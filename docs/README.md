@@ -12,7 +12,7 @@ OLED face, speech, tracks and a lifting claw. A shared Mac handles the AI.
 | --- | --- |
 | See the build order and what is ready | [Project plan](PLAN.md) and [full linear sequence](PLAN.md#complete-linear-build-and-permanent-verification-stages) |
 | Continue work across parallel chats or coding agents | [Repository agent instructions](../AGENTS.md) and [cross-chat engineering handoff](reviews/PARALLEL_CHAT_HANDOFF.md) |
-| Check the cross-layer wiring and event registry regression contract | [Integration contract tests](../code/tests/test_integration_contracts.py) and [CI runner startup blocker](reviews/CI_RUNNER_PRESTEP_TRIAGE_2026_11_11.md) |
+| Check the cross-layer wiring and event registry regression contract | [Integration contract tests](../code/tests/test_integration_contracts.py), [live GitHub Actions runs](https://github.com/hungngodev/desk-robot-remix/actions/workflows/host-verification.yml) and [historical November 11 runner incident](reviews/CI_RUNNER_PRESTEP_TRIAGE_2026_11_11.md) |
 | Research natural proactive social robot behavior | [Reachy Mini source and proactive interaction papers](reviews/REACHY_MINI_PROACTIVE_REUSE_2026_11_11.md) |
 | Check useful features in closed PRs before rewriting them | [Actual closed PR patch reconciliation](reviews/CLOSED_PR_RECONCILIATION.md) |
 | Find every requested idea and link | [200 feature entries](source-map.md#original-html-feature-and-sensor-idea-register) and [131 original HTML URLs](source-map.md#complete-original-html-research-link-index) and [original file followup](research/2026-11-10-original-html-link-and-hardware-audit.md) |
@@ -24,7 +24,9 @@ OLED face, speech, tracks and a lifting claw. A shared Mac handles the AI.
 | Start the first physical check | [Gripper fit and bench guide](guides/first-gripper-test.md) |
 | Find current firmware build commands without enabling motion | [Current XIAO Sense and WROOM build guide](guides/build.md) |
 
-**Purchasing safeguard:** `code/scripts/procurement_release.py` now blocks fleet release if any of the 42 selected pet/dock roles or seven shared room station roles is omitted or reduced below the current design minimum, even if the remaining components have receipts. The regression test uses simulated approval data, not measured parts. Cheap generic VL53L0X GY-530 is the selected ranging candidate, not a verified breakout or approval to buy forty sensors. No new Adafruit hardware is authorized.\n\n**Reproducible wiring export:** Run `python3 code/scripts/emit_wiring_manifest.py` from the repo root for the current WROOM, XIAO, motor phase and all sixteen sensor mux-lane connections, verified against the source GPIO symbols. The generated output intentionally refuses to act as a final battery/charger schematic. Its source and tests are [the harness generator](../code/scripts/emit_wiring_manifest.py) and [contract tests](../code/tests/test_assembly_harness.py). Real electrical and mechanical acceptance remains open.
+**Purchasing safeguard:** `code/scripts/procurement_release.py` now blocks fleet release if any of the 42 selected pet/dock roles or seven shared room station roles is omitted or reduced below the current design minimum, even if the remaining components have receipts. The regression test uses simulated approval data, not measured parts. Cheap generic VL53L0X GY-530 is the selected ranging candidate, not a verified breakout or approval to buy forty sensors. No new Adafruit hardware is authorized.
+
+**Reproducible wiring export:** Run `python3 code/scripts/emit_wiring_manifest.py` from the repo root for the current WROOM, XIAO, motor phase and all sixteen sensor mux-lane connections, verified against the source GPIO symbols. The generated output intentionally refuses to act as a final battery/charger schematic. Its source and tests are [the harness generator](../code/scripts/emit_wiring_manifest.py) and [contract tests](../code/tests/test_assembly_harness.py). Real electrical and mechanical acceptance remains open.
 
 **Next step.** First settle the day-zero architecture, part variant, final fit and full delivered cost gates, then check one MG90S servo in the saved gripper before printing the whole robot. Keep robot motion disabled during fit work.
 
@@ -40,14 +42,17 @@ See the [full source versus physical sensor matrix](hardware/full-feature-wiring
 [actual open-source incorporation audit](ATTRIBUTION.md#what-is-actually-reused-versus-locally-implemented-november-12-audit)
 and [multimodal social/camera data path](guides/multimodal-voice-video-orchestration.md#november-12-source-truthful-natural-social-behavior-and-active-camera-triggers).
 
-**Not assembled or certified.** Four GitHub Actions jobs continue to fail
-before recording any step, so newly added Python/C++ tests and both firmware
-builds have no current execution evidence. Live XIAO microphone/Opus interruption,
-actual concurrent camera speed, full socket/pin power/charging protection,
-terminal dual-IR docking, measured lift/grip force, final dimensionally fitted
-printable CAD and five physical robots remain open. The original **$50 delivered**
-prototype cap still conflicts with the requested sensor hardware. Never place a
-bulk hardware order or call this an assembly-only kit based on committed code.
+**Not assembled or certified.** CI must be assessed at the exact PR head,
+not by extrapolating an older green run or the historical November 11 runner
+incident. Open the [live host verification workflow](https://github.com/hungngodev/desk-robot-remix/actions/workflows/host-verification.yml)
+and inspect each job and its tested SHA. The [verification record](records/verification.md)
+separates source checks from physical acceptance. A passed host job cannot
+qualify live XIAO microphone/Opus interruption, concurrent camera performance,
+power and charging protection, dual IR dock behavior, measured lift and grip
+force, a fitted printable assembly, or five physical robots. The original
+**$50 delivered** first-unit cap has not been demonstrated against a complete,
+current, delivered quote. Keep bulk purchases, loaded robot movement and
+powered charging on HOLD until their independent physical gates pass.
 
 ## Reference
 
