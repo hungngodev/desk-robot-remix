@@ -129,6 +129,10 @@ async def guarded_grasp(
             raw_delta = (measured - baseline) * calibration.grip_force_sign
             if raw_delta > ceiling:
                 raise OperationError("Gripper raw force ceiling exceeded")
+            # Contradictory FSR polarity cannot mean that the jaws are clear.
+            # Stop rather than continue closing on reversed sensor evidence.
+            if raw_delta <= -threshold:
+                raise OperationError("Gripper feedback contradicts calibrated FSR polarity")
             confirmed = confirmed + 1 if raw_delta >= threshold else 0
             if confirmed >= 2:
                 return {

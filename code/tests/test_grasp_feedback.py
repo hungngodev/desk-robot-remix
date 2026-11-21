@@ -98,6 +98,19 @@ async def test_overforce_and_bad_baseline_fail_closed(monkeypatch):
     assert head.commands == []
 
 
+@pytest.mark.parametrize("sign,opposite", [(1, 800), (-1, 1200)])
+async def test_inverse_fsr_contact_does_not_continue_closing(monkeypatch, sign, opposite):
+    async def instant(_seconds):
+        pass
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    class Calibrated(Settings):
+        grip_force_sign = sign
+    head = FakeHead([1000, 1000, opposite])
+    with pytest.raises(OperationError, match="contradicts calibrated FSR polarity"):
+        await guarded_grasp(head, Calibrated(), robot_id="robot-01", health=healthy)
+    assert head.commands == ["grip 65", "grip 60"]
+
+
 async def test_local_disarm_never_bypassed_to_release_jaw(monkeypatch):
     async def instant(_seconds):
         pass
