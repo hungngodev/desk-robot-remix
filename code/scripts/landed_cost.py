@@ -63,6 +63,10 @@ def _quote_date(value: object) -> None:
         raise ValueError("quote date must be a YYYY-MM-DD calendar date") from exc
     if parsed.isoformat() != value:
         raise ValueError("quote date must be a YYYY-MM-DD calendar date")
+    # A future-dated seller quote cannot be a completed historical checkout
+    # receipt, even if its format and monetary arithmetic are valid.
+    if parsed > date.today():
+        raise ValueError("supplier quote date cannot be in the future")
 
 
 def account_landed_cost(

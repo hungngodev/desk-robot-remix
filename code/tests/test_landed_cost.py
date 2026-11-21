@@ -398,6 +398,16 @@ def test_quote_requires_an_actual_iso_calendar_date(quoted_at):
                for error in out["errors"])
 
 
+def test_future_supplier_quote_is_not_valid_checkout_evidence():
+    ev = sample()
+    ev["lines"][0]["quoted_at"] = "2099-01-01"
+    out = calculate(ev)
+    assert not out["calculation_complete_not_physical_approval"]
+    assert out["payable_now_cents"] is None
+    assert any("supplier quote date cannot be in the future" in error
+               for error in out["errors"])
+
+
 def test_actual_leap_day_quote_remains_valid():
     ev = sample()
     ev["lines"][0]["quoted_at"] = "2024-02-29"
