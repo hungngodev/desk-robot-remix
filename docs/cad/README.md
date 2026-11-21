@@ -1,19 +1,34 @@
 # CAD source register
 
-Originals go in `originals/`, small changes in `remixes/`. EVA's original head
-3MF, three Bluino gripper STLs, two original forklift STLs and the four requested
-SMARS chassis/wheel/track STLs are saved and inspected, with original assembly
-documents. No geometry has been edited or sliced. Updated 2026-11-03: the stepper chassis
-and rear wheel originals are also saved; combined mechanical fit is unverified.
+Saved upstream models remain unmodified in `originals/`: the EVA head 3MF,
+Bluino gripper, forklift, SMARS chassis/wheels/tracks and stepper chassis/rear
+wheel with their original assembly sources and licenses. The November 3 note
+about no edited geometry applied only to those historical originals. **Locally
+authored, provisional geometry now exists** in `remixes/`, but no complete robot
+or powered dock has been assembled or physically fit qualified.
 
-**Appearance revision:** user chose a rounder existing head. Saved
-[Sparky v0.1.0](originals/sparky-head/README.md) is the current fit-check candidate;
-EVA is historical. [Four concept views](concepts/2026-11-03-rounded/README.md)
-use real shell/chassis meshes but illustrative tracks/mechanism/mounts and no qualified battery envelope.
+**Current builder path:** follow the [one robot Fusion assembly guide](FUSION_ONE_ROBOT_ASSEMBLY.md)
+and [one robot adapter/export guide](remixes/one_robot_adapter_kit_README.md).
+The [parametric adapter kit](remixes/one_robot_adapter_kit.scad),
+[passive dock and rail entry coupon](remixes/dock/dock_passive_fit.scad),
+[remaining nonconductive fit gauges](remixes/remaining_fit_gauges.scad), and
+[Fusion one robot scaffold](remixes/fusion_one_robot_scaffold.py) are authored
+source references. The adapter exporter can create provisional STLs and a
+source-pinned mesh manifest, subject to its verification gate; these are **not**
+approved permanent installation quantities or proof of physical fit. Confirm
+actual part revisions, clearances, motion sweeps, licenses, pack enclosure,
+ToF optical geometry, dock seating and protected contact charging before release.
+
+**Appearance revision:** the selected look is rounder. Saved
+[Sparky v0.1.0](originals/sparky-head/README.md) remains an unprinted upstream
+head source considered by the Fusion fit guide, not a dimensionally qualified
+or permanently selected assembled shell; EVA is historical.
+[Four concept views](concepts/2026-11-03-rounded/README.md) use real shell/chassis
+meshes but illustrative tracks/mechanism/mounts and no qualified battery envelope.
 
 | Source | Author | Needed files | License |
 | --- | --- | --- | --- |
-| [Sparky v0.1.0](https://github.com/slahiri/sparky/releases/tag/v0.1.0) | Siddhartha Lahiri | [Saved shell, collar, rack, base/lid, archive and license](originals/sparky-head/README.md); current fit-check candidate, explicitly unprinted | CC BY-SA 4.0 |
+| [Sparky v0.1.0](https://github.com/slahiri/sparky/releases/tag/v0.1.0) | Siddhartha Lahiri | [Saved shell, collar, rack, base/lid, archive and license](originals/sparky-head/README.md); unprinted upstream fit reference, not qualified final assembly | CC BY-SA 4.0 |
 | [Tiny Engineer head](https://github.com/jamro/tiny-engineer/tree/aefc852a894174604a1e350bf9bc04c04f28ec80/3d_models) | Krzysztof Jamroz | [Saved Head/Hat/license/notice](originals/tiny-engineer-head/README.md); alternative reference only | CERN-OHL-S-2.0 |
 | [EVA Robot head 7319190](https://www.thingiverse.com/thing:7319190/files) | Ksirailway-Base | [Saved EVA-Robot.3mf](originals/eva-head/EVA-Robot.3mf), [inspection/provenance](originals/eva-head/README.md); historical, four objects in assembly positions | CC BY-SA 4.0 |
 | [SMARS 2662828](https://www.thingiverse.com/thing:2662828/files) | tristomietitoredeituit | [Saved screwless selection and documents](originals/smars/README.md): `chassis_-SL.stl`, `master_wheel.stl`, `slave_wheel_SL.stl`, `mechanical_track.stl`; `doc_lite.zip`, `Instructions.pdf` | CC BY-NC-SA 4.0 |
