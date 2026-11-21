@@ -1021,18 +1021,23 @@ def test_max98357a_output_rate_and_aec_reference_contract():
         assert "RATE_CVT_CFG(decoder_sample_rate_, codec->output_sample_rate()" in upstream
 
 def test_sense_face_discards_person_cues_received_during_body_fault():
-    """A Mac sighting during fault cannot animate as fresh after recovery."""
+    """Consume cues during a WROOM fault without replaying after recovery."""
     board = (HEAD / "sense/desk_robot_sense.cc").read_text()
-    guard = board.split(
-        "if (board->body_bridge_ && board->body_bridge_->TakePersonCue()", 1
-    )[1].split("person_cue_until_ms = now_ms + 1500U;", 1)[0]
-    assert "!body_unhealthy" in guard
-    assert "if (body_unhealthy) person_cue_until_ms = 0;" in board
-    assert "#include <algorithm>" in board
-    # Existing face priority also suppresses previously active cues while
-    # fault remains. Neither cosmetic cue is a body motion command.
-    assert "person_cue_until_ms != 0U" in board
-    assert "Event(EventType::kPersonDetected)" in board
+    face = board.split("static void FaceTask(void* context)", 1)[1].split(
+        "void InitializeDisplay()", 1
+    )[0]
+    # Short circuit left to right: TakePersonCue must run even when the
+    # body is unhealthy, and the HSM may see an event only for a good body.
+    assert (
+        "board->body_bridge_->TakePersonCue() &&\\n"
+        "                !body_unhealthy"
+    ).replace("\\n", "\n") in face
+    assert "Event(EventType::kPersonDetected)" in face
+    # Do not regress to a fixed surprise response or stale cue timer.
+    assert "person_cue_until_ms" not in face
+    assert 'person_cue_active ? "surprised"' not in face
+    # A local status fault stays factual and never becomes a motor command.
+    assert 'board->display_->SetStatus("Body safety stop");' in face
     assert "Transact(event" not in (HEAD / "overlay/robot_bridge.cc").read_text()
 
 def test_body_status_is_async_and_urgent_stop_preempts_uart_telemetry():
