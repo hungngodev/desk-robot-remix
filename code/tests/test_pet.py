@@ -5224,10 +5224,14 @@ async def test_proactive_context_stage_never_reads_private_memory_without_optin(
             "robot-01", SceneChange("key", "A key appeared", .96),
         )
         assert gathered is not None
-        recent, context, private_allowed, live_used = gathered
+        # The Mac context owner now reports independently consented
+        # room station evidence as a fifth return value. None may leak
+        # through disabled hardware camera or memory permissions.
+        recent, context, private_allowed, live_used, room_used = gathered
         assert recent == []
         assert private_allowed is False
         assert live_used is False
+        assert room_used is False
         assert "PRIVATE_CONTEXT_CANARY" not in (
             context.recent + context.core + context.interaction
         )
