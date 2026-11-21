@@ -22,7 +22,7 @@ def _part(sequence: int, jpeg: bytes) -> bytes:
 
 
 def test_single_oversized_network_batch_fails_before_any_frame_publication():
-    jpeg = b"\\xff\\xd8" + b"x" * 180_000 + b"\\xff\\xd9"
+    jpeg = b"\xff\xd8" + b"x" * 180_000 + b"\xff\xd9"
     batch = b"".join(_part(i, jpeg) for i in range(1, 26))
     assert len(batch) > 4 * 1024 * 1024
     reader = _MjpegFrames(expected_robot_id="robot-01")
