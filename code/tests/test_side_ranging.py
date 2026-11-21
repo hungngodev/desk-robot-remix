@@ -292,11 +292,12 @@ def test_unrepresentably_large_side_event_clock_fails_closed(now):
 
 def test_transport_delay_does_not_make_serialized_side_sample_fresh():
     tracker = SideRangeEvents()
-    sample = lambda mm, stamp: body(
-        mm=(mm, 600, 600),
-        sample_ms=(stamp, stamp, stamp),
-        boot_id=901,
-    )
+    def sample(mm, stamp):
+        return body(
+            mm=(mm, 600, 600),
+            sample_ms=(stamp, stamp, stamp),
+            boot_id=901,
+        )
     assert tracker.observe(sample(600, 100), now=10.0, near_mm=170,
                            require_hardware_identity=True) == []
     assert tracker.observe(sample(100, 200), now=11.1, near_mm=170,
