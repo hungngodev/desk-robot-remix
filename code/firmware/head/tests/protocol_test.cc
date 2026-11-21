@@ -30,6 +30,25 @@ int main() {
     assert(cap.Observe(0) == 0); // wrap never fabricates a contact
     assert(cap.Observe(3) == 3);
 
+    // Urgent requests must win over telemetry without fabricating ACKs.
+    UrgentStopGate gate;
+    assert(!gate.preempts(false));
+    {
+        UrgentStopGate::Request read(gate, false);
+        assert(!gate.preempts(false));
+        {
+            UrgentStopGate::Request stop(gate, true);
+            assert(gate.preempts(false));
+            assert(!gate.preempts(true));
+            {
+                UrgentStopGate::Request halt(gate, true);
+                assert(gate.preempts(false));
+            }
+            assert(gate.preempts(false));
+        }
+        assert(!gate.preempts(false));
+    }
+
     Command c;
     assert(ParseCommand("drive 100 -100 250", false, c));
     assert(ExpectedAck(c) == "OK drive left=40 right=-40 ms=250");
