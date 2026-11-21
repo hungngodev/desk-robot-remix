@@ -95,6 +95,14 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn('app.GetAecMode() == kAecOnDeviceSide', source)
         self.assertIn('app.ToggleChatState();  // existing Xiaozhi realtime listen', source)
         self.assertIn('board->continuous_audio_started_ = true;', source)
+        self.assertIn('WifiManager::GetInstance().IsConnected()', source)
+        self.assertIn('if (!wifi_connected)', source)
+        self.assertIn('board->continuous_audio_started_ = false;', source)
+        self.assertIn('&& wifi_connected && now_ms >= 10000', source)
+        self.assertLess(
+            source.index('if (!board->continuous_audio_started_'),
+            source.index('app.ToggleChatState();  // existing Xiaozhi realtime listen'),
+        )
         self.assertIn('audio_operator_touched_.store(true);', source)
         self.assertIn('CONFIG_DESK_ROBOT_AEC_DELAY_MS', (board / 'sense_reference_codec.h').read_text())
         self.assertIn('#include "stackchan_behavior.hpp"', source)
