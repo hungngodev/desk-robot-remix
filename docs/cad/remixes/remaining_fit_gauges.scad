@@ -5,8 +5,11 @@ part = "battery_boost_tray";
 fit_xy = 0.4;
 m3_clearance = 3.4;
 
-// Battery/boost system package envelope. MEASURE after selecting rated boards.
-power_l = 68;
+// Provisional protected LPHD7430085 pack BODY is 86 mm long before leads.
+// The outer power package, connector and safe lead bend are still UNMEASURED.
+// This gauge only excludes undersized layouts, not a full power enclosure.
+candidate_pack_body_l_mm = 86;
+power_l = 86;
 power_w = 35;
 power_h = 14;
 wall = 2.4;
@@ -31,6 +34,8 @@ module battery_boost_tray() {
     w = power_w + 2*fit_xy + 2*wall;
     h = power_h + base;
     assert(power_l > 25 && power_l < 150);
+    assert(power_l >= candidate_pack_body_l_mm,
+           "Battery tray shorter than selected candidate pack body");
     assert(power_w > 12 && power_w < 100);
     assert(power_h > 4 && power_h < 60);
     difference() {
