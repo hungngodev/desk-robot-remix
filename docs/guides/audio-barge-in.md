@@ -379,18 +379,19 @@ alone cannot bound this on-device lock.
 
 Our `code/firmware/head/install_overlay.py` now applies the smallest
 Sense-only edit to the exact upstream writer in a disposable pinned
-clone. It uses a **500 ms maximum speaker I2S TX wait** and returns the
-actual accepted 32-bit sample count even after timeout, with a warning
+clone. It uses a **120 ms maximum speaker I2S TX wait** and
+returns a sample count only for a successful, bounded, whole-frame I2S
+write. Driver errors and invalid byte counts become zero accepted frames
 rather than fatal `ESP_ERROR_CHECK`. The normal native Xiaozhi
-`SenseReferenceCodec` consumes that accepted count so the AEC
-reference contains only audio which the output driver reported writing.
+`SenseReferenceCodec` marks short output as an integrity failure and never
+promotes uncertain queued PCM into playback or echo reference evidence.
 The original upstream checkout, CoreS3, and modular/waveshare board
 profiles remain unchanged. `firmware/head/tests/test_overlay.py`
 checks pinned patch anchor, callback semantics, the selected Sense
 profile and exact revert.
 
-This gives a **bounded codec wait**, not a 500ms end-to-end guaranteed
-spoken interruption. 500ms I2S timeout plus decoder scheduler, task
+This gives a **bounded codec wait**, not a guaranteed 500 ms
+spoken interruption. Even 120 ms I2S timeout plus decoder scheduler, task
 wake, VAD/network latency, buffered amplifier output and real
 speaker/microphone acoustics can exceed the stated user acceptance
 limit. Playback frame length and output DMA queues need a live
