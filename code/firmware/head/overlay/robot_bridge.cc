@@ -797,6 +797,17 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         if (!result) return Json(req, 503, Envelope(false, "audio status unavailable"));
         cJSON_AddStringToObject(result.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
         cJSON_AddNumberToObject(result.get(), "boot", boot_nonce_);
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+        // A speaker reset can invalidate the capture AFTER the raw response.
+        // Bind the final authenticated receipt to the same PCM generation.
+        char capture_generation[24] = {};
+        snprintf(capture_generation, sizeof(capture_generation), "%llu",
+                 static_cast<unsigned long long>(
+                     static_cast<SenseReferenceCodec*>(audio_codec_)
+                         ->BenchPcmGeneration()));
+        cJSON_AddStringToObject(result.get(), "capture_generation",
+                                capture_generation);
+#endif
         cJSON_AddNumberToObject(result.get(), "reference_underflow_reads", d.underflow_reads);
         cJSON_AddNumberToObject(result.get(), "reference_overwrite_reads", d.overwrite_reads);
         cJSON_AddNumberToObject(result.get(), "discarded_stale_writes", d.discarded_stale_writes);

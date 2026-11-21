@@ -45,7 +45,7 @@ def fake_read(*, raw=None, boot=7, robot="robot-01", raw_boot=None,
               frames=64000, ready=True, delay_ms=0, mic_muted=False,
               last_us=5000000, privacy_epoch=3, final_epoch=None,
               start_generation="1", status_generation="1", raw_generation="1",
-              final_muted=False, final_boot=None,
+              final_generation=None, final_muted=False, final_boot=None,
               initial_mic=100, final_mic=64100,
               initial_speaker=200, final_speaker=8400):
     if raw is None:
@@ -89,6 +89,9 @@ def fake_read(*, raw=None, boot=7, robot="robot-01", raw_boot=None,
                 privacy_epoch if final_epoch is None else final_epoch
             ),
             "microphone_privacy_muted": final_muted,
+            "capture_generation": (
+                start_generation if final_generation is None else final_generation
+            ),
             "microphone_frames_read": final_mic,
             "speaker_frames_accepted": final_speaker,
             "reference_integrity_failed": False,
@@ -222,6 +225,19 @@ def test_capture_requires_actual_zero_delay_on_authenticated_firmware(delay_ms):
     assert [request[0].split("/")[-1] for request in http.calls] == [
         "audio.reference",
     ]
+
+
+@pytest.mark.parametrize("final_generation", ["2", "0", "invalid"])
+def test_completed_pcm_rejects_generation_reset_after_raw_transfer(final_generation):
+    """A post-transfer speaker reset invalidates A2 samples before WAV save."""
+    http = fake_read(final_generation=final_generation)
+    with pytest.raises((RuntimeError, ValueError), match="generation"):
+        capture.capture_head(
+            http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
+            clock=iter([0.0, 0.1]).__next__, pause=lambda _: None,
+        )
+    assert http.calls[-2][0].endswith("/api/audio.reference")
+    assert http.calls[-1][0].endswith("/api/audio.capture.abort")
 
 
 def test_capture_refuses_device_microphone_mute_before_start():

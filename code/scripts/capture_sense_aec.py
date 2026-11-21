@@ -202,9 +202,12 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
                 or _number(final.get("boot"), 0, 0xffffffff, "boot ID") != boot
                 or _number(final.get("microphone_privacy_epoch"), 0, 0xffffffff,
                            "microphone privacy epoch") != privacy_epoch
+                or _generation(final.get("capture_generation")) != generation
                 or final.get("microphone_privacy_muted") is not False
                 or final.get("reference_integrity_failed") is not False):
-            raise RuntimeError("Sense microphone privacy or boot changed during capture")
+            raise RuntimeError(
+                "Sense microphone privacy or boot changed during capture or generation reset"
+            )
         mic_frames_after = _number(
             final.get("microphone_frames_read"), 0, 0xffffffff,
             "final microphone frame count",
