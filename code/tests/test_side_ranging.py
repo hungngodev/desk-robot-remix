@@ -350,14 +350,16 @@ async def test_real_side_status_slow_transport_never_records_stale_firsthand_eve
     class DelayedHead:
         async def status(self):
             delay, mm, stamp = steps.pop(0)
-            if delay:
-                await asyncio.sleep(delay)
             result = body(
                 mm=(mm, 600, 600),
                 sample_ms=(stamp, stamp, stamp),
                 boot_id=901,
             )
             result["robot_id"] = "robot-01"
+            # The device serialized the acquisition BEFORE network/host
+            # latency; the Mac receives that same older response afterward.
+            if delay:
+                await asyncio.sleep(delay)
             return result
 
     pet.heads["robot-01"] = DelayedHead()
