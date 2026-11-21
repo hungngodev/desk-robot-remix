@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
+import stat
 from pathlib import Path
 
 import pytest
@@ -31,6 +33,27 @@ async def test_hardware_camera_cli_requires_live_mjpeg_not_snapshots(
     assert exc.value.code == 2
     assert "requires --stream persistent MJPEG" in capsys.readouterr().err
     assert not (tmp_path / "camera.json").exists()
+
+
+def test_camera_bench_report_private_exclusive_and_preflighted(tmp_path):
+    path = tmp_path / "private" / "trial.json"
+    bench.preflight_private_report(path)
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    bench.save_private_report(path, {"robot_id": "robot-01", "stream": True})
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert json.loads(path.read_text()) == {
+        "robot_id": "robot-01", "stream": True,
+    }
+    with pytest.raises(FileExistsError):
+        bench.preflight_private_report(path)
+    with pytest.raises(FileExistsError):
+        bench.save_private_report(path, {"stream": False})
+    assert json.loads(path.read_text())["stream"] is True
+    public = tmp_path / "public"
+    public.mkdir(mode=0o755)
+    public.chmod(0o755)
+    with pytest.raises(ValueError, match="private mode"):
+        bench.preflight_private_report(public / "another.json")
 
 
 async def test_camera_bench_keeps_status_independent_and_never_qualifies_hardware():
