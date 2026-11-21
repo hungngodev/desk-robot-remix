@@ -480,7 +480,9 @@ class SenseOverlayTests(unittest.TestCase):
         assert "pdMS_TO_TICKS(kMaxI2sWaitMs)" in writer
         assert "std::lock_guard<std::mutex> codec_lock(data_if_mutex_)" in writer
         assert "i2s_channel_write(" in writer
-        assert "status == ESP_OK && bytes_written % sizeof(int32_t) == 0" in writer
+        assert "status == ESP_OK" in writer
+        assert "bytes_written <= pcm32.size() * sizeof(int32_t)" in writer
+        assert "bytes_written % sizeof(int32_t) == 0" in writer
         assert "if (accepted != samples)" in writer
         assert "reference_integrity_failed_ = true;" in writer
         assert writer.index("i2s_channel_write(") < writer.index(
