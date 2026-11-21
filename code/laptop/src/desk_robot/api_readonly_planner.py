@@ -65,6 +65,14 @@ def register_readonly_planner_routes(
                 timeline = [entry for entry in timeline
                             if not (entry.get("channel") == "tool"
                                     and entry.get("kind") == "memory_recall")]
+            if not settings.room_station_context_enabled:
+                timeline = [
+                    entry for entry in timeline
+                    if entry.get("channel") != "room_station"
+                ]
+        room_context_used = any(
+            item.get("channel") == "room_station" for item in timeline
+        )
         private_context_used = any(
             item.get("channel") == "tool"
             and item.get("kind") == "memory_recall"
@@ -105,6 +113,8 @@ def register_readonly_planner_routes(
             raise HTTPException(403, "Live observation consent revoked during planning")
         if private_context_used and not settings.voice_memory_tools_enabled:
             raise HTTPException(403, "Private memory consent revoked during planning")
+        if room_context_used and not settings.room_station_context_enabled:
+            raise HTTPException(403, "Room station consent revoked during planning")
         choices = parsed.get("tools") if isinstance(parsed, dict) else None
         allowed = {
             "look", "status", "power-status", "aux-status",
