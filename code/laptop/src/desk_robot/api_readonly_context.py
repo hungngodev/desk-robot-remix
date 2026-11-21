@@ -146,6 +146,13 @@ def register_readonly_context_routes(
         timeline = visual.hub.interaction_timeline(
             robot_id, now, limit=10 - len(activity) - len(continuity)
         )
+        # The shared station has a separate opt-in. Revocation cannot be
+        # bypassed by a still-fresh room sample cached in the RAM hub.
+        if not settings.room_station_context_enabled:
+            timeline = [
+                item for item in timeline
+                if item.get("channel") != "room_station"
+            ]
         timeline.extend(activity)
         timeline.extend(continuity)
         if not settings.voice_memory_tools_enabled:
