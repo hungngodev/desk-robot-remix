@@ -398,3 +398,31 @@ def test_selected_gy530_board_outline_matches_provisional_eight_mount_brackets()
     assert "tof_pcb_w=10.5;" in mounts
     assert "tof_pcb_h=13.3;" in mounts
     assert "Lens center, holes, connector overhang and true mounting height UNMEASURED" in mounts
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+def test_nonenergized_contact_gauge_refuses_overlap_with_m3_bores(tmp_path):
+    """Keep real printed mounting material between the pocket and bolt bore."""
+    source = ROOT / "docs/cad/remixes/remaining_fit_gauges.scad"
+    good = tmp_path / "contact_good.stl"
+    base = [
+        "openscad", "--export-format", "binstl",
+        "-D", 'part="dock_contact_recess_gauge"',
+    ]
+    subprocess.run(
+        [*base, "-o", str(good), str(source)],
+        check=True, capture_output=True, text=True, timeout=90,
+    )
+    assert module().closed_mesh_edges(good) > 0
+    for too_close in ("38", "39"):
+        bad = tmp_path / ("contact_bad_" + too_close + ".stl")
+        completed = subprocess.run(
+            [*base, "-D", f"contact_centers_mm={too_close}",
+             "-o", str(bad), str(source)],
+            capture_output=True, text=True, timeout=90,
+        )
+        assert "Contact recess would intersect or thin" in (
+            completed.stderr + completed.stdout
+        )
+        # An OpenSCAD error may leave a file; never treat it as a print
+        # candidate if the parameter assertion was raised.
