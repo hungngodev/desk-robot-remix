@@ -733,6 +733,27 @@ pack_screen = runpy.run_path(str(
 ))["screen_protected_pack"]
 
 
+def test_protected_pack_rejects_sustained_load_above_peak_requirement():
+    # The vendor-specific screen already rejects this contradiction. The
+    # reusable pack screen must not approve an invented inconsistent source.
+    demand = tool(1.0, 0.6)
+    peak = demand["minimum_rated_cell_and_boost_input_a"]
+    demand["minimum_continuous_cell_input_a"] = peak + 0.001
+    specs = dict(
+        pack_length_mm=55, pack_width_mm=30, pack_thickness_mm=10,
+        tray_length_mm=68, tray_width_mm=35, tray_height_mm=14,
+        rated_peak_discharge_a=10, rated_continuous_discharge_a=10,
+        pcm_overcurrent_trip_a=12, connector_continuous_a=10,
+        wire_and_crimp_continuous_a=10,
+    )
+    with pytest.raises(ValueError, match="Continuous cell demand cannot exceed peak"):
+        pack_screen(demand, **specs)
+    demand["minimum_continuous_cell_input_a"] = peak
+    allowed = pack_screen(demand, **specs)
+    assert allowed["candidate_usable_on_paper"] is True
+    assert allowed["candidate_physically_qualified"] is False
+
+
 def test_protected_pack_envelope_and_current_screen_never_certifies_hardware():
     """No generic 2A pack or 86mm candidate is silently approved for 68mm tray."""
     requirements = tool(3, 1.8, cell_low_v=3.0, measured_boost_efficiency=.85)
