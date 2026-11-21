@@ -8,6 +8,8 @@
 #include "robot_protocol.h"
 #include "real_touch_edges.h"
 
+class AudioCodec;
+
 namespace desk_robot {
 struct Reply {
     int status;
@@ -24,7 +26,7 @@ struct BodyInteraction {
 
 class Bridge {
 public:
-    explicit Bridge(Camera* camera);
+    explicit Bridge(Camera* camera, AudioCodec* audio_codec = nullptr);
     void Start();
     // One bounded local status transaction, no motor authority or second UART.
     BodyInteraction PollInteraction();
@@ -34,6 +36,7 @@ public:
 
 private:
     Camera* camera_;
+    AudioCodec* audio_codec_ = nullptr;  // Sense codec only, no second audio owner
     httpd_handle_t server_ = nullptr;
     std::mutex uart_mutex_;
     bool uart_ready_ = false;

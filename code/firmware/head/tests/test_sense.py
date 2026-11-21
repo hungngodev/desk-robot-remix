@@ -730,7 +730,11 @@ def test_authenticated_mac_person_face_cue_is_cosmetic_only():
     header = (HEAD / "overlay/robot_bridge.h").read_text()
     board = (HEAD / "sense/desk_robot_sense.cc").read_text()
     assert '{"/api/face", HTTP_POST}' in bridge
-    assert 'config.max_uri_handlers = 9;' in bridge
+    assert 'config.max_uri_handlers = 10;' in bridge
+    assert '{"/api/audio.reference", HTTP_GET}' in bridge
+    assert '"speaker_playback_verified", false' in bridge
+    assert '"aec_physically_qualified", false' in bridge
+    assert 'Bridge robot_bridge(camera_, GetAudioCodec())' in board
     assert '"/api/camera.identity", HTTP_GET' in bridge
     assert 'strcmp(event->valuestring, "person_detected") != 0' in bridge
     assert 'person_cue_pending_.store(true' in bridge

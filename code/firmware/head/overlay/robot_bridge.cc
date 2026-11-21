@@ -17,6 +17,9 @@
 #include "esp_timer.h"
 #include "mcp_server.h"
 #include "sdkconfig.h"
+#if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3)
+#include "sense_reference_codec.h"
+#endif
 
 namespace desk_robot {
 namespace {
@@ -286,7 +289,8 @@ bool ValidConfiguration() {
 }
 }  // namespace
 
-Bridge::Bridge(Camera* camera) : camera_(camera) {}
+Bridge::Bridge(Camera* camera, AudioCodec* audio_codec)
+    : camera_(camera), audio_codec_(audio_codec) {}
 
 void Bridge::Start() {
     enabled_ = ValidConfiguration();
@@ -310,7 +314,7 @@ void Bridge::Start() {
     config.server_port = 8081;
     config.ctrl_port = 32771;
     config.stack_size = 12288;
-    config.max_uri_handlers = 9;
+    config.max_uri_handlers = 10;
     config.recv_wait_timeout = 2;
     config.send_wait_timeout = 2;
     if (httpd_start(&server_, &config) != ESP_OK) {
@@ -323,7 +327,8 @@ void Bridge::Start() {
              {"/api/command", HTTP_POST}, {"/api/face", HTTP_POST},
              {"/api/camera.jpg", HTTP_GET},
              {"/api/camera.mjpg", HTTP_GET},
-             {"/api/camera.identity", HTTP_GET}}) {
+             {"/api/camera.identity", HTTP_GET},
+             {"/api/audio.reference", HTTP_GET}}) {
         httpd_uri_t uri = {};
         uri.uri = entry.first;
         uri.method = entry.second;
@@ -574,6 +579,27 @@ void Bridge::CameraStreamTask(void* context) {
 
 esp_err_t Bridge::Handle(httpd_req_t* req) {
     if (!Authorize(req)) return Json(req, 401, Envelope(false, "unauthorized"));
+    if (strcmp(req->uri, "/api/audio.reference") == 0) {
+#if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3)
+        if (!audio_codec_) return Json(req, 503, Envelope(false, "Sense audio unavailable"));
+        // The Sense board supplies the actual single Xiaozhi audio codec.
+        // These are software-integrity counters, NEVER proof of heard TTS.
+        const auto d = static_cast<SenseReferenceCodec*>(audio_codec_)
+                           ->GetReferenceDiagnostics();
+        JsonPtr result(cJSON_CreateObject(), cJSON_Delete);
+        if (!result) return Json(req, 503, Envelope(false, "audio status unavailable"));
+        cJSON_AddStringToObject(result.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
+        cJSON_AddNumberToObject(result.get(), "reference_underflow_reads", d.underflow_reads);
+        cJSON_AddNumberToObject(result.get(), "reference_overwrite_reads", d.overwrite_reads);
+        cJSON_AddNumberToObject(result.get(), "discarded_stale_writes", d.discarded_stale_writes);
+        cJSON_AddBoolToObject(result.get(), "reference_integrity_failed", d.integrity_failed);
+        cJSON_AddBoolToObject(result.get(), "speaker_playback_verified", false);
+        cJSON_AddBoolToObject(result.get(), "aec_physically_qualified", false);
+        return Json(req, 200, Encode(result.get()));
+#else
+        return Json(req, 503, Envelope(false, "No Sense reference codec on this board"));
+#endif
+    }
     if (strcmp(req->uri, "/api/camera.identity") == 0) {
         // Read only the actual sensor ID from Espressif's initialized
         // upstream camera driver. No new camera task, JPEG or UART owner.

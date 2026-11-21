@@ -285,7 +285,7 @@ public:
 
     void StartNetwork() override {
         WifiBoard::StartNetwork();
-        static desk_robot::Bridge robot_bridge(camera_);
+        static desk_robot::Bridge robot_bridge(camera_, GetAudioCodec());
         static std::once_flag bridge_once;
         std::call_once(bridge_once, [] { robot_bridge.Start(); });
         body_bridge_ = &robot_bridge;
