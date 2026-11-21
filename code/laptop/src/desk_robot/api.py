@@ -482,7 +482,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             raise HTTPException(404, "Job not found")
         return coordinator().jobs[job_id].data()
 
-    @app.post("/v1/conversation", dependencies=[Depends(authorize)])
+    @app.post("/v1/conversation", dependencies=[Depends(operator)])
     async def conversation(request: ChatRequest):
         try:
             # Validate first. Human conversation preempts any robot's spontaneous
