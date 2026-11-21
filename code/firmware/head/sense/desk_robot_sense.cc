@@ -11,6 +11,7 @@
 #include "stackchan_behavior.hpp"
 #include "led/single_led.h"
 #include "sdkconfig.h"
+#include "assets/lang_config.h"
 
 #include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
@@ -158,11 +159,20 @@ private:
                     (!last_rendered_fault || (idle && !last_was_idle))) {
                     board->display_->SetStatus("Body safety stop");
                     last_rendered_fault = true;
-                } else if (last_rendered_fault && !body_unhealthy && idle) {
-                    // Do not erase Xiaozhi's active speaking/listening status.
-                    // Retain ownership until idle, then clear only our warning.
-                    board->display_->SetStatus("");
-                    last_rendered_fault = false;
+                } else if (last_rendered_fault && !body_unhealthy) {
+                    // Restore the pinned Xiaozhi localized speaking/listening
+                    // status promptly. Continuous listening may never go idle.
+                    if (device_state == kDeviceStateSpeaking) {
+                        board->display_->SetStatus(Lang::Strings::SPEAKING);
+                        last_rendered_fault = false;
+                    } else if (device_state == kDeviceStateListening) {
+                        board->display_->SetStatus(Lang::Strings::LISTENING);
+                        last_rendered_fault = false;
+                    } else if (idle) {
+                        board->display_->SetStatus("");
+                        last_rendered_fault = false;
+                    }
+                    // Unknown states defer clear until a known status owner.
                 }
             }
             if (idle && board->display_ != nullptr) {
