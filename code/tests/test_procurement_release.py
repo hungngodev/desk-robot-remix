@@ -745,7 +745,13 @@ def test_extra_register_rows_are_known_alternatives_not_hidden_purchases():
     }
     assert set(expected) == set(role)
     for name, values in rows.items():
-        actual = tuple(int(v) for v in values[2:4])
+        if name == "Room thermal 8x8 array":
+            assert values[2:4] == ["1 if later selected", "1 visible option"]
+            assert values[5] == "0"
+            assert "CONDITIONAL OPTIONAL, NOT SELECTED" in values[6]
+            actual = (1, 1)
+        else:
+            actual = tuple(int(v) for v in values[2:4])
         assert actual == expected[name], (
             f"{name}: subcomponent quantities {actual} do not match "
             f"the one robot or one shared station role {expected[name]}"
@@ -945,7 +951,13 @@ def test_all_fourteen_addon_quantities_match_one_fleet():
         cells = [x.strip() for x in line.strip().strip("|").split("|")]
         assert len(cells) == 7, line
         assert cells[0] not in observed, cells[0]
-        observed[cells[0]] = (int(cells[2]), int(cells[3]))
+        if cells[0] == "Room thermal 8x8 array":
+            assert cells[2:4] == ["1 if later selected", "1 visible option"]
+            assert cells[5] == "0"
+            assert "CONDITIONAL OPTIONAL, NOT SELECTED" in cells[6]
+            observed[cells[0]] = (1, 1)
+        else:
+            observed[cells[0]] = (int(cells[2]), int(cells[3]))
         # A quoted source or candidate must never masquerade as approval.
         assert cells[6], cells[0]
     assert observed == expected, (
