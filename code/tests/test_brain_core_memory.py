@@ -286,10 +286,23 @@ def test_operator_episode_edits_retract_only_matching_live_asr_cues(settings, to
             # The same source event identity on a peer remains independent.
             assert hub.remember_heard("robot-02", deleted_id, "Peer words", now)
             assert attention.heard("robot-02", deleted_id, "Peer words", now)
+            hub.remember_tool("robot-01", "memory_recall",
+                              "Old private words", now)
+            hub.remember_tool("robot-01", "robot_status",
+                              "Independent status", now)
+            hub.remember_tool("robot-02", "memory_recall",
+                              "Peer private words", now)
             reply = client.delete(
                 f"/v1/pet/robot-01/memories/{deleted_id}", headers=authorization,
             )
             assert reply.status_code == 200 and reply.json()["removed"] is True
+            # A deleted memory cannot reappear through the old 30s voice
+            # tool receipt, while status and other pets remain independent.
+            own_tools = hub.recent_tool_context("robot-01", time.monotonic())
+            assert [item["kind"] for item in own_tools] == ["robot_status"]
+            assert hub.recent_tool_context("robot-02", time.monotonic())[
+                0
+            ]["summary"] == "Peer private words"
             assert not hub.remember_heard(
                 "robot-01", deleted_id, "Old replay", time.monotonic()
             )
@@ -298,11 +311,16 @@ def test_operator_episode_edits_retract_only_matching_live_asr_cues(settings, to
                 kind="heard_human", source_robot="robot-01", witnessed=True,
             )
             assert any(x[0] == deleted_id for x in hub.heard_history["robot-02"])
+            hub.remember_tool("robot-01", "memory_recall",
+                              "Mistaken words", time.monotonic())
             patch = client.patch(
                 f"/v1/pet/robot-01/memories/{corrected_id}",
                 headers=authorization, json={"summary": "Operator corrected words"},
             )
             assert patch.status_code == 200 and patch.json()["corrected"] is True
+            assert [item["kind"] for item in hub.recent_tool_context(
+                "robot-01", time.monotonic(),
+            )] == ["robot_status"]
             assert hub.heard_revoked("robot-01", corrected_id)
             assert attention.timeline("robot-01", time.monotonic()) == []
             assert runtime.memory.recent("robot-01")[0].summary == "Operator corrected words"

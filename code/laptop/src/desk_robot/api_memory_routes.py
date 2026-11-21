@@ -34,6 +34,12 @@ def register_memory_routes(
         invalidate = getattr(conversation, "invalidate_private_memory", None)
         if callable(invalidate):
             invalidate(robot_id)
+        # The earlier voice-memory receipt can remain in the live timeline
+        # for 30 seconds after its source memory was corrected or forgotten.
+        hub = getattr(getattr(app.state.runtime, "multimodal", None), "hub", None)
+        discard = getattr(hub, "discard_memory_tools", None)
+        if callable(discard):
+            discard(robot_id)
 
     def retract_live_asr(robot_id: str, event_id: str) -> None:
         """Keep an operator correction/deletion out of volatile speech context."""

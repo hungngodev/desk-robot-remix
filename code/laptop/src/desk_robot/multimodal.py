@@ -813,6 +813,15 @@ class CameraFrameHub:
             selected.add(index)
         return [items[index][1] for index in sorted(selected)]
 
+    def discard_memory_tools(self, robot_id: str) -> None:
+        """Retract cached private recall after operator memory correction."""
+        self._check(robot_id)
+        entries = self.tool_history[robot_id]
+        self.tool_history[robot_id] = deque(
+            (entry for entry in entries if entry[0] != "memory_recall"),
+            maxlen=entries.maxlen,
+        )
+
     def discard_visual_tools(self, robot_id: str) -> None:
         """Expire visual guesses without erasing independent read-only facts."""
         self._check(robot_id)
