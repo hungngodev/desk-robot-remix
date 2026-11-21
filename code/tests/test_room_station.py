@@ -422,9 +422,11 @@ def test_recursive_json_parse_error_does_not_restart_usb_replay_epoch(monkeypatc
     import desk_robot.room_station as room_module
 
     original_loads = room_module.json.loads
+    recursive_frames = []
 
     def loads(value, *args, **kwargs):
-        if value == "[[[":
+        if value.strip() == "[[[":
+            recursive_frames.append(value)
             raise RecursionError("Excessively nested USB JSON")
         return original_loads(value, *args, **kwargs)
 
@@ -462,6 +464,7 @@ def test_recursive_json_parse_error_does_not_restart_usb_replay_epoch(monkeypatc
     assert feed.received == 2
     assert feed.rejected == 2
     assert feed.callback_failures == 0
+    assert recursive_frames == ["[[[\\n"]  # The RecursionError branch ran.
 
 
 def test_callback_exception_does_not_reopen_usb_or_reset_replay_fence(monkeypatch):
