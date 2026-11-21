@@ -64,6 +64,25 @@ def test_decomposed_vietnamese_memory_query_recalls_existing_text(tmp_path):
         assert store.search("robot-02", decomposed) == []
 
 
+def test_legacy_decomposed_vietnamese_memory_is_still_retrievable(tmp_path):
+    """Canonical-equivalent FTS5 indexes must remain readable without migration."""
+    import unicodedata
+
+    store = MemoryStore(tmp_path, ["robot-01", "robot-02"])
+    nfd = unicodedata.normalize("NFD", "điện")
+    assert nfd != "điện"
+    store.remember(
+        "robot-01", "legacy_nfd_word", nfd,
+        kind="object", source_robot="robot-01", witnessed=True,
+    )
+    for form in ("NFC", "NFD"):
+        question = unicodedata.normalize(form, "điện")
+        assert [m.event_id for m in store.search("robot-01", question)] == [
+            "legacy_nfd_word",
+        ]
+        assert store.search("robot-02", question) == []
+
+
 @pytest.mark.parametrize("question", ["", " ", "z" * 241, "\x00key", None, True])
 def test_recall_rejects_unbounded_or_invalid_questions(tmp_path, question):
     store = MemoryStore(tmp_path, ["robot-01"])
