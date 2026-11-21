@@ -532,11 +532,73 @@ async def test_sensor_burst_uses_existing_camera_owner_and_coalesces_requests():
         await visual.close()
 
 
+async def test_sensor_events_keep_wroom_context_without_camera_consent():
+    """Touch and cliff sensing continue, but cannot start JPEG snapshots."""
+    heads = {"robot-01": Head(), "robot-02": Head()}
+    visual = MultimodalOrchestrator(
+        config(enabled=False), heads, Vision(), asyncio.Lock(),
+    )
+    try:
+        visual.sensor_event("robot-01", "touch_tap")
+        visual.sensor_event("robot-01", "safety_fault")
+        await asyncio.sleep(0.04)
+        assert heads["robot-01"].captures == 0
+        assert not visual.sensor_burst_pending("robot-01")
+        assert not visual.hub.frames["robot-01"]
+        assert {"touch_tap", "safety_fault"} <= {
+            item["kind"] for item in visual.hub.recent_events(
+                "robot-01", time.monotonic()
+            )
+        }
+        with pytest.raises(RuntimeError, match="Camera consent revoked"):
+            await visual.capture(
+                "robot-01", source="sensor", trigger_kind="touch_tap"
+            )
+        assert heads["robot-01"].captures == 0
+    finally:
+        await visual.close()
+
+
+async def test_sensor_capture_revoked_during_jpeg_preparation_never_publishes():
+    """Consent can disappear after the real JPEG, before Mac publication."""
+    entered, release = asyncio.Event(), asyncio.Event()
+    policy = config(enabled=True)
+    head = Head()
+    visual = MultimodalOrchestrator(
+        policy, {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+
+    async def blocked_prepare(jpeg, *, priority):
+        entered.set()
+        await release.wait()
+        return _prepare(jpeg)
+
+    visual._prepare_bounded = blocked_prepare
+    task = asyncio.create_task(
+        visual.capture("robot-01", source="sensor", trigger_kind="touch_tap")
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        policy.voice_vision_tools_enabled = False
+        release.set()
+        with pytest.raises(RuntimeError, match="Camera consent revoked"):
+            await asyncio.wait_for(task, timeout=1)
+        assert head.captures == 1  # Captured before revocation, NOT published.
+        assert not visual.hub.frames["robot-01"]
+        assert visual.status("robot-01")["software_timings"]["camera_errors"] >= 1
+    finally:
+        release.set()
+        await visual.close()
+
+
 async def test_sensor_two_frame_burst_never_blocks_human_speech_priority():
     heads = {"robot-01": Head(), "robot-02": Head()}
     visual = MultimodalOrchestrator(
-        config(enabled=False), heads, Vision(), asyncio.Lock()
+        config(enabled=True), heads, Vision(), asyncio.Lock()
     )
+    # This test isolates sensor preemption, not the separate VAD camera sampler.
+    visual.start_speech_frames = lambda _robot_id: None
     try:
         visual.sensor_event("robot-01", "petting_zone")
         async with asyncio.timeout(2):
@@ -597,8 +659,10 @@ async def test_one_human_vad_preempts_all_five_pet_optional_camera_captures():
 async def test_other_pets_sensor_bursts_yield_to_one_fleet_human_turn():
     heads = {"robot-01": Head(), "robot-02": Head()}
     visual = MultimodalOrchestrator(
-        config(enabled=False), heads, Vision(), asyncio.Lock()
+        config(enabled=True), heads, Vision(), asyncio.Lock()
     )
+    # This test isolates sensor preemption, not the separate VAD camera sampler.
+    visual.start_speech_frames = lambda _robot_id: None
     try:
         visual.sensor_event("robot-02", "nfc_tag")
         async with asyncio.timeout(2):
@@ -727,7 +791,7 @@ async def test_direct_visual_question_preempts_busy_optional_model_without_extra
 async def test_sensor_two_frame_burst_is_bounded_and_camera_serial():
     head = Head()
     visual = MultimodalOrchestrator(
-        config(enabled=False),
+        config(enabled=True),
         {"robot-01": head, "robot-02": Head()},
         Vision(), asyncio.Lock(),
     )
