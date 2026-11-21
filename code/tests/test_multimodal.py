@@ -1330,6 +1330,36 @@ async def test_voice_vision_tool_gets_real_authenticated_head_frames_without_act
 
 
 
+
+
+@pytest.mark.parametrize("regrant", [False, True])
+async def test_new_visual_question_only_reuses_same_grant_camera_media(
+    settings, regrant,
+):
+    """OFF/ON between requests cannot revive a still-fresh old-grant JPEG."""
+    settings.voice_vision_tools_enabled = True
+    settings.vision_model = "local-vlm"
+    robot_id = settings.robots[0].id
+    head, scene = Head(), Vision()
+    visual = MultimodalOrchestrator(
+        settings, {robot_id: head}, scene, asyncio.Lock(),
+    )
+    try:
+        old = await visual.capture(robot_id, source="speech")
+        assert head.captures == 1
+        if regrant:
+            previous_grant = settings.camera_consent_generation
+            settings.voice_vision_tools_enabled = False
+            settings.voice_vision_tools_enabled = True
+            assert settings.camera_consent_generation > previous_grant
+        result = await visual.look(robot_id, "What is on the desk?")
+        assert result["answer"] == "I can see a dark square on the table."
+        assert head.captures == (2 if regrant else 1)
+        assert scene.calls
+        assert (scene.calls[-1][1][-1] != old.jpeg) is regrant
+    finally:
+        await visual.close()
+
 @pytest.mark.parametrize("revoke_and_regrant", [False, True])
 async def test_visual_model_regrant_during_inference_cannot_restore_old_grant(
     settings, revoke_and_regrant,

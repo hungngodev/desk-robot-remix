@@ -1735,6 +1735,11 @@ class MultimodalOrchestrator:
         if (not self.settings.voice_vision_tools_enabled
                 or not self.settings.vision_model):
             raise ValueError("Enable local voice vision and install a vision model")
+        # A newly granted question must never borrow a JPEG buffered under
+        # the previous grant, even if no camera task saw the brief opt out.
+        self._camera_grant_valid(
+            robot_id, getattr(self.settings, "camera_consent_generation", None)
+        )
         # Consent revocation is permanent for this request, even after regrant.
         camera_consent_generation = getattr(
             self.settings, "camera_consent_generation", None
