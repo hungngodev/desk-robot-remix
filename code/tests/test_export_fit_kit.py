@@ -466,4 +466,4 @@ def test_gy530_bracket_does_not_drill_unmeasured_pcb_holes_through_optics():
     assert "No fake GY-530 PCB screw holes" in source
     assert "for(x=[-tof_pcb_w/2+2,tof_pcb_w/2-2])" not in source
     assert "This is an aperture/angle reference ONLY" in source
-    assert 'part="tof_adjustable"' in source
+    assert 'else if(part=="tof_adjustable")' in source
