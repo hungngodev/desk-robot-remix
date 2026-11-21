@@ -732,3 +732,38 @@ async def test_dock_diagnostic_keeps_raw_camera_only_when_mount_unmeasured(
     )
     assert result["pose"]["chassis_lateral_mm"] is None
     assert not result["motor_authorized"] and not result["charging_authorized"]
+
+
+async def test_dock_diagnostic_uses_strict_live_frame_receipt_if_available(
+    tmp_path, monkeypatch,
+):
+    """Dock diagnostics never choose the generic snapshot when a strict one exists."""
+    calibration = tmp_path / "dock.json"
+    calibration.write_text(json.dumps({
+        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
+    }))
+
+    class StrictHead(Head):
+        async def snapshot(self):
+            raise AssertionError("Generic camera snapshot used for docking")
+
+        async def snapshot_for_dock(self):
+            self.captures += 1
+            return b"\\xff\\xd8\\xff\\xd9"
+
+    monkeypatch.setattr(
+        dock_runtime, "detect_apriltag",
+        lambda jpeg, camera, *, captured_at: DockPose(
+            0, 0, 450, 0.5, captured_at,
+        ),
+    )
+    head = StrictHead()
+    result = await dock_runtime.observe_actual_dock(
+        head, SimpleNamespace(id="robot-01", dock_calibration=calibration),
+    )
+    assert result["phase"] == "approach"
+    assert head.captures == 1
+    assert head.commands == []
+    assert not result["motor_authorized"]
+    assert not result["charging_authorized"]
