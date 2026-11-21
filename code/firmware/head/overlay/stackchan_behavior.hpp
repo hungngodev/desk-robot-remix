@@ -1,4 +1,4 @@
-// Vendored unchanged from Stackchan agent Behavior.hpp
+// Adapted from pinned Stackchan agent Behavior.hpp for wrap-safe ESP32 uptime timers
 // Source: https://github.com/botamochi6277/stackchan-agent/blob/bfb98fb8bdb4f8ecc4b7c1c4f9bc90ee5227e613/include/Behavior.hpp
 // License notice retained below; motion actions are NEVER forwarded to body actuators.
 /*
@@ -196,8 +196,13 @@ class HsmBehavior {
   uint32_t entered_ms_ = 0;
   uint32_t last_activity_ms_ = 0;
   uint32_t talk_ms_ = 0;       // duration of the current speech
-  uint32_t next_pick_ms_ = 0;  // idle picker
-  uint32_t transient_until_ms_ = 0;
+  // Use elapsed unsigned intervals rather than absolute 32-bit deadlines:
+  // esp_timer_get_time()/1000 wraps after ~49 days on a continuously on pet.
+  uint32_t next_pick_started_ms_ = 0;
+  uint32_t next_pick_delay_ms_ = 0;
+  uint32_t transient_started_ms_ = 0;
+  uint32_t transient_duration_ms_ = 0;
+  bool transient_active_ = false;
   uint32_t rng_;
   char text_[kMaxTextLength + 1] = {0};
   Action action_;  // accumulated during one update()
@@ -232,11 +237,14 @@ class HsmBehavior {
 
   void startle() {
     setMood(Mood::kSurprised);
-    transient_until_ms_ = now_ + surprised_ms;  // back to neutral by updateTransientMood()
+    transient_started_ms_ = now_;
+    transient_duration_ms_ = surprised_ms;
+    transient_active_ = true;  // even if an absolute deadline would wrap to zero
   }
 
   void scheduleNextPick() {
-    next_pick_ms_ = now_ + pick_min_ms + random(pick_max_ms - pick_min_ms + 1);
+    next_pick_started_ms_ = now_;
+    next_pick_delay_ms_ = pick_min_ms + random(pick_max_ms - pick_min_ms + 1);
   }
 
   void transition(State to, const char* cause) {
@@ -254,7 +262,7 @@ class HsmBehavior {
   void enter(State s, const char* /*cause*/) {
     state_ = s;
     entered_ms_ = now_;
-    transient_until_ms_ = 0;
+    transient_active_ = false;
     switch (s) {
       case State::kIdle:
         setMood(Mood::kNeutral);
@@ -405,14 +413,15 @@ class HsmBehavior {
   }
 
   void updateTransientMood() {
-    if (transient_until_ms_ != 0 && now_ >= transient_until_ms_) {
-      transient_until_ms_ = 0;
+    if (transient_active_ &&
+        static_cast<uint32_t>(now_ - transient_started_ms_) >= transient_duration_ms_) {
+      transient_active_ = false;
       setMood(Mood::kNeutral);
     }
   }
 
   void pickIdleBehavior() {
-    if (now_ < next_pick_ms_) {
+    if (static_cast<uint32_t>(now_ - next_pick_started_ms_) < next_pick_delay_ms_) {
       return;
     }
     scheduleNextPick();
@@ -455,7 +464,9 @@ class HsmBehavior {
         break;
       case kSmileCand:
         setMood(Mood::kSmile);
-        transient_until_ms_ = now_ + transient_ms;
+        transient_started_ms_ = now_;
+        transient_duration_ms_ = transient_ms;
+        transient_active_ = true;
         break;
       default:
         break;
