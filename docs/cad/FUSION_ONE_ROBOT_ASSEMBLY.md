@@ -143,6 +143,10 @@ the original README files, including noncommercial and share alike restrictions.
     service access. Move tracks through full travel, servos through their
     complete mechanical range, and look at camera/cliff lens field obstructions.
     Record top/heavy battery center of mass relative to the track footprint.
+    Also screen ALL load-bearing wheel/track contacts and the weighted
+    assembled center of mass with the source-only `screen_assembly_stability.py`
+    before any loaded grip or moving dock trial. A heavy external protected
+    pack must not be assumed stable merely because it physically mounts.
     Use Mesh > Prepare > Generate Face Groups and Mesh > Modify > Convert Mesh
     only on simplified local shapes you need as Fusion solids. For dense
     curved meshes, keep source STL as mesh reference and model your
@@ -207,3 +211,38 @@ not a measurement of the user's robot.
 Sources/licensing: docs/cad/README.md and the individual original-source
 README files. This guide is a reproducible mechanical work order and does not
 claim the user's physical fit has passed.
+
+
+## Loaded whole-robot static stability screen
+
+The original SMARS chassis cannot contain the provisional protected power
+tray flat within its XY footprint. Any outboard battery relocation or lifted
+jaw changes the robot's stability and desk-edge clearance. Do not solve
+battery packaging with an unsupported overhanging cell.
+
+The pure source-level screen requires measured support contacts and all
+assembly mass groups in these four poses: stowed empty, key grasp extended,
+candy grasp lifted, and stopped at the dock. Generate a blank record with:
+
+```sh
+python3 code/scripts/screen_assembly_stability.py --template --output robot01_stability.json
+```
+
+After measuring actual wheel and track support points, real heavy component
+masses/centers, maximum body roll and pitch and required static reserve,
+fill the blanks and run:
+
+```sh
+python3 code/scripts/screen_assembly_stability.py --measurements robot01_stability.json
+```
+
+The input body frame is X forward, Y left, Z upward, with millimeters
+and grams. The tool computes the convex support footprint, weighted
+source center of mass and worst signed distance to each support boundary
+under the supplied maximum positive and negative tilts. It rejects
+missing key or candy payload masses, stale or partial component roles,
+degenerate support contacts, malformed numbers and unsupported tilt.
+It deliberately does not infer a mass or support position from raw STLs.
+Even a passing paper screen keeps physical mass locations, **dynamic**
+acceleration, stopping, tip, desk-edge and actual printed assembly gates
+unverified. It never approves motion, charging, printing or procurement.

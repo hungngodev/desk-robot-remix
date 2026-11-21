@@ -1,0 +1,232 @@
+"""Static mass and support-footprint screen for the COMPLETE first desk pet.
+
+All source inputs are independently measured by a builder, never inferred
+from a concept render. A pass is a necessary static paper screen only. This
+does not verify center of gravity, moving tracks, dynamic braking, table
+edges, gripper torque, docking, charger isolation or physical tip safety.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import math
+from pathlib import Path
+
+ROLES = frozenset({
+    "body_and_tracks", "power_stack", "head_and_sense",
+    "lift_and_gripper", "sensors_and_wiring", "payload",
+})
+REQUIRED_POSES = frozenset({
+    "stowed_empty", "key_grasp_extended",
+    "candy_grasp_lifted", "docked_stopped",
+})
+COORDINATE_FRAME = "body_x_forward_y_left_z_up"
+UNIT_SYSTEM = "mm_g"
+
+
+def _finite(value: object, limit: float) -> bool:
+    # Reject bool and huge int before calling math.isfinite.
+    return type(value) in (float, int) and -limit <= value <= limit and (
+        math.isfinite(value)
+    )
+
+
+def _point(value: object, *, dimension: int) -> tuple[float, ...]:
+    if (not isinstance(value, (list, tuple))
+            or len(value) != dimension
+            or not all(_finite(v, 1000) for v in value)):
+        raise ValueError("Measured support and center points need finite millimeters")
+    return tuple(float(v) for v in value)
+
+
+def _cross(o: tuple, a: tuple, b: tuple) -> float:
+    return ((a[0]-o[0]) * (b[1]-o[1])
+            - (a[1]-o[1]) * (b[0]-o[0]))
+
+
+def support_hull(contacts: object) -> list[tuple[float, float]]:
+    if not isinstance(contacts, list) or not 3 <= len(contacts) <= 32:
+        raise ValueError("Every real load-bearing track or caster contact is needed")
+    points = [_point(p, dimension=2) for p in contacts]
+    if len(set(points)) != len(points):
+        raise ValueError("Duplicate support contact must not imply a wider base")
+    ordered = sorted(points)
+    lower = []
+    for p in ordered:
+        while len(lower) >= 2 and _cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+    upper = []
+    for p in reversed(ordered):
+        while len(upper) >= 2 and _cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+    hull = lower[:-1] + upper[:-1]
+    if len(hull) < 3:
+        raise ValueError("Collinear supports cannot create a stability footprint")
+    return hull
+
+
+def minimum_signed_edge_margin(point: tuple, hull: list[tuple]) -> float:
+    distances = []
+    for a, b in zip(hull, hull[1:] + hull[:1], strict=True):
+        length = math.hypot(b[0] - a[0], b[1] - a[1])
+        if length <= 0:
+            raise ValueError("Invalid support polygon edge")
+        distances.append(_cross(a, b, point) / length)
+    return min(distances)
+
+
+def blank_template() -> dict:
+    """Never invent mass, track contacts or a lifted payload position."""
+    return {
+        "units": UNIT_SYSTEM,
+        "coordinate_frame": COORDINATE_FRAME,
+        "support_contacts_mm": [],
+        "required_static_edge_margin_mm": None,
+        "max_roll_deg": None,
+        "max_pitch_deg": None,
+        "poses": [{
+            "name": pose,
+            "components": [{
+                "id": role, "mass_g": None,
+                "com_mm": [None, None, None],
+            } for role in sorted(ROLES)],
+        } for pose in sorted(REQUIRED_POSES)],
+    }
+
+
+def screen(measurement: object) -> dict:
+    if not isinstance(measurement, dict) or set(measurement) != {
+        "units", "coordinate_frame", "support_contacts_mm",
+        "required_static_edge_margin_mm", "max_roll_deg",
+        "max_pitch_deg", "poses",
+    }:
+        raise ValueError("Full mass and footprint measurement record is required")
+    if (measurement["units"] != UNIT_SYSTEM
+            or measurement["coordinate_frame"] != COORDINATE_FRAME):
+        raise ValueError("Wrong chassis coordinate frame or mass/distance units")
+    margin = measurement["required_static_edge_margin_mm"]
+    roll = measurement["max_roll_deg"]
+    pitch = measurement["max_pitch_deg"]
+    if (not _finite(margin, 1000) or not 2 <= margin <= 100
+            or not _finite(roll, 25) or not 0 <= roll <= 25
+            or not _finite(pitch, 25) or not 0 <= pitch <= 25):
+        raise ValueError("Measured roll, pitch and static margin required")
+    hull = support_hull(measurement["support_contacts_mm"])
+    cases = measurement["poses"]
+    if not isinstance(cases, list) or not 4 <= len(cases) <= 40:
+        raise ValueError("All stowed, key, candy and docked poses required")
+    names = [case.get("name") for case in cases if isinstance(case, dict)]
+    if (len(names) != len(cases) or len(set(names)) != len(names)
+            or not REQUIRED_POSES.issubset(names)
+            or any(not isinstance(name, str) or not name for name in names)):
+        raise ValueError("Missing, unnamed or duplicated load pose")
+    results = []
+    for case in cases:
+        if set(case) != {"name", "components"}:
+            raise ValueError("Every load pose needs only measured components")
+        components = case["components"]
+        if not isinstance(components, list) or not 6 <= len(components) <= 60:
+            raise ValueError("Full assembly mass roles are required")
+        masses = {}
+        for part in components:
+            if not isinstance(part, dict) or set(part) != {
+                "id", "mass_g", "com_mm",
+            }:
+                raise ValueError("Every role needs a measured mass and center")
+            role = part["id"]
+            if not isinstance(role, str) or not role or role in masses:
+                raise ValueError("Duplicate or unnamed component mass")
+            mass = part["mass_g"]
+            if not _finite(mass, 100_000) or mass < 0:
+                raise ValueError("Component mass must be a measured finite gram value")
+            if role != "payload" and mass <= 0:
+                raise ValueError("Mandatory robot component cannot disappear")
+            masses[role] = (float(mass), _point(part["com_mm"], dimension=3))
+        if not ROLES.issubset(masses):
+            raise ValueError("Missing body, power, head, gripper, sensors or payload")
+        payload_mass = masses["payload"][0]
+        if case["name"] == "stowed_empty" and payload_mass != 0:
+            raise ValueError("Empty stowed pose must have zero payload")
+        if case["name"] in {"key_grasp_extended", "candy_grasp_lifted"} and (
+            payload_mass <= 0
+        ):
+            raise ValueError("Loaded grasp poses need actual key and candy mass")
+        total = sum(m for m, _ in masses.values())
+        com = tuple(
+            sum(m * xyz[axis] for m, xyz in masses.values()) / total
+            for axis in range(3)
+        )
+        margins = []
+        # Check all independent worst tilt signs. This intentionally
+        # overbounds the projection rather than predicting body dynamics.
+        for roll_sign in (-1, 1):
+            for pitch_sign in (-1, 1):
+                projected = (
+                    com[0] + com[2] * math.tan(math.radians(pitch_sign * pitch)),
+                    com[1] + com[2] * math.tan(math.radians(roll_sign * roll)),
+                )
+                margins.append(minimum_signed_edge_margin(projected, hull))
+        worst_margin = min(margins)
+        results.append({
+            "name": case["name"],
+            "mass_total_g": round(total, 3),
+            "source_center_of_mass_mm": [round(x, 3) for x in com],
+            "worst_tilt_static_margin_mm": round(worst_margin, 3),
+            "necessary_static_margin_on_paper": worst_margin >= margin,
+        })
+    return {
+        "required_pose_names": sorted(REQUIRED_POSES),
+        "support_hull_mm": [list(p) for p in hull],
+        "required_static_edge_margin_mm": margin,
+        "poses": results,
+        "necessary_stability_on_paper": all(
+            p["necessary_static_margin_on_paper"] for p in results
+        ),
+        "actual_mass_and_support_locations_physically_verified": False,
+        "loaded_dynamic_turn_and_braking_stability_verified": False,
+        "cliff_stop_and_motor_authorized": False,
+        "assembly_print_or_purchase_approved": False,
+    }
+
+
+def _unique_keys(pairs: list[tuple[str, object]]) -> dict:
+    out = {}
+    for key, value in pairs:
+        if key in out:
+            raise ValueError("Duplicate assembly stability measurement key")
+        out[key] = value
+    return out
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--measurements", type=Path)
+    group.add_argument("--template", action="store_true")
+    parser.add_argument("--output", type=Path)
+    args = parser.parse_args()
+    if args.template:
+        artifact = json.dumps(blank_template(), indent=2) + "\n"
+        if args.output is not None:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            with args.output.open("x", encoding="utf-8") as file:
+                file.write(artifact)
+        else:
+            print(artifact, end="")
+        return
+    if args.output is not None:
+        parser.error("--output is allowed only with --template")
+    record = json.loads(
+        args.measurements.read_text(encoding="utf-8"),
+        object_pairs_hook=_unique_keys,
+        parse_constant=lambda token: (_ for _ in ()).throw(
+            ValueError("Nonfinite mass or geometry token: " + token)
+        ),
+    )
+    print(json.dumps(screen(record), indent=2))
+
+
+if __name__ == "__main__":
+    main()

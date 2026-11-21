@@ -1,0 +1,127 @@
+"""Measured assembled center of mass is necessary for safe gripping and docking."""
+import importlib.util
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = ROOT / "code/scripts/screen_assembly_stability.py"
+
+
+def load():
+    spec = importlib.util.spec_from_file_location("screen_stability", SCRIPT)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def complete():
+    module = load()
+    data = module.blank_template()
+    data["support_contacts_mm"] = [
+        [-40, -45], [40, -45], [40, 45], [-40, 45],
+    ]
+    data["required_static_edge_margin_mm"] = 10
+    data["max_roll_deg"] = 8
+    data["max_pitch_deg"] = 8
+    defaults = {
+        "body_and_tracks": (350, [0, 0, 15]),
+        "power_stack": (150, [-10, 0, 25]),
+        "head_and_sense": (100, [0, 0, 65]),
+        "lift_and_gripper": (90, [16, 0, 20]),
+        "sensors_and_wiring": (60, [0, 0, 28]),
+        "payload": (0, [0, 0, 15]),
+    }
+    for pose in data["poses"]:
+        for component in pose["components"]:
+            mass, xyz = defaults[component["id"]]
+            if component["id"] == "payload":
+                if pose["name"] == "key_grasp_extended":
+                    mass, xyz = 10, [35, 0, 20]
+                if pose["name"] == "candy_grasp_lifted":
+                    mass, xyz = 20, [30, 0, 70]
+            component["mass_g"] = mass
+            component["com_mm"] = xyz
+    return data
+
+
+def test_four_real_required_pose_roles_are_screened_but_unqualified():
+    tool = load()
+    result = tool.screen(complete())
+    assert result["necessary_stability_on_paper"]
+    assert len(result["poses"]) == 4
+    assert len(result["support_hull_mm"]) == 4
+    assert all(p["worst_tilt_static_margin_mm"] >= 10
+               for p in result["poses"])
+    assert result["actual_mass_and_support_locations_physically_verified"] is False
+    assert result["loaded_dynamic_turn_and_braking_stability_verified"] is False
+    assert result["cliff_stop_and_motor_authorized"] is False
+    assert result["assembly_print_or_purchase_approved"] is False
+
+
+def test_external_heavy_protected_battery_requires_real_stability_redesign():
+    data = complete()
+    for pose in data["poses"]:
+        battery = next(p for p in pose["components"]
+                       if p["id"] == "power_stack")
+        battery.update(mass_g=1400, com_mm=[80, 0, 45])
+    result = load().screen(data)
+    assert not result["necessary_stability_on_paper"]
+    assert all(not x["necessary_static_margin_on_paper"]
+               for x in result["poses"])
+    assert not result["assembly_print_or_purchase_approved"]
+
+
+def test_large_raised_gripper_payload_can_fail_while_empty_pose_passes():
+    data = complete()
+    lifted = next(p for p in data["poses"]
+                  if p["name"] == "candy_grasp_lifted")
+    mass = next(p for p in lifted["components"] if p["id"] == "payload")
+    mass.update(mass_g=900, com_mm=[120, 0, 90])
+    report = load().screen(data)
+    results = {row["name"]: row for row in report["poses"]}
+    assert results["stowed_empty"]["necessary_static_margin_on_paper"]
+    assert not results["candy_grasp_lifted"]["necessary_static_margin_on_paper"]
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda d: d.update(max_roll_deg=26),
+    lambda d: d.update(max_pitch_deg=float("nan")),
+    lambda d: d.update(required_static_edge_margin_mm=True),
+    lambda d: d.update(support_contacts_mm=[[0, 0], [1, 1], [2, 2]]),
+    lambda d: d.update(support_contacts_mm=[[0, 0], [0, 0], [3, 4]]),
+    lambda d: d.update(support_contacts_mm=[[0, 0], [1e308, 0], [0, 1e308]]),
+    lambda d: d["poses"].pop(),
+    lambda d: d["poses"][0]["components"].pop(),
+    lambda d: d["poses"][0]["components"][0].update(mass_g=True),
+    lambda d: d["poses"][0]["components"][0].update(mass_g=10**1000),
+    lambda d: d["poses"][0]["components"][0].update(com_mm=[0, 0, float("inf")]),
+    lambda d: d.update(units="inch_lbs"),
+    lambda d: d.update(coordinate_frame="world_z_down"),
+])
+def test_invalid_support_mass_or_missing_behaviors_never_pass(mutation):
+    record = complete()
+    mutation(record)
+    with pytest.raises(ValueError):
+        load().screen(record)
+
+
+def test_blank_source_template_is_not_a_qualified_measurement():
+    tool = load()
+    template = tool.blank_template()
+    assert template["support_contacts_mm"] == []
+    assert len(template["poses"]) == 4
+    assert all(part["mass_g"] is None
+               for case in template["poses"]
+               for part in case["components"])
+    with pytest.raises(ValueError):
+        tool.screen(template)
+
+
+def test_hull_margin_is_signed_and_does_not_qualify_outside_contact():
+    tool = load()
+    hull = tool.support_hull([
+        [-10, -10], [-10, 10], [10, 10], [10, -10],
+    ])
+    assert tool.minimum_signed_edge_margin((0, 0), hull) == pytest.approx(10)
+    assert tool.minimum_signed_edge_margin((12, 0), hull) < 0
