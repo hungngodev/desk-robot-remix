@@ -52,18 +52,40 @@ a separate ignored `xiaozhi-sense` copy.
 
 ## Face and interaction
 
-The OLED is monochrome, not a color LCD. Begin with original blink/gaze/listening/
-speaking/rest/blocked expressions. [RoboEyes](https://github.com/FluxGarage/RoboEyes)
-is a strong **GPL-3.0** candidate, with an Arduino/GFX graphics layer; a small
-ESP-IDF drawing/timing adapter is needed. Tech Talkies' custom-face fork is also
-GPL-3.0. Neither is integrated; resolve dependency/notices/source obligations
-before copying. Do not mark a combined GPL firmware MIT-only.
+The OLED is monochrome, not a color LCD. The selected Sense firmware
+already integrates the **MIT-licensed Stackchan-agent hierarchical behavior
+machine**, pinned at `bfb98fb8bdb4f8ecc4b7c1c4f9bc90ee5227e613`,
+into `overlay/stackchan_behavior.hpp` and the existing local
+`DeskRobotSenseBoard::FaceTask`. Preserve its source license notice.
+It handles blink, gaze, listening/speaking transitions, idle/rest and
+bounded contextual face cues. Its motion suggestions are **never** sent
+to the WROOM motor or gripper. The Mac may request cosmetic mood cues,
+but cannot override deterministic body safety; body faults display a
+local safety status and neutral face before ordinary idle expressions.
+[RoboEyes](https://github.com/FluxGarage/RoboEyes) and the Tech Talkies
+face fork remain **GPL-3.0 research options, not integrated dependencies**.
+Do not copy their code into this MIT source without a separate license review.
 
-One task should own OLED updates; animation must yield and never delay audio,
-UART stop or camera handling. Blink/idle behavior can continue locally while the
-Mac provides higher-level character state. Prototype head touch uses the owned
-Adafruit #1374, pending mounting and response checks.
-Head patting does not locate the user or navigate back to them.
+Only the existing local face task owns OLED updates. The WROOM status poll
+uses a separate task so an interrupted UART read cannot stall blink timing,
+Xiaozhi audio or emergency STOP. The OLED remains available during
+continuous listening as well as idle; status and mood owners are separate.
+The selected inexpensive generic AT42QT1010 head-touch input needs actual
+through-case placement and bounce tests. Reuse any genuinely owned compatible
+sensor rather than ordering a new Adafruit module. Head patting does not
+locate the user or navigate back to them.
+
+The consented camera is **one authenticated continuous MJPEG producer** on
+`/api/camera.mjpg`, not a recurring snapshot request. The Mac
+`HttpHead.stream_frames()` verifies each JPEG's per-robot boot, sequence
+and device capture-completion receipt and selects the newest frame in
+coalesced network reads. It discards obvious old buffered frames when
+Mac arrival advances by over 1.5 seconds but the same-boot device
+completion time advances more than one second less. This is a
+**relative backlog check**, not clock synchronization or proof of image
+exposure latency. Mac and ESP32 clocks cannot be compared absolutely.
+A real A9 trial still needs measured camera-to-Mac latency, object freshness,
+concurrent voice and consent/offline recovery.
 
 ## Existing case and small changes
 
