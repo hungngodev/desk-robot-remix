@@ -147,7 +147,8 @@ async def test_dock_approach_moves_once_then_holds_before_contacts(
             raise AssertionError("Dock motion used stale generic snapshot")
 
         async def snapshot_for_dock(self):
-            return b"simulated marker image"
+            import time
+            return b"simulated marker image", time.monotonic()
 
         async def command(self, text):
             self.commands.append(text)
