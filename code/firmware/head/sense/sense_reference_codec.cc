@@ -2,8 +2,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <vector>
-#include <driver/i2s_std.h>
 #include <esp_timer.h>
 #include <esp_log.h>
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
@@ -219,42 +217,16 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
         output_sample_rate_ != static_cast<int>(kSpeakerRate)) {
         return 0;
     }
-    // Keep the pinned Xiaozhi squared-volume PCM32 conversion, but not its
-    // portMAX_DELAY or ESP_ERROR_CHECK on the head speaker path. A stalled
-    // I2S peripheral must not hold urgent Xiaozhi output-disable indefinitely
-    // or reboot the head on an ordinary recoverable driver error.
-    const int volume = std::clamp(output_volume_, 0, 100);
+    const int volume = output_volume_;
     uint64_t started_generation = 0;
     {
         std::lock_guard<std::mutex> lock(reference_mutex_);
         started_generation = reference_generation_;
     }
-    int accepted = 0;
-    {
-        std::lock_guard<std::mutex> codec_lock(data_if_mutex_);
-        std::vector<int32_t> pcm32(samples);
-        const int32_t gain = static_cast<int32_t>(
-            std::pow(static_cast<double>(volume) / 100.0, 2) * 65536);
-        for (int i = 0; i < samples; ++i) {
-            const int64_t scaled = static_cast<int64_t>(data[i]) * gain;
-            pcm32[i] = static_cast<int32_t>(std::clamp(
-                scaled, static_cast<int64_t>(INT32_MIN),
-                static_cast<int64_t>(INT32_MAX)));
-        }
-        size_t bytes_written = 0;
-        constexpr uint32_t kMaxI2sWaitMs = 120;
-        const esp_err_t status = i2s_channel_write(
-            tx_handle_, pcm32.data(), pcm32.size() * sizeof(int32_t),
-            &bytes_written, pdMS_TO_TICKS(kMaxI2sWaitMs));
-        // An error can leave DMA progress uncertain, so never claim the
-        // partial byte count as accepted microphone echo reference.
-        if (status == ESP_OK
-                && bytes_written <= pcm32.size() * sizeof(int32_t)
-                && bytes_written % sizeof(int32_t) == 0)
-            accepted = static_cast<int>(bytes_written / sizeof(int32_t));
-    }
-    // No I2S lock is held while publishing AEC reference. A concurrent STOP
-    // can invalidate the captured generation and discard any stale samples.
+    // The selected Sense overlay already bounds the pinned Xiaozhi writer's
+    // I2S wait. Preserve its mutex, squared-volume PCM conversion and sole
+    // speaker owner rather than maintaining a second codec implementation.
+    const int accepted = NoAudioCodec::Write(data, samples);
     bool log_stale = false;
     uint32_t stale_discards = 0;
     bool log_short = false;
