@@ -197,6 +197,35 @@ async def test_truncated_camera_jpeg_does_not_consume_source_sequence(settings, 
         assert calls == 2
 
 
+async def test_oversized_still_jpeg_does_not_consume_camera_sequence(settings, tokens):
+    """The Mac must enforce the Sense 512 KiB cap even on legacy still HTTP."""
+    calls = 0
+
+    async def handler(request):
+        nonlocal calls
+        assert request.url.path == "/api/camera.jpg"
+        calls += 1
+        return httpx.Response(
+            200,
+            headers={
+                "X-Desk-Camera-Robot-Id": settings.robots[0].id,
+                "X-Desk-Camera-Boot": "61",
+                "X-Desk-Camera-Sequence": "1",
+                "X-Desk-Camera-Complete-Us": "11000",
+            },
+            content=(b"\xff\xd8" + b"x" * (512 * 1024) + b"\xff\xd9"
+                     if calls == 1 else b"\xff\xd8ok\xff\xd9"),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        with pytest.raises(HeadError, match="bounded complete JPEG"):
+            await head.snapshot()
+        assert await head.snapshot() == b"\xff\xd8ok\xff\xd9"
+        assert head._last_camera == (61, 1, 11000)
+        assert calls == 2
+
+
 async def test_snapshot_rejects_missing_or_cross_pet_camera_identity(
     settings, tokens,
 ):
