@@ -696,7 +696,10 @@ void BodyControl::execute(const char* line, std::size_t length,
     }
     // A completed belly ADC conversion must never refresh an old jaw
     // sample or certify a current grasp contact.
-    const bool force_fresh = a.force.valid && a.force.jaw_sample_seq != 0U &&
+    const bool jaw_unclipped = a.force.adc[1] != -32768 &&
+                               a.force.adc[1] != 32767;
+    const bool force_fresh = a.force.valid && jaw_unclipped &&
+                             a.force.jaw_sample_seq != 0U &&
                              now_ms - a.force.at_ms < 500U &&
                              now_ms - a.force.jaw_at_ms < 500U;
     const bool climate_fresh = a.climate.valid &&

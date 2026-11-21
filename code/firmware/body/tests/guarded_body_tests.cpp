@@ -1171,6 +1171,20 @@ static void belly_adc_does_not_refresh_stale_jaw_sample() {
   CHECK(send(body, "aux", 702U).find(
       "\"jaw_seq\":5,\"boot_id\":123,\"jaw_age_ms\":1,\"valid\":true")
         != std::string::npos);
+  // Electrical clipping remains visible as raw ADC diagnostics but cannot
+  // masquerade as usable force evidence for any Mac consumer.
+  for (const int endpoint : {-32768, 32767}) {
+    readings.force.adc[1] = static_cast<std::int16_t>(endpoint);
+    readings.force.jaw_sample_seq += 1U;
+    readings.force.jaw_at_ms = readings.force.at_ms = 703U;
+    body.set_accessories(readings, 703U);
+    const auto clipped = send(body, "aux", 704U);
+    CHECK(clipped.find(
+        "\"jaw_age_ms\":1,\"valid\":false,\"calibrated\":false")
+          != std::string::npos);
+    CHECK(clipped.find(std::string(",") + std::to_string(endpoint) + "]") !=
+          std::string::npos);
+  }
   CHECK(!body.state().armed);
 }
 
