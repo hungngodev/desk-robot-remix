@@ -212,9 +212,14 @@ def register_voice_context_route(
         # alone cannot certify that retrieved private facts are still current.
         conversation = getattr(app.state.runtime, "conversation", None)
         revisions = getattr(conversation, "_private_memory_generation", None)
-        memory_revision = (
-            revisions.get(robot_id) if isinstance(revisions, dict) else None
-        )
+        if not isinstance(revisions, dict):
+            raise HTTPException(409, "Private memory revision unavailable")
+        if robot_id in revisions:
+            memory_revision = revisions[robot_id]
+        elif hasattr(conversation, "invalidate_private_memory"):
+            memory_revision = 0
+        else:
+            memory_revision = None
         if type(memory_revision) is not int or memory_revision < 0:
             # A partial runtime must not bypass correction/deletion fencing
             # or disclose old private voice memories after an operator edit.
@@ -279,13 +284,17 @@ def register_voice_context_route(
             ]
         # A completed read may contain text from before an operator correction
         # or deletion, even if it still belongs to the same voice turn.
-        current_revisions = getattr(
-            getattr(app.state.runtime, "conversation", None),
-            "_private_memory_generation", None,
-        )
-        if (not isinstance(current_revisions, dict)
-                or type(current_revisions.get(robot_id)) is not int
-                or current_revisions[robot_id] != memory_revision):
+        current_conv = getattr(app.state.runtime, "conversation", None)
+        current_revisions = getattr(current_conv, "_private_memory_generation", None)
+        if not isinstance(current_revisions, dict):
+            raise HTTPException(409, "Private memory changed during retrieval")
+        if robot_id in current_revisions:
+            current_rev = current_revisions[robot_id]
+        elif hasattr(current_conv, "invalidate_private_memory"):
+            current_rev = 0
+        else:
+            current_rev = None
+        if current_rev != memory_revision:
             raise HTTPException(409, "Private memory changed during retrieval")
         # A SQLite worker may complete after a NEW authenticated voice turn.
         # Discard the entire private response, not merely its Mac timeline

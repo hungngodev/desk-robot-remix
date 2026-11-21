@@ -3,6 +3,7 @@
 These are source contract checks, not physically applied 5V/3.3V tests.
 """
 import json
+import platform
 import shutil
 import subprocess
 from pathlib import Path
@@ -252,10 +253,19 @@ def test_bme_completed_native_conversion_cache_with_sanitizers(tmp_path):
     src = ROOT / "code/firmware/room_station/tests/bme_completed_sample_tests.cpp"
     includes = ROOT / "code/firmware/room_station/src"
     executable = tmp_path / "bme_completed_sample_tests"
-    subprocess.run([
+    cmd = [
         compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
         "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
         f"-I{includes}", str(src), "-o", str(executable),
-    ], check=True, capture_output=True, text=True, timeout=30)
+    ]
+    if platform.system() == "Darwin":
+        for sdk in (
+            Path("/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1"),
+            Path("/Library/Developer/CommandLineTools/SDKs/MacOSX15.4.sdk/usr/include/c++/v1"),
+        ):
+            if sdk.exists():
+                cmd.extend(["-stdlib=libc++", f"-I{sdk}"])
+                break
+    subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=30)
     subprocess.run([str(executable)], check=True, capture_output=True,
                    text=True, timeout=15)

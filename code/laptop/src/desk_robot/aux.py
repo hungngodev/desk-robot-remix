@@ -128,6 +128,7 @@ def validate_aux(data: dict, robot_id: str) -> dict:
             or not _bool(proximity.get("valid"))
             or not _uint(proximity.get("gesture"), 4)
             or not _uint(proximity.get("gesture_events"), 0xffffffff)
+            or ("boot_id" in proximity and not _uint(proximity["boot_id"], 0xffffffff))
             or proximity.get("physically_qualified") is not False):
         raise ValueError("Invalid APDS9960 source")
     bmp = data.get("bmp280")

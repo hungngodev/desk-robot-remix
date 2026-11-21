@@ -3,9 +3,8 @@
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
 
-import pytest
-
 import desk_robot.memory as memory_module
+import pytest
 from desk_robot.memory import MemoryStore, MemoryWriteSealed
 
 

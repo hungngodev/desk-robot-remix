@@ -51,8 +51,10 @@ def test_aux_sensors_are_finite_typed_raw_and_unqualified():
     current = sample()
     current["force"]["boot_id"] = 0x12345678
     current["force"]["jaw_age_ms"] = 25
+    current["proximity"]["boot_id"] = 0x87654321
     assert validate_aux(current, "robot-01")["force"]["boot_id"] == 0x12345678
     assert validate_aux(current, "robot-01")["force"]["jaw_age_ms"] == 25
+    assert validate_aux(current, "robot-01")["proximity"]["boot_id"] == 0x87654321
     assert result["power"]["current_calibrated"] is False
     assert result["proximity"]["gesture"] == 1
     assert result["proximity"]["gesture_events"] == 3
@@ -84,6 +86,9 @@ def test_aux_sensors_are_finite_typed_raw_and_unqualified():
         ("power", "fuel_seq", 4294967296), ("proximity", "raw", 256),
         ("proximity", "gesture", "left"),
         ("proximity", "gesture_events", -1),
+        ("proximity", "boot_id", -1),
+        ("proximity", "boot_id", True),
+        ("proximity", "boot_id", 4294967296),
         ("proximity", "physically_qualified", True),
     ],
 )

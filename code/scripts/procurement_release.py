@@ -1807,7 +1807,9 @@ def main() -> int:
             return 2
         try:
             from verify_procurement_receipts import (
-                audit_release, checkout_sha, verified_required_ci_jobs,
+                audit_release,
+                checkout_sha,
+                verified_required_ci_jobs,
             )
             checked_sha = checkout_sha()
             # The same generator decision map owns optional station inclusion.

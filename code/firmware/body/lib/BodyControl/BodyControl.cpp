@@ -841,7 +841,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"shunt_uv\":%d,\"fuel_valid\":%s,\"fuel_seq\":%lu,\"monitor_valid\":%s,"
         "\"pack_ma\":%d,\"pack_valid\":%s,\"pack_seq\":%lu,"
         "\"current_calibrated\":false},"
-        "\"proximity\":{\"raw\":%u,\"valid\":%s,\"gesture\":%u,\"gesture_events\":%lu,\"physically_qualified\":false},"
+        "\"proximity\":{\"raw\":%u,\"valid\":%s,\"gesture\":%u,\"gesture_events\":%lu,\"boot_id\":%lu,\"physically_qualified\":false},"
         "\"dock\":{\"present\":%s,\"valid\":%s,\"left_seated\":%s,\"right_seated\":%s,"
         "\"input_good\":%s,\"charge_indicated\":%s,\"seq\":%lu,\"age_ms\":%lu,"
         "\"charging_verified\":false},\"nfc\":{\"v\":%s,\"t\":%lu,\"e\":%lu,\"s\":%lu}}",
@@ -891,6 +891,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         proximity_fresh ? "true" : "false",
         static_cast<unsigned>(a.proximity.gesture_direction),
         static_cast<unsigned long>(a.proximity.gesture_events),
+        static_cast<unsigned long>(boot_epoch_),
         a.dock.present ? "true" : "false", dock_fresh ? "true" : "false",
         dock_fresh && a.dock.left_seated ? "true" : "false",
         dock_fresh && a.dock.right_seated ? "true" : "false",

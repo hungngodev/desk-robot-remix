@@ -1,3 +1,24 @@
+## 21 November 2026: APDS9960 gesture boot epoch recovery, WROOM aux provenance, memory revision fencing fix, and fast-lane lint hardening
+
+PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
+Exact inspected PR head commit `458b1548e5b4c743b48f907b6b645e7aa721c2d3`.
+This source and test batch does not close physical or commercial gates.
+
+* APDS9960 gesture recovery across WROOM reboot & wrap (Review #4654369428):
+  - In `code/firmware/body/lib/BodyControl/BodyControl.cpp`, added `boot_id` to `/api/aux` `proximity` telemetry (`boot_epoch_`), matching `force.boot_id` and IMU status.
+  - In `code/firmware/body/tests/guarded_body_tests.cpp`, updated `aux` test assertion to verify `proximity.boot_id` emission.
+  - In `code/laptop/src/desk_robot/aux.py`, updated `validate_aux` to accept and validate typed uint32 `proximity.boot_id`.
+  - In `code/laptop/src/desk_robot/pet.py`, updated `PetState` with `last_gesture_boot_id` and `retired_gesture_boot_ids`. In `_observe_aux`, APDS9960 gesture processing tracks WROOM boot identity. A new boot establishes a fresh counter baseline without false wave triggers, subsequent waves in the new boot trigger cleanly, replayed frames from retired boots are rejected without corrupting baseline, and modular 32-bit forward counter advance (`_sensor_counter_advance`) correctly handles counter wrap from `UINT32_MAX` to 0.
+  - Added comprehensive regression in `code/tests/test_pet.py` (`test_apds9960_gestures_recover_across_wroom_reboot_and_reject_stale_boot_replays`) and updated `test_aux_telemetry.py`.
+* Private memory revision fencing fix for unedited robots:
+  - In `code/laptop/src/desk_robot/api_memory_routes.py`, fixed voice-context revision validation so that unedited pets in a live `Conversation` start at default generation 0 rather than failing closed with HTTP 409 Conflict when `_private_memory_generation` is unpopulated for that pet. Legacy/injected mock runtimes without a valid revision owner still strictly fail closed with 409.
+  - Updated mock runtime fixtures in `code/tests/test_multimodal_api.py` to supply `conversation` revision contexts.
+* Fast-lane CI lint & Darwin build hardening:
+  - In `code/tests/test_api_conversation.py`, fixed unused `previous_permit` variable (ruff F841).
+  - In `code/tests/test_room_station.py`, formatted imports (ruff I001).
+  - In `code/tests/test_room_station_full_profile.py`, added Darwin SDK libc++ include path detection for C++17 station tests with sanitizers.
+  - Repo passes `uv run ruff check .` with 0 errors.
+
 ## 21 November 2026: Camera consent decoupling for nonvisual tools, WROOM physical event preservation, and fast-lane CI integration
 
 PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.

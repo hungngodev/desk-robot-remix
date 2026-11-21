@@ -2646,6 +2646,81 @@ async def test_wroom_aux_boot_epoch_resets_optional_sources_without_old_replay(
         await pet.close()
 
 
+async def test_apds9960_gestures_recover_across_wroom_reboot_and_reject_stale_boot_replays(fleet, tmp_path):
+    fleet.mode = "hardware"
+    fleet.robots[0].gesture_interactions_qualified = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    chat = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, chat, memory, KeyScene())
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 6
+
+    def payload(count, direction, boot_id=None, valid=True):
+        prox = {
+            "raw": 0, "valid": valid, "gesture": direction,
+            "gesture_events": count, "physically_qualified": False,
+        }
+        if boot_id is not None:
+            prox["boot_id"] = boot_id
+        return {
+            "robot_id": "robot-01",
+            "pulse": {"present": False, "valid": False, "part_id": 0,
+                      "red": 0, "ir": 0, "age_ms": 0, "bpm": None,
+                      "medical": False},
+            "angles": {"raw": [0, 0, 0], "present_mask": 0,
+                       "valid_mask": 0, "magnet": [0, 0, 0]},
+            "force": {"adc": [0, 0], "jaw_seq": 0, "valid": False, "calibrated": False},
+            "climate": {"temp_centi": 0, "rh_centi": 0, "valid": False},
+            "power": {"cell_mv": 0, "soc_centi": 0, "bus_mv": 0,
+                      "shunt_uv": 0, "fuel_valid": False, "monitor_valid": False,
+                      "current_calibrated": False},
+            "proximity": prox,
+        }
+
+    try:
+        # Boot 1 (boot_id=101): initial count 300 sets baseline
+        await pet._observe_aux("robot-01", 6, payload(300, 0, boot_id=101))
+        assert not any(m.kind == "hand_wave" for m in memory.recent("robot-01"))
+        # Real wave 301 in Boot 1 triggers hand_wave
+        await pet._observe_aux("robot-01", 6, payload(301, 1, boot_id=101))
+        waves = [m for m in memory.recent("robot-01") if m.kind == "hand_wave"]
+        assert len(waves) == 1
+        assert "up" in waves[0].summary
+
+        # WROOM reboots! Boot 2 (boot_id=102): count resets to 0, establishing new baseline
+        await pet._observe_aux("robot-01", 6, payload(0, 0, boot_id=102))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "hand_wave"]) == 1
+
+        # Real wave 1 in Boot 2 triggers exactly once
+        await pet._observe_aux("robot-01", 6, payload(1, 3, boot_id=102))
+        waves = [m for m in memory.recent("robot-01") if m.kind == "hand_wave"]
+        assert len(waves) == 2
+        assert "left" in waves[0].summary
+
+        # Subsequent wave 2 in Boot 2
+        await pet._observe_aux("robot-01", 6, payload(2, 4, boot_id=102))
+        waves = [m for m in memory.recent("robot-01") if m.kind == "hand_wave"]
+        assert len(waves) == 3
+        assert "right" in waves[0].summary
+
+        # Stale replay from old Boot 1 (count 301 and 302): rejected by retired boot id
+        await pet._observe_aux("robot-01", 6, payload(301, 1, boot_id=101))
+        await pet._observe_aux("robot-01", 6, payload(302, 1, boot_id=101))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "hand_wave"]) == 3
+
+        # Wrap around handling: after sensor reset establishes baseline at 0xffffffff, wraps to 0
+        await pet._observe_aux("robot-01", 6, payload(0, 0, boot_id=102, valid=False))
+        await pet._observe_aux("robot-01", 6, payload(0xffffffff, 0, boot_id=102))
+        assert len([m for m in memory.recent("robot-01") if m.kind == "hand_wave"]) == 3
+        await pet._observe_aux("robot-01", 6, payload(0, 2, boot_id=102))
+        waves = [m for m in memory.recent("robot-01") if m.kind == "hand_wave"]
+        assert len(waves) == 4
+        assert "down" in waves[0].summary
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_cap1188_touch_memory_carries_real_edge_provenance(fleet, tmp_path):
     memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
     conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)

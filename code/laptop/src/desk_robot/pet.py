@@ -840,10 +840,11 @@ class PetController:
         if not state.enabled or state.generation != generation or self._closed:
             return
         # The current selected WROOM /api/aux serializer carries its random
-        # per-boot epoch as force.boot_id even when the FSR is unqualified.
-        # Treat that as an envelope identity for ALL WROOM accessory counters.
-        # Old out-of-order HTTP replies cannot resurrect a retired epoch.
-        boot_id = data["force"].get("boot_id")
+        # per-boot epoch as force.boot_id and proximity.boot_id even when the FSR
+        # is unqualified. Treat that as an envelope identity for ALL WROOM
+        # accessory counters. Old out-of-order HTTP replies cannot resurrect a
+        # retired epoch.
+        boot_id = data["force"].get("boot_id") or data["proximity"].get("boot_id")
         if boot_id is not None:
             if boot_id in state.retired_aux_boot_ids:
                 return
