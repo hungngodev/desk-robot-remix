@@ -20,6 +20,8 @@ def receipt() -> dict:
         "short_output_writes": 0,
         "microphone_frames_read": 32000,
         "speaker_frames_accepted": 64000,
+        "microphone_privacy_muted": False,
+        "microphone_privacy_epoch": 0,
         "reference_integrity_failed": False,
         "speaker_playback_verified": False,
         "aec_physically_qualified": False,
@@ -46,6 +48,8 @@ async def test_real_sense_audio_status_is_read_only_and_not_playback_ack(monkeyp
     data = await query(receipt(), monkeypatch)
     assert data["microphone_frames_read"] == 32000
     assert data["speaker_frames_accepted"] == 64000
+    assert data["microphone_privacy_muted"] is False
+    assert data["microphone_privacy_epoch"] == 0
     assert data["speaker_playback_verified"] is False
     assert data["aec_physically_qualified"] is False
 
@@ -63,6 +67,11 @@ async def test_real_sense_audio_status_is_read_only_and_not_playback_ack(monkeyp
     {"speaker_frames_accepted": 0.5},
     {"short_output_writes": "0"},
     {"short_output_writes": True},
+    {"microphone_privacy_muted": 1},
+    {"microphone_privacy_muted": None},
+    {"microphone_privacy_epoch": True},
+    {"microphone_privacy_epoch": -1},
+    {"microphone_privacy_epoch": 0x100000000},
     {"speaker_playback_verified": True},
     {"aec_physically_qualified": True},
     {"reference_integrity_failed": "false"},
