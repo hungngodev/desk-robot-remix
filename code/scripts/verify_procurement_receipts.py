@@ -166,8 +166,18 @@ def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
 def audit_release(evidence: dict, sha: str, lookup=None, *,
                   first_robot: bool = False) -> list[str]:
     """Fail closed if a receipt is missing, mis-scoped or not actually present."""
-    if not isinstance(evidence, dict) or not SHA.fullmatch(sha):
+    if (not isinstance(evidence, dict) or type(sha) is not str
+            or not SHA.fullmatch(sha)):
         return ["missing exact checkout SHA or release evidence"]
+    # These are untrusted machine-readable release receipts. A wrong JSON
+    # section shape cannot turn into an uncaught .items()/.get() exception.
+    for section in ("parts", "room_pod", "system", "supplemental_decisions"):
+        records = evidence.get(section, {})
+        if (not isinstance(records, dict)
+                or (section != "system"
+                    and any(not isinstance(r, dict)
+                            for r in records.values()))):
+            return [f"malformed {section} release evidence"]
     from verify_playbook_receipts import github_json
     lookup = github_json if lookup is None else lookup
     errors = []

@@ -73,6 +73,13 @@ def test_ci_fails_if_github_reports_failure_or_wrong_sha():
     assert "CI run not verified" in verify.audit(promoted(), failed)[0]
 
 
+def test_malformed_github_contents_envelope_is_not_a_raw_physical_receipt():
+    for response in ([], None, 42, "error", {"type": "dir"}):
+        assert not verify.verified_raw_record(
+            RAW, SHA, lambda _, value=response: value
+        )
+
+
 def test_physical_record_must_exist_at_same_commit():
     bad = promoted("MEASURED")
     bad["procedures"][0]["physical_measurement_receipt"]["raw_data_url"] = (

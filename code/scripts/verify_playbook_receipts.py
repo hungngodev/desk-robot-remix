@@ -84,8 +84,8 @@ def verified_raw_record(url: str, sha: str, lookup=github_json) -> bool:
         f"https://api.github.com/repos/{REPO}/contents/"
         f"{encoded_path}?ref={sha}"
     )
-    return data.get("type") == "file" and type(data.get("size")) is int \
-        and data["size"] > 0
+    return isinstance(data, dict) and data.get("type") == "file" \
+        and type(data.get("size")) is int and data["size"] > 0
 
 
 

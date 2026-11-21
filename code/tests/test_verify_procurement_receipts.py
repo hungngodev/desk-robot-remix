@@ -178,6 +178,36 @@ def test_duplicate_and_missing_measurement_records_fail_closed():
         )
 
 
+@pytest.mark.parametrize("broken", [
+    {"parts": []},
+    {"parts": {"imu": None}},
+    {"room_pod": {"scd40": "not a receipt mapping"}},
+    {"system": []},
+    {"supplemental_decisions": False},
+    {"supplemental_decisions": {"power_path": None}},
+])
+def test_malformed_physical_release_sections_fail_closed_without_network(broken):
+    def forbidden_network(_):
+        raise AssertionError("Bad JSON envelope must fail before network")
+
+    errors = release.audit_release(broken, SHA, forbidden_network)
+    assert any("malformed" in problem for problem in errors)
+
+
+@pytest.mark.parametrize("sha", [None, 123, True, [], {}])
+def test_nonstring_purchase_revision_is_rejected_not_a_regex_crash(sha):
+    errors = release.audit_release({}, sha, lambda _: 1 / 0)
+    assert errors == ["missing exact checkout SHA or release evidence"]
+
+
+def test_github_contents_directory_cannot_be_a_physical_receipt():
+    item = receipt("part:imu", release.PART_GATES[0])
+    for not_file in ([], None, "unexpected", {"type": "dir"}, 42):
+        assert not release.verified_scoped_record(
+            item, SHA, lambda _, body=not_file: body
+        )
+
+
 def test_empty_evidence_fails_closed_even_with_valid_sha():
     errors = release.audit_release({}, SHA, lookup)
     assert errors
