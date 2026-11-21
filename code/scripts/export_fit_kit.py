@@ -43,6 +43,36 @@ def binary_stl_triangles(path: Path) -> int:
     return triangles
 
 
+def mesh_bounds_mm(path: Path) -> dict:
+    """Read actual exported STL bounds in millimeters, never assumed CAD size.
+
+    STL has no native unit metadata: millimeters are the declared OpenSCAD
+    export convention. A bounding box is a print-layout aid, NOT component
+    fit, internal clearance, mechanical assembly or strength certification.
+    """
+    blob = path.read_bytes()
+    triangles = binary_stl_triangles(path)
+    lows = [float("inf")] * 3
+    highs = [float("-inf")] * 3
+    for i in range(triangles):
+        offset = 84 + 50 * i + 12
+        for corner in range(3):
+            point = unpack_from("<fff", blob, offset + 12 * corner)
+            for axis, value in enumerate(point):
+                if not isfinite(value):
+                    raise ValueError(f"Nonfinite STL bounds: {path.name}")
+                lows[axis] = min(lows[axis], value)
+                highs[axis] = max(highs[axis], value)
+    dimensions = [hi - lo for lo, hi in zip(lows, highs, strict=True)]
+    if any(not isfinite(v) or v <= 0 for v in dimensions):
+        raise ValueError(f"Degenerate STL bounds: {path.name}")
+    return {
+        "minimum_mm": [round(v, 3) for v in lows],
+        "maximum_mm": [round(v, 3) for v in highs],
+        "dimensions_mm": [round(v, 3) for v in dimensions],
+    }
+
+
 def closed_mesh_edges(path: Path) -> int:
     """Reject open, inverted-edge, nonfinite and degenerate STL geometry.
 
@@ -155,6 +185,7 @@ def export_kit(
                     "mesh_sha256": sha256(target.read_bytes()).hexdigest(),
                     "units": "mm",
                     "triangles": triangles, "manifold_edges": edges,
+                    "bbox_mm": mesh_bounds_mm(target),
                     # This number describes how many provisional candidates
                     # to export for layout, NOT approved installed inventory.
                     "quantity_per_robot": 8 if name == "tof_adjustable" else 1,
@@ -236,6 +267,8 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
         if (binary_stl_triangles(mesh) != item.get("triangles")
                 or closed_mesh_edges(mesh) != item.get("manifold_edges")):
             raise ValueError(f"Mesh geometry mismatch: {location}")
+        if item.get("bbox_mm") != mesh_bounds_mm(mesh):
+            raise ValueError(f"STL bounds changed: {location}")
     return report
 
 def main() -> None:

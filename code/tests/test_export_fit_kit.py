@@ -66,6 +66,11 @@ def test_binary_stl_geometry_rejects_truncation_and_zero_triangles(tmp_path):
     output.write_bytes(tetra_stl())
     assert source.binary_stl_triangles(output) == 4
     assert source.closed_mesh_edges(output) == 6
+    assert source.mesh_bounds_mm(output) == {
+        "minimum_mm": [0.0, 0.0, 0.0],
+        "maximum_mm": [1.0, 1.0, 1.0],
+        "dimensions_mm": [1.0, 1.0, 1.0],
+    }
     # Flipping every facet preserves edge pairing, but turns the entire
     # printable volume inside out. Reject that case before slicing.
     inverted = bytearray(tetra_stl())
@@ -154,6 +159,8 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
                     "temporary_fit_coupon"
                 ] is False
     assert all(item["manifold_edges"] == 6 for item in report["parts"])
+    assert all(item["bbox_mm"]["dimensions_mm"] == [1.0, 1.0, 1.0]
+               for item in report["parts"])
     assert source.verify_fit_kit(tmp_path, output_dir=rendered) == report
     # A modified JSON receipt must never promote a reversible fit kit
     # to a physically qualified assembly, energized dock, or licensed product.
@@ -168,6 +175,12 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
         manifest.write_text(json.dumps(edited))
         with pytest.raises(ValueError, match="Unsafe fit kit provenance flags"):
             source.verify_fit_kit(tmp_path, output_dir=rendered)
+    manifest.write_text(original)
+    forged_bounds = json.loads(original)
+    forged_bounds["parts"][0]["bbox_mm"]["dimensions_mm"][0] = 999.0
+    manifest.write_text(json.dumps(forged_bounds))
+    with pytest.raises(ValueError, match="STL bounds changed"):
+        source.verify_fit_kit(tmp_path, output_dir=rendered)
     manifest.write_text(original)
     for field, forged in (("installed_quantity_per_robot", 1),
                           ("temporary_fit_coupon", False)):

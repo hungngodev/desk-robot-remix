@@ -14,7 +14,11 @@ three existing power, docking and jaw fit gauges to
 `docs/cad/remixes/fit_stls/`. Each STL is exported in deterministic binary
 format, checked for nonzero triangles and exact file length, and listed in
 `docs/cad/remixes/fit_kit_manifest.json`, including SHA256 digests of every
-binary STL and its source SCAD file and explicit millimeter units. Run `python3 code/scripts/export_fit_kit.py --verify` before slicing. It
+binary STL and its source SCAD file, declared millimeter units, and
+actual triangle-derived `bbox_mm` minimum, maximum and dimensions for every
+provisional STL. Those bounds help identify wrong print scale and oversize
+envelopes, but cannot prove an assembled part fits. Run
+`python3 code/scripts/export_fit_kit.py --verify` before slicing. It
 checks every expected part, current SCAD and STL digests, and watertight mesh
 topology. Passing verifies source traceability, not actual part fit, license,
 dock power, charging or physical qualification. A failed rebuild invalidates an earlier
