@@ -46,6 +46,7 @@ async def measure(head, robot_id: str, *, seconds: float,
     invalid_receipts = 0
     received = 0
     integrity_failure_seen = False
+    privacy_muted_seen = False
     counter_regressions = 0
     while time.monotonic() < deadline:
         try:
@@ -62,11 +63,15 @@ async def measure(head, robot_id: str, *, seconds: float,
                            or not 0 <= sample[key] <= 0xffffffff
                            for key in COUNTERS)
                     or type(sample.get("reference_integrity_failed")) is not bool
+                    or type(sample.get("microphone_privacy_muted")) is not bool
+                    or type(sample.get("microphone_privacy_epoch")) is not int
+                    or not 0 <= sample["microphone_privacy_epoch"] <= 0xffffffff
                     or sample.get("speaker_playback_verified") is not False
                     or sample.get("aec_physically_qualified") is not False):
                 raise ValueError("Untrusted robot AEC reference receipt")
             if previous is not None and (
                 sample["boot"] != previous["boot"]
+                or sample["microphone_privacy_epoch"] < previous["microphone_privacy_epoch"]
                 or any(sample[key] < previous[key] for key in COUNTERS)
                 or (previous["reference_integrity_failed"]
                     and not sample["reference_integrity_failed"])
@@ -79,6 +84,7 @@ async def measure(head, robot_id: str, *, seconds: float,
                 first = sample
             last = sample
             integrity_failure_seen |= sample["reference_integrity_failed"]
+            privacy_muted_seen |= sample["microphone_privacy_muted"]
         except asyncio.CancelledError:
             raise
         except Exception as exc:
@@ -101,9 +107,15 @@ async def measure(head, robot_id: str, *, seconds: float,
         "counter_regressions": counter_regressions,
         "reference_counter_delta": deltas,
         "reference_integrity_failure_observed": integrity_failure_seen,
+        "microphone_privacy_muted_observed": privacy_muted_seen,
+        "microphone_privacy_epoch_delta": (
+            last["microphone_privacy_epoch"] - first["microphone_privacy_epoch"]
+            if first is not None and last is not None else None
+        ),
         "reference_software_integrity_observed": (
             received >= 2 and invalid_receipts == 0
-            and not integrity_failure_seen and deltas is not None
+            and not integrity_failure_seen and not privacy_muted_seen
+            and deltas is not None
             and deltas["reference_underflow_reads"] == 0
             and deltas["reference_overwrite_reads"] == 0
             and deltas["discarded_stale_writes"] == 0
