@@ -195,9 +195,17 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
         std::lock_guard<std::mutex> lock(bench_mutex_);
         if (!microphone_privacy_muted_.load(std::memory_order_acquire) &&
             privacy_epoch == microphone_privacy_epoch_.load(std::memory_order_acquire)) {
+            const bool already_ready = bench_window_.ready();
             bench_window_.offer(microphone_frame_.data(), reference_frame_.data(),
                                 static_cast<uint32_t>(frames), esp_timer_get_time(),
                                 reference_ready);
+            // Snapshot activity at the final MIC callback. Later speaker
+            // writes after raw capture completion cannot qualify this window.
+            if (!already_ready && bench_window_.ready()) {
+                std::lock_guard<std::mutex> reference_lock(reference_mutex_);
+                bench_speaker_activity_in_window_ =
+                    speaker_frames_accepted_ > bench_speaker_at_start_;
+            }
         }
     }
 #endif
@@ -375,6 +383,14 @@ bool SenseReferenceCodec::BeginBenchPcmCapture() {
         return false;
     }
     bench_started_us_ = now;
+    {
+        // Lock ordering matches ClearReference: bench, then reference.
+        // The snapshot belongs to this authenticated START, not a later
+        // asynchronous HTTP read of lifetime counters.
+        std::lock_guard<std::mutex> reference_lock(reference_mutex_);
+        bench_speaker_at_start_ = speaker_frames_accepted_;
+    }
+    bench_speaker_activity_in_window_ = false;
     bench_capture_generation_.fetch_add(1, std::memory_order_acq_rel);
     return true;
 }
@@ -388,6 +404,7 @@ SenseReferenceCodec::GetBenchPcmProgress() {
         bench_window_.failed(),
         bench_window_.frames_received(),
         bench_capture_generation_.load(std::memory_order_acquire),
+        bench_window_.ready() && bench_speaker_activity_in_window_,
     };
 }
 
