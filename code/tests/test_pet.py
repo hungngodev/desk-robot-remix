@@ -3867,7 +3867,35 @@ async def test_proactive_silent_model_mood_is_cosmetic_and_fenced(fleet):
     await pet._cue_decided_face(robot.id, "happy", lambda: True)
     await pet._cue_decided_face(robot.id, "surprised", lambda: False)
     await pet._cue_decided_face(robot.id, "mood:move", lambda: True)
+    await pet._cue_decided_face(robot.id, {"event": "arm"}, lambda: True)
     assert head.events == ["mood:thinking"]  # cooldown, consent, allowlist
+
+
+@pytest.mark.parametrize("invalid_mood", [
+    {}, ["happy"], True, 11, "mood:drive",
+])
+async def test_proactive_model_rejects_untrusted_non_string_mood(
+    fleet, invalid_mood,
+):
+    from desk_robot.conversation import OllamaChat
+
+    reply = {
+        "action": "silence", "text": "", "tool": "none",
+        "mood": invalid_mood,
+    }
+
+    def respond(request):
+        assert request.url.path == "/api/chat"
+        assert request.method == "POST"
+        return httpx.Response(200, json={
+            "message": {"content": json.dumps(reply)},
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(RuntimeError, match="Invalid proactive model decision"):
+            await OllamaChat(fleet, client).proactive_decision([
+                {"role": "user", "content": "An optional cosmetic event"},
+            ])
 
 
 async def test_proactive_brain_can_choose_to_stay_silent_without_tts(fleet, tmp_path):

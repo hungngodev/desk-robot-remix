@@ -149,6 +149,7 @@ class OllamaChat:
                     {"action", "text", "tool"},
                     {"action", "text", "tool", "mood"},
                 )
+                or type(value.get("mood", "none")) is not str
                 or value.get("mood", "none") not in {
                     "none", "neutral", "happy", "thinking", "surprised",
                 }

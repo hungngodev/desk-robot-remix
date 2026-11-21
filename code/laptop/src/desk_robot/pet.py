@@ -1798,7 +1798,8 @@ class PetController:
         model, or speaker arbitration. Invalid or obsolete decisions fail
         silently without disturbing the actual speech owner.
         """
-        if (mood not in {"neutral", "happy", "thinking", "surprised"}
+        if (type(mood) is not str
+                or mood not in {"neutral", "happy", "thinking", "surprised"}
                 or self.settings.mode != "hardware"
                 or not permitted()):
             return
