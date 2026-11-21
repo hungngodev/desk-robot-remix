@@ -84,3 +84,37 @@ def test_builder_plan_consistently_selects_mpu6050_with_berryimu_as_spare():
     # 6. No unannotated "version-confirmed BerryIMU handling/tilt/shake" remains
     assert "version-confirmed BerryIMU handling/tilt/shake" not in plan_text
 
+
+def test_product_acceptance_requires_first_dock_charge_not_expansion():
+    """Do not silently defer the actual first robot's mandatory own dock."""
+    product = (ROOT / "docs/product-definition.md").read_text(encoding="utf-8")
+    acceptance = product.split("## Acceptance before duplication", 1)[1].split(
+        "## What the eventual print-and-assemble package must contain", 1
+    )[0]
+    a6 = next(
+        row.casefold() for row in acceptance.splitlines()
+        if row.startswith("| A6 Power/mechanics |")
+    )
+    for required in (
+        "its own dock",
+        "safe approach",
+        "seated alignment",
+        "normally unpowered contacts",
+        "measured net pack charge",
+        "temperature",
+        "safe departure",
+    ):
+        assert required in a6
+    exclusion = acceptance.split("Initial success excludes", 1)[1].casefold()
+    assert "automatic charging" not in exclusion.split(
+        "**autonomous docking", 1
+    )[0]
+    for required in (
+        "autonomous docking and protected automatic charging",
+        "physical hold",
+        "software simulation or a passing ci run cannot satisfy a6",
+    ):
+        assert required in acceptance.casefold()
+    # The original acceptance IDs remain present and separate.
+    for number in range(1, 13):
+        assert f"| A{number} " in acceptance

@@ -210,7 +210,7 @@ unmatched binaries, sensor wiring or the new case.
 | A3 Control ownership | In simulation, operator enable remains active beyond 300 seconds without renewal. Pause/stop, manual/pickup preemption and link loss cancel active/queued pet motion; individual drive deadlines/watchdog remain effective. Model commands, reconnect and restart cannot enable movement. Initially grant one fleet motion owner; canceled queued movement never resumes automatically. |
 | A4 Local edge stop | Test every sensor disconnect, invalid/stale reading, bus fault and relevant edge approach with a tether/catch setup. Log actual detection latency and coast distance; require measured margin before the support footprint crosses an edge. No universal stop distance is assumed. |
 | A5 Manipulation | At least 8/10 actual flat-key trials and 8/10 wrapped-candy trials: lift visibly10mm, hold3seconds, then place under control. Record object dimensions/mass, slips and human assistance. Assisted trials fail. Blocks are supplementary, not a substitute for keys. |
-| A6 Power/mechanics | Loaded drive/turns and lift/grip with Wi-Fi/audio do not reset the robot, loosen mounts or exceed component ratings. Record peak current/voltage and temperatures. Verify camera/sensor views throughout mechanism travel. |
+| A6 Power/mechanics | Loaded drive/turns and lift/grip with Wi-Fi/audio do not reset the robot, loosen mounts or exceed component ratings. Record peak current/voltage and temperatures. Verify camera/sensor views throughout mechanism travel. Before the first robot is complete, qualify its own dock with safe approach and seated alignment, normally unpowered contacts, protected charging with measured net pack charge and temperature, bounded retries and safe departure. |
 | A7 Five peers | Five distinct stationary robots complete ten coordinated utterances with one speaker at a time, no unintended motion and clean stop/disconnect cleanup. Repeat calibration/power/stopping checks on each unit before its permitted movement. |
 | A8 Initiative | In a five-minute stationary, non-quiet pet-mode trial, at least one attention, curiosity, rest or social activity starts without a new user prompt. Verify the 120-second group cooldown between spontaneous spoken initiations. No movement is needed for this test. |
 | A9 Proactive camera | Introduce a visible person/object or scene change without speaking or pressing a button. Require a fresh observation and suitable reaction. Repeated/stationary events must not trigger repeated announcements; quiet mode suppresses unsolicited speech; stale/disconnected frames cannot trigger claims/actions. Run simultaneous audio/camera and record latency. Test five observation feeds for deduplication and one-speaker ownership. |
@@ -219,10 +219,16 @@ unmatched binaries, sensor wiring or the new case.
 | A12 Sound/lighting, if enabled | External sound reactions remain responsive while self-speech/motors do not cause repeated startle; optional LED pin/voltage/current/quiet-mode behavior is qualified. |
 
 Initial success excludes SLAM, precise map navigation, returning to a person by
-known coordinates, force-controlled grasping, automatic charging, simultaneous
-unrestricted roaming/chasing and physical object handoff. Those need additional
-localization, coverage and validation. An active personality is achievable through
-gaze, pauses, initiative and supervised movement without claiming those features.
+known coordinates, force-controlled grasping, simultaneous unrestricted
+roaming/chasing and physical object handoff. Those need additional localization,
+coverage and validation. **Autonomous docking and protected automatic charging
+are NOT excluded:** the first robot must qualify its own dock under A6, including
+safe approach, seated detection, normally unpowered contacts, actual charger and
+pack protection, measured net charge and temperature, bounded retries, and safe
+departure. This remains a physical HOLD until tests on the assembled unit prove it;
+software simulation or a passing CI run cannot satisfy A6. An active personality
+is achievable through gaze, pauses, initiative and supervised movement without
+claiming any of the excluded features.
 
 ## What the eventual print-and-assemble package must contain
 
