@@ -27,3 +27,10 @@ def test_host_verification_uses_independent_bounded_job_lanes():
         assert "Verify exact source commit under test" in (
             str(job["steps"])
         )
+        checkout = next(
+            step for step in job["steps"]
+            if step.get("uses", "").startswith("actions/checkout@")
+        )
+        assert checkout["with"]["ref"] == (
+            "${{ github.event.pull_request.head.sha || github.sha }}"
+        )
