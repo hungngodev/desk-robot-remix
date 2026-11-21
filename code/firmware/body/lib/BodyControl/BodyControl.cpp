@@ -396,10 +396,14 @@ void BodyControl::tick(std::uint32_t now_ms) {
     return;
   }
   if (imu_motion_required_ && !imu_fresh(now_ms)) {
-    // Missing, failed or stale compulsory motion sensor locally disarms.
-    // This is not a tilt interlock: orientation calibration is still required.
+    // A compulsory sensor going stale DURING active motion must not be
+    // repaired by an old queued head ARM after I2C recovers. Keep local
+    // recovery authority separate from the normal remote arm lease.
+    if (state_.armed) imu_sensor_fault_latched_ = true;
     stop_motion();
     state_.armed = false;
+    // This is not a measured tilt interlock: orientation qualification
+    // remains a separate physical release gate.
     return;
   }
   if (dc_fault_latched_ || dc_driver_fault_bad(now_ms)) {
@@ -846,6 +850,7 @@ void BodyControl::execute(const char* line, std::size_t length,
     const bool touch_hit = state_.touch_active || state_.touch_raw_active;
     const bool local_motion_ready = cliff_ready && !driver_unhealthy &&
         !motor_watchdog_latched_ && !imu_low_g_latched_ &&
+        !imu_sensor_fault_latched_ &&
         !dock_unhealthy && !bumper_hit && !touch_hit &&
         (!imu_motion_required_ || imu_valid);
     // A critical cliff/bus fault takes precedence over a simultaneous
@@ -874,6 +879,7 @@ void BodyControl::execute(const char* line, std::size_t length,
             imu_.accel[0] == 0 && imu_.accel[1] == 0 &&
             imu_.accel[2] == 0 ? "imu_zero_accel" :
         imu_motion_required_ && !imu_valid ? "imu_missing_or_stale" :
+        imu_sensor_fault_latched_ ? "imu_sensor_fault_latched" :
         !guarded_motion_profile() ? "not_required" : "none";
     const int written = std::snprintf(
         reply, capacity,
@@ -996,8 +1002,13 @@ void BodyControl::execute(const char* line, std::size_t length,
     dc_fault_latched_ = false;  // local USB only, after fresh HIGH nFAULT
     motor_watchdog_latched_ = false; // no old drive resumed
     imu_low_g_latched_ = false; // after a truly fresh, clear MPU status
+    imu_sensor_fault_latched_ = false; // after fresh sensor and USB recovery
     std::snprintf(reply, capacity, "OK rearm");
   } else if (arm) {
+    if (imu_sensor_fault_latched_) {
+      std::snprintf(reply, capacity, "ERR arm imu_sensor_fault_latched");
+      return;
+    }
     if (imu_low_g_latched_) {
       std::snprintf(reply, capacity, "ERR arm imu_low_g_latched");
       return;

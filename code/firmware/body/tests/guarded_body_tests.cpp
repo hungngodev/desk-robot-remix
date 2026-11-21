@@ -795,6 +795,11 @@ static void required_imu_is_a_local_freshness_interlock() {
   CHECK(send(body, "arm", 252) == "ERR arm imu_missing_or_stale");
   reading.valid = true;
   body.set_imu(reading);
+  CHECK(send(body, "arm", 252) == "ERR arm imu_sensor_fault_latched");
+  CHECK(send(body, "status", 252).find(
+      "\"fault\":\"imu_sensor_fault_latched\"") != std::string::npos);
+  CHECK(send(body, "rearm", 252) == "ERR rearm local_only");
+  CHECK(send(body, "rearm", 252, true) == "OK rearm");
   CHECK(send(body, "arm", 252) == "OK arm");
   CHECK(body.state().left == 0 && body.state().right == 0);
   // Unrecognized model cannot claim a valid raw sample.

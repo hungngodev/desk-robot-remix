@@ -213,6 +213,7 @@ class BodyControl {
   bool dc_fault_last_active_ = false;
   bool motor_watchdog_latched_ = false;  // only local USB may clear
   bool imu_low_g_latched_ = false;  // native MPU event needs local USB rearm
+  bool imu_sensor_fault_latched_ = false; // lost live IMU during motion: USB only
   bool dc_driver_fault_bad(std::uint32_t now_ms) const;
   bool dock_telemetry_bad(std::uint32_t now_ms) const;
   bool extra_candidates_[3]{};
