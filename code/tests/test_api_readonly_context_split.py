@@ -820,7 +820,8 @@ def test_voice_context_excludes_camera_and_visual_look_when_camera_disabled(sett
         assert payload["core_facts"] == [{"slot": "pref", "value": "Secret violet tea fact"}]
 
 
-def test_voice_context_discards_visual_cues_on_camera_consent_toggle_during_sqlite_read(settings):
+@pytest.mark.parametrize("toggle_during", ("recent", "search", "core"))
+def test_voice_context_discards_visual_cues_on_camera_consent_toggle_during_sqlite_read(settings, toggle_during):
     """Visual cues read before SQLite yield are discarded if camera was toggled ON->OFF->ON."""
     import time
     from types import SimpleNamespace
@@ -838,14 +839,24 @@ def test_voice_context_discards_visual_cues_on_camera_consent_toggle_during_sqli
     hub.remember_tool("robot-01", "visual_look", "OLD PRE-TOGGLE SIGHTING", now)
     hub.notify("robot-01", "touch_tap", now)
 
+    def revoke_and_regrant_camera():
+        settings.voice_vision_tools_enabled = False
+        settings.voice_vision_tools_enabled = True
+
     class Memory:
         def recent(self, robot_id, *, limit):
+            if toggle_during == "recent":
+                revoke_and_regrant_camera()
+            return []
+
+        def search(self, robot_id, query, *, limit):
+            if toggle_during == "search":
+                revoke_and_regrant_camera()
             return []
 
         def core_facts(self, robot_id, *, limit):
-            # Toggle camera OFF then back ON during the simulated SQLite await
-            settings.voice_vision_tools_enabled = False
-            settings.voice_vision_tools_enabled = True
+            if toggle_during == "core":
+                revoke_and_regrant_camera()
             return [SimpleNamespace(slot="fact", value="Durable core fact")]
 
     app = FastAPI()
@@ -861,7 +872,10 @@ def test_voice_context_discards_visual_cues_on_camera_consent_toggle_during_sqli
         remember_tool_context=lambda *args: None,
     )
     with TestClient(app) as client:
-        result = client.get("/v1/pet/robot-01/voice-context")
+        result = client.get(
+            "/v1/pet/robot-01/voice-context",
+            params={"query": "tea"} if toggle_during == "search" else None,
+        )
         assert result.status_code == 200
         payload = result.json()
         assert "OLD PRE-TOGGLE SIGHTING" not in str(payload)

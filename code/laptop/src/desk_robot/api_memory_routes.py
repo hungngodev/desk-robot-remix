@@ -225,6 +225,10 @@ def register_voice_context_route(
             # A partial runtime must not bypass correction/deletion fencing
             # or disclose old private voice memories after an operator edit.
             raise HTTPException(409, "Private memory revision unavailable")
+        # Snapshot camera permission before either SQLite await. Revoking and
+        # regranting during the first read must not authorize cached vision.
+        vision_at_start = settings.voice_vision_tools_enabled
+        camera_consent_gen_at_start = getattr(settings, "camera_consent_generation", None)
         if query is None:
             records = await asyncio.to_thread(
                 app.state.runtime.memory.recent, robot_id, limit=6
@@ -239,8 +243,6 @@ def register_voice_context_route(
         # One existing per-head camera/sensor/tool hub, not an extra agent.
         # Keep historical text and current transient cues separate so a
         # model cannot reinterpret yesterday's memory as today's sighting.
-        vision_at_start = settings.voice_vision_tools_enabled
-        camera_consent_gen_at_start = getattr(settings, "camera_consent_generation", None)
         visual = getattr(app.state.runtime, "multimodal", None)
         sensor_cues, tool_cues, timeline = [], [], []
         if visual is not None:
@@ -268,7 +270,7 @@ def register_voice_context_route(
         # during that read invalidates the entire current private tool reply.
         if not settings.voice_memory_tools_enabled:
             raise HTTPException(403, "Voice memory consent revoked during read")
-        # Camera consent revoked or toggled while the SQLite core-fact query yielded.
+        # Camera consent revoked or toggled during either SQLite read.
         # Discard cues collected under the previous live vision permit.
         camera_gen_now = getattr(settings, "camera_consent_generation", None)
         camera_consent_toggled = (
