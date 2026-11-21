@@ -876,6 +876,12 @@ class MultimodalOrchestrator:
             r.id: getattr(settings, "camera_consent_generation", None)
             for r in settings.robots
         }
+        # Synthetic/legacy policies lack an epoch, so an observed OFF edge
+        # still needs to revoke cached JPEGs without repeated invalidation.
+        self._camera_consent_last_enabled = {
+            r.id: bool(settings.voice_vision_tools_enabled)
+            for r in settings.robots
+        }
         self.heads = heads
         self.scene = scene
         self.inference_lock = inference_lock
@@ -977,10 +983,13 @@ class MultimodalOrchestrator:
         Synthetic legacy policies without an epoch retain their old behavior.
         """
         current = getattr(self.settings, "camera_consent_generation", None)
-        if current != self._camera_grants[robot_id]:
+        enabled = bool(self.settings.voice_vision_tools_enabled)
+        if (current != self._camera_grants[robot_id]
+                or (not enabled and self._camera_consent_last_enabled[robot_id])):
             self._camera_grants[robot_id] = current
             self.hub.discard_video(robot_id)
-        return self.settings.voice_vision_tools_enabled and current == origin
+        self._camera_consent_last_enabled[robot_id] = enabled
+        return enabled and current == origin
 
     def stream_owns_camera(self, robot_id: str) -> bool:
         """One live visual worker owns acquisition, including reconnects."""
