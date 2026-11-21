@@ -260,9 +260,14 @@ def register_readonly_planner_routes(
                 for cue in (
                     "see", "look", "inspect", "camera", "picture", "photo",
                     "image", "visible", "on the desk", "on my desk",
-                    "on the table", "object", "in front of", "what color",
-                    "what colour", "what shape", "what size", "how many",
+                    "on the table", "object", "in front of",
                 )
+            ) or re.search(
+                # A bare quantifier has no visual subject. "How many days
+                # until my exam?" is not permission to capture a frame.
+                # Deictic requests do point at something in the scene.
+                r"\b(?:what (?:colou?r|shape|size) is|how many of) "
+                r"(?:this|that|these|those)\b", piece,
             ):
                 visual_question = True
                 break
