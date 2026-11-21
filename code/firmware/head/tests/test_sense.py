@@ -1007,7 +1007,9 @@ def test_sense_fault_face_overrides_idle_moods_and_recovers_once():
     fault = face.split('if (body_unhealthy) {', 2)[-1].split(
         '} else if (requested_mood', 1
     )[0]
-    assert 'SetEmotion("sad")' in fault
+    # Motor safety is factual; a fault must not force scripted sadness.
+    assert 'SetEmotion("neutral")' in fault
+    assert 'SetEmotion("sad")' not in fault
     assert '!last_idle_face_fault || !last_was_idle' in fault
     assert 'model_mood_active = false;' in fault
     # Recovery must force a neutral/local HSM face refresh even if its
