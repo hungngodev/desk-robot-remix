@@ -33,6 +33,14 @@ struct RangeOpticalRaw {
   std::uint32_t at_ms = 0;
 };
 
+// Calibrated from the installed, upright MPU6050 rather than assumed axes.
+struct ImuAttitudeLimits {
+  std::int16_t upright_accel[3]{};
+  std::uint16_t min_projection_permille = 0;
+  std::uint16_t min_accel_norm_raw = 0;
+  std::uint16_t max_accel_norm_raw = 0;
+};
+
 // The mounted jaw's force polarity and mechanical travel come only from
 // measured physical calibration. No arbitrary remote threshold is trusted.
 struct JawForceLimits {
@@ -159,6 +167,9 @@ class BodyControl {
   // though actual tilt thresholds are NOT yet calibrated. DC test profile
   // and host policy tests opt in explicitly rather than changing their ABI.
   void require_imu_for_motion(bool required) { imu_motion_required_ = required; }
+  // Full WROOM builds fail closed until an installed-board measurement exists.
+  void require_imu_attitude_guard(bool required) { imu_attitude_required_ = required; }
+  bool configure_imu_attitude_limits(const ImuAttitudeLimits& limits);
   // Physical full build must never advance an MG90S jaw toward a command
   // target without a recent, unclipped, independently acquired ADS1115
   // channel 1 value. The historical disconnected DC fixture opts out.
@@ -224,6 +235,14 @@ class BodyControl {
   BerryReading imu_{};
   std::uint32_t boot_epoch_ = 0;
   bool imu_motion_required_ = false;
+  bool imu_attitude_required_ = false;
+  bool imu_attitude_configured_ = false;
+  bool imu_attitude_latched_ = false;
+  ImuAttitudeLimits imu_attitude_limits_{};
+  std::uint8_t imu_attitude_bad_streak_ = 0;
+  std::uint8_t imu_attitude_good_streak_ = 0;
+  bool attitude_sample_unsafe(const BerryReading& reading) const;
+  bool attitude_recovery_ready(std::uint32_t now_ms) const;
   bool grip_feedback_required_ = false;
   bool jaw_limits_configured_ = false;
   JawForceLimits jaw_limits_{};

@@ -2152,6 +2152,95 @@ static void eight_lane_optical_words_are_read_only_and_expire() {
   CHECK(!body.state().armed); // diagnostic cannot grant any motor authority
 }
 
+static void mpu_static_attitude_fails_closed_and_needs_usb_recovery() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 100);
+  CHECK(guard.try_rearm(100));
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.require_imu_for_motion(true);
+  body.require_imu_attitude_guard(true);
+  body.set_imu_identity(4, 0x68, 0);
+  desk_robot::BerryReading imu{};
+  imu.model = desk_robot::BerryModel::Mpu6050;
+  imu.valid = true;
+  imu.low_g_status_valid = true;
+  imu.accel[2] = 16384;
+  imu.at_ms = 100;
+  body.set_imu(imu);
+  CHECK(send(body, "arm", 100) == "ERR arm imu_attitude_unqualified");
+  CHECK(!body.configure_imu_attitude_limits({{0, 0, 16384}, 1000, 12000, 20000}));
+  CHECK(body.configure_imu_attitude_limits({{0, 0, 16384}, 800, 12000, 20000}));
+  CHECK(!body.configure_imu_attitude_limits({{0, 0, 16384}, 800, 12000, 20000}));
+  imu.at_ms = 150;
+  body.set_imu(imu);
+  imu.at_ms = 200;
+  body.set_imu(imu);
+  fresh(guard, 200);
+  CHECK(send(body, "rearm", 200, true) == "OK rearm");
+  CHECK(send(body, "arm", 200) == "OK arm");
+  CHECK(send(body, "drive 20 20 200", 200).find("OK drive") == 0);
+
+  // A single tilt-shaped impulse followed by a recovered upright frame
+  // cannot falsely latch a healthy motor session.
+  imu.accel[0] = 14000;
+  imu.accel[2] = 8000;
+  imu.at_ms = 250;
+  body.set_imu(imu);
+  fresh(guard, 250);
+  body.tick(250);
+  CHECK(body.state().armed);
+  imu.accel[0] = 3000;
+  imu.accel[2] = 16100;
+  imu.at_ms = 300;
+  body.set_imu(imu);
+  fresh(guard, 300);
+  body.tick(300);
+  CHECK(body.state().armed);
+
+  // Static tilt with no FF_INT must still locally disarm on new data.
+  imu.accel[0] = 14000;
+  imu.accel[2] = 8000;
+  imu.at_ms = 350;
+  body.set_imu(imu);
+  fresh(guard, 350);
+  CHECK(body.state().armed);
+  imu.at_ms = 400;
+  body.set_imu(imu);
+  fresh(guard, 400);
+  CHECK(!body.state().armed && body.state().left == 0 &&
+        body.state().right == 0 && body.state().servos_attached);
+  CHECK(send(body, "status", 400).find(
+      "\"fault\":\"imu_attitude_latched\"") != std::string::npos);
+  CHECK(send(body, "arm", 400) == "ERR arm imu_attitude_latched");
+  CHECK(send(body, "rearm", 400, true) == "ERR rearm imu_attitude_not_upright");
+
+  // Putdown with healthy samples is not automatic motion authority.
+  imu.accel[0] = 0;
+  imu.accel[2] = 16384;
+  imu.at_ms = 450;
+  body.set_imu(imu);
+  fresh(guard, 450);
+  CHECK(send(body, "rearm", 450, true) == "ERR rearm imu_attitude_not_upright");
+  imu.at_ms = 500;
+  body.set_imu(imu);
+  fresh(guard, 500);
+  CHECK(send(body, "arm", 500) == "ERR arm imu_attitude_latched");
+  CHECK(send(body, "rearm", 500) == "ERR rearm local_only");
+  CHECK(send(body, "rearm", 500, true) == "OK rearm");
+  CHECK(!body.state().armed && body.state().left == 0);
+  CHECK(send(body, "arm", 500) == "OK arm");
+  CHECK(body.state().left == 0 && body.state().right == 0);
+
+  // Same timestamp with contradictory axes is a replay, not a new permit.
+  imu.accel[1] = 300;
+  body.set_imu(imu);
+  fresh(guard, 500);
+  body.tick(500);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 500) == "ERR arm imu_sensor_fault_latched");
+}
+
 int main() {
   try {
     desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
@@ -2208,6 +2297,7 @@ int main() {
     required_imu_is_a_local_freshness_interlock();
     zero_acceleration_mpu_does_not_authorize_motion();
     mpu_native_low_g_irq_vetoes_local_wheels();
+    mpu_static_attitude_fails_closed_and_needs_usb_recovery();
     imu_replay_and_rollover_are_local_motion_safety_evidence();
     missing_mpu_interrupt_status_cannot_authorize_wheels();
     imu_status_preserves_physical_conversion_and_boot_identity();

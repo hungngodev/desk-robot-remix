@@ -456,9 +456,27 @@ void setup() {
   }
   // This is a required sensor for the selected physical robot core. No
   // optional board or stale sample is allowed to bypass the local arm gate.
-  // Orientation/tilt thresholds remain unqualified, and this gate alone
-  // is never a physical A11 handling acceptance.
+  // A fresh IMU is not sufficient to declare upright/held safety.
   control.require_imu_for_motion(true);
+  control.require_imu_attitude_guard(true);
+#if defined(DESK_ROBOT_ATTITUDE_LIMITS_QUALIFIED) && DESK_ROBOT_ATTITUDE_LIMITS_QUALIFIED
+#if !defined(DESK_ROBOT_UPRIGHT_ACCEL_X) || !defined(DESK_ROBOT_UPRIGHT_ACCEL_Y) || \
+    !defined(DESK_ROBOT_UPRIGHT_ACCEL_Z) || !defined(DESK_ROBOT_UPRIGHT_PROJECTION_PERMILLE) || \
+    !defined(DESK_ROBOT_ACCEL_MIN_NORM_RAW) || !defined(DESK_ROBOT_ACCEL_MAX_NORM_RAW)
+#error Measured installed MPU6050 upright axes and tolerance bounds are required
+#endif
+  const desk_robot::ImuAttitudeLimits attitude_limits{
+      {DESK_ROBOT_UPRIGHT_ACCEL_X, DESK_ROBOT_UPRIGHT_ACCEL_Y,
+       DESK_ROBOT_UPRIGHT_ACCEL_Z},
+      DESK_ROBOT_UPRIGHT_PROJECTION_PERMILLE,
+      DESK_ROBOT_ACCEL_MIN_NORM_RAW, DESK_ROBOT_ACCEL_MAX_NORM_RAW};
+  if (!control.configure_imu_attitude_limits(attitude_limits)) {
+    control.force_disarm();
+    Serial.println("ERR imu_attitude_limits_invalid wheels_locked");
+  }
+#else
+  Serial.println("WARN imu_attitude_unqualified wheels_locked");
+#endif
   // A full physical jaw cannot execute a queued close while its own
   // ADS1115 feedback has gone stale. Bench-only fixtures remain opt-in.
   control.require_grip_feedback(true);

@@ -107,6 +107,51 @@ bool BodyControl::jaw_force_allows_closing() const {
   return delta < jaw_limits_.max_delta_adc && delta >= -tolerance;
 }
 
+bool BodyControl::configure_imu_attitude_limits(const ImuAttitudeLimits& limits) {
+  if (imu_attitude_configured_ || state_.armed ||
+      limits.min_projection_permille < 500U ||
+      limits.min_projection_permille > 990U ||
+      limits.min_accel_norm_raw < 8000U ||
+      limits.max_accel_norm_raw > 30000U ||
+      limits.max_accel_norm_raw <= limits.min_accel_norm_raw) return false;
+  std::int64_t norm_sq = 0;
+  for (const auto axis : limits.upright_accel)
+    norm_sq += static_cast<std::int64_t>(axis) * axis;
+  const auto low = static_cast<std::int64_t>(limits.min_accel_norm_raw);
+  const auto high = static_cast<std::int64_t>(limits.max_accel_norm_raw);
+  if (norm_sq < low * low || norm_sq > high * high) return false;
+  imu_attitude_limits_ = limits;
+  imu_attitude_configured_ = true;
+  imu_attitude_bad_streak_ = 0;
+  imu_attitude_good_streak_ = 0;
+  return true;
+}
+
+bool BodyControl::attitude_sample_unsafe(const BerryReading& reading) const {
+  if (!imu_attitude_configured_ || reading.model != BerryModel::Mpu6050 ||
+      !reading.valid || !reading.low_g_status_valid || reading.low_g_irq)
+    return true;
+  std::int64_t norm_sq = 0, upright_sq = 0, projection = 0;
+  for (unsigned i = 0; i < 3; ++i) {
+    const auto axis = static_cast<std::int64_t>(reading.accel[i]);
+    const auto upright = static_cast<std::int64_t>(imu_attitude_limits_.upright_accel[i]);
+    norm_sq += axis * axis;
+    upright_sq += upright * upright;
+    projection += axis * upright;
+  }
+  const auto low = static_cast<std::int64_t>(imu_attitude_limits_.min_accel_norm_raw);
+  const auto high = static_cast<std::int64_t>(imu_attitude_limits_.max_accel_norm_raw);
+  // No trigonometric floating point in the local motor safety loop.
+  // A measured acceleration norm envelope rejects high-g false upright.
+  return norm_sq < low * low || norm_sq > high * high ||
+         projection * 1000 < upright_sq * imu_attitude_limits_.min_projection_permille;
+}
+
+bool BodyControl::attitude_recovery_ready(std::uint32_t now_ms) const {
+  return imu_attitude_configured_ && imu_fresh(now_ms) &&
+         imu_attitude_good_streak_ >= 2 && imu_attitude_bad_streak_ == 0;
+}
+
 void BodyControl::stop_motion() {
   state_.left = 0;
   state_.right = 0;
@@ -316,6 +361,12 @@ bool BodyControl::dock_telemetry_bad(std::uint32_t now_ms) const {
 void BodyControl::set_accessories(const AccessoryReadings& readings,
                                   std::uint32_t now_ms) {
   state_.accessories = readings;
+  if (imu_attitude_required_ &&
+      (!imu_attitude_configured_ || imu_attitude_latched_)) {
+    stop_motion();
+    state_.armed = false;
+    return;
+  }
   if (fuel_monitor_required_ && !fuel_monitor_fresh(now_ms)) {
     if (!fuel_monitor_fault_latched_) {
       fuel_monitor_fault_seq_ = readings.gauge.fuel_sample_seq;
@@ -457,7 +508,9 @@ void BodyControl::set_imu(const BerryReading& reading) {
                 reading.gyro[i] == imu_.gyro[i];
   }
   const std::uint32_t advance = reading.at_ms - imu_last_at_ms_;
-  if (!imu_sample_seen_ || (advance != 0U && advance < 0x80000000U)) {
+  const bool newly_acquired = !imu_sample_seen_ ||
+      (advance != 0U && advance < 0x80000000U);
+  if (newly_acquired) {
     imu_sample_seen_ = true;
     imu_last_at_ms_ = reading.at_ms;
     imu_provenance_bad_ = false;
@@ -470,6 +523,25 @@ void BodyControl::set_imu(const BerryReading& reading) {
     }
   }
   imu_ = reading;
+  if (imu_attitude_required_ && newly_acquired) {
+    if (!imu_attitude_configured_ || !reading.valid ||
+        reading.model != BerryModel::Mpu6050 || !reading.low_g_status_valid) {
+      imu_attitude_bad_streak_ = 0;
+      imu_attitude_good_streak_ = 0;
+    } else if (attitude_sample_unsafe(reading)) {
+      imu_attitude_good_streak_ = 0;
+      if (imu_attitude_bad_streak_ < 2) ++imu_attitude_bad_streak_;
+      if (imu_attitude_bad_streak_ >= 2) {
+        // Two separate 50 ms conversions; not cached motor-loop reads.
+        imu_attitude_latched_ = true;
+        stop_motion();
+        state_.armed = false;  // keep gripper holding PWM
+      }
+    } else {
+      imu_attitude_bad_streak_ = 0;
+      if (imu_attitude_good_streak_ < 2) ++imu_attitude_good_streak_;
+    }
+  }
   // Native FF_INT is read-to-clear. A following healthy poll cannot erase
   // the safety stop: only a deliberate local USB rearm may resume wheels.
   if (imu_motion_required_ && reading.model == BerryModel::Mpu6050 &&
@@ -1085,8 +1157,9 @@ void BodyControl::execute(const char* line, std::size_t length,
         !fuel_monitor_fault_latched_ &&
         (!fuel_monitor_required_ || fuel_monitor_fresh(now_ms)) &&
         !motor_watchdog_latched_ && !command_timeout_latched_ &&
-        !imu_low_g_latched_ &&
+        !imu_low_g_latched_ && !imu_attitude_latched_ &&
         !imu_sensor_fault_latched_ &&
+        (!imu_attitude_required_ || attitude_recovery_ready(now_ms)) &&
         !dock_unhealthy && !bumper_hit && !touch_hit &&
         !battery_below_arm_min &&
         (!imu_motion_required_ || imu_valid);
@@ -1107,6 +1180,11 @@ void BodyControl::execute(const char* line, std::size_t length,
         bumper_fault_latched_ ? "bumper_latched" :
         touch_hit ? "touch_active" :
         imu_low_g_latched_ ? "imu_low_g_latched" :
+        imu_attitude_latched_ ? "imu_attitude_latched" :
+        imu_attitude_required_ && !imu_attitude_configured_ ?
+            "imu_attitude_unqualified" :
+        imu_attitude_required_ && !attitude_recovery_ready(now_ms) ?
+            "imu_attitude_not_upright" :
         // Once motion trips this local latch, report mandatory USB recovery
         // ahead of mutable raw IMU symptoms; raw telemetry remains available.
         imu_sensor_fault_latched_ ? "imu_sensor_fault_latched" :
@@ -1242,6 +1320,10 @@ void BodyControl::execute(const char* line, std::size_t length,
       std::snprintf(reply, capacity, "ERR rearm imu_missing_or_stale");
       return;
     }
+    if (imu_attitude_required_ && !attitude_recovery_ready(now_ms)) {
+      std::snprintf(reply, capacity, "ERR rearm imu_attitude_not_upright");
+      return;
+    }
     if (fuel_monitor_required_ && !fuel_monitor_fresh(now_ms)) {
       std::snprintf(reply, capacity, "ERR rearm fuel_monitor_missing_or_stale");
       return;
@@ -1281,6 +1363,7 @@ void BodyControl::execute(const char* line, std::size_t length,
     motor_watchdog_latched_ = false; // no old drive resumed
     command_timeout_latched_ = false; // local USB recovery only
     imu_low_g_latched_ = false; // after a truly fresh, clear MPU status
+    imu_attitude_latched_ = false; // two upright samples and local USB
     imu_sensor_fault_latched_ = false; // after fresh sensor and USB recovery
     std::snprintf(reply, capacity, "OK rearm");
   } else if (arm) {
@@ -1310,6 +1393,14 @@ void BodyControl::execute(const char* line, std::size_t length,
     }
     if (imu_low_g_latched_) {
       std::snprintf(reply, capacity, "ERR arm imu_low_g_latched");
+      return;
+    }
+    if (imu_attitude_latched_) {
+      std::snprintf(reply, capacity, "ERR arm imu_attitude_latched");
+      return;
+    }
+    if (imu_attitude_required_ && !imu_attitude_configured_) {
+      std::snprintf(reply, capacity, "ERR arm imu_attitude_unqualified");
       return;
     }
     if (motor_watchdog_latched_) {
@@ -1348,6 +1439,10 @@ void BodyControl::execute(const char* line, std::size_t length,
     }
     if (imu_motion_required_ && !imu_fresh(now_ms)) {
       std::snprintf(reply, capacity, "ERR arm imu_missing_or_stale");
+      return;
+    }
+    if (imu_attitude_required_ && !attitude_recovery_ready(now_ms)) {
+      std::snprintf(reply, capacity, "ERR arm imu_attitude_not_upright");
       return;
     }
     if (state_.accessories.gauge.fuel_valid &&
