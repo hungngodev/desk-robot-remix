@@ -463,6 +463,23 @@ def test_audio_builder_guide_points_to_live_capture_without_claiming_qualificati
     assert "no 20-trial physical acceptance is claimed" in guide
 
 
+@pytest.mark.parametrize("mic_silent,ref_silent", [
+    (True, False), (False, True), (True, True),
+])
+def test_mac_rejects_silent_pcm_even_when_head_counters_claim_activity(
+    mic_silent, ref_silent,
+):
+    raw = struct.pack(
+        "<hh", 0 if mic_silent else 123, 0 if ref_silent else -456,
+    ) * capture.FRAMES
+    http = fake_read(raw=raw)
+    with pytest.raises(ValueError, match="all-zero microphone or reference"):
+        capture.capture_head(
+            http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
+            clock=iter([0.0, 0.1]).__next__, pause=lambda _: None,
+        )
+
+
 def test_consent_audio_capture_compiled_off_by_default():
     root = SOURCE.parents[1]
     head = (root / "firmware/head/sense/sense_reference_codec.h").read_text()
