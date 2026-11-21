@@ -419,6 +419,96 @@ def test_room_station_context_plan_uses_original_permission_epoch(
         assert "room station" in response.json()["detail"].lower()
 
 
+@pytest.mark.parametrize("grant_change,expected_status", [
+    ("unchanged", 200), ("revoked", 403), ("regranted", 409),
+])
+def test_semantic_planner_private_memory_grant_survives_no_revoke(
+    settings, tokens, grant_change, expected_status,
+):
+    """A stale model prompt cannot use private recall after consent regrant."""
+    import json
+    import time
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.voice_memory_tools_enabled = True
+    original_generation = settings.voice_memory_consent_generation
+    robot = settings.robots[0].id
+    hub = CameraFrameHub([r.id for r in settings.robots])
+    hub.remember_tool(
+        robot, "memory_recall", "PRIVATE_PRE_REVOKE_RECALL",
+        time.monotonic(),
+    )
+
+    class Model:
+        async def reply(self, history):
+            assert "PRIVATE_PRE_REVOKE_RECALL" in str(history)
+            if grant_change != "unchanged":
+                settings.voice_memory_tools_enabled = False
+                if grant_change == "regranted":
+                    settings.voice_memory_tools_enabled = True
+            return json.dumps({"tools": [{"route": "voice-context"}]})
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=Model()),
+        multimodal=SimpleNamespace(hub=hub),
+        start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        response = client.post(
+            f"/v1/pet/{robot}/plan-readonly", headers=headers,
+            json={"transcript": "What do you remember about our earlier conversation?"},
+        )
+    assert response.status_code == expected_status
+    assert settings.voice_memory_consent_generation == (
+        original_generation + (grant_change != "unchanged")
+    )
+    if expected_status == 200:
+        assert [item["route"] for item in response.json()["tools"]] == [
+            "voice-context",
+        ]
+    else:
+        assert "private memory" in response.json()["detail"].lower()
+
+
+def test_semantic_planner_cannot_gain_memory_permission_mid_inference(
+    settings, tokens,
+):
+    """Enabling private memory while a plan waits is a new authorization."""
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.voice_memory_tools_enabled = False
+    robot = settings.robots[0].id
+
+    class Model:
+        async def reply(self, history):
+            settings.voice_memory_tools_enabled = True
+            return '{"tools":[{"route":"voice-context"}]}'
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=Model()),
+        multimodal=None, start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        response = client.post(
+            f"/v1/pet/{robot}/plan-readonly", headers=headers,
+            json={"transcript": "What do you remember about our earlier conversation?"},
+        )
+    assert response.status_code == 200
+    assert response.json()["tools"] == []
+
+
 def test_mac_semantic_planner_rejects_late_plan_after_new_human_vad(
     settings, tokens,
 ):

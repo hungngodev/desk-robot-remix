@@ -97,6 +97,8 @@ def register_readonly_planner_routes(
             and item.get("kind") == "memory_recall"
             for item in timeline
         )
+        memory_granted_at_request = settings.voice_memory_tools_enabled
+        memory_consent_generation = settings.voice_memory_consent_generation
         context = compose_brain_context([], [], timeline).interaction[:280]
         schema = (
             'Return ONLY a JSON object {"tools":[{"route":"look"},'
@@ -139,6 +141,9 @@ def register_readonly_planner_routes(
             raise HTTPException(409, "Live observation grant changed during planning")
         if private_context_used and not settings.voice_memory_tools_enabled:
             raise HTTPException(403, "Private memory consent revoked during planning")
+        if (private_context_used
+                and settings.voice_memory_consent_generation != memory_consent_generation):
+            raise HTTPException(409, "Private memory grant changed during planning")
         if room_context_used and not settings.room_station_context_enabled:
             raise HTTPException(403, "Room station consent revoked during planning")
         if (room_context_used
@@ -389,7 +394,10 @@ def register_readonly_planner_routes(
             if route == "aux-status" and not aux_question:
                 continue
             if route == "voice-context" and (
-                not settings.voice_memory_tools_enabled or not memory_question
+                not memory_granted_at_request
+                or not settings.voice_memory_tools_enabled
+                or settings.voice_memory_consent_generation != memory_consent_generation
+                or not memory_question
             ):
                 continue
             picked.append(route)
