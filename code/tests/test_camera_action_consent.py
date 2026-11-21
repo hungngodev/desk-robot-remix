@@ -4,7 +4,6 @@ import time
 from types import SimpleNamespace
 
 import pytest
-
 from desk_robot.controller import Coordinator, Job, OperationError
 from desk_robot.simulator import SimulatedHead, SimulationVision
 

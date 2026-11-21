@@ -3,9 +3,8 @@
 from types import SimpleNamespace
 
 import pytest
-from fastapi.testclient import TestClient
-
 from desk_robot.api import create_app
+from fastapi.testclient import TestClient
 
 
 @pytest.mark.parametrize(("grant_change", "status"), [
