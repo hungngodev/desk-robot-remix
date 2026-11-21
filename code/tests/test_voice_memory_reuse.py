@@ -105,6 +105,8 @@ def test_voice_memory_receipt_is_independent_of_camera_opt_in(settings):
     settings.voice_memory_tools_enabled = True
     settings.voice_vision_tools_enabled = False
     receipts = []
+    turn_owner = SimpleNamespace(_turn_epoch={"robot-01": 1})
+    owner_ref = {"value": (turn_owner, 1)}
 
     class Memory:
         def recent(self, robot_id, *, limit):
@@ -123,7 +125,7 @@ def test_voice_memory_receipt_is_independent_of_camera_opt_in(settings):
     register_voice_context_route(
         app, settings, authorize=lambda: None,
         requested_tool_context=lambda request, robot_id: (
-            "current-voice-turn"
+            owner_ref["value"]
             if request.headers.get("x-desk-robot-tool-receipt") == "1"
             and robot_id == "robot-01" else None
         ),
@@ -137,9 +139,25 @@ def test_voice_memory_receipt_is_independent_of_camera_opt_in(settings):
         assert result.status_code == 200
         assert result.json()["matched"] is True
         assert receipts == [(
-            "current-voice-turn", "robot-01", "memory_recall",
+            (turn_owner, 1), "robot-01", "memory_recall",
             "own observed event: The blue key was observed",
         )]
+        # Forged or obsolete ownership must fail closed, never disclose
+        # historical memory and never add a model tool receipt.
+        owner_ref["value"] = "current-voice-turn"
+        invalid = client.get(
+            "/v1/pet/robot-01/voice-context",
+            headers={"x-desk-robot-tool-receipt": "1"},
+        )
+        assert invalid.status_code == 409
+        assert "The blue key" not in str(invalid.json())
+        owner_ref["value"] = (turn_owner, True)
+        assert client.get(
+            "/v1/pet/robot-01/voice-context",
+            headers={"x-desk-robot-tool-receipt": "1"},
+        ).status_code == 409
+        assert len(receipts) == 1
+        owner_ref["value"] = (turn_owner, 1)
         # An operator fetch cannot silently seed the model's next speech.
         assert client.get("/v1/pet/robot-01/voice-context").status_code == 200
         assert len(receipts) == 1

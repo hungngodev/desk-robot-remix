@@ -207,9 +207,12 @@ def register_voice_context_route(
         # Discard the entire private response, not merely its Mac timeline
         # receipt; the superseded caller has no authority to reuse these facts.
         if owner is not None:
+            if not isinstance(owner, tuple) or len(owner) != 2:
+                raise HTTPException(409, "Unverifiable voice tool turn identity")
             turn_owner, turn_generation = owner
             current_epochs = getattr(turn_owner, "_turn_epoch", None)
-            if (not isinstance(current_epochs, dict)
+            if (type(turn_generation) is not int
+                    or not isinstance(current_epochs, dict)
                     or current_epochs.get(robot_id) != turn_generation):
                 raise HTTPException(409, "Voice tool turn superseded during memory retrieval")
         # Voice memory consent is independent from the vision opt-in.
