@@ -160,6 +160,34 @@ async def test_real_mjpeg_bench_receives_continuous_frames_without_snapshot_http
     assert result["camera_error_count"] == 0
 
 
+async def test_cancelled_camera_bench_closes_stream_lease():
+    """Cancelling a bench must release the same live MJPEG HTTP lease."""
+    entered, closed = asyncio.Event(), asyncio.Event()
+
+    class Head:
+        async def stream_frames(self):
+            try:
+                entered.set()
+                while True:
+                    await asyncio.sleep(10)
+                    yield b"unused", 0
+            finally:
+                closed.set()
+
+        async def status(self):
+            return {"robot_id": "robot-01"}
+
+    task = asyncio.create_task(
+        bench.measure(Head(), "robot-01", seconds=60,
+                      status_period_s=.05, stream=True)
+    )
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert closed.is_set()  # Lease closed before cancellation completes.
+
+
 async def test_stalled_continuous_mjpeg_is_reported_not_mistaken_for_live():
     class StalledHead:
         _last_camera = None
