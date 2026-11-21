@@ -1,5 +1,6 @@
 """Source regressions for the read-only Sense physical BOOT privacy bench."""
 import importlib.util
+import stat
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,23 @@ SPEC = importlib.util.spec_from_file_location(
 )
 bench = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bench)
+
+
+def test_boot_privacy_report_preflight_rejects_public_or_existing_path(
+    tmp_path,
+):
+    private = tmp_path / "consented" / "privacy.json"
+    bench.preflight_private_report(private)
+    assert stat.S_IMODE(private.parent.stat().st_mode) == 0o700
+    private.write_text("preserve previous BOOT evidence")
+    with pytest.raises(FileExistsError):
+        bench.preflight_private_report(private)
+    assert private.read_text() == "preserve previous BOOT evidence"
+    public = tmp_path / "world-readable"
+    public.mkdir(mode=0o755)
+    public.chmod(0o755)
+    with pytest.raises(ValueError, match="private mode"):
+        bench.preflight_private_report(public / "privacy.json")
 
 
 class Clock:
