@@ -170,6 +170,20 @@ async def test_real_mjpeg_bench_receives_continuous_frames_without_snapshot_http
             self._last_camera = None
             self.snapshot_calls = 0
             self.status_calls = 0
+            self.audio_calls = 0
+
+        async def audio_reference_status(self):
+            self.audio_calls += 1
+            return {
+                "robot_id": "robot-01", "boot": 31337,
+                "microphone_frames_read": self.audio_calls * 160,
+                "speaker_frames_accepted": self.audio_calls * 320,
+                "reference_underflow_reads": 8,
+                "microphone_privacy_muted": False,
+                "reference_integrity_failed": False,
+                "speaker_playback_verified": False,
+                "aec_physically_qualified": False,
+            }
 
         async def snapshot(self):
             self.snapshot_calls += 1
@@ -198,6 +212,15 @@ async def test_real_mjpeg_bench_receives_continuous_frames_without_snapshot_http
     assert result["status_latency"]["count"] >= 3
     assert head.snapshot_calls == 0
     assert head.status_calls >= 3
+    assert head.audio_calls >= 3
+    assert result["concurrent_audio_samples"] >= 2
+    assert result["concurrent_audio_errors"] == []
+    assert result["concurrent_audio_driver_activity_observed"] is True
+    assert result["concurrent_audio_counter_delta"]["microphone_frames_read"] > 0
+    assert result["concurrent_audio_counter_delta"]["speaker_frames_accepted"] > 0
+    assert result["actual_speaker_playback_verified"] is False if (
+        "actual_speaker_playback_verified" in result
+    ) else result["physical_aec_latency_measured"] is False
     assert result["camera_error_count"] == 0
 
 
