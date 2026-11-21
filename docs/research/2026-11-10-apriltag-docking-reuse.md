@@ -66,3 +66,16 @@ Because head snapshots currently expose a receipt timestamp rather than a
 calibrated exposure timestamp, any autonomous approach needs real motion
 and image latency qualification before setting dock_motion_qualified true.
 No automatic battery low docking is claimed.
+
+
+**Dock MJPEG freshness guard:** When the actual `HttpHead` supports
+`snapshot_for_dock`, both guarded approach and the read-only observer
+reuse the authenticated continuous MJPEG transport and require a frame
+received by the Mac within the preceding **200 ms**. A disconnected
+stream cannot silently fall back to a legacy `/api/camera.jpg` call,
+including while the capture lock is pending. Ordinary conversational
+snapshot semantics are unchanged. This measures Mac **receipt** age,
+not the original camera sensor exposure timestamp or end-to-end latency.
+No millimeter-scale docking movement or real charging is qualified until
+camera exposure latency, physical marker placement, optical standoff,
+local WROOM safety and stopped-distance trials are measured.
