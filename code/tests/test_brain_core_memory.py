@@ -159,7 +159,9 @@ def test_operator_core_preference_changes_invalidate_only_affected_private_promp
         }
         created = client.put(first, headers=operator, json={"value": "chess"})
         assert created.status_code == 200 and created.json()["changed"] is True
-        assert conversation._private_memory_generation == {"robot-01": 1}
+        assert conversation._private_memory_generation == {
+            "robot-01": 1, "robot-02": 0,
+        }
 
         # A repeated value, unauthorized edit or failed validation must not
         # cancel a dialogue or invalidate another robot's private memory.
@@ -167,7 +169,9 @@ def test_operator_core_preference_changes_invalidate_only_affected_private_promp
         assert repeated.status_code == 200 and repeated.json()["changed"] is False
         assert client.put(first, headers=model, json={"value": "checkers"}).status_code == 403
         assert client.put(first, headers=operator, json={"value": ""}).status_code == 422
-        assert conversation._private_memory_generation == {"robot-01": 1}
+        assert conversation._private_memory_generation == {
+            "robot-01": 1, "robot-02": 0,
+        }
 
         peer = client.put(second, headers=operator, json={"value": "puzzles"})
         assert peer.status_code == 200 and peer.json()["changed"] is True
