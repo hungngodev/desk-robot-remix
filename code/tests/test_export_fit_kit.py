@@ -808,11 +808,13 @@ def test_adapter_readme_fit_reference_count_tracks_exporter():
     fit_count = (
         len(source.GAUGES)
         + len(source.SPEAKER_FITS)
+        + len(source.MG90S_FITS)
         + len(source.RANGER_FITS)
         + len(source.DOCKS)
     )
-    assert fit_count == 9
+    assert len(source.MG90S_FITS) == 4
+    assert fit_count == 13
     assert f"current **{fit_count}** provisional fit references" in readme
     assert f"up to {fit_count} provisional dock, battery, contact" in readme
-    assert "up to thirteen provisional" not in readme
+    assert "up to nine provisional" not in readme
 
