@@ -109,6 +109,10 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
             or pre.get("aec_physically_qualified") is not False):
         raise ValueError("Sense reference stream not eligible for trial")
     boot = _number(pre.get("boot"), 0, 0xffffffff, "boot ID")
+    privacy_epoch = _number(
+        pre.get("microphone_privacy_epoch"), 0, 0xffffffff,
+        "microphone privacy epoch",
+    )
     # A genuine bench build statically enforces zero delay. Verify the live
     # flashed head too; older/misconfigured diagnostics must not masquerade as
     # an absolute speaker-to-microphone acoustic measurement.
@@ -168,6 +172,18 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
         raw = response.read(BYTES + 1)
     if len(raw) != BYTES:
         raise ValueError("Incomplete or oversized authenticated Sense PCM body")
+    # The BOOT privacy switch can change while the HTTP worker transfers
+    # buffered audio. Reject an otherwise complete capture if that happened,
+    # even though the head must independently invalidate mid-flight chunks.
+    # This final authenticated receipt fences the file write on the Mac.
+    final = _json_response(opener, base + "/api/audio.reference", token)
+    if (final.get("robot_id") != robot_id
+            or _number(final.get("boot"), 0, 0xffffffff, "boot ID") != boot
+            or _number(final.get("microphone_privacy_epoch"), 0, 0xffffffff,
+                       "microphone privacy epoch") != privacy_epoch
+            or final.get("microphone_privacy_muted") is not False
+            or final.get("reference_integrity_failed") is not False):
+        raise RuntimeError("Sense microphone privacy or boot changed during capture")
     report = {
         "capture_source": "authenticated_sense_codec_private_pcm_window",
         "robot_id": robot_id,
