@@ -246,6 +246,9 @@ class SenseOverlayTests(unittest.TestCase):
         ):
             self.assertIn(expected, board)
         self.assertIn("camera_busy_.exchange(true)", bridge)
+        self.assertIn('"X-Desk-Camera-Robot-Id: %s', bridge)
+        self.assertIn('jpeg->size(), CONFIG_DESK_ROBOT_ID,', bridge)
+        self.assertIn('char headers[320] = {};', bridge)
         self.assertIn('Envelope(false, "camera busy")', bridge)
         self.assertIn("vTaskDelay(pdMS_TO_TICKS(250));", bridge)
         self.assertIn("bridge->camera_busy_.store(false);", bridge)

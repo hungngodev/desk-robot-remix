@@ -515,15 +515,18 @@ void Bridge::CameraStreamTask(void* context) {
                 // completion metadata as the established snapshot endpoint.
                 const auto seq = ++bridge->camera_sequence_;
                 const auto completed = esp_timer_get_time();
-                char headers[224] = {};
+                // Longest legal ID and 64-bit timestamp must fit together.
+                char headers[320] = {};
                 const int n = snprintf(
                     headers, sizeof(headers),
                     "Content-Type: image/jpeg\r\n"
                     "Content-Length: %zu\r\n"
+                    "X-Desk-Camera-Robot-Id: %s\r\n"
                     "X-Desk-Camera-Boot: %u\r\n"
                     "X-Desk-Camera-Sequence: %u\r\n"
                     "X-Desk-Camera-Complete-Us: %lld\r\n\r\n",
-                    jpeg->size(), static_cast<unsigned>(bridge->boot_nonce_),
+                    jpeg->size(), CONFIG_DESK_ROBOT_ID,
+                    static_cast<unsigned>(bridge->boot_nonce_),
                     static_cast<unsigned>(seq), static_cast<long long>(completed));
                 if (n < 0 || static_cast<std::size_t>(n) >= sizeof(headers)) {
                     status = ESP_FAIL;

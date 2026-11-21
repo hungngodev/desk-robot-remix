@@ -206,6 +206,7 @@ def _stream_part(seq, payload=b"\xff\xd8camera\xff\xd9", *, boot=17):
         f"--deskrobotframe\r\n"
         "Content-Type: image/jpeg\r\n"
         f"Content-Length: {len(payload)}\r\n"
+        "X-Desk-Camera-Robot-Id: robot-01\r\n"
         f"X-Desk-Camera-Boot: {boot}\r\n"
         f"X-Desk-Camera-Sequence: {seq}\r\n"
         f"X-Desk-Camera-Complete-Us: {seq * 1000}\r\n\r\n"

@@ -73,8 +73,9 @@ class _MjpegFrames:
 
     boundary = b"--deskrobotframe\r\n"
 
-    def __init__(self):
+    def __init__(self, expected_robot_id: str | None = None):
         self.buffer = bytearray()
+        self.expected_robot_id = expected_robot_id
 
     def feed(self, chunk: bytes) -> list[tuple[bytes, tuple[int, int, int]]]:
         # Retain the bounded batch helper for unit callers.
@@ -115,6 +116,16 @@ class _MjpegFrames:
                     headers[key] = value
                 if headers.get("content-type") != "image/jpeg":
                     raise ValueError("MJPEG part is not JPEG")
+                # Neither the URL nor a shared HTTP credential establishes
+                # which of five physical heads produced these image bytes.
+                # Every multipart part must declare the flashed head ID.
+                identity = headers.get("x-desk-camera-robot-id")
+                if (not isinstance(identity, str)
+                        or re.fullmatch(r"[a-zA-Z0-9_-]{1,48}", identity) is None):
+                    raise ValueError("MJPEG camera robot identity missing or malformed")
+                if (self.expected_robot_id is not None
+                        and identity != self.expected_robot_id):
+                    raise ValueError("MJPEG camera robot identity mismatch")
                 def decimal(name: str, headers=headers) -> int:
                     value = headers[name]
                     if not 1 <= len(value) <= 20 or not value.isascii() or not value.isdecimal():
@@ -330,7 +341,7 @@ class HttpHead:
                     "multipart/x-mixed-replace; boundary=deskrobotframe"
                 ):
                     raise HeadError("XIAO did not return MJPEG stream")
-                reader = _MjpegFrames()
+                reader = _MjpegFrames(expected_robot_id=self.config.id)
                 async with self._stream_condition:
                     if generation != self._stream_generation:
                         raise HeadError("Superseded XIAO camera stream")
@@ -358,7 +369,7 @@ class HttpHead:
                     if latest is not None:
                         yield latest, received
         except (httpx.HTTPError, ValueError) as exc:
-            raise HeadError("XIAO authenticated camera stream unavailable") from exc
+            raise HeadError(f"XIAO authenticated camera stream unavailable: {exc}") from exc
         finally:
             async with self._stream_condition:
                 if generation == self._stream_generation:

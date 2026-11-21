@@ -13,6 +13,7 @@ def _part(sequence: int, jpeg: bytes) -> bytes:
         b"--deskrobotframe\r\n"
         b"Content-Type: image/jpeg\r\n"
         + f"Content-Length: {len(jpeg)}\r\n".encode("ascii")
+        + b"X-Desk-Camera-Robot-Id: robot-01\r\n"
         + b"X-Desk-Camera-Boot: 19\r\n"
         + f"X-Desk-Camera-Sequence: {sequence}\r\n".encode("ascii")
         + f"X-Desk-Camera-Complete-Us: {sequence * 250000}\r\n\r\n".encode("ascii")
@@ -38,6 +39,55 @@ def test_large_network_read_keeps_incremental_mjpeg_buffer_bounded():
     assert all(frame == jpeg for frame, _ in frames)
     assert not reader.buffer
     assert reader.buffer.peak <= 512 * 1024 + 64 * 1024 + 1024
+
+
+def test_camera_stream_header_requires_per_frame_robot_provenance():
+    jpeg = b"\xff\xd8cam\xff\xd9"
+    valid = _part(1, jpeg)
+    assert _MjpegFrames(expected_robot_id="robot-01").feed(valid) == [
+        (jpeg, (19, 1, 250000))
+    ]
+    with pytest.raises(ValueError, match="identity"):
+        _MjpegFrames(expected_robot_id="robot-01").feed(
+            valid.replace(b"X-Desk-Camera-Robot-Id: robot-01\r\n", b"")
+        )
+    with pytest.raises(ValueError, match="identity"):
+        _MjpegFrames(expected_robot_id="robot-01").feed(
+            valid.replace(b"X-Desk-Camera-Robot-Id: robot-01",
+                          b"X-Desk-Camera-Robot-Id: robot-02")
+        )
+
+
+@pytest.mark.asyncio
+async def test_multi_pet_stream_refuses_foreign_camera_before_publication(monkeypatch):
+    monkeypatch.setenv("SENSE_TEST_TOKEN", "x" * 32)
+    jpeg = b"\xff\xd8frame\xff\xd9"
+    foreign = _part(2, jpeg).replace(
+        b"X-Desk-Camera-Robot-Id: robot-01",
+        b"X-Desk-Camera-Robot-Id: robot-02",
+    )
+    batch = _part(1, jpeg) + foreign
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda _: httpx.Response(
+                200,
+                content=batch,
+                headers={"content-type":
+                         "multipart/x-mixed-replace; boundary=deskrobotframe"},
+            )
+        )
+    ) as client:
+        head = HttpHead(
+            RobotConfig(
+                id="robot-01", name="Pet one", token_env="SENSE_TEST_TOKEN",
+                head_url="http://head.example",
+            ), client,
+        )
+        with pytest.raises(HeadError, match="identity mismatch"):
+            async for _ in head.stream_frames():
+                pass
+        assert head._stream_latest is None
+        assert head._stream_connected is False
 
 
 def test_fragmented_mjpeg_header_and_body_complete_once():
