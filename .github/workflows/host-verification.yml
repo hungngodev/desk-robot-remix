@@ -47,6 +47,7 @@ jobs:
             tests/test_brain_context.py \
             tests/test_brain_core_memory.py \
             tests/test_brain_memory_retrieval.py \
+            tests/test_memory_duplicate_identity.py \
             tests/test_api_conversation.py \
             tests/test_api_readonly_context_split.py \
             tests/test_realtime_omni_protocol.py \
