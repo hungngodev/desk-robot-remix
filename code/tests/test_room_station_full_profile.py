@@ -96,13 +96,17 @@ def test_bme_empty_upstream_conversion_cannot_reuse_old_gas_as_fresh():
     start = code.split("void bme_step(", 1)[1].split("void bme_observation(", 1)[0]
     assert "bme.gas_resistance = 0;" in start
     assert start.index("bme.gas_resistance = 0;") < start.index("bme.beginReading()")
-    assert "bme.gas_resistance > 0" in start
+    # Unsigned integer gas resistance uses >= 1 rather than > 0. Both
+    # reject the zero sentinel; the upper bound rejects absurd stale data.
+    assert "bme.gas_resistance >= 1" in start
+    assert "bme.gas_resistance <= 1000000000U" in start
     assert "if (bme_valid) bme_sample_ms = now;" in start
 
 
 def test_bme_unstable_gas_sentinel_is_not_sent_as_valid():
     code = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
-    assert "isfinite(bme.gas_resistance) && bme.gas_resistance > 0" in code
+    assert "isfinite(bme.gas_resistance) && bme.gas_resistance >= 1" in code
+    assert "bme.gas_resistance <= 1000000000U" in code
     assert "bme.gas_resistance >= 0" not in code
 
 
