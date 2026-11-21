@@ -616,6 +616,9 @@ class Conversation:
         # Remember only whether an actual room observation entered a group
         # model prompt. Revoking that station source must fence later speech.
         room_context_used = False
+        # A later turn may opt into camera evidence after group startup.
+        # Track source admission, not only the initial permission snapshot.
+        visual_context_used = False
 
         def consent_still_valid() -> bool:
             return (
@@ -623,7 +626,7 @@ class Conversation:
                  or self.settings.fleet_text_sharing_enabled)
                 and (not private_at_start
                      or self.settings.voice_memory_tools_enabled)
-                and (not visual_at_start
+                and (not (visual_at_start or visual_context_used)
                      or self.settings.voice_vision_tools_enabled)
                 and (not room_context_used
                      or self.settings.room_station_context_enabled)
@@ -721,7 +724,7 @@ class Conversation:
                 )
 
             def live_cues(robot_id: str) -> str:
-                nonlocal room_context_used
+                nonlocal room_context_used, visual_context_used
                 # Reuse the existing per-pet Mac timeline, not a second
                 # camera, microphone or sensor event owner. This snapshot
                 # may change between turns in the same group conversation.
@@ -761,6 +764,10 @@ class Conversation:
                             raw = []
                         if live_media_allowed:
                             timeline = raw
+                            # The hub callback can revoke consent while reading;
+                            # admission is what binds the next speech boundary.
+                            if self.settings.mode == "hardware" and raw:
+                                visual_context_used = True
                         else:
                             # Camera opt-out must not erase independent WROOM
                             # handling or safety evidence, but old ASR, visual
@@ -868,6 +875,8 @@ class Conversation:
                                 # context only as temporary task data.
                                 turn_history = list(self.histories[robot.id])
                                 latest_cues = live_cues(robot.id)
+                                if not consent_still_valid():
+                                    raise RuntimeError("Group conversation consent revoked")
                                 if latest_cues:
                                     turn_history.append({
                                         "role": "user",
@@ -1014,7 +1023,7 @@ class Conversation:
                              and not self.settings.fleet_text_sharing_enabled)
                             or (private_at_start
                                 and not self.settings.voice_memory_tools_enabled)
-                            or (visual_at_start
+                            or ((visual_at_start or visual_context_used)
                                 and not self.settings.voice_vision_tools_enabled)
                         )
                         if revoked:

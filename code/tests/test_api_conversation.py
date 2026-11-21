@@ -359,6 +359,54 @@ async def test_group_sensor_talk_cannot_speak_revoked_shared_camera_context(
     assert conversation.active is None
 
 
+
+async def test_group_camera_granted_mid_session_then_revoked_blocks_peer_speech(
+    settings,
+):
+    """Late visual prompts must be fenced despite initial camera opt-out."""
+    import time
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_vision_tools_enabled = False
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.remember_tool(
+        "robot-02", "visual_look", "PRIVATE_VISUAL_SECOND_TURN",
+        time.monotonic(),
+    )
+
+    class RevokingChat:
+        def __init__(self):
+            self.prompts = []
+
+        async def reply(self, history):
+            self.prompts.append(str(history))
+            if len(self.prompts) == 1:
+                settings.voice_vision_tools_enabled = True
+                return "First pet spoke without camera input."
+            assert "PRIVATE_VISUAL_SECOND_TURN" in self.prompts[-1]
+            settings.voice_vision_tools_enabled = False
+            return "This private visual inference must never be spoken."
+
+    chat = RevokingChat()
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(settings, chat, speaker)
+    conversation.multimodal = SimpleNamespace(hub=hub)
+    with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
+        await conversation.run(
+            ["robot-01", "robot-02"], "Discuss your surroundings", 2,
+        )
+    assert len(chat.prompts) == 2
+    assert speaker.spoken == [
+        ("robot-01", "First pet spoke without camera input."),
+    ]
+    assert conversation.active is None
+    assert "PRIVATE_VISUAL_SECOND_TURN" not in str(conversation.histories)
+
+
 async def test_empty_ollama_stream_never_creates_phantom_social_speech(
     settings, tmp_path,
 ):
