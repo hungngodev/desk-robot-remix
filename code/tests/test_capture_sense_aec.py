@@ -44,6 +44,7 @@ class HeadHTTP:
 def fake_read(*, raw=None, boot=7, robot="robot-01", raw_boot=None,
               frames=64000, ready=True, delay_ms=0, mic_muted=False,
               last_us=5000000, privacy_epoch=3, final_epoch=None,
+              start_generation="1", status_generation="1", raw_generation="1",
               final_muted=False, final_boot=None):
     if raw is None:
         raw = struct.pack("<hh", 123, -456) * capture.FRAMES
@@ -52,6 +53,7 @@ def fake_read(*, raw=None, boot=7, robot="robot-01", raw_boot=None,
         "X-Desk-Audio-Robot-Id": robot,
         "X-Desk-Audio-Boot": str(boot if raw_boot is None else raw_boot),
         "X-Desk-Audio-Frames": "64000",
+        "X-Desk-Audio-Generation": raw_generation,
         "X-Desk-Audio-First-Us": "1000000",
         "X-Desk-Audio-Last-Us": str(last_us),
     }
@@ -65,11 +67,15 @@ def fake_read(*, raw=None, boot=7, robot="robot-01", raw_boot=None,
             "speaker_playback_verified": False,
             "aec_physically_qualified": False,
         }),
-        Response({"ok": True, "robot_id": robot}, status=202),
+        Response({
+            "ok": True, "robot_id": robot, "boot": boot,
+            "capture_generation": start_generation,
+        }, status=202),
         Response({
             "robot_id": robot, "boot": boot, "active": not ready,
             "ready": ready, "failed": False, "frames": frames,
             "physical_aec_qualified": False,
+            "capture_generation": status_generation,
         }),
         Response(raw, headers=header),
         Response({
@@ -100,6 +106,7 @@ def test_authenticated_head_pcm_delivers_one_bounded_private_wav_pair(tmp_path):
     ]
     assert all(header == "Bearer " + "x" * 32 for _, _, header, _ in http.calls)
     assert report["frames"] == 64000 and report["boot"] == 7
+    assert report["capture_generation"] == 1
     for value in ("physical_speaker_playback_verified",
                   "aec_physically_qualified",
                   "source_device_physically_authenticated"):
@@ -197,6 +204,21 @@ def test_full_pcm_payload_still_requires_continuous_device_sample_timestamps(las
         "audio.reference", "audio.capture.start",
         "audio.capture.status", "audio.capture.raw",
     ]
+
+
+@pytest.mark.parametrize("override", [
+    {"start_generation": "0"},
+    {"start_generation": "bad"},
+    {"status_generation": "2"},
+    {"raw_generation": "2"},
+])
+def test_capture_rejects_stale_or_invalid_generation(override):
+    http = fake_read(**override)
+    with pytest.raises((RuntimeError, ValueError), match="generation|inconsistent"):
+        capture.capture_head(
+            http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
+            clock=iter([0.0, 0.1]).__next__, pause=lambda _: None,
+        )
 
 
 def test_consent_audio_capture_compiled_off_by_default():
