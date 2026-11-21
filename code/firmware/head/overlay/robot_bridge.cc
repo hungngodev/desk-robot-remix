@@ -433,11 +433,14 @@ BodyInteraction Bridge::PollInteraction() {
     auto count = cJSON_GetObjectItemCaseSensitive(touch, "count");
     auto safety = cJSON_GetObjectItemCaseSensitive(json.get(), "safety");
     auto fault = cJSON_GetObjectItemCaseSensitive(safety, "fault");
+    auto required = cJSON_GetObjectItemCaseSensitive(safety, "required");
+    auto ready = cJSON_GetObjectItemCaseSensitive(safety, "ready");
     if (!cJSON_IsObject(touch) || !cJSON_IsNumber(count) ||
         !std::isfinite(count->valuedouble) ||
         count->valuedouble < 0 || count->valuedouble > 4294967295.0 ||
         std::floor(count->valuedouble) != count->valuedouble ||
-        !cJSON_IsObject(safety) || !cJSON_IsString(fault)) {
+        !cJSON_IsObject(safety) || !cJSON_IsString(fault) ||
+        !cJSON_IsBool(required) || !cJSON_IsBool(ready)) {
         head_touch_edges_.Reset();
         body_cap_edges_.Reset();
         return observation;
@@ -478,8 +481,11 @@ BodyInteraction Bridge::PollInteraction() {
     } else {
         body_cap_edges_.Reset();
     }
-    observation.fault = std::strcmp(fault->valuestring, "none") != 0 &&
-                        std::strcmp(fault->valuestring, "not_required") != 0;
+    // A valid status without a REQUIRED and READY WROOM safety profile
+    // cannot justify a happy/normal OLED face. Keep sensory events intact,
+    // and let the physical body continue to own its independent motor stop.
+    observation.fault = BodySafetyUnhealthy(
+        cJSON_IsTrue(required), cJSON_IsTrue(ready), fault->valuestring);
     observation.valid = true;
     return observation;
 }
