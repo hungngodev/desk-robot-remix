@@ -8,7 +8,7 @@ def test_manual_raw_camera_requires_operator_token(settings, tokens):
     """Xiaozhi can request bounded model observations, not raw JPEG access."""
     from types import SimpleNamespace
 
-    jpeg = b"\\xff\\xd8" + b"private-image" + b"\\xff\\xd9"
+    jpeg = bytes.fromhex("ffd8") + b"private-image" + bytes.fromhex("ffd9")
     calls = []
 
     class Head:
