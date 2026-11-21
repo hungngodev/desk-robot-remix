@@ -44,7 +44,6 @@ private:
     // Keep one actual bridge UART owner; only read-only polling moves tasks.
     std::atomic<bool> body_fault_active_{true};
     std::atomic<uint32_t> body_last_valid_ms_{0};
-    std::atomic<int> pending_face_touches_{0};
     TaskHandle_t face_task_ = nullptr;
     TaskHandle_t body_poll_task_ = nullptr;
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
@@ -89,19 +88,13 @@ private:
                     static_cast<uint32_t>(esp_timer_get_time() / 1000);
                 board->body_fault_active_.store(body.fault, std::memory_order_release);
                 board->body_last_valid_ms_.store(at_ms, std::memory_order_release);
-                // A paused face must never replay unbounded old touch cues.
-                int real_pets = std::clamp(body.touch_events, 0, 3) +
-                                std::clamp(body.cap_touch_events, 0, 3);
-                real_pets = std::min(real_pets, 3);
-                int queued = board->pending_face_touches_.load(std::memory_order_relaxed);
-                while (!board->pending_face_touches_.compare_exchange_weak(
-                    queued, std::min(3, queued + real_pets),
-                    std::memory_order_release, std::memory_order_relaxed)) {}
+                // WROOM/CAP touch counters remain available to the Mac's
+                // unified sensor timeline. They must not force a local
+                // happy face or nod before the contextual mood owner decides.
             } else {
                 // A timeout or malformed status cannot leave healthy eyes.
                 board->body_fault_active_.store(true, std::memory_order_release);
                 board->body_last_valid_ms_.store(0, std::memory_order_release);
-                board->pending_face_touches_.store(0, std::memory_order_release);
             }
             vTaskDelay(pdMS_TO_TICKS(300));
         }
@@ -122,12 +115,9 @@ private:
             const bool body_unhealthy =
                 valid_at == 0 || now_ms - valid_at > 1200U ||
                 board->body_fault_active_.load(std::memory_order_acquire);
-            const int real_pets =
-                board->pending_face_touches_.exchange(0, std::memory_order_acq_rel);
-            if (!body_unhealthy) {
-                for (int i = 0; i < real_pets; ++i)
-                    board->face_behavior_.pushEvent(Event(EventType::kTouched));
-            }
+            // Touch is a physical observation, not an unconditional mood.
+            // The Mac may request a transient face cue through the existing
+            // consented cosmetic route; WROOM independently owns local STOP.
             // Consume a visual cue even during a fault so it cannot
             // replay as a fresh sighting on recovery. The existing
             // Stackchan HSM owns optional idle expression, not motion.
