@@ -261,6 +261,8 @@ def test_operator_episode_edits_retract_only_matching_live_asr_cues(settings, to
             assert attention.timeline("robot-01", time.monotonic()) == []
             assert runtime.memory.recent("robot-01")[0].summary == "Operator corrected words"
             assert "Peer words" in attention.timeline("robot-02", time.monotonic())[0]["content"]
+            assert runtime.conversation._private_memory_generation["robot-01"] == 2
+            assert runtime.conversation._private_memory_generation.get("robot-02", 0) == 0
         finally:
             runtime.multimodal = original_visual
             runtime.attention = original_attention

@@ -40,6 +40,12 @@ def register_memory_routes(
         discard_attention = getattr(attention, "discard_heard", None)
         if callable(discard_attention):
             discard_attention(robot_id, event_id)
+        # A group model may already have copied this pet's old private
+        # memory into an active prompt. Revoke that prompt generation too.
+        conversation = getattr(runtime, "conversation", None)
+        invalidate = getattr(conversation, "invalidate_private_memory", None)
+        if callable(invalidate):
+            invalidate(robot_id)
 
     @app.get("/v1/pet/{robot_id}/memories", dependencies=[Depends(operator)])
     async def pet_memories(robot_id: str, limit: int = Query(default=12, ge=1, le=50)):

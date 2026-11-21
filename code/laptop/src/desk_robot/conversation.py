@@ -412,6 +412,22 @@ class Conversation:
         # The original speaker task owns this short lived dialogue state.
         self._group_activity_epoch = 0
         self._group_activity: dict[str, dict] = {}
+        self._private_memory_generation: dict[str, int] = {}
+        self._active_private_memory_ids: frozenset[str] = frozenset()
+
+    def invalidate_private_memory(self, robot_id: str) -> None:
+        """Revoke old prompt copies after a per-pet memory correction/delete."""
+        self.settings.robot(robot_id)
+        self._private_memory_generation[robot_id] = (
+            self._private_memory_generation.get(robot_id, 0) + 1
+        )
+        active = self.active
+        if (robot_id in self._active_private_memory_ids
+                and active is not None and not active.done()
+                and not active.cancelling()):
+            # The original group task owns physical STOP and cleanup.
+            # Do not start another speaker or mark playback complete.
+            active.cancel()
 
     def group_activity_timeline(
         self, robot_id: str, *, now: float | None = None,
@@ -590,6 +606,13 @@ class Conversation:
             and self.settings.voice_vision_tools_enabled
             and self.settings.fleet_text_sharing_enabled
         )
+        memory_context_at_start = self.memory is not None and (
+            self.settings.mode != "hardware" or private_at_start
+        )
+        memory_generation = {
+            robot.id: self._private_memory_generation.get(robot.id, 0)
+            for robot in robots
+        }
         # Remember only whether an actual room observation entered a group
         # model prompt. Revoking that station source must fence later speech.
         room_context_used = False
@@ -604,6 +627,10 @@ class Conversation:
                      or self.settings.voice_vision_tools_enabled)
                 and (not room_context_used
                      or self.settings.room_station_context_enabled)
+                and (not memory_context_at_start or all(
+                    self._private_memory_generation.get(robot.id, 0)
+                    == memory_generation[robot.id] for robot in robots
+                ))
                 and (permission_check is None or permission_check())
             )
 
@@ -611,6 +638,9 @@ class Conversation:
             await self._say_with_permission(robot, text, consent_still_valid)
 
         self.active = asyncio.current_task()
+        self._active_private_memory_ids = (
+            frozenset(robot_ids) if memory_context_at_start else frozenset()
+        )
         self._group_activity_epoch += 1
         epoch = self._group_activity_epoch
         topic_excerpt = " ".join(topic.split())[:100]
@@ -976,7 +1006,11 @@ class Conversation:
                         record["status"] = outcome
                         record["updated_at"] = time.monotonic()
                         revoked = (
-                            (sharing_at_start
+                            (memory_context_at_start and any(
+                                self._private_memory_generation.get(peer.id, 0)
+                                != memory_generation[peer.id] for peer in robots
+                            ))
+                            or (sharing_at_start
                              and not self.settings.fleet_text_sharing_enabled)
                             or (private_at_start
                                 and not self.settings.voice_memory_tools_enabled)
@@ -1005,6 +1039,7 @@ class Conversation:
                                 self.attention_failures += 1
             finally:
                 self.active = None
+                self._active_private_memory_ids = frozenset()
 
     async def say_proactive(
         self, robot: RobotConfig, text: str, *,

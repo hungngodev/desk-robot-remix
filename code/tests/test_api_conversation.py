@@ -1794,3 +1794,55 @@ async def test_group_origin_unhashable_rejected_before_activity(settings, invali
         await agent.run(["robot-01", "robot-02"], "Talk about a key", 2, origin=invalid)
     assert agent.active is None
     assert agent.group_activity_timeline("robot-01") == []
+
+
+async def test_group_memory_revision_cancels_stale_model_turn_without_peer_leak(settings, tmp_path):
+    ids = [robot.id for robot in settings.robots]
+    store = MemoryStore(tmp_path, ids)
+    assert store.remember(
+        ids[0], "private_topic", "A private old preference",
+        kind="scene", source_robot=ids[0], witnessed=True,
+    )
+    started, released = asyncio.Event(), asyncio.Event()
+
+    class HeldChat:
+        async def reply(self, history):
+            started.set()
+            await released.wait()
+            return "A reply based on obsolete private context"
+
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(settings, HeldChat(), speaker, memory=store)
+    task = asyncio.create_task(conversation.run(ids[:2], "Discuss the desk", 2))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=3)
+        conversation.invalidate_private_memory(ids[0])
+        released.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=3)
+        assert speaker.spoken == []
+        assert ids[0] not in conversation.histories
+        assert ids[1] not in conversation.histories
+        assert conversation.active is None
+        assert not conversation._active_private_memory_ids
+    finally:
+        released.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_unrelated_pet_memory_revision_does_not_cancel_group(settings, tmp_path):
+    ids = [robot.id for robot in settings.robots]
+    store = MemoryStore(tmp_path, ids)
+    speaker = SimulatedSpeaker()
+    owner = None
+
+    class Chat:
+        async def reply(self, history):
+            owner.invalidate_private_memory(ids[2])
+            return "I can still answer my current partner."
+
+    owner = Conversation(settings, Chat(), speaker, memory=store)
+    transcript = await owner.run(ids[:2], "Continue", 2)
+    assert len(transcript) == 2 and len(speaker.spoken) == 2
