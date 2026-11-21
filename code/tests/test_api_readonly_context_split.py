@@ -394,3 +394,55 @@ def test_voice_memory_lookup_rejects_payload_after_turn_is_superseded(settings):
         assert "superseded" in stale.json()["detail"]
         assert "Private historical cobalt key" not in str(stale.json())
         assert len(receipts) == 1
+
+
+def test_xiaozhi_live_context_drops_cached_room_on_station_consent_revoke(settings):
+    """A still fresh USB room observation is not permission to keep sharing."""
+    import time
+
+    from desk_robot.api_readonly_context import register_readonly_context_routes
+    from desk_robot.multimodal import CameraFrameHub
+    from desk_robot.room_station import RoomObservation
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.room_station_context_enabled = True
+    hub = CameraFrameHub(["robot-01"])
+    hub.remember_room(RoomObservation(
+        seq=1, at_ms=100, received_at=time.monotonic(), readings={},
+        summary="ROOM PRIVATE: raw humidity changed",
+    ))
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        multimodal=SimpleNamespace(hub=hub),
+        coordinator=SimpleNamespace(jobs={}),
+        attention=None, conversation=None,
+    )
+    register_readonly_context_routes(
+        app, settings, authorize=lambda: None,
+        coordinator=lambda: app.state.runtime.coordinator,
+        requested_tool_context=lambda *args: None,
+        remember_tool_context=lambda *args: None,
+        native_pet_speech_policy=lambda robot_id: {},
+    )
+    with TestClient(app) as client:
+        allowed = client.get("/v1/pet/robot-01/interaction-context")
+        assert allowed.status_code == 200
+        assert "ROOM PRIVATE" in allowed.json()["model_context"]
+        assert any(
+            item["channel"] == "room_station"
+            for item in allowed.json()["current_interaction_timeline"]
+        )
+        settings.room_station_context_enabled = False
+        revoked = client.get("/v1/pet/robot-01/interaction-context")
+        assert revoked.status_code == 200
+        payload = revoked.json()
+        assert "ROOM PRIVATE" not in payload["model_context"]
+        assert all(
+            item["channel"] != "room_station"
+            for item in payload["current_interaction_timeline"]
+        )
+        assert payload["motor_authorized"] is False
+        assert payload["model_context_untrusted_not_instructions"] is True
