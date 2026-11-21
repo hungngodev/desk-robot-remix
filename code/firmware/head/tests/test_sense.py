@@ -108,7 +108,12 @@ class SenseOverlayTests(unittest.TestCase):
         boot = source.split('boot_button_.OnClick([this]() {', 1)[1].split('void StartNetwork() override', 1)[0]
         self.assertIn('->SetMicrophonePrivacyMuted(now_muted);', boot)
         self.assertIn('app.SetDeviceState(kDeviceStateIdle);', boot)
-        self.assertIn('app.StopListening();  // selected overlay closes channel', boot)
+        self.assertIn('app.SetSenseMicrophonePrivacyMuted(now_muted);', boot)
+        self.assertIn('app.StopListening();', boot)
+        self.assertLess(boot.index('app.SetSenseMicrophonePrivacyMuted(now_muted);'),
+                        boot.index('->SetMicrophonePrivacyMuted(now_muted);'))
+        self.assertLess(boot.index('->SetMicrophonePrivacyMuted(now_muted);'),
+                        boot.index('app.StopListening();'))
         self.assertIn('if (state == kDeviceStateIdle) app.ToggleChatState();', boot)
         self.assertLess(boot.index('->SetMicrophonePrivacyMuted(now_muted);'),
                         boot.index('if (now_muted)'))
