@@ -300,7 +300,9 @@ def _create_private(path: Path, *, directory_fd: int | None = None):
     return os.fdopen(os.open(target, flags, 0o600, dir_fd=directory_fd), "wb")
 
 
-def _check_private_directory(directory: Path, directory_fd: int) -> None:
+def _check_private_directory(
+    directory: Path, directory_fd: int, expected_identity: tuple[int, int],
+) -> None:
     """Reject a swapped recording path without following a replacement link."""
     owned = os.fstat(directory_fd)
     try:
@@ -310,27 +312,35 @@ def _check_private_directory(directory: Path, directory_fd: int) -> None:
     if (not stat.S_ISDIR(owned.st_mode)
             or stat.S_IMODE(owned.st_mode) & 0o077
             or not stat.S_ISDIR(named.st_mode)
-            or (owned.st_dev, owned.st_ino) != (named.st_dev, named.st_ino)):
+            or (owned.st_dev, owned.st_ino) != (named.st_dev, named.st_ino)
+            or (owned.st_dev, owned.st_ino) != expected_identity):
         raise ValueError("AEC capture directory changed during write")
 
 
-def preflight_private_destination(directory: Path) -> None:
-    """Reject an unusable recording location before the head captures audio.
+def preflight_private_destination(directory: Path) -> tuple[int, int]:
+    """Record the exact private directory approved before capturing audio.
 
-    Rechecked after the transfer; O_EXCL/O_NOFOLLOW still protect each write.
+    Retain its inode across the slow authenticated head transfer; an attacker
+    cannot substitute another mode-0700 directory and receive the raw PCM.
     """
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if directory.is_symlink() or stat.S_IMODE(directory.stat().st_mode) & 0o077:
+    identity = os.stat(directory, follow_symlinks=False)
+    if (not stat.S_ISDIR(identity.st_mode)
+            or stat.S_IMODE(identity.st_mode) & 0o077):
         raise ValueError("AEC capture directory must be private mode 0700")
     paths = [directory / "microphone.wav", directory / "speaker_reference.wav",
              directory / "capture.json"]
     if any(p.exists() or p.is_symlink() for p in paths):
         raise FileExistsError("Private audio trial files already exist")
+    return identity.st_dev, identity.st_ino
 
 
 def save_wavs(directory: Path, raw: bytes, report: dict, *,
-              verify_before_publish=None) -> None:
-    preflight_private_destination(directory)
+              verify_before_publish=None,
+              expected_directory_identity: tuple[int, int] | None = None) -> None:
+    identity = preflight_private_destination(directory)
+    if expected_directory_identity is not None and identity != expected_directory_identity:
+        raise ValueError("AEC capture directory changed during write")
     mic, ref = split_pcm(raw)
     paths = [directory / "microphone.wav", directory / "speaker_reference.wav",
              directory / "capture.json"]
@@ -341,7 +351,7 @@ def save_wavs(directory: Path, raw: bytes, report: dict, *,
     directory_fd = os.open(directory, flags)
     written = []
     try:
-        _check_private_directory(directory, directory_fd)
+        _check_private_directory(directory, directory_fd, identity)
         for path, pcm in zip(paths[:2], (mic, ref), strict=True):
             with _create_private(path, directory_fd=directory_fd) as out:
                 written.append(path.name)
@@ -357,7 +367,7 @@ def save_wavs(directory: Path, raw: bytes, report: dict, *,
         # response. Recheck both device privacy and destination identity.
         if verify_before_publish is not None:
             verify_before_publish()
-        _check_private_directory(directory, directory_fd)
+        _check_private_directory(directory, directory_fd, identity)
     except BaseException:
         # Do not unlink through the pathname if it was retargeted: that could
         # delete unrelated files and leave the original private PCM orphaned.
@@ -403,7 +413,7 @@ def main() -> int:
     # No capture of private microphone PCM when the destination already fails.
     # This is a preflight only; save_wavs rechecks against concurrent changes.
     head_address(args.head_url)
-    preflight_private_destination(args.output_dir)
+    operator_directory_identity = preflight_private_destination(args.output_dir)
     # Disable proxies AND redirects. urllib's default redirect handler can
     # carry Authorization from a private robot URL to an unrelated origin.
     opener = urllib.request.build_opener(
@@ -414,6 +424,7 @@ def main() -> int:
     )
     save_wavs(
         args.output_dir, raw, report,
+        expected_directory_identity=operator_directory_identity,
         verify_before_publish=lambda: verify_postwrite_privacy(
             opener, args.head_url, token, report,
         ),
