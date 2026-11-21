@@ -698,7 +698,7 @@ class SenseSelectionTests(unittest.TestCase):
         assert "httpd_resp_send_chunk(req" in bridge
         assert "X-Desk-Camera-Sequence: %u" in bridge
         assert "X-Desk-Camera-Complete-Us: %lld" in bridge
-        assert "config.max_uri_handlers = 9;" in bridge
+        assert "config.max_uri_handlers = 13;" in bridge
         assert '"/api/camera.identity", HTTP_GET' in bridge
 
     def test_vendor_stackchan_behavior_compiles_without_motor_framework(self):
@@ -827,6 +827,7 @@ class SenseSelectionTests(unittest.TestCase):
             self.assertIn('CONFIG_DESK_ROBOT_ID="robot-05"', settings)
             self.assertIn('CONFIG_DESK_ROBOT_AEC_DELAY_MS=90', settings)
             self.assertIn('CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED=n', settings)
+            self.assertIn('CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED=n', settings)
             args.extend(['--aec-delay-ms', '115'])
             with patch.object(private, 'ROOT', root), patch.object(sys, 'argv', args), \
                     patch.dict(os.environ, SENSE_TEST_TOKEN='x' * 32):
@@ -842,6 +843,7 @@ class SenseSelectionTests(unittest.TestCase):
                 private.main()
             live = json.loads((board / 'config.private.json').read_text())['builds'][0]['sdkconfig_append']
             self.assertIn('CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED=y', live)
+            self.assertIn('CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED=n', live)
             args.pop()
             with patch.object(private, 'ROOT', root), patch.object(sys, 'argv', args), \
                     patch.dict(os.environ, SENSE_TEST_TOKEN='x' * 32):
@@ -865,7 +867,7 @@ def test_authenticated_mac_person_face_cue_is_cosmetic_only():
     header = (HEAD / "overlay/robot_bridge.h").read_text()
     board = (HEAD / "sense/desk_robot_sense.cc").read_text()
     assert '{"/api/face", HTTP_POST}' in bridge
-    assert 'config.max_uri_handlers = 10;' in bridge
+    assert 'config.max_uri_handlers = 13;' in bridge
     assert '{"/api/audio.reference", HTTP_GET}' in bridge
     assert '"speaker_playback_verified", false' in bridge
     assert '"aec_physically_qualified", false' in bridge
