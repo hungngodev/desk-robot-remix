@@ -119,7 +119,9 @@ def test_immutable_scoped_source_rejects_forged_local_claim(changed):
 def test_physical_receipt_requires_canonical_completed_calendar_day(tested_on):
     gate = release.PART_GATES[0]
     invalid = {**receipt("part:imu", gate), "tested_on": tested_on}
-    source = lambda url: lookup(url, records=[invalid])
+    def source(url):
+        return lookup(url, records=[invalid])
+
     assert not release.verified_scoped_record(invalid, SHA, source)
     errors = release.audit_release(
         {"parts": {"imu": {gate: invalid}}}, SHA, source,
