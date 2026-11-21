@@ -475,6 +475,7 @@ class SenseOverlayTests(unittest.TestCase):
         )[1].split("void SenseReferenceCodec::ClearReference()", 1)[0]
         installer = (HEAD / "install_overlay.py").read_text()
         assert "NoAudioCodec::Write(data, samples)" in writer
+        assert "const int volume = std::clamp(output_volume_, 0, 100);" in writer
         assert "i2s_channel_write(" not in writer
         assert "pdMS_TO_TICKS(120)" in installer
         assert "bytes_written = 0;" in installer
