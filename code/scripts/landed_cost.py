@@ -23,6 +23,20 @@ def cents(value: object, label: str) -> int:
         raise ValueError(f"{label}: invalid USD amount") from exc
     if not number.is_finite() or number < 0:
         raise ValueError(f"{label}: USD amount must be nonnegative cents")
+    # Keep all supplier and prior-order amounts bounded before Decimal
+    # arithmetic. An absurd exponent can otherwise raise decimal.Overflow
+    # instead of producing a failed receipt.
+    if number > Decimal("1000000000000"):
+        raise ValueError(f"{label}: USD amount exceeds receipt bound")
+    # Inspect the exact Decimal representation before multiplication:
+    # finite nonzero 1e-999999 * 100 silently underflows to 0 under the
+    # default decimal context. A positive subcent quote must not become free.
+    if number and number.as_tuple().exponent < -2:
+        digits = number.as_tuple().digits
+        beyond_cent = -number.as_tuple().exponent - 2
+        if (beyond_cent >= len(digits)
+                or any(digit != 0 for digit in digits[-beyond_cent:])):
+            raise ValueError(f"{label}: subcent amount")
     scaled = number * 100
     if scaled != scaled.to_integral_value():
         raise ValueError(f"{label}: subcent amount")

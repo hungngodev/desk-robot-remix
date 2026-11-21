@@ -114,6 +114,41 @@ def test_money_rejects_inexact_or_invalid_values(bad):
         mod.cents(bad, "test")
 
 
+@pytest.mark.parametrize("invalid", [
+    "1e999999", "1e-999999", "1.0000000000000000000000000001",
+    "0.0000000000000000000000000001", "1000000000001",
+])
+def test_extreme_supplier_decimals_fail_closed_without_overflow_or_underflow(
+    invalid,
+):
+    with pytest.raises(ValueError):
+        mod.cents(invalid, "supplier USD")
+
+
+@pytest.mark.parametrize("field,location", [
+    ("package_price_usd", "lines"),
+    ("shipping_usd", "seller_charges"),
+    ("total_paid_usd", "paid_orders"),
+])
+def test_extreme_money_in_any_receipt_bucket_does_not_crash_or_approve(
+    field, location,
+):
+    ev = sample()
+    ev[location][0][field] = "1e999999"
+    out = calculate(ev)
+    assert out["payable_now_cents"] is None
+    assert out["prototype_cumulative_cents"] is None
+    assert not out["calculation_complete_not_physical_approval"]
+    assert out["errors"]
+
+
+def test_exact_cents_with_arbitrarily_long_trailing_zeros_remain_valid():
+    assert mod.cents("5.950000000000000000000000000000", "USD") == 595
+    assert mod.cents("0e-999999", "USD") == 0
+    with pytest.raises(ValueError, match="subcent"):
+        mod.cents("0.0000000000000000000000000001", "USD")
+
+
 def test_conflicting_reused_order_reference_fails():
     ev = sample()
     ev["paid_orders"].append({"order_reference": "already-paid",
