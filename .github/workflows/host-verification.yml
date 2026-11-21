@@ -125,6 +125,8 @@ jobs:
               exit 1
             fi
           done < <(git ls-files -z)
+      - name: Compile head test Python before expensive toolchain setup
+        run: python3 -m compileall -q code/firmware/head/tests
       - name: Install Python and locked dependencies
         working-directory: code
         run: |
