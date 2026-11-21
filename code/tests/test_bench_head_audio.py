@@ -26,6 +26,8 @@ def _sample(n: int, *, robot_id: str = "robot-01", failure=False,
         "short_output_writes": 0,
         "microphone_frames_read": n * 160,
         "speaker_frames_accepted": n * 320,
+        "microphone_privacy_muted": False,
+        "microphone_privacy_epoch": 0,
         "reference_integrity_failed": failure,
         "speaker_playback_verified": False,
         "aec_physically_qualified": False,
@@ -112,6 +114,61 @@ async def test_audio_bench_cannot_pass_with_idle_microphone_or_speaker(missing):
     assert result["reference_counter_delta"][missing] == 0
     assert result["reference_software_integrity_observed"] is False
     assert result["physical_aec_delay_measured"] is False
+
+
+async def test_audio_bench_rejects_active_boot_privacy_mute():
+    class MutedHead:
+        def __init__(self):
+            self.calls = 0
+
+        async def audio_reference_status(self):
+            self.calls += 1
+            return dict(_sample(self.calls), microphone_privacy_muted=True,
+                        microphone_privacy_epoch=1)
+
+    result = await bench.measure(
+        MutedHead(), "robot-01", seconds=0.16, poll_period_s=0.05,
+    )
+    assert result["samples"] >= 2
+    assert result["microphone_privacy_muted_observed"] is True
+    assert result["reference_software_integrity_observed"] is False
+    assert result["actual_speaker_playback_verified"] is False
+
+
+async def test_audio_bench_rejects_mute_epoch_change_even_after_unmute():
+    class ToggledHead:
+        def __init__(self):
+            self.calls = 0
+
+        async def audio_reference_status(self):
+            self.calls += 1
+            return dict(_sample(self.calls),
+                        microphone_privacy_muted=self.calls == 2,
+                        microphone_privacy_epoch=max(0, self.calls - 1))
+
+    result = await bench.measure(
+        ToggledHead(), "robot-01", seconds=0.2, poll_period_s=0.05,
+    )
+    assert result["samples"] >= 2
+    assert result["microphone_privacy_muted_observed"] is True
+    assert result["microphone_privacy_epoch_delta"] > 0
+    assert result["reference_software_integrity_observed"] is False
+
+
+async def test_audio_bench_rejects_regressed_privacy_epoch():
+    class EpochRewindHead:
+        def __init__(self):
+            self.calls = 0
+
+        async def audio_reference_status(self):
+            self.calls += 1
+            return dict(_sample(self.calls), microphone_privacy_epoch=(8 if self.calls == 1 else 7))
+
+    result = await bench.measure(
+        EpochRewindHead(), "robot-01", seconds=0.13, poll_period_s=0.05,
+    )
+    assert result["counter_regressions"] >= 1
+    assert result["reference_software_integrity_observed"] is False
 
 
 async def test_audio_bench_rejects_incomplete_speaker_output_receipts():
