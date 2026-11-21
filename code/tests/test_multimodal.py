@@ -883,7 +883,10 @@ def test_speech_floor_requires_real_end_not_a_seven_second_guess():
     assert not hub.user_active("robot-01", 180.1)
 
 
-def test_aec_barge_has_finite_lease_but_never_shortens_explicit_vad():
+def test_aec_barge_has_finite_lease_but_never_shortens_explicit_vad(monkeypatch):
+    # This is a simulated VAD timeline, not an actual future Mac receipt.
+    # Keep the local monotonic-clock safety fence enabled in production.
+    monkeypatch.setattr("desk_robot.multimodal.time.monotonic", lambda: 1000.0)
     hub = CameraFrameHub(["robot-01"])
     hub.barge_in("robot-01", 100.0)
     assert hub.user_active("robot-01", 106.9)
