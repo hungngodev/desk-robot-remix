@@ -248,7 +248,9 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
             &bytes_written, pdMS_TO_TICKS(kMaxI2sWaitMs));
         // An error can leave DMA progress uncertain, so never claim the
         // partial byte count as accepted microphone echo reference.
-        if (status == ESP_OK && bytes_written % sizeof(int32_t) == 0)
+        if (status == ESP_OK
+                && bytes_written <= pcm32.size() * sizeof(int32_t)
+                && bytes_written % sizeof(int32_t) == 0)
             accepted = static_cast<int>(bytes_written / sizeof(int32_t));
     }
     // No I2S lock is held while publishing AEC reference. A concurrent STOP
