@@ -58,6 +58,7 @@ jobs:
             tests/test_server_bridge.py::test_legacy_brain_drops_old_mac_reply_after_new_voice_turn \
             tests/test_server_bridge.py::test_legacy_mac_context_remains_tool_data_never_system_or_human \
             tests/test_server_bridge.py::test_legacy_mac_context_rejects_older_overlapping_tool_result \
+            tests/test_server_bridge.py::test_legacy_mac_context_expires_without_persisting_to_session_memory \
             tests/test_ci_lane_concurrency.py
 
   python-and-head-host:
