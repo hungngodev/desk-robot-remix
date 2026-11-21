@@ -398,7 +398,20 @@ class HttpHead:
                     self._stream_latest = None
                     self._stream_condition.notify_all()
 
-    async def snapshot(self) -> bytes:
+    async def snapshot_for_dock(self) -> bytes:
+        """Only a very recent authenticated MJPEG receipt may guide docking.
+
+        Never initiate a separate still capture when the live stream is down.
+        This does not establish true camera exposure latency or authorize motors.
+        """
+        if not self._stream_connected:
+            raise HeadError("Dock observation needs connected live camera stream")
+        return await self.snapshot(max_stream_age_seconds=0.20)
+
+    async def snapshot(self, *, max_stream_age_seconds: float = 1.0) -> bytes:
+        if (type(max_stream_age_seconds) not in (int, float)
+                or not 0 < max_stream_age_seconds <= 1.0):
+            raise ValueError("Invalid camera stream receipt age limit")
         # Separate camera serialization: concurrent Mac pet/pickup callers must
         # not trip the Sense single-capture worker or block body keepalives.
         async with self.capture_lock:
@@ -411,7 +424,8 @@ class HttpHead:
                             while (self._stream_connected and (
                                 self._stream_latest is None
                                 or self._stream_version <= self._snapshot_version
-                                or time.monotonic() - self._stream_received_at > 1
+                                or time.monotonic() - self._stream_received_at
+                                   > max_stream_age_seconds
                             )):
                                 await self._stream_condition.wait()
                             if not self._stream_connected:
