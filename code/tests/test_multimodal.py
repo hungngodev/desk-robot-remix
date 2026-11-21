@@ -397,6 +397,19 @@ def test_brightness_shift_not_mistaken_for_localized_motion():
     assert change_fraction(a, bytes(c)) > 0.01
 
 
+def test_multiplicative_light_shift_preserves_real_camera_occlusion():
+    fingerprint = bytes(
+        40 if (i // 64 + i % 64) % 2 else 110
+        for i in range(64 * 48)
+    )
+    doubled = bytes(2 * value for value in fingerprint)
+    assert change_fraction(fingerprint, doubled) == 0
+    assert change_fraction(fingerprint, bytes([20] * len(fingerprint))) > 0.9
+    changed = bytearray(doubled)
+    changed[120:320] = bytes([0] * 200)
+    assert change_fraction(fingerprint, bytes(changed)) > 0.05
+
+
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_direct_visual_request_reserves_fleet_vlm_and_camera_until_finished(cancel):
     """No new speculative JPEG/VLM may overtake the entire human look."""

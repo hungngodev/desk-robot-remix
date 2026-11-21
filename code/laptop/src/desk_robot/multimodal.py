@@ -86,11 +86,30 @@ def change_fraction(a: bytes, b: bytes, *, threshold: int = 16) -> float:
     """
     if len(a) != len(b) or len(a) != 64 * 48:
         raise ValueError("Frame fingerprints have incompatible dimensions")
-    shift = sum(y - x for x, y in zip(a, b, strict=True)) / len(a)
+    count = len(a)
+    sum_a, sum_b = sum(a), sum(b)
+    sum_aa = sum(x * x for x in a)
+    sum_bb = sum(y * y for y in b)
+    sum_ab = sum(x * y for x, y in zip(a, b, strict=True))
+    variance_a = count * sum_aa - sum_a * sum_a
+    variance_b = count * sum_bb - sum_b * sum_b
+    covariance = count * sum_ab - sum_a * sum_b
+    gain = 1.0
+    # Bright and dark surfaces change by different amounts under a lamp.
+    # Fit a bounded affine gain only for strongly correlated textured frames;
+    # camera occlusion and changed geometry must still count as motion.
+    if (variance_a > count * count * 30
+            and variance_b > count * count * 30
+            and covariance > 0
+            and covariance * covariance >= 0.90 * variance_a * variance_b):
+        candidate_gain = covariance / variance_a
+        if 0.55 <= candidate_gain <= 2.5:
+            gain = candidate_gain
+    offset = (sum_b - gain * sum_a) / count
     return sum(
         1 for x, y in zip(a, b, strict=True)
-        if abs((y - x) - shift) >= threshold
-    ) / len(a)
+        if abs(y - (gain * x + offset)) >= threshold
+    ) / count
 
 
 @dataclass(frozen=True)
