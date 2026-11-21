@@ -141,7 +141,10 @@ def test_capture_rejects_boot_privacy_switch_during_download(changes):
             http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
             clock=iter([0.0, 0.1]).__next__, pause=lambda _: None,
         )
-    assert http.calls[-1][0].endswith("/api/audio.reference")
+    # The post-download privacy receipt runs before error cleanup aborts
+    # this exact private capture generation.
+    assert http.calls[-2][0].endswith("/api/audio.reference")
+    assert http.calls[-1][0].endswith("/api/audio.capture.abort")
 
 
 @pytest.mark.parametrize("address", [
@@ -203,6 +206,7 @@ def test_full_pcm_payload_still_requires_continuous_device_sample_timestamps(las
     assert [req[0].split("/")[-1] for req in http.calls] == [
         "audio.reference", "audio.capture.start",
         "audio.capture.status", "audio.capture.raw",
+        "audio.capture.abort",
     ]
 
 
