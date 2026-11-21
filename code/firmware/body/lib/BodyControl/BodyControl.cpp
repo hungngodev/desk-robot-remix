@@ -517,14 +517,23 @@ void BodyControl::tick(std::uint32_t now_ms) {
         const std::uint32_t delta = seq - jaw_servo_sample_seq_;
         // Sequence 0 is never a valid conversion; permit UINT32 rollover
         // but reject duplicates, backwards reads and stale HTTP replay.
-        if (jaw_sample_motion_budget_ == 0 &&
-            (jaw_servo_sample_seq_ == 0 ||
-             (delta != 0U && delta < 0x80000000U))) {
-          jaw_servo_sample_seq_ = seq;
-          jaw_sample_motion_budget_ = 4;
+        if (jaw_servo_sample_seq_ != 0 &&
+            delta >= 0x80000000U) {
+          // Replayed or regressed sensor identity invalidates even the
+          // unused part of a previously trusted movement allowance.
+          // Require a fresh command and newer conversion; never resume
+          // the old target after a backwards hardware sample.
+          state_.grip_target = state_.grip;
+          jaw_sample_motion_budget_ = 0;
+        } else {
+          if (jaw_sample_motion_budget_ == 0 &&
+              (jaw_servo_sample_seq_ == 0 || delta != 0U)) {
+            jaw_servo_sample_seq_ = seq;
+            jaw_sample_motion_budget_ = 4;
+          }
+          jaw_steps = steps < jaw_sample_motion_budget_ ?
+              steps : jaw_sample_motion_budget_;
         }
-        jaw_steps = steps < jaw_sample_motion_budget_ ?
-            steps : jaw_sample_motion_budget_;
       }
     }
     const int previous_grip = state_.grip;

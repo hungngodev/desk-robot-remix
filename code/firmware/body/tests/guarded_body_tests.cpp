@@ -1269,24 +1269,39 @@ static void gripper_jaw_consumes_at_most_four_degrees_per_adc_conversion() {
   r.force.jaw_sample_seq = 2U;
   r.force.at_ms = r.force.jaw_at_ms = 281U;
   body.set_accessories(r, 281U);
-  body.tick(300);
+  body.tick(380); // five actual servo intervals, only four jaw degrees
   CHECK(body.state().grip == 98);
   r.force.jaw_sample_seq = 1U; // backwards replay is rejected
-  r.force.at_ms = r.force.jaw_at_ms = 301U;
-  body.set_accessories(r, 301U);
-  body.tick(320);
-  CHECK(body.state().grip == 98);
+  r.force.at_ms = r.force.jaw_at_ms = 381U;
+  body.set_accessories(r, 381U);
+  body.tick(400);
+  CHECK(body.state().grip == 98 && body.state().grip_target == 98);
   r.force.jaw_sample_seq = 3U;
-  r.force.at_ms = r.force.jaw_at_ms = 321U;
-  body.set_accessories(r, 321U);
-  body.tick(340);
+  r.force.at_ms = r.force.jaw_at_ms = 401U;
+  body.set_accessories(r, 401U);
+  CHECK(send(body, "grip 120", 401) == "OK grip angle=120");
+  body.tick(480);
   CHECK(body.state().grip == 102 && body.state().grip_target == 120);
+
+  // A regressed conversion while a four-degree allowance is only partly
+  // used revokes even its remaining credit and cancels the pending target.
+  r.force.jaw_sample_seq = 4U;
+  r.force.at_ms = r.force.jaw_at_ms = 481U;
+  body.set_accessories(r, 481U);
+  CHECK(send(body, "grip 120", 481) == "OK grip angle=120");
+  body.tick(500);
+  CHECK(body.state().grip == 103 && body.state().grip_target == 120);
+  r.force.jaw_sample_seq = 3U;
+  r.force.at_ms = r.force.jaw_at_ms = 501U;
+  body.set_accessories(r, 501U);
+  body.tick(520);
+  CHECK(body.state().grip == 103 && body.state().grip_target == 103);
 
   // A failed jaw conversion freezes the commanded target and retains PWM.
   r.force.valid = false;
-  body.set_accessories(r, 341U);
-  body.tick(360);
-  CHECK(body.state().grip == 102 && body.state().grip_target == 102);
+  body.set_accessories(r, 521U);
+  body.tick(540);
+  CHECK(body.state().grip == 103 && body.state().grip_target == 103);
   CHECK(body.state().servos_attached);
 }
 
