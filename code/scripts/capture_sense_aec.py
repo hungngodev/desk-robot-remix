@@ -113,6 +113,19 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
         pre.get("microphone_privacy_epoch"), 0, 0xffffffff,
         "microphone privacy epoch",
     )
+    # Count only actual successful PDM reads and accepted I2S frames.
+    # These are activity witnesses, never acoustic speaker playback proof.
+    initial_mic_frames = _number(
+        pre.get("microphone_frames_read"), 0, 0xffffffff,
+        "initial microphone frame count",
+    )
+    initial_speaker_frames = _number(
+        pre.get("speaker_frames_accepted"), 0, 0xffffffff,
+        "initial speaker frame count",
+    )
+    if (initial_mic_frames > 0xffffffff - FRAMES
+            or initial_speaker_frames == 0xffffffff):
+        raise ValueError("Sense activity counters saturated before trial")
     # A genuine bench build statically enforces zero delay. Verify the live
     # flashed head too; older/misconfigured diagnostics must not masquerade as
     # an absolute speaker-to-microphone acoustic measurement.
@@ -192,12 +205,26 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
                 or final.get("microphone_privacy_muted") is not False
                 or final.get("reference_integrity_failed") is not False):
             raise RuntimeError("Sense microphone privacy or boot changed during capture")
+        mic_frames_after = _number(
+            final.get("microphone_frames_read"), 0, 0xffffffff,
+            "final microphone frame count",
+        )
+        speaker_frames_after = _number(
+            final.get("speaker_frames_accepted"), 0, 0xffffffff,
+            "final speaker frame count",
+        )
+        if (mic_frames_after - initial_mic_frames < FRAMES
+                or speaker_frames_after <= initial_speaker_frames):
+            raise RuntimeError("Sense PCM trial has no complete microphone or speaker activity")
         report = {
             "capture_source": "authenticated_sense_codec_private_pcm_window",
             "robot_id": robot_id,
             "boot": boot,
             "capture_generation": generation,
             "frames": frames,
+            "microphone_frames_read_delta": mic_frames_after - initial_mic_frames,
+            "speaker_frames_accepted_delta": speaker_frames_after - initial_speaker_frames,
+            "speaker_activity_not_acoustic_playback": True,
             "sample_rate_hz": RATE,
             "first_sample_us": first,
             "last_sample_us": last,
