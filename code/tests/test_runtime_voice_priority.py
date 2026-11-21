@@ -1062,6 +1062,12 @@ def test_room_usb_thread_callback_does_not_schedule_after_mac_shutdown():
     """A late read-only USB frame cannot reopen a closed Mac event loop."""
     runtime = Runtime.__new__(Runtime)
     configure_room_dispatch(runtime)
+    # Production always supplies Settings. This isolated shutdown fixture
+    # must also supply the existing room observation consent epoch.
+    runtime.settings = SimpleNamespace(
+        room_station_context_enabled=True,
+        room_station_consent_generation=0,
+    )
     events = []
     observation = object()
     runtime._closed = False
