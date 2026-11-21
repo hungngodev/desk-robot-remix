@@ -306,6 +306,29 @@ class SenseOverlayTests(unittest.TestCase):
         )
         self.assertIn('physical TX silence unverified', writer)
 
+    def test_partial_i2s_speaker_output_is_a_sticky_integrity_failure(self):
+        """An I2S timeout is not a completed spoken turn or valid AEC frame."""
+        header = (HEAD / "sense/sense_reference_codec.h").read_text()
+        code = (HEAD / "sense/sense_reference_codec.cc").read_text()
+        writer = code.split("int SenseReferenceCodec::Write(", 1)[1].split(
+            "void SenseReferenceCodec::ClearReference()", 1
+        )[0]
+        self.assertIn("uint32_t short_output_writes;", header)
+        self.assertIn("uint32_t short_output_writes_ = 0;", header)
+        self.assertIn("if (accepted != samples)", writer)
+        self.assertLess(
+            writer.index("if (accepted != samples)"),
+            writer.index("if (accepted > 0 && started_generation"),
+        )
+        self.assertIn("if (short_output_writes_ != UINT32_MAX)", writer)
+        self.assertIn("reference_integrity_failed_ = true;", writer)
+        self.assertIn("if (log_short)", writer)
+        self.assertIn("stale_publish_discards_, short_output_writes_", code)
+        clear = code.split("void SenseReferenceCodec::ClearReference()", 1)[1].split(
+            "SenseReferenceCodec::ReferenceDiagnostics", 1
+        )[0]
+        self.assertNotIn("short_output_writes_ = 0", clear)
+
     def test_reference_capture_reuses_bounded_scratch_without_heap_churn(self):
         """Static ownership contract; firmware compile verifies C++ integration."""
         header = (HEAD / "sense/sense_reference_codec.h").read_text()
