@@ -3922,6 +3922,34 @@ async def test_proactive_model_rejects_untrusted_non_string_mood(
             ])
 
 
+@pytest.mark.parametrize(
+    ("field", "bad_value"),
+    [
+        ("action", []), ("action", {"speak": True}),
+        ("tool", []), ("tool", {"status": True}),
+    ],
+)
+async def test_proactive_model_rejects_unhashable_action_and_tool(
+    fleet, field, bad_value,
+):
+    """Malformed model JSON is a rejected decision, not a TypeError crash."""
+    from desk_robot.conversation import OllamaChat
+
+    reply = {"action": "silence", "text": "", "tool": "none"}
+    reply[field] = bad_value
+
+    def respond(_request):
+        return httpx.Response(200, json={
+            "message": {"content": json.dumps(reply)},
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(RuntimeError, match="Invalid proactive model decision"):
+            await OllamaChat(fleet, client).proactive_decision([
+                {"role": "user", "content": "Choose silence after a routine scene"},
+            ])
+
+
 async def test_proactive_brain_can_choose_to_stay_silent_without_tts(fleet, tmp_path):
     class DecisionChat:
         def __init__(self):
