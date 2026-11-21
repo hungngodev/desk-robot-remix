@@ -81,6 +81,10 @@ def register_native_omni_routes(
             # opt-out, even if the camera permit remains enabled.
             if not settings.voice_memory_tools_enabled:
                 raise HTTPException(403, "Native memory consent revoked during read")
+            if not settings.voice_vision_tools_enabled:
+                # SQLite yields to independent live-media opt-out. No
+                # private startup context may escape a revoked live session.
+                raise HTTPException(403, "Native live consent revoked during read")
             # Match proactive speech's single authoritative provenance
             # formatter. A sent line is NOT a visual observation and no
             # model-estimated ASR sentence becomes an operator preference.
