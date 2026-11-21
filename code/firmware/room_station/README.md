@@ -88,14 +88,17 @@ https://github.com/adafruit/Adafruit_BME680/tree/2.0.5
 
 ## USB reconnect freshness handshake
 
-On each serial port open the Mac sends a fresh random `SYNC <16 lowercase hex>\n`
-challenge. The Feather returns the matching `SYNC_ACK <nonce>\n`
-before its next observation frame. The Mac discards ALL earlier buffered
-lines, including otherwise valid complete JSON. Without the correct reply
-within three seconds, the station remains unavailable and its data never
-enters live conversation context. This protects against treating a pre-open
-USB buffer as a freshly acquired room reading. It is **not** cryptographic
-device authentication, nor proof of calibrated environmental sensors.
+The Mac sends a fresh random `SYNC <16 lowercase hex>\n` challenge
+after opening the serial port and again before each accepted report. The
+Feather replies with `SYNC_ACK <nonce>\n`. Complete JSON frames received
+before the current challenge ACK are discarded even if their fields appear
+valid. If the report is delayed more than 2.5 seconds after its ACK, the
+Mac discards the late frame and starts a new challenge. If the ACK itself
+does not arrive within three seconds, the station remains unavailable.
+This prevents old USB frames buffered on reconnect or after a read stall
+from masquerading as freshly captured room context. Actual sensor-age checks
+remain independently enforced. The challenge is **not** cryptographic
+authentication, physical source calibration, or verified room sensor timing.
 The standalone bench collector uses the same handshake. Old station firmware
 must be rebuilt before current Mac USB context can be enabled.
 

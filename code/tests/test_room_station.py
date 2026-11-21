@@ -776,3 +776,95 @@ def test_room_station_missing_current_epoch_ack_never_delivers_old_json(monkeypa
         reader._read_port(lambda: True)
     assert not observed
     assert reader.received == 0
+
+
+def test_usb_reader_rechallenges_after_a_stalled_post_ack_frame(monkeypatch):
+    """A late complete JSON line is NOT a current room observation."""
+    import sys
+    from types import SimpleNamespace
+    import desk_robot.room_station as module
+
+    clock = {"now": 100.0}
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock["now"])
+    opened, observed = [], []
+
+    class Port(SynchronizedFakePort):
+        def __init__(self, *args, **kwargs):
+            self.samples = 0
+            self.sync_count = 0
+            opened.append(self)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def write(self, request):
+            self.sync_count += 1
+            return super().write(request)
+
+        def readline(self, size):
+            ack = self._read_session_reply()
+            if ack is not None:
+                return ack
+            self.samples += 1
+            if self.samples == 2:
+                clock["now"] += module.USB_POST_SYNC_FRAME_TIMEOUT_S + 0.1
+            if self.samples <= 3:
+                return json.dumps(frame(self.samples, self.samples * 1000)).encode() + b"\n"
+            return b""
+
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
+    feed = RoomSerialFeed("/dev/cu.test", lambda obs: observed.append(obs.seq))
+    feed._read_port(lambda: not opened or opened[0].samples < 4)
+    assert observed == [1, 3]
+    assert feed.received == 2
+    assert opened[0].sync_count == 4
+
+
+def test_usb_reader_never_accepts_second_frame_without_its_own_ack(monkeypatch):
+    """Missing a per-report ACK must not turn queued JSON into live context."""
+    import sys
+    from types import SimpleNamespace
+    import desk_robot.room_station as module
+
+    clock = {"now": 100.0}
+    monkeypatch.setattr(module.time, "monotonic", lambda: clock["now"])
+    opened, observed = [], []
+
+    class Port(SynchronizedFakePort):
+        def __init__(self, *args, **kwargs):
+            self.samples = 0
+            self.sync_count = 0
+            opened.append(self)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def write(self, request):
+            self.sync_count += 1
+            result = super().write(request)
+            if self.sync_count == 2:
+                self._session_reply = None
+            return result
+
+        def readline(self, size):
+            ack = self._read_session_reply()
+            if ack is not None:
+                return ack
+            self.samples += 1
+            if self.samples <= 2:
+                return json.dumps(frame(self.samples, self.samples * 1000)).encode() + b"\n"
+            clock["now"] += module.USB_SYNC_TIMEOUT_S + 0.1
+            return b""
+
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
+    feed = RoomSerialFeed("/dev/cu.test", lambda obs: observed.append(obs.seq))
+    with pytest.raises(RuntimeError, match="SYNC unacknowledged"):
+        feed._read_port(lambda: True)
+    assert observed == [1]
+    assert opened[0].sync_count == 2

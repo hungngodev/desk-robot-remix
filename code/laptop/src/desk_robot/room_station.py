@@ -24,6 +24,8 @@ MAX_FRAME_BYTES = 4096
 # Per-port unpredictable causal marker. A delayed USB JSON frame written
 # before this challenge must never inherit a fresh Mac receive timestamp.
 USB_SYNC_TIMEOUT_S = 3.0
+# The source of each report must postdate an ACK within this bounded window.
+USB_POST_SYNC_FRAME_TIMEOUT_S = 2.5
 UINT32 = 0xffffffff
 # Mac receive time limits impossible station uptime advances on one USB epoch.
 # 0.1% clock drift plus 3s scheduling slack; not a physical timing claim.
@@ -306,33 +308,47 @@ class RoomSerialFeed:
             self.last_error = None
             if not running():
                 return
-            # The Feather emits ordinary samples even before a host attaches.
-            # An old complete JSON frame can be buffered by USB for arbitrary
-            # time and cannot be made current merely by assigning Mac now().
-            # Challenge the firmware after opening this real USB epoch. Only
-            # an exact reply to this fresh nonce authorizes later JSON lines.
-            nonce = secrets.token_hex(8).encode("ascii")
-            request = b"SYNC " + nonce + b"\n"
-            if port.write(request) != len(request):
-                raise RuntimeError("Room station epoch SYNC write incomplete")
-            expected = b"SYNC_ACK " + nonce + b"\n"
-            deadline = time.monotonic() + USB_SYNC_TIMEOUT_S
+            # The Feather accepts repeated SYNC challenges. Re-issue one
+            # after each report to exclude stale USB frames after a stall.
+            def request_sync() -> tuple[bytes, float]:
+                nonce = secrets.token_hex(8).encode("ascii")
+                request = b"SYNC " + nonce + b"\n"
+                if port.write(request) != len(request):
+                    raise RuntimeError("Room station SYNC write incomplete")
+                return (b"SYNC_ACK " + nonce + b"\n",
+                        time.monotonic() + USB_SYNC_TIMEOUT_S)
+
+            expected, deadline = request_sync()
             synchronized = False
+            frame_deadline = 0.0
             decoder = RoomStationDecoder(soil_calibration=self.soil_calibration)
             discard_until_newline = False
             while running():
-                if not synchronized and time.monotonic() >= deadline:
-                    raise RuntimeError(
-                        "Room station post-connect SYNC unacknowledged"
-                    )
+                now = time.monotonic()
+                if not synchronized and now >= deadline:
+                    raise RuntimeError("Room station post-connect SYNC unacknowledged")
+                if synchronized and now >= frame_deadline:
+                    expected, deadline = request_sync()
+                    synchronized = False
                 line = port.readline(MAX_FRAME_BYTES + 1)
                 if not line:
                     continue
+                if not running():
+                    break
+                now = time.monotonic()
+                if synchronized and now >= frame_deadline:
+                    # An old line may finish readline after a USB stall.
+                    # Discard it rather than assigning a new host timestamp.
+                    expected, deadline = request_sync()
+                    synchronized = False
+                    continue
                 if not synchronized:
-                    # Drop ALL pre-ack telemetry, even fully valid JSON.
-                    # A prior connection cannot know this connection nonce.
+                    # No valid JSON may pass until the current challenge is
+                    # acknowledged. Stale ACKs and older buffered frames drop.
                     if line == expected:
                         synchronized = True
+                        frame_deadline = now + USB_POST_SYNC_FRAME_TIMEOUT_S
+                        discard_until_newline = False
                     continue
                 # readline() may return partial bytes on timeout or the size
                 # limit. Do not accept a parseable suffix as a fresh, distinct
@@ -364,6 +380,11 @@ class RoomSerialFeed:
                     self.callback_failures += 1
                 else:
                     self.received += 1
+                if running():
+                    # Even a callback failure must not authorize the next
+                    # sensor report without a fresh host/Feather causal ACK.
+                    expected, deadline = request_sync()
+                    synchronized = False
 
     async def run(self, stop: asyncio.Event) -> None:
         while not stop.is_set():
