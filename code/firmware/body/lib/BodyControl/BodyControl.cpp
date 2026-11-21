@@ -333,7 +333,7 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
     stop_motion();
     state_.armed = false;
   }
-  if (readings.gauge.fuel_valid && readings.gauge.cell_mv > 0 &&
+  if (readings.gauge.fuel_valid &&
       readings.gauge.cell_mv < 3200U) {
     stop_motion();
     state_.armed = false;
@@ -430,7 +430,6 @@ void BodyControl::tick(std::uint32_t now_ms) {
     return;
   }
   if (state_.armed && state_.accessories.gauge.fuel_valid &&
-      state_.accessories.gauge.cell_mv > 0 &&
       state_.accessories.gauge.cell_mv < 3200U) {
     stop_motion();
     state_.armed = false;
@@ -868,7 +867,6 @@ void BodyControl::execute(const char* line, std::size_t length,
         ((state_.extra_mask & 1U) != 0U && state_.bumper_active);
     const bool touch_hit = state_.touch_active || state_.touch_raw_active;
     const bool battery_depleted = state_.accessories.gauge.fuel_valid &&
-        state_.accessories.gauge.cell_mv > 0 &&
         state_.accessories.gauge.cell_mv < 3200U;
     const bool local_motion_ready = cliff_ready && !driver_unhealthy &&
         !motor_watchdog_latched_ && !imu_low_g_latched_ &&
@@ -1074,7 +1072,6 @@ void BodyControl::execute(const char* line, std::size_t length,
       return;
     }
     if (state_.accessories.gauge.fuel_valid &&
-        state_.accessories.gauge.cell_mv > 0 &&
         state_.accessories.gauge.cell_mv < 3300U) {
       std::snprintf(reply, capacity, "ERR arm battery_low");
       return;

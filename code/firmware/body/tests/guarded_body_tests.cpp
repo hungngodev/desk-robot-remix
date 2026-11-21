@@ -1375,6 +1375,33 @@ static void optional_sensor_inputs_never_arm_or_forge_boot_events() {
   CHECK(disabled.find("\"extras\":{\"mask\":0") != std::string::npos);
 }
 
+static void battery_undervoltage_rejects_arm_and_stops_motion() {
+  using desk_robot::BodyControl;
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 0);
+  BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  send(body, "rearm", 0, true);
+  CHECK(send(body, "arm", 0) == "OK arm");
+
+  desk_robot::AccessoryReadings readings{};
+  readings.gauge.fuel_valid = true;
+  readings.gauge.cell_mv = 0; // Collapsed 0 mV reading must fail closed
+  body.set_accessories(readings, 1);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 1) == "ERR arm battery_low");
+
+  readings.gauge.cell_mv = 3190;
+  body.set_accessories(readings, 2);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "arm", 2) == "ERR arm battery_low");
+
+  readings.gauge.cell_mv = 3350;
+  body.set_accessories(readings, 3);
+  CHECK(send(body, "arm", 3) == "OK arm");
+  CHECK(body.state().armed);
+}
+
 
 static void guarded_dc_has_identical_cliff_touch_and_usb_rearm_contract() {
   // This is a policy/command contract test, not a load or PWM hardware test.
@@ -1674,6 +1701,7 @@ int main() {
     raw_bumper_trip_preempts_debounce_and_preserves_payload();
     accessory_reconnect_does_not_invent_petting_events();
     optional_sensor_inputs_never_arm_or_forge_boot_events();
+    battery_undervoltage_rejects_arm_and_stops_motion();
     accessory_sensors_never_infer_grip_or_current_or_grant_arm();
     independent_pack_sensor_freshness_never_crosses_devices();
     optional_max30102_raw_never_authorizes_motion_or_diagnosis();
