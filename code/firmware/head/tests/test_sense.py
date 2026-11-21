@@ -451,10 +451,10 @@ class SenseOverlayTests(unittest.TestCase):
         writer = writer.split("void SenseReferenceCodec::ClearReference()", 1)[0]
         self.assertLess(
             writer.index("started_generation = reference_generation_;"),
-            writer.index("NoAudioCodec::Write(data, samples)"),
+            writer.index("i2s_channel_write("),
         )
         self.assertLess(
-            writer.index("NoAudioCodec::Write(data, samples)"),
+            writer.index("i2s_channel_write("),
             writer.index("started_generation == reference_generation_"),
         )
         self.assertIn("if (stale_publish_discards_ != UINT32_MAX) ++stale_publish_discards_;", writer)
@@ -467,6 +467,25 @@ class SenseOverlayTests(unittest.TestCase):
             clear.index("reference_.fill(0);"),
         )
         self.assertIn('physical TX silence unverified', writer)
+
+    def test_sense_i2s_write_is_bounded_and_nonfatal_on_driver_error(self):
+        """Pinned upstream infinite wait and ESP_ERROR_CHECK cannot own STOP."""
+        writer = (HEAD / "sense/sense_reference_codec.cc").read_text().split(
+            "int SenseReferenceCodec::Write(", 1
+        )[1].split("void SenseReferenceCodec::ClearReference()", 1)[0]
+        assert "NoAudioCodec::Write(data, samples)" not in writer
+        assert "portMAX_DELAY" not in writer
+        assert "ESP_ERROR_CHECK" not in writer
+        assert "constexpr uint32_t kMaxI2sWaitMs = 120;" in writer
+        assert "pdMS_TO_TICKS(kMaxI2sWaitMs)" in writer
+        assert "std::lock_guard<std::mutex> codec_lock(data_if_mutex_)" in writer
+        assert "i2s_channel_write(" in writer
+        assert "status == ESP_OK && bytes_written % sizeof(int32_t) == 0" in writer
+        assert "if (accepted != samples)" in writer
+        assert "reference_integrity_failed_ = true;" in writer
+        assert writer.index("i2s_channel_write(") < writer.index(
+            "started_generation == reference_generation_"
+        )
 
     def test_partial_i2s_speaker_output_is_a_sticky_integrity_failure(self):
         """An I2S timeout is not a completed spoken turn or valid AEC frame."""
