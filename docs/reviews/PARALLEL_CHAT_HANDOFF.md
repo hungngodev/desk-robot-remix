@@ -1,3 +1,51 @@
+## 21 November 2026: multi-area safety audit, zero-voltage interlock, and CI test suite recovery
+
+PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
+Exact inspected PR head commit `329ff61bf2034dc864677ef19e46458a1801aedb`.
+This source and test batch does not close physical or commercial gates.
+GitHub Actions CI run 44873718222 passed all 4 host and WROOM compile lanes:
+Python and head host tests (3,184 passed), Body C++ host tests with sanitizers (38 passed),
+ESP32 WROOM firmware compile (all targets), and Mac conversation and memory regression;
+XIAO Sense ESP-IDF 6.1 compile queued on runner.
+
+* `8020a92e`: `fix(pet): preserve tactile and attention continuity when vision tools are disabled`
+  Decoupled `continuity = attention.timeline(robot_id, now)` from `voice_vision_tools_enabled`
+  in `code/laptop/src/desk_robot/pet.py`. Added unit test `test_hardware_attention_continuity_preserved_when_vision_disabled`
+  in `code/tests/test_pet.py`. Resolves review thread `PRRT_kwDOVlmnQ866Sl2o` (comment #4650941488).
+* `a1316f26`: `fix(room_station): preserve dual radar targets and prevent thermal summary truncation`
+  Preserved both moving and stationary radar gate descriptions (`", ".join(targets)`) and
+  expanded summary character bounds to prevent mid-word truncation in
+  `code/laptop/src/desk_robot/room_station.py`. Added dual radar target test and full 5-sensor range
+  regression tests in `code/tests/test_room_station.py`. Resolves review threads
+  `PRRT_kwDOVlmnQ866SmCN` (comment #4650942946) and `PRRT_kwDOVlmnQ866SmMR` (comment #4650944091).
+* `d553ddb1`: `fix(safety): treat zero cell voltage as depleted battery in body firmware`
+  Removed `cell_mv > 0` condition in `BodyControl.cpp` (`set_accessories`, `step_motion`,
+  `evaluateSafetyFaults`, and `arm`). When `fuel_valid` is true, 0 mV (collapsed or unplugged rail)
+  is treated as an undervoltage fault (`battery_low`), disarming H-bridges and rejecting `arm`.
+  Added regression test `battery_undervoltage_rejects_arm_and_stops_motion` in
+  `code/firmware/body/tests/guarded_body_tests.cpp`. Resolves review thread `PRRT_kwDOVlmnQ866Smaq`
+  (comment #4650945797).
+* `329ff61b`: `fix(ci): restore NC bumper trip comment in main.cpp and align watchdog heartbeat contract test`
+  Restored exact comment `// NC series to GND; open or unplugged -> HIGH trip` and assignment
+  `bumper = digitalRead(body_pins::kBumperInput) == HIGH;` in `code/firmware/body/src/main.cpp`.
+  Aligned `code/tests/test_dc_motor_watchdog_contract.py` with the non-inlined `reset()` implementation
+  in `MotorHeartbeat.h`. Resolved the 3 host test failures on previous runs, restoring 100% green
+  test suite across all 3,184 Python and head host tests.
+* Review audit & clean-up:
+  - Deleted expired comment #4650448552 (superseded unauthenticated raw UDP capture proposal on
+    `code/scripts/estimate_aec_delay.py`).
+  - Resolved review thread `PRRT_kwDOVlmnQ866Smo-` (comment #4650947409) via verified design proof:
+    `code/tests/test_dock_motion.py:650-685` (`test_dock_approach_refuses_parallel_native_detector_ownership`)
+    intentionally requires `DockDetectorBusy` to propagate fail-closed rather than synthesising a fake
+    camera observation.
+  - Active review thread `PRRT_kwDOVlmnQ864qJJP` on `code/laptop/src/desk_robot/handling.py:155`
+    remains intentionally open tracking A11 physical qualification until bench-top tilt-table and shake
+    trial data is recorded.
+* Hardware & safety boundaries preserved:
+  Digital tests do NOT constitute physical qualification. Physical gates A1–A12 (including A1/A2 acoustic
+  trials, A3 motor stopping under load, A6 thermal/power limits, A11 handling, and printed CAD clearances)
+  remain OPEN. PR #17 remains DRAFT on `impl/mac-hardware-safety-preflight-2026-11-10`.
+
 ## 19 November 2026: landed cost presentation and hardware map source correction
 
 PR #17 only. This source and test batch does not close physical or commercial gates.
