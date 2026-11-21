@@ -1021,3 +1021,62 @@ def test_sense_pcm_window_native_cpp_regression():
             env=native_cpp_env(),
         )
         subprocess.run([str(exe)], check=True)
+
+def test_private_sense_pcm_bench_requires_explicit_fresh_consent():
+    """No private image may inherit earlier raw microphone capture permission."""
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        config = root / "fleet.toml"
+        config.write_text(
+            '[[robots]]\nid="robot-01"\ntoken_env="BENCH_SENSE_TOKEN"\n'
+        )
+        board = (
+            root / "firmware/head/build/xiaozhi-sense/main/boards/"
+            "desk-robot/desk-robot-sense-s3"
+        )
+        board.mkdir(parents=True)
+        original = {"builds": [{"sdkconfig_append": ["CONFIG_UNRELATED=y"]}]}
+        (board / "config.json").write_text(json.dumps(original))
+        base = [
+            "private_config.py", "--board", "sense", "--robot", "robot-01",
+            "--config", str(config), "--secrets", str(root / "missing.env"),
+            "--server-ip", "192.168.1.15",
+        ]
+        env = {"BENCH_SENSE_TOKEN": "x" * 40}
+
+        def invoke(args):
+            with patch.object(private, "ROOT", root), (
+                patch.object(sys, "argv", args)
+            ), patch.dict(os.environ, env):
+                private.main()
+
+        # The capture option alone cannot activate any microphone or output.
+        with unittest.TestCase().assertRaises(SystemExit):
+            invoke(base + ["--bench-aec-capture"])
+        with unittest.TestCase().assertRaises(SystemExit):
+            invoke(base + [
+                "--continuous-audio", "--bench-aec-capture",
+            ])
+        with unittest.TestCase().assertRaises(SystemExit):
+            invoke(base + [
+                "--aec-delay-ms", "0", "--bench-aec-capture",
+            ])
+        assert not (board / "config.private.json").exists()
+
+        invoke(base + [
+            "--continuous-audio", "--aec-delay-ms", "0",
+            "--bench-aec-capture",
+        ])
+        target = board / "config.private.json"
+        enabled = json.loads(target.read_text())["builds"][0]["sdkconfig_append"]
+        assert "CONFIG_DESK_ROBOT_AEC_DELAY_MS=0" in enabled
+        assert "CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED=y" in enabled
+        assert "CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED=y" in enabled
+        assert target.stat().st_mode & 0o777 == 0o600
+
+        # Regeneration is explicit opt-in each time, even on the same head.
+        invoke(base + ["--continuous-audio", "--aec-delay-ms", "0"])
+        disabled = json.loads(target.read_text())["builds"][0]["sdkconfig_append"]
+        assert "CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED=n" in disabled
+        assert "CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED=y" not in disabled
+        assert json.loads((board / "config.json").read_text()) == original
