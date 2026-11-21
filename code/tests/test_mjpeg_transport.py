@@ -83,9 +83,20 @@ async def test_multi_pet_stream_refuses_foreign_camera_before_publication(monkey
                 head_url="http://head.example",
             ), client,
         )
+        captured_read_timeout = []
+        open_stream = client.stream
+
+        def inspect_stream(*args, **kwargs):
+            # The selected MJPEG transport keeps the actual one HTTP stream
+            # but bounds silent socket waits after consent is revoked.
+            captured_read_timeout.append(kwargs["timeout"].read)
+            return open_stream(*args, **kwargs)
+
+        monkeypatch.setattr(client, "stream", inspect_stream)
         with pytest.raises(HeadError, match="identity mismatch"):
             async for _ in head.stream_frames():
                 pass
+        assert captured_read_timeout == [1.5]
         assert head._stream_latest is None
         assert head._stream_connected is False
 
