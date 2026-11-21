@@ -750,7 +750,7 @@ async def test_dock_diagnostic_uses_strict_live_frame_receipt_if_available(
 
         async def snapshot_for_dock(self):
             self.captures += 1
-            return b"\\xff\\xd8\\xff\\xd9"
+            return b"\xff\xd8\xff\xd9"
 
     monkeypatch.setattr(
         dock_runtime, "detect_apriltag",
