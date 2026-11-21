@@ -1165,6 +1165,69 @@ async def test_different_observations_of_same_kind_are_not_falsely_coalesced(
         await pet.close()
 
 
+async def test_cross_camera_paraphrases_keep_distinct_events_and_touches(
+    fleet, tmp_path,
+):
+    """A shared speech key does not invent cross-camera spatial identity."""
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    pet = PetController(
+        fleet, {}, Conversation(
+            fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+        ), memory, KeyScene(), group_window=5,
+    )
+    for robot_id in ("robot-01", "robot-02", "robot-03"):
+        state = pet.states[robot_id]
+        state.enabled, state.generation, state.quiet = True, 9, True
+    try:
+        for robot_id, description in (
+            ("robot-01", "A red key appeared beside the laptop"),
+            ("robot-02", "I noticed a red key next to the laptop"),
+        ):
+            pet._consider_speech(
+                robot_id, SceneChange("key", description, .97), 9,
+                camera_derived=True,
+            )
+        assert len(pet._event_kinds) == 1
+        for kind, description in (
+            ("key", "A blue key appeared beside the laptop"),
+            ("object", "A red notebook appeared beside the laptop"),
+        ):
+            pet._consider_speech(
+                "robot-03", SceneChange(kind, description, .97), 9,
+                camera_derived=True,
+            )
+        assert len(pet._event_kinds) == 3
+        for robot_id in ("robot-01", "robot-02"):
+            pet._consider_speech(
+                robot_id, SceneChange(
+                    "touch_tap", "Someone touched my head", 1.0,
+                ), 9,
+            )
+        assert len(pet._event_kinds) == 5
+        key = next(k for k in pet._event_kinds if k[1] == "key"
+                   and k[2].startswith("camera:") and "red" in k[2])
+        pet._event_kinds[key] = time.monotonic() - 6
+        pet._consider_speech(
+            "robot-02", SceneChange(
+                "key", "The red key appeared near the laptop", .97,
+            ), 9, camera_derived=True,
+        )
+        assert len(pet._event_kinds) == 5
+        assert time.monotonic() - pet._event_kinds[key] < 1
+        for description in (
+            "Red key moved from left to right of laptop",
+            "Red key moved from right to left of laptop",
+        ):
+            pet._consider_speech(
+                "robot-03", SceneChange("key", description, .97), 9,
+                camera_derived=True,
+            )
+        assert len(pet._event_kinds) == 7
+        assert memory.count("robot-01") == memory.count("robot-02") == 0
+    finally:
+        await pet.close()
+
+
 async def test_independent_touch_poll_silences_pet_while_camera_vlm_is_blocked(
     fleet, tmp_path
 ):

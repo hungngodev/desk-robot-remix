@@ -13,6 +13,7 @@ import asyncio
 import json
 import math
 import random
+import re
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -66,6 +67,38 @@ _SOCIAL_EVENT_KINDS = frozenset({
 # the camera hub. No independent duplicate registry can silently drift.
 _DIRECT_INTERACTION_KINDS = DIRECT_INTERACTION_KINDS
 _PHYSICAL_INITIATIVE_KINDS = PHYSICAL_INITIATIVE_KINDS
+
+
+_CAMERA_SCENE_FILLER = frozenset({
+    "a", "an", "the", "i", "we", "my", "our", "there", "is", "are", "was",
+    "were", "have", "has", "see", "saw", "seen", "notice", "noticed",
+    "show", "shows", "showed", "appeared", "appears", "just", "now", "new",
+    "near", "beside", "next", "to", "by", "on", "at",
+})
+# Reordering these clauses could reverse the event or erase a safety detail.
+_CAMERA_SCENE_ORDER_SENSITIVE = frozenset({
+    "not", "no", "left", "right", "behind", "front", "under", "over",
+    "inside", "outside", "before", "after", "moved", "moving", "approached",
+    "leaving", "turned", "rotated", "vanished", "disappeared", "removed",
+    "picked", "dropped", "fell",
+})
+
+
+def _camera_scene_signature(description: str) -> str:
+    """Group cautious lexical paraphrases, never claim shared spatial identity.
+
+    The object's type, attributes, number and location words remain evidence.
+    Motion, negation, and non-ASCII text keep exact normalized descriptions,
+    rather than risk merging unrelated scene changes across cameras.
+    """
+    normalized = " ".join(description.casefold().split())
+    if not normalized.isascii():
+        return normalized
+    words = re.findall(r"[a-z0-9]+", normalized)
+    if any(word in _CAMERA_SCENE_ORDER_SENSITIVE for word in words):
+        return normalized
+    content = [word for word in words if word not in _CAMERA_SCENE_FILLER]
+    return " ".join(sorted(content)) if len(content) >= 2 else normalized
 
 
 def _initiative_evidence(change: SceneChange) -> bool:
@@ -2154,9 +2187,16 @@ class PetController:
             robot_id if not camera_derived
             and change.kind in _PHYSICAL_INITIATIVE_KINDS else None
         )
+        # Reworded camera descriptions can represent one shared visual
+        # scene. Keep this as a speech budget key, never an eyewitness claim.
+        # Physical sensor identities must remain independent.
+        description_key = (
+            _camera_scene_signature(change.description) if camera_derived
+            else " ".join(change.description.casefold().split())
+        )
         event_key = (
             physical_owner, change.kind,
-            " ".join(change.description.casefold().split()),
+            ("camera:" if camera_derived else "other:") + description_key,
         )
         previous = self._event_kinds.get(event_key, -math.inf)
         if len(self._event_kinds) >= 64:
