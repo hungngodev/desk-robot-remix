@@ -120,6 +120,8 @@ class CameraEvidence:
     motion_fraction: float
     source: str
     trigger_kind: str | None = None  # Scheduling cause, NOT object recognition.
+    # Device-local capture completion receipt; NOT Mac-time exposure proof.
+    source_identity: tuple[int, int, int] | None = None
 
 
 class CameraFrameHub:
@@ -327,7 +329,9 @@ class CameraFrameHub:
     def offer_prepared(self, robot_id: str, prepared: tuple[bytes, bytes, float],
                        received_at: float, *, source: str,
                        generation: int | None = None,
-                       trigger_kind: str | None = None) -> CameraEvidence:
+                       trigger_kind: str | None = None,
+                       source_identity: tuple[int, int, int] | None = None
+                       ) -> CameraEvidence:
         """Commit preprocessed media on its single event-loop owner.
 
         Image decoding may run in a worker, but no worker can mutate this hub.
@@ -346,6 +350,14 @@ class CameraFrameHub:
             raise ValueError("Only a real sensor burst can label its trigger")
         if received_at <= self.last_capture[robot_id]:
             raise ValueError("Out of order camera reception timestamp")
+        if source_identity is not None and (
+            type(source_identity) is not tuple or len(source_identity) != 3
+            or any(type(value) is not int for value in source_identity)
+            or not 0 <= source_identity[0] <= 0xffffffff
+            or not 1 <= source_identity[1] <= 0xffffffff
+            or source_identity[2] <= 0
+        ):
+            raise ValueError("Invalid device camera completion identity")
         reduced, gray, _ = prepared
         if (not isinstance(reduced, bytes) or not reduced.startswith(b"\xff\xd8")
                 or len(reduced) > 1_000_000 or not isinstance(gray, bytes)
@@ -361,7 +373,7 @@ class CameraFrameHub:
         self.last_capture[robot_id] = received_at
         self.urgent[robot_id] = False
         evidence = CameraEvidence(reduced, received_at, motion, source,
-                                  trigger_kind)
+                                  trigger_kind, source_identity)
         self.frames[robot_id].append(evidence)
         return evidence
 
@@ -656,7 +668,7 @@ class CameraFrameHub:
             }))
         for frame in self.frames[robot_id]:
             if 0 <= now - frame.received_at <= 6:
-                items.append((frame.received_at, {
+                camera_item = {
                     "channel": "camera",
                     "kind": frame.source,
                     "age_ms": round(1000 * (now - frame.received_at)),
@@ -666,7 +678,16 @@ class CameraFrameHub:
                     "content": None,  # never put JPEG bytes or guessed objects here
                     "exposure_timestamp_verified": False,
                     "physical_action_verified": False,
-                }))
+                }
+                if frame.source_identity is not None:
+                    boot, sequence, complete_us = frame.source_identity
+                    camera_item.update({
+                        "source_boot": boot,
+                        "source_frame_sequence": sequence,
+                        "source_capture_complete_us": complete_us,
+                        "source_clock_not_aligned_to_mac": True,
+                    })
+                items.append((frame.received_at, camera_item))
         for kind, summary, stamp in self.tool_history[robot_id]:
             if 0 <= now - stamp <= (
                 8 if kind == "visual_look" else 30
@@ -1031,6 +1052,9 @@ class MultimodalOrchestrator:
                 # before a return from the enclosing coroutine.
                 async with aclosing(head.stream_frames()) as stream:
                     async for jpeg, received in stream:
+                        # HttpHead validated the frame's device source header.
+                        # Snapshot its clock before Pillow yields the loop.
+                        source_identity = getattr(head, "_last_camera", None)
                         if self._closed or not self.settings.voice_vision_tools_enabled:
                             self.hub.discard_video(robot_id)
                             return
@@ -1143,6 +1167,7 @@ class MultimodalOrchestrator:
                             self.hub.offer_prepared(
                                 robot_id, prepared, received, source=source,
                                 generation=generation,
+                                source_identity=source_identity,
                             )
                         except (RuntimeError, ValueError):
                             metrics["stream_frames_skipped"] += 1
