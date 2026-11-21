@@ -254,7 +254,13 @@ async def test_snapshot_rejects_missing_or_cross_pet_camera_identity(
 
 async def test_hardware_camera_requires_true_capture_metadata(settings, tokens):
     async def handler(request):
-        return httpx.Response(200, content=b"\xff\xd8unmarked\xff\xd9")
+        # Supply the required pet identity, but NOT the camera boot,
+        # sequence, or capture completion headers. This isolates the
+        # missing-metadata refusal from the earlier identity check.
+        return httpx.Response(
+            200, headers={"X-Desk-Camera-Robot-Id": settings.robots[0].id},
+            content=b"\xff\xd8unmarked\xff\xd9",
+        )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         head = HttpHead(settings.robots[0], client, strict_capture=True)
