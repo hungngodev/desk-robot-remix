@@ -271,6 +271,11 @@ jobs:
           c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/radar_sample_clock_tests.cpp -o /tmp/desk-room-radar-clock-test
           /tmp/desk-room-radar-clock-test
 
+      - name: Verify room SCD40 cached samples fail closed on readiness errors
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/scd_sample_freshness_tests.cpp -o /tmp/desk-room-scd-test
+          /tmp/desk-room-scd-test
+
   sense-idf:
     concurrency:
       group: host-verification-sense-idf-${{ github.run_attempt > 1 && github.run_id || github.event.pull_request.number || github.ref }}

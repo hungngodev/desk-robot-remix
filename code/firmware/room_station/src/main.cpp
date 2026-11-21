@@ -15,6 +15,7 @@
 #include "thermal_pixels.h"
 #include "soil_sample.h"
 #include "radar_sample_clock.h"
+#include "scd_sample_freshness.h"
 
 #ifndef ROOM_SOIL_FITTED
 #define ROOM_SOIL_FITTED 0
@@ -60,21 +61,25 @@ void number(float value, int decimals = 2) {
 void scd_observation(uint32_t now) {
   if (scd_started) {
     bool ready = false;
-    if (scd.getDataReadyStatus(ready) == 0 && ready) {
+    const int readiness_status = scd.getDataReadyStatus(ready);
+    bool measurement_valid = false;
+    if (readiness_status == 0 && ready) {
       uint16_t ppm = 0;
       float t = 0, rh = 0;
-      if (scd.readMeasurement(ppm, t, rh) == 0 &&
+      measurement_valid = scd.readMeasurement(ppm, t, rh) == 0 &&
           ppm > 0 && ppm <= 50000 && finite_temperature(t) &&
-          isfinite(rh) && rh >= 0 && rh <= 100) {
+          isfinite(rh) && rh >= 0 && rh <= 100;
+      if (measurement_valid) {
         co2_ppm = ppm;
         scd_temp = t;
         scd_humidity = rh;
         last_scd_ms = now;
-        scd_valid = true;
-      } else {
-        scd_valid = false;
       }
     }
+    // A bus error invalidates the old sample now, not after kScdStaleMs.
+    // A healthy not-ready poll retains it only until that age limit.
+    scd_valid = desk_robot_room::scd_sample_valid_after_poll(
+        scd_valid, readiness_status, ready, measurement_valid);
   }
   const bool fresh = scd_valid && now - last_scd_ms <= kScdStaleMs;
   Serial.print(F("\"scd40\":{\"valid\":")); jsbool(fresh);
