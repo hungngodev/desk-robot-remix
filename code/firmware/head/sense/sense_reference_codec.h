@@ -18,6 +18,7 @@
 #endif
 
 #include <array>
+#include <atomic>
 #include <cstdint>
 #include <mutex>
 
@@ -32,6 +33,16 @@ public:
     // i2s_channel_disable()/enable() remains owned by the inherited codec.
     void ClearReference();
     void EnableOutput(bool enable) override;
+
+    // Physical BOOT consent wins before queued Xiaozhi audio tasks unwind.
+    // This gates the actual PDM samples on the canonical codec only.
+    void SetMicrophonePrivacyMuted(bool muted) {
+        const bool previous = microphone_privacy_muted_.exchange(
+            muted, std::memory_order_acq_rel);
+        if (previous != muted) {
+            microphone_privacy_epoch_.fetch_add(1, std::memory_order_acq_rel);
+        }
+    }
 
     // Read-only integrity counters for A2 diagnostics, not an acoustic pass.
     // Counters persist across speech cancellation. A physical qualification
@@ -97,6 +108,8 @@ private:
     // allocating twice on every realtime 16 kHz microphone callback.
     // One capture reader owns the scratch buffers at a time.
     static constexpr int kMaxReadFrames = 2048;
+    std::atomic<bool> microphone_privacy_muted_{false};
+    std::atomic<uint32_t> microphone_privacy_epoch_{0};
     std::mutex input_read_mutex_;
     std::array<int16_t, kMaxReadFrames> microphone_frame_{};
     std::array<int16_t, kMaxReadFrames> reference_frame_{};
