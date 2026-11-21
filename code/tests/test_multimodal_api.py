@@ -190,6 +190,13 @@ def test_semantic_planner_keeps_explicit_safety_status_with_battery(
         assert [tool["route"] for tool in battery_only.json()["tools"]] == [
             "power-status",
         ]
+        battery_status = client.post(url, headers=headers, json={
+            "transcript": "Check your battery status",
+        })
+        assert battery_status.status_code == 200
+        assert [tool["route"] for tool in battery_status.json()["tools"]] == [
+            "power-status",
+        ]
         assert both.json()["motor_authorized"] is False
 
 

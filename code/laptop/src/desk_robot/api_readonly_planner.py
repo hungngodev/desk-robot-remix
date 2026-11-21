@@ -270,13 +270,20 @@ def register_readonly_planner_routes(
             )
 
         status_question = explicitly_requested(
-            ("status", "safety", "fault", "health", "are your sensors working",
+            ("safety", "fault", "health", "are your sensors working",
              "are you armed", "robot state", "motors running"),
             re.compile(
                 r"^(?:(?:your|my|the) )?"
                 r"(?:status|safety|safety status|sensor status|"
                 r"robot status|faults?|health)\??$"
             ),
+        ) or any(
+            # 'Check my battery status' asks only for the fuel gauge. The
+            # generic word 'status' is not a second body safety request
+            # when it modifies battery in the SAME clause.
+            is_request[i] and re.search(r"\bstatus\b", piece)
+            and battery_cue.search(piece) is None
+            for i, piece in enumerate(clauses)
         )
         aux_question = explicitly_requested(
             ("sensor", "sensors", "temperature", "humidity", "pressure", "climate",
