@@ -99,21 +99,10 @@ async def guarded_grasp(
         request_elapsed_ms = max(0, int((time.monotonic() - started) * 1000))
         if not isinstance(sample, dict) or sample.get("robot_id") != robot_id:
             raise ValueError("Foreign or missing jaw sensor robot identity")
-        observation = force_observation(sample)
-        group = sample["force"]
-        # Read-only legacy adapters may infer validity from composite force.valid,
-        # but physical jaw motion needs the actual fresh jaw ADC channel verdict.
-        if group.get("jaw_valid") is not True:
-            raise ValueError("Missing independent jaw ADC channel validity")
-        # Physical servo movement must not trust a legacy/partial AUX
-        # adapter with no acquisition clock or reboot fence. Keep the
-        # optional metadata allowance in force_observation for read-only
-        # inspection, but require both fields at this motion boundary.
-        age_ms = group.get("jaw_age_ms")
-        if (type(age_ms) is not int or not 0 <= age_ms < 500
-                or age_ms + request_elapsed_ms >= 500):
-            raise ValueError("Missing or expired jaw ADC acquisition age")
-        observed_boot = group.get("boot_id")
+        # Fence a new or unknown WROOM epoch before decoding any jaw data.
+        # A simultaneous channel fault must not mask a reboot and allow relief.
+        group = sample.get("force")
+        observed_boot = group.get("boot_id") if isinstance(group, dict) else None
         if (type(observed_boot) is not int
                 or not 1 <= observed_boot <= 0xffffffff):
             # A zero or malformed boot after movement cannot authorize even
@@ -127,6 +116,19 @@ async def guarded_grasp(
             # unarmed session, even if an alternate health adapter says yes.
             force_boot_changed = True
             raise ValueError("WROOM reboot invalidated grasp force sequence")
+        observation = force_observation(sample)
+        # Read-only legacy adapters may infer validity from composite force.valid,
+        # but physical jaw motion needs the actual fresh jaw ADC channel verdict.
+        if group.get("jaw_valid") is not True:
+            raise ValueError("Missing independent jaw ADC channel validity")
+        # Physical servo movement must not trust a legacy/partial AUX
+        # adapter with no acquisition clock or reboot fence. Keep the
+        # optional metadata allowance in force_observation for read-only
+        # inspection, but require both fields at this motion boundary.
+        age_ms = group.get("jaw_age_ms")
+        if (type(age_ms) is not int or not 0 <= age_ms < 500
+                or age_ms + request_elapsed_ms >= 500):
+            raise ValueError("Missing or expired jaw ADC acquisition age")
         force_boot_seen = True
         force_boot_id = observed_boot
         return observation

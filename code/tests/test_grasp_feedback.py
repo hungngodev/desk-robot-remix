@@ -730,8 +730,44 @@ async def test_grasp_loses_required_provenance_after_first_pulse(
         await guarded_grasp(
             head, Settings(), robot_id="robot-01", health=healthy,
         )
-    # Existing guarded relief is permitted only while WROOM reports armed.
-    assert head.commands == ["grip 64", "grip 60"]
+    # Without a verified boot identity, even a relief command is unsafe.
+    assert head.commands == (
+        ["grip 64"] if missing == "boot_id" else ["grip 64", "grip 60"]
+    )
+
+
+@pytest.mark.parametrize("when", ["before_first", "after_first_close"])
+@pytest.mark.parametrize("invalid_boot", [None, 0, 9002, True])
+async def test_compound_wroom_epoch_and_jaw_fault_blocks_all_followup_commands(
+    monkeypatch, when, invalid_boot,
+):
+    """A bad jaw field must not hide a reset and authorize servo relief."""
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+
+    class CompoundFault(FakeHead):
+        async def aux_status(self):
+            frame = await super().aux_status()
+            if when == "before_first" or self.seq >= 3:
+                group = frame["force"]
+                group["jaw_valid"] = False
+                if invalid_boot is None:
+                    group.pop("boot_id")
+                else:
+                    group["boot_id"] = invalid_boot
+            return frame
+
+    head = CompoundFault([100, 101, 240])
+    expected = ("Fresh force feedback required"
+                if when == "before_first" else "Lost fresh force sensor")
+    with pytest.raises(OperationError, match=expected):
+        await guarded_grasp(
+            head, Settings(), robot_id="robot-01", health=healthy,
+        )
+    # WROOM identity cannot be trusted even if another health adapter is armed.
+    assert head.commands == ([] if when == "before_first" else ["grip 64"])
 
 
 async def test_grasp_waits_for_real_mux_jaw_conversion_instead_of_aborting(
