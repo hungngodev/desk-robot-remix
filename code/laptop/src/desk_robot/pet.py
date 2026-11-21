@@ -1073,8 +1073,11 @@ class PetController:
 
         force = data["force"]
         if robot.squeeze_raw_threshold is not None and force["valid"]:
-            # An FSR is a nonlinear pad. Raw ADC only, no fabricated Newtons.
-            squeezed = max(force["adc"]) >= robot.squeeze_raw_threshold
+            # ADS1115 channel 0 is the belly FSR. Channel 1 is the jaw
+            # contact for guarded grasp; gripping an object cannot claim
+            # that a person squeezed this robot's pressure pad.
+            # Both remain nonlinear raw ADC values, never Newtons.
+            squeezed = force["adc"][0] >= robot.squeeze_raw_threshold
             if state.last_force_squeeze is False and squeezed:
                 changes.append(SceneChange(
                     "squeeze", "Someone pressed my calibrated pressure pad", 1.0

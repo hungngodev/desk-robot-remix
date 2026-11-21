@@ -2217,6 +2217,14 @@ async def test_hardware_aux_sensors_react_only_to_real_calibrated_edges(fleet, t
         await pet._observe_aux(robot_id, 3, first)
         assert not any(m.kind in {"battery_low", "nose_twist", "squeeze", "nearby_object"}
                        for m in memory.recent(robot_id))
+        # Jaw FSR on ADS1115 channel 1 can be fully pressed while channel 0
+        # remains at its unchanged belly baseline. This is NOT a human touch.
+        jaw_only = report(5000, 100, 100, 40, fuel_seq=1)
+        jaw_only["force"]["adc"][1] = 10000
+        await pet._observe_aux(robot_id, 3, validate_aux(jaw_only, robot_id))
+        assert state.last_force_squeeze is False
+        assert not any(m.kind == "squeeze" for m in memory.recent(robot_id))
+        # Subsequent genuine belly pad contact still crosses the edge.
         await pet._observe_aux(robot_id, 3, report(1900, 900, 10000, 150, fuel_seq=2))
         await pet._observe_aux(robot_id, 3, report(1900, 900, 10000, 150, fuel_seq=2))
         assert not any(m.kind == "battery_low" for m in memory.recent(robot_id))
