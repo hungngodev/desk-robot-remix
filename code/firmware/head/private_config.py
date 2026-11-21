@@ -5,6 +5,7 @@ import ipaddress
 import json
 import os
 import re
+import tempfile
 import tomllib
 from pathlib import Path
 
@@ -103,10 +104,28 @@ def main():
             + ("y" if args.bench_aec_capture else "n"),
         ])
     target = board / "config.private.json"
-    fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as stream:
-        os.fchmod(stream.fileno(), 0o600)
-        json.dump(config, stream, indent=2)
+    if target.is_symlink():
+        p.error("Refuse a symlinked private build settings target")
+    # A failed write must preserve the previous usable settings. Never open
+    # the destination with O_TRUNC: that would follow a planted symlink and
+    # could leak a real device bearer into an unrelated tracked file.
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=board,
+            prefix=".config.private.", suffix=".tmp", delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+            os.fchmod(stream.fileno(), 0o600)
+            json.dump(config, stream, indent=2)
+            stream.flush()
+            os.fsync(stream.fileno())
+        if target.is_symlink():
+            p.error("Private build settings target became a symlink")
+        os.replace(temporary, target)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
     print(f"Private build settings prepared for {args.robot}; token hidden. Nothing flashed.")
 
 
