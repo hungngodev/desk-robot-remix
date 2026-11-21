@@ -8,7 +8,7 @@ The strict procurement release still owns receipt verification.
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 
