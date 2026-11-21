@@ -196,6 +196,11 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
             raw = response.read(BYTES + 1)
         if len(raw) != BYTES:
             raise ValueError("Incomplete or oversized authenticated Sense PCM body")
+        # Protect against an older or misconfigured bench image: driver
+        # activity counters do not establish a usable nonzero PCM signal.
+        microphone_pcm, reference_pcm = split_pcm(raw)
+        if not any(microphone_pcm) or not any(reference_pcm):
+            raise ValueError("Sense PCM capture has an all-zero microphone or reference")
         # The BOOT privacy switch can change while the HTTP worker transfers
         # buffered audio. Reject an otherwise complete capture if that happened,
         # even though the head must independently invalidate mid-flight chunks.
