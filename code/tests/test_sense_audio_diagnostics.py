@@ -37,6 +37,7 @@ async def test_actual_sense_reference_counters_are_authenticated_and_bounded(
             "reference_integrity_failed": True,
             "microphone_privacy_muted": False,
             "microphone_privacy_epoch": 0,
+            "aec_delay_config_ms": 90,
             "speaker_playback_verified": False,
             "aec_physically_qualified": False,
         })
@@ -47,6 +48,7 @@ async def test_actual_sense_reference_counters_are_authenticated_and_bounded(
     assert observed["reference_integrity_failed"] is True
     assert observed["microphone_privacy_muted"] is False
     assert observed["microphone_frames_read"] == 110
+    assert observed["aec_delay_config_ms"] == 90
     assert calls == [("GET", "/api/audio.reference", "Bearer " + "s" * 32)]
 
 
@@ -65,6 +67,11 @@ async def test_actual_sense_reference_counters_are_authenticated_and_bounded(
     {"reference_integrity_failed": 0},
     {"microphone_privacy_muted": "no"},
     {"microphone_privacy_epoch": -1},
+    {"aec_delay_config_ms": None},
+    {"aec_delay_config_ms": True},
+    {"aec_delay_config_ms": "0"},
+    {"aec_delay_config_ms": -1},
+    {"aec_delay_config_ms": 251},
     {"speaker_playback_verified": True},
     {"aec_physically_qualified": True},
 ])
@@ -82,6 +89,7 @@ async def test_no_foreign_or_fabricated_reference_evidence(monkeypatch, changed)
         "reference_integrity_failed": False,
         "microphone_privacy_muted": False,
         "microphone_privacy_epoch": 0,
+        "aec_delay_config_ms": 90,
         "speaker_playback_verified": False,
         "aec_physically_qualified": False,
     }
