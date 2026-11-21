@@ -42,7 +42,7 @@ class HeadHTTP:
 
 
 def fake_read(*, raw=None, boot=7, robot="robot-01", raw_boot=None,
-              frames=64000, ready=True):
+              frames=64000, ready=True, delay_ms=0, mic_muted=False):
     if raw is None:
         raw = struct.pack("<hh", 123, -456) * capture.FRAMES
     header = {
@@ -57,6 +57,8 @@ def fake_read(*, raw=None, boot=7, robot="robot-01", raw_boot=None,
         Response({
             "robot_id": robot, "boot": boot,
             "reference_integrity_failed": False,
+            "aec_delay_config_ms": delay_ms,
+            "microphone_privacy_muted": mic_muted,
             "speaker_playback_verified": False,
             "aec_physically_qualified": False,
         }),
@@ -132,11 +134,36 @@ def test_authenticated_capture_rejects_reboot_wrong_robot_and_short_payload():
             )
 
 
+@pytest.mark.parametrize("delay_ms", [None, 90, 250, True, "0"])
+def test_capture_requires_actual_zero_delay_on_authenticated_firmware(delay_ms):
+    http = fake_read(delay_ms=delay_ms)
+    with pytest.raises(ValueError, match="AEC delay 0 ms"):
+        capture.capture_head(
+            http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
+        )
+    # Refuse before starting any microphone recording.
+    assert [request[0].split("/")[-1] for request in http.calls] == [
+        "audio.reference",
+    ]
+
+
+def test_capture_refuses_device_microphone_mute_before_start():
+    http = fake_read(mic_muted=True)
+    with pytest.raises(ValueError, match="not eligible"):
+        capture.capture_head(
+            http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
+        )
+    assert len(http.calls) == 1
+
+
 def test_consent_audio_capture_compiled_off_by_default():
     root = SOURCE.parents[1]
     head = (root / "firmware/head/sense/sense_reference_codec.h").read_text()
     bridge = (root / "firmware/head/overlay/robot_bridge.cc").read_text()
     assert "CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED" in head
+    assert "static_assert(kDelaySamples == 0" in head
+    assert '"aec_delay_config_ms"' in bridge
+    assert "CONFIG_DESK_ROBOT_AEC_DELAY_MS" in bridge
     for route in (
         "/api/audio.capture.start", "/api/audio.capture.status",
         "/api/audio.capture.raw",
