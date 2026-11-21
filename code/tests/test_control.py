@@ -1383,6 +1383,7 @@ async def test_hardware_pickup_cannot_use_camera_frame_after_consent_revoke(sett
 async def test_hardware_exploration_needs_existing_continuous_camera_owner(settings):
     c, head = make(settings)
     settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
     async def healthy(_robot_id, *, require_front_clearance=False):
         return {"armed": True}
     c._assert_armed_health = healthy
