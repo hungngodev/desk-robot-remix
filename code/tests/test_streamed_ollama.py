@@ -454,6 +454,7 @@ async def test_kokoro_session_grant_and_release_bind_exact_device_set(
         permitted = {
             "device_ids": sorted(ids),
             "enabled": sent["enabled"],
+            "lease_id": sent["lease_id"],
             "expires_in_seconds": 305 if sent["enabled"] else 0,
         }
         if sent["enabled"]:
@@ -478,15 +479,20 @@ async def test_kokoro_session_grant_and_release_bind_exact_device_set(
         speaker = KokoroHeadSpeaker(settings, client)
         if corrupt_grant is None:
             async with speaker.session(robots):
-                assert requests == [{"device_ids": ids, "enabled": True}]
+                assert len(requests) == 1
+                assert requests[0]["device_ids"] == ids
+                assert requests[0]["enabled"] is True
+                assert isinstance(requests[0]["lease_id"], str)
+                assert len(requests[0]["lease_id"]) == 32
         else:
             with pytest.raises(RuntimeError, match="grant identity unconfirmed"):
                 async with speaker.session(robots):
                     pytest.fail("Corrupt session grant must never hand over audio")
-    assert requests == [
-        {"device_ids": ids, "enabled": True},
-        {"device_ids": ids, "enabled": False},
-    ]
+    assert len(requests) == 2
+    assert requests[0]["device_ids"] == requests[1]["device_ids"] == ids
+    assert [request["enabled"] for request in requests] == [True, False]
+    assert requests[0]["lease_id"] == requests[1]["lease_id"]
+    assert len(requests[0]["lease_id"]) == 32
 
 
 async def test_kokoro_session_rejects_unconfirmed_release_and_duplicate_devices(
@@ -501,6 +507,7 @@ async def test_kokoro_session_rejects_unconfirmed_release_and_duplicate_devices(
         return httpx.Response(200, json={
             "device_ids": body["device_ids"],
             "enabled": True,  # release request must not be misacknowledged
+            "lease_id": body["lease_id"],
             "expires_in_seconds": 305,
         })
 
