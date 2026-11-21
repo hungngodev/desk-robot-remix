@@ -160,6 +160,14 @@ async def observe_actual_dock(head, robot) -> dict:
         calib, target = load_real_dock_calibration(robot.dock_calibration)
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
         return _hold(robot.id, reason=f"Dock calibration required: {exc}", source="not_calibrated")
+    # A camera model change invalidates checkerboard intrinsics even when
+    # two sensors return equal-size JPEGs. A real numeric pose requires the
+    # sensor PID actually measured for this dock calibration.
+    if calib.camera_sensor_pid not in ("OV3660", "OV5640"):
+        return _hold(
+            robot.id, reason="Dock calibration needs actual camera sensor PID",
+            source="not_calibrated",
+        )
     try:
         # The native AprilTag slot must not be occupied by an alternate
         # head snapshot that suppresses coroutine cancellation indefinitely.
@@ -183,6 +191,38 @@ async def observe_actual_dock(head, robot) -> dict:
     if (not isinstance(jpeg, bytes) or len(jpeg) < 4 or len(jpeg) > 512000
             or not jpeg.startswith(b"\xff\xd8") or not jpeg.endswith(b"\xff\xd9")):
         return _hold(robot.id, reason="Invalid dock JPEG", source="head_snapshot_invalid")
+    # Compare live Espressif PID with the just-accepted JPEG boot identity.
+    # HttpHead.camera_identity rejects a different or retired Sense boot;
+    # a saved calibration field alone cannot establish physical provenance.
+    read_identity = getattr(head, "camera_identity", None)
+    if not callable(read_identity):
+        return _hold(
+            robot.id, reason="Dock camera live sensor identity unavailable",
+            source="camera_identity_unavailable",
+        )
+    try:
+        observed_pid = await _bounded_head_reply(
+            read_identity(), seconds=2.0,
+            timeout_message="Dock camera live sensor identity timeout",
+        )
+    except Exception as exc:
+        # Cancellation propagates; asyncio.CancelledError is BaseException.
+        return _hold(
+            robot.id,
+            reason=f"Dock camera live identity unavailable: {type(exc).__name__}",
+            source="camera_identity_unavailable",
+        )
+    if observed_pid != calib.camera_sensor_pid:
+        return _hold(
+            robot.id, reason="Dock camera sensor PID differs from calibration",
+            source="camera_identity_mismatch",
+        )
+    # Identity may be slow; never refresh the original JPEG receipt clock.
+    if time.monotonic() - received_at > 0.20:
+        return _hold(
+            robot.id, reason="Dock camera receipt expired during identity check",
+            source="head_snapshot_invalid",
+        )
     try:
         pose = await detect_bounded(jpeg, calib, captured_at=received_at)
     except DockDetectorBusy as exc:
