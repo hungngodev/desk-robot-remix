@@ -1339,7 +1339,7 @@ static void raw_bumper_trip_preempts_debounce_and_preserves_payload() {
         body.state().grip_target == held_grip);
   CHECK(body.state().bumper_raw && !body.state().bumper_active &&
         body.state().bumper_events == 0);
-  CHECK(send(body, "arm", 21) == "ERR arm bumper_active");
+  CHECK(send(body, "arm", 21) == "ERR arm bumper_latched");
   body.sample_bumper_input(false);
   CHECK(!body.state().armed); // no automatic travel after the contact clears
   CHECK(send(body, "arm", 22) == "ERR arm bumper_latched");
