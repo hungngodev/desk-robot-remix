@@ -325,7 +325,14 @@ async def test_background_camera_cancel_for_user_speech_does_not_kill_pet_loop(
     state.enabled, state.generation, state.quiet = True, 12, True
     worker = asyncio.create_task(pet._observe("robot-01", 12))
     try:
-        await asyncio.wait_for(device.started.wait(), timeout=1)
+        try:
+            await asyncio.wait_for(device.started.wait(), timeout=1)
+        except TimeoutError:
+            pytest.fail(
+                f"Observer did not request initial camera: "
+                f"error={state.last_error!r}, active={not worker.done()}, "
+                f"head_metrics={visual._metrics['robot-01']}"
+            )
         visual.voice_started("robot-01")
         await wait_for(lambda: device.cancelled)
         assert not worker.done()
@@ -534,7 +541,14 @@ async def test_sensor_capture_burst_is_consumed_by_one_proactive_scene_owner(
     state.enabled, state.generation, state.quiet = True, 42, True
     work = asyncio.create_task(pet._observe("robot-01", 42))
     try:
-        await wait_for(lambda: state.last_scene_frame_at is not None)
+        try:
+            await wait_for(lambda: state.last_scene_frame_at is not None)
+        except TimeoutError:
+            pytest.fail(
+                f"Sensor scene observer missed its initial camera: "
+                f"error={state.last_error!r}, active={not work.done()}, "
+                f"head_metrics={visual._metrics['robot-01']}"
+            )
         assert device.calls == 1
         visual.sensor_event("robot-01", "petting_zone")
         await wait_for(lambda: device.calls >= 3, timeout=4)
@@ -610,7 +624,17 @@ async def test_continuous_stream_changes_reach_real_pet_scene_memory_without_pol
     visual.start_streams()
     observer = asyncio.create_task(pet._observe("robot-01", 17))
     try:
-        await wait_for(lambda: state.events >= 1, timeout=5)
+        try:
+            await wait_for(lambda: state.events >= 1, timeout=5)
+        except TimeoutError:
+            pytest.fail(
+                f"Continuous camera did not reach pet scene: "
+                f"error={state.last_error!r}, active={not observer.done()}, "
+                f"head_metrics={visual._metrics['robot-01']}, "
+                f"scene_calls={scene.calls}, emitted={head.emitted}, "
+                f"stored_frames={len(visual.hub.frames['robot-01'])}, "
+                f"observer_receipt={state.last_scene_frame_at}"
+            )
         assert scene.calls == 1 and state.events == 1
         assert head.snapshot_calls == 0
         assert memory.count("robot-01") == 1
