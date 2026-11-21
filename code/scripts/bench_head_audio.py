@@ -98,6 +98,7 @@ async def measure(head, robot_id: str, *, seconds: float,
         "reference_software_integrity_observed": (
             received >= 2 and invalid_receipts == 0
             and not integrity_failure_seen and deltas is not None
+            and deltas["reference_underflow_reads"] == 0
             and deltas["reference_overwrite_reads"] == 0
             and deltas["discarded_stale_writes"] == 0
         ),

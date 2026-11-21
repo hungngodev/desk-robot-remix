@@ -15,10 +15,11 @@ bench = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bench)
 
 
-def _sample(n: int, *, robot_id: str = "robot-01", failure=False) -> dict:
+def _sample(n: int, *, robot_id: str = "robot-01", failure=False,
+            underflow_reads: int = 8) -> dict:
     return {
         "robot_id": robot_id,
-        "reference_underflow_reads": 8 + n,
+        "reference_underflow_reads": underflow_reads,
         "reference_overwrite_reads": 0,
         "discarded_stale_writes": 0,
         "reference_integrity_failed": failure,
@@ -42,7 +43,7 @@ async def test_audio_bench_samples_real_codec_status_without_pcm_or_motor():
     )
     assert head.calls >= 2
     assert report["samples"] >= 2
-    assert report["reference_counter_delta"]["reference_underflow_reads"] >= 1
+    assert report["reference_counter_delta"]["reference_underflow_reads"] == 0
     assert report["probe_errors"] == 0
     assert report["reference_software_integrity_observed"] is True
     assert report["physical_aec_delay_measured"] is False
@@ -70,6 +71,24 @@ async def test_audio_bench_rejects_foreign_and_untrusted_status(bad):
     assert report["reference_software_integrity_observed"] is False
 
 
+async def test_audio_bench_rejects_fresh_reference_underflows():
+    class Head:
+        def __init__(self):
+            self.calls = 0
+
+        async def audio_reference_status(self):
+            self.calls += 1
+            return _sample(self.calls, underflow_reads=8 + self.calls)
+
+    result = await bench.measure(
+        Head(), "robot-01", seconds=0.13, poll_period_s=0.05,
+    )
+    assert result["samples"] >= 2
+    assert result["reference_counter_delta"]["reference_underflow_reads"] > 0
+    assert result["reference_software_integrity_observed"] is False
+    assert result["physical_aec_delay_measured"] is False
+
+
 async def test_audio_bench_counter_reset_cannot_be_healthy():
     class ResetHead:
         def __init__(self):
@@ -77,7 +96,9 @@ async def test_audio_bench_counter_reset_cannot_be_healthy():
 
         async def audio_reference_status(self):
             self.calls += 1
-            return _sample(2 if self.calls == 1 else 1)
+            return _sample(
+                self.calls, underflow_reads=10 if self.calls == 1 else 9,
+            )
 
     report = await bench.measure(
         ResetHead(), "robot-01", seconds=0.12, poll_period_s=0.05,
