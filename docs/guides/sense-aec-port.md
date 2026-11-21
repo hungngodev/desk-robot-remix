@@ -86,55 +86,62 @@ cancellation of already buffered TX DMA or preservation of real human
 speech during double talk. The operator must still record the actual
 audio and hardware timing tests from the mandatory barge-in guide.
 
-## Opt-in real Sense microphone/reference capture
+## Authenticated one-shot Sense microphone/reference capture
 
-The pinned Xiaozhi upstream source already has an optional
-`AudioDebugger::Feed` in `main/audio/audio_service.cc`. When the explicitly
-enabled audio debugger runs, it transmits the existing
-`ReadAudioData` PCM to a configured UDP listener. This Sense codec
-supplies *interleaved microphone and post-volume playback reference*
-at 16 kHz before AFE processing. This reuses the one Xiaozhi microphone
-and AEC codec, not a second audio driver or invented WAVs.
+The selected `SenseReferenceCodec` now exposes one *optional* private
+four-second PCM calibration window, fed by its own existing
+`NoAudioCodecSimplexPdm::Read` callback. The same sample index stores
+microphone and digital post-volume speaker reference. No second audio
+reader, AEC engine or separate UDP audio path is required. The original
+Xiaozhi microphone, AFE, camera, Opus and speaker remain canonical.
 
-**Bench only. It is OFF by default.** The upstream switch
-`CONFIG_USE_AUDIO_DEBUGGER` defaults to `n`. Its raw UDP audio has no
-encryption, sender authentication, packet sequence, or playback
-generation. Do not use it on a public WiFi/LAN or production build.
-Obtain consent from everyone whose microphone audio could be recorded.
-Use an isolated private network, record only a deliberate short trial,
-disable the switch and reflash normal firmware afterward. Do not commit
-recordings, and delete them when analysis is complete.
+**This bench feature is disabled in normal firmware.** For a temporary
+operator-authorized lab image only, configure
+`CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED=y` and
+`CONFIG_DESK_ROBOT_AEC_DELAY_MS=0`. The head build requires delay zero
+while capturing absolute acoustic latency, and the firmware rejects
+incomplete or invalid microphone/reference windows. Keep the selected
+Sense 16 kHz PDM, 32 kHz speaker and device AEC setup. The endpoint
+requires the existing per-head bearer token, uses the existing
+`/api/audio.capture.start`, `/api/audio.capture.status`, and
+`/api/audio.capture.raw` HTTP handlers, and streams one bounded
+256000-byte RAM window through an asynchronous worker so HTTP dispatch
+can continue serving emergency STOP. Firmware wipes the PSRAM buffer
+after transfer, timeout, revocation or failed capture.
 
-1. Build the *existing* Sense overlay using the project's firmware
-   instructions. For this temporary lab image only, set
-   `CONFIG_USE_AUDIO_DEBUGGER=y` and
-   `CONFIG_AUDIO_DEBUG_UDP_SERVER="<actual_private_Mac_IP>:<chosen_port>"`
-   in its ESP-IDF configuration. Keep the selected Sense
-   `CONFIG_USE_DEVICE_AEC=y`, 16 kHz PDM and 32 kHz output settings.
-   Verify the real board ID, head/microphone consent, and that the
-   source IP and interface are on the isolated lab network. Do not
-   enable a new UDP microphone service in the normal product image.
-2. On the Mac, run the source-backed receiver before the timed test:
+The operator must explicitly consent to recording microphone data.
+Use a private isolated network and disable/reflash the capture setting
+after measurements. Do not transmit the bearer token as a command-line
+argument, record other people without permission, commit the WAVs or
+store them outside the local protected trial directory.
+
+1. With the physical Sense head running and the bench image deliberately
+   enabled, set its actual private bearer token in the Mac environment
+   variable already configured for this robot. Start the existing audio
+   session before capturing; this is a recorder of active codec samples,
+   not permission to wake the microphone without consent.
+2. Capture a four-second source-tagged device window:
 
    ```sh
    cd code
-   uv run --no-sync python scripts/capture_sense_aec_udp.py \
-     --bind-ip <actual_private_Mac_IP> --port <chosen_port> \
-     --expected-source-ip <actual_private_Sense_IP> \
-     --duration 5 --output-dir data/private/aec_lab_trial \
+   uv run --no-sync python scripts/capture_sense_aec.py \
+     --head-url http://<actual_private_Sense_IP>:8081 \
+     --robot-id robot-01 --token-env DESK_ROBOT_HEAD_01_TOKEN \
+     --output-dir data/private/aec_lab_trial \
      --i-consent-to-private-raw-audio
    ```
 
-3. Have the real head play a distinctive broadband test stimulus through
-   the *existing* Xiaozhi speaker while its ordinary microphone/AFE
-   task is running. The tool captures exactly five seconds of the two
-   corresponding 16 kHz channels and writes mode 0600 files
-   `microphone.wav`, `speaker_reference.wav`, and `capture.json`
-   in a mode 0700 directory. A stopped stream, malformed/foreign
-   packet or large receive gap rejects the capture; existing files
-   are never overwritten.
-4. Feed these **actual board sourced WAVs** into the current offline
-   estimator, retaining its separate software-only result:
+   The client checks the head's authenticated reference diagnostics
+   before starting, validates the same robot identity and boot epoch
+   through capture status and raw PCM headers, requires exactly 64000
+   stereo PCM frames and a plausible four-second device timestamp span,
+   and rejects truncated/oversized replies. It makes **no automatic
+   retry** of a possibly already-started capture. The output is private
+   mode 0600 `microphone.wav`, `speaker_reference.wav`, and
+   `capture.json`, in a mode 0700 directory with no overwrite.
+3. Have the real head emit a distinctive test stimulus on its canonical
+   Xiaozhi speaker while its ordinary microphone/AFE task is active.
+   Read these real source frames with the existing offline estimator:
 
    ```sh
    cd code
@@ -143,16 +150,22 @@ recordings, and delete them when analysis is complete.
      --speaker data/private/aec_lab_trial/speaker_reference.wav
    ```
 
-The capture tool verifies sample/channel layout and receives packets
-only from a declared private IPv4 source. That IP **does not authenticate
-the ESP32**. The pinned raw UDP format has no sequence numbers, so
-undetected packet loss, jitter, clock drift, source boot epoch, and
-physical speaker playback are **not verified** merely because it
-produced two aligned WAV files. Correlation quality, physical timing,
-double talk with human speech, WiFi/camera/servo load, echo suppression,
-interrupt to audible-silence timing, and repeatability across board
-restarts must still be measured and documented under A2 before closing
-the open playback and AEC acceptance threads.
+4. Repeat bench trials with and without playback, double talk, VAD
+   interruption, WiFi/camera/servo load and head reboot. Retain a
+   source-qualified local verification receipt with the tested board
+   revision, actual output volume, delay estimates, clock drift and
+   rejected/valid runs. Securely delete raw WAVs after analysis.
+
+**A source capture is not A2 physical qualification.** The on-device
+timestamp reports when PCM samples entered the codec reference window;
+it does not prove physical loudspeaker propagation, analog output
+drain, zero acoustic echo, or the actual audible silence position after
+barge-in. There is no hardware evidence yet for echo suppression, ERLE,
+double-talk preservation, interruption timing, temperature drift,
+accurate amplifier feedback or five-pet simultaneity. `capture.json`
+and `estimate_aec_delay.py` must keep
+`aec_physically_qualified=false` until real bench trials are reviewed.
+The independent playback acknowledgment thread remains open.
 
 ## Configuration and verification
 
