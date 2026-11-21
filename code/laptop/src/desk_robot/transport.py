@@ -85,6 +85,11 @@ class _MjpegFrames:
         """Yield verified parts without retaining a whole network batch."""
         if not isinstance(chunk, bytes):
             raise ValueError("Invalid MJPEG network chunk")
+        # The per-part 512 KiB limit does not cap a *single* network batch.
+        # Refuse a multi-megabyte burst BEFORE parsing any frame while
+        # holding the shared stream lock. A healthy 4 FPS source fits.
+        if len(chunk) > 4 * 1024 * 1024:
+            raise ValueError("Oversized MJPEG network batch")
         for offset in range(0, len(chunk), 64 * 1024):
             yield from self._feed_bounded_chunk(chunk[offset:offset + 64 * 1024])
 

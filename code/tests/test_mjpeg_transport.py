@@ -21,6 +21,19 @@ def _part(sequence: int, jpeg: bytes) -> bytes:
     )
 
 
+def test_single_oversized_network_batch_fails_before_any_frame_publication():
+    jpeg = b"\\xff\\xd8" + b"x" * 180_000 + b"\\xff\\xd9"
+    batch = b"".join(_part(i, jpeg) for i in range(1, 26))
+    assert len(batch) > 4 * 1024 * 1024
+    reader = _MjpegFrames(expected_robot_id="robot-01")
+    with pytest.raises(ValueError, match="Oversized MJPEG network batch"):
+        reader.feed(batch)
+    assert not reader.buffer
+    assert reader.feed(_part(26, jpeg)) == [
+        (jpeg, (19, 26, 26 * 250000))
+    ]
+
+
 def test_large_network_read_keeps_incremental_mjpeg_buffer_bounded():
     class TrackedBuffer(bytearray):
         peak = 0
