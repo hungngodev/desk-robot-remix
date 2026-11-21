@@ -4,7 +4,6 @@ No GitHub network, hardware or fictional checkout approval is required.
 """
 import base64
 import hashlib
-import importlib.util
 import json
 import subprocess
 import sys
@@ -12,8 +11,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "code/scripts"))
-import verify_playbook_receipts as playbook
-import verify_procurement_receipts as procurement
+import verify_playbook_receipts as playbook  # noqa: E402
+import verify_procurement_receipts as procurement  # noqa: E402
 
 DATE = "2026-11-20"
 GATE = procurement.PART_GATES[0]
@@ -68,23 +67,26 @@ def real_history(tmp_path, *, code_change=False):
         tail = url[len(prefix):]
         if tail.startswith("compare/"):
             left, right = tail[len("compare/"):].split("...", 1)
-            commits = list(reversed(git(tmp_path, "rev-list",
-                                        f"{left}..{right}").splitlines()))
-            changed = []
-            for line in git(tmp_path, "diff", "--name-status", left, right).splitlines():
-                status, filename = line.split("\t", 1)
-                changed.append({"filename": filename,
-                                "status": {"A": "added", "M": "modified",
-                                           "D": "removed"}[status]})
-            return {
-                "status": "ahead" if git(tmp_path, "merge-base", left, right) == left
-                          else "diverged",
-                "ahead_by": len(commits),
-                "total_commits": len(commits),
-                "merge_base_commit": {"sha": git(tmp_path, "merge-base", left, right)},
-                "commits": [{"sha": sha} for sha in commits],
-                "files": changed,
-            }
+            try:
+                commits = list(reversed(git(tmp_path, "rev-list",
+                                            f"{left}..{right}").splitlines()))
+                changed = []
+                for line in git(tmp_path, "diff", "--name-status", left, right).splitlines():
+                    status, filename = line.split("\t", 1)
+                    changed.append({"filename": filename,
+                                    "status": {"A": "added", "M": "modified",
+                                               "D": "removed"}[status]})
+                return {
+                    "status": "ahead" if git(tmp_path, "merge-base", left, right) == left
+                              else "diverged",
+                    "ahead_by": len(commits),
+                    "total_commits": len(commits),
+                    "merge_base_commit": {"sha": git(tmp_path, "merge-base", left, right)},
+                    "commits": [{"sha": sha} for sha in commits],
+                    "files": changed,
+                }
+            except subprocess.CalledProcessError as exc:
+                raise OSError(f"Revision lookup failed: {exc}") from exc
         if tail.startswith("contents/docs/records/"):
             path, revision = tail[len("contents/"):].split("?ref=", 1)
             raw = subprocess.check_output(

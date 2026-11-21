@@ -1,3 +1,15 @@
+## 21 November 2026: Voice context camera consent fencing and derived tool stripping
+
+PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
+Exact inspected PR head commit `37577ab4bcea10436b12bd7ff7be89e47591f11c`.
+This source and test batch does not close physical or commercial gates.
+
+* Voice context camera consent leak remediation (Review PRRT_kwDOVlmnQ866a8iV):
+  - In `code/laptop/src/desk_robot/api_memory_routes.py`, `GET /v1/pet/{robot_id}/voice-context` now filters `kind=visual_look` out of `recent_tool_interpretations` and uses `is_camera_derived_timeline_item` for `current_interaction_timeline` whenever `voice_vision_tools_enabled` is False.
+  - Binds `camera_consent_generation` at route entry and verifies it hasn't toggled across the asynchronous SQLite `core_facts` yield, safely discarding stale pre-revocation cues if camera consent was toggled ON->OFF->ON during retrieval.
+  - Preserves physical sensor cues (`touch_tap`, `safety_fault`), nonvisual tool cues (`memory_recall`), and private memory facts.
+  - Added test cases in `code/tests/test_api_readonly_context_split.py` validating that camera-disabled requests exclude all visual look evidence while retaining touch and memory, and that mid-read ON->OFF->ON consent toggles cleanly discard cached visual cues.
+
 ## 21 November 2026: Darwin C++17 toolchain preflight SDK flags for touch boot epoch tests
 
 PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.

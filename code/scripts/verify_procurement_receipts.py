@@ -33,13 +33,13 @@ from procurement_release import (
 from verify_playbook_receipts import (
     REPO,
     RUN_PATH,
+    evidence_digest_matches,
     finite_receipt_float,
     reject_nonfinite_receipt_value,
+    source_unchanged_since_test,
     strict_receipt_object,
     verified_actions_run,
     verified_raw_record,
-    source_unchanged_since_test,
-    evidence_digest_matches,
 )
 from verify_system import source_snapshot
 

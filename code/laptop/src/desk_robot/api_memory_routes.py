@@ -11,6 +11,7 @@ import time
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from .brain_context import is_camera_derived_timeline_item
 from .config import Settings
 
 
@@ -239,6 +240,7 @@ def register_voice_context_route(
         # Keep historical text and current transient cues separate so a
         # model cannot reinterpret yesterday's memory as today's sighting.
         vision_at_start = settings.voice_vision_tools_enabled
+        camera_consent_gen_at_start = getattr(settings, "camera_consent_generation", None)
         visual = getattr(app.state.runtime, "multimodal", None)
         sensor_cues, tool_cues, timeline = [], [], []
         if visual is not None:
@@ -251,11 +253,13 @@ def register_voice_context_route(
             if callable(ordered):
                 timeline = ordered(robot_id, clock, limit=10)
             if not vision_at_start:
+                tool_cues = [
+                    item for item in tool_cues
+                    if not (isinstance(item, dict) and item.get("kind") == "visual_look")
+                ]
                 timeline = [
                     item for item in timeline
-                    if item.get("channel") != "camera"
-                    and not (item.get("channel") == "sensor"
-                             and item.get("kind") == "camera_face")
+                    if not is_camera_derived_timeline_item(item)
                 ]
         core = await asyncio.to_thread(
             app.state.runtime.memory.core_facts, robot_id, limit=8
@@ -264,16 +268,25 @@ def register_voice_context_route(
         # during that read invalidates the entire current private tool reply.
         if not settings.voice_memory_tools_enabled:
             raise HTTPException(403, "Voice memory consent revoked during read")
-        # Camera consent revoked while the SQLite core-fact query yielded.
+        # Camera consent revoked or toggled while the SQLite core-fact query yielded.
         # Discard cues collected under the previous live vision permit.
-        if vision_at_start and not settings.voice_vision_tools_enabled:
+        camera_gen_now = getattr(settings, "camera_consent_generation", None)
+        camera_consent_toggled = (
+            camera_consent_gen_at_start is not None
+            and camera_gen_now != camera_consent_gen_at_start
+        )
+        if (vision_at_start and not settings.voice_vision_tools_enabled) or (
+            vision_at_start and camera_consent_toggled
+        ):
             sensor_cues, tool_cues, timeline = [], [], []
         elif not settings.voice_vision_tools_enabled:
+            tool_cues = [
+                item for item in tool_cues
+                if not (isinstance(item, dict) and item.get("kind") == "visual_look")
+            ]
             timeline = [
                 item for item in timeline
-                if item.get("channel") != "camera"
-                and not (item.get("channel") == "sensor"
-                         and item.get("kind") == "camera_face")
+                if not is_camera_derived_timeline_item(item)
             ]
         # Room USB context has independent consent; a cached sample read
         # before SQLite yielded must disappear if the operator opted out.

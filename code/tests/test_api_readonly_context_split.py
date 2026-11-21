@@ -766,3 +766,107 @@ def test_plan_readonly_selects_status_and_interaction_tools_when_camera_disabled
         )
         assert res_visual.status_code == 200
         assert res_visual.json()["tools"] == []
+
+
+def test_voice_context_excludes_camera_and_visual_look_when_camera_disabled(settings):
+    """Voice context retains memory and physical cues but strips all visual evidence."""
+    import time
+
+    from desk_robot.api_memory_routes import register_voice_context_route
+    from desk_robot.multimodal import CameraFrameHub
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.mode = "hardware"
+    settings.voice_memory_tools_enabled = True
+    settings.voice_vision_tools_enabled = False
+    hub = CameraFrameHub(["robot-01"])
+    now = time.monotonic()
+    hub.remember_tool("robot-01", "visual_look", "PRIVATE CAMERA DESCRIPTION", now)
+    hub.remember_tool("robot-01", "memory_recall", "Private non-visual recall note", now)
+    hub.notify("robot-01", "touch_tap", now)
+
+    class Memory:
+        def recent(self, robot_id, *, limit):
+            return []
+
+        def core_facts(self, robot_id, *, limit):
+            return [SimpleNamespace(slot="pref", value="Secret violet tea fact")]
+
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        memory=Memory(), multimodal=SimpleNamespace(hub=hub),
+        conversation=SimpleNamespace(
+            _private_memory_generation={"robot-01": 0},
+        ),
+    )
+    register_voice_context_route(
+        app, settings, authorize=lambda: None,
+        requested_tool_context=lambda *args: None,
+        remember_tool_context=lambda *args: None,
+    )
+    with TestClient(app) as client:
+        result = client.get("/v1/pet/robot-01/voice-context")
+        assert result.status_code == 200
+        payload = result.json()
+        assert "PRIVATE CAMERA DESCRIPTION" not in str(payload)
+        tool_kinds = [c.get("kind") for c in payload["recent_tool_interpretations"]]
+        assert "visual_look" not in tool_kinds
+        assert "memory_recall" in tool_kinds
+        timeline_kinds = [c.get("kind") for c in payload["current_interaction_timeline"]]
+        assert "visual_look" not in timeline_kinds
+        assert all(item.get("channel") != "camera" for item in payload["current_interaction_timeline"])
+        assert "touch_tap" in timeline_kinds
+        assert payload["core_facts"] == [{"slot": "pref", "value": "Secret violet tea fact"}]
+
+
+def test_voice_context_discards_visual_cues_on_camera_consent_toggle_during_sqlite_read(settings):
+    """Visual cues read before SQLite yield are discarded if camera was toggled ON->OFF->ON."""
+    import time
+    from types import SimpleNamespace
+
+    from desk_robot.api_memory_routes import register_voice_context_route
+    from desk_robot.multimodal import CameraFrameHub
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.mode = "hardware"
+    settings.voice_memory_tools_enabled = True
+    settings.voice_vision_tools_enabled = True
+    hub = CameraFrameHub(["robot-01"])
+    now = time.monotonic()
+    hub.remember_tool("robot-01", "visual_look", "OLD PRE-TOGGLE SIGHTING", now)
+    hub.notify("robot-01", "touch_tap", now)
+
+    class Memory:
+        def recent(self, robot_id, *, limit):
+            return []
+
+        def core_facts(self, robot_id, *, limit):
+            # Toggle camera OFF then back ON during the simulated SQLite await
+            settings.voice_vision_tools_enabled = False
+            settings.voice_vision_tools_enabled = True
+            return [SimpleNamespace(slot="fact", value="Durable core fact")]
+
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        memory=Memory(), multimodal=SimpleNamespace(hub=hub),
+        conversation=SimpleNamespace(
+            _private_memory_generation={"robot-01": 0},
+        ),
+    )
+    register_voice_context_route(
+        app, settings, authorize=lambda: None,
+        requested_tool_context=lambda *args: None,
+        remember_tool_context=lambda *args: None,
+    )
+    with TestClient(app) as client:
+        result = client.get("/v1/pet/robot-01/voice-context")
+        assert result.status_code == 200
+        payload = result.json()
+        assert "OLD PRE-TOGGLE SIGHTING" not in str(payload)
+        assert payload["live_sensor_cues"] == []
+        assert payload["recent_tool_interpretations"] == []
+        assert payload["current_interaction_timeline"] == []
+        assert payload["core_facts"] == [{"slot": "fact", "value": "Durable core fact"}]
+
