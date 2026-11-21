@@ -13,7 +13,7 @@ def test_host_verification_uses_independent_bounded_job_lanes():
     assert "concurrency" not in workflow
     jobs = workflow["jobs"]
     expected = {
-        "python-and-head-host", "body-platformio", "body-host", "sense-idf",
+        "mac-fast", "python-and-head-host", "body-platformio", "body-host", "sense-idf",
     }
     assert expected <= jobs.keys()
     for lane in expected:
