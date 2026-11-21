@@ -1185,6 +1185,40 @@ static void optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract() {
         != std::string::npos);
 }
 
+
+static void raw_bumper_trip_preempts_debounce_and_preserves_payload() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 0);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.sample_optional_inputs(1U, false, false, false); // event baseline
+  CHECK(send(body, "rearm", 0, true) == "OK rearm");
+  CHECK(send(body, "arm", 0) == "OK arm");
+  CHECK(send(body, "drive 30 30 250", 0).find("OK drive") == 0);
+  CHECK(send(body, "grip 110", 0) == "OK grip angle=110");
+  body.tick(20);
+  const int held_grip = body.state().grip;
+  body.sample_bumper_input(true); // first raw GPIO read, before 25 ms classifier
+  CHECK(!body.state().armed && body.state().left == 0 &&
+        body.state().right == 0);
+  CHECK(body.state().servos_attached &&
+        body.state().grip == held_grip &&
+        body.state().grip_target == held_grip);
+  CHECK(body.state().bumper_raw && !body.state().bumper_active &&
+        body.state().bumper_events == 0);
+  CHECK(send(body, "arm", 21) == "ERR arm bumper_active");
+  body.sample_bumper_input(false);
+  CHECK(!body.state().armed); // no automatic travel after the contact clears
+  CHECK(send(body, "arm", 22) == "OK arm");
+  CHECK(body.state().left == 0 && body.state().right == 0);
+
+  // The raw local interlock must also work before the first 25 ms
+  // classifier sample sets the optional-input mask after boot.
+  desk_robot::BodyControl startup(desk_robot::BodyProfile::DcPwm);
+  startup.sample_bumper_input(true);
+  CHECK(send(startup, "arm", 0) == "ERR arm bumper_active");
+}
+
 static void optional_sensor_inputs_never_arm_or_forge_boot_events() {
   using desk_robot::BodyControl;
   BodyControl body(desk_robot::BodyProfile::DcPwm);
@@ -1505,6 +1539,7 @@ int main() {
     dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof();
     optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract();
     dual_ir_evidence_never_authorizes_body_motion_or_charging();
+    raw_bumper_trip_preempts_debounce_and_preserves_payload();
     optional_sensor_inputs_never_arm_or_forge_boot_events();
     accessory_sensors_never_infer_grip_or_current_or_grant_arm();
     independent_pack_sensor_freshness_never_crosses_devices();
