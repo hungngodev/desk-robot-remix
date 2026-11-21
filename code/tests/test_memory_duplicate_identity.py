@@ -42,3 +42,30 @@ def test_memory_root_permissions_must_be_private_before_creating_databases(tmp_p
     with pytest.raises(PermissionError, match="Cannot protect private robot memory root"):
         MemoryStore(root, ["pet_a", "pet_b"])
     assert not list(root.glob("*.sqlite3"))
+
+
+def test_each_pet_database_restricts_legacy_file_permissions(tmp_path, monkeypatch):
+    import os
+    import stat
+
+    store = MemoryStore(tmp_path, ["pet_a", "pet_b"])
+    own = tmp_path / "pet_a.sqlite3"
+    peer = tmp_path / "pet_b.sqlite3"
+    assert stat.S_IMODE(own.stat().st_mode) == 0o600
+    assert stat.S_IMODE(peer.stat().st_mode) == 0o600
+    own.chmod(0o644)
+    assert store.count("pet_a") == 0
+    assert stat.S_IMODE(own.stat().st_mode) == 0o600
+
+    original = os.chmod
+
+    def refuse_database(path, mode):
+        if os.fspath(path) == os.fspath(own):
+            raise PermissionError("private volume denies chmod")
+        return original(path, mode)
+
+    monkeypatch.setattr(os, "chmod", refuse_database)
+    with pytest.raises(PermissionError, match="Cannot protect private robot memory database"):
+        store.recent("pet_a")
+    # No failure on one private file changes another robot's storage.
+    assert store.recent("pet_b") == []

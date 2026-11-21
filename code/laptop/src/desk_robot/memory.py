@@ -170,6 +170,19 @@ class MemoryStore:
             raise ValueError("Refusing symlinked memory database")
         db = sqlite3.connect(path, timeout=3)
         try:
+            # A private root is necessary but insufficient if an older
+            # database file was created with group/world read bits. Restrict
+            # both new and legacy pet files before any episode is accessed.
+            try:
+                os.chmod(path, 0o600)
+            except OSError as exc:
+                raise PermissionError(
+                    "Cannot protect private robot memory database"
+                ) from exc
+            if path.stat().st_mode & 0o077:
+                raise PermissionError(
+                    "Robot memory database is accessible to other users"
+                )
             db.execute("PRAGMA busy_timeout=3000")
             yield db
             db.commit()
