@@ -2216,3 +2216,62 @@ async def test_legacy_mac_context_rejects_older_overlapping_tool_result(
         first_release.set()
         pending.cancel()
         await asyncio.gather(pending, return_exceptions=True)
+
+
+async def test_legacy_mac_context_uses_pinned_upstream_tool_message_serializer(bridge, monkeypatch):
+    """Check actual pinned Dialogue formatting, not only our test stub."""
+    upstream = (
+        ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server"
+        / "core/utils/dialogue.py"
+    )
+    if not upstream.is_file():
+        pytest.skip("Pinned Xiaozhi server fixture is restored in full host CI")
+
+    spec = importlib.util.spec_from_file_location(
+        "verified_pinned_xiaozhi_dialogue", upstream,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setitem(sys.modules, "core.utils.dialogue", module)
+    dialogue = module.Dialogue()
+    dialogue.put(module.Message(role="system", content="Trusted pet persona"))
+    dialogue.put(module.Message(role="user", content="What changed?"))
+    conn = SimpleNamespace(device_id="mac-01", dialogue=dialogue)
+    bridge.register(conn)
+
+    async def call(current, route):
+        assert current is conn and route == "interaction-context"
+        return {
+            "robot_id": "robot-01",
+            "model_context": "Physical sensor edge: touch_tap",
+            "raw_media_included": False,
+            "persistent_memory_included": False,
+            "model_context_untrusted_not_instructions": True,
+            "motor_authorized": False,
+            "charging_authorized": False,
+        }
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tool = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tool.call = call
+    for key, stub in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tool),
+    ):
+        monkeypatch.setitem(sys.modules, key, stub)
+
+    await bridge.inject_live_context_into_legacy_llm(conn)
+    messages = dialogue.get_llm_dialogue()
+    assert [item["role"] for item in messages] == [
+        "system", "user", "assistant", "tool",
+    ]
+    assert messages[0]["content"] == "Trusted pet persona"
+    assert messages[1]["content"] == "What changed?"
+    assert messages[2]["tool_calls"][0]["id"] == messages[3]["tool_call_id"]
+    assert json.loads(messages[3]["content"])["model_context"] == (
+        "Physical sensor edge: touch_tap"
+    )
