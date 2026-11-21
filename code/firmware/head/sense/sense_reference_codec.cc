@@ -137,6 +137,10 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
     bool newly_overwritten = false;
     {
         std::lock_guard<std::mutex> lock(reference_mutex_);
+        // Only successful, complete microphone reads advance actual input
+        // activity. Counting attempted reads would fake an active PDM stream.
+        microphone_frames_read_ += std::min(
+            static_cast<uint32_t>(frames), UINT32_MAX - microphone_frames_read_);
         const int64_t capture_end_us = esp_timer_get_time();
         FillSilenceLocked(capture_end_us);
         const uint32_t previous_overwrites = reference_overwrite_reads_;
@@ -187,6 +191,13 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
     uint32_t short_writes = 0;
     {
         std::lock_guard<std::mutex> lock(reference_mutex_);
+        // Accepted into I2S does not establish audible playback or DMA
+        // drain. It is only a required software activity signal for A2.
+        if (accepted > 0) {
+            speaker_frames_accepted_ += std::min(
+                static_cast<uint32_t>(accepted),
+                UINT32_MAX - speaker_frames_accepted_);
+        }
         // The pinned AudioCodec::OutputData discards Write's return value.
         // Never let a timed-out/partial Sense TX masquerade as complete
         // speech or a qualified echo reference, even on a clean generation.
@@ -242,7 +253,9 @@ SenseReferenceCodec::GetReferenceDiagnostics() {
     std::lock_guard<std::mutex> lock(reference_mutex_);
     return ReferenceDiagnostics{
         missing_reference_reads_, reference_overwrite_reads_,
-        stale_publish_discards_, short_output_writes_, reference_integrity_failed_};
+        stale_publish_discards_, short_output_writes_,
+        microphone_frames_read_, speaker_frames_accepted_,
+        reference_integrity_failed_};
 }
 
 void SenseReferenceCodec::EnableOutput(bool enable) {
