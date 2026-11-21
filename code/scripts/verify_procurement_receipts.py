@@ -22,6 +22,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 
 from procurement_release import (
+    CONDITIONAL_ROOM_PER_STATION,
     FIRST_ROBOT_ROOM_GATE,
     FLEET_ONLY_SYSTEM_GATES,
     PART_GATES,
@@ -96,7 +97,8 @@ def checkout_sha(lookup=None) -> str:
     return sha
 
 
-def required_receipts(evidence: dict, *, first_robot: bool = False):
+def required_receipts(evidence: dict, *, first_robot: bool = False,
+                      deferred_optional_ids: frozenset[str] = frozenset()):
     """Scope each receipt to its specific purchased part, station or gate."""
     for ident, record in evidence.get("parts", {}).items():
         for gate in PART_GATES:
@@ -112,6 +114,9 @@ def required_receipts(evidence: dict, *, first_robot: bool = False):
         yield ("system", FIRST_ROBOT_ROOM_GATE,
                evidence.get("system", {}).get(FIRST_ROBOT_ROOM_GATE))
     for ident in SUPPLEMENTAL_DECISIONS:
+        if ident in deferred_optional_ids:
+            # Generator already verified this optional parent is not selected.
+            continue
         selection = evidence.get("supplemental_decisions", {}).get(ident, {})
         scope = "supplemental:" + ident
         yield scope, "decision_receipt", selection.get("decision_receipt")
@@ -225,7 +230,8 @@ def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
 
 
 def audit_release(evidence: dict, sha: str, lookup=None, *,
-                  first_robot: bool = False) -> list[str]:
+                  first_robot: bool = False,
+                  deferred_optional_ids: frozenset[str] = frozenset()) -> list[str]:
     """Fail closed if a receipt is missing, mis-scoped or not actually present."""
     if (not isinstance(evidence, dict) or type(sha) is not str
             or not SHA.fullmatch(sha)):
@@ -239,6 +245,16 @@ def audit_release(evidence: dict, sha: str, lookup=None, *,
                     and any(not isinstance(r, dict)
                             for r in records.values()))):
             return [f"malformed {section} release evidence"]
+    allowed_deferred = {
+        ident for ident, (parent, _) in SUPPLEMENTAL_DECISIONS.items()
+        if parent in CONDITIONAL_ROOM_PER_STATION
+    }
+    if (not isinstance(deferred_optional_ids, frozenset)
+            or not deferred_optional_ids <= allowed_deferred):
+        return ["invalid deferred optional receipt scope"]
+    if any(ident in evidence.get("supplemental_decisions", {})
+           for ident in deferred_optional_ids):
+        return ["deferred optional has conflicting purchase evidence"]
     from verify_playbook_receipts import github_json
     lookup = github_json if lookup is None else lookup
     errors = []
@@ -251,7 +267,8 @@ def audit_release(evidence: dict, sha: str, lookup=None, *,
         return fetched[url]
 
     for scope, gate, receipt in required_receipts(
-        evidence, first_robot=first_robot
+        evidence, first_robot=first_robot,
+        deferred_optional_ids=deferred_optional_ids,
     ):
         seen += 1
         if not isinstance(receipt, dict):

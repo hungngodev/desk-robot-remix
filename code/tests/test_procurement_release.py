@@ -1904,3 +1904,21 @@ def test_fleet_landed_quote_does_not_inherit_first_unit_budget_hold():
     incomplete = mod.cost_quote_markdown(values)
     assert "Payable now: unknown" in incomplete
     assert "Cumulative fleet spending: unknown" in incomplete
+
+def test_default_deferred_shared_station_options_are_reviewed_without_purchase_receipts():
+    """A deferred AMG8833/NFC option must not become a mandatory cart line."""
+    import json
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    projected = mod.generate(plan)
+    decisions = {item["id"]: item for item in projected["supplemental_decisions"]}
+    room = {item["id"]: item for item in projected["room_pod"]}
+    for option, part in (
+        ("room_amg8833", "amg8833"),
+        ("room_nfc_game_tokens", "nfc_game_props"),
+    ):
+        assert room[part]["excluded_from_order_as_optional"] is True
+        assert decisions[option]["reviewed"] is True
+        assert decisions[option]["disposition"] == "deferred_optional"
+        assert decisions[option]["parent_role"] == part
+        assert room[part]["effective_selected_fleet_total"] == 0

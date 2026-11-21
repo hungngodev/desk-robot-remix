@@ -1808,8 +1808,18 @@ def main() -> int:
         try:
             from verify_procurement_receipts import audit_release, checkout_sha
             checked_sha = checkout_sha()
+            # The same generator decision map owns optional station inclusion.
+            # Deferred, reviewed shared-room options require no fabricated
+            # purchase receipts; selected options still require every gate.
+            deferred_optional_ids = frozenset(
+                decision["id"] for decision in report["supplemental_decisions"]
+                if decision["reviewed"]
+                and decision["disposition"] == "deferred_optional"
+                and decision["parent_role"] in CONDITIONAL_ROOM_PER_STATION
+            )
             failures = audit_release(
-                evidence, checked_sha, first_robot=args.require_first_robot
+                evidence, checked_sha, first_robot=args.require_first_robot,
+                deferred_optional_ids=deferred_optional_ids,
             )
         except (OSError, ValueError, TypeError, KeyError) as exc:
             print("HOLD: cannot verify real purchasing evidence: " + str(exc),

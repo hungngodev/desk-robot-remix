@@ -504,3 +504,85 @@ def test_finite_decimal_receipt_floats_still_decode(valid):
         parse_float=finite_receipt_float,
     )
     assert decoded["measurement"]["x"] == float(valid)
+
+def test_reviewed_default_station_deferrals_need_no_immutable_purchase_receipts():
+    deferred = frozenset({"room_amg8833", "room_nfc_game_tokens"})
+    decisions = {
+        ident: {
+            "disposition": "rejected_in_favor_of_qualified_alternative",
+            "decision_receipt": receipt("supplemental:" + ident,
+                                        "decision_receipt"),
+            "alternative_or_parent_receipt": receipt(
+                "supplemental:" + ident, "alternative_or_parent_receipt"),
+        }
+        for ident in release.SUPPLEMENTAL_DECISIONS if ident not in deferred
+    }
+    evidence = {
+        "system": {gate: receipt("system", gate)
+                   for gate in release.SYSTEM_GATES},
+        "supplemental_decisions": decisions,
+    }
+    assert release.audit_release(
+        evidence, SHA, lookup, deferred_optional_ids=deferred
+    ) == []
+    # Without the generator's reviewed disposition the same omissions
+    # cannot silently pass the online immutable receipt verifier.
+    errors = release.audit_release(evidence, SHA, lookup)
+    assert any("room_amg8833" in problem for problem in errors)
+    assert any("room_nfc_game_tokens" in problem for problem in errors)
+
+    evidence["supplemental_decisions"]["room_amg8833"] = {
+        "disposition": "selected",
+    }
+    assert "deferred optional has conflicting purchase evidence" in (
+        release.audit_release(
+            evidence, SHA, lookup, deferred_optional_ids=deferred
+        )
+    )
+    assert "invalid deferred optional receipt scope" in (
+        release.audit_release(
+            evidence, SHA, lookup,
+            deferred_optional_ids=frozenset({"bq24075_charger_candidate"}),
+        )
+    )
+
+
+def test_selected_station_option_still_needs_every_physical_gate_receipt():
+    selected = "room_amg8833"
+    deferred = frozenset({"room_nfc_game_tokens"})
+    decisions = {
+        ident: {
+            "disposition": "rejected_in_favor_of_qualified_alternative",
+            "decision_receipt": receipt("supplemental:" + ident,
+                                        "decision_receipt"),
+            "alternative_or_parent_receipt": receipt(
+                "supplemental:" + ident, "alternative_or_parent_receipt"),
+        }
+        for ident in release.SUPPLEMENTAL_DECISIONS
+        if ident not in deferred and ident != selected
+    }
+    scope = "supplemental:" + selected
+    decisions[selected] = {
+        "disposition": "selected",
+        "decision_receipt": receipt(scope, "decision_receipt"),
+        **{gate: receipt(scope, gate) for gate in release.PART_GATES},
+    }
+    evidence = {
+        "system": {gate: receipt("system", gate)
+                   for gate in release.SYSTEM_GATES},
+        "supplemental_decisions": decisions,
+    }
+    sourced = [claim for _, _, claim in release.required_receipts(
+        evidence, deferred_optional_ids=deferred
+    )]
+    assert release.audit_release(
+        evidence, SHA, lambda url: lookup(url, records=sourced),
+        deferred_optional_ids=deferred,
+    ) == []
+    del decisions[selected][release.PART_GATES[0]]
+    errors = release.audit_release(
+        evidence, SHA, lambda url: lookup(url, records=sourced),
+        deferred_optional_ids=deferred,
+    )
+    assert any(scope in problem and "missing receipt" in problem
+               for problem in errors)
