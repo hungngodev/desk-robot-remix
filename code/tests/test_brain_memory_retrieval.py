@@ -496,3 +496,38 @@ def test_deleted_episode_tombstone_fences_late_replay_and_other_pets(tmp_path):
     assert reopened.count("robot-01") == 0
     assert reopened.count("robot-02") == 1
     assert reopened.search("robot-01", "private scene speech") == []
+
+
+def test_stale_episode_trimmed_on_insert_is_not_reported_as_remembered(tmp_path):
+    """An old trimmed eyewitness cannot be fanout truth for another pet."""
+    store = MemoryStore(tmp_path, ["robot-01", "robot-02"])
+    for i in range(250):
+        assert store.remember(
+            "robot-01", f"new{i:03}", f"new observation number {i}",
+            kind="observation", source_robot="robot-01", witnessed=True,
+            observed_at=1000 + i,
+        )
+    # SQLite accepted this INSERT, but retention immediately removes it.
+    # A False receipt prevents PetController sharing an unretained eyewitness.
+    assert not store.remember(
+        "robot-01", "older_one", "older scene",
+        kind="observation", source_robot="robot-01", witnessed=True,
+        observed_at=900,
+    )
+    assert store.count("robot-01") == 250
+    assert all(e.event_id != "older_one" for e in store.recent("robot-01", limit=50))
+    assert not store.search("robot-01", "older scene")
+    # Normal new evidence remains actionable, and a duplicate is still false.
+    assert store.remember(
+        "robot-01", "newest_one", "newest scene",
+        kind="observation", source_robot="robot-01", witnessed=True,
+        observed_at=1300,
+    )
+    assert not store.remember(
+        "robot-01", "newest_one", "changed text",
+        kind="observation", source_robot="robot-01", witnessed=True,
+        observed_at=1301,
+    )
+    assert store.search("robot-01", "newest scene")[0].event_id == "newest_one"
+    assert store.count("robot-01") == 250
+    assert store.count("robot-02") == 0

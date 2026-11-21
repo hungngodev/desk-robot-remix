@@ -282,7 +282,15 @@ class MemoryStore:
                      ORDER BY observed_at DESC, event_id DESC LIMIT -1 OFFSET 250
                    )"""
             )
-            return cursor.rowcount == 1
+            if cursor.rowcount != 1:
+                return False
+            # An old but previously unseen episode can be inserted and
+            # immediately evicted by the 250-row retention policy. Report
+            # persisted evidence, not merely a successful INSERT, so callers
+            # cannot share a fact the eyewitness pet no longer remembers.
+            return db.execute(
+                "SELECT 1 FROM memories WHERE event_id=?", (event_id,),
+            ).fetchone() is not None
 
     def recent(self, robot_id: str, *, limit: int = 12) -> list[Memory]:
         if type(limit) is not int or not 1 <= limit <= 50:
