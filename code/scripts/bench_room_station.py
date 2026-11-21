@@ -73,8 +73,18 @@ def capture(
     except Exception as exc:
         error = type(exc).__name__
 
-    elapsed = max(0.0, clock() - start)
+    finished = clock()
+    elapsed = max(0.0, finished - start)
     gaps = [b - a for a, b in zip(received_at[:-1], received_at[1:], strict=True)]
+    # A station that goes silent after one successful packet has no adjacent
+    # receive gap. Include start and end of the actual trial for continuity.
+    leading = max(0.0, received_at[0] - start) if received_at else None
+    trailing = max(0.0, finished - received_at[-1]) if received_at else None
+    silence_windows = list(gaps)
+    if leading is not None:
+        silence_windows.extend((leading, trailing))
+    elif elapsed > 0:
+        silence_windows.append(elapsed)
     # Preserve observed station sequence gaps independently of HTTP/USB
     # receipt cadence. Do not interpret any gap as a motor safety measurement.
     missing = sum(max(0, ((b - a) & 0xffffffff) - 1)
@@ -94,6 +104,11 @@ def capture(
         "last_station_sequence": sequence[-1] if sequence else None,
         "missing_station_sequences": missing,
         "largest_mac_receive_gap_ms": round(max(gaps) * 1000, 1) if gaps else None,
+        "initial_receive_silence_ms": round(leading * 1000, 1) if leading is not None else None,
+        "trailing_receive_silence_ms": round(trailing * 1000, 1) if trailing is not None else None,
+        "largest_mac_receive_silence_ms": (
+            round(max(silence_windows) * 1000, 1) if silence_windows else None
+        ),
         "valid_sensor_frames": sensor_counts,
         "read_only_usb_sample_captured": bool(sequence) and error is None,
         "device_identity_authenticated": False,
