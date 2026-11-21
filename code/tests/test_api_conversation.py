@@ -36,24 +36,23 @@ def test_model_token_cannot_enable_motion_or_manually_drive(settings, tokens):
             client.post(
                 "/v1/robots/robot-01/pickup", headers=tool, json={"target": "key"}
             ).status_code
-            == 403
+            == 409
         )
         assert client.post("/v1/robots/robot-01/enable", headers=operator).status_code == 200
         coordinator = app.state.runtime.coordinator
         previous_jobs = set(coordinator.jobs)
         previous_permit = coordinator.permits["robot-01"]
-        # Even an active thirty-second operator arm does not let the model
-        # choose a physical action or consume the human's motion permit.
-        denied = client.post(
+        # Xiaozhi cannot mint a permit but can consume the operator's single
+        # recent grant for a bounded key or candy pickup, with WROOM guards.
+        result = client.post(
             "/v1/robots/robot-01/pickup", headers=tool, json={"target": "key"}
         )
-        assert denied.status_code == 403
-        assert set(coordinator.jobs) == previous_jobs
-        assert coordinator.permits["robot-01"] == previous_permit
-        result = client.post(
-            "/v1/robots/robot-01/pickup", headers=operator, json={"target": "key"}
-        )
         assert result.status_code == 202
+        assert set(coordinator.jobs) != previous_jobs
+        assert coordinator.permits["robot-01"] != previous_permit
+        assert client.post(
+            "/v1/robots/robot-01/pickup", headers=tool, json={"target": "key"}
+        ).status_code == 409
         assert client.post("/v1/robots/robot-01/stop", headers=tool).status_code == 200
         assert (
             client.get(f"/v1/jobs/{result.json()['id']}", headers=tool).json()["state"]

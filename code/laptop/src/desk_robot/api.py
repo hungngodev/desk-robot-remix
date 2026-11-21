@@ -262,9 +262,9 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             raise OperationError("Quiet mode blocks exploration")
         return coordinator().explore(robot_id).data()
 
-    # A generic prior operator arm permit is not a model action permit.
-    # Only the operator can select a physical gripper/motion job here.
-    @app.post("/v1/robots/{robot_id}/pickup", dependencies=[Depends(operator)], status_code=202)
+    # A spoken key/candy request may consume ONE recent operator-granted
+    # permit; the model cannot mint or extend that permit itself.
+    @app.post("/v1/robots/{robot_id}/pickup", dependencies=[Depends(authorize)], status_code=202)
     async def pickup(robot_id: str, request: PickupRequest):
         return coordinator().pickup(robot_id, request.target).data()
 
