@@ -383,7 +383,11 @@ class SenseOverlayTests(unittest.TestCase):
         status = face.index('SetStatus("Body safety stop")')
         idle_mood = face.index("if (idle && board->display_ != nullptr)")
         self.assertLess(status, idle_mood)
-        self.assertIn("(!last_rendered_fault || (idle && !last_was_idle))", face)
+        # A WROOM fault must remain visible even if Xiaozhi rewrites
+        # the display while speaking or listening continuously.
+        self.assertIn("now_ms - last_fault_status_refresh_ms >= 750U", face)
+        self.assertIn("last_fault_status_refresh_ms = now_ms;", face)
+        self.assertIn("board->display_->SetStatus(\"Body safety stop\");", face)
         # Continuous listening may never go idle. Restore Xiaozhi's
         # localized speaking/listening status on recovery, not a blank label.
         self.assertIn("else if (last_rendered_fault && !body_unhealthy)", face)
