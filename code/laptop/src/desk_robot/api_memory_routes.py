@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .brain_context import is_camera_derived_timeline_item
 from .config import Settings
+from .memory import CoreMemoryMutationSuperseded
 
 
 class CoreMemoryRequest(BaseModel):
@@ -110,10 +111,18 @@ def register_memory_routes(
         except KeyError as exc:
             raise HTTPException(404, "Robot not found") from exc
         try:
+            # Record authenticated request order BEFORE dispatch to a worker.
+            # A delayed PUT must never restore a completed newer DELETE.
+            generation = app.state.runtime.memory.reserve_core_fact_mutation(
+                robot_id, slot, request.value,
+            )
             changed = await asyncio.to_thread(
                 app.state.runtime.memory.set_core_fact,
-                robot_id, slot, request.value
+                robot_id, slot, request.value,
+                mutation_generation=generation,
             )
+        except CoreMemoryMutationSuperseded as exc:
+            raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         if changed:
@@ -131,9 +140,15 @@ def register_memory_routes(
         except KeyError as exc:
             raise HTTPException(404, "Robot not found") from exc
         try:
-            removed = await asyncio.to_thread(
-                app.state.runtime.memory.forget_core_fact, robot_id, slot
+            generation = app.state.runtime.memory.reserve_core_fact_mutation(
+                robot_id, slot,
             )
+            removed = await asyncio.to_thread(
+                app.state.runtime.memory.forget_core_fact, robot_id, slot,
+                mutation_generation=generation,
+            )
+        except CoreMemoryMutationSuperseded as exc:
+            raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         if removed:

@@ -34,6 +34,10 @@ class MemoryWriteSealed(RuntimeError):
     """Private episode writes are disabled after the deletion fence fills."""
 
 
+class CoreMemoryMutationSuperseded(RuntimeError):
+    """A newer operator mutation retired this core slot request."""
+
+
 _CORE_SLOT = re.compile(r"[a-z][a-z0-9_]{1,39}\Z")
 _WORDS = re.compile(r"(?u)[^\W_]{2,}")
 _QUERY_FILLER = frozenset({
@@ -187,6 +191,14 @@ class MemoryStore:
                          slot TEXT PRIMARY KEY,
                          value TEXT NOT NULL,
                          updated_at REAL NOT NULL
+                       )"""
+                )
+                # Durable request-order tombstones remain after a deletion.
+                # Neither the slot token nor its revision stores private text.
+                db.execute(
+                    """CREATE TABLE IF NOT EXISTS core_fact_mutations (
+                         slot TEXT PRIMARY KEY,
+                         generation INTEGER NOT NULL CHECK(generation > 0)
                        )"""
                 )
                 # SQLite FTS5 is built in and zero-dependency. An external
@@ -494,7 +506,59 @@ class MemoryStore:
         ranked.sort(key=lambda entry: entry[0], reverse=True)
         return [memory for _, memory in ranked[:limit]]
 
-    def set_core_fact(self, robot_id: str, slot: str, value: str) -> bool:
+    def reserve_core_fact_mutation(
+        self, robot_id: str, slot: str, value: str | None = None,
+    ) -> int:
+        """Order one operator request before its asynchronous SQLite write."""
+        if not isinstance(robot_id, str) or robot_id not in self.robot_ids:
+            raise ValueError("Unknown robot memory identity")
+        if not isinstance(slot, str) or not _CORE_SLOT.fullmatch(slot):
+            raise ValueError("Invalid core memory slot")
+        if value is not None and (
+            not isinstance(value, str) or not 1 <= len(value.strip()) <= 200
+            or "\x00" in value
+        ):
+            raise ValueError("Invalid bounded core memory value")
+        with self._connect(robot_id) as db:
+            db.execute("BEGIN IMMEDIATE")
+            return self._advance_core_mutation(db, slot)
+
+    @staticmethod
+    def _advance_core_mutation(db: sqlite3.Connection, slot: str) -> int:
+        old = db.execute(
+            "SELECT generation FROM core_fact_mutations WHERE slot=?", (slot,)
+        ).fetchone()
+        if old is not None and old[0] >= (1 << 63) - 1:
+            raise ValueError("Core memory generation exhausted")
+        generation = 1 if old is None else old[0] + 1
+        db.execute(
+            """INSERT INTO core_fact_mutations(slot,generation) VALUES (?,?)
+               ON CONFLICT(slot) DO UPDATE SET generation=excluded.generation""",
+            (slot, generation),
+        )
+        return generation
+
+    @classmethod
+    def _require_core_mutation(
+        cls, db: sqlite3.Connection, slot: str, generation: int | None,
+    ) -> None:
+        if generation is None:
+            cls._advance_core_mutation(db, slot)
+            return
+        if type(generation) is not int or generation <= 0:
+            raise ValueError("Invalid core memory mutation generation")
+        current = db.execute(
+            "SELECT generation FROM core_fact_mutations WHERE slot=?", (slot,)
+        ).fetchone()
+        if current != (generation,):
+            raise CoreMemoryMutationSuperseded(
+                "A newer operator memory mutation superseded this request"
+            )
+
+    def set_core_fact(
+        self, robot_id: str, slot: str, value: str, *,
+        mutation_generation: int | None = None,
+    ) -> bool:
         """Curate one long-lived preference; ONLY operator API may invoke.
 
         No model/tool automatically edits identity, user preferences or safety
@@ -510,6 +574,7 @@ class MemoryStore:
         clean = " ".join(value.split())
         with self._connect(robot_id) as db:
             db.execute("BEGIN IMMEDIATE")
+            self._require_core_mutation(db, slot, mutation_generation)
             old = db.execute(
                 "SELECT value FROM core_facts WHERE slot=?", (slot,)
             ).fetchone()
@@ -539,10 +604,15 @@ class MemoryStore:
         return [CoreFact(robot_id, slot, value, at)
                 for slot, value, at in rows]
 
-    def forget_core_fact(self, robot_id: str, slot: str) -> bool:
+    def forget_core_fact(
+        self, robot_id: str, slot: str, *,
+        mutation_generation: int | None = None,
+    ) -> bool:
         if not isinstance(slot, str) or not _CORE_SLOT.fullmatch(slot):
             raise ValueError("Invalid core memory slot")
         with self._connect(robot_id) as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._require_core_mutation(db, slot, mutation_generation)
             return db.execute(
                 "DELETE FROM core_facts WHERE slot=?", (slot,)
             ).rowcount == 1
