@@ -74,8 +74,13 @@ reuse the authenticated continuous MJPEG transport and require a frame
 received by the Mac within the preceding **200 ms**. A disconnected
 stream cannot silently fall back to a legacy `/api/camera.jpg` call,
 including while the capture lock is pending. Ordinary conversational
-snapshot semantics are unchanged. This measures Mac **receipt** age,
-not the original camera sensor exposure timestamp or end-to-end latency.
+snapshot semantics are unchanged. The stream transport returns the original JPEG and Mac receipt timestamp as one
+atomic pair; both dock consumers feed that original timestamp to AprilTag
+pose freshness assessment rather than resetting the clock after awaiting a
+camera lock or native detector. Stale, malformed, future or nonfinite receipt
+timestamps fail closed before motion planning. This still measures Mac
+**receipt** age, not the original camera sensor exposure timestamp or
+end-to-end latency.
 No millimeter-scale docking movement or real charging is qualified until
 camera exposure latency, physical marker placement, optical standoff,
 local WROOM safety and stopped-distance trials are measured.
