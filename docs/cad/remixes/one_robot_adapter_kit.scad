@@ -60,9 +60,11 @@ module tof_adjustable(){
       translate([x,-4,1.5]) rotate([0,0,90]) oval_slot(5,m2_clearance_d,7);
     translate([0,7.5,face_z/2+1]) rotate([90,0,0])
       cylinder(h=7,d=tof_lens_d+2,center=true);
-    for(x=[-tof_pcb_w/2+2,tof_pcb_w/2-2])
-      translate([x,7.5,face_z/2+1]) rotate([90,0,0])
-        oval_slot(6,m2_clearance_d,7);
+    // No fake GY-530 PCB screw holes. The formerly assumed centers at
+    // +/- (10.5/2 - 2) mm put both 6 mm slots THROUGH the optical aperture.
+    // The actual carrier has no qualified mounting-hole coordinates yet.
+    // This is an aperture/angle reference ONLY, not a retained sensor mount.
+    // Design a measured carrier clamp or adapter after the pilot PCB arrives.
   }
 }
 module oled_bezel(){
