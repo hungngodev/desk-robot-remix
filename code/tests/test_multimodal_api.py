@@ -4,6 +4,43 @@ from desk_robot.api import create_app
 from fastapi.testclient import TestClient
 
 
+def test_manual_raw_camera_requires_operator_token(settings, tokens):
+    """Xiaozhi can request bounded model observations, not raw JPEG access."""
+    from types import SimpleNamespace
+
+    jpeg = b"\\xff\\xd8" + b"private-image" + b"\\xff\\xd9"
+    calls = []
+
+    class Head:
+        async def snapshot(self):
+            calls.append("operator_snapshot")
+            return jpeg
+
+    async def noop():
+        pass
+
+    robot_id = settings.robots[0].id
+    coordinator = SimpleNamespace(
+        robot=lambda robot: settings.robot(robot),
+        heads={robot_id: Head()},
+    )
+    runtime = SimpleNamespace(
+        coordinator=coordinator, start=noop, close=noop,
+    )
+    route = f"/v1/robots/{robot_id}/camera.jpg"
+    tool = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    operator = {"Authorization": "Bearer " + tokens["DESK_ROBOT_API_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        assert client.get(route, headers=tool).status_code == 403
+        assert client.get(route).status_code == 403
+        assert calls == []
+        response = client.get(route, headers=operator)
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/jpeg"
+        assert response.content == jpeg
+        assert calls == ["operator_snapshot"]
+
+
 def test_mac_existing_ollama_selects_only_consented_readonly_tools(
     settings, tokens,
 ):
