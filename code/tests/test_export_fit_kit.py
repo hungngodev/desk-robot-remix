@@ -606,3 +606,48 @@ def test_actual_source_chassis_cannot_contain_86mm_tray_on_axis(tmp_path):
     assert screen["chassis_outer_xy_diagonal_mm"] < max(
         screen["candidate_tray_xy_mm"]
     )
+
+
+def test_flat_tray_diagonal_bound_distinguishes_rotation_from_impossibility(tmp_path):
+    """A yaw-independent impossibility proof must not reject any mere 90deg miss.
+
+    We synthesize closed tetra meshes with exact XY coordinate bounds. These
+    are geometry unit fixtures, never representations of the real robot.
+    """
+    from struct import pack_into, unpack_from
+
+    source = module()
+    root = tmp_path / "repo"
+    chassis = root / (
+        "docs/cad/originals/smars-stepper/SMARS_2BJY8-Chassis.stl"
+    )
+    candidate = tmp_path / "out/fit_stls/battery_boost_tray.stl"
+    chassis.parent.mkdir(parents=True)
+    candidate.parent.mkdir(parents=True)
+
+    def scaled_tetra(x_mm, y_mm):
+        blob = bytearray(tetra_stl())
+        for face in range(4):
+            for corner in range(3):
+                start = 84 + 50 * face + 12 + 12 * corner
+                x, y = unpack_from("<ff", blob, start)
+                pack_into("<ff", blob, start, x * x_mm, y * y_mm)
+        return bytes(blob)
+
+    chassis.write_bytes(scaled_tetra(58, 86))
+    candidate.write_bytes(scaled_tetra(90, 10))
+    uncertain = source.reference_body_footprint_screen(root, candidate.parents[1])
+    assert uncertain["axis_aligned_packaging_possible"] is False
+    assert uncertain["flat_tray_any_yaw_impossible"] is False
+    assert uncertain["physical_interior_fit_verified"] is False
+    candidate.write_bytes(scaled_tetra(110, 10))
+    excluded = source.reference_body_footprint_screen(root, candidate.parents[1])
+    assert excluded["flat_tray_any_yaw_impossible"] is True
+    assert excluded["axis_aligned_packaging_possible"] is False
+    candidate.write_bytes(scaled_tetra(50, 80))
+    possible_on_axes = source.reference_body_footprint_screen(
+        root, candidate.parents[1]
+    )
+    assert possible_on_axes["axis_aligned_packaging_possible"] is True
+    assert possible_on_axes["flat_tray_any_yaw_impossible"] is False
+    assert possible_on_axes["physical_interior_fit_verified"] is False
