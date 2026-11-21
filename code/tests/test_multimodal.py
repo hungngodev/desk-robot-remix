@@ -439,6 +439,44 @@ async def test_persistent_stream_adapts_static_sampling_after_two_baselines():
         await visual.close()
 
 
+async def test_reconnect_restarts_two_frame_motion_bootstrap():
+    class ReconnectedHead(Head):
+        def __init__(self):
+            super().__init__()
+            self.attempts = 0
+            self.ready = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def stream_frames(self):
+            self.attempts += 1
+            base = time.monotonic() - 1
+            still = image()
+            for index in range(4):
+                yield still, base + index * .25
+                await asyncio.sleep(0)
+            if self.attempts > 1:
+                self.ready.set()
+                await self.release.wait()
+
+    head = ReconnectedHead()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    visual.start_streams()
+    try:
+        await asyncio.wait_for(head.ready.wait(), timeout=5)
+        assert head.attempts >= 2
+        assert len(visual.hub.frames["robot-01"]) == 2
+        assert visual.status("robot-01")["software_timings"][
+            "stream_frames_selected"
+        ] == 4
+        assert head.captures == 0
+    finally:
+        head.release.set()
+        await visual.close()
+
+
 def test_all_new_physical_interactions_trigger_camera_without_extra_sensor_drivers():
     hub = CameraFrameHub(["robot-01", "robot-02"], idle_fps=0.3)
     hub.offer("robot-01", image(), 100.0, source="proactive")
