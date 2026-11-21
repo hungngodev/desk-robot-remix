@@ -233,6 +233,36 @@ tested. A compiled head profile establishes software integration only. No hardwa
 has been flashed by this project and no interruption test has passed.
 
 
+## Authenticated Sense reference integrity while camera and audio run
+
+The existing Sense Xiaozhi codec now exposes **read-only counters** through the
+same private, authenticated head bridge as the camera:
+
+`GET http://<sense-lan-ip>:8081/api/audio.reference`
+
+Use this only with the configured head bearer token in a controlled private
+bench network. Its fields include `robot_id`,
+`reference_underflow_reads`, `reference_overwrite_reads`,
+`discarded_stale_writes`, and `reference_integrity_failed`. Both
+`speaker_playback_verified` and `aec_physically_qualified` are explicitly
+`false`: an accepted I2S write or software reference buffer **cannot** prove
+that audio emerged from the speaker or that a human interruption was understood.
+
+The Mac validates these fields and refuses a mismatched robot identity,
+noninteger or out-of-range counters, or a claimed physical qualification.
+The existing authenticated `code/scripts/bench_head_camera.py --stream`
+now attaches these counters to the read-only contention report when the
+Sense head is reachable; `aec_reference_probe_error` records any unavailable
+route, and `aec_reference_diagnostics` is null when unsupported. It never
+opens another PDM reader or stores raw audio. Run the bench with active
+operator mic/camera consent and a known speech activity trial, then retain
+the actual hardware result. Normal silence can increment some counters;
+evaluate changes across measured trials, not a zero counter alone.
+
+This telemetry narrows down A2 reference integrity defects but does **not**
+satisfy the still-open physical PCM capture path, acoustic latency
+calibration, device playback position receipt or twenty actual barge-in trials.
+
 ## Per-robot playback reference alignment in the pinned Sense build
 
 The ESP-SR AFE input remains two-channel interleaved `MR` at 16 kHz;
