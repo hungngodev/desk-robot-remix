@@ -111,8 +111,16 @@ def required_receipts(evidence: dict, *, first_robot: bool = False,
             continue
         yield "system", gate, evidence.get("system", {}).get(gate)
     if first_robot:
-        yield ("system", FIRST_ROBOT_ROOM_GATE,
-               evidence.get("system", {}).get(FIRST_ROBOT_ROOM_GATE))
+        system = evidence.get("system", {})
+        first = system.get(FIRST_ROBOT_ROOM_GATE)
+        fleet_gate = "room_pod_usb_serial_and_five_pet_observers"
+        # An actually verified fleet observation is stronger than the first
+        # observer trial. Retain its original scope/gate in the signed record.
+        # An explicit first-unit claim is never silently ignored when invalid.
+        if first is None and fleet_gate in system:
+            yield "system", fleet_gate, system[fleet_gate]
+        else:
+            yield "system", FIRST_ROBOT_ROOM_GATE, first
     for ident in SUPPLEMENTAL_DECISIONS:
         if ident in deferred_optional_ids:
             # Generator already verified this optional parent is not selected.

@@ -586,3 +586,60 @@ def test_selected_station_option_still_needs_every_physical_gate_receipt():
     )
     assert any(scope in problem and "missing receipt" in problem
                for problem in errors)
+
+
+def test_first_robot_accepts_pinned_stronger_fleet_station_receipt():
+    deferred = frozenset({"room_amg8833", "room_nfc_game_tokens"})
+    fleet_gate = "room_pod_usb_serial_and_five_pet_observers"
+    first_gate = release.FIRST_ROBOT_ROOM_GATE
+    system = {
+        gate: receipt("system", gate) for gate in release.SYSTEM_GATES
+        if gate not in release.FLEET_ONLY_SYSTEM_GATES
+    }
+    system[fleet_gate] = receipt("system", fleet_gate)
+    decisions = {
+        ident: {
+            "disposition": "rejected_in_favor_of_qualified_alternative",
+            "decision_receipt": receipt("supplemental:" + ident,
+                                        "decision_receipt"),
+            "alternative_or_parent_receipt": receipt(
+                "supplemental:" + ident, "alternative_or_parent_receipt"),
+        }
+        for ident in release.SUPPLEMENTAL_DECISIONS if ident not in deferred
+    }
+    evidence = {"system": system, "supplemental_decisions": decisions}
+    chosen = [gate for scope, gate, _ in release.required_receipts(
+        evidence, first_robot=True, deferred_optional_ids=deferred,
+    ) if scope == "system"]
+    assert fleet_gate in chosen
+    assert first_gate not in chosen
+    assert release.audit_release(
+        evidence, SHA, lookup, first_robot=True,
+        deferred_optional_ids=deferred,
+    ) == []
+
+    # Its own original gate and immutable provenance are required.
+    system[fleet_gate] = receipt("system", first_gate)
+    assert any(fleet_gate in error and "unpinned or generic signoff" in error
+               for error in release.audit_release(
+                   evidence, SHA, lookup, first_robot=True,
+                   deferred_optional_ids=deferred,
+               ))
+    system[fleet_gate] = receipt("system", fleet_gate)
+    system[first_gate] = receipt("system", first_gate)
+    chosen = [gate for scope, gate, _ in release.required_receipts(
+        evidence, first_robot=True, deferred_optional_ids=deferred,
+    ) if scope == "system"]
+    assert first_gate in chosen
+    assert fleet_gate not in chosen
+    assert release.audit_release(
+        evidence, SHA, lookup, first_robot=True,
+        deferred_optional_ids=deferred,
+    ) == []
+    del system[first_gate]
+    del system[fleet_gate]
+    assert any(first_gate in error and "missing receipt" in error
+               for error in release.audit_release(
+                   evidence, SHA, lookup, first_robot=True,
+                   deferred_optional_ids=deferred,
+               ))
