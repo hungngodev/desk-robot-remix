@@ -56,3 +56,31 @@ def test_cad_register_rejects_obsolete_power_bank_assembly_instructions():
     assert "BQ24075" in circuit and "NOT A FABRICATED OR TESTED PCB" in circuit
     for obsolete in ("bank-based plan", "physical bank size", "WROOM/bank"):
         assert obsolete not in cad
+
+
+def test_builder_plan_consistently_selects_mpu6050_with_berryimu_as_spare():
+    plan_text = PLAN.read_text(encoding="utf-8")
+    feature_plan_json = (ROOT / "docs/hardware/full-feature-plan.json").read_text(encoding="utf-8")
+    parts_md = (ROOT / "docs/hardware/parts.md").read_text(encoding="utf-8")
+
+    # 1. Feature plan JSON freezes MPU6050 GY521 with BerryIMU as spare
+    assert '"id": "imu"' in feature_plan_json
+    assert "MPU6050 GY521 compatible six axis breakout" in feature_plan_json
+    assert "BerryIMU preserved as spare" in feature_plan_json
+
+    # 2. parts.md confirms supersession
+    assert "MPU6050" in parts_md
+    assert "BerryIMU first choice references later in this document are superseded" in parts_md
+
+    # 3. PLAN.md Stage 7 qualifies MPU6050, notes BerryIMU superseded
+    assert "qualified MPU6050 (GY521 compatible WHO_AM_I 0x68 on 3.3V WROOM path; BerryIMU superseded and retained only as spare)" in plan_text
+
+    # 4. PLAN.md Stage 2 schematic requires MPU6050
+    assert "MPU6050, servos, motors, touch, and the separate 0x71 accessory mux" in plan_text
+
+    # 5. PLAN.md Stage 4 summary table notes supersession
+    assert "verify MPU6050 GY521 (BerryIMU superseded / retained as spare)" in plan_text
+
+    # 6. No unannotated "version-confirmed BerryIMU handling/tilt/shake" remains
+    assert "version-confirmed BerryIMU handling/tilt/shake" not in plan_text
+

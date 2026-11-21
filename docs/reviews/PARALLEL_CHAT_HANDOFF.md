@@ -1,3 +1,14 @@
+## 21 November 2026: Builder-path MPU6050 selection consistency in PLAN.md
+
+PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
+Exact inspected PR head commit `a7224940d9990b79361a4f0012c8b87d55d781b0`.
+This source and test batch does not close physical or commercial gates.
+
+* Builder-path IMU selection consistency (Review PRRT_kwDOVlmnQ866bhJ4):
+  - In `docs/PLAN.md`, resolved contradictory references to BerryIMU in Stage 7 (:184), Stage 1 (:120), and the Stage 4 summary table (:24).
+  - Explicitly documents qualification of preferred MPU6050 (GY521 compatible, WHO_AM_I 0x68 on 3.3V WROOM path) for handling/tilt/shake across all builder stages, matching `docs/hardware/full-feature-plan.json` and Stage 2 schematic, with BerryIMU noted as superseded and retained only as a spare.
+  - In `code/tests/test_plan_first_dock_gate.py`, added `test_builder_plan_consistently_selects_mpu6050_with_berryimu_as_spare` asserting end-to-end consistency between `full-feature-plan.json`, `parts.md`, and `docs/PLAN.md`.
+
 ## 21 November 2026: Guarded numeric overflow in procurement receipt validation
 
 PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
