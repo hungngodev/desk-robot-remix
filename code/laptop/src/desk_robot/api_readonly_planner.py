@@ -91,6 +91,7 @@ def register_readonly_planner_routes(
         room_context_used = any(
             item.get("channel") == "room_station" for item in timeline
         )
+        room_consent_generation = settings.room_station_consent_generation
         private_context_used = any(
             item.get("channel") == "tool"
             and item.get("kind") == "memory_recall"
@@ -140,6 +141,9 @@ def register_readonly_planner_routes(
             raise HTTPException(403, "Private memory consent revoked during planning")
         if room_context_used and not settings.room_station_context_enabled:
             raise HTTPException(403, "Room station consent revoked during planning")
+        if (room_context_used
+                and settings.room_station_consent_generation != room_consent_generation):
+            raise HTTPException(409, "Room station grant changed during planning")
         choices = parsed.get("tools") if isinstance(parsed, dict) else None
         allowed = {
             "look", "status", "power-status", "aux-status",

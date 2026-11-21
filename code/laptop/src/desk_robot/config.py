@@ -68,6 +68,7 @@ class Settings(BaseModel):
     # storage never becomes a serializable configuration or model instruction.
     _camera_consent_generation: int = PrivateAttr(default=0)
     _voice_memory_consent_generation: int = PrivateAttr(default=0)
+    _room_station_consent_generation: int = PrivateAttr(default=0)
     robots: list[RobotConfig]
     mode: Literal["hardware", "simulation"] = "hardware"
     coordinator_token_env: str = "DESK_ROBOT_API_TOKEN"
@@ -163,6 +164,10 @@ class Settings(BaseModel):
             name == "voice_memory_tools_enabled"
             and getattr(self, "voice_memory_tools_enabled", False) is True
         )
+        room_was_granted = (
+            name == "room_station_context_enabled"
+            and getattr(self, "room_station_context_enabled", False) is True
+        )
         super().__setattr__(name, value)
         if was_granted and not self.voice_vision_tools_enabled:
             # Even an immediate re-enable is a NEW grant; old VLM evidence
@@ -172,6 +177,10 @@ class Settings(BaseModel):
             # Disabling memory access revokes outstanding asynchronous reads.
             # The next opt-in is a new grant even without SQLite edits.
             self._voice_memory_consent_generation += 1
+        if room_was_granted and not self.room_station_context_enabled:
+            # Room-station text from a previous grant cannot be emitted by a
+            # late Ollama plan if the operator has already opted out.
+            self._room_station_consent_generation += 1
 
     @property
     def camera_consent_generation(self) -> int:
@@ -180,6 +189,10 @@ class Settings(BaseModel):
     @property
     def voice_memory_consent_generation(self) -> int:
         return self._voice_memory_consent_generation
+
+    @property
+    def room_station_consent_generation(self) -> int:
+        return self._room_station_consent_generation
 
     def robot(self, robot_id: str) -> RobotConfig:
         for robot in self.robots:

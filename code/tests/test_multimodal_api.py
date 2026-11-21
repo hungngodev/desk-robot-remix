@@ -358,6 +358,67 @@ def test_mac_semantic_planner_discards_revoked_context_during_model_decision(
         assert "revoked during planning" in response.json()["detail"]
 
 
+@pytest.mark.parametrize("grant_change,expected_status", [
+    ("unchanged", 200), ("revoked", 403), ("regranted", 409),
+])
+def test_room_station_context_plan_uses_original_permission_epoch(
+    settings, tokens, grant_change, expected_status,
+):
+    """Old room data cannot authorize a plan after operator opt out/in."""
+    import json
+    from types import SimpleNamespace
+
+    settings.mode = "hardware"
+    settings.room_station_enabled = True
+    settings.room_station_port = "/dev/tty.usbmodem-room"
+    settings.room_station_context_enabled = True
+    initial_epoch = settings.room_station_consent_generation
+    robot = settings.robots[0].id
+    timeline = [{
+        "channel": "room_station",
+        "kind": "climate",
+        "content": "ROOM_SENSOR_PRIVATE_TEST_READING",
+        "shared_not_robot_eyewitness": True,
+        "identity_verified": False,
+    }]
+    seen = []
+
+    class Model:
+        async def reply(self, history):
+            seen.append(history)
+            assert "ROOM_SENSOR_PRIVATE_TEST_READING" in str(history)
+            if grant_change != "unchanged":
+                settings.room_station_context_enabled = False
+                if grant_change == "regranted":
+                    settings.room_station_context_enabled = True
+            return json.dumps({"tools": [{"route": "status"}]})
+
+    async def noop():
+        pass
+
+    hub = SimpleNamespace(interaction_timeline=lambda *args, **kwargs: timeline)
+    runtime = SimpleNamespace(
+        conversation=SimpleNamespace(chat=Model()),
+        multimodal=SimpleNamespace(hub=hub),
+        start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        response = client.post(
+            f"/v1/pet/{robot}/plan-readonly", headers=headers,
+            json={"transcript": "What is your safety status?"},
+        )
+    assert len(seen) == 1
+    assert response.status_code == expected_status
+    assert settings.room_station_consent_generation == (
+        initial_epoch + (grant_change != "unchanged")
+    )
+    if grant_change == "unchanged":
+        assert [item["route"] for item in response.json()["tools"]] == ["status"]
+    else:
+        assert "room station" in response.json()["detail"].lower()
+
+
 def test_mac_semantic_planner_rejects_late_plan_after_new_human_vad(
     settings, tokens,
 ):
