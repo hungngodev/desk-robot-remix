@@ -51,6 +51,7 @@ private:
     // The operator can stop mic streaming with BOOT. Do not silently
     // restart listening after that explicit human action.
     std::atomic<bool> audio_operator_touched_{false};
+    std::atomic<bool> audio_operator_muted_{false};
     bool continuous_audio_started_ = false;
 #endif
 
@@ -307,24 +308,50 @@ public:
         InitializeDisplay();
         InitializeCamera();
         boot_button_.OnClick([this]() {
-#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
-            audio_operator_touched_.store(true);
-#endif
             auto& app = Application::GetInstance();
-            if (app.GetDeviceState() == kDeviceStateStarting) {
+            const auto state = app.GetDeviceState();
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+            // A BOOT tap acts on the actual Sense PDM codec immediately.
+            // A second tap is explicit manual unmute, but unattended audio
+            // may never restart after a human touched this control.
+            audio_operator_touched_.store(true, std::memory_order_release);
+            const bool now_muted = !audio_operator_muted_.load(
+                std::memory_order_acquire);
+            audio_operator_muted_.store(now_muted, std::memory_order_release);
+            static_cast<SenseReferenceCodec*>(GetAudioCodec())
+                ->SetMicrophonePrivacyMuted(now_muted);
+#endif
+            if (state == kDeviceStateStarting) {
                 EnterWifiConfigMode();
                 return;
             }
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
-            if (app.GetDeviceState() == kDeviceStateSpeaking) {
-                // Stock ToggleChatState would only abort speech and resume
-                // continuous listening. The privacy button must CLOSE mic
-                // upload even if clicked while the model is talking.
-                app.StopListening();
+            // Preserve upstream explicit WiFi audio testing with a real
+            // physical press; switching back to configuration mutes PDM.
+            if (state == kDeviceStateWifiConfiguring ||
+                state == kDeviceStateAudioTesting) {
+                app.ToggleChatState();
                 return;
             }
-#endif
+            if (now_muted) {
+                if (state == kDeviceStateConnecting) {
+                    // A pending async channel open must not outlive BOOT.
+                    // The selected application overlay also checks this
+                    // state AFTER OpenAudioChannel finishes.
+                    app.SetDeviceState(kDeviceStateIdle);
+                } else if (state == kDeviceStateListening) {
+                    app.ToggleChatState();  // closes the Xiaozhi channel
+                } else if (state == kDeviceStateSpeaking) {
+                    app.StopListening();  // selected overlay closes channel
+                }
+                return;
+            }
+            // Explicit unmute can resume one normal Xiaozhi session only.
+            if (state == kDeviceStateIdle) app.ToggleChatState();
+            return;
+#else
             app.ToggleChatState();
+#endif
         });
     }
 
