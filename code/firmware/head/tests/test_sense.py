@@ -70,6 +70,23 @@ class SenseOverlayTests(unittest.TestCase):
         overlay.remove(self.root)
         self.assertEqual((self.root / path).read_bytes(), original)
 
+    def test_pinned_xiaozhi_oled_status_and_emotion_are_independent(self):
+        """Speaking/listening text must survive the cosmetic face update."""
+        oled = (UPSTREAM / "main/display/oled_display.cc").read_text()
+        lvgl = (UPSTREAM / "main/display/lvgl_display/lvgl_display.cc").read_text()
+        emotion = oled.split("bool OledDisplay::SetEmotion(", 1)[1].split(
+            "void OledDisplay::SetTheme(", 1
+        )[0]
+        status = lvgl.split("void LvglDisplay::SetStatus(", 1)[1].split(
+            "void LvglDisplay::ShowNotification(", 1
+        )[0]
+        self.assertIn("DisplayLockGuard lock(this);", emotion)
+        self.assertIn("lv_label_set_text(emotion_label_", emotion)
+        self.assertNotIn("status_label_", emotion)
+        self.assertIn("DisplayLockGuard lock(this);", status)
+        self.assertIn("lv_label_set_text(status_label_, status);", status)
+        self.assertNotIn("emotion_label_", status)
+
     def test_sense_camera_pdm_pin_budget_and_eight_mb_layout(self):
         overlay.apply(self.root, 'sense')
         board = self.root / overlay.BOARDS['sense']
