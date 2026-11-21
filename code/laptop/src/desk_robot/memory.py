@@ -88,7 +88,10 @@ class MemoryStore:
                            for i in robot_ids)):
             raise ValueError("Every robot ID must be a safe nonempty identifier")
         self.robot_ids = frozenset(robot_ids)
-        if len(self.robot_ids) != len(robot_ids):
+        # The Mac's APFS volume may be case insensitive. Different Python
+        # identifiers must not silently share one physical SQLite filename.
+        if (len(self.robot_ids) != len(robot_ids)
+                or len({robot.casefold() for robot in robot_ids}) != len(robot_ids)):
             raise ValueError("Duplicate robot memory identities are not allowed")
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
         if self.root.is_symlink():

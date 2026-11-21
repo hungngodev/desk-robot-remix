@@ -8,6 +8,8 @@ from desk_robot.memory import MemoryStore
     ["pet_a", "pet_a"],
     ("pet_a", "pet_b", "pet_a"),
     ["pet_a", "pet_b", "pet_b", "pet_c"],
+    ["pet_a", "PET_A"],
+    ("Pet_01", "pet_01", "pet_02"),
 ])
 def test_duplicate_robot_memory_id_rejected_before_database_creation(tmp_path, ids):
     with pytest.raises(ValueError, match="Duplicate robot memory identities"):
