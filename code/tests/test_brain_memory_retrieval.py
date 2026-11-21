@@ -573,3 +573,58 @@ def test_exact_episode_lookup_reaches_beyond_recent_fifty_without_peer_leak(tmp_
         kind="object", source_robot="robot-01", witnessed=True,
     )
     assert store.get_episode("robot-01", "older_seen") is None
+
+
+def test_live_context_refuses_unowned_private_revision_and_cached_recall(
+    settings, tokens, tmp_path,
+):
+    """No absent/bool private lease may appear as revision zero to Xiaozhi."""
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.memory_dir = tmp_path
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = True
+    robot = settings.robots[0].id
+    hub = CameraFrameHub([item.id for item in settings.robots])
+    hub.remember_tool(
+        robot, "memory_recall", "PRIVATE_STALE_DETAIL",
+        time.monotonic(),
+    )
+    hub.notify(robot, "touch_tap", time.monotonic())
+    headers = {"Authorization": f"Bearer {tokens['DESK_ROBOT_TOOL_TOKEN']}"}
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        original = runtime.multimodal
+        runtime.multimodal = SimpleNamespace(hub=hub)
+        try:
+            generations = runtime.conversation._private_memory_generation
+            assert generations[robot] == 0
+            url = f"/v1/pet/{robot}/interaction-context"
+            good = client.get(url, headers=headers)
+            assert good.status_code == 200
+            assert good.json()["private_memory_generation"] == 0
+            assert "PRIVATE_STALE_DETAIL" in good.json()["model_context"]
+            for invalid in (None, True, -1, "0", 2**63):
+                if invalid is None:
+                    generations.pop(robot, None)
+                else:
+                    generations[robot] = invalid
+                denied = client.get(url, headers=headers)
+                assert denied.status_code == 200
+                body = denied.json()
+                assert body["private_memory_generation"] is None
+                assert "PRIVATE_STALE_DETAIL" not in body["model_context"]
+                assert "touch_tap" in body["model_context"]
+                assert all(
+                    item.get("kind") != "memory_recall"
+                    for item in body["current_interaction_timeline"]
+                )
+            generations[robot] = 0
+            restored = client.get(url, headers=headers)
+            assert restored.status_code == 200
+            assert restored.json()["private_memory_generation"] == 0
+            assert "PRIVATE_STALE_DETAIL" in restored.json()["model_context"]
+        finally:
+            runtime.multimodal = original

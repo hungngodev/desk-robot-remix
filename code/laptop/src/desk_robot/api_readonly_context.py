@@ -135,10 +135,18 @@ def register_readonly_context_routes(
         # consent. It remains separate from Coordinator motion authority.
         conversation = getattr(app.state.runtime, "conversation", None)
         revisions = getattr(conversation, "_private_memory_generation", None)
+        # Missing or malformed per-pet ownership cannot be reported as
+        # generation zero. Native Xiaozhi uses this integer as the final
+        # exact-lease check before any private memory fact reaches speech.
+        generation = (
+            revisions.get(robot_id) if isinstance(revisions, dict) else None
+        )
+        memory_lease_valid = (
+            type(generation) is int and 0 <= generation < 2**63
+        )
         private_memory_generation = (
-            revisions.get(robot_id, 0)
-            if settings.voice_memory_tools_enabled and isinstance(revisions, dict)
-            else None
+            generation if settings.voice_memory_tools_enabled
+            and memory_lease_valid else None
         )
         if settings.fleet_text_sharing_enabled:
             dialogue = getattr(conversation, "group_activity_timeline", None)
@@ -171,7 +179,10 @@ def register_readonly_context_routes(
                 item for item in timeline
                 if not is_camera_derived_timeline_item(item)
             ]
-        if not settings.voice_memory_tools_enabled:
+        if not settings.voice_memory_tools_enabled or not memory_lease_valid:
+            # Revoking memory consent or losing its per-pet revision owner
+            # also revokes any transient private retrieval cached in RAM.
+            # Preserve independent WROOM and touch evidence.
             # Revoking memory consent also revokes the transient retrieval
             # result. A still-active camera permit is not permission to read
             # yesterday's private text through a native model prompt.
