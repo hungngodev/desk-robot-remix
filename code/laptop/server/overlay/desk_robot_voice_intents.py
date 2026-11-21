@@ -190,15 +190,23 @@ def native_readonly_requests_with_capacity(
     if (not isinstance(transcript, str)
             or not 3 <= len(transcript) <= 2400 or "\x00" in transcript):
         return (), False
+    truncated_requested_read = False
     if len(transcript) > 280:
         # Human ASR often contains a long introduction followed by one
         # direct question. Route ONLY a separately punctuated short final
-        # question, never a guessed mid-sentence motor instruction.
+        # question, never a guessed mid-sentence motor instruction. Unlike
+        # an ordinary introduction, an EARLIER explicit tool request cannot
+        # silently vanish when we select the safe final short question.
         clauses_by_sentence = re.split(r"(?<=[.!?])\s+", transcript.strip())
         tail = clauses_by_sentence[-1].strip()
         if (len(clauses_by_sentence) < 2 or not tail.endswith("?")
                 or not 3 <= len(tail) <= 280):
             return (), False
+        truncated_requested_read = any(
+            native_readonly_request(sentence) is not None
+            for sentence in clauses_by_sentence[:-1]
+            if 3 <= len(sentence) <= 280
+        )
         transcript = tail
     whole = native_readonly_request(transcript)
     # Split only at a new spoken request. Splitting every "and" loses
@@ -234,8 +242,11 @@ def native_readonly_requests_with_capacity(
         # Preserve the entire spoken memory/visual question where possible.
         # If the first clause was an unsupported physical command, still
         # permit an explicitly requested independent READ-ONLY second clause.
-        return ((whole,) if whole is not None else tuple(found)), False
-    return tuple(found[:3]), len(found) > 3
+        return (
+            (whole,) if whole is not None else tuple(found),
+            truncated_requested_read,
+        )
+    return tuple(found[:3]), len(found) > 3 or truncated_requested_read
 
 
 def native_readonly_requests(transcript: str) -> tuple[tuple[str, dict], ...]:

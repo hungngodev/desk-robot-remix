@@ -8694,3 +8694,34 @@ async def test_native_four_clause_asr_marks_complete_answer_unavailable(native):
         "look", "power-status", "aux-status",
     ]
     assert session.native_readonly_tools_dropped == 0
+
+
+def test_long_asr_with_prior_distinct_read_does_not_silently_drop_earlier_question(
+    native,
+):
+    module, _ = native
+    unrelated_context = (
+        "Earlier I was explaining a design decision about my code editor. " * 6
+    )
+    transcript = (
+        "Look at the key on my desk? " + unrelated_context
+        + "Check your battery level?"
+    )
+    assert len(transcript) > 280
+    requests, incomplete = module.native_readonly_requests_with_capacity(
+        transcript
+    )
+    assert [route for route, _ in requests] == ["power-status"]
+    assert incomplete is True
+    # Older callers still receive the same conservative final-question route.
+    assert module.native_readonly_requests(transcript) == requests
+
+    advice = (
+        "How do I organize a Python program? " + unrelated_context
+        + "Check your battery level?"
+    )
+    safe, advice_incomplete = module.native_readonly_requests_with_capacity(
+        advice
+    )
+    assert [route for route, _ in safe] == ["power-status"]
+    assert advice_incomplete is False
