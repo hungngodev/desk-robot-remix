@@ -79,6 +79,13 @@
       "source": "docs/cad/remixes/speaker_rect_fit_gauge.scad",
       "host_test": "code/tests/test_export_fit_kit.py",
       "source_state": "speaker_fit_reference_only",
+      "secondary_implementation": {
+        "purpose": "Sense digital I2S speaker output and resampling source",
+        "source": "code/firmware/head/sense/sense_reference_codec.cc",
+        "host_test": "code/firmware/head/tests/test_sense.py",
+        "physical_qualification_guide": "docs/guides/audio-barge-in.md",
+        "physical_qualification_completed": false
+      },
       "remaining_qualification": "sealed acoustic enclosure,2W heat and mic coupling"
     },
     "cap1188": {
