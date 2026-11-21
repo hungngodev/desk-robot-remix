@@ -103,3 +103,27 @@ then confirm the camera's real fitted pose with checkerboard calibration.
 The SVG byte verifier does **not** measure printed paper, certify camera
 pose, command autonomous docking, verify either independent seat switch,
 or authorize any contact charging.
+
+
+## Measured dual NC switch mounting screen
+
+The two normally closed seat switches are independent mechanical safety
+inputs. Neither a valid AprilTag nor two optical NEC frames substitutes
+for physical switch actuation or verified charging. Before finalizing a
+switch bracket, measure the actual physical switch bodies, separation,
+positions, pretravel, planned mechanical stop and safe total travel.
+With a user-supplied JSON record containing those measured values, run
+`python3 code/scripts/screen_dock_seat_mechanics.py --measurements PATH`
+from the repository root. The JSON must include `dock_id` (1 through 5),
+`cad_source_sha256` of this exact SCAD file, `seat_pair_spacing_mm`,
+`switch_body_width_mm`, `switch_body_height_mm`,
+`switch_center_z_mm`, `ir_emitter_center_z_mm`,
+`operating_displacement_mm`, `planned_stop_displacement_mm` and
+`safe_total_displacement_mm`.
+
+The tool rejects missing, ambiguous or stale evidence. It checks both
+switch footprints against the actual printed tag pocket, nominal IR hole
+positions and available backstop perimeter, plus mechanical travel.
+This is a **2D paper clearance screen only**. Do not substitute example
+test dimensions for physical calipers, assume an NC contact polarity,
+cut unmeasured final switch holes, or energize charge contacts.
