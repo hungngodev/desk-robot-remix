@@ -252,6 +252,7 @@ class AttentionLedger:
                 + state.asr[:66]
             )
         # Don't promote a remembered handling event to present sensor status.
+        safety_piece: str | None = None
         events = [
             (kind, at) for kind, at, generation in state.sensor_edges
             if generation == state.generation and 0 <= now - at <= 120
@@ -278,7 +279,10 @@ class AttentionLedger:
                 description += (
                     f"; also {another[0]} {int(now - another[1])}s ago"
                 )
-            pieces.append(description + " (historical, not current telemetry)")
+            event_piece = description + " (historical, not current telemetry)"
+            pieces.append(event_piece)
+            if kind == "safety_fault":
+                safety_piece = event_piece
         if state.sent and 0 <= now - state.sent_at <= 45:
             pieces.append(
                 "Earlier speech transmitted, playback unverified: "
@@ -286,7 +290,28 @@ class AttentionLedger:
             )
         if not pieces:
             return []
-        content = "; ".join(pieces)[:260]
+        content = "; ".join(pieces)
+        if len(content) > 260 and safety_piece is not None:
+            # Preserve complete, correctly historical fault evidence when a
+            # long topic and newer ASR consume the ordinary attention budget.
+            # Clipping inside "safety_fault ... historical" silently drops
+            # the distinction between a past fault and current WROOM state.
+            mandatory = [pieces[0]] if newer_asr else []
+            mandatory.append(safety_piece)
+            if len("; ".join(mandatory)) > 260:
+                # A concurrent secondary handling cue is lower priority than
+                # the actual safety fault and its provenance qualifier.
+                first_fault = safety_piece.split("; also ", 1)[0]
+                if " (historical, not current telemetry)" not in first_fault:
+                    first_fault += " (historical, not current telemetry)"
+                mandatory[-1] = first_fault
+            for optional in pieces:
+                if optional == safety_piece or (newer_asr and optional == pieces[0]):
+                    continue
+                candidate = "; ".join([*mandatory, optional])
+                if len(candidate) <= 260:
+                    mandatory.append(optional)
+            content = "; ".join(mandatory)
         return [{
             "channel": "mac_attention",
             "kind": "conversation_continuity",

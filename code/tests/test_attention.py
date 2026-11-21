@@ -98,6 +98,33 @@ def test_new_human_question_preempts_old_topic_in_attention_context(monkeypatch)
     assert "Old reply from" not in ledger.timeline("pet", 32)[0]["content"]
 
 
+
+def test_attention_safety_fault_never_clipped_after_long_topic_and_new_asr(
+    monkeypatch,
+):
+    """Historical safety evidence must not become an incomplete warning."""
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 300.0)
+    ledger = AttentionLedger(["pet"])
+    ledger.begin_topic("pet", "T" * 100, 10)
+    assert ledger.sensor("pet", "safety_fault", 11)
+    ledger.human_started("pet", 12)
+    event = "omni_" + "a" * 12 + "_" + "b" * 20
+    assert ledger.heard("pet", event, "A" * 90, 13)
+    evidence = ledger.timeline("pet", 14)
+    assert len(evidence) == 1
+    content = evidence[0]["content"]
+    assert content.startswith("Newer uncertain ASR words")
+    assert "A" * 66 in content
+    assert "WROOM safety_fault edge 3s ago" in content
+    assert "historical, not current telemetry" in content
+    assert len(content) <= 260
+    composed = compose_brain_context([], [], evidence)
+    assert "safety_fault" in composed.interaction
+    assert "historical, not current telemetry" in composed.interaction
+    assert "motor_authorized" not in content
+    assert evidence[0]["motor_authorized"] is False
+
+
 def test_sensor_buffer_bounds_and_rejects_untrusted_kinds_and_order(monkeypatch):
     # Explicit synthetic time avoids depending on the CI host uptime.
     monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 300.0)
