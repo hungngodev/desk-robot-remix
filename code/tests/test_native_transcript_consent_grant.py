@@ -163,3 +163,58 @@ def test_parent_memory_disabled_never_retains_native_transcript(
         assert response.json()["retained_on_disk"] is False
         assert response.json()["ephemeral_context_added"] is True
     assert store.count(robot_id) == 0
+
+
+@pytest.mark.parametrize("regrant", [False, True])
+def test_live_asr_revoke_during_durable_write_retracts_ephemeral_receipt(
+    settings, tmp_path, regrant,
+):
+    """An old voice/live grant cannot revive transient ASR on an ON/OFF/ON."""
+    import time
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.voice_memory_tools_enabled = True
+    settings.voice_transcript_memory_enabled = True
+    settings.voice_vision_tools_enabled = True
+    ids = [r.id for r in settings.robots]
+    robot_id = ids[0]
+    store = MemoryStore(tmp_path / "private", ids)
+    hub = CameraFrameHub(ids)
+    event_id = "omni_" + "a" * 12 + "_" + "f" * 20
+    original = store.remember
+    attention_calls = []
+    original_generation = settings.camera_consent_generation
+
+    def live_revoke_while_writing(*args, **kwargs):
+        inserted = original(*args, **kwargs)
+        settings.voice_vision_tools_enabled = False
+        if regrant:
+            settings.voice_vision_tools_enabled = True
+        return inserted
+
+    store.remember = live_revoke_while_writing
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        memory=store, multimodal=SimpleNamespace(hub=hub),
+        attention=SimpleNamespace(heard=lambda *args: attention_calls.append(args)),
+    )
+    register_native_omni_routes(
+        app, settings, authorize=lambda: None,
+        coordinator=lambda: SimpleNamespace(robot=settings.robot),
+        native_pet_speech_policy=lambda _robot_id: {},
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            f"/v1/pet/{robot_id}/omni-heard",
+            json={"event_id": event_id, "transcript": "A fleeting live ASR cue"},
+        )
+    assert response.status_code == 200
+    assert response.json()["stored"] is True
+    assert response.json()["ephemeral_context_added"] is False
+    assert store.get_episode(robot_id, event_id) is not None
+    assert not hub.heard_history[robot_id]
+    assert not hub.interaction_timeline(robot_id, time.monotonic())
+    assert attention_calls == []
+    assert settings.camera_consent_generation == original_generation + 1
+    assert settings.voice_vision_tools_enabled is regrant

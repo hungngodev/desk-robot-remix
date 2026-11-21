@@ -157,6 +157,7 @@ def register_native_omni_routes(
             raise HTTPException(400, "Invalid model-estimated transcript")
         visual = getattr(app.state.runtime, "multimodal", None)
         observed_at = time.monotonic()
+        live_consent_generation = settings.camera_consent_generation
         ephemeral = False
         if settings.voice_vision_tools_enabled and visual is not None:
             remember = getattr(visual.hub, "remember_heard", None)
@@ -216,7 +217,10 @@ def register_native_omni_routes(
         # before SQLite I/O finishes. Live context consent is separate from
         # durable transcript consent: retract only THIS newly accepted item
         # if the operator disabled live observation during the awaited write.
-        if ephemeral and not settings.voice_vision_tools_enabled:
+        if (ephemeral and (
+                not settings.voice_vision_tools_enabled
+                or settings.camera_consent_generation != live_consent_generation)):
+            # An OFF/ON during SQLite must not re-admit prior-grant ASR.
             visual.hub.discard_heard(robot_id, request.event_id)
             ephemeral = False
         # Deletion may finish while a SQLite writer is still pending.
