@@ -177,7 +177,7 @@ is a separate historical objective, not a robot dependency.
 | `F034` | Ambient sound events and one RGB pixel | RESERVE NOW | Double clap attention, triple clap stop, whistle bands, self-sound filtering, no acoustic event may arm |
 | `F035` | Fleet play and ongoing peers | REQUIRED | Distinct persistent characters, digital peer exchange, invitations, ten turns, social play, one speaker initially |
 | `F036` | AprilTag localization and world anchors | EXPANSION | Existing detector libraries, fiducial cards and measured pose; not required to assert precise location from one camera |
-| `F037` | Self-docking and OOMWOO patterns | EXPANSION | Actual charger mechanics, fiducials, safe approach, contact isolation; no automatic docking until separately proven |
+| `F037` | Self-docking and OOMWOO patterns | REQUIRED FIRST PET AND DOCK, PHYSICAL HOLD; historically EXPANSION | Accepted subsequent complete first-pet requirement supersedes original expansion timing. One passive and electrically qualified dock per pet; OOMWOO remains a design reference, not reused production hardware. Real contact isolation, predock visuals, measured net charge and safety release still pending |
 | `F038` | Health freshness ladder | REQUIRED | Treat stale sensor data as fault; health from timestamps, successful reads and model confidence, not a plausible old value |
 | `F039` | Research links landing pages and tutorials | PRESERVE | All HTML library sections cross-reference the source map and reuse register; reject conclusions not supported by code |
 
@@ -328,7 +328,7 @@ is a separate historical objective, not a robot dependency.
 | `G026` | Servo pan/tilt head | EXPANSION HARDWARE VARIANT | Not in two servo allocation; requires third/fourth actuator and confirmed new center of mass |
 | `G027` | 4-servo body language / dance | EXPANSION HARDWARE VARIANT | Cannot be "free" on two-servo lift+grip base |
 | `G028` | Two pets and five pet interaction | REQUIRED | Digital messages and individual characters; coordinated games |
-| `G029` | Self dock / go home | EXPANSION HARDWARE | AprilTag, charger contacts, path safety, alignment verification |
+| `G029` | Self dock / go home | REQUIRED FIRST PET AND DOCK, PHYSICAL HOLD; historically EXPANSION HARDWARE | New accepted first-pet requirement supersedes historical expansion timing. AprilTag predock, terminal alignment, two independent passive seat inputs, contact isolation, charger qualification, bounded retries and explicit safe departure must be proven on the assembled robot |
 | `G030` | Remote phone and ESP-NOW control | EXPANSION | Operator-only control path, no motion permission from broadcasts |
 | `G031` | Camera see-what-it-sees and AI Eye | REQUIRED | Real fresh image to VLM; scene comments are validated before claims |
 | `G032` | Hand/face mimic and personalized gestures | EXPANSION | Do not infer face identity without opt-in data and evaluation |
