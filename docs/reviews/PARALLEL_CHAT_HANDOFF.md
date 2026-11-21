@@ -1,12 +1,22 @@
 ## 21 November 2026: multi-area safety audit, zero-voltage interlock, and CI test suite recovery
 
 PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
-Exact inspected PR head commit `329ff61bf2034dc864677ef19e46458a1801aedb`.
+Exact inspected PR head commit `cece2526c8b9db1d6a693cba36b8e217277e9233`.
 This source and test batch does not close physical or commercial gates.
-GitHub Actions CI run 44873718222 passed all 4 host and WROOM compile lanes:
+Completed GitHub Actions CI run 44874363525 passed 100% across all 5 jobs on exact commit `cece2526`:
 Python and head host tests (3,184 passed), Body C++ host tests with sanitizers (38 passed),
-ESP32 WROOM firmware compile (all targets), and Mac conversation and memory regression;
-XIAO Sense ESP-IDF 6.1 compile queued on runner.
+ESP32 WROOM firmware compile (all 17 targets), Mac conversation and memory regression (69 passed),
+and XIAO Sense ESP-IDF 6.1 firmware compile (both real Sense image and opt-in PCM bench variant).
+
+* `1a80bb0b`: `fix(conversation): admit wroom_sensed_event handling cues through group camera privacy fence`
+  In `code/laptop/src/desk_robot/conversation.py:738-748`, admitted `wroom_sensed_event` (from `hub.recent_events`)
+  alongside `wroom_event` (from `hub.interaction_timeline`) through the privacy fence when camera tools are
+  disabled, so peer discussions retain physical handling/tilt cues without exposing raw vision or private ASR.
+  Added unit test `test_group_sensed_event_and_handling_survive_camera_opt_out` in `code/tests/test_api_conversation.py`.
+* `f5ad311f`: `fix(pet): harmonize wroom_sensed_event handling source in proactive context camera privacy fence`
+  Harmonized `code/laptop/src/desk_robot/pet.py:2274` to accept both `wroom_event` and `wroom_sensed_event`
+  so that proactive pet context preserves handling events when camera tools are disabled. Added regression test
+  `test_hardware_wroom_sensed_event_survives_camera_privacy` in `code/tests/test_pet.py`.
 
 * `8020a92e`: `fix(pet): preserve tactile and attention continuity when vision tools are disabled`
   Decoupled `continuity = attention.timeline(robot_id, now)` from `voice_vision_tools_enabled`
