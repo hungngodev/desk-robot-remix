@@ -133,3 +133,15 @@ def test_real_opencv_36h11_bits_match_vector_marker_exactly():
                     for r in rectangles[1:]
                 )
                 assert painted_black is actual[y][x]
+
+
+def test_print_guide_commands_are_unescaped_markdown():
+    guide = (
+        ROOT / "docs/cad/remixes/dock/README.md"
+    ).read_text(encoding="utf-8")
+    section = guide.split("## Source checked, print scale accurate AprilTag paper")[1]
+    assert chr(92) + chr(96) not in section
+    assert chr(96) * 3 + "sh" in section
+    assert "--dock-id 1 --marker-id 12" in section
+    assert "--verify" in section
+    assert "100 percent actual size" in section

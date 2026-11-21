@@ -76,19 +76,19 @@ Its exported source and watertight mesh are checked by the regular
 The dock vision consumer uses OpenCV's **AprilTag 36h11** dictionary and
 the same explicit marker ID in the per robot camera calibration.
 Do not draw an arbitrary QR pattern or use printer "fit to page" scaling.
-Generate a true vector tag directly from the pinned OpenCV dictionary:
+Generate a true vector tag directly from the installed OpenCV AprilTag dictionary:
 
-\`\`\`sh
+```sh
 cd code
 uv sync --extra vision
 python3 scripts/generate_dock_tag.py --dock-id 1 --marker-id 12 \
   --output ../docs/cad/remixes/dock/tag_dock01_id12.svg
 python3 scripts/generate_dock_tag.py --dock-id 1 --marker-id 12 \
   --output ../docs/cad/remixes/dock/tag_dock01_id12.svg --verify
-\`\`\`
+```
 
 ID 12 is an **example**, not a chosen real dock assignment. Configure the
-actual robot's \`DockCalibration.marker_id\` to the chosen printed number.
+actual robot's `DockCalibration.marker_id` to the chosen printed number.
 Each independent dock must use a distinct documented marker number.
 The tool reads the active SCAD dimensions, prints exactly **60 mm** of
 8 by 8 tag modules with a **5 mm white quiet margin on every side**,
