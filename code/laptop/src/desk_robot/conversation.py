@@ -571,6 +571,9 @@ class Conversation:
             and self.settings.voice_vision_tools_enabled
             and self.settings.fleet_text_sharing_enabled
         )
+        # Remember only whether an actual room observation entered a group
+        # model prompt. Revoking that station source must fence later speech.
+        room_context_used = False
 
         def consent_still_valid() -> bool:
             return (
@@ -580,6 +583,8 @@ class Conversation:
                      or self.settings.voice_memory_tools_enabled)
                 and (not visual_at_start
                      or self.settings.voice_vision_tools_enabled)
+                and (not room_context_used
+                     or self.settings.room_station_context_enabled)
                 and (permission_check is None or permission_check())
             )
 
@@ -667,6 +672,7 @@ class Conversation:
                 )
 
             def live_cues(robot_id: str) -> str:
+                nonlocal room_context_used
                 # Reuse the existing per-pet Mac timeline, not a second
                 # camera, microphone or sensor event owner. This snapshot
                 # may change between turns in the same group conversation.
@@ -687,6 +693,16 @@ class Conversation:
                     timeline = self.multimodal.hub.interaction_timeline(
                         robot_id, time.monotonic(), limit=10 - len(activity)
                     )
+                    if not self.settings.room_station_context_enabled:
+                        timeline = [
+                            item for item in timeline
+                            if item.get("channel") != "room_station"
+                        ]
+                    elif any(
+                        item.get("channel") == "room_station"
+                        for item in timeline
+                    ):
+                        room_context_used = True
                 timeline.extend(activity)
                 # A completed recall from a DIFFERENT human turn is not
                 # permission to discuss private facts in an unrelated group
