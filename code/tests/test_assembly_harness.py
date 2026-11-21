@@ -149,3 +149,21 @@ def test_max30102_wiring_assignment_is_not_speculative():
     assert "accessory mux `0x71` channel 0 at address `0x57`" in definition
     assert "potentially an unused mux channel" not in definition
     assert "CH0 CAP1188 0x29 default / 0x28 strapped + MAX30102 0x57" in wiring
+
+
+def test_current_builder_guide_keeps_selected_sense_and_motor_profiles():
+    """Builder instructions must not silently return to the obsolete 2026-11-03 image."""
+    source = (ROOT / "code/firmware/body/platformio.ini").read_text()
+    builder = (ROOT / "docs/guides/build.md").read_text(encoding="utf-8")
+    head_script = (ROOT / "code/scripts/build_head.sh").read_text()
+    assert "default_envs = esp32_full" in source
+    assert "[env:esp32_dc_full]" in source
+    assert "sense) variant=desk-robot-sense-s3" in head_script
+    assert "defaults to `esp32_full`" in builder
+    assert "`-e esp32_dc_full`" in builder
+    assert "bash scripts/build_head.sh --board sense" in builder
+    assert "--board sense --upstream upstream/xiaozhi-esp32" in builder
+    assert "motor-power cutoff **unqualified and disabled**" in builder
+    assert "historical Freenove modular and CoreS3 sections" in builder
+    assert "default build is now `esp32_stepper`" not in builder
+    assert "It has no ToF I/O/calibration supplied" not in builder
