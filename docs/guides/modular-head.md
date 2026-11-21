@@ -79,9 +79,11 @@ The consented camera is **one authenticated continuous MJPEG producer** on
 `/api/camera.mjpg`, not a recurring snapshot request. The Mac
 `HttpHead.stream_frames()` verifies each JPEG's per-robot boot, sequence
 and device capture-completion receipt and selects the newest frame in
-coalesced network reads. It discards obvious old buffered frames when
-Mac arrival advances by over 1.5 seconds but the same-boot device
-completion time advances more than one second less. This is a
+coalesced network reads. It rejects same-boot backlog when
+the relative Mac arrival interval exceeds the device capture-completion
+interval by more than 500 ms, about two ordinary 4 FPS frame periods.
+Delayed frames are not relabeled as fresh simply because the network
+reader woke up later. This is a
 **relative backlog check**, not clock synchronization or proof of image
 exposure latency. Mac and ESP32 clocks cannot be compared absolutely.
 A real A9 trial still needs measured camera-to-Mac latency, object freshness,
