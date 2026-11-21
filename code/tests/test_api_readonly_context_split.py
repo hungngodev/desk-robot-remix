@@ -884,3 +884,64 @@ def test_voice_context_discards_visual_cues_on_camera_consent_toggle_during_sqli
         assert payload["current_interaction_timeline"] == []
         assert payload["core_facts"] == [{"slot": "fact", "value": "Durable core fact"}]
 
+
+
+@pytest.mark.parametrize("toggle_during", ("none", "recent", "search", "core"))
+def test_voice_context_memory_consent_regrant_invalidates_inflight_sqlite_read(
+    settings, toggle_during,
+):
+    """Revoked private memory access cannot be restored by an immediate opt-in."""
+    from desk_robot.api_memory_routes import register_voice_context_route
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.voice_memory_tools_enabled = True
+    before = settings.voice_memory_consent_generation
+    receipts = []
+
+    def revoke_and_regrant():
+        settings.voice_memory_tools_enabled = False
+        settings.voice_memory_tools_enabled = True
+
+    class Memory:
+        def recent(self, robot_id, *, limit):
+            if toggle_during == "recent":
+                revoke_and_regrant()
+            return []
+
+        def search(self, robot_id, query, *, limit):
+            if toggle_during == "search":
+                revoke_and_regrant()
+            return []
+
+        def core_facts(self, robot_id, *, limit):
+            if toggle_during == "core":
+                revoke_and_regrant()
+            return [SimpleNamespace(slot="preference", value="private old fact")]
+
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        memory=Memory(), multimodal=None,
+        conversation=SimpleNamespace(_private_memory_generation={"robot-01": 0}),
+    )
+    register_voice_context_route(
+        app, settings, authorize=lambda: None,
+        requested_tool_context=lambda *args: None,
+        remember_tool_context=lambda *args: receipts.append(args),
+    )
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/pet/robot-01/voice-context",
+            params={"query": "tea"} if toggle_during == "search" else None,
+        )
+    if toggle_during == "none":
+        assert response.status_code == 200
+        assert response.json()["core_facts"] == [
+            {"slot": "preference", "value": "private old fact"}
+        ]
+        assert settings.voice_memory_consent_generation == before
+    else:
+        assert response.status_code == 403
+        assert "private old fact" not in response.text
+        assert settings.voice_memory_consent_generation > before
+    assert receipts == []

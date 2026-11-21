@@ -67,6 +67,7 @@ class Settings(BaseModel):
     # Global live camera grant covers every configured pet. Private Pydantic
     # storage never becomes a serializable configuration or model instruction.
     _camera_consent_generation: int = PrivateAttr(default=0)
+    _voice_memory_consent_generation: int = PrivateAttr(default=0)
     robots: list[RobotConfig]
     mode: Literal["hardware", "simulation"] = "hardware"
     coordinator_token_env: str = "DESK_ROBOT_API_TOKEN"
@@ -158,15 +159,27 @@ class Settings(BaseModel):
             name == "voice_vision_tools_enabled"
             and getattr(self, "voice_vision_tools_enabled", False) is True
         )
+        memory_was_granted = (
+            name == "voice_memory_tools_enabled"
+            and getattr(self, "voice_memory_tools_enabled", False) is True
+        )
         super().__setattr__(name, value)
         if was_granted and not self.voice_vision_tools_enabled:
             # Even an immediate re-enable is a NEW grant; old VLM evidence
             # and in-flight plans must never regain the prior authorization.
             self._camera_consent_generation += 1
+        if memory_was_granted and not self.voice_memory_tools_enabled:
+            # Disabling memory access revokes outstanding asynchronous reads.
+            # The next opt-in is a new grant even without SQLite edits.
+            self._voice_memory_consent_generation += 1
 
     @property
     def camera_consent_generation(self) -> int:
         return self._camera_consent_generation
+
+    @property
+    def voice_memory_consent_generation(self) -> int:
+        return self._voice_memory_consent_generation
 
     def robot(self, robot_id: str) -> RobotConfig:
         for robot in self.robots:

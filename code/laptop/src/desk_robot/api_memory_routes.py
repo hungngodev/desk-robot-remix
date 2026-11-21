@@ -206,6 +206,7 @@ def register_voice_context_route(
             raise HTTPException(404, "Robot not found") from exc
         if not settings.voice_memory_tools_enabled:
             raise HTTPException(403, "Opt in to voice memory retrieval first")
+        memory_consent_generation = settings.voice_memory_consent_generation
         # Capture the current voice turn BEFORE off-thread SQLite lookups.
         # A completed older lookup must not become a new turn's memory cue.
         owner = requested_tool_context(request, robot_id)
@@ -268,7 +269,8 @@ def register_voice_context_route(
         )
         # Each SQLite operation yields to the event loop. A local opt-out
         # during that read invalidates the entire current private tool reply.
-        if not settings.voice_memory_tools_enabled:
+        if (not settings.voice_memory_tools_enabled
+                or settings.voice_memory_consent_generation != memory_consent_generation):
             raise HTTPException(403, "Voice memory consent revoked during read")
         # Camera consent revoked or toggled during either SQLite read.
         # Discard cues collected under the previous live vision permit.
