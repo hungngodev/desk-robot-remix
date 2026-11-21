@@ -29,6 +29,9 @@ speaker_h=4.7;
 fsr_d=12;
 dock_tag_black_square=60;
 dock_mount_spacing=76;
+// Minimum radial print web from M3 bolt bore to any free plate edge.
+// Keeps the provisional hole pitch without claiming dock mount fit.
+dock_tag_edge_web_mm=3;
 // Dimensions above are placeholders until real hardware is measured.
 module oval_slot(l=7,d=2.5,h=5){
   hull(){
@@ -111,7 +114,12 @@ module fsr_jaw_pocket(){
   }
 }
 module dock_tag_backplate(){
-  side=dock_tag_black_square+20;
+  // The 76 mm provisional hole pitch on an 80 mm panel left just 0.325 mm
+  // of plastic outside each 3.35 mm bore. Enlarge the plate instead of
+  // silently changing the unmeasured mounting pattern.
+  assert(dock_tag_edge_web_mm >= 3 && dock_tag_edge_web_mm <= 8);
+  side=max(dock_tag_black_square+20,
+           dock_mount_spacing+m3_clearance_d+2*dock_tag_edge_web_mm);
   difference(){
     union(){
       translate([0,0,1.5]) cube([side,side,3],center=true);
@@ -119,7 +127,9 @@ module dock_tag_backplate(){
     }
     for(x=[-dock_mount_spacing/2,dock_mount_spacing/2],
         y=[-dock_mount_spacing/2,dock_mount_spacing/2])
-      translate([x,y,1.5]) cylinder(h=5,d=m3_clearance_d,center=true);
+      // Bore through the 12 mm rear stiffening rib as well as the plate.
+      // A 5 mm cut left the rear pair plugged above z=4 mm.
+      translate([x,y,6]) cylinder(h=18,d=m3_clearance_d,center=true);
     for(x=[-dock_mount_spacing/4,dock_mount_spacing/4])
       translate([x,-side/2+4,7]) rotate([90,0,0])
         oval_slot(6,m3_clearance_d,12);

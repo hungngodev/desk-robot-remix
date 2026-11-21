@@ -467,3 +467,63 @@ def test_gy530_bracket_does_not_drill_unmeasured_pcb_holes_through_optics():
     assert "for(x=[-tof_pcb_w/2+2,tof_pcb_w/2-2])" not in source
     assert "This is an aperture/angle reference ONLY" in source
     assert 'else if(part=="tof_adjustable")' in source
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+def test_apriltag_backplate_has_printable_mount_web_and_through_bores(tmp_path):
+    """CGAL mesh verifies the four real through holes, including the rear rib.
+
+    The old 80 mm plate with 76 mm hole centers left just 0.325 mm of edge
+    web, and the rear two holes stopped inside a 12 mm reinforcement.
+    """
+    import re
+    from struct import unpack_from
+
+    cad = ROOT / "docs/cad/remixes/one_robot_adapter_kit.scad"
+    source = cad.read_text(encoding="utf-8")
+
+    def scalar(name):
+        match = re.search(
+            r"^" + re.escape(name) + r"\s*=\s*([0-9.]+)\s*;",
+            source, re.M,
+        )
+        assert match is not None, name
+        return float(match.group(1))
+
+    pitch = scalar("dock_mount_spacing")
+    bore = scalar("m3_clearance_d")
+    minimum_web = scalar("dock_tag_edge_web_mm")
+    output = tmp_path / "dock_tag_backplate.stl"
+    subprocess.run(
+        ["openscad", "--export-format", "binstl", "-o", str(output),
+         "-D", 'part="dock_tag_backplate"', str(cad)],
+        check=True, capture_output=True, text=True, timeout=60,
+    )
+    assert module().closed_mesh_edges(output) > 0
+    mesh = output.read_bytes()
+    count = unpack_from("<I", mesh, 80)[0]
+    faces = [
+        tuple(unpack_from("<3f", mesh, 84 + 50 * i + 12 + 12 * j)
+              for j in range(3))
+        for i in range(count)
+    ]
+    xs = [vertex[0] for face in faces for vertex in face]
+    ys = [vertex[1] for face in faces for vertex in face]
+    # Check the exported mesh, not the SCAD author's intended expression.
+    assert (max(xs) - min(xs) - pitch - bore) / 2 >= minimum_web - 0.01
+    assert (max(ys) - min(ys) - pitch - bore) / 2 >= minimum_web - 0.01
+
+    def blocks_vertical_bore(x, y, face):
+        """Does a triangle fill any point on the bolt's centerline?"""
+        (ax, ay, _), (bx, by, _), (cx, cy, _) = face
+        determinant = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy)
+        if abs(determinant) < 1e-8:
+            return False
+        u = ((by - cy) * (x - cx) + (cx - bx) * (y - cy)) / determinant
+        v = ((cy - ay) * (x - cx) + (ax - cx) * (y - cy)) / determinant
+        return min(u, v, 1 - u - v) > 1e-6
+
+    for x in (-pitch / 2, pitch / 2):
+        for y in (-pitch / 2, pitch / 2):
+            assert not any(blocks_vertical_bore(x, y, face)
+                           for face in faces), (x, y)
+
