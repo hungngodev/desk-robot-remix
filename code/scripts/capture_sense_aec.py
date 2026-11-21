@@ -230,8 +230,11 @@ def _create_private(path: Path):
     return os.fdopen(os.open(path, flags, 0o600), "wb")
 
 
-def save_wavs(directory: Path, raw: bytes, report: dict) -> None:
-    mic, ref = split_pcm(raw)
+def preflight_private_destination(directory: Path) -> None:
+    """Reject an unusable recording location before the head captures audio.
+
+    Rechecked after the transfer; O_EXCL/O_NOFOLLOW still protect each write.
+    """
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
     if directory.is_symlink() or stat.S_IMODE(directory.stat().st_mode) & 0o077:
         raise ValueError("AEC capture directory must be private mode 0700")
@@ -239,6 +242,13 @@ def save_wavs(directory: Path, raw: bytes, report: dict) -> None:
              directory / "capture.json"]
     if any(p.exists() or p.is_symlink() for p in paths):
         raise FileExistsError("Private audio trial files already exist")
+
+
+def save_wavs(directory: Path, raw: bytes, report: dict) -> None:
+    preflight_private_destination(directory)
+    mic, ref = split_pcm(raw)
+    paths = [directory / "microphone.wav", directory / "speaker_reference.wav",
+             directory / "capture.json"]
     written = []
     try:
         for path, pcm in zip(paths[:2], (mic, ref), strict=True):
@@ -273,6 +283,10 @@ def main() -> int:
     token = os.environ.get(args.token_env, "")
     if len(token) < 24:
         parser.error("Missing valid private device token")
+    # No capture of private microphone PCM when the destination already fails.
+    # This is a preflight only; save_wavs rechecks against concurrent changes.
+    head_address(args.head_url)
+    preflight_private_destination(args.output_dir)
     # Disable proxies AND redirects. urllib's default redirect handler can
     # carry Authorization from a private robot URL to an unrelated origin.
     opener = urllib.request.build_opener(

@@ -269,3 +269,41 @@ def test_capture_main_installs_no_redirect_handler():
     """The guarded opener must be used by the real user facing CLI."""
     source = SOURCE.read_text()
     assert "urllib.request.ProxyHandler({}), NoRedirect()" in source
+
+def test_destination_preflight_rejects_existing_audio_and_public_directory(tmp_path):
+    private = tmp_path / "private"
+    capture.preflight_private_destination(private)
+    assert stat.S_IMODE(private.stat().st_mode) == 0o700
+    (private / "microphone.wav").write_bytes(b"existing private audio")
+    with pytest.raises(FileExistsError):
+        capture.preflight_private_destination(private)
+    assert (private / "microphone.wav").read_bytes() == b"existing private audio"
+
+    public = tmp_path / "public"
+    public.mkdir(mode=0o755)
+    public.chmod(0o755)
+    with pytest.raises(ValueError, match="private mode"):
+        capture.preflight_private_destination(public)
+
+
+def test_cli_refuses_unwritable_destination_before_audio_capture(
+    tmp_path, monkeypatch,
+):
+    import sys
+
+    folder = tmp_path / "recordings"
+    folder.mkdir(mode=0o700)
+    (folder / "speaker_reference.wav").write_bytes(b"previous sample")
+    monkeypatch.setenv("DESK_CAPTURE_TOKEN", "x" * 32)
+    monkeypatch.setattr(sys, "argv", [
+        "capture_sense_aec.py", "--head-url", "http://192.168.1.23:8081",
+        "--robot-id", "robot-01", "--token-env", "DESK_CAPTURE_TOKEN",
+        "--output-dir", str(folder), "--i-consent-to-private-raw-audio",
+    ])
+
+    def forbidden_capture(*args, **kwargs):
+        raise AssertionError("Never start a microphone capture for unusable output")
+    monkeypatch.setattr(capture, "capture_head", forbidden_capture)
+    with pytest.raises(FileExistsError):
+        capture.main()
+    assert (folder / "speaker_reference.wav").read_bytes() == b"previous sample"
