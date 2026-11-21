@@ -2634,6 +2634,16 @@ class PetController:
         state = self.states[robot_id]
         robot = self.settings.robot(robot_id)
         scheduled_activity = change.kind == _ACTIVITY_RECONSIDERATION_KIND
+        # A private core preference or episode can change during SQLite
+        # retrieval, slow reasoning or even speech synthesis. The operator
+        # route invalidates this one pet's memory revision on each real edit.
+        memory_revisions = getattr(
+            self.conversation, "_private_memory_generation", {}
+        )
+        memory_revision = (
+            memory_revisions.get(robot_id, 0)
+            if isinstance(memory_revisions, dict) else None
+        )
 
         def newer_human_turn() -> bool:
             # A short VAD can start AND finish during slow model/memory work.
@@ -2648,6 +2658,21 @@ class PetController:
                 return
             (recent_memory, context, private_memory_allowed,
              live_context_used, room_context_used) = gathered
+
+            def private_memory_current() -> bool:
+                revisions = getattr(
+                    self.conversation, "_private_memory_generation", None
+                )
+                return (
+                    not private_memory_allowed or memory_revision is None
+                    or (isinstance(revisions, dict)
+                        and revisions.get(robot_id, 0) == memory_revision)
+                )
+
+            if not private_memory_current():
+                state.suppressed += 1
+                state.last_initiative_suppression = "private_memory_revised"
+                return
             # A social turn is NOT five independent agents speaking at once.
             # Reuse Conversation.run: one exclusive Xiaozhi speech lease,
             # each pet's own persona, two bounded turns and per-pet memory.
@@ -2671,6 +2696,7 @@ class PetController:
                     not self._closed and self.voice_monitor_ready
                     and state.enabled and not state.quiet
                     and state.generation == generation
+                    and private_memory_current()
                     and (not private_memory_allowed
                          or self.settings.voice_memory_tools_enabled)
                     and (not live_context_used
@@ -2731,6 +2757,10 @@ class PetController:
                 state.suppressed += 1
                 state.last_initiative_suppression = "event_expired_during_reasoning"
                 return
+            if not private_memory_current():
+                state.suppressed += 1
+                state.last_initiative_suppression = "private_memory_revised"
+                return
             if not self.voice_monitor_ready:
                 state.suppressed += 1
                 state.last_initiative_suppression = "voice_monitor_unavailable"
@@ -2771,6 +2801,7 @@ class PetController:
                     not self._closed and self.voice_monitor_ready
                     and state.enabled and not state.quiet
                     and state.generation == generation
+                    and private_memory_current()
                     and (not private_memory_allowed
                          or self.settings.voice_memory_tools_enabled)
                     and (not live_context_used

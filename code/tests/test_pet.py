@@ -3060,6 +3060,71 @@ async def test_proactive_private_consent_revocation_never_reaches_speaker(
         await pet.close()
 
 
+
+@pytest.mark.parametrize("stage", ["memory_read", "model_reasoning"])
+async def test_proactive_operator_memory_edit_never_speaks_old_core_preference(
+    fleet, tmp_path, stage,
+):
+    """Private core edits supersede a pet's in-flight unsolicited speech."""
+    import threading
+
+    fleet.mode = "hardware"
+    fleet.voice_memory_tools_enabled = True
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    assert memory.set_core_fact("robot-01", "favorite_game", "old chess")
+    entered, release = threading.Event(), threading.Event()
+    if stage == "memory_read":
+        original_recent = memory.recent
+
+        def blocked_recent(*args, **kwargs):
+            entered.set()
+            assert release.wait(timeout=3)
+            return original_recent(*args, **kwargs)
+
+        memory.recent = blocked_recent
+
+    class Chat:
+        async def reply(self, history):
+            if stage == "memory_read":
+                raise AssertionError("A revised preference reached the model")
+            assert "old chess" in str(history)
+            entered.set()
+            assert await asyncio.to_thread(release.wait, 3)
+            return "I still prefer the old game."
+
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, Chat(), speaker, memory=memory)
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(), speech_cooldown=0,
+    )
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 91
+    task = asyncio.create_task(pet._speak(
+        "robot-01", SceneChange("key", "A key moved", 0.96),
+        91, offered_at=time.monotonic(),
+    ))
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        # This is the actual operator route's durable edit plus its revision
+        # invalidation, not a global cancellation of other robot memories.
+        assert memory.set_core_fact("robot-01", "favorite_game", "new puzzles")
+        conversation.invalidate_private_memory("robot-01")
+        release.set()
+        await asyncio.wait_for(task, timeout=3)
+        assert speaker.spoken == []
+        assert state.spoken == 0
+        assert state.last_error is None
+        assert state.last_initiative_suppression == "private_memory_revised"
+        assert memory.core_facts("robot-01")[0].value == "new puzzles"
+    finally:
+        release.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        state.enabled = False
+        await pet.close()
+
+
 @pytest.mark.parametrize("opt_in", [False, True])
 async def test_proactive_hardware_voice_never_reads_private_history_without_opt_in(
     fleet, tmp_path, opt_in,
