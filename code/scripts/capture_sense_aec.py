@@ -241,13 +241,14 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
         # This best-effort device abort is scoped to the START generation:
         # it must not destroy a later calibration trial.
         try:
-            _abort_capture(opener, base, token, generation)
+            _abort_capture(opener, base, token, robot_id, generation)
         except Exception:
             pass  # The independent 12-second head expiry remains authoritative.
         raise
 
 
-def _abort_capture(opener, base: str, token: str, generation: int) -> None:
+def _abort_capture(opener, base: str, token: str, robot_id: str,
+                   generation: int) -> None:
     """Cancel only this authenticated bench generation after an exception."""
     request = urllib.request.Request(
         base + "/api/audio.capture.abort", data=b"", method="POST",
@@ -262,6 +263,7 @@ def _abort_capture(opener, base: str, token: str, generation: int) -> None:
             raise RuntimeError("Sense PCM ABORT unconfirmed")
         result = json.loads(response.read(1024))
     if (type(result) is not dict or result.get("ok") is not True
+            or result.get("robot_id") != robot_id
             or result.get("reply") != "Private bench PCM capture aborted"):
         raise RuntimeError("Sense PCM ABORT identity unconfirmed")
 
