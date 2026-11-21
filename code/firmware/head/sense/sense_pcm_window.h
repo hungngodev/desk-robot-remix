@@ -18,6 +18,11 @@ class SensePcmWindow {
   static constexpr std::uint32_t kFrames = 4 * kSampleRate;
   static constexpr std::size_t kBytes =
       std::size_t{kFrames} * kChannels * sizeof(std::int16_t);
+  // Timestamp validation for the *calibration recording*, not a runtime
+  // microphone latency budget. Large stalled reads distort acoustic lag
+  // even if 64,000 PCM samples eventually arrive in the output buffer.
+  static constexpr std::int64_t kMaxCallbackJitterUs = 40'000;
+  static constexpr std::int64_t kMaxWindowDriftUs = 80'000;
 
   struct Complete {
     std::int16_t* interleaved = nullptr;
@@ -47,7 +52,10 @@ class SensePcmWindow {
         !reference_valid || end_us <= requested_us_ ||
         end_us - requested_us_ > 6'000'000 ||
         (last_sample_us_ != 0 &&
-         (end_us <= last_sample_us_ || end_us - last_sample_us_ > 250'000)) ||
+         (end_us <= last_sample_us_ ||
+          end_us - last_sample_us_ >
+              std::int64_t{frames} * 1'000'000 / kSampleRate +
+                  kMaxCallbackJitterUs)) ||
         (last_sample_us_ == 0 && end_us - requested_us_ > 500'000)) {
       failed_ = true;
       return;
@@ -75,7 +83,19 @@ class SensePcmWindow {
     }
     received_ += accepted;
     last_sample_us_ = accepted_end_us;
-    if (received_ == kFrames) ready_ = true;
+    if (received_ == kFrames) {
+      // A full byte count does not prove an uninterrupted four seconds.
+      // Short missing intervals can each fit the per-read jitter budget,
+      // while collectively making the source capture unreliable.
+      const auto elapsed = last_sample_us_ - first_sample_us_;
+      const auto expected = std::int64_t{kFrames} * 1'000'000 / kSampleRate;
+      if (elapsed < expected - kMaxWindowDriftUs ||
+          elapsed > expected + kMaxWindowDriftUs) {
+        failed_ = true;
+      } else {
+        ready_ = true;
+      }
+    }
   }
 
   bool ready() const noexcept { return ready_ && !failed_; }
