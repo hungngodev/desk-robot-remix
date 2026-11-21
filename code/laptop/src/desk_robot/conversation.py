@@ -688,21 +688,42 @@ class Conversation:
                     if isinstance(jobs, dict) else []
                 )
                 timeline = []
-                if (self.multimodal is not None
-                        and self.settings.voice_vision_tools_enabled):
-                    timeline = self.multimodal.hub.interaction_timeline(
-                        robot_id, time.monotonic(), limit=10 - len(activity)
-                    )
-                    if not self.settings.room_station_context_enabled:
-                        timeline = [
-                            item for item in timeline
-                            if item.get("channel") != "room_station"
-                        ]
-                    elif any(
-                        item.get("channel") == "room_station"
-                        for item in timeline
-                    ):
-                        room_context_used = True
+                if self.multimodal is not None:
+                    remaining = max(0, 10 - len(activity))
+                    if remaining:
+                        live_media_allowed = (
+                            self.settings.mode != "hardware"
+                            or self.settings.voice_vision_tools_enabled
+                        )
+                        raw = self.multimodal.hub.interaction_timeline(
+                            robot_id, time.monotonic(),
+                            limit=remaining if live_media_allowed else 16,
+                        )
+                        if live_media_allowed:
+                            timeline = raw
+                        else:
+                            # Camera opt-out must not erase independent WROOM
+                            # handling or safety evidence, but old ASR, visual
+                            # guesses and tool text remain private.
+                            timeline = [
+                                item for item in raw
+                                if (item.get("channel") == "sensor"
+                                    and item.get("source") == "wroom_event")
+                                or (item.get("channel") == "sensor_history"
+                                    and item.get("source") == "wroom_event_history")
+                                or (item.get("channel") == "room_station"
+                                    and item.get("shared_not_robot_eyewitness") is True)
+                            ][-remaining:]
+                        if not self.settings.room_station_context_enabled:
+                            timeline = [
+                                item for item in timeline
+                                if item.get("channel") != "room_station"
+                            ]
+                        elif any(
+                            item.get("channel") == "room_station"
+                            for item in timeline
+                        ):
+                            room_context_used = True
                 timeline.extend(activity)
                 # A completed recall from a DIFFERENT human turn is not
                 # permission to discuss private facts in an unrelated group
