@@ -933,7 +933,10 @@ def test_frame_hub_speech_adaptive_priority_and_identity():
     assert not hub.frames["robot-01"]
 
 
-def test_speech_floor_requires_real_end_not_a_seven_second_guess():
+def test_speech_floor_requires_real_end_not_a_seven_second_guess(monkeypatch):
+    # Synthetic VAD times must not trip the production future receipt fence
+    # on a newly started CI runner with less than 180 seconds of uptime.
+    monkeypatch.setattr("desk_robot.multimodal.time.monotonic", lambda: 300.0)
     hub = CameraFrameHub(["robot-01", "robot-02"])
     hub.notify("robot-01", "human_voice", 100.0)
     # Long human questions must never free the spontaneous speaker floor.

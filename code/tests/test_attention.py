@@ -113,7 +113,10 @@ def test_sensor_buffer_bounds_and_rejects_untrusted_kinds_and_order():
     assert snapshot["physical_action_verified"] is False
 
 
-def test_listening_does_not_spuriously_mark_speech_played_or_commanded():
+def test_listening_does_not_spuriously_mark_speech_played_or_commanded(monkeypatch):
+    # Synthetic receipts extend to 150s; a fresh CI runner may have less
+    # monotonic uptime. Preserve the production future-clock rejection.
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 300.0)
     ledger = AttentionLedger(["pet"])
     ledger.human_started("pet", 8)
     ledger.human_started("pet", 8)
