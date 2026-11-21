@@ -430,6 +430,14 @@ async def test_private_group_consent_revoked_while_model_thinks_sends_no_audio(
         assert speaker.spoken == []
         assert memory.count("robot-01") == 1
         assert memory.count("robot-02") == 0
+        # No private memory remains copied into the conversation owner after
+        # the operator withdraws the permission that allowed retrieval.
+        assert "Secret cobalt key" not in str(c.histories)
+        assert c.histories == {}
+        assert all(
+            not c.group_activity_timeline(robot_id)[0]["topic"]
+            for robot_id in ("robot-01", "robot-02")
+        )
     finally:
         release.set()
         task.cancel()

@@ -908,11 +908,18 @@ class Conversation:
                         revoked = (
                             (sharing_at_start
                              and not self.settings.fleet_text_sharing_enabled)
+                            or (private_at_start
+                                and not self.settings.voice_memory_tools_enabled)
                             or (visual_at_start
                                 and not self.settings.voice_vision_tools_enabled)
                         )
                         if revoked:
                             record["topic"] = ""
+                            # The model may already have read private SQLite
+                            # facts before consent changed. Retract only the
+                            # volatile prompt copy, never delete the operator's
+                            # durable per-pet memory on a voice sharing opt-out.
+                            self.histories.pop(robot.id, None)
                         if robot.id in attention_tokens:
                             try:
                                 if revoked:
