@@ -22,14 +22,20 @@ def example():
         "dock_id": 1,
         "cad_source_sha256": source["source_sha256"],
         "seat_pair_spacing_mm": 98,
-        "switch_body_width_mm": 10,
-        "switch_body_height_mm": 8,
-        "switch_center_z_mm": 24,
-        "ir_emitter_center_z_mm": 70,
-        "operating_displacement_mm": 1.5,
-        "planned_stop_displacement_mm": 2.0,
-        "safe_total_displacement_mm": 2.5,
-        "required_travel_reserve_mm": 0.2,
+        **{
+            f"{side}_{key}": value
+            for side in ("left", "right")
+            for key, value in {
+                "switch_body_width_mm": 10,
+                "switch_body_height_mm": 8,
+                "switch_center_z_mm": 24,
+                "ir_emitter_center_z_mm": 70,
+                "operating_displacement_mm": 1.5,
+                "planned_stop_displacement_mm": 2.0,
+                "safe_total_displacement_mm": 2.5,
+                "required_travel_reserve_mm": 0.2,
+            }.items()
+        },
     }
 
 
@@ -55,15 +61,15 @@ def test_source_cad_fixture_trial_cannot_approve_physical_dock():
 
 @pytest.mark.parametrize("field,value", [
     ("seat_pair_spacing_mm", 55),
-    ("switch_body_width_mm", 30),
-    ("switch_center_z_mm", 89),
-    ("ir_emitter_center_z_mm", 24),
-    ("ir_emitter_center_z_mm", 110),
-    ("planned_stop_displacement_mm", 2.5),
-    ("required_travel_reserve_mm", 0.6),
-    ("planned_stop_displacement_mm", 1.0),
-    ("planned_stop_displacement_mm", 3.0),
-    ("safe_total_displacement_mm", 1.6),
+    ("left_switch_body_width_mm", 30),
+    ("right_switch_center_z_mm", 89),
+    ("left_ir_emitter_center_z_mm", 24),
+    ("right_ir_emitter_center_z_mm", 110),
+    ("left_planned_stop_displacement_mm", 2.5),
+    ("right_required_travel_reserve_mm", 0.6),
+    ("right_planned_stop_displacement_mm", 1.0),
+    ("left_planned_stop_displacement_mm", 3.0),
+    ("right_safe_total_displacement_mm", 1.6),
 ])
 def test_interference_or_overtravel_is_rejected_on_paper(field, value):
     datum = example()
@@ -76,11 +82,11 @@ def test_interference_or_overtravel_is_rejected_on_paper(field, value):
 @pytest.mark.parametrize("field,value", [
     ("dock_id", 6),
     ("dock_id", True),
-    ("switch_body_height_mm", True),
-    ("switch_body_width_mm", 10**1000),
-    ("switch_body_width_mm", float("nan")),
-    ("switch_center_z_mm", -1),
-    ("switch_center_z_mm", float("inf")),
+    ("left_switch_body_height_mm", True),
+    ("right_switch_body_width_mm", 10**1000),
+    ("left_switch_body_width_mm", float("nan")),
+    ("right_switch_center_z_mm", -1),
+    ("left_switch_center_z_mm", float("inf")),
     ("seat_pair_spacing_mm", None),
 ])
 def test_bad_measured_switch_inputs_fail_closed(field, value):
@@ -112,3 +118,21 @@ def test_printer_source_and_switch_screen_share_real_pocket_width():
     assert g["tag_paper_x_max_mm"] == pytest.approx(98.6)
     assert g["ir_pair_spacing_mm"] == 98
     assert g["ir_hole_radius_mm"] == 2.75
+
+
+def test_independent_right_switch_measurements_cannot_inherit_left_pass():
+    source = load()
+    datum = example()
+    datum["right_switch_body_width_mm"] = 12
+    good = source.screen(datum)
+    assert good["source_only_layout_possible"]
+    assert good["switches"][0]["source_body_x_mm"] == [9.0, 19.0]
+    assert good["switches"][1]["source_body_x_mm"] == [106.0, 118.0]
+    assert all(side["stop_displacement_inside_measured_travel"]
+               for side in good["switches"])
+    datum["right_safe_total_displacement_mm"] = 1.7
+    bad = source.screen(datum)
+    assert bad["switches"][0]["stop_displacement_inside_measured_travel"]
+    assert not bad["switches"][1]["stop_displacement_inside_measured_travel"]
+    assert not bad["source_only_layout_possible"]
+    assert not bad["charging_authorized"]

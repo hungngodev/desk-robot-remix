@@ -116,10 +116,12 @@ With a user-supplied JSON record containing those measured values, run
 `python3 code/scripts/screen_dock_seat_mechanics.py --measurements PATH`
 from the repository root. The JSON must include `dock_id` (1 through 5),
 `cad_source_sha256` of this exact SCAD file, `seat_pair_spacing_mm`,
-`switch_body_width_mm`, `switch_body_height_mm`,
+and **separately for left and right**, each key prefixed `left_` and
+`right_`: `switch_body_width_mm`, `switch_body_height_mm`,
 `switch_center_z_mm`, `ir_emitter_center_z_mm`,
 `operating_displacement_mm`, `planned_stop_displacement_mm`,
-`safe_total_displacement_mm` and `required_travel_reserve_mm`. The measured
+`safe_total_displacement_mm`, and `required_travel_reserve_mm`.
+These are distinct mounted bodies, not one nominally repeated switch. The measured
 travel reserve must fit both after the operating point and before the
 manufacturer's maximum total plunger travel; the program will reject a
 hard stop at the switch's travel limit. The mounted IR aperture must also

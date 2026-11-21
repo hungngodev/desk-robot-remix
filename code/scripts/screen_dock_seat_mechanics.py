@@ -15,11 +15,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CAD = ROOT / "docs/cad/remixes/dock/dock_passive_fit.scad"
-NUMERICS = (
-    "seat_pair_spacing_mm", "switch_body_width_mm", "switch_body_height_mm",
-    "switch_center_z_mm", "ir_emitter_center_z_mm",
-    "operating_displacement_mm", "planned_stop_displacement_mm",
-    "safe_total_displacement_mm", "required_travel_reserve_mm",
+PER_SWITCH_NUMERICS = (
+    "switch_body_width_mm", "switch_body_height_mm", "switch_center_z_mm",
+    "ir_emitter_center_z_mm", "operating_displacement_mm",
+    "planned_stop_displacement_mm", "safe_total_displacement_mm",
+    "required_travel_reserve_mm",
+)
+NUMERICS = ("seat_pair_spacing_mm",) + tuple(
+    f"{side}_{name}" for side in ("left", "right")
+    for name in PER_SWITCH_NUMERICS
 )
 
 
@@ -112,10 +116,13 @@ def screen(measurements: dict, *, cad: Path = CAD) -> dict:
     for side, center_x, emitter_x in zip(
         ("left", "right"), switch_centers, ir_centers, strict=True
     ):
-        x0 = center_x - d["switch_body_width_mm"] / 2
-        x1 = center_x + d["switch_body_width_mm"] / 2
-        z0 = d["switch_center_z_mm"] - d["switch_body_height_mm"] / 2
-        z1 = d["switch_center_z_mm"] + d["switch_body_height_mm"] / 2
+        prefix = side + "_"
+        x0 = center_x - d[prefix + "switch_body_width_mm"] / 2
+        x1 = center_x + d[prefix + "switch_body_width_mm"] / 2
+        z0 = (d[prefix + "switch_center_z_mm"]
+              - d[prefix + "switch_body_height_mm"] / 2)
+        z1 = (d[prefix + "switch_center_z_mm"]
+              + d[prefix + "switch_body_height_mm"] / 2)
         body_inside = (
             x0 >= margin and x1 <= width - margin
             and z0 >= geometry["backstop_min_z_mm"] + margin
@@ -128,10 +135,26 @@ def screen(measurements: dict, *, cad: Path = CAD) -> dict:
         # Minimum 2D distance from emitter hole center to rectangular
         # switch envelope. It is NOT a 3D mount or wire bend verification.
         dx = max(x0 - emitter_x, emitter_x - x1, 0)
-        dz = max(z0 - d["ir_emitter_center_z_mm"],
-                 d["ir_emitter_center_z_mm"] - z1, 0)
+        dz = max(z0 - d[prefix + "ir_emitter_center_z_mm"],
+                 d[prefix + "ir_emitter_center_z_mm"] - z1, 0)
         ir_clear = math.hypot(dx, dz) >= (
             geometry["ir_hole_radius_mm"] + margin
+        )
+        # Each NC switch and IR emitter must be independently measured.
+        # A good left plunger cannot authorize an unmeasured right plunger.
+        actuation = (
+            d[prefix + "operating_displacement_mm"]
+            + d[prefix + "required_travel_reserve_mm"]
+            <= d[prefix + "planned_stop_displacement_mm"]
+            <= d[prefix + "safe_total_displacement_mm"]
+            - d[prefix + "required_travel_reserve_mm"]
+        )
+        emitter_inside = (
+            geometry["backstop_min_z_mm"]
+            + geometry["ir_hole_radius_mm"] + margin
+            <= d[prefix + "ir_emitter_center_z_mm"]
+            <= geometry["backstop_max_z_mm"]
+            - geometry["ir_hole_radius_mm"] - margin
         )
         checks.append({
             "side": side, "source_body_x_mm": [x0, x1],
@@ -139,24 +162,19 @@ def screen(measurements: dict, *, cad: Path = CAD) -> dict:
             "within_backstop_with_2mm_web": body_inside,
             "avoids_apriltag_paper_with_2mm_gap": tag_clear,
             "avoids_nominal_ir_hole_with_2mm_gap": ir_clear,
+            "stop_displacement_inside_measured_travel": actuation,
+            "ir_emitter_aperture_inside_backstop": emitter_inside,
         })
     independent_separation = (
-        d["seat_pair_spacing_mm"] - d["switch_body_width_mm"] >= 2 * margin
+        d["seat_pair_spacing_mm"]
+        - (d["left_switch_body_width_mm"]
+           + d["right_switch_body_width_mm"]) / 2 >= 2 * margin
     )
-    # Vendor total safe travel is a LIMIT, not an acceptable hard stop.
-    # Caller supplies real mechanical/print tolerance from its measured
-    # installed switch: require the reserve on BOTH sides of the operating
-    # threshold and before the maximum total travel.
-    actuation = (
-        d["operating_displacement_mm"] + d["required_travel_reserve_mm"]
-        <= d["planned_stop_displacement_mm"]
-        <= d["safe_total_displacement_mm"] - d["required_travel_reserve_mm"]
+    actuation = all(
+        x["stop_displacement_inside_measured_travel"] for x in checks
     )
-    ir_emitter_within_backstop = (
-        geometry["backstop_min_z_mm"] + geometry["ir_hole_radius_mm"] + margin
-        <= d["ir_emitter_center_z_mm"]
-        <= geometry["backstop_max_z_mm"]
-        - geometry["ir_hole_radius_mm"] - margin
+    ir_emitter_within_backstop = all(
+        x["ir_emitter_aperture_inside_backstop"] for x in checks
     )
     fits = (
         all(c["within_backstop_with_2mm_web"]
