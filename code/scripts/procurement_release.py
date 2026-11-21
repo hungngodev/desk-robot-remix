@@ -1806,7 +1806,9 @@ def main() -> int:
                   file=sys.stderr)
             return 2
         try:
-            from verify_procurement_receipts import audit_release, checkout_sha
+            from verify_procurement_receipts import (
+                audit_release, checkout_sha, verified_required_ci_jobs,
+            )
             checked_sha = checkout_sha()
             # The same generator decision map owns optional station inclusion.
             # Deferred, reviewed shared-room options require no fabricated
@@ -1831,6 +1833,15 @@ def main() -> int:
             if len(failures) > 20:
                 print(f"HOLD: {len(failures) - 20} further evidence failures",
                       file=sys.stderr)
+            return 2
+        # A purchase receipt is not executable-source qualification. The
+        # declared CI run must show all five required exact-revision jobs
+        # completed successfully, not merely a successful workflow headline.
+        if not verified_required_ci_jobs(
+            evidence.get("source_ci_run_url"), checked_sha
+        ):
+            print("HOLD: exact-source Mac, Python, sanitizer, WROOM and Sense "
+                  "CI jobs not all verified successful", file=sys.stderr)
             return 2
         if (not cost["calculation_complete_not_physical_approval"]
                 or args.require_first_robot and not cost["within_prototype_cap"]

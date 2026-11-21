@@ -643,3 +643,69 @@ def test_first_robot_accepts_pinned_stronger_fleet_station_receipt():
                    evidence, SHA, lookup, first_robot=True,
                    deferred_optional_ids=deferred,
                ))
+
+
+def test_purchase_ci_verifies_every_named_job_from_same_exact_run_attempt():
+    run_url = (
+        "https://github.com/hungngodev/desk-robot-remix/actions/runs/12345"
+    )
+    api = "https://api.github.com/repos/hungngodev/desk-robot-remix"
+    run = {
+        "id": 12345, "run_attempt": 2, "head_sha": SHA,
+        "name": "Host verification", "event": "pull_request",
+        "head_branch": "impl/mac-hardware-safety-preflight-2026-11-10",
+        "head_repository": {"full_name": "hungngodev/desk-robot-remix"},
+        "path": ".github/workflows/host-verification.yml",
+        "status": "completed", "conclusion": "success",
+    }
+    jobs = [
+        {
+            "id": index + 1, "name": name, "run_id": 12345,
+            "run_attempt": 2, "head_sha": SHA,
+            "status": "completed", "conclusion": "success",
+        }
+        for index, name in enumerate(sorted(release.REQUIRED_PURCHASE_CI_JOBS))
+    ]
+
+    def check(run_values, job_values, total=None):
+        def lookup_ci(url):
+            if url == api + "/actions/runs/12345":
+                return run_values
+            if url == api + "/actions/runs/12345/jobs?per_page=100":
+                return {
+                    "total_count": len(job_values) if total is None else total,
+                    "jobs": job_values,
+                }
+            raise AssertionError("Unexpected CI API URL: " + url)
+
+        return release.verified_required_ci_jobs(run_url, SHA, lookup_ci)
+
+    assert check(run, jobs)
+    assert not check(run, jobs[:-1])
+    assert not check(run, jobs, total=6)
+    assert not check(run, jobs + [jobs[0]])
+    for field, value in (
+        ("conclusion", "cancelled"), ("conclusion", "failed"),
+        ("conclusion", "skipped"), ("conclusion", None),
+        ("status", "queued"), ("status", "in_progress"),
+        ("run_id", 12346), ("run_attempt", 1),
+        ("head_sha", "b" * 40),
+    ):
+        altered = [{**job} for job in jobs]
+        altered[0][field] = value
+        assert not check(run, altered), field
+    for field, value in (
+        ("conclusion", "cancelled"), ("status", "in_progress"),
+        ("event", "push"), ("head_sha", "b" * 40),
+        ("name", "Unrelated workflow"), ("run_attempt", 1.0),
+        ("path", ".github/workflows/another.yml"),
+        ("id", 12346),
+    ):
+        assert not check({**run, field: value}, jobs), field
+    assert not release.verified_required_ci_jobs(None, SHA, lambda _: run)
+    assert not release.verified_required_ci_jobs(run_url, "b" * 40,
+                                                  lambda _: run)
+    from urllib.error import URLError
+    assert not release.verified_required_ci_jobs(
+        run_url, SHA, lambda _: (_ for _ in ()).throw(URLError("offline"))
+    )

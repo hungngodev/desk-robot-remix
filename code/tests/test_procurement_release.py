@@ -1922,3 +1922,13 @@ def test_default_deferred_shared_station_options_are_reviewed_without_purchase_r
         assert decisions[option]["disposition"] == "deferred_optional"
         assert decisions[option]["parent_role"] == part
         assert room[part]["effective_selected_fleet_total"] == 0
+
+
+def test_strict_purchase_cli_requires_five_successful_exact_ci_jobs():
+    """Do not allow a future refactor to bypass the independently checked run."""
+    import inspect
+
+    source = inspect.getsource(mod.main)
+    assert "verified_required_ci_jobs" in source
+    assert 'evidence.get("source_ci_run_url"), checked_sha' in source
+    assert "if not verified_required_ci_jobs(" in source
