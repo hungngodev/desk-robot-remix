@@ -42,7 +42,8 @@ class HeadHTTP:
 
 
 def fake_read(*, raw=None, boot=7, robot="robot-01", raw_boot=None,
-              frames=64000, ready=True, delay_ms=0, mic_muted=False):
+              frames=64000, ready=True, delay_ms=0, mic_muted=False,
+              last_us=5000000):
     if raw is None:
         raw = struct.pack("<hh", 123, -456) * capture.FRAMES
     header = {
@@ -51,7 +52,7 @@ def fake_read(*, raw=None, boot=7, robot="robot-01", raw_boot=None,
         "X-Desk-Audio-Boot": str(boot if raw_boot is None else raw_boot),
         "X-Desk-Audio-Frames": "64000",
         "X-Desk-Audio-First-Us": "1000000",
-        "X-Desk-Audio-Last-Us": "5000000",
+        "X-Desk-Audio-Last-Us": str(last_us),
     }
     return HeadHTTP([
         Response({
@@ -154,6 +155,21 @@ def test_capture_refuses_device_microphone_mute_before_start():
             http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
         )
     assert len(http.calls) == 1
+
+
+@pytest.mark.parametrize("last_us", [4800000, 5081000, 5500000])
+def test_full_pcm_payload_still_requires_continuous_device_sample_timestamps(last_us):
+    # Four seconds of bytes alone are not evidence of four seconds of audio.
+    http = fake_read(last_us=last_us)
+    with pytest.raises(RuntimeError, match="capture timestamps inconsistent"):
+        capture.capture_head(
+            http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
+            clock=iter([0.0, 0.1]).__next__, pause=lambda _: None,
+        )
+    assert [req[0].split("/")[-1] for req in http.calls] == [
+        "audio.reference", "audio.capture.start",
+        "audio.capture.status", "audio.capture.raw",
+    ]
 
 
 def test_consent_audio_capture_compiled_off_by_default():
