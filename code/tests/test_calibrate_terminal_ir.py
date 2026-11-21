@@ -150,3 +150,57 @@ async def test_capture_rejects_foreign_assigned_dock_at_http_boundary(monkeypatc
         await cal.capture("http://localhost:8765", "S" * 40,
                           "robot-01", "center", 20, .05, 1)
     assert len(calls) == 1
+
+
+def test_cached_one_sided_rmt_frame_does_not_count_twenty_left_optical_votes():
+    """Right-only new frames cannot turn one cached left vote into twenty."""
+    rows = position_records()
+    for i, row in enumerate(rows[:20], 1):
+        row["ir"].update(
+            left_seq=10, right_seq=i,
+            left_valid=True, right_valid=True,
+            left_age_ms=15, right_age_ms=15,
+            match=False, code=0,
+        )
+    for row in rows[20:]:
+        if row["ir"]["right_seq"]:
+            row["ir"]["right_seq"] += 20
+    result = cal.analyze(rows, "robot-01")
+    assert result["positions"]["left"]["left_fresh_count"] == 1
+    assert result["positions"]["left"]["left_fresh_fraction"] == .05
+    assert result["positions"]["left"]["right_fresh_count"] == 20
+    assert result["independent_fresh_minimum_met"] is False
+    assert result["candidate_differential_signal"] is False
+
+
+def test_center_pair_requires_two_independently_advancing_frame_counters():
+    """Matching code with only one advancing side is not a fresh optical pair."""
+    rows = position_records()
+    for row in rows[20:40]:
+        row["ir"]["right_seq"] = 1
+        assert row["ir"]["match"] is True
+    result = cal.analyze(rows, "robot-01")
+    center = result["positions"]["center"]
+    assert center["left_fresh_count"] == 20
+    assert center["right_fresh_count"] == 1
+    assert center["both_matching_count"] == 1
+    assert center["both_matching_fraction"] == .05
+    assert result["candidate_differential_signal"] is False
+
+
+def test_true_32bit_receiver_counter_rollover_is_fresh_optical_evidence():
+    rows = position_records()
+    rows[0]["ir"]["left_seq"] = 0xfffffffe
+    rows[1]["ir"]["left_seq"] = 0xffffffff
+    rows[2]["ir"]["left_seq"] = 1
+    result = cal.analyze(rows, "robot-01")
+    assert result["positions"]["left"]["left_fresh_count"] == 20
+    assert result["independent_fresh_minimum_met"] is True
+    assert result["candidate_differential_signal"] is True
+
+
+def test_rebooted_receiver_counter_still_requires_restart_of_trial():
+    rows = position_records()
+    rows[1]["ir"]["left_seq"] = 0xffffffff
+    with pytest.raises(ValueError, match="Reboot or out-of-order"):
+        cal.analyze(rows, "robot-01")

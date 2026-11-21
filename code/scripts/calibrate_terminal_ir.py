@@ -25,7 +25,7 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
     if not robot_id or not 10 <= min_per_position <= 500:
         raise ValueError("Invalid robot ID or minimum real sample count")
     data: dict[str, list[dict]] = {name: [] for name in LABELS}
-    previous = (0, 0)
+    previous: tuple[int, int] | None = None
     last_at = -1.0
     for row in rows:
         if not isinstance(row, dict) or row.get("label") not in LABELS:
@@ -37,31 +37,60 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
             raise ValueError("Strictly increasing recorded receive timestamps required")
         last_at = stamp
         sequences = (reading["left_seq"], reading["right_seq"])
-        if any(after < before for after, before in zip(sequences, previous, strict=True)):
-            raise ValueError("Reboot or out-of-order receiver sequences: restart trial")
-        if sequences == previous and any(reading[f"{side}_valid"] for side in ("left", "right")):
-            # A repeated HTTP status cannot count as a fresh optical sample.
-            raise ValueError("Replayed receiver counter with claimed new optical evidence")
+        if previous is None:
+            advances = (sequences[0] > 0, sequences[1] > 0)
+        else:
+            # Independent RMT receiver counters are not a pairwise clock.
+            # One side advancing cannot refresh the other cached side.
+            # Modulo arithmetic permits true unsigned 32-bit counter wrap.
+            deltas = tuple(
+                (after - before) & 0xffffffff
+                for after, before in zip(sequences, previous, strict=True)
+            )
+            if any(delta >= 0x80000000 for delta in deltas):
+                raise ValueError("Reboot or out-of-order receiver sequences: restart trial")
+            advances = tuple(delta > 0 for delta in deltas)
+            if not any(advances) and any(
+                reading[f"{side}_valid"] for side in ("left", "right")
+            ):
+                raise ValueError("Replayed receiver counter with claimed new optical evidence")
         previous = sequences
-        data[row["label"]].append(reading)
+        left_new = reading["left_valid"] and advances[0]
+        right_new = reading["right_valid"] and advances[1]
+        data[row["label"]].append({
+            "left_new": left_new,
+            "right_new": right_new,
+            "pair_new": left_new and right_new and reading["match"],
+        })
     if any(len(samples) < min_per_position for samples in data.values()):
         raise ValueError("Need independently labeled real observations for all 3 positions")
     summary = {}
     for label, readings in data.items():
         length = len(readings)
+        left_fresh = sum(x["left_new"] for x in readings)
+        right_fresh = sum(x["right_new"] for x in readings)
+        pair_fresh = sum(x["pair_new"] for x in readings)
         summary[label] = {
             "records": length,
-            "left_fresh_fraction": round(sum(x["left_valid"] for x in readings) / length, 3),
-            "right_fresh_fraction": round(sum(x["right_valid"] for x in readings) / length, 3),
-            "both_matching_fraction": round(sum(x["match"] for x in readings) / length, 3),
+            "left_fresh_count": left_fresh,
+            "right_fresh_count": right_fresh,
+            "both_matching_count": pair_fresh,
+            "left_fresh_fraction": round(left_fresh / length, 3),
+            "right_fresh_fraction": round(right_fresh / length, 3),
+            "both_matching_fraction": round(pair_fresh / length, 3),
         }
     left = summary["left"]
     center = summary["center"]
     right = summary["right"]
-    # A candidate differential pattern must be backed by real repeated
-    # optical observations, never a single supposedly accurate camera frame.
+    # The minimum is independent optical acquisitions, not HTTP polls.
+    enough_fresh = (
+        left["left_fresh_count"] >= min_per_position
+        and center["both_matching_count"] >= min_per_position
+        and right["right_fresh_count"] >= min_per_position
+    )
     separates = (
-        left["left_fresh_fraction"] > left["right_fresh_fraction"] + .25
+        enough_fresh
+        and left["left_fresh_fraction"] > left["right_fresh_fraction"] + .25
         and right["right_fresh_fraction"] > right["left_fresh_fraction"] + .25
         and center["both_matching_fraction"] >= .50
         and center["left_fresh_fraction"] >= .50
@@ -70,6 +99,7 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
     return {
         "robot_id": robot_id, "positions": summary,
         "observations_total": len(rows),
+        "independent_fresh_minimum_met": enough_fresh,
         "candidate_differential_signal": separates,
         "requires_human_optical_baffle_and_receiver_trial": True,
         "absolute_bearing_calibrated": False,
