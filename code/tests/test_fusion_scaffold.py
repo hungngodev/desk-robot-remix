@@ -29,11 +29,25 @@ def test_fusion_source_manifest_is_complete_and_not_a_fake_assembly():
     )
     assert len(manifest) == len(source.SOURCE_MESHES) + generated
     assert all(path.is_file() for _, path in manifest)
-    script = SCRIPT.read_text()
-    assert "MillimeterMeshUnit" in script
-    assert "DirectDesignType" in script
-    assert "occurrences.addNewComponent" in script
-    assert "Interference" in script
+    # The legacy entrypoint delegates to ONE canonical Fusion implementation.
+    # Test the real mesh importer rather than demanding duplicate API code
+    # inside the compatibility wrapper.
+    wrapper = SCRIPT.read_text(encoding="utf-8")
+    implementation = SCRIPT.with_name("fusion_one_robot_scaffold.py").read_text(
+        encoding="utf-8"
+    )
+    canonical = source._load()
+    assert "fusion_one_robot_scaffold.py" in wrapper
+    assert 'return _load()["run"](context)' in wrapper
+    assert source.SOURCE_MESHES == canonical["SOURCE_MESHES"]
+    assert source.ADAPTER_NAMES == canonical["ADAPTER_NAMES"]
+    assert "verify_optional_fit_references(repo)" in implementation
+    assert "MillimeterMeshUnit" in implementation
+    assert "DirectDesignType" in implementation
+    assert "occurrences.addNewComponent" in implementation
+    assert "Inspect > Interference" in (
+        ROOT / "docs/cad/FUSION_ONE_ROBOT_ASSEMBLY.md"
+    ).read_text(encoding="utf-8")
 
 
 def test_mechanical_sheet_never_approves_premium_ranger_or_mismatched_pack():
@@ -46,8 +60,12 @@ def test_mechanical_sheet_never_approves_premium_ranger_or_mismatched_pack():
     )
     assert "VL53L0X GY-530" in sheet
     assert "VL53L4CD" not in sheet
-    # 86 mm provisional protected pack is NOT proof of fit in the
-    # 68 mm default gauge; the documents must preserve that blocker.
-    assert "power_l = 68;" in gauge
-    assert "86 mm" in sheet and "68" in sheet
-    assert "does not fit" in sheet
+    # The former 68 mm coupon could not hold the candidate 86 mm pack
+    # body. We now reject that undersize, while NEVER claiming full power
+    # assembly fit, lead bend, safe charging or mounting qualification.
+    assert "candidate_pack_body_l_mm = 86;" in gauge
+    assert "power_l = 86;" in gauge
+    assert "power_l >= candidate_pack_body_l_mm" in gauge
+    assert "86 mm" in sheet and "68 mm" in sheet
+    assert "undersized" in sheet
+    assert "unqualified" in sheet

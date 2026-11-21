@@ -29,7 +29,11 @@ def test_exact_source_bracket_lens_is_below_minimum_if_mount_flush_to_desk():
     assert source["firmware_valid_max_mm"] == 1300
     assert source["manufacturer_system_fov_deg"] == 25.0
     low = evaluate()
-    assert low["nominal_optical_floor_path_mm"] == 13.5
+    # Source and evaluated geometry must agree; reject a stale 18 mm PCB
+    # assumption without weakening the 30 mm sensor-validity gate.
+    assert low["nominal_optical_floor_path_mm"] == source[
+        "lens_center_above_adapter_mount_mm"
+    ]
     assert not low["nominal_floor_in_firmware_valid_range"]
     assert not low["candidate_geometry_possible_on_paper"]
     assert not low["40_sensor_fleet_purchase_approved"]
@@ -154,7 +158,7 @@ def test_forward_2d_contact_coverage_uses_st_25_degree_optical_rear_setback():
 
 
 def test_planar_lead_cannot_pass_if_floor_is_below_sensor_minimum_range():
-    # With a flush adapter the 13.5 mm lens height is BELOW firmware's
+    # With a flush adapter the 11.15 mm lens height is BELOW firmware's
     # 30 mm VL53L0X acceptance minimum. Large forward sensor lead must not
     # make a motion geometry report pass when no floor sample is accepted.
     result = planar(chassis_mount_above_desk_mm=0.0)

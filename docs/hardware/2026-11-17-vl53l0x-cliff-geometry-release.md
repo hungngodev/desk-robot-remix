@@ -15,15 +15,15 @@ a reliable cliff sample.
 ## Actual bracket geometry, not a guessed chassis clearance
 
 Current `docs/cad/remixes/one_robot_adapter_kit.scad` has:
-* `tof_pcb_h = 18` mm
+* `tof_pcb_h = 13.3` mm (candidate carrier outline, not a measured lens offset)
 * `face_z = tof_pcb_h + 7` mm
-* lens opening center at `face_z / 2 + 1`, **13.5 mm above
-  the printed adapter mounting plane**
+* lens opening center at `face_z / 2 + 1`, **11.15 mm above
+  the printed adapter mounting plane**, calculated from provisional CAD
 
-Thus a flush desk mount has only **13.5 mm** floor optical path, **below
-the production driver minimum 30 mm**. A chassis mounting plane 20 mm
-above the desk produces **33.5 mm** vertical optical path, barely inside
-the source valid range on paper. It needs real margin and surface testing
+Thus a flush desk mount has only **11.15 mm** nominal vertical optical
+path, **below the production driver minimum 30 mm**. A chassis mounting
+plane 20 mm above the desk produces **31.15 mm** nominal vertical optical
+path, only 1.15 mm beyond the driver validity threshold on paper. It needs real margin and surface testing
 rather than being accepted as universal. Physical mounting height, actual
 lens position, optical direction and the chosen wheel/chassis are still
 unmeasured.
@@ -59,17 +59,17 @@ rejects tilt where the cone reaches the horizon. It deliberately gives no
 extra braking credit for a forward tilted optical axis.
 
 **Specific prior false positive:** with mount 20 mm above desk and current
-13.5 mm adapter optical center, height is 33.5 mm. ST's 25 degree FoV
-leaves `33.5 * tan(12.5 degrees) = 7.43 mm` of potential rearward floor
+11.15 mm adapter optical center, height is 31.15 mm. ST's 25 degree FoV
+leaves `31.15 * tan(12.5 degrees) = 6.91 mm` of potential rearward floor
 reflection. At speed 100 mm/s, assumed 80 ms sensor latency, 10 mm illustrative worst observed loaded stopping and 10 mm reserve, the required clearance is 28 mm **plus
-7.43 mm**. A 32 mm ahead-of-wheel sensor looks safe under the previous
-point-ray equation, but has just 24.57 mm effective lead and is now
+6.91 mm**. A 32 mm ahead-of-wheel sensor looks safe under the previous
+point-ray equation, but has just 25.09 mm effective lead and is now
 correctly rejected by both the geometry code and committed regressions.
 
 **November 17 fail-closed source corrections:** The planar four-floor-sensor
 swept-contact check now requires the complete nominal FoV floor return path
 to be inside the existing 30..1300 mm firmware range. In particular, a flush
-adapter at only 13.5 mm optical height may have ample geometric wheel lead
+adapter at only 11.15 mm nominal optical height may have ample geometric wheel lead
 while yielding NO acceptable floor data; it must fail both criteria. The
 forward `evaluate()` function no longer lets a p95-only stopping number
 authorize a desk-edge geometry: the separate worst observed loaded stop
