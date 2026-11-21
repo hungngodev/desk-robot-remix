@@ -547,6 +547,48 @@ def test_private_aec_capture_rejects_directory_symlink_swap_during_wav_write(
     assert list(retired.iterdir()) == []
 
 
+def test_private_aec_capture_rejects_another_private_inode_after_preflight(
+    tmp_path, monkeypatch,
+):
+    """A replacement 0700 directory is not the originally authorized output."""
+    private = tmp_path / "private"
+    moved = tmp_path / "moved"
+    private.mkdir(mode=0o700)
+    original_preflight = capture.preflight_private_destination
+
+    def replace_after_preflight(directory):
+        identity = original_preflight(directory)
+        private.rename(moved)
+        private.mkdir(mode=0o700)
+        return identity
+
+    monkeypatch.setattr(
+        capture, "preflight_private_destination", replace_after_preflight,
+    )
+    with pytest.raises(ValueError, match="directory changed during write"):
+        capture.save_wavs(
+            private, bytes(capture.BYTES), {"robot_id": "robot-01"},
+        )
+    assert list(private.iterdir()) == []
+    assert list(moved.iterdir()) == []
+
+
+def test_private_aec_capture_rechecks_directory_approved_before_head_transfer(tmp_path):
+    """A path retargeted during the four-second recording cannot receive PCM."""
+    private = tmp_path / "private"
+    moved = tmp_path / "moved"
+    approved = capture.preflight_private_destination(private)
+    private.rename(moved)
+    private.mkdir(mode=0o700)
+    with pytest.raises(ValueError, match="directory changed during write"):
+        capture.save_wavs(
+            private, bytes(capture.BYTES), {"robot_id": "robot-01"},
+            expected_directory_identity=approved,
+        )
+    assert list(private.iterdir()) == []
+    assert list(moved.iterdir()) == []
+
+
 def test_destination_preflight_rejects_existing_audio_and_public_directory(tmp_path):
     private = tmp_path / "private"
     capture.preflight_private_destination(private)
