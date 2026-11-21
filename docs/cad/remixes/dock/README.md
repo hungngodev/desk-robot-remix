@@ -69,3 +69,37 @@ pet and screw fit before adapting the final backstop. This coupon has
 no emitter electronics, mounting authority, charging contacts or power.
 Its exported source and watertight mesh are checked by the regular
 `export_fit_kit.py` route.
+
+
+## Source checked, print scale accurate AprilTag paper
+
+The dock vision consumer uses OpenCV's **AprilTag 36h11** dictionary and
+the same explicit marker ID in the per robot camera calibration.
+Do not draw an arbitrary QR pattern or use printer "fit to page" scaling.
+Generate a true vector tag directly from the pinned OpenCV dictionary:
+
+\`\`\`sh
+cd code
+uv sync --extra vision
+python3 scripts/generate_dock_tag.py --dock-id 1 --marker-id 12 \
+  --output ../docs/cad/remixes/dock/tag_dock01_id12.svg
+python3 scripts/generate_dock_tag.py --dock-id 1 --marker-id 12 \
+  --output ../docs/cad/remixes/dock/tag_dock01_id12.svg --verify
+\`\`\`
+
+ID 12 is an **example**, not a chosen real dock assignment. Configure the
+actual robot's \`DockCalibration.marker_id\` to the chosen printed number.
+Each independent dock must use a distinct documented marker number.
+The tool reads the active SCAD dimensions, prints exactly **60 mm** of
+8 by 8 tag modules with a **5 mm white quiet margin on every side**,
+and records the SCAD SHA256 inside the invisible SVG description.
+The resulting **70 mm** paper art fits the nominal **71.2 mm** registration
+pocket, leaving **0.6 mm** slack per side. It never adds a label in
+the white quiet margin. Put a human dock ID label outside that border.
+
+Print SVG at **100 percent actual size**, measure the real outer black
+square with a ruler or calipers, verify it remains 60 mm after printing,
+then confirm the camera's real fitted pose with checkerboard calibration.
+The SVG byte verifier does **not** measure printed paper, certify camera
+pose, command autonomous docking, verify either independent seat switch,
+or authorize any contact charging.
