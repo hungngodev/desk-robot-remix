@@ -4356,7 +4356,9 @@ async def test_opt_in_sensor_event_invites_one_peer_without_extra_audio_owner(
         event = SceneChange("nfc_tag", "My toy NFC tag 12345678 arrived", 1.0)
         await pet._store_observation("robot-01", event)
         pet._consider_speech("robot-01", event, 2)
-        await wait_for(lambda: pet.states["robot-01"].spoken == 1)
+        await wait_for(lambda: (
+            pet.states["robot-02"].spoken == 1 and pet._speech_task is None
+        ))
         assert speaker.spoken == [
             ("robot-01", "A new object! That looks interesting."),
             ("robot-02", "A new object! That looks interesting."),
