@@ -3927,6 +3927,9 @@ async def test_failed_or_cancelled_face_post_does_not_consume_mood_cooldown(flee
 
     head.failure = None
     await pet._cue_decided_face(robot.id, "happy", lambda: True)
+    assert head.calls == ["mood:thinking"]  # repeated offline request throttled
+    state.last_model_face_attempt_at = float("-inf")
+    await pet._cue_decided_face(robot.id, "happy", lambda: True)
     assert head.calls == ["mood:thinking", "mood:happy"]
     assert state.last_model_face_cue_at > float("-inf")
     await pet._cue_decided_face(robot.id, "surprised", lambda: True)
@@ -3938,6 +3941,9 @@ async def test_failed_or_cancelled_face_post_does_not_consume_mood_cooldown(flee
         await pet._cue_decided_face(robot.id, "surprised", lambda: True)
     assert state.last_model_face_cue_at == float("-inf")
     head.failure = None
+    await pet._cue_decided_face(robot.id, "neutral", lambda: True)
+    assert head.calls[-1] == "mood:surprised"  # cancellation throttled too
+    state.last_model_face_attempt_at = float("-inf")
     await pet._cue_decided_face(robot.id, "neutral", lambda: True)
     assert head.calls[-1] == "mood:neutral"
 
@@ -5240,17 +5246,24 @@ async def test_person_face_failed_or_cancelled_head_ack_retries_without_stale_cu
 
     head.failure = None
     await pet._cue_person_face(robot.id, change, 1, observed_at, 4)
+    assert head.calls == ["person_detected"]  # retry is bounded
+    state.last_person_face_attempt_at = float("-inf")
+    await pet._cue_person_face(robot.id, change, 1, observed_at, 4)
     await pet._cue_person_face(robot.id, change, 1, observed_at, 4)
     assert head.calls == ["person_detected", "person_detected"]
     assert state.last_person_face_cue_at > float("-inf")
 
     state.last_person_face_cue_at = float("-inf")
+    state.last_person_face_attempt_at = float("-inf")
     head.failure = asyncio.CancelledError()
     with pytest.raises(asyncio.CancelledError):
         await pet._cue_person_face(robot.id, change, 1, observed_at, 4)
     assert state.last_person_face_cue_at == float("-inf")
 
     head.failure = None
+    await pet._cue_person_face(robot.id, change, 1, observed_at, 4)
+    assert len(head.calls) == 3  # no hammering after cancelled HTTP
+    state.last_person_face_attempt_at = float("-inf")
     await pet._cue_person_face(robot.id, change, 1, observed_at, 4)
     assert head.calls[-1] == "person_detected"
     assert len(head.calls) == 4

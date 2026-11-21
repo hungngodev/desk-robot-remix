@@ -115,8 +115,10 @@ class PetState:
     stale_camera_events: int = 0
     last_event: str | None = None
     last_scene_frame_at: float | None = None  # latest processed Mac receipt, this robot only
-    last_person_face_cue_at: float = -math.inf  # cosmetic cue cooldown, not speech
-    last_model_face_cue_at: float = -math.inf  # contextual visual cue, not an actuator
+    last_person_face_cue_at: float = -math.inf  # successful visual ACK cooldown
+    last_person_face_attempt_at: float = -math.inf  # bounded offline retries
+    last_model_face_cue_at: float = -math.inf  # successful model mood ACK cooldown
+    last_model_face_attempt_at: float = -math.inf  # bounded offline retries
     last_hub_generation: int | None = None  # rejects cross-reconnect scene inference
     last_error: str | None = None
     last_touch_count: int | None = None
@@ -1778,12 +1780,14 @@ class PetController:
                 or self._vision_preemption_epoch != preemption_epoch
                 or self._human_active_in_fleet(now)
                 or now - captured_at > self.max_observation_age
-                or now - state.last_person_face_cue_at < 10.0):
+                or now - state.last_person_face_cue_at < 10.0
+                or now - state.last_person_face_attempt_at < 2.0):
             return
         cue = getattr(self.heads.get(robot_id), "face_event", None)
         if not callable(cue):
             return
         previous = state.last_person_face_cue_at
+        state.last_person_face_attempt_at = now
         state.last_person_face_cue_at = now
         acknowledged = False
         try:
@@ -1813,12 +1817,14 @@ class PetController:
             return
         state = self.states[robot_id]
         now = time.monotonic()
-        if now - state.last_model_face_cue_at < 4.0:
+        if (now - state.last_model_face_cue_at < 4.0
+                or now - state.last_model_face_attempt_at < 1.0):
             return
         cue = getattr(self.heads.get(robot_id), "face_event", None)
         if not callable(cue):
             return
         previous = state.last_model_face_cue_at
+        state.last_model_face_attempt_at = now
         state.last_model_face_cue_at = now
         acknowledged = False
         try:
