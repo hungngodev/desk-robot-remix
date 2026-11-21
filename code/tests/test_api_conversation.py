@@ -681,6 +681,85 @@ async def test_group_memory_regrant_while_speaker_waits_drops_untransmitted_text
         await asyncio.gather(task, return_exceptions=True)
 
 
+async def test_group_sharing_regrant_during_model_must_not_relay_old_words(
+    settings,
+):
+    """Rapid OFF/ON cannot make a private peer session current again."""
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    initial = settings.fleet_sharing_consent_generation
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class Chat:
+        async def reply(self, history):
+            entered.set()
+            await release.wait()
+            return "Private cross-pet speech from an old sharing grant."
+
+    speaker = SimulatedSpeaker()
+    conv = Conversation(settings, Chat(), speaker)
+    task = asyncio.create_task(conv.run(
+        ["robot-01", "robot-02"], "Talk to each other", 2,
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=3)
+        settings.fleet_text_sharing_enabled = False
+        settings.fleet_text_sharing_enabled = True
+        assert settings.fleet_sharing_consent_generation == initial + 1
+        release.set()
+        with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
+            await asyncio.wait_for(task, timeout=3)
+        assert speaker.spoken == []
+        assert conv.histories == {}
+    finally:
+        release.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_revoked_peer_sharing_sqlite_write_retracts_only_new_peer_copy(
+    settings, tmp_path, monkeypatch,
+):
+    """An off/on during a SQLite worker cannot leave an old peer transcript."""
+    import threading
+
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    ids = ["robot-01", "robot-02"]
+    store = MemoryStore(tmp_path, ids)
+    conv = Conversation(settings, SimulatedChat(), SimulatedSpeaker(), memory=store)
+    original = store.remember
+    peer_written, allow_return = threading.Event(), threading.Event()
+
+    def write_then_pause(*args, **kwargs):
+        result = original(*args, **kwargs)
+        if args[0] == "robot-02":
+            peer_written.set()
+            allow_return.wait(timeout=3)
+        return result
+
+    monkeypatch.setattr(store, "remember", write_then_pause)
+    task = asyncio.create_task(conv._persist_spoken_turn(
+        settings.robot("robot-01"), "First peer said hello", [
+            settings.robot("robot-01"), settings.robot("robot-02"),
+        ],
+    ))
+    try:
+        assert await asyncio.to_thread(peer_written.wait, 3)
+        generation = settings.fleet_sharing_consent_generation
+        settings.fleet_text_sharing_enabled = False
+        settings.fleet_text_sharing_enabled = True
+        assert settings.fleet_sharing_consent_generation == generation + 1
+        allow_return.set()
+        await asyncio.wait_for(task, timeout=3)
+        assert store.count("robot-01") == 1
+        assert store.count("robot-02") == 0
+    finally:
+        allow_return.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 async def test_group_stream_revocation_stops_next_segment_and_never_shares_partial(
     settings, tmp_path,
 ):

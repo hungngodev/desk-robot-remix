@@ -576,6 +576,7 @@ class Conversation:
         if self.memory is None:
             return
         event_id = uuid.uuid4().hex
+        sharing_grant = self.settings.fleet_sharing_consent_generation
         for peer in participants:
             if (peer.id != speaker.id
                     and self.settings.mode == "hardware"
@@ -585,6 +586,12 @@ class Conversation:
                 # words. Each pet may still retain its own sent speech.
                 continue
             def persist_with_consent_cleanup(peer=peer) -> None:
+                if (peer.id != speaker.id
+                        and self.settings.mode == "hardware"
+                        and (not self.settings.fleet_text_sharing_enabled
+                             or self.settings.fleet_sharing_consent_generation
+                                != sharing_grant)):
+                    return
                 inserted = self.memory.remember(
                     peer.id,
                     event_id,
@@ -596,7 +603,9 @@ class Conversation:
                 )
                 if (inserted and peer.id != speaker.id
                         and self.settings.mode == "hardware"
-                        and not self.settings.fleet_text_sharing_enabled):
+                        and (not self.settings.fleet_text_sharing_enabled
+                             or self.settings.fleet_sharing_consent_generation
+                                != sharing_grant)):
                     # The worker must own its compensating delete. Cancelling
                     # asyncio.to_thread does NOT cancel a SQLite thread, so
                     # coroutine-side cleanup could otherwise be skipped.
@@ -641,6 +650,7 @@ class Conversation:
         }
         # Source permission epochs survive a rapid OFF/ON during slow model
         # generation. Current booleans alone cannot revive old context.
+        sharing_consent_generation = self.settings.fleet_sharing_consent_generation
         private_consent_generation = self.settings.voice_memory_consent_generation
         visual_consent_generation = (
             self.settings.camera_consent_generation if visual_at_start else None
@@ -656,7 +666,9 @@ class Conversation:
         def consent_still_valid() -> bool:
             return (
                 (not sharing_at_start
-                 or self.settings.fleet_text_sharing_enabled)
+                 or (self.settings.fleet_text_sharing_enabled
+                     and self.settings.fleet_sharing_consent_generation
+                        == sharing_consent_generation))
                 and (not private_at_start
                      or (self.settings.voice_memory_tools_enabled
                          and self.settings.voice_memory_consent_generation
@@ -1083,7 +1095,9 @@ class Conversation:
                                 != memory_generation[peer.id] for peer in robots
                             ))
                             or (sharing_at_start
-                             and not self.settings.fleet_text_sharing_enabled)
+                                and (not self.settings.fleet_text_sharing_enabled
+                                     or self.settings.fleet_sharing_consent_generation
+                                        != sharing_consent_generation))
                             or (private_at_start
                                 and (not self.settings.voice_memory_tools_enabled
                                      or self.settings.voice_memory_consent_generation

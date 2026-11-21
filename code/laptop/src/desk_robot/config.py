@@ -70,6 +70,7 @@ class Settings(BaseModel):
     _voice_memory_consent_generation: int = PrivateAttr(default=0)
     _transcript_consent_generation: int = PrivateAttr(default=0)
     _room_station_consent_generation: int = PrivateAttr(default=0)
+    _fleet_sharing_consent_generation: int = PrivateAttr(default=0)
     robots: list[RobotConfig]
     mode: Literal["hardware", "simulation"] = "hardware"
     coordinator_token_env: str = "DESK_ROBOT_API_TOKEN"
@@ -173,6 +174,10 @@ class Settings(BaseModel):
             name == "voice_transcript_memory_enabled"
             and getattr(self, "voice_transcript_memory_enabled", False) is True
         )
+        sharing_was_granted = (
+            name == "fleet_text_sharing_enabled"
+            and getattr(self, "fleet_text_sharing_enabled", False) is True
+        )
         super().__setattr__(name, value)
         if was_granted and not self.voice_vision_tools_enabled:
             # Even an immediate re-enable is a NEW grant; old VLM evidence
@@ -190,6 +195,9 @@ class Settings(BaseModel):
         if transcript_was_granted and not self.voice_transcript_memory_enabled:
             # Immediate regrant does not revive an in-flight transcript write.
             self._transcript_consent_generation += 1
+        if sharing_was_granted and not self.fleet_text_sharing_enabled:
+            # Peer relays and in-flight SQLite writes belong to the old grant.
+            self._fleet_sharing_consent_generation += 1
 
     @property
     def camera_consent_generation(self) -> int:
@@ -206,6 +214,10 @@ class Settings(BaseModel):
     @property
     def room_station_consent_generation(self) -> int:
         return self._room_station_consent_generation
+
+    @property
+    def fleet_sharing_consent_generation(self) -> int:
+        return self._fleet_sharing_consent_generation
 
     def robot(self, robot_id: str) -> RobotConfig:
         for robot in self.robots:
