@@ -3874,6 +3874,72 @@ async def test_opt_in_sensor_event_invites_one_peer_without_extra_audio_owner(
         await pet.close()
 
 
+
+async def test_partial_social_speech_consumes_budget_before_peer_reply(
+    fleet, tmp_path,
+):
+    """An interrupted first speech line cannot reset the fleet budget."""
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_social_autonomy_enabled = True
+    peer_entered = asyncio.Event()
+
+    class FirstLineThenBlockedPeer:
+        calls = 0
+
+        async def reply(self, history):
+            self.calls += 1
+            if self.calls == 1:
+                return "I noticed the tag. Want to play?"
+            peer_entered.set()
+            await asyncio.Event().wait()
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(
+        fleet, FirstLineThenBlockedPeer(), speaker, memory=memory,
+    )
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(), speech_cooldown=60,
+    )
+    for robot_id in ("robot-01", "robot-02", "robot-03"):
+        pet.states[robot_id].enabled = True
+        pet.states[robot_id].generation = 13
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange("nfc_tag", "First tag arrived", 1.0), 13,
+        )
+        await asyncio.wait_for(peer_entered.wait(), timeout=2)
+        assert speaker.spoken == [
+            ("robot-01", "I noticed the tag. Want to play?"),
+        ]
+        assert pet.states["robot-01"].spoken == 1
+        assert pet.states["robot-02"].spoken == 0
+        assert 0 <= time.monotonic() - pet._group_last_spoken < 2
+
+        await asyncio.wait_for(pet.interrupt("robot-01"), timeout=3)
+        assert conversation.active is None
+        assert pet._speech_task is None
+        assert pet.states["robot-01"].spoken == 1
+        assert pet.states["robot-02"].spoken == 0
+
+        # Remove only the separate social-start interval to test the
+        # speech budget against an unrelated event from a different pet.
+        pet._social_last_started = float("-inf")
+        pet._consider_speech(
+            "robot-03",
+            SceneChange("nfc_tag", "Second unrelated tag arrived", 1.0),
+            13,
+        )
+        assert pet.states["robot-03"].last_initiative_suppression == (
+            "quiet_voice_or_group_budget"
+        )
+        assert len(speaker.spoken) == 1
+    finally:
+        for state in pet.states.values():
+            state.enabled = False
+        await pet.close()
+
+
 async def test_social_event_never_shares_without_explicit_local_consent(
     fleet, tmp_path,
 ):

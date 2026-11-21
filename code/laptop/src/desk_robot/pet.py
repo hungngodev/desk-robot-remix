@@ -2475,17 +2475,28 @@ class PetController:
                 and not self._human_active_in_fleet(time.monotonic())
                 and not newer_human_turn()
             )
+        # Count the first successfully transmitted segment, not the second
+        # reply or unverified physical playback. An interrupted first line
+        # still uses the spontaneous fleet speech budget.
+        sent_speakers: set[str] = set()
+
+        def count_sent_segment(sent_robot_id: str) -> None:
+            if (sent_robot_id not in {robot_id, social_peer_id}
+                    or sent_robot_id in sent_speakers):
+                return
+            sent_speakers.add(sent_robot_id)
+            self.states[sent_robot_id].spoken += 1
+            self._group_last_spoken = time.monotonic()
+
         turns = await asyncio.wait_for(
             self.conversation.run(
                 [robot_id, social_peer_id], topic, utterances=2,
                 permission_check=social_permission, origin="autonomous_social",
+                segment_sent=count_sent_segment,
             ), timeout=75.0
         )
         if len(turns) == 2:
-            state.spoken += 1
-            peer.spoken += 1
             now = time.monotonic()
-            self._group_last_spoken = now
             if self.multimodal is not None:
                 remember_spoken = getattr(
                     self.multimodal.hub, "remember_spoken", None

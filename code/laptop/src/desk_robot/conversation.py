@@ -589,6 +589,7 @@ class Conversation:
         self, robot_ids: list[str], topic: str, utterances: int | None = None,
         *, permission_check: Callable[[], bool] | None = None,
         origin: str = "operator",
+        segment_sent: Callable[[str], None] | None = None,
     ) -> list[dict]:
         if type(origin) is not str or origin not in {"operator", "autonomous_social"}:
             raise ValueError("Unsupported group conversation origin")
@@ -920,6 +921,9 @@ class Conversation:
                                         record["sent_segments"] += 1
                                         record["updated_at"] = time.monotonic()
                                         record_sent_attention(robot.id, segment)
+                                        if (origin == "autonomous_social"
+                                                and segment_sent is not None):
+                                            segment_sent(robot.id)
                                     if not completed_segments:
                                         # A successful HTTP stream with zero
                                         # spoken segments is not a completed
@@ -940,6 +944,9 @@ class Conversation:
                                     record["sent_segments"] += 1
                                     record["updated_at"] = time.monotonic()
                                     record_sent_attention(robot.id, text)
+                                    if (origin == "autonomous_social"
+                                            and segment_sent is not None):
+                                        segment_sent(robot.id)
                             if not consent_still_valid():
                                 raise RuntimeError("Group conversation consent revoked")
                             await self._persist_spoken_turn(robot, text, robots)
