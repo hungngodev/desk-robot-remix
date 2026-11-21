@@ -236,7 +236,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             raise OperationError("This head has no dock auxiliary telemetry")
         return await observe_dock_evidence(head, robot_id)
 
-    @app.get("/v1/robots/{robot_id}/camera.jpg", dependencies=[Depends(authorize)])
+    # Raw JPEG preview is an operator action, never a privilege granted by
+    # the read-only Xiaozhi model/tool token. Conversed visual facts have
+    # separately consented, bounded /v1/pet/* routes.
+    @app.get("/v1/robots/{robot_id}/camera.jpg", dependencies=[Depends(operator)])
     async def camera(robot_id: str):
         coordinator().robot(robot_id)
         return Response(
