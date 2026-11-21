@@ -156,6 +156,15 @@ store them outside the local protected trial directory.
    gaps larger than the frame duration plus 40 ms. These conservative
    limits protect software timestamp validity, not physical AEC quality.
    It makes **no automatic retry** of a possibly already-started capture.
+   On an interrupted or failed read after an acknowledged START, the
+   Mac sends an authenticated **generation scoped ABORT** using the
+   same head bearer. The codec invalidates only that capture generation
+   and wipes its retained PCM; its asynchronous HTTP worker checks the
+   generation before sending the next chunk. A delayed older ABORT
+   cannot erase a newer capture. If the Mac crashes or the network
+   disappears, the firmware's independent 12-second buffer expiry
+   remains the fallback. None of these software receipts certifies
+   audible speaker playback or measured AEC quality.
    The output is private mode 0600 `microphone.wav`,
    `speaker_reference.wav`, and `capture.json`, in a mode 0700
    directory with no overwrite.
