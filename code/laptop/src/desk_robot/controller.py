@@ -63,6 +63,30 @@ class OperationError(RuntimeError):
     pass
 
 
+def _require_safe_fuel_sample(
+    power: object, *, min_cell_mv: int, min_soc_centi: int,
+    context: str, depleted_message: str,
+) -> None:
+    """Reject malformed claimed-valid fuel evidence before motion decisions.
+
+    A missing optional power section or an explicit fuel_valid:false is not
+    a current measurement. The independent WROOM still owns motor cutoffs.
+    """
+    if power is None:
+        return
+    if not isinstance(power, dict) or type(power.get("fuel_valid")) is not bool:
+        raise OperationError(f"{context}: malformed battery telemetry")
+    if power["fuel_valid"] is False:
+        return
+    cell_mv = power.get("cell_mv")
+    soc_centi = power.get("soc_centi")
+    if (type(cell_mv) is not int or not 2500 <= cell_mv <= 4500
+            or type(soc_centi) is not int or not 0 <= soc_centi <= 10000):
+        raise OperationError(f"{context}: malformed battery telemetry")
+    if cell_mv < min_cell_mv or soc_centi < min_soc_centi:
+        raise OperationError(depleted_message)
+
+
 @dataclass
 class Job:
     id: str
@@ -167,14 +191,11 @@ class Coordinator:
             or any(type(mm) is not int or not 1 <= mm <= 1300 for mm in readings)
         ):
             raise OperationError("Hardware preflight: stale or malformed ranging telemetry")
-        power = status.get("power")
-        if isinstance(power, dict) and power.get("fuel_valid") is True:
-            cell_mv = power.get("cell_mv")
-            soc_centi = power.get("soc_centi")
-            if (isinstance(cell_mv, int) and cell_mv < 3350) or (
-                isinstance(soc_centi, int) and soc_centi < 500
-            ):
-                raise OperationError("Hardware preflight: battery voltage critical (<3350 mV)")
+        _require_safe_fuel_sample(
+            status.get("power"), min_cell_mv=3350, min_soc_centi=500,
+            context="Hardware preflight",
+            depleted_message="Hardware preflight: battery voltage critical (<3350 mV)",
+        )
 
     async def operator_arm(self, robot_id: str):
         robot = self.robot(robot_id)
@@ -517,14 +538,13 @@ class Coordinator:
             or touch.get("active") is not False
         ):
             raise OperationError("Operation blocked by local sensor or corridor")
-        power = body.get("power")
-        if isinstance(power, dict) and power.get("fuel_valid") is True:
-            cell_mv = power.get("cell_mv")
-            soc_centi = power.get("soc_centi")
-            if (isinstance(cell_mv, int) and cell_mv < 3300) or (
-                isinstance(soc_centi, int) and soc_centi < 300
-            ):
-                raise OperationError("Operation blocked: battery depleted below motor operating limit")
+        _require_safe_fuel_sample(
+            body.get("power"), min_cell_mv=3300, min_soc_centi=300,
+            context="Operation blocked",
+            depleted_message=(
+                "Operation blocked: battery depleted below motor operating limit"
+            ),
+        )
         return body
 
     def explore(self, robot_id: str) -> Job:

@@ -360,6 +360,60 @@ async def test_hardware_enable_fails_closed_on_unqualified_body_status(
         await coordinator.close()
 
 
+@pytest.mark.parametrize("power", [
+    {"fuel_valid": True, "cell_mv": "0", "soc_centi": None},
+    {"fuel_valid": True, "cell_mv": True, "soc_centi": 7000},
+    {"fuel_valid": True, "cell_mv": 3800, "soc_centi": False},
+    {"fuel_valid": True, "cell_mv": None, "soc_centi": 7000},
+    {"fuel_valid": True, "cell_mv": 3800},
+    {"fuel_valid": True, "soc_centi": 7000},
+    {"fuel_valid": True, "cell_mv": 2499, "soc_centi": 7000},
+    {"fuel_valid": True, "cell_mv": 4501, "soc_centi": 7000},
+    {"fuel_valid": True, "cell_mv": 3800, "soc_centi": -1},
+    {"fuel_valid": True, "cell_mv": 3800, "soc_centi": 10001},
+    {"fuel_valid": "true", "cell_mv": 3800, "soc_centi": 7000},
+    {"cell_mv": 3800, "soc_centi": 7000},
+    "unexpected string",
+])
+async def test_valid_claimed_fuel_requires_typed_physical_range_in_both_paths(
+    settings, power,
+):
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    head.body_status["power"] = power
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        with pytest.raises(OperationError, match="Hardware preflight: malformed battery"):
+            await coordinator.operator_arm("robot-01")
+        assert coordinator.permits.get("robot-01") is None
+        assert not head.commands
+        head.body_status["armed"] = True
+        with pytest.raises(OperationError, match="Operation blocked: malformed battery"):
+            await coordinator._assert_armed_health("robot-01")
+    finally:
+        await coordinator.close()
+
+
+@pytest.mark.parametrize("power", [
+    {"fuel_valid": False},
+    {"fuel_valid": True, "cell_mv": 3800, "soc_centi": 7000},
+])
+async def test_optional_unavailable_or_healthy_fuel_keeps_existing_arming_path(
+    settings, power,
+):
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    head.body_status["power"] = power
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        permit = await coordinator.operator_arm("robot-01")
+        assert permit["operator_permit"] is True
+        head.body_status["armed"] = True
+        assert await coordinator._assert_armed_health("robot-01")
+    finally:
+        await coordinator.close()
+
+
 async def test_hardware_running_health_rejects_depleted_battery(settings):
     settings.mode = "hardware"
     head = HardwareStatusHead("robot-01")
