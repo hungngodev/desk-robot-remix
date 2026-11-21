@@ -48,6 +48,13 @@ class SensePcmWindow {
              std::uint32_t frames, std::int64_t end_us,
              bool reference_valid) noexcept {
     if (storage_ == nullptr || ready_ || failed_) return;
+    // A PDM Read may have started before the authenticated bench START.
+    // Never save pre-consent microphone samples merely because that blocking
+    // callback finished after START. Drop the whole overlapping callback;
+    // the next fresh callback begins the four-second source window.
+    if (first_sample_us_ == 0 && frames > 0 && frames <= 2048 &&
+        end_us - (std::int64_t{frames} * 1'000'000 / kSampleRate) <
+            requested_us_) return;
     if (!mic || !reference || frames == 0 || frames > 2048 ||
         !reference_valid || end_us <= requested_us_ ||
         end_us - requested_us_ > 6'000'000 ||
