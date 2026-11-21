@@ -139,7 +139,7 @@ class OverlayTests(unittest.TestCase):
         paths = ["main/Kconfig.projbuild", "main/CMakeLists.txt", "main/mcp_server.cc", "main/boards/common/camera.h", "main/boards/common/esp_video.h", "main/boards/common/esp_video.cc"]
         # Sense overlays urgent-stop and the pinned Xiaozhi I2S writer; no
         # shortcut synthetic codec is installed in the firmware clone.
-        paths += ["main/application.cc", "main/audio/audio_service.cc", "main/audio/codecs/no_audio_codec.cc"]
+        paths += ["main/application.cc", "main/application.h", "main/audio/audio_service.cc", "main/audio/codecs/no_audio_codec.cc"]
         paths += ["main/boards/common/esp32_camera.h", "main/boards/common/esp32_camera.cc"]
         paths += [p.relative_to(UPSTREAM).as_posix() for p in (UPSTREAM / "main/boards/m5stack/core-s3").iterdir() if p.is_file()]
         self.original = {}
