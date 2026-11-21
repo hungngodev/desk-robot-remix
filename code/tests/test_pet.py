@@ -194,6 +194,11 @@ async def test_activity_reconsideration_round_robins_enabled_pets_with_one_speak
 
     pet._reconsider_activity()
     await wait_for(lambda: len(speaker.spoken) == 1)
+    # Audio transmission is observed BEFORE the prior activity releases
+    # the one shared speech lease. Await its owner, not only the output.
+    await wait_for(
+        lambda: pet._speech_task is None or pet._speech_task.done(),
+    )
     pet._reconsider_activity()
     await wait_for(lambda: len(speaker.spoken) == 2)
 
