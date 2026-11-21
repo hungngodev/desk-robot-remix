@@ -2,6 +2,7 @@
 #include <esp_system.h>
 
 #include "BodyControl.h"
+#include "ReplyTxQueue.h"
 #include "BodyPins.h"
 #ifndef DESK_ROBOT_FULL_SENSORS
 #define DESK_ROBOT_FULL_SENSORS DESK_ROBOT_STEPPER
@@ -202,6 +203,12 @@ desk_robot::BodyControl control;
 desk_robot::LineReceiver usb_receiver(true);
 desk_robot::LineReceiver head_receiver;
 HardwareSerial head_uart(2);
+// UART output is never sent synchronously inside the sensor/heartbeat loop.
+// Two full worst-case replies fit per port; saturation drops an ACK rather
+// than holding the local STOP and watchdog behind UART backpressure.
+using ReplyQueue = desk_robot::ReplyTxQueue<2 * (desk_robot::kReplyCapacity + 2)>;
+ReplyQueue head_replies;
+ReplyQueue usb_replies;
 bool pwm_ready = false;
 bool servo_attached = false;
 #if !DESK_ROBOT_STEPPER
@@ -336,7 +343,8 @@ void apply_outputs() {
   }
 }
 
-void process_input(Stream& stream, desk_robot::LineReceiver& receiver, bool local_usb) {
+void process_input(HardwareSerial& stream, desk_robot::LineReceiver& receiver,
+                   ReplyQueue& replies, bool local_usb) {
   char reply[desk_robot::kReplyCapacity]{};
   // Bounded read prevents sustained input from starving the other port/timers.
   for (int bytes = 0; bytes < 64 && stream.available() > 0; ++bytes) {
@@ -371,8 +379,10 @@ void process_input(Stream& stream, desk_robot::LineReceiver& receiver, bool loca
 #endif
     apply_outputs();  // apply accepted command/expired timer before acknowledging
     if (completed) {
-      stream.print(reply);
-      stream.print("\r\n");
+      // A saturated transmit FIFO cannot defer the command itself. If the
+      // reply cannot fit atomically, the caller times out fail-closed while
+      // the already-applied local STOP remains effective.
+      replies.enqueue_line(reply);
     }
   }
 }
@@ -630,7 +640,11 @@ void loop() {
   }
 #endif
   apply_outputs();
-  process_input(head_uart, head_receiver, false);
-  process_input(Serial, usb_receiver, true);
+  process_input(head_uart, head_receiver, head_replies, false);
+  process_input(Serial, usb_receiver, usb_replies, true);
+  // Never wait for the complete JSON/status wire time. Each port transfers
+  // at most 32 already-bufferable bytes after safety and input handling.
+  head_replies.drain(head_uart);
+  usb_replies.drain(Serial);
   delay(1);
 }
