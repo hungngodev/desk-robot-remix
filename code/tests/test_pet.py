@@ -3895,6 +3895,53 @@ async def test_proactive_silent_model_mood_is_cosmetic_and_fenced(fleet):
     assert head.events == ["mood:thinking"]  # cooldown, consent, allowlist
 
 
+async def test_failed_or_cancelled_face_post_does_not_consume_mood_cooldown(fleet):
+    from types import SimpleNamespace
+
+    from desk_robot.pet import PetState
+    from desk_robot.transport import HeadError
+
+    robot = fleet.robots[0]
+
+    class Head:
+        def __init__(self):
+            self.calls = []
+            self.failure = HeadError("head unavailable")
+
+        async def face_event(self, event):
+            self.calls.append(event)
+            if self.failure is not None:
+                raise self.failure
+
+    head = Head()
+    pet = object.__new__(PetController)
+    pet.settings = SimpleNamespace(mode="hardware")
+    pet.heads = {robot.id: head}
+    pet.states = {robot.id: PetState(enabled=True, generation=1)}
+    state = pet.states[robot.id]
+
+    await pet._cue_decided_face(robot.id, "thinking", lambda: True)
+    assert head.calls == ["mood:thinking"]
+    assert state.last_model_face_cue_at == float("-inf")
+    assert "HeadError" in state.last_error
+
+    head.failure = None
+    await pet._cue_decided_face(robot.id, "happy", lambda: True)
+    assert head.calls == ["mood:thinking", "mood:happy"]
+    assert state.last_model_face_cue_at > float("-inf")
+    await pet._cue_decided_face(robot.id, "surprised", lambda: True)
+    assert len(head.calls) == 2
+
+    state.last_model_face_cue_at = float("-inf")
+    head.failure = asyncio.CancelledError()
+    with pytest.raises(asyncio.CancelledError):
+        await pet._cue_decided_face(robot.id, "surprised", lambda: True)
+    assert state.last_model_face_cue_at == float("-inf")
+    head.failure = None
+    await pet._cue_decided_face(robot.id, "neutral", lambda: True)
+    assert head.calls[-1] == "mood:neutral"
+
+
 @pytest.mark.parametrize("invalid_mood", [
     {}, ["happy"], True, 11, "mood:drive",
 ])

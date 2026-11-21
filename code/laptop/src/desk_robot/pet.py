@@ -1783,11 +1783,19 @@ class PetController:
         cue = getattr(self.heads.get(robot_id), "face_event", None)
         if not callable(cue):
             return
+        previous = state.last_person_face_cue_at
         state.last_person_face_cue_at = now
+        acknowledged = False
         try:
             await asyncio.wait_for(cue("person_detected"), timeout=1.0)
+            acknowledged = True
         except (HeadError, TimeoutError, OSError) as error:
             state.last_error = f"Head cosmetic cue unavailable: {type(error).__name__}"
+        finally:
+            # An unacknowledged or cancelled HTTP send is not a real cue.
+            # Only this attempt may restore its previous cooldown.
+            if not acknowledged and state.last_person_face_cue_at == now:
+                state.last_person_face_cue_at = previous
 
     async def _cue_decided_face(
         self, robot_id: str, mood: str, permitted: Callable[[], bool],
@@ -1810,13 +1818,19 @@ class PetController:
         cue = getattr(self.heads.get(robot_id), "face_event", None)
         if not callable(cue):
             return
+        previous = state.last_model_face_cue_at
         state.last_model_face_cue_at = now
+        acknowledged = False
         try:
             await asyncio.wait_for(cue("mood:" + mood), timeout=0.7)
+            acknowledged = True
         except (HeadError, TimeoutError, OSError, ValueError) as error:
             state.last_error = (
                 f"Optional contextual OLED cue unavailable: {type(error).__name__}"
             )
+        finally:
+            if not acknowledged and state.last_model_face_cue_at == now:
+                state.last_model_face_cue_at = previous
 
     def _human_active_in_fleet(self, now: float) -> bool:
         """Human VAD and brief post-turn quiet protect the fleet speech floor.
