@@ -414,6 +414,56 @@ def test_unterminated_or_oversized_serial_fragments_never_become_room_frames(mon
     assert feed.callback_failures == 0
 
 
+
+def test_recursive_json_parse_error_does_not_restart_usb_replay_epoch(monkeypatch):
+    # Pathological USB JSON must not close the port and reset its replay fence.
+    import sys
+    from types import SimpleNamespace
+    import desk_robot.room_station as room_module
+
+    original_loads = room_module.json.loads
+
+    def loads(value, *args, **kwargs):
+        if value == "[[[":
+            raise RecursionError("Excessively nested USB JSON")
+        return original_loads(value, *args, **kwargs)
+
+    monkeypatch.setattr(room_module.json, "loads", loads)
+    chunks = [
+        json.dumps(frame(1, 1000)).encode() + b"\n",
+        b"[[[\n",
+        json.dumps(frame(1, 1000)).encode() + b"\n",
+        json.dumps(frame(2, 2000)).encode() + b"\n",
+    ]
+    opened = []
+    received = []
+
+    class Port:
+        def __init__(self, *args, **kwargs):
+            self.reads = 0
+            opened.append(self)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def readline(self, size):
+            chunk = chunks[self.reads]
+            self.reads += 1
+            return chunk
+
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
+    feed = RoomSerialFeed("/dev/cu.test", lambda obs: received.append(obs.seq))
+    feed._read_port(lambda: not opened or opened[0].reads < len(chunks))
+    assert len(opened) == 1
+    assert received == [1, 2]
+    assert feed.received == 2
+    assert feed.rejected == 2
+    assert feed.callback_failures == 0
+
+
 def test_callback_exception_does_not_reopen_usb_or_reset_replay_fence(monkeypatch):
     """A failed consumer must not turn replayed USB frames into new evidence."""
     import sys
