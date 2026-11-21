@@ -1103,6 +1103,23 @@ class MultimodalOrchestrator:
                             # by the outer reconnect loop.
                             metrics["stream_frames_skipped"] += 1
                             continue
+                        # Keep the inexpensive 2 FPS visual comparison
+                        # alive after warmup, even when the long idle model
+                        # cadence has not elapsed. A brief new desk object
+                        # must reach the pet's scene gate before it vanishes.
+                        # Identical/static images need not enter the shared
+                        # three-frame context ring or wake native subscribers
+                        # until the ordinary adaptive heartbeat is due.
+                        # This uses the ALREADY decoded 64x48 gray image,
+                        # never another head snapshot, video thread or VLM.
+                        if (not recent_sensor_edge
+                                and len(self.hub.frames[robot_id]) >= 2
+                                and not self.hub.due(robot_id, received)):
+                            earlier = self.hub.previous_gray.get(robot_id)
+                            if (earlier is not None
+                                    and change_fraction(earlier, prepared[1]) < .01):
+                                metrics["stream_frames_skipped"] += 1
+                                continue
                         if not self.settings.voice_vision_tools_enabled:
                             # Opt out can arrive while Pillow/motion preparation
                             # owns the frame. Do not publish that completed JPEG
