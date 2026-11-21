@@ -394,6 +394,44 @@ async def test_continuous_camera_stream_supplies_voice_frames_without_new_poller
 
 
 
+async def test_persistent_stream_adapts_static_sampling_after_two_baselines():
+    """Keep draining the existing feed while skipping idle JPEG decoding."""
+    class StaticFeed(Head):
+        def __init__(self):
+            super().__init__()
+            self.emitted = 0
+            self.drained = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def stream_frames(self):
+            base = time.monotonic() - 4
+            frame = image()
+            for index in range(17):
+                self.emitted += 1
+                yield frame, base + index * 0.25
+                await asyncio.sleep(0)
+            self.drained.set()
+            await self.release.wait()
+
+    head = StaticFeed()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    visual.start_streams()
+    try:
+        await asyncio.wait_for(head.drained.wait(), timeout=3)
+        stats = visual.status("robot-01")["software_timings"]
+        assert head.emitted == stats["stream_frames_received"] == 17
+        # Two warmup samples at 0 and 0.5 seconds; one more at 4 seconds.
+        assert stats["stream_frames_selected"] == 3
+        assert stats["stream_frames_skipped"] == 14
+        assert head.captures == 0
+    finally:
+        head.release.set()
+        await visual.close()
+
+
 def test_all_new_physical_interactions_trigger_camera_without_extra_sensor_drivers():
     hub = CameraFrameHub(["robot-01", "robot-02"], idle_fps=0.3)
     hub.offer("robot-01", image(), 100.0, source="proactive")

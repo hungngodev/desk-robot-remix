@@ -1068,8 +1068,15 @@ class MultimodalOrchestrator:
                             self.hub.event_history[robot_id]
                         )
                     )
-                    if (received - self._last_stream_sample[robot_id] < sample_gap
-                            and not recent_sensor_edge):
+                    # Prime two selected frames for actual motion scoring,
+                    # then let the existing hub set the idle/active/VAD rate.
+                    # The stream is still drained continuously, and genuine
+                    # physical triggers bypass both optional sampling gates.
+                    bootstrap = metrics["stream_frames_selected"] < 2
+                    if not recent_sensor_edge and (
+                        received - self._last_stream_sample[robot_id] < sample_gap
+                        or (not bootstrap and not self.hub.due(robot_id, received))
+                    ):
                         metrics["stream_frames_skipped"] += 1
                         continue
                     self._last_stream_sample[robot_id] = received
