@@ -25,6 +25,7 @@ def bridge(monkeypatch):
     )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
+    monkeypatch.setitem(sys.modules, "desk_robot_bridge", module)
     monkeypatch.setenv("DESK_ROBOT_SPEECH_TOKEN", "s" * 40)
     monkeypatch.setenv(
         "DESK_ROBOT_DEVICE_MAP", json.dumps({"robot-01": "mac-01", "robot-02": "mac-02"})
@@ -761,6 +762,7 @@ async def test_transmit_clears_speaking_status_when_final_stop_fails(bridge, mon
         sys.modules, "core.handle.sendAudioHandle", SimpleNamespace(send_tts_message=send)
     )
     connection = conn("mac-01")
+    bridge.register(connection)
     connection.conn_from_mqtt_gateway = False
     cleared = []
     connection.clearSpeakStatus = lambda: cleared.append(True)
@@ -1100,6 +1102,7 @@ async def test_normal_xiaozhi_realtime_listening_barges_into_its_own_tts(bridge)
             sent.append(json.loads(frame))
 
     one = conn("mac-01")
+    bridge.register(one)
     one.client_listen_mode = "realtime"
     one.client_is_speaking = True
     one.session_id = "head-user-dialogue"
@@ -1201,6 +1204,7 @@ async def test_direct_human_barge_failed_head_stop_preserves_authenticated_vad(
 ):
     """A wedged XIAO must not erase real human VAD or fake speaker STOP."""
     one = conn("mac-01")
+    bridge.register(one)
     one.client_listen_mode = "realtime"
     one.client_is_speaking = True
     one.session_id = "physical-head"
@@ -1464,6 +1468,7 @@ async def test_stop_during_group_playback_marks_urgent_flush(bridge, monkeypatch
             sent.append(frame)
 
     connection = conn("mac-01")
+    bridge.register(connection)
     connection.conn_from_mqtt_gateway = False
     connection.websocket = Socket()
     connection.session_id = "session"
@@ -1642,6 +1647,7 @@ async def test_live_stream_interrupt_fences_remaining_opus_packets(bridge, monke
     sent = []
     cleared = []
     connection = conn("mac-01")
+    bridge.register(connection)
     connection.conn_from_mqtt_gateway = False
     connection.session_id = "session"
     connection.last_activity_time = 0
@@ -1759,6 +1765,7 @@ async def test_physical_normal_barge_in_emits_only_from_live_registered_connecti
             sent.append(json.loads(frame))
 
     one = conn("mac-01")
+    bridge.register(one)
     one.client_listen_mode = "realtime"
     one.client_is_speaking = True
     one.session_id = "live-device"

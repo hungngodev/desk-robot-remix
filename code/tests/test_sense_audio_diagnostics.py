@@ -32,7 +32,11 @@ async def test_actual_sense_reference_counters_are_authenticated_and_bounded(
             "reference_overwrite_reads": 2,
             "discarded_stale_writes": 3,
             "short_output_writes": 0,
+            "microphone_frames_read": 110,
+            "speaker_frames_accepted": 80,
             "reference_integrity_failed": True,
+            "microphone_privacy_muted": False,
+            "microphone_privacy_epoch": 0,
             "speaker_playback_verified": False,
             "aec_physically_qualified": False,
         })
@@ -41,6 +45,8 @@ async def test_actual_sense_reference_counters_are_authenticated_and_bounded(
         observed = await _head(client).audio_reference_status()
     assert observed["reference_underflow_reads"] == 11
     assert observed["reference_integrity_failed"] is True
+    assert observed["microphone_privacy_muted"] is False
+    assert observed["microphone_frames_read"] == 110
     assert calls == [("GET", "/api/audio.reference", "Bearer " + "s" * 32)]
 
 
@@ -54,7 +60,11 @@ async def test_actual_sense_reference_counters_are_authenticated_and_bounded(
     {"reference_underflow_reads": True},
     {"reference_overwrite_reads": 0x1_0000_0000},
     {"discarded_stale_writes": "3"},
+    {"microphone_frames_read": -1},
+    {"speaker_frames_accepted": 0x1_0000_0000},
     {"reference_integrity_failed": 0},
+    {"microphone_privacy_muted": "no"},
+    {"microphone_privacy_epoch": -1},
     {"speaker_playback_verified": True},
     {"aec_physically_qualified": True},
 ])
@@ -67,7 +77,11 @@ async def test_no_foreign_or_fabricated_reference_evidence(monkeypatch, changed)
         "reference_overwrite_reads": 0,
         "discarded_stale_writes": 0,
         "short_output_writes": 0,
+        "microphone_frames_read": 0,
+        "speaker_frames_accepted": 0,
         "reference_integrity_failed": False,
+        "microphone_privacy_muted": False,
+        "microphone_privacy_epoch": 0,
         "speaker_playback_verified": False,
         "aec_physically_qualified": False,
     }

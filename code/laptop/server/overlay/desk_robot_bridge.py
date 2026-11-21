@@ -694,20 +694,26 @@ async def transmit(conn, text, frames, *, passive: bool = False):
                         or generation != interrupt_generation.get(conn.device_id, 0)
                         or human_speech_active()):
                     # Bypass upstream normal stop's wait-for-all-audio behavior.
-                    await conn.websocket.send(json.dumps({
-                        "type": "tts", "state": "stop",
-                        "session_id": conn.session_id, "flush": True,
-                    }))
+                    if hasattr(conn, "websocket") and conn.websocket is not None:
+                        await conn.websocket.send(json.dumps({
+                            "type": "tts", "state": "stop",
+                            "session_id": getattr(conn, "session_id", None), "flush": True,
+                        }))
+                    else:
+                        await send_tts_message(conn, "stop")
                 elif leased and callable(control):
                     # Pinned Xiaozhi's normal stop waits for its own TTS
                     # audio-rate queue, not Mac's separately sent Opus.
                     # The Mac sender has already paced its packets and tail.
                     # Send the SAME upstream control envelope directly while
                     # owning the device lock; no acoustic ACK is fabricated.
-                    await conn.websocket.send(json.dumps({
-                        "type": "tts", "state": "stop",
-                        "session_id": conn.session_id,
-                    }))
+                    if hasattr(conn, "websocket") and conn.websocket is not None:
+                        await conn.websocket.send(json.dumps({
+                            "type": "tts", "state": "stop",
+                            "session_id": getattr(conn, "session_id", None),
+                        }))
+                    else:
+                        await send_tts_message(conn, "stop")
                 else:
                     await send_tts_message(conn, "stop")
             if leased and callable(control):
