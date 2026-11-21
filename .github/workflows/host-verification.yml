@@ -265,7 +265,7 @@ jobs:
       cancel-in-progress: false
     name: XIAO Sense ESP-IDF 6.1 firmware compile
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 55
     container:
       image: espressif/idf:v6.1
     steps:
@@ -306,6 +306,32 @@ jobs:
         run: |
           test -f build/desk-robot-sense-s3.bin || test -f build/merged-binary.bin
           test -f build/partition_table/partition-table.bin
+
+      - name: Prepare private opt-in Sense PCM compiler coverage
+        working-directory: code
+        shell: bash
+        run: |
+          cat > /tmp/desk-sense-bench-fleet.toml <<'FLEET'
+          [[robots]]
+          id = "robot-01"
+          token_env = "DESK_SENSE_CI_ONLY_TOKEN"
+          FLEET
+          # A CI-only synthetic credential. Neither a release image nor a
+          # flashed robot. Normal firmware above remains default capture OFF.
+          DESK_SENSE_CI_ONLY_TOKEN=CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC             python3 firmware/head/private_config.py               --board sense --robot robot-01               --config /tmp/desk-sense-bench-fleet.toml               --secrets /tmp/desk-sense-ci-no-secrets               --server-ip 192.168.1.200               --continuous-audio --aec-delay-ms 0 --bench-aec-capture
+          test "$(stat -c %a firmware/head/build/xiaozhi-sense/main/boards/desk-robot/desk-robot-sense-s3/config.private.json)" = "600"
+      - name: Compile disabled-by-default authenticated PCM bench variant
+        working-directory: code/firmware/head/build/xiaozhi-sense
+        shell: bash
+        run: |
+          source "$IDF_PATH/export.sh"
+          python scripts/build.py desk-robot/desk-robot-sense-s3             --name desk-robot-sense-s3 --config config.private.json             --language en-US --wake-word disabled
+          # The second build must truly compile the private guarded paths:
+          # a passing default build with capture OFF is insufficient.
+          grep -qx 'CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED=y' sdkconfig
+          grep -qx 'CONFIG_DESK_ROBOT_AEC_DELAY_MS=0' sdkconfig
+          grep -qx 'CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED=y' sdkconfig
+          test -f build/desk-robot-sense-s3.bin || test -f build/merged-binary.bin
 
 # This compiles the real ESP-IDF Sense target and both WROOM profiles but DOES
 # NOT flash hardware or verify physical AEC, cliff sensors, pickup or power.
