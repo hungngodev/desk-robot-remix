@@ -111,11 +111,19 @@ def test_private_aec_capture_requires_live_audio_activity(changed):
             http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
             clock=iter([0.0, 0.1]).__next__, pause=lambda _: None,
         )
-    # A failure before START never requests raw audio. A failed completed
-    # recording is aborted by the normal generation-scoped cleanup path.
-    assert not any(call[0].endswith("/api/audio.capture.raw")
-                   for call in http.calls if changed.get("initial_mic") == 0xffffffff
-                   or changed.get("initial_speaker") == 0xffffffff)
+    if "initial_mic" in changed or "initial_speaker" in changed:
+        # Refuse saturated counters before starting a private recording.
+        assert [call[0].split("/")[-1] for call in http.calls] == [
+            "audio.reference",
+        ]
+    else:
+        # A started and rejected calibration must not leave a private
+        # microphone buffer waiting for its independent expiry timer.
+        assert [call[0].split("/")[-1] for call in http.calls] == [
+            "audio.reference", "audio.capture.start",
+            "audio.capture.status", "audio.capture.raw",
+            "audio.reference", "audio.capture.abort",
+        ]
 
 
 def test_authenticated_head_pcm_delivers_one_bounded_private_wav_pair(tmp_path):
