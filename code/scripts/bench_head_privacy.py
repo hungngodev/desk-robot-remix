@@ -11,6 +11,7 @@ import asyncio
 import json
 import math
 import os
+import stat
 import time
 from pathlib import Path
 
@@ -19,6 +20,16 @@ from desk_robot.config import load_settings
 from desk_robot.transport import HttpHead
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def preflight_private_report(path: Path) -> None:
+    """Fail before physical BOOT trials if the measurement cannot be stored."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if (path.parent.is_symlink()
+            or stat.S_IMODE(path.parent.stat().st_mode) & 0o077):
+        raise ValueError("Privacy trial report directory must be private mode 0700")
+    if path.exists() or path.is_symlink():
+        raise FileExistsError("Privacy trial report already exists")
 
 
 def _valid(sample: dict, robot_id: str) -> bool:
@@ -171,13 +182,13 @@ async def main() -> int:
     robot = settings.robot(args.robot)
     if not robot.device_id:
         parser.error("A unique actual Xiaozhi device identity is required")
+    preflight_private_report(args.report)
     print("Start consented live Xiaozhi listening. Hold the BOOT button ready.", flush=True)
     async with httpx.AsyncClient() as client:
         report = await measure(
             HttpHead(robot, client), robot.id, seconds=args.seconds,
             poll_period_s=args.poll_period, on_ready=lambda m: print(m, flush=True),
         )
-    args.report.parent.mkdir(parents=True, exist_ok=True)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
