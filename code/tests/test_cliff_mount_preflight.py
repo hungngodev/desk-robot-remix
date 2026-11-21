@@ -24,7 +24,7 @@ def evaluate(**updates):
 
 def test_exact_source_bracket_lens_is_below_minimum_if_mount_flush_to_desk():
     source = tool.verify_source_contract()
-    assert source["lens_center_above_adapter_mount_mm"] == 13.5
+    assert source["lens_center_above_adapter_mount_mm"] == 11.15
     assert source["firmware_valid_min_mm"] == 30
     assert source["firmware_valid_max_mm"] == 1300
     assert source["manufacturer_system_fov_deg"] == 25.0
@@ -37,14 +37,14 @@ def test_exact_source_bracket_lens_is_below_minimum_if_mount_flush_to_desk():
 
 def test_properly_raised_sensor_can_be_feasible_but_not_qualified():
     r = evaluate(chassis_mount_above_desk_mm=20.0)
-    assert r["nominal_optical_floor_path_mm"] == 33.5
+    assert r["nominal_optical_floor_path_mm"] == 31.15
     assert r["nominal_floor_in_firmware_valid_range"]
     # ST's 25 degree cone leaves a rearward floor sliver visible even
     # after a point-ray would have already crossed the edge.
     assert r["required_stopping_clearance_mm"] == 28.0
-    assert r["rear_floor_return_setback_mm"] == pytest.approx(7.42677, abs=.001)
-    assert r["effective_wheel_edge_lead_mm"] == pytest.approx(37.57323, abs=.001)
-    assert r["required_wheel_behind_sensor_mm"] == pytest.approx(35.42677, abs=.001)
+    assert r["rear_floor_return_setback_mm"] == pytest.approx(6.90579, abs=.001)
+    assert r["effective_wheel_edge_lead_mm"] == pytest.approx(38.09421, abs=.001)
+    assert r["required_wheel_behind_sensor_mm"] == pytest.approx(34.90579, abs=.001)
     assert r["full_fov_floor_path_in_valid_range"]
     assert r["nominal_stopping_geometry_possible"]
     assert r["worst_observed_stop_supplied"]
@@ -55,9 +55,9 @@ def test_properly_raised_sensor_can_be_feasible_but_not_qualified():
 
 
 def test_st_full_fov_rear_floor_echo_rejects_false_point_ray_pass():
-    # A 32mm lead exceeds 28mm stopping clearance in the OLD point ray
-    # calculation, but 7.43mm of rearward cone sees the desk afterwards.
-    # Effective 24.57mm lead is too short: prevent a premature purchase.
+    # A 32mm lead exceeds 28mm stopping clearance in a point ray
+    # calculation, but the rearward cone still sees the desk afterwards.
+    # Effective 25.09mm lead is too short: prevent a premature purchase.
     unsafe = evaluate(chassis_mount_above_desk_mm=20.0,
                       leading_wheel_behind_sensor_mm=32.0)
     assert unsafe["nominal_floor_in_firmware_valid_range"]
@@ -112,9 +112,13 @@ def test_worst_observed_stop_rejects_faster_than_reported_p95():
 
 
 def test_worst_observed_stop_controls_required_wheel_lead():
+    # A 44mm sensor lead is feasible at the default 10mm p95,
+    # but NOT at the measured 20mm worst stop plus latency and full FoV.
     p95_only = evaluate(chassis_mount_above_desk_mm=20,
+                        leading_wheel_behind_sensor_mm=44,
                         measured_worst_stopping_distance_mm=None)
     worst = evaluate(chassis_mount_above_desk_mm=20,
+                     leading_wheel_behind_sensor_mm=44,
                      measured_worst_stopping_distance_mm=20)
     assert worst["required_wheel_behind_sensor_mm"] == pytest.approx(
         p95_only["required_wheel_behind_sensor_mm"] + 10
@@ -143,7 +147,7 @@ def test_forward_2d_contact_coverage_uses_st_25_degree_optical_rear_setback():
     assert result["body_translation_mm_s"] == 100.0
     assert result["body_turn_rate_rad_s"] == 0.0
     assert result["manufacturer_fov_deg"] == 25.0
-    assert result["nominal_fov_rear_footprint_mm"] == pytest.approx(7.42677, abs=.001)
+    assert result["nominal_fov_rear_footprint_mm"] == pytest.approx(6.90579, abs=.001)
     assert all(s["covered"] for s in result["support_checks"])
     assert result["necessary_planar_coverage_on_paper"]
     assert not result["fully_safe_cliff_operation_proven"]
