@@ -3824,6 +3824,52 @@ async def test_pet_drops_old_robot_frame_after_brief_peer_voice_turn(
         await visual.close()
 
 
+async def test_proactive_silent_model_mood_is_cosmetic_and_fenced(fleet):
+    from types import SimpleNamespace
+
+    from desk_robot.pet import PetState
+
+    robot = fleet.robots[0]
+
+    class Head:
+        def __init__(self):
+            self.events = []
+
+        async def face_event(self, event):
+            self.events.append(event)
+
+    class Chat:
+        async def proactive_decision(self, history):
+            return {
+                "action": "silence", "text": "", "tool": "none",
+                "mood": "thinking",
+            }
+
+    head = Head()
+    pet = object.__new__(PetController)
+    pet.settings = SimpleNamespace(
+        mode="hardware", robot=lambda robot_id: robot,
+    )
+    pet.heads = {robot.id: head}
+    pet.states = {robot.id: PetState(enabled=True, generation=3)}
+    pet.conversation = SimpleNamespace(chat=Chat())
+    pet.max_observation_age = 5.0
+    pet._closed = False
+    event = SceneChange("key", "An old friend mentioned a key", 0.96)
+    context = SimpleNamespace(recent="", core="", interaction="")
+    text = await pet._generate_proactive_line(
+        robot.id, event, context,
+        offered_at=time.monotonic(), model_context_permitted=lambda: True,
+    )
+    assert text is None
+    assert head.events == ["mood:thinking"]
+    assert pet.states[robot.id].spoken == 0
+    await pet._cue_decided_face(robot.id, "happy", lambda: True)
+    await pet._cue_decided_face(robot.id, "surprised", lambda: False)
+    await pet._cue_decided_face(robot.id, "mood:move", lambda: True)
+    assert head.events == ["mood:thinking"]  # cooldown, consent, allowlist
+
+
 async def test_proactive_brain_can_choose_to_stay_silent_without_tts(fleet, tmp_path):
     class DecisionChat:
         def __init__(self):

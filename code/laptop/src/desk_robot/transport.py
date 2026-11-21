@@ -221,14 +221,19 @@ class HttpHead:
         This is not an actuator, speech, wake, or motor command. The head
         validates the same per-device bearer token as the other endpoints.
         """
-        if event != "person_detected":
+        if (type(event) is not str or event not in {
+            "person_detected", "mood:neutral", "mood:happy",
+            "mood:thinking", "mood:surprised",
+        }):
             raise ValueError("Unsupported cosmetic face event")
         response = await self._request(
             "POST", "/api/face", json={"event": event}
         )
         data = _response_object(response)
+        reply = ("person cue queued" if event == "person_detected"
+                 else "mood cue queued")
         if (data.get("ok") is not True or data.get("robot_id") != self.config.id
-                or data.get("reply") != "person cue queued"):
+                or data.get("reply") != reply):
             raise HeadError("Cosmetic face cue not acknowledged by this robot")
 
     async def status(self) -> dict:

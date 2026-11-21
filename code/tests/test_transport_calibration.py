@@ -828,6 +828,39 @@ async def test_failed_replacement_mjpeg_stream_cannot_revive_old_reader(settings
         assert calls == 2
 
 
+async def test_contextual_mood_cue_is_authenticated_and_never_motor(
+    settings, tokens,
+):
+    robot = settings.robots[0]
+    observed = []
+
+    def reply(req):
+        observed.append(req)
+        assert req.url.path == "/api/face"
+        assert req.headers["authorization"] == "Bearer " + tokens[robot.token_env]
+        assert json.loads(req.content) == {"event": "mood:thinking"}
+        return httpx.Response(200, json={
+            "ok": True, "reply": "mood cue queued", "robot_id": robot.id,
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(reply)) as client:
+        head = HttpHead(robot, client)
+        await head.face_event("mood:thinking")
+        assert len(observed) == 1
+        for illegal in ("mood:move", "mood:speak", "mood:angry", {}):
+            with pytest.raises(ValueError, match="Unsupported cosmetic"):
+                await head.face_event(illegal)
+        assert len(observed) == 1
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda req: httpx.Response(200, json={
+            "ok": True, "reply": "mood cue queued", "robot_id": "robot-02",
+        })
+    )) as client:
+        with pytest.raises(HeadError, match="Cosmetic face cue"):
+            await HttpHead(robot, client).face_event("mood:thinking")
+
+
 async def test_authenticated_person_face_cue_is_cosmetic_and_identity_bound(
     settings, tokens,
 ):

@@ -114,6 +114,12 @@ class OllamaChat:
                     "type": "string",
                     "enum": ["none", "status", "aux_status"],
                 },
+                # Optional for older local-model fixtures. A model can
+                # choose silence plus a subtle OLED expression without TTS.
+                "mood": {
+                    "type": "string",
+                    "enum": ["none", "neutral", "happy", "thinking", "surprised"],
+                },
             },
             "required": ["action", "text", "tool"],
             "additionalProperties": False,
@@ -139,7 +145,13 @@ class OllamaChat:
         except ValueError as exc:
             raise RuntimeError("Malformed proactive model decision") from exc
         if (not isinstance(value, dict)
-                or set(value) != {"action", "text", "tool"}
+                or set(value) not in (
+                    {"action", "text", "tool"},
+                    {"action", "text", "tool", "mood"},
+                )
+                or value.get("mood", "none") not in {
+                    "none", "neutral", "happy", "thinking", "surprised",
+                }
                 or value["action"] not in {"silence", "speak", "inspect"}
                 or value["tool"] not in {"none", "status", "aux_status"}
                 or not isinstance(value["text"], str)
@@ -149,6 +161,7 @@ class OllamaChat:
                 ))
                 or (value["action"] == "inspect" and (
                     value["tool"] == "none" or value["text"].strip()
+                    or value.get("mood", "none") != "none"
                 ))
                 or (value["action"] == "silence" and (
                     value["tool"] != "none" or value["text"].strip()
