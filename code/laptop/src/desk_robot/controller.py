@@ -167,6 +167,14 @@ class Coordinator:
             or any(type(mm) is not int or not 1 <= mm <= 1300 for mm in readings)
         ):
             raise OperationError("Hardware preflight: stale or malformed ranging telemetry")
+        power = status.get("power")
+        if isinstance(power, dict) and power.get("fuel_valid") is True:
+            cell_mv = power.get("cell_mv")
+            soc_centi = power.get("soc_centi")
+            if (isinstance(cell_mv, int) and cell_mv < 3350) or (
+                isinstance(soc_centi, int) and soc_centi < 500
+            ):
+                raise OperationError("Hardware preflight: battery voltage critical (<3350 mV)")
 
     async def operator_arm(self, robot_id: str):
         robot = self.robot(robot_id)
@@ -516,6 +524,14 @@ class Coordinator:
             or touch.get("active") is not False
         ):
             raise OperationError("Operation blocked by local sensor or corridor")
+        power = body.get("power")
+        if isinstance(power, dict) and power.get("fuel_valid") is True:
+            cell_mv = power.get("cell_mv")
+            soc_centi = power.get("soc_centi")
+            if (isinstance(cell_mv, int) and cell_mv < 3300) or (
+                isinstance(soc_centi, int) and soc_centi < 300
+            ):
+                raise OperationError("Operation blocked: battery depleted below motor operating limit")
         return body
 
     def explore(self, robot_id: str) -> Job:

@@ -340,6 +340,8 @@ class HardwareStatusHead(SimulatedHead):
                     "present_mask": 31, "valid_mask": 31}),
         ("ranges", {"mm": [0] * 5, "age_ms": [0] * 5,
                     "present_mask": 31, "valid_mask": 31}),
+        ("power", {"fuel_valid": True, "cell_mv": 3200, "soc_centi": 400}),
+        ("power", {"fuel_valid": True, "cell_mv": 3800, "soc_centi": 200}),
     ],
 )
 async def test_hardware_enable_fails_closed_on_unqualified_body_status(
@@ -354,6 +356,19 @@ async def test_hardware_enable_fails_closed_on_unqualified_body_status(
             await coordinator.operator_arm("robot-01")
         assert "robot-01" not in coordinator.permits
         assert head.commands == []
+    finally:
+        await coordinator.close()
+
+
+async def test_hardware_running_health_rejects_depleted_battery(settings):
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    head.body_status["armed"] = True
+    head.body_status["power"] = {"fuel_valid": True, "cell_mv": 3200, "soc_centi": 500}
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        with pytest.raises(OperationError, match="battery depleted"):
+            await coordinator._assert_armed_health("robot-01")
     finally:
         await coordinator.close()
 
