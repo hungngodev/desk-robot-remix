@@ -87,6 +87,7 @@ def register_readonly_planner_routes(
             is_camera_derived_timeline_item(item) for item in timeline
         )
         camera_consent_generation = settings.camera_consent_generation
+        camera_granted_at_request = settings.voice_vision_tools_enabled
         room_context_used = any(
             item.get("channel") == "room_station" for item in timeline
         )
@@ -265,6 +266,18 @@ def register_readonly_planner_routes(
             ):
                 visual_question = True
                 break
+        # A camera request may contain no prior camera evidence. The grant
+        # that existed before waiting for Ollama still owns any new look:
+        # revoking and regranting consent cannot revive the stale plan.
+        if (visual_question and isinstance(choices, list) and any(
+            isinstance(item, dict) and item.get("route") == "look"
+            for item in choices[:8]
+        )):
+            if camera_granted_at_request and not settings.voice_vision_tools_enabled:
+                raise HTTPException(403, "Live observation consent revoked during planning")
+            if (camera_granted_at_request != settings.voice_vision_tools_enabled
+                    or settings.camera_consent_generation != camera_consent_generation):
+                raise HTTPException(409, "Live observation grant changed during planning")
         # A background status or auxiliary poll requires the same actual
         # human question/imperative as vision and fuel telemetry. Do not
         # let an overeager planner turn "my sensors were broken yesterday"
