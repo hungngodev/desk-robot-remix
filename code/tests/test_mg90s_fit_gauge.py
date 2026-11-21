@@ -1,8 +1,8 @@
 """Physical MG90S fit coupons must reject misleading printable geometry."""
-from pathlib import Path
-from struct import unpack_from
 import shutil
 import subprocess
+from pathlib import Path
+from struct import unpack_from
 
 import pytest
 
