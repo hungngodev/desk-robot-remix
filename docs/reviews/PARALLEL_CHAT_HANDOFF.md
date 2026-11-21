@@ -1,3 +1,16 @@
+## 21 November 2026: Single-dock provenance binding in terminal IR calibration
+
+PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
+Exact inspected PR head commit `6898560383d47ad9b4e8574100918c7c94f553f1`.
+This source and test batch does not close physical or commercial gates.
+
+* Single assigned dock provenance enforcement in terminal IR calibration (Review PRRT_kwDOVlmnQ866b6Gq):
+  - In `code/scripts/calibrate_terminal_ir.py`, updated `analyze()` to track the observed NEC dock beacon code and fail closed with `ValueError("Mixed NEC dock beacons in trial: observations must share one assigned dock")` if matched records across left/center/right positions reference conflicting dock codes.
+  - Recorded explicit assigned dock identity (`assigned_dock_id` and `dock_id_assigned`) in the calibration result dictionary.
+  - Made `--dock-id 1..5` mandatory in the CLI for both live capture and saved-log analysis mode, rejecting unassigned runs before analysis.
+  - Updated builder instructions in `docs/hardware/charging-design-and-validation.md` to pass `--dock-id 1` in live capture and saved-log analysis commands.
+  - In `code/tests/test_calibrate_terminal_ir.py`, added regression tests: `test_mixed_dock_codes_in_center_records_rejected`, `test_analyze_reports_assigned_dock_identity`, `test_cli_requires_dock_id_for_both_capture_and_input`, and `test_cli_runs_input_analysis_with_dock_id`.
+
 ## 21 November 2026: 32-bit sample_ms rollover handling in handling calibration
 
 PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.

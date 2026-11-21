@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import importlib.util
+import json
+import sys
 from pathlib import Path
 
 import httpx
@@ -204,3 +206,76 @@ def test_rebooted_receiver_counter_still_requires_restart_of_trial():
     rows[1]["ir"]["left_seq"] = 0xffffffff
     with pytest.raises(ValueError, match="Reboot or out-of-order"):
         cal.analyze(rows, "robot-01")
+
+
+def test_mixed_dock_codes_in_center_records_rejected():
+    rows = position_records()
+    # Alternate center records between dock 4 (0xCB34ED12) and dock 5 (0xCA35ED12)
+    for i in range(21, 40, 2):
+        rows[i]["ir"]["code"] = 0xCA35ED12
+    with pytest.raises(ValueError, match="Mixed NEC dock beacons in trial"):
+        cal.analyze(rows, "robot-01")
+
+
+def test_analyze_reports_assigned_dock_identity():
+    rows = position_records()
+    # Explicit expected_dock_id
+    res_assigned = cal.analyze(rows, "robot-01", expected_dock_id=4)
+    assert res_assigned["assigned_dock_id"] == 4
+    assert res_assigned["dock_id_assigned"] is True
+
+    # Inferred from observed matching beacon code without explicit assignment
+    res_inferred = cal.analyze(rows, "robot-01")
+    assert res_inferred["assigned_dock_id"] == 4
+    assert res_inferred["dock_id_assigned"] is False
+
+
+def test_cli_requires_dock_id_for_both_capture_and_input(monkeypatch, tmp_path, capsys):
+    dummy_input = tmp_path / "trial.jsonl"
+    dummy_input.write_text(json.dumps(position_records()[0]) + "\n")
+
+    # Missing --dock-id with --input
+    monkeypatch.setattr(
+        sys, "argv",
+        ["calibrate_terminal_ir.py", "--robot", "robot-01", "--input", str(dummy_input)]
+    )
+    with pytest.raises(SystemExit) as exc:
+        cal.main()
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert "Terminal IR calibration requires --dock-id 1 through 5" in captured.err
+
+    # Missing --dock-id with live capture args
+    monkeypatch.setattr(
+        sys, "argv",
+        ["calibrate_terminal_ir.py", "--robot", "robot-01", "--label", "left", "--out", str(tmp_path / "out.jsonl")]
+    )
+    with pytest.raises(SystemExit) as exc:
+        cal.main()
+    assert exc.value.code == 2
+    captured = capsys.readouterr()
+    assert "Terminal IR calibration requires --dock-id 1 through 5" in captured.err
+
+
+def test_cli_runs_input_analysis_with_dock_id(monkeypatch, tmp_path, capsys):
+    trial_file = tmp_path / "trial.jsonl"
+    trial_file.write_text(
+        "\n".join(json.dumps(r) for r in position_records()) + "\n"
+    )
+    monkeypatch.setattr(
+        sys, "argv",
+        [
+            "calibrate_terminal_ir.py",
+            "--robot", "robot-01",
+            "--dock-id", "4",
+            "--input", str(trial_file),
+        ]
+    )
+    cal.main()
+    captured = capsys.readouterr()
+    result = json.loads(captured.out)
+    assert result["robot_id"] == "robot-01"
+    assert result["assigned_dock_id"] == 4
+    assert result["dock_id_assigned"] is True
+    assert result["candidate_differential_signal"] is True
+

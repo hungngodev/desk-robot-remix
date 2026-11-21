@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 import httpx
-from desk_robot.dock_ir import validate_ir
+from desk_robot.dock_ir import dock_beacon_code, validate_ir
 
 LABELS = ("left", "center", "right")
 
@@ -27,11 +27,21 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
     data: dict[str, list[dict]] = {name: [] for name in LABELS}
     previous: tuple[int, int] | None = None
     last_at = -1.0
+    observed_dock_code: int | None = None
+    if expected_dock_id is not None:
+        observed_dock_code = dock_beacon_code(expected_dock_id)
     for row in rows:
         if not isinstance(row, dict) or row.get("label") not in LABELS:
             raise ValueError("Explicitly labeled left/center/right records required")
         reading = validate_ir(row.get("ir"), robot_id,
                               expected_dock_id=expected_dock_id)
+        if reading["match"] and reading["code"] != 0:
+            if observed_dock_code is None:
+                observed_dock_code = reading["code"]
+            elif reading["code"] != observed_dock_code:
+                raise ValueError(
+                    "Mixed NEC dock beacons in trial: observations must share one assigned dock"
+                )
         stamp = row.get("received_monotonic")
         if type(stamp) not in (int, float) or not math.isfinite(stamp) or stamp <= last_at:
             raise ValueError("Strictly increasing recorded receive timestamps required")
@@ -96,8 +106,23 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
         and center["left_fresh_fraction"] >= .50
         and center["right_fresh_fraction"] >= .50
     )
+    assigned_dock = (
+        expected_dock_id
+        if expected_dock_id is not None
+        else (
+            next(
+                (i for i in range(1, 6) if dock_beacon_code(i) == observed_dock_code),
+                None,
+            )
+            if observed_dock_code is not None
+            else None
+        )
+    )
     return {
-        "robot_id": robot_id, "positions": summary,
+        "robot_id": robot_id,
+        "assigned_dock_id": assigned_dock,
+        "dock_id_assigned": expected_dock_id is not None,
+        "positions": summary,
         "observations_total": len(rows),
         "independent_fresh_minimum_met": enough_fresh,
         "candidate_differential_signal": separates,
@@ -145,7 +170,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--robot", required=True)
     parser.add_argument("--dock-id", type=int, choices=range(1, 6),
-                        help="Required actual physical beacon ID 1 through 5 for live capture")
+                        help="Required actual physical beacon ID 1 through 5")
     parser.add_argument("--input", type=Path, help="Read previously labeled JSONL")
     parser.add_argument("--out", type=Path, help="Append new labeled JSONL evidence")
     parser.add_argument("--label", choices=LABELS)
@@ -156,6 +181,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.input and (args.out or args.label):
         parser.error("--input cannot be combined with --out or --label")
+    if args.dock_id is None:
+        parser.error("Terminal IR calibration requires --dock-id 1 through 5")
     if args.input:
         rows = [json.loads(line) for line in args.input.read_text().splitlines()
                 if line.strip()]
@@ -165,8 +192,6 @@ def main() -> None:
         return
     if not args.out or args.label is None:
         parser.error("Supply --input for analysis or --out and --label for real capture")
-    if args.dock_id is None:
-        parser.error("Live optical calibration requires --dock-id 1 through 5")
     # The user must move an UNPOWERED robot to three stationary positions.
     # No motion, camera, battery or charging endpoint is ever requested.
     rows = asyncio.run(capture(

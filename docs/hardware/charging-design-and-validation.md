@@ -204,10 +204,10 @@ The WROOM now includes two independent legacy RMT receiver channels only in the 
 Once the receiver **signal lines only** are powered from a bench-qualified 3.3V rail and the dock's charge contacts are physically isolated from any source, a human can hold the assembled but **motor-disconnected** robot left, centered and right of a test beacon and record optical evidence with existing authorized Mac API. Run these commands from the `code` directory with your private `DESK_ROBOT_OPERATOR_TOKEN` environment variable set on the local machine:
 
 ```sh
-uv run python scripts/calibrate_terminal_ir.py --robot robot-01 --label left --samples 30 --out /tmp/robot-01-ir.jsonl
-uv run python scripts/calibrate_terminal_ir.py --robot robot-01 --label center --samples 30 --out /tmp/robot-01-ir.jsonl
-uv run python scripts/calibrate_terminal_ir.py --robot robot-01 --label right --samples 30 --out /tmp/robot-01-ir.jsonl
-uv run python scripts/calibrate_terminal_ir.py --robot robot-01 --input /tmp/robot-01-ir.jsonl
+uv run python scripts/calibrate_terminal_ir.py --robot robot-01 --dock-id 1 --label left --samples 30 --out /tmp/robot-01-ir.jsonl
+uv run python scripts/calibrate_terminal_ir.py --robot robot-01 --dock-id 1 --label center --samples 30 --out /tmp/robot-01-ir.jsonl
+uv run python scripts/calibrate_terminal_ir.py --robot robot-01 --dock-id 1 --label right --samples 30 --out /tmp/robot-01-ir.jsonl
+uv run python scripts/calibrate_terminal_ir.py --robot robot-01 --dock-id 1 --input /tmp/robot-01-ir.jsonl
 ```
 
 The tool requires an actual advancing left/right RMT acquisition sequence, increasing local receive timestamps, at least 20 real observations per position and authentic per-robot token. It estimates optical left/right fresh-hit fractions and center same-beacon fraction. Three identical reception patterns cannot pass the differential signal candidate. **It cannot assign bearing angles, calibrate wheel turn sign, prove final clearance, allow powered contact, or claim electrical acceptance.** Never interpret its `candidate_differential_signal` as a motion permit. `code/tests/test_calibrate_terminal_ir.py` verifies good synthetic sample structure, stale/replayed/forged signals and no authority, without pretending the robot is assembled.
