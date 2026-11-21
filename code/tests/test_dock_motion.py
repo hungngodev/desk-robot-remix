@@ -793,8 +793,10 @@ async def test_dock_approach_rejects_expired_stream_receipt_before_detector_or_d
     settings, monkeypatch,
 ):
     import time
+
     from desk_robot.controller import Job
     from desk_robot.dock_vision import DockCameraCalibration
+
     settings.mode = "hardware"
 
     class StaleHead:
