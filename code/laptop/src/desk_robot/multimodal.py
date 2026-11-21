@@ -1464,8 +1464,8 @@ class MultimodalOrchestrator:
         self.hub._check(robot_id)
         if self._closed:
             raise RuntimeError("Multimodal orchestrator closed")
-        if source == "sensor" and not self.settings.voice_vision_tools_enabled:
-            raise RuntimeError("Camera consent revoked for sensor capture")
+        if not self.settings.voice_vision_tools_enabled:
+            raise RuntimeError("Camera consent revoked for capture")
         if not 0 <= reuse_if_recent_s <= 1.0:
             raise ValueError("Invalid shared live camera age")
         if trigger_kind is not None and (
@@ -1479,8 +1479,8 @@ class MultimodalOrchestrator:
         # HttpHead.capture_lock provides serialization with pet observation,
         # dock calibration and pickup. Do not bypass its strict source checks.
         async with self._camera_locks[robot_id]:
-            if source == "sensor" and not self.settings.voice_vision_tools_enabled:
-                raise RuntimeError("Camera consent revoked for sensor capture")
+            if not self.settings.voice_vision_tools_enabled:
+                raise RuntimeError("Camera consent revoked for capture")
             if (source == "proactive"
                     and (pending := self._look_tasks.get(robot_id)) is not None
                     and not pending.done()):
@@ -1523,11 +1523,11 @@ class MultimodalOrchestrator:
                 # Its API request is not owned by _capture_tasks, so cancelling
                 # that sampler on reconnect or a newer VAD is insufficient:
                 # old HTTP/decode work must never repopulate the emptied hub.
-                if source == "sensor" and not self.settings.voice_vision_tools_enabled:
+                if not self.settings.voice_vision_tools_enabled:
                     # An opt-out during JPEG I/O or Pillow preparation is final:
                     # never publish an old sensor-triggered image to the Mac hub.
                     self.hub.discard_video(robot_id)
-                    raise RuntimeError("Camera consent revoked for sensor capture")
+                    raise RuntimeError("Camera consent revoked for capture")
                 if (self._turn_epoch[robot_id] != turn
                         or self._question_epoch[robot_id] != question):
                     raise RuntimeError(

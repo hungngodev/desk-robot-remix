@@ -750,10 +750,11 @@ async def test_one_human_vad_preempts_all_five_pet_optional_camera_captures():
 
     first, second = SlowHead(), SlowHead()
     visual = MultimodalOrchestrator(
-        config(enabled=False),
+        config(enabled=True),
         {"robot-01": first, "robot-02": second},
         Vision(), asyncio.Lock(),
     )
+    visual.start_speech_frames = lambda _robot_id: None
     task = asyncio.create_task(
         visual.capture("robot-02", source="proactive")
     )
@@ -816,9 +817,10 @@ async def test_human_voice_preempts_only_the_background_snapshot():
 
     head = SlowHead()
     visual = MultimodalOrchestrator(
-        config(enabled=False), {"robot-01": head, "robot-02": Head()},
+        config(enabled=True), {"robot-01": head, "robot-02": Head()},
         Vision(), asyncio.Lock(),
     )
+    visual.start_speech_frames = lambda _robot_id: None
     pending = asyncio.create_task(visual.capture("robot-01", source="proactive"))
     try:
         await asyncio.wait_for(head.started.wait(), timeout=1)
@@ -1230,6 +1232,22 @@ async def test_external_pet_jpeg_revoke_while_decoding_never_publishes():
         await visual.close()
 
 
+@pytest.mark.parametrize("source", ["sensor", "proactive", "speech", "voice_question"])
+async def test_direct_capture_sources_fail_closed_without_vision_consent(source):
+    head = Head()
+    visual = MultimodalOrchestrator(
+        config(enabled=False), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        with pytest.raises(RuntimeError, match="Camera consent revoked"):
+            await visual.capture("robot-01", source=source)
+        assert head.captures == 0
+        assert not visual.hub.frames["robot-01"]
+    finally:
+        await visual.close()
+
+
 async def test_camera_is_off_without_explicit_voice_vision_opt_in():
     head = Head()
     service = MultimodalOrchestrator(
@@ -1422,10 +1440,11 @@ async def test_real_vad_during_jpeg_cpu_prepare_suppresses_late_idle_frame(monke
 
     monkeypatch.setattr(media, "_prepare", slow_prepare)
     service = MultimodalOrchestrator(
-        config(enabled=False),
+        config(enabled=True),
         {"robot-01": Head(), "robot-02": Head()},
         Vision(), asyncio.Lock(),
     )
+    service.start_speech_frames = lambda _robot_id: None
     task = asyncio.create_task(
         service.capture("robot-02", source="proactive")
     )
@@ -2156,10 +2175,11 @@ async def test_old_native_camera_cannot_repopulate_new_voice_turn(
 
     monkeypatch.setattr(media, "_prepare", held_prepare)
     service = MultimodalOrchestrator(
-        config(enabled=False),
+        config(enabled=True),
         {"robot-01": Head(), "robot-02": Head()},
         Vision(), asyncio.Lock(),
     )
+    service.start_speech_frames = lambda _robot_id: None
     task = asyncio.create_task(service.capture("robot-01", source=source))
     try:
         assert await asyncio.wait_for(
