@@ -221,6 +221,69 @@ def test_capture_rejects_stale_or_invalid_generation(override):
         )
 
 
+def test_partial_pcm_failure_aborts_its_generation():
+    """No orphaned private mic buffer after an invalid raw body."""
+    http = fake_read(raw=b"short", start_generation="17",
+                     status_generation="17", raw_generation="17")
+    original = http.open
+    aborted = []
+
+    def open_request(request, timeout):
+        if request.full_url.endswith("/api/audio.capture.abort"):
+            aborted.append((
+                request.get_method(),
+                request.get_header("X-desk-audio-generation"),
+                timeout,
+            ))
+            return Response({
+                "ok": True, "reply": "Private bench PCM capture aborted",
+            })
+        return original(request, timeout)
+
+    http.open = open_request
+    with pytest.raises(ValueError, match="Incomplete or oversized"):
+        capture.capture_head(
+            http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
+            clock=iter([0.0, 0.1]).__next__, pause=lambda _: None,
+        )
+    assert aborted == [("POST", "17", 2.0)]
+
+
+def test_operator_keyboard_interrupt_aborts_same_private_capture():
+    """Physical head cleanup still gets a chance on Ctrl+C, not on GC."""
+    http = fake_read(start_generation="42")
+    original = http.open
+    aborted = []
+
+    def open_request(request, timeout):
+        if request.full_url.endswith("/api/audio.capture.status"):
+            raise KeyboardInterrupt
+        if request.full_url.endswith("/api/audio.capture.abort"):
+            aborted.append(request.get_header("X-desk-audio-generation"))
+            return Response({
+                "ok": True, "reply": "Private bench PCM capture aborted",
+            })
+        return original(request, timeout)
+
+    http.open = open_request
+    with pytest.raises(KeyboardInterrupt):
+        capture.capture_head(
+            http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
+            clock=iter([0.0, 0.1]).__next__, pause=lambda _: None,
+        )
+    assert aborted == ["42"]
+
+
+def test_audio_capture_abort_is_guarded_and_generation_scoped_in_sense_firmware():
+    bridge = (SOURCE.parents[1] / "firmware/head/overlay/robot_bridge.cc").read_text()
+    assert '"/api/audio.capture.abort", HTTP_POST' in bridge
+    assert 'strcmp(req->uri, "/api/audio.capture.abort") == 0' in bridge
+    assert '"X-Desk-Audio-Generation", supplied' in bridge
+    assert 'strcmp(expected, supplied) != 0' in bridge
+    assert 'codec->AbortBenchPcmCapture();' in bridge
+    assert 'config.max_uri_handlers = 14;' in bridge
+
+
 def test_consent_audio_capture_compiled_off_by_default():
     root = SOURCE.parents[1]
     head = (root / "firmware/head/sense/sense_reference_codec.h").read_text()
