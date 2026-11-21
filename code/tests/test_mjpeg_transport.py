@@ -215,13 +215,13 @@ async def test_late_network_camera_frame_needs_matching_source_clock_progress(
 ):
     """A delayed old device frame cannot get a new Mac freshness clock."""
     monkeypatch.setenv("SENSE_TEST_TOKEN", "x" * 32)
-    jpeg = b"\\xff\\xd8scene\\xff\\xd9"
+    jpeg = b"\xff\xd8scene\xff\xd9"
     old = _part(1, jpeg)
     newer = _part(2, jpeg)
     if device_kept_up:
         newer = newer.replace(
-            b"X-Desk-Camera-Complete-Us: 500000\\r\\n",
-            b"X-Desk-Camera-Complete-Us: 5250000\\r\\n",
+            b"X-Desk-Camera-Complete-Us: 500000\r\n",
+            b"X-Desk-Camera-Complete-Us: 5250000\r\n",
         )
 
     def respond(_request):
