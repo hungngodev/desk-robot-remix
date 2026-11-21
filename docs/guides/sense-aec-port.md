@@ -201,11 +201,16 @@ store them outside the local protected trial directory.
      --speaker data/private/aec_lab_trial/speaker_reference.wav
    ```
 
-5. Repeat bench trials with and without playback, double talk, VAD
-   interruption, WiFi/camera/servo load and head reboot. Retain a
-   source-qualified local verification receipt with the tested board
-   revision, actual output volume, delay estimates, clock drift and
-   rejected/valid runs. Securely delete raw WAVs after analysis.
+5. Repeat speaker-active broadband bench captures during double talk,
+   VAD interruption, WiFi/camera/servo load and head reboot. Also run
+   **no-playback and muted-microphone negative controls**: an entirely
+   zero-valued digital reference or microphone is expected to fail the
+   capture validity check and produce no accepted calibration WAV. Record
+   those rejections and authenticated integrity counters separately, not
+   as successful acoustic delay estimates. Retain a source-qualified
+   local verification receipt with the tested board revision, actual
+   output volume, delay estimates, clock drift and rejected/valid runs.
+   Securely delete raw WAVs after analysis.
 
 **A source capture is not A2 physical qualification.** The on-device
 timestamp reports when PCM samples entered the codec reference window;
