@@ -354,6 +354,50 @@ def test_abort_ack_cannot_claim_another_pet_or_missing_identity(response):
         )
 
 
+def test_disk_write_privacy_recheck_removes_private_wavs(tmp_path):
+    """A BOOT mute during disk serialization must retract all output files."""
+    raw = struct.pack("<hh", 12, -10) * capture.FRAMES
+    output = tmp_path / "trial"
+    watched = []
+
+    def revoked_after_write():
+        watched.append(sorted(path.name for path in output.iterdir()))
+        raise RuntimeError("Sense microphone privacy changed before WAV publication")
+
+    with pytest.raises(RuntimeError, match="privacy changed"):
+        capture.save_wavs(
+            output, raw, {"robot_id": "robot-01"},
+            verify_before_publish=revoked_after_write,
+        )
+    assert watched == [["capture.json", "microphone.wav", "speaker_reference.wav"]]
+    assert list(output.iterdir()) == []
+
+
+@pytest.mark.parametrize("state", [
+    {"robot_id": "robot-02", "boot": 7,
+     "microphone_privacy_epoch": 3, "capture_generation": "4",
+     "microphone_privacy_muted": False, "reference_integrity_failed": False},
+    {"robot_id": "robot-01", "boot": 7,
+     "microphone_privacy_epoch": 4, "capture_generation": "4",
+     "microphone_privacy_muted": False, "reference_integrity_failed": False},
+    {"robot_id": "robot-01", "boot": 7,
+     "microphone_privacy_epoch": 3, "capture_generation": "4",
+     "microphone_privacy_muted": True, "reference_integrity_failed": False},
+])
+def test_postwrite_head_receipt_rejects_foreign_or_revoked_privacy(state):
+    class Head:
+        def open(self, request, timeout):
+            assert request.full_url.endswith("/api/audio.reference")
+            return Response(state)
+
+    with pytest.raises(RuntimeError, match="privacy changed"):
+        capture.verify_postwrite_privacy(
+            Head(), "http://192.168.1.23:8081", "x" * 32,
+            {"robot_id": "robot-01", "boot": 7,
+             "microphone_privacy_epoch": 3, "capture_generation": 4},
+        )
+
+
 def test_audio_capture_abort_is_guarded_and_generation_scoped_in_sense_firmware():
     bridge = (SOURCE.parents[1] / "firmware/head/overlay/robot_bridge.cc").read_text()
     assert '"/api/audio.capture.abort", HTTP_POST' in bridge
