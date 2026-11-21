@@ -158,16 +158,20 @@ def test_fusion_gui_exposes_protected_pack_source_footprint_block():
             **blocked["source_chassis_battery_footprint"],
             "axis_aligned_packaging_possible": True,
             "flat_tray_any_yaw_impossible": False,
-        }
+        },
+        "power_fit_scope": blocked["power_fit_scope"],
     }
     assert "physical fit remain OPEN" in warning(possible)
     assert "unqualified" in warning(None)
     import pytest
     with pytest.raises(ValueError, match="provenance"):
-        warning({"source_chassis_battery_footprint": {
-            "physical_interior_fit_verified": True,
-            "axis_aligned_packaging_possible": True,
-        }})
+        warning({
+            "source_chassis_battery_footprint": {
+                "physical_interior_fit_verified": True,
+                "axis_aligned_packaging_possible": True,
+            },
+            "power_fit_scope": blocked["power_fit_scope"],
+        })
     with pytest.raises(ValueError, match="power fit scope"):
         warning({
             "source_chassis_battery_footprint": blocked[
