@@ -798,6 +798,24 @@ def test_identified_5a_86mm_pack_fails_conservative_three_amp_five_volt_case():
     assert result["candidate_physically_qualified"] is False
 
 
+
+
+def test_impossible_pack_envelope_is_false_even_without_current_ratings():
+    # The assembled 86 mm pack cannot fit the 68 mm tray regardless of
+    # whether its electrical ratings are known.
+    demand = tool(1.0, 0.6)
+    result = pack_screen(
+        demand, pack_length_mm=86, pack_width_mm=30,
+        pack_thickness_mm=7.4, tray_length_mm=68,
+        tray_width_mm=35, tray_height_mm=14,
+    )
+    assert result["assembled_pack_fits_tray_on_paper"] is False
+    assert result["current_sufficient_on_paper"] is None
+    assert result["pack_only_usable_on_paper"] is False
+    assert result["candidate_usable_on_paper"] is False
+    assert result["candidate_physically_qualified"] is False
+
+
 def test_protected_pack_incomplete_ratings_and_rotated_fit():
     requirements = tool(1.0, 0.6)
     base = dict(pack_length_mm=30, pack_width_mm=55,

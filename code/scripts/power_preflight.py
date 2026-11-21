@@ -191,7 +191,9 @@ def screen_protected_pack(
         "current_ratings_complete": ratings_complete,
         "current_sufficient_on_paper": current_ok,
         "candidate_usable_on_paper": complete_harness_usable,
-        "pack_only_usable_on_paper": fits_flat and current_ok if ratings_complete else None,
+        "pack_only_usable_on_paper": (
+            False if not fits_flat else current_ok if ratings_complete else None
+        ),
         "connector_and_wire_ratings_complete": interconnect_complete,
         "connector_and_wire_current_sufficient_on_paper": interconnect_ok,
         "minimum_cell_peak_a": supply["minimum_rated_cell_and_boost_input_a"],
