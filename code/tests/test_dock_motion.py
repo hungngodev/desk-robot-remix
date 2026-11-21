@@ -787,3 +787,56 @@ async def test_unidentified_or_wrong_sensor_cannot_steer_real_dock(
         assert head.commands == []
     finally:
         await controller.close()
+
+
+async def test_dock_approach_rejects_expired_stream_receipt_before_detector_or_drive(
+    settings, monkeypatch,
+):
+    import time
+    from desk_robot.controller import Job
+    from desk_robot.dock_vision import DockCameraCalibration
+    settings.mode = "hardware"
+
+    class StaleHead:
+        def __init__(self):
+            self.commands = []
+
+        async def status(self):
+            return {
+                "robot_id": "robot-01", "armed": True,
+                "safety": {"required": True, "ready": True, "fault": "none"},
+                "ranges": {"present_mask": 31, "valid_mask": 31,
+                           "mm": [50, 50, 50, 50, 600],
+                           "age_ms": [5, 5, 5, 5, 5]},
+                "imu": {"valid": True, "age_ms": 10},
+                "touch": {"active": False},
+            }
+
+        async def snapshot(self):
+            raise AssertionError("Unexpected generic camera request")
+
+        async def snapshot_for_dock(self):
+            return b"synthetic image", time.monotonic() - 0.3
+
+        async def command(self, command):
+            self.commands.append(command)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Stale dock frame entered native detector")
+
+    monkeypatch.setattr("desk_robot.dock_runtime.detect_apriltag", forbidden)
+    head = StaleHead()
+    controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    camera = DockCameraCalibration(
+        410, 410, 320, 240, 60, 1,
+        mount_lateral_offset_mm=0, mount_yaw_deg=0,
+    )
+    try:
+        with pytest.raises(OperationError, match="Stale or invalid dock camera receipt"):
+            await controller._dock_approach(
+                Job("expired-frame", "robot-01", "dock_approach"),
+                camera, 200, 1, 1,
+            )
+        assert head.commands == []
+    finally:
+        await controller.close()
