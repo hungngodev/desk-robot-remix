@@ -180,3 +180,44 @@ async def test_live_camera_bench_rejects_reboot_even_if_receipts_look_fresh(monk
     assert result["camera_frames_received"] == 1
     assert result["camera_error_count"] == 1
     assert any("rebooted" in error for error in result["camera_errors"])
+
+async def test_camera_bench_collects_actual_sense_aec_reference_counters():
+    """Read-only diagnostic uses the existing head without a second mic."""
+    class Head:
+        _last_camera = None
+
+        def __init__(self):
+            self.frames = 0
+            self.audio_reads = 0
+
+        async def snapshot(self):
+            self.frames += 1
+            self._last_camera = (17, self.frames, self.frames * 1000)
+            return b"\xff\xd8valid jpeg\xff\xd9"
+
+        async def status(self):
+            return {"robot_id": "robot-01"}
+
+        async def audio_reference_status(self):
+            self.audio_reads += 1
+            return {
+                "robot_id": "robot-01",
+                "reference_underflow_reads": 4,
+                "reference_overwrite_reads": 0,
+                "discarded_stale_writes": 1,
+                "reference_integrity_failed": True,
+                "speaker_playback_verified": False,
+                "aec_physically_qualified": False,
+            }
+
+    head = Head()
+    result = await bench.measure(
+        head, "robot-01", seconds=0.12,
+        camera_period_s=0.05, status_period_s=0.05,
+    )
+    assert head.audio_reads == 1
+    assert result["aec_reference_diagnostics"]["reference_underflow_reads"] == 4
+    assert result["aec_reference_diagnostics"]["reference_integrity_failed"] is True
+    assert result["aec_reference_probe_error"] is None
+    assert result["physical_aec_latency_measured"] is False
+    assert result["speaker_silence_verified"] is False
