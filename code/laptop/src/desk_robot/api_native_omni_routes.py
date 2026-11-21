@@ -48,6 +48,7 @@ def register_native_omni_routes(
         robot = coordinator().robot(robot_id)
         if settings.mode != "hardware" or not settings.voice_vision_tools_enabled:
             raise HTTPException(403, "Native voice and camera need explicit opt in")
+        camera_grant = settings.camera_consent_generation
         prefix = (
             robot.persona[:950]
             + " You are speaking live through your own small desk robot. "
@@ -68,6 +69,7 @@ def register_native_omni_routes(
         # The existing voice-context tool still supports opt-in recall.
         historical_evidence = {"core": "", "recent": ""}
         if settings.voice_memory_tools_enabled:
+            memory_grant = settings.voice_memory_consent_generation
             # A SQLite snapshot is valid only for the current memory
             # correction/deletion generation of this particular pet.
             owner = getattr(app.state.runtime, "conversation", None)
@@ -91,11 +93,13 @@ def register_native_omni_routes(
             # Private consent can change WHILE SQLite is reading. Never
             # return historical text in a native startup persona after an
             # opt-out, even if the camera permit remains enabled.
-            if not settings.voice_memory_tools_enabled:
+            if (not settings.voice_memory_tools_enabled
+                    or settings.voice_memory_consent_generation != memory_grant):
                 raise HTTPException(403, "Native memory consent revoked during read")
-            if not settings.voice_vision_tools_enabled:
-                # SQLite yields to independent live-media opt-out. No
-                # private startup context may escape a revoked live session.
+            if (not settings.voice_vision_tools_enabled
+                    or settings.camera_consent_generation != camera_grant):
+                # Even an immediate OFF/ON replaces the old camera grant.
+                # Private memory read under old live consent must not escape.
                 raise HTTPException(403, "Native live consent revoked during read")
             current = getattr(
                 getattr(app.state.runtime, "conversation", None),
