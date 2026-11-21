@@ -16,6 +16,42 @@ permissions:
 # pending revision per PR, without force-cancelling active firmware builds.
 # Never combine all four lanes into one workflow-level concurrency group.
 jobs:
+  mac-fast:
+    name: Mac conversation and memory regression
+    concurrency:
+      group: host-verification-mac-fast-\${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: \${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify exact source commit under test
+        shell: bash
+        run: |
+          expected="\${{ github.event.pull_request.head.sha || github.sha }}"
+          actual="$(git -c safe.directory="$PWD" rev-parse HEAD)"
+          test "$actual" = "$expected"
+      - uses: astral-sh/setup-uv@v6
+      - name: Install locked Mac test dependencies
+        working-directory: code
+        run: |
+          uv python install 3.11
+          uv sync --extra dev --python 3.11 --locked
+      - name: Verify bounded Mac voice, memory and fleet ownership
+        working-directory: code
+        run: |
+          uv run --no-sync pytest -q -ra \
+            tests/test_attention.py \
+            tests/test_live_turns.py \
+            tests/test_brain_context.py \
+            tests/test_brain_core_memory.py \
+            tests/test_brain_memory_retrieval.py \
+            tests/test_api_conversation.py \
+            tests/test_api_readonly_context_split.py \
+            tests/test_realtime_omni_protocol.py \
+            tests/test_ci_lane_concurrency.py
+
   python-and-head-host:
     concurrency:
       group: host-verification-python-and-head-host-${{ github.event.pull_request.number || github.ref }}
