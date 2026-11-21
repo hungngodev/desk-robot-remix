@@ -229,7 +229,10 @@ async def test_continuous_camera_feed_populates_proactive_hub_without_snapshot_p
 
 
 
-async def test_stream_consent_revoked_during_frame_preparation_cannot_publish_jpeg():
+@pytest.mark.parametrize("primed_frames", [0, 2])
+async def test_stream_consent_revoked_during_frame_preparation_cannot_publish_jpeg(
+    primed_frames,
+):
     """An in-flight image worker cannot outlive operator visual opt out."""
     entered, release = asyncio.Event(), asyncio.Event()
     stream_closed = asyncio.Event()
@@ -257,6 +260,16 @@ async def test_stream_consent_revoked_during_frame_preparation_cannot_publish_jp
         await release.wait()
         return _prepare(jpeg)
 
+    # Cover both a first-frame opt-out and a late static third frame.
+    # The static novelty skip must never bypass the consent fence and
+    # leave a prior camera buffer or an open MJPEG lease after revoke.
+    if primed_frames:
+        at = time.monotonic() - 1
+        for index in range(primed_frames):
+            visual.hub.offer(
+                "robot-01", image(square=True), at + index * .1,
+                source="proactive",
+            )
     visual._prepare_bounded = slow_prepare
     visual.start_streams()
     try:
