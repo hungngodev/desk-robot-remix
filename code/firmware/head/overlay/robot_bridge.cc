@@ -324,7 +324,7 @@ void Bridge::Start() {
     config.server_port = 8081;
     config.ctrl_port = 32771;
     config.stack_size = 12288;
-    config.max_uri_handlers = 13;
+    config.max_uri_handlers = 14;
     config.recv_wait_timeout = 2;
     config.send_wait_timeout = 2;
     if (httpd_start(&server_, &config) != ESP_OK) {
@@ -341,6 +341,7 @@ void Bridge::Start() {
              {"/api/audio.reference", HTTP_GET}
 #if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3) && defined(CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED)
              ,{"/api/audio.capture.start", HTTP_POST},
+             {"/api/audio.capture.abort", HTTP_POST},
              {"/api/audio.capture.status", HTTP_GET},
              {"/api/audio.capture.raw", HTTP_GET}
 #endif
@@ -710,6 +711,27 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         cJSON_AddNumberToObject(started.get(), "boot", boot_nonce_);
         cJSON_AddStringToObject(started.get(), "capture_generation", generation);
         return Json(req, 202, Encode(started.get()));
+    }
+    if (strcmp(req->uri, "/api/audio.capture.abort") == 0) {
+        if (req->content_len != 0)
+            return Json(req, 400, Envelope(false, "Bench abort request must be empty"));
+        if (!audio_codec_) return Json(req, 503, Envelope(false, "Sense codec unavailable"));
+        auto* codec = static_cast<SenseReferenceCodec*>(audio_codec_);
+        // Check the exact decimal generation, not a model-provided command.
+        // Handler serialization prevents another HTTP START between this
+        // comparison and the abort. BOOT can still independently invalidate
+        // the source, but never grants authority to restore it.
+        char expected[24] = {};
+        char supplied[24] = {};
+        snprintf(expected, sizeof(expected), "%llu",
+                 static_cast<unsigned long long>(codec->BenchPcmGeneration()));
+        if (httpd_req_get_hdr_value_str(
+                req, "X-Desk-Audio-Generation", supplied,
+                sizeof(supplied)) != ESP_OK ||
+            strcmp(expected, supplied) != 0)
+            return Json(req, 409, Envelope(false, "Bench capture generation mismatch"));
+        codec->AbortBenchPcmCapture(); // Wipe pending PCM; fence HTTP worker.
+        return Json(req, 200, Envelope(true, "Private bench PCM capture aborted"));
     }
     if (strcmp(req->uri, "/api/audio.capture.status") == 0) {
         if (!audio_codec_) return Json(req, 503, Envelope(false, "Sense codec unavailable"));
