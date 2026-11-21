@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
@@ -16,6 +17,32 @@ inline bool CompleteJpeg(const std::uint8_t* data, std::size_t size) {
            data[0] == 0xff && data[1] == 0xd8 &&
            data[size - 2] == 0xff && data[size - 1] == 0xd9;
 }
+
+// A pending urgent STOP/HALT preempts nonurgent UART traffic. This head
+// scheduling cue never replaces the WROOM's independent motor safety latch.
+class UrgentStopGate {
+public:
+    class Request {
+    public:
+        Request(UrgentStopGate& gate, bool urgent) : gate_(gate), urgent_(urgent) {
+            if (urgent_) gate_.pending_.fetch_add(1, std::memory_order_acq_rel);
+        }
+        Request(const Request&) = delete;
+        Request& operator=(const Request&) = delete;
+        ~Request() {
+            if (urgent_) gate_.pending_.fetch_sub(1, std::memory_order_acq_rel);
+        }
+    private:
+        UrgentStopGate& gate_;
+        bool urgent_;
+    };
+
+    bool preempts(bool urgent) const {
+        return !urgent && pending_.load(std::memory_order_acquire) != 0;
+    }
+private:
+    std::atomic<unsigned> pending_{0};
+};
 
 struct Command {
     std::string verb;
