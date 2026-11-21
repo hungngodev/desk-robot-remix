@@ -116,8 +116,11 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn('#include "stackchan_behavior.hpp"', source)
         self.assertIn('HsmBehavior face_behavior_', source)
         self.assertIn('body_bridge_->PollInteraction()', source)
-        self.assertIn('pending_face_touches_.exchange(0', source)
-        self.assertIn('Event(EventType::kTouched)', source)
+        # Source-qualified touch contributes to the Mac world model,
+        # not a compulsory local smile or nod on every contact.
+        self.assertNotIn('pending_face_touches_', source)
+        self.assertNotIn('Event(EventType::kTouched)', source)
+        self.assertIn('TakeCosmeticMoodCue()', source)
         self.assertIn('body_fault_active_', source)
         self.assertIn('bool last_rendered_fault = false;', source)
         self.assertIn('static void BodyPollTask(void* context)', source)
@@ -206,8 +209,10 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn('body_last_valid_ms_.store(', poll)
         self.assertIn('body_last_valid_ms_.load(', face)
         self.assertIn('now_ms - valid_at > 1200U', face)
-        self.assertIn('pending_face_touches_.exchange(0', face)
-        self.assertIn('if (!body_unhealthy)', face)
+        self.assertNotIn('pending_face_touches_', face)
+        self.assertNotIn('Event(EventType::kTouched)', face)
+        self.assertIn('TakeCosmeticMoodCue()', face)
+        self.assertIn('if (!body_unhealthy &&', face)
         self.assertIn('vTaskDelay(pdMS_TO_TICKS(100));', face)
         self.assertIn('xTaskCreate(BodyPollTask, "sense_body_poll"', source)
 
