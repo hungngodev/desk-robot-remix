@@ -36,6 +36,7 @@ public:
         uint32_t underflow_reads;
         uint32_t overwrite_reads;
         uint32_t discarded_stale_writes;
+        uint32_t short_output_writes;
         bool integrity_failed;
     };
     ReferenceDiagnostics GetReferenceDiagnostics();
@@ -80,6 +81,8 @@ private:
     // Guarded by reference_mutex_, not a competing audio task/driver.
     uint64_t reference_generation_ = 0;
     uint32_t stale_publish_discards_ = 0;
+    // I2S timeout/short output cannot be counted as fully delivered speech.
+    uint32_t short_output_writes_ = 0;
     // Silence-only reference on startup/reset is expected briefly. Count
     // missing windows and warn only on prolonged consecutive underflow.
     uint32_t missing_reference_reads_ = 0;
