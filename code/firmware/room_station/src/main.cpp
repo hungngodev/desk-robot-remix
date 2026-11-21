@@ -234,7 +234,10 @@ void setup() {
   }
   amg_started = amg.begin(kAmgAddress);
   Serial1.begin(256000);  // LD2410C, different UART from USB CDC Serial
-  radar.begin(Serial1);
+  // Pinned ld2410 v0.2.2 otherwise blocks probing the optional radar
+  // firmware for up to one second when the board is missing. Keep the
+  // shared climate and thermal station independently bootable.
+  radar.begin(Serial1, false);
 #if ROOM_SOIL_FITTED
   analogReadResolution(12);
 #endif
