@@ -1368,6 +1368,10 @@ async def test_recovered_snapshot_does_not_release_newer_human_voice():
             self.calls = 0
 
         async def interrupt(self, robot_id):
+            # One real VAD preempts every pet; only one physical head is
+            # blocked per interruption in this test's two STOP barriers.
+            if robot_id != "robot-01":
+                return
             index = self.calls
             self.calls += 1
             entered[index].set()
