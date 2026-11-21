@@ -749,8 +749,9 @@ async def test_dock_diagnostic_uses_strict_live_frame_receipt_if_available(
             raise AssertionError("Generic camera snapshot used for docking")
 
         async def snapshot_for_dock(self):
+            import time
             self.captures += 1
-            return b"\xff\xd8\xff\xd9"
+            return b"\xff\xd8\xff\xd9", time.monotonic()
 
     monkeypatch.setattr(
         dock_runtime, "detect_apriltag",
@@ -767,3 +768,28 @@ async def test_dock_diagnostic_uses_strict_live_frame_receipt_if_available(
     assert head.commands == []
     assert not result["motor_authorized"]
     assert not result["charging_authorized"]
+
+
+async def test_stale_mac_receipt_does_not_enter_dock_detector(tmp_path, monkeypatch):
+    import time
+
+    calibration = tmp_path / "dock.json"
+    calibration.write_text(json.dumps({
+        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
+    }))
+
+    class StaleHead(Head):
+        async def snapshot_for_dock(self):
+            return b"\xff\xd8\xff\xd9", time.monotonic() - 0.30
+
+    def detector(*args, **kwargs):
+        raise AssertionError("Stale observation entered native detector")
+
+    monkeypatch.setattr(dock_runtime, "detect_apriltag", detector)
+    result = await dock_runtime.observe_actual_dock(
+        StaleHead(), SimpleNamespace(id="robot-01", dock_calibration=calibration)
+    )
+    assert result["phase"] == "hold"
+    assert result["source"] == "head_snapshot_invalid"
+    assert not result["motor_authorized"] and not result["charging_authorized"]
