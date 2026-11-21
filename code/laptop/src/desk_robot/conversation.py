@@ -762,24 +762,33 @@ class Conversation:
                             )
                         except Exception:
                             raw = []
-                        if live_media_allowed:
-                            timeline = raw
-                            # The hub callback can revoke consent while reading;
-                            # admission is what binds the next speech boundary.
-                            if self.settings.mode == "hardware" and raw:
-                                visual_context_used = True
-                        else:
-                            # Camera opt-out must not erase independent WROOM
-                            # handling or safety evidence, but old ASR, visual
-                            # guesses and tool text remain private.
-                            timeline = [
-                                item for item in raw
-                                if (item.get("channel") == "sensor"
-                                    and item.get("source") in {"wroom_event", "wroom_sensed_event"})
+                        # WROOM and shared room observations remain available
+                        # independently of camera consent. Only material that
+                        # the camera-off branch would withhold needs a visual
+                        # revocation fence on later model/speaker completion.
+                        def independent_nonvisual(item: dict) -> bool:
+                            return (
+                                (item.get("channel") == "sensor"
+                                 and item.get("source") in {
+                                     "wroom_event", "wroom_sensed_event",
+                                 })
                                 or (item.get("channel") == "sensor_history"
                                     and item.get("source") == "wroom_event_history")
                                 or (item.get("channel") == "room_station"
                                     and item.get("shared_not_robot_eyewitness") is True)
+                            )
+
+                        if live_media_allowed:
+                            timeline = raw
+                            # Record admission, even if consent changes during
+                            # the hub read, but not for independent WROOM cues.
+                            if (self.settings.mode == "hardware"
+                                    and any(not independent_nonvisual(item)
+                                            for item in raw)):
+                                visual_context_used = True
+                        else:
+                            timeline = [
+                                item for item in raw if independent_nonvisual(item)
                             ][-remaining:]
                         if not self.settings.room_station_context_enabled:
                             timeline = [

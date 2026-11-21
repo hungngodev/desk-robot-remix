@@ -421,6 +421,50 @@ async def test_group_camera_granted_mid_session_then_revoked_blocks_peer_speech(
     assert "PRIVATE_VISUAL_SECOND_TURN" not in str(conversation.histories)
 
 
+
+async def test_group_camera_toggle_does_not_revoke_wroom_only_peer_context(
+    settings,
+):
+    """Independent WROOM touch evidence is not a private camera inference."""
+    import time
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_vision_tools_enabled = False
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.notify("robot-02", "touch_tap", time.monotonic())
+
+    class Chat:
+        def __init__(self):
+            self.prompts = []
+
+        async def reply(self, history):
+            self.prompts.append(str(history))
+            if len(self.prompts) == 1:
+                settings.voice_vision_tools_enabled = True
+                return "First pet spoke."
+            assert "touch_tap" in self.prompts[-1]
+            settings.voice_vision_tools_enabled = False
+            return "Second pet sensed a touch."
+
+    speaker = SimulatedSpeaker()
+    chat = Chat()
+    conversation = Conversation(settings, chat, speaker)
+    conversation.multimodal = SimpleNamespace(hub=hub)
+    result = await conversation.run(
+        ["robot-01", "robot-02"], "Discuss the desk", 2,
+    )
+    assert [item["robot_id"] for item in result] == ["robot-01", "robot-02"]
+    assert speaker.spoken == [
+        ("robot-01", "First pet spoke."),
+        ("robot-02", "Second pet sensed a touch."),
+    ]
+    assert conversation.active is None
+
+
 async def test_empty_ollama_stream_never_creates_phantom_social_speech(
     settings, tmp_path,
 ):
