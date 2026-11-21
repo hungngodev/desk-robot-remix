@@ -1774,6 +1774,13 @@ def test_verified_checkout_evidence_is_embedded_in_existing_shopping_lists():
         assert "quoted 2026-11-20" in shown
         assert "https://supplier.example/mux" in shown
     assert "Remaining under prototype $50 cap: $30.25" in one
+    # The stored quote must preserve its validated role identity. It must
+    # never let a different component inherit an unrelated seller receipt.
+    bad = {**quote, "role_key": "station:unknown_sensor"}
+    with pytest.raises(ValueError, match="unknown shopping role"):
+        mod.attach_verified_checkout_evidence(
+            report, cost, {**evidence, "lines": [bad]}
+        )
 
 
 def test_landed_cost_markdown_allocations_are_visible_and_not_checkout_prices():

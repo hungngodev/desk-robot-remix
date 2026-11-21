@@ -1672,7 +1672,7 @@ def attach_verified_checkout_evidence(
             raise ValueError("Verified quote references unknown shopping role")
         normalized = {}
         for key in (
-            "seller", "sku", "pcb_revision", "quantity_packages",
+            "role_key", "seller", "sku", "pcb_revision", "quantity_packages",
             "units_per_package", "package_price_usd", "quoted_at",
             "stock_evidence_url", "quote_reference",
         ):
