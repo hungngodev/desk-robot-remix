@@ -982,8 +982,12 @@ def test_authenticated_mac_person_face_cue_is_cosmetic_only():
     assert 'Bridge robot_bridge(camera_, GetAudioCodec())' in board
     assert '"/api/camera.identity", HTTP_GET' in bridge
     assert 'strcmp(event->valuestring, "person_detected") != 0' in bridge
-    assert 'person_cue_pending_.store(true' in bridge
-    assert 'person_cue_pending_.exchange(false' in bridge
+    # The upstream overlay now uses a bounded one-second atomic timestamp
+    # instead of a replayable boolean; match the actual producer/consumer.
+    assert 'person_cue_.offer(' in bridge
+    assert 'person_cue_.take(' in bridge
+    assert 'TimedPersonCue person_cue_{};' in header
+    assert 'class TimedPersonCue' in (HEAD / "overlay/robot_protocol.h").read_text()
     assert 'bool TakePersonCue();' in header
     assert 'body_bridge_->TakePersonCue()' in board
     assert 'Event(EventType::kPersonDetected)' in board
