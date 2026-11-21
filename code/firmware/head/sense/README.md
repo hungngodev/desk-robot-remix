@@ -119,8 +119,12 @@ session. Neither press allows automatic microphone reactivation later in this
 boot, including a WiFi reconnect. Power cycling permits the original explicit
 build-level setting to start another session.
 
-This is a **source-based privacy fence**, not a measured upper bound on packets
-already encoded or sent before the physical press. On the assembled head,
+The selected Sense Xiaozhi application also checks the same physical mute
+flag before every queued Opus send, drops remaining encoded microphone packets,
+rejects stale start/listen tasks and closes the existing channel. The codec
+does not feed newly sampled PDM data while muted. This is a **source-based
+privacy fence**, not a measured upper bound on a packet already inside an
+in-flight network send before the physical press. On the assembled head,
 press BOOT during idle listening, active speech, pending slow WiFi connection,
 AEC capture and reconnection. Verify microphone packet cutoff, that a late
 network open cannot restart listening, and that explicit manual unmute is
