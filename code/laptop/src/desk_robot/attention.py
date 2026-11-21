@@ -85,6 +85,10 @@ class AttentionLedger:
         if not cleaned:
             raise ValueError("Empty conversation topic")
         state = self._state(robot_id)
+        # Late or duplicated topic callbacks cannot steal the current Mac
+        # activity owner or erase its live sensor evidence.
+        if state.generation > 0 and at <= state.topic_updated_at:
+            raise ValueError("Topic start must follow prior topic activity")
         state.generation += 1
         state.topic = cleaned
         state.topic_origin = origin

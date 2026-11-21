@@ -538,3 +538,23 @@ def test_cleared_attention_does_not_reissue_old_conversation_generation(monkeypa
     assert "Fresh conversation" in ledger.timeline("pet", 16)[0]["content"]
     assert "Older interrupted topic" not in ledger.timeline("pet", 16)[0]["content"]
     assert ledger.timeline("peer", 16) == []
+
+
+def test_delayed_old_topic_start_cannot_overwrite_newer_activity(monkeypatch):
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 100.0)
+    ledger = AttentionLedger(["pet"])
+    first = ledger.begin_topic("pet", "Old topic", 10)
+    current = ledger.begin_topic("pet", "Current song", 20)
+    assert current > first
+    assert ledger.sensor("pet", "handling_tilt", 22)
+    with pytest.raises(ValueError, match="Topic start"):
+        ledger.begin_topic("pet", "Delayed older callback", 15)
+    with pytest.raises(ValueError, match="Topic start"):
+        ledger.begin_topic("pet", "Duplicate current callback", 20)
+    assert ledger._state("pet").generation == current
+    assert ledger._state("pet").topic_state == "active"
+    assert "Current song" in ledger.timeline("pet", 23)[0]["content"]
+    assert "handling_tilt" in ledger.timeline("pet", 23)[0]["content"]
+    assert "Delayed older callback" not in ledger.timeline("pet", 23)[0]["content"]
+    assert not ledger.finish_topic("pet", first, 24, interrupted=True)
+    assert ledger.finish_topic("pet", current, 25, interrupted=False)
