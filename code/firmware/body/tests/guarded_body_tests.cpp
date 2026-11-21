@@ -704,9 +704,9 @@ static void missing_mpu_interrupt_status_cannot_authorize_wheels() {
   body.tick(101);
   CHECK(!body.state().armed && body.state().left == 0 &&
         body.state().right == 0 && body.state().servos_attached);
-  CHECK(send(body, "arm", 101) == "ERR arm imu_missing_or_stale");
+  CHECK(send(body, "arm", 101) == "ERR arm imu_sensor_fault_latched");
   const auto status = send(body, "status", 101);
-  CHECK(status.find("\"fault\":\"imu_low_g_status_unavailable\"") != std::string::npos);
+  CHECK(status.find("\"fault\":\"imu_sensor_fault_latched\"") != std::string::npos);
   CHECK(status.find("\"low_g_valid\":false,\"low_g_irq\":false") !=
         std::string::npos);
 }
@@ -739,8 +739,8 @@ static void zero_acceleration_mpu_does_not_authorize_motion() {
   body.tick(101);
   CHECK(!body.state().armed && body.state().left == 0 &&
         body.state().right == 0 && body.state().servos_attached);
-  CHECK(send(body, "arm", 101) == "ERR arm imu_missing_or_stale");
-  CHECK(send(body, "status", 101).find("\"fault\":\"imu_zero_accel\"") != std::string::npos);
+  CHECK(send(body, "arm", 101) == "ERR arm imu_sensor_fault_latched");
+  CHECK(send(body, "status", 101).find("\"fault\":\"imu_sensor_fault_latched\"") != std::string::npos);
 }
 
 static void required_imu_is_a_local_freshness_interlock() {

@@ -874,6 +874,9 @@ void BodyControl::execute(const char* line, std::size_t length,
         bumper_hit ? "bumper_active" :
         touch_hit ? "touch_active" :
         imu_low_g_latched_ ? "imu_low_g_latched" :
+        // Once motion trips this local latch, report mandatory USB recovery
+        // ahead of mutable raw IMU symptoms; raw telemetry remains available.
+        imu_sensor_fault_latched_ ? "imu_sensor_fault_latched" :
         imu_motion_required_ && imu_raw_fresh &&
             imu_.model == BerryModel::Mpu6050 &&
             imu_.low_g_status_valid && imu_.low_g_irq ?
@@ -885,10 +888,6 @@ void BodyControl::execute(const char* line, std::size_t length,
             imu_.model == BerryModel::Mpu6050 &&
             imu_.accel[0] == 0 && imu_.accel[1] == 0 &&
             imu_.accel[2] == 0 ? "imu_zero_accel" :
-        // A safety fault latched during motion remains the operator's
-        // recovery reason even when the raw sample subsequently goes stale.
-        // A normal head ARM cannot clear it; only local USB rearm can.
-        imu_sensor_fault_latched_ ? "imu_sensor_fault_latched" :
         imu_motion_required_ && !imu_valid ? "imu_missing_or_stale" :
         !guarded_motion_profile() ? "not_required" : "none";
     const int written = std::snprintf(
