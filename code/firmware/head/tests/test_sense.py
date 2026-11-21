@@ -1159,7 +1159,7 @@ def test_private_sense_settings_reject_symlink_without_leaking_device_token():
         root = Path(directory)
         config = root / "fleet.toml"
         config.write_text(
-            '[[robots]]\\nid="robot-01"\\ntoken_env="BENCH_SENSE_TOKEN"\\n'
+            '[[robots]]\nid="robot-01"\ntoken_env="BENCH_SENSE_TOKEN"\n'
         )
         board = (
             root / "firmware/head/build/xiaozhi-sense/main/boards/"
@@ -1194,7 +1194,7 @@ def test_private_sense_settings_write_failure_keeps_previous_secret_file():
         root = Path(directory)
         config = root / "fleet.toml"
         config.write_text(
-            '[[robots]]\\nid="robot-01"\\ntoken_env="BENCH_SENSE_TOKEN"\\n'
+            '[[robots]]\nid="robot-01"\ntoken_env="BENCH_SENSE_TOKEN"\n'
         )
         board = (
             root / "firmware/head/build/xiaozhi-sense/main/boards/"
