@@ -282,4 +282,8 @@ class AttentionLedger:
         }]
 
     def clear(self, robot_id: str) -> None:
-        self._robots[robot_id] = _Attention()
+        # Drop private transient context while preserving an ever-increasing
+        # activity lease. An old completion must never match a new topic after
+        # an operator reset, consent revoke or optional ledger failure.
+        prior = self._state(robot_id)
+        self._robots[robot_id] = _Attention(generation=prior.generation + 1)

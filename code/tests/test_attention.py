@@ -521,3 +521,20 @@ def test_nonboolean_interruption_cannot_relabel_live_conversation(monkeypatch, i
     assert ledger._state("pet").topic_updated_at == 10
     assert ledger.finish_topic("pet", generation, 14, interrupted=False)
     assert ledger._state("pet").topic_state == "completed"
+
+
+def test_cleared_attention_does_not_reissue_old_conversation_generation(monkeypatch):
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 100.0)
+    ledger = AttentionLedger(["pet", "peer"])
+    obsolete = ledger.begin_topic("pet", "Older interrupted topic", 10)
+    ledger.sensor("pet", "handling_tilt", 11)
+    ledger.clear("pet")
+    assert ledger.timeline("pet", 12) == []
+    current = ledger.begin_topic("pet", "Fresh conversation", 13)
+    assert current > obsolete
+    assert not ledger.finish_topic("pet", obsolete, 14, interrupted=True)
+    assert ledger._state("pet").topic_state == "active"
+    assert ledger.finish_topic("pet", current, 15, interrupted=False)
+    assert "Fresh conversation" in ledger.timeline("pet", 16)[0]["content"]
+    assert "Older interrupted topic" not in ledger.timeline("pet", 16)[0]["content"]
+    assert ledger.timeline("peer", 16) == []
