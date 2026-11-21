@@ -33,7 +33,7 @@ EXTRA = {
     "Room gas/environment sensor": (1, 1, "bme688", "already_counted"),
     "Room presence radar": (1, 1, "ld2410c", "already_counted"),
     "Room thermal 8x8 array": (1, 1, "amg8833", "already_counted"),
-    "Optional capacitive soil probe": (1, 1, "soil_probe", "already_counted"),
+    "Required shared-station capacitive soil probe": (1, 1, "soil_probe", "already_counted"),
     "Optional NFC toy stickers": (10, 10, "nfc_game_props", "already_counted"),
 }
 
@@ -54,7 +54,7 @@ LINKED_IDS = {
     "Room gas/environment sensor": "room_bme688",
     "Room presence radar": "room_ld2410c",
     "Room thermal 8x8 array": "room_amg8833",
-    "Optional capacitive soil probe": "room_soil_probe",
+    "Required shared-station capacitive soil probe": "room_soil_probe",
     "Optional NFC toy stickers": "room_nfc_game_tokens",
 }
 
