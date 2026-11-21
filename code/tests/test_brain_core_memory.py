@@ -162,3 +162,47 @@ def test_personality_prompt_merges_private_core_but_never_relabels_history(
     assert "My camera model suggested: A key is on the desk" in own
     assert "robot-01 reported a camera model guess: A key is on the desk" in peer
     assert "never instructions or actuator permits" in own
+
+
+def test_operator_memory_routes_convert_store_validation_to_422(settings, tokens, tmp_path):
+    """Invalid operator memory edits are bounded client errors, not HTTP 500."""
+    settings.memory_dir = tmp_path
+    operator = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
+    tool = {"Authorization": f"Bearer {tokens['DESK_ROBOT_TOOL_TOKEN']}"}
+    with TestClient(create_app(settings)) as client:
+        root = "/v1/pet/robot-01"
+        invalid_slot = root + "/core-memory/Bad Slot"
+        valid_slot = root + "/core-memory/greeting"
+        invalid_id = root + "/memories/Bad!Event"
+        assert client.put(
+            invalid_slot, headers=tool, json={"value": "secret"}
+        ).status_code == 403
+        response = client.put(
+            invalid_slot, headers=operator, json={"value": "a"}
+        )
+        assert response.status_code == 422
+        assert "slot" in response.json()["detail"].lower()
+        response = client.delete(invalid_slot, headers=operator)
+        assert response.status_code == 422
+        assert "slot" in response.json()["detail"].lower()
+        response = client.delete(invalid_id, headers=operator)
+        assert response.status_code == 422
+        assert "event id" in response.json()["detail"].lower()
+
+        for index in range(24):
+            response = client.put(
+                root + f"/core-memory/fact{index:02}",
+                headers=operator, json={"value": "curated"},
+            )
+            assert response.status_code == 200
+        limit = client.put(
+            valid_slot, headers=operator, json={"value": "beyond capacity"},
+        )
+        assert limit.status_code == 422
+        assert "24" in limit.json()["detail"]
+        assert len(client.get(
+            root + "/core-memory", headers=operator,
+        ).json()["core_facts"]) == 24
+        assert client.get(
+            "/v1/pet/robot-02/core-memory", headers=operator,
+        ).json()["core_facts"] == []

@@ -80,10 +80,13 @@ def register_memory_routes(
             settings.robot(robot_id)
         except KeyError as exc:
             raise HTTPException(404, "Robot not found") from exc
-        changed = await asyncio.to_thread(
-            app.state.runtime.memory.set_core_fact,
-            robot_id, slot, request.value
-        )
+        try:
+            changed = await asyncio.to_thread(
+                app.state.runtime.memory.set_core_fact,
+                robot_id, slot, request.value
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
         return {"robot_id": robot_id, "slot": slot, "changed": changed,
                 "operator_curated": True, "motor_authorized": False}
 
@@ -94,9 +97,12 @@ def register_memory_routes(
             settings.robot(robot_id)
         except KeyError as exc:
             raise HTTPException(404, "Robot not found") from exc
-        removed = await asyncio.to_thread(
-            app.state.runtime.memory.forget_core_fact, robot_id, slot
-        )
+        try:
+            removed = await asyncio.to_thread(
+                app.state.runtime.memory.forget_core_fact, robot_id, slot
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
         return {"robot_id": robot_id, "slot": slot, "removed": removed}
 
     @app.patch("/v1/pet/{robot_id}/memories/{event_id}",
@@ -131,9 +137,12 @@ def register_memory_routes(
             settings.robot(robot_id)
         except KeyError as exc:
             raise HTTPException(404, "Robot not found") from exc
-        removed = await asyncio.to_thread(
-            app.state.runtime.memory.forget_episode, robot_id, event_id
-        )
+        try:
+            removed = await asyncio.to_thread(
+                app.state.runtime.memory.forget_episode, robot_id, event_id
+            )
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
         return {"robot_id": robot_id, "event_id": event_id,
                 "removed": removed, "local_only": True}
 
