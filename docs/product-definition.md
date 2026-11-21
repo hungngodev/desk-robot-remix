@@ -6,8 +6,8 @@ working software and physically verified hardware. **No complete robot has been
 assembled, flashed or tested.**
 
 **Accepted docking scope revision, 2026-11-21:** The completed first robot
-includes its own independently qualified dock. The eventual five pets each
-have a dedicated dock, with one separate shared room station. Docking and
+includes its own independently qualified dock. The eventual five pets have five docks, one dedicated to each robot,
+and one shared room station. Docking and
 charging were originally classed as expansion ideas in older records; that
 historical scope is superseded by this accepted required experience. Safe
 predock, seated alignment, normally unpowered contacts, pack temperature,
