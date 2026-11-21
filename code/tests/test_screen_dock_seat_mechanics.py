@@ -226,3 +226,46 @@ def test_unpowered_contact_coupon_datum_parser_reads_current_source():
     assert constants["carrier_height_mm"] == 9
     assert len(constants["source_sha256"]) == 64
     assert constants["electrical_contact_selected"] is False
+
+
+def test_source_pinned_blank_template_cannot_pass_as_measurement():
+    source = load()
+    form = source.blank_template(1)
+    assert form["dock_id"] == 1
+    assert form["cad_source_sha256"] == source.dock_constants()[
+        "source_sha256"
+    ]
+    assert form["contact_cad_source_sha256"] == source.contact_constants()[
+        "source_sha256"
+    ]
+    assert all(form[field] is None for field in source.NUMERICS)
+    with pytest.raises(ValueError, match="finite measured"):
+        source.screen(form)
+
+
+def test_dock_template_cli_refuses_to_replace_previous_evidence(tmp_path):
+    import subprocess
+    import sys
+
+    output = tmp_path / "dock01_measurements.json"
+    cmd = [
+        sys.executable, str(SCRIPT), "--template-for-dock", "1",
+        "--output", str(output),
+    ]
+    ok = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    assert ok.returncode == 0, ok.stderr
+    original = output.read_text(encoding="utf-8")
+    import json
+
+    form = json.loads(original)
+    assert form == load().blank_template(1)
+    refused = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+    assert refused.returncode != 0
+    assert "FileExistsError" in refused.stderr
+    assert output.read_text(encoding="utf-8") == original
+    rejected = subprocess.run(
+        [sys.executable, str(SCRIPT), "--measurements", str(output)],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert rejected.returncode != 0
+    assert "finite measured" in rejected.stderr

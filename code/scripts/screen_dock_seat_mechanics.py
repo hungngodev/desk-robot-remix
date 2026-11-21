@@ -310,10 +310,39 @@ def _reject_duplicates(pairs: list[tuple[str, object]]) -> dict:
     return result
 
 
+def blank_template(dock_id: int, *, cad: Path = CAD,
+                   contact_cad: Path = CONTACT_CAD) -> dict:
+    """Create the real-source contract without fabricating any measurement."""
+    if type(dock_id) is not int or not 1 <= dock_id <= 5:
+        raise ValueError("An actual numbered physical dock ID is required")
+    return {
+        "dock_id": dock_id,
+        "cad_source_sha256": dock_constants(cad)["source_sha256"],
+        "contact_cad_source_sha256": contact_constants(contact_cad)["source_sha256"],
+        **{field: None for field in NUMERICS},
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--measurements", type=Path, required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--measurements", type=Path)
+    mode.add_argument("--template-for-dock", type=int, choices=range(1, 6),
+                      help="Emit a blank source-pinned measurement form")
+    parser.add_argument("--output", type=Path,
+                        help="Write new template only; never overwrite evidence")
     args = parser.parse_args()
+    if args.template_for_dock is not None:
+        content = json.dumps(blank_template(args.template_for_dock), indent=2) + "\n"
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            with args.output.open("x", encoding="utf-8") as sink:
+                sink.write(content)
+        else:
+            print(content, end="")
+        return
+    if args.output:
+        parser.error("--output only supports blank template generation")
     values = json.loads(
         args.measurements.read_text(encoding="utf-8"),
         object_pairs_hook=_reject_duplicates,

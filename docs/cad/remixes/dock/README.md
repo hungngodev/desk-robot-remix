@@ -112,8 +112,18 @@ inputs. Neither a valid AprilTag nor two optical NEC frames substitutes
 for physical switch actuation or verified charging. Before finalizing a
 switch bracket, measure the actual physical switch bodies, separation,
 positions, pretravel, planned mechanical stop and safe total travel.
-With a user-supplied JSON record containing those measured values, run
-`python3 code/scripts/screen_dock_seat_mechanics.py --measurements PATH`
+First create a **blank** per-dock JSON template with source hashes from
+the current CAD, never prefilled sample measurements:
+
+```sh
+python3 code/scripts/screen_dock_seat_mechanics.py --template-for-dock 1 --output dock01_measurements.json
+```
+
+Enter the actual independent switch and dummy contact carrier dimensions
+only after caliper measurements. The generator refuses to overwrite an
+existing record, and the validator rejects the blank form. With the completed
+user-supplied JSON, run
+`python3 code/scripts/screen_dock_seat_mechanics.py --measurements dock01_measurements.json`
 from the repository root. The JSON must include `dock_id` (1 through 5),
 `cad_source_sha256` of this exact SCAD file, `seat_pair_spacing_mm`,
 and **separately for left and right**, each key prefixed `left_` and
