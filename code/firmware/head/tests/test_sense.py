@@ -147,6 +147,37 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertEqual((self.root / 'main/boards/common/esp32_camera.cc').read_text()
                          .count('camera_lock(AccessMutex())'), 6)
 
+    def test_boot_mute_while_speaking_closes_pinned_xiaozhi_channel(self):
+        """The BOOT privacy action must close the active speaker session."""
+        overlay.apply(self.root, "sense")
+        app = (self.root / "main/application.cc").read_text()
+        begin = app.index("void Application::StopListening()")
+        end = app.index("void Application::HandleWakeWordDetectedEvent()", begin)
+        stop = app[begin:end]
+        self.assertIn("} else if (state == kDeviceStateSpeaking)", stop)
+        self.assertIn("#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED", stop)
+        for action in (
+            "AbortSpeaking(kAbortReasonNone);",
+            "audio_service_.ResetDecoder();",
+            "Board::GetInstance().GetAudioCodec()->EnableOutput(false);",
+            "protocol_->CloseAudioChannel();",
+            "SetDeviceState(kDeviceStateIdle);",
+        ):
+            self.assertIn(action, stop)
+        self.assertLess(
+            stop.index("AbortSpeaking(kAbortReasonNone);"),
+            stop.index("protocol_->CloseAudioChannel();"),
+        )
+        board = (self.root / overlay.BOARDS["sense"] / "desk_robot_sense.cc").read_text()
+        click = board.split("boot_button_.OnClick([this]()", 1)[1].split(
+            "void StartNetwork()", 1
+        )[0]
+        self.assertIn("audio_operator_touched_.store(true);", click)
+        self.assertIn("if (app.GetDeviceState() == kDeviceStateSpeaking)", click)
+        self.assertIn("app.StopListening();", click)
+        self.assertIn("!board->audio_operator_touched_.load()", board)
+
+
     def test_local_oled_scheduler_never_blocks_on_uart_poll(self):
         """Preserve responsive local face when WROOM UART holds 350 ms."""
         source = (HEAD / "sense/desk_robot_sense.cc").read_text()
