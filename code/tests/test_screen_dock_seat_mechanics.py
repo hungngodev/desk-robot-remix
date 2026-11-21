@@ -172,6 +172,29 @@ def test_screen_rejects_ir_pair_coupons_breaching_paper_or_outer_web(
         tool.dock_constants(changed)
 
 
+
+@pytest.mark.parametrize("original,replacement", [
+    ("track_outer_width_mm = 96;", "track_outer_width_mm = 220;"),
+    ("side_clearance_each_mm = 2;", "side_clearance_each_mm = 10;"),
+    ("entry_flare_each_mm = 7;", "entry_flare_each_mm = 12;"),
+    ("guide_run_mm = 107;", "guide_run_mm = 140;"),
+    ("entry_coupon_length_mm = 48;", "entry_coupon_length_mm = 36;"),
+    ("tag_recess_depth_mm = 0.8;", "tag_recess_depth_mm = 3.5;"),
+    ("ir_coupon_height_mm = 16;", "ir_coupon_height_mm = 8;"),
+])
+def test_screen_rejects_nonrenderable_dock_source_dimensions(
+    tmp_path, original, replacement,
+):
+    """The source paper screener should not accept invalid SCAD assertions."""
+    tool = load()
+    raw = tool.CAD.read_text(encoding="utf-8")
+    assert raw.count(original) == 1
+    modified = tmp_path / "unprintable.scad"
+    modified.write_text(raw.replace(original, replacement), encoding="utf-8")
+    with pytest.raises(ValueError, match="violates printable geometry"):
+        tool.dock_constants(modified)
+
+
 def test_printer_source_and_switch_screen_share_real_pocket_width():
     g = load().dock_constants()
     assert g["backstop_width_mm"] == 126

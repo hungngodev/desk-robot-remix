@@ -36,11 +36,13 @@ def dock_constants(source: Path = CAD) -> dict:
     names = (
         "track_outer_width_mm", "side_clearance_each_mm",
         "guide_wall_mm", "wall_outside_margin_mm",
+        "guide_run_mm", "entry_flare_each_mm", "entry_coupon_length_mm",
         "base_length_mm", "backstop_thickness_mm",
         "backstop_height_mm", "base_thickness_mm", "tag_black_side_mm",
         "tag_white_margin_each_mm", "tag_paper_slack_each_mm",
+        "tag_recess_depth_mm",
         "tag_bottom_z_mm", "ir_pair_spacing_mm", "ir_probe_bore_d_mm",
-        "ir_min_tag_web_mm",
+        "ir_min_tag_web_mm", "ir_coupon_height_mm", "ir_coupon_thickness_mm",
     )
     values = {}
     for name in names:
@@ -52,6 +54,32 @@ def dock_constants(source: Path = CAD) -> dict:
         values[name] = float(matches[0])
     if not all(math.isfinite(v) and 0 < v < 1000 for v in values.values()):
         raise ValueError("Invalid dock CAD dimensions")
+    # Keep this paper screen aligned with the printable geometry's assert
+    # contract. It must not greenlight a switch layout on an SCAD file
+    # whose rails, entry coupon, tag pocket or IR coupon cannot render.
+    inner_wall = values["guide_wall_mm"] + values["wall_outside_margin_mm"]
+    if (not 40 < values["track_outer_width_mm"] < 200
+            or not 0.5 <= values["side_clearance_each_mm"] < 8
+            or not values["guide_run_mm"] > 37
+            or not 37 < values["entry_coupon_length_mm"] < values["guide_run_mm"]
+            or not values["base_length_mm"] >
+                values["guide_run_mm"] + values["backstop_thickness_mm"]
+            or not 0 < values["entry_flare_each_mm"] <=
+                values["wall_outside_margin_mm"]
+            or not values["entry_flare_each_mm"] < inner_wall
+            or not 10 <= values["tag_black_side_mm"] <= 75
+            or not 4 <= values["tag_white_margin_each_mm"] <= 10
+            or not 0.25 <= values["tag_paper_slack_each_mm"] <= 1.5
+            or not 0.4 <= values["tag_recess_depth_mm"] <
+                values["backstop_thickness_mm"] - 2
+            or not 1 < values["ir_probe_bore_d_mm"] < 15
+            or not values["ir_min_tag_web_mm"] >= 3
+            or not values["ir_coupon_thickness_mm"] >= 2
+            or not values["ir_coupon_height_mm"] >= 10
+            or not values["ir_coupon_height_mm"] / 2 -
+                values["ir_probe_bore_d_mm"] / 2 >=
+                values["ir_min_tag_web_mm"]):
+        raise ValueError("Dock SCAD source violates printable geometry constraints")
     width = (
         values["track_outer_width_mm"]
         + 2 * values["side_clearance_each_mm"]
