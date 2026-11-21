@@ -704,6 +704,21 @@ class Coordinator:
             # turns need real footprint and obstacle qualification.
             await asyncio.sleep(0.35)
 
+    def _camera_motion_grant(self) -> int | None:
+        """Bind physical camera-guided work to one operator grant epoch."""
+        if self.settings.mode != "hardware":
+            return None
+        if not self.settings.voice_vision_tools_enabled:
+            raise OperationError("Hardware motion requires camera consent")
+        return self.settings.camera_consent_generation
+
+    def _require_camera_motion_grant(self, grant: int | None) -> None:
+        if grant is not None and (
+            not self.settings.voice_vision_tools_enabled
+            or self.settings.camera_consent_generation != grant
+        ):
+            raise OperationError("Camera consent revoked during physical operation")
+
     def dock(self, robot_id: str) -> Job:
         """Permit-gated camera approach ending BEFORE unqualified charge contacts."""
         robot = self.robot(robot_id)
@@ -739,18 +754,22 @@ class Coordinator:
             )
         if robot.dock_beacon_id is None:
             raise OperationError("Dock approach needs the assigned physical NEC beacon")
+        camera_grant = self._camera_motion_grant()
         return self._submit(
             robot_id, "dock_approach",
             lambda job: self._dock_approach(
-                job, camera, target_mm, robot.dock_turn_sign, robot.dock_forward_sign
+                job, camera, target_mm, robot.dock_turn_sign,
+                robot.dock_forward_sign, camera_grant=camera_grant,
             ),
         )
 
     async def _dock_approach(
         self, job: Job, camera, target_mm: float,
-        turn_sign: int, forward_sign: int
+        turn_sign: int, forward_sign: int,
+        *, camera_grant: int | None = None,
     ) -> dict:
         """Camera plus fresh assigned dock IR plus local guard; NEVER charge."""
+        self._require_camera_motion_grant(camera_grant)
         head = self.heads[job.robot_id]
         expected_dock = self.robot(job.robot_id).dock_beacon_id
         previous_ir: tuple[int, int] | None = None
@@ -768,6 +787,7 @@ class Coordinator:
                 capture_dock(), seconds=2.0,
                 timeout_message="Camera snapshot timeout",
             )
+            self._require_camera_motion_grant(camera_grant)
             try:
                 jpeg, received_at = unpack_dock_frame(observation)
             except ValueError as exc:
@@ -900,6 +920,7 @@ class Coordinator:
                 await verify_selected_dock_frame(head, observation)
             except Exception as exc:
                 raise OperationError("Dock JPEG source changed before drive") from exc
+            self._require_camera_motion_grant(camera_grant)
             await head.command(command)
             await asyncio.sleep(0.12)
             await _bounded_pulse_stop(head)
@@ -926,10 +947,19 @@ class Coordinator:
             raise OperationError("Real pickup requires measured ADS1115 gripper contact threshold")
         if self.settings.mode == "hardware":
             self._pickup_live_media(robot_id)
-        return self._submit(robot_id, "pickup", lambda job: self._pickup(job, target, calibration))
+        camera_grant = self._camera_motion_grant()
+        return self._submit(
+            robot_id, "pickup",
+            lambda job: self._pickup(
+                job, target, calibration, camera_grant=camera_grant,
+            ),
+        )
 
-    def _pickup_live_media(self, robot_id: str):
+    def _pickup_live_media(
+        self, robot_id: str, camera_grant: int | None = None,
+    ):
         """Never let hardware grasp use a stale or privately disabled camera."""
+        self._require_camera_motion_grant(camera_grant)
         media = self.multimodal
         if (media is None or not self.settings.voice_vision_tools_enabled
                 or not media.stream_owns_camera(robot_id)
@@ -940,11 +970,12 @@ class Coordinator:
     async def _observe(
         self, robot_id: str, target: str, c: Calibration,
         *, after: float = float("-inf"),
+        camera_grant: int | None = None,
     ) -> tuple[Detection, float]:
         if self.settings.mode == "hardware":
             # Grasp must share the SAME authenticated pushed XIAO MJPEG feed
             # as exploration and voice, never fall back to /api/camera.jpg.
-            media = self._pickup_live_media(robot_id)
+            media = self._pickup_live_media(robot_id, camera_grant)
 
             def newest():
                 return next((
@@ -963,7 +994,7 @@ class Coordinator:
                     timeout_message="Live pickup camera stalled",
                 )
                 frame = newest()
-            self._pickup_live_media(robot_id)
+            self._pickup_live_media(robot_id, camera_grant)
             if frame is None:
                 raise OperationError("Live pickup camera stalled")
             jpeg = frame.jpeg
@@ -992,29 +1023,35 @@ class Coordinator:
         if len(objects) != 1:
             raise OperationError("Lost or ambiguous target; stop and request operator intervention")
         if self.settings.mode == "hardware":
-            self._pickup_live_media(robot_id)
+            self._pickup_live_media(robot_id, camera_grant)
             if time.monotonic() - jpeg_received_at > 2.0:
                 raise OperationError("Pickup visual evidence expired during inference")
         return objects[0], jpeg_received_at
 
-    async def _pickup(self, job: Job, target: str, c: Calibration) -> dict:
+    async def _pickup(
+        self, job: Job, target: str, c: Calibration,
+        *, camera_grant: int | None = None,
+    ) -> dict:
         head = self.heads[job.robot_id]
         if self.settings.mode == "hardware":
             # A missing camera must stop BEFORE jaw or lift preposition.
-            self._pickup_live_media(job.robot_id)
+            self._pickup_live_media(job.robot_id, camera_grant)
         last_live_frame_at = float("-inf")
 
         async def observe() -> tuple[Detection, float]:
             nonlocal last_live_frame_at
             result = await self._observe(
-                job.robot_id, target, c, after=last_live_frame_at
+                job.robot_id, target, c, after=last_live_frame_at,
+                camera_grant=camera_grant,
             )
             last_live_frame_at = result[1]
             return result
 
         await self._assert_armed_health(job.robot_id)
+        self._require_camera_motion_grant(camera_grant)
         await head.command(f"grip {c.grip_open}")
         await self._assert_armed_health(job.robot_id)
+        self._require_camera_motion_grant(camera_grant)
         await head.command(f"lift {c.lift_down}")
         await asyncio.sleep(c.servo_settle_seconds)
         initial = None
@@ -1041,6 +1078,7 @@ class Coordinator:
             if (self.settings.mode == "hardware"
                     and time.monotonic() - visual_received_at > 2.0):
                 raise OperationError("Pickup visual evidence expired before movement")
+            self._require_camera_motion_grant(camera_grant)
             await head.command(command)  # exactly once: an uncertain ACK is a failure
             await asyncio.sleep(0.12)
             await _bounded_pulse_stop(head)
@@ -1049,18 +1087,25 @@ class Coordinator:
             raise OperationError("Alignment attempt limit reached")
         await self._assert_armed_health(job.robot_id)
         if self.settings.mode == "hardware":
+            async def grasp_health() -> dict:
+                body = await self._assert_armed_health(job.robot_id)
+                self._require_camera_motion_grant(camera_grant)
+                return body
+
+            self._require_camera_motion_grant(camera_grant)
             tactile = await guarded_grasp(
-                head, c, robot_id=job.robot_id,
-                health=lambda: self._assert_armed_health(job.robot_id)
+                head, c, robot_id=job.robot_id, health=grasp_health,
             )
             job.events.append(
                 f"tactile contact delta={tactile['contact_delta_raw']} "
                 f"commanded_angle={tactile['commanded_angle']}; not physical acceptance"
             )
         else:
+            self._require_camera_motion_grant(camera_grant)
             await head.command(f"grip {c.grip_closed}")
             await asyncio.sleep(c.servo_settle_seconds)
         await self._assert_armed_health(job.robot_id)
+        self._require_camera_motion_grant(camera_grant)
         await head.command(f"lift {c.lift_up}")
         await asyncio.sleep(c.servo_settle_seconds)
         # Image evidence: same category moves upward into measured raised-jaw region and remains
@@ -1095,6 +1140,7 @@ class Coordinator:
         # calibrated ground area. No blind wheel movement or drop command.
         job.events.append("lift and hold visually verified; begin supervised placement")
         await self._assert_armed_health(job.robot_id)
+        self._require_camera_motion_grant(camera_grant)
         await head.command(f"lift {c.lift_down}")
         await asyncio.sleep(c.servo_settle_seconds)
         lowered, _ = await observe()
@@ -1109,9 +1155,11 @@ class Coordinator:
         await self._assert_armed_health(job.robot_id)
         # Release only after observing the object near the table, then raise
         # the empty jaws to distinguish a placed object from one stuck in them.
+        self._require_camera_motion_grant(camera_grant)
         await head.command(f"grip {c.grip_open}")
         await asyncio.sleep(c.servo_settle_seconds)
         await self._assert_armed_health(job.robot_id)
+        self._require_camera_motion_grant(camera_grant)
         await head.command(f"lift {c.lift_up}")
         await asyncio.sleep(c.servo_settle_seconds)
         placed_positions = []
