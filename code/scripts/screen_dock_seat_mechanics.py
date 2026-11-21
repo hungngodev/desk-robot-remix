@@ -63,6 +63,16 @@ def dock_constants(source: Path = CAD) -> dict:
     )
     if not 0 < paper < width or not 0 < values["ir_pair_spacing_mm"] < width:
         raise ValueError("Dock tag/IR source geometry is inconsistent")
+    # Mirror the printable SCAD's tag pocket assertions. A pocket which
+    # cannot exist inside the rail channel or backstop must not receive a
+    # positive paper-only seat-switch layout screen.
+    channel = values["track_outer_width_mm"] + 2 * values["side_clearance_each_mm"]
+    floor = values["base_thickness_mm"]
+    if (paper >= channel
+            or values["tag_bottom_z_mm"] < floor + 12
+            or values["tag_bottom_z_mm"] + paper + 3 >
+                floor + values["backstop_height_mm"]):
+        raise ValueError("Dock tag pocket exceeds printable CAD clearance")
     return {
         "backstop_width_mm": width,
         "dock_base_length_mm": values["base_length_mm"],

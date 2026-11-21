@@ -132,6 +132,26 @@ def test_stale_source_revision_and_unexpected_measurement_rejected(tmp_path):
         load().screen(example(), cad=wrong)
 
 
+
+
+@pytest.mark.parametrize("original,replacement", [
+    ("track_outer_width_mm = 96;", "track_outer_width_mm = 60;"),
+    ("tag_bottom_z_mm = 16;", "tag_bottom_z_mm = 7;"),
+    ("tag_bottom_z_mm = 16;", "tag_bottom_z_mm = 70;"),
+])
+def test_screen_rejects_tag_pockets_that_openscad_refuses_to_render(
+    tmp_path, original, replacement,
+):
+    """A positive paper screen cannot be based on nonrenderable dock CAD."""
+    tool = load()
+    source = tool.CAD.read_text(encoding="utf-8")
+    assert source.count(original) == 1
+    changed = tmp_path / "impossible_dock.scad"
+    changed.write_text(source.replace(original, replacement), encoding="utf-8")
+    with pytest.raises(ValueError, match="tag pocket exceeds printable CAD"):
+        tool.dock_constants(changed)
+
+
 def test_printer_source_and_switch_screen_share_real_pocket_width():
     g = load().dock_constants()
     assert g["backstop_width_mm"] == 126
