@@ -135,6 +135,30 @@ def _completed_trial_date(value: object) -> bool:
     return tested.isoformat() == value and tested <= date.today()
 
 
+
+def _same_json_measurement(recorded: object, claimed: object) -> bool:
+    """Compare immutable physical evidence without Python bool/int coercion.
+
+    Int and float also remain distinct: a signoff must preserve the precise
+    JSON type recorded by the reviewer, even when their numeric values match.
+    """
+    if type(recorded) is not type(claimed):
+        return False
+    if type(recorded) is dict:
+        return (
+            recorded.keys() == claimed.keys()
+            and all(type(key) is str and _same_json_measurement(value, claimed[key])
+                    for key, value in recorded.items())
+        )
+    if type(recorded) is list:
+        return (
+            len(recorded) == len(claimed)
+            and all(_same_json_measurement(left, right)
+                    for left, right in zip(recorded, claimed, strict=True))
+        )
+    return type(recorded) in (str, int, float, bool, type(None)) and recorded == claimed
+
+
 def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
     """Require one matching record in a versioned docs/records/*.json file.
 
@@ -197,7 +221,7 @@ def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
     return (record.get("result") == "pass"
             and all(record.get(key) == receipt.get(key) for key in fields)
             and isinstance(measurement, dict) and bool(measurement)
-            and measurement == receipt.get("measurement"))
+            and _same_json_measurement(measurement, receipt.get("measurement")))
 
 
 def audit_release(evidence: dict, sha: str, lookup=None, *,

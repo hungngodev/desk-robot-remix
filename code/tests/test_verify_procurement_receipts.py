@@ -417,3 +417,42 @@ def test_purchase_approval_refuses_foreign_or_detached_branch(monkeypatch):
         )
         with pytest.raises(ValueError, match="canonical PR #17 branch"):
             release.checkout_sha()
+
+
+@pytest.mark.parametrize("replacement", [True, 1.0])
+def test_procurement_nested_measurement_type_confusion_never_releases(replacement):
+    """JSON true and 1, or 1.0 and 1, cannot impersonate immutable millimeters."""
+    import copy
+
+    gate = release.PART_GATES[0]
+    recorded = receipt("part:imu", gate)
+    recorded["measurement"] = {
+        "lift": {"lift_mm": 1, "samples_mm": [3, {"width_mm": 2}]}
+    }
+    claimed = copy.deepcopy(recorded)
+    claimed["measurement"]["lift"]["lift_mm"] = replacement
+
+    source = lambda url: lookup(url, records=[recorded])
+    assert release.verified_scoped_record(recorded, SHA, source)
+    assert not release.verified_scoped_record(claimed, SHA, source)
+    errors = release.audit_release(
+        {"parts": {"imu": {gate: claimed}}}, SHA, source,
+    )
+    assert any("immutable scoped record absent or mismatched" in err
+               and f"part:imu.{gate}" in err for err in errors)
+
+
+def test_procurement_nested_list_boolean_cannot_impersonate_sample_count():
+    import copy
+
+    gate = release.PART_GATES[0]
+    recorded = receipt("part:imu", gate)
+    recorded["measurement"] = {"trials": [{"count": 1}, {"count": 2}]}
+    forged = copy.deepcopy(recorded)
+    forged["measurement"]["trials"][0]["count"] = True
+    assert release.verified_scoped_record(
+        recorded, SHA, lambda url: lookup(url, records=[recorded])
+    )
+    assert not release.verified_scoped_record(
+        forged, SHA, lambda url: lookup(url, records=[recorded])
+    )
