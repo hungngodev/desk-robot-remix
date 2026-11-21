@@ -134,6 +134,7 @@ async def test_kokoro_proactive_session_declares_passive_before_synthesis(
                 session_bodies.append(body.copy())
                 payload = {
                     "device_ids": sorted(body["device_ids"]),
+                    "lease_id": body["lease_id"],
                     "enabled": body["enabled"],
                     "expires_in_seconds": 305 if body["enabled"] else 0,
                 }
@@ -260,6 +261,7 @@ async def test_kokoro_wav_generated_after_group_memory_revoke_never_reaches_xiao
             if url.endswith("/session"):
                 return Response(payload={
                     "device_ids": sorted(body["device_ids"]),
+                    "lease_id": body["lease_id"],
                     "enabled": body["enabled"],
                     "expires_in_seconds": 305 if body["enabled"] else 0,
                 })
@@ -1388,6 +1390,7 @@ async def test_kokoro_permission_revoked_during_bridge_transmission_stops_head(
                 enabled = body["enabled"]
                 return Response({
                     "device_ids": sorted(body["device_ids"]),
+                    "lease_id": body["lease_id"],
                     "enabled": enabled,
                     "expires_in_seconds": 305 if enabled else 0,
                 })
@@ -1855,6 +1858,7 @@ async def test_kokoro_lost_grant_response_compensates_bridge_lease(
                 self.active = False
             return Response({
                 "device_ids": ["head-01"],
+                "lease_id": body["lease_id"],
                 "enabled": body["enabled"],
                 "expires_in_seconds": 305 if body["enabled"] else 0,
                 **({"passive": True} if body.get("passive") else {}),

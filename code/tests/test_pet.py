@@ -3654,6 +3654,7 @@ async def test_proactive_private_wav_revoked_during_kokoro_never_reaches_head(
                 assert body.get("passive") is True
                 return Response(payload={
                     "device_ids": sorted(body["device_ids"]),
+                    "lease_id": body["lease_id"],
                     "enabled": body["enabled"],
                     "expires_in_seconds": 305 if body["enabled"] else 0,
                     "passive": True,
@@ -4084,6 +4085,7 @@ async def test_proactive_sensor_private_live_context_revoked_during_tts(
                 assert body.get("passive") is None
                 return Response({
                     "device_ids": sorted(body["device_ids"]),
+                    "lease_id": body["lease_id"],
                     "enabled": body["enabled"],
                     "expires_in_seconds": 305 if body["enabled"] else 0,
                 })
