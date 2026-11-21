@@ -35,6 +35,22 @@ async def test_hardware_camera_cli_requires_live_mjpeg_not_snapshots(
     assert not (tmp_path / "camera.json").exists()
 
 
+def test_camera_only_pass_cannot_certify_simultaneous_aec_activity():
+    result = {
+        "camera_frames_received": 7,
+        "status_latency": {"count": 7},
+        "camera_error_count": 0,
+        "status_error_count": 0,
+        "concurrent_audio_driver_activity_observed": False,
+    }
+    assert bench.bench_passed(result, require_audio=False)
+    assert not bench.bench_passed(result, require_audio=True)
+    result["concurrent_audio_driver_activity_observed"] = True
+    assert bench.bench_passed(result, require_audio=True)
+    result["camera_error_count"] = 1
+    assert not bench.bench_passed(result, require_audio=True)
+
+
 def test_camera_bench_report_private_exclusive_and_preflighted(tmp_path):
     path = tmp_path / "private" / "trial.json"
     bench.preflight_private_report(path)
