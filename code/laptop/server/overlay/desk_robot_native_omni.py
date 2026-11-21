@@ -1475,15 +1475,19 @@ class NativeOmniSession:
                         except asyncio.QueueFull:
                             self.native_readonly_tools_dropped += 1
                     continue
+                # A successful authenticated Mac call is still a completed
+                # HTTP tool invocation even when a minimal response yields no
+                # safe fact for spoken grounding. Preserve the established
+                # completion and context wakeup semantics for callers.
+                self.native_readonly_tools_completed += 1
+                self._context_wakeup.set()
                 fact = native_grounded_fact(route, result)
                 if fact is not None:
-                    self.native_readonly_tools_completed += 1
-                    self._context_wakeup.set()
                     facts[index] = fact
-                else:
-                    self.native_readonly_tools_dropped += 1
-                    if route != "plan-readonly":
-                        rejected_routes[index] = route
+                elif route != "plan-readonly":
+                    # Do not voice the unqualified payload. A valid sibling
+                    # fact may only accompany an explicit unavailable clause.
+                    rejected_routes[index] = route
             # A foreign or malformed HTTP 200 is NEVER a tool fact. When
             # another clause has a usable fact, state only that the rejected
             # requested route could not be verified. Never pass any untrusted

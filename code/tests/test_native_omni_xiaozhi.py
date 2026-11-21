@@ -8357,14 +8357,16 @@ async def test_native_compound_rejected_camera_is_an_unavailable_clause(
     assert facts[0]["route"] == "look"
     assert facts[0]["available"] is False
     assert facts[0]["physical_action_verified"] is False
-    assert session.native_readonly_tools_dropped == 1
-    assert session.native_readonly_tools_completed == 1
+    foreign = invalid_camera["robot_id"] != "robot-01"
+    assert session.native_readonly_tools_dropped == (1 if foreign else 0)
+    assert session.native_readonly_tools_completed == (1 if foreign else 2)
     assert session._context_wakeup.is_set()
     packed = module.pack_grounded_facts(facts)
     assert "mac_tool_execution_unavailable" in packed
     assert "wroom_fuel_gauge" in packed
     assert invalid_camera["answer"] not in packed
-    assert invalid_camera["robot_id"] not in packed if invalid_camera["robot_id"] != "robot-01" else True
+    if foreign:
+        assert invalid_camera["robot_id"] not in packed
 
 
 async def test_native_readonly_queue_overflow_speaks_limitation_not_partial_answer(native):
