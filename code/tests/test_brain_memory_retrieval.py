@@ -42,6 +42,28 @@ def test_relevant_episodic_recall_is_private_and_does_not_invent_matches(tmp_pat
     assert store.count("robot-01") == 2 and store.count("robot-02") == 1
 
 
+def test_decomposed_vietnamese_memory_query_recalls_existing_text(tmp_path):
+    """Unicode-equivalent ASR text must retrieve the same pet's NFC memory."""
+    import unicodedata
+
+    store = MemoryStore(tmp_path, ["robot-01", "robot-02"])
+    examples = (
+        ("greeting01", "Tôi nghe lời chào của bạn", "chào"),
+        ("phone01", "Tôi thấy điện thoại trên bàn", "điện thoại"),
+    )
+    for event_id, summary, query in examples:
+        store.remember(
+            "robot-01", event_id, summary, kind="object",
+            source_robot="robot-01", witnessed=True,
+        )
+        decomposed = unicodedata.normalize("NFD", query)
+        assert decomposed != query
+        assert [m.event_id for m in store.search("robot-01", decomposed)] == [
+            event_id,
+        ]
+        assert store.search("robot-02", decomposed) == []
+
+
 @pytest.mark.parametrize("question", ["", " ", "z" * 241, "\x00key", None, True])
 def test_recall_rejects_unbounded_or_invalid_questions(tmp_path, question):
     store = MemoryStore(tmp_path, ["robot-01"])
