@@ -10,6 +10,8 @@ import argparse
 import asyncio
 import json
 import math
+import os
+import stat
 import time
 from pathlib import Path
 
@@ -18,6 +20,26 @@ from desk_robot.config import load_settings
 from desk_robot.transport import HttpHead
 
 ROOT = Path(__file__).resolve().parents[1]
+def preflight_private_report(path: Path) -> None:
+    """Refuse to record a benchmark against an existing or public report."""
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if (path.parent.is_symlink()
+            or stat.S_IMODE(path.parent.stat().st_mode) & 0o077):
+        raise ValueError("Audio bench report directory must be private mode 0700")
+    if path.exists() or path.is_symlink():
+        raise FileExistsError("Audio bench report already exists")
+
+
+def save_private_report(path: Path, report: dict) -> None:
+    preflight_private_report(path)
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    with os.fdopen(os.open(path, flags, 0o600), "w", encoding="utf-8") as out:
+        json.dump(report, out, indent=2)
+        out.write("\n")
+
+
 COUNTERS = (
     "reference_underflow_reads",
     "reference_overwrite_reads",
@@ -146,14 +168,14 @@ async def main() -> int:
     robot = settings.robot(args.robot)
     if not robot.device_id:
         cli.error("Configure the unique Xiaozhi device identity")
+    preflight_private_report(args.report)
     async with httpx.AsyncClient() as client:
         head = HttpHead(robot, client)
         report = await measure(
             head, robot.id, seconds=args.seconds,
             poll_period_s=args.poll_period,
         )
-    args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    save_private_report(args.report, report)
     print(json.dumps(report, indent=2))
     return 0 if report["reference_software_integrity_observed"] else 1
 
