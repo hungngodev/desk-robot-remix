@@ -104,10 +104,16 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
     pre = _json_response(opener, base + "/api/audio.reference", token)
     if (pre.get("robot_id") != robot_id
             or pre.get("reference_integrity_failed") is not False
+            or pre.get("microphone_privacy_muted") is not False
             or pre.get("speaker_playback_verified") is not False
             or pre.get("aec_physically_qualified") is not False):
         raise ValueError("Sense reference stream not eligible for trial")
     boot = _number(pre.get("boot"), 0, 0xffffffff, "boot ID")
+    # A genuine bench build statically enforces zero delay. Verify the live
+    # flashed head too; older/misconfigured diagnostics must not masquerade as
+    # an absolute speaker-to-microphone acoustic measurement.
+    if type(pre.get("aec_delay_config_ms")) is not int or pre["aec_delay_config_ms"] != 0:
+        raise ValueError("Sense calibration requires verified firmware AEC delay 0 ms")
     started = _json_response(
         opener, base + "/api/audio.capture.start", token, method="POST",
     )
