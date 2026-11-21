@@ -128,6 +128,9 @@ def account_landed_cost(
     charged_sellers = set()
     seller_totals = {}
     quote_claims: set[tuple[str, str, str, str]] = set()
+    # Keep physical packages distinct from role coverage. A sealed retail
+    # multipack can leave explicitly reviewed spare units, never free stock.
+    quote_packs_by_role: dict[str, list[tuple[int, int, object]]] = defaultdict(list)
     lines = evidence.get("lines", [])
     if not isinstance(lines, list):
         errors.append("Quote lines must be a list")
@@ -156,6 +159,9 @@ def account_landed_cost(
             if claim in quote_claims:
                 raise ValueError("duplicate quoted SKU under same role and quote reference")
             quote_claims.add(claim)
+            quote_packs_by_role[role].append(
+                (packages, units, line.get("minimum_pack_review"))
+            )
             supplied[role] += packages * units
             seller_subtotals[seller] += total
             seller_category_goods[seller][category] += total
@@ -269,6 +275,7 @@ def account_landed_cost(
         except (AttributeError, ValueError) as exc:
             errors.append(f"in-flight {index}: {exc}")
     pending_roles = []
+    reviewed_pack_surplus_units: dict[str, int] = {}
     for role, needed in required_roles.items():
         if allocated[role] + awaiting[role] + supplied[role] < needed:
             pending_roles.append(role)
@@ -276,11 +283,38 @@ def account_landed_cost(
             errors.append(f"{role}: allocated and incoming exceed needed stock")
         if supplied[role] and allocated[role] + awaiting[role] >= needed:
             errors.append(f"{role}: duplicated purchase despite covered inventory")
-        if (supplied[role] > needed - allocated[role] - awaiting[role]
-                and needed - allocated[role] - awaiting[role] > 0):
-            # A single package may contain extra units; this is an explicit
-            # review warning rather than silently discarding the package cost.
-            errors.append(f"{role}: over-order or package surplus needs review")
+        remaining = needed - allocated[role] - awaiting[role]
+        quoted_packs = quote_packs_by_role[role]
+        if supplied[role] > remaining and remaining > 0:
+            # The only permitted excess is the smallest number of sealed
+            # packages of one reviewed SKU that can cover the missing role.
+            # Multiple sellers or surplus packages are not a minimum pack.
+            extra = supplied[role] - remaining
+            acceptable = False
+            if len(quoted_packs) == 1:
+                packages, units, review = quoted_packs[0]
+                minimum_packages = (remaining + units - 1) // units
+                acceptable = (
+                    packages == minimum_packages
+                    and isinstance(review, dict)
+                    and set(review) == {
+                        "extra_units", "seller_minimum_pack_url", "reviewed"
+                    }
+                    and type(review.get("extra_units")) is int
+                    and review["extra_units"] == extra
+                    and review.get("reviewed") is True
+                    and _url(review.get("seller_minimum_pack_url"))
+                )
+            if acceptable:
+                reviewed_pack_surplus_units[role] = extra
+            else:
+                errors.append(
+                    f"{role}: over-order or minimum pack surplus lacks exact review"
+                )
+        elif any(review is not None for _, _, review in quoted_packs):
+            # A review cannot manufacture a surplus or justify a purchase
+            # against inventory that already covers the role.
+            errors.append(f"{role}: minimum pack review without genuine surplus")
     charges = evidence.get("seller_charges", [])
     if not isinstance(charges, list):
         errors.append("Seller charges must be a list")
@@ -359,6 +393,14 @@ def account_landed_cost(
         "calculation_complete_not_physical_approval": complete,
         "errors": errors,
         "unaccounted_roles": sorted(pending_roles),
+        "reviewed_pack_surplus_units": dict(sorted(reviewed_pack_surplus_units.items())),
+        # These quantities, not retail pack quantities, count toward roles.
+        # Spare units remain physical leftovers, never a second free order.
+        "quoted_units_applied_to_roles": {
+            role: min(supplied[role], max(
+                0, need - allocated[role] - awaiting[role]
+            )) for role, need in sorted(required_roles.items())
+        },
         "awaiting_arrival_roles": sorted(role for role in awaiting if awaiting[role]),
         "material_subtotals_cents": buckets,
         "allocated_landed_subtotals_cents": allocated_landed_subtotals,

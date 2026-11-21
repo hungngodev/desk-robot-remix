@@ -45,6 +45,78 @@ def calculate(evidence):
                                    expected_scope="evaluation")
 
 
+def test_unavoidable_single_retail_pack_surplus_is_charged_once_and_reported():
+    ev = sample()
+    line = ev["lines"][0]
+    line["sku"] = "SEALED-FIVE"
+    line["units_per_package"] = 5
+    line["package_price_usd"] = "3.00"
+    line["minimum_pack_review"] = {
+        "extra_units": 4,
+        "seller_minimum_pack_url": "https://supplier.example/pack-five",
+        "reviewed": True,
+    }
+    out = calculate(ev)
+    assert out["errors"] == []
+    assert out["calculation_complete_not_physical_approval"]
+    assert out["reviewed_pack_surplus_units"] == {
+        "robot:cliff_obstacle": 4
+    }
+    assert out["quoted_units_applied_to_roles"] == {
+        "robot:cliff_obstacle": 1, "robot:i2c_mux": 1
+    }
+    assert out["payable_now_cents"] == 779
+    assert out["prototype_cumulative_cents"] == 2029
+    assert not out["landed_price_is_a_verified_supplier_checkout"]
+
+
+@pytest.mark.parametrize("mutation", [
+    lambda line: line.pop("minimum_pack_review"),
+    lambda line: line["minimum_pack_review"].update(extra_units=3),
+    lambda line: line["minimum_pack_review"].update(reviewed=False),
+    lambda line: line["minimum_pack_review"].update(
+        seller_minimum_pack_url="http://unsafe.example/pack-five"
+    ),
+    lambda line: line.update(quantity_packages=2),
+    lambda line: line["minimum_pack_review"].update(extra_units=True),
+    lambda line: line["minimum_pack_review"].update(extra_units="4"),
+])
+def test_minimum_pack_never_waives_unreviewed_or_unnecessary_excess(mutation):
+    ev = sample()
+    line = ev["lines"][0]
+    line["units_per_package"] = 5
+    line["minimum_pack_review"] = {
+        "extra_units": 4,
+        "seller_minimum_pack_url": "https://supplier.example/pack-five",
+        "reviewed": True,
+    }
+    mutation(line)
+    out = calculate(ev)
+    assert out["payable_now_cents"] is None
+    assert any("minimum pack surplus lacks exact review" in e for e in out["errors"])
+
+
+def test_pack_review_requires_actual_excess_and_single_supplier_line():
+    ev = sample()
+    line = ev["lines"][0]
+    line["minimum_pack_review"] = {
+        "extra_units": 4,
+        "seller_minimum_pack_url": "https://supplier.example/pack-five",
+        "reviewed": True,
+    }
+    no_surplus = calculate(ev)
+    assert no_surplus["payable_now_cents"] is None
+    assert any("without genuine surplus" in e for e in no_surplus["errors"])
+    line["units_per_package"] = 5
+    ev["lines"].append({
+        **line, "sku": "ANOTHER-PACK", "quote_reference": "other-quote",
+        "minimum_pack_review": None,
+    })
+    duplicate_surplus = calculate(ev)
+    assert duplicate_surplus["payable_now_cents"] is None
+    assert any("surplus lacks exact review" in e for e in duplicate_surplus["errors"])
+
+
 def test_exact_landed_cost_includes_shipping_tax_and_paid_spend_once():
     ev = sample()
     ev["paid_orders"].append(dict(ev["paid_orders"][0]))
