@@ -220,25 +220,29 @@ tray flat within its XY footprint. Any outboard battery relocation or lifted
 jaw changes the robot's stability and desk-edge clearance. Do not solve
 battery packaging with an unsupported overhanging cell.
 
-The pure source-level screen requires measured support contacts and all
-assembly mass groups in these four poses: stowed empty, key grasp extended,
-candy grasp lifted, and stopped at the dock. Generate a blank record with:
+The pure source-level screen requires independent measured load-bearing
+support contacts for EACH of four poses: stowed empty, key grasp extended,
+candy grasp lifted, and stopped at the dock. The contact polygon may change
+when a track unloads or a dock guide carries weight, so a union of all
+contact points must never be reused as one optimistic footprint. Every pose
+also needs its own complete assembly mass groups. Generate a blank record with:
 
 ```sh
 python3 code/scripts/screen_assembly_stability.py --template --output robot01_stability.json
 ```
 
-After measuring actual wheel and track support points, real heavy component
-masses/centers, maximum body roll and pitch and required static reserve,
-fill the blanks and run:
+After measuring which wheel, track, caster or dock guide contacts actually
+carry load in EACH pose, along with its heavy component masses/centers,
+maximum body roll and pitch and required static reserve, fill the
+`poses[].support_contacts_mm` and component blanks and run:
 
 ```sh
 python3 code/scripts/screen_assembly_stability.py --measurements robot01_stability.json
 ```
 
 The input body frame is X forward, Y left, Z upward, with millimeters
-and grams. The tool computes the convex support footprint, weighted
-source center of mass and worst signed distance to each support boundary
+and grams. The tool computes a DISTINCT convex support footprint per pose,
+weighted source center of mass and worst signed distance to its own boundary
 under the supplied maximum positive and negative tilts. It rejects
 missing key or candy payload masses, stale or partial component roles,
 degenerate support contacts, malformed numbers and unsupported tilt.

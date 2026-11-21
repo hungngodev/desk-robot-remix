@@ -18,9 +18,6 @@ def load():
 def complete():
     module = load()
     data = module.blank_template()
-    data["support_contacts_mm"] = [
-        [-40, -45], [40, -45], [40, 45], [-40, 45],
-    ]
     data["required_static_edge_margin_mm"] = 10
     data["max_roll_deg"] = 8
     data["max_pitch_deg"] = 8
@@ -33,6 +30,9 @@ def complete():
         "payload": (0, [0, 0, 15]),
     }
     for pose in data["poses"]:
+        pose["support_contacts_mm"] = [
+            [-40, -45], [40, -45], [40, 45], [-40, 45],
+        ]
         for component in pose["components"]:
             mass, xyz = defaults[component["id"]]
             if component["id"] == "payload":
@@ -50,7 +50,7 @@ def test_four_real_required_pose_roles_are_screened_but_unqualified():
     result = tool.screen(complete())
     assert result["necessary_stability_on_paper"]
     assert len(result["poses"]) == 4
-    assert len(result["support_hull_mm"]) == 4
+    assert all(len(p["support_hull_mm"]) == 4 for p in result["poses"])
     assert all(p["worst_tilt_static_margin_mm"] >= 10
                for p in result["poses"])
     assert result["actual_mass_and_support_locations_physically_verified"] is False
@@ -88,9 +88,10 @@ def test_large_raised_gripper_payload_can_fail_while_empty_pose_passes():
     lambda d: d.update(max_roll_deg=26),
     lambda d: d.update(max_pitch_deg=float("nan")),
     lambda d: d.update(required_static_edge_margin_mm=True),
-    lambda d: d.update(support_contacts_mm=[[0, 0], [1, 1], [2, 2]]),
-    lambda d: d.update(support_contacts_mm=[[0, 0], [0, 0], [3, 4]]),
-    lambda d: d.update(support_contacts_mm=[[0, 0], [1e308, 0], [0, 1e308]]),
+    lambda d: d["poses"][0].update(support_contacts_mm=[[0, 0], [1, 1], [2, 2]]),
+    lambda d: d["poses"][0].update(support_contacts_mm=[[0, 0], [0, 0], [3, 4]]),
+    lambda d: d["poses"][0].update(support_contacts_mm=[[0, 0], [1e308, 0], [0, 1e308]]),
+    lambda d: d["poses"][0].pop("support_contacts_mm"),
     lambda d: d["poses"].pop(),
     lambda d: d["poses"][0]["components"].pop(),
     lambda d: d["poses"][0]["components"][0].update(mass_g=True),
@@ -106,11 +107,37 @@ def test_invalid_support_mass_or_missing_behaviors_never_pass(mutation):
         load().screen(record)
 
 
+
+def test_pose_specific_supports_never_borrow_docked_footprint():
+    """Equal mass and COM still need their own wheel/dock contact polygon."""
+    data = complete()
+    stowed = next(p for p in data["poses"] if p["name"] == "stowed_empty")
+    docked = next(p for p in data["poses"] if p["name"] == "docked_stopped")
+    stowed["support_contacts_mm"] = [
+        [-8, -45], [8, -45], [8, 45], [-8, 45],
+    ]
+    # Docked keeps the measured wide contact polygon. With identical
+    # payload-free mass/COM, stowed must lose the required 10 mm reserve.
+    report = load().screen(data)
+    cases = {pose["name"]: pose for pose in report["poses"]}
+    assert cases["stowed_empty"]["source_center_of_mass_mm"] == (
+        cases["docked_stopped"]["source_center_of_mass_mm"]
+    )
+    assert cases["stowed_empty"]["worst_tilt_static_margin_mm"] < (
+        cases["docked_stopped"]["worst_tilt_static_margin_mm"]
+    )
+    assert not cases["stowed_empty"]["necessary_static_margin_on_paper"]
+    assert cases["docked_stopped"]["necessary_static_margin_on_paper"]
+    assert not report["necessary_stability_on_paper"]
+    assert report["assembly_print_or_purchase_approved"] is False
+
+
 def test_blank_source_template_is_not_a_qualified_measurement():
     tool = load()
     template = tool.blank_template()
-    assert template["support_contacts_mm"] == []
+    assert "support_contacts_mm" not in template
     assert len(template["poses"]) == 4
+    assert all(pose["support_contacts_mm"] == [] for pose in template["poses"])
     assert all(part["mass_g"] is None
                for case in template["poses"]
                for part in case["components"])

@@ -27,7 +27,7 @@ These blank fields are **intentional** and are not permission to guess a fit.
 | Exact two independent seat switch bodies, mount pitch / hole diameter, free and operating positions, normally closed polarity, overtravel and wire clearance | | dock_seat_left / dock_seat_right / dock_seat_body / dock_seat_mount_pitch / dock_seat_hole_d / dock_seat_fp / dock_seat_op / dock_seat_overtravel / dock_seat_wire_clearance |
 | AprilTag printed black square size and camera height | | tag_square_mm, tag_center_height |
 | Key and candy actual width and thickness | | object_w / h |
-| Full load-bearing wheel/track/caster contact coordinates in body X forward Y left | | stability_support_contacts_mm |
+| Per-pose load-bearing wheel/track/caster/dock-guide contact coordinates in body X forward Y left, measured separately for stowed, extended key, lifted candy, and docked | | poses[].support_contacts_mm |
 | Actual mass and 3D center of mass for body and tracks, full protected power stack, head, gripper, sensors/wires, key and candy in four poses | | stability_mass_groups / stability_com_xyz |
 | Maximum mounted chassis roll and pitch during loaded approach, and required static perimeter reserve | | stability_roll_max_deg / stability_pitch_max_deg / static_edge_margin_mm |
 | Actual printer minimum wall and hole clearance | | print_wall, clearance_xy |

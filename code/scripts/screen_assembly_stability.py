@@ -82,12 +82,12 @@ def blank_template() -> dict:
     return {
         "units": UNIT_SYSTEM,
         "coordinate_frame": COORDINATE_FRAME,
-        "support_contacts_mm": [],
         "required_static_edge_margin_mm": None,
         "max_roll_deg": None,
         "max_pitch_deg": None,
         "poses": [{
             "name": pose,
+            "support_contacts_mm": [],
             "components": [{
                 "id": role, "mass_g": None,
                 "com_mm": [None, None, None],
@@ -98,7 +98,7 @@ def blank_template() -> dict:
 
 def screen(measurement: object) -> dict:
     if not isinstance(measurement, dict) or set(measurement) != {
-        "units", "coordinate_frame", "support_contacts_mm",
+        "units", "coordinate_frame",
         "required_static_edge_margin_mm", "max_roll_deg",
         "max_pitch_deg", "poses",
     }:
@@ -113,7 +113,6 @@ def screen(measurement: object) -> dict:
             or not _finite(roll, 25) or not 0 <= roll <= 25
             or not _finite(pitch, 25) or not 0 <= pitch <= 25):
         raise ValueError("Measured roll, pitch and static margin required")
-    hull = support_hull(measurement["support_contacts_mm"])
     cases = measurement["poses"]
     if not isinstance(cases, list) or not 4 <= len(cases) <= 40:
         raise ValueError("All stowed, key, candy and docked poses required")
@@ -124,8 +123,12 @@ def screen(measurement: object) -> dict:
         raise ValueError("Missing, unnamed or duplicated load pose")
     results = []
     for case in cases:
-        if set(case) != {"name", "components"}:
-            raise ValueError("Every load pose needs only measured components")
+        if set(case) != {"name", "components", "support_contacts_mm"}:
+            raise ValueError("Each load pose needs measured components and support contacts")
+        # Dock guides, tracks and casters can carry load in different poses.
+        # A shared union polygon can falsely certify a pose that lacks a
+        # contact. Independently validate the real load-bearing set.
+        hull = support_hull(case["support_contacts_mm"])
         components = case["components"]
         if not isinstance(components, list) or not 6 <= len(components) <= 60:
             raise ValueError("Full assembly mass roles are required")
@@ -171,6 +174,7 @@ def screen(measurement: object) -> dict:
         worst_margin = min(margins)
         results.append({
             "name": case["name"],
+            "support_hull_mm": [list(p) for p in hull],
             "mass_total_g": round(total, 3),
             "source_center_of_mass_mm": [round(x, 3) for x in com],
             "worst_tilt_static_margin_mm": round(worst_margin, 3),
@@ -178,7 +182,6 @@ def screen(measurement: object) -> dict:
         })
     return {
         "required_pose_names": sorted(REQUIRED_POSES),
-        "support_hull_mm": [list(p) for p in hull],
         "required_static_edge_margin_mm": margin,
         "poses": results,
         "necessary_stability_on_paper": all(
