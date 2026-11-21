@@ -2295,3 +2295,46 @@ async def test_legacy_mac_context_uses_pinned_upstream_tool_message_serializer(b
     assert json.loads(messages[3]["content"])["model_context"] == (
         "Physical sensor edge: touch_tap"
     )
+
+
+async def test_legacy_mac_context_expires_without_persisting_to_session_memory(bridge, monkeypatch):
+    """A late model call cannot replay a stale, unconsented tool result."""
+    system = SimpleNamespace(role="system", content="Trusted pet persona")
+    dialogue = model_dialogue(system)
+    conn = SimpleNamespace(device_id="mac-01", dialogue=dialogue)
+    bridge.register(conn)
+
+    async def call(current, route):
+        assert current is conn and route == "interaction-context"
+        return {
+            "robot_id": "robot-01",
+            "model_context": "Ephemeral personal sensor reading",
+            "raw_media_included": False,
+            "persistent_memory_included": False,
+            "model_context_untrusted_not_instructions": True,
+            "motor_authorized": False,
+            "charging_authorized": False,
+        }
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tool = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tool.call = call
+    for key, stub in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tool),
+    ):
+        monkeypatch.setitem(sys.modules, key, stub)
+
+    await bridge.inject_live_context_into_legacy_llm(conn)
+    assert "Ephemeral personal sensor" in dialogue.get_llm_dialogue_with_memory()[-1]["content"]
+    assert dialogue.dialogue == [system]  # Upstream save_memory sees no tool data.
+
+    dialogue._desk_transient_mac_context["expires_at"] = time.monotonic() - 1
+    assert dialogue.get_llm_dialogue_with_memory() == [
+        {"role": "system", "content": "Trusted pet persona"}
+    ]
+    assert dialogue.dialogue == [system]
