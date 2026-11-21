@@ -162,6 +162,16 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     assert all(item["manifold_edges"] == 6 for item in report["parts"])
     assert all(item["bbox_mm"]["dimensions_mm"] == [1.0, 1.0, 1.0]
                for item in report["parts"])
+    assert report["power_fit_scope"] == source.POWER_FIT_SCOPE
+    assert report["power_fit_scope"] == {
+        "part": "battery_boost_tray",
+        "protected_pack_body_only": True,
+        "includes_connector_and_leads": False,
+        "includes_charger": False,
+        "includes_boost": False,
+        "includes_fuse_switch": False,
+        "whole_power_stack_fit_verified": False,
+    }
     assert report["source_chassis_battery_footprint"] == {
         "source_mesh_only": True,
         "physical_interior_fit_verified": False,
@@ -183,6 +193,18 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
         manifest.write_text(json.dumps(edited))
         with pytest.raises(ValueError, match="Unsafe fit kit provenance flags"):
             source.verify_fit_kit(tmp_path, output_dir=rendered)
+    manifest.write_text(original)
+    forged_scope = json.loads(original)
+    forged_scope["power_fit_scope"]["includes_boost"] = True
+    manifest.write_text(json.dumps(forged_scope))
+    with pytest.raises(ValueError, match="Unsafe power fit scope"):
+        source.verify_fit_kit(tmp_path, output_dir=rendered)
+    manifest.write_text(original)
+    forged_scope = json.loads(original)
+    forged_scope["power_fit_scope"]["whole_power_stack_fit_verified"] = True
+    manifest.write_text(json.dumps(forged_scope))
+    with pytest.raises(ValueError, match="Unsafe power fit scope"):
+        source.verify_fit_kit(tmp_path, output_dir=rendered)
     manifest.write_text(original)
     forged_bounds = json.loads(original)
     forged_bounds["parts"][0]["bbox_mm"]["dimensions_mm"][0] = 999.0
@@ -673,6 +695,7 @@ def test_flat_tray_diagonal_bound_distinguishes_rotation_from_impossibility(tmp_
     assert possible_on_axes["axis_aligned_packaging_possible"] is True
     assert possible_on_axes["flat_tray_any_yaw_impossible"] is False
     assert possible_on_axes["physical_interior_fit_verified"] is False
+
 
 def test_protected_pack_audit_tracks_active_fit_coupon_dimensions():
     """The buying audit must not keep the retired 68 mm battery tray claim."""

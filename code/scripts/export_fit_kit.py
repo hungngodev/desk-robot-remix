@@ -32,6 +32,18 @@ RANGER_FITS = ("vl53l0x_gy530_fit_gauge",)
 DOCKS = ("dock_passive_fit", "dock_rail_entry_coupon",
          "dock_ir_pair_position_coupon")
 
+POWER_FIT_SCOPE = {
+    # Historical generated filename retained for compatibility.
+    # The geometry currently represents the protected pack body only.
+    "part": "battery_boost_tray",
+    "protected_pack_body_only": True,
+    "includes_connector_and_leads": False,
+    "includes_charger": False,
+    "includes_boost": False,
+    "includes_fuse_switch": False,
+    "whole_power_stack_fit_verified": False,
+}
+
 
 def binary_stl_triangles(path: Path) -> int:
     """Reject empty, truncated or malformed binary STL output."""
@@ -251,6 +263,7 @@ def export_kit(
         "full_printable_assembly_verified": False,
         "dock_charge_contacts_approved": False,
         "commercial_manufacture_authorized": False,
+        "power_fit_scope": dict(POWER_FIT_SCOPE),
         "source_chassis_battery_footprint": reference_body_footprint_screen(
             root, out,
         ),
@@ -278,6 +291,8 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
                 "commercial_manufacture_authorized",
             ))):
         raise ValueError("Unsafe fit kit provenance flags")
+    if report.get("power_fit_scope") != POWER_FIT_SCOPE:
+        raise ValueError("Unsafe power fit scope")
     # A changed source chassis must invalidate an old packing screen.
     # Passing this reference-only screen can never authorize fit or charging.
     if report.get("source_chassis_battery_footprint") != (

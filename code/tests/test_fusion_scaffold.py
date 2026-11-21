@@ -139,10 +139,19 @@ def test_fusion_gui_exposes_protected_pack_source_footprint_block():
             "candidate_tray_xy_mm": [107.6, 40.6],
             "axis_aligned_packaging_possible": False,
             "flat_tray_any_yaw_impossible": True,
-        }
+        },
+        "power_fit_scope": {
+            "part": "battery_boost_tray",
+            "protected_pack_body_only": True,
+            "includes_connector_and_leads": False,
+            "includes_charger": False,
+            "includes_boost": False,
+            "includes_fuse_switch": False,
+            "whole_power_stack_fit_verified": False,
+        },
     }
     assert "BATTERY PACKAGING CONFLICT" in warning(blocked)
-    assert "Rotating the tray flat cannot fix this" in warning(blocked)
+    assert "Rotating the coupon flat cannot fix this" in warning(blocked)
     assert "before final printing" in warning(blocked)
     possible = {
         "source_chassis_battery_footprint": {
@@ -159,6 +168,16 @@ def test_fusion_gui_exposes_protected_pack_source_footprint_block():
             "physical_interior_fit_verified": True,
             "axis_aligned_packaging_possible": True,
         }})
+    with pytest.raises(ValueError, match="power fit scope"):
+        warning({
+            "source_chassis_battery_footprint": blocked[
+                "source_chassis_battery_footprint"
+            ],
+            "power_fit_scope": {
+                **blocked["power_fit_scope"],
+                "includes_boost": True,
+            },
+        })
 
 
 def test_original_licensed_fusion_meshes_are_revision_pinned(tmp_path):

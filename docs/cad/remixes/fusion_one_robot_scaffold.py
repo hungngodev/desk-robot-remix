@@ -140,6 +140,15 @@ def packaging_warning(verified_fit_kit: dict | None) -> str:
     """
     if verified_fit_kit is None:
         return "No candidate kit imported; physical packaging is unqualified."
+    power_scope = verified_fit_kit.get("power_fit_scope")
+    if (not isinstance(power_scope, dict)
+            or power_scope.get("protected_pack_body_only") is not True
+            or power_scope.get("includes_connector_and_leads") is not False
+            or power_scope.get("includes_charger") is not False
+            or power_scope.get("includes_boost") is not False
+            or power_scope.get("includes_fuse_switch") is not False
+            or power_scope.get("whole_power_stack_fit_verified") is not False):
+        raise ValueError("Unverified Fusion power fit scope")
     screen = verified_fit_kit.get("source_chassis_battery_footprint")
     if not isinstance(screen, dict) or screen.get(
         "physical_interior_fit_verified"
@@ -147,9 +156,9 @@ def packaging_warning(verified_fit_kit: dict | None) -> str:
         raise ValueError("Unverified Fusion battery packaging provenance")
     if screen.get("flat_tray_any_yaw_impossible") is True:
         return (
-            "BATTERY PACKAGING CONFLICT: the tray has a physical XY span "
+            "BATTERY PACKAGING CONFLICT: the body-only pack coupon has a physical XY span "
             "longer than the original SMARS chassis outer XY diagonal. "
-            "Rotating the tray flat cannot fix this; redesign its mounting "
+            "Rotating the coupon flat cannot fix this; redesign the complete power stack "
             "without dropping protection and verify the full power assembly "
             "before final printing."
         )
@@ -160,8 +169,8 @@ def packaging_warning(verified_fit_kit: dict | None) -> str:
         )
     if screen.get("axis_aligned_packaging_possible") is True:
         return (
-            "Battery tray passed only a source outer bounding screen; "
-            "internal clearance, load, cable bends and physical fit remain OPEN."
+            "Battery body-only coupon passed only a source outer bounding screen; "
+            "leads, charger, boost, fuse/switch, internal clearance and physical fit remain OPEN."
         )
     return "Original chassis reference unavailable; battery footprint not checked."
 
