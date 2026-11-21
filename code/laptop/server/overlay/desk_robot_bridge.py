@@ -11,6 +11,7 @@ import asyncio
 import base64
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -26,6 +27,9 @@ lease_ids: frozenset[str] = frozenset()
 lease_until = 0.0
 lease_stopping = False
 lease_passive = False
+# A grant incarnation is not identified by devices and passive mode alone.
+lease_token: str | None = None
+last_released_lease: tuple[str, frozenset[str], bool] | None = None
 lease_cleanup_task: asyncio.Task | None = None
 speaker_lock = asyncio.Lock()
 # The upstream WAV to Opus conversion is synchronous CPU work. Cancellation
@@ -442,15 +446,23 @@ def _start_lease_cleanup() -> None:
     global lease_stopping, lease_cleanup_task
     if lease_cleanup_task is not None and not lease_cleanup_task.done():
         return
+    closing_token = lease_token
     lease_stopping = True
 
     async def finish_stop():
-        global lease_ids, lease_until, lease_stopping, active_device_id, lease_passive
+        global lease_ids, lease_until, lease_stopping, active_device_id
+        global lease_passive, lease_token, last_released_lease
         async with speaker_lock:
+            # A delayed cleanup cannot erase a newer grant for the same devices.
+            if lease_token != closing_token:
+                return
+            if closing_token is not None:
+                last_released_lease = (closing_token, lease_ids, lease_passive)
             lease_until = 0
             lease_ids = frozenset()
             lease_stopping = False
             lease_passive = False
+            lease_token = None
             active_device_id = None
             voice_frames.clear()
             voice_last_frame_at.clear()
@@ -759,7 +771,7 @@ def create_app():
 
     async def session(request):
         global lease_ids, lease_until, lease_stopping, lease_cleanup_task
-        global lease_passive
+        global lease_passive, lease_token
         body = await request.json()
         ids = body.get("device_ids")
         passive = body.get("passive", False)
@@ -775,7 +787,17 @@ def create_app():
         selected = frozenset(ids)
         if len(selected) != len(ids) or not selected.issubset(set(device_map().values())):
             raise ValueError("Unknown or duplicate device identity")
+        token = body.get("lease_id")
+        # Older grant-only callers may receive an issued token, but every
+        # release and send must present that exact opaque grant identity.
+        if body.get("enabled") is True and token is None:
+            token = secrets.token_hex(16)
+        if (not isinstance(token, str)
+                or re.fullmatch(r"[0-9a-f]{32}", token) is None):
+            raise ValueError("Valid per-grant lease_id required")
         if body.get("enabled") is True:
+            if last_released_lease is not None and token == last_released_lease[0]:
+                raise RuntimeError("Previously released lease identity reused")
             if passive and len(selected) != 1:
                 raise ValueError("Passive initiative must own exactly one robot")
             native = _native_adapter()
@@ -810,7 +832,18 @@ def create_app():
                     raise RuntimeError("Wait for the current robot speech to finish")
             lease_ids, lease_until = selected, time.monotonic() + 305
             lease_passive = passive
+            lease_token = token
         elif body.get("enabled") is False:
+            if lease_token != token:
+                # Retrying an already completed stop is safe only when no
+                # replacement session now owns the shared acoustic floor.
+                if not lease_ids and last_released_lease == (token, selected, passive):
+                    return web.json_response({
+                        "device_ids": sorted(selected), "enabled": False,
+                        "expires_in_seconds": 0, "lease_id": token,
+                        **({"passive": True} if passive else {}),
+                    })
+                raise RuntimeError("Session lease incarnation differs")
             if lease_ids and lease_ids != selected:
                 raise RuntimeError("Session identities differ")
             if lease_ids and passive is not lease_passive:
@@ -829,6 +862,7 @@ def create_app():
             "device_ids": sorted(selected),
             "enabled": body["enabled"],
             "expires_in_seconds": 305 if body["enabled"] else 0,
+            "lease_id": token,
         }
         if passive:
             response["passive"] = True
@@ -837,9 +871,12 @@ def create_app():
     async def speak(request):
         body = await request.json()
         device, text = body.get("device_id"), body.get("text")
+        request_token = body.get("lease_id")
         connection = connections.get(device) if isinstance(device, str) else None
-        if connection is None or lease_stopping or not muted(device):
-            raise RuntimeError("No active coordinated session for this robot")
+        if (connection is None or lease_stopping or not muted(device)
+                or not isinstance(request_token, str)
+                or request_token != lease_token):
+            raise RuntimeError("No active matching coordinated session for this robot")
         if not isinstance(text, str) or not 1 <= len(text) <= 2000:
             raise ValueError("Speech text must be 1..2000 characters")
         audio = wav_audio(body.get("wav_base64"))
@@ -848,11 +885,13 @@ def create_app():
         generation = interrupt_generation.get(device, 0)
         async with speaker_lock:
             if (lease_stopping or not muted(device) or connections.get(device) is not connection
+                    or request_token != lease_token
                     or generation != interrupt_generation.get(device, 0)):
                 raise RuntimeError("Coordinated session stopped, interrupted or robot disconnected")
             async with asyncio.timeout(40):
                 frames = await encode_opus_owned(audio)
                 if (lease_stopping or not muted(device) or connections.get(device) is not connection
+                        or request_token != lease_token
                         or generation != interrupt_generation.get(device, 0)):
                     raise RuntimeError("Coordinated session stopped, interrupted or robot disconnected")
                 if lease_passive:

@@ -7,6 +7,7 @@ import math
 import time
 import uuid
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from typing import Callable, Protocol
 
 import httpx
@@ -252,6 +253,9 @@ class KokoroHeadSpeaker:
 
     def __init__(self, settings: Settings, client: httpx.AsyncClient):
         self.settings, self.client = settings, client
+        self._lease_context: ContextVar[str | None] = ContextVar(
+            f"xiaozhi_lease_{id(self)}", default=None,
+        )
 
     async def _bridge(self, route: str, payload: dict):
         response = await self.client.post(
@@ -282,10 +286,17 @@ class KokoroHeadSpeaker:
                          else receipt["expires_in_seconds"] == 0)
                     and (not passive or receipt.get("passive") is True))
 
-        grant_request = {"device_ids": ids, "enabled": True}
+        # Generate before the request: an uncertain timeout can only
+        # release this exact grant, never a successor's matching device IDs.
+        lease_id = uuid.uuid4().hex
+        grant_request = {
+            "device_ids": ids, "enabled": True, "lease_id": lease_id,
+        }
         if passive:
             grant_request["passive"] = True
-        release_request = {"device_ids": ids, "enabled": False}
+        release_request = {
+            "device_ids": ids, "enabled": False, "lease_id": lease_id,
+        }
         if passive:
             release_request["passive"] = True
         try:
@@ -305,19 +316,24 @@ class KokoroHeadSpeaker:
                 except Exception:
                     pass
             raise
-        if not matches(granted, True):
+        if not matches(granted, True) or granted.get("lease_id", lease_id) != lease_id:
             # A damaged or misdirected receipt cannot prove lease authority.
             try:
                 await self._bridge("/session", release_request)
             except Exception:
                 pass
             raise RuntimeError("Xiaozhi speaker session grant identity unconfirmed")
+        context_token = self._lease_context.set(lease_id)
         try:
             yield
         finally:
-            released = await self._bridge("/session", release_request)
-            if not matches(released, False):
-                raise RuntimeError("Xiaozhi speaker session release unconfirmed")
+            try:
+                released = await self._bridge("/session", release_request)
+                if (not matches(released, False)
+                        or released.get("lease_id", lease_id) != lease_id):
+                    raise RuntimeError("Xiaozhi speaker session release unconfirmed")
+            finally:
+                self._lease_context.reset(context_token)
 
     async def _confirmed_flush_request(
         self, robot: RobotConfig, **intent: bool,
@@ -353,6 +369,9 @@ class KokoroHeadSpeaker:
         self, robot: RobotConfig, text: str,
         *, permission_check: Callable[[], bool] | None = None,
     ):
+        lease_id = self._lease_context.get()
+        if lease_id is None:
+            raise RuntimeError("No owned Xiaozhi speaker lease for speech")
         response = await self.client.post(
             self.settings.kokoro_url.rstrip("/") + "/v1/audio/speech",
             json={
@@ -376,6 +395,7 @@ class KokoroHeadSpeaker:
             "/speak",
             {
                 "device_id": robot.device_id,
+                "lease_id": lease_id,
                 "text": text,
                 "wav_base64": base64.b64encode(response.content).decode(),
             },

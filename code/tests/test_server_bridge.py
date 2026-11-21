@@ -2,6 +2,7 @@ import asyncio
 import base64
 import importlib.util
 import json
+import secrets
 import sys
 import threading
 import time
@@ -151,7 +152,9 @@ async def test_bridge_auth_identity_and_lease_cleanup(bridge):
         assert (await client.post("/session", json={})).status == 401
         headers = {"Authorization": "Bearer " + "s" * 40}
         request = {"device_ids": ["mac-01", "mac-02"], "enabled": True}
-        assert (await client.post("/session", headers=headers, json=request)).status == 200
+        granted = await client.post("/session", headers=headers, json=request)
+        assert granted.status == 200
+        request["lease_id"] = (await granted.json())["lease_id"]
         assert bridge.muted("mac-01") and bridge.muted("mac-02")
         assert (await client.post("/session", headers=headers, json=request)).status == 409
         assert (
@@ -196,7 +199,8 @@ async def test_bridge_rejects_human_vad_during_deliberate_and_group_grants(
         assert accepted.status == 200
         released = await client.post(
             "/session", headers=headers,
-            json={"device_ids": ["mac-01"], "enabled": False},
+            json={"device_ids": ["mac-01"], "enabled": False,
+                  "lease_id": (await accepted.json())["lease_id"]},
         )
         assert released.status == 200
 
@@ -524,6 +528,15 @@ def fleet_handlers(bridge, monkeypatch):
 
 
 def body_request(body):
+    # Tests simulate the real client carrying the grant's opaque token
+    # into every subsequent release and queued speaker request.
+    body = dict(body)
+    bridge = sys.modules.get("desk_robot_bridge")
+    if body.get("enabled") is True:
+        body.setdefault("lease_id", secrets.token_hex(16))
+    elif bridge is not None and (body.get("enabled") is False or "wav_base64" in body):
+        body.setdefault("lease_id", bridge.lease_token)
+
     async def json_body():
         return body
 
@@ -534,7 +547,9 @@ async def test_five_bridge_devices_muted_and_speech_serialized(bridge, monkeypat
     ids, handlers = fleet_handlers(bridge, monkeypatch)
     session = handlers["/session"]
     granted = await session(body_request({"device_ids": ids, "enabled": True}))
-    assert json.loads(granted.text) == {
+    grant_data = json.loads(granted.text)
+    assert grant_data.pop("lease_id") == bridge.lease_token
+    assert grant_data == {
         "device_ids": sorted(ids), "enabled": True, "expires_in_seconds": 305,
     }
     active, maximum, spoken = 0, 0, []
@@ -565,7 +580,9 @@ async def test_five_bridge_devices_muted_and_speech_serialized(bridge, monkeypat
     ]
     assert maximum == 1 and spoken == ids
     released = await session(body_request({"device_ids": ids, "enabled": False}))
-    assert json.loads(released.text) == {
+    release_data = json.loads(released.text)
+    assert release_data.pop("lease_id") is not None
+    assert release_data == {
         "device_ids": sorted(ids), "enabled": False, "expires_in_seconds": 0,
     }
     assert not bridge.lease_ids and not bridge.lease_stopping
@@ -593,7 +610,9 @@ async def test_passive_session_fails_closed_and_echoes_budget_capability(
     grant = await session(body_request({
         "device_ids": [ids[0]], "enabled": True, "passive": True,
     }))
-    assert json.loads(grant.text) == {
+    grant_data = json.loads(grant.text)
+    assert grant_data.pop("lease_id") == bridge.lease_token
+    assert grant_data == {
         "device_ids": [ids[0]], "enabled": True,
         "expires_in_seconds": 305, "passive": True,
     }
@@ -601,7 +620,9 @@ async def test_passive_session_fails_closed_and_echoes_budget_capability(
     release = await session(body_request({
         "device_ids": [ids[0]], "enabled": False, "passive": True,
     }))
-    assert json.loads(release.text) == {
+    release_data = json.loads(release.text)
+    assert release_data.pop("lease_id") is not None
+    assert release_data == {
         "device_ids": [ids[0]], "enabled": False,
         "expires_in_seconds": 0, "passive": True,
     }
@@ -2382,3 +2403,72 @@ async def test_legacy_mac_context_expires_without_persisting_to_session_memory(b
         {"role": "system", "content": "Trusted pet persona"}
     ]
     assert dialogue.dialogue == [system]
+
+
+async def test_stale_session_release_and_speech_cannot_claim_replacement_lease(
+    bridge, monkeypatch,
+):
+    """A completed old session cannot stop or speak under a later same-ID grant."""
+    ids, handlers = fleet_handlers(bridge, monkeypatch)
+    selected = [ids[0]]
+    session = handlers["/session"]
+    speak = handlers["/speak"]
+    old = json.loads((await session(body_request({
+        "device_ids": selected, "enabled": True,
+    }))).text)["lease_id"]
+    await session(body_request({
+        "device_ids": selected, "enabled": False, "lease_id": old,
+    }))
+    # A repeated stop of the completed grant is idempotent, not a new abort.
+    repeated = await session(body_request({
+        "device_ids": selected, "enabled": False, "lease_id": old,
+    }))
+    assert json.loads(repeated.text)["lease_id"] == old
+    newer = json.loads((await session(body_request({
+        "device_ids": selected, "enabled": True,
+    }))).text)["lease_id"]
+    assert old != newer
+    with pytest.raises(RuntimeError, match="incarnation"):
+        await session(body_request({
+            "device_ids": selected, "enabled": False, "lease_id": old,
+        }))
+    assert bridge.lease_token == newer and bridge.muted(ids[0])
+    # The stale request is rejected before touching PCM or the Opus worker.
+    with pytest.raises(RuntimeError, match="matching coordinated session"):
+        await speak(body_request({
+            "device_id": ids[0], "text": "obsolete",
+            "wav_base64": "", "lease_id": old,
+        }))
+    assert bridge.lease_token == newer
+    await session(body_request({
+        "device_ids": selected, "enabled": False, "lease_id": newer,
+    }))
+    assert not bridge.muted(ids[0])
+
+
+async def test_late_cleanup_cannot_erase_new_lease_incarnation(bridge, monkeypatch):
+    ids, handlers = fleet_handlers(bridge, monkeypatch)
+    session = handlers["/session"]
+    old = json.loads((await session(body_request({
+        "device_ids": [ids[0]], "enabled": True,
+    }))).text)["lease_id"]
+    await bridge.speaker_lock.acquire()
+    try:
+        bridge._start_lease_cleanup()
+        assert bridge.lease_stopping
+        # Model an adversarial state replacement while cleanup is queued.
+        # Production grants are independently inhibited during lease_stopping.
+        bridge.lease_token = "a" * 32
+        bridge.lease_ids = frozenset([ids[1]])
+        bridge.lease_until = time.monotonic() + 5
+        bridge.lease_stopping = False
+    finally:
+        bridge.speaker_lock.release()
+    await bridge.lease_cleanup_task
+    assert bridge.lease_token == "a" * 32
+    assert bridge.lease_ids == frozenset([ids[1]])
+    assert bridge.muted(ids[1])
+    assert old != bridge.lease_token
+    await session(body_request({
+        "device_ids": [ids[1]], "enabled": False, "lease_id": "a" * 32,
+    }))
