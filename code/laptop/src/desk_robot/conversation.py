@@ -832,7 +832,8 @@ class Conversation:
                             for peer in robots:
                                 if (peer.id != robot.id
                                         and (self.settings.mode != "hardware"
-                                             or self.settings.fleet_text_sharing_enabled)):
+                                             or (sharing_at_start
+                                                 and self.settings.fleet_text_sharing_enabled))):
                                     # This is model-generated speech from a
                                     # different pet, never a fresh human command.
                                     # Keep its identity and quote its words as
