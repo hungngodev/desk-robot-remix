@@ -1103,6 +1103,18 @@ class MultimodalOrchestrator:
                             # by the outer reconnect loop.
                             metrics["stream_frames_skipped"] += 1
                             continue
+                        if not self.settings.voice_vision_tools_enabled:
+                            # Opt out can arrive while Pillow/motion preparation
+                            # owns the frame. Do not publish that completed JPEG
+                            # to the Mac hub, native subscriber or pet observer.
+                            self.hub.discard_video(robot_id)
+                            return
+                        if (self._closed or turn != self._turn_epoch[robot_id]
+                                or generation != self.hub._generation[robot_id]
+                                or (source == "proactive"
+                                    and received <= self._last_fleet_human_turn_at)):
+                            metrics["stream_frames_skipped"] += 1
+                            continue
                         # Keep the inexpensive 2 FPS visual comparison
                         # alive after warmup, even when the long idle model
                         # cadence has not elapsed. A brief new desk object
@@ -1120,18 +1132,6 @@ class MultimodalOrchestrator:
                                     and change_fraction(earlier, prepared[1]) < .01):
                                 metrics["stream_frames_skipped"] += 1
                                 continue
-                        if not self.settings.voice_vision_tools_enabled:
-                            # Opt out can arrive while Pillow/motion preparation
-                            # owns the frame. Do not publish that completed JPEG
-                            # to the Mac hub, native subscriber or pet observer.
-                            self.hub.discard_video(robot_id)
-                            return
-                        if (self._closed or turn != self._turn_epoch[robot_id]
-                                or generation != self.hub._generation[robot_id]
-                                or (source == "proactive"
-                                    and received <= self._last_fleet_human_turn_at)):
-                            metrics["stream_frames_skipped"] += 1
-                            continue
                         try:
                             self.hub.offer_prepared(
                                 robot_id, prepared, received, source=source,
