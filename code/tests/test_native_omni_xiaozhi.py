@@ -8789,3 +8789,165 @@ async def test_native_clean_camera_eof_rechecks_revocation_without_sleep(native)
     assert session.last_error == "Mac continuous camera permission revoked"
     assert session.latest_jpeg is None
     assert session._camera_stream_connected is False
+
+
+
+@pytest.mark.parametrize("revision", [12, 13, None, True])
+async def test_native_private_revision_fences_unrelated_tool_dialogue(
+    native, revision,
+):
+    """A private edit retires old spoken context even for a new battery query."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._memory_tools_enabled = True
+    session._private_memory_generation = 12
+    session._tool_speech_turn = (0, 1)
+    session._tool_dialogue.append(
+        (module.time.monotonic(), "My secret?", "The secret is red.")
+    )
+    session._tool_reply_pending["old"] = (0, "secret", "red")
+    session._native_output_words["old"] = {"spoken": "red"}
+
+    class Reply:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def json(self):
+            return {
+                "robot_id": "robot-01", "model_context": "Fresh sensor",
+                "persistent_memory_included": False,
+                "raw_media_included": False,
+                "model_context_untrusted_not_instructions": True,
+                "motor_authorized": False, "charging_authorized": False,
+                "memory_tools_enabled": True,
+                "private_memory_generation": revision,
+                "transcript_memory_enabled": False,
+                "voice_monitor_ready": True,
+            }
+
+    class Mac:
+        def get(self, url, **kwargs):
+            assert url.endswith("/v1/pet/robot-01/interaction-context")
+            return Reply()
+
+    scene = await session._current_tool_scene(Mac(), 0, 1)
+    if type(revision) is int and revision == 12:
+        assert scene == "Fresh sensor"
+        assert not session.closed
+        assert "red" in session._tool_dialogue_context(module.time.monotonic())
+    else:
+        assert scene == ""
+        assert session.closed
+        assert not session._tool_dialogue
+        assert not session._tool_reply_pending
+        assert not session._native_output_words
+
+
+@pytest.mark.parametrize("revision", [24, None, True])
+async def test_native_periodic_context_retires_model_on_private_edit(
+    native, revision,
+):
+    """A private edit retires the duplex KV without another memory question."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    session._memory_tools_enabled = True
+    session._private_memory_generation = 23
+    session._tool_dialogue.append(
+        (module.time.monotonic(), "Recall?", "Private deleted preference")
+    )
+
+    class Reply:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def json(self):
+            return {
+                "robot_id": "robot-01", "model_context": "",
+                "persistent_memory_included": False,
+                "raw_media_included": False,
+                "model_context_untrusted_not_instructions": True,
+                "memory_tools_enabled": True,
+                "private_memory_generation": revision,
+                "transcript_memory_enabled": False,
+                "pet_quiet": False, "pet_autonomy_enabled": True,
+                "voice_monitor_ready": True,
+            }
+
+    class Mac:
+        def get(self, *_args, **_kwargs):
+            return Reply()
+
+    task = asyncio.create_task(session._refresh_live_context(Mac()))
+    session._context_wakeup.set()
+    await asyncio.wait_for(task, timeout=1.0)
+    assert session.closed
+    assert session.native_context_updates == 0
+    assert not session._tool_dialogue
+    assert "private memory" in session.last_error
+
+
+@pytest.mark.parametrize("revision", [42, None, True])
+async def test_native_startup_requires_authenticated_private_revision(
+    native, revision,
+):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+
+    class Reply:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def json(self):
+            return {
+                "robot_id": "robot-01", "instructions": "Be Pip.",
+                "model_can_arm_motors": False,
+                "memory_enabled": True,
+                "private_memory_generation": revision,
+                "live_transcript_context_enabled": True,
+                "voice_monitor_ready": True,
+            }
+
+    class Mac:
+        def get(self, *_args, **_kwargs):
+            return Reply()
+
+    await session._load_private_persona(Mac())
+    if type(revision) is int:
+        assert session._private_memory_generation == 42
+        assert not session.closed
+    else:
+        assert session.closed
+        assert not session._mac_context_verified

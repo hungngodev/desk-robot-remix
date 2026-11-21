@@ -62,6 +62,7 @@ async def test_paused_native_startup_read_is_revision_fenced(settings, changed_p
         assert result["untrusted_historical_evidence"] == {
             "core": "", "recent": "",
         }
+        assert result["private_memory_generation"] == generations[robot]
     else:
         with pytest.raises(HTTPException) as exc:
             await task

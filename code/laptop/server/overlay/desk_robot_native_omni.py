@@ -277,6 +277,8 @@ class NativeOmniSession:
         self._mac_context_verified = False
         self._last_authenticated_mac_at = float("-inf")
         self._memory_tools_enabled = False
+        # Revoking a fact also invalidates the native model session history.
+        self._private_memory_generation: int | None = None
         self._live_transcript_enabled = False
         self._base_instructions = self.wire.instructions
         self._voice_persona = "a curious desk pet"
@@ -379,6 +381,32 @@ class NativeOmniSession:
         task = self.started
         if task is not None and not task.done():
             task.cancel()
+
+    def _check_private_memory_revision(
+        self, revision: object, *, enabled: bool,
+    ) -> bool:
+        """Fence old native model history after a private memory correction."""
+        if not enabled:
+            return True
+        if type(revision) is not int or not 0 <= revision < 2**63:
+            reason = "Mac private memory revision unavailable; native session must restart"
+        elif self._private_memory_generation is None:
+            # Real startup pins the revision before opening the model socket.
+            # Direct synthetic unit sessions can first bind a live response.
+            self._private_memory_generation = revision
+            return True
+        elif revision == self._private_memory_generation:
+            return True
+        else:
+            reason = "Mac private memory changed; native session must restart"
+        # Invalidate old model KV by ending this session, not by filtering
+        # the next question. Retire pending spoken text and old dialogue too.
+        self._tool_dialogue.clear()
+        self._tool_reply_pending.clear()
+        self._native_output_words.clear()
+        self._last_human_transcript = ""
+        self.fail(reason)
+        return False
 
     async def _send(self, event: dict) -> None:
         if self._socket is None or self.closed:
@@ -510,6 +538,14 @@ class NativeOmniSession:
                             and "\x00" not in persona):
                         self._voice_persona = " ".join(persona.split())[:900]
                     self._context_instructions = instructions
+                    if data.get("memory_enabled") is True:
+                        revision = data.get("private_memory_generation")
+                        if type(revision) is not int or not 0 <= revision < 2**63:
+                            self.fail(
+                                "Mac private memory revision unavailable at native startup"
+                            )
+                            return
+                        self._private_memory_generation = revision
                     self._transcript_memory_enabled = (
                         data.get("transcript_memory_enabled") is True
                     )
@@ -816,6 +852,11 @@ class NativeOmniSession:
                     # facts after revocation. A new model session is required.
                     self.fail("Mac private memory consent changed; native session must restart")
                     return
+                if not self._check_private_memory_revision(
+                    data.get("private_memory_generation"),
+                    enabled=data["memory_tools_enabled"],
+                ):
+                    return
                 if (self.closed or not self.connected
                         or self._generation != epoch
                         or self._video_turn != video_turn
@@ -1015,6 +1056,11 @@ class NativeOmniSession:
                 self.fail(
                     "Mac private memory consent changed; native session must restart"
                 )
+                return ""
+            if not self._check_private_memory_revision(
+                info.get("private_memory_generation"),
+                enabled=info["memory_tools_enabled"],
+            ):
                 return ""
             if expected_private_memory_generation is not None:
                 revision = info.get("private_memory_generation")

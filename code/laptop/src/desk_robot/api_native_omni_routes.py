@@ -77,7 +77,7 @@ def register_native_omni_routes(
             if not isinstance(revisions, dict):
                 raise HTTPException(409, "Native private memory revision unavailable")
             generation = revisions.get(robot_id)
-            if type(generation) is not int or generation < 0:
+            if type(generation) is not int or not 0 <= generation < 2**63:
                 raise HTTPException(409, "Native private memory revision unavailable")
             core, records = await asyncio.wait_for(
                 asyncio.gather(
@@ -124,6 +124,9 @@ def register_native_omni_routes(
             "startup_memory_instructions_excluded": True,
             "persona": robot.persona[:900],
             "memory_enabled": settings.voice_memory_tools_enabled,
+            "private_memory_generation": (
+                generation if settings.voice_memory_tools_enabled else None
+            ),
             "transcript_memory_enabled": (
                 settings.voice_transcript_memory_enabled
                 and settings.voice_memory_tools_enabled
