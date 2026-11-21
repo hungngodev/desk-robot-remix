@@ -31,6 +31,8 @@ def test_host_verification_uses_independent_bounded_job_lanes():
             tests = str(job["steps"])
             assert "tests/test_native_omni_xiaozhi.py" in tests
             assert "tests/test_voice_memory_reuse.py" in tests
+            assert "tests/test_vision_worker.py::test_scene_comparator_unhashable_model_kind_is_rejected_without_crash" in tests
+            assert "tests/test_multimodal.py::test_unhashable_multimodal_cues_are_rejected_without_mutation" in tests
         checkout = next(
             step for step in job["steps"]
             if step.get("uses", "").startswith("actions/checkout@")
