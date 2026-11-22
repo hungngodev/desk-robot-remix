@@ -3,7 +3,20 @@
 import argparse
 import csv
 import json
+import math
+from datetime import date
 from pathlib import Path
+
+
+def _finite_measurement(row, field, *, positive=False):
+    """A physical measurement is never infinity, NaN, or a negative distance."""
+    try:
+        value = float(row[field])
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"Invalid physical measurement: {field}") from exc
+    if not math.isfinite(value) or value < 0 or (positive and value == 0):
+        raise ValueError(f"Invalid physical measurement: {field}")
+    return value
 
 
 def summarize(rows, robot_id):
@@ -15,16 +28,23 @@ def summarize(rows, robot_id):
             raise ValueError("Each category needs distinct trial numbers 1..10")
         successes = 0
         for r in selected:
-            if (
-                not all(r[k] for k in ("object_description", "date", "firmware", "calibration"))
-                or float(r["mass_g"]) <= 0
+            if not all(
+                isinstance(r.get(k), str) and r[k].strip()
+                for k in ("object_description", "date", "firmware", "calibration")
             ):
-                raise ValueError(
-                    "Record real object, mass, date and configuration for every attempt"
-                )
+                raise ValueError("Record real object, mass, date and configuration for every attempt")
+            try:
+                trial_date = date.fromisoformat(r["date"])
+            except ValueError as exc:
+                raise ValueError("Invalid physical trial date") from exc
+            if trial_date.isoformat() != r["date"]:
+                raise ValueError("Invalid physical trial date")
+            _finite_measurement(r, "mass_g", positive=True)
+            lift_mm = _finite_measurement(r, "lift_mm")
+            hold_seconds = _finite_measurement(r, "hold_seconds")
             successes += (
-                float(r["lift_mm"]) >= 10
-                and float(r["hold_seconds"]) >= 3
+                lift_mm >= 10
+                and hold_seconds >= 3
                 and r["placed_under_control"] == "true"
                 and r["assisted"] == "false"
                 and (category != "key" or r["flat_start"] == "true")
