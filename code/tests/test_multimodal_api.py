@@ -1,7 +1,44 @@
 """Native Mac vision endpoints can be called by Xiaozhi, not used to mint motion."""
+import hashlib
+import hmac
+import json
+import secrets
+import time
+
 import pytest
 from desk_robot.api import create_app
 from fastapi.testclient import TestClient
+
+
+
+def _signed_tool_headers(settings, tokens, robot_id, path, generation, monkeypatch):
+    """Mint an independent, one-use Xiaozhi receipt for a real Mac route."""
+    robot = settings.robot(robot_id)
+    if not robot.device_id:
+        robot.device_id = f"test-{robot_id}-head"
+    speech_token = "s" * 40
+    monkeypatch.setenv(settings.speech_bridge_token_env, speech_token)
+    path = path.partition("?")[0]
+    issued_us = time.time_ns() // 1000
+    receipt_id = secrets.token_hex(16)
+    message = json.dumps(
+        [1, robot_id, robot.device_id, generation, "GET", path,
+         issued_us, receipt_id],
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("ascii")
+    signature = hmac.new(
+        speech_token.encode(), message, hashlib.sha256,
+    ).hexdigest()
+    return {
+        "Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"],
+        "X-Desk-Robot-Tool-Receipt": "1",
+        "X-Desk-Robot-Tool-Receipt-Id": receipt_id,
+        "X-Desk-Robot-Tool-Receipt-At-Us": str(issued_us),
+        "X-Desk-Robot-Tool-Receipt-Device": robot.device_id,
+        "X-Desk-Robot-Tool-Receipt-Generation": str(generation),
+        "X-Desk-Robot-Tool-Receipt-Signature": signature,
+    }
 
 
 def test_manual_raw_camera_requires_operator_token(settings, tokens):
@@ -930,7 +967,7 @@ def test_real_wroom_power_tool_reports_raw_gauge_only_without_charging_claim(
 
 
 def test_power_tool_does_not_write_old_sensor_receipt_into_new_human_turn(
-    settings, tokens,
+    settings, tokens, monkeypatch,
 ):
     from types import SimpleNamespace
 
@@ -964,12 +1001,12 @@ def test_power_tool_does_not_write_old_sensor_receipt_into_new_human_turn(
         ),
         multimodal=visual, start=noop, close=noop,
     )
-    headers = {
-        "Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"],
-        "X-Desk-Robot-Tool-Receipt": "1",
-    }
+    url = f"/v1/pet/{robot}/power-status"
+    headers = _signed_tool_headers(
+        settings, tokens, robot, url, 10, monkeypatch,
+    )
     with TestClient(create_app(settings, runtime=runtime)) as client:
-        result = client.get(f"/v1/pet/{robot}/power-status", headers=headers)
+        result = client.get(url, headers=headers)
         assert result.status_code == 409
         assert "superseded" in result.json()["detail"]
         assert visual._turn_epoch[robot] == 11
@@ -977,7 +1014,7 @@ def test_power_tool_does_not_write_old_sensor_receipt_into_new_human_turn(
 
 
 def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
-    settings, tokens,
+    settings, tokens, monkeypatch,
 ):
     import time
     from types import SimpleNamespace
@@ -1024,14 +1061,17 @@ def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
 
     runtime.start, runtime.close = start, close
     tool = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
-    marked = {**tool, "X-Desk-Robot-Tool-Receipt": "1"}
     with TestClient(create_app(settings, runtime=runtime)) as client:
         status_url = f"/v1/robots/{ids[0]}/status"
         job_url = f"/v1/robots/{ids[0]}/jobs/latest-pickup"
         assert client.get(status_url, headers=tool).status_code == 200
         assert hub.recent_tool_context(ids[0], time.monotonic()) == []
-        assert client.get(status_url, headers=marked).status_code == 200
-        result = client.get(job_url, headers=marked)
+        assert client.get(status_url, headers=_signed_tool_headers(
+            settings, tokens, ids[0], status_url, 0, monkeypatch,
+        )).status_code == 200
+        result = client.get(job_url, headers=_signed_tool_headers(
+            settings, tokens, ids[0], job_url, 0, monkeypatch,
+        ))
         assert result.status_code == 200
         assert result.json()["state"] == "running"
         cues = hub.recent_tool_context(ids[0], time.monotonic())
@@ -1043,7 +1083,9 @@ def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
         assert "Recent head telemetry" in context.interaction
         hub.tool_history[ids[0]].clear()
         head.reported_id = ids[1]
-        assert client.get(status_url, headers=marked).status_code == 503
+        assert client.get(status_url, headers=_signed_tool_headers(
+            settings, tokens, ids[0], status_url, 0, monkeypatch,
+        )).status_code == 503
         assert not hub.tool_history[ids[0]]  # Foreign head is never evidence.
         assert "Mac pickup job receipt, not verified grasp" in context.interaction
         assert hub.recent_tool_context(ids[1], time.monotonic()) == []
@@ -1696,7 +1738,7 @@ def test_native_asr_live_optout_during_disk_write_retracts_only_ephemeral_item(
 
 
 def test_native_memory_tool_receipt_respects_consent_turn_and_pet_isolation(
-    settings, tokens, tmp_path,
+    settings, tokens, tmp_path, monkeypatch,
 ):
     from types import SimpleNamespace
 
@@ -1733,14 +1775,14 @@ def test_native_memory_tool_receipt_respects_consent_turn_and_pet_isolation(
     runtime.conversation = SimpleNamespace(
         _private_memory_generation={rid: 0 for rid in ids}
     )
-    headers = {
-        "Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"],
-        "X-Desk-Robot-Tool-Receipt": "1",
-    }
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
     with TestClient(create_app(settings, runtime=runtime)) as client:
         url = f"/v1/pet/{pet.id}/voice-context"
         recall = client.get(
-            url, params={"query": "key green mug"}, headers=headers
+            url, params={"query": "key green mug"},
+            headers=_signed_tool_headers(
+                settings, tokens, pet.id, url, 0, monkeypatch,
+            ),
         )
         assert recall.status_code == 200
         assert recall.json()["matched"] is True
@@ -1908,7 +1950,7 @@ def test_authoritative_latest_pickup_status_survives_head_reconnect_without_cros
 
 
 def test_sensor_tool_receipt_enters_same_mac_history_only_from_current_voice_tool(
-    settings, tokens,
+    settings, tokens, monkeypatch,
 ):
     import time
     from types import SimpleNamespace
@@ -1955,9 +1997,9 @@ def test_sensor_tool_receipt_enters_same_mac_history_only_from_current_voice_too
         ordinary = client.get(url, headers=token)
         assert ordinary.status_code == 200
         assert not hub.tool_history[robot]
-        tool = client.get(url, headers={
-            **token, "X-Desk-Robot-Tool-Receipt": "1",
-        })
+        tool = client.get(url, headers=_signed_tool_headers(
+            settings, tokens, robot, url, 5, monkeypatch,
+        ))
         assert tool.status_code == 200
         assert len(hub.tool_history[robot]) == 1
         kind, summary, when = hub.tool_history[robot][0]
@@ -1969,14 +2011,14 @@ def test_sensor_tool_receipt_enters_same_mac_history_only_from_current_voice_too
             assert not hub.tool_history[other.id]
         hub.tool_history[robot].clear()
         head.reported_id = settings.robots[1].id
-        assert client.get(url, headers={
-            **token, "X-Desk-Robot-Tool-Receipt": "1",
-        }).status_code == 503
+        assert client.get(url, headers=_signed_tool_headers(
+            settings, tokens, robot, url, 5, monkeypatch,
+        )).status_code == 503
         assert not hub.tool_history[robot]  # Foreign AUX cannot become a fact.
 
 
 def test_slow_readonly_tool_receipt_cannot_cross_into_new_human_turn(
-    settings, tokens, tmp_path,
+    settings, tokens, tmp_path, monkeypatch,
 ):
     """Old async WROOM and SQLite results may not pollute the next VAD turn."""
     import asyncio
@@ -2051,10 +2093,10 @@ def test_slow_readonly_tool_receipt_cannot_cross_into_new_human_turn(
         )
         url = (f"/v1/robots/{robot}/aux" if route == "aux"
                else f"/v1/pet/{robot}/voice-context?query=blue%20key")
-        headers = {
-            "Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"],
-            "X-Desk-Robot-Tool-Receipt": "1",
-        }
+        headers = _signed_tool_headers(
+            settings, tokens, robot, url, visual._turn_epoch[robot],
+            monkeypatch,
+        )
         with TestClient(create_app(settings, runtime=runtime)) as client:
             with ThreadPoolExecutor(max_workers=1) as executor:
                 pending = executor.submit(client.get, url, headers=headers)
@@ -2071,7 +2113,10 @@ def test_slow_readonly_tool_receipt_cannot_cross_into_new_human_turn(
                 assert "superseded" in stale.json()["detail"]
             assert not hub.tool_history[robot]
             # A genuinely NEW tool request in that turn is still recorded.
-            assert client.get(url, headers=headers).status_code == 200
+            assert client.get(url, headers=_signed_tool_headers(
+                settings, tokens, robot, url, visual._turn_epoch[robot],
+                monkeypatch,
+            )).status_code == 200
             expected = ("sensor_telemetry" if route == "aux"
                         else "memory_recall")
             assert [entry[0] for entry in hub.tool_history[robot]] == [expected]
