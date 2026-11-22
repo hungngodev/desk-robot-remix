@@ -1776,6 +1776,56 @@ async def test_direct_look_retracts_old_eyewitness_even_during_sqlite_commit(
         await pet.close()
 
 
+
+async def test_auto_fanout_revoke_regrant_retracts_old_peer_batch(
+    fleet, tmp_path, monkeypatch,
+):
+    """Regrant must not resume a pending text fanout under the prior grant."""
+    import threading
+
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_text_auto_fanout_enabled = True
+    robot_ids = [robot.id for robot in fleet.robots]
+    memory = MemoryStore(tmp_path, robot_ids)
+    original_remember = memory.remember
+    second_written, release = threading.Event(), threading.Event()
+
+    def delayed_second_peer(robot_id, *args, **kwargs):
+        result = original_remember(robot_id, *args, **kwargs)
+        if robot_id == "robot-03" and kwargs.get("witnessed") is False:
+            second_written.set()
+            assert release.wait(3)
+        return result
+
+    monkeypatch.setattr(memory, "remember", delayed_second_peer)
+    pet = PetController(
+        fleet, {},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    task = asyncio.create_task(pet._store_observation(
+        "robot-01", SceneChange("touch_tap", "A genuine touch", 1.0),
+    ))
+    try:
+        try:
+            assert await asyncio.to_thread(second_written.wait, 2)
+            assert memory.count("robot-02") == 1
+            assert memory.count("robot-03") == 1
+            fleet.fleet_text_sharing_enabled = False
+            fleet.fleet_text_sharing_enabled = True
+        finally:
+            release.set()
+        await asyncio.wait_for(task, timeout=3)
+        assert memory.count("robot-01") == 1
+        assert all(memory.count(robot_id) == 0 for robot_id in robot_ids[1:])
+        retained = memory.recent("robot-01")
+        assert len(retained) == 1 and retained[0].witnessed
+    finally:
+        release.set()
+        await pet.close()
+
+
+
 async def test_cancelled_fleet_fanout_retracts_all_new_peer_copies(
     fleet, tmp_path, monkeypatch,
 ):
