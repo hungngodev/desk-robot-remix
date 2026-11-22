@@ -1158,7 +1158,7 @@ class MultimodalOrchestrator:
         Not a separate controller. The permanent pet loop still decides if
         selected change evidence is worth a model call or a spoken reaction.
         """
-        if self._closed or not self.settings.voice_vision_tools_enabled:
+        if self._closed:
             return
         for robot_id, head in self.heads.items():
             if not callable(getattr(head, "stream_frames", None)):
@@ -1166,13 +1166,15 @@ class MultimodalOrchestrator:
             # Hardware visual consent requires a real running feed. Never
             # quietly turn an outage into the old periodic snapshot design.
             require_stream = getattr(head, "require_stream", None)
-            if callable(require_stream):
+            if self.settings.voice_vision_tools_enabled and callable(require_stream):
                 require_stream()
             supervisor = self._stream_supervisors.get(robot_id)
             if supervisor is not None and not supervisor.done():
                 continue
             worker = self._stream_tasks.get(robot_id)
-            if worker is None or worker.done():
+            if self.settings.voice_vision_tools_enabled and (
+                worker is None or worker.done()
+            ):
                 self._stream_tasks[robot_id] = asyncio.create_task(
                     self._consume_stream(robot_id, head)
                 )
@@ -1210,6 +1212,15 @@ class MultimodalOrchestrator:
                     worker.exception()  # Observe unexpected worker errors.
                 if not self._camera_grant_valid(robot_id, admitted_grant):
                     continue
+                require_stream = getattr(head, "require_stream", None)
+                if callable(require_stream):
+                    try:
+                        require_stream()
+                    except Exception:
+                        # An unsupported head must not silently fall back to snapshots.
+                        self._metrics[robot_id]["stream_reconnects"] += 1
+                        await asyncio.sleep(1.0)
+                        continue
                 self._last_stream_sample[robot_id] = -math.inf
                 self._stream_tasks[robot_id] = asyncio.create_task(
                     self._consume_stream(robot_id, head)

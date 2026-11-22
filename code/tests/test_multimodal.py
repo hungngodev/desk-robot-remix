@@ -3425,6 +3425,44 @@ async def test_camera_stream_regrant_after_worker_stops(settings):
     finally:
         await service.close()
 
+async def test_camera_disabled_at_runtime_start_can_enable_one_stream(settings):
+    settings.voice_vision_tools_enabled = False
+    rid = settings.robots[0].id
+
+    class StreamingHead(Head):
+        def __init__(self):
+            super().__init__()
+            self.opens = 0
+            self.closed = 0
+
+        async def stream_frames(self):
+            self.opens += 1
+            try:
+                yield image(square=True), time.monotonic()
+                await asyncio.Event().wait()
+            finally:
+                self.closed += 1
+
+    head = StreamingHead()
+    service = MultimodalOrchestrator(
+        settings, {rid: head}, Vision(), asyncio.Lock(),
+    )
+    try:
+        service.start_streams()  # Runtime starts once, before camera opt-in.
+        await asyncio.sleep(0.1)
+        assert head.opens == 0
+        assert not service._stream_tasks
+        settings.voice_vision_tools_enabled = True
+        async with asyncio.timeout(3):
+            while not service.hub.frames[rid]:
+                await asyncio.sleep(0.01)
+        assert head.opens == 1
+        assert service.hub.frames[rid][-1].source == "proactive"
+    finally:
+        await service.close()
+    assert head.closed == 1
+
+
 async def test_native_live_subscriber_does_not_cross_camera_regrant(settings):
     settings.voice_vision_tools_enabled = True
     rid = settings.robots[0].id
