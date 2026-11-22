@@ -2590,6 +2590,68 @@ def test_native_speech_tools_allow_only_explicit_readonly_requests(
         }
 
 
+@pytest.mark.parametrize(("spoken", "route"), [
+    ("Are you armed?", "status"),
+    ("Are you disarmed?", "status"),
+    ("Are your motors armed right now?", "status"),
+    ("Is your drive armed?", "status"),
+    ("What's your arm status?", "status"),
+    ("Check your arming state", "status"),
+    ("I was armed yesterday", None),
+    ("Were you armed yesterday?", None),
+    ("How do I arm the motors?", None),
+    ("Please arm the robot", None),
+    ("Tell me how to disarm your drive", None),
+])
+def test_native_current_arm_status_uses_readonly_status_only(native, spoken, route):
+    module, _ = native
+    request = module.native_readonly_request(spoken)
+    assert (request[0] if request else None) == route
+    if request:
+        assert request == ("status", {})
+    # A phrase spoken to Dot may not authorize a read from Pip's head.
+    assert module.native_readonly_request(
+        "Hey Dot, are you armed?", robot_name="Pip",
+        fleet_names=("Pip", "Dot"),
+    ) is None
+    assert module.native_readonly_request(
+        "Hey Pip, are you armed?", robot_name="Pip",
+        fleet_names=("Pip", "Dot"),
+    ) == ("status", {})
+
+
+@pytest.mark.parametrize("armed", [True, False])
+def test_native_status_fact_preserves_typed_wroom_arm_latch(native, armed):
+    module, _ = native
+    fact = module.native_grounded_fact("status", {
+        "robot_id": "robot-01",
+        "armed": armed,
+        "safety": {"fault": "none", "ready": True},
+        "motor_authorized": False,
+        "charging_authorized": False,
+    })
+    assert fact == {
+        "source": "wroom_status", "available": True,
+        "armed": armed, "safety_fault": "none",
+        "physical_acceptance_verified": False,
+    }
+
+
+@pytest.mark.parametrize("armed", [None, "true", "false", 0, 1, [], {}])
+def test_native_status_fact_fails_closed_without_boolean_arm_latch(native, armed):
+    module, _ = native
+    fact = module.native_grounded_fact("status", {
+        "robot_id": "robot-01", "armed": armed,
+        "safety": {"fault": "none", "ready": False},
+    })
+    assert fact == {
+        "source": "wroom_status", "available": False,
+        "safety_fault": "none", "physical_acceptance_verified": False,
+    }
+    assert "armed" not in fact
+    assert module.native_grounded_fact("status", {"armed": True}) is None
+
+
 @pytest.mark.parametrize("name", ["Pip", "Dot", "Chip", "Byte", "Bob"])
 @pytest.mark.parametrize(("question", "expected"), [
     ("can you look around?", "look"),
@@ -3278,7 +3340,7 @@ def test_native_grounded_tool_discards_unbounded_status_and_pickup_strings(nativ
         "safety": {"fault": hostile, "ready": False},
     })
     assert fault == {
-        "source": "wroom_status",
+        "source": "wroom_status", "available": False,
         "safety_fault": "unknown",
         "physical_acceptance_verified": False,
     }

@@ -192,6 +192,20 @@ def native_readonly_request(
                 polite,
             )):
         return "aux-status", {}
+    # A question about the current motor arm latch is observation, never an
+    # instruction to arm, move or clear a local WROOM safety stop. Preserve
+    # conversational ASR without punctuation, but reject historical statements.
+    if re.fullmatch(
+        r"(?:are you (?:currently )?(?:armed|disarmed)|"
+        r"are your motors (?:currently )?(?:armed|disarmed)|"
+        r"is (?:your |the )?(?:drive|motor|motors|motion) "
+        r"(?:currently )?(?:armed|disarmed)|"
+        r"what(?:'s| is) your (?:arm|arming) (?:state|status)|"
+        r"check your (?:arm|arming) (?:state|status))"
+        r"(?: (?:right now|at the moment))?",
+        polite,
+    ):
+        return "status", {}
     if (
         re.match(r"^(?:check|what|how|is|are|tell)\b", polite)
         and re.search(
@@ -520,7 +534,15 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
         if (not isinstance(fault, str)
                 or re.fullmatch(r"[a-z][a-z0-9_]{0,47}", fault) is None):
             fault = "unknown"
-        return {"source": "wroom_status", "safety_fault": fault,
+        # A status read must not silently turn an absent, string or integer
+        # armed value into a confident motor state. Keep faults observable,
+        # but expose the arm latch only when WROOM provided a real boolean.
+        armed = result.get("armed")
+        if type(armed) is not bool:
+            return {"source": "wroom_status", "available": False,
+                    "safety_fault": fault, "physical_acceptance_verified": False}
+        return {"source": "wroom_status", "available": True,
+                "armed": armed, "safety_fault": fault,
                 "physical_acceptance_verified": False}
     if route == "interaction-context":
         summary = result.get("model_context")
