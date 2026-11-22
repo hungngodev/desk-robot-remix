@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import errno
 import hashlib
 import io
 import json
@@ -28,6 +29,51 @@ def _reject_private_output_symlink_ancestors(folder: Path) -> None:
         raise ValueError("Private checkerboard output has a symlink ancestor")
 
 
+def _open_new_private_folder(folder: Path) -> tuple[int, int]:
+    """Anchor the capture folder to verified directories, not a mutable path."""
+    absolute = folder.absolute()
+    if ".." in absolute.parts:
+        raise ValueError("Private checkerboard output may not traverse parent directories")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    parent_fd = os.open(absolute.anchor, flags)
+    try:
+        for component in absolute.parts[1:-1]:
+            child_fd = os.open(component, flags, dir_fd=parent_fd)
+            os.close(parent_fd)
+            parent_fd = child_fd
+        # mkdir through the held parent cannot follow a substituted ancestor.
+        os.mkdir(absolute.name, mode=0o700, dir_fd=parent_fd)
+        try:
+            capture_fd = os.open(absolute.name, flags, dir_fd=parent_fd)
+        except BaseException:
+            os.rmdir(absolute.name, dir_fd=parent_fd)
+            raise
+        return parent_fd, capture_fd
+    except OSError as exc:
+        os.close(parent_fd)
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+            raise ValueError("Private checkerboard output has a symlink ancestor") from exc
+        raise
+    except BaseException:
+        os.close(parent_fd)
+        raise
+
+
+def _same_inode(one: os.stat_result, two: os.stat_result) -> bool:
+    return (one.st_dev, one.st_ino) == (two.st_dev, two.st_ino)
+
+
+def _capture_path_still_original(folder: Path, capture_fd: int) -> bool:
+    """A swapped alias must not be reported as the private capture location."""
+    try:
+        _reject_private_output_symlink_ancestors(folder)
+        return _same_inode(
+            os.stat(folder, follow_symlinks=False), os.fstat(capture_fd)
+        )
+    except (OSError, ValueError):
+        return False
+
+
 async def capture_checkerboards(
     head, folder: Path, *, count: int,
     prompt: Callable[[int], Awaitable[None]],
@@ -37,11 +83,11 @@ async def capture_checkerboards(
         raise ValueError("Require 12 to 40 distinct checkerboard captures")
     if not callable(prompt):
         raise ValueError("Explicit placement confirmation required")
-    # Reject a preexisting linked parent before creating any sensitive data.
+    # A string precheck alone is insufficient after the first awaited prompt.
     _reject_private_output_symlink_ancestors(folder)
-    # Do not merge private images with an existing folder or other session.
-    folder.mkdir(mode=0o700)
-    saved = []
+    # Do not merge sessions; pin both the parent and new folder descriptors.
+    parent_fd, capture_fd = _open_new_private_folder(folder)
+    saved: list[str] = []
     size = None
     seen_pixels = set()
     success = False
@@ -73,11 +119,16 @@ async def capture_checkerboards(
             if size is not None and frame_size != size:
                 raise ValueError("XIAO camera resolution changed during calibration")
             size = frame_size
-            target = folder / f"{index+1:02d}.jpg"
-            fd = os.open(target, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-            saved.append(target)  # Also remove a partially written private JPEG.
+            filename = f"{index+1:02d}.jpg"
+            fd = os.open(
+                filename, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600, dir_fd=capture_fd,
+            )
+            saved.append(filename)  # Also remove a partially written private JPEG.
             with os.fdopen(fd, "wb") as file:
                 file.write(jpeg)
+        if not _capture_path_still_original(folder, capture_fd):
+            raise ValueError("Private checkerboard folder changed during capture")
         success = True
         return {
             "images": len(saved), "image_width_px": size[0],
@@ -87,12 +138,26 @@ async def capture_checkerboards(
             "charging_authorized": False,
         }
     finally:
-        # A partial set has unknown independent placement/calibration value.
-        # Never leave private partial image records after failure or cancel.
-        if not success:
-            for target in saved:
-                target.unlink(missing_ok=True)
-            folder.rmdir()
+        # The held directory FD keeps cleanup on the original private inode
+        # even if a parent is renamed or replaced during an operator prompt.
+        try:
+            if not success:
+                for filename in saved:
+                    try:
+                        os.unlink(filename, dir_fd=capture_fd)
+                    except FileNotFoundError:
+                        pass
+                try:
+                    entry = os.stat(
+                        folder.name, dir_fd=parent_fd, follow_symlinks=False
+                    )
+                    if _same_inode(entry, os.fstat(capture_fd)):
+                        os.rmdir(folder.name, dir_fd=parent_fd)
+                except FileNotFoundError:
+                    pass
+        finally:
+            os.close(capture_fd)
+            os.close(parent_fd)
 
 
 async def main() -> None:

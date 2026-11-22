@@ -227,3 +227,38 @@ async def test_checkerboard_private_images_reject_symlink_parent_dotdot(
     with pytest.raises(ValueError, match="symlink ancestor"):
         await capture_checkerboards(object(), folder, count=12, prompt=no_prompt)
     assert not (external / "private-capture").exists()
+
+
+@pytest.mark.asyncio
+async def test_parent_swap_during_prompt_cannot_redirect_private_jpegs(tmp_path):
+    """The actual operator wait is a path substitution boundary."""
+    trusted_parent = tmp_path / "trusted"
+    trusted_parent.mkdir()
+    relocated = tmp_path / "moved"
+    untrusted = tmp_path / "shared"
+    untrusted.mkdir()
+    (untrusted / "capture").mkdir()
+    folder = trusted_parent / "capture"
+    originals = [jpeg(color=(50 + i * 10, 90, 130)) for i in range(12)]
+
+    class Head:
+        next_image = 0
+
+        async def status(self):
+            return {"armed": False}
+
+        async def snapshot(self):
+            image = originals[self.next_image]
+            self.next_image += 1
+            return image
+
+    async def confirm(index):
+        if index == 1:
+            # An alias appears AFTER folder preflight, during the real prompt.
+            trusted_parent.rename(relocated)
+            trusted_parent.symlink_to(untrusted, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="changed during capture"):
+        await capture_checkerboards(Head(), folder, count=12, prompt=confirm)
+    assert not list((untrusted / "capture").glob("*.jpg"))
+    assert not (relocated / "capture").exists()
