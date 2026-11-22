@@ -19,6 +19,24 @@ def _number(value: object, label: str) -> float:
     return measured
 
 
+def _unique_json_fields(pairs: list[tuple[str, object]]) -> dict:
+    """Reject conflicting or repeated physical evidence at any JSON depth."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Duplicate JSON trial field: {key}")
+        result[key] = value
+    return result
+
+
+def parse_trial_jsonl(contents: str) -> list[dict]:
+    """Load operator trial records without JSON's unsafe last-key-wins rule."""
+    return [
+        json.loads(line, object_pairs_hook=_unique_json_fields)
+        for line in contents.splitlines() if line.strip()
+    ]
+
+
 def evaluate(records: list[dict]) -> dict:
     if not isinstance(records, list) or any(not isinstance(r, dict) for r in records):
         raise ValueError("Trial log must contain objects")
@@ -281,7 +299,7 @@ def main() -> None:
     path = parser.parse_args().file
     if not path.is_file() or path.stat().st_size > 200000:
         raise ValueError("Missing or oversized physical audio trial log")
-    records = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    records = parse_trial_jsonl(path.read_text())
     print(json.dumps(evaluate(records), indent=2))
 
 
