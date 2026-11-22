@@ -34,6 +34,40 @@ def test_unverified_pilot_projection_remains_available_without_release_flag():
     assert pilot["actual_current_landed_cost_verified"] is False
 
 
+
+def test_first_unit_two_list_preview_exposes_known_payment_not_fake_checkout():
+    """Normal builder views carry real partial cash evidence without approval."""
+    import json
+
+    markdown = subprocess.run(
+        [sys.executable, str(SCRIPT), "--format", "first-robot-markdown"],
+        cwd=ROOT / "code", text=True, capture_output=True,
+        check=False, timeout=20,
+    )
+    assert markdown.returncode == 0, markdown.stderr
+    assert "PROTOTYPE BUYING STATUS: HOLD" in markdown.stdout
+    assert "Documented prior payments, minimum: $13.67" in markdown.stdout
+    assert "Complete prior spending register: NOT RECONCILED" in markdown.stdout
+    assert "Payable now, cumulative delivered total" in markdown.stdout
+    assert "real shortfall: UNKNOWN" in markdown.stdout
+    assert markdown.stdout.count("## 1. Reported owned or ordered") == 1
+    assert markdown.stdout.count(
+        "## 2. First-unit remaining slots and conditional alternatives"
+    ) == 1
+
+    machine = subprocess.run(
+        [sys.executable, str(SCRIPT), "--format", "first-robot-json"],
+        cwd=ROOT / "code", text=True, capture_output=True,
+        check=False, timeout=20,
+    )
+    assert machine.returncode == 0, machine.stderr
+    payload = json.loads(machine.stdout)
+    assert payload["purchase_approved"] is False
+    assert payload["documented_prior_paid_cents"] == 1367
+    assert payload["all_prior_spending_reconciled"] is False
+    assert payload["verified_checkout_cost"] is None
+
+
 def test_one_robot_release_requires_real_first_unit_receipts_before_printing_cart():
     result = subprocess.run(
         [sys.executable, str(SCRIPT), "--require-first-robot",

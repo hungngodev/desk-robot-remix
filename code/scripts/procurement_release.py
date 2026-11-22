@@ -773,6 +773,30 @@ def public_purchase_view(report: dict, *, live_receipts_verified: bool = False) 
     return visible
 
 
+
+def _documented_prior_spend_baseline() -> dict:
+    """Known paid receipt is a floor, never a completed historical register."""
+    reference = _load_cli_json(PLAN.parent / "bom.json", "confirmed paid reference")
+    if not isinstance(reference, dict) or reference.get("currency") != "USD":
+        raise ValueError("Confirmed prior payment reference is missing or invalid")
+    payment = reference.get("paid_reconciliation")
+    if not isinstance(payment, dict):
+        raise ValueError("Confirmed Sense payment reconciliation is missing")
+    sense_cents = cents(str(payment.get("payment_total_usd")), "Sense payment")
+    baseline_cents = cents(
+        str(reference.get("reported_already_purchased_usd")), "prior paid floor",
+    )
+    if sense_cents < 1 or baseline_cents < sense_cents:
+        raise ValueError("Documented prior spend cannot omit paid Sense purchase")
+    return {
+        "known_paid_cents": baseline_cents,
+        "sense_paid_cents": sense_cents,
+        "all_prior_spending_reconciled": (
+            payment.get("all_project_prior_spend_reconciled") is True
+        ),
+    }
+
+
 def first_robot_projection(report: dict) -> dict:
     """One COMPLETE robot, its dock and shared station, with independent gates.
 
@@ -890,10 +914,15 @@ def first_robot_projection(report: dict) -> dict:
             "reviewed": item["reviewed"], "disposition": item["disposition"],
             "additive_purchase_authorized": False,
         })
+    documented = _documented_prior_spend_baseline()
     return {
         "robot_count": 1, "dock_count": 1, "shared_station_count": 1,
         "motor_variant": motor, "parent_role_count": len(rows),
         "linked_decision_count": len(linked),
+        "documented_prior_paid_cents": documented["known_paid_cents"],
+        "all_prior_spending_reconciled": documented[
+            "all_prior_spending_reconciled"
+        ],
         # Never authorize on source links or prices alone. Approval is
         # possible only after the unchanged complete physical system gates
         # have ALREADY passed through generate(), including installed parts.
@@ -1578,6 +1607,19 @@ def render_first_robot_markdown(report: dict) -> str:
         "",
     ]
     lines.extend(_verified_checkout_summary(report))
+    if not isinstance(report.get("verified_checkout_cost"), dict):
+        lines.extend([
+            "Documented prior payments, minimum: "
+            + _checkout_money(projection["documented_prior_paid_cents"])
+            + " (one confirmed XIAO ESP32S3 Sense purchase).",
+            "Complete prior spending register: "
+            + ("reconciled" if projection["all_prior_spending_reconciled"]
+               else "NOT RECONCILED")
+            + ". Payable now, cumulative delivered total, exact remaining "
+            "budget and real shortfall: UNKNOWN until all seller checkout "
+            "charges and physical receipts qualify.",
+            "",
+        ])
     lines += [
         "## 1. Reported owned or ordered, still unverified",
         "",
@@ -2203,15 +2245,10 @@ def _load_cli_json(path: Path, label: str) -> object:
 
 def _confirmed_first_unit_prior_payment_missing(cost: dict, evidence: dict) -> bool:
     """A confirmed Sense purchase cannot disappear from the $50 spend ledger."""
-    reference = _load_cli_json(PLAN.parent / "bom.json", "confirmed paid reference")
-    if not isinstance(reference, dict) or reference.get("currency") != "USD":
-        raise ValueError("Confirmed prior payment reference is missing or invalid")
-    payment = reference.get("paid_reconciliation")
-    if not isinstance(payment, dict):
-        raise ValueError("Confirmed Sense payment reconciliation is missing")
-    paid_cents = cents(str(payment.get("payment_total_usd")), "Sense payment")
+    baseline = _documented_prior_spend_baseline()
+    paid_cents = baseline["sense_paid_cents"]
     counted = cost.get("prior_paid_orders_cents")
-    if paid_cents < 1 or type(counted) is not int or counted < paid_cents:
+    if type(counted) is not int or counted < baseline["known_paid_cents"]:
         return True
     costs = evidence.get("costs")
     orders = costs.get("paid_orders", []) if isinstance(costs, dict) else []
