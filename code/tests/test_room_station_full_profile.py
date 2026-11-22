@@ -125,7 +125,25 @@ def test_optional_radar_absence_never_blocks_shared_station_boot():
     assert "radar.begin(radar_uart);" not in src
     assert "radar.read();" in src
     assert "radar.isConnected()" in src
-    assert "radar_sample_clock.has_sample()" in src
+    assert "radar_sample_clock.fresh(now, kRadarStaleMs)" in src
+
+
+def test_stale_radar_isolated_without_dropping_fresh_room_sensors():
+    # One over-age valid radar would cause Mac to drop the entire USB frame.
+    # The station must invalidate the radar field before emitting that frame.
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    clock = (ROOT / "code/firmware/room_station/src/radar_sample_clock.h").read_text()
+    mac = (ROOT / "code/laptop/src/desk_robot/room_station.py").read_text()
+    report = src.split("void radar_observation(uint32_t now) {", 1)[1].split(
+        "void soil_observation(uint32_t now) {", 1
+    )[0]
+    assert "constexpr uint32_t kRadarStaleMs = 3000;" in src
+    assert '"ld2410c": 3000' in mac
+    assert "radar.isConnected() &&" in report
+    assert "radar_sample_clock.fresh(now, kRadarStaleMs)" in report
+    assert "return has_sample_ && now_ms - sample_ms_ <= max_age_ms;" in clock
+    assert "jsbool(connected)" in report
+    assert "Serial.print(radar_sample_clock.sample_ms());" in report
 
 
 def test_bme688_gas_conversion_never_blocks_radar_uart_or_fakes_sample_age():

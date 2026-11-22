@@ -29,6 +29,7 @@ namespace {
 constexpr uint32_t kReportMs = 1000;
 constexpr uint32_t kScdStaleMs = 8500;
 constexpr uint32_t kBmeStaleMs = 3000;
+constexpr uint32_t kRadarStaleMs = 3000;
 constexpr uint32_t kThermalStaleMs = 3000;
 constexpr uint32_t kThermalScanMaxMs = 250;
 constexpr uint32_t kBootWaitMs = 1200;
@@ -211,7 +212,10 @@ void bme_observation(uint32_t now) {
 void radar_observation(uint32_t now) {
   // read() only drains the existing upstream bounded UART parser.
   // A static/moving echo is not authentication or a particular human.
-  const bool connected = radar.isConnected() && radar_sample_clock.has_sample();
+  // A connected decoder may still carry the last valid UART packet. Expire
+  // stale radar evidence locally rather than poisoning fresh room sensors.
+  const bool connected = radar.isConnected() &&
+      radar_sample_clock.fresh(now, kRadarStaleMs);
   Serial.print(F("\"ld2410c\":{\"valid\":")); jsbool(connected);
   if (connected) {
     Serial.print(F(",\"sample_ms\":"));

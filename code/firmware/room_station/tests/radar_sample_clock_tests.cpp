@@ -28,18 +28,23 @@ int main() {
   desk_robot_room::RadarSampleClock clock;
   desk_robot_room::RadarDataFrameGate gate;
   assert(!clock.has_sample());
+  assert(!clock.fresh(1000, 3000));
 
   clock.observe(false, true, 1000);
   assert(!clock.has_sample());
   assert(feed(gate, kBasicFrame));
   clock.observe(true, true, 1010);
   assert(clock.has_sample() && clock.sample_ms() == 1010);
+  assert(clock.fresh(1010, 3000));
+  assert(clock.fresh(4010, 3000));  // inclusive age limit
+  assert(!clock.fresh(4011, 3000));
 
   // The pinned driver can still say connected for 100 ms after a good frame.
   // Noise and partial frames must never refresh cached target fields.
   assert(!gate.consume(0x17));
   clock.observe(false, true, 1060);
   assert(clock.sample_ms() == 1010);
+  assert(!clock.fresh(4011, 3000));  // noise cannot refresh age
   assert(!feed(gate, kBasicFrame, 0, 10));
   clock.observe(false, true, 1080);
   assert(clock.sample_ms() == 1010);
@@ -75,8 +80,12 @@ int main() {
   assert(feed(gate, kBasicFrame));
   clock.observe(true, true, UINT32_MAX);
   assert(clock.sample_ms() == UINT32_MAX);
+  assert(clock.fresh(2999, 3000));   // 32-bit rollover
+  assert(!clock.fresh(3000, 3000));
   assert(feed(gate, kBasicFrame));
   clock.observe(true, true, 3);
   assert(clock.sample_ms() == 3);
+  assert(clock.fresh(3003, 3000));
+  assert(!clock.fresh(3004, 3000));
   return 0;
 }
