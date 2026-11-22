@@ -3082,6 +3082,25 @@ async def test_nfc_toy_tag_events_are_real_per_robot_counter_edges(fleet, tmp_pa
         assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 1
         await pet._observe_aux("robot-01", 14, report(2, 0xFEDCBA98, seq=2))
         assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 2
+        previous_camera_events = sum(
+            event["kind"] == "nfc_tag"
+            for event in hub.recent_events("robot-01", time.monotonic())
+        )
+        # A failed PN532 ACK publishes invalid status, not an observed absence.
+        # The same continuously presented tag can later complete a new scan
+        # without producing a new arrival or a second firsthand memory.
+        await pet._observe_aux(
+            "robot-01", 14, report(2, 0, valid=False, seq=2)
+        )
+        await pet._observe_aux(
+            "robot-01", 14, report(2, 0xFEDCBA98, seq=3)
+        )
+        assert state.last_nfc_scan_seq == 3
+        assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 2
+        assert sum(
+            event["kind"] == "nfc_tag"
+            for event in hub.recent_events("robot-01", time.monotonic())
+        ) == previous_camera_events
         assert memory.count("robot-02") == 0
         kinds = [event["kind"] for event in hub.recent_events(
             "robot-01", time.monotonic()
