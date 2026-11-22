@@ -1777,8 +1777,11 @@ async def test_direct_look_retracts_old_eyewitness_even_during_sqlite_commit(
 
 
 
+@pytest.mark.parametrize("consent_switch", [
+    "fleet_text_sharing_enabled", "fleet_text_auto_fanout_enabled",
+])
 async def test_auto_fanout_revoke_regrant_retracts_old_peer_batch(
-    fleet, tmp_path, monkeypatch,
+    fleet, tmp_path, monkeypatch, consent_switch,
 ):
     """Regrant must not resume a pending text fanout under the prior grant."""
     import threading
@@ -1811,8 +1814,8 @@ async def test_auto_fanout_revoke_regrant_retracts_old_peer_batch(
             assert await asyncio.to_thread(second_written.wait, 2)
             assert memory.count("robot-02") == 1
             assert memory.count("robot-03") == 1
-            fleet.fleet_text_sharing_enabled = False
-            fleet.fleet_text_sharing_enabled = True
+            setattr(fleet, consent_switch, False)
+            setattr(fleet, consent_switch, True)
         finally:
             release.set()
         await asyncio.wait_for(task, timeout=3)

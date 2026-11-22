@@ -627,6 +627,7 @@ class PetController:
             # Per-robot SQLite databases are independent. A failed or busy
             # peer must not erase the eyewitness fact or suppress its reply.
             sharing_grant = self.settings.fleet_sharing_consent_generation
+            fanout_grant = self.settings.fleet_auto_fanout_consent_generation
             destinations = [r.id for r in self.settings.robots if r.id != robot_id]
             def permitted() -> bool:
                 return (
@@ -634,6 +635,8 @@ class PetController:
                     and self.settings.fleet_sharing_consent_generation
                     == sharing_grant
                     and self.settings.fleet_text_auto_fanout_enabled
+                    and self.settings.fleet_auto_fanout_consent_generation
+                    == fanout_grant
                     and current_visual_epoch()
                     and (not camera_derived or self.settings.mode != "hardware"
                          or self.settings.voice_vision_tools_enabled)

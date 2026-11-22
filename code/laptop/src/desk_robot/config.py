@@ -73,6 +73,7 @@ class Settings(BaseModel):
     _transcript_consent_generation: int = PrivateAttr(default=0)
     _room_station_consent_generation: int = PrivateAttr(default=0)
     _fleet_sharing_consent_generation: int = PrivateAttr(default=0)
+    _fleet_auto_fanout_consent_generation: int = PrivateAttr(default=0)
     robots: list[RobotConfig]
     mode: Literal["hardware", "simulation"] = "hardware"
     coordinator_token_env: str = "DESK_ROBOT_API_TOKEN"
@@ -185,6 +186,10 @@ class Settings(BaseModel):
             name == "fleet_text_sharing_enabled"
             and getattr(self, "fleet_text_sharing_enabled", False) is True
         )
+        fanout_was_granted = (
+            name == "fleet_text_auto_fanout_enabled"
+            and getattr(self, "fleet_text_auto_fanout_enabled", False) is True
+        )
         super().__setattr__(name, value)
         if was_granted and not self.voice_vision_tools_enabled:
             # Even an immediate re-enable is a NEW grant; old VLM evidence
@@ -209,6 +214,9 @@ class Settings(BaseModel):
         if sharing_was_granted and not self.fleet_text_sharing_enabled:
             # Peer relays and in-flight SQLite writes belong to the old grant.
             self._fleet_sharing_consent_generation += 1
+        if fanout_was_granted and not self.fleet_text_auto_fanout_enabled:
+            # Selective-only mode retires an older automatic peer batch.
+            self._fleet_auto_fanout_consent_generation += 1
 
     @property
     def camera_consent_generation(self) -> int:
@@ -233,6 +241,10 @@ class Settings(BaseModel):
     @property
     def fleet_sharing_consent_generation(self) -> int:
         return self._fleet_sharing_consent_generation
+
+    @property
+    def fleet_auto_fanout_consent_generation(self) -> int:
+        return self._fleet_auto_fanout_consent_generation
 
     def robot(self, robot_id: str) -> RobotConfig:
         for robot in self.robots:
