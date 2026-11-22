@@ -16,13 +16,12 @@ ROLES = frozenset({
     "body_and_tracks", "power_stack", "head_and_sense",
     "lift_and_gripper", "sensors_and_wiring", "payload",
 })
-# Only the head, articulated gripper and payload may shift their own COM
-# between poses. Extra unnamed ballast or accessories are stationary by
-# default; otherwise a measurement could silently move the battery or body
-# on paper to manufacture a safe support margin.
-ARTICULATED_COM_ROLES = frozenset({
-    "head_and_sense", "lift_and_gripper", "payload",
-})
+# The first-unit Sense head is fixed to the chassis. Only its articulated
+# gripper and carried payload may change relative center between poses.
+# Head pan/tilt is an unqualified expansion, not motion on this build.
+# Extra unnamed components are stationary unless a new measured mechanism
+# is explicitly qualified; do not shift them to inflate the paper margin.
+ARTICULATED_COM_ROLES = frozenset({"lift_and_gripper", "payload"})
 REQUIRED_POSES = frozenset({
     "stowed_empty", "key_grasp_extended",
     "candy_grasp_lifted", "docked_stopped",

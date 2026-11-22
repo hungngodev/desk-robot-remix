@@ -238,11 +238,10 @@ def test_fixed_component_center_cannot_teleport_between_poses(
         tool.screen(data)
 
 
-def test_articulated_head_gripper_and_payload_keep_pose_specific_centers():
+def test_articulated_gripper_and_payload_keep_pose_specific_centers():
     data = complete()
     lifted = next(p for p in data["poses"] if p["name"] == "candy_grasp_lifted")
     centers = {
-        "head_and_sense": [3, 0, 68],
         "lift_and_gripper": [26, 0, 30],
         "payload": [30, 0, 70],
     }
@@ -252,3 +251,12 @@ def test_articulated_head_gripper_and_payload_keep_pose_specific_centers():
     report = load().screen(data)
     assert report["necessary_stability_on_paper"]
     assert report["assembly_print_or_purchase_approved"] is False
+
+
+def test_fixed_sense_head_cannot_shift_on_paper_without_a_moving_joint():
+    data = complete()
+    lifted = next(p for p in data["poses"] if p["name"] == "candy_grasp_lifted")
+    head = next(p for p in lifted["components"] if p["id"] == "head_and_sense")
+    head["com_mm"] = [3, 0, 68]
+    with pytest.raises(ValueError, match="Fixed assembly role 'head_and_sense' center changed"):
+        load().screen(data)
