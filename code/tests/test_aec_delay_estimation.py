@@ -28,6 +28,26 @@ def test_estimates_positive_lag_from_correlated_playback():
     assert not report["natural_barge_in_verified"]
 
 
+def test_audio_must_cover_requested_acoustic_delay_horizon():
+    """A short correlated clip cannot substantiate a longer search window."""
+    rng = np.random.default_rng(991)
+    short = rng.normal(0, 0.15, 320)  # 20 ms, not a 250 ms trial
+    microphone = np.concatenate((np.zeros(60), short))[:320]
+    # Before this bound, the algorithm reports a confident 3.75 ms delay.
+    for left, right in (
+        (short, microphone),
+        (short, np.pad(microphone, (0, 8000 - len(microphone)))),
+    ):
+        with pytest.raises(ValueError, match="too short for requested delay"):
+            estimate_delay(left, right)
+
+    speaker = rng.normal(0, 0.2, 8000)
+    recorded = np.concatenate((np.zeros(1120), speaker))[:8000]
+    report = estimate_delay(speaker, recorded)
+    assert report["sample_lag"] == 1120
+    assert report["aec_physically_verified"] is False
+
+
 def test_silence_uncorrelated_or_nonfinite_cannot_fake_calibration():
     with pytest.raises(ValueError):
         estimate_delay(np.zeros(1000), np.ones(1000))

@@ -63,6 +63,14 @@ def estimate_delay(
             or min(len(reference), len(microphone)) < 320
             or max(len(reference), len(microphone)) > 160000):
         raise ValueError("Expected bounded one-channel arrays")
+    # A 20 ms frame cannot establish a delay over a requested 250 ms
+    # search window. Leave 100 ms of captured signal after the largest
+    # candidate lag instead of silently clipping the search to array length.
+    requested_lag = round(sample_rate * max_delay_ms / 1000)
+    if min(len(reference), len(microphone)) < requested_lag + sample_rate // 10:
+        raise ValueError(
+            "Audio capture too short for requested delay search and 100 ms tail"
+        )
     if not np.isfinite(reference).all() or not np.isfinite(microphone).all():
         raise ValueError("Nonfinite audio samples")
     ref = reference.astype(np.float64, copy=False)
@@ -78,7 +86,7 @@ def estimate_delay(
         np.fft.rfft(mic, nfft) * np.conj(np.fft.rfft(ref, nfft)),
         nfft,
     )
-    lag_limit = min(round(sample_rate * max_delay_ms / 1000), len(mic) - 1)
+    lag_limit = requested_lag
     strength = np.abs(corr[:lag_limit + 1])
     lag = int(np.argmax(strength))
     peak = float(strength[lag])
