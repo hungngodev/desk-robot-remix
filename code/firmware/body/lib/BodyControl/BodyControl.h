@@ -185,8 +185,8 @@ class BodyControl {
   void require_fuel_monitor(bool required) { fuel_monitor_required_ = required; }
   bool fuel_monitor_fresh(std::uint32_t now_ms) const {
     const auto& f = state_.accessories.gauge;
-    return f.fuel_present && f.fuel_valid && f.fuel_sample_seq != 0U &&
-           now_ms - f.fuel_at_ms < 500U;
+    return !fuel_provenance_bad_ && f.fuel_present && f.fuel_valid &&
+           f.fuel_sample_seq != 0U && now_ms - f.fuel_at_ms < 500U;
   }
   bool grip_feedback_fresh(std::uint32_t now_ms) const {
     const auto& f = state_.accessories.force;
@@ -254,6 +254,12 @@ class BodyControl {
   std::uint32_t jaw_servo_sample_seq_ = 0;
   std::uint8_t jaw_sample_motion_budget_ = 0;
   bool fuel_monitor_required_ = false;
+  // A changed or regressed MAX17048 frame cannot claim a fresh
+  // acquisition merely by reusing an already accepted sample identity.
+  bool fuel_sample_seen_ = false;
+  bool fuel_provenance_bad_ = false;
+  std::uint32_t fuel_last_seq_ = 0, fuel_last_at_ms_ = 0;
+  unsigned fuel_last_cell_mv_ = 0, fuel_last_soc_centi_ = 0;
   bool motor_cutoff_unqualified_ = false;
   std::uint32_t last_control_ms_ = 0;
   std::uint32_t drive_started_ms_ = 0;

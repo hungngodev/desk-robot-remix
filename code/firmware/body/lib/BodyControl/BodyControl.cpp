@@ -402,6 +402,37 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
   // while a guarded motion session was still armed.
   const bool was_armed = state_.armed;
   state_.accessories = readings;
+  const auto& fuel = readings.gauge;
+  // The MAX17048 producer advances both sequence and acquisition time
+  // only after its cell-voltage and SOC registers have been read. A cached
+  // conversion is normal, but changing its values or replaying an older
+  // acquisition is not new evidence for motor or battery authorization.
+  const bool fuel_current = fuel.fuel_present && fuel.fuel_valid &&
+      fuel.fuel_sample_seq != 0U && now_ms - fuel.fuel_at_ms < 500U;
+  const std::uint32_t fuel_seq_delta =
+      fuel.fuel_sample_seq - fuel_last_seq_;
+  const std::uint32_t fuel_time_delta = fuel.fuel_at_ms - fuel_last_at_ms_;
+  const bool fuel_repeated = fuel_current && fuel_sample_seen_ &&
+      fuel.fuel_sample_seq == fuel_last_seq_ &&
+      fuel.fuel_at_ms == fuel_last_at_ms_ &&
+      fuel.cell_mv == fuel_last_cell_mv_ &&
+      fuel.soc_centi == fuel_last_soc_centi_;
+  const bool fuel_new = fuel_current &&
+      (!fuel_sample_seen_ ||
+       (fuel_seq_delta != 0U && fuel_seq_delta < 0x80000000U &&
+        fuel_time_delta != 0U && fuel_time_delta < 0x80000000U));
+  if (fuel_new) {
+    fuel_sample_seen_ = true;
+    fuel_last_seq_ = fuel.fuel_sample_seq;
+    fuel_last_at_ms_ = fuel.fuel_at_ms;
+    fuel_last_cell_mv_ = fuel.cell_mv;
+    fuel_last_soc_centi_ = fuel.soc_centi;
+    fuel_provenance_bad_ = false;
+  } else if (fuel_current && !fuel_repeated) {
+    // Requiring a newer completed conversion prevents a repeated low-cell
+    // sample from being rewritten as a healthy voltage under the same ID.
+    fuel_provenance_bad_ = true;
+  }
   if (imu_attitude_required_ &&
       (!imu_attitude_configured_ || imu_attitude_latched_)) {
     // Attitude HOLD cannot suppress independent dock, nFAULT, fuel,
@@ -1052,7 +1083,8 @@ void BodyControl::execute(const char* line, std::size_t length,
                                now_ms - a.climate.at_ms < 1000U;
     const bool bmp_fresh = a.barometer.present && a.barometer.valid &&
                            now_ms - a.barometer.at_ms < 2000U;
-    const bool fuel_fresh = a.gauge.fuel_valid &&
+    const bool fuel_fresh = !fuel_provenance_bad_ &&
+                            a.gauge.fuel_present && a.gauge.fuel_valid &&
                             a.gauge.fuel_sample_seq != 0U &&
                             now_ms - a.gauge.fuel_at_ms < 500U;
     const bool monitor_fresh = a.gauge.monitor_valid &&

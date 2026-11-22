@@ -1915,6 +1915,84 @@ static void battery_undervoltage_rejects_arm_and_stops_motion() {
 }
 
 
+
+static void fuel_voltage_replay_cannot_rearm_or_restore_drive() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 100);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.require_fuel_monitor(true);
+  desk_robot::AccessoryReadings readings{};
+  readings.gauge.fuel_present = readings.gauge.fuel_valid = true;
+  readings.gauge.fuel_sample_seq = 10;
+  readings.gauge.fuel_at_ms = 100;
+  readings.gauge.cell_mv = 3250; // below the new ARM minimum
+  readings.gauge.soc_centi = 5000;
+  body.set_accessories(readings, 100);
+  CHECK(send(body, "rearm", 100, true) == "OK rearm");
+  CHECK(send(body, "arm", 100) == "ERR arm battery_low");
+
+  // A second caller must not relabel the same conversion as 3.8 V.
+  readings.gauge.cell_mv = 3800;
+  body.set_accessories(readings, 101);
+  CHECK(!body.fuel_monitor_fresh(101));
+  CHECK(send(body, "status", 101).find(
+      "\"fault\":\"fuel_monitor_latched\"") != std::string::npos);
+  CHECK(send(body, "arm", 101) == "ERR arm fuel_monitor_latched");
+  CHECK(send(body, "rearm", 101, true) ==
+        "ERR rearm fuel_monitor_missing_or_stale");
+
+  // Only a genuinely newer conversion and local USB rearm restore motion.
+  readings.gauge.fuel_sample_seq = 11;
+  readings.gauge.fuel_at_ms = 102;
+  body.set_accessories(readings, 102);
+  CHECK(body.fuel_monitor_fresh(102));
+  CHECK(send(body, "arm", 102) == "ERR arm fuel_monitor_latched");
+  CHECK(send(body, "rearm", 102, true) == "OK rearm");
+  CHECK(send(body, "arm", 102) == "OK arm");
+  CHECK(send(body, "drive 30 30 150", 102).find("OK drive") == 0);
+  body.set_accessories(readings, 103); // identical cached frame is permitted
+  CHECK(body.state().armed && body.state().left == 30);
+
+  readings.gauge.soc_centi = 6000; // same identity, contradictory SOC
+  body.set_accessories(readings, 104);
+  CHECK(!body.state().armed && body.state().left == 0 &&
+        body.state().right == 0 && body.state().servos_attached);
+  CHECK(send(body, "arm", 104) == "ERR arm fuel_monitor_latched");
+  readings.gauge.fuel_sample_seq = 10; // older, even if it looks plausible
+  readings.gauge.fuel_at_ms = 100;
+  body.set_accessories(readings, 105);
+  CHECK(!body.fuel_monitor_fresh(105));
+  readings.gauge.fuel_sample_seq = 12;
+  readings.gauge.fuel_at_ms = 106;
+  body.set_accessories(readings, 106);
+  fresh(guard, 106);
+  CHECK(send(body, "rearm", 106, true) == "OK rearm");
+  CHECK(send(body, "arm", 106) == "OK arm");
+  CHECK(body.state().left == 0 && body.state().right == 0);
+
+  // The producer explicitly skips sequence zero on wrap. Both sequence
+  // and millis wrap must preserve forward ordering, not old replays.
+  desk_robot::BodyControl wrapped;
+  wrapped.require_fuel_monitor(true);
+  readings.gauge.fuel_sample_seq = 0xffffffffU;
+  readings.gauge.fuel_at_ms = 0xfffffff9U;
+  wrapped.set_accessories(readings, 0xfffffffbU);
+  CHECK(wrapped.fuel_monitor_fresh(0xfffffffbU));
+  readings.gauge.fuel_sample_seq = 1U;
+  readings.gauge.fuel_at_ms = 3U;
+  wrapped.set_accessories(readings, 3U);
+  CHECK(wrapped.fuel_monitor_fresh(3U));
+  readings.gauge.fuel_sample_seq = 0xffffffffU;
+  readings.gauge.fuel_at_ms = 0xfffffffaU;
+  wrapped.set_accessories(readings, 4U);
+  CHECK(!wrapped.fuel_monitor_fresh(4U));
+  readings.gauge.fuel_sample_seq = 2U;
+  readings.gauge.fuel_at_ms = 5U;
+  wrapped.set_accessories(readings, 5U);
+  CHECK(wrapped.fuel_monitor_fresh(5U));
+}
+
 static void required_fuel_gauge_loss_stops_and_requires_local_rearm() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -2434,6 +2512,7 @@ int main() {
     battery_readiness_matches_stricter_arm_voltage();
     battery_undervoltage_rejects_arm_and_stops_motion();
     required_fuel_gauge_loss_stops_and_requires_local_rearm();
+    fuel_voltage_replay_cannot_rearm_or_restore_drive();
     accessory_sensors_never_infer_grip_or_current_or_grant_arm();
     independent_pack_sensor_freshness_never_crosses_devices();
     optional_max30102_raw_never_authorizes_motion_or_diagnosis();
