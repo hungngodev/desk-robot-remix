@@ -24,6 +24,7 @@ from .brain_context import (
     compose_brain_context,
     repeated_spontaneous_line,
 )
+from .api_robot_status import _aux_boot_epoch, _fresh_aux_acquisition
 from .config import Settings
 from .conversation import Conversation
 from .handling import HandlingGate
@@ -290,6 +291,13 @@ class PetController:
         # Only admitted initiatives consume the short spoken-event budget.
         # Preserve _event_kinds for cross-camera candidate bookkeeping.
         self._admitted_event_kinds: dict[tuple[str | None, str, str], float] = {}
+        # Unlike a raw dashboard poll, proactive model input requires a NEW
+        # WROOM ambient acquisition from an authenticated current boot.
+        self._proactive_aux_cursors: dict[
+            tuple[str, str], tuple[int, int]
+        ] = {}
+        self._proactive_aux_active_boot: dict[str, int] = {}
+        self._proactive_aux_retired_boots: dict[str, set[int]] = {}
         self._closed = False
 
     def set_voice_monitor_ready(self, ready: bool) -> None:
@@ -2314,26 +2322,42 @@ class PetController:
         # tokens, model-controlled strings or an unqualified charge claim.
         if tool == "aux_status":
             selected = {}
+            boot = _aux_boot_epoch(result)
+            if boot in self._proactive_aux_retired_boots.get(robot_id, set()):
+                boot = None  # A reconnect cannot replay an earlier boot.
+            pending_seq: dict[tuple[str, str], tuple[int, int]] = {}
+
+            def novel(kind: str, reading: object, max_age_ms: int) -> bool:
+                if boot is None:
+                    return False
+                key = (robot_id, kind)
+                cursor = self._proactive_aux_cursors.get(key)
+                prior = cursor[1] if cursor is not None and cursor[0] == boot else None
+                return _fresh_aux_acquisition(
+                    reading, previous_seq=prior, max_age_ms=max_age_ms,
+                )
+
             climate = result.get("climate")
-            if isinstance(climate, dict) and climate.get("valid") is True:
+            if novel("climate", climate, 1000):
                 if (type(climate.get("temp_centi")) is int
                         and -4500 <= climate["temp_centi"] <= 13000
                         and type(climate.get("rh_centi")) is int
-                        and 0 <= climate["rh_centi"] <= 10000
-                        and (climate.get("age_ms") is None or (
-                            type(climate["age_ms"]) is int
-                            and 0 <= climate["age_ms"] < 1000))):
+                        and 0 <= climate["rh_centi"] <= 10000):
+                    pending_seq[(robot_id, "climate")] = (boot, climate["seq"])
                     selected["sht41"] = {
                         "temp_centi": climate["temp_centi"],
                         "rh_centi": climate["rh_centi"],
                     }
             bmp = result.get("bmp280")
-            if isinstance(bmp, dict) and bmp.get("valid") is True:
-                if (type(bmp.get("pressure_pa")) is int
-                        and 30000 <= bmp["pressure_pa"] <= 120000
-                        and (bmp.get("age_ms") is None or (
-                            type(bmp["age_ms"]) is int
-                            and 0 <= bmp["age_ms"] < 2000))):
+            if novel("bmp280", bmp, 2000):
+                if (bmp.get("present") is True
+                        and type(bmp.get("chip_id")) is int
+                        and bmp["chip_id"] == 0x58
+                        and type(bmp.get("temp_centi")) is int
+                        and -4000 <= bmp["temp_centi"] <= 8500
+                        and type(bmp.get("pressure_pa")) is int
+                        and 30000 <= bmp["pressure_pa"] <= 120000):
+                    pending_seq[(robot_id, "bmp280")] = (boot, bmp["seq"])
                     selected["bmp280"] = {
                         "pressure_pa": bmp["pressure_pa"],
                         "physically_verified": False,
@@ -2362,6 +2386,25 @@ class PetController:
                 if (type(nfc.get("e")) is int
                         and 0 <= nfc["e"] <= 0xffffffff):
                     selected["nfc"] = {"event_count": nfc["e"]}
+            # Commit only valid new conversions. An unspecified or retired
+            # boot remains readable as raw status but cannot refresh a fact.
+            if pending_seq:
+                prior_boot = self._proactive_aux_active_boot.get(robot_id)
+                if prior_boot is not None and prior_boot != boot:
+                    retired = self._proactive_aux_retired_boots.setdefault(
+                        robot_id, set()
+                    )
+                    if len(retired) >= 128:
+                        # Refuse this new boot rather than silently promoting
+                        # its readings without a replay fence.
+                        selected.pop("sht41", None)
+                        selected.pop("bmp280", None)
+                        pending_seq.clear()
+                    else:
+                        retired.add(prior_boot)
+                if pending_seq:
+                    self._proactive_aux_active_boot[robot_id] = boot
+                    self._proactive_aux_cursors.update(pending_seq)
             dock = result.get("dock")
             if (isinstance(dock, dict)
                     and dock.get("present") is True

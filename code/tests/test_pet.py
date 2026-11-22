@@ -5684,10 +5684,14 @@ async def test_proactive_ollama_cannot_narrate_out_of_range_wroom_readings(
 
     values = {
         "robot_id": "robot-01",
-        "climate": {"valid": True, "temp_centi": 2200, "rh_centi": 5000},
-        "bmp280": {"valid": True, "pressure_pa": 101325},
+        "climate": {"valid": True, "temp_centi": 2200, "rh_centi": 5000,
+                    "seq": 3, "age_ms": 100},
+        "bmp280": {"present": True, "valid": True, "chip_id": 0x58,
+                   "temp_centi": 2200, "pressure_pa": 101325,
+                   "seq": 3, "age_ms": 100},
         "power": {"fuel_valid": True, "soc_centi": 5000, "cell_mv": 3700},
-        "proximity": {"valid": True, "gesture": 2},
+        "force": {"boot_id": 7},
+        "proximity": {"valid": True, "gesture": 2, "boot_id": 7},
         "nfc": {"v": True, "e": 4},
     }
     values = deepcopy(values)
@@ -5752,6 +5756,93 @@ async def test_proactive_fuel_readonly_accepts_only_plausible_voltage_boundaries
         await pet.close()
 
 
+async def test_proactive_ambient_tool_uses_new_boot_and_conversion_only(
+    fleet, tmp_path,
+):
+    """Optional model data never promotes stale legacy climate to live facts."""
+    from copy import deepcopy
+
+    value = {
+        "robot_id": "robot-01",
+        "force": {"boot_id": 77},
+        "proximity": {"boot_id": 77},
+        "climate": {"valid": True, "temp_centi": 2315,
+                    "rh_centi": 4800, "seq": 10, "age_ms": 80},
+        "bmp280": {"valid": True, "present": True, "chip_id": 0x58,
+                   "temp_centi": 2315, "pressure_pa": 101200,
+                   "seq": 10, "age_ms": 90},
+        "power": {"fuel_valid": True, "soc_centi": 5300, "cell_mv": 3760},
+    }
+
+    class Head:
+        async def aux_status(self):
+            return deepcopy(value)
+
+        async def command(self, *_):
+            raise AssertionError("Read-only ambient context must not move motors")
+
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": Head()},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+
+    async def read():
+        return (await pet._proactive_tool_receipt(
+            "robot-01", "aux_status",
+        ))["data"]
+
+    try:
+        first = await read()
+        assert first["sht41"]["temp_centi"] == 2315
+        assert first["bmp280"]["pressure_pa"] == 101200
+        assert first["fuel_gauge"]["qualified"] is False
+
+        duplicate = await read()
+        assert "sht41" not in duplicate
+        assert "bmp280" not in duplicate
+        assert "fuel_gauge" in duplicate  # Ordinary raw read-only data survives.
+
+        value["climate"]["seq"] = 11
+        value["bmp280"]["seq"] = 11
+        fresh = await read()
+        assert "sht41" in fresh and "bmp280" in fresh
+
+        value["climate"]["age_ms"] = 1000
+        value["bmp280"]["age_ms"] = 2000
+        assert "sht41" not in await read()
+        assert "bmp280" not in await read()
+        value["climate"]["age_ms"] = 30
+        value["bmp280"]["age_ms"] = 30
+
+        value["force"]["boot_id"] = 78
+        value["proximity"]["boot_id"] = 78
+        value["climate"]["seq"] = 1
+        value["bmp280"]["seq"] = 1
+        assert "sht41" in await read()
+        assert "bmp280" not in await read()  # Same conversion was consumed.
+
+        # The previous 77 boot cannot come back as a fresh new boot.
+        value["force"]["boot_id"] = 77
+        value["proximity"]["boot_id"] = 77
+        value["climate"]["seq"] = 12
+        value["bmp280"]["seq"] = 12
+        replay = await read()
+        assert "sht41" not in replay and "bmp280" not in replay
+
+        # Even plausible values lack a live observation without both source
+        # boot witnesses, a sample sequence and a bounded acquisition age.
+        value.pop("force")
+        value["climate"].pop("age_ms")
+        value["bmp280"].pop("seq")
+        unqualified = await read()
+        assert "sht41" not in unqualified
+        assert "bmp280" not in unqualified
+    finally:
+        await pet.close()
+
+
 async def test_proactive_sensors_enter_ollama_tool_history_as_validated_raw_fields(
     fleet, tmp_path,
 ):
@@ -5763,8 +5854,12 @@ async def test_proactive_sensors_enter_ollama_tool_history_as_validated_raw_fiel
                     "valid": True, "temp_centi": 2225, "rh_centi": 4650,
                     "seq": 14, "age_ms": 100,
                 },
-                "bmp280": {"valid": True, "pressure_pa": 100927},
-                "proximity": {"valid": True, "gesture": 2},
+                "bmp280": {"present": True, "valid": True,
+                           "chip_id": 0x58, "temp_centi": 2190,
+                           "pressure_pa": 100927, "seq": 17,
+                           "age_ms": 120},
+                "force": {"boot_id": 81},
+                "proximity": {"valid": True, "gesture": 2, "boot_id": 81},
                 "nfc": {"v": True, "e": 4},
                 "dock": {
                     "present": True, "valid": True,
