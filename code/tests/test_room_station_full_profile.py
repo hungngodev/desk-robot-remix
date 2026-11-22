@@ -119,8 +119,10 @@ def test_optional_radar_absence_never_blocks_shared_station_boot():
     # one second for firmware identification if the optional radar is absent.
     # Explicit nonblocking boot must preserve fresh UART packet gating.
     src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
-    assert "radar.begin(Serial1, false);" in src
+    assert "RadarObservedUart radar_uart(Serial1);" in src
+    assert "radar.begin(radar_uart, false);" in src
     assert "radar.begin(Serial1);" not in src
+    assert "radar.begin(radar_uart);" not in src
     assert "radar.read();" in src
     assert "radar.isConnected()" in src
     assert "radar_sample_clock.has_sample()" in src
