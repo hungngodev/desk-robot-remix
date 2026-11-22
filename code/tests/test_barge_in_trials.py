@@ -1,12 +1,15 @@
 """Operator measured double-talk gates, not simulated physical success."""
+import json
 import runpy
 from pathlib import Path
 
 import pytest
 
-evaluate = runpy.run_path(str(
+script = runpy.run_path(str(
     Path(__file__).resolve().parents[1] / "scripts/check_barge_in_trials.py"
-))["evaluate"]
+))
+evaluate = script["evaluate"]
+parse_trial_jsonl = script["parse_trial_jsonl"]
 
 
 def fake_rows():
@@ -310,3 +313,24 @@ def test_human_acoustic_gate_cannot_mix_distinct_robot_identities():
     records[10]["robot_id"] = "robot-02"
     with pytest.raises(ValueError, match="Do not mix firmware"):
         evaluate(records)
+
+
+def test_jsonl_parser_preserves_valid_full_acoustic_trial_population():
+    rows = both_distances()
+    loaded = parse_trial_jsonl("\n".join(json.dumps(row) for row in rows))
+    report = evaluate(loaded)
+    assert report["meets_proposed_gate"]
+    assert report["human_trials"] == 40
+
+
+@pytest.mark.parametrize("line", [
+    '{"kind":"human","audible_stop_ms":900,"audible_stop_ms":200}',
+    '{"kind":"human","speaker_distance_cm":100,"speaker_distance_cm":50}',
+    '{"kind":"robot_only","self_interruptions":1,"self_interruptions":0}',
+    '{"kind":"quiet","quiet_mode_enabled":false,"quiet_mode_enabled":true}',
+    '{"kind":"human","id":"trial0","id":"trial0"}',
+    '{"kind":"human","diagnostics":{"source":"other","source":"other"}}',
+])
+def test_jsonl_parser_rejects_duplicate_fields_before_evidence_evaluation(line):
+    with pytest.raises(ValueError, match="Duplicate JSON trial field"):
+        parse_trial_jsonl(line)
