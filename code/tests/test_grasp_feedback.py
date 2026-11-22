@@ -910,3 +910,50 @@ async def test_zero_boot_epoch_never_authorizes_jaw_command_or_relief(
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     # No cross-boot relief even if a stale health adapter still says armed.
     assert head.commands == ([] if when == "before_first" else ["grip 64"])
+
+
+@pytest.mark.parametrize("when", ["before_close", "after_close"])
+@pytest.mark.parametrize("health_boot", [None, 0, True, 5104])
+async def test_armed_health_boot_must_match_jaw_boot_before_servo_motion(
+    monkeypatch, when, health_boot,
+):
+    """A fresh armed verdict from a new or unknown boot cannot use old ADC."""
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([100, 101, 240])
+    checks = 0
+
+    async def mixed_epoch_health():
+        nonlocal checks
+        checks += 1
+        # A first jaw command may have happened before the body rebooted.
+        observed = (5103 if when == "after_close" and checks == 1
+                    else health_boot)
+        imu = {} if observed is None else {"boot_id": observed}
+        return {"armed": True, "robot_id": "robot-01", "imu": imu}
+
+    with pytest.raises(OperationError, match="WROOM health boot"):
+        await guarded_grasp(
+            head, Settings(), robot_id="robot-01", health=mixed_epoch_health,
+        )
+    assert head.commands == ([] if when == "before_close" else ["grip 64"])
+
+
+async def test_matching_wroom_health_and_jaw_boot_allows_bounded_grasp(monkeypatch):
+    """The real same-boot status path must retain the calibrated jaw sequence."""
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([100, 101, 130, 240, 245])
+
+    async def current_wroom_health():
+        return {"armed": True, "robot_id": "robot-01", "imu": {"boot_id": 5103}}
+
+    result = await guarded_grasp(
+        head, Settings(), robot_id="robot-01", health=current_wroom_health,
+    )
+    assert result["physical_acceptance_pass"] is False
+    assert head.commands == ["grip 64", "grip 68", "grip 72"]

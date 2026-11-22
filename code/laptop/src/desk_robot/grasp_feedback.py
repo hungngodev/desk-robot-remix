@@ -134,6 +134,7 @@ async def guarded_grasp(
         return observation
 
     async def confirmed_health() -> None:
+        nonlocal force_boot_changed
         # The normal Coordinator raises for disarmed/foreign WROOM status,
         # but an alternate head/health adapter may merely return a false
         # verdict. Never interpret completion of that callback as a permit.
@@ -145,6 +146,19 @@ async def guarded_grasp(
                 or status.get("armed") is not True
                 or ("robot_id" in status and status["robot_id"] != robot_id)):
             raise OperationError("Gripper operation blocked by WROOM health")
+        # A fresh armed verdict from a different WROOM boot cannot authorize
+        # a jaw pulse against an older ADC sample. The production WROOM
+        # status carries imu.boot_id; allow older minimal test adapters with
+        # no imu group, but fail closed if a supplied identity is missing,
+        # invalid or disagrees with the force source.
+        if "imu" in status:
+            imu = status["imu"]
+            health_boot = imu.get("boot_id") if isinstance(imu, dict) else None
+            if (type(health_boot) is not int
+                    or not 1 <= health_boot <= 0xffffffff
+                    or health_boot != force_boot_id):
+                force_boot_changed = True
+                raise OperationError("Gripper WROOM health boot mismatched jaw source")
 
     async def read_new_jaw(previous_seq: int, failure: str) -> tuple[int, int]:
         """Wait for one distinct same-boot conversion, not repeated cached ADC.
