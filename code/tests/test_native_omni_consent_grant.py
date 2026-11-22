@@ -45,7 +45,9 @@ def test_native_startup_rejects_permission_regrant_during_sqlite_read(
         app, settings,
         authorize=lambda: None,
         coordinator=lambda: SimpleNamespace(
-            robot=lambda robot: SimpleNamespace(persona="Quiet companion")
+            robot=lambda robot: SimpleNamespace(
+                persona="Quiet companion", name=settings.robot(robot).name,
+            )
         ),
         native_pet_speech_policy=lambda robot: {},
     )
@@ -56,6 +58,10 @@ def test_native_startup_rejects_permission_regrant_during_sqlite_read(
         assert response.json()["untrusted_historical_evidence"] == {
             "core": "", "recent": "",
         }
+        assert response.json()["pet_name"] == settings.robot(robot_id).name
+        assert response.json()["fleet_pet_names"] == [
+            robot.name for robot in settings.robots
+        ]
         assert settings.voice_memory_consent_generation == memory_grant
         assert settings.camera_consent_generation == camera_grant
     else:

@@ -2590,6 +2590,82 @@ def test_native_speech_tools_allow_only_explicit_readonly_requests(
         }
 
 
+@pytest.mark.parametrize("name", ["Pip", "Dot", "Chip", "Byte", "Bob"])
+@pytest.mark.parametrize(("question", "expected"), [
+    ("can you look around?", "look"),
+    ("can you check your battery status?", "power-status"),
+    ("tell me about your favorite season", None),
+])
+def test_native_current_configured_pet_name_routes_safe_readonly_only(
+    native, name, question, expected,
+):
+    module, _bridge = native
+    names = ("Pip", "Dot", "Chip", "Byte", "Bob")
+    transcript = f"Hey {name}, {question}"
+    result = module.native_readonly_request(
+        transcript, robot_name=name, fleet_names=names,
+    )
+    assert (result[0] if result else None) == expected
+    batch, overflow = module.native_readonly_requests_with_capacity(
+        transcript, robot_name=name, fleet_names=names,
+    )
+    assert overflow is False
+    assert (batch[0][0] if batch else None) == expected
+    assert module.addressed_to_other_pet(
+        transcript, robot_name=name, fleet_names=names,
+    ) is False
+    other = "Pip" if name != "Pip" else "Dot"
+    assert module.addressed_to_other_pet(
+        transcript, robot_name=other, fleet_names=names,
+    ) is True
+    assert module.native_readonly_requests_with_capacity(
+        transcript, robot_name=other, fleet_names=names,
+    ) == ((), False)
+
+
+def test_native_named_question_routes_only_on_addressed_physical_head(native):
+    module, bridge = native
+    bridge.robot_for_device = lambda device: {
+        "mac-01": "robot-01", "mac-02": "robot-02",
+    }.get(device)
+    pip_conn, _ = connection()
+    dot_conn, _ = connection()
+    dot_conn.device_id = "mac-02"
+    bridge.connections.update({"mac-01": pip_conn, "mac-02": dot_conn})
+    tokens = dict(
+        url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    pip = module.NativeOmniSession(pip_conn, **tokens)
+    dot = module.NativeOmniSession(dot_conn, **tokens)
+    for session, name in ((pip, "Pip"), (dot, "Dot")):
+        session._live_transcript_enabled = True
+        session._robot_name = name
+        session._fleet_pet_names = ("Pip", "Dot", "Chip", "Byte", "Bob")
+    request = {
+        "item_id": "targeted-input",
+        "transcript": "Hey Pip, can you look around?",
+    }
+    assert pip._queue_readonly_tool(request) is True
+    assert pip._readonly_queue.get_nowait()[0] == "look"
+    assert dot._queue_readonly_tool(request) is False
+    assert dot._readonly_queue.empty()
+    assert dot._readonly_capacity_exceeded is None
+    assert dot._readonly_inflight is None
+    # A request addressed to a peer must not reach a slower semantic
+    # planner either, even when the transcript includes a tool word.
+    assert dot._queue_readonly_tool({
+        "item_id": "peer-plan",
+        "transcript": "Hey Chip, what about the battery on the desk?",
+    }) is False
+    assert dot._readonly_queue.empty()
+    # Ordinary unaddressed human questions remain available locally.
+    assert dot._queue_readonly_tool({
+        "item_id": "direct-dot", "transcript": "Check your battery status",
+    }) is True
+    assert dot._readonly_queue.get_nowait()[0] == "power-status"
+
+
 @pytest.mark.parametrize(
     ("spoken", "route"),
     [
@@ -6536,6 +6612,8 @@ async def test_native_persona_negotiates_live_asr_without_disk_permission(native
             return {
                 "robot_id": "robot-01", "instructions": "Be kind and concise.",
                 "persona": "Pip, a curious desk robot",
+                "pet_name": "Pip",
+                "fleet_pet_names": ["Pip", "Dot", "Chip", "Byte", "Bob"],
                 "model_can_arm_motors": False,
                 "live_transcript_context_enabled": True,
                 "transcript_memory_enabled": False,
@@ -6552,6 +6630,8 @@ async def test_native_persona_negotiates_live_asr_without_disk_permission(native
     assert session._transcript_memory_enabled is False
     assert session.wire.instructions == "Be kind and concise."
     assert session._voice_persona == "Pip, a curious desk robot"
+    assert session._robot_name == "Pip"
+    assert session._fleet_pet_names == ("Pip", "Dot", "Chip", "Byte", "Bob")
 
 
 async def test_native_asr_live_only_context_does_not_count_as_saved_memory(native):

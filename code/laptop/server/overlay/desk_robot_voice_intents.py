@@ -10,12 +10,60 @@ import json
 import re
 
 
-def _advice_only_request(text: str) -> bool:
+def _addressed_request_text(
+    text: str, *, robot_name: str | None = None,
+    fleet_names: tuple[str, ...] = (),
+) -> str | None:
+    """Only this authenticated pet may route an explicitly addressed request.
+
+    The unbound legacy parser retains its old Pip/Dot compatibility. Native
+    sessions instead supply verified Mac-configured names for ALL pets.
+    """
+    normalized = " ".join(text.casefold().split())
+    names = (
+        ("robot", "pip", "dot") if robot_name is None
+        else ("robot", robot_name, *fleet_names)
+    )
+    for candidate in sorted({
+        name.casefold() for name in names
+        if isinstance(name, str) and 1 <= len(name) <= 32
+    }, key=len, reverse=True):
+        match = re.match(
+            r"^hey\s+" + re.escape(candidate) + r"(?:[,!]\s*|\s+)",
+            normalized,
+        )
+        if match is None:
+            continue
+        if (robot_name is not None and candidate != "robot"
+                and candidate != robot_name.casefold()):
+            return None
+        return normalized[match.end():].strip()
+    return normalized
+
+
+def addressed_to_other_pet(
+    transcript: str, *, robot_name: str | None,
+    fleet_names: tuple[str, ...] = (),
+) -> bool:
+    return (
+        isinstance(transcript, str)
+        and _addressed_request_text(
+            transcript, robot_name=robot_name, fleet_names=fleet_names,
+        ) is None
+    )
+
+
+def _advice_only_request(text: str, *, robot_name: str | None = None,
+                         fleet_names: tuple[str, ...] = ()) -> bool:
     """Keep how-to advice in natural conversation, not sensor/tool routing."""
     if not isinstance(text, str):
         return False
-    normalized = " ".join(text.casefold().split()).strip(" ?!.,")
-    normalized = re.sub(r"^hey (?:robot|pip|dot)[, ]+", "", normalized)
+    normalized = _addressed_request_text(
+        text, robot_name=robot_name, fleet_names=fleet_names,
+    )
+    if normalized is None:
+        return False
+    normalized = normalized.strip(" ?!.,")
     normalized = re.sub(r"^please\s+", "", normalized)
     normalized = re.sub(
         r"^(?:can|could|would|will) you (?:please )?", "", normalized,
@@ -30,7 +78,10 @@ def _advice_only_request(text: str) -> bool:
     ))
 
 
-def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
+def native_readonly_request(
+    transcript: str, *, robot_name: str | None = None,
+    fleet_names: tuple[str, ...] = (),
+) -> tuple[str, dict] | None:
     """Route explicit natural questions to existing read-only Mac authorities.
 
     MiniCPM-o native duplex has no verified function-call stream here. This
@@ -42,14 +93,20 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
     text = " ".join(transcript.split())
     if not 3 <= len(text) <= 280 or "\x00" in text:
         return None
-    spoken = text.casefold().strip(" ?!.,")
-    spoken = re.sub(r"^hey (?:robot|pip|dot)[, ]+", "", spoken)
+    spoken = _addressed_request_text(
+        text, robot_name=robot_name, fleet_names=fleet_names,
+    )
+    if spoken is None:
+        return None
+    spoken = spoken.strip(" ?!.,")
     spoken = re.sub(r"^please\s+", "", spoken)
     # A polite question still has to name the read-only observation action.
     polite = re.sub(
         r"^(?:can|could|would|will) you (?:please )?", "", spoken,
     )
-    if _advice_only_request(text):
+    if _advice_only_request(
+        text, robot_name=robot_name, fleet_names=fleet_names,
+    ):
         return None
     look = (
         r"(?:look (?:at|around|over|toward|for)\b|"
@@ -179,7 +236,8 @@ def native_readonly_request(transcript: str) -> tuple[str, dict] | None:
 
 
 def native_readonly_requests_with_capacity(
-    transcript: str,
+    transcript: str, *, robot_name: str | None = None,
+    fleet_names: tuple[str, ...] = (),
 ) -> tuple[tuple[tuple[str, dict], ...], bool]:
     """Return at most three safe routes plus an explicit overcapacity flag.
 
@@ -188,7 +246,10 @@ def native_readonly_requests_with_capacity(
     only when multiple independent natural requests are actually recognized.
     """
     if (not isinstance(transcript, str)
-            or not 3 <= len(transcript) <= 2400 or "\x00" in transcript):
+            or not 3 <= len(transcript) <= 2400 or "\x00" in transcript
+            or addressed_to_other_pet(
+                transcript, robot_name=robot_name, fleet_names=fleet_names,
+            )):
         return (), False
     truncated_requested_read = False
     if len(transcript) > 280:
@@ -203,12 +264,16 @@ def native_readonly_requests_with_capacity(
                 or not 3 <= len(tail) <= 280):
             return (), False
         truncated_requested_read = any(
-            native_readonly_request(sentence) is not None
+            native_readonly_request(
+                sentence, robot_name=robot_name, fleet_names=fleet_names,
+            ) is not None
             for sentence in clauses_by_sentence[:-1]
             if 3 <= len(sentence) <= 280
         )
         transcript = tail
-    whole = native_readonly_request(transcript)
+    whole = native_readonly_request(
+        transcript, robot_name=robot_name, fleet_names=fleet_names,
+    )
     # Split only at a new spoken request. Splitting every "and" loses
     # object names in "look at the key and the mug and check the battery".
     clauses = re.split(
@@ -225,7 +290,11 @@ def native_readonly_requests_with_capacity(
     # Inspect a fourth explicit distinct read-only clause before truncating:
     # otherwise the unexecuted request disappears before the queue can
     # honestly warn that the answer will not be complete.
-    candidates = [native_readonly_request(part) for part in clauses]
+    candidates = [
+        native_readonly_request(
+            part, robot_name=robot_name, fleet_names=fleet_names,
+        ) for part in clauses
+    ]
     found: list[tuple[str, dict]] = []
     seen: set[str] = set()
     for request in candidates:
@@ -249,9 +318,14 @@ def native_readonly_requests_with_capacity(
     return tuple(found[:3]), len(found) > 3 or truncated_requested_read
 
 
-def native_readonly_requests(transcript: str) -> tuple[tuple[str, dict], ...]:
+def native_readonly_requests(
+    transcript: str, *, robot_name: str | None = None,
+    fleet_names: tuple[str, ...] = (),
+) -> tuple[tuple[str, dict], ...]:
     """Compatibility router for callers that only need the first three tools."""
-    return native_readonly_requests_with_capacity(transcript)[0]
+    return native_readonly_requests_with_capacity(
+        transcript, robot_name=robot_name, fleet_names=fleet_names,
+    )[0]
 
 
 

@@ -119,6 +119,10 @@ def register_native_omni_routes(
             historical_evidence = {"core": context.core, "recent": context.recent}
         return {
             "robot_id": robot_id,
+            # The authenticated Mac configuration, not a guessed model
+            # nickname or an unauthenticated transcript, owns addressability.
+            "pet_name": robot.name,
+            "fleet_pet_names": [pet.name for pet in settings.robots],
             "instructions": prefix[:2000],
             "untrusted_historical_evidence": historical_evidence,
             "startup_memory_instructions_excluded": True,

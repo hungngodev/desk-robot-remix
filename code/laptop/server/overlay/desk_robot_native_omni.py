@@ -30,6 +30,7 @@ from urllib.parse import urlsplit
 import aiohttp
 from desk_robot_voice_intents import (
     _advice_only_request,
+    addressed_to_other_pet,
     native_grounded_fact,
     native_readonly_request,
     native_readonly_requests_with_capacity,
@@ -222,6 +223,10 @@ class NativeOmniSession:
         self.conn = conn
         self.device = conn.device_id
         self.robot = _robot_id(conn)
+        # Set only by the authenticated Mac omni-context identity response.
+        # Until then, named ASR cannot address this microphone's tools.
+        self._robot_name: str | None = None
+        self._fleet_pet_names: tuple[str, ...] = ()
         self.url = approved_backend_url(url)
         self.token = token
         self.wire = OmniDuplexWire(model=model)
@@ -538,6 +543,23 @@ class NativeOmniSession:
                             and 1 <= len(persona) <= 900
                             and "\x00" not in persona):
                         self._voice_persona = " ".join(persona.split())[:900]
+                    pet_name = data.get("pet_name")
+                    fleet_names = data.get("fleet_pet_names")
+                    if (isinstance(pet_name, str)
+                            and re.fullmatch(r"[A-Za-z][A-Za-z0-9 _-]{0,31}", pet_name)
+                            and isinstance(fleet_names, list)
+                            and 1 <= len(fleet_names) <= 16
+                            and all(isinstance(name, str)
+                                    and re.fullmatch(
+                                        r"[A-Za-z][A-Za-z0-9 _-]{0,31}", name,
+                                    ) for name in fleet_names)
+                            and len({name.casefold() for name in fleet_names})
+                                == len(fleet_names)
+                            and pet_name.casefold() in {
+                                name.casefold() for name in fleet_names
+                            }):
+                        self._robot_name = pet_name
+                        self._fleet_pet_names = tuple(fleet_names)
                     self._context_instructions = instructions
                     if data.get("memory_enabled") is True:
                         revision = data.get("private_memory_generation")
@@ -1330,8 +1352,20 @@ class NativeOmniSession:
         if (not isinstance(item, str) or not 1 <= len(item) <= 128
                 or not item.isascii() or item in self._readonly_seen):
             return False
+        transcript = event.get("transcript")
+        # An addressed human question is not a broadcast to every camera.
+        # Never fall back to semantic planning for another pet's name.
+        if (isinstance(transcript, str)
+                and ((self._robot_name is None
+                      and transcript.casefold().lstrip().startswith("hey "))
+                     or addressed_to_other_pet(
+                         transcript, robot_name=self._robot_name,
+                         fleet_names=self._fleet_pet_names,
+                     ))):
+            return False
         requests, over_capacity = native_readonly_requests_with_capacity(
-            event.get("transcript")
+            transcript, robot_name=self._robot_name,
+            fleet_names=self._fleet_pet_names,
         )
         if over_capacity:
             # The final distinct request did not fit the supported three
@@ -1367,8 +1401,10 @@ class NativeOmniSession:
                     question for stamp, question, _said
                     in reversed(self._tool_dialogue)
                     if 0 <= now - stamp <= 45
-                    and (native_readonly_request(question) or (None,))[0]
-                        == "look"
+                    and (native_readonly_request(
+                        question, robot_name=self._robot_name,
+                        fleet_names=self._fleet_pet_names,
+                    ) or (None,))[0] == "look"
                 ), "")
                 if previous_question:
                     requests = (("look", {"question": (
@@ -1381,7 +1417,10 @@ class NativeOmniSession:
             if (not isinstance(transcript, str)
                     or not 3 <= len(transcript.strip()) <= 280
                     or "\x00" in transcript
-                    or _advice_only_request(transcript)):
+                    or _advice_only_request(
+                        transcript, robot_name=self._robot_name,
+                        fleet_names=self._fleet_pet_names,
+                    )):
                 return False
             # Only ambiguous OBSERVATIONAL speech needs semantic selection.
             # Ordinary social talk and actuator requests never open another
