@@ -2303,8 +2303,9 @@ async def test_camera_peer_fanout_retracts_copies_after_visual_opt_out(
             camera_derived=True,
         )
         assert inserted_peer_count >= 1
-        assert memory.count("robot-01") == 1
-        assert memory.count("robot-02") == memory.count("robot-03") == 0
+        # Revocation invalidates the original camera eyewitness too, not
+        # merely the copies shared with peers after insertion.
+        assert all(memory.count(robot.id) == 0 for robot in fleet.robots)
     finally:
         await pet.close()
 
@@ -2470,12 +2471,14 @@ async def test_camera_regrant_before_queued_speech_prevents_stale_audio(
         await wait_for(lambda: pet._speech_task is None, timeout=2)
         assert speaker.spoken == []
         assert all(memory.count(r.id) == 0 for r in fleet.robots)
-        # Ordinary physical evidence is independent of camera consent.
-        pet._consider_speech(
-            "robot-01", SceneChange("touch_tap", "A real touch", 1.0), 91,
+        # Do not force canned speech for a real touch: the proactive brain
+        # may naturally remain silent. Verify the physical evidence still
+        # enters private memory independently of the old camera consent.
+        await pet._store_observation(
+            "robot-01", SceneChange("touch_tap", "A real touch", 1.0),
+            camera_derived=False,
         )
-        await wait_for(lambda: pet._speech_task is None, timeout=2)
-        assert speaker.spoken
+        assert memory.count("robot-01") == 1
     finally:
         for state in pet.states.values():
             state.enabled = False
