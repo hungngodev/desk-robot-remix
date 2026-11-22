@@ -85,8 +85,8 @@ bool StatusValid(cJSON* json) {
     // Two independent status sections MUST agree on their source boot.
     auto imu_boot = get(imu, "boot_id");
     auto side_boot = get(side_ranges, "boot_id");
-    if (!integer(imu_boot, 0, 4294967295.0) ||
-        !integer(side_boot, 0, 4294967295.0) ||
+    if (!integer(imu_boot, 1, 4294967295.0) ||
+        !integer(side_boot, 1, 4294967295.0) ||
         imu_boot->valuedouble != side_boot->valuedouble) return false;
     for (const char* name : {"m0", "m1"})
         if (!integer(get(motor, name), -40, 40)) return false;
@@ -455,7 +455,7 @@ BodyInteraction Bridge::PollInteraction() {
     auto imu = cJSON_GetObjectItemCaseSensitive(json.get(), "imu");
     auto boot = cJSON_GetObjectItemCaseSensitive(imu, "boot_id");
     if (!cJSON_IsNumber(boot) || !std::isfinite(boot->valuedouble) ||
-        boot->valuedouble < 0 || boot->valuedouble > 4294967295.0 ||
+        boot->valuedouble < 1 || boot->valuedouble > 4294967295.0 ||
         !head_touch_edges_.AcceptBoot(
             static_cast<std::uint32_t>(boot->valuedouble)))
         return observation;
