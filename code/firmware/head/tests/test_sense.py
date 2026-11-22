@@ -38,8 +38,12 @@ class SenseOverlayTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         names = ['main/Kconfig.projbuild', 'main/CMakeLists.txt', 'main/mcp_server.cc',
                  'main/application.cc', 'main/application.h',
-                 'main/audio/audio_service.cc',
-                 'main/audio/codecs/no_audio_codec.cc']
+                 'main/audio/audio_codec.cc', 'main/audio/audio_codec.h',
+                 'main/audio/audio_service.cc', 'main/audio/audio_service.h',
+                 'main/audio/codecs/no_audio_codec.cc',
+                 'main/protocols/protocol.cc', 'main/protocols/protocol.h',
+                 'main/protocols/websocket_protocol.cc',
+                 'main/protocols/websocket_protocol.h']
         names += [f'main/boards/common/{name}' for name in (
             'camera.h', 'esp_video.h', 'esp_video.cc', 'esp32_camera.h', 'esp32_camera.cc')]
         names += [p.relative_to(UPSTREAM).as_posix()
