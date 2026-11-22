@@ -56,6 +56,19 @@ def test_host_verification_uses_independent_bounded_job_lanes():
                 "test_actual_pinned_xiaozhi_tts_initializer_selects_each_registered_voice",
             ):
                 assert f"tests/test_server_bridge.py::{native_voice_test}" in tests
+            steps = job["steps"]
+            restore = next(
+                index for index, step in enumerate(steps)
+                if step.get("name") == "Restore pinned Xiaozhi server fixture"
+            )
+            verify = next(
+                index for index, step in enumerate(steps)
+                if step.get("name") == "Verify bounded Mac voice, memory and fleet ownership"
+            )
+            assert restore < verify
+            pinned = "d9c2e8c5d92627b670dec57d72a07a4226a410a3"
+            assert pinned in steps[restore]["run"]
+            assert "test \"$(git -C upstream/xiaozhi-esp32-server rev-parse HEAD)\"" in steps[restore]["run"]
         checkout = next(
             step for step in job["steps"]
             if step.get("uses", "").startswith("actions/checkout@")
