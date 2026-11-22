@@ -54,7 +54,7 @@ def steps(suite: str, build: Path) -> list[tuple[str, list[str], Path, int]]:
                 "esp32_full", "esp32_full_pulse_reversed_lab",
                 "esp32_full_interaction_lab", "esp32_full_haptic_lab",
                 "esp32_dc_full", "esp32_dc_watchdog_lab",
-                "esp32_dc_integrated_lab",
+                "esp32_dc_integrated_lab", "esp32_servo_center_bench",
                 "esp32_stepper", "esp32dev", "esp32_vl53l0x_bench",
             )
         ]
