@@ -402,6 +402,43 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
   // while a guarded motion session was still armed.
   const bool was_armed = state_.armed;
   state_.accessories = readings;
+  const auto& force = readings.force;
+  const bool jaw_valid = (force.valid_mask & 2U) != 0U ||
+      (force.valid_mask == 0U && force.valid);
+  const bool jaw_current = force.present && jaw_valid &&
+      force.jaw_sample_seq != 0U && now_ms - force.jaw_at_ms < 500U &&
+      force.adc[1] != -32768 && force.adc[1] != 32767;
+  const std::uint32_t jaw_seq_delta =
+      force.jaw_sample_seq - jaw_last_seq_;
+  const std::uint32_t jaw_time_delta =
+      force.jaw_at_ms - jaw_last_at_ms_;
+  const bool jaw_repeated = jaw_current && jaw_sample_seen_ &&
+      force.jaw_sample_seq == jaw_last_seq_ &&
+      force.jaw_at_ms == jaw_last_at_ms_ &&
+      force.adc[1] == jaw_last_adc_;
+  const bool jaw_new = jaw_current &&
+      (!jaw_sample_seen_ ||
+       (jaw_seq_delta != 0U && jaw_seq_delta < 0x80000000U &&
+        jaw_time_delta != 0U && jaw_time_delta < 0x80000000U));
+  if (jaw_new) {
+    jaw_sample_seen_ = true;
+    jaw_last_seq_ = force.jaw_sample_seq;
+    jaw_last_at_ms_ = force.jaw_at_ms;
+    jaw_last_adc_ = force.adc[1];
+    jaw_provenance_bad_ = false;
+  } else if ((jaw_current && !jaw_repeated) ||
+             (jaw_sample_seen_ && !jaw_current)) {
+    // Failed conversions, replays and changed raw values under one
+    // sequence cannot silently become trusted by a later cached reply.
+    // Only a NEW, independently timed conversion restores jaw evidence.
+    jaw_provenance_bad_ = true;
+  }
+  if (grip_feedback_required_ && !grip_feedback_fresh(now_ms)) {
+    // Stop immediately, before the next PWM ramp. Retain the output
+    // attachment to hold an already grasped object without extra travel.
+    state_.grip_target = state_.grip;
+    jaw_sample_motion_budget_ = 0;
+  }
   const auto& fuel = readings.gauge;
   // The MAX17048 producer advances both sequence and acquisition time
   // only after its cell-voltage and SOC registers have been read. A cached
@@ -1073,7 +1110,8 @@ void BodyControl::execute(const char* line, std::size_t length,
                              now_ms - a.force.belly_at_ms < 500U;
     const bool jaw_unclipped = a.force.adc[1] != -32768 &&
                                a.force.adc[1] != 32767;
-    const bool jaw_fresh = ((a.force.valid_mask & 2U) != 0U ||
+    const bool jaw_fresh = !jaw_provenance_bad_ &&
+                           ((a.force.valid_mask & 2U) != 0U ||
                             (a.force.valid_mask == 0U && a.force.valid)) &&
                            jaw_unclipped &&
                            a.force.jaw_sample_seq != 0U &&

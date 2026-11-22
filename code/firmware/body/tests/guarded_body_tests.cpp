@@ -1501,6 +1501,12 @@ static void belly_adc_does_not_refresh_stale_jaw_sample() {
   for (const int endpoint : {-32768, 32767}) {
     readings.force.adc[0] = static_cast<std::int16_t>(endpoint);
     readings.force.adc[1] = 555;
+    if (endpoint == -32768) {
+      // Restoring an earlier clipped jaw value needs a fresh channel-1
+      // conversion rather than relabeling the last failed sample.
+      ++readings.force.jaw_sample_seq;
+      readings.force.jaw_at_ms = 705U;
+    }
     readings.force.belly_sample_seq += 1U;
     readings.force.belly_at_ms = readings.force.at_ms = 705U;
     body.set_accessories(readings, 705U);
@@ -1540,6 +1546,9 @@ static void gripper_jaw_consumes_at_most_four_degrees_per_adc_conversion() {
   r.force.jaw_sample_seq = 2U;
   r.force.at_ms = r.force.jaw_at_ms = 281U;
   body.set_accessories(r, 281U);
+  // The forged timestamp freezes the old target; a newly acquired reading
+  // does not revive that cancelled motion without a fresh grip command.
+  CHECK(send(body, "grip 120", 281) == "OK grip angle=120");
   body.tick(380); // five actual servo intervals, only four jaw degrees
   CHECK(body.state().grip == 98);
   r.force.jaw_sample_seq = 1U; // backwards replay is rejected
@@ -1574,6 +1583,92 @@ static void gripper_jaw_consumes_at_most_four_degrees_per_adc_conversion() {
   body.tick(540);
   CHECK(body.state().grip == 103 && body.state().grip_target == 103);
   CHECK(body.state().servos_attached);
+}
+
+
+static void jaw_acquisition_identity_prevents_forged_force_relief() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  body.require_grip_feedback(true);
+  CHECK(body.configure_jaw_force_limits({60, 120, 1000, 1, 300}));
+  CHECK(send(body, "arm", 100) == "OK arm");
+  desk_robot::AccessoryReadings r{};
+  r.force.present = r.force.valid = true;
+  r.force.valid_mask = 2U;
+  r.force.adc[1] = 1000;
+  r.force.jaw_sample_seq = 10U;
+  r.force.jaw_at_ms = r.force.at_ms = 100U;
+  body.set_accessories(r, 100U);
+  CHECK(send(body, "grip 120", 100) == "OK grip angle=120");
+  body.tick(160);
+  CHECK(body.state().grip == 93);
+
+  // A cached reading is allowed. Altering its force value is not.
+  body.set_accessories(r, 161U);
+  CHECK(body.grip_feedback_fresh(161U));
+  r.force.adc[1] = 900; // falsely claims less contact force
+  body.set_accessories(r, 162U);
+  CHECK(!body.grip_feedback_fresh(162U));
+  CHECK(body.state().grip_target == 93);
+  CHECK(body.state().armed && body.state().servos_attached);
+  CHECK(send(body, "grip 120", 162) ==
+        "ERR grip force_missing_or_stale");
+  CHECK(send(body, "aux", 162).find(
+      "\"jaw_valid\":false") != std::string::npos);
+  r.force.adc[1] = 1000; // reverting cached data is not recovery
+  body.set_accessories(r, 163U);
+  CHECK(!body.grip_feedback_fresh(163U));
+
+  r.force.jaw_sample_seq = 11U;
+  r.force.jaw_at_ms = r.force.at_ms = 164U;
+  body.set_accessories(r, 164U);
+  CHECK(body.grip_feedback_fresh(164U));
+  CHECK(body.state().grip_target == 93);
+  CHECK(send(body, "grip 120", 164) == "OK grip angle=120");
+  body.tick(200);
+  CHECK(body.state().grip == 95);
+
+  // Sequence-only and time-only changes are not completed conversions.
+  r.force.jaw_sample_seq = 12U;
+  body.set_accessories(r, 201U);
+  CHECK(!body.grip_feedback_fresh(201U));
+  CHECK(body.state().grip_target == 95);
+  r.force.jaw_at_ms = r.force.at_ms = 202U;
+  r.force.jaw_sample_seq = 11U;
+  body.set_accessories(r, 202U);
+  CHECK(!body.grip_feedback_fresh(202U));
+  r.force.jaw_sample_seq = 12U;
+  body.set_accessories(r, 203U);
+  CHECK(body.grip_feedback_fresh(203U));
+  CHECK(send(body, "grip 120", 203) == "OK grip angle=120");
+
+  r.force.jaw_sample_seq = 11U; // backward acquisition
+  r.force.jaw_at_ms = r.force.at_ms = 164U;
+  body.set_accessories(r, 204U);
+  CHECK(!body.grip_feedback_fresh(204U));
+  CHECK(body.state().grip_target == body.state().grip);
+  r.force.jaw_sample_seq = 13U;
+  r.force.jaw_at_ms = r.force.at_ms = 205U;
+  body.set_accessories(r, 205U);
+  CHECK(body.grip_feedback_fresh(205U));
+
+  // A real uint32 sequence and millis rollover is forward progress.
+  desk_robot::BodyControl wrapped;
+  r.force.jaw_sample_seq = 0xffffffffU;
+  r.force.jaw_at_ms = 0xfffffff9U;
+  wrapped.set_accessories(r, 0xfffffffbU);
+  CHECK(wrapped.grip_feedback_fresh(0xfffffffbU));
+  r.force.jaw_sample_seq = 1U;
+  r.force.jaw_at_ms = 3U;
+  wrapped.set_accessories(r, 3U);
+  CHECK(wrapped.grip_feedback_fresh(3U));
+  r.force.jaw_sample_seq = 0xffffffffU; // delayed pre-wrap replay
+  r.force.jaw_at_ms = 0xfffffffaU;
+  wrapped.set_accessories(r, 4U);
+  CHECK(!wrapped.grip_feedback_fresh(4U));
+  r.force.jaw_sample_seq = 2U;
+  r.force.jaw_at_ms = 5U;
+  wrapped.set_accessories(r, 5U);
+  CHECK(wrapped.grip_feedback_fresh(5U));
 }
 
 static void physical_gripper_stops_ramping_when_adc_is_not_trustworthy() {
@@ -2503,6 +2598,7 @@ int main() {
     belly_adc_does_not_refresh_stale_jaw_sample();
     physical_gripper_stops_ramping_when_adc_is_not_trustworthy();
     gripper_jaw_consumes_at_most_four_degrees_per_adc_conversion();
+    jaw_acquisition_identity_prevents_forged_force_relief();
     jaw_force_ceiling_is_local_and_direction_aware();
     optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract();
     dual_ir_evidence_never_authorizes_body_motion_or_charging();

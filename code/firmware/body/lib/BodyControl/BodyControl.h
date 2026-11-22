@@ -191,7 +191,7 @@ class BodyControl {
   bool grip_feedback_fresh(std::uint32_t now_ms) const {
     const auto& f = state_.accessories.force;
     const bool jaw_valid = (f.valid_mask & 2U) != 0U || (f.valid_mask == 0U && f.valid);
-    return f.present && jaw_valid &&
+    return !jaw_provenance_bad_ && f.present && jaw_valid &&
            f.jaw_sample_seq != 0U && now_ms - f.jaw_at_ms < 500U &&
            f.adc[1] != -32768 && f.adc[1] != 32767;
   }
@@ -253,6 +253,13 @@ class BodyControl {
   // channel-1 conversion. Belly conversions never renew this movement grant.
   std::uint32_t jaw_servo_sample_seq_ = 0;
   std::uint8_t jaw_sample_motion_budget_ = 0;
+  // The ADS1115 producer advances channel-1 sequence AND acquisition
+  // time only after a completed, channel-selected conversion. An altered
+  // cached ADC word must never authorize a stronger squeeze.
+  bool jaw_sample_seen_ = false;
+  bool jaw_provenance_bad_ = false;
+  std::uint32_t jaw_last_seq_ = 0, jaw_last_at_ms_ = 0;
+  std::int16_t jaw_last_adc_ = 0;
   bool fuel_monitor_required_ = false;
   // A changed or regressed MAX17048 frame cannot claim a fresh
   // acquisition merely by reusing an already accepted sample identity.
