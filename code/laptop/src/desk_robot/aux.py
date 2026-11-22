@@ -125,6 +125,14 @@ def validate_aux(data: dict, robot_id: str) -> dict:
         or (power["fuel_valid"] and fuel_seq == 0)
     ):
         raise ValueError("Invalid MAX17048 fuel acquisition provenance")
+    # Old read-only firmware may omit acquisition age, but then the
+    # model must not infer a new battery observation from a cached number.
+    fuel_age = power.get("fuel_age_ms")
+    if ("fuel_age_ms" in power and (
+        not _uint(fuel_age, 0xffffffff)
+        or (power["fuel_valid"] and fuel_age >= 500)
+    )):
+        raise ValueError("Invalid MAX17048 fuel acquisition age")
     # Optional until an inspected 5mOhm Kelvin sensor and matching WROOM
     # firmware actually exist. Raw calculated milliamp telemetry is not a
     # calibrated battery ammeter or charging authorization.

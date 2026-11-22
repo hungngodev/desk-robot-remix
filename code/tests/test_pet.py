@@ -5501,7 +5501,10 @@ async def test_proactive_completed_tool_rejoins_native_mac_timeline(
         async def aux_status(self):
             return {
                 "robot_id": "robot-01",
-                "power": {"fuel_valid": True, "soc_centi": 4800,
+                "force": {"boot_id": 17},
+                "proximity": {"boot_id": 17},
+                "power": {"fuel_valid": True, "fuel_seq": 4,
+                          "fuel_age_ms": 20, "soc_centi": 4800,
                           "cell_mv": 3750},
                 "dock": {"present": True, "valid": True,
                          "left_seated": False, "right_seated": False,
@@ -5846,9 +5849,12 @@ async def test_proactive_mac_does_not_claim_invalid_dock_charger_evidence(
         async def aux_status(self):
             return {
                 "robot_id": "robot-01",
+                "force": {"boot_id": 7},
+                "proximity": {"boot_id": 7},
                 "dock": dock,
                 "power": {"fuel_valid": True, "cell_mv": 3720,
-                          "soc_centi": 5200},
+                          "soc_centi": 5200, "fuel_seq": 2,
+                          "fuel_age_ms": 30},
             }
 
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
@@ -5908,7 +5914,8 @@ async def test_proactive_ollama_cannot_narrate_out_of_range_wroom_readings(
         "bmp280": {"present": True, "valid": True, "chip_id": 0x58,
                    "temp_centi": 2200, "pressure_pa": 101325,
                    "seq": 3, "age_ms": 100},
-        "power": {"fuel_valid": True, "soc_centi": 5000, "cell_mv": 3700},
+        "power": {"fuel_valid": True, "soc_centi": 5000, "cell_mv": 3700,
+                  "fuel_seq": 3, "fuel_age_ms": 60},
         "force": {"boot_id": 7},
         "proximity": {"valid": True, "gesture": 2, "boot_id": 7},
         "nfc": {"v": True, "e": 4},
@@ -5952,10 +5959,11 @@ async def test_proactive_fuel_readonly_accepts_only_plausible_voltage_boundaries
         async def aux_status(self):
             return {
                 "robot_id": "robot-01",
+                "force": {"boot_id": 9},
+                "proximity": {"boot_id": 9},
                 "power": {
-                    "fuel_valid": True,
-                    "soc_centi": 6000,
-                    "cell_mv": cell_mv,
+                    "fuel_valid": True, "fuel_seq": 1, "fuel_age_ms": 10,
+                    "soc_centi": 6000, "cell_mv": cell_mv,
                 },
             }
 
@@ -5990,7 +5998,8 @@ async def test_proactive_ambient_tool_uses_new_boot_and_conversion_only(
         "bmp280": {"valid": True, "present": True, "chip_id": 0x58,
                    "temp_centi": 2315, "pressure_pa": 101200,
                    "seq": 10, "age_ms": 90},
-        "power": {"fuel_valid": True, "soc_centi": 5300, "cell_mv": 3760},
+        "power": {"fuel_valid": True, "soc_centi": 5300, "cell_mv": 3760,
+                  "fuel_seq": 10, "fuel_age_ms": 80},
     }
 
     class Head:
@@ -6021,7 +6030,7 @@ async def test_proactive_ambient_tool_uses_new_boot_and_conversion_only(
         duplicate = await read()
         assert "sht41" not in duplicate
         assert "bmp280" not in duplicate
-        assert "fuel_gauge" in duplicate  # Ordinary raw read-only data survives.
+        assert "fuel_gauge" not in duplicate  # No new conversion.
 
         value["climate"]["seq"] = 11
         value["bmp280"]["seq"] = 11
@@ -6037,6 +6046,7 @@ async def test_proactive_ambient_tool_uses_new_boot_and_conversion_only(
 
         value["force"]["boot_id"] = 78
         value["proximity"]["boot_id"] = 78
+        value["power"]["fuel_seq"] = 1
         value["climate"]["seq"] = 1
         value["bmp280"]["seq"] = 1
         assert "sht41" in await read()
@@ -6060,6 +6070,102 @@ async def test_proactive_ambient_tool_uses_new_boot_and_conversion_only(
         assert "bmp280" not in unqualified
     finally:
         await pet.close()
+
+
+async def test_proactive_fuel_and_dock_require_current_boot_sequence_and_delivery(
+    fleet, tmp_path, monkeypatch,
+):
+    """Model facts need fresh source conversions, not simply new HTTP reads."""
+    from copy import deepcopy
+    from types import SimpleNamespace
+    import desk_robot.pet as pet_module
+
+    now = [400.0]
+    monkeypatch.setattr(
+        pet_module, "time", SimpleNamespace(monotonic=lambda: now[0]),
+    )
+    sample = {
+        "robot_id": "robot-01",
+        "force": {"boot_id": 71},
+        "proximity": {"boot_id": 71, "valid": False},
+        "power": {
+            "fuel_valid": True, "fuel_seq": 9, "fuel_age_ms": 50,
+            "cell_mv": 3700, "soc_centi": 5300,
+        },
+        "dock": {
+            "present": True, "valid": True, "seq": 88, "age_ms": 35,
+            "left_seated": True, "right_seated": True, "input_good": True,
+            "charge_indicated": True, "charging_verified": False,
+        },
+    }
+    delay = [0.0]
+
+    class Head:
+        async def aux_status(self):
+            now[0] += delay[0]
+            return deepcopy(sample)
+
+        async def command(self, *_):
+            raise AssertionError("Proactive sensor read cannot move motors")
+
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": Head()},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+
+    async def read():
+        receipt = await pet._proactive_tool_receipt("robot-01", "aux_status")
+        assert receipt["verified_charging"] is False
+        assert receipt["verified_motion"] is False
+        return receipt["data"]
+
+    try:
+        first = await read()
+        assert "fuel_gauge" in first and "dock_contacts" in first
+        assert first["fuel_gauge"]["qualified"] is False
+        assert first["dock_contacts"]["charging_verified"] is False
+        repeat = await read()
+        assert "fuel_gauge" not in repeat and "dock_contacts" not in repeat
+
+        sample["power"]["fuel_seq"] = 10
+        sample["dock"]["seq"] = 89
+        sample["dock"]["age_ms"] = 350
+        delay[0] = 1.2
+        expired = await read()
+        assert "fuel_gauge" not in expired and "dock_contacts" not in expired
+
+        delay[0] = 0
+        sample["dock"]["age_ms"] = 35
+        fresh = await read()
+        assert "fuel_gauge" in fresh and "dock_contacts" in fresh
+
+        sample["force"]["boot_id"] = 72
+        sample["proximity"]["boot_id"] = 72
+        sample["power"]["fuel_seq"] = 1
+        sample["dock"]["seq"] = 1
+        assert "fuel_gauge" in await read()
+
+        sample["force"]["boot_id"] = 71
+        sample["proximity"]["boot_id"] = 71
+        sample["power"]["fuel_seq"] = 11
+        sample["dock"]["seq"] = 90
+        replay = await read()
+        assert "fuel_gauge" not in replay
+        assert "dock_contacts" not in replay
+    finally:
+        await pet.close()
+
+
+def test_wroom_fuel_source_age_is_written_from_actual_sample_clock():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1]
+              / "firmware/body/lib/BodyControl/BodyControl.cpp").read_text()
+    assert r'\"fuel_age_ms\":%lu' in source
+    assert "now_ms - a.gauge.fuel_at_ms" in source
+    assert "a.gauge.fuel_sample_seq != 0U" in source
 
 
 async def test_proactive_sensors_enter_ollama_tool_history_as_validated_raw_fields(
@@ -6087,7 +6193,8 @@ async def test_proactive_sensors_enter_ollama_tool_history_as_validated_raw_fiel
                     "charging_verified": False, "seq": 8, "age_ms": 30,
                 },
                 "power": {
-                    "fuel_valid": True, "soc_centi": 6320,
+                    "fuel_valid": True, "fuel_seq": 12, "fuel_age_ms": 40,
+                    "soc_centi": 6320,
                     "cell_mv": 3820, "current_calibrated": False,
                 },
                 "credentials": "must never leak to the model",

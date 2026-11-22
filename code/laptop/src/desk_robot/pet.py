@@ -2386,6 +2386,7 @@ class PetController:
         read = getattr(head, tool, None)
         if not callable(read):
             raise RuntimeError("Selected head read-only tool unavailable")
+        requested_at = time.monotonic()
         pending = asyncio.create_task(read())
         try:
             done, _ = await asyncio.wait(
@@ -2394,6 +2395,7 @@ class PetController:
             if not done:
                 raise TimeoutError("Optional proactive read-only tool timed out")
             result = await pending
+            transport_ms = max(0.0, (time.monotonic() - requested_at) * 1000)
         finally:
             if not pending.done():
                 pending.cancel()
@@ -2415,14 +2417,22 @@ class PetController:
                 boot = None  # A reconnect cannot replay an earlier boot.
             pending_seq: dict[tuple[str, str], tuple[int, int]] = {}
 
-            def novel(kind: str, reading: object, max_age_ms: int) -> bool:
+            def novel(
+                kind: str, reading: object, max_age_ms: int,
+                *, include_transport: bool = False,
+            ) -> bool:
                 if boot is None:
+                    return False
+                # The WROOM age is measured BEFORE its HTTP response.
+                # A queued request may be older by the time Ollama sees it.
+                budget_ms = max_age_ms - (transport_ms if include_transport else 0)
+                if budget_ms <= 0:
                     return False
                 key = (robot_id, kind)
                 cursor = self._proactive_aux_cursors.get(key)
                 prior = cursor[1] if cursor is not None and cursor[0] == boot else None
                 return _fresh_aux_acquisition(
-                    reading, previous_seq=prior, max_age_ms=max_age_ms,
+                    reading, previous_seq=prior, max_age_ms=budget_ms,
                 )
 
             climate = result.get("climate")
@@ -2451,11 +2461,18 @@ class PetController:
                         "physically_verified": False,
                     }
             power = result.get("power")
-            if isinstance(power, dict) and power.get("fuel_valid") is True:
+            if isinstance(power, dict) and novel(
+                "fuel", {
+                    "valid": power.get("fuel_valid"),
+                    "seq": power.get("fuel_seq"),
+                    "age_ms": power.get("fuel_age_ms"),
+                }, 500, include_transport=True,
+            ):
                 if (type(power.get("soc_centi")) is int
                         and 0 <= power["soc_centi"] <= 10000
                         and type(power.get("cell_mv")) is int
                         and 2500 <= power["cell_mv"] <= 4500):
+                    pending_seq[(robot_id, "fuel")] = (boot, power["fuel_seq"])
                     selected["fuel_gauge"] = {
                         "soc_centi": power["soc_centi"],
                         "cell_mv": power["cell_mv"],
@@ -2474,6 +2491,24 @@ class PetController:
                 if (type(nfc.get("e")) is int
                         and 0 <= nfc["e"] <= 0xffffffff):
                     selected["nfc"] = {"event_count": nfc["e"]}
+            dock = result.get("dock")
+            if (isinstance(dock, dict)
+                    and dock.get("present") is True
+                    and novel("dock", dock, 500, include_transport=True)
+                    and dock.get("charging_verified") is False
+                    and all(type(dock.get(field)) is bool for field in (
+                        "left_seated", "right_seated", "input_good",
+                        "charge_indicated",
+                    ))
+                    and (not dock["charge_indicated"] or dock["input_good"])):
+                pending_seq[(robot_id, "dock")] = (boot, dock["seq"])
+                selected["dock_contacts"] = {
+                    "left_seated": dock["left_seated"],
+                    "right_seated": dock["right_seated"],
+                    "input_good": dock["input_good"],
+                    "charge_indicated": dock["charge_indicated"],
+                    "charging_verified": False,
+                }
             # Commit only valid new conversions. An unspecified or retired
             # boot remains readable as raw status but cannot refresh a fact.
             if pending_seq:
@@ -2485,35 +2520,15 @@ class PetController:
                     if len(retired) >= 128:
                         # Refuse this new boot rather than silently promoting
                         # its readings without a replay fence.
-                        selected.pop("sht41", None)
-                        selected.pop("bmp280", None)
+                        for kind in ("sht41", "bmp280", "fuel_gauge",
+                                     "dock_contacts"):
+                            selected.pop(kind, None)
                         pending_seq.clear()
                     else:
                         retired.add(prior_boot)
                 if pending_seq:
                     self._proactive_aux_active_boot[robot_id] = boot
                     self._proactive_aux_cursors.update(pending_seq)
-            dock = result.get("dock")
-            if (isinstance(dock, dict)
-                    and dock.get("present") is True
-                    and dock.get("valid") is True
-                    and dock.get("charging_verified") is False
-                    and type(dock.get("seq")) is int
-                    and 0 < dock["seq"] <= 0xffffffff
-                    and type(dock.get("age_ms")) is int
-                    and 0 <= dock["age_ms"] < 500
-                    and all(type(dock.get(field)) is bool for field in (
-                        "left_seated", "right_seated", "input_good",
-                        "charge_indicated",
-                    ))
-                    and (not dock["charge_indicated"] or dock["input_good"])):
-                selected["dock_contacts"] = {
-                    "left_seated": dock["left_seated"],
-                    "right_seated": dock["right_seated"],
-                    "input_good": dock["input_good"],
-                    "charge_indicated": dock["charge_indicated"],
-                    "charging_verified": False,
-                }
         else:
             # Head status contains nested firmware diagnostics that can
             # evolve independently of the model. Never forward arbitrary
