@@ -2538,7 +2538,7 @@ def test_native_kokoro_voice_fails_closed_for_unmapped_provider(bridge, monkeypa
         bridge.native_tts_config(conn)
 
 
-def test_native_voice_mapping_export_matches_fleet_and_rejects_duplicates():
+def test_native_voice_mapping_export_matches_fleet_and_rejects_duplicates(tmp_path):
     spec = importlib.util.spec_from_file_location(
         "native_fleet_runner", ROOT / "laptop/server/run_server.py"
     )
@@ -2580,6 +2580,13 @@ def test_native_voice_mapping_export_matches_fleet_and_rejects_duplicates():
         devices, voices = module.fleet_device_and_voice_maps(provisioned)
         assert len(devices) == len(voices) == 5
         assert len(set(voices.values())) == 5
+
+    # This test is selected in the independent fast Mac lane. Pair the
+    # device/voice identity proof with the pinned upstream token-auth preflight.
+    test_native_fleet_launcher_requires_real_token_auth_not_device_whitelist(
+        tmp_path
+    )
+    test_native_fleet_launcher_checks_auth_before_running_upstream_server()
 
 
 def test_pinned_upstream_connection_initializes_per_device_native_tts():
@@ -2659,3 +2666,52 @@ def test_actual_pinned_xiaozhi_tts_initializer_selects_each_registered_voice(
     assert initialize(pip) == "af_heart"
     assert seen == ["af_heart", "am_adam", "af_heart"]
     assert common["TTS"]["CustomTTS"]["params"]["voice"] == "af_heart"
+
+
+def test_native_fleet_launcher_requires_real_token_auth_not_device_whitelist(tmp_path):
+    """Upstream token bypass settings must never register a private fleet head."""
+    spec = importlib.util.spec_from_file_location(
+        "native_auth_runner", ROOT / "laptop/server/run_server.py"
+    )
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    template = (ROOT / "config/xiaozhi.local.example.yaml").read_text()
+    assert "auth_key: LOCAL_RANDOM_SECRET" in template
+    path = tmp_path / "private-xiaozhi.yaml"
+
+    def verify(settings):
+        path.write_text(settings)
+        runner.verified_xiaozhi_auth_config(path)
+
+    valid = template.replace(
+        "auth_key: LOCAL_RANDOM_SECRET",
+        "auth_key: " + ("x" * 40),
+    )
+    verify(valid)
+    for insecure, reason in (
+        (valid.replace("enabled: true", "enabled: false", 1), "token authentication"),
+        (valid.replace("enabled: true", "enabled: 'true'", 1), "token authentication"),
+        (valid.replace("allowed_devices: []", "allowed_devices: [mac-01]", 1), "whitelist"),
+        (valid.replace("allowed_devices: []", "allowed_devices: null", 1), "whitelist"),
+        (valid.replace("read_config_from_api: false", "read_config_from_api: true", 1), "local server"),
+        (valid.replace("auth_key: " + ("x" * 40), "auth_key: LOCAL_RANDOM_SECRET", 1), "auth_key"),
+        (valid.replace("auth_key: " + ("x" * 40), "auth_key: short", 1), "auth_key"),
+    ):
+        with pytest.raises(ValueError, match=reason):
+            verify(insecure)
+
+    # Malformed or missing local configuration cannot start a private server.
+    path.write_text("not: [valid")
+    with pytest.raises(ValueError, match="Cannot verify"):
+        runner.verified_xiaozhi_auth_config(path)
+    path.unlink()
+    with pytest.raises(ValueError, match="Cannot verify"):
+        runner.verified_xiaozhi_auth_config(path)
+
+
+def test_native_fleet_launcher_checks_auth_before_running_upstream_server():
+    source = (ROOT / "laptop/server/run_server.py").read_text()
+    assert "verified_xiaozhi_auth_config(local_config)" in source
+    assert source.index("verified_xiaozhi_auth_config(local_config)") < source.index(
+        'runpy.run_path(str(server / "app.py")'
+    )

@@ -8,6 +8,8 @@ import runpy
 import tomllib
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -39,6 +41,37 @@ def fleet_device_and_voice_maps(robots: list[dict]) -> tuple[dict, dict]:
     return devices, voices
 
 
+def verified_xiaozhi_auth_config(path: Path) -> None:
+    """Refuse native pet identity if upstream could bypass device token auth.
+
+    Pinned Xiaozhi WebSocketServer._handle_auth accepts unsigned device IDs
+    when auth.enabled is false or the ID is whitelisted. The Mac voice and
+    private MCP mapping assumes that device IDs were token authenticated.
+    Check the effective local config before any server or pet is registered.
+    """
+    try:
+        with path.open("r", encoding="utf-8") as stream:
+            config = yaml.safe_load(stream)
+    except (OSError, UnicodeError, yaml.YAMLError) as exc:
+        raise ValueError("Cannot verify private Xiaozhi authentication config") from exc
+    if not isinstance(config, dict) or config.get("read_config_from_api") is not False:
+        raise ValueError("Fleet Xiaozhi must use verified local server config")
+    server = config.get("server")
+    if not isinstance(server, dict):
+        raise ValueError("Private Xiaozhi server settings missing")
+    auth = server.get("auth")
+    if not isinstance(auth, dict) or auth.get("enabled") is not True:
+        raise ValueError("Fleet Xiaozhi requires device token authentication")
+    # The upstream whitelist deliberately bypasses token checks even when
+    # auth.enabled is true. It cannot authorize a private fleet head.
+    if auth.get("allowed_devices") != []:
+        raise ValueError("Fleet Xiaozhi must disable device auth whitelist")
+    key = server.get("auth_key")
+    if (not isinstance(key, str) or len(key.strip()) < 16
+            or key == "LOCAL_RANDOM_SECRET"):
+        raise ValueError("Set a private non-placeholder Xiaozhi auth_key")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--config", type=Path, default=ROOT / "config/local.toml")
@@ -56,8 +89,13 @@ def main():
     os.environ["DESK_ROBOT_DEVICE_MAP"] = json.dumps(mapping)
     os.environ["DESK_ROBOT_NATIVE_VOICE_MAP"] = json.dumps(voices)
     server = ROOT / "laptop/server/build/xiaozhi/main/xiaozhi-server"
-    if not (server / "data/.config.yaml").is_file():
+    local_config = server / "data/.config.yaml"
+    if not local_config.is_file():
         p.error("Create data/.config.yaml using config/xiaozhi.local.example.yaml first")
+    try:
+        verified_xiaozhi_auth_config(local_config)
+    except ValueError as exc:
+        p.error(str(exc))
     import sys
 
     sys.path.insert(0, str(server))
