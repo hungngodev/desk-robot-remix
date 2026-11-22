@@ -20,6 +20,32 @@ from desk_robot.dock_ir import dock_beacon_code, validate_ir
 LABELS = ("left", "center", "right")
 
 
+def _unique_trial_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """Reject ambiguous labels, timestamps and nested optical receiver facts."""
+    fields: dict[str, object] = {}
+    for key, value in pairs:
+        if key in fields:
+            raise ValueError("Duplicate terminal IR trial JSON field: " + key)
+        fields[key] = value
+    return fields
+
+
+def _reject_nonfinite_trial_json(token: str) -> None:
+    raise ValueError("Nonfinite terminal IR trial JSON constant: " + token)
+
+
+def load_trial_rows(path: Path) -> list[dict]:
+    """Parse physical trial JSONL without silently overwriting evidence."""
+    return [
+        json.loads(
+            line, object_pairs_hook=_unique_trial_fields,
+            parse_constant=_reject_nonfinite_trial_json,
+        )
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
 def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
             expected_dock_id: int | None = None) -> dict:
     if not robot_id or not 10 <= min_per_position <= 500:
@@ -198,8 +224,7 @@ def main() -> None:
     if args.dock_id is None:
         parser.error("Terminal IR calibration requires --dock-id 1 through 5")
     if args.input:
-        rows = [json.loads(line) for line in args.input.read_text().splitlines()
-                if line.strip()]
+        rows = load_trial_rows(args.input)
         print(json.dumps(analyze(
             rows, args.robot, expected_dock_id=args.dock_id,
         ), indent=2))

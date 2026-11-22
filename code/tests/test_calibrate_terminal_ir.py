@@ -351,3 +351,48 @@ def test_cli_runs_input_analysis_with_dock_id(monkeypatch, tmp_path, capsys):
     assert result["dock_id_assigned"] is True
     assert result["candidate_differential_signal"] is True
 
+def test_strict_terminal_ir_trial_reader_accepts_real_capture_shape(tmp_path):
+    rows = position_records()
+    path = tmp_path / "authentic_ir_trials.jsonl"
+    path.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    assert cal.load_trial_rows(path) == rows
+    result = cal.analyze(cal.load_trial_rows(path), "robot-01", expected_dock_id=4)
+    assert result["candidate_differential_signal"] is True
+    assert result["motor_authorized"] is False
+    assert result["physical_acceptance_pass"] is False
+
+
+@pytest.mark.parametrize("original,early_field", [
+    ('"label": "left"', '"label": "right"'),
+    ('"received_monotonic": 1000.0', '"received_monotonic": 999.0'),
+    ('"left_seq": 1', '"left_seq": 0'),
+    ('"robot_id": "robot-01"', '"robot_id": "robot-02"'),
+    ('"code": 0', '"code": 1234'),
+])
+def test_terminal_ir_trial_jsonl_cannot_override_recorded_evidence(
+    tmp_path, original, early_field,
+):
+    row = position_records()[0]
+    line = json.dumps(row)
+    assert line.count(original) == 1
+    path = tmp_path / "ambiguous_ir_trials.jsonl"
+    path.write_text(line.replace(original, early_field + ", " + original) + "\n")
+    with pytest.raises(ValueError, match="Duplicate terminal IR trial JSON field"):
+        cal.load_trial_rows(path)
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_terminal_ir_trial_jsonl_rejects_nonstandard_numeric_tokens(
+    tmp_path, constant,
+):
+    line = json.dumps(position_records()[0])
+    path = tmp_path / "nonfinite_ir_trials.jsonl"
+    path.write_text(line.replace(
+        '"received_monotonic": 1000.0',
+        f'"received_monotonic": {constant}',
+    ) + "\n")
+    with pytest.raises(ValueError, match="Nonfinite terminal IR trial JSON constant"):
+        cal.load_trial_rows(path)
