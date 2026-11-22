@@ -7,6 +7,14 @@ from desk_robot.controller import Coordinator, Job, OperationError
 from desk_robot.simulator import SimulatedHead, SimulationVision
 
 
+@pytest.fixture(autouse=True)
+def selected_motor_backend_for_host_tests(settings):
+    # Host fakes simulate a builder who verified the assembled motor driver.
+    # Production config deliberately defaults to no motor profile grant.
+    for robot in settings.robots:
+        robot.motor_backend = "stepper_28byj48"
+
+
 def make(settings):
     head = SimulatedHead("robot-01")
     heads = {"robot-01": head, "robot-02": SimulatedHead("robot-02")}
@@ -434,6 +442,7 @@ async def test_full_guarded_dc_path_is_not_confused_with_unprotected_pwm(setting
     settings.mode = "hardware"
     head = HardwareStatusHead("robot-01")
     head.body_status["backend"] = "dc_pwm_guarded"
+    settings.robots[0].motor_backend = "dc_pwm_guarded"
     coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
     try:
         permit = await coordinator.operator_arm("robot-01")
@@ -1605,3 +1614,61 @@ async def test_fleet_motion_owner_latches_failed_stop_until_explicit_recovery(se
     finally:
         head.fail_command = None
         await c.close()
+
+
+@pytest.mark.parametrize(
+    ("selected", "reported", "allowed"),
+    [
+        ("stepper_28byj48", "stepper_28byj48", True),
+        ("dc_pwm_guarded", "dc_pwm_guarded", True),
+        (None, "stepper_28byj48", False),
+        ("stepper_28byj48", "dc_pwm_guarded", False),
+        ("dc_pwm_guarded", "stepper_28byj48", False),
+        ("dc_pwm_guarded", "dc_pwm", False),
+    ],
+)
+async def test_hardware_operator_arm_requires_selected_motor_profile(
+    settings, selected, reported, allowed,
+):
+    settings.mode = "hardware"
+    settings.robots[0].motor_backend = selected
+    head = HardwareStatusHead("robot-01")
+    head.body_status["backend"] = reported
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        if allowed:
+            permit = await coordinator.operator_arm("robot-01")
+            assert permit["operator_permit"] is True
+        else:
+            with pytest.raises(OperationError, match="motor backend"):
+                await coordinator.operator_arm("robot-01")
+            assert "robot-01" not in coordinator.permits
+        assert not head.commands
+    finally:
+        await coordinator.close()
+
+
+async def test_motor_backend_change_during_status_never_creates_permit(settings):
+    settings.mode = "hardware"
+    started, resume = asyncio.Event(), asyncio.Event()
+
+    class DelayedStatus(HardwareStatusHead):
+        async def status(self):
+            started.set()
+            await resume.wait()
+            return await super().status()
+
+    head = DelayedStatus("robot-01")
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        pending = asyncio.create_task(coordinator.operator_arm("robot-01"))
+        await asyncio.wait_for(started.wait(), timeout=1)
+        settings.robots[0].motor_backend = "dc_pwm_guarded"
+        resume.set()
+        with pytest.raises(OperationError, match="motor backend"):
+            await asyncio.wait_for(pending, timeout=1)
+        assert "robot-01" not in coordinator.permits
+        assert not head.commands
+    finally:
+        resume.set()
+        await coordinator.close()

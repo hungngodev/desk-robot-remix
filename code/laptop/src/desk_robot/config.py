@@ -18,6 +18,8 @@ class RobotConfig(BaseModel):
     token_env: str
     device_id: str = ""
     motion_enabled: bool = False
+    # Set only after verifying installed driver, wiring, and flashed WROOM.
+    motor_backend: Literal["stepper_28byj48", "dc_pwm_guarded"] | None = None
     exploration_qualified: bool = False  # Explicit real swept-path trial gate; not a simulation claim.
     # Optional physical sensor-triggered interactions. None means NOT calibrated.
     nose_twist_threshold_counts: int | None = Field(default=None, ge=80, le=1800)

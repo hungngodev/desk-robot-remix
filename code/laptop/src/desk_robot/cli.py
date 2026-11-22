@@ -75,14 +75,18 @@ async def inspect_live_media(settings, robot_id: str, *, look: bool = False,
     robot = settings.robot(robot_id)
     if not robot.device_id:
         raise ValueError("A configured real Xiaozhi head device ID is required")
+    selected_backend = robot.motor_backend
+    if selected_backend not in ("stepper_28byj48", "dc_pwm_guarded"):
+        raise ValueError("Live WROOM diagnosis requires a verified motor backend")
 
     async def inspect(http: httpx.AsyncClient) -> dict:
         status = await http.get(f"/v1/robots/{robot_id}/status", timeout=6)
         status.raise_for_status()
         body = status.json()
         if (not isinstance(body, dict) or body.get("robot_id") != robot_id
-                or body.get("backend") != "stepper_28byj48"):
-            raise ValueError("Real WROOM body or robot identity not confirmed")
+                or body.get("backend") != selected_backend
+                or robot.motor_backend != selected_backend):
+            raise ValueError("Real WROOM body or motor backend identity not confirmed")
 
         vision = await http.get(f"/v1/pet/{robot_id}/vision-status", timeout=6)
         vision.raise_for_status()

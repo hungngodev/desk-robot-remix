@@ -6,8 +6,9 @@ import pytest
 from desk_robot.cli import inspect_live_media, request
 
 
-def configured():
-    robot = SimpleNamespace(id="robot-01", device_id="xiaozhi-01")
+def configured(*, motor_backend="stepper_28byj48"):
+    robot = SimpleNamespace(id="robot-01", device_id="xiaozhi-01",
+                            motor_backend=motor_backend)
     return SimpleNamespace(
         mode="hardware", voice_vision_tools_enabled=True,
         coordinator_token_env="DESK_ROBOT_API_TOKEN",
@@ -17,7 +18,8 @@ def configured():
 
 
 def simulated_mac(*, wrong_head=False, old_frame=False,
-                  raw_context=False, invalid_tool=False):
+                  raw_context=False, invalid_tool=False,
+                  backend="stepper_28byj48"):
     seen = []
 
     def respond(request):
@@ -38,7 +40,7 @@ def simulated_mac(*, wrong_head=False, old_frame=False,
         if path.endswith("/status"):
             return httpx.Response(200, json={
                 "robot_id": "robot-02" if wrong_head else "robot-01",
-                "backend": "stepper_28byj48",
+                "backend": backend,
             })
         if path.endswith("/vision-status"):
             return httpx.Response(200, json={
@@ -163,3 +165,42 @@ async def test_real_camera_cli_commands_route_to_existing_mac_authorities(
     args.action = "look"
     with pytest.raises(ValueError, match="consent"):
         await request(args, settings)
+
+
+@pytest.mark.parametrize(
+    ("selected", "reported", "allowed"),
+    [
+        ("stepper_28byj48", "stepper_28byj48", True),
+        ("dc_pwm_guarded", "dc_pwm_guarded", True),
+        ("stepper_28byj48", "dc_pwm_guarded", False),
+        ("dc_pwm_guarded", "stepper_28byj48", False),
+        ("dc_pwm_guarded", "dc_pwm", False),
+        (None, "dc_pwm_guarded", False),
+    ],
+)
+async def test_live_doctor_binds_selected_backend_without_motor_commands(
+    selected, reported, allowed,
+):
+    transport, calls = simulated_mac(backend=reported)
+    async with httpx.AsyncClient(
+        base_url="http://127.0.0.1:8765", transport=transport,
+    ) as client:
+        if allowed:
+            result = await inspect_live_media(
+                configured(motor_backend=selected), "robot-01", client=client,
+            )
+            assert result["xiao_jpeg_received"] is True
+            assert result["motor_armed_or_charging_verified"] is False
+            assert [method for method, _ in calls] == ["GET"] * 4
+        else:
+            with pytest.raises(ValueError, match="motor backend"):
+                await inspect_live_media(
+                    configured(motor_backend=selected), "robot-01", client=client,
+                )
+            assert calls == ([] if selected is None else [
+                ("GET", "/v1/robots/robot-01/status"),
+            ])
+    assert not any(
+        action in path for _, path in calls
+        for action in ("/enable", "/move", "/pickup")
+    )

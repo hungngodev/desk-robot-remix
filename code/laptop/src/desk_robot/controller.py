@@ -141,14 +141,26 @@ class Coordinator:
         """
         if self.settings.mode != "hardware":
             return
+        robot = self.robot(robot_id)
+        selected_backend = robot.motor_backend
+        if selected_backend not in ("stepper_28byj48", "dc_pwm_guarded"):
+            raise OperationError(
+                "Hardware preflight: verified motor backend is not configured"
+            )
         status = await _bounded_head_reply(
             self.heads[robot_id].status(), seconds=2.5,
             timeout_message="WROOM preflight status timeout",
         )
         if not isinstance(status, dict) or status.get("robot_id") != robot_id:
             raise OperationError("Hardware preflight: body identity missing or mismatched")
-        if (status.get("backend") not in ("stepper_28byj48", "dc_pwm_guarded")
-                or status.get("armed") is not False):
+        if (status.get("backend") != selected_backend
+                or robot.motor_backend != selected_backend):
+            # A firmware swap or operator profile change cannot authorize an
+            # actuator driver wired for a different physical assembly.
+            raise OperationError(
+                "Hardware preflight: motor backend differs from verified assembly"
+            )
+        if status.get("armed") is not False:
             raise OperationError("Hardware preflight: guarded body must be present and disarmed")
         touch = status.get("touch")
         if not isinstance(touch, dict) or touch.get("active") is not False:
