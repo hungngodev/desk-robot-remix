@@ -3311,3 +3311,55 @@ async def test_native_live_subscriber_does_not_cross_camera_regrant(settings):
     finally:
         await stream.aclose()
         await service.close()
+
+
+def test_native_sent_receipt_seen_ids_survive_twelve_history_entries():
+    """Old response IDs stay idempotent for the entire valid send window."""
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    now = time.monotonic()
+
+    def receipt(index):
+        return "omni_sent_" + "a" * 12 + f"{index:020x}"
+
+    for index in range(13):
+        assert hub.remember_native_spoken(
+            "robot-01", receipt(index), f"sent line {index}", now,
+        )
+    assert len(hub.native_spoken_ids["robot-01"]) == 12
+    assert receipt(0) not in hub.native_spoken_ids["robot-01"]
+    before = list(hub.spoken_history["robot-01"])
+    assert not hub.remember_native_spoken(
+        "robot-01", receipt(0), "OBSOLETE REPLAYED LINE", now,
+    )
+    assert list(hub.spoken_history["robot-01"]) == before
+    # A new VAD does not turn sent audio into another completed response.
+    hub.notify("robot-01", "human_voice", now)
+    hub.spoken_history["robot-01"].clear()
+    assert not hub.remember_native_spoken(
+        "robot-01", receipt(0), "OBSOLETE AFTER VAD", now,
+    )
+    assert not hub.spoken_history["robot-01"]
+    assert hub.remember_native_spoken(
+        "robot-02", receipt(0), "independent robot speech", now,
+    )
+    # Saturation refuses new evidence rather than evicting older live IDs.
+    for index in range(13, 256):
+        assert hub.remember_native_spoken(
+            "robot-01", receipt(index), f"sent line {index}", now,
+        )
+    assert len(hub.native_spoken_seen["robot-01"]) == 256
+    assert not hub.remember_native_spoken(
+        "robot-01", receipt(256), "capacity overflow", now,
+    )
+    assert not hub.remember_native_spoken(
+        "robot-01", receipt(0), "SATURATED OLD REPLAY", now,
+    )
+    # Expired admission may be reclaimed, without weakening the five-second
+    # validation of actual transmitted timestamps.
+    hub.native_spoken_seen["robot-01"][receipt(0)] = now - 6
+    assert hub.remember_native_spoken(
+        "robot-01", receipt(256), "fresh after expiry", now,
+    )
+    hub.clear("robot-01")
+    assert not hub.native_spoken_seen["robot-01"]
+    assert hub.native_spoken_seen["robot-02"]

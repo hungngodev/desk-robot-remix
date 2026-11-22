@@ -193,6 +193,12 @@ class CameraFrameHub:
         self.native_spoken_ids = {
             robot: deque(maxlen=12) for robot in robot_ids
         }
+        # The 12-entry displayed receipt cache is not an idempotency fence:
+        # a burst of new sent responses must not admit an old response again
+        # while its authenticated five-second source window remains live.
+        self.native_spoken_seen: dict[str, dict[str, float]] = {
+            robot: {} for robot in robot_ids
+        }
         # Completed model ASR is short-lived turn context, not durable memory.
         # Each robot's words remain isolated and deduped by source item ID.
         self.heard_history = {
@@ -563,16 +569,28 @@ class CameraFrameHub:
         # otherwise an attacker or misbehaving voice bridge could replay a
         # previously accepted ID with an ancient or future timestamp and get
         # a misleading HTTP 200 rather than an invalid-receipt rejection.
-        if (not _finite(sent_at)
-                or not 0 <= time.monotonic() - sent_at <= 5):
+        mac_now = time.monotonic()
+        if not _finite(sent_at) or not 0 <= mac_now - sent_at <= 5:
             raise ValueError("Stale or future native audio receipt")
-        if event_id in self.native_spoken_ids[robot_id]:
+        seen = self.native_spoken_seen[robot_id]
+        # Identity retention uses the host admission clock, never a
+        # replay-provided timestamp. Reconnect and display overflow cannot
+        # make the same transmitted response into new conversational text.
+        while seen:
+            oldest = next(iter(seen))
+            if mac_now - seen[oldest] <= 5:
+                break
+            del seen[oldest]
+        if event_id in seen:
             return False
+        if len(seen) >= 256:
+            return False  # Never evict a still-live source ID to accept new text.
         self.remember_spoken(
             robot_id, text, sent_at,
             source="native_model_text_opus_sent_playback_unverified",
         )
         self.native_spoken_ids[robot_id].append(event_id)
+        seen[event_id] = mac_now
         return True
 
     def remember_heard(self, robot_id: str, event_id: str, transcript: str,
@@ -875,6 +893,7 @@ class CameraFrameHub:
         self.tool_history[robot_id].clear()
         self.spoken_history[robot_id].clear()
         self.native_spoken_ids[robot_id].clear()
+        self.native_spoken_seen[robot_id].clear()
         self.heard_history[robot_id].clear()
         # Do not clear heard_seen_ids or retractions on session/display loss:
         # a delayed old native HTTP receipt must remain idempotent.
