@@ -302,6 +302,21 @@ CRITICAL_TRIAL_GATES = {
             ("measured_pivot_coast_distance_mm", "mm", 0, None, False),
         ),
     },
+    "sixteen_mux_channel_400khz_pullups_rise_and_sink_trials": {
+        # Physical Fast-mode timing must hold on all 16 selected TCA9548A
+        # branches, not merely on a convenient short upstream harness.
+        # NXP UM10204 and TI TCA9548A: <=300 ns rise, <=400 pF bus load.
+        "minimum_samples": 16,
+        "quantities": (
+            ("distinct_mux_lanes_tested", "lanes", 16, 16, True),
+            ("configured_clock_khz", "kHz", 400, 400, True),
+            ("maximum_scl_rise_time_ns", "ns", 1, 300, False),
+            ("maximum_sda_rise_time_ns", "ns", 1, 300, False),
+            ("maximum_branch_bus_capacitance_pf", "pF", 1, 400, False),
+            ("continuous_poll_cycles", "cycles", 10000, None, True),
+            ("i2c_bus_recovery_events", "events", 0, 0, True),
+        ),
+    },
     "real_dual_ir_terminal_docking": {
         "minimum_samples": 3,
         "quantities": (
@@ -372,6 +387,10 @@ def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
             "robot_id", "firmware_commit", "audio_config_id",
             "mic_speaker_placement_id", "trial_capture_id",
         ))
+    if gate == "sixteen_mux_channel_400khz_pullups_rise_and_sink_trials":
+        keys.extend(("bus_topology_revision", "pullup_network_revision"))
+        if conditions.get("instrument_type") != "oscilloscope":
+            return False
     for key in keys:
         value = conditions.get(key)
         if (type(value) is not str or not value.strip()

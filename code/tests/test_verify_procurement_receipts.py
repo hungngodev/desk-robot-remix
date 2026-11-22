@@ -47,6 +47,13 @@ def measurement_for_gate(scope, gate):
                     "mic_speaker_placement_id": "measured_mount_01",
                     "trial_capture_id": "aligned_a2_capture_01",
                 } if gate == "sense_speaker_mic_double_talk" else {}),
+                **({
+                    "instrument_type": "oscilloscope",
+                    "bus_topology_revision": "two_tca9548a_0x70_0x71",
+                    "pullup_network_revision": "measured_3v3_network_01",
+                } if gate == (
+                    "sixteen_mux_channel_400khz_pullups_rise_and_sink_trials"
+                ) else {}),
             },
             "quantities": quantities,
         }
@@ -1117,4 +1124,52 @@ def test_independent_cutoff_evidence_requires_real_scope_and_fault(field, invali
     bogus["measurement"]["conditions"][field] = invalid
     assert not release.verified_scoped_record(
         bogus, SHA, lambda url: lookup(url, records=[bogus]),
+    )
+
+
+@pytest.mark.parametrize(("metric", "invalid"), [
+    ("distinct_mux_lanes_tested", 15),
+    ("configured_clock_khz", 100),
+    ("maximum_scl_rise_time_ns", 301),
+    ("maximum_sda_rise_time_ns", 301),
+    ("maximum_branch_bus_capacitance_pf", 401),
+    ("continuous_poll_cycles", 9999),
+    ("i2c_bus_recovery_events", 1),
+])
+def test_mux_fastmode_receipt_rejects_partial_lanes_or_out_of_spec(metric, invalid):
+    import copy
+
+    gate = "sixteen_mux_channel_400khz_pullups_rise_and_sink_trials"
+    good = receipt("system", gate)
+    by_name = {row["name"]: row for row in good["measurement"]["quantities"]}
+    by_name["maximum_scl_rise_time_ns"]["value"] = 300
+    by_name["maximum_sda_rise_time_ns"]["value"] = 300
+    by_name["maximum_branch_bus_capacitance_pf"]["value"] = 400
+    assert release.verified_scoped_record(
+        good, SHA, lambda url: lookup(url, records=[good]),
+    )
+    bad = copy.deepcopy(good)
+    metric_row = next(
+        row for row in bad["measurement"]["quantities"]
+        if row["name"] == metric
+    )
+    metric_row["value"] = invalid
+    metric_row["maximum"] = max(metric_row["maximum"], invalid)
+    assert not release.verified_scoped_record(
+        bad, SHA, lambda url: lookup(url, records=[bad]),
+    )
+
+
+@pytest.mark.parametrize(("field", "invalid"), [
+    ("instrument_type", "voltmeter"),
+    ("instrument_type", None),
+    ("bus_topology_revision", "tbd"),
+    ("pullup_network_revision", ""),
+])
+def test_mux_fastmode_receipt_requires_installed_bus_and_scope(field, invalid):
+    gate = "sixteen_mux_channel_400khz_pullups_rise_and_sink_trials"
+    item = receipt("system", gate)
+    item["measurement"]["conditions"][field] = invalid
+    assert not release.verified_scoped_record(
+        item, SHA, lambda url: lookup(url, records=[item]),
     )
