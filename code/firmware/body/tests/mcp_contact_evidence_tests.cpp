@@ -33,7 +33,8 @@ void poll(BodyControl& body, McpContactEvidence& evidence,
     reed = evidence.reed_closed();
     pir = evidence.pir_active();
   }
-  body.sample_optional_inputs(mask, bumper, reed, pir);
+  // Production poll_optional passes the already-qualified GPIOB state.
+  body.sample_optional_inputs(mask, bumper, reed, pir, true);
 }
 
 void duplicate_cached_gpio_never_fabricates_rising_event() {
@@ -65,12 +66,15 @@ void three_independent_gpio_conversions_emit_exactly_one_event() {
   for (std::uint32_t now : {193U, 218U, 243U})
     poll(body, evidence, reading(12, 168, true, true), now);
   CHECK(body.state().pir_events == 0U);
+  // The THIRD actual conversion is sufficient. Do not require two fake
+  // new inputs from cached 25ms polls before announcing a valid edge.
   poll(body, evidence, reading(13, 252, true, true), 252);
+  CHECK(body.state().reed_events == 1U && body.state().pir_events == 1U);
   poll(body, evidence, reading(13, 252, true, true), 277);
   poll(body, evidence, reading(13, 252, true, true), 302);
   CHECK(body.state().reed_events == 1U && body.state().pir_events == 1U);
   CHECK(body.state().reed_active && body.state().pir_active);
-  for (std::uint32_t now : {327U, 352U, 377U, 402U})
+  for (std::uint32_t now : {336U, 361U, 386U, 411U})
     poll(body, evidence, reading(14, 336, true, true), now);
   CHECK(body.state().reed_events == 1U && body.state().pir_events == 1U);
 }

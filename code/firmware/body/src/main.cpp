@@ -112,7 +112,9 @@ void poll_optional(std::uint32_t now_ms) {
     pir = contact_evidence.pir_active();
   }
 #endif
-  control.sample_optional_inputs(mask, bumper, reed, pir);
+  // McpContactEvidence already debounces distinct GPIOB acquisitions.
+  // Do not re-count cached 25ms reads as new physical reed/PIR samples.
+  control.sample_optional_inputs(mask, bumper, reed, pir, true);
 }
 
 void poll_touch(std::uint32_t now_ms) {

@@ -162,8 +162,12 @@ class BodyControl {
   // Raw normally closed bumper line is sampled every WROOM loop, before
   // the slower debounce/event classifier. Open circuit stops tracks.
   void sample_bumper_input(bool active);
+  // MCP GPIOB supplies already-debounced reed/PIR levels from three distinct
+  // verified conversions. Raw test/compatibility inputs still need the local
+  // three-call classifier; the direct bumper always keeps its own interlock.
   void sample_optional_inputs(std::uint8_t enabled_mask, bool bumper,
-                              bool reed, bool pir);
+                              bool reed, bool pir,
+                              bool qualified_optional = false);
   // Boot-time read-only identity; does not confer tilt safety or arm privilege.
   void set_imu_identity(std::uint8_t family, std::uint8_t gyro, std::uint8_t aux);
   // Raw, read-only diagnostics. No tilt or motor permission follows from it.

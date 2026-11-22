@@ -298,7 +298,8 @@ void BodyControl::sample_bumper_input(bool active) {
 }
 
 void BodyControl::sample_optional_inputs(std::uint8_t enabled_mask, bool bumper,
-                                         bool reed, bool pir) {
+                                         bool reed, bool pir,
+                                         bool qualified_optional) {
   enabled_mask &= 0x07U;
   const std::uint8_t previously_enabled = state_.extra_mask;
   state_.extra_mask = enabled_mask;
@@ -327,6 +328,18 @@ void BodyControl::sample_optional_inputs(std::uint8_t enabled_mask, bool bumper,
       *stable[i] = levels[i];
       extra_candidates_[i] = levels[i];
       extra_streaks_[i] = 1;
+      continue;
+    }
+    if (qualified_optional && i > 0) {
+      // The MCP23017 filter already required three different, ordered GPIOB
+      // conversions for this stable state. A cached 25ms poll must neither
+      // add a second debounce delay nor invent another physical edge.
+      if (levels[i] != *stable[i]) {
+        *stable[i] = levels[i];
+        if (levels[i]) ++*counts[i];
+      }
+      extra_candidates_[i] = levels[i];
+      extra_streaks_[i] = 3;
       continue;
     }
     if (levels[i] != extra_candidates_[i]) {
