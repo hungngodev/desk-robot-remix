@@ -57,14 +57,20 @@ class SensePcmWindow {
     if (first_sample_us_ == 0 && frames > 0 && frames <= 2048 &&
         end_us - (std::int64_t{frames} * 1'000'000 / kSampleRate) <
             requested_us_) return;
+    // Completion timestamps are host-clock estimates, not true PDM
+    // per-sample timestamps. Allow 2 ms of scheduler jitter, but reject a
+    // larger inferred overlap: it duplicates previously captured samples
+    // while still increasing the four-second window's frame count.
+    const std::int64_t callback_us =
+        std::int64_t{frames} * 1'000'000 / kSampleRate;
     if (!mic || !reference || frames == 0 || frames > 2048 ||
         !reference_valid || end_us <= requested_us_ ||
         end_us - requested_us_ > 6'000'000 ||
         (last_sample_us_ != 0 &&
          (end_us <= last_sample_us_ ||
           end_us - last_sample_us_ >
-              std::int64_t{frames} * 1'000'000 / kSampleRate +
-                  kMaxCallbackJitterUs)) ||
+              callback_us + kMaxCallbackJitterUs ||
+          end_us - callback_us + 2'000 < last_sample_us_)) ||
         (last_sample_us_ == 0 && end_us - requested_us_ > 500'000)) {
       failed_ = true;
       return;

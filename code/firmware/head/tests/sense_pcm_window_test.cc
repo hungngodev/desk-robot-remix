@@ -116,5 +116,30 @@ int main() {
   assert(drifted.failed() && !drifted.ready());
   assert(drifted.take().interleaved == nullptr);
   assert(drifted.discard() == data.data());
+  // Monotonic callback END timestamps alone cannot show that the inferred
+  // 20 ms source intervals do not overlap. Repeated source samples would
+  // corrupt A2 acoustic lag/drift calibration even when 64k frames arrive.
+  SensePcmWindow overlap;
+  assert(overlap.begin(data.data(), 1000000));
+  overlap.offer(mic.data(), ref.data(), 320, 1020000, true);
+  overlap.offer(mic.data(), ref.data(), 320, 1030000, true);
+  assert(overlap.failed() && !overlap.ready());
+  assert(overlap.frames_received() == 320);
+  assert(overlap.discard() == data.data());
+  // A 3 ms overlap still exceeds the bounded scheduler jitter allowance.
+  assert(overlap.begin(data.data(), 1000000));
+  overlap.offer(mic.data(), ref.data(), 320, 1020000, true);
+  overlap.offer(mic.data(), ref.data(), 320, 1037000, true);
+  assert(overlap.failed() && overlap.frames_received() == 320);
+  assert(overlap.discard() == data.data());
+  // A small 1 ms callback scheduling variation remains permissible.
+  SensePcmWindow jitter;
+  assert(jitter.begin(data.data(), 1000000));
+  for (int i = 1; i <= 200; ++i) {
+    jitter.offer(mic.data(), ref.data(), 320,
+                 1000000 + i * 20000 - (i > 1 ? 1000 : 0), true);
+  }
+  assert(jitter.ready() && !jitter.failed());
+  assert(jitter.take().frames == SensePcmWindow::kFrames);
   return 0;
 }
