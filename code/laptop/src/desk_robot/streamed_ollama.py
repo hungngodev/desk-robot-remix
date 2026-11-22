@@ -54,6 +54,14 @@ async def ollama_speech_segments(
             raise RuntimeError("Ollama streaming provider error")
         if "done" in packet and type(packet["done"]) is not bool:
             raise RuntimeError("Ollama streaming completion marker invalid")
+        # done=True means the HTTP stream ended, not necessarily that the
+        # model finished its sentence. A token-budget/length stop must never
+        # be promoted into a complete peer turn, even if it carries text.
+        # Older Ollama streams omit done_reason; explicit reasons must be stop.
+        if packet.get("done") is True and "done_reason" in packet:
+            reason = packet["done_reason"]
+            if type(reason) is not str or reason != "stop":
+                raise RuntimeError("Ollama streaming stopped before normal completion")
         message = packet.get("message", {})
         if not isinstance(message, dict):
             raise RuntimeError("Ollama streaming message invalid")

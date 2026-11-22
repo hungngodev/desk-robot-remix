@@ -576,3 +576,101 @@ async def test_kokoro_session_rejects_unconfirmed_release_and_duplicate_devices(
                 pass
     assert [request["enabled"] for request in requests] == [True, False]
 
+
+
+@pytest.mark.parametrize("reason", ["stop", None])
+async def test_ollama_normal_terminal_reason_or_legacy_absence_completes(reason):
+    terminal = {
+        "message": {"role": "assistant", "content": "All done."},
+        "done": True,
+    }
+    if reason is not None:
+        terminal["done_reason"] = reason
+    frames = [
+        {"message": {"role": "assistant", "content": "First sentence. "}, "done": False},
+        terminal,
+    ]
+    assert [s async for s in ollama_speech_segments(chunks(frames))] == [
+        "First sentence.", "All done."
+    ]
+
+
+@pytest.mark.parametrize("reason", ["length", "load", False, None])
+async def test_ollama_nonstop_terminal_never_emits_unsent_partial_tail(reason):
+    frames = [
+        {"message": {"role": "assistant", "content": "A complete sentence. "},
+         "done": False},
+        {"message": {"role": "assistant", "content": "The answer is"},
+         "done": True, "done_reason": reason},
+    ]
+    stream = ollama_speech_segments(chunks(frames))
+    assert await anext(stream) == "A complete sentence."
+    with pytest.raises(RuntimeError, match="before normal completion"):
+        await anext(stream)
+
+
+async def test_ollama_token_exhaustion_aborts_head_and_keeps_only_sent_private_text(
+    settings, tmp_path,
+):
+    """Actual NDJSON -> OllamaChat -> Conversation -> speaker abort -> SQLite."""
+    from desk_robot.memory import MemoryStore
+
+    frames = [
+        {"message": {"role": "assistant", "content": "I saw the silver key. "},
+         "done": False},
+        {"message": {"role": "assistant", "content": "It seems to be"},
+         "done": True, "done_reason": "length"},
+    ]
+    requests = []
+    def respond(request):
+        assert request.url.path == "/api/chat"
+        assert json.loads(request.content)["stream"] is True
+        requests.append(request)
+        return httpx.Response(200, text="\n".join(json.dumps(p) for p in frames))
+
+    events = []
+    class Speaker:
+        @asynccontextmanager
+        async def session(self, robots):
+            events.append("session_begin")
+            try:
+                yield
+            finally:
+                events.append("session_end")
+
+        async def say(self, robot, text):
+            events.append(("sent", robot.id, text))
+
+        async def interrupt(self, robot):
+            events.append(("head_abort", robot.id))
+
+    store = MemoryStore(tmp_path, [robot.id for robot in settings.robots])
+    model_settings = SimpleNamespace(
+        ollama_url="http://ollama.local:11434", ollama_model="qwen3",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        chat = OllamaChat(model_settings, client)
+        conversation = Conversation(settings, chat, Speaker(), memory=store)
+        with pytest.raises(RuntimeError, match="before normal completion"):
+            await conversation.run(["robot-01", "robot-02"], "what is the key?", 2)
+
+    assert len(requests) == 1  # The second pet cannot inherit a cut-off answer.
+    assert events == [
+        "session_begin",
+        ("sent", "robot-01", "I saw the silver key."),
+        ("head_abort", "robot-01"),
+        "session_end",
+    ]
+    saved = store.recent("robot-01")
+    assert len(saved) == 1
+    assert saved[0].kind == "own_utterance"
+    assert saved[0].summary == (
+        "I started to say (sent, playback unverified): I saw the silver key."
+    )
+    assert store.recent("robot-02") == []
+    assert not any(
+        message["role"] == "assistant"
+        for history in conversation.histories.values()
+        for message in history
+    )
+    assert conversation.active is None
