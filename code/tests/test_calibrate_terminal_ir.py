@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import stat
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -396,3 +398,67 @@ def test_terminal_ir_trial_jsonl_rejects_nonstandard_numeric_tokens(
     ) + "\n")
     with pytest.raises(ValueError, match="Nonfinite terminal IR trial JSON constant"):
         cal.load_trial_rows(path)
+
+
+def test_terminal_ir_evidence_append_is_private_and_keeps_all_positions(tmp_path):
+    path = tmp_path / "private" / "dock_ir.jsonl"
+    rows = position_records()
+    for section in (rows[:20], rows[20:40], rows[40:]):
+        cal.append_trial_rows(path, section)
+    assert cal.load_trial_rows(path) == rows
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_terminal_ir_evidence_symlink_cannot_overwrite_other_file(tmp_path):
+    directory = tmp_path / "private"
+    directory.mkdir(mode=0o700)
+    original = tmp_path / "other.jsonl"
+    original.write_text("DO NOT TOUCH", encoding="utf-8")
+    link = directory / "trial.jsonl"
+    link.symlink_to(original)
+    with pytest.raises(OSError):
+        cal.append_trial_rows(link, position_records()[:1])
+    assert original.read_text(encoding="utf-8") == "DO NOT TOUCH"
+
+
+def test_terminal_ir_evidence_rejects_parent_alias_without_side_effects(tmp_path):
+    actual = tmp_path / "actual"
+    actual.mkdir(mode=0o700)
+    alias = tmp_path / "alias"
+    alias.symlink_to(actual, target_is_directory=True)
+    with pytest.raises(ValueError, match="Unsafe"):
+        cal.append_trial_rows(alias / "trial.jsonl", position_records()[:1])
+    assert not (actual / "trial.jsonl").exists()
+    with pytest.raises(ValueError, match="Unsafe"):
+        cal.append_trial_rows(
+            tmp_path / "fresh" / ".." / "actual" / "injected.jsonl",
+            position_records()[:1],
+        )
+    assert not (actual / "injected.jsonl").exists()
+
+
+def test_terminal_ir_evidence_rejects_public_or_linked_file(tmp_path):
+    directory = tmp_path / "private"
+    directory.mkdir(mode=0o700)
+    public = directory / "public.jsonl"
+    public.write_text("ORIGINAL", encoding="utf-8")
+    os.chmod(public, 0o644)
+    with pytest.raises(ValueError, match="owned private regular file"):
+        cal.append_trial_rows(public, position_records()[:1])
+    assert public.read_text(encoding="utf-8") == "ORIGINAL"
+    os.chmod(public, 0o600)
+    second_name = directory / "second.jsonl"
+    os.link(public, second_name)
+    with pytest.raises(ValueError, match="owned private regular file"):
+        cal.append_trial_rows(second_name, position_records()[:1])
+    assert public.read_text(encoding="utf-8") == "ORIGINAL"
+
+
+def test_terminal_ir_evidence_rejects_nonregular_fifo_without_blocking(tmp_path):
+    directory = tmp_path / "private"
+    directory.mkdir(mode=0o700)
+    fifo = directory / "fifo"
+    os.mkfifo(fifo)
+    with pytest.raises(OSError):
+        cal.append_trial_rows(fifo, position_records()[:1])

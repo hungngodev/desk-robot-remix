@@ -11,6 +11,7 @@ import asyncio
 import json
 import math
 import os
+import stat
 import time
 from pathlib import Path
 
@@ -18,6 +19,72 @@ import httpx
 from desk_robot.dock_ir import dock_beacon_code, validate_ir
 
 LABELS = ("left", "center", "right")
+
+def _private_trial_parent_fd(parent: Path) -> int:
+    """Create private descendants through verified directory handles."""
+    absolute = parent.absolute()
+    if ".." in absolute.parts or parent.is_symlink():
+        raise ValueError("Unsafe terminal IR trial directory alias or traversal")
+    descriptor = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for name in absolute.parts[1:]:
+            owner = os.fstat(descriptor)
+            try:
+                entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                os.mkdir(name, mode=0o700, dir_fd=descriptor)
+                entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            if stat.S_ISLNK(entry.st_mode):
+                # macOS /var is a root-owned alias under a root-owned parent.
+                if (entry.st_uid != 0 or owner.st_uid != 0
+                        or stat.S_IMODE(owner.st_mode) & 0o022):
+                    raise ValueError("Unsafe terminal IR trial directory alias")
+            elif not stat.S_ISDIR(entry.st_mode):
+                raise ValueError("Terminal IR trial parent is not a directory")
+            flags = os.O_RDONLY | os.O_DIRECTORY
+            if not stat.S_ISLNK(entry.st_mode):
+                flags |= os.O_NOFOLLOW
+            next_descriptor = os.open(name, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_descriptor
+        leaf = os.fstat(descriptor)
+        if (leaf.st_uid != os.geteuid()
+                or stat.S_IMODE(leaf.st_mode) & 0o077):
+            raise ValueError(
+                "Terminal IR trial directory must be owned and private mode 0700"
+            )
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def append_trial_rows(path: Path, rows: list[dict]) -> None:
+    """Append captured JSONL only to one owned private regular file."""
+    descriptor = _private_trial_parent_fd(path.parent)
+    try:
+        # NONBLOCK prevents a substituted FIFO from hanging the capture tool.
+        flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK
+        file_descriptor = os.open(path.name, flags, 0o600, dir_fd=descriptor)
+        try:
+            target = os.fstat(file_descriptor)
+            if (not stat.S_ISREG(target.st_mode)
+                    or target.st_uid != os.geteuid()
+                    or target.st_nlink != 1
+                    or stat.S_IMODE(target.st_mode) & 0o077):
+                raise ValueError(
+                    "Terminal IR trial output must be an owned private regular file"
+                )
+            with os.fdopen(file_descriptor, "a", encoding="utf-8") as output:
+                file_descriptor = -1
+                for row in rows:
+                    output.write(json.dumps(row, separators=(",", ":")) + "\n")
+        finally:
+            if file_descriptor >= 0:
+                os.close(file_descriptor)
+    finally:
+        os.close(descriptor)
+
 
 
 def _unique_trial_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -237,10 +304,7 @@ def main() -> None:
         args.api, os.environ.get(args.token_env, ""), args.robot,
         args.label, args.samples, args.interval, args.dock_id,
     ))
-    args.out.parent.mkdir(parents=True, exist_ok=True)
-    with args.out.open("a", encoding="utf-8") as file:
-        for row in rows:
-            file.write(json.dumps(row, separators=(",", ":")) + "\n")
+    append_trial_rows(args.out, rows)
     print(json.dumps({
         "label": args.label, "records_written": len(rows),
         "output": str(args.out), "physical_acceptance_pass": False,
