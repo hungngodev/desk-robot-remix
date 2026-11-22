@@ -171,6 +171,28 @@ int main() {
     CHECK(!stale_pulse.poll(200));
     CHECK(!stale_pulse.sample().valid); // FIFO empty: no fresh paw event
     CHECK(stale_pulse.sample().sample_seq == 1U);
+    // A long delay is ambiguous even with just two queued FIFO records and
+    // no overflow. Old paw contact must not gain a new source timestamp.
+    TwoWire delayed_pulse_wire;
+    desk_robot::PulsePad delayed_pulse;
+    CHECK(delayed_pulse.begin(delayed_pulse_wire));
+    CHECK(delayed_pulse.poll(0));
+    const auto before_gap_seq = delayed_pulse.sample().sample_seq;
+    CHECK(before_gap_seq == 1U);
+    delayed_pulse_wire.pulse_fifo_write_pointer = 6;
+    CHECK(!delayed_pulse.poll(500));
+    CHECK(!delayed_pulse.sample().valid);
+    CHECK(delayed_pulse.sample().sample_seq == before_gap_seq);
+    CHECK(delayed_pulse_wire.pulse_fifo_read_pointer == 6);
+    CHECK(delayed_pulse_wire.pulse_fifo_overflow == 0);
+    CHECK(delayed_pulse_wire.ranges == 0 && delayed_pulse_wire.extras == 0);
+    // A subsequent independently acquired conversion restores raw contact.
+    delayed_pulse_wire.pulse_fifo_write_pointer = 7;
+    CHECK(delayed_pulse.poll(570));
+    CHECK(delayed_pulse.sample().valid);
+    CHECK(delayed_pulse.sample().sample_seq == before_gap_seq + 1);
+    CHECK(delayed_pulse_wire.pulse_fifo_read_pointer == 7);
+    CHECK(delayed_pulse_wire.ranges == 0 && delayed_pulse_wire.extras == 0);
     // A completely full MAX30102 FIFO can have matching write/read
     // pointers. Its independent overflow counter must still block old
     // optical evidence and recover only after a genuinely new conversion.

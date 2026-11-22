@@ -84,6 +84,9 @@ bool PulsePad::begin(TwoWire& wire) {
 bool PulsePad::poll(std::uint32_t now_ms) {
   if (!sample_.present || (polled_ && now_ms - last_ms_ < 60U))
     return false;
+  // The FIFO has no capture timestamps. After a stalled body poll, even
+  // one to four buffered records may be old, despite no FIFO overflow.
+  const bool missed_poll_window = polled_ && now_ms - last_ms_ > 250U;
   polled_ = true;
   last_ms_ = now_ms;
   if (!select()) { close(); sample_.valid = false; return false; }
@@ -102,11 +105,12 @@ bool PulsePad::poll(std::uint32_t now_ms) {
   const std::uint8_t available =
       static_cast<std::uint8_t>((write_pointer - read_pointer) & 31U);
   // The MAX30102 FIFO_RD_PTR (0x06) is writable. If the body loop was
-  // delayed, the oldest four of a longer backlog are NOT fresh paw contact.
-  // Drop that backlog in one bounded register write instead of assigning
-  // now_ms to samples acquired before the pause. A new reading must arrive
-  // on a later poll before an event may be emitted.
-  if (ok && (available > 4U || (overflow & 31U) != 0U)) {
+  // delayed, even a short backlog may contain stale paw contact. Reject
+  // elapsed polls exceeding 250ms as well as count and overflow anomalies.
+  // Drop any ambiguous backlog without assigning it a new capture time.
+  // A new reading must arrive on a later poll before an event is emitted.
+  if (ok && (missed_poll_window || available > 4U ||
+             (overflow & 31U) != 0U)) {
     // A full FIFO can wrap both pointers to the same value. The hardware
     // overflow counter is independent evidence that samples were lost.
     // Clear both old data and the overflow flag before accepting new ones.
