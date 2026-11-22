@@ -328,11 +328,13 @@ def verified_manual_review(row: dict, sha: str, lookup=github_json) -> bool:
         and comment.get("author_association") in {"OWNER", "MEMBER", "COLLABORATOR"}
         and isinstance(body, str)
         and isinstance(identifier, int)
-        and bool(re.search(
-            rf"\bACCEPTED\s+procedure\s*#?{identifier}\b",
-            body, re.IGNORECASE,
+        # A mere mention can be a rejection ("NOT ACCEPTED"), a quote or
+        # historical discussion. Accept only a deliberate, standalone
+        # affirmative reviewer statement bound to the exact tested SHA.
+        and bool(re.fullmatch(
+            rf"ACCEPTED procedure #?{identifier} at {re.escape(sha)}",
+            body.strip(), re.IGNORECASE,
         ))
-        and sha in body
     )
 
 

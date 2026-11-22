@@ -452,6 +452,38 @@ def test_online_manual_review_requires_real_matching_pr_comment():
     )
 
 
+def test_manual_review_rejects_negated_quoted_or_ambiguous_acceptance():
+    row = promoted("MEASURED")["procedures"][0]
+    accepted = f"ACCEPTED procedure 9 at {SHA}"
+
+    def reviewed(url, body):
+        if url.endswith("/issues/comments/5678"):
+            return {**lookup(url), "body": body}
+        return lookup(url)
+
+    for affirmative in (accepted, f"ACCEPTED procedure #9 at {SHA}"):
+        resolver = lambda url, body=affirmative: reviewed(url, body)
+        assert verify.verified_manual_review(row, SHA, resolver)
+        assert verify.audit(full_ledger_with(row), resolver) == []
+
+    for rejected in (
+        f"NOT {accepted}",
+        f"REJECTED: previously {accepted}",
+        f"> {accepted}",
+        f"Discussion mentioned {accepted}",
+        f"{accepted} but this trial is REJECTED",
+        f"{accepted}\nNOT ACCEPTED procedure 9 at {SHA}",
+        f"ACCEPTED procedure 8 at {SHA}",
+        f"ACCEPTED procedure 9 at {'b' * 40}",
+    ):
+        resolver = lambda url, body=rejected: reviewed(url, body)
+        assert not verify.verified_manual_review(row, SHA, resolver)
+        assert any(
+            "manual review not verified" in problem
+            for problem in verify.audit(full_ledger_with(row), resolver)
+        )
+
+
 def test_online_physical_receipts_refuse_placeholder_signoff_identities():
     for field, wrong in [
         ("operator", "bench engineer"),
