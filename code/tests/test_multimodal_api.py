@@ -970,8 +970,8 @@ def test_power_tool_does_not_write_old_sensor_receipt_into_new_human_turn(
     }
     with TestClient(create_app(settings, runtime=runtime)) as client:
         result = client.get(f"/v1/pet/{robot}/power-status", headers=headers)
-        assert result.status_code == 200
-        assert result.json()["reported_cell_mv"] == 3820
+        assert result.status_code == 409
+        assert "superseded" in result.json()["detail"]
         assert visual._turn_epoch[robot] == 11
         assert hub.recent_tool_context(robot, __import__("time").monotonic()) == []
 
@@ -2444,7 +2444,7 @@ def test_native_model_speech_text_enters_shared_mac_context_without_disk_storage
         ).status_code == 422
         assert client.post(
             url, headers=auth, json={**payload, "sent_at_us": 1}
-        ).status_code == 400
+        ).status_code == 403
         assert client.post(
             url, headers=auth, json={**payload, "sent_at_us": 10 ** 20}
         ).status_code == 422

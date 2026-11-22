@@ -3319,7 +3319,7 @@ def test_native_sent_receipt_seen_ids_survive_twelve_history_entries():
     now = time.monotonic()
 
     def receipt(index):
-        return "omni_sent_" + "a" * 12 + f"{index:020x}"
+        return "omni_sent_" + "a" * 12 + "_" + f"{index:020x}"
 
     for index in range(13):
         assert hub.remember_native_spoken(
