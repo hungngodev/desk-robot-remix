@@ -187,3 +187,28 @@ def test_a5_cli_require_pass_rejects_mixed_configuration(tmp_path):
     assert result.returncode != 0
     assert "A5 trials must use the same firmware and calibration" in result.stderr
     assert '"physical_acceptance_pass": true' not in result.stdout
+
+
+@pytest.mark.parametrize("duplicate", ["assisted", "firmware"])
+def test_a5_cli_rejects_duplicate_column_headers(tmp_path, duplicate):
+    rows = trial_rows()
+    headers = list(rows[0])
+    duplicate_at = headers.index(duplicate)
+    headers.insert(duplicate_at, duplicate)
+    csv_path = tmp_path / "contradictory-a5-headers.csv"
+    with csv_path.open("w", newline="") as stream:
+        writer = csv.writer(stream)
+        writer.writerow(headers)
+        for row in rows:
+            values = [row[header] for header in headers]
+            # The later column looks admissible to DictReader while the
+            # earlier column contradicts it, so last-key-wins is unsafe.
+            values[duplicate_at] = "true" if duplicate == "assisted" else "old-firmware"
+            writer.writerow(values)
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--file", str(csv_path), "--require-pass"],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "unique, nonempty column names" in result.stderr
+    assert '"physical_acceptance_pass": true' not in result.stdout

@@ -82,8 +82,16 @@ if __name__ == "__main__":
     p.add_argument("--robot", default="robot-01")
     p.add_argument("--require-pass", action="store_true")
     args = p.parse_args()
-    with args.file.open() as stream:
-        result = summarize(list(csv.DictReader(stream)), args.robot)
+    with args.file.open(newline="") as stream:
+        reader = csv.DictReader(stream)
+        headers = reader.fieldnames
+        # DictReader silently overwrites earlier values for repeated names.
+        # Contradictory assisted/configuration fields must never pass A5.
+        if (not headers or any(not name or name != name.strip()
+                               for name in headers)
+                or len(headers) != len(set(headers))):
+            raise ValueError("A5 physical trial CSV needs unique, nonempty column names")
+        result = summarize(list(reader), args.robot)
     print(json.dumps(result, indent=2))
     if args.require_pass and not result["physical_acceptance_pass"]:
         p.exit(1, "Physical trial target has not been met.\n")
