@@ -1196,7 +1196,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"power\":{\"cell_mv\":%u,\"soc_centi\":%u,\"bus_mv\":%u,"
         "\"shunt_uv\":%d,\"fuel_valid\":%s,\"fuel_seq\":%lu,\"monitor_valid\":%s,"
         "\"pack_ma\":%d,\"pack_valid\":%s,\"pack_seq\":%lu,"
-        "\"current_calibrated\":false},"
+        "\"pack_age_ms\":%lu,\"current_calibrated\":false},"
         "\"proximity\":{\"raw\":%u,\"valid\":%s,\"gesture\":%u,\"gesture_events\":%lu,\"boot_id\":%lu,\"physically_qualified\":false},"
         "\"dock\":{\"present\":%s,\"valid\":%s,\"left_seated\":%s,\"right_seated\":%s,"
         "\"input_good\":%s,\"charge_indicated\":%s,\"seq\":%lu,\"age_ms\":%lu,"
@@ -1248,6 +1248,8 @@ void BodyControl::execute(const char* line, std::size_t length,
             a.gauge.pack_current_ma : 0,
         monitor_fresh && a.gauge.pack_current_valid ? "true" : "false",
         static_cast<unsigned long>(a.gauge.monitor_sample_seq),
+        static_cast<unsigned long>(a.gauge.monitor_sample_seq != 0U ?
+            now_ms - a.gauge.monitor_at_ms : 0U),
         static_cast<unsigned>(a.proximity.raw),
         proximity_fresh ? "true" : "false",
         static_cast<unsigned>(a.proximity.gesture_direction),

@@ -227,7 +227,7 @@ async def test_reboot_with_monotonic_dock_and_pack_sequences_is_not_stable(
     for index, sample in enumerate(samples):
         sample["power"].update(
             shunt_uv=150, pack_ma=30, pack_valid=True,
-            pack_seq=index + 40, monitor_valid=True,
+            pack_seq=index + 40, pack_age_ms=35, monitor_valid=True,
         )
     # A restarted WROOM may produce different monotonic GPIO and INA226
     # sequences. Require one boot epoch rather than trusting those counts.
@@ -360,6 +360,7 @@ async def test_new_ina226_current_receipts_report_direction_without_charger_auth
             pack_ma=raw_ma,
             pack_valid=True,
             pack_seq=index + 19,
+            pack_age_ms=35,
             monitor_valid=True,
         )
     result = await observe_dock_evidence(FakeHead(samples), "robot-01")
@@ -383,7 +384,7 @@ async def test_raw_pack_replay_cannot_forge_three_current_conversions(monkeypatc
     for data in samples:
         data["power"].update(
             shunt_uv=150, pack_ma=30, pack_valid=True,
-            pack_seq=9, monitor_valid=True,
+            pack_seq=9, pack_age_ms=35, monitor_valid=True,
         )
     result = await observe_dock_evidence(FakeHead(samples), "robot-01")
     assert result["stable_three_samples"]  # independent dock pin samples pass
@@ -391,3 +392,92 @@ async def test_raw_pack_replay_cannot_forge_three_current_conversions(monkeypatc
     assert result["raw_pack_samples_fresh"] is False
     assert result["raw_pack_ma"] == []
     assert result["charging_verified"] is False
+
+
+@pytest.mark.parametrize(("source_age_ms", "transport_ms", "fresh"), [
+    (35, 20, True),
+    (480, 100, False),
+    (499, 2, False),
+])
+async def test_pack_current_consumer_age_is_independent_of_dock_pin_age(
+    monkeypatch, source_age_ms, transport_ms, fresh,
+):
+    import desk_robot.dock_evidence as evidence
+
+    now = [200.0]
+    monkeypatch.setattr(evidence, "monotonic", lambda: now[0])
+
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr(evidence.asyncio, "sleep", fast)
+
+    class TimedHead(FakeHead):
+        async def aux_status(self):
+            now[0] += transport_ms / 1000.0
+            return await super().aux_status()
+
+    samples = fresh_samples()
+    for index, record in enumerate(samples):
+        record["dock"]["age_ms"] = 10
+        record["power"].update(
+            shunt_uv=-150, pack_ma=-30, pack_valid=True,
+            pack_seq=index + 1, monitor_valid=True,
+            pack_age_ms=source_age_ms,
+        )
+    head = TimedHead(samples)
+    result = await observe_dock_evidence(head, "robot-01")
+    assert result["stable_three_samples"]
+    assert result["state"] == "charger_reports_active"
+    assert result["raw_pack_samples_fresh"] is fresh
+    assert result["raw_pack_direction"] == (
+        "out_of_pack_unqualified" if fresh
+        else "current_sample_stale_or_age_unverified"
+    )
+    assert result["raw_pack_ma"] == ([-30] * 3 if fresh else [])
+    assert result["charger_indicator_net_discharge_conflict"] is fresh
+    assert not result["battery_current_measured"]
+    assert not result["charging_verified"] and not result["charging_authorized"]
+    assert head.commands == []
+
+
+async def test_old_pack_telemetry_without_age_cannot_claim_fresh_current(monkeypatch):
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for index, record in enumerate(samples):
+        record["power"].update(
+            shunt_uv=150, pack_ma=30, pack_valid=True,
+            pack_seq=index + 9, monitor_valid=True,
+        )
+    result = await observe_dock_evidence(FakeHead(samples), "robot-01")
+    assert result["stable_three_samples"]
+    assert not result["raw_pack_samples_fresh"]
+    assert result["raw_pack_direction"] == "current_sample_stale_or_age_unverified"
+    assert not result["charging_verified"] and not result["charging_authorized"]
+
+
+@pytest.mark.parametrize("invalid", [True, -1, 0.5, 500, 0xffffffff + 1])
+def test_pack_age_source_contract_rejects_unqualified_timestamp(invalid):
+    from desk_robot.aux import validate_aux
+
+    frame = payload()
+    frame["power"].update(
+        shunt_uv=150, pack_ma=30, pack_valid=True, pack_seq=1,
+        monitor_valid=True, pack_age_ms=invalid,
+    )
+    with pytest.raises(ValueError, match="INA226 pack"):
+        validate_aux(frame, "robot-01")
+
+
+def test_wroom_pack_age_field_uses_real_monitor_sample_clock():
+    from pathlib import Path
+
+    source = (Path(__file__).resolve().parents[1]
+              / "firmware/body/lib/BodyControl/BodyControl.cpp").read_text()
+    assert r'"pack_age_ms":%lu' not in source  # source escapes JSON in C++
+    assert r'\"pack_age_ms\":%lu' in source
+    assert "now_ms - a.gauge.monitor_at_ms" in source
+    assert "a.gauge.monitor_sample_seq != 0U" in source

@@ -82,10 +82,15 @@ async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> di
             and force_boot == proximity_boot else None
         )
         power = sample["power"]
+        pack_age_ms = power.get("pack_age_ms")
         raw_pack_samples.append((
             power.get("pack_valid", False),
             power.get("pack_seq", 0),
             power.get("pack_ma", 0),
+            # An old WROOM image without this provenance may still
+            # report read-only pins, but never fresh net pack current.
+            type(pack_age_ms) is int
+            and pack_age_ms + request_ms < 500,
         ))
         snapshots.append((
             dock["present"], dock["valid"], dock["left_seated"],
@@ -120,6 +125,9 @@ async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> di
     # cached HTTPS replies as three new battery-current measurements.
     # Raw mA is ALWAYS uncalibrated and cannot enable dock charging.
     if all(item[0] and item[1] > 0 for item in raw_pack_samples):
+        if not all(item[3] for item in raw_pack_samples):
+            result["raw_pack_direction"] = "current_sample_stale_or_age_unverified"
+            return result
         ids = [item[1] for item in raw_pack_samples]
         if newer(ids[1], ids[0]) and newer(ids[2], ids[1]):
             amps = [item[2] for item in raw_pack_samples]
