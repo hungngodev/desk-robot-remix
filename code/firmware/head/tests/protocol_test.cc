@@ -40,6 +40,18 @@ int main() {
     assert(BodySafetyUnhealthy(true, true, "cliff"));
     assert(BodySafetyUnhealthy(true, true, ""));
     assert(BodySafetyUnhealthy(true, false, "not_required"));
+    // A genuine WROOM dock interlock is still unhealthy and motor stopped.
+    // Only a known, disarmed, required, not-ready local status may get a
+    // truthful dock-lock label. Any stale/malformed status reverts to STOP.
+    assert(BodySafetyUnhealthy(true, false, "dock_power_connected"));
+    assert(BodyDockLockoutObserved(true, false, false, "dock_power_connected"));
+    assert(!BodyDockLockoutObserved(true, true, false, "dock_power_connected"));
+    assert(!BodyDockLockoutObserved(false, false, false, "dock_power_connected"));
+    assert(!BodyDockLockoutObserved(true, false, true, "dock_power_connected"));
+    assert(!BodyDockLockoutObserved(true, false, false, "dock_monitor_latched"));
+    assert(!BodyDockLockoutObserved(true, false, false, "cliff"));
+    assert(!BodyDockLockoutObserved(true, false, false, "none"));
+    assert(!BodyDockLockoutObserved(true, false, false, ""));
 
     // Cosmetic cues are latest only, time bounded, and never motor commands.
     CosmeticMoodCue mood;

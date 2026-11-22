@@ -490,6 +490,10 @@ BodyInteraction Bridge::PollInteraction() {
     // and let the physical body continue to own its independent motor stop.
     observation.fault = BodySafetyUnhealthy(
         cJSON_IsTrue(required), cJSON_IsTrue(ready), fault->valuestring);
+    observation.dock_lockout = BodyDockLockoutObserved(
+        cJSON_IsTrue(required), cJSON_IsTrue(ready),
+        cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(json.get(), "armed")),
+        fault->valuestring);
     observation.valid = true;
     return observation;
 }

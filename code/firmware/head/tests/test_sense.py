@@ -239,6 +239,28 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertEqual((self.root / 'main/boards/common/esp32_camera.cc').read_text()
                          .count('camera_lock(AccessMutex())'), 6)
 
+    def test_dock_contact_lockout_ui_keeps_local_stop_and_rejects_stale_status(self):
+        """A physical contact latch is not a charging or seating certificate."""
+        board = HEAD / 'sense/desk_robot_sense.cc'
+        source = board.read_text()
+        bridge = (HEAD / 'overlay/robot_bridge.cc').read_text()
+        header = (HEAD / 'overlay/robot_bridge.h').read_text()
+        protocol = (HEAD / 'overlay/robot_protocol.h').read_text()
+        assert 'bool dock_lockout = false;' in header
+        assert 'BodyDockLockoutObserved(' in protocol
+        assert 'observation.dock_lockout = BodyDockLockoutObserved(' in bridge
+        assert 'board->body_dock_lockout_active_.store(false,' in source
+        assert 'body_unhealthy && valid_at != 0 &&' in source
+        assert 'now_ms - valid_at <= 1200U &&' in source
+        assert 'dock_lockout != last_rendered_dock_lockout' in source
+        assert 'board->display_->SetStatus("Dock lock: motors off");' in source
+        assert 'board->display_->SetStatus("Body safety stop");' in source
+        assert 'if (body_unhealthy || !face_available)' in source
+        assert 'if (body_unhealthy)' in source
+        assert 'charging' not in source.split(
+            'board->display_->SetStatus("Dock lock: motors off");', 1,
+        )[0].split('if (body_unhealthy &&', 1)[-1].lower()
+
     def test_boot_mute_while_speaking_closes_pinned_xiaozhi_channel(self):
         """The BOOT privacy action must close the active speaker session."""
         overlay.apply(self.root, "sense")

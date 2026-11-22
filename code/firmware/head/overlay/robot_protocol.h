@@ -53,6 +53,15 @@ inline bool BodySafetyUnhealthy(bool required, bool ready,
     return !required || !ready || fault != "none";
 }
 
+// Read-only OLED classification of the WROOM's latched dock contact stop.
+// This is NOT proof of current seating, electrical charging or a motor permit.
+// Other faults and any unready/missing safety profile retain the generic STOP.
+inline bool BodyDockLockoutObserved(bool required, bool ready, bool armed,
+                                    std::string_view fault) {
+    return required && !ready && !armed &&
+           fault == "dock_power_connected";
+}
+
 // A pure cosmetic one-shot, not a sensor HSM, speech or motor authority.
 // This mailbox carries the Mac's already validated decision to the local
 // OLED owner and expires if the face task stalls or Xiaozhi owns the screen.

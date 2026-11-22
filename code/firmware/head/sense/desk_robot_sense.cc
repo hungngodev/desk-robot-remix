@@ -46,6 +46,7 @@ private:
     // A 350 ms UART timeout cannot block the OLED animation task.
     // Keep one actual bridge UART owner; only read-only polling moves tasks.
     std::atomic<bool> body_fault_active_{true};
+    std::atomic<bool> body_dock_lockout_active_{false};
     std::atomic<uint32_t> body_last_valid_ms_{0};
     TaskHandle_t face_task_ = nullptr;
     TaskHandle_t body_poll_task_ = nullptr;
@@ -94,6 +95,8 @@ private:
                 const uint32_t at_ms =
                     static_cast<uint32_t>(esp_timer_get_time() / 1000);
                 board->body_fault_active_.store(body.fault, std::memory_order_release);
+                board->body_dock_lockout_active_.store(
+                    body.dock_lockout, std::memory_order_release);
                 board->body_last_valid_ms_.store(at_ms, std::memory_order_release);
                 // WROOM/CAP touch counters remain available to the Mac's
                 // unified sensor timeline. They must not force a local
@@ -101,6 +104,7 @@ private:
             } else {
                 // A timeout or malformed status cannot leave healthy eyes.
                 board->body_fault_active_.store(true, std::memory_order_release);
+                board->body_dock_lockout_active_.store(false, std::memory_order_release);
                 board->body_last_valid_ms_.store(0, std::memory_order_release);
             }
             vTaskDelay(pdMS_TO_TICKS(300));
@@ -111,6 +115,7 @@ private:
         auto* board = static_cast<DeskRobotSenseBoard*>(context);
         using namespace stackchan::behavior;
         bool last_rendered_fault = false;
+        bool last_rendered_dock_lockout = false;
         // Xiaozhi may rewrite OLED status while a safety fault remains
         // latched. Periodically restore the factual local fault overlay,
         // but never flood the shared I2C display every 100 ms.
@@ -132,6 +137,13 @@ private:
             const bool body_unhealthy =
                 valid_at == 0 || now_ms - valid_at > 1200U ||
                 board->body_fault_active_.load(std::memory_order_acquire);
+            // A dock-contact fault is still a mandatory local motor STOP.
+            // This only distinguishes its factual OLED label while the
+            // authenticated WROOM status is fresh. Never call it charging.
+            const bool dock_lockout =
+                body_unhealthy && valid_at != 0 &&
+                now_ms - valid_at <= 1200U &&
+                board->body_dock_lockout_active_.load(std::memory_order_acquire);
             // Touch is a physical observation, not an unconditional mood.
             // The Mac may request a transient face cue through the existing
             // consented cosmetic route; WROOM independently owns local STOP.
@@ -219,11 +231,17 @@ private:
                 // No mandatory warning speech or motor authority follows.
                 if (body_unhealthy &&
                     (!last_rendered_fault || (idle && !last_was_idle) ||
+                     dock_lockout != last_rendered_dock_lockout ||
                      now_ms - last_fault_status_refresh_ms >= 750U)) {
-                    board->display_->SetStatus("Body safety stop");
+                    if (dock_lockout)
+                        board->display_->SetStatus("Dock lock: motors off");
+                    else
+                        board->display_->SetStatus("Body safety stop");
                     last_fault_status_refresh_ms = now_ms;
                     last_rendered_fault = true;
+                    last_rendered_dock_lockout = dock_lockout;
                 } else if (last_rendered_fault && !body_unhealthy) {
+                    last_rendered_dock_lockout = false;
                     // Restore the pinned Xiaozhi localized speaking/listening
                     // status promptly. Continuous listening may never go idle.
                     if (device_state == kDeviceStateSpeaking) {

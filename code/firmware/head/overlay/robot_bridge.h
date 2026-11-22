@@ -22,6 +22,7 @@ struct BodyInteraction {
     int touch_events = 0;
     int cap_touch_events = 0; // actual optional eight-zone CAP1188 rise counters
     bool fault = false;
+    bool dock_lockout = false; // source-latched WROOM contact, never charging proof
     bool valid = false;
 };
 
