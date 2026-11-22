@@ -66,7 +66,22 @@ def register_readonly_context_routes(
         # Capture the exact Mac human epoch BEFORE slow WROOM HTTP. A new
         # voice turn during the read must not inherit this old fuel gauge.
         owner = requested_tool_context(request, robot_id)
+        # An explicit Xiaozhi tool response must belong to a real human turn.
+        # A dashboard poll has no turn lease and remains independently readable.
+        if request.headers.get("x-desk-robot-tool-receipt") == "1" and owner is None:
+            raise HTTPException(409, "Voice power tool turn identity unavailable")
         data = await coordinator().heads[robot_id].aux_status()
+        if owner is not None:
+            # The read yields to a new VAD or a head reconnect. Do not return
+            # its old gauge payload to the newer model turn merely because
+            # the cache helper refuses to remember a stale receipt.
+            visual, generation = owner
+            epochs = getattr(visual, "_turn_epoch", None)
+            if (getattr(app.state.runtime, "multimodal", None) is not visual
+                    or type(generation) is not int
+                    or not isinstance(epochs, dict)
+                    or epochs.get(robot_id) != generation):
+                raise HTTPException(409, "Voice power tool turn superseded during read")
         if (not isinstance(data, dict)
                 or data.get("robot_id") != robot_id
                 or not isinstance(data.get("power"), dict)):
