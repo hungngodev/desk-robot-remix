@@ -335,6 +335,26 @@ CRITICAL_TRIAL_GATES = {
             ("charge_authorizations_from_chg_pin", "events", 0, 0, True),
         ),
     },
+    "battery_pack_ntc_to_charger_ts_thermal_fault_trial": {
+        # A real installed 10k R25 pack NTC must drive BQ24075 TS rather than
+        # a fixed resistor. Four independent fault cases must inhibit charge
+        # while CHG status alone never certifies net pack current.
+        # t_DGL(TS)=50ms is typical, not a guaranteed universal max.
+        "minimum_samples": 5,
+        "quantities": (
+            ("thermal_cutoff_latency_ms", "ms", 0, None, False),
+            ("installed_pack_ntc_r25_ohm", "ohm", 10000, 10000, True),
+            ("pack_ntc_third_lead_verified", "trials", 1, None, True),
+            ("ts_open_suspends_charge_trials", "trials", 1, None, True),
+            ("ts_short_suspends_charge_trials", "trials", 1, None, True),
+            ("cold_ntc_suspends_charge_trials", "trials", 1, None, True),
+            ("hot_ntc_suspends_charge_trials", "trials", 1, None, True),
+            ("normal_ntc_resume_trials", "trials", 1, None, True),
+            ("independent_ammeter_fault_direction_checks", "checks", 4, None, True),
+            ("maximum_positive_pack_charge_during_fault_ma", "mA", 0, 0, False),
+            ("chg_only_charge_authorization_events", "events", 0, 0, True),
+        ),
+    },
     "real_dual_ir_terminal_docking": {
         "minimum_samples": 3,
         "quantities": (
@@ -416,6 +436,16 @@ def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
             "charger_indicator_conflict_fixture",
         ))
         if conditions.get("instrument_type") != "independent_ammeter":
+            return False
+    if gate == "battery_pack_ntc_to_charger_ts_thermal_fault_trial":
+        keys.extend((
+            "pack_thermistor_revision", "ts_network_schematic_revision",
+            "thermal_capture_id", "independent_ammeter_capture_id",
+            "charge_enable_fixture",
+        ))
+        if (conditions.get("instrument_type")
+                != "temperature_chamber_and_independent_ammeter"
+                or conditions.get("fixed_ts_bypass_removed") is not True):
             return False
     for key in keys:
         value = conditions.get(key)

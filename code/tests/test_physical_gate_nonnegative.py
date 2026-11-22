@@ -25,6 +25,33 @@ def physical_reading(gate, *, value, minimum, maximum):
         "setup": "identified mounted test fixture",
         "instrument": "calibrated measuring instrument",
     }
+    if gate == "battery_pack_ntc_to_charger_ts_thermal_fault_trial":
+        specification = release.CRITICAL_TRIAL_GATES[gate]
+        conditions.update({
+            "installed_hardware": "inspected pack and BQ24075 TS",
+            "procedure_revision": "isolated_ts_fault_01",
+            "instrument_type": "temperature_chamber_and_independent_ammeter",
+            "fixed_ts_bypass_removed": True,
+            "pack_thermistor_revision": "three_wire_10k_R25_A",
+            "ts_network_schematic_revision": "BQ24075_TS_revA",
+            "thermal_capture_id": "four_fault_chamber_01",
+            "independent_ammeter_capture_id": "pack_ammeter_01",
+            "charge_enable_fixture": "isolated_bench_ce_01",
+        })
+        quantities = [
+            {
+                "name": key, "unit": units, "value": lower,
+                "minimum": 0, "maximum": upper if upper is not None
+                else max(lower, 10),
+            }
+            for key, units, lower, upper, _ in specification["quantities"]
+        ]
+        timer = next(row for row in quantities if row["name"] == name)
+        timer.update(value=value, minimum=minimum, maximum=maximum)
+        return {
+            "sample_count": specification["minimum_samples"],
+            "conditions": conditions, "quantities": quantities,
+        }
     if gate == "hardware_motor_driver_fails_low_after_cpu_stall":
         # A structurally valid cutoff time still needs independent physical
         # fault injection and timestamped oscilloscope/logic analyzer proof.

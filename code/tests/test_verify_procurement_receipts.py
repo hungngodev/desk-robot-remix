@@ -64,6 +64,18 @@ def measurement_for_gate(scope, gate):
                 } if gate == (
                     "signed_pack_current_three_new_samples_and_chg_mismatch_trial"
                 ) else {}),
+                **({
+                    "instrument_type":
+                    "temperature_chamber_and_independent_ammeter",
+                    "fixed_ts_bypass_removed": True,
+                    "pack_thermistor_revision": "three_wire_10k_R25_A",
+                    "ts_network_schematic_revision": "BQ24075_TS_revA",
+                    "thermal_capture_id": "four_fault_chamber_01",
+                    "independent_ammeter_capture_id": "pack_ammeter_01",
+                    "charge_enable_fixture": "isolated_bench_ce_01",
+                } if gate == (
+                    "battery_pack_ntc_to_charger_ts_thermal_fault_trial"
+                ) else {}),
             },
             "quantities": quantities,
         }
@@ -1249,6 +1261,81 @@ def test_signed_pack_current_receipt_rejects_cached_or_text_only_readings():
         partial, SHA, lambda url: lookup(url, records=[partial]),
     )
     text_only = {**good, "measurement": {"observed": "CHG asserted, pass"}}
+    assert not release.verified_scoped_record(
+        text_only, SHA, lambda url: lookup(url, records=[text_only]),
+    )
+
+
+@pytest.mark.parametrize(("metric", "bad_value"), [
+    ("installed_pack_ntc_r25_ohm", 4700),
+    ("pack_ntc_third_lead_verified", 0),
+    ("ts_open_suspends_charge_trials", 0),
+    ("ts_short_suspends_charge_trials", 0),
+    ("cold_ntc_suspends_charge_trials", 0),
+    ("hot_ntc_suspends_charge_trials", 0),
+    ("normal_ntc_resume_trials", 0),
+    ("independent_ammeter_fault_direction_checks", 3),
+    ("maximum_positive_pack_charge_during_fault_ma", 1),
+    ("chg_only_charge_authorization_events", 1),
+])
+def test_ntc_receipt_rejects_missing_real_thermistor_fault_case(metric, bad_value):
+    import copy
+
+    gate = "battery_pack_ntc_to_charger_ts_thermal_fault_trial"
+    valid = receipt("system", gate)
+    assert release.verified_scoped_record(
+        valid, SHA, lambda url: lookup(url, records=[valid]),
+    )
+    invalid = copy.deepcopy(valid)
+    row = next(entry for entry in invalid["measurement"]["quantities"]
+               if entry["name"] == metric)
+    row["value"] = bad_value
+    row["maximum"] = max(row["maximum"], bad_value)
+    assert not release.verified_scoped_record(
+        invalid, SHA, lambda url: lookup(url, records=[invalid]),
+    )
+
+
+@pytest.mark.parametrize(("field", "replacement"), [
+    ("instrument_type", "charger_status_pin"),
+    ("fixed_ts_bypass_removed", False),
+    ("pack_thermistor_revision", "unknown"),
+    ("ts_network_schematic_revision", "tbd"),
+    ("thermal_capture_id", ""),
+    ("independent_ammeter_capture_id", "none"),
+    ("charge_enable_fixture", None),
+])
+def test_ntc_receipt_requires_independent_fault_capture(field, replacement):
+    gate = "battery_pack_ntc_to_charger_ts_thermal_fault_trial"
+    invalid = receipt("system", gate)
+    invalid["measurement"]["conditions"][field] = replacement
+    assert not release.verified_scoped_record(
+        invalid, SHA, lambda url: lookup(url, records=[invalid]),
+    )
+
+
+def test_ntc_receipt_rejects_only_cutoff_time_or_qualitative_status():
+    gate = "battery_pack_ntc_to_charger_ts_thermal_fault_trial"
+    good = receipt("system", gate)
+    assert release.verified_scoped_record(
+        good, SHA, lambda url: lookup(url, records=[good]),
+    )
+    low_count = {**good, "measurement": {
+        **good["measurement"], "sample_count": 4,
+    }}
+    assert not release.verified_scoped_record(
+        low_count, SHA, lambda url: lookup(url, records=[low_count]),
+    )
+    only_time = {**good, "measurement": {
+        **good["measurement"], "quantities": [{
+            "name": "thermal_cutoff_latency_ms", "unit": "ms",
+            "value": 50, "minimum": 0, "maximum": 100,
+        }],
+    }}
+    assert not release.verified_scoped_record(
+        only_time, SHA, lambda url: lookup(url, records=[only_time]),
+    )
+    text_only = {**good, "measurement": {"observed": "CHG light green"}}
     assert not release.verified_scoped_record(
         text_only, SHA, lambda url: lookup(url, records=[text_only]),
     )
