@@ -451,7 +451,7 @@ def test_usb_bench_reads_five_real_range_slots_without_arming():
     assert result["imu"]["family"] == "berryimu_v1"
     assert result["imu"]["gyro_who_am_i"] == 212
     assert result["imu"]["raw_six_axis_available"] is False
-    assert result["imu"]["attitude_interlock_active"] is False
+    assert result["imu"]["attitude_interlock_active"] is None
     assert result["local_guard_fault"] == "missing_sample"
     assert not result["physical_qualification_pass"]
     status["ranges"]["present_mask"] = 23
@@ -476,7 +476,7 @@ def test_usb_bench_reports_raw_six_axis_without_claiming_tilt_safety():
     }
     result = inspect_status(status)
     assert result["imu"]["raw_six_axis_available"] is True
-    assert result["imu"]["attitude_interlock_active"] is False
+    assert result["imu"]["attitude_interlock_active"] is None
     assert result["imu"]["accelerometer_raw"] == [-32768, 0, 16384]
     assert result["imu"]["gyroscope_raw"] == [-25, 33, 125]
     assert result["imu"]["sample_age_ms"] == 20
@@ -514,7 +514,7 @@ def test_usb_mpu6050_raw_diagnostic_and_family_validation():
     result = inspect_status(status)
     assert result["imu"]["family"] == "mpu6050"
     assert result["imu"]["raw_six_axis_available"] is True
-    assert result["imu"]["attitude_interlock_active"] is False
+    assert result["imu"]["attitude_interlock_active"] is None
     assert result["imu"]["physical_qualification_pass"] is False
     for bad in ({"gyro_id": 0}, {"aux_id": 3}, {"family": 5}, {"age_ms": 201}):
         changed = {**status, "imu": {**status["imu"], **bad}}
