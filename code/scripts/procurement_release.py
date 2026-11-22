@@ -1042,21 +1042,25 @@ def _historical_pilot_budget(sample_subtotal_usd: float) -> dict:
             max(0.0, combined - cap), 2
         ),
         "current_landed_total_verified": False,
+        "historical_over_cap_is_hypothetical": True,
+        "all_previous_project_spend_reconciled": False,
+        "lowest_complete_compatible_cart_verified": False,
     }
 
 
 def _pilot_budget_summary(budget: dict) -> str:
     return (
         "Historical first-unit cap USD "
-        f"{budget['first_unit_cap_usd']:.2f}; reported prior spend USD "
-        f"{budget['reported_prior_spend_usd']:.2f}; combined prior spend "
-        "plus sample merchandise USD "
+        f"{budget['first_unit_cap_usd']:.2f}; documented Sense payment USD "
+        f"{budget['reported_prior_spend_usd']:.2f}; that payment plus "
+        "historically quoted, NOT PURCHASED sample merchandise USD "
         f"{budget['historical_combined_before_tax_shipping_usd']:.2f}; "
-        "amount already above cap BEFORE tax, shipping, and remaining "
-        "unpriced robot roles USD "
+        "hypothetical excess for this incomplete sample selection USD "
         f"{budget['historical_over_cap_before_tax_shipping_usd']:.2f}. "
-        "These are historical references, NOT a current landed quote or "
-        "purchase approval."
+        "This is NOT an incurred sample expense or a verified minimum "
+        "shortfall. Other prior spending, shipping, tax and required "
+        "unpriced parts remain unknown. Historical references are "
+        "NOT a current landed quote or purchase approval."
     )
 
 

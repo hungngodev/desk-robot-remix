@@ -1680,6 +1680,9 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     assert cart["historical_first_unit_budget"]["reported_prior_spend_usd"] == 13.67
     assert cart["historical_first_unit_budget"]["historical_combined_before_tax_shipping_usd"] == 54.08
     assert cart["historical_first_unit_budget"]["historical_over_cap_before_tax_shipping_usd"] == 4.08
+    assert cart["historical_first_unit_budget"]["historical_over_cap_is_hypothetical"]
+    assert not cart["historical_first_unit_budget"]["all_previous_project_spend_reconciled"]
+    assert not cart["historical_first_unit_budget"]["lowest_complete_compatible_cart_verified"]
     assert not cart["historical_first_unit_budget"]["current_landed_total_verified"]
     assert not cart["landed_total_verified"]
     assert not cart["complete_robot_purchase_approved"]
@@ -1727,6 +1730,10 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     assert "| DigiKey | Vishay | TSOP38438 |" in rendered
     assert "shared DigiKey listings do NOT verify a single shipment" in rendered
     assert "13.67" in rendered and "54.08" in rendered and "4.08" in rendered
+    assert "hypothetical excess for this incomplete sample selection" in rendered
+    assert "NOT PURCHASED sample merchandise" in rendered
+    assert "amount already above cap" not in rendered
+    assert "Other prior spending, shipping, tax" in rendered
     assert "NOT a current landed quote or purchase approval" in rendered
     assert "0 SKUs have unknown comparable USD price" in rendered
     assert "There is no verified landed total" in rendered
