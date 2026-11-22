@@ -1,14 +1,17 @@
 """Real sensor trial selection remains operator supplied, never certified in CI."""
 from __future__ import annotations
 
+import json
 import runpy
 from pathlib import Path
 
 import pytest
 
-analyze = runpy.run_path(str(
+calibrator = runpy.run_path(str(
     Path(__file__).resolve().parents[1] / "scripts/calibrate_handling.py"
-))["analyze"]
+))
+analyze = calibrator["analyze"]
+load_trial_rows = calibrator["load_trial_rows"]
 
 
 def trials():
@@ -164,3 +167,51 @@ def test_handling_calibration_allows_real_elapsed_gaps_between_phases():
     report = analyze(rows)
     assert report["thresholds_physically_qualified"] is False
     assert report["motor_authorization"] is False
+
+def test_handling_jsonl_reader_preserves_real_trial_shape(tmp_path):
+    rows = trials()
+    source = tmp_path / "mounted_imu_trial.jsonl"
+    source.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    decoded = load_trial_rows(source)
+    assert decoded == rows
+    result = analyze(decoded)
+    assert result["sample_counts"] == {"upright": 8, "tilted": 4, "shaking": 4}
+    assert result["thresholds_physically_qualified"] is False
+    assert result["motor_authorization"] is False
+
+
+@pytest.mark.parametrize("field,earlier", [
+    ('"label": "upright"', '"label": "tilted"'),
+    ('"firmware_commit": "physically-flashed-sha"',
+     '"firmware_commit": "different-flash"'),
+    ('"mount_id": "actual-head-mount-revision"',
+     '"mount_id": "different-mounted-axis"'),
+    ('"boot_id": 123', '"boot_id": 456'),
+    ('"sample_ms": 1000', '"sample_ms": 999999'),
+    ('"valid": true', '"valid": false'),
+])
+def test_handling_trial_rejects_conflicting_duplicate_fields(
+    tmp_path, field, earlier,
+):
+    recorded = json.dumps(trials()[0])
+    assert recorded.count(field) == 1
+    source = tmp_path / "conflicting_handling.jsonl"
+    source.write_text(recorded.replace(field, earlier + ", " + field) + "\n")
+    with pytest.raises(ValueError, match="Duplicate handling trial JSON field"):
+        load_trial_rows(source)
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_handling_trial_jsonl_rejects_nonfinite_tokens(tmp_path, constant):
+    recorded = json.dumps(trials()[0])
+    assert recorded.count('"time_monotonic_s": 100.0') == 1
+    source = tmp_path / "nonfinite_handling.jsonl"
+    source.write_text(recorded.replace(
+        '"time_monotonic_s": 100.0',
+        f'"time_monotonic_s": {constant}',
+    ) + "\n")
+    with pytest.raises(ValueError, match="Nonfinite handling trial JSON constant"):
+        load_trial_rows(source)

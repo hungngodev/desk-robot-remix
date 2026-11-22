@@ -27,6 +27,32 @@ def _finite(value: object) -> bool:
         return False
 
 
+def _unique_handling_trial_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """A physical handling trial must not overwrite earlier sampled facts."""
+    fields: dict[str, object] = {}
+    for key, value in pairs:
+        if key in fields:
+            raise ValueError("Duplicate handling trial JSON field: " + key)
+        fields[key] = value
+    return fields
+
+
+def _reject_nonfinite_handling_json(token: str) -> None:
+    raise ValueError("Nonfinite handling trial JSON constant: " + token)
+
+
+def load_trial_rows(path: Path) -> list[dict]:
+    """Keep actual recorded sample and boot provenance unambiguous."""
+    return [
+        json.loads(
+            row, object_pairs_hook=_unique_handling_trial_fields,
+            parse_constant=_reject_nonfinite_handling_json,
+        )
+        for row in path.read_text(encoding="utf-8").splitlines()
+        if row.strip()
+    ]
+
+
 def analyze(records: list[dict]) -> dict:
     """Require real independent WROOM acquisitions from one mounted unit."""
     if not isinstance(records, list) or not 16 <= len(records) <= 500:
@@ -180,8 +206,7 @@ def main() -> None:
     args = parser.parse_args()
     if not args.jsonl.is_file() or args.jsonl.stat().st_size > 300000:
         raise ValueError("Missing or oversized handling trial log")
-    records = [json.loads(row) for row in args.jsonl.read_text().splitlines()
-               if row.strip()]
+    records = load_trial_rows(args.jsonl)
     print(json.dumps(analyze(records), indent=2))
 
 
