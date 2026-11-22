@@ -9,15 +9,48 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ipaddress
 import json
 import math
 import os
+import re
 import statistics
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 from desk_robot.grasp_feedback import _fresh_jaw_sequence, force_observation
+
+_ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
+
+
+def _safe_aux_endpoint(base_url: str, robot: str) -> str:
+    """Never send an operator bearer token to unencrypted remote origins."""
+    if type(robot) is not str or not _ROBOT_ID.fullmatch(robot):
+        raise ValueError("Require exact configured robot identity")
+    if (type(base_url) is not str or base_url != base_url.strip()
+            or any(ord(ch) < 32 for ch in base_url)):
+        raise ValueError("Invalid jaw calibration API origin")
+    try:
+        parsed = urlsplit(base_url)
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError("Invalid jaw calibration API origin") from exc
+    if (parsed.scheme not in ("http", "https") or not parsed.hostname
+            or parsed.username is not None or parsed.password is not None
+            or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
+        raise ValueError("Invalid jaw calibration API origin")
+    if parsed.scheme == "http":
+        try:
+            loopback = (parsed.hostname == "localhost"
+                        or ipaddress.ip_address(parsed.hostname).is_loopback)
+        except ValueError:
+            loopback = False
+        if not loopback:
+            raise ValueError("Bearer token requires loopback HTTP or HTTPS")
+    return base_url.rstrip("/") + f"/v1/robots/{robot}/aux"
+
 
 
 def _strict_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -113,12 +146,13 @@ async def capture(
 ) -> list[tuple[int, int]]:
     if not 5 <= count <= 40 or not 0.12 <= interval <= 2:
         raise ValueError("Invalid real ADC sampling cadence")
+    endpoint = _safe_aux_endpoint(base_url, robot)
     samples = []
     seen = None
     for _ in range(count * 5):
         started = time.monotonic()
         response = await client.get(
-            f"{base_url.rstrip('/')}/v1/robots/{robot}/aux",
+            endpoint,
             headers={"Authorization": f"Bearer {token}"}, timeout=3.0,
         )
         response.raise_for_status()
@@ -161,6 +195,7 @@ async def main() -> None:
     parser.add_argument("--calibration", type=Path, required=True)
     parser.add_argument("--samples", type=int, default=8)
     args = parser.parse_args()
+    _safe_aux_endpoint(args.url, args.robot)
     token = os.getenv(args.token_env, "")
     if len(token) < 24:
         raise ValueError("Private operator token required")

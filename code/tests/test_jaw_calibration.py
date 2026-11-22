@@ -9,6 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 tool = runpy.run_path(str(ROOT / "scripts/calibrate_jaw_fsr.py"))
 propose = tool["propose_force_limits"]
 capture = tool["capture"]
+safe_endpoint = tool["_safe_aux_endpoint"]
 
 
 def measured_samples():
@@ -138,3 +139,45 @@ async def test_capture_requires_independent_jaw_seq_and_reuses_existing_aux():
                              robot="robot-01", token="s" * 32,
                              count=5, interval=0.12)
     assert rows == [(100, seq) for seq in range(1, 6)]
+
+
+@pytest.mark.parametrize(("origin", "robot"), [
+    ("http://example.com:8008", "robot-01"),
+    ("http://192.168.1.100:8008", "robot-01"),
+    ("http://127.0.0.1:8008/another", "robot-01"),
+    ("http://username:password@localhost:8008", "robot-01"),
+    ("http://localhost:8008?redirect=1", "robot-01"),
+    ("http://localhost:8008#fragment", "robot-01"),
+    ("ftp://localhost:8008", "robot-01"),
+    ("http://localhost:99999", "robot-01"),
+    ("http://localhost:8008\nInjected: 1", "robot-01"),
+    ("http://localhost:8008", "robot-01/aux"),
+    ("http://localhost:8008", "robot-01?other=1"),
+    ("http://localhost:8008", "a" * 41),
+])
+async def test_jaw_calibration_rejects_bad_bearer_origin_before_http(
+    origin, robot,
+):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(200, json={})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(ValueError):
+            await capture(
+                client, base_url=origin, robot=robot, token="s" * 32,
+                count=5, interval=0.12,
+            )
+    assert calls == []
+
+
+@pytest.mark.parametrize(("origin", "expected"), [
+    ("http://127.0.0.1:8008", "http://127.0.0.1:8008/v1/robots/robot-01/aux"),
+    ("http://localhost:8008/", "http://localhost:8008/v1/robots/robot-01/aux"),
+    ("http://[::1]:8008", "http://[::1]:8008/v1/robots/robot-01/aux"),
+    ("https://robot.example.com", "https://robot.example.com/v1/robots/robot-01/aux"),
+])
+def test_jaw_calibration_allows_loopback_http_or_verified_https(origin, expected):
+    assert safe_endpoint(origin, "robot-01") == expected
