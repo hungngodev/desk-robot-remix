@@ -317,6 +317,24 @@ CRITICAL_TRIAL_GATES = {
             ("i2c_bus_recovery_events", "events", 0, 0, True),
         ),
     },
+    "signed_pack_current_three_new_samples_and_chg_mismatch_trial": {
+        # CHG is status, never signed current. INA226's lab-only pack
+        # direction needs the physical 5 mOhm Kelvin shunt and independent
+        # ammeter agreement, including a net-discharge CHG conflict trial.
+        "minimum_samples": 9,
+        "quantities": (
+            ("fresh_charge_pack_samples", "samples", 3, None, True),
+            ("fresh_discharge_pack_samples", "samples", 3, None, True),
+            ("fresh_chg_conflict_pack_samples", "samples", 3, None, True),
+            ("distinct_pack_acquisition_sequences", "samples", 9, None, True),
+            ("observed_charging_current_ma", "mA", 21, None, True),
+            ("observed_discharge_magnitude_ma", "mA", 21, None, True),
+            ("independent_ammeter_direction_checks", "checks", 2, None, True),
+            ("charger_indicator_net_discharge_conflicts", "events", 1, None, True),
+            ("inspected_kelvin_shunt_milliohm", "mOhm", 5, 5, False),
+            ("charge_authorizations_from_chg_pin", "events", 0, 0, True),
+        ),
+    },
     "real_dual_ir_terminal_docking": {
         "minimum_samples": 3,
         "quantities": (
@@ -391,6 +409,14 @@ def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
         keys.extend(("bus_topology_revision", "pullup_network_revision"))
         if conditions.get("instrument_type") != "oscilloscope":
             return False
+    if gate == "signed_pack_current_three_new_samples_and_chg_mismatch_trial":
+        keys.extend((
+            "wroom_boot_epoch", "raw_pack_sequence_capture",
+            "ammeter_calibration_capture", "shunt_board_revision",
+            "charger_indicator_conflict_fixture",
+        ))
+        if conditions.get("instrument_type") != "independent_ammeter":
+            return False
     for key in keys:
         value = conditions.get(key)
         if (type(value) is not str or not value.strip()
@@ -422,6 +448,17 @@ def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
         if (minimum < 0 or minimum > value or value > maximum
                 or value < lower or (upper is not None and value > upper)
                 or (name in POSITIVE_CLEARANCE_METRICS and value <= 0)):
+            return False
+    if gate == "signed_pack_current_three_new_samples_and_chg_mismatch_trial":
+        values = {item["name"]: item["value"] for item in observations}
+        phase_count = sum(values[name] for name in (
+            "fresh_charge_pack_samples", "fresh_discharge_pack_samples",
+            "fresh_chg_conflict_pack_samples",
+        ))
+        if (phase_count > measurement["sample_count"]
+                or values["distinct_pack_acquisition_sequences"] < phase_count
+                or values["distinct_pack_acquisition_sequences"]
+                > measurement["sample_count"]):
             return False
     return True
 

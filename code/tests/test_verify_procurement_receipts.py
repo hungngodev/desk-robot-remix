@@ -54,6 +54,16 @@ def measurement_for_gate(scope, gate):
                 } if gate == (
                     "sixteen_mux_channel_400khz_pullups_rise_and_sink_trials"
                 ) else {}),
+                **({
+                    "instrument_type": "independent_ammeter",
+                    "wroom_boot_epoch": "wroom_boot_01",
+                    "raw_pack_sequence_capture": "INA226_nine_new_samples_01",
+                    "ammeter_calibration_capture": "calibrated_ammeter_01",
+                    "shunt_board_revision": "5mOhm_Kelvin_revA",
+                    "charger_indicator_conflict_fixture": "CHG_mismatch_trial_01",
+                } if gate == (
+                    "signed_pack_current_three_new_samples_and_chg_mismatch_trial"
+                ) else {}),
             },
             "quantities": quantities,
         }
@@ -1172,4 +1182,73 @@ def test_mux_fastmode_receipt_requires_installed_bus_and_scope(field, invalid):
     item["measurement"]["conditions"][field] = invalid
     assert not release.verified_scoped_record(
         item, SHA, lambda url: lookup(url, records=[item]),
+    )
+
+
+@pytest.mark.parametrize(("metric", "invalid"), [
+    ("fresh_charge_pack_samples", 2),
+    ("fresh_discharge_pack_samples", 2),
+    ("fresh_chg_conflict_pack_samples", 2),
+    ("distinct_pack_acquisition_sequences", 8),
+    ("observed_charging_current_ma", 20),
+    ("observed_discharge_magnitude_ma", 20),
+    ("independent_ammeter_direction_checks", 1),
+    ("charger_indicator_net_discharge_conflicts", 0),
+    ("inspected_kelvin_shunt_milliohm", 4),
+    ("charge_authorizations_from_chg_pin", 1),
+])
+def test_signed_pack_current_receipt_rejects_missing_direction(metric, invalid):
+    import copy
+
+    gate = "signed_pack_current_three_new_samples_and_chg_mismatch_trial"
+    good = receipt("system", gate)
+    assert release.verified_scoped_record(
+        good, SHA, lambda url: lookup(url, records=[good]),
+    )
+    bad = copy.deepcopy(good)
+    entry = next(row for row in bad["measurement"]["quantities"]
+                 if row["name"] == metric)
+    entry["value"] = invalid
+    entry["maximum"] = max(entry["maximum"], invalid)
+    assert not release.verified_scoped_record(
+        bad, SHA, lambda url: lookup(url, records=[bad]),
+    )
+
+
+@pytest.mark.parametrize(("field", "invalid"), [
+    ("instrument_type", "charger_status_pin"),
+    ("wroom_boot_epoch", ""),
+    ("raw_pack_sequence_capture", "tbd"),
+    ("ammeter_calibration_capture", "unknown"),
+    ("shunt_board_revision", ""),
+    ("charger_indicator_conflict_fixture", None),
+])
+def test_signed_pack_current_receipt_requires_measurement_provenance(field, invalid):
+    gate = "signed_pack_current_three_new_samples_and_chg_mismatch_trial"
+    record = receipt("system", gate)
+    record["measurement"]["conditions"][field] = invalid
+    assert not release.verified_scoped_record(
+        record, SHA, lambda url: lookup(url, records=[record]),
+    )
+
+
+def test_signed_pack_current_receipt_rejects_cached_or_text_only_readings():
+    import copy
+
+    gate = "signed_pack_current_three_new_samples_and_chg_mismatch_trial"
+    good = receipt("system", gate)
+    for count in (3, 8):
+        stale = copy.deepcopy(good)
+        stale["measurement"]["sample_count"] = count
+        assert not release.verified_scoped_record(
+            stale, SHA, lambda url, row=stale: lookup(url, records=[row]),
+        )
+    partial = copy.deepcopy(good)
+    partial["measurement"]["quantities"].pop()
+    assert not release.verified_scoped_record(
+        partial, SHA, lambda url: lookup(url, records=[partial]),
+    )
+    text_only = {**good, "measurement": {"observed": "CHG asserted, pass"}}
+    assert not release.verified_scoped_record(
+        text_only, SHA, lambda url: lookup(url, records=[text_only]),
     )
