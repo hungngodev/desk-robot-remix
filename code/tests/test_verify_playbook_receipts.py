@@ -569,9 +569,9 @@ def test_physical_promotion_requires_authorized_matching_pr_acceptance():
     """Matching source, measured data and a green run cannot self-approve."""
     for gate in ("MEASURED", "QUALIFIED"):
         row = promoted(gate)["procedures"][0]
-        def physical_lookup(url):
+        def physical_lookup(url, qualified=(gate == "QUALIFIED")):
             value = lookup(url)
-            if gate == "QUALIFIED" and "/contents/docs/records/bench.csv" in url:
+            if qualified and "/contents/docs/records/bench.csv" in url:
                 raw = base64.b64decode(value["content"]).replace(
                     b",MEASURED,", b",QUALIFIED,",
                 )
