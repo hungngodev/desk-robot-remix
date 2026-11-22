@@ -129,6 +129,12 @@ class CameraEvidence:
     source_identity: tuple[int, int, int] | None = None
 
 
+# Keep the stream's cheap motion admission consistent with the pet's
+# two-frame VisualChangeGate minimum. Higher thresholds hide small keys
+# before semantic relevance can be considered.
+_STREAM_VISUAL_CHANGE_MIN_FRACTION = 0.008
+
+
 class CameraFrameHub:
     """Per-robot tiny RAM-only buffer with priority hints and bounded cadence.
 
@@ -408,7 +414,7 @@ class CameraFrameHub:
         motion = change_fraction(prev, gray) if prev is not None else 0.0
         self.previous_gray[robot_id] = gray
         self.changed_streak[robot_id] = (
-            min(3, self.changed_streak[robot_id] + 1) if motion >= 0.01
+            min(3, self.changed_streak[robot_id] + 1) if motion >= _STREAM_VISUAL_CHANGE_MIN_FRACTION
             else 0
         )
         self.last_capture[robot_id] = received_at
@@ -1357,7 +1363,8 @@ class MultimodalOrchestrator:
                                 and self.hub.changed_streak[robot_id] == 0):
                             earlier = self.hub.previous_gray.get(robot_id)
                             if (earlier is not None
-                                    and change_fraction(earlier, prepared[1]) < .01):
+                                    and change_fraction(earlier, prepared[1])
+                                    < _STREAM_VISUAL_CHANGE_MIN_FRACTION):
                                 metrics["stream_frames_skipped"] += 1
                                 continue
                         try:

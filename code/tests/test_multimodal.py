@@ -13,7 +13,7 @@ from desk_robot.multimodal import (
     _prepare,
     change_fraction,
 )
-from desk_robot.vision import OllamaScene
+from desk_robot.vision import OllamaScene, VisualChangeGate
 from PIL import Image, ImageDraw
 
 
@@ -352,6 +352,70 @@ async def test_continuous_camera_feed_populates_proactive_hub_without_snapshot_p
 
 
 
+
+
+async def test_small_object_stream_change_reaches_two_frame_semantic_confirmation():
+    """A 0.88 percent object must not wait for the slow idle VLM heartbeat."""
+    background = Image.new("L", (64, 48), 100)
+    with_object = background.copy()
+    # This is exactly 27 high contrast pixels out of the 3,072 pixel
+    # fingerprint used by both the continuous stream and pet scene gate.
+    for y in range(12, 15):
+        for x in range(20, 29):
+            with_object.putpixel((x, y), 250)
+
+    def encoded(frame):
+        output = BytesIO()
+        frame.save(output, "JPEG", quality=100, subsampling=0)
+        return output.getvalue()
+
+    before = encoded(background)
+    after = encoded(with_object)
+    old_gray, new_gray = _prepare(before)[1], _prepare(after)[1]
+    fraction = change_fraction(old_gray, new_gray)
+    assert 0.008 <= fraction < 0.01
+    assert change_fraction(old_gray, new_gray, threshold=18) == fraction
+    assert VisualChangeGate().min_changed_fraction == 0.008
+
+    class LiveHead(Head):
+        def __init__(self):
+            super().__init__()
+            self.emitted = 0
+
+        async def stream_frames(self):
+            for index in range(8):
+                self.emitted += 1
+                yield after if index >= 4 else before, time.monotonic()
+                await asyncio.sleep(0.26)
+
+    head, vision = LiveHead(), Vision()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        vision, asyncio.Lock(),
+    )
+    visual.start_streams()
+    try:
+        async with asyncio.timeout(3):
+            while (head.emitted < 8 or
+                   visual.status("robot-01")["software_timings"][
+                       "stream_frames_selected"] < 4):
+                await asyncio.sleep(0.02)
+        selected = list(visual.hub.frames["robot-01"])
+        assert len(selected) >= 3
+        assert selected[-2].motion_fraction == fraction
+        assert selected[-1].motion_fraction == 0
+        assert selected[-2].jpeg == after == selected[-1].jpeg
+        gate = VisualChangeGate()
+        assert gate.observe_reduced(before, old_gray) is None
+        assert gate.observe_reduced(selected[-2].jpeg, new_gray) is None
+        assert gate.observe_reduced(selected[-1].jpeg, new_gray) == before
+        metrics = visual.status("robot-01")["software_timings"]
+        assert metrics["stream_frames_selected"] == 4
+        assert metrics["stream_frames_skipped"] >= 3
+        assert head.captures == 0
+        assert vision.calls == []
+    finally:
+        await visual.close()
 
 
 @pytest.mark.parametrize("primed_frames", [0, 2])
