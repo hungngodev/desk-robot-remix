@@ -704,3 +704,50 @@ def test_buy07_historical_evaluation_preserves_nonapproving_cost_math():
     result = calculate(ev)
     assert result["calculation_complete_not_physical_approval"]
     assert not result["landed_price_is_a_verified_supplier_checkout"]
+
+
+@pytest.mark.parametrize("field", ["quantity_packages", "units_per_package"])
+def test_enormous_supplier_quantity_fails_before_cost_arithmetic(field):
+    ev = sample()
+    ev["lines"][0][field] = 10**1200
+    result = calculate(ev)
+    assert result["payable_now_cents"] is None
+    assert any("quantity exceeds 10000 unit bound" in e for e in result["errors"])
+
+
+@pytest.mark.parametrize("source", ["inventory", "paid_order", "in_flight"])
+def test_enormous_stock_allocation_fails_closed(source):
+    ev = sample()
+    huge = 10**1200
+    if source == "inventory":
+        ev["inventory"] = [{
+            "role_key": "robot:cliff_obstacle",
+            "usable_allocated": huge,
+            "acquisition_kind": "already_owned",
+            "inspection_receipt_url": "https://supplier.example/inspection",
+        }]
+    elif source == "paid_order":
+        ev["paid_orders"][0]["allocations"] = [{
+            "role_key": "robot:cliff_obstacle", "quantity": huge
+        }]
+    else:
+        ev["paid_orders"][0]["allocations"] = [{
+            "role_key": "robot:cliff_obstacle", "quantity": 1
+        }]
+        ev["paid_in_flight"] = [{
+            "role_key": "robot:cliff_obstacle",
+            "quantity": huge, "order_reference": "already-paid",
+        }]
+    result = calculate(ev)
+    assert result["payable_now_cents"] is None
+    assert any("quantity exceeds 10000 unit bound" in e for e in result["errors"])
+
+
+def test_canonical_role_count_is_bounded_before_accounting():
+    huge_required = dict(REQUIRED)
+    huge_required["robot:cliff_obstacle"] = 10**1200
+    with pytest.raises(ValueError, match="Invalid canonical requirement count"):
+        mod.account_landed_cost(
+            sample(), huge_required, CATEGORIES, expected_scope="evaluation"
+        )
+    assert mod.positive_count(mod.MAX_ACCOUNTING_UNITS, "units") == 10000

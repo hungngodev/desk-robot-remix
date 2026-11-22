@@ -43,9 +43,16 @@ def cents(value: object, label: str) -> int:
     return int(scaled)
 
 
+# A supplier may not inject arbitrary-precision counts into cost arithmetic.
+# This limit exceeds every selected first-robot and five-pet role by far.
+MAX_ACCOUNTING_UNITS = 10_000
+
+
 def positive_count(value: object, label: str) -> int:
     if type(value) is not int or value < 1:
         raise ValueError(f"{label}: expected a positive integer")
+    if value > MAX_ACCOUNTING_UNITS:
+        raise ValueError(f"{label}: quantity exceeds {MAX_ACCOUNTING_UNITS} unit bound")
     return value
 
 
@@ -164,7 +171,8 @@ def account_landed_cost(
         raise ValueError("Unknown cost scope")
     if type(cap_cents) is not int or cap_cents <= 0:
         raise ValueError("Invalid prototype budget")
-    if any(type(qty) is not int or qty < 0 for qty in required_roles.values()):
+    if any(type(qty) is not int or not 0 <= qty <= MAX_ACCOUNTING_UNITS
+           for qty in required_roles.values()):
         raise ValueError("Invalid canonical requirement count")
     if set(required_roles) != set(role_categories):
         raise ValueError("Cost category map differs from canonical requirements")
