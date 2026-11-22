@@ -271,6 +271,10 @@ class BodyControl {
   std::uint8_t dock_last_pins_ = 0;
   bool dock_provenance_fault_ = false;  // requires a new GPIOA acquisition
   bool dock_monitor_required_ = false; // full robot build, set at boot only
+  bool dock_monitor_fault_latched_ = false; // loss during guarded ARM: USB only
+  std::uint32_t dock_monitor_fault_seq_ = 0;
+  std::uint32_t dock_monitor_fault_at_ms_ = 0;
+  void latch_dock_monitor_fault();
   bool dc_fault_required_ = false;  // fail closed for DRV8833 full DC profile
   bool dc_fault_latched_ = false;   // only local USB may clear
   // A replayed or contradictory GPIOB sample cannot clear nFAULT shutdown.

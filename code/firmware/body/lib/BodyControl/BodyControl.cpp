@@ -388,8 +388,19 @@ bool BodyControl::dock_telemetry_bad(std::uint32_t now_ms) const {
           now_ms - dock.at_ms >= 500U);
 }
 
+void BodyControl::latch_dock_monitor_fault() {
+  if (!dock_monitor_fault_latched_) {
+    dock_monitor_fault_seq_ = dock_last_seq_;
+    dock_monitor_fault_at_ms_ = dock_last_at_ms_;
+  }
+  dock_monitor_fault_latched_ = true;
+}
+
 void BodyControl::set_accessories(const AccessoryReadings& readings,
                                   std::uint32_t now_ms) {
+  // Other simultaneous faults must not hide a dock GPIOA loss that happened
+  // while a guarded motion session was still armed.
+  const bool was_armed = state_.armed;
   state_.accessories = readings;
   if (imu_attitude_required_ &&
       (!imu_attitude_configured_ || imu_attitude_latched_)) {
@@ -490,6 +501,11 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
   // Preserve the last latch and fail closed until a fresh acquisition.
   state_.accessories.dock.valid =
       (new_sample || repeated) && !dock_provenance_fault_;
+  if (was_armed && guarded_motion_profile() && dock_telemetry_bad(now_ms)) {
+    // Losing compulsory GPIOA during a drive is a cancelled session. Fresh
+    // reads may restore telemetry but not remote ARM authorization.
+    latch_dock_monitor_fault();
+  }
   if (dock_power_lockout_) {
     // Contact must veto wheel motion without detaching holding servo PWM.
     // Only an explicit disarm should deliberately release a grasped payload.
@@ -630,6 +646,12 @@ void BodyControl::tick(std::uint32_t now_ms) {
     ++state_.touch_taps;
     touch_pending_tap_ = false;
   }
+  if (guarded_motion_profile() && state_.armed &&
+      dock_telemetry_bad(now_ms)) {
+    // Capture independently even when a simultaneous cliff fault wins the
+    // immediate return below. Never make another safety lane mask GPIOA loss.
+    latch_dock_monitor_fault();
+  }
   if (guarded_motion_profile() &&
       (guard_ == nullptr || !guard_->evaluate(now_ms))) {
     stop_motion();
@@ -667,9 +689,9 @@ void BodyControl::tick(std::uint32_t now_ms) {
     state_.armed = false;
     return;
   }
-  if (dock_telemetry_bad(now_ms)) {
-    // Optional installed dock input is a mandatory local interlock once
-    // present. Never keep stepping toward contacts on stale input data.
+  if (dock_monitor_fault_latched_ || dock_telemetry_bad(now_ms)) {
+    // A recovered expander cannot restore a cancelled motion session
+    // without a new unseated acquisition and local USB recovery.
     stop_motion();
     state_.armed = false;
     return;
@@ -1173,7 +1195,8 @@ void BodyControl::execute(const char* line, std::size_t length,
     const bool cliff_ready = guarded_motion_profile() && guard_ != nullptr &&
         guard_->evaluate(now_ms);
     const bool driver_unhealthy = dc_fault_latched_ || dc_driver_fault_bad(now_ms);
-    const bool dock_unhealthy = dock_power_lockout_ || dock_telemetry_bad(now_ms);
+    const bool dock_unhealthy = dock_power_lockout_ ||
+        dock_monitor_fault_latched_ || dock_telemetry_bad(now_ms);
     const bool bumper_hit = state_.bumper_raw ||
         ((state_.extra_mask & 1U) != 0U && state_.bumper_active);
     const bool touch_hit = state_.touch_active || state_.touch_raw_active;
@@ -1209,6 +1232,7 @@ void BodyControl::execute(const char* line, std::size_t length,
             guard_ == nullptr ? "missing_guard" :
             CliffGuard::fault_name(guard_->fault()) :
         dock_power_lockout_ ? "dock_power_connected" :
+        dock_monitor_fault_latched_ ? "dock_monitor_latched" :
         dock_telemetry_bad(now_ms) ? "dock_gpio_missing_or_stale" :
         bumper_hit ? "bumper_active" :
         bumper_fault_latched_ ? "bumper_latched" :
@@ -1345,6 +1369,20 @@ void BodyControl::execute(const char* line, std::size_t length,
       std::snprintf(reply, capacity, "ERR rearm dock_gpio_missing_or_stale");
       return;
     }
+    if (dock_monitor_fault_latched_) {
+      // A cached previously good unseated GPIOA packet is not independent
+      // post-fault evidence. Require forward-moving sequence AND acquisition
+      // timestamp, including uint32 wrap, before the LOCAL USB can recover.
+      const std::uint32_t seq_delta = dock_last_seq_ - dock_monitor_fault_seq_;
+      const std::uint32_t time_delta =
+          dock_last_at_ms_ - dock_monitor_fault_at_ms_;
+      if (!dock_sample_seen_ || dock_last_pins_ != 0U ||
+          seq_delta == 0U || seq_delta >= 0x80000000U ||
+          time_delta == 0U || time_delta >= 0x80000000U) {
+        std::snprintf(reply, capacity, "ERR rearm dock_monitor_no_new_sample");
+        return;
+      }
+    }
     if (state_.bumper_raw ||
         ((state_.extra_mask & 1U) && state_.bumper_active)) {
       std::snprintf(reply, capacity, "ERR rearm bumper_active");
@@ -1395,6 +1433,7 @@ void BodyControl::execute(const char* line, std::size_t length,
       return;
     }
     dc_fault_latched_ = false;  // local USB only, after fresh HIGH nFAULT
+    dock_monitor_fault_latched_ = false; // local USB after new unseated GPIOA
     bumper_fault_latched_ = false; // only USB, after released raw contact
     battery_fault_latched_ = false; // after newer measured safe fuel sample
     fuel_monitor_fault_latched_ = false; // after fresh independently acquired data
@@ -1460,6 +1499,10 @@ void BodyControl::execute(const char* line, std::size_t length,
     }
     if (dock_power_lockout_) {
       std::snprintf(reply, capacity, "ERR arm dock_power_connected");
+      return;
+    }
+    if (dock_monitor_fault_latched_) {
+      std::snprintf(reply, capacity, "ERR arm dock_monitor_latched");
       return;
     }
     if (dock_telemetry_bad(now_ms)) {

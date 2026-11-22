@@ -1210,6 +1210,92 @@ static void dock_removal_accepts_genuine_uint32_wrap() {
   CHECK(send(body, "disarm", 7) == "OK disarm");
 }
 
+
+static void guarded_dc_dock_loss_latches_until_fresh_local_usb_rearm() {
+  using desk_robot::BodyControl;
+  using desk_robot::BodyProfile;
+  // Three independent acquisition failures, not three replays of one run.
+  for (int failure = 0; failure < 3; ++failure) {
+    desk_robot::CliffGuard guard;
+    CHECK(guard.configure(config()));
+    fresh(guard, 100);
+    BodyControl body(BodyProfile::DcGuarded, &guard);
+    body.require_dock_monitor(true);
+    desk_robot::AccessoryReadings readings{};
+    auto& dock = readings.dock;
+    dock.present = dock.valid = true;
+    dock.sample_seq = 1;
+    dock.at_ms = 100;
+    body.set_accessories(readings, 100);
+    CHECK(send(body, "rearm", 100, true) == "OK rearm");
+    CHECK(send(body, "arm", 100) == "OK arm");
+    CHECK(send(body, "drive 20 20 200", 101).find("OK drive") == 0);
+    CHECK(body.state().armed && body.state().servos_attached);
+    CHECK(body.state().left == 20 && body.state().right == 20);
+
+    std::uint32_t lost_at = 102;
+    if (failure == 0) {
+      dock.valid = false;  // a failed GPIOA I2C transaction
+      body.set_accessories(readings, lost_at);
+    } else if (failure == 1) {
+      dock.present = false;  // physical expander unplug or bus loss
+      body.set_accessories(readings, lost_at);
+    } else {
+      lost_at = 601; // >500 ms after the last real independent read
+      fresh(guard, lost_at);
+      body.tick(lost_at);
+    }
+    CHECK(!body.state().armed && body.state().servos_attached);
+    CHECK(body.state().left == 0 && body.state().right == 0);
+    CHECK(send(body, "status", lost_at).find("dock_monitor_latched") !=
+          std::string::npos);
+
+    desk_robot::LineReceiver head, usb(true);
+    auto request = [&](desk_robot::LineReceiver& receiver,
+                       const char* line, std::uint32_t now_ms) {
+      char response[desk_robot::kReplyCapacity]{};
+      for (char c : std::string(line) + "\n") {
+        receiver.feed(c, now_ms, body, response, sizeof(response));
+      }
+      return std::string(response);
+    };
+    CHECK(request(head, "arm", lost_at) == "ERR arm dock_monitor_latched");
+    CHECK(request(head, "rearm", lost_at) == "ERR rearm local_only");
+
+    // Replaying the last acknowledged, unseated GPIOA does not prove that
+    // an expander has recovered after the failed acquisition.
+    dock.present = dock.valid = true;
+    body.set_accessories(readings, lost_at + 1);
+    CHECK(request(head, "arm", lost_at + 1) ==
+          "ERR arm dock_monitor_latched");
+    if (failure == 2) {
+      CHECK(request(usb, "rearm", lost_at + 1) ==
+            "ERR rearm dock_gpio_missing_or_stale");
+    } else {
+      CHECK(request(usb, "rearm", lost_at + 1) ==
+            "ERR rearm dock_monitor_no_new_sample");
+    }
+    CHECK(!body.state().armed);
+
+    // Only a genuinely later, fresh, fully unseated GPIOA transaction plus
+    // an explicit LOCAL USB action may authorize a NEW motion session.
+    dock.sample_seq = 2;
+    dock.at_ms = lost_at + 2;
+    fresh(guard, lost_at + 2);
+    body.set_accessories(readings, lost_at + 2);
+    CHECK(send(body, "status", lost_at + 2).find("dock_monitor_latched") !=
+          std::string::npos);
+    CHECK(request(head, "arm", lost_at + 3) ==
+          "ERR arm dock_monitor_latched");
+    CHECK(request(usb, "rearm", lost_at + 3) == "OK rearm");
+    CHECK(!body.state().armed && body.state().left == 0 &&
+          body.state().right == 0 && body.state().servos_attached);
+    CHECK(request(head, "arm", lost_at + 3) == "OK arm");
+    CHECK(body.state().left == 0 && body.state().right == 0);
+    CHECK(send(body, "disarm", lost_at + 4) == "OK disarm");
+  }
+}
+
 static void complete_robot_requires_boot_installed_and_fresh_dock_expander() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
   body.require_dock_monitor(true);  // only the full physical firmware boot sets this
@@ -2323,6 +2409,7 @@ int main() {
     dock_replayed_gpio_bits_do_not_preserve_arm_permission();
     inconsistent_dock_acquisition_requires_new_sample_to_recover();
     installed_dock_i2c_loss_or_single_seat_stops_local_motors();
+    guarded_dc_dock_loss_latches_until_fresh_local_usb_rearm();
     complete_robot_requires_boot_installed_and_fresh_dock_expander();
     dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof();
     belly_adc_does_not_refresh_stale_jaw_sample();
