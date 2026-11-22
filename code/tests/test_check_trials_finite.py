@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "check_trials.py"
 spec = importlib.util.spec_from_file_location("check_trials", SCRIPT)
 assert spec is not None and spec.loader is not None
