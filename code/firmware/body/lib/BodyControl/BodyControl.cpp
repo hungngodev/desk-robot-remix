@@ -1184,6 +1184,9 @@ void BodyControl::execute(const char* line, std::size_t length,
         state_.accessories.gauge.cell_mv < 3300U;
     const bool local_motion_ready = cliff_ready && !driver_unhealthy &&
         !motor_cutoff_unqualified_ &&
+        // Guarded ARM attaches both MG90S PWM outputs. Never attach the jaw
+        // with its physical travel and startup angle still unqualified.
+        (!grip_feedback_required_ || jaw_limits_configured_) &&
         !bumper_fault_latched_ && !battery_fault_latched_ &&
         !fuel_monitor_fault_latched_ &&
         (!fuel_monitor_required_ || fuel_monitor_fresh(now_ms)) &&
@@ -1239,6 +1242,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         battery_below_arm_min ? "battery_low" :
         fuel_monitor_required_ && !fuel_monitor_fresh(now_ms) ?
             "fuel_monitor_missing_or_stale" :
+        guarded_motion_profile() && grip_feedback_required_ &&
+            !jaw_limits_configured_ ? "jaw_limits_unqualified" :
         !guarded_motion_profile() ? "not_required" : "none";
     const int written = std::snprintf(
         reply, capacity,
@@ -1402,6 +1407,11 @@ void BodyControl::execute(const char* line, std::size_t length,
   } else if (arm) {
     if (motor_cutoff_unqualified_) {
       std::snprintf(reply, capacity, "ERR arm motor_cutoff_unqualified");
+      return;
+    }
+    if (guarded_motion_profile() && grip_feedback_required_ &&
+        !jaw_limits_configured_) {
+      std::snprintf(reply, capacity, "ERR arm jaw_limits_unqualified");
       return;
     }
     if (fuel_monitor_fault_latched_) {

@@ -2264,6 +2264,40 @@ static void mpu_static_attitude_fails_closed_and_needs_usb_recovery() {
   CHECK(send(body, "arm", 501) == "ERR arm imu_sensor_fault_latched");
 }
 
+
+static void guarded_startup_never_attaches_unmeasured_jaw_pwm() {
+  for (int which = 0; which < 2; ++which) {
+    desk_robot::CliffGuard guard;
+    CHECK(guard.configure(config()));
+    fresh(guard, 10);
+    const auto profile = which == 0
+        ? desk_robot::BodyProfile::StepperGuarded
+        : desk_robot::BodyProfile::DcGuarded;
+    desk_robot::BodyControl body(profile, &guard);
+    body.require_grip_feedback(true);
+    CHECK(send(body, "rearm", 10, true) == "OK rearm");
+    const auto status = send(body, "status", 10);
+    CHECK(status.find("\"ready\":false") != std::string::npos);
+    CHECK(status.find("\"fault\":\"jaw_limits_unqualified\"") !=
+          std::string::npos);
+    CHECK(send(body, "arm", 10) == "ERR arm jaw_limits_unqualified");
+    CHECK(!body.state().armed && !body.state().servos_attached &&
+          body.state().left == 0 && body.state().right == 0);
+    // The fixed startup target 90 lies inside these measured endpoints.
+    // Firmware configuration is not a substitute for actual rig trials.
+    CHECK(body.configure_jaw_force_limits({60, 120, 1000, 1, 300}));
+    fresh(guard, 11);
+    CHECK(send(body, "status", 11).find("\"ready\":true") !=
+          std::string::npos);
+    CHECK(send(body, "arm", 11) == "OK arm");
+    CHECK(body.state().armed && body.state().servos_attached);
+    CHECK(send(body, "stop", 12) == "OK stop");
+    CHECK(body.state().servos_attached); // preserve confirmed holding PWM
+    CHECK(send(body, "disarm", 13) == "OK disarm");
+    CHECK(!body.state().servos_attached);
+  }
+}
+
 int main() {
   try {
     desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
@@ -2321,6 +2355,7 @@ int main() {
     zero_acceleration_mpu_does_not_authorize_motion();
     mpu_native_low_g_irq_vetoes_local_wheels();
     mpu_static_attitude_fails_closed_and_needs_usb_recovery();
+    guarded_startup_never_attaches_unmeasured_jaw_pwm();
     imu_replay_and_rollover_are_local_motion_safety_evidence();
     missing_mpu_interrupt_status_cannot_authorize_wheels();
     imu_status_preserves_physical_conversion_and_boot_identity();
