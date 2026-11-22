@@ -148,6 +148,17 @@ def test_cross_distance_reused_trial_onset_is_not_new_acoustic_evidence():
         evaluate(rows)
 
 
+@pytest.mark.parametrize(("kind", "field", "label"), [
+    ("human", "human_onset_ms", "human_onset_ms"),
+    ("robot_only", "duration_seconds", "robot-only duration"),
+])
+def test_oversized_numeric_acoustic_evidence_fails_closed(kind, field, label):
+    rows = both_distances()
+    next(row for row in rows if row["kind"] == kind)[field] = 10**1000
+    with pytest.raises(ValueError, match=f"Missing or invalid measured {label}"):
+        evaluate(rows)
+
+
 def test_late_double_talk_and_self_interruption_fail():
     rows = both_distances()
     rows[0]["audible_stop_ms"] += 650

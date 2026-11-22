@@ -8,9 +8,15 @@ from pathlib import Path
 
 
 def _number(value: object, label: str) -> float:
-    if type(value) not in (int, float) or not math.isfinite(value):
+    if type(value) not in (int, float):
         raise ValueError(f"Missing or invalid measured {label}")
-    return float(value)
+    try:
+        measured = float(value)
+    except OverflowError as exc:
+        raise ValueError(f"Missing or invalid measured {label}") from exc
+    if not math.isfinite(measured):
+        raise ValueError(f"Missing or invalid measured {label}")
+    return measured
 
 
 def evaluate(records: list[dict]) -> dict:
