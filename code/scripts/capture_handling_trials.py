@@ -43,6 +43,23 @@ def _safe_endpoint(url: str, robot: str) -> str:
     return url.rstrip("/") + "/v1/robots/" + robot + "/status"
 
 
+def save_private_trial_rows(output: Path, rows: list[dict]) -> None:
+    """Write complete measured trial JSONL with exclusive owner-only access."""
+    if not rows:
+        raise ValueError("No captured IMU samples to write")
+    # Serialize before creating a new file. Invalid records never leave an
+    # empty or partially populated physical trial log.
+    payload = "".join(
+        json.dumps(row, separators=(",", ":")) + "\n" for row in rows
+    )
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(output, flags, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as file:
+        file.write(payload)
+
+
 async def capture_phase(
     client: httpx.AsyncClient, *, base_url: str, robot: str,
     token: str, label: str, count: int, sample_interval: float,
@@ -114,7 +131,7 @@ async def main() -> None:
     token = os.getenv(args.token_env, "")
     if len(token) < 24:
         raise ValueError("Operator bearer token not configured")
-    if args.output.exists():
+    if args.output.exists() or args.output.is_symlink():
         raise FileExistsError("Do not overwrite prior measured IMU evidence")
     rows: list[dict] = []
     async with httpx.AsyncClient() as client:
@@ -137,9 +154,7 @@ async def main() -> None:
             rows.extend(phase)
     # Only write the whole capture after all physically labeled phases
     # complete. The separate analyzer still rejects overlapping classes.
-    with args.output.open("x", encoding="utf-8") as file:
-        for row in rows:
-            file.write(json.dumps(row, separators=(",", ":")) + "\n")
+    save_private_trial_rows(args.output, rows)
     print(f"Recorded {len(rows)} distinct samples to {args.output}")
     print("Next run calibrate_handling.py; no physical certificate was issued")
 

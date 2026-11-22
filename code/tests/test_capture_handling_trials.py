@@ -1,7 +1,10 @@
 """Read-only physical MPU trial recorder never controls actuators."""
 from __future__ import annotations
 
+import json
+import os
 import runpy
+import stat
 from pathlib import Path
 
 import pytest
@@ -11,6 +14,7 @@ _capture_module = runpy.run_path(str(
 ))
 capture_phase = _capture_module["capture_phase"]
 _safe_endpoint = _capture_module["_safe_endpoint"]
+save_private_trial_rows = _capture_module["save_private_trial_rows"]
 
 
 class FakeResponse:
@@ -166,3 +170,35 @@ async def test_capture_never_counts_only_pre_wrap_replays_as_fresh():
             SequencedFakeClient([0xffffffff]), count=1,
             previous_sample=2, previous_boot=1,
         )
+
+
+def test_measured_trial_output_is_exclusive_and_mode_0600(tmp_path):
+    output = tmp_path / "handling.jsonl"
+    rows = [{"label": "upright", "body": {"imu": {"sample_ms": 4}}}]
+    old_umask = os.umask(0o022)
+    try:
+        save_private_trial_rows(output, rows)
+    finally:
+        os.umask(old_umask)
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600
+    assert [json.loads(line) for line in output.read_text().splitlines()] == rows
+    with pytest.raises(FileExistsError):
+        save_private_trial_rows(output, rows)
+    assert [json.loads(line) for line in output.read_text().splitlines()] == rows
+
+
+def test_measured_trial_output_rejects_symlink_and_invalid_rows(tmp_path):
+    actual = tmp_path / "existing.jsonl"
+    actual.write_text("original evidence\n", encoding="utf-8")
+    redirected = tmp_path / "redirected.jsonl"
+    redirected.symlink_to(actual)
+    with pytest.raises(FileExistsError):
+        save_private_trial_rows(redirected, [{"body": "should not write"}])
+    assert actual.read_text(encoding="utf-8") == "original evidence\n"
+    invalid = tmp_path / "invalid.jsonl"
+    with pytest.raises(TypeError):
+        save_private_trial_rows(invalid, [{"unserializable": object()}])
+    assert not invalid.exists()
+    with pytest.raises(ValueError, match="No captured IMU samples"):
+        save_private_trial_rows(invalid, [])
+    assert not invalid.exists()
