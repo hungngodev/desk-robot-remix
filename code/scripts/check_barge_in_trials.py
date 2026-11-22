@@ -19,12 +19,14 @@ def evaluate(records: list[dict]) -> dict:
     human = [r for r in records if r.get("kind") == "human"]
     alone = [r for r in records if r.get("kind") == "robot_only"]
     quiet = [r for r in records if r.get("kind") == "quiet"]
-    if (len(human) != 20 or len(alone) != 1
-            or len(quiet) != 1 or len(records) != 22):
-        raise ValueError("Need 20 human, one robot-only, and one quiet-mode trial")
+    if (len(human) not in (20, 40) or len(alone) != 1
+            or len(quiet) != 1 or len(records) != len(human) + 2):
+        raise ValueError(
+            "Need 20 human trials per tested distance and separate robot-only/quiet controls"
+        )
     ids = [r.get("id") for r in human]
     if (any(type(x) is not str or not 1 <= len(x) <= 64 for x in ids)
-            or len(set(ids)) != 20):
+            or len(set(ids)) != len(human)):
         raise ValueError("Need unique nonempty human trial IDs")
 
     on_time = 0
@@ -33,6 +35,15 @@ def evaluate(records: list[dict]) -> dict:
     firmware_revisions, audio_configs, placements, robot_ids = (
         set(), set(), set(), set()
     )
+    # 50 cm and 100 cm are separate 20-trial acceptance populations.
+    # One completed population is useful diagnostic evidence, never A2 PASS.
+    distance_bands = {
+        name: {"count": 0, "on_time": 0, "understood": 0,
+               "volumes": set(), "positions": set(), "loads": set(),
+               "speakers": set(), "turns": set(), "no_replay": True}
+        for name in ("50cm", "100cm")
+    }
+    onset_times = set()
     for r in human:
         volume = r.get("volume")
         if volume not in ("low", "medium", "high"):
@@ -65,10 +76,25 @@ def evaluate(records: list[dict]) -> dict:
         stages = [_number(r.get(name), name) for name in stage_names]
         if any(later < earlier for earlier, later in zip(stages, stages[1:], strict=False)):
             raise ValueError("Audio stop stage timestamps are not monotonic")
+        if stages[0] in onset_times:
+            raise ValueError("Human acoustic trial onset timestamp reused")
+        onset_times.add(stages[0])
         distance = _number(r.get("speaker_distance_cm"), "speaker distance")
         noise = _number(r.get("room_noise_db_a"), "room background noise")
-        if not 45 <= distance <= 55 or not 0 <= noise <= 100:
-            raise ValueError("Record 50 cm speaking distance and measured room noise")
+        if not 0 <= noise <= 100:
+            raise ValueError("Record measured room noise")
+        if 45 <= distance <= 55:
+            band = distance_bands["50cm"]
+        elif 95 <= distance <= 105:
+            band = distance_bands["100cm"]
+        else:
+            raise ValueError("Record 50 cm or 100 cm speaking distance")
+        band["count"] += 1
+        band["volumes"].add(volume)
+        band["positions"].add(position)
+        band["loads"].add(load)
+        band["speakers"].add(speaker)
+        band["turns"].add(turn)
 
         for label in (
             "firmware_commit", "audio_config_id", "mic_speaker_placement_id",
@@ -90,8 +116,13 @@ def evaluate(records: list[dict]) -> dict:
             raise ValueError("Record speech, start-of-utterance and replay evidence")
         if correct and not (captured and beginning):
             raise ValueError("Correct intent requires captured intelligible utterance start")
-        on_time += stages[-1] - stages[0] <= 500
-        understood += captured and correct and beginning and no_replay
+        stopped = stages[-1] - stages[0] <= 500
+        retained = captured and correct and beginning and no_replay
+        on_time += stopped
+        understood += retained
+        band["on_time"] += stopped
+        band["understood"] += retained
+        band["no_replay"] &= no_replay
 
     if volumes != {"low", "medium", "high"}:
         raise ValueError("Human trials must cover all intended speaker volumes")
@@ -103,6 +134,8 @@ def evaluate(records: list[dict]) -> dict:
         raise ValueError("Need trials with a second human speaker")
     if not any(turn + 1 in turns for turn in turns):
         raise ValueError("Need adjacent conversation turns")
+    if any(band["count"] not in (0, 20) for band in distance_bands.values()):
+        raise ValueError("Each tested speaking distance requires exactly 20 human trials")
 
     # A single acceptance result must not mix different firmware builds,
     # AEC settings or microphone/speaker geometry across its twenty trials.
@@ -144,6 +177,26 @@ def evaluate(records: list[dict]) -> dict:
             or type(unsolicited_motion) is not int
             or unsolicited_speech < 0 or unsolicited_motion < 0):
         raise ValueError("Need 600s real quiet-mode speech and motion counts")
+    distance_results = {}
+    for name, band in distance_bands.items():
+        varied = (
+            band["volumes"] == {"low", "medium", "high"}
+            and band["positions"] == {"early", "late"}
+            and band["loads"] == {"voice_only", "camera_wifi", "motors_servos_stand"}
+            and len(band["speakers"]) >= 2
+            and any(turn + 1 in band["turns"] for turn in band["turns"])
+        )
+        distance_results[name] = {
+            "human_trials": band["count"],
+            "audible_stops_within_500ms": band["on_time"],
+            "new_intents_understood": band["understood"],
+            "coverage_complete": varied and band["count"] == 20,
+            "meets_human_gate": (
+                band["count"] == 20 and varied
+                and band["on_time"] >= 19 and band["understood"] >= 18
+                and band["no_replay"]
+            ),
+        }
     return {
         # Bind the result to the one measured assembly; never present a
         # twenty-trial pass as a generic fleet or firmware certification.
@@ -151,7 +204,9 @@ def evaluate(records: list[dict]) -> dict:
         "firmware_commit": human[0]["firmware_commit"],
         "audio_config_id": human[0]["audio_config_id"],
         "mic_speaker_placement_id": human[0]["mic_speaker_placement_id"],
-        "human_trials": 20,
+        "human_trials": len(human),
+        "required_distances_cm": [50, 100],
+        "distance_results": distance_results,
         "audible_stops_within_500ms": on_time,
         "new_intents_understood": understood,
         "robot_only_seconds": duration,
@@ -170,7 +225,8 @@ def evaluate(records: list[dict]) -> dict:
             "conversation_turns": sorted(turns),
         },
         "meets_proposed_gate": (
-            on_time >= 19 and understood >= 18 and echoes == 0
+            all(b["meets_human_gate"] for b in distance_results.values())
+            and echoes == 0
             and unsolicited_speech == 0 and unsolicited_motion == 0
             and all(r["obsolete_audio_never_resumed"] for r in human)
         ),

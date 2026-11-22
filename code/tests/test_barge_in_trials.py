@@ -55,9 +55,26 @@ def fake_rows():
     }]
 
 
+def both_distances():
+    near = fake_rows()
+    far = []
+    for row in near[:-2]:
+        trial = {**row, "id": row["id"] + "-far", "speaker_distance_cm": 100}
+        for key in (
+            "human_onset_ms", "vad_arrival_ms", "abort_dispatch_ms",
+            "head_queue_clear_ms", "i2s_stop_ms", "audible_stop_ms",
+        ):
+            trial[key] += 20000
+        far.append(trial)
+    return near[:-2] + far + near[-2:]
+
+
 def test_well_formed_synthetic_rows_only_verify_test_criteria():
-    report = evaluate(fake_rows())
+    report = evaluate(both_distances())
     assert report["meets_proposed_gate"]
+    assert report["human_trials"] == 40
+    assert report["distance_results"]["50cm"]["human_trials"] == 20
+    assert report["distance_results"]["100cm"]["human_trials"] == 20
     assert report["records_are_operator_supplied_not_independently_attested"]
     assert report["robot_id"] == "robot-01"
     assert report["firmware_commit"] == "sha-of-physically-flashed-build"
@@ -75,13 +92,69 @@ def test_well_formed_synthetic_rows_only_verify_test_criteria():
     ]
 
 
+def test_near_only_cannot_pass_full_a2_even_when_all_near_trials_pass():
+    report = evaluate(fake_rows())
+    assert report["distance_results"]["50cm"]["meets_human_gate"]
+    assert not report["distance_results"]["100cm"]["meets_human_gate"]
+    assert not report["meets_proposed_gate"]
+
+
+def test_far_only_is_a_partial_valid_trial_not_complete_a2():
+    rows = both_distances()[20:]
+    assert not evaluate(rows)["meets_proposed_gate"]
+
+
+@pytest.mark.parametrize(("field", "allowed"), [
+    ("audible_stop_ms", 18),
+    ("new_intent_correct", 17),
+])
+def test_far_distance_must_independently_meet_stop_and_intent_thresholds(
+    field, allowed,
+):
+    rows = both_distances()
+    failures = 2 if field == "audible_stop_ms" else 3
+    for row in rows[20:20 + failures]:
+        if field == "audible_stop_ms":
+            row[field] = row["human_onset_ms"] + 750
+        else:
+            row[field] = False
+    report = evaluate(rows)
+    assert report["distance_results"]["50cm"]["meets_human_gate"]
+    metric = (
+        "audible_stops_within_500ms" if field == "audible_stop_ms"
+        else "new_intents_understood"
+    )
+    assert report["distance_results"]["100cm"][metric] == allowed
+    assert not report["meets_proposed_gate"]
+
+
+def test_incomplete_far_band_is_rejected_not_rounded_to_twenty():
+    rows = both_distances()
+    rows.pop(25)
+    with pytest.raises(ValueError, match="20 human trials"):
+        evaluate(rows)
+
+
+def test_cross_distance_reused_trial_onset_is_not_new_acoustic_evidence():
+    rows = both_distances()
+    rows[20].update({
+        key: rows[0][key]
+        for key in (
+            "human_onset_ms", "vad_arrival_ms", "abort_dispatch_ms",
+            "head_queue_clear_ms", "i2s_stop_ms", "audible_stop_ms",
+        )
+    })
+    with pytest.raises(ValueError, match="onset timestamp reused"):
+        evaluate(rows)
+
+
 def test_late_double_talk_and_self_interruption_fail():
-    rows = fake_rows()
+    rows = both_distances()
     rows[0]["audible_stop_ms"] += 650
     rows[1]["audible_stop_ms"] += 650
     rows[-2]["self_interruptions"] = 1
     report = evaluate(rows)
-    assert report["audible_stops_within_500ms"] == 18
+    assert report["distance_results"]["50cm"]["audible_stops_within_500ms"] == 18
     assert not report["meets_proposed_gate"]
 
 
@@ -143,7 +216,7 @@ def test_mixed_hardware_or_software_setup_cannot_be_certified(field):
 
 
 def test_old_playback_replay_prevents_gate():
-    rows = fake_rows()
+    rows = both_distances()
     rows[0]["obsolete_audio_never_resumed"] = False
     assert not evaluate(rows)["meets_proposed_gate"]
 
@@ -181,7 +254,7 @@ def test_quiet_mode_must_match_robot_and_flashing_configuration(field):
     "unsolicited_speech_events", "unsolicited_motion_events",
 ])
 def test_quiet_mode_unsolicited_activity_prevents_a2_gate(field):
-    records = fake_rows()
+    records = both_distances()
     records[-1][field] = 1
     report = evaluate(records)
     assert report["quiet_mode_seconds"] == 600

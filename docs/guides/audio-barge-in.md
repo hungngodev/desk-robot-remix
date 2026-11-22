@@ -18,13 +18,14 @@ each interruption. Model-generated voice must not continually interrupt itself.
 Proposed robot-one gate, not an achieved measurement:
 
 1. Record firmware/config, mic/speaker placement, operating volume, room/background
-   noise and a 50 cm speaking distance. Use low/middle/maximum **intended** volume,
+   noise and separate 50 cm and 100 cm speaking distances. Use low/middle/maximum **intended** volume,
    not arbitrary amplifier maximum. Include interruptions near the beginning and
    later in an answer, and during more than one consecutive conversation turn.
-2. At least 19 of 20 ordinary-speech trials stop audible obsolete TTS within 500 ms
+2. At each distance, at least 19 of 20 ordinary-speech trials stop audible obsolete TTS within 500 ms
    of human-speech onset. At least 18 of 20 yield the correct new intent, with an
    intelligible transcript that includes the start of the person's utterance.
-   A stop without capturing the request fails the conversational part.
+   A stop without capturing the request fails the conversational part. The
+   50 cm and 100 cm sets must pass independently on the same qualified build.
 3. Ten minutes of robot-only speech has no false self-interruption. Test a second
    person, normal pauses and nearby speech/noise; document the allowed conditions.
 4. Repeat with camera capture and Wi-Fi activity, then motors/servos on a stand.
@@ -43,19 +44,22 @@ These thresholds make the requirement reviewable; no physical trial exists yet.
 `code/scripts/check_barge_in_trials.py` now rejects incomplete trial
 coverage instead of treating an arbitrary set of twenty identical
 interruptions as acceptance evidence. The input is JSON Lines containing
-exactly twenty `kind: human` records, one `kind: robot_only` record,
-and one `kind: quiet` record. Both controls must be observed for at least
+twenty `kind: human` records at 50 cm and another twenty at 100 cm,
+plus one `kind: robot_only` record and one `kind: quiet` record.
+One complete twenty-trial distance set alone can be inspected but **never
+passes A2 overall**. Both controls must be observed for at least
 600 seconds on the same actual robot, firmware, audio setup and head geometry.
 
 Each human row records a unique `id`, `volume` (`low`, `medium`,
 `high`), `interruption_position` (`early` or `late`),
 `load_profile` (`voice_only`, `camera_wifi`, or
 `motors_servos_stand`), `speaker_id`, a positive
-`conversation_turn`, `speaker_distance_cm` within 45 to 55,
+`conversation_turn`, `speaker_distance_cm` within 45 to 55 for the
+50 cm set or 95 to 105 for the 100 cm set,
 `room_noise_db_a`, `robot_id`, `firmware_commit`, `audio_config_id`,
 and `mic_speaker_placement_id`. The twenty rows must actually cover both
 positions, all three load profiles and intended speaker volumes, two
-human speakers and adjacent conversation turn numbers.
+human speakers and adjacent conversation turn numbers **in each twenty-trial set**.
 
 Each human row also supplies measured monotonic timestamps, in order:
 `human_onset_ms`, `vad_arrival_ms`, `abort_dispatch_ms`,
@@ -81,7 +85,7 @@ quiet control must repeat the same `robot_id`, `firmware_commit`,
 `audio_config_id`, and `mic_speaker_placement_id` as the interruption
 trials. An echo-only control is not a quiet-mode test.
 The checker includes these identities in its result so no generic
-five-robot qualification can be inferred. The proposed acoustic gate needs
+five-robot qualification can be inferred. The proposed acoustic gate needs **at each distance**
 19/20 audible stops within 500 ms, 18/20 correctly retained and understood
 intents, zero self-interruptions, no obsolete audio resuming, and no
 unsolicited quiet-mode speech or motion.
