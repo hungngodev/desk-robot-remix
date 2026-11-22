@@ -389,6 +389,38 @@ def test_export_and_verify_reject_symlinked_artifacts_before_mutation(
         source.verify_fit_kit(ROOT, output_dir=output)
 
 
+@pytest.mark.parametrize("preexisting", [False, True])
+def test_fit_kit_rejects_user_controlled_ancestor_before_creating_output(
+    tmp_path, monkeypatch, preexisting,
+):
+    source = module()
+    selected = tmp_path / "selected"
+    selected.mkdir()
+    # This untrusted parent is writable even when a fixture runs as root.
+    selected.chmod(0o777)
+    external = tmp_path / "unrelated"
+    external.mkdir()
+    alias = selected / "alias"
+    alias.symlink_to(external, target_is_directory=True)
+    output = alias / "candidate"
+    if preexisting:
+        output.mkdir()
+        (output / "fit_kit_manifest.json").write_text("prior evidence")
+    else:
+        assert not output.exists()
+    assert alias.is_symlink() and not output.is_symlink()
+    monkeypatch.setattr(source.shutil, "which", lambda _: "/usr/bin/openscad")
+    with pytest.raises(ValueError, match="Symlinked fit kit output path"):
+        source.export_kit(ROOT, output_dir=output)
+    if preexisting:
+        assert (output / "fit_kit_manifest.json").read_text() == "prior evidence"
+    else:
+        assert not output.exists()
+    assert not (external / "candidate/adapter_stls").exists()
+    with pytest.raises(ValueError, match="Symlinked fit kit output path"):
+        source.verify_fit_kit(ROOT, output_dir=output)
+
+
 def test_failed_cad_render_never_publishes_partial_parts(monkeypatch, tmp_path):
     source = module()
     folder = tmp_path / "docs/cad/remixes"

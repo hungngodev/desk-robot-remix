@@ -205,7 +205,17 @@ def _reject_fit_kit_output_aliases(output: Path) -> None:
     directories and manifest must remain inside that selected directory.
     Check before deleting a prior manifest or starting any mesh render.
     """
-    paths = [output, output / "fit_kit_manifest.json"]
+    # The default macOS temp tree can traverse root-owned /var or /tmp
+    # aliases. Trust only system-owned links beneath nonwritable parents.
+    # A user-controlled ancestor could otherwise redirect an entire output.
+    for ancestor in (output, *output.parents):
+        if not ancestor.is_symlink():
+            continue
+        if (ancestor.lstat().st_uid == 0
+                and not (ancestor.parent.stat().st_mode & 0o022)):
+            continue
+        raise ValueError(f"Symlinked fit kit output path: {ancestor}")
+    paths = [output / "fit_kit_manifest.json"]
     groups = (
         ("adapter_stls", ADAPTERS),
         ("fit_stls", (*GAUGES, *SPEAKER_FITS, *RANGER_FITS, *MG90S_FITS)),
@@ -239,8 +249,8 @@ def export_kit(
     for _, source, _ in sources:
         if not source.is_file():
             raise FileNotFoundError(f"Missing original parametric source: {source}")
-    out.mkdir(parents=True, exist_ok=True)
     _reject_fit_kit_output_aliases(out)
+    out.mkdir(parents=True, exist_ok=True)
     # Fail closed: a failed rebuild cannot retain an old success manifest.
     (out / "fit_kit_manifest.json").unlink(missing_ok=True)
     rendered: list[dict] = []
