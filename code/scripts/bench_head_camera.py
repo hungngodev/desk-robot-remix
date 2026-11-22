@@ -27,24 +27,59 @@ ROOT = Path(__file__).resolve().parents[1]
 MAX_CAMERA_GAP_S = 1.2
 
 
+def _private_report_directory_fd(parent: Path) -> int:
+    """Keep a validated directory open across the actual report creation."""
+    absolute = Path(os.path.abspath(parent))
+    descriptor = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for name in absolute.parts[1:]:
+            entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            owner = os.fstat(descriptor)
+            # Stable root-owned system aliases (such as macOS /var) are
+            # permitted only under root-owned non-writable directories.
+            if stat.S_ISLNK(entry.st_mode) and (
+                entry.st_uid != 0 or owner.st_uid != 0
+                or stat.S_IMODE(owner.st_mode) & 0o022
+            ):
+                raise ValueError("Camera bench report directory has unsafe symlink")
+            flags = os.O_RDONLY | os.O_DIRECTORY
+            if not stat.S_ISLNK(entry.st_mode):
+                flags |= os.O_NOFOLLOW
+            next_descriptor = os.open(name, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_descriptor
+        if stat.S_IMODE(os.fstat(descriptor).st_mode) & 0o077:
+            raise ValueError("Camera bench report directory must be private mode 0700")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def preflight_private_report(path: Path) -> None:
-    """Reject public or existing measurement paths before touching the head."""
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if (path.parent.is_symlink()
-            or stat.S_IMODE(path.parent.stat().st_mode) & 0o077):
+    """Reject symlinked or public camera report paths before touching the head."""
+    if path.parent.is_symlink():
         raise ValueError("Camera bench report directory must be private mode 0700")
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    descriptor = _private_report_directory_fd(path.parent)
+    os.close(descriptor)
     if path.exists() or path.is_symlink():
         raise FileExistsError("Camera bench trial report already exists")
 
 
 def save_private_report(path: Path, report: dict) -> None:
     preflight_private_report(path)
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    with os.fdopen(os.open(path, flags, 0o600), "w", encoding="utf-8") as out:
-        json.dump(report, out, indent=2)
-        out.write("\n")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    descriptor = _private_report_directory_fd(path.parent)
+    try:
+        with os.fdopen(
+            os.open(path.name, flags, 0o600, dir_fd=descriptor),
+            "w", encoding="utf-8",
+        ) as out:
+            json.dump(report, out, indent=2)
+            out.write("\n")
+    finally:
+        os.close(descriptor)
 
 
 

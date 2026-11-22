@@ -72,6 +72,26 @@ def test_camera_bench_report_private_exclusive_and_preflighted(tmp_path):
         bench.preflight_private_report(public / "another.json")
 
 
+def test_camera_bench_rejects_symlinked_ancestor_of_private_report(tmp_path):
+    # The direct parent is genuinely 0700 and not a link. A replaceable
+    # ancestor must still be refused before a private bench record escapes.
+    attacker = tmp_path / "attacker"
+    attacker.mkdir(mode=0o700)
+    (attacker / "reports").mkdir(mode=0o700)
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o777)
+    shared.chmod(0o777)
+    (shared / "alias").symlink_to(attacker, target_is_directory=True)
+    output = shared / "alias" / "reports" / "camera.json"
+    assert not output.parent.is_symlink()
+    assert stat.S_IMODE(output.parent.stat().st_mode) == 0o700
+    with pytest.raises(ValueError, match="unsafe symlink"):
+        bench.preflight_private_report(output)
+    with pytest.raises(ValueError, match="unsafe symlink"):
+        bench.save_private_report(output, {"robot_id": "robot-01"})
+    assert not (attacker / "reports" / "camera.json").exists()
+
+
 async def test_camera_bench_keeps_status_independent_and_never_qualifies_hardware():
     class Head:
         def __init__(self):
