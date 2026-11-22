@@ -90,3 +90,50 @@ async def test_jaw_capture_rejects_cross_robot_auxiliary_telemetry():
                 robot="robot-01", token="t" * 24,
                 count=5, interval=0.12,
             )
+
+
+async def test_jaw_physical_capture_rejects_zero_boot():
+    def read(_request):
+        return httpx.Response(200, json={
+            "robot_id": "robot-01",
+            "force": {"jaw_valid": True, "valid": True, "calibrated": False,
+                      "jaw_seq": 1, "jaw_age_ms": 10, "boot_id": 0,
+                      "adc": [0, 350]},
+        })
+    async with httpx.AsyncClient(transport=httpx.MockTransport(read)) as client:
+        with pytest.raises(ValueError, match="WROOM boot and jaw age"):
+            await jaw.capture(
+                client, base_url="http://127.0.0.1:8008",
+                robot="robot-01", token="t" * 24,
+                count=5, interval=0.12, boot_state={},
+            )
+
+
+async def test_jaw_physical_capture_rejects_changed_boot_after_valid_phase():
+    sample_number = 0
+    boot = 4242
+    def read(_request):
+        nonlocal sample_number
+        sample_number += 1
+        return httpx.Response(200, json={
+            "robot_id": "robot-01",
+            "force": {"jaw_valid": True, "valid": True, "calibrated": False,
+                      "jaw_seq": sample_number, "jaw_age_ms": 10,
+                      "boot_id": boot, "adc": [0, 350]},
+        })
+    state = {}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(read)) as client:
+        samples = await jaw.capture(
+            client, base_url="http://127.0.0.1:8008",
+            robot="robot-01", token="t" * 24,
+            count=5, interval=0.12, boot_state=state,
+        )
+        assert len(samples) == 5
+        assert state["boot_id"] == 4242
+        boot = 4243
+        with pytest.raises(ValueError, match="WROOM reboot"):
+            await jaw.capture(
+                client, base_url="http://127.0.0.1:8008",
+                robot="robot-01", token="t" * 24,
+                count=5, interval=0.12, boot_state=state,
+            )

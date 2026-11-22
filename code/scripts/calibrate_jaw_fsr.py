@@ -110,7 +110,7 @@ async def capture(
             force = payload["force"]
             boot = force.get("boot_id")
             age = force.get("jaw_age_ms")
-            if (type(boot) is not int or not 0 <= boot <= 0xffffffff
+            if (type(boot) is not int or not 1 <= boot <= 0xffffffff
                     or type(age) is not int or not 0 <= age < 500):
                 raise ValueError("Physical jaw calibration requires WROOM boot and jaw age")
             if "boot_id" in boot_state and boot_state["boot_id"] != boot:
