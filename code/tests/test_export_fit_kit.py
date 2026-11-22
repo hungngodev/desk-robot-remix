@@ -220,6 +220,19 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     import json
     manifest = rendered / "fit_kit_manifest.json"
     original = manifest.read_text()
+    # A hand-edited JSON manifest must fail closed with a validation error,
+    # not crash on a non-object part or an unhashable location.
+    manifest.write_text("[]")
+    with pytest.raises(ValueError, match="Invalid fit kit manifest root"):
+        source.verify_fit_kit(tmp_path, output_dir=rendered)
+    for bad_part in (None, ["not a part"], "not a part",
+                     {"location": []}, {"location": {"nested": "path"}}):
+        altered = json.loads(original)
+        altered["parts"][0] = bad_part
+        manifest.write_text(json.dumps(altered))
+        with pytest.raises(ValueError, match="Missing or duplicate fit kit parts"):
+            source.verify_fit_kit(tmp_path, output_dir=rendered)
+    manifest.write_text(original)
     for unsafe_flag in (
         "hardware_fit_verified", "full_printable_assembly_verified",
         "dock_charge_contacts_approved", "commercial_manufacture_authorized",

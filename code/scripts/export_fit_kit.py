@@ -371,6 +371,8 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
         object_pairs_hook=strict_fit_kit_manifest_object,
         parse_constant=reject_nonfinite_fit_kit_number,
     )
+    if not isinstance(report, dict):
+        raise ValueError("Invalid fit kit manifest root")
     # Generated STLs are only reversible coupons. A hand-edited manifest
     # cannot turn any missing physical, assembly or licensing evidence into
     # a passing release claim without invalidating source verification.
@@ -404,7 +406,10 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
             expected[f"{folder}/{name}.stl"] = f"docs/cad/remixes/{filename}"
     items = report.get("parts")
     if (not isinstance(items, list) or len(items) != len(expected)
-            or {item.get("location") for item in items} != set(expected)):
+            or any(not isinstance(item, dict)
+                   or type(item.get("location")) is not str
+                   for item in items)
+            or {item["location"] for item in items} != set(expected)):
         raise ValueError("Missing or duplicate fit kit parts")
     for item in items:
         location = item["location"]
