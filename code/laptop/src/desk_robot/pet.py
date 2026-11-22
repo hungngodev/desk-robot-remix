@@ -1797,12 +1797,14 @@ class PetController:
                 hub_generation = self._sync_visual_generation(robot_id)
                 camera_consent_generation = self.settings.camera_consent_generation
 
-                def current_camera_grant() -> bool:
+                def current_camera_grant(
+                    admitted_grant: int = camera_consent_generation,
+                ) -> bool:
                     return (
                         self.settings.mode != "hardware"
                         or (self.settings.voice_vision_tools_enabled
                             and self.settings.camera_consent_generation
-                            == camera_consent_generation)
+                            == admitted_grant)
                     )
                 if (self.settings.mode == "hardware"
                         and not self.settings.voice_vision_tools_enabled):
