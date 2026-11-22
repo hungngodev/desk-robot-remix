@@ -2576,3 +2576,65 @@ def test_pinned_upstream_connection_initializes_per_device_native_tts():
         "native_tts_config(self)"
     )
     compile(patched, "native_xiaozhi_connection.py", "exec")
+
+
+def test_actual_pinned_xiaozhi_tts_initializer_selects_each_registered_voice(
+    bridge, monkeypatch,
+):
+    """Execute the patched real upstream method with its actual call ordering."""
+    import ast
+    from types import SimpleNamespace
+
+    monkeypatch.setenv(
+        "DESK_ROBOT_NATIVE_VOICE_MAP",
+        json.dumps({"robot-01": "af_heart", "robot-02": "am_adam"}),
+    )
+    spec = importlib.util.spec_from_file_location(
+        "executed_voice_overlay", ROOT / "laptop/server/install_overlay.py"
+    )
+    installer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(installer)
+    source = installer.files(
+        ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server"
+    )["core/connection.py"]
+    tree = ast.parse(source)
+    connection = next(
+        cls for cls in tree.body
+        if isinstance(cls, ast.ClassDef) and cls.name == "ConnectionHandler"
+    )
+    method = next(
+        member for member in connection.body
+        if isinstance(member, ast.FunctionDef)
+        and member.name == "_initialize_tts"
+    )
+
+    seen = []
+
+    def original_pinned_factory(config):
+        # The original provider chooses the voice from its TTS params.
+        voice = config["TTS"]["CustomTTS"]["params"]["voice"]
+        seen.append(voice)
+        return voice
+
+    namespace = {
+        "initialize_tts": original_pinned_factory,
+        "DefaultTTS": lambda *args, **kwargs: None,
+    }
+    isolated = ast.Module(body=[method], type_ignores=[])
+    exec(compile(isolated, "pinned_native_tts_hook.py", "exec"), namespace)
+    initialize = namespace["_initialize_tts"]
+    common = {
+        "selected_module": {"TTS": "CustomTTS"},
+        "TTS": {"CustomTTS": {
+            "type": "custom", "params": {"voice": "af_heart", "model": "kokoro"},
+        }},
+    }
+    pip = SimpleNamespace(device_id="mac-01", config=common, need_bind=False)
+    dot = SimpleNamespace(device_id="mac-02", config=common, need_bind=False)
+    bridge.register(pip)
+    bridge.register(dot)
+    assert initialize(pip) == "af_heart"
+    assert initialize(dot) == "am_adam"
+    assert initialize(pip) == "af_heart"
+    assert seen == ["af_heart", "am_adam", "af_heart"]
+    assert common["TTS"]["CustomTTS"]["params"]["voice"] == "af_heart"
