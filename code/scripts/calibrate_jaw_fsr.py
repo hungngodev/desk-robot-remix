@@ -20,7 +20,6 @@ import httpx
 from desk_robot.grasp_feedback import _fresh_jaw_sequence, force_observation
 
 
-
 def _strict_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
     """Refuse contradictory operator-entered calibration provenance."""
     result: dict[str, object] = {}
