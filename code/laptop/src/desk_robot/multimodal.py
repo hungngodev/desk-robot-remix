@@ -28,6 +28,11 @@ if TYPE_CHECKING:
 from .room_station import RoomObservation
 from .sensor_event_contract import TRIGGERS  # retained public import name
 
+# Keep source-ID deduplication longer than the 30s visible ASR context.
+# A saturated identity fence refuses new context rather than evicting live IDs.
+_HEARD_REPLAY_SECONDS = 60.0
+_HEARD_REPLAY_MAX_IDS = 1024
+
 TEMPORAL_WORDS = re.compile(
     r"\b(chang(?:e|ed|ing)|mov(?:e|ed|ing)|happen(?:ed|ing)?|"
     r"before|after|just|appear(?:ed)?|disappear(?:ed)?|"
@@ -192,6 +197,12 @@ class CameraFrameHub:
         # Each robot's words remain isolated and deduped by source item ID.
         self.heard_history = {
             robot: deque(maxlen=4) for robot in robot_ids
+        }
+        # An ASR receipt stays seen even after the four content slots roll
+        # over or voice transport clears the transient display. Each pet has
+        # its own bounded monotonic replay window with fail-closed capacity.
+        self.heard_seen_ids: dict[str, dict[str, float]] = {
+            robot: {} for robot in robot_ids
         }
         # Retractions must outlive the short ASR history slot, otherwise
         # a replayed authenticated event can resurrect operator-deleted text.
@@ -579,14 +590,28 @@ class CameraFrameHub:
             raise ValueError("Invalid native ASR turn evidence")
         # A future Mac receipt could remain dormant and later reappear as
         # a new human request. Keep historical ASR only within its normal TTL.
-        if received_at > time.monotonic() + 1:
+        mac_now = time.monotonic()
+        if received_at > mac_now + 1:
             raise ValueError("Future native ASR receipt clock")
+        seen = self.heard_seen_ids[robot_id]
+        # Insertion order is first-admission order, using the host monotonic
+        # clock rather than untrusted transcript text or source timestamps.
+        while seen:
+            oldest = next(iter(seen))
+            if mac_now - seen[oldest] <= _HEARD_REPLAY_SECONDS:
+                break
+            del seen[oldest]
         if (event_id in self.revoked_heard_ids[robot_id]
-                or any(entry[0] == event_id for entry in self.heard_history[robot_id])):
+                or event_id in seen):
+            return False
+        # Do not evict a still-live ID under flood; losing a new uncertain
+        # transcript is safer than replaying an old operator request.
+        if len(seen) >= _HEARD_REPLAY_MAX_IDS:
             return False
         self.heard_history[robot_id].append(
             (event_id, " ".join(transcript.split())[:240], received_at)
         )
+        seen[event_id] = mac_now
         return True
 
     def heard_revoked(self, robot_id: str, event_id: str) -> bool:
@@ -851,6 +876,8 @@ class CameraFrameHub:
         self.spoken_history[robot_id].clear()
         self.native_spoken_ids[robot_id].clear()
         self.heard_history[robot_id].clear()
+        # Do not clear heard_seen_ids or retractions on session/display loss:
+        # a delayed old native HTTP receipt must remain idempotent.
         self.event_history[robot_id].clear()
         self.situation_edges[robot_id].clear()
         self.latest_safety_fault[robot_id] = -math.inf

@@ -219,3 +219,96 @@ def test_live_asr_revoke_during_durable_write_retracts_ephemeral_receipt(
     assert attention_calls == []
     assert settings.camera_consent_generation == original_generation + 1
     assert settings.voice_vision_tools_enabled is regrant
+
+
+def test_native_asr_replay_after_four_display_slots_never_reenters_context(settings):
+    """The actual authenticated route keeps ID replay apart from display TTL."""
+    import time
+
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = False
+    settings.voice_transcript_memory_enabled = False
+    robot_id = settings.robots[0].id
+    hub = CameraFrameHub([robot_id])
+    heard_calls = []
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        multimodal=SimpleNamespace(hub=hub),
+        attention=SimpleNamespace(
+            heard=lambda *args: heard_calls.append(args),
+        ),
+        memory=None,
+    )
+    register_native_omni_routes(
+        app, settings, authorize=lambda: None,
+        coordinator=lambda: SimpleNamespace(robot=settings.robot),
+        native_pet_speech_policy=lambda _robot_id: {},
+    )
+    ids = [f"omni_{index:012x}_{index:020x}" for index in range(1, 6)]
+    route = f"/v1/pet/{robot_id}/omni-heard"
+    with TestClient(app) as client:
+        for index, event_id in enumerate(ids):
+            response = client.post(
+                route,
+                json={"event_id": event_id, "transcript": f"Current turn {index}"},
+            )
+            assert response.status_code == 200
+            assert response.json()["ephemeral_context_added"] is True
+            assert response.json()["retained_on_disk"] is False
+        # The first ID has already fallen out of the four displayed slots.
+        assert [item[0] for item in hub.heard_history[robot_id]] == ids[1:]
+        replay = client.post(
+            route, json={
+                "event_id": ids[0],
+                "transcript": "OLD REQUEST MUST NOT REENTER",
+            },
+        )
+        assert replay.status_code == 200
+        assert replay.json()["ephemeral_context_added"] is False
+        assert replay.json()["stored"] is False
+        # The voice path can drop live display context on reconnect without
+        # renewing an already used source ID from an earlier session.
+        hub.heard_history[robot_id].clear()
+        again = client.post(
+            route, json={
+                "event_id": ids[0], "transcript": "OLD REQUEST AFTER RESET",
+            },
+        )
+        assert again.status_code == 200
+        assert again.json()["ephemeral_context_added"] is False
+    assert len(heard_calls) == 5
+    assert not any(
+        item["channel"] == "human_transcript"
+        for item in hub.interaction_timeline(robot_id, time.monotonic())
+    )
+
+
+def test_native_asr_replay_capacity_fails_closed_and_is_per_pet():
+    """A flood must not evict an in-window receipt or mix pet identities."""
+    import time
+
+    from desk_robot.multimodal import CameraFrameHub
+
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    now = time.monotonic()
+    for index in range(1024):
+        assert hub.remember_heard(
+            "robot-01", f"receipt-{index}", f"Message {index}", now,
+        )
+    assert len(hub.heard_history["robot-01"]) == 4
+    assert not hub.remember_heard(
+        "robot-01", "receipt-1024", "Overflow must be dropped", now,
+    )
+    assert not hub.remember_heard(
+        "robot-01", "receipt-0", "Replay must be dropped", now,
+    )
+    assert hub.remember_heard(
+        "robot-02", "receipt-0", "Independent pet speech", now,
+    )
+    hub.clear("robot-01")
+    assert not hub.remember_heard(
+        "robot-01", "receipt-0", "Replay after clear", now,
+    )
