@@ -577,6 +577,7 @@ class Conversation:
     async def _say_with_permission(
         self, robot: RobotConfig, text: str,
         permission_check: Callable[[], bool] | None,
+        *, transmission_started: Callable[[], None] | None = None,
     ) -> None:
         """One consent-aware entry for every hardware speaker implementation.
 
@@ -588,6 +589,11 @@ class Conversation:
         aware = getattr(self.speaker, "supports_permission_checks", False) is True
         if self.settings.mode == "hardware" and not aware:
             raise RuntimeError("Hardware speaker lacks permission-aware speech contract")
+        # A revoked model output before this point never entered the decoder.
+        # Mark risk synchronously at the real speaker call boundary, not when
+        # we merely acquire a session or start generating model text.
+        if transmission_started is not None:
+            transmission_started()
         if aware:
             await self.speaker.say(
                 robot, text, permission_check=permission_check,
@@ -793,8 +799,17 @@ class Conversation:
                 and (permission_check is None or permission_check())
             )
 
+        last_audio_robot: RobotConfig | None = None
+
         async def say_group(robot: RobotConfig, text: str) -> None:
-            await self._say_with_permission(robot, text, consent_still_valid)
+            def mark_transmission() -> None:
+                nonlocal last_audio_robot
+                last_audio_robot = robot
+
+            await self._say_with_permission(
+                robot, text, consent_still_valid,
+                transmission_started=mark_transmission,
+            )
 
         self.active = asyncio.current_task()
         self._active_private_memory_ids = (
@@ -1143,9 +1158,9 @@ class Conversation:
                         # Urgently stop the head first. Only completed sends,
                         # never the segment being cancelled or a guessed audio
                         # duration, can be saved as uncertain speech history.
-                        if current_robot is not None:
+                        if last_audio_robot is not None:
                             try:
-                                await self._abort_speaker_or_latch(current_robot)
+                                await self._abort_speaker_or_latch(last_audio_robot)
                             except BaseException:
                                 # The global STOP latch survives task cancellation.
                                 # Preserve the original model/transport failure.
@@ -1288,9 +1303,16 @@ class Conversation:
                         permission_check is not None and not permission_check()
                     ):
                         return False
+                    transmission_attempted = False
+
+                    def mark_transmission() -> None:
+                        nonlocal transmission_attempted
+                        transmission_attempted = True
+
                     try:
                         await self._say_with_permission(
                             robot, text, permission_check,
+                            transmission_started=mark_transmission,
                         )
                         # Simulated and alternate speakers may yield during say.
                         # Never report a completed proactive remark after opt-out.
@@ -1300,12 +1322,13 @@ class Conversation:
                         # A failed WAV/Opus transfer, not just cancellation,
                         # can leave already queued audio in the XIAO decoder.
                         # Fail closed using the existing speech abort route.
-                        try:
-                            await self._abort_speaker_or_latch(robot)
-                        except BaseException:
-                            # Keep the original failure, but latch uncertain
-                            # physical playback across cancelled task teardown.
-                            pass
+                        if transmission_attempted:
+                            try:
+                                await self._abort_speaker_or_latch(robot)
+                            except BaseException:
+                                # Preserve original failure; uncertain real audio
+                                # remains latched across cancelled task teardown.
+                                pass
                         raise
             return True
 

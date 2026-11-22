@@ -125,3 +125,36 @@ async def test_proactive_stop_failure_reaches_runtime_and_blocks_audio(settings)
     await conversation.stop()
     assert not conversation.speaker_stop_unconfirmed
     assert speaker.stop_calls[-2:] == ["robot-01", "robot-02"]
+
+async def test_consent_revoked_before_any_speaker_send_never_latches_decoder(settings):
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+
+    class RevokingChat:
+        async def reply(self, history):
+            settings.fleet_text_sharing_enabled = False
+            return "This output was revoked before entering a speaker."
+
+    class NoPlaybackSpeaker:
+        supports_permission_checks = True
+
+        def __init__(self):
+            self.session_grants = 0
+            self.sends = 0
+
+        @asynccontextmanager
+        async def session(self, robots):
+            self.session_grants += 1
+            yield
+
+        async def say(self, robot, text, *, permission_check=None):
+            self.sends += 1
+            raise AssertionError("Consent revocation must stop before transmission")
+
+    speaker = NoPlaybackSpeaker()
+    conversation = Conversation(settings, RevokingChat(), speaker)
+    with pytest.raises(RuntimeError, match="consent revoked"):
+        await conversation.run(["robot-01", "robot-02"], "private camera context", 2)
+    assert speaker.session_grants == 1
+    assert speaker.sends == 0
+    assert not conversation.speaker_stop_unconfirmed
