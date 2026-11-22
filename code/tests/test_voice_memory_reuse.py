@@ -362,3 +362,127 @@ def test_live_runtime_registers_per_pet_memory_revision_owners(settings, tokens)
         assert conversation._private_memory_generation == {
             robot.id: 0 for robot in settings.robots
         }
+
+@pytest.mark.parametrize(
+    ("query", "expected", "matched"),
+    [
+        ("What do you remember about my favorite color?",
+         "operator curated fact: favorite_color: blue", True),
+        ("Can you recall my favorite game?",
+         "operator curated fact: favorite_game: chess", True),
+        ("Do you remember my favorite snack?",
+         "No matching historical memories for this query", False),
+        (None, "operator curated fact: favorite_color: blue", True),
+    ],
+)
+def test_native_voice_recall_uses_relevant_operator_core_fact_without_episodes(
+    settings, query, expected, matched,
+):
+    """A current Xiaozhi turn must hear a curated fact, not an empty recall."""
+    from types import SimpleNamespace
+
+    from desk_robot.api_memory_routes import register_voice_context_route
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.voice_memory_tools_enabled = True
+    receipts = []
+    turn = SimpleNamespace(_turn_epoch={"robot-01": 7})
+
+    class Memory:
+        def recent(self, robot_id, *, limit):
+            assert robot_id == "robot-01" and limit == 6
+            return []
+
+        def search(self, robot_id, words, *, limit):
+            assert robot_id == "robot-01" and words == query and limit == 6
+            return []
+
+        def core_facts(self, robot_id, *, limit):
+            assert robot_id == "robot-01" and limit == 8
+            return [
+                SimpleNamespace(slot="favorite_color", value="blue"),
+                SimpleNamespace(slot="favorite_game", value="chess"),
+            ]
+
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        memory=Memory(), multimodal=None,
+        conversation=SimpleNamespace(
+            _private_memory_generation={"robot-01": 0},
+        ),
+    )
+    register_voice_context_route(
+        app, settings, authorize=lambda: None,
+        requested_tool_context=lambda *args: (turn, 7),
+        remember_tool_context=lambda *args: receipts.append(args),
+    )
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/pet/robot-01/voice-context",
+            params={"query": query} if query is not None else None,
+        )
+        assert response.status_code == 200
+        assert response.json()["matched"] is matched
+        assert response.json()["core_facts"] == [
+            {"slot": "favorite_color", "value": "blue"},
+            {"slot": "favorite_game", "value": "chess"},
+        ]
+        assert receipts == [((turn, 7), "robot-01", "memory_recall", expected)]
+        receipts.clear()
+        # A stale human turn may still read JSON, but may not be promoted
+        # into an authoritative receipt on a different turn.
+        turn._turn_epoch["robot-01"] = 8
+        stale = client.get(
+            "/v1/pet/robot-01/voice-context",
+            params={"query": query} if query is not None else None,
+        )
+        assert stale.status_code == 409
+        assert "blue" not in stale.text and "chess" not in stale.text
+        assert receipts == []
+
+
+@pytest.mark.parametrize("revoke_and_regrant", (False, True))
+def test_native_curated_fact_recall_never_survives_memory_consent_change(
+    settings, revoke_and_regrant,
+):
+    from types import SimpleNamespace
+
+    from desk_robot.api_memory_routes import register_voice_context_route
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.voice_memory_tools_enabled = True
+    receipts = []
+    turn = SimpleNamespace(_turn_epoch={"robot-01": 1})
+
+    class Memory:
+        def search(self, robot_id, words, *, limit):
+            return []
+
+        def core_facts(self, robot_id, *, limit):
+            settings.voice_memory_tools_enabled = False
+            if revoke_and_regrant:
+                settings.voice_memory_tools_enabled = True
+            return [SimpleNamespace(slot="favorite_color", value="private blue")]
+
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        memory=Memory(), multimodal=None,
+        conversation=SimpleNamespace(
+            _private_memory_generation={"robot-01": 0},
+        ),
+    )
+    register_voice_context_route(
+        app, settings, authorize=lambda: None,
+        requested_tool_context=lambda *args: (turn, 1),
+        remember_tool_context=lambda *args: receipts.append(args),
+    )
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/pet/robot-01/voice-context",
+            params={"query": "What is my favorite color?"},
+        )
+    assert response.status_code == 403
+    assert "private blue" not in response.text
+    assert receipts == []

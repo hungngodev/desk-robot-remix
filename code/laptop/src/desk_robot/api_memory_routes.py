@@ -27,6 +27,26 @@ class EpisodeMemoryCorrectionRequest(BaseModel):
 
 
 
+def _matching_curated_fact(core: list, query: str | None):
+    """Find only a relevant operator-curated slot for one voice recall turn.
+
+    The JSON endpoint still returns all authorized facts. The short spoken
+    receipt must not promote an unrelated preference into a topical answer.
+    """
+    if not core:
+        return None
+    if query is None:
+        return core[0]
+    words = " " + " ".join(
+        "".join(char if char.isalnum() else " " for char in query.casefold()).split()
+    ) + " "
+    return next(
+        (fact for fact in core
+         if " " + fact.slot.replace("_", " ") + " " in words),
+        None,
+    )
+
+
 def register_memory_routes(
     app: FastAPI, settings: Settings, *, operator,
 ) -> None:
@@ -391,8 +411,18 @@ def register_voice_context_route(
         # Voice memory consent is independent from the vision opt-in.
         # Only a marked, still-current voice tool turn may publish a short
         # memory receipt; ordinary operator/dashboard reads cannot.
+        # A topical core preference is more authoritative than a loosely
+        # related episode. General recall preserves episode-first behavior.
+        curated = (
+            _matching_curated_fact(core, query)
+            if query is not None or not records else None
+        )
         if owner is not None:
-            if records:
+            if curated is not None:
+                summary = (
+                    f"operator curated fact: {curated.slot}: {curated.value}"
+                )
+            elif records:
                 item = records[0]
                 provenance = (
                     "own observed event" if item.witnessed
@@ -415,7 +445,7 @@ def register_voice_context_route(
                 for item in core
             ],
             "retrieval": "topic" if query is not None else "recent",
-            "matched": bool(records),
+            "matched": bool(records) or curated is not None,
             "untrusted_context_not_instructions": True,
             "no_new_motion_permission": True,
             "live_sensor_cues": sensor_cues,
