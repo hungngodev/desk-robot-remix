@@ -982,6 +982,21 @@ PILOT_SAMPLE_PRODUCTS = {
         "https://www.digikey.com/en/products/detail/vishay-semiconductor-opto-division/TSAL6200/1681339", 2, 0.35),
 }
 
+# Keep historical pilot quote rows visible, but do not present uncertain
+# seller stock or carrier identity as an actionable evaluation order.
+# COM-05-067 is advertised as TCA9548A while its seller photograph shows
+# PCA9548A / PD548A. BOB-13282 has a backorder purchase control.
+PILOT_SUPPLIER_QUOTE_HOLDS = {
+    "i2c_mux": (
+        "HOLD: COM-05-067 seller image indicates PCA9548A/PD548A; "
+        "confirm actual PCB IC, revision and reviewed TCA-role compatibility"
+    ),
+    "rgb": (
+        "HOLD: BOB-13282 seller purchase control shows backorder; "
+        "reconfirm current checkout stock or qualify an exact replacement"
+    ),
+}
+
 PILOT_PHYSICAL_SELECTION_HOLDS = frozenset({
     "stepper", "uln2003", "cap_power", "switch_power", "ina226",
     "max17048", "dock_contacts", "dock_fixture", "assembly",
@@ -1050,13 +1065,18 @@ def first_robot_pilot_samples(report: dict) -> dict:
         elif ident in PILOT_PHYSICAL_SELECTION_HOLDS:
             action = "HOLD_POWER_MOTION_OR_FIT_SELECTION"
         elif source is not None:
-            action = ("SAMPLE_ONLY_FOR_BENCH_VERIFICATION"
-                      if part["name"] == source[0]
-                      else "HOLD_CHANGED_PART_IDENTITY")
+            if part["name"] != source[0]:
+                action = "HOLD_CHANGED_PART_IDENTITY"
+            elif ident in PILOT_SUPPLIER_QUOTE_HOLDS:
+                action = "QUOTE_ONLY_SUPPLIER_HOLD"
+            else:
+                action = "SAMPLE_ONLY_FOR_BENCH_VERIFICATION"
         else:
             action = "HOLD_EXACT_CARRIER_AND_VENDOR_SELECTION"
-        source = (source if action == "SAMPLE_ONLY_FOR_BENCH_VERIFICATION"
-                  else None)
+        source = (source if action in (
+            "SAMPLE_ONLY_FOR_BENCH_VERIFICATION",
+            "QUOTE_ONLY_SUPPLIER_HOLD",
+        ) else None)
         qty = min(remaining, source[4]) if source else 0
         decisions.append({
             "id": ident, "name": part["name"], "scope": part["scope"],
@@ -1068,6 +1088,10 @@ def first_robot_pilot_samples(report: dict) -> dict:
             "source_sku": source[2] if source else None,
             "source_url": source[3] if source else None,
             "historical_unit_quote_usd": source[5] if source else None,
+            "supplier_quote_only_reason": (
+                PILOT_SUPPLIER_QUOTE_HOLDS[ident]
+                if source and action == "QUOTE_ONLY_SUPPLIER_HOLD" else None
+            ),
             # TSAL6200 is a bare LED, not a driven 38 kHz dock channel.
             # Preserve this distinction in machine-readable pilot JSON too.
             "sample_is_complete_functional_channel": (
@@ -1136,7 +1160,10 @@ def pilot_supplier_cart(report: dict) -> dict:
         qty = role["pilot_sample_quantity"]
         if not qty:
             continue
-        if role["pilot_action"] != "SAMPLE_ONLY_FOR_BENCH_VERIFICATION":
+        if role["pilot_action"] not in (
+            "SAMPLE_ONLY_FOR_BENCH_VERIFICATION",
+            "QUOTE_ONLY_SUPPLIER_HOLD",
+        ):
             raise ValueError("Unreviewed role in supplier cart")
         seller, sku, url = role["source_vendor"], role["source_sku"], role["source_url"]
         if not all(isinstance(x, str) and x.strip()
@@ -1173,6 +1200,8 @@ def pilot_supplier_cart(report: dict) -> dict:
             "manufacturer_or_brand": seller,
             "checkout_seller_candidate": checkout_seller,
             "sku": sku, "product_url": url, "quantity": qty,
+            "supplier_quote_only_reason": role["supplier_quote_only_reason"],
+            "purchase_actionable_from_pilot_listing": False,
             "historical_unit_quote_usd": quote,
             "historical_line_quote_usd": round(qty * quote, 2)
             if quote is not None else None,
@@ -1212,6 +1241,9 @@ def pilot_supplier_cart(report: dict) -> dict:
         "historical_first_unit_budget": pilot["historical_first_unit_budget"],
         "unpriced_skus": [x["sku"] for x in items
                           if x["historical_unit_quote_usd"] is None],
+        "supplier_quote_hold_skus": [
+            x["sku"] for x in items if x["supplier_quote_only_reason"]
+        ],
         "landed_total_verified": False,
         "complete_robot_purchase_approved": pilot[
             "whole_first_robot_purchase_approved"],
@@ -1314,8 +1346,8 @@ def render_pilot_supplier_cart(report: dict) -> str:
         "or proof that optional firmware is enabled. No lithium charging or "
         "motor motion is authorized.",
         "",
-        "| Candidate checkout seller | Brand or manufacturer | SKU | Part | Qty | Historical USD each | Link | Engineering source |",
-        "| --- | --- | --- | --- | ---: | ---: | --- | --- |",
+        "| Candidate checkout seller | Brand or manufacturer | SKU | Part | Qty | Historical USD each | Link | Engineering source | Supplier status |",
+        "| --- | --- | --- | --- | ---: | ---: | --- | --- | --- |",
     ]
     for x in cart["items"]:
         quote = ("$" + format(x["historical_unit_quote_usd"], ".2f")
@@ -1326,7 +1358,8 @@ def render_pilot_supplier_cart(report: dict) -> str:
             f"{x['manufacturer_or_brand']} | {x['sku']} | "
             f"{str(x['name']).replace('|', '/')} | "
             f"{x['quantity']} | {quote} | {x['product_url']} | "
-            f"{x['implementation_source']} ({x['implementation_state']}) |"
+            f"{x['implementation_source']} ({x['implementation_state']}) | "
+            f"{x['supplier_quote_only_reason'] or 'Unqualified bench candidate'} |"
         )
     lines += [
         "",
@@ -1339,6 +1372,10 @@ def render_pilot_supplier_cart(report: dict) -> str:
         _pilot_budget_summary(cart["historical_first_unit_budget"]),
         f"{len(cart['unpriced_skus'])} SKUs have unknown comparable USD price. "
         "There is no verified landed total.",
+        "Supplier quote HOLD on: "
+        + ", ".join(cart["supplier_quote_hold_skus"])
+        + ". These are historical comparison lines, not immediately orderable "
+          "bench samples; confirm real SKU identity and current checkout stock.",
         "Bare TSAL6200 IR emitters are NOT complete driven dock channels. "
         "They need separate rated transistors and current limiting.",
         "Unlisted parts remain required in the canonical full-feature plan. "
@@ -1387,6 +1424,8 @@ def render_first_robot_pilot_samples(report: dict) -> str:
                      else "currency or landed USD quote not verified")
             source = (f"{x['source_vendor']} {x['source_sku']}: "
                       f"{x['source_url']} ({quote})")
+            if x["supplier_quote_only_reason"]:
+                source += " (" + x["supplier_quote_only_reason"] + ")"
         lines.append(
             f"| {x['name']} | {x['conditional_remaining']} | "
             f"{x['pilot_sample_quantity']} | {x['pilot_action']} | {source} |"

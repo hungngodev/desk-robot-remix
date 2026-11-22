@@ -1594,6 +1594,37 @@ def test_pilot_supplier_rows_never_mutate_canonical_fleet_source_references():
     assert mod.PILOT_SAMPLE_PRODUCTS["i2c_mux"][2] == "COM-05-067"
 
 
+def test_known_supplier_conflicts_are_quote_only_in_both_pilot_views():
+    import json
+
+    report = mod.generate(json.loads(mod.PLAN.read_text(encoding="utf-8")))
+    pilot = mod.first_robot_pilot_samples(report)
+    rows = {row["id"]: row for row in pilot["roles"]}
+    assert rows["i2c_mux"]["pilot_action"] == "QUOTE_ONLY_SUPPLIER_HOLD"
+    assert "PCA9548A/PD548A" in rows["i2c_mux"]["supplier_quote_only_reason"]
+    assert rows["rgb"]["pilot_action"] == "QUOTE_ONLY_SUPPLIER_HOLD"
+    assert "backorder" in rows["rgb"]["supplier_quote_only_reason"]
+    assert rows["cliff_obstacle"]["pilot_action"] == "SAMPLE_ONLY_FOR_BENCH_VERIFICATION"
+    assert rows["cliff_obstacle"]["supplier_quote_only_reason"] is None
+
+    # Keep historical comparison quantity and math without authorizing an order.
+    cart = mod.pilot_supplier_cart(report)
+    assert cart["exact_sku_count"] == 13
+    assert cart["component_quantity"] == 17
+    assert cart["historical_priced_partial_subtotal_usd"] == 40.41
+    assert sorted(cart["supplier_quote_hold_skus"]) == ["BOB-13282", "COM-05-067"]
+    by_sku = {item["sku"]: item for item in cart["items"]}
+    assert all(not item["purchase_actionable_from_pilot_listing"]
+               for item in cart["items"])
+    assert "PCA9548A/PD548A" in by_sku["COM-05-067"]["supplier_quote_only_reason"]
+    assert "backorder" in by_sku["BOB-13282"]["supplier_quote_only_reason"]
+    assert by_sku["SEN-19-006"]["supplier_quote_only_reason"] is None
+    for view in (mod.render_first_robot_pilot_samples(report),
+                 mod.render_pilot_supplier_cart(report)):
+        assert "COM-05-067" in view and "PCA9548A/PD548A" in view
+        assert "BOB-13282" in view and "backorder" in view
+
+
 def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     import json
     from collections import Counter
