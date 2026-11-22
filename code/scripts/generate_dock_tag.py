@@ -31,10 +31,22 @@ def read_marker_assignments(path: Path = ASSIGNMENTS, *,
     This is a candidate print manifest, not camera pose or motion approval.
     Validate the entire five-dock set before printing any single marker.
     """
+    def reject_duplicate_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        fields: dict[str, object] = {}
+        for key, value in pairs:
+            if key in fields:
+                raise ValueError(
+                    "Duplicate dock marker assignment JSON field: " + key
+                )
+            fields[key] = value
+        return fields
+
     try:
         if raw is None:
             raw = path.read_bytes()
-        document = json.loads(raw.decode("utf-8"))
+        document = json.loads(
+            raw.decode("utf-8"), object_pairs_hook=reject_duplicate_fields,
+        )
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise ValueError("Dock marker assignment manifest missing or unreadable") from exc
     if (type(document) is not dict

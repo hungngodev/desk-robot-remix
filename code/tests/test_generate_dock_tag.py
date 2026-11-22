@@ -256,3 +256,27 @@ def test_missing_assignment_manifest_fails_closed(monkeypatch, tmp_path):
     with pytest.raises(ValueError, match="manifest missing"):
         module.build_svg(1, 12, assignments=tmp_path / "missing.json")
 
+@pytest.mark.parametrize("before,after", [
+    ('"marker_id": 12', '"marker_id": 13, "marker_id": 12'),
+    ('"marker_id": 12', '"marker_id": 12, "marker_id": 12'),
+    ('"beacon_id": 1', '"beacon_id": 2, "beacon_id": 1'),
+    ('"dock_id": 1', '"dock_id": 2, "dock_id": 1'),
+    ('"schema_version": 1', '"schema_version": 2, "schema_version": 1'),
+])
+def test_duplicate_json_keys_cannot_override_dock_marker_assignment(
+    monkeypatch, tmp_path, before, after,
+):
+    """An apparently valid last field cannot hide a conflicting earlier ID."""
+    module = source()
+    monkeypatch.setattr(module, "marker_bits", synthetic_bits)
+    manifest = module.ASSIGNMENTS.read_text()
+    assert manifest.count(before) == 1
+    forged = manifest.replace(before, after)
+    path = tmp_path / "duplicated_assignments.json"
+    path.write_text(forged, encoding="utf-8")
+    output = tmp_path / "dock01.svg"
+    with pytest.raises(ValueError, match="Duplicate dock marker assignment JSON field"):
+        module.read_marker_assignments(path)
+    with pytest.raises(ValueError, match="Duplicate dock marker assignment JSON field"):
+        module.save_or_verify(output, 1, 12, assignments=path)
+    assert not output.exists()
