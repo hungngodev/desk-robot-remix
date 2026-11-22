@@ -441,7 +441,7 @@ async def test_native_barge_invalidates_backend_audio_and_never_forges_ack(nativ
 
 
 @pytest.mark.asyncio
-async def test_authenticated_device_playback_progress_drives_wire_ack_after_stop(native):
+async def test_authenticated_i2s_progress_never_forges_playback_ack(native):
     module, bridge = native
     conn, sent = connection()
     bridge.connections[conn.device_id] = conn
@@ -465,77 +465,39 @@ async def test_authenticated_device_playback_progress_drives_wire_ack_after_stop
     playback_id = session._begin_head_playback("r1", session._generation)
     assert 0 < playback_id <= 0x7fffffff
     assert await session._send_device_state("start", session._generation)
-    start = json.loads(sent[-1])
-    assert start["desk_playback_id"] == playback_id
-    session.wire.handle_event({"type": "response.done", "response_id": "r1"})
-    assert await session._send_device_state("stop", session._generation)
+    assert json.loads(sent[-1])["desk_playback_id"] == playback_id
 
-    forwarded = []
-    forwarded_ready = asyncio.Event()
+    common = {
+        "type": "desk_robot_i2s_progress",
+        "session_id": conn.session_id,
+        "playback_id": playback_id,
+    }
+    assert not module.device_i2s_progress(
+        conn, {**common, "session_id": "old-session", "committed_ms": 60}
+    )
+    assert not module.device_i2s_progress(
+        conn, {**common, "playback_id": playback_id + 1, "committed_ms": 60}
+    )
+    assert module.device_i2s_progress(conn, {**common, "committed_ms": 60})
+    assert not module.device_i2s_progress(conn, {**common, "committed_ms": 60})
+    assert not module.device_i2s_progress(conn, {**common, "committed_ms": 59})
+    assert not module.device_i2s_progress(conn, {**common, "committed_ms": 180})
+    assert session.wire.played_ms == 0
 
-    async def transport(event):
-        forwarded.append(event)
-        forwarded_ready.set()
+    status = module.status(conn.device_id)
+    assert status["head_audio_playback_acknowledged"] is False
+    assert status["head_audio_i2s_progress_observed"] is True
+    assert status["head_audio_i2s_committed_ms"] == 60
 
-    session._send = transport
-    worker = asyncio.create_task(session._send_playback_acks())
-    try:
-        common = {
-            "type": "desk_robot_playback",
-            "session_id": conn.session_id,
-            "playback_id": playback_id,
-        }
-        assert not module.device_playback_progress(
-            conn, {**common, "session_id": "old-session", "played_ms": 60}
-        )
-        assert not module.device_playback_progress(
-            conn, {**common, "playback_id": playback_id + 1, "played_ms": 60}
-        )
+    assert module.device_i2s_progress(conn, {**common, "committed_ms": 120})
+    assert session.wire.played_ms == 0
 
-        forwarded_ready.clear()
-        assert module.device_playback_progress(
-            conn, {**common, "played_ms": 60}
-        )
-        assert not module.device_playback_progress(
-            conn, {**common, "played_ms": 60}
-        )
-        assert not module.device_playback_progress(
-            conn, {**common, "played_ms": 59}
-        )
-        await asyncio.wait_for(forwarded_ready.wait(), timeout=1)
-        assert forwarded[-1] == {
-            "type": "playback.ack", "response_id": "r1",
-            "played_ms": 60, "committed_ms": 60, "truncate": False,
-        }
-        assert module.status(conn.device_id)["head_audio_playback_acknowledged"] is True
-
-        forwarded_ready.clear()
-        # A later success cannot jump over a missing 60 ms output completion.
-        # That gap would otherwise commit words from a failed I2S interval.
-        assert not module.device_playback_progress(
-            conn, {**common, "played_ms": 180}
-        )
-        assert not forwarded_ready.is_set()
-
-        # The device transmitted a padded final 60 ms frame. The backend ACK
-        # is clamped to the 100 ms of real model PCM, including after STOP.
-        assert module.device_playback_progress(
-            conn, {**common, "played_ms": 120}
-        )
-        await asyncio.wait_for(forwarded_ready.wait(), timeout=1)
-        assert forwarded[-1]["played_ms"] == 100
-        assert session.wire.played_ms == 100
-
-        await session.barge()
-        assert not module.device_playback_progress(
-            conn, {**common, "played_ms": 120}
-        )
-        assert session.wire.played_ms == 0
-    finally:
-        session.closed = True
-        worker.cancel()
-        await asyncio.gather(worker, return_exceptions=True)
-        module._sessions.pop(conn.device_id, None)
+    await session.barge()
+    assert not module.device_i2s_progress(
+        conn, {**common, "committed_ms": 120}
+    )
+    assert session.wire.played_ms == 0
+    module._sessions.pop(conn.device_id, None)
 
 
 @pytest.mark.parametrize("state", ["start", "stop"])

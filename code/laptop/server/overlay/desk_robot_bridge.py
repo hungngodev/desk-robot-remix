@@ -471,14 +471,14 @@ def suppress_message(conn, message):
             data = json.loads(message)
         except (ValueError, TypeError):
             data = None
-        if isinstance(data, dict) and data.get("type") == "desk_robot_playback":
-            # Device receipts are private control telemetry. Consume them
-            # before upstream Xiaozhi routing even when no fleet mute is active.
+        if isinstance(data, dict) and data.get("type") == "desk_robot_i2s_progress":
+            # Digital output telemetry is private control data. It must not
+            # become user text or a physical playback acknowledgement.
             if connections.get(conn.device_id) is conn:
                 native = _native_adapter()
-                receipt = getattr(native, "device_playback_progress", None)
-                if callable(receipt):
-                    receipt(conn, data)
+                observe = getattr(native, "device_i2s_progress", None)
+                if callable(observe):
+                    observe(conn, data)
             return True
     if not muted(conn.device_id):
         return False

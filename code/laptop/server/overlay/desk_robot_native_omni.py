@@ -139,13 +139,17 @@ def status(device: str) -> dict:
                     0.0, _retry_after.get(device, 0) - time.monotonic()), 2),
                 "last_error": _terminal_errors.get(device),
                 "head_audio_playback_acknowledged": False,
+                "head_audio_i2s_progress_observed": False,
+                "head_audio_i2s_committed_ms": 0,
                 "audio_video_latency_physically_measured": False,
                 "native_tool_calls_supported": False,
                 "live_transcript_context_enabled": False}
     return {
         "native_omni_enabled": True,
         "native_backend_connected": s.connected and not s.closed,
-        "head_audio_playback_acknowledged": s._head_playback_receipts > 0,
+        "head_audio_playback_acknowledged": False,
+        "head_audio_i2s_progress_observed": s._head_i2s_receipts > 0,
+        "head_audio_i2s_committed_ms": s._head_i2s_last_device_ms,
         "audio_video_latency_physically_measured": False,
         "native_tool_calls_supported": False,
         "live_transcript_context_enabled": s._live_transcript_enabled,
@@ -281,11 +285,8 @@ class NativeOmniSession:
         self._head_playback_response_id: str | None = None
         self._head_playback_generation = -1
         self._head_playback_turn = -1
-        self._head_playback_last_receipt_ms = 0
-        self._head_playback_last_device_ms = 0
-        self._head_playback_pending: tuple[int, int, str, int] | None = None
-        self._head_playback_wakeup = asyncio.Event()
-        self._head_playback_receipts = 0
+        self._head_i2s_last_device_ms = 0
+        self._head_i2s_receipts = 0
         # Consent comes from THIS pet's authenticated Mac context. Never
         # persist a microphone transcript unless separately enabled there.
         self._transcript_memory_enabled = False
@@ -2149,22 +2150,20 @@ class NativeOmniSession:
         self._head_playback_response_id = response_id
         self._head_playback_generation = generation
         self._head_playback_turn = self._readonly_turn
-        self._head_playback_last_receipt_ms = 0
-        self._head_playback_last_device_ms = 0
-        self._head_playback_pending = None
+        self._head_i2s_last_device_ms = 0
         return self._head_playback_id
 
-    def accept_head_playback_progress(self, event: dict) -> bool:
-        """Accept current authenticated Sense I2S progress, never acoustics."""
+    def accept_head_i2s_progress(self, event: dict) -> bool:
+        """Accept authenticated digital I2S progress without claiming playback."""
         import desk_robot_bridge as bridge
         if (self.closed or bridge.connections.get(self.device) is not self.conn
                 or event.get("session_id") != self.conn.session_id):
             return False
         playback_id = event.get("playback_id")
-        played_ms = event.get("played_ms")
-        if (type(playback_id) is not int or type(played_ms) is not int
+        committed_ms = event.get("committed_ms")
+        if (type(playback_id) is not int or type(committed_ms) is not int
                 or playback_id == 0 or playback_id != self._head_playback_id
-                or played_ms <= 0
+                or committed_ms <= 0
                 or self._head_playback_generation != self._generation
                 or self._head_playback_turn != self._readonly_turn
                 or self._head_playback_response_id != self.wire.response_id):
@@ -2172,53 +2171,20 @@ class NativeOmniSession:
         generated_ms = self.wire.generated_bytes * 1000 // (24000 * 2)
         if generated_ms <= 0:
             return False
-        # This adapter emits one 60 ms Opus frame at a time. A later device
-        # receipt may not jump over a missing I2S completion, because doing so
-        # would commit words from the failed interval as if they were heard.
-        if played_ms != self._head_playback_last_device_ms + 60:
+        max_committed_ms = ((generated_ms + 59) // 60) * 60
+        if (committed_ms != self._head_i2s_last_device_ms + 60
+                or committed_ms > max_committed_ms):
             return False
-        committed_ms = min(played_ms, generated_ms)
-        if committed_ms <= self._head_playback_last_receipt_ms:
-            return False
-        self._head_playback_last_device_ms = played_ms
-        self._head_playback_last_receipt_ms = committed_ms
-        self._head_playback_pending = (
-            self._generation, self._readonly_turn,
-            self._head_playback_response_id, committed_ms,
-        )
-        self._head_playback_receipts += 1
-        self._head_playback_wakeup.set()
+        self._head_i2s_last_device_ms = committed_ms
+        self._head_i2s_receipts += 1
         return True
-
-    async def _send_playback_acks(self) -> None:
-        """Coalesce device receipts and forward only current response ACKs."""
-        while not self.closed:
-            await self._head_playback_wakeup.wait()
-            self._head_playback_wakeup.clear()
-            while self._head_playback_pending is not None and not self.closed:
-                pending = self._head_playback_pending
-                self._head_playback_pending = None
-                generation, turn, response_id, committed_ms = pending
-                if (generation != self._generation or turn != self._readonly_turn
-                        or self._head_playback_id == 0
-                        or response_id != self._head_playback_response_id
-                        or response_id != self.wire.response_id):
-                    continue
-                try:
-                    ack = self.wire.playback_ack(
-                        response_id=response_id,
-                        actually_played_ms=committed_ms,
-                    )
-                except ValueError:
-                    continue
-                await self._send(ack)
 
     async def _play(self) -> None:
         """24k model PCM to the SAME Xiaozhi 16k Opus speaker.
 
-        No fabricated playback. Queuing or sending Opus never emits an ACK.
-        playback.ack is produced only by the separately authenticated Sense
-        output progress path; acoustic A2 qualification remains separate.
+        No fabricated playback. Queued, sent, or I2S accepted audio does not
+        mean the transducer produced audible speech, so playback.ack is never
+        generated from this transport path.
         """
         import opuslib_next  # available in pinned Xiaozhi, not needed for host-only tests
         encoder = opuslib_next.Encoder(
@@ -2327,9 +2293,7 @@ class NativeOmniSession:
                         self._head_playback_response_id = None
                         self._head_playback_generation = -1
                         self._head_playback_turn = -1
-                        self._head_playback_last_receipt_ms = 0
-                        self._head_playback_last_device_ms = 0
-                        self._head_playback_pending = None
+                        self._head_i2s_last_device_ms = 0
                     dropped_response_id = response_id
                     current_response = None
                     pending.clear()
@@ -2542,9 +2506,7 @@ class NativeOmniSession:
         self._head_playback_response_id = None
         self._head_playback_generation = -1
         self._head_playback_turn = -1
-        self._head_playback_last_receipt_ms = 0
-        self._head_playback_last_device_ms = 0
-        self._head_playback_pending = None
+        self._head_i2s_last_device_ms = 0
         self._direct_reply_available = False
         self._direct_reply_active = False
         self._readonly_turn += 1
@@ -2646,7 +2608,6 @@ class NativeOmniSession:
                         asyncio.create_task(self._send_mic()),
                         asyncio.create_task(self._receive_model()),
                         asyncio.create_task(self._play()),
-                        asyncio.create_task(self._send_playback_acks()),
                         asyncio.create_task(self._camera_stream(http)),
                     ]
                     if (self._live_transcript_enabled
@@ -3308,13 +3269,13 @@ def route_audio(conn, pcm_frame: bytes, have_voice: bool) -> bool:
     return True
 
 
-def device_playback_progress(conn, event: dict) -> bool:
-    """Consume a current device progress receipt from its registered socket."""
+def device_i2s_progress(conn, event: dict) -> bool:
+    """Consume current digital I2S telemetry from its registered socket."""
     session = _sessions.get(getattr(conn, "device_id", None))
     if (session is None or session.conn is not conn or session.closed
             or not isinstance(event, dict)):
         return False
-    return session.accept_head_playback_progress(event)
+    return session.accept_head_i2s_progress(event)
 
 
 async def on_barge(conn) -> bool:

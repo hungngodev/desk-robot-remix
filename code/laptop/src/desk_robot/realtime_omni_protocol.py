@@ -6,9 +6,8 @@ https://github.com/vllm-project/vllm-omni/blob/main/docs/serving/realtime_duplex
 This module does NOT drive the XIAO speaker or bypass the pinned Xiaozhi
 session. An actual adapter must bring real, authenticated head PCM and camera
 frames, route generated 24 kHz PCM through the existing Opus speaker owner,
-and report only authenticated device output progress. Digital I2S completion
-is not acoustic proof; audible qualification stays a physical gate. Nothing
-here can arm, charge or move a robot. Default deployment remains Xiaozhi + Ollama.
+and report only physically acknowledged playback. Nothing here can arm,
+charge or move a robot. Default deployment remains Xiaozhi + Ollama.
 """
 from __future__ import annotations
 
@@ -379,12 +378,10 @@ class OmniDuplexWire:
 
     def playback_ack(self, *, response_id: str, actually_played_ms: int,
                      truncate: bool = False) -> dict:
-        """Only call from authenticated device output progress, never transport send.
+        """Only call from actual speaker playback progress, never from HTTP send.
 
-        This function cannot guess progress or mark generated audio as heard
-        from HTTP, Opus, or model delivery alone. The caller must supply
-        monotonic current-head output completion. That is still not acoustic
-        proof, so physical A2 measurement remains a separate acceptance gate.
+        This function intentionally cannot guess progress or mark generated
+        audio as heard without a caller-provided physical playback measurement.
         """
         if (not isinstance(response_id, str) or not response_id
                 or self.response_id is None

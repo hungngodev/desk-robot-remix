@@ -388,7 +388,7 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
             protocol_header,
             "    virtual void SendMcpMessage(const std::string& message);",
             """    virtual void SendMcpMessage(const std::string& message);
-    void SendPlaybackProgress(uint32_t playback_id, uint32_t media_position_ms);""",
+    void SendI2sProgress(uint32_t playback_id, uint32_t media_position_ms);""",
         )
         files[path] = protocol_header.encode()
 
@@ -409,14 +409,14 @@ bool Protocol::IsTimeout() const {""",
     SendText(message);
 }
 
-void Protocol::SendPlaybackProgress(uint32_t playback_id, uint32_t media_position_ms) {
+void Protocol::SendI2sProgress(uint32_t playback_id, uint32_t media_position_ms) {
     if (playback_id == 0 || media_position_ms == 0) {
         return;
     }
     std::string message =
         "{\"session_id\":\"" + session_id_ +
-        "\",\"type\":\"desk_robot_playback\",\"playback_id\":" +
-        std::to_string(playback_id) + ",\"played_ms\":" +
+        "\",\"type\":\"desk_robot_i2s_progress\",\"playback_id\":" +
+        std::to_string(playback_id) + ",\"committed_ms\":" +
         std::to_string(media_position_ms) + "}";
     SendText(message);
 }
@@ -666,7 +666,7 @@ bool Protocol::IsTimeout() const {""",
     callbacks.on_playback_committed = [this](uint32_t playback_id, uint32_t media_position_ms) {
         Schedule([this, playback_id, media_position_ms]() {
             if (protocol_) {
-                protocol_->SendPlaybackProgress(playback_id, media_position_ms);
+                protocol_->SendI2sProgress(playback_id, media_position_ms);
             }
         });
     };

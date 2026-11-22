@@ -291,8 +291,10 @@ class OverlayTests(unittest.TestCase):
             service.index("codec_->OutputData(task.pcm)"),
             service.index("callbacks_.on_playback_committed"),
         )
-        self.assertIn("SendPlaybackProgress", protocol_header)
-        self.assertIn('"type\\":\\"desk_robot_playback', protocol_source)
+        self.assertIn("SendI2sProgress", protocol_header)
+        self.assertIn('"type\\":\\"desk_robot_i2s_progress', protocol_source)
+        self.assertIn('"committed_ms\\":', protocol_source)
+        self.assertNotIn('"played_ms\\":', protocol_source)
         self.assertIn("desk_playback_id_", websocket_header)
         self.assertIn(".playback_id = playback_id", websocket_source)
         self.assertIn(".media_position_ms = media_position_ms", websocket_source)

@@ -1558,14 +1558,14 @@ async def test_stop_during_group_playback_marks_urgent_flush(bridge, monkeypatch
     )
 
 
-def test_device_playback_receipt_is_private_and_bound_to_current_head(
+def test_device_i2s_progress_is_private_and_bound_to_current_head(
     bridge, monkeypatch
 ):
     seen = []
 
     class Native:
         @staticmethod
-        def device_playback_progress(connection, event):
+        def device_i2s_progress(connection, event):
             seen.append((connection, event))
             return True
 
@@ -1573,10 +1573,10 @@ def test_device_playback_receipt_is_private_and_bound_to_current_head(
     current = conn("mac-01")
     bridge.connections[current.device_id] = current
     event = json.dumps({
-        "type": "desk_robot_playback",
+        "type": "desk_robot_i2s_progress",
         "session_id": "session",
         "playback_id": 7,
-        "played_ms": 60,
+        "committed_ms": 60,
     })
     assert bridge.suppress_message(current, event) is True
     assert seen == [(current, json.loads(event))]
