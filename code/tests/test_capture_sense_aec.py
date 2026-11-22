@@ -590,6 +590,21 @@ def test_private_aec_capture_rejects_another_private_inode_after_preflight(
     assert list(moved.iterdir()) == []
 
 
+def test_raw_pcm_writer_does_not_recreate_deleted_preapproved_directory(tmp_path):
+    private = tmp_path / "original"
+    moved = tmp_path / "retired"
+    approved = capture.preflight_private_destination(private)
+    private.rename(moved)
+    with pytest.raises(ValueError, match="directory changed during write"):
+        capture.save_wavs(
+            private, bytes(capture.BYTES), {"robot_id": "robot-01"},
+            expected_directory_identity=approved,
+        )
+    assert not private.exists()
+    assert moved.is_dir()
+    assert list(moved.iterdir()) == []
+
+
 def test_private_aec_capture_rechecks_directory_approved_before_head_transfer(tmp_path):
     """A path retargeted during the four-second recording cannot receive PCM."""
     private = tmp_path / "private"

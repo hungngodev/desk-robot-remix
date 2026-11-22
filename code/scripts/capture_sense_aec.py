@@ -370,7 +370,9 @@ def _private_destination_directory_fd(
         raise
 
 
-def preflight_private_destination(directory: Path) -> tuple[int, int]:
+def preflight_private_destination(
+    directory: Path, *, create_missing: bool = True,
+) -> tuple[int, int]:
     """Record the exact private directory approved before capturing audio.
 
     Retain its inode across the slow authenticated head transfer; an attacker
@@ -378,7 +380,9 @@ def preflight_private_destination(directory: Path) -> tuple[int, int]:
     """
     if directory.is_symlink():
         raise ValueError("AEC capture destination has unsafe ancestor symlink")
-    descriptor = _private_destination_directory_fd(directory, create_missing=True)
+    descriptor = _private_destination_directory_fd(
+        directory, create_missing=create_missing,
+    )
     try:
         identity = os.fstat(descriptor)
         paths = [directory / "microphone.wav", directory / "speaker_reference.wav",
@@ -393,7 +397,17 @@ def preflight_private_destination(directory: Path) -> tuple[int, int]:
 def save_wavs(directory: Path, raw: bytes, report: dict, *,
               verify_before_publish=None,
               expected_directory_identity: tuple[int, int] | None = None) -> None:
-    identity = preflight_private_destination(directory)
+    if expected_directory_identity is None:
+        identity = preflight_private_destination(directory)
+    else:
+        # A prior operator-approved directory was already created before the
+        # private mic capture. After that slow device transfer, a removed path
+        # must never be recreated by the WAV writer, even if inode checks
+        # would eventually refuse to publish its contents.
+        try:
+            identity = preflight_private_destination(directory, create_missing=False)
+        except FileNotFoundError as exc:
+            raise ValueError("AEC capture directory changed during write") from exc
     if expected_directory_identity is not None and identity != expected_directory_identity:
         raise ValueError("AEC capture directory changed during write")
     mic, ref = split_pcm(raw)
