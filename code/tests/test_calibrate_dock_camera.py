@@ -232,3 +232,43 @@ def test_original_checkerboard_sources_reject_symlink_aliases(tmp_path, kind):
             camera_sensor_pid="OV5640",
             robot_id="robot-01", head_device_id="xiaozhi-01",
         )
+
+
+def test_checkerboard_photo_swap_to_symlink_during_read_is_rejected(
+    tmp_path, monkeypatch,
+):
+    """A successful path precheck cannot authorize later swapped evidence."""
+    cv2 = pytest.importorskip("cv2")
+    images = tmp_path / "capture"
+    images.mkdir()
+    ok, encoded = cv2.imencode(
+        ".jpg", np.zeros((480, 640), dtype=np.uint8)
+    )
+    assert ok
+    for index in range(12):
+        (images / f"{index:02d}.jpg").write_bytes(encoded.tobytes())
+    outside = tmp_path / "outside.jpg"
+    outside.write_bytes(encoded.tobytes())
+    target = images / "01.jpg"
+    module = fitter()
+    original_open = module.os.open
+    switched = False
+
+    def substitute_before_second_image_open(path, flags, *args, **kwargs):
+        nonlocal switched
+        if path == "01.jpg" and not switched:
+            switched = True
+            target.unlink()
+            target.symlink_to(outside)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(module.os, "open", substitute_before_second_image_open)
+    with pytest.raises(ValueError, match="symlink"):
+        module.calibrate_images(
+            images, columns=9, rows=6, square_mm=10,
+            tag_side_mm=60, marker_id=2, target_distance_mm=200,
+            camera_sensor_pid="OV5640",
+            robot_id="robot-01", head_device_id="xiaozhi-01",
+        )
+    assert switched
+    assert target.is_symlink()

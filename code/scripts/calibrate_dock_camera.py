@@ -7,8 +7,11 @@ not physically approved just because OpenCV returns low reprojection error.
 from __future__ import annotations
 
 import argparse
+import errno
 import json
 import math
+import os
+import stat
 from pathlib import Path
 
 
@@ -130,6 +133,53 @@ def fit_corners(
     }
 
 
+def _original_camera_jpegs(folder: Path) -> list[tuple[str, bytes]]:
+    """Read bounded original JPEGs from one pinned, no-follow directory."""
+    absolute = folder.absolute()
+    if ".." in absolute.parts:
+        raise ValueError("Checkerboard capture directory must not traverse parents")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    folder_fd = os.open(absolute.anchor, flags)
+    try:
+        for part in absolute.parts[1:]:
+            child_fd = os.open(part, flags, dir_fd=folder_fd)
+            os.close(folder_fd)
+            folder_fd = child_fd
+        names = sorted(
+            name for name in os.listdir(folder_fd)
+            if Path(name).suffix.lower() in (".jpg", ".jpeg")
+        )
+        if len(names) < 12:
+            raise ValueError("Provide at least 12 original checkerboard JPEGs")
+        originals = []
+        for name in names:
+            try:
+                image_fd = os.open(
+                    name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                    dir_fd=folder_fd,
+                )
+            except OSError as exc:
+                if exc.errno in (errno.ELOOP, errno.ENOENT):
+                    raise ValueError(
+                        "Original checkerboard JPEG must not be a symlink or vanish"
+                    ) from exc
+                raise
+            with os.fdopen(image_fd, "rb") as image:
+                if not stat.S_ISREG(os.fstat(image.fileno()).st_mode):
+                    raise ValueError("Original checkerboard JPEG must be a regular file")
+                # Limit reads before handing camera bytes to native OpenCV.
+                originals.append((name, image.read(3_000_001)))
+        return originals
+    except OSError as exc:
+        if exc.errno in (errno.ELOOP, errno.ENOTDIR):
+            raise ValueError(
+                "Checkerboard capture directory must not use symlinks"
+            ) from exc
+        raise
+    finally:
+        os.close(folder_fd)
+
+
 def calibrate_images(folder: Path, *, columns: int, rows: int,
                      square_mm: float, tag_side_mm: float,
                      marker_id: int, target_distance_mm: float,
@@ -155,26 +205,22 @@ def calibrate_images(folder: Path, *, columns: int, rows: int,
     # Check the entire lexical directory chain, not only the final folder.
     if any(part.is_symlink() for part in (folder, *folder.parents)):
         raise ValueError("Checkerboard capture directory must not use symlinks")
-    files = sorted(p for p in folder.iterdir()
-                   if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg"))
-    if any(path.is_symlink() for path in files):
-        raise ValueError("Original checkerboard JPEG must not be a symlink")
-    if len(files) < 12:
-        raise ValueError("Provide at least 12 original checkerboard JPEGs")
+    # Preload the original bytes through held descriptors before native
+    # decoding; a swapped file or parent must not replace checked evidence.
+    files = _original_camera_jpegs(folder)
 
     import cv2
     import numpy as np
     views = []
     size = None
-    for path in files:
-        blob = path.read_bytes()
+    for filename, blob in files:
         if (not 100 <= len(blob) <= 3_000_000
                 or not blob.startswith(b"\xff\xd8")
                 or not blob.endswith(b"\xff\xd9")):
-            raise ValueError("Invalid or oversized original JPEG: " + path.name)
+            raise ValueError("Invalid or oversized original JPEG: " + filename)
         gray = cv2.imdecode(np.frombuffer(blob, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
         if gray is None:
-            raise ValueError("Undecodable source JPEG: " + path.name)
+            raise ValueError("Undecodable source JPEG: " + filename)
         current = (gray.shape[1], gray.shape[0])
         if size is not None and current != size:
             raise ValueError("XIAO camera resolution changed across views")
