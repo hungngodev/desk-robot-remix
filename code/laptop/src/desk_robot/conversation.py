@@ -491,6 +491,7 @@ class Conversation:
             "playback_verified": False, "motor_authorized": False,
             "physical_action_verified": False,
             "memory_write_failures": record.get("memory_write_failures", 0),
+            "memory_write_pending": record.get("memory_write_pending", 0),
             "memory_write_error_type": record.get("memory_write_error_type"),
         }]
 
@@ -620,19 +621,53 @@ class Conversation:
                     # Never retract the speaker's own transmitted words.
                     self.memory.forget_episode(peer.id, event_id)
 
-            try:
-                await asyncio.to_thread(persist_with_consent_cleanup)
-            except (sqlite3.Error, MemoryWriteSealed, OSError) as exc:
-                # One pet's optional SQLite failure must not turn already
-                # transmitted speech into a speaker failure or stop peers.
-                # Never present an unpersisted episode as remembered.
-                record = self._group_activity.get(peer.id)
+            record = self._group_activity.get(peer.id)
+
+            def record_failure(exc: Exception) -> None:
+                # Never turn an optional SQLite write into an audio failure.
                 if record is not None:
                     record["memory_write_failures"] = (
                         record.get("memory_write_failures", 0) + 1
                     )
-                    # Retain only the exception type, never private text.
                     record["memory_write_error_type"] = type(exc).__name__
+
+            def observe_late_write(task: asyncio.Task) -> None:
+                # A timed-out or externally cancelled await cannot stop a
+                # running SQLite thread. Own its eventual result and report
+                # a failure only if the write really failed.
+                if record is not None:
+                    record["memory_write_pending"] -= 1
+                try:
+                    task.result()
+                except asyncio.CancelledError:
+                    pass
+                except Exception as exc:
+                    record_failure(exc)
+
+            worker = asyncio.create_task(
+                asyncio.to_thread(persist_with_consent_cleanup)
+            )
+            try:
+                finished, _ = await asyncio.wait({worker}, timeout=0.2)
+                if finished:
+                    await worker
+                else:
+                    # Do not block the next authorized audible turn on a
+                    # three-second busy SQLite timeout. No success is claimed.
+                    if record is not None:
+                        record["memory_write_pending"] = (
+                            record.get("memory_write_pending", 0) + 1
+                        )
+                    worker.add_done_callback(observe_late_write)
+            except asyncio.CancelledError:
+                if record is not None:
+                    record["memory_write_pending"] = (
+                        record.get("memory_write_pending", 0) + 1
+                    )
+                worker.add_done_callback(observe_late_write)
+                raise
+            except (sqlite3.Error, MemoryWriteSealed, OSError) as exc:
+                record_failure(exc)
 
     async def run(
         self, robot_ids: list[str], topic: str, utterances: int | None = None,

@@ -547,3 +547,59 @@ async def test_digital_peer_sentence_is_quoted_evidence_not_operator_command(fle
     }
     assert hostile_line not in chat.calls[1][0]["content"]
     assert conversation.histories["robot-02"][0]["role"] == "system"
+
+
+@pytest.mark.parametrize("fail_after_release", [False, True])
+async def test_busy_private_memory_does_not_delay_peer_speech(
+    fleet, tmp_path, monkeypatch, fail_after_release,
+):
+    # Real thread wait models a SQLite writer delayed past its speech budget.
+    # The voice owner must advance while the optional writer is still active.
+    import sqlite3
+    import threading
+
+    memory = MemoryStore(tmp_path, IDS)
+    original = memory.remember
+    started, release = threading.Event(), threading.Event()
+
+    def slow_peer(robot_id, *args, **kwargs):
+        if robot_id == "robot-02":
+            started.set()
+            if not release.wait(timeout=3):
+                raise sqlite3.OperationalError("fixture writer never released")
+            if fail_after_release:
+                raise sqlite3.OperationalError("database is locked")
+        return original(robot_id, *args, **kwargs)
+
+    monkeypatch.setattr(memory, "remember", slow_peer)
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, SimulatedChat(), speaker, memory=memory)
+    try:
+        result = await asyncio.wait_for(
+            conversation.run(IDS[:2], "A desk game", 2), timeout=1.5,
+        )
+        assert started.is_set()
+        assert [row["robot_id"] for row in result] == IDS[:2]
+        assert len(speaker.spoken) == 2
+        assert not release.is_set()
+        record = conversation.group_activity_timeline("robot-02")[0]
+        assert record["memory_write_pending"] >= 1
+        assert record["memory_write_failures"] == 0
+    finally:
+        release.set()  # Never leak a blocked test thread.
+
+    async def all_writes_settled():
+        while conversation.group_activity_timeline("robot-02")[0][
+            "memory_write_pending"
+        ]:
+            await asyncio.sleep(0.01)
+
+    await asyncio.wait_for(all_writes_settled(), timeout=2)
+    record = conversation.group_activity_timeline("robot-02")[0]
+    assert record["memory_write_pending"] == 0
+    assert record["memory_write_failures"] == (2 if fail_after_release else 0)
+    if fail_after_release:
+        assert record["memory_write_error_type"] == "OperationalError"
+        assert memory.count("robot-02") == 0
+    else:
+        assert memory.count("robot-02") == 2
