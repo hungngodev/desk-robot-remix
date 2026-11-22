@@ -53,7 +53,7 @@ def evaluate(records: list[dict]) -> dict:
     if (any(
         type(x) is not str or not 1 <= len(x) <= 64 or not x.strip()
         for x in ids
-    ) or len(set(ids)) != len(human)):
+    ) or len({trial_id.strip() for trial_id in ids}) != len(human)):
         raise ValueError("Need unique nonempty human trial IDs")
 
     on_time = 0

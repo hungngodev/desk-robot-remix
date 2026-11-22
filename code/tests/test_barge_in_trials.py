@@ -276,6 +276,26 @@ def test_human_trial_id_requires_visible_identifier(trial_id):
         evaluate(rows)
 
 
+@pytest.mark.parametrize("wrapper", [
+    lambda value: f" {value} ",
+    lambda value: f"\t{value}\t",
+])
+def test_human_trial_id_whitespace_cannot_duplicate_one_measured_attempt(wrapper):
+    records = both_distances()
+    records[0]["id"] = wrapper(records[1]["id"])
+    # Without canonical uniqueness, one attempt could be counted twice
+    # under labels differing only in surrounding whitespace.
+    loaded = parse_trial_jsonl("\n".join(json.dumps(row) for row in records))
+    with pytest.raises(ValueError, match="unique nonempty human trial IDs"):
+        evaluate(loaded)
+
+
+def test_distinct_human_trial_id_with_surrounding_space_remains_valid():
+    records = both_distances()
+    records[0]["id"] = "  independent-trial  "
+    assert evaluate(records)["meets_proposed_gate"] is True
+
+
 def test_stage_boundary_cannot_precede_human_speech():
     rows = fake_rows()
     rows[0]["vad_arrival_ms"] = rows[0]["human_onset_ms"] - 1
