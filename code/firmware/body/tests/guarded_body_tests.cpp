@@ -1247,8 +1247,12 @@ static void guarded_dc_dock_loss_latches_until_fresh_local_usb_rearm() {
     }
     CHECK(!body.state().armed && body.state().servos_attached);
     CHECK(body.state().left == 0 && body.state().right == 0);
-    CHECK(send(body, "status", lost_at).find("dock_monitor_latched") !=
-          std::string::npos);
+    const auto stopped_status = send(body, "status", lost_at);
+    if (stopped_status.find("dock_monitor_latched") == std::string::npos) {
+      throw std::runtime_error(
+          "dock monitor fault status mismatch after failure " +
+          std::to_string(failure) + ": " + stopped_status);
+    }
 
     desk_robot::LineReceiver head, usb(true);
     auto request = [&](desk_robot::LineReceiver& receiver,
