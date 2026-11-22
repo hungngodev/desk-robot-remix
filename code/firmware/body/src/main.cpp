@@ -379,10 +379,13 @@ void process_input(HardwareSerial& stream, desk_robot::LineReceiver& receiver,
 #endif
     apply_outputs();  // apply accepted command/expired timer before acknowledging
     if (completed) {
-      // A saturated transmit FIFO cannot defer the command itself. If the
-      // reply cannot fit atomically, the caller times out fail-closed while
-      // the already-applied local STOP remains effective.
-      replies.enqueue_line(reply);
+      // STOP/HALT already took effect before acknowledgement. Keep the
+      // small final reply out of the normal status backlog without splicing
+      // it into any JSON line that has begun transmitting.
+      if (strcmp(reply, "OK halt") == 0 || strcmp(reply, "OK stop") == 0)
+        replies.enqueue_priority_line(reply);
+      else
+        replies.enqueue_line(reply);
     }
   }
 }

@@ -56,5 +56,44 @@ int main() {
   assert(sink.sent == "1234567890123456\r\ntwo\r\n");
   assert(!congested.enqueue_line(std::string(25, 'x').c_str()));
   assert(congested.dropped() == 2);
-  std::cout << "PASS bounded independent WROOM UART reply queues\n";
+  // Already-full normal queue must not swallow a completed STOP/HALT receipt.
+  desk_robot::ReplyTxQueue<128> backlog;
+  const std::string one(60, 'a'), two(60, 'b');
+  assert(backlog.enqueue_line(one.c_str()));
+  assert(backlog.enqueue_line(two.c_str()));
+  assert(!backlog.enqueue_line("another ordinary status"));
+  assert(backlog.enqueue_priority_line("OK halt"));
+  assert(backlog.enqueue_priority_line("OK stop"));
+  assert(!backlog.enqueue_priority_line("OK halt")); // bounded urgent lane
+  assert(backlog.dropped() == 2);
+  FakeSerial backlog_serial;
+  backlog_serial.free = 0;
+  assert(backlog.drain(backlog_serial) == 0);
+  while (backlog.pending()) {
+    backlog_serial.free = 128;
+    assert(backlog.drain(backlog_serial) <= 32);
+  }
+  assert(backlog_serial.sent == "OK halt\r\nOK stop\r\n" +
+         one + "\r\n" + two + "\r\n");
+
+  // Once a JSON line starts, complete it before the priority lane. Never
+  // splice "OK halt" into an already transmitted status frame.
+  desk_robot::ReplyTxQueue<128> partial;
+  assert(partial.enqueue_line(one.c_str()));
+  assert(partial.enqueue_line(two.c_str()));
+  FakeSerial partial_serial;
+  partial_serial.free = 3;
+  partial_serial.per_write = 2;
+  assert(partial.drain(partial_serial) == 2);
+  assert(partial.enqueue_priority_line("OK halt"));
+  while (partial.pending()) {
+    partial_serial.free = 128;
+    partial_serial.per_write = 5;
+    assert(partial.drain(partial_serial) <= 5);
+  }
+  assert(partial_serial.sent == one + "\r\nOK halt\r\n" + two + "\r\n");
+
+  assert(!partial.enqueue_priority_line(std::string(63, 'x').c_str()));
+  assert(partial.dropped() == 1);
+  std::cout << "PASS bounded independent WROOM UART reply queues with urgent stop receipts\n";
 }
