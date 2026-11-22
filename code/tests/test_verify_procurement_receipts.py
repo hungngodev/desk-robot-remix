@@ -889,7 +889,8 @@ def test_critical_product_trial_requires_actual_metric_scope_and_counts(gate):
     )
     for changed in variants:
         falsified = {**original, "measurement": changed}
-        source = lambda url, row=falsified: lookup(url, records=[row])
+        def source(url, row=falsified):
+            return lookup(url, records=[row])
         assert not release.verified_scoped_record(falsified, SHA, source)
         errors = release.audit_release(
             {"system": {gate: falsified}}, SHA, source,
