@@ -56,6 +56,11 @@ def percentile(values: list[int], proportion: float) -> int:
 def analyze(rows: list[dict], robot_id: str) -> dict:
     samples = defaultdict(list)
     seen_capture_ids = defaultdict(set)
+    # WROOM /status reports each lens's actual conversion millisecond and
+    # one boot epoch. A fresh operator sample_id alone is not a fresh ToF
+    # measurement: repeated HTTP reads may still show the same conversion.
+    last_conversion_ms: dict[str, int] = {}
+    measured_boot_id: int | None = None
     for line in rows:
         if (not isinstance(line, dict) or line.get("robot_id") != robot_id
                 or line.get("direction") not in SIDE
@@ -66,6 +71,7 @@ def analyze(rows: list[dict], robot_id: str) -> dict:
         if not isinstance(data, dict):
             raise ValueError("Actual WROOM side_ranges required")
         mm, age = data.get("mm"), data.get("age_ms")
+        stamps, boot_id = data.get("sample_ms"), data.get("boot_id")
         valid, present = data.get("valid_mask"), data.get("present_mask")
         if (not isinstance(mm, list) or len(mm) != 3
                 or not isinstance(age, list) or len(age) != 3
@@ -76,7 +82,12 @@ def analyze(rows: list[dict], robot_id: str) -> dict:
                 or type(mm[channel]) is not int
                 or not 1 <= mm[channel] <= 1300
                 or type(age[channel]) is not int
-                or not 0 <= age[channel] <= 350):
+                or not 0 <= age[channel] <= 350
+                or not isinstance(stamps, list) or len(stamps) != 3
+                or type(stamps[channel]) is not int
+                or not 0 <= stamps[channel] <= 0xffffffff
+                or type(boot_id) is not int
+                or not 1 <= boot_id <= 0xffffffff):
             raise ValueError("Invalid, stale, absent or forged real side sample")
         # A repeated GET /status is NOT an independently measured conversion.
         # Require a physical record ID (monotonic camera/logger capture number)
@@ -87,10 +98,21 @@ def analyze(rows: list[dict], robot_id: str) -> dict:
             # One physical side-lens conversion cannot be both near and far.
             # Separate lenses may share one synchronized sweep/capture ID.
             raise ValueError("Unique positive measured sample_id required per side direction")
-        seen_capture_ids[line["direction"]].add(capture_id)
-        samples[line["direction"], line["label"]].append(
-            (capture_id, mm[channel])
-        )
+        direction = line["direction"]
+        if measured_boot_id is not None and boot_id != measured_boot_id:
+            raise ValueError("Cannot mix WROOM boot identities in one side-range calibration")
+        observed_ms = stamps[channel]
+        previous_ms = last_conversion_ms.get(direction)
+        if previous_ms is not None:
+            # Subtraction modulo uint32 permits a genuine millis rollover,
+            # but rejects equal conversions and old frames replayed afterward.
+            advance = (observed_ms - previous_ms) & 0xffffffff
+            if not 0 < advance < 0x80000000:
+                raise ValueError("Repeated or reversed physical side-range conversion")
+        measured_boot_id = boot_id
+        last_conversion_ms[direction] = observed_ms
+        seen_capture_ids[direction].add(capture_id)
+        samples[direction, line["label"]].append((capture_id, mm[channel]))
 
     summary = {}
     for side in SIDE:

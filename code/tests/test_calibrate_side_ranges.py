@@ -18,11 +18,14 @@ def record(side, label, index, distance):
     channel = {"left": 0, "right": 1, "rear": 2}[side]
     mm = [800, 800, 800]
     mm[channel] = distance
+    acquisition_ms = [0, 0, 0]
+    acquisition_ms[channel] = index * 20
     return {
         "robot_id": "robot-01",
         "direction": side, "label": label, "sample_id": index,
         "side_ranges": {
             "mm": mm, "age_ms": [35, 35, 35],
+            "sample_ms": acquisition_ms, "boot_id": 73,
             "present_mask": 7, "valid_mask": 7,
             "motion_certified": False,
         },
@@ -84,6 +87,56 @@ def test_rejects_same_physical_side_sample_counted_as_both_near_and_far():
         if row["label"] == "far":
             row["sample_id"] -= 20
     with pytest.raises(ValueError, match="sample_id.*side direction"):
+        module().analyze(rows, "robot-01")
+
+
+def test_new_operator_id_cannot_relabel_cached_side_conversion_as_new():
+    rows = samples()
+    # The capture IDs and range readings are distinct, but the hardware
+    # reports exactly the same left-lens acquisition for two HTTP reads.
+    rows[1]["side_ranges"]["sample_ms"][0] = rows[0]["side_ranges"]["sample_ms"][0]
+    with pytest.raises(ValueError, match="Repeated or reversed"):
+        module().analyze(rows, "robot-01")
+
+
+def test_reversed_sensor_acquisition_and_mixed_boot_are_rejected():
+    rows = samples()
+    rows[1]["side_ranges"]["sample_ms"][0] = 1
+    with pytest.raises(ValueError, match="Repeated or reversed"):
+        module().analyze(rows, "robot-01")
+    rows = samples()
+    rows[-1]["side_ranges"]["boot_id"] = 74
+    with pytest.raises(ValueError, match="boot identities"):
+        module().analyze(rows, "robot-01")
+
+
+def test_real_uint32_side_conversion_rollover_is_not_a_replay():
+    rows = samples()
+    for item in rows:
+        channel = {"left": 0, "right": 1, "rear": 2}[item["direction"]]
+        # Each lens crosses millis wrap mid-run without a WROOM reboot.
+        item["side_ranges"]["sample_ms"][channel] = (
+            0xfffffff0 + item["sample_id"]
+        ) & 0xffffffff
+    assert module().analyze(rows, "robot-01")["samples_total"] == 120
+    rows[18]["side_ranges"]["sample_ms"][0] = 0xfffffff0
+    with pytest.raises(ValueError, match="Repeated or reversed"):
+        module().analyze(rows, "robot-01")
+
+
+@pytest.mark.parametrize("invalid", [None, True, -1, 0x100000000])
+def test_missing_forged_or_unrepresentable_sensor_conversion_is_rejected(invalid):
+    rows = samples()
+    rows[0]["side_ranges"]["sample_ms"][0] = invalid
+    with pytest.raises(ValueError, match="Invalid"):
+        module().analyze(rows, "robot-01")
+
+
+@pytest.mark.parametrize("boot", [None, True, 0, 0x100000000])
+def test_missing_or_uninitialized_wroom_boot_identity_is_rejected(boot):
+    rows = samples()
+    rows[0]["side_ranges"]["boot_id"] = boot
+    with pytest.raises(ValueError, match="Invalid"):
         module().analyze(rows, "robot-01")
 
 
