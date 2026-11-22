@@ -4,14 +4,13 @@
 
 namespace desk_robot_room {
 
-// The pinned ld2410 library exposes only a 100 ms isConnected() freshness
-// window, not its private valid-packet timestamp. Record the latest local UART
-// activity that still coincides with that validated connection window. This is
-// a conservative transport observation timestamp, never person identity.
+// Only a complete validated LD2410 data packet may update acquisition time.
+// The pinned driver's read() boolean also means "any UART byte was read".
+// Keep a timestamp across invalid bytes and over uint32 millis rollover.
 class RadarSampleClock {
  public:
-  void observe(bool uart_activity, bool connected, uint32_t now_ms) {
-    if (uart_activity && connected) {
+  void observe(bool data_frame_complete, bool connected, uint32_t now_ms) {
+    if (data_frame_complete && connected) {
       sample_ms_ = now_ms;
       has_sample_ = true;
     }

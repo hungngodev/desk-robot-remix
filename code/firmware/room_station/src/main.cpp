@@ -15,6 +15,7 @@
 #include "thermal_pixels.h"
 #include "soil_sample.h"
 #include "radar_sample_clock.h"
+#include "radar_data_frame_gate.h"
 #include "scd_sample_freshness.h"
 #include "bme_completed_sample.h"
 #include "usb_epoch_sync.h"
@@ -41,6 +42,35 @@ constexpr uint8_t kAmgAddress = 0x69;
 SensirionI2cScd4x scd;
 Adafruit_BME680 bme(&Wire);
 Adafruit_AMG88xx amg;
+// Pass every radar byte to the pinned decoder unchanged while independently
+// recognizing complete validated data frames. A stray UART byte or command
+// ACK must not refresh the timestamp of cached target data.
+class RadarObservedUart final : public Stream {
+ public:
+  explicit RadarObservedUart(Stream& source) : source_(source) {}
+  int available() override { return source_.available(); }
+  int peek() override { return source_.peek(); }
+  int read() override {
+    const int value = source_.read();
+    if (value >= 0 && gate_.consume(static_cast<uint8_t>(value)))
+      data_frame_complete_ = true;
+    return value;
+  }
+  void flush() override { source_.flush(); }
+  size_t write(uint8_t value) override { return source_.write(value); }
+  using Print::write;
+  bool take_completed_data_frame() {
+    const bool complete = data_frame_complete_;
+    data_frame_complete_ = false;
+    return complete;
+  }
+
+ private:
+  Stream& source_;
+  desk_robot_room::RadarDataFrameGate gate_;
+  bool data_frame_complete_ = false;
+};
+RadarObservedUart radar_uart(Serial1);
 ld2410 radar;
 desk_robot_room::RadarSampleClock radar_sample_clock;
 desk_robot_room::UsbEpochSync usb_epoch_sync;
@@ -347,7 +377,7 @@ void setup() {
   // Pinned ld2410 v0.2.2 otherwise blocks probing the optional radar
   // firmware for up to one second when the board is missing. Keep the
   // shared climate and thermal station independently bootable.
-  radar.begin(Serial1, false);
+  radar.begin(radar_uart, false);
 #if ROOM_SOIL_FITTED
   analogReadResolution(12);
 #endif
@@ -364,12 +394,12 @@ void loop() {
       Serial.println(usb_epoch_sync.token());
     }
   }
-  const bool radar_activity = radar.read();
+  radar.read();
   const uint32_t now = millis();
-  // The pinned library reports connected for up to 100 ms after its last
-  // valid packet. Preserve when UART activity was actually observed instead
-  // of stamping cached target data with the later one-second report time.
-  radar_sample_clock.observe(radar_activity, radar.isConnected(), now);
+  // ld2410::read() returns true on any byte, even an incomplete frame.
+  // Only a complete protocol-validated *data* packet can renew acquisition.
+  radar_sample_clock.observe(radar_uart.take_completed_data_frame(),
+                             radar.isConnected(), now);
   recover_sensors(now);
   bme_step(now); // no heater-time sleep; preserve 256000 baud radar service
   thermal_step(now); // one I2C chunk per loop, complete frame only
