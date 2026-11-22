@@ -1558,6 +1558,38 @@ async def test_stop_during_group_playback_marks_urgent_flush(bridge, monkeypatch
     )
 
 
+def test_device_playback_receipt_is_private_and_bound_to_current_head(
+    bridge, monkeypatch
+):
+    seen = []
+
+    class Native:
+        @staticmethod
+        def device_playback_progress(connection, event):
+            seen.append((connection, event))
+            return True
+
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: Native())
+    current = conn("mac-01")
+    bridge.connections[current.device_id] = current
+    event = json.dumps({
+        "type": "desk_robot_playback",
+        "session_id": "session",
+        "playback_id": 7,
+        "played_ms": 60,
+    })
+    assert bridge.suppress_message(current, event) is True
+    assert seen == [(current, json.loads(event))]
+
+    replacement = conn("mac-01")
+    bridge.connections[current.device_id] = replacement
+    assert bridge.suppress_message(current, event) is True
+    assert len(seen) == 1
+    assert bridge.suppress_message(
+        replacement, json.dumps({"type": "listen", "state": "start"})
+    ) is False
+
+
 async def test_authenticated_device_interrupt_restored_from_pr7(bridge):
     sent = []
 

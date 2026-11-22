@@ -440,6 +440,98 @@ async def test_native_barge_invalidates_backend_audio_and_never_forges_ack(nativ
 
 
 
+@pytest.mark.asyncio
+async def test_authenticated_device_playback_progress_drives_wire_ack_after_stop(native):
+    module, bridge = native
+    conn, sent = connection()
+    bridge.connections[conn.device_id] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+    session.wire.handle_event({
+        "type": "response.created", "response_id": "r1",
+        "response": {"id": "r1", "metadata": {"duplex_event": {"epoch": 0}}},
+    })
+    packet = session.wire.handle_event({
+        "type": "response.output_audio.delta", "response_id": "r1",
+        "format": "pcm16", "sample_rate_hz": 24000,
+        "delta": base64.b64encode(b"\0" * 4800).decode("ascii"),
+        "metadata": {"epoch": 0},
+    })
+    assert packet is not None and packet.total_generated_ms == 100
+
+    assert await session._send_device_state(
+        "start", session._generation, response_id="r1"
+    )
+    start = json.loads(sent[-1])
+    playback_id = start["desk_playback_id"]
+    assert 0 < playback_id <= 0x7fffffff
+    session.wire.handle_event({"type": "response.done", "response_id": "r1"})
+    assert await session._send_device_state("stop", session._generation)
+
+    forwarded = []
+    forwarded_ready = asyncio.Event()
+
+    async def transport(event):
+        forwarded.append(event)
+        forwarded_ready.set()
+
+    session._send = transport
+    worker = asyncio.create_task(session._send_playback_acks())
+    try:
+        common = {
+            "type": "desk_robot_playback",
+            "session_id": conn.session_id,
+            "playback_id": playback_id,
+        }
+        assert not module.device_playback_progress(
+            conn, {**common, "session_id": "old-session", "played_ms": 60}
+        )
+        assert not module.device_playback_progress(
+            conn, {**common, "playback_id": playback_id + 1, "played_ms": 60}
+        )
+
+        forwarded_ready.clear()
+        assert module.device_playback_progress(
+            conn, {**common, "played_ms": 60}
+        )
+        assert not module.device_playback_progress(
+            conn, {**common, "played_ms": 60}
+        )
+        assert not module.device_playback_progress(
+            conn, {**common, "played_ms": 59}
+        )
+        await asyncio.wait_for(forwarded_ready.wait(), timeout=1)
+        assert forwarded[-1] == {
+            "type": "playback.ack", "response_id": "r1",
+            "played_ms": 60, "committed_ms": 60, "truncate": False,
+        }
+        assert module.status(conn.device_id)["head_audio_playback_acknowledged"] is True
+
+        forwarded_ready.clear()
+        # The device transmitted a padded final 60 ms frame. The backend ACK
+        # is clamped to the 100 ms of real model PCM, including after STOP.
+        assert module.device_playback_progress(
+            conn, {**common, "played_ms": 120}
+        )
+        await asyncio.wait_for(forwarded_ready.wait(), timeout=1)
+        assert forwarded[-1]["played_ms"] == 100
+        assert session.wire.played_ms == 100
+
+        await session.barge()
+        assert not module.device_playback_progress(
+            conn, {**common, "played_ms": 120}
+        )
+        assert session.wire.played_ms == 0
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+        module._sessions.pop(conn.device_id, None)
+
+
 @pytest.mark.parametrize("state", ["start", "stop"])
 async def test_native_control_lock_wait_has_deadline_and_recovers(native, state):
     """A wedged Opus lock cannot leave native START/STOP waiting forever."""

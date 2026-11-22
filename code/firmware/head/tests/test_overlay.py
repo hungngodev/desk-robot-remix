@@ -139,7 +139,15 @@ class OverlayTests(unittest.TestCase):
         paths = ["main/Kconfig.projbuild", "main/CMakeLists.txt", "main/mcp_server.cc", "main/boards/common/camera.h", "main/boards/common/esp_video.h", "main/boards/common/esp_video.cc"]
         # Sense overlays urgent-stop and the pinned Xiaozhi I2S writer; no
         # shortcut synthetic codec is installed in the firmware clone.
-        paths += ["main/application.cc", "main/application.h", "main/audio/audio_service.cc", "main/audio/codecs/no_audio_codec.cc"]
+        paths += [
+            "main/application.cc", "main/application.h",
+            "main/audio/audio_service.cc", "main/audio/audio_service.h",
+            "main/audio/audio_codec.cc", "main/audio/audio_codec.h",
+            "main/audio/codecs/no_audio_codec.cc",
+            "main/protocols/protocol.cc", "main/protocols/protocol.h",
+            "main/protocols/websocket_protocol.cc",
+            "main/protocols/websocket_protocol.h",
+        ]
         paths += ["main/boards/common/esp32_camera.h", "main/boards/common/esp32_camera.cc"]
         paths += [p.relative_to(UPSTREAM).as_posix() for p in (UPSTREAM / "main/boards/m5stack/core-s3").iterdir() if p.is_file()]
         self.original = {}
@@ -257,6 +265,31 @@ class OverlayTests(unittest.TestCase):
         self.assertIn("portMAX_DELAY", source)
         self.assertNotIn("pdMS_TO_TICKS(120)", original)
         service = (self.root / "main/audio/audio_service.cc").read_text()
+        service_header = (self.root / "main/audio/audio_service.h").read_text()
+        codec_header = (self.root / "main/audio/audio_codec.h").read_text()
+        codec_base = (self.root / "main/audio/audio_codec.cc").read_text()
+        protocol_header = (self.root / "main/protocols/protocol.h").read_text()
+        protocol_source = (self.root / "main/protocols/protocol.cc").read_text()
+        websocket_header = (
+            self.root / "main/protocols/websocket_protocol.h"
+        ).read_text()
+        websocket_source = (
+            self.root / "main/protocols/websocket_protocol.cc"
+        ).read_text()
+        self.assertIn("virtual int OutputData", codec_header)
+        self.assertIn("return Write(data.data(), data.size());", codec_base)
+        self.assertIn("on_playback_committed", service_header)
+        self.assertIn("transmitted_frames", service)
+        self.assertLess(
+            service.index("codec_->OutputData(task.pcm)"),
+            service.index("callbacks_.on_playback_committed"),
+        )
+        self.assertIn("SendPlaybackProgress", protocol_header)
+        self.assertIn('"type\\":\\"desk_robot_playback', protocol_source)
+        self.assertIn("desk_playback_id_", websocket_header)
+        self.assertIn(".playback_id = playback_id", websocket_source)
+        self.assertIn(".media_position_ms = media_position_ms", websocket_source)
+        self.assertIn('strcmp(type->valuestring, "tts") == 0', websocket_source)
         self.assertIn("constexpr int initial_decoder_rate = 24000;", service)
         self.assertIn("esp_ae_rate_cvt_open(&cfg, &output_resampler_)", service)
         # Scope the assertion to Sense's STARTUP converter. The upstream

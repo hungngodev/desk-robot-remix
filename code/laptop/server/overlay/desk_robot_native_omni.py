@@ -145,7 +145,7 @@ def status(device: str) -> dict:
     return {
         "native_omni_enabled": True,
         "native_backend_connected": s.connected and not s.closed,
-        "head_audio_playback_acknowledged": False,
+        "head_audio_playback_acknowledged": s._head_playback_receipts > 0,
         "audio_video_latency_physically_measured": False,
         "native_tool_calls_supported": False,
         "live_transcript_context_enabled": s._live_transcript_enabled,
@@ -276,6 +276,15 @@ class NativeOmniSession:
         self._direct_reply_active = False
         self._silent_frames = 0
         self._playback_generation = -1
+        self._head_playback_counter = uuid.uuid4().int & 0x7ffffffe
+        self._head_playback_id = 0
+        self._head_playback_response_id: str | None = None
+        self._head_playback_generation = -1
+        self._head_playback_turn = -1
+        self._head_playback_last_receipt_ms = 0
+        self._head_playback_pending: tuple[int, int, str, int] | None = None
+        self._head_playback_wakeup = asyncio.Event()
+        self._head_playback_receipts = 0
         # Consent comes from THIS pet's authenticated Mac context. Never
         # persist a microphone transcript unless separately enabled there.
         self._transcript_memory_enabled = False
@@ -2127,6 +2136,75 @@ class NativeOmniSession:
                         "Native model output queue full before terminal STOP"
                     ) from exc
 
+    def _begin_head_playback(self, response_id: str, generation: int) -> int:
+        """Bind one opaque device token to the current model response."""
+        if (self.closed or generation != self._generation
+                or self.wire.response_id != response_id):
+            return 0
+        self._head_playback_counter = (
+            self._head_playback_counter % 0x7ffffffe
+        ) + 1
+        self._head_playback_id = self._head_playback_counter
+        self._head_playback_response_id = response_id
+        self._head_playback_generation = generation
+        self._head_playback_turn = self._readonly_turn
+        self._head_playback_last_receipt_ms = 0
+        self._head_playback_pending = None
+        return self._head_playback_id
+
+    def accept_head_playback_progress(self, event: dict) -> bool:
+        """Accept current authenticated Sense I2S progress, never acoustics."""
+        import desk_robot_bridge as bridge
+        if (self.closed or bridge.connections.get(self.device) is not self.conn
+                or event.get("session_id") != self.conn.session_id):
+            return False
+        playback_id = event.get("playback_id")
+        played_ms = event.get("played_ms")
+        if (type(playback_id) is not int or type(played_ms) is not int
+                or playback_id == 0 or playback_id != self._head_playback_id
+                or played_ms <= 0
+                or self._head_playback_generation != self._generation
+                or self._head_playback_turn != self._readonly_turn
+                or self._head_playback_response_id != self.wire.response_id):
+            return False
+        generated_ms = self.wire.generated_bytes * 1000 // (24000 * 2)
+        if generated_ms <= 0:
+            return False
+        committed_ms = min(played_ms, generated_ms)
+        if committed_ms <= self._head_playback_last_receipt_ms:
+            return False
+        self._head_playback_last_receipt_ms = committed_ms
+        self._head_playback_pending = (
+            self._generation, self._readonly_turn,
+            self._head_playback_response_id, committed_ms,
+        )
+        self._head_playback_receipts += 1
+        self._head_playback_wakeup.set()
+        return True
+
+    async def _send_playback_acks(self) -> None:
+        """Coalesce device receipts and forward only current response ACKs."""
+        while not self.closed:
+            await self._head_playback_wakeup.wait()
+            self._head_playback_wakeup.clear()
+            while self._head_playback_pending is not None and not self.closed:
+                pending = self._head_playback_pending
+                self._head_playback_pending = None
+                generation, turn, response_id, committed_ms = pending
+                if (generation != self._generation or turn != self._readonly_turn
+                        or self._head_playback_id == 0
+                        or response_id != self._head_playback_response_id
+                        or response_id != self.wire.response_id):
+                    continue
+                try:
+                    ack = self.wire.playback_ack(
+                        response_id=response_id,
+                        actually_played_ms=committed_ms,
+                    )
+                except ValueError:
+                    continue
+                await self._send(ack)
+
     async def _play(self) -> None:
         """24k model PCM to the SAME Xiaozhi 16k Opus speaker.
 
@@ -2232,7 +2310,9 @@ class NativeOmniSession:
                 fully_sent = True
                 current_response = response_id
                 generation = self._generation
-                started = await self._send_device_state("start", generation)
+                started = await self._send_device_state(
+                    "start", generation, response_id=response_id
+                )
                 if started is False:
                     dropped_response_id = response_id
                     current_response = None
@@ -2274,7 +2354,9 @@ class NativeOmniSession:
                     fully_sent = True
                     break
 
-    async def _send_device_state(self, state: str, generation: int) -> bool:
+    async def _send_device_state(
+        self, state: str, generation: int, *, response_id: str | None = None
+    ) -> bool:
         global _output_owner, _last_passive_speech_started_at
         if self.closed or generation != self._generation:
             return False
@@ -2344,11 +2426,18 @@ class NativeOmniSession:
                     if state == "start":
                         self.conn.client_abort = False
                         self.conn.client_is_speaking = True
+                    message = {
+                        "type": "tts", "state": state,
+                        "session_id": self.conn.session_id,
+                    }
+                    if state == "start" and response_id is not None:
+                        playback_id = self._begin_head_playback(
+                            response_id, generation
+                        )
+                        if playback_id:
+                            message["desk_playback_id"] = playback_id
                     await asyncio.wait_for(
-                        self.conn.websocket.send(json.dumps({
-                            "type": "tts", "state": state,
-                            "session_id": self.conn.session_id,
-                        })), timeout=0.4,
+                        self.conn.websocket.send(json.dumps(message)), timeout=0.4,
                     )
                     if bridge.connections.get(self.device) is not self.conn:
                         # Sending to the old socket does not stop the new head.
@@ -2437,6 +2526,12 @@ class NativeOmniSession:
     async def _invalidate_head_first(self) -> tuple[dict, ...]:
         """Local audio generation, queued PCM and actual head flush first."""
         self._generation += 1
+        self._head_playback_id = 0
+        self._head_playback_response_id = None
+        self._head_playback_generation = -1
+        self._head_playback_turn = -1
+        self._head_playback_last_receipt_ms = 0
+        self._head_playback_pending = None
         self._direct_reply_available = False
         self._direct_reply_active = False
         self._readonly_turn += 1
@@ -2538,6 +2633,7 @@ class NativeOmniSession:
                         asyncio.create_task(self._send_mic()),
                         asyncio.create_task(self._receive_model()),
                         asyncio.create_task(self._play()),
+                        asyncio.create_task(self._send_playback_acks()),
                         asyncio.create_task(self._camera_stream(http)),
                     ]
                     if (self._live_transcript_enabled
@@ -3197,6 +3293,15 @@ def route_audio(conn, pcm_frame: bytes, have_voice: bool) -> bool:
         return True
     session.queue_mic(pcm_frame, have_voice)
     return True
+
+
+def device_playback_progress(conn, event: dict) -> bool:
+    """Consume a current device progress receipt from its registered socket."""
+    session = _sessions.get(getattr(conn, "device_id", None))
+    if (session is None or session.conn is not conn or session.closed
+            or not isinstance(event, dict)):
+        return False
+    return session.accept_head_playback_progress(event)
 
 
 async def on_barge(conn) -> bool:

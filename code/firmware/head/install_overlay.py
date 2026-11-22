@@ -344,6 +344,166 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
         return 0;''',
         )
         files[path] = codec_source.encode()
+
+        # Preserve upstream notification progress semantics. Add a separate
+        # selected Sense completion callback sourced from the blocking I2S
+        # write result. This is digital output progress, not acoustic proof.
+        path = "main/audio/audio_codec.h"
+        codec_header = (target / path).read_text()
+        codec_header = replace_once(
+            codec_header,
+            "    virtual void OutputData(std::vector<int16_t>& data);",
+            "    virtual int OutputData(std::vector<int16_t>& data);",
+        )
+        files[path] = codec_header.encode()
+
+        path = "main/audio/audio_codec.cc"
+        codec_base = (target / path).read_text()
+        codec_base = replace_once(
+            codec_base,
+            """void AudioCodec::OutputData(std::vector<int16_t>& data) {
+    Write(data.data(), data.size());
+}""",
+            """int AudioCodec::OutputData(std::vector<int16_t>& data) {
+    return Write(data.data(), data.size());
+}""",
+        )
+        files[path] = codec_base.encode()
+
+        path = "main/audio/audio_service.h"
+        service_header = (target / path).read_text()
+        service_header = replace_once(
+            service_header,
+            "    std::function<void(uint32_t playback_id, uint32_t media_position_ms)> on_playback_progress;",
+            """    std::function<void(uint32_t playback_id, uint32_t media_position_ms)> on_playback_progress;
+    // Selected Sense progress after a complete blocking I2S transmit.
+    // This proves digital output progress, not acoustic diaphragm playback.
+    std::function<void(uint32_t playback_id, uint32_t media_position_ms)> on_playback_committed;""",
+        )
+        files[path] = service_header.encode()
+
+        path = "main/protocols/protocol.h"
+        protocol_header = (target / path).read_text()
+        protocol_header = replace_once(
+            protocol_header,
+            "    virtual void SendMcpMessage(const std::string& message);",
+            """    virtual void SendMcpMessage(const std::string& message);
+    void SendPlaybackProgress(uint32_t playback_id, uint32_t media_position_ms);""",
+        )
+        files[path] = protocol_header.encode()
+
+        path = "main/protocols/protocol.cc"
+        protocol_source = (target / path).read_text()
+        protocol_source = replace_once(
+            protocol_source,
+            """void Protocol::SendMcpMessage(const std::string& payload) {
+    std::string message =
+        "{\"session_id\":\"" + session_id_ + "\",\"type\":\"mcp\",\"payload\":" + payload + "}";
+    SendText(message);
+}
+
+bool Protocol::IsTimeout() const {""",
+            """void Protocol::SendMcpMessage(const std::string& payload) {
+    std::string message =
+        "{\"session_id\":\"" + session_id_ + "\",\"type\":\"mcp\",\"payload\":" + payload + "}";
+    SendText(message);
+}
+
+void Protocol::SendPlaybackProgress(uint32_t playback_id, uint32_t media_position_ms) {
+    if (playback_id == 0 || media_position_ms == 0) {
+        return;
+    }
+    std::string message =
+        "{\"session_id\":\"" + session_id_ +
+        "\",\"type\":\"desk_robot_playback\",\"playback_id\":" +
+        std::to_string(playback_id) + ",\"played_ms\":" +
+        std::to_string(media_position_ms) + "}";
+    SendText(message);
+}
+
+bool Protocol::IsTimeout() const {""",
+        )
+        files[path] = protocol_source.encode()
+
+        path = "main/protocols/websocket_protocol.h"
+        websocket_header = (target / path).read_text()
+        websocket_header = replace_once(
+            websocket_header,
+            """    std::shared_ptr<WebSocket> websocket_;
+    int version_ = 1;""",
+            """    std::shared_ptr<WebSocket> websocket_;
+    int version_ = 1;
+    uint32_t desk_playback_id_ = 0;
+    uint32_t desk_playback_position_ms_ = 0;""",
+        )
+        files[path] = websocket_header.encode()
+
+        path = "main/protocols/websocket_protocol.cc"
+        websocket_source = (target / path).read_text()
+        websocket_source = replace_once(
+            websocket_source,
+            """        if (binary) {
+            if (on_incoming_audio_ != nullptr) {""",
+            """        if (binary) {
+            uint32_t playback_id = 0;
+            uint32_t media_position_ms = 0;
+            if (desk_playback_id_ != 0 && server_frame_duration_ > 0) {
+                const uint32_t frame_ms = static_cast<uint32_t>(server_frame_duration_);
+                if (desk_playback_position_ms_ <= 0xffffffffu - frame_ms) {
+                    desk_playback_position_ms_ += frame_ms;
+                    playback_id = desk_playback_id_;
+                    media_position_ms = desk_playback_position_ms_;
+                } else {
+                    desk_playback_id_ = 0;
+                    desk_playback_position_ms_ = 0;
+                }
+            }
+            if (on_incoming_audio_ != nullptr) {""",
+        )
+        websocket_source = replace_once(
+            websocket_source,
+            """                        .timestamp = bp2->timestamp,
+                        .payload = std::vector<uint8_t>(payload, payload + bp2->payload_size)}));""",
+            """                        .timestamp = bp2->timestamp,
+                        .playback_id = playback_id,
+                        .media_position_ms = media_position_ms,
+                        .payload = std::vector<uint8_t>(payload, payload + bp2->payload_size)}));""",
+        )
+        websocket_source = websocket_source.replaceAll(
+            """                        .timestamp = 0,
+                        .payload = """,
+            """                        .timestamp = 0,
+                        .playback_id = playback_id,
+                        .media_position_ms = media_position_ms,
+                        .payload = """,
+        )
+        websocket_source = replace_once(
+            websocket_source,
+            """            if (cJSON_IsString(type)) {
+                if (strcmp(type->valuestring, "hello") == 0) {""",
+            """            if (cJSON_IsString(type)) {
+                if (strcmp(type->valuestring, "tts") == 0) {
+                    auto state = cJSON_GetObjectItem(root, "state");
+                    if (cJSON_IsString(state) && strcmp(state->valuestring, "start") == 0) {
+                        desk_playback_id_ = 0;
+                        desk_playback_position_ms_ = 0;
+                        auto playback_id = cJSON_GetObjectItem(root, "desk_playback_id");
+                        if (cJSON_IsNumber(playback_id) &&
+                            playback_id->valuedouble >= 1 &&
+                            playback_id->valuedouble <= 2147483647) {
+                            desk_playback_id_ =
+                                static_cast<uint32_t>(playback_id->valuedouble);
+                        }
+                    } else if (cJSON_IsString(state) &&
+                               strcmp(state->valuestring, "stop") == 0) {
+                        desk_playback_id_ = 0;
+                        desk_playback_position_ms_ = 0;
+                    }
+                }
+                if (strcmp(type->valuestring, "hello") == 0) {""",
+        )
+        files[path] = websocket_source.encode()
+
         # An I2S DAC at 32 kHz must not force an invalid 32 kHz Opus
         # decoder. Reuse Xiaozhi's existing Opus and ESP-AE rate converter
         # on the isolated Sense build; do not modify the pinned upstream.
@@ -454,6 +614,16 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
     }
     decoder_sample_rate_ = sample_rate;""",
         )
+        service = replace_once(
+            service,
+            "        codec_->OutputData(task.pcm);",
+            """        const int transmitted_frames = codec_->OutputData(task.pcm);
+        if (transmitted_frames == static_cast<int>(task.pcm.size()) &&
+            task.playback_id != 0 && callbacks_.on_playback_committed) {
+            callbacks_.on_playback_committed(
+                task.playback_id, task.media_position_ms);
+        }""",
+        )
         files[path] = service.encode()
         # Urgent stop is an extension to the existing Xiaozhi TTS state event,
         # not a second decoder or audio transport. Normal TTS stops retain the
@@ -461,6 +631,24 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
         # and disables I2S TX so its DMA no longer plays obsolete audio.
         path = "main/application.cc"
         text = (target / path).read_text()
+        text = replace_once(
+            text,
+            """    callbacks.on_playback_progress = [this](uint32_t playback_id, uint32_t media_position_ms) {
+        notify_player_.OnPlaybackProgress(playback_id, media_position_ms);
+    };
+    audio_service_.SetCallbacks(callbacks);""",
+            """    callbacks.on_playback_progress = [this](uint32_t playback_id, uint32_t media_position_ms) {
+        notify_player_.OnPlaybackProgress(playback_id, media_position_ms);
+    };
+    callbacks.on_playback_committed = [this](uint32_t playback_id, uint32_t media_position_ms) {
+        Schedule([this, playback_id, media_position_ms]() {
+            if (protocol_) {
+                protocol_->SendPlaybackProgress(playback_id, media_position_ms);
+            }
+        });
+    };
+    audio_service_.SetCallbacks(callbacks);""",
+        )
         text = replace_once(
             text,
             """} else if (strcmp(state->valuestring, "stop") == 0) {

@@ -465,17 +465,28 @@ def was_interrupted_by_human(device_id):
 
 
 def suppress_message(conn, message):
+    data = None
+    if not isinstance(message, bytes):
+        try:
+            data = json.loads(message)
+        except (ValueError, TypeError):
+            data = None
+        if isinstance(data, dict) and data.get("type") == "desk_robot_playback":
+            # Device receipts are private control telemetry. Consume them
+            # before upstream Xiaozhi routing even when no fleet mute is active.
+            if connections.get(conn.device_id) is conn:
+                native = _native_adapter()
+                receipt = getattr(native, "device_playback_progress", None)
+                if callable(receipt):
+                    receipt(conn, data)
+            return True
     if not muted(conn.device_id):
         return False
     if isinstance(message, bytes):
         return not (conn.device_id == active_device_id and duplex_available(conn))
-    try:
-        data = json.loads(message)
-        # The existing listener setup is established before the speaker lease.
-        # A fresh listen request during group playback cannot reset ASR state.
-        return isinstance(data, dict) and data.get("type") == "listen"
-    except (ValueError, TypeError):
-        return False
+    # The existing listener setup is established before the speaker lease.
+    # A fresh listen request during group playback cannot reset ASR state.
+    return isinstance(data, dict) and data.get("type") == "listen"
 
 
 def _start_lease_cleanup() -> None:
