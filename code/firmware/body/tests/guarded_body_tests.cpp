@@ -1248,10 +1248,16 @@ static void guarded_dc_dock_loss_latches_until_fresh_local_usb_rearm() {
     CHECK(!body.state().armed && body.state().servos_attached);
     CHECK(body.state().left == 0 && body.state().right == 0);
     const auto stopped_status = send(body, "status", lost_at);
-    if (stopped_status.find("dock_monitor_latched") == std::string::npos) {
-      throw std::runtime_error(
-          "dock monitor fault status mismatch after failure " +
-          std::to_string(failure) + ": " + stopped_status);
+    // When the GPIOA timeout also expires cliff samples, the independently
+    // latched cliff failure takes precedence in reported status. The dock
+    // latch must nevertheless reject all remote ARM requests below.
+    CHECK(stopped_status.find("\"ready\":false") != std::string::npos);
+    if (failure == 2) {
+      CHECK(stopped_status.find("\"fault\":\"stale_sample\"") !=
+            std::string::npos);
+    } else {
+      CHECK(stopped_status.find("dock_monitor_latched") !=
+            std::string::npos);
     }
 
     desk_robot::LineReceiver head, usb(true);
@@ -1287,7 +1293,7 @@ static void guarded_dc_dock_loss_latches_until_fresh_local_usb_rearm() {
     dock.at_ms = lost_at + 2;
     fresh(guard, lost_at + 2);
     body.set_accessories(readings, lost_at + 2);
-    CHECK(send(body, "status", lost_at + 2).find("dock_monitor_latched") !=
+    CHECK(send(body, "status", lost_at + 2).find("\"ready\":false") !=
           std::string::npos);
     CHECK(request(head, "arm", lost_at + 3) ==
           "ERR arm dock_monitor_latched");
