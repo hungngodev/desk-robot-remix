@@ -13,6 +13,13 @@ public:
     void Reset() { baselined_ = false; last_ = 0; }
 
     bool AcceptBoot(std::uint32_t boot_id) {
+        // WROOM initializes its epoch as esp_random() | 1U. Zero is an
+        // uninitialized or malformed report, never a new observed boot.
+        // Invalidate the edge baseline but preserve the retired epoch fence.
+        if (boot_id == 0U) {
+            Reset();
+            return false;
+        }
         if (!boot_seen_) {
             boot_seen_ = true;
             active_boot_ = boot_id;
