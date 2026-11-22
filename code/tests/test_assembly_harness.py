@@ -230,3 +230,42 @@ def test_current_builder_guide_keeps_selected_sense_and_motor_profiles():
         assert path in builder
     assert "A1 through A12" in builder
     assert "Release the final print set only after qualification" in builder
+
+def test_strict_wiring_plan_preserves_current_source_mapping():
+    path = ROOT / harness.PLAN
+    assert harness.read_wiring_plan(path) == json.loads(
+        path.read_text(encoding="utf-8")
+    )
+    _, body, sense = sources()
+    assert harness.render(harness.read_wiring_plan(path), body, sense) == (
+        ROOT / "docs/hardware/one-robot-signal-harness.generated.md"
+    ).read_text()
+
+
+@pytest.mark.parametrize("before,after", [
+    ('"sda": 21', '"sda": 6, "sda": 21'),
+    ('"position": "floor_front_left"',
+     '"position": "wrong_cliff", "position": "floor_front_left"'),
+    ('"schema_version": 1', '"schema_version": 99, "schema_version": 1'),
+    ('"bus": {', '"bus": {}, "bus": {'),
+])
+def test_ambiguous_json_cannot_hide_conflicting_wiring_or_cliff_plan(
+    tmp_path, before, after,
+):
+    source = (ROOT / harness.PLAN).read_text(encoding="utf-8")
+    assert source.count(before) == 1
+    forged = source.replace(before, after)
+    path = tmp_path / "ambiguous_full_feature_plan.json"
+    path.write_text(forged, encoding="utf-8")
+    with pytest.raises(ValueError, match="Duplicate wiring plan JSON field"):
+        harness.read_wiring_plan(path)
+
+
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity"])
+def test_nonstandard_json_number_never_reaches_wiring_release(tmp_path, token):
+    source = (ROOT / harness.PLAN).read_text(encoding="utf-8")
+    assert source.count('"sda": 21') == 1
+    path = tmp_path / "bad_numeric_wiring_plan.json"
+    path.write_text(source.replace('"sda": 21', f'"sda": {token}'))
+    with pytest.raises(ValueError, match="Nonfinite wiring plan JSON constant"):
+        harness.read_wiring_plan(path)

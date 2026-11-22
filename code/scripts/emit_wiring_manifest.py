@@ -48,6 +48,32 @@ _BODY_OUTPUT_ROLES = frozenset({
 })
 
 
+def _strict_wiring_plan_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """Do not allow a later pin or cliff-lane field to hide the first one."""
+    values: dict[str, object] = {}
+    for key, value in pairs:
+        if key in values:
+            raise ValueError("Duplicate wiring plan JSON field: " + key)
+        values[key] = value
+    return values
+
+
+def _reject_wiring_plan_constant(token: str) -> None:
+    raise ValueError("Nonfinite wiring plan JSON constant: " + token)
+
+
+def read_wiring_plan(path: Path) -> dict:
+    """Parse the exact reviewed hardware plan without ambiguous JSON fields."""
+    plan = json.loads(
+        path.read_text(encoding="utf-8"),
+        object_pairs_hook=_strict_wiring_plan_object,
+        parse_constant=_reject_wiring_plan_constant,
+    )
+    if type(plan) is not dict:
+        raise ValueError("Wiring plan root must be a JSON object")
+    return plan
+
+
 def _pin(pattern: str, source: str, label: str) -> int:
     hits = re.findall(pattern, source)
     if len(hits) != 1:
@@ -380,7 +406,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path, help="Write generated Markdown here")
     args = parser.parse_args()
     root = args.root
-    output = render(json.loads((root / PLAN).read_text()),
+    output = render(read_wiring_plan(root / PLAN),
                     (root / BODY_PINS).read_text(),
                     (root / HEAD_PINS).read_text())
     if args.out:
