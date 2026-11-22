@@ -335,6 +335,20 @@ def test_standalone_audit_rejects_unclassified_promotion():
                for item in verify.audit({"procedures": [row]}, lookup))
 
 
+def test_executed_receipt_requires_exact_integer_zero_exit_status():
+    valid = promoted("TESTED")["procedures"][0]
+    assert verify.audit(full_ledger_with(valid), lookup) == []
+    for invalid in (False, True, 0.0, "0", None):
+        bad = {
+            **valid,
+            "executed_test_receipt": {
+                **valid["executed_test_receipt"], "exit_code": invalid,
+            },
+        }
+        errors = verify.audit(full_ledger_with(bad), lookup)
+        assert any("invalid source receipt" in problem for problem in errors)
+
+
 def test_online_audit_refuses_nonexecuting_or_mismatched_playbook_commands():
     for invalid in [
         "cd code && python scripts/verify_system.py --help",

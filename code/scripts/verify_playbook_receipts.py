@@ -390,7 +390,8 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
         if (not isinstance(sha, str) or not SHA.fullmatch(sha)
                 or not isinstance(receipt, dict)
                 or receipt.get("sha") != sha
-                or receipt.get("exit_code") != 0):
+                or type(receipt.get("exit_code")) is not int
+                or receipt["exit_code"] != 0):
             errors.append(f"procedure {identifier}: invalid source receipt")
             continue
         method = row.get("verification_method")
