@@ -2096,7 +2096,6 @@ def cost_quote_markdown(cost: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-
 def _unique_json_object(
     pairs: list[tuple[str, object]],
 ) -> dict[str, object]:
@@ -2134,6 +2133,7 @@ def _load_cli_json(path: Path, label: str) -> object:
         raise ValueError(
             f"{label} JSON is invalid or ambiguous: {exc}"
         ) from exc
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
