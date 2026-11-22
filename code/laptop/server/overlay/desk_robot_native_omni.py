@@ -2319,10 +2319,17 @@ class NativeOmniSession:
                 fully_sent = True
                 current_response = response_id
                 generation = self._generation
-                started = await self._send_device_state(
-                    "start", generation, response_id=response_id
-                )
+                self._begin_head_playback(response_id, generation)
+                started = await self._send_device_state("start", generation)
                 if started is False:
+                    if self._head_playback_response_id == response_id:
+                        self._head_playback_id = 0
+                        self._head_playback_response_id = None
+                        self._head_playback_generation = -1
+                        self._head_playback_turn = -1
+                        self._head_playback_last_receipt_ms = 0
+                        self._head_playback_last_device_ms = 0
+                        self._head_playback_pending = None
                     dropped_response_id = response_id
                     current_response = None
                     pending.clear()
@@ -2363,9 +2370,7 @@ class NativeOmniSession:
                     fully_sent = True
                     break
 
-    async def _send_device_state(
-        self, state: str, generation: int, *, response_id: str | None = None
-    ) -> bool:
+    async def _send_device_state(self, state: str, generation: int) -> bool:
         global _output_owner, _last_passive_speech_started_at
         if self.closed or generation != self._generation:
             return False
@@ -2439,12 +2444,10 @@ class NativeOmniSession:
                         "type": "tts", "state": state,
                         "session_id": self.conn.session_id,
                     }
-                    if state == "start" and response_id is not None:
-                        playback_id = self._begin_head_playback(
-                            response_id, generation
-                        )
-                        if playback_id:
-                            message["desk_playback_id"] = playback_id
+                    if (state == "start" and self._head_playback_id != 0
+                            and self._head_playback_generation == generation
+                            and self._head_playback_response_id == self.wire.response_id):
+                        message["desk_playback_id"] = self._head_playback_id
                     await asyncio.wait_for(
                         self.conn.websocket.send(json.dumps(message)), timeout=0.4,
                     )

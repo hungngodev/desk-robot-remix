@@ -462,12 +462,11 @@ async def test_authenticated_device_playback_progress_drives_wire_ack_after_stop
     })
     assert packet is not None and packet.total_generated_ms == 100
 
-    assert await session._send_device_state(
-        "start", session._generation, response_id="r1"
-    )
-    start = json.loads(sent[-1])
-    playback_id = start["desk_playback_id"]
+    playback_id = session._begin_head_playback("r1", session._generation)
     assert 0 < playback_id <= 0x7fffffff
+    assert await session._send_device_state("start", session._generation)
+    start = json.loads(sent[-1])
+    assert start["desk_playback_id"] == playback_id
     session.wire.handle_event({"type": "response.done", "response_id": "r1"})
     assert await session._send_device_state("stop", session._generation)
 
