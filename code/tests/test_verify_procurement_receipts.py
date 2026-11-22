@@ -22,6 +22,25 @@ URL = ("https://github.com/hungngodev/desk-robot-remix/blob/"
 
 
 def measurement_for_gate(scope, gate):
+    if gate in release.CRITICAL_TRIAL_GATES:
+        specification = release.CRITICAL_TRIAL_GATES[gate]
+        quantities = []
+        for name, unit, lower, upper, _ in specification["quantities"]:
+            quantities.append({
+                "name": name, "unit": unit, "value": lower,
+                "minimum": 0, "maximum": upper if upper is not None
+                else max(10, lower),
+            })
+        return {
+            "sample_count": specification["minimum_samples"],
+            "conditions": {
+                "setup": "installed_test_fixture",
+                "instrument": "calibrated_measurement_tool",
+                "installed_hardware": "revision_A_assembled_robot",
+                "procedure_revision": "physical_acceptance_v1",
+            },
+            "quantities": quantities,
+        }
     if gate in release.PHYSICAL_GATE_METRICS:
         metric, unit = release.PHYSICAL_GATE_METRICS[gate]
         return {
@@ -831,3 +850,85 @@ def test_parser_to_audit_release_huge_integer_fails_closed():
         )
         assert any(f"system.{gate}" in err and "unpinned" in err for err in errors)
 
+
+
+@pytest.mark.parametrize("gate", sorted(release.CRITICAL_TRIAL_GATES))
+def test_critical_product_trial_requires_actual_metric_scope_and_counts(gate):
+    """A text-only signed receipt cannot become an A2, A4, A5 or dock pass."""
+    import copy
+
+    original = receipt("system", gate)
+    assert release.verified_scoped_record(
+        original, SHA, lambda url: lookup(url, records=[original]),
+    )
+    measurement = original["measurement"]
+    observations = measurement["quantities"]
+    missing = copy.deepcopy(measurement)
+    missing["quantities"].pop()
+    wrong_unit = copy.deepcopy(measurement)
+    wrong_unit["quantities"][0]["unit"] = "unknown"
+    wrong_name = copy.deepcopy(measurement)
+    wrong_name["quantities"][0]["name"] = "generic_pass"
+    under_limit = copy.deepcopy(measurement)
+    under_limit["quantities"][0]["value"] = -1
+    boolean_count = copy.deepcopy(measurement)
+    boolean_count["quantities"][0]["value"] = True
+    duplicate = copy.deepcopy(measurement)
+    duplicate["quantities"].append(copy.deepcopy(observations[0]))
+    unhashable_name = copy.deepcopy(measurement)
+    unhashable_name["quantities"][0]["name"] = ["forged"]
+    bad_conditions = copy.deepcopy(measurement)
+    bad_conditions["conditions"]["procedure_revision"] = "tbd"
+    variants = (
+        {"result": "pass"},
+        {**measurement, "sample_count": (
+            release.CRITICAL_TRIAL_GATES[gate]["minimum_samples"] - 1)},
+        {**measurement, "sample_count": True},
+        missing, wrong_unit, wrong_name, under_limit, boolean_count,
+        duplicate, unhashable_name, bad_conditions,
+    )
+    for changed in variants:
+        falsified = {**original, "measurement": changed}
+        source = lambda url, row=falsified: lookup(url, records=[row])
+        assert not release.verified_scoped_record(falsified, SHA, source)
+        errors = release.audit_release(
+            {"system": {gate: falsified}}, SHA, source,
+        )
+        assert any(
+            f"system.{gate}" in error and "unpinned" in error
+            for error in errors
+        )
+
+
+@pytest.mark.parametrize("gate,metric", [
+    ("sense_speaker_mic_double_talk", "audible_stops_within_500ms"),
+    ("sense_speaker_mic_double_talk", "new_intents_retained"),
+    ("lift_and_grip_calibration", "flat_key_unassisted_successes"),
+    ("lift_and_grip_calibration", "wrapped_candy_unassisted_successes"),
+])
+def test_critical_trial_rejects_below_published_success_threshold(gate, metric):
+    case = receipt("system", gate)
+    data = case["measurement"]
+    selected = next(item for item in data["quantities"]
+                    if item["name"] == metric)
+    selected["value"] -= 1
+    assert not release.verified_scoped_record(
+        case, SHA, lambda url: lookup(url, records=[case]),
+    )
+
+
+def test_critical_dock_requires_both_switches_and_three_ir_viewpoints():
+    case = receipt("system", "real_dual_ir_terminal_docking")
+    for missing in (
+        "left_ir_observed_trials", "center_ir_observed_trials",
+        "right_ir_observed_trials", "both_seat_switches_confirmed_trials",
+        "unpowered_contact_alignment_error_mm",
+    ):
+        altered = json.loads(json.dumps(case))
+        altered["measurement"]["quantities"] = [
+            item for item in altered["measurement"]["quantities"]
+            if item["name"] != missing
+        ]
+        assert not release.verified_scoped_record(
+            altered, SHA, lambda url, row=altered: lookup(url, records=[row]),
+        )

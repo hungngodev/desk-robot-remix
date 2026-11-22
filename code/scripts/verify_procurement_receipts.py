@@ -266,6 +266,94 @@ PHYSICAL_GATE_METRICS = {
 }
 
 
+# A signed immutable record is not a witnessed test. These physical product
+# gates must at least contain inspectable measurements matching the published
+# acceptance criteria; qualitative source/license decisions remain separate.
+# Tuple: metric name, unit, minimum result, maximum result, integer-only.
+CRITICAL_TRIAL_GATES = {
+    "four_cliff_sensor_surface_trials": {
+        "minimum_samples": 4,
+        "quantities": (
+            ("qualified_floor_sensors", "sensors", 4, 4, True),
+            ("distinct_tested_surfaces", "surfaces", 2, None, True),
+            ("minimum_stopping_margin_mm", "mm", 0, None, False),
+            ("measured_coast_distance_mm", "mm", 0, None, False),
+        ),
+    },
+    "real_dual_ir_terminal_docking": {
+        "minimum_samples": 3,
+        "quantities": (
+            ("left_ir_observed_trials", "trials", 1, None, True),
+            ("center_ir_observed_trials", "trials", 1, None, True),
+            ("right_ir_observed_trials", "trials", 1, None, True),
+            ("both_seat_switches_confirmed_trials", "trials", 1, None, True),
+            ("unpowered_contact_alignment_error_mm", "mm", 0, None, False),
+        ),
+    },
+    "lift_and_grip_calibration": {
+        "minimum_samples": 20,
+        "quantities": (
+            ("flat_key_attempts", "attempts", 10, 10, True),
+            ("flat_key_unassisted_successes", "successes", 8, 10, True),
+            ("wrapped_candy_attempts", "attempts", 10, 10, True),
+            ("wrapped_candy_unassisted_successes", "successes", 8, 10, True),
+            ("verified_lift_height_mm", "mm", 10, None, False),
+            ("verified_hold_duration_s", "s", 3, None, False),
+        ),
+    },
+    "sense_speaker_mic_double_talk": {
+        "minimum_samples": 20,
+        "quantities": (
+            ("ordinary_speech_attempts", "attempts", 20, 20, True),
+            ("audible_stops_within_500ms", "successes", 19, 20, True),
+            ("new_intents_retained", "successes", 18, 20, True),
+            ("echo_only_false_interruptions", "interruptions", 0, 0, True),
+            ("separate_quiet_run_minutes", "min", 10, None, False),
+        ),
+    },
+}
+
+
+def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
+    """Format screen only; device, calibration and witness still need review."""
+    specification = CRITICAL_TRIAL_GATES[gate]
+    if measurement["sample_count"] < specification["minimum_samples"]:
+        return False
+    conditions = measurement["conditions"]
+    for key in ("installed_hardware", "procedure_revision"):
+        value = conditions.get(key)
+        if (type(value) is not str or not value.strip()
+                or value.strip().casefold() in {"unknown", "tbd", "none", "pass"}):
+            return False
+    observations = measurement["quantities"]
+    if len(observations) < len(specification["quantities"]):
+        return False
+    names = [item.get("name") for item in observations if type(item) is dict]
+    if (len(names) != len(observations)
+            or any(type(name) is not str for name in names)
+            or len(set(names)) != len(names)):
+        return False
+    for name, unit, lower, upper, integer_only in specification["quantities"]:
+        matches = [item for item in observations if item.get("name") == name]
+        if len(matches) != 1 or matches[0].get("unit") != unit:
+            return False
+        numbers = (matches[0].get("value"), matches[0].get("minimum"),
+                   matches[0].get("maximum"))
+        permitted = (int,) if integer_only else (int, float)
+        if any(type(number) not in permitted for number in numbers):
+            return False
+        try:
+            if not all(math.isfinite(number) for number in numbers):
+                return False
+        except (OverflowError, ValueError):
+            return False
+        value, minimum, maximum = numbers
+        if (minimum < 0 or minimum > value or value > maximum
+                or value < lower or (upper is not None and value > upper)):
+            return False
+    return True
+
+
 NONNEGATIVE_PHYSICAL_GATES = frozenset({
     "loaded_drive_and_stopping",
     "hardware_motor_driver_fails_low_after_cpu_stall",
@@ -282,7 +370,8 @@ def _qualified_gate_measurement(gate: object, measurement: object) -> bool:
     and the installed hardware. Other gates retain their own open criteria.
     """
     expected = PHYSICAL_GATE_METRICS.get(gate) if isinstance(gate, str) else None
-    if expected is None:
+    trial_gate = isinstance(gate, str) and gate in CRITICAL_TRIAL_GATES
+    if expected is None and not trial_gate:
         return True
     if type(measurement) is not dict:
         return False
@@ -304,6 +393,8 @@ def _qualified_gate_measurement(gate: object, measurement: object) -> bool:
         if type(item) is dict
         and (item.get("name"), item.get("unit")) == expected
     ]
+    if trial_gate:
+        return _qualified_trial_gate(gate, measurement)
     if len(matched) != 1:
         return False
     item = matched[0]
