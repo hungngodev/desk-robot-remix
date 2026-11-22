@@ -11,6 +11,7 @@ OLED face, speech, tracks and a lifting claw. A shared Mac handles the AI.
 | I want to… | Open |
 | --- | --- |
 | See the build order and what is ready | [Project plan](PLAN.md) and [full linear sequence](PLAN.md#complete-linear-build-and-permanent-verification-stages) |
+| Build and qualify the first complete pet from one route | [One complete robot builder route](guides/one-complete-robot.md), including buying holds, fit, firmware, quiet mode, STOP and the open acceptance record |
 | Continue work across parallel chats or coding agents | [Repository agent instructions](../AGENTS.md) and [cross-chat engineering handoff](reviews/PARALLEL_CHAT_HANDOFF.md) |
 | Check the cross-layer wiring and event registry regression contract | [Integration contract tests](../code/tests/test_integration_contracts.py), [live GitHub Actions runs](https://github.com/hungngodev/desk-robot-remix/actions/workflows/host-verification.yml) and [historical November 11 runner incident](reviews/CI_RUNNER_PRESTEP_TRIAGE_2026_11_11.md) |
 | Research natural proactive social robot behavior | [Reachy Mini source and proactive interaction papers](reviews/REACHY_MINI_PROACTIVE_REUSE_2026_11_11.md) |

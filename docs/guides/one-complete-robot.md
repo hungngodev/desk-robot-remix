@@ -76,6 +76,8 @@ The already committed source and host tests cover room SCD40 readiness bus error
 
 Follow [Mac and firmware interfaces](interfaces.md), [live conversation](live-conversation.md), and [multimodal world evidence ownership](multimodal-voice-video-orchestration.md). Keep Xiaozhi as the single realtime microphone, speaker and MCP route. Only consented persistent camera and microphone streams may contribute. Old frames, stale tools and another pet's memory cannot authorize movement. New human speech preempts speech playback while the independent WROOM keeps local safety authority.
 
+Quiet mode uses the existing operator-only `POST /v1/pet/{robot_id}/quiet` route. Send `{"quiet": true}` to suppress spontaneous pet speech and activity while keeping user-requested interaction available, and send `{"quiet": false}` through the same operator route to leave quiet mode. The tool token is intentionally not authorized to change quiet mode. Entering quiet cancels current pet speech through the same bounded stop path; it does not arm movement, clear a local WROOM fault or qualify an acoustic stop.
+
 Do not put personal audio, camera recordings, room occupancy histories, raw conversations or private keys in GitHub. Keep per pet memory isolated. Record software and physical trials separately, with robot identity, board revision, source hash, test fixture, capture clock, expected and actual behavior, failures and safe recovery. STOP, fault, contact loss, reboot and putdown require deliberate explicit safe resume, never automatic rearm.
 
 ## 7. Final release decision

@@ -12,6 +12,7 @@ GUIDE = ROOT / "docs/guides/one-complete-robot.md"
 def test_one_complete_robot_guide_is_discoverable_and_links_real_files():
     text = GUIDE.read_text(encoding="utf-8")
     assert "one-complete-robot.md" in (ROOT / "README.md").read_text()
+    assert "guides/one-complete-robot.md" in (ROOT / "docs/README.md").read_text()
     for target in re.findall(r"\]\(([^)]+)\)", text):
         if target.startswith(("https://", "http://")):
             continue
@@ -33,3 +34,13 @@ def test_builder_guide_does_not_claim_unqualified_power_or_print_release():
     assert "86 mm" in text and "68 mm" in text
     assert "independent external motor cutoff" in text
     assert "Digital I2S acceptance does not establish acoustic playback completion" in text
+
+
+def test_builder_guide_exposes_real_quiet_control_without_motion_authority():
+    text = GUIDE.read_text()
+    assert "POST /v1/pet/{robot_id}/quiet" in text
+    assert '{"quiet": true}' in text
+    assert '{"quiet": false}' in text
+    assert "operator-only" in text
+    assert "tool token is intentionally not authorized" in text
+    assert "does not arm movement" in text
