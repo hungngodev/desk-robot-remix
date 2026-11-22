@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 
 from .config import Settings
 from .transport import HeadError
@@ -70,6 +70,25 @@ def register_robot_status_routes(
     active_aux_boot: dict[str, int] = {}
     retired_aux_boots: dict[str, set[int]] = {}
 
+    def require_current_voice_tool(request: Request, robot_id: str, owner) -> None:
+        """Do not return an old head HTTP result to a newer spoken turn.
+
+        Only the canonical Xiaozhi tool marker demands this stricter
+        response fence. Unmarked operator/dashboard reads stay read-only,
+        and the existing sensor acquisition cursor remains independent.
+        """
+        if request.headers.get("x-desk-robot-tool-receipt") != "1":
+            return
+        if not isinstance(owner, tuple) or len(owner) != 2:
+            raise HTTPException(409, "Voice telemetry tool turn identity unavailable")
+        visual, generation = owner
+        epochs = getattr(visual, "_turn_epoch", None)
+        if (getattr(app.state.runtime, "multimodal", None) is not visual
+                or type(generation) is not int
+                or not isinstance(epochs, dict)
+                or epochs.get(robot_id) != generation):
+            raise HTTPException(409, "Voice telemetry tool turn superseded during read")
+
     def previous_seq(key: tuple[str, str], boot: int) -> int | None:
         cursor = last_aux_context_seq.get(key)
         return cursor[1] if cursor is not None and cursor[0] == boot else None
@@ -89,7 +108,9 @@ def register_robot_status_routes(
     async def status(robot_id: str, request: Request):
         coordinator().robot(robot_id)
         context = requested_tool_context(request, robot_id)
+        require_current_voice_tool(request, robot_id, context)
         data = await coordinator().heads[robot_id].status()
+        require_current_voice_tool(request, robot_id, context)
         if not isinstance(data, dict) or data.get("robot_id") != robot_id:
             raise HeadError("Head status robot identity mismatch")
         if isinstance(data, dict):
@@ -109,11 +130,13 @@ def register_robot_status_routes(
         # Bind the requesting human turn before slow physical telemetry.
         # A new VAD epoch must not inherit the older tool's receipt.
         owner = requested_tool_context(request, robot_id)
+        require_current_voice_tool(request, robot_id, owner)
         getter = getattr(coordinator().heads[robot_id], "aux_status", None)
         if not callable(getter):
             return {"robot_id": robot_id, "available": False,
                     "reason": "No physical accessory telemetry adapter"}
         data = await getter()
+        require_current_voice_tool(request, robot_id, owner)
         if not isinstance(data, dict) or data.get("robot_id") != robot_id:
             raise HeadError("Auxiliary telemetry robot identity mismatch")
         # Only an authenticated, explicit head tool request may add a short
