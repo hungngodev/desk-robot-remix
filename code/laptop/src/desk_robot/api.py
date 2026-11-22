@@ -148,6 +148,15 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         # Background UI/status polling must not become conversation history.
         if request.headers.get("x-desk-robot-tool-receipt") != "1":
             return None
+        # Operator dashboard access and Xiaozhi tool execution intentionally
+        # have different credentials. A caller cannot promote a normal
+        # operator read into model dialogue by adding an untrusted header.
+        authorization = request.headers.get("authorization", "")
+        scheme, separator, credential = authorization.partition(" ")
+        if (scheme.lower() != "bearer" or not separator
+                or not credential.isascii()
+                or not secrets.compare_digest(credential, app.state.tool_token)):
+            return None
         visual = getattr(app.state.runtime, "multimodal", None)
         epochs = getattr(visual, "_turn_epoch", None)
         if not isinstance(epochs, dict) or robot_id not in epochs:
