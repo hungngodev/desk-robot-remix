@@ -6079,6 +6079,7 @@ async def test_proactive_fuel_and_dock_require_current_boot_sequence_and_deliver
     """Model facts need fresh source conversions, not simply new HTTP reads."""
     from copy import deepcopy
     from types import SimpleNamespace
+
     import desk_robot.pet as pet_module
 
     now = [400.0]
