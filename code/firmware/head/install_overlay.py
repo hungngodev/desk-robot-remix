@@ -616,10 +616,28 @@ bool Protocol::IsTimeout() const {""",
         )
         service = replace_once(
             service,
+            """void AudioService::AudioOutputTask() {
+    while (true) {""",
+            """void AudioService::AudioOutputTask() {
+    // A cumulative media position is only trustworthy while every prior
+    // frame in this playback lease completed its blocking I2S write.
+    uint32_t desk_robot_failed_playback_id = 0;
+    while (true) {""",
+        )
+        service = replace_once(
+            service,
             "        codec_->OutputData(task.pcm);",
             """        const int transmitted_frames = codec_->OutputData(task.pcm);
-        if (transmitted_frames == static_cast<int>(task.pcm.size()) &&
-            task.playback_id != 0 && callbacks_.on_playback_committed) {
+        if (task.playback_id != 0 &&
+            transmitted_frames != static_cast<int>(task.pcm.size())) {
+            // Future packets already carry later cumulative positions. Once
+            // this lease has a hole, suppress all later completion receipts
+            // instead of skipping over the failed interval.
+            desk_robot_failed_playback_id = task.playback_id;
+        } else if (transmitted_frames == static_cast<int>(task.pcm.size()) &&
+                   task.playback_id != 0 &&
+                   task.playback_id != desk_robot_failed_playback_id &&
+                   callbacks_.on_playback_committed) {
             callbacks_.on_playback_committed(
                 task.playback_id, task.media_position_ms);
         }""",

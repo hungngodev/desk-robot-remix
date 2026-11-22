@@ -511,6 +511,13 @@ async def test_authenticated_device_playback_progress_drives_wire_ack_after_stop
         assert module.status(conn.device_id)["head_audio_playback_acknowledged"] is True
 
         forwarded_ready.clear()
+        # A later success cannot jump over a missing 60 ms output completion.
+        # That gap would otherwise commit words from a failed I2S interval.
+        assert not module.device_playback_progress(
+            conn, {**common, "played_ms": 180}
+        )
+        assert not forwarded_ready.is_set()
+
         # The device transmitted a padded final 60 ms frame. The backend ACK
         # is clamped to the 100 ms of real model PCM, including after STOP.
         assert module.device_playback_progress(

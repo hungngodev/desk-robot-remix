@@ -282,6 +282,7 @@ class NativeOmniSession:
         self._head_playback_generation = -1
         self._head_playback_turn = -1
         self._head_playback_last_receipt_ms = 0
+        self._head_playback_last_device_ms = 0
         self._head_playback_pending: tuple[int, int, str, int] | None = None
         self._head_playback_wakeup = asyncio.Event()
         self._head_playback_receipts = 0
@@ -2149,6 +2150,7 @@ class NativeOmniSession:
         self._head_playback_generation = generation
         self._head_playback_turn = self._readonly_turn
         self._head_playback_last_receipt_ms = 0
+        self._head_playback_last_device_ms = 0
         self._head_playback_pending = None
         return self._head_playback_id
 
@@ -2170,9 +2172,15 @@ class NativeOmniSession:
         generated_ms = self.wire.generated_bytes * 1000 // (24000 * 2)
         if generated_ms <= 0:
             return False
+        # This adapter emits one 60 ms Opus frame at a time. A later device
+        # receipt may not jump over a missing I2S completion, because doing so
+        # would commit words from the failed interval as if they were heard.
+        if played_ms != self._head_playback_last_device_ms + 60:
+            return False
         committed_ms = min(played_ms, generated_ms)
         if committed_ms <= self._head_playback_last_receipt_ms:
             return False
+        self._head_playback_last_device_ms = played_ms
         self._head_playback_last_receipt_ms = committed_ms
         self._head_playback_pending = (
             self._generation, self._readonly_turn,
@@ -2208,8 +2216,9 @@ class NativeOmniSession:
     async def _play(self) -> None:
         """24k model PCM to the SAME Xiaozhi 16k Opus speaker.
 
-        No fabricated playback. A queued/sent packet does not mean the
-        transducer has finished playing it, so playback.ack is NEVER sent.
+        No fabricated playback. Queuing or sending Opus never emits an ACK.
+        playback.ack is produced only by the separately authenticated Sense
+        output progress path; acoustic A2 qualification remains separate.
         """
         import opuslib_next  # available in pinned Xiaozhi, not needed for host-only tests
         encoder = opuslib_next.Encoder(
@@ -2531,6 +2540,7 @@ class NativeOmniSession:
         self._head_playback_generation = -1
         self._head_playback_turn = -1
         self._head_playback_last_receipt_ms = 0
+        self._head_playback_last_device_ms = 0
         self._head_playback_pending = None
         self._direct_reply_available = False
         self._direct_reply_active = False

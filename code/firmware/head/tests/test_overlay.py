@@ -280,6 +280,13 @@ class OverlayTests(unittest.TestCase):
         self.assertIn("return Write(data.data(), data.size());", codec_base)
         self.assertIn("on_playback_committed", service_header)
         self.assertIn("transmitted_frames", service)
+        self.assertIn("desk_robot_failed_playback_id", service)
+        self.assertIn(
+            "transmitted_frames != static_cast<int>(task.pcm.size())", service
+        )
+        self.assertIn(
+            "task.playback_id != desk_robot_failed_playback_id", service
+        )
         self.assertLess(
             service.index("codec_->OutputData(task.pcm)"),
             service.index("callbacks_.on_playback_committed"),
