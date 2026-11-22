@@ -39,6 +39,8 @@ def fake_rows():
     return rows + [{
         "kind": "robot_only", "duration_seconds": 600,
         "self_interruptions": 0, "robot_speech_seconds": 120,
+        "robot_speech_seconds_by_minute": [12.0] * 10,
+        "robot_speech_volumes_observed": ["low", "medium", "high"],
         "audible_robot_speech_observed": True,
         "robot_id": "robot-01",
         "firmware_commit": "sha-of-physically-flashed-build",
@@ -82,6 +84,10 @@ def test_well_formed_synthetic_rows_only_verify_test_criteria():
     assert report["mic_speaker_placement_id"] == "prototype-enclosure-a"
     assert report["quiet_mode_seconds"] == 600
     assert report["robot_speech_seconds"] == 120
+    assert report["robot_speech_seconds_by_minute"] == [12.0] * 10
+    assert report["robot_speech_volumes_observed"] == [
+        "high", "low", "medium",
+    ]
     assert report["audible_robot_speech_observed"] is True
     assert report["quiet_mode_enabled"] is True
     assert report["quiet_unsolicited_speech_events"] == 0
@@ -90,6 +96,33 @@ def test_well_formed_synthetic_rows_only_verify_test_criteria():
     assert report["coverage"]["load_profiles"] == [
         "camera_wifi", "motors_servos_stand", "voice_only",
     ]
+
+
+@pytest.mark.parametrize("change", [
+    lambda x: x[-2].update({
+        "robot_speech_seconds": 0.001,
+        "robot_speech_seconds_by_minute": [0.0001] * 10,
+    }),
+    lambda x: x[-2].update({
+        "robot_speech_seconds_by_minute": [60.0, 60.0] + [0.0] * 8,
+    }),
+    lambda x: x[-2].update({"robot_speech_seconds_by_minute": [12.0] * 9}),
+    lambda x: x[-2].update({"robot_speech_seconds_by_minute": [11.0] * 10}),
+    lambda x: x[-2].update({"robot_speech_seconds_by_minute": [12.0] * 9 + [True]}),
+    lambda x: x[-2].update({"robot_speech_volumes_observed": ["high"]}),
+    lambda x: x[-2].update({
+        "robot_speech_volumes_observed": ["low", "medium", []],
+    }),
+    lambda x: x[-2].update({
+        "robot_speech_seconds": 119.99,
+        "robot_speech_seconds_by_minute": [11.999] * 10,
+    }),
+])
+def test_robot_only_acoustic_control_rejects_unrepresentative_speech(change):
+    rows = both_distances()
+    change(rows)
+    with pytest.raises(ValueError, match="robot|Robot"):
+        evaluate(rows)
 
 
 def test_near_only_cannot_pass_full_a2_even_when_all_near_trials_pass():

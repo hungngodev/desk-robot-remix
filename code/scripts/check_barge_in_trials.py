@@ -174,6 +174,39 @@ def evaluate(records: list[dict]) -> dict:
         raise ValueError(
             "Need 600s robot-only observation with actual audible robot speech"
         )
+    # The first 600 seconds must contain meaningful self-echo exposure.
+    # A single millisecond of speech during a ten-minute stopwatch run
+    # cannot establish that the AEC avoids false self-interruption.
+    # This checker still only validates operator-supplied measurements.
+    per_minute = control.get("robot_speech_seconds_by_minute")
+    if type(per_minute) is not list or len(per_minute) != 10:
+        raise ValueError("Need ten measured robot-only speech minute exposures")
+    minute_seconds = [
+        _number(value, f"robot speech minute {index + 1}")
+        for index, value in enumerate(per_minute)
+    ]
+    if (
+        any(not 5 <= seconds <= 60 for seconds in minute_seconds)
+        or speech_seconds < 120
+        or not math.isclose(
+            math.fsum(minute_seconds), speech_seconds,
+            rel_tol=0.0, abs_tol=0.01,
+        )
+    ):
+        raise ValueError(
+            "Need 120s cumulative robot speech, at least 5s in each "
+            "of ten minutes, and a matching measured total"
+        )
+    robot_volumes = control.get("robot_speech_volumes_observed")
+    if (
+        type(robot_volumes) is not list
+        or len(robot_volumes) != 3
+        or any(type(volume) is not str for volume in robot_volumes)
+        or set(robot_volumes) != {"low", "medium", "high"}
+    ):
+        raise ValueError(
+            "Robot-only control must exercise low, medium and high intended volumes"
+        )
     if quiet[0].get("quiet_mode_enabled") is not True:
         raise ValueError("Quiet-mode control must confirm enabled quiet mode")
     quiet_duration = _number(quiet[0].get("duration_seconds"), "quiet duration")
@@ -218,6 +251,8 @@ def evaluate(records: list[dict]) -> dict:
         "robot_only_seconds": duration,
         "self_interruptions": echoes,
         "robot_speech_seconds": speech_seconds,
+        "robot_speech_seconds_by_minute": minute_seconds,
+        "robot_speech_volumes_observed": sorted(robot_volumes),
         "audible_robot_speech_observed": True,
         "quiet_mode_enabled": True,
         "quiet_mode_seconds": quiet_duration,

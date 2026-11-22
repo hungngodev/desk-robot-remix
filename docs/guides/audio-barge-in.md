@@ -26,7 +26,8 @@ Proposed robot-one gate, not an achieved measurement:
    intelligible transcript that includes the start of the person's utterance.
    A stop without capturing the request fails the conversational part. The
    50 cm and 100 cm sets must pass independently on the same qualified build.
-3. Ten minutes of robot-only speech has no false self-interruption. Test a second
+3. Ten minutes of robot-only observation with sustained, audible robot speech
+   across the full window has no false self-interruption. Test a second
    person, normal pauses and nearby speech/noise; document the allowed conditions.
 4. Repeat with camera capture and Wi-Fi activity, then motors/servos on a stand.
    Log capture/reference alignment, clipping, buffer losses, memory and timings.
@@ -73,10 +74,27 @@ requires actual retained speech at its start. The robot-only row records
 `audio_config_id`, and `mic_speaker_placement_id` as the twenty human
 trials. A control from another robot or mounting configuration is invalid.
 The ten-minute `kind: robot_only` control must additionally report
-positive, finite `robot_speech_seconds` no greater than the observed
-duration, plus `audible_robot_speech_observed=true`. An otherwise silent
-robot is not an echo-suppression test; the speaker must actually be heard
-during the observation window. The separate `kind: quiet` row must
+finite `robot_speech_seconds` covering the **first 600 seconds** of the
+observation, plus `audible_robot_speech_observed=true`. To exercise the
+actual self-echo path throughout this window, the proposed protocol requires
+at least **120 cumulative seconds** of audible playback (20% exposure),
+a list `robot_speech_seconds_by_minute` of exactly ten finite values
+between **5 and 60 seconds** (one value for each successive 60-second
+interval), and an aggregate matching `robot_speech_seconds` within
+0.01 second. Record `robot_speech_volumes_observed` with all three
+intended playback settings, `low`, `medium`, and `high`, during
+this control, not merely in the human interruptions. For runs longer than
+600 seconds, these metrics describe the first complete ten minutes; later
+time cannot rescue an inadequately exercised initial window. The per-minute
+distribution prevents a few early utterances from being mistaken for a
+ten-minute acoustic stress control. These exposure thresholds are explicit
+proposed test coverage criteria, not validated acoustic performance limits.
+
+An otherwise silent or nearly silent robot is not an echo-suppression test.
+Measure playback from device logs and synchronized audio capture. The checker
+can reject incomplete declarations but cannot authenticate the per-minute
+measurements or prove audible energy, volume, microphone exposure, or the
+absence of false self-interruption without physical recordings. The separate `kind: quiet` row must
 declare `quiet_mode_enabled=true` and record at least 600 actual
 seconds with nonnegative integer `unsolicited_speech_events` and
 `unsolicited_motion_events`. Both counts must be zero for A2 acceptance,
