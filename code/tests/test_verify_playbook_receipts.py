@@ -462,7 +462,8 @@ def test_manual_review_rejects_negated_quoted_or_ambiguous_acceptance():
         return lookup(url)
 
     for affirmative in (accepted, f"ACCEPTED procedure #9 at {SHA}"):
-        resolver = lambda url, body=affirmative: reviewed(url, body)
+        def resolver(url, body=affirmative):
+            return reviewed(url, body)
         assert verify.verified_manual_review(row, SHA, resolver)
         assert verify.audit(full_ledger_with(row), resolver) == []
 
@@ -476,7 +477,8 @@ def test_manual_review_rejects_negated_quoted_or_ambiguous_acceptance():
         f"ACCEPTED procedure 8 at {SHA}",
         f"ACCEPTED procedure 9 at {'b' * 40}",
     ):
-        resolver = lambda url, body=rejected: reviewed(url, body)
+        def resolver(url, body=rejected):
+            return reviewed(url, body)
         assert not verify.verified_manual_review(row, SHA, resolver)
         assert any(
             "manual review not verified" in problem
