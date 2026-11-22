@@ -6027,10 +6027,9 @@ async def test_proactive_ambient_tool_uses_new_boot_and_conversion_only(
         assert first["bmp280"]["pressure_pa"] == 101200
         assert first["fuel_gauge"]["qualified"] is False
 
-        duplicate = await read()
-        assert "sht41" not in duplicate
-        assert "bmp280" not in duplicate
-        assert "fuel_gauge" not in duplicate  # No new conversion.
+        # Duplicate source acquisitions produce no tool receipt at all.
+        with pytest.raises(RuntimeError, match="No bounded authenticated tool evidence"):
+            await read()
 
         value["climate"]["seq"] = 11
         value["bmp280"]["seq"] = 11
@@ -6039,8 +6038,8 @@ async def test_proactive_ambient_tool_uses_new_boot_and_conversion_only(
 
         value["climate"]["age_ms"] = 1000
         value["bmp280"]["age_ms"] = 2000
-        assert "sht41" not in await read()
-        assert "bmp280" not in await read()
+        with pytest.raises(RuntimeError, match="No bounded authenticated tool evidence"):
+            await read()
         value["climate"]["age_ms"] = 30
         value["bmp280"]["age_ms"] = 30
 
@@ -6049,25 +6048,27 @@ async def test_proactive_ambient_tool_uses_new_boot_and_conversion_only(
         value["power"]["fuel_seq"] = 1
         value["climate"]["seq"] = 1
         value["bmp280"]["seq"] = 1
-        assert "sht41" in await read()
-        assert "bmp280" not in await read()  # Same conversion was consumed.
+        new_boot = await read()
+        assert "sht41" in new_boot and "fuel_gauge" in new_boot
+        # The same completed conversion does not qualify a second read.
+        with pytest.raises(RuntimeError, match="No bounded authenticated tool evidence"):
+            await read()
 
         # The previous 77 boot cannot come back as a fresh new boot.
         value["force"]["boot_id"] = 77
         value["proximity"]["boot_id"] = 77
         value["climate"]["seq"] = 12
         value["bmp280"]["seq"] = 12
-        replay = await read()
-        assert "sht41" not in replay and "bmp280" not in replay
+        with pytest.raises(RuntimeError, match="No bounded authenticated tool evidence"):
+            await read()
 
         # Even plausible values lack a live observation without both source
         # boot witnesses, a sample sequence and a bounded acquisition age.
         value.pop("force")
         value["climate"].pop("age_ms")
         value["bmp280"].pop("seq")
-        unqualified = await read()
-        assert "sht41" not in unqualified
-        assert "bmp280" not in unqualified
+        with pytest.raises(RuntimeError, match="No bounded authenticated tool evidence"):
+            await read()
     finally:
         await pet.close()
 
@@ -6126,15 +6127,15 @@ async def test_proactive_fuel_and_dock_require_current_boot_sequence_and_deliver
         assert "fuel_gauge" in first and "dock_contacts" in first
         assert first["fuel_gauge"]["qualified"] is False
         assert first["dock_contacts"]["charging_verified"] is False
-        repeat = await read()
-        assert "fuel_gauge" not in repeat and "dock_contacts" not in repeat
+        with pytest.raises(RuntimeError, match="No bounded authenticated tool evidence"):
+            await read()
 
         sample["power"]["fuel_seq"] = 10
         sample["dock"]["seq"] = 89
         sample["dock"]["age_ms"] = 350
         delay[0] = 1.2
-        expired = await read()
-        assert "fuel_gauge" not in expired and "dock_contacts" not in expired
+        with pytest.raises(RuntimeError, match="No bounded authenticated tool evidence"):
+            await read()
 
         delay[0] = 0
         sample["dock"]["age_ms"] = 35
@@ -6151,9 +6152,8 @@ async def test_proactive_fuel_and_dock_require_current_boot_sequence_and_deliver
         sample["proximity"]["boot_id"] = 71
         sample["power"]["fuel_seq"] = 11
         sample["dock"]["seq"] = 90
-        replay = await read()
-        assert "fuel_gauge" not in replay
-        assert "dock_contacts" not in replay
+        with pytest.raises(RuntimeError, match="No bounded authenticated tool evidence"):
+            await read()
     finally:
         await pet.close()
 
