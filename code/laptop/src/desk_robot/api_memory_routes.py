@@ -30,6 +30,15 @@ class EpisodeMemoryCorrectionRequest(BaseModel):
 def register_memory_routes(
     app: FastAPI, settings: Settings, *, operator,
 ) -> None:
+    # Serialize only the admission order, not the potentially slow writes.
+    # One lock per actual robot keeps different pets independent while a
+    # blocked SQLite BEGIN IMMEDIATE stays OFF the Mac audio event loop.
+    reservation_locks = {robot.id: asyncio.Lock() for robot in settings.robots}
+
+    async def reserve_ordered(robot_id: str, reserve, *args) -> int:
+        async with reservation_locks[robot_id]:
+            return await asyncio.to_thread(reserve, robot_id, *args)
+
     def invalidate_private_prompt(robot_id: str) -> None:
         """Revoke group prompts that may contain a changed private fact."""
         conversation = getattr(app.state.runtime, "conversation", None)
@@ -113,8 +122,9 @@ def register_memory_routes(
         try:
             # Record authenticated request order BEFORE dispatch to a worker.
             # A delayed PUT must never restore a completed newer DELETE.
-            generation = app.state.runtime.memory.reserve_core_fact_mutation(
-                robot_id, slot, request.value,
+            generation = await reserve_ordered(
+                robot_id, app.state.runtime.memory.reserve_core_fact_mutation,
+                slot, request.value,
             )
             changed = await asyncio.to_thread(
                 app.state.runtime.memory.set_core_fact,
@@ -140,8 +150,9 @@ def register_memory_routes(
         except KeyError as exc:
             raise HTTPException(404, "Robot not found") from exc
         try:
-            generation = app.state.runtime.memory.reserve_core_fact_mutation(
-                robot_id, slot,
+            generation = await reserve_ordered(
+                robot_id, app.state.runtime.memory.reserve_core_fact_mutation,
+                slot,
             )
             removed = await asyncio.to_thread(
                 app.state.runtime.memory.forget_core_fact, robot_id, slot,
@@ -166,8 +177,9 @@ def register_memory_routes(
             raise HTTPException(404, "Robot not found") from exc
         try:
             # Reserve request order before asynchronously scheduling SQLite.
-            generation = app.state.runtime.memory.reserve_episode_mutation(
-                robot_id, event_id, request.summary,
+            generation = await reserve_ordered(
+                robot_id, app.state.runtime.memory.reserve_episode_mutation,
+                event_id, request.summary,
             )
             corrected = await asyncio.to_thread(
                 app.state.runtime.memory.correct_episode,
@@ -197,8 +209,9 @@ def register_memory_routes(
         except KeyError as exc:
             raise HTTPException(404, "Robot not found") from exc
         try:
-            generation = app.state.runtime.memory.reserve_episode_mutation(
-                robot_id, event_id,
+            generation = await reserve_ordered(
+                robot_id, app.state.runtime.memory.reserve_episode_mutation,
+                event_id,
             )
             removed = await asyncio.to_thread(
                 app.state.runtime.memory.forget_episode, robot_id, event_id,
