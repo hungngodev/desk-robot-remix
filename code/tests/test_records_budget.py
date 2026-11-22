@@ -40,6 +40,93 @@ def test_allowances_and_over_budget_are_not_ready():
         budget(data, -1, 0)
 
 
+def historical_quoted_budget():
+    return {
+        "cap_usd": 50, "fit_confirmed": True,
+        "readiness_checks": {"power": True},
+        "items": [
+            {"item": "sample part", "quantity": 2,
+             "unit_usd": 10, "price_status": "verified"},
+        ],
+    }
+
+
+@pytest.mark.parametrize("quantity", [-1, 0, 1.5, True, False, "2", None])
+def test_legacy_budget_rejects_nonpositive_or_noninteger_quantities(quantity):
+    data = historical_quoted_budget()
+    data["items"][0]["quantity"] = quantity
+    with pytest.raises(ValueError, match="positive integer"):
+        module("check_budget").budget(data, 0, 0)
+
+
+@pytest.mark.parametrize("unit_price", [
+    -10, "-1.50", "NaN", "Infinity", "-Infinity", float("nan"),
+    float("inf"), True, "not a quote",
+])
+def test_legacy_budget_rejects_negative_nonfinite_and_nonnumeric_price(unit_price):
+    data = historical_quoted_budget()
+    data["items"][0]["unit_usd"] = unit_price
+    with pytest.raises(ValueError, match="finite non-negative"):
+        module("check_budget").budget(data, 0, 0)
+
+
+@pytest.mark.parametrize("bad_cap", [
+    -1, "NaN", "Infinity", float("inf"), True, None,
+])
+def test_legacy_budget_rejects_invalid_purchase_cap(bad_cap):
+    data = historical_quoted_budget()
+    data["cap_usd"] = bad_cap
+    with pytest.raises(ValueError, match="finite non-negative"):
+        module("check_budget").budget(data, 0, 0)
+
+
+@pytest.mark.parametrize("which,bad_value", [
+    ("shipping", -1), ("tax", -1),
+    ("shipping", "NaN"), ("tax", "Infinity"),
+    ("shipping", float("inf")), ("tax", True),
+])
+def test_legacy_budget_rejects_bad_landed_fees(which, bad_value):
+    data = historical_quoted_budget()
+    fees = {"shipping": 0, "tax": 0}
+    fees[which] = bad_value
+    with pytest.raises(ValueError, match="finite non-negative"):
+        module("check_budget").budget(data, **fees)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("fit_confirmed", "yes"), ("readiness_checks", {"power": "yes"}),
+    ("items", [None]),
+])
+def test_legacy_budget_rejects_untrusted_release_like_inputs(field, value):
+    data = historical_quoted_budget()
+    data[field] = value
+    with pytest.raises(ValueError):
+        module("check_budget").budget(data, 0, 0)
+
+
+def test_legacy_budget_valid_math_still_cannot_authorize_purchase_cli(tmp_path):
+    import subprocess
+    import sys
+
+    data = historical_quoted_budget()
+    budget = module("check_budget").budget
+    assert budget(data, 5, 2)["known_subtotal_usd"] == 20
+    assert budget(data, 5, 2)["quoted_total_usd"] == 27
+    assert budget(data, 5, 2)["purchase_ready"] is True
+    data["items"][0]["quantity"] = -10
+    path = tmp_path / "unsafe-historical.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/check_budget.py"),
+         "--bom", str(path), "--shipping", "0", "--tax", "0",
+         "--require-ready"],
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 2
+    assert "positive integer" in result.stderr
+    assert not result.stdout.strip()
+
+
 def test_active_budget_is_a_first_robot_target_with_open_checks():
     data = json.loads((ROOT.parent / "docs/hardware/bom.json").read_text())
     result = module("check_budget").budget(data)
