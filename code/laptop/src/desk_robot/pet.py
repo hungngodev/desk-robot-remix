@@ -528,6 +528,12 @@ class PetController:
                 raise TimeoutError("Pet speaker cancellation unconfirmed")
             if not task.cancelled():
                 task.exception()
+        # A cancelled speech task may have swallowed a failed Xiaozhi /interrupt.
+        # Preserve the shared decoder STOP latch for Runtime's VAD aggregate.
+        if getattr(
+            getattr(self, "conversation", None), "speaker_stop_unconfirmed", False
+        ):
+            raise RuntimeError("Pet decoder STOP unconfirmed")
 
     async def _store_observation(
         self, robot_id: str, change: SceneChange, *,

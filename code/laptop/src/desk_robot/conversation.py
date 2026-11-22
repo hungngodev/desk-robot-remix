@@ -430,6 +430,9 @@ class Conversation:
         self.speaker_lock = asyncio.Lock()
         self.session_lock = asyncio.Lock()  # One owned device-audio session across group and pet.
         self.active: asyncio.Task | None = None
+        # A cancelled Python task is not evidence of a stopped Xiaozhi decoder.
+        # Never grant another speech session after an unacknowledged STOP.
+        self.speaker_stop_unconfirmed = False
         self.histories: dict[str, list[dict]] = {}
         self.multimodal = None  # Existing Mac live context, attached in hardware mode.
         self.coordinator_jobs = None  # Existing Coordinator's read-only registry.
@@ -445,6 +448,49 @@ class Conversation:
             robot.id: 0 for robot in settings.robots
         }
         self._active_private_memory_ids: frozenset[str] = frozenset()
+
+
+    @asynccontextmanager
+    async def _confirmed_speaker_session(self, robots: list[RobotConfig]):
+        """Check the global STOP latch AFTER admission lock, BEFORE device grant."""
+        if self.speaker_stop_unconfirmed:
+            raise RuntimeError("Xiaozhi speaker STOP unconfirmed; recovery required")
+        async with self.speaker.session(robots):
+            yield
+
+    async def _abort_speaker_or_latch(self, robot: RobotConfig) -> None:
+        """Cancel queued audio and remember an unacknowledged physical STOP."""
+        interrupt = getattr(self.speaker, "interrupt", None)
+        if not callable(interrupt):
+            if self.settings.mode == "hardware":
+                self.speaker_stop_unconfirmed = True
+            return
+        try:
+            await _bounded_speaker_abort(interrupt, robot)
+        except BaseException:
+            if self.settings.mode == "hardware":
+                self.speaker_stop_unconfirmed = True
+            raise
+
+    async def recover_speaker_stop(self) -> None:
+        """Explicit recovery requires new STOP receipts from every real head."""
+        if not self.speaker_stop_unconfirmed:
+            return
+        if self.active is not None and not self.active.done():
+            raise RuntimeError("Speaker recovery refused while dialogue is active")
+        interrupt = getattr(self.speaker, "interrupt", None)
+        targets = [
+            robot for robot in self.settings.robots
+            if getattr(robot, "device_id", None)
+        ]
+        if not callable(interrupt) or not targets:
+            raise RuntimeError("Xiaozhi speaker STOP unconfirmed; no recovery route")
+        try:
+            for robot in targets:
+                await _bounded_speaker_abort(interrupt, robot)
+        except BaseException as exc:
+            raise RuntimeError("Xiaozhi speaker recovery STOP unconfirmed") from exc
+        self.speaker_stop_unconfirmed = False
 
     def invalidate_private_memory(self, robot_id: str) -> None:
         """Revoke old prompt copies after a per-pet memory correction/delete."""
@@ -680,6 +726,8 @@ class Conversation:
         if type(origin) is not str or origin not in {"operator", "autonomous_social"}:
             raise ValueError("Unsupported group conversation origin")
         turns = conversation_turns(robot_ids, utterances)
+        if self.speaker_stop_unconfirmed:
+            raise RuntimeError("Xiaozhi speaker STOP unconfirmed; recovery required")
         if self.active is not None and not self.active.done():
             raise RuntimeError("A conversation is already active")
         robots = [self.settings.robot(i) for i in robot_ids]
@@ -975,7 +1023,7 @@ class Conversation:
             if not consent_still_valid():
                 raise RuntimeError("Group conversation consent revoked")
             async with asyncio.timeout(300):
-                async with self.session_lock, self.speaker.session(robots):
+                async with self.session_lock, self._confirmed_speaker_session(robots):
                     try:
                         # Track only segments whose speaker.say actually
                         # returned; cancellation during a WAV send cannot be
@@ -1095,12 +1143,13 @@ class Conversation:
                         # Urgently stop the head first. Only completed sends,
                         # never the segment being cancelled or a guessed audio
                         # duration, can be saved as uncertain speech history.
-                        interrupt = getattr(self.speaker, "interrupt", None)
-                        if current_robot is not None and callable(interrupt):
+                        if current_robot is not None:
                             try:
-                                await _bounded_speaker_abort(interrupt, current_robot)
-                            except Exception:
-                                pass  # Preserve the original model/transport failure.
+                                await self._abort_speaker_or_latch(current_robot)
+                            except BaseException:
+                                # The global STOP latch survives task cancellation.
+                                # Preserve the original model/transport failure.
+                                pass
                         if current_robot is not None and completed_segments:
                             # An interrupted song still has real transmitted
                             # words. Keep that first-person context in the
@@ -1208,6 +1257,8 @@ class Conversation:
         if self.active is not None and not self.active.done():
             return False
         async with self.session_lock:
+            if self.speaker_stop_unconfirmed:
+                raise RuntimeError("Xiaozhi speaker STOP unconfirmed; recovery required")
             if (self.active is not None and not self.active.done()) or (
                 permission_check is not None and not permission_check()
             ):
@@ -1249,12 +1300,12 @@ class Conversation:
                         # A failed WAV/Opus transfer, not just cancellation,
                         # can leave already queued audio in the XIAO decoder.
                         # Fail closed using the existing speech abort route.
-                        interrupt = getattr(self.speaker, "interrupt", None)
-                        if interrupt is not None:
-                            try:
-                                await _bounded_speaker_abort(interrupt, robot)
-                            except Exception:
-                                pass  # Still cancel; transport failure remains unverified.
+                        try:
+                            await self._abort_speaker_or_latch(robot)
+                        except BaseException:
+                            # Keep the original failure, but latch uncertain
+                            # physical playback across cancelled task teardown.
+                            pass
                         raise
             return True
 
@@ -1276,3 +1327,9 @@ class Conversation:
                 raise TimeoutError("Conversation STOP unconfirmed; owner still active")
             if not task.cancelled():
                 task.exception()
+            if self.speaker_stop_unconfirmed:
+                raise RuntimeError("Conversation decoder STOP unconfirmed")
+        elif self.speaker_stop_unconfirmed:
+            # A later deliberate STOP is allowed to recover an abandoned
+            # decoder owner, never by granting a fresh speech session.
+            await self.recover_speaker_stop()
