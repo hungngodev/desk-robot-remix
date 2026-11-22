@@ -3,7 +3,6 @@
 from types import SimpleNamespace
 
 import pytest
-
 from desk_robot.conversation import KokoroHeadSpeaker
 
 
