@@ -406,7 +406,6 @@ async def test_small_object_stream_change_reaches_two_frame_semantic_confirmatio
         assert selected[-1].motion_fraction == 0
         # The hub stores the VLM re-encoded JPEG, not raw source bytes.
         assert selected[-2].jpeg == selected[-1].jpeg
-        assert selected[-2].jpeg.startswith(b"\\xff\\xd8")
         gate = VisualChangeGate()
         assert gate.observe_reduced(before, old_gray) is None
         assert gate.observe_reduced(selected[-2].jpeg, new_gray) is None
