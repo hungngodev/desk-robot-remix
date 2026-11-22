@@ -18,9 +18,16 @@ SHA = "a" * 40
 RUN = "https://github.com/hungngodev/desk-robot-remix/actions/runs/42"
 RAW = ("https://github.com/hungngodev/desk-robot-remix/blob/"
        + SHA + "/docs/records/bench.csv")
+REVIEW_URL = ("https://github.com/hungngodev/desk-robot-remix/pull/17"
+              "#issuecomment-5678")
 
 
 def lookup(url):
+    if url.endswith("/issues/comments/5678"):
+        return {"html_url": REVIEW_URL,
+                "body": f"ACCEPTED procedure 9 at {SHA}",
+                "author_association": "OWNER",
+                "user": {"login": "physical_owner", "type": "User"}}
     if url.endswith("/actions/runs/42"):
         return {"head_sha": SHA, "name": "Host verification",
                 "event": "pull_request",
@@ -47,6 +54,10 @@ def promoted(gate="TESTED"):
         "executed_test_receipt": {
             "sha": SHA, "exit_code": 0, "url": RUN,
             "command": "cd code && python -m pytest -q tests/test_complete_component_ownership.py",
+        },
+        "manual_review_receipt": {
+            "sha": SHA, "reviewer": "physical_owner",
+            "review_url": REVIEW_URL,
         },
         "physical_measurement_receipt": {
             "result": "pass", "raw_data_url": RAW,
@@ -552,3 +563,51 @@ def test_source_comparison_fails_closed_at_github_file_cap():
     assert not check([f"docs/records/receipt_{i}.json" for i in range(298)]
                      + ["code/laptop/src/desk_robot/pet.py"])
     assert not check([])
+
+
+def test_physical_promotion_requires_authorized_matching_pr_acceptance():
+    """Matching source, measured data and a green run cannot self-approve."""
+    for gate in ("MEASURED", "QUALIFIED"):
+        row = promoted(gate)["procedures"][0]
+        def physical_lookup(url):
+            value = lookup(url)
+            if gate == "QUALIFIED" and "/contents/docs/records/bench.csv" in url:
+                raw = base64.b64decode(value["content"]).replace(
+                    b",MEASURED,", b",QUALIFIED,",
+                )
+                return {**value, "size": len(raw),
+                        "content": base64.b64encode(raw).decode()}
+            return value
+
+        assert verify.audit(full_ledger_with(row), physical_lookup) == []
+
+        missing = {**row}
+        missing.pop("manual_review_receipt")
+        assert any("manual review not verified" in issue
+                   for issue in verify.audit(full_ledger_with(missing), lookup))
+
+        for field, wrong in (
+            ("reviewer", "unknown"),
+            ("sha", "b" * 40),
+            ("review_url", "https://example.org/untrusted"),
+        ):
+            altered = {**row, "manual_review_receipt": {
+                **row["manual_review_receipt"], field: wrong,
+            }}
+            assert any("manual review not verified" in issue
+                       for issue in verify.audit(full_ledger_with(altered), lookup))
+
+        def unauthorized(url):
+            result = lookup(url)
+            if url.endswith("/issues/comments/5678"):
+                return {**result, "author_association": "NONE"}
+            return result
+
+        assert any("manual review not verified" in issue
+                   for issue in verify.audit(full_ledger_with(row), unauthorized))
+
+    # The new authority gate does not force reviewer comments for a source
+    # result classified only TESTED; physical status is the trigger.
+    tested = promoted("TESTED")["procedures"][0]
+    tested.pop("manual_review_receipt")
+    assert verify.audit(full_ledger_with(tested), lookup) == []

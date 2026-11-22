@@ -401,7 +401,10 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
         if type(identifier) is int and 1 <= identifier <= 8 and method != "manual_review":
             errors.append(f"procedure {identifier}: manual review evidence is compulsory")
             continue
-        if method == "manual_review":
+        # A physical pass must be accepted by an authorized GitHub reviewer,
+        # even when its verification method is an executable test command.
+        # Operator and device strings alone are not acceptance authority.
+        if method == "manual_review" or gate in {"MEASURED", "QUALIFIED"}:
             try:
                 if not verified_manual_review(row, sha, lookup):
                     errors.append(f"procedure {identifier}: manual review not verified")
