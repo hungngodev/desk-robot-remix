@@ -54,6 +54,8 @@ private:
     // restart listening after that explicit human action.
     std::atomic<bool> audio_operator_touched_{false};
     std::atomic<bool> audio_operator_muted_{false};
+    // This press latches mute before the release-based click event runs.
+    std::atomic<bool> boot_press_muted_{false};
     bool continuous_audio_started_ = false;
     uint32_t last_audio_listen_attempt_ms_ = 0;
     uint32_t last_audio_failure_epoch_seen_ = 0;
@@ -391,11 +393,44 @@ public:
         ESP_ERROR_CHECK(gpio_set_level(SD_CARD_CS_GPIO, 1));
         InitializeDisplay();
         InitializeCamera();
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+        // Pinned Xiaozhi OnClick is a release event. Privacy must take effect
+        // at button press-down, including for a long held BOOT button.
+        boot_button_.OnPressDown([this]() {
+            audio_operator_touched_.store(true, std::memory_order_release);
+            const bool already_muted = audio_operator_muted_.exchange(
+                true, std::memory_order_acq_rel);
+            boot_press_muted_.store(!already_muted, std::memory_order_release);
+            if (already_muted) return;  // A deliberate second tap unmutes on release.
+            auto& app = Application::GetInstance();
+            const auto state = app.GetDeviceState();
+            // Gate queued Opus and actual PDM acquisition BEFORE any audio abort.
+            app.SetSenseMicrophonePrivacyMuted(true);
+            static_cast<SenseReferenceCodec*>(GetAudioCodec())
+                ->SetMicrophonePrivacyMuted(true);
+            if (state == kDeviceStateConnecting) {
+                app.SetDeviceState(kDeviceStateIdle);
+            }
+            app.StopListening();
+        });
+#endif
         boot_button_.OnClick([this]() {
             auto& app = Application::GetInstance();
             const auto state = app.GetDeviceState();
+            if (state == kDeviceStateStarting) {
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
-            // A BOOT tap acts on the actual Sense PDM codec immediately.
+                boot_press_muted_.store(false, std::memory_order_release);
+#endif
+                EnterWifiConfigMode();
+                return;
+            }
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+            // The first press already muted and cancelled listening. A
+            // release MUST NOT turn the microphone back on in that same tap.
+            if (boot_press_muted_.exchange(false, std::memory_order_acq_rel)) {
+                return;
+            }
+            // A second deliberate BOOT tap can explicitly restore listening.
             // A second tap is explicit manual unmute, but unattended audio
             // may never restart after a human touched this control.
             audio_operator_touched_.store(true, std::memory_order_release);
@@ -406,10 +441,6 @@ public:
             static_cast<SenseReferenceCodec*>(GetAudioCodec())
                 ->SetMicrophonePrivacyMuted(now_muted);
 #endif
-            if (state == kDeviceStateStarting) {
-                EnterWifiConfigMode();
-                return;
-            }
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
             // Physical mute wins in setup audio testing too. An explicit
             // second BOOT tap can resume the original upstream test mode.
