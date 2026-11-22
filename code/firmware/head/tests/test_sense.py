@@ -27,6 +27,8 @@ def load_module(name, path):
 
 overlay = load_module('sense_overlay', HEAD / 'install_overlay.py')
 private = load_module('sense_private', HEAD / 'private_config.py')
+test_overlay = load_module('test_overlay', Path(__file__).with_name('test_overlay.py'))
+native_cpp_env = test_overlay.native_cpp_env
 
 
 @unittest.skipUnless(UPSTREAM.is_dir(), 'Pinned upstream fixture unavailable')
@@ -1588,5 +1590,5 @@ int main() {
         subprocess.run([
             compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
             "-I", str(HEAD / "overlay"), str(cpp), "-o", str(binary),
-        ], check=True, capture_output=True, text=True)
+        ], check=True, capture_output=True, text=True, env=native_cpp_env())
         subprocess.run([str(binary)], check=True, capture_output=True, text=True)
