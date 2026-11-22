@@ -12,7 +12,6 @@ from .config import RobotConfig, secret
 from .dock_ir import validate_ir
 from .tof_optics import validate_optics
 
-
 # Sense emits signed int64 esp_timer_get_time() microseconds in both camera routes.
 _MAX_CAMERA_COMPLETE_US = (1 << 63) - 1
 
