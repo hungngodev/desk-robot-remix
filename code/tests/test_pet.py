@@ -4165,6 +4165,81 @@ async def test_shared_room_revoke_cannot_reuse_cached_room_fact_in_proactive_spe
         await pet.close()
 
 
+@pytest.mark.parametrize("source", ["camera", "room"])
+async def test_proactive_model_regrant_cannot_speak_old_media_context(
+    fleet, tmp_path, source,
+):
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraFrameHub
+    from desk_robot.room_station import RoomObservation
+
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = source == "camera"
+    fleet.room_station_context_enabled = source == "room"
+    ids = [robot.id for robot in fleet.robots]
+    hub = CameraFrameHub(ids, room_settings=fleet)
+    now = time.monotonic()
+    if source == "camera":
+        hub.remember_heard(
+            "robot-01", "private_asr_before_revocation",
+            "OLD_CAMERA_CONTEXT locked cabinet", now,
+        )
+        setting = "voice_vision_tools_enabled"
+        marker = "OLD_CAMERA_CONTEXT"
+    else:
+        hub.remember_room(RoomObservation(
+            seq=1, at_ms=100, received_at=now, readings={},
+            summary="OLD_ROOM_CONTEXT private climate sample",
+        ))
+        setting = "room_station_context_enabled"
+        marker = "OLD_ROOM_CONTEXT"
+    entered, resume = asyncio.Event(), asyncio.Event()
+
+    class DelayedChat:
+        async def reply(self, history):
+            assert marker in str(history)
+            entered.set()
+            await resume.wait()
+            return "That recent observation sounds interesting."
+
+    memory = MemoryStore(tmp_path, ids)
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {}, Conversation(
+            fleet, DelayedChat(), speaker, memory=memory,
+        ), memory, KeyScene(),
+    )
+    pet.multimodal = SimpleNamespace(hub=hub)
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 92
+    task = asyncio.create_task(pet._speak(
+        "robot-01", SceneChange("touch_tap", "Head tap", 1.0),
+        92, offered_at=now,
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        # A complete revoke and regrant can occur between model callbacks.
+        setattr(fleet, setting, False)
+        setattr(fleet, setting, True)
+        resume.set()
+        await asyncio.wait_for(task, timeout=3)
+        assert state.last_error is None
+        assert state.spoken == 0
+        assert speaker.spoken == []
+        assert memory.count("robot-01") == 0
+        assert state.last_initiative_suppression in {
+            "live_context_consent_revoked", "room_context_consent_revoked",
+        }
+    finally:
+        resume.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        state.enabled = False
+        await pet.close()
+
+
 async def test_proactive_physical_sensor_rechecks_live_consent_after_model_await(
     fleet, tmp_path,
 ):
@@ -4222,24 +4297,34 @@ async def test_proactive_physical_sensor_rechecks_live_consent_after_model_await
         await pet.close()
 
 
+@pytest.mark.parametrize("source", ["camera", "room"])
+@pytest.mark.parametrize("regrant", [False, True])
 async def test_proactive_sensor_private_live_context_revoked_during_tts(
-    fleet, tmp_path, monkeypatch,
+    fleet, tmp_path, monkeypatch, source, regrant,
 ):
-    """Opted-out ASR context must not reach the head from a physical paw cue."""
+    """A revoked media grant cannot leak old context through TTS."""
     from types import SimpleNamespace
 
     from desk_robot.multimodal import CameraFrameHub
+    from desk_robot.room_station import RoomObservation
 
     fleet.mode = "hardware"
-    fleet.voice_vision_tools_enabled = True
+    fleet.voice_vision_tools_enabled = source == "camera"
+    fleet.room_station_context_enabled = source == "room"
     fleet.robots[0].device_id = "mac-01"
     monkeypatch.setenv(fleet.speech_bridge_token_env, "p" * 32)
     ids = [robot.id for robot in fleet.robots]
-    hub = CameraFrameHub(ids)
-    hub.remember_heard(
-        "robot-01", "live_asr_for_paw",
-        "A private conversation about the wooden drawer", time.monotonic(),
-    )
+    hub = CameraFrameHub(ids, room_settings=fleet)
+    if source == "camera":
+        hub.remember_heard(
+            "robot-01", "live_asr_for_paw",
+            "A private conversation about the wooden drawer", time.monotonic(),
+        )
+    else:
+        hub.remember_room(RoomObservation(
+            seq=1, at_ms=100, received_at=time.monotonic(), readings={},
+            summary="A private room temperature observation",
+        ))
     calls = []
 
     class Response:
@@ -4267,7 +4352,13 @@ async def test_proactive_sensor_private_live_context_revoked_during_tts(
                     "expires_in_seconds": 305 if body["enabled"] else 0,
                 })
             if url.endswith("/v1/audio/speech"):
-                fleet.voice_vision_tools_enabled = False
+                setting = (
+                    "voice_vision_tools_enabled" if source == "camera"
+                    else "room_station_context_enabled"
+                )
+                setattr(fleet, setting, False)
+                if regrant:
+                    setattr(fleet, setting, True)
             if url.endswith("/speak"):
                 raise AssertionError("Revoked live context was sent to the head")
             if url.endswith("/interrupt"):

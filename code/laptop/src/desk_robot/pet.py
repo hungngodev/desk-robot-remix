@@ -2927,6 +2927,10 @@ class PetController:
         # retrieval, slow reasoning or even speech synthesis. The operator
         # route invalidates this one pet's memory revision on each real edit.
         memory_grant = self.settings.voice_memory_consent_generation
+        # A rapid OFF/ON is a new media grant even if the final opt-in is True.
+        # Bind it before the asynchronous memory/context collection begins.
+        camera_grant = self.settings.camera_consent_generation
+        room_grant = self.settings.room_station_consent_generation
         memory_revisions = getattr(
             self.conversation, "_private_memory_generation", {}
         )
@@ -2948,6 +2952,18 @@ class PetController:
                 return
             (recent_memory, context, private_memory_allowed,
              live_context_used, room_context_used) = gathered
+
+            def media_context_current() -> bool:
+                return (
+                    (not (live_context_used or camera_derived)
+                     or self.settings.mode != "hardware"
+                     or (self.settings.voice_vision_tools_enabled
+                         and self.settings.camera_consent_generation == camera_grant))
+                    and (not room_context_used
+                         or self.settings.mode != "hardware"
+                         or (self.settings.room_station_context_enabled
+                             and self.settings.room_station_consent_generation == room_grant))
+                )
 
             def private_memory_current() -> bool:
                 revisions = getattr(
@@ -3004,13 +3020,7 @@ class PetController:
                     and private_memory_current()
                     and (not private_memory_allowed
                          or self.settings.voice_memory_tools_enabled)
-                    and (not live_context_used
-                         or self.settings.voice_vision_tools_enabled)
-                    and (not room_context_used
-                         or self.settings.room_station_context_enabled)
-                    and (not camera_derived
-                         or self.settings.mode != "hardware"
-                         or self.settings.voice_vision_tools_enabled)
+                    and media_context_current()
                     and not self._human_active_in_fleet(now)
                     and not newer_human_turn()
                     and now - offered_at <= self.max_observation_age
@@ -3091,13 +3101,17 @@ class PetController:
                 state.suppressed += 1
                 state.last_initiative_suppression = "memory_consent_revoked"
                 return
-            if (live_context_used
-                    and not self.settings.voice_vision_tools_enabled):
+            if ((live_context_used or camera_derived)
+                    and self.settings.mode == "hardware"
+                    and (not self.settings.voice_vision_tools_enabled
+                         or self.settings.camera_consent_generation != camera_grant)):
                 state.suppressed += 1
                 state.last_initiative_suppression = "live_context_consent_revoked"
                 return
             if (room_context_used
-                    and not self.settings.room_station_context_enabled):
+                    and self.settings.mode == "hardware"
+                    and (not self.settings.room_station_context_enabled
+                         or self.settings.room_station_consent_generation != room_grant)):
                 state.suppressed += 1
                 state.last_initiative_suppression = "room_context_consent_revoked"
                 return
@@ -3111,12 +3125,7 @@ class PetController:
                     and private_memory_current()
                     and (not private_memory_allowed
                          or self.settings.voice_memory_tools_enabled)
-                    and (not live_context_used
-                         or self.settings.voice_vision_tools_enabled)
-                    and (not room_context_used
-                         or self.settings.room_station_context_enabled)
-                    and (not camera_derived or self.settings.mode != "hardware"
-                         or self.settings.voice_vision_tools_enabled)
+                    and media_context_current()
                     and not self._human_active_in_fleet(time.monotonic())
                     and not newer_human_turn()
                     # An old camera guess must never restart speech when TTS
