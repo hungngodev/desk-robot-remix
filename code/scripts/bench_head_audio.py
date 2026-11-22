@@ -24,12 +24,22 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _private_report_directory_fd(parent: Path) -> int:
     """Use directory descriptors to reject replaceable ancestor symlinks."""
-    absolute = Path(os.path.abspath(parent))
+    # Preserve lexical .. until validation; abspath can hide an alias/..
+    # traversal before the operating system resolves the symbolic link.
+    absolute = parent.absolute()
+    if ".." in absolute.parts:
+        raise ValueError("Unsafe audio bench report parent traversal")
     descriptor = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
     try:
         for name in absolute.parts[1:]:
-            entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
             owner = os.fstat(descriptor)
+            try:
+                entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                # Create only beneath an already verified and held parent,
+                # never through an uninspected path with a symlink ancestor.
+                os.mkdir(name, mode=0o700, dir_fd=descriptor)
+                entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
             # Root-owned system aliases such as macOS /var are stable only
             # under a root-owned, non-writable parent. Other aliases can
             # redirect an ostensibly private report to somebody else's tree.
@@ -56,7 +66,6 @@ def preflight_private_report(path: Path) -> None:
     """Refuse to record a benchmark against an existing or public report."""
     if path.parent.is_symlink():
         raise ValueError("Audio bench report directory must be private mode 0700")
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     directory_fd = _private_report_directory_fd(path.parent)
     os.close(directory_fd)
     if path.exists() or path.is_symlink():

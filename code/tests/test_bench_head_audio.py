@@ -52,6 +52,36 @@ def test_audio_diagnostic_report_rejects_replaceable_ancestor_symlink(tmp_path):
     assert not (target / "reports" / "acoustic.json").exists()
 
 
+def test_audio_bench_rejects_symlink_ancestor_without_creating_target_directory(
+    tmp_path,
+):
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o777)
+    shared.chmod(0o777)
+    (shared / "alias").symlink_to(private, target_is_directory=True)
+    unexpected = private / "not_yet_created"
+    output = shared / "alias" / unexpected.name / "diagnostic.json"
+    with pytest.raises(ValueError, match="unsafe symlink"):
+        bench.preflight_private_report(output)
+    assert not unexpected.exists()
+    with pytest.raises(ValueError, match="unsafe symlink"):
+        bench.save_private_report(output, {"microphone_frames_read": 1})
+    assert not unexpected.exists()
+
+
+def test_audio_bench_rejects_parent_traversal_before_mkdir(tmp_path):
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    output = private / "alias" / ".." / "created" / "diagnostic.json"
+    with pytest.raises(ValueError, match="parent traversal"):
+        bench.preflight_private_report(output)
+    with pytest.raises(ValueError, match="parent traversal"):
+        bench.save_private_report(output, {"microphone_frames_read": 1})
+    assert not (private / "created").exists()
+
+
 def _sample(n: int, *, robot_id: str = "robot-01", failure=False,
             underflow_reads: int = 8) -> dict:
     return {
