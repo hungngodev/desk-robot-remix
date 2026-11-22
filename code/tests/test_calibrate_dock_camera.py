@@ -272,3 +272,89 @@ def test_checkerboard_photo_swap_to_symlink_during_read_is_rejected(
         )
     assert switched
     assert target.is_symlink()
+
+
+def unapproved_dock_candidate():
+    return {
+        "robot_id": "robot-01", "camera_sensor_pid": "OV5640",
+        "measured": False, "physical_acceptance_pass": False,
+        "motor_authorized": False, "charging_authorized": False,
+    }
+
+
+def test_private_dock_candidate_is_exclusive_0600_even_with_public_umask(tmp_path):
+    import json
+    import os
+    import stat
+
+    target = tmp_path / "intrinsics.json"
+    camera = fitter()
+    original = unapproved_dock_candidate()
+    previous_umask = os.umask(0)
+    try:
+        camera.write_private_dock_candidate(target, original)
+    finally:
+        os.umask(previous_umask)
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    assert json.loads(target.read_text(encoding="utf-8")) == original
+    with pytest.raises(FileExistsError):
+        camera.write_private_dock_candidate(target, unapproved_dock_candidate())
+    assert json.loads(target.read_text(encoding="utf-8")) == original
+
+
+def test_private_dock_candidate_refuses_symlink_to_existing_evidence(tmp_path):
+    original = tmp_path / "reviewed.json"
+    original.write_text("DO NOT MODIFY", encoding="utf-8")
+    target = tmp_path / "linked.json"
+    target.symlink_to(original)
+    with pytest.raises(OSError):
+        fitter().write_private_dock_candidate(target, unapproved_dock_candidate())
+    assert original.read_text(encoding="utf-8") == "DO NOT MODIFY"
+
+
+def test_private_dock_candidate_rejects_unsafe_parent_alias_and_traversal(tmp_path):
+    real = tmp_path / "camera"
+    real.mkdir(mode=0o700)
+    alias = tmp_path / "alias"
+    alias.symlink_to(real, target_is_directory=True)
+    camera = fitter()
+    with pytest.raises(ValueError, match="symlink"):
+        camera.write_private_dock_candidate(
+            alias / "intrinsics.json", unapproved_dock_candidate(),
+        )
+    with pytest.raises(ValueError, match="safe path"):
+        camera.write_private_dock_candidate(
+            tmp_path / "missing" / ".." / "camera" / "intrinsics.json",
+            unapproved_dock_candidate(),
+        )
+    assert not (real / "intrinsics.json").exists()
+
+
+def test_private_dock_candidate_rejects_writable_parent(tmp_path):
+    import os
+
+    folder = tmp_path / "public"
+    folder.mkdir(mode=0o700)
+    os.chmod(folder, 0o777)
+    target = folder / "intrinsics.json"
+    with pytest.raises(ValueError, match="private to writers"):
+        fitter().write_private_dock_candidate(target, unapproved_dock_candidate())
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("override", [
+    {"measured": True},
+    {"physical_acceptance_pass": True},
+    {"motor_authorized": True},
+    {"charging_authorized": True},
+    {"fx": float("nan")},
+])
+def test_private_dock_candidate_never_publishes_approved_or_nonfinite_fields(
+    tmp_path, override,
+):
+    candidate = unapproved_dock_candidate()
+    candidate.update(override)
+    target = tmp_path / "intrinsics.json"
+    with pytest.raises(ValueError):
+        fitter().write_private_dock_candidate(target, candidate)
+    assert not target.exists()

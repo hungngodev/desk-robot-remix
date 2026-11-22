@@ -253,6 +253,71 @@ def calibrate_images(folder: Path, *, columns: int, rows: int,
     return candidate
 
 
+
+def write_private_dock_candidate(target: Path, candidate: dict) -> None:
+    """Write a review-only intrinsics candidate to one private local file.
+
+    Directory handles anchor the actual destination: an operator-controlled
+    symlink or a path containing '..' must not redirect checkerboard evidence.
+    No existing calibration is modified or granted motor/charge authority.
+    """
+    if (".." in target.parts or not isinstance(candidate, dict)
+            or any(candidate.get(key) is not False for key in (
+                "measured", "physical_acceptance_pass",
+                "motor_authorized", "charging_authorized",
+            ))):
+        raise ValueError("Dock camera candidate requires unapproved provenance and safe path")
+    # Verify JSON entirely before opening a filesystem target, so a rejected
+    # NaN or non-JSON input cannot leave an incomplete safety evidence file.
+    contents = json.dumps(candidate, indent=2, allow_nan=False) + "\n"
+    absolute = target.absolute()
+    folder_fd = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in absolute.parts[1:-1]:
+            entry = os.stat(part, dir_fd=folder_fd, follow_symlinks=False)
+            if stat.S_ISLNK(entry.st_mode):
+                current = os.fstat(folder_fd)
+                # macOS /var and similar immutable root aliases are allowed;
+                # user-owned or writable aliases are not measurement roots.
+                if (entry.st_uid != 0 or current.st_uid != 0
+                        or stat.S_IMODE(current.st_mode) & 0o022):
+                    raise ValueError("Unsafe dock camera candidate parent symlink")
+            elif not stat.S_ISDIR(entry.st_mode):
+                raise ValueError("Dock candidate parent is not a directory")
+            flags = os.O_RDONLY | os.O_DIRECTORY
+            if not stat.S_ISLNK(entry.st_mode):
+                flags |= os.O_NOFOLLOW
+            next_fd = os.open(part, flags, dir_fd=folder_fd)
+            os.close(folder_fd)
+            folder_fd = next_fd
+        directory = os.fstat(folder_fd)
+        if (directory.st_uid != os.geteuid()
+                or stat.S_IMODE(directory.st_mode) & 0o022):
+            raise ValueError("Dock candidate parent must be owned and private to writers")
+        created = False
+        try:
+            fd = os.open(
+                absolute.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600, dir_fd=folder_fd,
+            )
+            created = True
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as output:
+                    fd = -1
+                    output.write(contents)
+                    output.flush()
+                    os.fsync(output.fileno())
+            finally:
+                if fd >= 0:
+                    os.close(fd)
+        except BaseException:
+            if created:
+                os.unlink(absolute.name, dir_fd=folder_fd)
+            raise
+    finally:
+        os.close(folder_fd)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--images", type=Path, required=True)
@@ -281,9 +346,7 @@ def main() -> None:
         camera_sensor_pid=args.camera_sensor_pid,
         robot_id=args.robot_id, head_device_id=args.head_device_id,
     )
-    with args.output.open("x", encoding="utf-8") as file:
-        json.dump(candidate, file, indent=2)
-        file.write("\n")
+    write_private_dock_candidate(args.output, candidate)
     print(json.dumps(candidate, indent=2))
 
 
