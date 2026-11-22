@@ -33,6 +33,7 @@ from procurement_release import (
 from verify_playbook_receipts import (
     REPO,
     RUN_PATH,
+    bounded_receipt_int,
     evidence_digest_matches,
     finite_receipt_float,
     reject_nonfinite_receipt_value,
@@ -610,6 +611,7 @@ def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
             raw.decode("utf-8"), object_pairs_hook=strict_receipt_object,
             parse_constant=reject_nonfinite_receipt_value,
             parse_float=finite_receipt_float,
+            parse_int=bounded_receipt_int,
         )
     except (ValueError, TypeError, UnicodeError, binascii.Error):
         return False

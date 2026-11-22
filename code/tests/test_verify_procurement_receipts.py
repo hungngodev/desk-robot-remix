@@ -1339,3 +1339,27 @@ def test_ntc_receipt_rejects_only_cutoff_time_or_qualitative_status():
     assert not release.verified_scoped_record(
         text_only, SHA, lambda url: lookup(url, records=[text_only]),
     )
+
+
+@pytest.mark.parametrize("invalid_integer", [
+    1 << 63,
+    -(1 << 63) - 1,
+    10 ** 40,
+])
+def test_immutable_procurement_record_rejects_out_of_range_integer(invalid_integer):
+    """Physical receipt JSON must share the playbook's exact integer bounds."""
+    gate = release.PART_GATES[0]
+    claimed = receipt("part:imu", gate)
+    claimed["measurement"] = {"raw_adc": invalid_integer}
+    assert not release.verified_scoped_record(
+        claimed, SHA, lambda url: lookup(url, records=[claimed]),
+    )
+
+
+def test_immutable_procurement_record_accepts_bounded_integer():
+    gate = release.PART_GATES[0]
+    claimed = receipt("part:imu", gate)
+    claimed["measurement"] = {"raw_adc": 32766}
+    assert release.verified_scoped_record(
+        claimed, SHA, lambda url: lookup(url, records=[claimed]),
+    )
