@@ -372,6 +372,11 @@ class KokoroHeadSpeaker:
         lease_id = self._lease_context.get()
         if lease_id is None:
             raise RuntimeError("No owned Xiaozhi speaker lease for speech")
+        # A revoked utterance must not occupy the one shared speech floor
+        # while Kokoro performs potentially long synthesis. Recheck again
+        # after synthesis and after the bridge transport below.
+        if permission_check is not None and not permission_check():
+            raise RuntimeError("Speech permission revoked before synthesis")
         response = await self.client.post(
             self.settings.kokoro_url.rstrip("/") + "/v1/audio/speech",
             json={
