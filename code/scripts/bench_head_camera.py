@@ -29,12 +29,22 @@ MAX_CAMERA_GAP_S = 1.2
 
 def _private_report_directory_fd(parent: Path) -> int:
     """Keep a validated directory open across the actual report creation."""
-    absolute = Path(os.path.abspath(parent))
+    # Preserve lexical parent traversal until it has been refused; abspath
+    # would hide alias/.. before the filesystem resolves that alias.
+    absolute = parent.absolute()
+    if ".." in absolute.parts:
+        raise ValueError("Unsafe camera bench report parent traversal")
     descriptor = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
     try:
         for name in absolute.parts[1:]:
-            entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
             owner = os.fstat(descriptor)
+            try:
+                entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                # Never create missing children until the preceding parent
+                # has been opened and verified through its held descriptor.
+                os.mkdir(name, mode=0o700, dir_fd=descriptor)
+                entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
             # Stable root-owned system aliases (such as macOS /var) are
             # permitted only under root-owned non-writable directories.
             if stat.S_ISLNK(entry.st_mode) and (
@@ -60,7 +70,6 @@ def preflight_private_report(path: Path) -> None:
     """Reject symlinked or public camera report paths before touching the head."""
     if path.parent.is_symlink():
         raise ValueError("Camera bench report directory must be private mode 0700")
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     descriptor = _private_report_directory_fd(path.parent)
     os.close(descriptor)
     if path.exists() or path.is_symlink():

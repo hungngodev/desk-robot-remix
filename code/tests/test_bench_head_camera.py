@@ -92,6 +92,34 @@ def test_camera_bench_rejects_symlinked_ancestor_of_private_report(tmp_path):
     assert not (attacker / "reports" / "camera.json").exists()
 
 
+def test_camera_bench_rejects_ancestor_alias_before_creating_missing_directory(tmp_path):
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o777)
+    shared.chmod(0o777)
+    (shared / "alias").symlink_to(private, target_is_directory=True)
+    created = private / "not_yet_created"
+    output = shared / "alias" / created.name / "camera.json"
+    with pytest.raises(ValueError, match="unsafe symlink"):
+        bench.preflight_private_report(output)
+    assert not created.exists()
+    with pytest.raises(ValueError, match="unsafe symlink"):
+        bench.save_private_report(output, {"camera_frames_received": 1})
+    assert not created.exists()
+
+
+def test_camera_bench_rejects_lexical_parent_traversal_without_mkdir(tmp_path):
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    output = private / "alias" / ".." / "created" / "camera.json"
+    with pytest.raises(ValueError, match="parent traversal"):
+        bench.preflight_private_report(output)
+    with pytest.raises(ValueError, match="parent traversal"):
+        bench.save_private_report(output, {"camera_frames_received": 1})
+    assert not (private / "created").exists()
+
+
 async def test_camera_bench_keeps_status_independent_and_never_qualifies_hardware():
     class Head:
         def __init__(self):
