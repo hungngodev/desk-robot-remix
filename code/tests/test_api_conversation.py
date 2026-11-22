@@ -2173,3 +2173,86 @@ async def test_unrelated_pet_memory_revision_does_not_cancel_group(tmp_path):
     owner = Conversation(settings, Chat(), speaker, memory=store)
     transcript = await owner.run(ids[:2], "Continue", 2)
     assert len(transcript) == 2 and len(speaker.spoken) == 2
+
+
+def test_operator_group_api_requires_peer_sharing_before_interrupting(
+    settings, tokens, monkeypatch,
+):
+    """Hardware group dialogue must not claim success without shared peer text."""
+    app = create_app(settings)
+    headers = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
+    body = {
+        "robot_ids": ["robot-01", "robot-02"],
+        "topic": "Compare what you each noticed", "utterances": 2,
+    }
+    with TestClient(app) as client:
+        # Construct without physical devices; test the hardware-mode route
+        # using the runtime's permission-aware simulated speaker fixture.
+        settings.mode = "hardware"
+        interrupts = []
+
+        async def interrupt(robot_id):
+            interrupts.append(robot_id)
+
+        monkeypatch.setattr(app.state.runtime.pet, "interrupt", interrupt)
+
+        rejected = client.post("/v1/conversation", json=body, headers=headers)
+        assert rejected.status_code == 409
+        assert "fleet peer text sharing consent" in rejected.json()["detail"].lower()
+        assert interrupts == []
+        assert app.state.runtime.conversation.active is None
+
+        class TracingChat:
+            def __init__(self):
+                self.prompts = []
+
+            async def reply(self, history):
+                self.prompts.append(str(history))
+                return "A first robot's observation" if len(self.prompts) == 1 else "I heard you"
+
+        chat = TracingChat()
+        app.state.runtime.conversation.chat = chat
+        settings.fleet_text_sharing_enabled = True
+        allowed = client.post("/v1/conversation", json=body, headers=headers)
+        assert allowed.status_code == 200
+        assert [turn["robot_id"] for turn in allowed.json()["transcript"]] == body["robot_ids"]
+        assert len(chat.prompts) == 2
+        assert "Untrusted digitally relayed peer speech" in chat.prompts[1]
+        assert "Source robot: robot-01" in chat.prompts[1]
+        assert "A first robot's observation" in chat.prompts[1]
+        assert len(interrupts) == len(settings.robots)
+        assert allowed.json()["physical_playback_verified"] is False
+
+
+def test_operator_group_api_refuses_revoke_regrant_during_preemption(
+    settings, tokens, monkeypatch,
+):
+    """A newer fleet consent epoch cannot authorize an older group request."""
+    app = create_app(settings)
+    headers = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
+    body = {
+        "robot_ids": ["robot-01", "robot-02"],
+        "topic": "Check the desks", "utterances": 2,
+    }
+    with TestClient(app) as client:
+        settings.mode = "hardware"
+        settings.fleet_text_sharing_enabled = True
+        starts = []
+
+        async def interrupt(robot_id):
+            if not starts:
+                settings.fleet_text_sharing_enabled = False
+                settings.fleet_text_sharing_enabled = True
+            starts.append(robot_id)
+
+        async def run(*args):
+            raise AssertionError("Revoked group request reached speech")
+
+        monkeypatch.setattr(app.state.runtime.pet, "interrupt", interrupt)
+        monkeypatch.setattr(app.state.runtime.conversation, "run", run)
+        result = client.post("/v1/conversation", json=body, headers=headers)
+        assert result.status_code == 409
+        assert "consent changed" in result.json()["detail"].lower()
+        assert settings.fleet_text_sharing_enabled is True
+        assert settings.fleet_sharing_consent_generation > 0
+        assert starts == [robot.id for robot in settings.robots]

@@ -516,8 +516,21 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             # speech, including a robot not in the requested peer subset.
             for robot_id in request.robot_ids:
                 settings.robot(robot_id)  # preserve unknown-ID 404, not coordinator's 409
+            # A hardware group needs a distinct peer-text sharing grant.
+            # Otherwise the second model never receives the first reply,
+            # even though the endpoint reports a completed conversation.
+            sharing_generation = settings.fleet_sharing_consent_generation
+            if settings.mode == "hardware" and not settings.fleet_text_sharing_enabled:
+                raise HTTPException(409, "Enable fleet peer text sharing consent before group dialogue")
             for robot in settings.robots:
                 await app.state.runtime.pet.interrupt(robot.id)
+            # Preemption awaits can allow revocation and immediate regrant.
+            # An older request must not inherit a newer consent epoch.
+            if settings.mode == "hardware" and (
+                not settings.fleet_text_sharing_enabled
+                or settings.fleet_sharing_consent_generation != sharing_generation
+            ):
+                raise HTTPException(409, "Fleet peer text sharing consent changed during startup")
             transcript = await app.state.runtime.conversation.run(
                 request.robot_ids, request.topic, request.utterances
             )
