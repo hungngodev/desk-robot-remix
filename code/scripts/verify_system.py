@@ -239,6 +239,10 @@ def main() -> int:
     parser.add_argument("--build-dir", type=Path,
                         default=Path(tempfile.gettempdir()) / "desk-robot-body-verify")
     args = parser.parse_args()
+    # Verification receipts are immutable evidence, not scratch output.
+    # Refuse even a dangling symlink before starting expensive checks.
+    if args.report.exists() or args.report.is_symlink():
+        parser.error("Verification report already exists; choose an unused path")
     checkout_before = source_snapshot()
     # A workspace or remote environment failing before pytest/cmake/Pio is
     # explicitly INCOMPLETE. Never manufacture a green CI result.
@@ -285,7 +289,14 @@ def main() -> int:
         "assembly_ready": False,
     }
     args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")
+    try:
+        # Exclusive creation also closes the race after the initial check.
+        with args.report.open("x", encoding="utf-8") as report_file:
+            report_file.write(json.dumps(receipt, indent=2) + "\n")
+    except FileExistsError as exc:
+        raise ValueError(
+            "Verification report already exists; choose an unused path"
+        ) from exc
     print("Machine-readable verification: " + str(args.report))
     return 0 if receipt["source_suite_pass"] and clean_same_commit else 1
 

@@ -367,3 +367,58 @@ def test_source_snapshot_rejects_sparse_checkout_with_missing_real_files(
     assert sparse["sha"] == complete["sha"]
     assert sparse["tracked_clean"] is True  # Git legitimately skips that path.
     assert sparse["root_tree_intact"] is False
+
+
+@pytest.mark.parametrize("kind", ("existing", "symlink", "dangling_symlink"))
+def test_verification_report_never_overwrites_existing_evidence_or_source(
+    monkeypatch, tmp_path, kind,
+):
+    protected = tmp_path / "source.py"
+    protected.write_text("keep this source intact\\n", encoding="utf-8")
+    report = tmp_path / "verification.json"
+    if kind == "existing":
+        report.write_text("older receipt\\n", encoding="utf-8")
+    elif kind == "symlink":
+        report.symlink_to(protected)
+    else:
+        report.symlink_to(tmp_path / "not-created.json")
+
+    calls = []
+    monkeypatch.setattr(verify, "run", lambda *args: calls.append(args))
+    monkeypatch.setattr(verify.sys, "argv", [
+        "verify_system.py", "--suite", "body", "--report", str(report),
+    ])
+    with pytest.raises(SystemExit) as error:
+        verify.main()
+    assert error.value.code == 2
+    assert calls == []
+    assert protected.read_text(encoding="utf-8") == "keep this source intact\\n"
+    if kind == "existing":
+        assert report.read_text(encoding="utf-8") == "older receipt\\n"
+    else:
+        assert report.is_symlink()
+
+
+def test_verification_report_refuses_a_concurrent_creator(monkeypatch, tmp_path):
+    report = tmp_path / "verification.json"
+    stage = ("test-stage", ["true"], tmp_path, 1)
+    monkeypatch.setattr(verify, "steps", lambda suite, build: [stage])
+    monkeypatch.setattr(verify, "source_snapshot", lambda: {
+        "sha": "a" * 40, "tracked_clean": True,
+        "root_tree_intact": True, "error": None,
+    })
+
+    def competing_writer(*args):
+        report.write_text("another writer's evidence\\n", encoding="utf-8")
+        return {
+            "name": "test-stage", "pass": True, "exit_code": 0,
+            "elapsed_s": 0.01, "output_tail": "", "error": None,
+        }
+
+    monkeypatch.setattr(verify, "run", competing_writer)
+    monkeypatch.setattr(verify.sys, "argv", [
+        "verify_system.py", "--suite", "body", "--report", str(report),
+    ])
+    with pytest.raises(ValueError, match="already exists"):
+        verify.main()
+    assert report.read_text(encoding="utf-8") == "another writer's evidence\\n"
