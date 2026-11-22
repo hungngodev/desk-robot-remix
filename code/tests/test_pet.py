@@ -1921,6 +1921,79 @@ async def test_manual_peer_share_revoked_while_sqlite_writes_removes_new_copy(
         await pet.close()
 
 
+
+@pytest.mark.parametrize(
+    ("pause_phase", "already_shared"),
+    [("lookup", False), ("write", False), ("write", True)],
+)
+async def test_manual_peer_share_revoke_regrant_invalidates_inflight_grant(
+    fleet, tmp_path, monkeypatch, pause_phase, already_shared,
+):
+    """OFF/ON must not revive an old SQLite relay or erase an older copy."""
+    import threading
+
+    fleet.fleet_text_sharing_enabled = True
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    event_id = "manual_share_regrant"
+    summary = "An eyewitness saw a key near the dock"
+    memory.remember(
+        "robot-01", event_id, summary,
+        kind="key", source_robot="robot-01", witnessed=True,
+    )
+    source = memory.get_episode("robot-01", event_id)
+    assert source is not None
+    if already_shared:
+        assert memory.remember(
+            "robot-02", event_id, summary, kind="key",
+            source_robot="robot-01", witnessed=False,
+            observed_at=source.observed_at,
+        )
+    original_get, original_remember = memory.get_episode, memory.remember
+    entered, resume = threading.Event(), threading.Event()
+
+    def paused_lookup(robot_id, incoming_id):
+        if (pause_phase == "lookup" and robot_id == "robot-01"
+                and not entered.is_set()):
+            entered.set()
+            assert resume.wait(3)
+        return original_get(robot_id, incoming_id)
+
+    def paused_insert(robot_id, *args, **kwargs):
+        inserted = original_remember(robot_id, *args, **kwargs)
+        if pause_phase == "write" and robot_id == "robot-02":
+            entered.set()
+            assert resume.wait(3)
+        return inserted
+
+    monkeypatch.setattr(memory, "get_episode", paused_lookup)
+    monkeypatch.setattr(memory, "remember", paused_insert)
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+    )
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    task = asyncio.create_task(
+        pet.share_with_peer("robot-01", "robot-02", event_id)
+    )
+    try:
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            fleet.fleet_text_sharing_enabled = False
+            fleet.fleet_text_sharing_enabled = True
+        finally:
+            resume.set()
+        with pytest.raises(ValueError, match="consent revoked"):
+            await asyncio.wait_for(task, timeout=3)
+        assert memory.get_episode("robot-01", event_id) == source
+        peer = memory.get_episode("robot-02", event_id)
+        assert (peer is not None) == already_shared
+        if peer is not None:
+            assert not peer.witnessed and peer.source_robot == "robot-01"
+    finally:
+        resume.set()
+        await pet.close()
+
+
+
 def test_visual_gate_reset_clears_private_jpeg_without_changing_thresholds():
     gate = VisualChangeGate(min_changed_fraction=0.02, confirmations=3)
     assert gate.observe(WHITE) is None

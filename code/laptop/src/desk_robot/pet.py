@@ -710,6 +710,13 @@ class PetController:
         self.settings.robot(to_robot)
         if not self.settings.fleet_text_sharing_enabled:
             raise ValueError("Enable explicit local fleet text sharing first")
+        # A revoke/regrant is a new consent epoch, even when sharing is ON.
+        sharing_generation = self.settings.fleet_sharing_consent_generation
+        def sharing_grant_active() -> bool:
+            return (self.settings.fleet_text_sharing_enabled
+                    and self.settings.fleet_sharing_consent_generation
+                    == sharing_generation)
+
         if from_robot == to_robot:
             raise ValueError("Source and receiving robot must be different")
         if not isinstance(event_id, str) or not 1 <= len(event_id) <= 96:
@@ -727,10 +734,10 @@ class PetController:
         # secondhand relay avoids misrepresenting who passed on that memory.
         if not source.witnessed or source.source_robot != from_robot:
             raise ValueError("Only the original eyewitness may share this event")
-        if not self.settings.fleet_text_sharing_enabled:
+        if not sharing_grant_active():
             raise ValueError("Fleet sharing consent revoked before peer write")
         def persist_shared_copy() -> bool:
-            if not self.settings.fleet_text_sharing_enabled:
+            if not sharing_grant_active():
                 return False
             # An operator may delete or correct the original while the first
             # thread is retrieving it. A stale pre-deletion eyewitness must
@@ -768,19 +775,19 @@ class PetController:
                         "Receiving pet has a conflicting memory event ID"
                     )
             if stored and (
-                not self.settings.fleet_text_sharing_enabled
+                not sharing_grant_active()
                 or self.memory.get_episode(from_robot, event_id) != source
             ):
                 # The worker survives cancellation of an operator HTTP
                 # request. Retract only THIS newly inserted secondhand copy.
                 self.memory.forget_episode(to_robot, source.event_id)
-                if not self.settings.fleet_text_sharing_enabled:
+                if not sharing_grant_active():
                     return False
                 raise ValueError("Original eyewitness memory changed or expired")
             return stored
 
         stored = await asyncio.to_thread(persist_shared_copy)
-        if not self.settings.fleet_text_sharing_enabled:
+        if not sharing_grant_active():
             if stored:
                 # A repeated share of a preexisting event must not erase
                 # older consent.
@@ -793,11 +800,13 @@ class PetController:
         current_source = await asyncio.to_thread(
             self.memory.get_episode, from_robot, event_id,
         )
-        if current_source != source:
+        if current_source != source or not sharing_grant_active():
             if stored:
                 await asyncio.to_thread(
                     self.memory.forget_episode, to_robot, source.event_id,
                 )
+            if not sharing_grant_active():
+                raise ValueError("Fleet sharing consent revoked during peer write")
             raise ValueError("Original eyewitness memory changed or expired")
         return {
             "from_robot": from_robot,
