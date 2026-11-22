@@ -95,8 +95,18 @@ class AttentionLedger:
         state.topic_origin = origin
         state.topic_state = "active"
         state.topic_updated_at = at
-        # Events from an earlier task cannot impersonate current task context.
+        # Recent safety and handling observations remain useful when the
+        # next human question is "why did you stop?". Carry only factual
+        # historical evidence, not routine contacts or source task authority.
+        # Keep the ORIGINAL generation so a late callback cannot impersonate
+        # a new observation or grant movement.
+        carry = [
+            edge for edge in state.sensor_edges
+            if edge[0] in {"safety_fault", "handling_tilt", "handling_shake"}
+            and 0 <= at - edge[1] <= 120
+        ]
         state.sensor_edges.clear()
+        state.sensor_edges.extend(carry)
         return state.generation
 
     def finish_topic(
@@ -192,6 +202,7 @@ class AttentionLedger:
         if state.sensor_edges and at < state.sensor_edges[-1][1]:
             return False
         if (state.sensor_edges and state.sensor_edges[-1][0] == kind
+                and state.sensor_edges[-1][2] == state.generation
                 and at - state.sensor_edges[-1][1] < 2.0):
             # Suppress duplicate callbacks during the same short physical
             # interaction, not every subsequent authentic touch of that kind.
@@ -255,7 +266,12 @@ class AttentionLedger:
         safety_piece: str | None = None
         events = [
             (kind, at) for kind, at, generation in state.sensor_edges
-            if generation == state.generation and 0 <= now - at <= 120
+            if 0 <= now - at <= 120 and (
+                generation == state.generation
+                or (generation < state.generation and kind in {
+                    "safety_fault", "handling_tilt", "handling_shake"
+                })
+            )
         ]
         if events:
             kind, stamp = next(

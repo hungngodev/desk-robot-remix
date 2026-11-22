@@ -317,7 +317,10 @@ def test_delayed_old_topic_sensor_and_speech_do_not_enter_new_generation(monkeyp
     assert "New song" in current
     assert "side_object" not in current
     assert "obsolete prior speech" not in current
-    assert "handling_tilt" not in current
+    # The actual earlier tilt remains visible as HISTORICAL evidence. A
+    # queued old side-object callback and obsolete speech still stay absent.
+    assert "handling_tilt" in current
+    assert "historical, not current telemetry" in current
     assert ledger.sensor("pet1", "side_object", 22)
     assert ledger.sent("pet1", "New song begins", 23)
     current = ledger.timeline("pet1", 24)[0]["content"]
@@ -666,3 +669,43 @@ def test_short_nonfault_attention_keeps_causal_order_and_full_source_labels(monk
     assert "not motion permission" in content
     assert "historical, not current telemetry" in content
     assert "playback unverified" in content
+
+
+def test_new_human_topic_retains_recent_safety_and_handling_as_history(monkeypatch):
+    """A follow-up question must not lose the reason movement just stopped."""
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 500.0)
+    ledger = AttentionLedger(["robot-01", "robot-02"])
+    prior = ledger.begin_topic("robot-01", "Sing near the desk edge", 10)
+    assert ledger.sensor("robot-01", "touch_tap", 10.5)
+    assert ledger.sensor("robot-01", "handling_tilt", 11)
+    assert ledger.sensor("robot-01", "safety_fault", 12)
+    assert ledger.finish_topic("robot-01", prior, 13, interrupted=True)
+    current = ledger.begin_topic("robot-01", "Why did you stop?", 14)
+    assert current > prior
+    cue = ledger.timeline("robot-01", 15)[0]
+    assert "Why did you stop?" in cue["content"]
+    assert "WROOM safety_fault edge 3s ago" in cue["content"]
+    assert "handling_tilt" in cue["content"]
+    assert "historical, not current telemetry" in cue["content"]
+    assert "touch_tap" not in cue["content"]
+    assert cue["motor_authorized"] is False
+    assert cue["physical_action_verified"] is False
+    assert len(cue["content"]) <= 260
+    assert ledger.timeline("robot-02", 15) == []
+    # The same old fault must expire from model context, not persist forever.
+    assert "safety_fault" not in ledger.timeline("robot-01", 133)[0]["content"]
+
+
+def test_new_topic_event_cannot_be_hidden_by_old_generation_debounce(monkeypatch):
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 500.0)
+    ledger = AttentionLedger(["pet"])
+    ledger.begin_topic("pet", "Old physical stop", 20)
+    assert ledger.sensor("pet", "safety_fault", 21)
+    ledger.begin_topic("pet", "Now what happened?", 22)
+    # A genuinely new independent fault must not be rejected solely because
+    # the immediately preceding prior-topic event had the same kind.
+    assert ledger.sensor("pet", "safety_fault", 22.5)
+    assert "WROOM safety_fault edge 0s ago" in (
+        ledger.timeline("pet", 23)[0]["content"]
+    )
+    assert not ledger.sensor("pet", "safety_fault", 23)
