@@ -647,6 +647,7 @@ class PetController:
             sharing_grant = self.settings.fleet_sharing_consent_generation
             fanout_grant = self.settings.fleet_auto_fanout_consent_generation
             destinations = [r.id for r in self.settings.robots if r.id != robot_id]
+            relay_tokens = {peer_id: uuid.uuid4().hex for peer_id in destinations}
             # Captured after the newly inserted eyewitness record is durable.
             # Operator PATCH/DELETE advances this generation, including a
             # correction away from and back to the same description.
@@ -696,6 +697,7 @@ class PetController:
                             witnessed=False, observed_at=observed_at,
                             confidence=change.confidence,
                             camera_provenance=camera_provenance,
+                            relay_token=relay_tokens[peer_id],
                         )
                         results.append(inserted)
                         if inserted:
@@ -707,7 +709,9 @@ class PetController:
                 if not permitted() or not source_current():
                     for peer_id in new_copies:
                         # Only copies from THIS request, not older duplicates.
-                        self.memory.forget_episode(peer_id, event_id)
+                        self.memory.retract_peer_copy(
+                            peer_id, event_id, relay_tokens[peer_id],
+                        )
                     results = [
                         item if isinstance(item, BaseException) else False
                         for item in results
@@ -729,7 +733,8 @@ class PetController:
                     # The original eyewitness record remains untouched;
                     # never erase an older idempotent peer memory.
                     await asyncio.to_thread(
-                        self.memory.forget_episode, peer_id, event_id
+                        self.memory.retract_peer_copy, peer_id, event_id,
+                        relay_tokens[peer_id],
                     )
             # A reconnect during the peer copy loop invalidates the source
             # eyewitness as well as every newly inserted secondhand copy.
@@ -779,6 +784,7 @@ class PetController:
             raise ValueError("Only the original eyewitness may share this event")
         if not sharing_grant_active():
             raise ValueError("Fleet sharing consent revoked before peer write")
+        relay_token = uuid.uuid4().hex
         def persist_shared_copy() -> bool:
             if not sharing_grant_active():
                 return False
@@ -796,6 +802,7 @@ class PetController:
                 witnessed=False, observed_at=source.observed_at,
                 confidence=source.confidence,
                 camera_provenance=original_camera,
+                relay_token=relay_token,
             )
             if not stored:
                 # A duplicate is idempotent only if the receiver already has
@@ -823,7 +830,9 @@ class PetController:
             ):
                 # The worker survives cancellation of an operator HTTP
                 # request. Retract only THIS newly inserted secondhand copy.
-                self.memory.forget_episode(to_robot, source.event_id)
+                self.memory.retract_peer_copy(
+                    to_robot, source.event_id, relay_token,
+                )
                 if not sharing_grant_active():
                     return False
                 raise ValueError("Original eyewitness memory changed or expired")
@@ -835,7 +844,8 @@ class PetController:
                 # A repeated share of a preexisting event must not erase
                 # older consent.
                 await asyncio.to_thread(
-                    self.memory.forget_episode, to_robot, source.event_id,
+                    self.memory.retract_peer_copy, to_robot, source.event_id,
+                    relay_token,
                 )
             raise ValueError("Fleet sharing consent revoked during peer write")
         # The caller may have been suspended while the source was deleted.
@@ -846,7 +856,8 @@ class PetController:
         if current_source != source or not sharing_grant_active():
             if stored:
                 await asyncio.to_thread(
-                    self.memory.forget_episode, to_robot, source.event_id,
+                    self.memory.retract_peer_copy, to_robot, source.event_id,
+                    relay_token,
                 )
             if not sharing_grant_active():
                 raise ValueError("Fleet sharing consent revoked during peer write")

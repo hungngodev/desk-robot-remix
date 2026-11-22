@@ -1823,6 +1823,12 @@ async def test_auto_fanout_revoke_regrant_retracts_old_peer_batch(
         assert all(memory.count(robot_id) == 0 for robot_id in robot_ids[1:])
         retained = memory.recent("robot-01")
         assert len(retained) == 1 and retained[0].witnessed
+        # No operator forget happened; a new grant may retry the same ID.
+        fresh = await pet.share_with_peer(
+            "robot-01", "robot-02", retained[0].event_id,
+        )
+        assert fresh["stored"] is True
+        assert memory.count("robot-02") == 1
     finally:
         release.set()
         await pet.close()
@@ -1839,7 +1845,8 @@ async def test_cancelled_fleet_fanout_retracts_all_new_peer_copies(
     fleet.fleet_text_auto_fanout_enabled = True
     ids = [r.id for r in fleet.robots]
     memory = MemoryStore(tmp_path, ids)
-    original_remember, original_forget = memory.remember, memory.forget_episode
+    original_remember = memory.remember
+    original_retract = memory.retract_peer_copy
     written, resume, cleaned_second = (
         threading.Event(), threading.Event(), threading.Event()
     )
@@ -1851,14 +1858,14 @@ async def test_cancelled_fleet_fanout_retracts_all_new_peer_copies(
             assert resume.wait(3)
         return result
 
-    def observed_forget(robot_id, event_id):
-        result = original_forget(robot_id, event_id)
+    def observed_retract(robot_id, event_id, receipt):
+        result = original_retract(robot_id, event_id, receipt)
         if robot_id == "robot-03":
             cleaned_second.set()
         return result
 
     monkeypatch.setattr(memory, "remember", blocked_second_peer)
-    monkeypatch.setattr(memory, "forget_episode", observed_forget)
+    monkeypatch.setattr(memory, "retract_peer_copy", observed_retract)
     pet = PetController(
         fleet, {}, Conversation(
             fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
@@ -1898,7 +1905,8 @@ async def test_cancelled_manual_peer_share_retracts_revoked_copy(
         "robot-01", source_id, "An original witnessed key",
         kind="key", source_robot="robot-01", witnessed=True,
     )
-    original_remember, original_forget = memory.remember, memory.forget_episode
+    original_remember = memory.remember
+    original_retract = memory.retract_peer_copy
     written, resume, retracted = (
         threading.Event(), threading.Event(), threading.Event()
     )
@@ -1910,14 +1918,14 @@ async def test_cancelled_manual_peer_share_retracts_revoked_copy(
             assert resume.wait(3)
         return result
 
-    def observed_forget(robot_id, event_id):
-        result = original_forget(robot_id, event_id)
+    def observed_retract(robot_id, event_id, receipt):
+        result = original_retract(robot_id, event_id, receipt)
         if robot_id == "robot-02":
             retracted.set()
         return result
 
     monkeypatch.setattr(memory, "remember", blocked_insert)
-    monkeypatch.setattr(memory, "forget_episode", observed_forget)
+    monkeypatch.setattr(memory, "retract_peer_copy", observed_retract)
     pet = PetController(
         fleet, {}, Conversation(
             fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
@@ -2041,10 +2049,53 @@ async def test_manual_peer_share_revoke_regrant_invalidates_inflight_grant(
         assert (peer is not None) == already_shared
         if peer is not None:
             assert not peer.witnessed and peer.source_robot == "robot-01"
+        if not already_shared:
+            fresh = await pet.share_with_peer("robot-01", "robot-02", event_id)
+            assert fresh["stored"] is True
+            assert memory.get_episode("robot-02", event_id) is not None
     finally:
         resume.set()
         await pet.close()
 
+
+
+def test_internal_relay_retraction_preserves_replacement_and_operator_forget(
+    tmp_path,
+):
+    """Old cancellation cannot remove replacement or resurrect operator deletion."""
+    ids = ["robot-01", "robot-02"]
+    memory = MemoryStore(tmp_path, ids)
+    first, second = "a" * 32, "b" * 32
+    event_id = "shared_once"
+    assert memory.remember(
+        "robot-01", event_id, "An original key", kind="key",
+        source_robot="robot-01", witnessed=True,
+    )
+    original = memory.get_episode("robot-01", event_id)
+    assert original is not None
+    kwargs = {
+        "kind": "key", "source_robot": "robot-01", "witnessed": False,
+        "observed_at": original.observed_at,
+    }
+    assert memory.remember(
+        "robot-02", event_id, original.summary, relay_token=first, **kwargs,
+    )
+    assert memory.retract_peer_copy("robot-02", event_id, first)
+    assert memory.remember(
+        "robot-02", event_id, original.summary, relay_token=second, **kwargs,
+    )
+    restarted = MemoryStore(tmp_path, ids)
+    assert not restarted.retract_peer_copy("robot-02", event_id, first)
+    assert restarted.get_episode("robot-02", event_id) is not None
+    assert restarted.correct_episode("robot-02", event_id, "My corrected key")
+    assert not restarted.retract_peer_copy("robot-02", event_id, second)
+    assert restarted.get_episode("robot-02", event_id).summary == "My corrected key"
+    assert restarted.forget_episode("robot-02", event_id)
+    assert not restarted.remember(
+        "robot-02", event_id, original.summary,
+        relay_token="c" * 32, **kwargs,
+    )
+    assert restarted.get_episode("robot-01", event_id) == original
 
 
 def test_visual_gate_reset_clears_private_jpeg_without_changing_thresholds():

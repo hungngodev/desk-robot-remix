@@ -22,6 +22,7 @@ from pathlib import Path
 _ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
 _EVENT_ID = re.compile(r"[A-Za-z0-9_-]{1,96}\Z")
 _EVENT_KIND = re.compile(r"[a-z_]{1,40}\Z")
+_RELAY_TOKEN = re.compile(r"[0-9a-f]{32}\Z")
 
 # Every retained deletion ID is an exact cross-restart replay prohibition.
 # Unlike bounded episode rows, tombstones CANNOT be silently evicted.
@@ -141,9 +142,15 @@ class MemoryStore:
                          kind TEXT NOT NULL,
                          summary TEXT NOT NULL,
                          observed_at REAL NOT NULL,
-                         confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1)
+                         confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1),
+                         relay_token TEXT
                        )"""
                 )
+                # Older private databases lack this nullable internal receipt.
+                if "relay_token" not in {
+                    row[1] for row in db.execute("PRAGMA table_info(memories)")
+                }:
+                    db.execute("ALTER TABLE memories ADD COLUMN relay_token TEXT")
                 # One private sidecar per robot, no JPEG or PCM stored.
                 db.execute(
                     """CREATE TABLE IF NOT EXISTS camera_provenance (
@@ -299,6 +306,7 @@ class MemoryStore:
         observed_at: float | None = None,
         confidence: float = 1.0,
         camera_provenance: CameraProvenance | None = None,
+        relay_token: str | None = None,
     ) -> bool:
         """Idempotently store one fact; duplicates do not rewrite earlier evidence."""
         if (not isinstance(robot_id, str) or not isinstance(source_robot, str)
@@ -311,6 +319,11 @@ class MemoryStore:
             raise ValueError("witnessed must be a boolean")
         if witnessed != (source_robot == robot_id):
             raise ValueError("Only this robot's own sensor observations are witnessed")
+        if relay_token is not None and (
+            witnessed or type(relay_token) is not str
+            or _RELAY_TOKEN.fullmatch(relay_token) is None
+        ):
+            raise ValueError("Only a secondhand copy can carry a relay receipt")
         if not isinstance(summary, str) or not 1 <= len(summary.strip()) <= 300:
             raise ValueError("Bounded nonempty description required")
         if "\x00" in summary:
@@ -378,11 +391,11 @@ class MemoryStore:
                 return False
             cursor = db.execute(
                 """INSERT OR IGNORE INTO memories
-                   (event_id,source_robot,witnessed,kind,summary,observed_at,confidence)
-                   VALUES (?,?,?,?,?,?,?)""",
+                   (event_id,source_robot,witnessed,kind,summary,observed_at,confidence,relay_token)
+                   VALUES (?,?,?,?,?,?,?,?)""",
                 (
                     event_id, source_robot, int(witnessed), kind, summary.strip(),
-                    float(when), float(confidence),
+                    float(when), float(confidence), relay_token,
                 ),
             )
             # Keep a bounded episodic store; rich long term semantic memory can
@@ -416,6 +429,26 @@ class MemoryStore:
                      str(identity[2]) if identity is not None else None),
                 )
             return retained
+
+    def retract_peer_copy(
+        self, robot_id: str, event_id: str, relay_token: str,
+    ) -> bool:
+        """Conditionally undo an internal relay without an operator tombstone.
+
+        The unique pending-insert receipt protects newer copies and explicit
+        corrections from a late cancelled sharing task.
+        """
+        if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
+            raise ValueError("Invalid memory event ID")
+        if type(relay_token) is not str or _RELAY_TOKEN.fullmatch(relay_token) is None:
+            raise ValueError("Invalid secondhand relay receipt")
+        with self._connect(robot_id) as db:
+            db.execute("BEGIN IMMEDIATE")
+            return db.execute(
+                """DELETE FROM memories
+                   WHERE event_id=? AND witnessed=0 AND relay_token=?""",
+                (event_id, relay_token),
+            ).rowcount == 1
 
     def get_episode(self, robot_id: str, event_id: str) -> Memory | None:
         """Look up one retained episode by ID without leaking peer history.
@@ -721,13 +754,20 @@ class MemoryStore:
             current = db.execute(
                 "SELECT summary FROM memories WHERE event_id=?", (event_id,)
             ).fetchone()
-            if current is None or current[0] == clean:
+            if current is None:
+                return False
+            if current[0] == clean:
+                # Human reaffirmation is no longer owned by a stale relay.
+                db.execute(
+                    "UPDATE memories SET relay_token=NULL "
+                    "WHERE event_id=? AND relay_token IS NOT NULL", (event_id,),
+                )
                 return False
             # Only the operator-correctable description changes. Event identity,
             # source, firsthand/peer attribution, kind, time and confidence stay
             # immutable, and the existing FTS UPDATE trigger refreshes search.
             return db.execute(
-                "UPDATE memories SET summary=? WHERE event_id=?",
+                "UPDATE memories SET summary=?,relay_token=NULL WHERE event_id=?",
                 (clean, event_id),
             ).rowcount == 1
 
