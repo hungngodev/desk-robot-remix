@@ -67,6 +67,46 @@ async def test_three_stable_charger_indications_are_not_battery_proof(monkeypatc
     assert head.commands == []
 
 
+@pytest.mark.parametrize(("transport_ms", "source_age_ms", "expected_stable"), [
+    (1200, 35, False),
+    (20, 35, True),
+    (10, 499, False),
+])
+async def test_dock_gpio_consumer_age_includes_http_transport(
+    monkeypatch, transport_ms, source_age_ms, expected_stable,
+):
+    import desk_robot.dock_evidence as evidence
+
+    now = [100.0]
+    monkeypatch.setattr(evidence, "monotonic", lambda: now[0])
+
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr(evidence.asyncio, "sleep", fast)
+    samples = fresh_samples()
+    for record in samples:
+        record["dock"]["age_ms"] = source_age_ms
+
+    class TimedHead(FakeHead):
+        async def aux_status(self):
+            # Different genuine WROOM acquisitions may still arrive too late.
+            now[0] += transport_ms / 1000.0
+            return await super().aux_status()
+
+    head = TimedHead(samples)
+    report = await observe_dock_evidence(head, "robot-01")
+    assert report["stable_three_samples"] is expected_stable
+    assert report["state"] == (
+        "charger_reports_active" if expected_stable
+        else "dock_telemetry_stale_at_consumer"
+    )
+    assert not report["charging_verified"]
+    assert not report["motor_authorized"]
+    assert not report["charging_authorized"]
+    assert head.commands == []
+
+
 async def test_asymmetric_switch_or_changing_input_refuses_seated_claim(monkeypatch):
     async def fast(_seconds):
         pass

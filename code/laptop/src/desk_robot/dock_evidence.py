@@ -7,6 +7,7 @@ diagnostic, not electrical qualification.
 from __future__ import annotations
 
 import asyncio
+from time import monotonic
 
 from .aux import validate_aux
 
@@ -54,14 +55,21 @@ async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> di
         # Do not let a cancellation-ignoring alternate telemetry adapter
         # freeze the read-only dock evidence request indefinitely.
         from .controller import _bounded_head_reply
-        sample = validate_aux(await _bounded_head_reply(
+        request_at = monotonic()
+        reply = await _bounded_head_reply(
             head.aux_status(), seconds=_DOCK_READ_TIMEOUT_S,
             timeout_message="Dock GPIO evidence read timed out",
-        ), robot_id)
+        )
+        # The device's age was stamped before the HTTP response reached Mac.
+        # Request latency is a conservative additional lower bound on age.
+        request_ms = max(0.0, (monotonic() - request_at) * 1000.0)
+        sample = validate_aux(reply, robot_id)
         dock = sample.get("dock")
         if dock is None or not dock["valid"] or not dock["present"]:
             return _result(robot_id, "dock_telemetry_unavailable", False)
-        # Validity and freshness are checked in validate_aux. A new HTTP
+        if dock["age_ms"] + request_ms >= 500:
+            return _result(robot_id, "dock_telemetry_stale_at_consumer", False)
+        # Source freshness is checked in validate_aux; transport time also counts. A new HTTP
         # response by itself does NOT mean a new physical GPIO conversion.
         sample_sequences.append(dock["seq"])
         # Both groups share one WROOM boot, but legacy captures may omit
