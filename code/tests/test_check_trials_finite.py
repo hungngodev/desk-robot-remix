@@ -41,7 +41,7 @@ def trial_rows():
 
 
 @pytest.mark.parametrize("invalid_id", [
-    "", " ", "\\t", "robot 01", "../robot-01", "robot-01\\n",
+    "", " ", "\t", "robot 01", "../robot-01", "robot-01\n",
     "a" * 41, None, True,
 ])
 def test_a5_rejects_invalid_selected_and_recorded_robot_ids(invalid_id):

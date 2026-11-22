@@ -24,10 +24,11 @@ def summarize(rows, robot_id):
     # Match RobotConfig.id. A blank or misspelled source label must never
     # certify a physical gripper as a configured robot or silently discard
     # a failed attempt from that robot's population.
-    valid_robot_id = lambda value: (
-        type(value) is str
-        and re.fullmatch(r"[a-zA-Z0-9_-]{1,40}", value) is not None
-    )
+    def valid_robot_id(value: object) -> bool:
+        return (
+            type(value) is str
+            and re.fullmatch(r"[a-zA-Z0-9_-]{1,40}", value) is not None
+        )
     if not valid_robot_id(robot_id) or any(
         not valid_robot_id(row.get("robot_id")) for row in rows
     ):
