@@ -1498,6 +1498,9 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
         "historical_combined_before_tax_shipping_usd": 54.08,
         "historical_over_cap_before_tax_shipping_usd": 4.08,
         "current_landed_total_verified": False,
+        "historical_over_cap_is_hypothetical": True,
+        "all_previous_project_spend_reconciled": False,
+        "lowest_complete_compatible_cart_verified": False,
     }
     assert not pilot["whole_first_robot_purchase_approved"]
     assert not pilot["lithium_charging_or_motor_motion_authorized"]
