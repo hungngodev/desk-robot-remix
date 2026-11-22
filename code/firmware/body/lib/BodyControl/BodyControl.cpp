@@ -54,6 +54,22 @@ void move_toward(int& current, int target, std::uint32_t steps) {
 
 }  // namespace
 
+bool BodyControl::configure_lift_travel_limits(const LiftTravelLimits& limits) {
+  // Limit selection is a boot-time physical measurement, not a UART or
+  // model command. Never adjust a live attached servo's safety envelope.
+  if (lift_limits_configured_ || state_.armed || state_.servos_attached ||
+      state_.lift != state_.lift_target ||
+      limits.min_deg < kServoMinDegrees ||
+      limits.max_deg > kServoMaxDegrees ||
+      limits.min_deg >= limits.max_deg ||
+      state_.lift < limits.min_deg || state_.lift > limits.max_deg) {
+    return false;
+  }
+  lift_limits_ = limits;
+  lift_limits_configured_ = true;
+  return true;
+}
+
 bool BodyControl::configure_jaw_force_limits(const JawForceLimits& limits) {
   // A running session cannot revise its own jaw safety authority.
   if (jaw_limits_configured_ || state_.armed ||
@@ -1277,8 +1293,9 @@ void BodyControl::execute(const char* line, std::size_t length,
         state_.accessories.gauge.cell_mv < 3300U;
     const bool local_motion_ready = cliff_ready && !driver_unhealthy &&
         !motor_cutoff_unqualified_ &&
-        // Guarded ARM attaches both MG90S PWM outputs. Never attach the jaw
-        // with its physical travel and startup angle still unqualified.
+        // Guarded ARM attaches BOTH MG90S channels. One unmeasured lifting
+        // link makes that attachment unsafe even if jaw limits are known.
+        (!lift_limits_required_ || lift_limits_configured_) &&
         (!grip_feedback_required_ || jaw_limits_configured_) &&
         !bumper_fault_latched_ && !battery_fault_latched_ &&
         !fuel_monitor_fault_latched_ &&
@@ -1336,6 +1353,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         battery_below_arm_min ? "battery_low" :
         fuel_monitor_required_ && !fuel_monitor_fresh(now_ms) ?
             "fuel_monitor_missing_or_stale" :
+        guarded_motion_profile() && lift_limits_required_ &&
+            !lift_limits_configured_ ? "lift_limits_unqualified" :
         guarded_motion_profile() && grip_feedback_required_ &&
             !jaw_limits_configured_ ? "jaw_limits_unqualified" :
         !guarded_motion_profile() ? "not_required" : "none";
@@ -1518,6 +1537,11 @@ void BodyControl::execute(const char* line, std::size_t length,
       std::snprintf(reply, capacity, "ERR arm motor_cutoff_unqualified");
       return;
     }
+    if (guarded_motion_profile() && lift_limits_required_ &&
+        !lift_limits_configured_) {
+      std::snprintf(reply, capacity, "ERR arm lift_limits_unqualified");
+      return;
+    }
     if (guarded_motion_profile() && grip_feedback_required_ &&
         !jaw_limits_configured_) {
       std::snprintf(reply, capacity, "ERR arm jaw_limits_unqualified");
@@ -1638,6 +1662,16 @@ void BodyControl::execute(const char* line, std::size_t length,
       std::snprintf(reply, capacity, "OK drive left=%d right=%d ms=%d",
                     state_.left, state_.right, duration);
     } else if (lift || grip) {
+      if (lift && lift_limits_required_) {
+        if (!lift_limits_configured_) {
+          std::snprintf(reply, capacity, "ERR lift travel_unqualified");
+          return;
+        }
+        if (first < lift_limits_.min_deg || first > lift_limits_.max_deg) {
+          std::snprintf(reply, capacity, "ERR lift outside_measured_endstops");
+          return;
+        }
+      }
       if (grip && grip_feedback_required_ && !grip_feedback_fresh(now_ms)) {
         std::snprintf(reply, capacity, "ERR grip force_missing_or_stale");
         return;

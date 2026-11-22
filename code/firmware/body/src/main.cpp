@@ -480,6 +480,23 @@ void setup() {
 #else
   Serial.println("WARN imu_attitude_unqualified wheels_locked");
 #endif
+  // ARM energizes BOTH positional MG90S channels. A generic 60..120 degree
+  // parser range does not qualify the actual lift horn, linkage or chassis.
+  // The default firmware leaves the lift and jaw unpowered at boot.
+  control.require_lift_travel_limits(true);
+#if defined(DESK_ROBOT_LIFT_LIMITS_QUALIFIED) && DESK_ROBOT_LIFT_LIMITS_QUALIFIED
+#if !defined(DESK_ROBOT_LIFT_MIN_DEG) || !defined(DESK_ROBOT_LIFT_MAX_DEG)
+#error Qualified lift travel requires measured minimum and maximum degrees
+#endif
+  const desk_robot::LiftTravelLimits lift_limits{
+      DESK_ROBOT_LIFT_MIN_DEG, DESK_ROBOT_LIFT_MAX_DEG};
+  if (!control.configure_lift_travel_limits(lift_limits)) {
+    control.force_disarm();
+    Serial.println("ERR lift_travel_limits_invalid servos_locked");
+  }
+#else
+  Serial.println("WARN lift_travel_unqualified servos_locked");
+#endif
   // A full physical jaw cannot execute a queued close while its own
   // ADS1115 feedback has gone stale. Bench-only fixtures remain opt-in.
   control.require_grip_feedback(true);

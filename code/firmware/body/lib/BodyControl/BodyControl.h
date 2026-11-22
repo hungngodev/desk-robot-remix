@@ -43,6 +43,13 @@ struct ImuAttitudeLimits {
 
 // The mounted jaw's force polarity and mechanical travel come only from
 // measured physical calibration. No arbitrary remote threshold is trusted.
+// Measured mechanical safe travel of the installed MG90S lifting link.
+// The commanded 90-degree startup duty must lie inside this envelope.
+struct LiftTravelLimits {
+  int min_deg = 0;
+  int max_deg = 0;
+};
+
 struct JawForceLimits {
   int open_deg = 0;
   int closed_deg = 0;
@@ -170,6 +177,11 @@ class BodyControl {
   // Full WROOM builds fail closed until an installed-board measurement exists.
   void require_imu_attitude_guard(bool required) { imu_attitude_required_ = required; }
   bool configure_imu_attitude_limits(const ImuAttitudeLimits& limits);
+  // Both MG90S PWM channels are attached by ARM. The full robot therefore
+  // requires the installed lift geometry to contain the 90-degree startup
+  // command; this is measured at assembly, never guessed from servo specs.
+  void require_lift_travel_limits(bool required) { lift_limits_required_ = required; }
+  bool configure_lift_travel_limits(const LiftTravelLimits& limits);
   // Physical full build must never advance an MG90S jaw toward a command
   // target without a recent, unclipped, independently acquired ADS1115
   // channel 1 value. The historical disconnected DC fixture opts out.
@@ -243,6 +255,9 @@ class BodyControl {
   std::uint8_t imu_attitude_good_streak_ = 0;
   bool attitude_sample_unsafe(const BerryReading& reading) const;
   bool attitude_recovery_ready(std::uint32_t now_ms) const;
+  bool lift_limits_required_ = false;
+  bool lift_limits_configured_ = false;
+  LiftTravelLimits lift_limits_{};
   bool grip_feedback_required_ = false;
   bool jaw_limits_configured_ = false;
   JawForceLimits jaw_limits_{};

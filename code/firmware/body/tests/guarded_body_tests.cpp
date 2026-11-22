@@ -2534,6 +2534,63 @@ static void mpu_static_attitude_fails_closed_and_needs_usb_recovery() {
 }
 
 
+
+static void full_profile_lift_requires_measured_startup_and_travel() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 100);
+  CHECK(guard.try_rearm(100));
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.require_lift_travel_limits(true);
+  CHECK(send(body, "status", 100).find("\"ready\":false") !=
+        std::string::npos);
+  CHECK(send(body, "status", 100).find(
+      "\"fault\":\"lift_limits_unqualified\"") != std::string::npos);
+  CHECK(send(body, "arm", 100) == "ERR arm lift_limits_unqualified");
+  CHECK(!body.state().armed && !body.state().servos_attached);
+  CHECK(!body.configure_lift_travel_limits({0, 120}));
+  CHECK(!body.configure_lift_travel_limits({60, 121}));
+  CHECK(!body.configure_lift_travel_limits({100, 90}));
+  CHECK(!body.configure_lift_travel_limits({95, 110})); // excludes startup 90
+  CHECK(!body.configure_lift_travel_limits({90, 90}));
+  // These are synthetic host test values, NOT a physical qualification.
+  CHECK(body.configure_lift_travel_limits({80, 110}));
+  CHECK(!body.configure_lift_travel_limits({60, 120}));
+  CHECK(send(body, "status", 100).find("\"ready\":true") !=
+        std::string::npos);
+  CHECK(send(body, "arm", 100) == "OK arm");
+  CHECK(body.state().servos_attached && body.state().lift == 90);
+  CHECK(send(body, "lift 79", 100) ==
+        "ERR lift outside_measured_endstops");
+  CHECK(send(body, "lift 111", 100) ==
+        "ERR lift outside_measured_endstops");
+  CHECK(body.state().lift_target == 90);
+  CHECK(send(body, "lift 110", 100) == "OK lift angle=110");
+  body.tick(120);
+  CHECK(body.state().lift == 91 && body.state().lift_target == 110);
+  CHECK(send(body, "stop", 121) == "OK stop");
+  CHECK(body.state().lift == 91 && body.state().lift_target == 91);
+  CHECK(body.state().servos_attached);
+  CHECK(!body.configure_lift_travel_limits({80, 120}));
+  CHECK(send(body, "disarm", 122) == "OK disarm");
+  CHECK(!body.state().servos_attached);
+  CHECK(!body.configure_lift_travel_limits({80, 120}));
+
+  // DC guarded profile has the same two-servo attachment veto.
+  desk_robot::CliffGuard dc_guard;
+  CHECK(dc_guard.configure(config()));
+  fresh(dc_guard, 200);
+  CHECK(dc_guard.try_rearm(200));
+  desk_robot::BodyControl dc(desk_robot::BodyProfile::DcGuarded, &dc_guard);
+  dc.require_lift_travel_limits(true);
+  CHECK(send(dc, "arm", 200) == "ERR arm lift_limits_unqualified");
+  CHECK(!dc.state().servos_attached);
+  CHECK(dc.configure_lift_travel_limits({80, 100}));
+  CHECK(send(dc, "arm", 200) == "OK arm");
+  CHECK(send(dc, "lift 101", 200) ==
+        "ERR lift outside_measured_endstops");
+}
+
 static void guarded_startup_never_attaches_unmeasured_jaw_pwm() {
   for (int which = 0; which < 2; ++which) {
     desk_robot::CliffGuard guard;
@@ -2628,6 +2685,7 @@ int main() {
     mpu_native_low_g_irq_vetoes_local_wheels();
     mpu_static_attitude_fails_closed_and_needs_usb_recovery();
     guarded_startup_never_attaches_unmeasured_jaw_pwm();
+    full_profile_lift_requires_measured_startup_and_travel();
     imu_replay_and_rollover_are_local_motion_safety_evidence();
     missing_mpu_interrupt_status_cannot_authorize_wheels();
     imu_status_preserves_physical_conversion_and_boot_identity();
