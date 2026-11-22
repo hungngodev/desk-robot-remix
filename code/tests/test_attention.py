@@ -709,3 +709,59 @@ def test_new_topic_event_cannot_be_hidden_by_old_generation_debounce(monkeypatch
         ledger.timeline("pet", 23)[0]["content"]
     )
     assert not ledger.sensor("pet", "safety_fault", 23)
+
+
+def test_social_topics_preserve_recent_operator_continuity_without_task_authority(
+    monkeypatch,
+):
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 500.0)
+    ledger = AttentionLedger(["pet", "peer"])
+    operator_gen = ledger.begin_topic("pet", "The small key fell", 10)
+    assert ledger.finish_topic("pet", operator_gen, 20, interrupted=True)
+    first_social = ledger.begin_topic(
+        "pet", "Guess my toy", 30, origin="autonomous_social",
+    )
+    cue = ledger.timeline("pet", 31)[0]
+    assert "Earlier interrupted operator topic" in cue["content"]
+    assert "The small key fell" in cue["content"]
+    assert "Guess my toy" in cue["content"]
+    assert "historical, no motion authority" in cue["content"]
+    assert "autonomous peer topic, not an operator command" in cue["content"]
+    assert cue["motor_authorized"] is False
+    assert len(cue["content"]) <= 260
+    assert not ledger.finish_topic("pet", operator_gen, 31.5, interrupted=False)
+    assert ledger.finish_topic("pet", first_social, 32, interrupted=False)
+    ledger.begin_topic("pet", "New peer game", 35, origin="autonomous_social")
+    assert "The small key fell" in ledger.timeline("pet", 36)[0]["content"]
+    assert ledger.timeline("peer", 36) == []
+    # A new operator instruction becomes the new single activity owner and
+    # clears that stale operator history, with no old second task to finish.
+    ledger.begin_topic("pet", "Now answer my question", 40, origin="operator")
+    latest = ledger.timeline("pet", 41)[0]["content"]
+    assert "Now answer my question" in latest
+    assert "The small key fell" not in latest
+
+
+def test_old_operator_topic_expires_without_erasing_current_social_or_fault(
+    monkeypatch,
+):
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 500.0)
+    ledger = AttentionLedger(["pet"])
+    first = ledger.begin_topic("pet", "Key", 1)
+    assert ledger.finish_topic("pet", first, 10, interrupted=False)
+    assert ledger.sensor("pet", "safety_fault", 11) is False
+    ledger.begin_topic("pet", "Play", 20, origin="autonomous_social")
+    assert ledger.sensor("pet", "safety_fault", 22)
+    near = ledger.timeline("pet", 23)[0]
+    assert "Earlier completed operator topic" in near["content"]
+    assert "WROOM safety_fault" in near["content"]
+    assert "historical, not current telemetry" in near["content"]
+    assert near["motor_authorized"] is False
+    far = ledger.timeline("pet", 131)[0]["content"]
+    assert "Earlier completed operator topic" not in far
+    assert "Play" in far
+    ledger.clear("pet")
+    ledger.begin_topic("pet", "Another game", 140, origin="autonomous_social")
+    assert "Earlier completed operator topic" not in (
+        ledger.timeline("pet", 141)[0]["content"]
+    )

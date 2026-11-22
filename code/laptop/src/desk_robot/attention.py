@@ -44,6 +44,11 @@ class _Attention:
     topic_origin: str = "operator"
     topic_state: str = "none"
     topic_updated_at: float = 0
+    # At most one recent operator topic survives when voluntary peer play
+    # starts; it is historical data, never a second active task owner.
+    prior_operator_topic: str = ""
+    prior_operator_at: float = -math.inf
+    prior_operator_state: str = ""
     voice_at: float = -math.inf
     voice_active: bool = False
     human_turns: int = 0
@@ -90,6 +95,23 @@ class AttentionLedger:
         # activity owner or erase its live sensor evidence.
         if state.generation > 0 and at <= state.topic_updated_at:
             raise ValueError("Topic start must follow prior topic activity")
+        if origin == "autonomous_social":
+            # Social banter may replace the current activity owner, but
+            # never silently delete the recent human topic. Only retain a
+            # completed/interrupted operator topic within its original
+            # continuity window. Active human work requires its own priority
+            # lease rather than a silently competing second task owner.
+            if (state.topic_origin == "operator"
+                    and state.topic_state in {"completed", "interrupted"}
+                    and state.topic
+                    and 0 <= at - state.topic_updated_at <= 120):
+                state.prior_operator_topic = state.topic
+                state.prior_operator_at = state.topic_updated_at
+                state.prior_operator_state = state.topic_state
+        else:
+            state.prior_operator_topic = ""
+            state.prior_operator_at = -math.inf
+            state.prior_operator_state = ""
         state.generation += 1
         state.topic = cleaned
         state.topic_origin = origin
@@ -242,6 +264,17 @@ class AttentionLedger:
             pieces.append(
                 "Newer uncertain ASR words (not verified command): "
                 + state.asr[:66]
+            )
+        # A voluntary social topic has lower conversational priority than
+        # the recent user's completed/interrupted topic. Preserve that fact
+        # as attributed past context, never an active instruction or permit.
+        if (state.topic_origin == "autonomous_social"
+                and state.prior_operator_topic
+                and 0 <= now - state.prior_operator_at <= 120):
+            pieces.append(
+                "Earlier " + state.prior_operator_state
+                + " operator topic (historical, no motion authority): "
+                + state.prior_operator_topic[:55]
             )
         if (state.topic and
                 (state.topic_state == "active" or
