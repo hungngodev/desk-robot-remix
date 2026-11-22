@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 import tomllib
 from pathlib import Path
 from typing import Literal
@@ -67,6 +68,7 @@ class Settings(BaseModel):
     # Global live camera grant covers every configured pet. Private Pydantic
     # storage never becomes a serializable configuration or model instruction.
     _camera_consent_generation: int = PrivateAttr(default=0)
+    _camera_consent_started_at: float = PrivateAttr(default=0.0)
     _voice_memory_consent_generation: int = PrivateAttr(default=0)
     _transcript_consent_generation: int = PrivateAttr(default=0)
     _room_station_consent_generation: int = PrivateAttr(default=0)
@@ -101,6 +103,11 @@ class Settings(BaseModel):
     max_job_seconds: float = Field(default=45, ge=1, le=120)
     trials_file: Path = Path("data/physical-trials.jsonl")
     memory_dir: Path = Path("../data/private/memory")
+
+    def model_post_init(self, __context: object) -> None:
+        # A boot-time live grant also needs a local monotonic admission fence.
+        if self.voice_vision_tools_enabled:
+            self._camera_consent_started_at = time.monotonic()
 
     @model_validator(mode="after")
     def unique_ids(self):
@@ -183,6 +190,10 @@ class Settings(BaseModel):
             # Even an immediate re-enable is a NEW grant; old VLM evidence
             # and in-flight plans must never regain the prior authorization.
             self._camera_consent_generation += 1
+        elif name == "voice_vision_tools_enabled" and self.voice_vision_tools_enabled and not was_granted:
+            # Sent Opus text has a Mac monotonic timestamp. A late HTTP
+            # receipt from the revoked grant cannot enter this new context.
+            self._camera_consent_started_at = time.monotonic()
         if memory_was_granted and not self.voice_memory_tools_enabled:
             # Disabling memory access revokes outstanding asynchronous reads.
             # The next opt-in is a new grant even without SQLite edits.
@@ -202,6 +213,10 @@ class Settings(BaseModel):
     @property
     def camera_consent_generation(self) -> int:
         return self._camera_consent_generation
+
+    @property
+    def camera_consent_started_at(self) -> float:
+        return self._camera_consent_started_at
 
     @property
     def voice_memory_consent_generation(self) -> int:

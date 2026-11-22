@@ -287,6 +287,13 @@ def register_native_omni_routes(
         if visual is None:
             raise HTTPException(503, "No authenticated Mac interaction owner")
         sent_at = request.sent_at_us / 1_000_000
+        # The native sender timestamps actual Opus transmission using the
+        # same host monotonic clock. A queued HTTP receipt from before a
+        # revoke/regrant is still fresh, but has no authority in this grant.
+        # Compare integer microseconds to avoid truncating a legitimate
+        # receipt sent in the first microsecond of the new grant.
+        if request.sent_at_us < int(settings.camera_consent_started_at * 1_000_000):
+            raise HTTPException(403, "Native sent receipt predates current live consent")
         added = visual.hub.remember_native_spoken(
             robot_id, request.event_id, request.model_text, sent_at,
         )
