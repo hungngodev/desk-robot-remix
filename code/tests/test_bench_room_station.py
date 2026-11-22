@@ -209,6 +209,41 @@ def test_room_bench_callback_failure_cannot_count_partial_usb_receipt():
     assert report["read_only_usb_sample_captured"] is False
 
 
+
+def test_room_bench_callback_error_after_valid_frame_blocks_success_receipt():
+    """A partial callback failure cannot be hidden by an earlier good USB frame."""
+    from dataclasses import replace
+
+    decoder = RoomStationDecoder()
+    genuine = decoder.accept(_packet(11, 1000), now=1.0)
+    incomplete = replace(genuine, readings={
+        key: value for key, value in genuine.readings.items()
+        if key != "amg8833"
+    })
+
+    class MixedFeed:
+        rejected = 0
+        callback_failures = 0
+
+        def __init__(self, port, on_observation):
+            self.on_observation = on_observation
+
+        def _read_port(self, running):
+            self.on_observation(genuine)
+            try:
+                self.on_observation(incomplete)
+            except ValueError:
+                self.callback_failures += 1
+
+    report = capture("/dev/cu.test", seconds=1,
+                     feed_factory=MixedFeed, clock=lambda: 0.0)
+    assert report["accepted_frames"] == 1
+    assert report["callback_failures"] == 1
+    assert report["first_station_sequence"] == 11
+    assert report["valid_sensor_frames"]["scd40"] == 1
+    assert report["read_only_usb_sample_captured"] is False
+
+
 def test_room_bench_records_terminal_blackout_without_another_frame():
     decoder = RoomStationDecoder()
     first = decoder.accept(_packet(5, 1000), now=10.2)

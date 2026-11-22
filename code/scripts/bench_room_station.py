@@ -123,7 +123,9 @@ def capture(
             round(max(silence_windows) * 1000, 1) if silence_windows else None
         ),
         "valid_sensor_frames": sensor_counts,
-        "read_only_usb_sample_captured": bool(sequence) and error is None,
+        "read_only_usb_sample_captured": (
+            bool(sequence) and error is None and reader.callback_failures == 0
+        ),
         "device_identity_authenticated": False,
         "sensor_accuracy_physically_qualified": False,
         "station_power_physically_qualified": False,
