@@ -372,6 +372,38 @@ int main() {
           jaw_stamp_before_pause);
     CHECK((stalled_ads.readings().force.valid_mask & 2U) != 0U);
     CHECK(stalled_ads.readings().force.valid);
+    // Like the ADS1115 above, an unread SHT41 single-shot result is not a
+    // fresh climate observation after a long WROOM scheduling stall. Lane 3
+    // starts a conversion at 696 ms; the next lane-3 visit after the gap must
+    // discard that old result without advancing its acquisition identity.
+    TwoWire stalled_sht_wire;
+    desk_robot::AccessorySensors stalled_sht;
+    CHECK(stalled_sht.begin(stalled_sht_wire));
+    for (std::uint32_t ms = 0; ms <= 696; ms += 12)
+      stalled_sht.poll(ms);
+    const auto climate_seq_before_pause =
+        stalled_sht.readings().climate.sample_seq;
+    const auto climate_stamp_before_pause =
+        stalled_sht.readings().climate.at_ms;
+    CHECK(climate_seq_before_pause > 0U);
+    CHECK(climate_stamp_before_pause > 0U);
+    CHECK(stalled_sht.readings().climate.valid);
+    for (std::uint32_t ms = 1692; ms <= 1764; ms += 12)
+      stalled_sht.poll(ms);
+    CHECK(stalled_sht.readings().climate.sample_seq ==
+          climate_seq_before_pause);
+    CHECK(stalled_sht.readings().climate.at_ms ==
+          climate_stamp_before_pause);
+    CHECK(!stalled_sht.readings().climate.valid);
+    // A later lane-3 visit issues a new single-shot command; only its later
+    // CRC-valid result may restore freshness and advance the sequence.
+    for (std::uint32_t ms = 1776; ms <= 1932; ms += 12)
+      stalled_sht.poll(ms);
+    CHECK(stalled_sht.readings().climate.valid);
+    CHECK(stalled_sht.readings().climate.sample_seq >
+          climate_seq_before_pause);
+    CHECK(stalled_sht.readings().climate.at_ms >
+          climate_stamp_before_pause);
     // A shared mux failure invalidates BOTH ADS1115 channels, not only
     // the aggregate flag. One recovered conversion cannot reuse the old pair.
     TwoWire force_fault_wire;

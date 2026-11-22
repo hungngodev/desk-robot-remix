@@ -354,6 +354,14 @@ void AccessorySensors::climate(std::uint32_t now_ms) {
     sht_started_ = now_ms;
     return;
   }
+  // A completed SHT41 single-shot result can remain readable long after
+  // the conversion that produced it. After a stalled WROOM loop that is old
+  // environmental evidence, so never restamp it as a current acquisition.
+  if (now_ms - sht_started_ >= 200U) {
+    c.valid = false;
+    sht_pending_ = false;
+    return;
+  }
   if (now_ms - sht_started_ < 12U) return;
   std::uint8_t b[6]{};
   // SHT4x data read has no register pointer after a measurement command.
