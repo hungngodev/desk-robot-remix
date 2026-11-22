@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
 import json
 import os
 import re
@@ -202,6 +203,42 @@ def device_map():
 
 def robot_for_device(device_id):
     return next((robot for robot, device in device_map().items() if device == device_id), None)
+
+
+def native_tts_config(conn):
+    """Per-device Kokoro voice within upstream's single Xiaozhi TTS owner.
+
+    Never modify the global config or trust a client-selected voice. Only
+    the current authenticated connection for a configured pet may select
+    the voice that the Mac operator assigned in local.toml.
+    """
+    config = conn.config
+    device = getattr(conn, "device_id", None)
+    robot = robot_for_device(device)
+    if robot is None:
+        return config  # Preserve upstream behavior for other clients.
+    if connections.get(device) is not conn:
+        raise RuntimeError("Native voice requires the current registered head")
+    try:
+        assignments = json.loads(os.environ.get("DESK_ROBOT_NATIVE_VOICE_MAP", "{}"))
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("Invalid trusted native fleet voice map") from exc
+    voice = assignments.get(robot) if isinstance(assignments, dict) else None
+    if (not isinstance(voice, str)
+            or re.fullmatch(r"[a-z]{2}_[a-z][a-z0-9_]{0,31}", voice) is None):
+        raise RuntimeError("Native fleet pet has no validated assigned voice")
+    selected = config.get("selected_module", {}).get("TTS")
+    if selected != "CustomTTS":
+        # A Volcengine speaker ID is not a Kokoro voice; refuse silent voice
+        # aliasing until that provider has its own verified per-pet mapping.
+        raise RuntimeError("Per-pet native voice requires CustomTTS Kokoro")
+    provider = config.get("TTS", {}).get("CustomTTS")
+    params = provider.get("params") if isinstance(provider, dict) else None
+    if not isinstance(params, dict) or provider.get("type") != "custom":
+        raise RuntimeError("Expected pinned CustomTTS params for pet voice")
+    isolated = copy.deepcopy(config)
+    isolated["TTS"]["CustomTTS"]["params"]["voice"] = voice
+    return isolated
 
 
 async def inject_live_context_into_legacy_llm(conn) -> None:

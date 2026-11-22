@@ -233,6 +233,12 @@ def files(root):
         '        """消息路由"""',
         '        """消息路由"""\n        import desk_robot_bridge\n        if desk_robot_bridge.suppress_message(self, message):\n            return',
     )
+    source = once(
+        source,
+        "            tts = initialize_tts(self.config)",
+        "            import desk_robot_bridge\n"
+        "            tts = initialize_tts(desk_robot_bridge.native_tts_config(self))",
+    )
     changes[path] = source
     path = "core/websocket_server.py"
     source = (root / path).read_text()

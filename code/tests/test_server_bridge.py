@@ -2472,3 +2472,107 @@ async def test_late_cleanup_cannot_erase_new_lease_incarnation(bridge, monkeypat
     await session(body_request({
         "device_ids": [ids[1]], "enabled": False, "lease_id": "a" * 32,
     }))
+
+
+def test_native_kokoro_voice_is_bound_to_current_pets_without_config_bleed(
+    bridge, monkeypatch,
+):
+    """Pinned CustomTTS uses per-connection params, never shared global voice."""
+    from types import SimpleNamespace
+
+    monkeypatch.setenv(
+        "DESK_ROBOT_NATIVE_VOICE_MAP",
+        json.dumps({"robot-01": "af_heart", "robot-02": "am_adam"}),
+    )
+    common = {
+        "selected_module": {"TTS": "CustomTTS"},
+        "TTS": {"CustomTTS": {
+            "type": "custom", "params": {"voice": "af_heart", "model": "kokoro"},
+        }},
+    }
+    first = SimpleNamespace(device_id="mac-01", config=common)
+    second = SimpleNamespace(device_id="mac-02", config=common)
+    bridge.register(first)
+    bridge.register(second)
+    first_tts = bridge.native_tts_config(first)
+    second_tts = bridge.native_tts_config(second)
+    assert first_tts["TTS"]["CustomTTS"]["params"]["voice"] == "af_heart"
+    assert second_tts["TTS"]["CustomTTS"]["params"]["voice"] == "am_adam"
+    assert common["TTS"]["CustomTTS"]["params"]["voice"] == "af_heart"
+    assert first_tts is not second_tts
+    assert first_tts["TTS"] is not second_tts["TTS"]
+    # A cached old connection cannot select a newly registered pet's voice.
+    with pytest.raises(RuntimeError, match="current registered"):
+        bridge.native_tts_config(SimpleNamespace(device_id="mac-02", config=common))
+    # Unknown nonfleet heads preserve pinned upstream default TTS behavior.
+    unknown = SimpleNamespace(device_id="other-client", config=common)
+    assert bridge.native_tts_config(unknown) is common
+
+
+@pytest.mark.parametrize("voice", [None, True, "af_heart;DROP", ""])
+def test_native_voice_refuses_missing_or_malformed_operator_mapping(
+    bridge, monkeypatch, voice,
+):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("DESK_ROBOT_NATIVE_VOICE_MAP", json.dumps({"robot-01": voice}))
+    config = {"selected_module": {"TTS": "CustomTTS"},
+              "TTS": {"CustomTTS": {"type": "custom", "params": {"voice": "af_heart"}}}}
+    owner = SimpleNamespace(device_id="mac-01", config=config)
+    bridge.register(owner)
+    with pytest.raises(RuntimeError, match="validated assigned voice"):
+        bridge.native_tts_config(owner)
+
+
+def test_native_kokoro_voice_fails_closed_for_unmapped_provider(bridge, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("DESK_ROBOT_NATIVE_VOICE_MAP", '{"robot-01": "af_heart"}')
+    conn = SimpleNamespace(
+        device_id="mac-01",
+        config={"selected_module": {"TTS": "HuoshanDoubleStreamTTSV2"},
+                "TTS": {"HuoshanDoubleStreamTTSV2": {"speaker": "other"}}},
+    )
+    bridge.register(conn)
+    with pytest.raises(RuntimeError, match="requires CustomTTS"):
+        bridge.native_tts_config(conn)
+
+
+def test_native_voice_mapping_export_matches_fleet_and_rejects_duplicates():
+    spec = importlib.util.spec_from_file_location(
+        "native_fleet_runner", ROOT / "laptop/server/run_server.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    devices, voices = module.fleet_device_and_voice_maps([
+        {"id": "robot-01", "device_id": "mac-01", "voice": "af_heart"},
+        {"id": "robot-02", "device_id": "mac-02", "voice": "am_adam"},
+        {"id": "robot-03", "device_id": "", "voice": "af_bella"},
+    ])
+    assert devices == {"robot-01": "mac-01", "robot-02": "mac-02"}
+    assert voices == {"robot-01": "af_heart", "robot-02": "am_adam"}
+    for invalid in [
+        [{"id": "robot-01", "device_id": "mac-01"}],
+        [{"id": "robot-01", "device_id": "mac-01", "voice": "bad value"}],
+        [{"id": "robot-01", "device_id": "mac-01", "voice": "af_heart"},
+         {"id": "robot-02", "device_id": "mac-01", "voice": "am_adam"}],
+    ]:
+        with pytest.raises(ValueError):
+            module.fleet_device_and_voice_maps(invalid)
+
+
+def test_pinned_upstream_connection_initializes_per_device_native_tts():
+    spec = importlib.util.spec_from_file_location(
+        "native_voice_overlay", ROOT / "laptop/server/install_overlay.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    patched = module.files(
+        ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server"
+    )["core/connection.py"]
+    assert "tts = initialize_tts(desk_robot_bridge.native_tts_config(self))" in patched
+    assert patched.count("tts = initialize_tts(") == 1
+    assert patched.index("desk_robot_bridge.register(self)") < patched.index(
+        "native_tts_config(self)"
+    )
+    compile(patched, "native_xiaozhi_connection.py", "exec")
