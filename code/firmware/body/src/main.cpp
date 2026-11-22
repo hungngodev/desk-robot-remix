@@ -42,6 +42,7 @@
 #include "ExpansionTouch.h"
 #include "PulsePad.h"
 #include "AccessorySensors.h"
+#include "McpContactEvidence.h"
 #include "TerminalIr.h"
 #include <Preferences.h>
 #endif
@@ -75,6 +76,7 @@ std::uint8_t touch_candidate_samples = 0;
 std::uint32_t touch_last_sample_ms = 0;
 
 std::uint32_t last_extra_sample_ms = 0;
+desk_robot::McpContactEvidence contact_evidence;
 void poll_optional(std::uint32_t now_ms) {
 #if defined(DESK_ROBOT_ENABLE_BUMPER) && DESK_ROBOT_ENABLE_BUMPER
   // NC series to GND; open or unplugged -> HIGH trip
@@ -96,20 +98,18 @@ void poll_optional(std::uint32_t now_ms) {
 #if (defined(DESK_ROBOT_ENABLE_REED) && DESK_ROBOT_ENABLE_REED) || \
     (defined(DESK_ROBOT_ENABLE_PIR) && DESK_ROBOT_ENABLE_PIR)
   const auto& extension = accessories.readings().optional_inputs;
-  const bool extension_fresh = extension.present && extension.valid &&
-      extension.sample_seq != 0 &&
-      now_ms - extension.at_ms <= 250U;
+  const bool extension_fresh = contact_evidence.observe(extension, now_ms);
 #endif
 #if defined(DESK_ROBOT_ENABLE_REED) && DESK_ROBOT_ENABLE_REED
   if (extension_fresh) {
     mask |= 2U;
-    reed = extension.reed_closed;
+    reed = contact_evidence.reed_closed();
   }
 #endif
 #if defined(DESK_ROBOT_ENABLE_PIR) && DESK_ROBOT_ENABLE_PIR
   if (extension_fresh) {
     mask |= 4U;
-    pir = extension.pir_active;
+    pir = contact_evidence.pir_active();
   }
 #endif
   control.sample_optional_inputs(mask, bumper, reed, pir);
