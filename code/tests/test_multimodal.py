@@ -3370,7 +3370,8 @@ async def test_continuous_stream_regrant_during_decode_rejects_old_frame(setting
         await asyncio.sleep(0.15)
         assert head.opens == 1  # Still holding the old physical camera lease.
         release.set()
-        await asyncio.wait_for(old_owner, timeout=2)
+        done, _ = await asyncio.wait({old_owner}, timeout=2)
+        assert done == {old_owner}
         async with asyncio.timeout(3):
             while head.opens < 2 or not service.hub.frames[rid]:
                 await asyncio.sleep(0.01)
@@ -3413,7 +3414,8 @@ async def test_camera_stream_regrant_after_worker_stops(settings):
             while not service.hub.frames[rid]:
                 await asyncio.sleep(0.01)
         settings.voice_vision_tools_enabled = False
-        await asyncio.wait_for(old_owner, timeout=2)
+        done, _ = await asyncio.wait({old_owner}, timeout=2)
+        assert done == {old_owner}
         assert head.closed == [1]
         assert not service.hub.frames[rid]
         settings.voice_vision_tools_enabled = True
