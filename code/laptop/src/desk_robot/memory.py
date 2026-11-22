@@ -38,6 +38,10 @@ class CoreMemoryMutationSuperseded(RuntimeError):
     """A newer operator mutation retired this core slot request."""
 
 
+class EpisodeMemoryMutationSuperseded(RuntimeError):
+    """A newer operator correction or deletion retired this episode request."""
+
+
 _CORE_SLOT = re.compile(r"[a-z][a-z0-9_]{1,39}\Z")
 _WORDS = re.compile(r"(?u)[^\W_]{2,}")
 _QUERY_FILLER = frozenset({
@@ -198,6 +202,15 @@ class MemoryStore:
                 db.execute(
                     """CREATE TABLE IF NOT EXISTS core_fact_mutations (
                          slot TEXT PRIMARY KEY,
+                         generation INTEGER NOT NULL CHECK(generation > 0)
+                       )"""
+                )
+                # Request ordering persists across async workers and Mac
+                # restarts. Only bounded event IDs, never private text, live
+                # here; an older correction cannot outlive a newer deletion.
+                db.execute(
+                    """CREATE TABLE IF NOT EXISTS episode_mutations (
+                         event_id TEXT PRIMARY KEY,
                          generation INTEGER NOT NULL CHECK(generation > 0)
                        )"""
                 )
@@ -617,7 +630,63 @@ class MemoryStore:
                 "DELETE FROM core_facts WHERE slot=?", (slot,)
             ).rowcount == 1
 
-    def correct_episode(self, robot_id: str, event_id: str, summary: str) -> bool:
+    def reserve_episode_mutation(
+        self, robot_id: str, event_id: str, summary: str | None = None,
+    ) -> int:
+        """Order the authenticated request before its offloaded SQLite write."""
+        if not isinstance(robot_id, str) or robot_id not in self.robot_ids:
+            raise ValueError("Unknown robot memory identity")
+        if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
+            raise ValueError("Invalid memory event ID")
+        if summary is not None and (
+            not isinstance(summary, str) or not 1 <= len(summary.strip()) <= 300
+            or "\x00" in summary
+        ):
+            raise ValueError("Bounded nonempty description required")
+        with self._connect(robot_id) as db:
+            db.execute("BEGIN IMMEDIATE")
+            return self._advance_episode_mutation(db, event_id)
+
+    @staticmethod
+    def _advance_episode_mutation(db: sqlite3.Connection, event_id: str) -> int:
+        old = db.execute(
+            "SELECT generation FROM episode_mutations WHERE event_id=?",
+            (event_id,),
+        ).fetchone()
+        if old is not None and old[0] >= (1 << 63) - 1:
+            raise ValueError("Episode memory generation exhausted")
+        generation = 1 if old is None else old[0] + 1
+        db.execute(
+            """INSERT INTO episode_mutations(event_id,generation) VALUES (?,?)
+               ON CONFLICT(event_id) DO UPDATE SET generation=excluded.generation""",
+            (event_id, generation),
+        )
+        return generation
+
+    @classmethod
+    def _require_episode_mutation(
+        cls, db: sqlite3.Connection, event_id: str, generation: int | None,
+    ) -> None:
+        if generation is None:
+            # Direct local corrections and safety deletions also retire an
+            # older pending API correction without losing their semantics.
+            cls._advance_episode_mutation(db, event_id)
+            return
+        if type(generation) is not int or generation <= 0:
+            raise ValueError("Invalid episode memory mutation generation")
+        current = db.execute(
+            "SELECT generation FROM episode_mutations WHERE event_id=?",
+            (event_id,),
+        ).fetchone()
+        if current != (generation,):
+            raise EpisodeMemoryMutationSuperseded(
+                "A newer operator episode mutation superseded this request"
+            )
+
+    def correct_episode(
+        self, robot_id: str, event_id: str, summary: str, *,
+        mutation_generation: int | None = None,
+    ) -> bool:
         """Correct local episode text without rewriting its evidence provenance."""
         if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
             raise ValueError("Invalid memory event ID")
@@ -626,6 +695,8 @@ class MemoryStore:
             raise ValueError("Bounded nonempty description required")
         clean = summary.strip()
         with self._connect(robot_id) as db:
+            db.execute("BEGIN IMMEDIATE")
+            self._require_episode_mutation(db, event_id, mutation_generation)
             current = db.execute(
                 "SELECT summary FROM memories WHERE event_id=?", (event_id,)
             ).fetchone()
@@ -639,12 +710,16 @@ class MemoryStore:
                 (clean, event_id),
             ).rowcount == 1
 
-    def forget_episode(self, robot_id: str, event_id: str) -> bool:
+    def forget_episode(
+        self, robot_id: str, event_id: str, *,
+        mutation_generation: int | None = None,
+    ) -> bool:
         """Explicit per-pet deletion; does not silently mutate peer memories."""
         if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
             raise ValueError("Invalid memory event ID")
         with self._connect(robot_id) as db:
             db.execute("BEGIN IMMEDIATE")
+            self._require_episode_mutation(db, event_id, mutation_generation)
             # Even a deletion arriving before a slow SQLite writer creates a
             # durable fence. Never copy a peer's deletion to this pet's DB.
             sealed = db.execute(

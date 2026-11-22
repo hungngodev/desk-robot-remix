@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .brain_context import is_camera_derived_timeline_item
 from .config import Settings
-from .memory import CoreMemoryMutationSuperseded
+from .memory import CoreMemoryMutationSuperseded, EpisodeMemoryMutationSuperseded
 
 
 class CoreMemoryRequest(BaseModel):
@@ -165,10 +165,17 @@ def register_memory_routes(
         except KeyError as exc:
             raise HTTPException(404, "Robot not found") from exc
         try:
+            # Reserve request order before asynchronously scheduling SQLite.
+            generation = app.state.runtime.memory.reserve_episode_mutation(
+                robot_id, event_id, request.summary,
+            )
             corrected = await asyncio.to_thread(
                 app.state.runtime.memory.correct_episode,
                 robot_id, event_id, request.summary,
+                mutation_generation=generation,
             )
+        except EpisodeMemoryMutationSuperseded as exc:
+            raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         if corrected:
@@ -190,9 +197,15 @@ def register_memory_routes(
         except KeyError as exc:
             raise HTTPException(404, "Robot not found") from exc
         try:
-            removed = await asyncio.to_thread(
-                app.state.runtime.memory.forget_episode, robot_id, event_id
+            generation = app.state.runtime.memory.reserve_episode_mutation(
+                robot_id, event_id,
             )
+            removed = await asyncio.to_thread(
+                app.state.runtime.memory.forget_episode, robot_id, event_id,
+                mutation_generation=generation,
+            )
+        except EpisodeMemoryMutationSuperseded as exc:
+            raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
         # The durable tombstone applies even when a delayed transcript
