@@ -118,6 +118,20 @@ int main() {
   if (touch.AcceptBoot(91) || cap.AcceptBoot(91)) return 10;
   if (!touch.AcceptBoot(92) || touch.Observe(4) != 0) return 11;
   if (touch.Observe(5) != 1 || touch.Observe(100) != 0) return 12;
+  // A zero epoch is never emitted by WROOM. Reject it before *any* edge
+  // baseline, and refuse to reuse a baseline after an invalid report.
+  desk_robot::RealTouchEdges zero;
+  if (zero.AcceptBoot(0)) return 13;
+  if (!zero.AcceptBoot(91) || zero.Observe(10) != 0) return 14;
+  if (zero.Observe(11) != 1) return 15;
+  if (zero.AcceptBoot(0)) return 16;
+  if (!zero.AcceptBoot(91) || zero.Observe(99) != 0) return 17;
+  if (zero.Observe(100) != 1) return 18;
+  // An invalid zero must not become a legitimate post-reboot epoch.
+  if (!zero.AcceptBoot(92) || zero.Observe(1) != 0) return 19;
+  if (zero.AcceptBoot(0) || zero.AcceptBoot(91)) return 20;
+  if (!zero.AcceptBoot(92) || zero.Observe(2) != 0) return 21;
+  if (zero.Observe(3) != 1) return 22;
   return 0;
 }
 """
@@ -147,3 +161,13 @@ def test_bridge_checks_matching_per_boot_status_before_face_events():
     assert "head_touch_edges_.AcceptBoot(" in text
     assert "body_cap_edges_.AcceptBoot(body_boot_id)" in text
     assert "head_touch_edges_.Observe(current)" in text
+
+
+def test_bridge_rejects_zero_wroom_boot_before_a_healthy_face():
+    """A zero epoch must not validate or publish a WROOM status report."""
+    bridge = (HEAD / "overlay/robot_bridge.cc").read_text()
+    body = (HEAD.parent / "body/src/main.cpp").read_text()
+    assert "control.set_boot_epoch(esp_random() | 1U);" in body
+    assert "!integer(imu_boot, 1, 4294967295.0)" in bridge
+    assert "!integer(side_boot, 1, 4294967295.0)" in bridge
+    assert "boot->valuedouble < 1 || boot->valuedouble > 4294967295.0" in bridge
