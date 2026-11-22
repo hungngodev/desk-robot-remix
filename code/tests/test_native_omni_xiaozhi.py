@@ -8852,6 +8852,66 @@ async def test_native_semantic_planner_overflow_marks_entire_answer_incomplete(
     assert session._readonly_capacity_exceeded is None
 
 
+def test_compound_visual_targets_survive_one_camera_route(native):
+    module, _ = native
+    requests, incomplete = module.native_readonly_requests_with_capacity(
+        "Look at the key and check your battery and look at the mug"
+    )
+    assert not incomplete
+    assert [route for route, _ in requests] == ["look", "power-status"]
+    assert "key" in requests[0][1]["question"].casefold()
+    assert "mug" in requests[0][1]["question"].casefold()
+    assert len(requests[0][1]["question"]) <= 280
+
+    repeated, repeated_incomplete = module.native_readonly_requests_with_capacity(
+        "Look at the key and check your battery and look at the key"
+    )
+    assert not repeated_incomplete
+    assert [route for route, _ in repeated] == ["look", "power-status"]
+    assert repeated[0][1]["question"].casefold().count("look at the key") == 1
+
+
+def test_distinct_unmergeable_same_route_read_is_disclosed(native):
+    module, _ = native
+    requests, incomplete = module.native_readonly_requests_with_capacity(
+        "Do you remember the key and check your battery "
+        "and do you remember the mug?"
+    )
+    assert [route for route, _ in requests] == [
+        "voice-context", "power-status",
+    ]
+    assert incomplete
+
+    long_key = "Look at the " + ("red " * 38) + "key"
+    long_mug = "look at the " + ("blue " * 35) + "mug"
+    requests, incomplete = module.native_readonly_requests_with_capacity(
+        long_key + " and check battery and " + long_mug
+    )
+    assert [route for route, _ in requests] == ["look", "power-status"]
+    assert incomplete
+
+
+async def test_native_queues_both_distinct_visual_targets_in_one_read(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    assert session._queue_readonly_tool({
+        "item_id": "visual_key_battery_mug",
+        "transcript": "Look at the key and check your battery and look at the mug",
+    })
+    queued = list(session._readonly_queue._queue)
+    assert [entry[0] for entry in queued] == ["look", "power-status"]
+    assert "key" in queued[0][1]["question"].casefold()
+    assert "mug" in queued[0][1]["question"].casefold()
+    assert session._readonly_capacity_exceeded is None
+
+
 def test_native_four_distinct_readonly_requests_report_cap_without_silent_drop(native):
     module, _ = native
     transcript = (

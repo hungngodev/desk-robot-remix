@@ -310,14 +310,37 @@ def native_readonly_requests_with_capacity(
         ) for part in clauses
     ]
     found: list[tuple[str, dict]] = []
-    seen: set[str] = set()
+    seen: dict[str, int] = {}
+    unmerged_requested_read = False
     for request in candidates:
         if request is None:
             continue
         route, payload = request
         if route in seen:
+            index = seen[route]
+            prior = found[index][1]
+            if prior == payload:
+                continue
+            # A single camera observation can answer multiple explicit
+            # visual questions. Preserve all distinct targets in one
+            # bounded request rather than silently dropping the later one.
+            if (route == "look" and type(prior.get("question")) is str
+                    and type(payload.get("question")) is str):
+                earlier = prior["question"].strip()
+                later = payload["question"].strip()
+                if " ".join(earlier.casefold().split()) == (
+                    " ".join(later.casefold().split())
+                ):
+                    continue
+                combined = earlier + "; " + later
+                if len(combined) <= 280:
+                    found[index] = (route, {"question": combined})
+                    continue
+            # Other routes may not support combining distinct questions.
+            # Disclose an unexecuted read rather than imply a full answer.
+            unmerged_requested_read = True
             continue
-        seen.add(route)
+        seen[route] = len(found)
         found.append((route, payload))
         if len(found) >= 4:
             break
@@ -327,9 +350,12 @@ def native_readonly_requests_with_capacity(
         # permit an explicitly requested independent READ-ONLY second clause.
         return (
             (whole,) if whole is not None else tuple(found),
-            truncated_requested_read,
+            truncated_requested_read or (
+                whole is None and unmerged_requested_read
+            ),
         )
-    return tuple(found[:3]), len(found) > 3 or truncated_requested_read
+    return (tuple(found[:3]), len(found) > 3 or
+            truncated_requested_read or unmerged_requested_read)
 
 
 def native_readonly_requests(
