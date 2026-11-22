@@ -144,6 +144,10 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
         std::fill_n(microphone_frame_.begin(), frames, 0);
         return 0;
     }
+    // Timestamp the completed PDM read once, before reference work or task
+    // scheduling can add an unrelated delay. This is a source-clock estimate,
+    // not a hardware exposure or acoustic speaker-playback receipt.
+    const int64_t capture_end_us = esp_timer_get_time();
     bool reference_ready = false;
     uint32_t consecutive_missing = 0;
     uint32_t overwrite_count = 0;
@@ -154,7 +158,6 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
         // activity. Counting attempted reads would fake an active PDM stream.
         microphone_frames_read_ += std::min(
             static_cast<uint32_t>(frames), UINT32_MAX - microphone_frames_read_);
-        const int64_t capture_end_us = esp_timer_get_time();
         FillSilenceLocked(capture_end_us);
         const uint32_t previous_overwrites = reference_overwrite_reads_;
         reference_ready = ReadReferenceLocked(
@@ -197,7 +200,7 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
             privacy_epoch == microphone_privacy_epoch_.load(std::memory_order_acquire)) {
             const bool already_ready = bench_window_.ready();
             bench_window_.offer(microphone_frame_.data(), reference_frame_.data(),
-                                static_cast<uint32_t>(frames), esp_timer_get_time(),
+                                static_cast<uint32_t>(frames), capture_end_us,
                                 reference_ready);
             // Snapshot activity at the final MIC callback. Later speaker
             // writes after raw capture completion cannot qualify this window.

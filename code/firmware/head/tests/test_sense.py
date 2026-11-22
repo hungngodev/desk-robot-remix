@@ -1350,6 +1350,23 @@ def test_sense_pcm_window_native_cpp_regression():
         )
         subprocess.run([str(exe)], check=True)
 
+def test_sense_pcm_capture_reuses_the_actual_pdm_read_end_clock():
+    """Reference selection and private PCM window must share one source time."""
+    codec = (HEAD / "sense/sense_reference_codec.cc").read_text()
+    read = codec.split("int SenseReferenceCodec::Read(", 1)[1].split(
+        "int SenseReferenceCodec::Write(", 1
+    )[0]
+    timestamp = "const int64_t capture_end_us = esp_timer_get_time();"
+    assert read.count(timestamp) == 1
+    assert read.index(timestamp) < read.index(
+        "std::lock_guard<std::mutex> lock(reference_mutex_);"
+    )
+    assert "reference_frame_.data(), frames, capture_end_us" in read
+    assert "static_cast<uint32_t>(frames), capture_end_us," in read
+    # A second later wall-clock read could mask source gaps or overlap.
+    assert "static_cast<uint32_t>(frames), esp_timer_get_time()" not in read
+
+
 def test_private_sense_pcm_bench_requires_explicit_fresh_consent():
     """No private image may inherit earlier raw microphone capture permission."""
     with tempfile.TemporaryDirectory() as directory:
