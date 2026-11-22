@@ -133,30 +133,33 @@
       "quantity": 4,
       "unit_usd": null,
       "price_status": "sample_quote_only",
-      "url": "https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole",
-      "fit": "Four independent downward corners on TCA9548A 0x70 channels 0-3 using the selected VL53L0X firmware path. ElectroPeak GY-530 is a low-cost candidate only. Buy or borrow one sample before any bulk order; verify real chip identity, 3.3V SDA/SCL behavior, lens height, black/glossy/transparent desk returns, loaded stopping margin, mount geometry and delivered price.",
-      "reference_unit_usd": 1.75,
-      "reference_price_date": "2026-11-20"
+      "url": "https://electropeak.com/gy-530-vl53l0x-laser-range-finder",
+      "fit": "Four independent downward corners on TCA9548A 0x70 channels 0-3 using the selected VL53L0X firmware path. ElectroPeak GY-530 is a low-cost candidate only. Buy or borrow one sample before any bulk order; verify real chip identity, 3.3V SDA/SCL behavior, lens height, black/glossy/transparent desk returns, loaded stopping margin, mount geometry and delivered price. The primary first-unit sample candidate is ElectroPeak SEN-19-006 (nominal 10.5 x 13.3 mm); do not substitute the historical SEN-19-018 double-hole carrier (nominal 25 x 10.7 mm) without separate electrical, optical and CAD fit review.",
+      "reference_unit_usd": 1.44,
+      "reference_price_date": "2026-11-18",
+      "candidate_seller_sku": "SEN-19-006"
     },
     {
       "item": "VL53L0X GY-530 generic forward obstacle carrier, exact sample unqualified",
       "quantity": 1,
       "unit_usd": null,
       "price_status": "sample_quote_only",
-      "url": "https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole",
-      "fit": "One forward guarded VL53L0X on TCA9548A 0x70 channel 4 using the same selected driver and carrier candidate. It does not prove gripper clearance or authorize reversing. Qualify the same one sample carrier electrically and optically before fleet purchase.",
-      "reference_unit_usd": 1.75,
-      "reference_price_date": "2026-11-20"
+      "url": "https://electropeak.com/gy-530-vl53l0x-laser-range-finder",
+      "fit": "One forward guarded VL53L0X on TCA9548A 0x70 channel 4 using the same selected driver and carrier candidate. It does not prove gripper clearance or authorize reversing. Qualify the same one sample carrier electrically and optically before fleet purchase. The primary first-unit sample candidate is ElectroPeak SEN-19-006 (nominal 10.5 x 13.3 mm); do not substitute the historical SEN-19-018 double-hole carrier (nominal 25 x 10.7 mm) without separate electrical, optical and CAD fit review.",
+      "reference_unit_usd": 1.44,
+      "reference_price_date": "2026-11-18",
+      "candidate_seller_sku": "SEN-19-006"
     },
     {
       "item": "VL53L0X GY-530 generic side and rear observation carriers, exact sample unqualified",
       "quantity": 3,
       "unit_usd": null,
       "price_status": "sample_quote_only",
-      "url": "https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole",
-      "fit": "Three diagnostic VL53L0X directions on TCA9548A 0x70 channels 5-7. These read-only side and rear observations never authorize reversing or turning. Use the same physically qualified carrier as the five critical lanes; do not order all three until the one sample electrical, optical and fit trial passes.",
-      "reference_unit_usd": 1.75,
-      "reference_price_date": "2026-11-20"
+      "url": "https://electropeak.com/gy-530-vl53l0x-laser-range-finder",
+      "fit": "Three diagnostic VL53L0X directions on TCA9548A 0x70 channels 5-7. These read-only side and rear observations never authorize reversing or turning. Use the same physically qualified carrier as the five critical lanes; do not order all three until the one sample electrical, optical and fit trial passes. The primary first-unit sample candidate is ElectroPeak SEN-19-006 (nominal 10.5 x 13.3 mm); do not substitute the historical SEN-19-018 double-hole carrier (nominal 25 x 10.7 mm) without separate electrical, optical and CAD fit review.",
+      "reference_unit_usd": 1.44,
+      "reference_price_date": "2026-11-18",
+      "candidate_seller_sku": "SEN-19-006"
     },
     {
       "item": "Owned Adafruit AT42QT1010 momentary touch breakout #1374",
@@ -253,5 +256,14 @@
   "historical_prototype_only": true,
   "procurement_authority": false,
   "superseded_by": "docs/hardware/full-feature-plan.json",
-  "warning": "This 2026-11-04 $50 quote uses outdated sensor models and incomplete role counts. Never use for current five robot purchases."
+  "warning": "This 2026-11-04 $50 quote uses outdated sensor models and incomplete role counts. Never use for current five robot purchases.",
+  "unselected_gy530_carrier_reference": {
+    "seller": "ElectroPeak",
+    "seller_sku": "SEN-19-018",
+    "url": "https://electropeak.com/gy-530-vl53l0x-laser-ranging-sensor-module-double-hole",
+    "reference_unit_usd": 1.75,
+    "reference_price_date": "2026-11-20",
+    "intended_status": "historical_alternative_not_selected_for_first_unit",
+    "note": "The double-hole GY-530 board has a different nominal 25 x 10.7 mm PCB envelope than selected SEN-19-006 (10.5 x 13.3 mm). Neither breakout revision has been physically measured, electrically inspected, or approved for loaded cliff safety."
+  }
 }
