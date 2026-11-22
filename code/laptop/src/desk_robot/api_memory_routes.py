@@ -36,8 +36,23 @@ def register_memory_routes(
     reservation_locks = {robot.id: asyncio.Lock() for robot in settings.robots}
 
     async def reserve_ordered(robot_id: str, reserve, *args) -> int:
-        async with reservation_locks[robot_id]:
-            return await asyncio.to_thread(reserve, robot_id, *args)
+        async def owned_reservation() -> int:
+            # The reservation task, not its HTTP request, owns the lock.
+            # Otherwise caller cancellation releases the lease while an
+            # already-started SQLite worker can still reorder future edits.
+            async with reservation_locks[robot_id]:
+                return await asyncio.to_thread(reserve, robot_id, *args)
+
+        worker = asyncio.create_task(owned_reservation())
+
+        def consume_unclaimed_result(done: asyncio.Task) -> None:
+            # A disconnected client may stop awaiting the shield, but the
+            # owner must complete and any error must still be observed.
+            if not done.cancelled():
+                done.exception()
+
+        worker.add_done_callback(consume_unclaimed_result)
+        return await asyncio.shield(worker)
 
     def invalidate_private_prompt(robot_id: str) -> None:
         """Revoke group prompts that may contain a changed private fact."""
