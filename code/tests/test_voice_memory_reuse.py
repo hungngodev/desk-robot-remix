@@ -21,7 +21,15 @@ def test_xiaozhi_memory_tool_calls_only_scoped_readonly_mac_endpoint():
     api = (root / "laptop/src/desk_robot/api.py").read_text()
     routes = (root / "laptop/src/desk_robot/api_memory_routes.py").read_text()
     assert 'elif route == "voice-context"' in bridge
-    assert 'client.get(f"/v1/pet/{robot}/voice-context")' in bridge
+    voice_context = bridge.split('elif route == "voice-context":', 1)[1].split(
+        'elif route == "look":', 1,
+    )[0]
+    assert "signed_get(" in voice_context
+    assert "client.get(" not in voice_context
+    assert 'f"/v1/pet/{robot}/voice-context"' in voice_context
+    assert 'params={"query": payload["question"]}' in voice_context
+    assert 'receipt_token = os.environ.get("DESK_ROBOT_SPEECH_TOKEN", "")' in bridge
+    assert '"X-Desk-Robot-Tool-Receipt-Signature": signature' in bridge
     assert '"desk_robot_memories"' in bridge
     assert 'if not settings.voice_memory_tools_enabled:' in routes
     assert '"no_new_motion_permission": True' in routes
