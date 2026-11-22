@@ -149,13 +149,21 @@ def calibrate_images(folder: Path, *, columns: int, rows: int,
             or value.strip() != value or len(value) > 160
         ):
             raise ValueError(f"Record actual {field_name} for dock calibration")
-    import cv2
-    import numpy as np
-
+    # An original on-head capture must be a regular file below the chosen
+    # capture folder. Path.is_file() and read_bytes() otherwise follow a
+    # symlink and can silently import an unrelated JPEG as measured evidence.
+    # Check the entire lexical directory chain, not only the final folder.
+    if any(part.is_symlink() for part in (folder, *folder.parents)):
+        raise ValueError("Checkerboard capture directory must not use symlinks")
     files = sorted(p for p in folder.iterdir()
                    if p.is_file() and p.suffix.lower() in (".jpg", ".jpeg"))
+    if any(path.is_symlink() for path in files):
+        raise ValueError("Original checkerboard JPEG must not be a symlink")
     if len(files) < 12:
         raise ValueError("Provide at least 12 original checkerboard JPEGs")
+
+    import cv2
+    import numpy as np
     views = []
     size = None
     for path in files:

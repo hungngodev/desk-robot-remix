@@ -200,3 +200,35 @@ def test_operator_recorded_calibration_identity_validation_before_cv2(
             camera_sensor_pid="OV5640", robot_id=robot_id,
             head_device_id=head_id if head_id is not None else "",
         )
+
+
+@pytest.mark.parametrize("kind", ["linked_image", "linked_folder", "linked_ancestor"])
+def test_original_checkerboard_sources_reject_symlink_aliases(tmp_path, kind):
+    """A copied or linked unrelated JPEG is not an original head capture."""
+    actual = tmp_path / "capture"
+    actual.mkdir()
+    image_root = actual
+    if kind == "linked_image":
+        external = tmp_path / "unrelated.jpg"
+        external.write_bytes(b"\\xff\\xd8" + b"x" * 128 + b"\\xff\\xd9")
+        for index in range(12):
+            (actual / f"{index:02}.jpg").symlink_to(external)
+    elif kind == "linked_folder":
+        image_root = tmp_path / "shortcut"
+        image_root.symlink_to(actual, target_is_directory=True)
+    else:
+        ancestor = tmp_path / "real_parent"
+        ancestor.mkdir()
+        link = tmp_path / "linked_parent"
+        link.symlink_to(ancestor, target_is_directory=True)
+        image_root = link / "photos"
+        image_root.mkdir()
+    # Preflight must reject the alias before file decoding, and without
+    # needing an installed OpenCV runtime or enabling motor/charge authority.
+    with pytest.raises(ValueError, match="symlink"):
+        fitter().calibrate_images(
+            image_root, columns=9, rows=6, square_mm=10,
+            tag_side_mm=60, marker_id=2, target_distance_mm=200,
+            camera_sensor_pid="OV5640",
+            robot_id="robot-01", head_device_id="xiaozhi-01",
+        )
