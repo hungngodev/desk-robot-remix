@@ -20,9 +20,10 @@ from PIL import Image
 
 def _reject_private_output_symlink_ancestors(folder: Path) -> None:
     """Do not redirect operator-consented JPEGs through a linked parent."""
-    # abspath keeps the original path components for lstat-style symlink
-    # checks, unlike resolve(), which would conceal the redirection.
-    absolute = Path(os.path.abspath(folder))
+    # Path.absolute() preserves .. components. os.path.abspath() applies
+    # normpath first and could hide `link/../` before link detection,
+    # even though the filesystem traverses that symlink before `..`.
+    absolute = folder.absolute()
     if any(parent.is_symlink() for parent in absolute.parents):
         raise ValueError("Private checkerboard output has a symlink ancestor")
 

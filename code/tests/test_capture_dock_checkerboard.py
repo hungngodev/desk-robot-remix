@@ -201,3 +201,29 @@ async def test_checkerboard_private_images_reject_symlink_ancestor(
         await capture_checkerboards(object(), folder, count=12, prompt=no_prompt)
     assert not (external / "capture").exists()
     assert not (external / "nested" / "capture").exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("relative", [False, True])
+async def test_checkerboard_private_images_reject_symlink_parent_dotdot(
+    tmp_path, monkeypatch, relative,
+):
+    external = tmp_path / "shared-destination"
+    nested = external / "nested"
+    nested.mkdir(parents=True)
+    linked = tmp_path / "redirect"
+    linked.symlink_to(nested, target_is_directory=True)
+    if relative:
+        monkeypatch.chdir(tmp_path)
+        folder = Path("redirect") / ".." / "private-capture"
+    else:
+        folder = linked / ".." / "private-capture"
+
+    async def no_prompt(_index):
+        raise AssertionError("No physical capture before path check")
+
+    # The filesystem follows redirect to external/nested before applying ..,
+    # but os.path.abspath would hide redirect during the privacy preflight.
+    with pytest.raises(ValueError, match="symlink ancestor"):
+        await capture_checkerboards(object(), folder, count=12, prompt=no_prompt)
+    assert not (external / "private-capture").exists()
