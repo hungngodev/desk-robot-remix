@@ -1,12 +1,62 @@
 """Xiaozhi tools cannot create an operator permit or send raw motor commands."""
 
 import asyncio
+import hashlib
+import hmac
+import json
 import os
+import secrets
+import time
 
 import desk_robot_bridge as bridge
 import httpx
 from desk_robot_bridge import connections, robot_for_device
 from plugins_func.register import Action, ActionResponse, ToolType, register_function
+
+
+def _receipt_message(
+    robot_id: str,
+    device_id: str,
+    generation: int,
+    method: str,
+    path: str,
+    issued_us: int,
+    receipt_id: str,
+) -> bytes:
+    return json.dumps(
+        [1, robot_id, device_id, generation, method.upper(), path, issued_us, receipt_id],
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("ascii")
+
+
+def _receipt_headers(
+    signing_token: str,
+    robot_id: str,
+    device_id: str,
+    generation: int,
+    method: str,
+    path: str,
+) -> dict[str, str]:
+    if type(generation) is not int or not 0 <= generation <= 0x7fffffffffffffff:
+        raise ValueError("Invalid Xiaozhi tool turn generation")
+    issued_us = time.time_ns() // 1000
+    receipt_id = secrets.token_hex(16)
+    signature = hmac.new(
+        signing_token.encode("utf-8"),
+        _receipt_message(
+            robot_id, device_id, generation, method, path, issued_us, receipt_id
+        ),
+        hashlib.sha256,
+    ).hexdigest()
+    return {
+        "X-Desk-Robot-Tool-Receipt": "1",
+        "X-Desk-Robot-Tool-Receipt-Id": receipt_id,
+        "X-Desk-Robot-Tool-Receipt-At-Us": str(issued_us),
+        "X-Desk-Robot-Tool-Receipt-Device": device_id,
+        "X-Desk-Robot-Tool-Receipt-Generation": str(generation),
+        "X-Desk-Robot-Tool-Receipt-Signature": signature,
+    }
 
 
 async def call(conn, route, payload=None):
@@ -20,8 +70,10 @@ async def call(conn, route, payload=None):
         return {"error": "Unsupported robot tool route", "retried": False}
     robot = robot_for_device(conn.device_id)
     token = os.environ.get("DESK_ROBOT_TOOL_TOKEN", "")
+    receipt_token = os.environ.get("DESK_ROBOT_SPEECH_TOKEN", "")
     if (robot is None or connections.get(conn.device_id) is not conn
-            or len(token) < 24):
+            or len(token) < 24 or len(receipt_token) < 24
+            or secrets.compare_digest(token, receipt_token)):
         # A detached old WebSocket must not issue a Mac action after a
         # replacement head reconnects under the same configured device ID.
         return {"error": "Current registered head or local tool credential missing"}
@@ -29,53 +81,79 @@ async def call(conn, route, payload=None):
     # A newer speech_start, AEC barge, or head reconnect invalidates its
     # result even when the Mac completed its HTTP request successfully.
     generation = getattr(bridge, "voice_turn_generation", {}).get(conn.device_id, 0)
+    if type(generation) is not int or not 0 <= generation <= 0x7fffffffffffffff:
+        return {"error": "Robot tool turn identity invalid", "retried": False}
+
     async def request_mac():
         async with httpx.AsyncClient(
-            base_url="http://127.0.0.1:8765", timeout=5,
-            headers={
-                "Authorization": f"Bearer {token}",
-                # Mac records only explicitly requested read-only tool
-                # receipts. Normal operator or background status polling
-                # must never crowd out an actual conversation.
-                "X-Desk-Robot-Tool-Receipt": "1",
-            }
+            base_url="http://127.0.0.1:8765",
+            timeout=5,
+            headers={"Authorization": f"Bearer {token}"},
         ) as client:
+            async def signed_get(path, **kwargs):
+                return await client.get(
+                    path,
+                    headers=_receipt_headers(
+                        receipt_token,
+                        robot,
+                        conn.device_id,
+                        generation,
+                        "GET",
+                        path,
+                    ),
+                    **kwargs,
+                )
+
+            async def signed_post(path, **kwargs):
+                return await client.post(
+                    path,
+                    headers=_receipt_headers(
+                        receipt_token,
+                        robot,
+                        conn.device_id,
+                        generation,
+                        "POST",
+                        path,
+                    ),
+                    **kwargs,
+                )
+
             if route == "status":
-                response = await client.get(f"/v1/robots/{robot}/status")
+                response = await signed_get(f"/v1/robots/{robot}/status")
             elif route == "power-status":
-                response = await client.get(f"/v1/pet/{robot}/power-status")
+                response = await signed_get(f"/v1/pet/{robot}/power-status")
             elif route == "aux-status":
                 # Reuse the existing authenticated and validated WROOM sensor
                 # adapter; never accept an arbitrary model-selected URL.
-                response = await client.get(f"/v1/robots/{robot}/aux")
+                response = await signed_get(f"/v1/robots/{robot}/aux")
             elif route == "latest-pickup":
-                response = await client.get(
+                response = await signed_get(
                     f"/v1/robots/{robot}/jobs/latest-pickup"
                 )
             elif route == "interaction-context":
-                response = await client.get(
+                response = await signed_get(
                     f"/v1/pet/{robot}/interaction-context"
                 )
             elif route == "voice-context":
                 if payload and payload.get("question"):
-                    response = await client.get(
+                    response = await signed_get(
                         f"/v1/pet/{robot}/voice-context",
                         params={"query": payload["question"]},
                     )
                 else:
-                    response = await client.get(f"/v1/pet/{robot}/voice-context")
+                    response = await signed_get(f"/v1/pet/{robot}/voice-context")
             elif route == "look":
-                response = await client.post(
+                response = await signed_post(
                     f"/v1/pet/{robot}/look", json=payload or {},
                     timeout=50,
                 )
             elif route == "plan-readonly":
-                response = await client.post(
+                response = await signed_post(
                     f"/v1/pet/{robot}/plan-readonly",
                     json=payload or {}, timeout=4,
                 )
             else:
-                response = await client.post(
+                response = await signed_post(
                     f"/v1/robots/{robot}/{route}", json=payload or {}
                 )
 

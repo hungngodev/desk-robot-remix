@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
+import json
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -44,6 +47,25 @@ from .runtime import Runtime
 from .transport import HeadError
 
 _PET_SHUTDOWN_TIMEOUT_S = 1.0
+_TOOL_RECEIPT_MAX_AGE_US = 5_000_000
+_TOOL_RECEIPT_REPLAY_TTL_S = 10.0
+
+
+def _tool_receipt_message(
+    robot_id: str,
+    device_id: str,
+    generation: int,
+    method: str,
+    path: str,
+    issued_us: int,
+    receipt_id: str,
+) -> bytes:
+    """Canonical bridge to Mac receipt payload, never model supplied text."""
+    return json.dumps(
+        [1, robot_id, device_id, generation, method.upper(), path, issued_us, receipt_id],
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("ascii")
 
 
 class CommandRequest(BaseModel):
@@ -104,6 +126,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             await app.state.runtime.close()
 
     app = FastAPI(title="Desk robot controls", version="0.1.0", lifespan=lifespan)
+    consumed_tool_receipts: dict[str, float] = {}
 
     async def authorize(credentials: HTTPAuthorizationCredentials | None = Depends(security)):
         if (
@@ -148,19 +171,81 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         # Background UI/status polling must not become conversation history.
         if request.headers.get("x-desk-robot-tool-receipt") != "1":
             return None
-        # Operator dashboard access and Xiaozhi tool execution intentionally
-        # have different credentials. A caller cannot promote a normal
-        # operator read into model dialogue by adding an untrusted header.
+        # The tool bearer authorizes the bounded Mac route, but it is not proof
+        # that this HTTP request came from the active Xiaozhi voice turn.
         authorization = request.headers.get("authorization", "")
         scheme, separator, credential = authorization.partition(" ")
         if (scheme.lower() != "bearer" or not separator
                 or not credential.isascii()
                 or not secrets.compare_digest(credential, app.state.tool_token)):
             return None
+        try:
+            configured_device = settings.robot(robot_id).device_id
+        except KeyError:
+            return None
+        receipt_id = request.headers.get("x-desk-robot-tool-receipt-id", "")
+        issued_text = request.headers.get("x-desk-robot-tool-receipt-at-us", "")
+        device_id = request.headers.get("x-desk-robot-tool-receipt-device", "")
+        generation_text = request.headers.get(
+            "x-desk-robot-tool-receipt-generation", ""
+        )
+        signature = request.headers.get("x-desk-robot-tool-receipt-signature", "")
+        if (
+            not configured_device
+            or device_id != configured_device
+            or len(receipt_id) != 32
+            or any(char not in "0123456789abcdef" for char in receipt_id)
+            or len(signature) != 64
+            or any(char not in "0123456789abcdef" for char in signature)
+            or not issued_text.isascii()
+            or not issued_text.isdigit()
+            or not generation_text.isascii()
+            or not generation_text.isdigit()
+        ):
+            return None
+        issued_us = int(issued_text)
+        generation = int(generation_text)
+        if generation > 0x7fffffffffffffff:
+            return None
+        now_us = time.time_ns() // 1000
+        if abs(now_us - issued_us) > _TOOL_RECEIPT_MAX_AGE_US:
+            return None
+        try:
+            signing_token = secret(settings.speech_bridge_token_env)
+        except ValueError:
+            return None
+        if secrets.compare_digest(signing_token, app.state.tool_token):
+            return None
+        expected = hmac.new(
+            signing_token.encode("utf-8"),
+            _tool_receipt_message(
+                robot_id,
+                device_id,
+                generation,
+                request.method,
+                request.url.path,
+                issued_us,
+                receipt_id,
+            ),
+            hashlib.sha256,
+        ).hexdigest()
+        if not secrets.compare_digest(signature, expected):
+            return None
+
         visual = getattr(app.state.runtime, "multimodal", None)
         epochs = getattr(visual, "_turn_epoch", None)
         if not isinstance(epochs, dict) or robot_id not in epochs:
             return None
+
+        # Every signed bridge request is a one-shot provenance receipt.
+        # Prune only expired IDs and consume after all authentication checks.
+        now = time.monotonic()
+        for old_id, expires_at in tuple(consumed_tool_receipts.items()):
+            if expires_at <= now:
+                consumed_tool_receipts.pop(old_id, None)
+        if receipt_id in consumed_tool_receipts:
+            return None
+        consumed_tool_receipts[receipt_id] = now + _TOOL_RECEIPT_REPLAY_TTL_S
         return visual, epochs[robot_id]
 
     def remember_tool_context(owner, robot_id: str, kind: str, summary: str) -> bool:
