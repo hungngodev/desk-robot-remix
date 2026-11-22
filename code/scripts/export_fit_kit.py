@@ -198,6 +198,28 @@ def reference_body_footprint_screen(root: Path, output: Path) -> dict:
     return result
 
 
+def _reject_fit_kit_output_aliases(output: Path) -> None:
+    """Never read or publish generated CAD through symlinked artifact paths.
+
+    The candidate output is user selected, but its three generated part
+    directories and manifest must remain inside that selected directory.
+    Check before deleting a prior manifest or starting any mesh render.
+    """
+    paths = [output, output / "fit_kit_manifest.json"]
+    groups = (
+        ("adapter_stls", ADAPTERS),
+        ("fit_stls", (*GAUGES, *SPEAKER_FITS, *RANGER_FITS, *MG90S_FITS)),
+        ("dock_stls", DOCKS),
+    )
+    for folder, names in groups:
+        root = output / folder
+        paths.append(root)
+        paths.extend(root / f"{name}.stl" for name in names)
+    for path in paths:
+        if path.is_symlink():
+            raise ValueError(f"Symlinked fit kit output path: {path}")
+
+
 def export_kit(
     root: Path = ROOT, *, output_dir: Path | None = None,
     openscad: str = "openscad",
@@ -218,6 +240,7 @@ def export_kit(
         if not source.is_file():
             raise FileNotFoundError(f"Missing original parametric source: {source}")
     out.mkdir(parents=True, exist_ok=True)
+    _reject_fit_kit_output_aliases(out)
     # Fail closed: a failed rebuild cannot retain an old success manifest.
     (out / "fit_kit_manifest.json").unlink(missing_ok=True)
     rendered: list[dict] = []
@@ -349,6 +372,7 @@ def reject_nonfinite_fit_kit_number(token: str) -> None:
 def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict:
     """Reject stale or changed print files; does not certify fit or power."""
     output = output_dir or root / "docs/cad/remixes"
+    _reject_fit_kit_output_aliases(output)
     manifest = output / "fit_kit_manifest.json"
     if not manifest.is_file():
         # Fresh clones deliberately do not ship generated, unqualified STLs.

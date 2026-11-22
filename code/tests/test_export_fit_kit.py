@@ -336,6 +336,59 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
         assert report[key] is False
 
 
+@pytest.mark.parametrize("alias", [
+    "root", "manifest", "adapter_dir", "fit_dir", "dock_dir", "mesh",
+])
+def test_export_and_verify_reject_symlinked_artifacts_before_mutation(
+    monkeypatch, tmp_path, alias,
+):
+    """A stale alias must not redirect a rendered coupon or erase evidence."""
+    source = module()
+    output = tmp_path / "selected"
+    output.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    existing = output / "fit_kit_manifest.json"
+    existing.write_text("prior manifest")
+    external_file = outside / "unchanged.stl"
+    external_file.write_text("unchanged")
+    if alias == "root":
+        actual = outside / "actual"
+        actual.mkdir()
+        existing = actual / "fit_kit_manifest.json"
+        existing.write_text("prior manifest")
+        output = tmp_path / "linked-output"
+        output.symlink_to(actual, target_is_directory=True)
+    elif alias == "manifest":
+        existing.unlink()
+        existing.symlink_to(external_file)
+    elif alias.endswith("_dir"):
+        folder = {
+            "adapter_dir": "adapter_stls",
+            "fit_dir": "fit_stls",
+            "dock_dir": "dock_stls",
+        }[alias]
+        (output / folder).symlink_to(outside, target_is_directory=True)
+    elif alias == "mesh":
+        (output / "fit_stls").mkdir()
+        (output / "fit_stls/battery_boost_tray.stl").symlink_to(
+            external_file
+        )
+    # This check must run before invoking OpenSCAD or removing the manifest.
+    monkeypatch.setattr(source.shutil, "which", lambda _: "/usr/bin/openscad")
+    with pytest.raises(ValueError, match="Symlinked fit kit output path"):
+        source.export_kit(ROOT, output_dir=output)
+    assert existing.read_text() == (
+        "unchanged" if alias == "manifest" else "prior manifest"
+    )
+    assert external_file.read_text() == "unchanged"
+    assert sorted(p.name for p in outside.iterdir()) == (
+        ["actual", "unchanged.stl"] if alias == "root" else ["unchanged.stl"]
+    )
+    with pytest.raises(ValueError, match="Symlinked fit kit output path"):
+        source.verify_fit_kit(ROOT, output_dir=output)
+
+
 def test_failed_cad_render_never_publishes_partial_parts(monkeypatch, tmp_path):
     source = module()
     folder = tmp_path / "docs/cad/remixes"
