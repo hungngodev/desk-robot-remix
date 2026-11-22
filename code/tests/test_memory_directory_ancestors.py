@@ -48,11 +48,11 @@ def test_loaded_memory_path_does_not_erase_configured_symlink(tmp_path):
     (tmp_path / "alias").symlink_to(actual, target_is_directory=True)
     config = tmp_path / "robot.toml"
     config.write_text(
-        'memory_dir = "alias/private"\\n'
-        '[[robots]]\\n'
-        'id = "robot-01"\\n'
-        'name = "Pet"\\n'
-        'token_env = "DESK_ROBOT_HEAD_TOKEN"\\n',
+        'memory_dir = "alias/private"\n'
+        '[[robots]]\n'
+        'id = "robot-01"\n'
+        'name = "Pet"\n'
+        'token_env = "DESK_ROBOT_HEAD_TOKEN"\n',
         encoding="utf-8",
     )
     settings = load_settings(config)
