@@ -2,11 +2,11 @@
 
 This is an example **fit tester**, not the final charging dock.
 
-Before the full cradle, render and print the smaller rail entry coupon:
+From the repository root, render and print the smaller rail entry coupon:
 
 ```sh
 openscad --export-format binstl -o dock_rail_entry_coupon.stl \
-  -D 'part="dock_rail_entry_coupon"' dock_passive_fit.scad
+  -D 'part="dock_rail_entry_coupon"' docs/cad/remixes/dock/dock_passive_fit.scad
 ```
 
 The default 96 mm track example yields a 126 by 48 by 15 mm coupon,
@@ -56,7 +56,7 @@ left/right separation without modifying or powering the full cradle, export:
 
 ```sh
 openscad --export-format binstl -o dock_ir_pair_position_coupon.stl \
-  -D 'part="dock_ir_pair_position_coupon"' dock_passive_fit.scad
+  -D 'part="dock_ir_pair_position_coupon"' docs/cad/remixes/dock/dock_passive_fit.scad
 ```
 
 The nominal flat plate uses the same 126 mm dock width and has two
