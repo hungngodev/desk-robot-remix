@@ -314,6 +314,42 @@ int main() {
     CHECK(read.force.present && read.force.valid && read.force.valid_mask == 3);
     CHECK(read.force.adc[0] == 1024);
     CHECK(read.force.adc[1] == -292);
+    // A completed ADS1115 single shot is not new force evidence after a
+    // stalled WROOM safety loop. In this scan order, lane 2 starts jaw
+    // conversion at 516ms; the next visit after a pause is too late to
+    // safely associate that old ADC register with the new receipt time.
+    TwoWire stalled_ads_wire;
+    desk_robot::AccessorySensors stalled_ads;
+    CHECK(stalled_ads.begin(stalled_ads_wire));
+    for (std::uint32_t ms = 0; ms <= 516; ms += 12)
+      stalled_ads.poll(ms);
+    CHECK(stalled_ads_wire.ads_config_high == 0xD3U);
+    const auto jaw_seq_before_pause =
+        stalled_ads.readings().force.jaw_sample_seq;
+    const auto jaw_stamp_before_pause =
+        stalled_ads.readings().force.jaw_at_ms;
+    CHECK(jaw_seq_before_pause > 0U);
+    CHECK(stalled_ads.readings().force.valid_mask == 3U);
+    // During the gap the physical single-shot conversion finished long
+    // ago; OS=1 is not a fresh acquisition after this scheduling stall.
+    for (std::uint32_t ms = 1716; ms <= 1788; ms += 12)
+      stalled_ads.poll(ms);
+    CHECK(stalled_ads.readings().force.jaw_sample_seq ==
+          jaw_seq_before_pause);
+    CHECK(stalled_ads.readings().force.jaw_at_ms ==
+          jaw_stamp_before_pause);
+    CHECK((stalled_ads.readings().force.valid_mask & 2U) == 0U);
+    CHECK(!stalled_ads.readings().force.valid);
+    // Explicitly start another ADC single shot and wait for completion.
+    // Old data may become valid ONLY after that later actual conversion.
+    for (std::uint32_t ms = 1800; ms <= 1968; ms += 12)
+      stalled_ads.poll(ms);
+    CHECK(stalled_ads.readings().force.jaw_sample_seq >
+          jaw_seq_before_pause);
+    CHECK(stalled_ads.readings().force.jaw_at_ms >
+          jaw_stamp_before_pause);
+    CHECK((stalled_ads.readings().force.valid_mask & 2U) != 0U);
+    CHECK(stalled_ads.readings().force.valid);
     // A shared mux failure invalidates BOTH ADS1115 channels, not only
     // the aggregate flag. One recovered conversion cannot reuse the old pair.
     TwoWire force_fault_wire;
