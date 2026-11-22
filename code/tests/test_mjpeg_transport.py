@@ -68,12 +68,11 @@ def test_large_network_read_keeps_incremental_mjpeg_buffer_bounded():
     assert reader.buffer.peak <= 512 * 1024 + 64 * 1024 + 1024
 
 
-
 @pytest.mark.asyncio
 async def test_camera_overflow_completion_cannot_poison_stream_reconnect(monkeypatch):
     """A bogus 20-digit source clock must not retire a healthy same-boot camera."""
     monkeypatch.setenv("SENSE_TEST_TOKEN", "x" * 32)
-    jpeg = b"\\xff\\xd8scene\\xff\\xd9"
+    jpeg = b"\xff\xd8scene\xff\xd9"
     huge = b"99999999999999999999"
     original = _part(1, jpeg)
     malformed = original.replace(
@@ -119,7 +118,7 @@ async def test_camera_overflow_completion_cannot_poison_stream_reconnect(monkeyp
 @pytest.mark.asyncio
 async def test_camera_overflow_completion_cannot_poison_legacy_still(monkeypatch):
     monkeypatch.setenv("SENSE_TEST_TOKEN", "x" * 32)
-    jpeg = b"\\xff\\xd8scene\\xff\\xd9"
+    jpeg = b"\xff\xd8scene\xff\xd9"
     clock = iter(("99999999999999999999", "500000"))
     seq = iter(("1", "2"))
 
