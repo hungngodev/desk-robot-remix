@@ -1441,11 +1441,23 @@ def test_native_asr_memory_requires_independent_consent_and_deduplicates(
         first = client.post(url, headers=tool, json=request)
         assert first.status_code == 200
         assert first.json()["stored"] is True
+        assert first.json()["retention_consent_enabled"] is True
+        assert first.json()["episode_persisted"] is True
+        assert first.json()["retained_on_disk"] is True
         assert first.json()["motor_authorized"] is False
         assert first.json()["speaker_identity_verified"] is False
         second = client.post(url, headers=tool, json=request)
         assert second.status_code == 200
         assert second.json()["stored"] is False
+        assert second.json()["retention_consent_enabled"] is True
+        assert second.json()["retained_on_disk"] is True
+        altered = client.post(url, headers=tool, json={
+            **request, "transcript": "A different unrecoverable transcript",
+        })
+        assert altered.status_code == 200
+        assert altered.json()["stored"] is False
+        assert altered.json()["retention_consent_enabled"] is True
+        assert altered.json()["retained_on_disk"] is False
         assert client.post(url, headers=tool, json={
             "event_id": "../bad", "transcript": "Move the robot"
         }).status_code == 422
@@ -1457,6 +1469,72 @@ def test_native_asr_memory_requires_independent_consent_and_deduplicates(
         assert "key beside the robot" in heard.summary
         settings.voice_transcript_memory_enabled = False
         assert client.post(url, headers=tool, json=request).status_code == 403
+
+
+def test_native_asr_tombstone_and_immediate_eviction_do_not_claim_persistence(
+    settings, tokens, tmp_path,
+):
+    import time
+    from types import SimpleNamespace
+
+    from desk_robot.memory import MemoryStore
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = False
+    settings.voice_memory_tools_enabled = True
+    settings.voice_transcript_memory_enabled = True
+    robot = settings.robots[0].id
+    memory = MemoryStore(tmp_path / "private", [r.id for r in settings.robots])
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(robot=settings.robot),
+        memory=memory, multimodal=None, start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    url = f"/v1/pet/{robot}/omni-heard"
+    event_id = "omni_" + "a" * 12 + "_" + "c" * 20
+    payload = {"event_id": event_id, "transcript": "The red key is on the desk"}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        stored = client.post(url, headers=headers, json=payload)
+        assert stored.status_code == 200
+        assert stored.json()["retained_on_disk"] is True
+        assert memory.forget_episode(robot, event_id)
+        replay = client.post(url, headers=headers, json=payload)
+        assert replay.status_code == 200
+        assert replay.json()["stored"] is False
+        assert replay.json()["retention_consent_enabled"] is True
+        assert replay.json()["retained_on_disk"] is False
+        assert replay.json()["episode_persisted"] is False
+        assert memory.get_episode(robot, event_id) is None
+
+        now = time.time()
+        for index in range(250):
+            assert memory.remember(
+                robot, f"seed_{index:03d}", f"Recent event {index}",
+                kind="heard_human", source_robot=robot, witnessed=True,
+                observed_at=now,
+            )
+        old_id = "omni_" + "d" * 12 + "_" + "e" * 20
+        original_remember = memory.remember
+
+        def immediately_old(*args, **kwargs):
+            return original_remember(
+                *args, **{**kwargs, "observed_at": now - 3600}
+            )
+
+        memory.remember = immediately_old
+        evicted = client.post(url, headers=headers, json={
+            "event_id": old_id, "transcript": "An old discarded observation",
+        })
+        assert evicted.status_code == 200
+        assert evicted.json()["stored"] is False
+        assert evicted.json()["retention_consent_enabled"] is True
+        assert evicted.json()["retained_on_disk"] is False
+        assert evicted.json()["episode_persisted"] is False
+        assert memory.get_episode(robot, old_id) is None
 
 
 def test_completed_native_asr_blends_with_live_camera_context_without_disk_consent(

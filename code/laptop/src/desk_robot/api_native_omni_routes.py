@@ -266,10 +266,30 @@ def register_native_omni_routes(
             attention.heard(
                 robot_id, request.event_id, spoken[:240], observed_at
             )
+        # Permission for SQLite retention is not evidence that this exact
+        # episode survived a tombstone, replay or bounded-store eviction.
+        # A reused event ID with different ASR text also cannot claim its
+        # uncommitted replacement transcript was retained.
+        retained = False
+        if memory_opt_in:
+            episode = app.state.runtime.memory.get_episode(
+                robot_id, request.event_id,
+            )
+            retained = (
+                episode is not None
+                and episode.kind == "heard_human"
+                and episode.source_robot == robot_id
+                and episode.witnessed is True
+                and episode.summary == (
+                    "Someone spoke (uncertain ASR): " + spoken[:240]
+                )
+            )
         return {
             "robot_id": robot_id, "stored": inserted,
             "ephemeral_context_added": ephemeral,
-            "retained_on_disk": memory_opt_in,
+            "retention_consent_enabled": memory_opt_in,
+            "episode_persisted": retained,
+            "retained_on_disk": retained,
             "source": "model_estimated_xiaozhi_audio_transcription",
             "speaker_identity_verified": False,
             "audio_playback_verified": False,

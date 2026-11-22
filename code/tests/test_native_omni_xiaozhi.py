@@ -2478,7 +2478,9 @@ async def test_native_completed_audio_transcript_has_opt_in_bounded_private_memo
         async def json(self):
             return {
                 "robot_id": "robot-01", "stored": True,
+                "retention_consent_enabled": True,
                 "retained_on_disk": True,
+                "episode_persisted": True,
                 "source": "model_estimated_xiaozhi_audio_transcription",
             }
 
@@ -2538,7 +2540,9 @@ async def test_native_asr_writer_retires_on_consent_revoke_before_next_chunk(
         async def json(self):
             return {
                 "robot_id": "robot-01", "stored": False,
+                "retention_consent_enabled": retained,
                 "retained_on_disk": retained,
+                "episode_persisted": retained,
                 "source": "model_estimated_xiaozhi_audio_transcription",
             }
 
@@ -2554,6 +2558,57 @@ async def test_native_asr_writer_retires_on_consent_revoke_before_next_chunk(
     assert len(calls) == 1
     assert session._heard_queue.qsize() == 1
     assert session.heard_memories_stored == 0
+
+
+async def test_native_asr_consent_does_not_require_every_event_to_persist(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._transcript_memory_enabled = True
+    session._heard_queue.put_nowait((
+        "omni_" + "a" * 12 + "_" + "b" * 20, "already forgotten",
+    ))
+    delivered = asyncio.Event()
+
+    class Reply:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def json(self):
+            delivered.set()
+            return {
+                "robot_id": "robot-01", "stored": False,
+                "retention_consent_enabled": True,
+                "retained_on_disk": False,
+                "episode_persisted": False,
+                "source": "model_estimated_xiaozhi_audio_transcription",
+            }
+
+    class Mac:
+        def post(self, *_args, **_kwargs):
+            return Reply()
+
+    worker = asyncio.create_task(session._persist_heard(Mac()))
+    try:
+        await asyncio.wait_for(delivered.wait(), timeout=1)
+        await asyncio.sleep(0)
+        assert not session.closed
+        assert session.heard_memories_stored == 0
+        assert session.heard_memories_dropped == 0
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
 
 
 async def test_native_asr_writer_detects_unexpected_new_storage_opt_in(native):
@@ -2577,7 +2632,9 @@ async def test_native_asr_writer_detects_unexpected_new_storage_opt_in(native):
         async def json(self):
             return {
                 "robot_id": "robot-01", "stored": True,
+                "retention_consent_enabled": True,
                 "retained_on_disk": True,
+                "episode_persisted": True,
                 "source": "model_estimated_xiaozhi_audio_transcription",
             }
 
@@ -6784,7 +6841,9 @@ async def test_native_asr_live_only_context_does_not_count_as_saved_memory(nativ
         async def json(self):
             return {
                 "robot_id": "robot-01", "stored": False,
+                "retention_consent_enabled": False,
                 "retained_on_disk": False,
+                "episode_persisted": False,
                 "ephemeral_context_added": True,
                 "source": "model_estimated_xiaozhi_audio_transcription",
             }

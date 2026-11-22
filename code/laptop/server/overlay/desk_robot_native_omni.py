@@ -713,13 +713,21 @@ class NativeOmniSession:
                         if (data.get("source")
                                 == "model_estimated_xiaozhi_audio_transcription"
                                 and type(data.get("stored")) is bool):
-                            if (type(data.get("retained_on_disk")) is not bool
-                                    or data["retained_on_disk"]
+                            if (type(data.get("retention_consent_enabled")) is not bool
+                                    or data["retention_consent_enabled"]
                                     != self._transcript_memory_enabled):
-                                # A consent change during queued speech must
-                                # retire the old private native model session.
+                                # A consent change retires old private
+                                # speech even if no episode was persisted.
                                 self.fail("Mac transcript memory consent changed")
                                 return
+                            if (type(data.get("retained_on_disk")) is not bool
+                                    or type(data.get("episode_persisted")) is not bool
+                                    or data["episode_persisted"] != data["retained_on_disk"]
+                                    or (data["stored"] and not data["retained_on_disk"])
+                                    or (data["retained_on_disk"]
+                                        and not data["retention_consent_enabled"])):
+                                self.heard_memories_dropped += 1
+                                continue
                             if data["stored"]:
                                 self.heard_memories_stored += 1
                             if data.get("ephemeral_context_added") is True:
