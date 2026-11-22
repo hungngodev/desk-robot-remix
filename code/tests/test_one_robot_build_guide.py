@@ -26,6 +26,10 @@ def test_builder_guide_does_not_claim_unqualified_power_or_print_release():
     assert "USD 50 delivered cap" in text
     assert "including previously paid items" in text
     assert "first-robot-markdown" in text
+    assert "five-pet fleet projection" in text
+    assert "NOT a one-unit checkout" in text
+    assert "Do not order fleet quantities" in text
+    assert "only two builder facing lists" in text
     assert "pilot-cart-markdown" in text
     assert "only two builder facing lists" in text
     assert "one shared room station" in text

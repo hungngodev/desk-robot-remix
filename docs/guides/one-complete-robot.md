@@ -6,7 +6,7 @@ A first completed, physically qualified pet is required before buying parts for 
 
 ## 1. Buy only against the canonical two lists
 
-Open [the generated owned and ordered list, and the remaining or held list](../hardware/complete-shopping-checklist.md). These are the **only two builder facing lists**; do not duplicate or hand edit quantities here. Their source is [the canonical full feature plan](../hardware/full-feature-plan.json), [the reported inventory and photos](../hardware/photo-inventory-2026-11-04.md), and [the reviewed purchase register](../hardware/2026-11-16-five-pet-purchase-register.md).
+For the first unit, use the **only two builder facing lists** printed by the `first-robot-markdown` command below: (1) reported owned or ordered and (2) first-unit remaining parts with conditional holds. Their source is [the canonical full feature plan](../hardware/full-feature-plan.json), [the reported inventory and photos](../hardware/photo-inventory-2026-11-04.md), and [the reviewed purchase register](../hardware/2026-11-16-five-pet-purchase-register.md). The separate [complete shopping checklist](../hardware/complete-shopping-checklist.md) is a **five-pet fleet projection**, NOT a one-unit checkout. Do not order fleet quantities from that static page or hand-edit a second first-unit cart.
 
 From the repository root, regenerate the first complete pet, its dock and one station projection without modifying the ledger:
 
