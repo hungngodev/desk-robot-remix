@@ -15,12 +15,12 @@
   },
   "items": [
     {
-      "item": "Purchased XIAO ESP32S3 Sense camera/PDM microphone bundle (quantity/arrival to confirm)",
+      "item": "Purchased XIAO ESP32S3 Sense camera/PDM microphone bundle (physical identity and condition to inspect)",
       "quantity": 1,
-      "unit_usd": 18.87,
+      "unit_usd": 13.67,
       "price_status": "reported_purchase",
       "url": "https://www.aliexpress.us/item/3256810060131517.html",
-      "fit": "User reports purchase; pasted listing display price18.87, quantity/receipt charges/arrival unconfirmed. Budget assumes one full Sense bundle, actual hardware markings still to verify. Keep this head. Camera/PDM mic included as described; software AEC/Gemini Live integration and physical tests remain pending."
+      "fit": "Receipt reconciliation 2026-11-22: one November 3 seller order confirmation for XIAO ESP32S3 Sense quantity 1 and separate payment processor receipt both show total USD 13.67, not the historical USD 18.87 listing. Carrier reported delivery November 7; actual board markings, accessories, condition and fit remain uninspected. No personal transaction, shipping or payment identifiers are stored here. This corrects one documented purchase only, not the complete project spending register. Camera/PDM microphone and physical AEC remain subject to installed verification."
     },
     {
       "item": "MAX98357 I2S amplifier breakout, ElectroPeak SEN-17-139",
@@ -184,7 +184,7 @@
     }
   ],
   "head_configuration": "Active head is user-purchased XIAO ESP32S3 Sense. Retain existing compiled Sense baseline; reuse pinned RIO software AEC/cancellation and official Google/Pipecat streaming patterns before considering replacement. Voice interruption remains first-build gate, not yet passed. Waveshare is optional fallback only.",
-  "note": "No full total established for revised1S/compactToF/touch/IMU core. Null prices are unknown, not free. Historical basket archived. Cap50includesreportedSensemoney; exactreceiptstillunknown. OptionalRGB/bumper excluded from required core until selected. Photo audit holds the prototype new-IMU purchase in favor of owned BerryIMU; MAX9814 is analog mic input and does not replace MAX98357A speaker output. No working-condition/fit gate changed.\n2026-11-10 MPU6050 is user-preferred. BerryIMU remains reported owned optional spare, not required buy.\n2026-11-20 the accepted ranging design is eight generic VL53L0X GY-530 roles per robot. ElectroPeak currently lists the double-hole GY-530 at $1.75 each before shipping and tax, with lower volume pricing, but that is a reference candidate rather than a delivered or physically qualified quote. Buy or borrow one sample first; do not order all 40 until carrier identity, 3.3V signaling, optics, stopping margin and fit pass.",
+  "note": "No full total established for revised1S/compactToF/touch/IMU core. Null prices are unknown, not free. Historical basket archived. Cap50includesreportedSensemoney; oneSensepaymentverifiedUSD13.67butotherpriorcashspendunknown. OptionalRGB/bumper excluded from required core until selected. Photo audit holds the prototype new-IMU purchase in favor of owned BerryIMU; MAX9814 is analog mic input and does not replace MAX98357A speaker output. No working-condition/fit gate changed.\n2026-11-10 MPU6050 is user-preferred. BerryIMU remains reported owned optional spare, not required buy.\n2026-11-20 the accepted ranging design is eight generic VL53L0X GY-530 roles per robot. ElectroPeak currently lists the double-hole GY-530 at $1.75 each before shipping and tax, with lower volume pricing, but that is a reference candidate rather than a delivered or physically qualified quote. Buy or borrow one sample first; do not order all 40 until carrier identity, 3.3V signaling, optics, stopping margin and fit pass.",
   "readiness_scope": "Prototype procurement preflight only: quotes, inventory and drawing/owned-part fit checks. Physical qualification is separate and required before roaming/fleet replication.",
   "qualification_checks": {
     "sense_board_configuration_and_8mb_build_confirmed": true,
@@ -198,7 +198,17 @@
     "touch_and_handling_interactions_physically_passed": false,
     "proactive_camera_pipeline_physically_passed": false
   },
-  "reported_already_purchased_usd": 18.87,
+  "reported_already_purchased_usd": 13.67,
+  "paid_reconciliation": {
+    "reviewed_at": "2026-11-22",
+    "item_scope": "one XIAO ESP32S3 Sense only",
+    "source": "private seller order confirmation plus independent processor payment receipt",
+    "payment_total_usd": 13.67,
+    "carrier_delivery_notice_date": "2026-11-07",
+    "inspected_usable_hardware": false,
+    "all_project_prior_spend_reconciled": false,
+    "redacted_receipts_not_public": true
+  },
   "quote_status": "incomplete_eight_vl53l0x_breakouts_and_1s_power",
   "optional_items": [
     {

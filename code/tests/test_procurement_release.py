@@ -1466,6 +1466,23 @@ def test_first_robot_projection_rejects_wrong_scope_and_variant():
 
 
 
+def test_redacted_sense_receipt_corrects_price_without_claiming_complete_project_spend():
+    import json
+
+    receipt = json.loads((mod.PLAN.parent / "bom.json").read_text(encoding="utf-8"))
+    sense = receipt["items"][0]
+    assert "XIAO ESP32S3 Sense" in sense["item"]
+    assert sense["quantity"] == 1
+    assert sense["unit_usd"] == 13.67
+    assert receipt["reported_already_purchased_usd"] == 13.67
+    review = receipt["paid_reconciliation"]
+    assert review["payment_total_usd"] == 13.67
+    assert review["inspected_usable_hardware"] is False
+    assert review["all_project_prior_spend_reconciled"] is False
+    assert review["redacted_receipts_not_public"] is True
+    assert receipt["procurement_authority"] is False
+
+
 def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     """A sample procurement gate breaks the prototype acceptance deadlock."""
     import json
@@ -1477,9 +1494,9 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     assert pilot["pilot_historical_quoted_subtotal_usd"] == 40.41
     assert pilot["historical_first_unit_budget"] == {
         "first_unit_cap_usd": 50.0,
-        "reported_prior_spend_usd": 18.87,
-        "historical_combined_before_tax_shipping_usd": 59.28,
-        "historical_over_cap_before_tax_shipping_usd": 9.28,
+        "reported_prior_spend_usd": 13.67,
+        "historical_combined_before_tax_shipping_usd": 54.08,
+        "historical_over_cap_before_tax_shipping_usd": 4.08,
         "current_landed_total_verified": False,
     }
     assert not pilot["whole_first_robot_purchase_approved"]
@@ -1528,7 +1545,7 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     assert text.count("## 2.") == 1
     assert "SEN-19-006" in text
     assert "40.41" in text
-    assert "18.87" in text and "59.28" in text and "9.28" in text
+    assert "13.67" in text and "54.08" in text and "4.08" in text
     assert "NOT a current landed quote or purchase approval" in text
     assert "not a physically qualified robot" in text
 
@@ -1634,9 +1651,9 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     assert cart["exact_sku_count"] == 13
     assert cart["component_quantity"] == 17
     assert cart["historical_priced_partial_subtotal_usd"] == 40.41
-    assert cart["historical_first_unit_budget"]["reported_prior_spend_usd"] == 18.87
-    assert cart["historical_first_unit_budget"]["historical_combined_before_tax_shipping_usd"] == 59.28
-    assert cart["historical_first_unit_budget"]["historical_over_cap_before_tax_shipping_usd"] == 9.28
+    assert cart["historical_first_unit_budget"]["reported_prior_spend_usd"] == 13.67
+    assert cart["historical_first_unit_budget"]["historical_combined_before_tax_shipping_usd"] == 54.08
+    assert cart["historical_first_unit_budget"]["historical_over_cap_before_tax_shipping_usd"] == 4.08
     assert not cart["historical_first_unit_budget"]["current_landed_total_verified"]
     assert not cart["landed_total_verified"]
     assert not cart["complete_robot_purchase_approved"]
@@ -1683,7 +1700,7 @@ def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     assert "| DigiKey | Challenge Electronics | CS20-02P110-04-1X |" in rendered
     assert "| DigiKey | Vishay | TSOP38438 |" in rendered
     assert "shared DigiKey listings do NOT verify a single shipment" in rendered
-    assert "18.87" in rendered and "59.28" in rendered and "9.28" in rendered
+    assert "13.67" in rendered and "54.08" in rendered and "4.08" in rendered
     assert "NOT a current landed quote or purchase approval" in rendered
     assert "0 SKUs have unknown comparable USD price" in rendered
     assert "There is no verified landed total" in rendered
