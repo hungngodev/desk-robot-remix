@@ -158,3 +158,24 @@ async def test_consent_revoked_before_any_speaker_send_never_latches_decoder(set
     assert speaker.session_grants == 1
     assert speaker.sends == 0
     assert not conversation.speaker_stop_unconfirmed
+
+async def test_pre_synthesis_human_cancel_still_requests_optional_stop(settings):
+    conversation, speaker = hardware_conversation(settings)
+    started = asyncio.Event()
+
+    class SlowChat:
+        async def reply(self, history):
+            started.set()
+            await asyncio.Event().wait()
+
+    conversation.chat = SlowChat()
+    task = asyncio.create_task(
+        conversation.run(["robot-01", "robot-02"], "cancel pre synthesis", 2)
+    )
+    await asyncio.wait_for(started.wait(), timeout=2)
+    await conversation.stop()
+    assert task.cancelled()
+    assert speaker.grants == 1
+    assert speaker.stop_calls == ["robot-01"]
+    # A failed precautionary STOP did not mask a non-existent audio send.
+    assert not conversation.speaker_stop_unconfirmed

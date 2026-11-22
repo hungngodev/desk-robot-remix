@@ -1165,6 +1165,17 @@ class Conversation:
                                 # The global STOP latch survives task cancellation.
                                 # Preserve the original model/transport failure.
                                 pass
+                        elif current_robot is not None:
+                            # Keep VAD's historical immediate STOP request, even
+                            # during model generation. No PCM was attempted, so
+                            # a failed best-effort request cannot prove playback
+                            # was queued or poison later speaker admission.
+                            interrupt = getattr(self.speaker, "interrupt", None)
+                            if callable(interrupt):
+                                try:
+                                    await _bounded_speaker_abort(interrupt, current_robot)
+                                except BaseException:
+                                    pass
                         if current_robot is not None and completed_segments:
                             # An interrupted song still has real transmitted
                             # words. Keep that first-person context in the
@@ -1329,6 +1340,15 @@ class Conversation:
                                 # Preserve original failure; uncertain real audio
                                 # remains latched across cancelled task teardown.
                                 pass
+                        else:
+                            # Request STOP on a cancelled pre-synthesis remark
+                            # without inventing an unconfirmed decoder queue.
+                            interrupt = getattr(self.speaker, "interrupt", None)
+                            if callable(interrupt):
+                                try:
+                                    await _bounded_speaker_abort(interrupt, robot)
+                                except BaseException:
+                                    pass
                         raise
             return True
 
