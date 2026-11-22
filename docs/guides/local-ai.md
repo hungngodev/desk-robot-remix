@@ -56,6 +56,45 @@ IDs. The adapter binds its private speech control to 127.0.0.1:8766. Xiaozhi's
 device WebSocket/OTA services need to be reachable on the trusted LAN. Keep these
 services off the public Internet.
 
+### Verify the native voice bound to each head
+
+The same private `config/local.toml` selects **both** the pet's Xiaozhi
+`device_id` and its `voice`. `run_server.py` validates the operator's
+configured identities and exports a trusted private voice assignment; the
+existing Xiaozhi connection selects that pet's Kokoro voice when it creates
+its own `CustomTTS` instance. This preserves one Xiaozhi microphone,
+Opus transport, TTS and MCP owner. It does **not** create a second speech
+server or trust voice identifiers supplied by incoming speech or web text.
+
+Start with just the first assembled head. Its `device_id` must match the
+identity provisioned in its private firmware and authenticated by Xiaozhi.
+Later, each provisioned head must have a **different** `device_id` and
+`voice`, matching [five pet setup](five-robots.md). The reviewed generic
+examples now choose `af_heart`, `am_adam`, `af_bella`, `am_michael`
+and `af_nicole`; verify these voice names actually exist in the selected
+installed Kokoro provider before marking speech ready. Omit the
+`device_id` for siblings not yet assembled. The runner refuses duplicate
+provisioned devices or voices rather than quietly substituting another pet's
+voice. Keep real IDs and tokens only in ignored local files.
+
+This mapping is qualified in source only for the pinned Xiaozhi
+`CustomTTS` with Kokoro-compatible `TTS.CustomTTS.params.voice`. Do not
+use a Kokoro name as a provider-specific speaker ID: other native TTS
+providers deliberately fail closed for provisioned fleet pets until a
+separate verified voice map exists.
+
+For each pet, connect **only its own** authenticated head, ask it a short
+ordinary question, then observe the chosen voice through the normal
+Xiaozhi speaker and compare it with the local configuration. Repeat after
+connecting a second stationary head and interrupt one with ordinary human
+speech while the other waits for the sole speaker lease. Do not infer which
+head actually spoke merely from a successful HTTP response or a Kokoro WAV
+file. Record head identity, build SHA, provider revision, selected voice,
+actual audible sound, interruption and decoder STOP evidence; hardware
+voice differentiation and acoustic gates remain **unqualified** until
+these tests run. The pinned host tests cover config isolation and real
+upstream TTS initialization, not physical sound.
+
 ## Vision and coordinator
 
 Install the optional detector in the coordinator environment:

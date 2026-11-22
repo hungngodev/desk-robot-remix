@@ -119,18 +119,27 @@ Start from `config/fleet.example.toml` for a new private `config/local.toml`.
 If `local.toml` already exists, merge the extra robot sections while preserving
 its real addresses and calibration paths. Do not overwrite an existing setup.
 
-| Robot | Example name | Head token environment name |
-| --- | --- | --- |
-| robot-01 | Pip | DESK_ROBOT_HEAD_01_TOKEN |
-| robot-02 | Dot | DESK_ROBOT_HEAD_02_TOKEN |
-| robot-03 | Chip | DESK_ROBOT_HEAD_03_TOKEN |
-| robot-04 | Byte | DESK_ROBOT_HEAD_04_TOKEN |
-| robot-05 | Bob | DESK_ROBOT_HEAD_05_TOKEN |
+| Robot | Example name | Head token environment name | Native Kokoro voice |
+| --- | --- | --- | --- |
+| robot-01 | Pip | DESK_ROBOT_HEAD_01_TOKEN | `af_heart` |
+| robot-02 | Dot | DESK_ROBOT_HEAD_02_TOKEN | `am_adam` |
+| robot-03 | Chip | DESK_ROBOT_HEAD_03_TOKEN | `af_bella` |
+| robot-04 | Byte | DESK_ROBOT_HEAD_04_TOKEN | `am_michael` |
+| robot-05 | Bob | DESK_ROBOT_HEAD_05_TOKEN | `af_nicole` |
 
 Names/personas may change without changing the core. Set actual LAN addresses
 and unique Xiaozhi device IDs, then reference separately measured calibration
 files. Hardware examples keep motion disabled. An identical printed core does
 not imply identical camera pose, motor polarity or servo endpoints.
+The selected `config/fleet.hardware.example.toml` and both generic
+`fleet.example.toml` and `robots.example.toml` assign the five distinct
+voices above. The Mac native runner refuses duplicate voice assignments
+for provisioned devices while allowing unbuilt siblings to remain without
+`device_id`. Do not flash a second pet using the first pet's identity.
+[Local AI setup](local-ai.md) explains the one Xiaozhi `CustomTTS` voice
+owner, the unsupported provider hold and the required actual speaker
+verification. Five distinct configured voice strings do not prove five
+different physical voices until the heads are tested.
 
 Extend credentials without rotating the original head/operator/model tokens:
 
