@@ -236,3 +236,19 @@ def test_a5_cli_rejects_row_width_mismatch(tmp_path, malformation):
     assert result.returncode != 0
     assert "A5 physical trial CSV row length differs from header" in result.stderr
     assert '"physical_acceptance_pass": true' not in result.stdout
+
+
+@pytest.mark.parametrize("unknown_category", ["key ", "candy_wrapper", ""])
+def test_unknown_selected_robot_a5_attempt_cannot_disappear(unknown_category):
+    rows = trial_rows()
+    rows.append({**rows[0], "category": unknown_category, "trial": "11",
+                 "assisted": "true", "lift_mm": "0"})
+    with pytest.raises(ValueError, match="Unrecognized physical trial category"):
+        check_trials.summarize(rows, "robot-01")
+
+
+def test_a5_other_robot_attempt_remains_independently_scoped():
+    rows = trial_rows()
+    rows.append({**rows[0], "robot_id": "robot-02", "category": "key ",
+                 "trial": "11", "assisted": "true"})
+    assert check_trials.summarize(rows, "robot-01")["physical_acceptance_pass"]

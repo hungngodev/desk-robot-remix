@@ -20,6 +20,11 @@ def _finite_measurement(row, field, *, positive=False):
 
 
 def summarize(rows, robot_id):
+    # Every recorded attempt for this robot belongs to an A5 population.
+    # An unexpected category cannot silently vanish from the denominator.
+    if any(r["robot_id"] == robot_id and r["category"] not in ("key", "candy")
+           for r in rows):
+        raise ValueError("Unrecognized physical trial category for selected robot")
     result = {}
     # A5 is one acceptance run for one fitted robot, not an average of
     # attempts from different firmware images or jaw calibrations.
