@@ -361,8 +361,8 @@ def test_historical_bom_tracks_selected_vl53l0x_without_authorizing_bulk_buy():
     assert sorted(item["quantity"] for item in ranging) == [1, 3, 4]
     assert all(item["unit_usd"] is None for item in ranging)
     assert all(item["price_status"] == "sample_quote_only" for item in ranging)
-    assert all(item["reference_unit_usd"] == 1.75 for item in ranging)
-    assert all(item["reference_price_date"] == "2026-11-20" for item in ranging)
+    assert all(item["reference_unit_usd"] == 1.44 for item in ranging)
+    assert all(item["reference_price_date"] == "2026-11-18" for item in ranging)
     assert all("one sample" in item["fit"].lower() for item in ranging)
     assert not any(
         "VL53L4CD compatible" in item["item"] for item in data["items"]
