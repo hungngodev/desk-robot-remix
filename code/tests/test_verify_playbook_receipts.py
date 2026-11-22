@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from urllib.error import URLError
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location(
     "playbook_online_receipts",
@@ -233,6 +235,45 @@ def test_physical_json_rejects_duplicate_pass_key_and_nonfinite_measurement():
     ):
         assert not verify.verified_procedure_record(
             row, SHA, lambda url, raw=corrupt: signed_file(url, raw))
+
+
+def test_immutable_physical_json_rejects_oversized_integer_tokens():
+    assert verify.bounded_receipt_int("9223372036854775807") == (1 << 63) - 1
+    assert verify.bounded_receipt_int("-9223372036854775808") == -(1 << 63)
+    for invalid in ("9223372036854775808", "-9223372036854775809",
+                    "9" * 512):
+        with pytest.raises(ValueError):
+            verify.bounded_receipt_int(invalid)
+
+    row = promoted("MEASURED")["procedures"][0]
+    signoff = row["physical_measurement_receipt"]
+    signoff["raw_data_url"] = RAW.replace("bench.csv", "integer.json")
+    record = {
+        "procedure_id": 9,
+        "source_sha": SHA,
+        "gate": "MEASURED",
+        "result": "pass",
+        "operator": signoff["operator"],
+        "device_revision": signoff["device_revision"],
+        "tested_on": signoff["tested_on"],
+        "measurement": {"lift_mm": 10},
+    }
+    good = json.dumps({"receipts": [record]})
+    def contents(raw_text):
+        data = raw_text.encode("utf-8")
+        return {"type": "file", "size": len(data), "encoding": "base64",
+                "content": base64.b64encode(data).decode("ascii")}
+
+    assert verify.verified_procedure_record(
+        row, SHA, lambda _: contents(good),
+    )
+    for invalid in ("9223372036854775808", "-9223372036854775809",
+                    "9" * 512):
+        changed = good.replace('"lift_mm": 10', f'"lift_mm": {invalid}')
+        assert changed != good
+        assert not verify.verified_procedure_record(
+            row, SHA, lambda _, raw=changed: contents(raw),
+        )
 
 
 def test_future_date_is_not_a_completed_physical_playbook_trial():

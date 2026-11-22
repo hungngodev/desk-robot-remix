@@ -186,6 +186,20 @@ def finite_receipt_float(value: str) -> float:
     return number
 
 
+def bounded_receipt_int(value: str) -> int:
+    """Reject huge JSON integer tokens before a physical receipt is trusted.
+
+    Keep evidence counters and measurements within exact signed 64-bit
+    bounds. This is a decoder guard, not a physical pass criterion.
+    """
+    if len(value) > 20:
+        raise ValueError("Overlong physical receipt JSON integer")
+    number = int(value)
+    if not -(1 << 63) <= number < (1 << 63):
+        raise ValueError("Out-of-range physical receipt JSON integer")
+    return number
+
+
 def verified_procedure_record(row: dict, sha: str, lookup=github_json) -> bool:
     """Require the immutable data file to identify the measured procedure.
 
@@ -235,6 +249,7 @@ def verified_procedure_record(row: dict, sha: str, lookup=github_json) -> bool:
                 content, object_pairs_hook=strict_receipt_object,
                 parse_constant=reject_nonfinite_receipt_value,
                 parse_float=finite_receipt_float,
+                parse_int=bounded_receipt_int,
             )
             records = document.get("receipts") if isinstance(document, dict) else None
         else:
