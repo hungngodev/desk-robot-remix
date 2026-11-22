@@ -39,14 +39,15 @@ class DockCameraCalibration:
     image_height_px: int | None = None
     # Camera PID is calibration provenance, not a self-attested motor permit.
     camera_sensor_pid: str | None = None
-    # Recorded builder provenance, not cryptographic camera attestation.
-    robot_id: str | None = None
-    head_device_id: str | None = None
     # Measured camera lens offset relative to the chassis centerline, right
     # positive, and horizontal yaw pointing right relative to chassis forward.
     # Image intrinsics alone cannot establish either mounting dimension.
     mount_lateral_offset_mm: float | None = None
     mount_yaw_deg: float | None = None
+    # Append rather than shifting existing positional mount parameters.
+    # Recorded builder provenance, not cryptographic camera attestation.
+    robot_id: str | None = None
+    head_device_id: str | None = None
 
     def __post_init__(self):
         for name in ("fx", "fy", "cx", "cy", "tag_side_mm"):

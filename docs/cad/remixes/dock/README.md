@@ -112,6 +112,16 @@ the white quiet margin. Put a human dock ID label outside that border.
 Print SVG at **100 percent actual size**, measure the real outer black
 square with a ruler or calipers, verify it remains 60 mm after printing,
 then confirm the camera's real fitted pose with checkerboard calibration.
+The offline checkerboard tool
+`code/scripts/calibrate_dock_camera.py` requires `--robot-id` and
+`--head-device-id` for the *actual selected pet and fitted Sense head*.
+Record their configured identities in every per-pet calibration. Two pets
+with the same OV5640 model and JPEG resolution cannot share measured lens
+intrinsics or camera-to-chassis offset data. The tool emits
+`"measured": false` candidates, not motion approval. Only real measured
+per-pet lens, mounting and approach trials can justify an operator-reviewed
+record. A replaced camera module or remounted head requires fresh
+measurements and a new record; nominal model PID alone is not enough.
 The SVG byte verifier does **not** measure printed paper, certify camera
 pose, command autonomous docking, verify either independent seat switch,
 or authorize any contact charging.

@@ -83,7 +83,7 @@ async def test_revoked_snapshot_does_not_reach_identity_or_detector(
 
     monkeypatch.setattr(
         dock_runtime, "load_real_dock_calibration",
-        lambda path: (SimpleNamespace(camera_sensor_pid="OV5640"), 200),
+        lambda path, **owner: (SimpleNamespace(camera_sensor_pid="OV5640"), 200),
     )
     monkeypatch.setattr(
         dock_runtime, "detect_bounded",

@@ -706,3 +706,14 @@ def test_malformed_native_detector_result_fails_closed(monkeypatch, malformed_re
     decision = assess_dock(pose, now=5.1, target_distance_mm=120)
     assert decision.phase == "hold"
     assert not decision.motor_authorized and not decision.charging_authorized
+
+
+def test_dock_calibration_adds_identity_without_shifting_positional_mount():
+    """New source labels must not reinterpret old positional mount geometry."""
+    calibration = DockCameraCalibration(
+        410, 410, 320, 240, 60, 1, None, 640, 480, "OV5640", 12.0, 2.0,
+    )
+    assert calibration.mount_lateral_offset_mm == 12.0
+    assert calibration.mount_yaw_deg == 2.0
+    assert calibration.robot_id is None
+    assert calibration.head_device_id is None

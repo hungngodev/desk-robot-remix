@@ -892,6 +892,7 @@ async def test_second_pet_cannot_use_first_pet_dock_intrinsics_to_move(
     settings, tmp_path,
 ):
     settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
     first, second = settings.robots
     first.device_id, second.device_id = "xiaozhi-01", "xiaozhi-02"
     for robot in (first, second):
