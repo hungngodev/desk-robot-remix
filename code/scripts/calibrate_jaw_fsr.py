@@ -14,6 +14,7 @@ import json
 import math
 import os
 import re
+import stat
 import statistics
 import time
 from pathlib import Path
@@ -139,6 +140,64 @@ def propose_force_limits(phases: dict[str, list[tuple[int, int]]]) -> dict:
     }
 
 
+
+def write_jaw_candidate(target: Path, payload: dict) -> None:
+    """Publish an unapproved trial exclusively as private regular evidence.
+
+    Walk directories by descriptors so a user-controlled alias cannot
+    redirect a safety calibration into another location. Allow macOS /var
+    root-owned aliases only when their root-owned parent is not writable.
+    """
+    if (".." in target.parts or not isinstance(payload, dict)
+            or payload.get("measured") is not False):
+        raise ValueError("Jaw candidate path or unreviewed provenance invalid")
+    contents = json.dumps(payload, indent=2, allow_nan=False) + "\n"
+    absolute = target.absolute()
+    directory_fd = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for segment in absolute.parts[1:-1]:
+            entry = os.stat(segment, dir_fd=directory_fd, follow_symlinks=False)
+            if stat.S_ISLNK(entry.st_mode):
+                directory = os.fstat(directory_fd)
+                if (entry.st_uid != 0 or directory.st_uid != 0
+                        or stat.S_IMODE(directory.st_mode) & 0o022):
+                    raise ValueError("Unsafe jaw candidate parent alias")
+            elif not stat.S_ISDIR(entry.st_mode):
+                raise ValueError("Jaw candidate parent is not a directory")
+            flags = os.O_RDONLY | os.O_DIRECTORY
+            if not stat.S_ISLNK(entry.st_mode):
+                flags |= os.O_NOFOLLOW
+            next_fd = os.open(segment, flags, dir_fd=directory_fd)
+            os.close(directory_fd)
+            directory_fd = next_fd
+        directory = os.fstat(directory_fd)
+        if (directory.st_uid != os.geteuid()
+                or stat.S_IMODE(directory.st_mode) & 0o022):
+            raise ValueError("Jaw candidate parent must be owned and not writable by peers")
+        created = False
+        try:
+            fd = os.open(
+                absolute.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                0o600, dir_fd=directory_fd,
+            )
+            created = True
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as output:
+                    fd = -1
+                    output.write(contents)
+                    output.flush()
+                    os.fsync(output.fileno())
+            finally:
+                if fd >= 0:
+                    os.close(fd)
+        except BaseException:
+            if created:
+                os.unlink(absolute.name, dir_fd=directory_fd)
+            raise
+    finally:
+        os.close(directory_fd)
+
+
 async def capture(
     client: httpx.AsyncClient, *, base_url: str, robot: str,
     token: str, count: int = 8, interval: float = 0.18,
@@ -225,9 +284,7 @@ async def main() -> None:
     })
     source["measured"] = False
     target = args.calibration.with_name(args.calibration.stem + ".jaw_candidate.json")
-    with target.open("x", encoding="utf-8") as output:
-        json.dump(source, output, indent=2)
-        output.write("\n")
+    write_jaw_candidate(target, source)
     print(json.dumps(proposed, indent=2))
     print(f"Candidate written to {target}; physical approval still required")
 

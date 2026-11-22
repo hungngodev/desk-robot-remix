@@ -196,3 +196,72 @@ async def test_jaw_cli_rejects_conflicted_identity_before_hardware_sampling(
     with pytest.raises(ValueError, match="Repeated jaw calibration JSON field"):
         await jaw.main()
     assert not (tmp_path / "wrong-identity.jaw_candidate.json").exists()
+
+
+def test_jaw_candidate_file_is_exclusive_private_and_stays_unqualified(tmp_path):
+    import json
+    import os
+    import stat
+
+    target = tmp_path / "physical.jaw_candidate.json"
+    payload = {"measured": False, "grip_force_limit_raw": 1200}
+    previous_umask = os.umask(0)
+    try:
+        jaw.write_jaw_candidate(target, payload)
+    finally:
+        os.umask(previous_umask)
+    assert json.loads(target.read_text(encoding="utf-8")) == payload
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    with pytest.raises(FileExistsError):
+        jaw.write_jaw_candidate(target, {"measured": False, "new": 1})
+    assert json.loads(target.read_text(encoding="utf-8")) == payload
+
+
+def test_jaw_candidate_rejects_symlink_to_existing_provenance(tmp_path):
+    actual = tmp_path / "approved.json"
+    actual.write_text("SAFE", encoding="utf-8")
+    candidate = tmp_path / "trial.jaw_candidate.json"
+    candidate.symlink_to(actual)
+    with pytest.raises(OSError):
+        jaw.write_jaw_candidate(candidate, {"measured": False})
+    assert actual.read_text(encoding="utf-8") == "SAFE"
+
+
+def test_jaw_candidate_rejects_parent_alias_and_traversal(tmp_path):
+    actual = tmp_path / "real"
+    actual.mkdir(mode=0o700)
+    alias = tmp_path / "alias"
+    alias.symlink_to(actual, target_is_directory=True)
+    with pytest.raises(ValueError, match="alias"):
+        jaw.write_jaw_candidate(
+            alias / "trial.jaw_candidate.json", {"measured": False},
+        )
+    with pytest.raises(ValueError, match="path"):
+        jaw.write_jaw_candidate(
+            tmp_path / "missing" / ".." / "real" / "trial.jaw_candidate.json",
+            {"measured": False},
+        )
+    assert not (actual / "trial.jaw_candidate.json").exists()
+
+
+def test_jaw_candidate_refuses_public_writable_parent_or_approved_payload(tmp_path):
+    import os
+
+    parent = tmp_path / "public"
+    parent.mkdir(mode=0o700)
+    os.chmod(parent, 0o777)
+    target = parent / "trial.jaw_candidate.json"
+    with pytest.raises(ValueError, match="not writable"):
+        jaw.write_jaw_candidate(target, {"measured": False})
+    assert not target.exists()
+    with pytest.raises(ValueError, match="unreviewed"):
+        jaw.write_jaw_candidate(
+            tmp_path / "candidate.json", {"measured": True},
+        )
+
+
+def test_jaw_candidate_refuses_invalid_nonfinite_json_before_file_creation(tmp_path):
+    target = tmp_path / "trial.jaw_candidate.json"
+    with pytest.raises(ValueError):
+        jaw.write_jaw_candidate(target, {"measured": False, "raw": float("nan")})
+    assert not target.exists()
