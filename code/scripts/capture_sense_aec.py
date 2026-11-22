@@ -322,22 +322,59 @@ def _check_private_directory(
         raise ValueError("AEC capture directory changed during write")
 
 
+def _private_destination_directory_fd(directory: Path) -> int:
+    """Anchor the raw PCM destination through trusted directory components.
+
+    An immediate 0700 directory is not sufficient when a user-controlled
+    ancestor link can redirect the entire four-second microphone recording.
+    """
+    absolute = Path(os.path.abspath(directory))
+    descriptor = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in absolute.parts[1:]:
+            entry = os.stat(part, dir_fd=descriptor, follow_symlinks=False)
+            owner = os.fstat(descriptor)
+            # macOS /var is a root-owned system alias under a nonwritable
+            # root directory. Reject every replaceable user-owned link.
+            if stat.S_ISLNK(entry.st_mode) and (
+                entry.st_uid != 0 or owner.st_uid != 0
+                or stat.S_IMODE(owner.st_mode) & 0o022
+            ):
+                raise ValueError("AEC capture destination has unsafe ancestor symlink")
+            flags = os.O_RDONLY | os.O_DIRECTORY
+            if not stat.S_ISLNK(entry.st_mode):
+                flags |= os.O_NOFOLLOW
+            next_descriptor = os.open(part, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_descriptor
+        selected = os.fstat(descriptor)
+        if not stat.S_ISDIR(selected.st_mode) or stat.S_IMODE(selected.st_mode) & 0o077:
+            raise ValueError("AEC capture directory must be private mode 0700")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def preflight_private_destination(directory: Path) -> tuple[int, int]:
     """Record the exact private directory approved before capturing audio.
 
     Retain its inode across the slow authenticated head transfer; an attacker
     cannot substitute another mode-0700 directory and receive the raw PCM.
     """
+    if directory.is_symlink():
+        raise ValueError("AEC capture destination has unsafe ancestor symlink")
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    identity = os.stat(directory, follow_symlinks=False)
-    if (not stat.S_ISDIR(identity.st_mode)
-            or stat.S_IMODE(identity.st_mode) & 0o077):
-        raise ValueError("AEC capture directory must be private mode 0700")
-    paths = [directory / "microphone.wav", directory / "speaker_reference.wav",
-             directory / "capture.json"]
-    if any(p.exists() or p.is_symlink() for p in paths):
-        raise FileExistsError("Private audio trial files already exist")
-    return identity.st_dev, identity.st_ino
+    descriptor = _private_destination_directory_fd(directory)
+    try:
+        identity = os.fstat(descriptor)
+        paths = [directory / "microphone.wav", directory / "speaker_reference.wav",
+                 directory / "capture.json"]
+        if any(p.exists() or p.is_symlink() for p in paths):
+            raise FileExistsError("Private audio trial files already exist")
+        return identity.st_dev, identity.st_ino
+    finally:
+        os.close(descriptor)
 
 
 def save_wavs(directory: Path, raw: bytes, report: dict, *,
@@ -352,8 +389,7 @@ def save_wavs(directory: Path, raw: bytes, report: dict, *,
     # O_NOFOLLOW on individual WAV paths alone is insufficient: a local
     # process could swap the containing private directory for a symlink after
     # preflight. Anchor creation and cleanup to one verified directory inode.
-    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
-    directory_fd = os.open(directory, flags)
+    directory_fd = _private_destination_directory_fd(directory)
     written = []
     try:
         _check_private_directory(directory, directory_fd, identity)

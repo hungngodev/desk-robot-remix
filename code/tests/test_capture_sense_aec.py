@@ -606,6 +606,39 @@ def test_private_aec_capture_rechecks_directory_approved_before_head_transfer(tm
     assert list(moved.iterdir()) == []
 
 
+def test_private_raw_pcm_capture_rejects_untrusted_parent_symlink_before_start(
+    tmp_path, monkeypatch,
+):
+    import sys
+
+    destination_root = tmp_path / "real_private"
+    destination_root.mkdir(mode=0o700)
+    (destination_root / "recordings").mkdir(mode=0o700)
+    untrusted_parent = tmp_path / "shared"
+    untrusted_parent.mkdir(mode=0o777)
+    untrusted_parent.chmod(0o777)
+    (untrusted_parent / "alias").symlink_to(
+        destination_root, target_is_directory=True,
+    )
+    redirected = untrusted_parent / "alias" / "recordings"
+    with pytest.raises(ValueError, match="unsafe ancestor symlink"):
+        capture.preflight_private_destination(redirected)
+
+    monkeypatch.setenv("DESK_CAPTURE_TOKEN", "x" * 32)
+    monkeypatch.setattr(sys, "argv", [
+        "capture_sense_aec.py", "--head-url", "http://192.168.1.23:8081",
+        "--robot-id", "robot-01", "--token-env", "DESK_CAPTURE_TOKEN",
+        "--output-dir", str(redirected), "--i-consent-to-private-raw-audio",
+    ])
+    monkeypatch.setattr(
+        capture, "capture_head",
+        lambda *a, **kw: pytest.fail("Unsafe directory started microphone capture"),
+    )
+    with pytest.raises(ValueError, match="unsafe ancestor symlink"):
+        capture.main()
+    assert list((destination_root / "recordings").iterdir()) == []
+
+
 def test_destination_preflight_rejects_existing_audio_and_public_directory(tmp_path):
     private = tmp_path / "private"
     capture.preflight_private_destination(private)
