@@ -2506,6 +2506,51 @@ async def test_late_cleanup_cannot_erase_new_lease_incarnation(bridge, monkeypat
     }))
 
 
+def test_trusted_fleet_maps_reject_ambiguous_json(bridge, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv(
+        "DESK_ROBOT_DEVICE_MAP",
+        '{"robot-01":"mac-01","robot-01":"mac-02"}',
+    )
+    with pytest.raises(ValueError, match="unambiguous"):
+        bridge.device_map()
+
+    monkeypatch.setenv(
+        "DESK_ROBOT_DEVICE_MAP",
+        '{"robot-01":NaN,"robot-02":"mac-02"}',
+    )
+    with pytest.raises(ValueError, match="unambiguous"):
+        bridge.device_map()
+
+    monkeypatch.setenv(
+        "DESK_ROBOT_DEVICE_MAP",
+        '{"robot-01":"mac-01","robot-02":"mac-02"}',
+    )
+    common = {
+        "selected_module": {"TTS": "CustomTTS"},
+        "TTS": {"CustomTTS": {
+            "type": "custom", "params": {"voice": "af_heart"},
+        }},
+    }
+    owner = SimpleNamespace(device_id="mac-01", config=common)
+    bridge.register(owner)
+
+    monkeypatch.setenv(
+        "DESK_ROBOT_NATIVE_VOICE_MAP",
+        '{"robot-01":"af_heart","robot-01":"am_adam"}',
+    )
+    with pytest.raises(RuntimeError, match="Invalid trusted native fleet voice map"):
+        bridge.native_tts_config(owner)
+
+    monkeypatch.setenv(
+        "DESK_ROBOT_NATIVE_VOICE_MAP",
+        '{"robot-01":Infinity}',
+    )
+    with pytest.raises(RuntimeError, match="Invalid trusted native fleet voice map"):
+        bridge.native_tts_config(owner)
+
+
 def test_native_kokoro_voice_is_bound_to_current_pets_without_config_bleed(
     bridge, monkeypatch,
 ):

@@ -192,9 +192,38 @@ def record_human_voice(conn, kind: str) -> bool:
 
 
 
+def _strict_trusted_json_object(name: str, error: str) -> dict:
+    """Parse trusted fleet configuration without ambiguous JSON semantics."""
+    def object_pairs(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"Duplicate JSON key: {key}")
+            result[key] = value
+        return result
+
+    def reject_constant(value):
+        raise ValueError(f"Non-finite JSON value: {value}")
+
+    try:
+        value = json.loads(
+            os.environ.get(name, "{}"),
+            object_pairs_hook=object_pairs,
+            parse_constant=reject_constant,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(error) from exc
+    if not isinstance(value, dict):
+        raise ValueError(error)
+    return value
+
+
 def device_map():
-    mapping = json.loads(os.environ.get("DESK_ROBOT_DEVICE_MAP", "{}"))
-    if not isinstance(mapping, dict) or not mapping or len(set(mapping.values())) != len(mapping):
+    mapping = _strict_trusted_json_object(
+        "DESK_ROBOT_DEVICE_MAP",
+        "Configure an unambiguous robot ID -> Xiaozhi device ID mapping",
+    )
+    if not mapping or len(set(mapping.values())) != len(mapping):
         raise ValueError("Configure a unique robot ID -> Xiaozhi device ID mapping")
     if not all(isinstance(k, str) and isinstance(v, str) and k and v for k, v in mapping.items()):
         raise ValueError("Device IDs must be nonempty strings")
@@ -220,10 +249,13 @@ def native_tts_config(conn):
     if connections.get(device) is not conn:
         raise RuntimeError("Native voice requires the current registered head")
     try:
-        assignments = json.loads(os.environ.get("DESK_ROBOT_NATIVE_VOICE_MAP", "{}"))
-    except (TypeError, ValueError) as exc:
+        assignments = _strict_trusted_json_object(
+            "DESK_ROBOT_NATIVE_VOICE_MAP",
+            "Invalid trusted native fleet voice map",
+        )
+    except ValueError as exc:
         raise RuntimeError("Invalid trusted native fleet voice map") from exc
-    voice = assignments.get(robot) if isinstance(assignments, dict) else None
+    voice = assignments.get(robot)
     if (not isinstance(voice, str)
             or re.fullmatch(r"[a-z]{2}_[a-z][a-z0-9_]{0,31}", voice) is None):
         raise RuntimeError("Native fleet pet has no validated assigned voice")
