@@ -27,7 +27,9 @@ def measurement_for_gate(scope, gate):
         quantities = []
         for name, unit, lower, upper, _ in specification["quantities"]:
             quantities.append({
-                "name": name, "unit": unit, "value": lower,
+                "name": name, "unit": unit,
+                "value": 1 if name in release.POSITIVE_CLEARANCE_METRICS
+                else lower,
                 "minimum": 0, "maximum": upper if upper is not None
                 else max(10, lower),
             })
@@ -933,3 +935,63 @@ def test_critical_dock_requires_both_switches_and_three_ir_viewpoints():
         assert not release.verified_scoped_record(
             altered, SHA, lambda url, row=altered: lookup(url, records=[row]),
         )
+
+
+@pytest.mark.parametrize("gate", [
+    "cliff_sensor_mount_height_and_stopping_geometry",
+    "four_floor_sensor_reverse_pivot_arc_sweep",
+])
+def test_cliff_geometry_and_reverse_pivot_need_every_measured_dimension(gate):
+    """An immutable generic physical signoff cannot replace installed geometry."""
+    import copy
+
+    record = receipt("system", gate)
+    assert release.verified_scoped_record(
+        record, SHA, lambda url: lookup(url, records=[record]),
+    )
+    for name, *_ in release.CRITICAL_TRIAL_GATES[gate]["quantities"]:
+        missing = copy.deepcopy(record)
+        missing["measurement"]["quantities"] = [
+            item for item in missing["measurement"]["quantities"]
+            if item["name"] != name
+        ]
+        assert not release.verified_scoped_record(
+            missing, SHA, lambda url, row=missing: lookup(url, records=[row]),
+        )
+    text_only = {**record, "measurement": {"observed": "safe to drive"}}
+    assert not release.verified_scoped_record(
+        text_only, SHA, lambda url: lookup(url, records=[text_only]),
+    )
+
+
+@pytest.mark.parametrize(("gate", "metric"), [
+    ("four_cliff_sensor_surface_trials", "minimum_stopping_margin_mm"),
+    ("cliff_sensor_mount_height_and_stopping_geometry", "installed_optical_height_mm"),
+    ("cliff_sensor_mount_height_and_stopping_geometry", "minimum_edge_stop_margin_mm"),
+    ("four_floor_sensor_reverse_pivot_arc_sweep",
+     "minimum_reverse_pivot_stopping_margin_mm"),
+])
+def test_zero_cliff_clearance_does_not_qualify_a_physical_gate(gate, metric):
+    record = receipt("system", gate)
+    selected = next(
+        item for item in record["measurement"]["quantities"]
+        if item["name"] == metric
+    )
+    selected["value"] = 0
+    assert not release.verified_scoped_record(
+        record, SHA, lambda url: lookup(url, records=[record]),
+    )
+
+
+def test_surface_sensor_pairs_need_eight_distinct_trials_not_four():
+    record = receipt("system", "four_cliff_sensor_surface_trials")
+    assert release.verified_scoped_record(
+        record, SHA, lambda url: lookup(url, records=[record]),
+    )
+    insufficient = {**record, "measurement": {
+        **record["measurement"], "sample_count": 4,
+    }}
+    assert not release.verified_scoped_record(
+        insufficient, SHA,
+        lambda url: lookup(url, records=[insufficient]),
+    )

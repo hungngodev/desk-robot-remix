@@ -272,12 +272,34 @@ PHYSICAL_GATE_METRICS = {
 # Tuple: metric name, unit, minimum result, maximum result, integer-only.
 CRITICAL_TRIAL_GATES = {
     "four_cliff_sensor_surface_trials": {
-        "minimum_samples": 4,
+        "minimum_samples": 8,
         "quantities": (
             ("qualified_floor_sensors", "sensors", 4, 4, True),
             ("distinct_tested_surfaces", "surfaces", 2, None, True),
+            ("surface_sensor_pairs_tested", "cases", 8, None, True),
             ("minimum_stopping_margin_mm", "mm", 0, None, False),
             ("measured_coast_distance_mm", "mm", 0, None, False),
+        ),
+    },
+    "cliff_sensor_mount_height_and_stopping_geometry": {
+        "minimum_samples": 8,
+        "quantities": (
+            ("installed_optical_height_mm", "mm", 0, None, False),
+            ("minimum_measured_floor_range_mm", "mm", 0, None, False),
+            ("loaded_coast_distance_mm", "mm", 0, None, False),
+            ("minimum_edge_stop_margin_mm", "mm", 0, None, False),
+            ("tested_surface_sensor_combinations", "cases", 8, None, True),
+        ),
+    },
+    "four_floor_sensor_reverse_pivot_arc_sweep": {
+        "minimum_samples": 8,
+        "quantities": (
+            ("reverse_direction_trials", "trials", 1, None, True),
+            ("left_pivot_trials", "trials", 1, None, True),
+            ("right_pivot_trials", "trials", 1, None, True),
+            ("distinct_floor_sensors_observed", "sensors", 4, 4, True),
+            ("minimum_reverse_pivot_stopping_margin_mm", "mm", 0, None, False),
+            ("measured_pivot_coast_distance_mm", "mm", 0, None, False),
         ),
     },
     "real_dual_ir_terminal_docking": {
@@ -312,6 +334,18 @@ CRITICAL_TRIAL_GATES = {
         ),
     },
 }
+
+
+# These geometry observations have to establish a positive installed
+# clearance or stopping margin; zero is not a safety margin. The accepted
+# clearance remains subject to real fitted geometry and physical review.
+POSITIVE_CLEARANCE_METRICS = frozenset({
+    "minimum_stopping_margin_mm",
+    "installed_optical_height_mm",
+    "minimum_measured_floor_range_mm",
+    "minimum_edge_stop_margin_mm",
+    "minimum_reverse_pivot_stopping_margin_mm",
+})
 
 
 def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
@@ -349,7 +383,8 @@ def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
             return False
         value, minimum, maximum = numbers
         if (minimum < 0 or minimum > value or value > maximum
-                or value < lower or (upper is not None and value > upper)):
+                or value < lower or (upper is not None and value > upper)
+                or (name in POSITIVE_CLEARANCE_METRICS and value <= 0)):
             return False
     return True
 
