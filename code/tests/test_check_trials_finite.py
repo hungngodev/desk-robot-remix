@@ -146,3 +146,44 @@ def test_require_pass_cli_rejects_unmeasured_infinity(tmp_path):
     assert rejected.returncode != 0
     assert '"physical_acceptance_pass": true' not in rejected.stdout
     assert "Invalid physical measurement: lift_mm" in rejected.stderr
+
+
+@pytest.mark.parametrize(
+    ("category", "field"),
+    [
+        ("key", "firmware"),
+        ("key", "calibration"),
+        ("candy", "firmware"),
+        ("candy", "calibration"),
+    ],
+)
+def test_a5_rejects_mixed_firmware_and_calibration(category, field):
+    rows = trial_rows()
+    next(row for row in rows if row["category"] == category)[field] = "other-setup"
+    with pytest.raises(ValueError, match="same firmware and calibration"):
+        check_trials.summarize(rows, "robot-01")
+
+
+def test_a5_accepts_consistent_nondefault_setup_across_both_objects():
+    rows = trial_rows()
+    for row in rows:
+        row["firmware"] = "qualified-firmware-commit"
+        row["calibration"] = "calibration-record-v2"
+    assert check_trials.summarize(rows, "robot-01")["physical_acceptance_pass"]
+
+
+def test_a5_cli_require_pass_rejects_mixed_configuration(tmp_path):
+    rows = trial_rows()
+    rows[10]["calibration"] = "another-jaw-calibration"
+    csv_path = tmp_path / "mixed-a5-setup.csv"
+    with csv_path.open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--file", str(csv_path), "--require-pass"],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "A5 trials must use the same firmware and calibration" in result.stderr
+    assert '"physical_acceptance_pass": true' not in result.stdout

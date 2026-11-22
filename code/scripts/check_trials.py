@@ -21,6 +21,9 @@ def _finite_measurement(row, field, *, positive=False):
 
 def summarize(rows, robot_id):
     result = {}
+    # A5 is one acceptance run for one fitted robot, not an average of
+    # attempts from different firmware images or jaw calibrations.
+    accepted_setup = None
     for category in ("key", "candy"):
         selected = [r for r in rows if r["robot_id"] == robot_id and r["category"] == category]
         ids = [int(r["trial"]) for r in selected]
@@ -42,6 +45,11 @@ def summarize(rows, robot_id):
             # A future-dated record cannot prove a completed physical trial.
             if trial_date > date.today():
                 raise ValueError("Future physical trial date")
+            setup = (r["firmware"].strip(), r["calibration"].strip())
+            if accepted_setup is None:
+                accepted_setup = setup
+            elif setup != accepted_setup:
+                raise ValueError("A5 trials must use the same firmware and calibration")
             _finite_measurement(r, "mass_g", positive=True)
             lift_mm = _finite_measurement(r, "lift_mm")
             hold_seconds = _finite_measurement(r, "hold_seconds")
