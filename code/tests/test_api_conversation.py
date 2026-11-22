@@ -2225,10 +2225,10 @@ def test_operator_group_api_requires_peer_sharing_before_interrupting(
         assert allowed.json()["physical_playback_verified"] is False
 
 
-def test_operator_group_api_rejects_quiet_participant_before_interrupting(
+def test_operator_group_api_allows_explicit_request_while_pet_stays_quiet(
     settings, tokens, monkeypatch,
 ):
-    """Quiet is an explicit speech veto and must win before fleet preemption."""
+    """Quiet suppresses unsolicited activity, not authenticated human requests."""
     app = create_app(settings)
     headers = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
     body = {
@@ -2255,53 +2255,14 @@ def test_operator_group_api_rejects_quiet_participant_before_interrupting(
         monkeypatch.setattr(app.state.runtime.pet, "interrupt", interrupt)
         monkeypatch.setattr(app.state.runtime.conversation, "run", run)
 
-        rejected = client.post("/v1/conversation", json=body, headers=headers)
-        assert rejected.status_code == 409
-        assert "quiet mode" in rejected.json()["detail"].lower()
-        assert "robot-02" in rejected.json()["detail"]
-        assert interrupts == []
-        assert runs == []
-        assert app.state.runtime.pet.states["robot-02"].quiet is True
-
-        app.state.runtime.pet.states["robot-02"].quiet = False
         allowed = client.post("/v1/conversation", json=body, headers=headers)
         assert allowed.status_code == 200
         assert interrupts == [robot.id for robot in settings.robots]
         assert len(runs) == 1
-
-
-def test_operator_group_api_rechecks_quiet_during_startup(
-    settings, tokens, monkeypatch,
-):
-    """A quiet request arriving during slow preemption must stop group speech."""
-    app = create_app(settings)
-    headers = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
-    body = {
-        "robot_ids": ["robot-01", "robot-02"],
-        "topic": "Compare notes", "utterances": 2,
-    }
-    with TestClient(app) as client:
-        settings.mode = "hardware"
-        settings.fleet_text_sharing_enabled = True
-        starts = []
-
-        async def interrupt(robot_id):
-            starts.append(robot_id)
-            if len(starts) == 1:
-                app.state.runtime.pet.states["robot-02"].quiet = True
-
-        async def run(*args):
-            raise AssertionError("Quiet participant reached group speech")
-
-        monkeypatch.setattr(app.state.runtime.pet, "interrupt", interrupt)
-        monkeypatch.setattr(app.state.runtime.conversation, "run", run)
-
-        rejected = client.post("/v1/conversation", json=body, headers=headers)
-        assert rejected.status_code == 409
-        assert "quiet mode became active" in rejected.json()["detail"].lower()
-        assert "robot-02" in rejected.json()["detail"]
-        assert starts == [robot.id for robot in settings.robots]
         assert app.state.runtime.pet.states["robot-02"].quiet is True
+        assert [turn["robot_id"] for turn in allowed.json()["transcript"]] == (
+            body["robot_ids"]
+        )
 
 
 def test_operator_group_api_refuses_revoke_regrant_during_preemption(
