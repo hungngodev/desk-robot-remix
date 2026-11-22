@@ -40,6 +40,42 @@ def trial_rows():
     return rows
 
 
+@pytest.mark.parametrize("invalid_id", [
+    "", " ", "\\t", "robot 01", "../robot-01", "robot-01\\n",
+    "a" * 41, None, True,
+])
+def test_a5_rejects_invalid_selected_and_recorded_robot_ids(invalid_id):
+    rows = trial_rows()
+    for row in rows:
+        row["robot_id"] = invalid_id
+    with pytest.raises(ValueError, match="Invalid A5 trial robot identity"):
+        check_trials.summarize(rows, invalid_id)
+
+    rows = trial_rows()
+    rows[0]["robot_id"] = invalid_id
+    with pytest.raises(ValueError, match="Invalid A5 trial robot identity"):
+        check_trials.summarize(rows, "robot-01")
+
+
+def test_a5_cli_cannot_certify_unidentified_20_trial_population(tmp_path):
+    rows = trial_rows()
+    for row in rows:
+        row["robot_id"] = " "
+    path = tmp_path / "unidentified-a5.csv"
+    with path.open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--file", str(path),
+         "--robot", " ", "--require-pass"],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "Invalid A5 trial robot identity" in result.stderr
+    assert '"physical_acceptance_pass": true' not in result.stdout
+
+
 def test_finite_eight_of_ten_per_object_passes_without_overclaiming():
     result = check_trials.summarize(trial_rows(), "robot-01")
     assert result["physical_acceptance_pass"] is True
