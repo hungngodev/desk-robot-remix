@@ -2064,15 +2064,11 @@ def test_slow_readonly_tool_receipt_cannot_cross_into_new_human_turn(
                 finally:
                     release.set()
                 stale = pending.result(timeout=4)
-                # A superseded PRIVATE retrieval must not return its data
-                # to the old Xiaozhi caller even if the SQLite read finished.
-                # Read-only physical AUX can return its old HTTP result, but
-                # neither response can enter the new human turn's context.
-                assert stale.status_code == (
-                    409 if route == "voice-context" else 200
-                )
-                if route == "voice-context":
-                    assert "superseded" in stale.json()["detail"]
+                # Neither a private lookup nor physical AUX telemetry
+                # from an old Xiaozhi tool turn may return its delayed facts
+                # after a newer authenticated human VAD supersedes it.
+                assert stale.status_code == 409
+                assert "superseded" in stale.json()["detail"]
             assert not hub.tool_history[robot]
             # A genuinely NEW tool request in that turn is still recorded.
             assert client.get(url, headers=headers).status_code == 200
