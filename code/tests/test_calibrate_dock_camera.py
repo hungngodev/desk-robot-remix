@@ -100,6 +100,39 @@ def test_fitter_refuses_repeated_position_and_scale():
         fit([original.copy() for _ in range(20)])
 
 
+def test_fitter_refuses_repeated_distinct_pose_subset():
+    cv2 = pytest.importorskip("cv2")
+    views = projected_views(cv2)
+    base = [views[index] for index in (0, 5, 18, 23)]
+    repeated = [view.copy() for view in base for _ in range(3)]
+    with pytest.raises(ValueError, match="near-duplicate placements"):
+        fit(repeated)
+
+
+def test_fitter_refuses_near_duplicate_pose_subset():
+    cv2 = pytest.importorskip("cv2")
+    views = projected_views(cv2)
+    base = [views[index] for index in (0, 5, 18, 23)]
+    repeated = []
+    for view in base:
+        for offset_px in (0.0, 2.0, 4.0):
+            shifted = view.copy()
+            shifted[..., 0] += offset_px
+            shifted[..., 1] += offset_px / 2
+            repeated.append(shifted)
+    with pytest.raises(ValueError, match="near-duplicate placements"):
+        fit(repeated)
+
+
+def test_fitter_accepts_twelve_geometrically_distinct_projected_views():
+    cv2 = pytest.importorskip("cv2")
+    candidate = fit(projected_views(cv2, count=12))
+    assert candidate["checkerboard_views"] == 12
+    assert candidate["measured"] is False
+    assert candidate["physical_acceptance_pass"] is False
+    assert candidate["motor_authorized"] is False
+
+
 def test_fitter_refuses_cropped_or_wrong_shape_corners():
     cv2 = pytest.importorskip("cv2")
     with pytest.raises(ValueError, match="cropped"):

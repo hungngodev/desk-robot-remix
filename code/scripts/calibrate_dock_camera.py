@@ -39,6 +39,7 @@ def fit_corners(
         np.mgrid[0:columns, 0:rows].T.reshape(-1, 2) * square_mm
     )
     image_points = []
+    checkerboard_grids = []
     centers = []
     board_areas = []
     for corners in views:
@@ -51,6 +52,7 @@ def fit_corners(
         points = points.reshape(-1, 1, 2)
         image_points.append(points)
         flat = points.reshape(-1, 2)
+        checkerboard_grids.append(flat.reshape(rows, columns, 2))
         centers.append(flat.mean(axis=0))
         board_areas.append(float(np.ptp(flat[:, 0]) * np.ptp(flat[:, 1])))
     centers = np.stack(centers)
@@ -59,6 +61,29 @@ def fit_corners(
         raise ValueError("Checkerboard views do not cover enough of the real sensor")
     if min(board_areas) <= 1 or max(board_areas) / min(board_areas) < 1.15:
         raise ValueError("Checkerboard views need varied distance and board scale")
+
+    # A wide aggregate center/scale range can still be manufactured by
+    # repeating only a few real placements. Require every accepted view to
+    # be observably distinct. Compare all four row/column orderings because
+    # OpenCV may reverse an otherwise identical board's corner ordering.
+    min_view_separation_px = max(3.0, 0.01 * math.hypot(width, height))
+    for index, grid in enumerate(checkerboard_grids):
+        for previous in checkerboard_grids[:index]:
+            previous_orders = (
+                previous,
+                previous[::-1, :, :],
+                previous[:, ::-1, :],
+                previous[::-1, ::-1, :],
+            )
+            separation_px = min(
+                float(np.sqrt(np.mean(np.sum((grid - order) ** 2, axis=2))))
+                for order in previous_orders
+            )
+            if separation_px < min_view_separation_px:
+                raise ValueError(
+                    "Checkerboard views include repeated or near-duplicate placements"
+                )
+
     rms, camera, dist, _, _, intrinsic_std, _, _ = cv2.calibrateCameraExtended(
         [object_grid] * len(image_points), image_points, (width, height),
         None, None,
