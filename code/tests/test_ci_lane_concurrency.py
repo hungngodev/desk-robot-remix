@@ -43,6 +43,19 @@ def test_host_verification_uses_independent_bounded_job_lanes():
             assert "tests/test_core_memory_mutation_race.py" in tests
             assert "tests/test_vision_worker.py::test_scene_comparator_unhashable_model_kind_is_rejected_without_crash" in tests
             assert "tests/test_multimodal.py::test_unhashable_multimodal_cues_are_rejected_without_mutation" in tests
+            # These new Mac source regressions must actually run in the
+            # independent lane, not only exist in a frequently canceled
+            # long full-Python CI job.
+            assert "tests/test_grasp_feedback.py" in tests
+            for native_voice_test in (
+                "test_native_kokoro_voice_is_bound_to_current_pets_without_config_bleed",
+                "test_native_voice_refuses_missing_or_malformed_operator_mapping",
+                "test_native_kokoro_voice_fails_closed_for_unmapped_provider",
+                "test_native_voice_mapping_export_matches_fleet_and_rejects_duplicates",
+                "test_pinned_upstream_connection_initializes_per_device_native_tts",
+                "test_actual_pinned_xiaozhi_tts_initializer_selects_each_registered_voice",
+            ):
+                assert f"tests/test_server_bridge.py::{native_voice_test}" in tests
         checkout = next(
             step for step in job["steps"]
             if step.get("uses", "").startswith("actions/checkout@")
