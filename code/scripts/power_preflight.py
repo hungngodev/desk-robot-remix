@@ -517,8 +517,8 @@ def main() -> None:
     parser.add_argument("--tray-length-mm", type=float)
     parser.add_argument("--tray-width-mm", type=float)
     parser.add_argument("--tray-height-mm", type=float)
-    parser.add_argument("--pack-wire-relief-mm", type=float, default=8.0)
-    parser.add_argument("--pack-side-clearance-mm", type=float, default=1.0)
+    parser.add_argument("--pack-wire-relief-mm", type=float)
+    parser.add_argument("--pack-side-clearance-mm", type=float)
     parser.add_argument("--pack-peak-discharge-a", type=float)
     parser.add_argument("--pack-continuous-discharge-a", type=float)
     parser.add_argument("--pack-pcm-trip-a", type=float)
@@ -537,7 +537,13 @@ def main() -> None:
         args.pack_connector_continuous_a,
         args.pack_wire_crimp_continuous_a,
     )
-    pack_requested = any(x is not None for x in pack_dimensions + pack_ratings)
+    # Explicit pack clearances request the pack screen too. Without all
+    # geometry a standalone option must fail, never silently disappear.
+    pack_requested = (
+        any(x is not None for x in pack_dimensions + pack_ratings)
+        or args.pack_wire_relief_mm is not None
+        or args.pack_side_clearance_mm is not None
+    )
     if pack_requested and any(x is None for x in pack_dimensions):
         parser.error("Pack mode requires all three assembled pack and tray dimensions")
     dock_inputs = (
@@ -613,8 +619,10 @@ def main() -> None:
                 tray_length_mm=args.tray_length_mm,
                 tray_width_mm=args.tray_width_mm,
                 tray_height_mm=args.tray_height_mm,
-                wire_relief_mm=args.pack_wire_relief_mm,
-                side_clearance_mm=args.pack_side_clearance_mm,
+                wire_relief_mm=(8.0 if args.pack_wire_relief_mm is None
+                                else args.pack_wire_relief_mm),
+                side_clearance_mm=(1.0 if args.pack_side_clearance_mm is None
+                                   else args.pack_side_clearance_mm),
                 rated_peak_discharge_a=args.pack_peak_discharge_a,
                 rated_continuous_discharge_a=args.pack_continuous_discharge_a,
                 pcm_overcurrent_trip_a=args.pack_pcm_trip_a,

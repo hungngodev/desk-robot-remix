@@ -920,6 +920,51 @@ def test_pack_cli_requires_all_geometry_and_undocked_mode(monkeypatch):
         assert exc.value.code == 2
 
 
+@pytest.mark.parametrize("flag,value", [
+    ("--pack-wire-relief-mm", "-5"),
+    ("--pack-side-clearance-mm", "3"),
+])
+def test_pack_cli_standalone_clearance_must_not_skip_pack_screen(
+    monkeypatch, flag, value,
+):
+    import sys
+
+    script = Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+    monkeypatch.setattr(sys, "argv", [
+        str(script), "--peak-5v-a", "1", "--continuous-5v-a", ".6",
+        flag, value,
+    ])
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_path(str(script), run_name="__main__")
+    assert exc.value.code == 2
+
+
+@pytest.mark.parametrize("extra,expected_fit", [
+    ([], True),
+    (["--pack-wire-relief-mm", "12"], False),
+    (["--pack-side-clearance-mm", "3"], False),
+    (["--pack-wire-relief-mm", "3", "--pack-side-clearance-mm", "1"], True),
+])
+def test_pack_cli_clearances_reach_assembled_envelope(
+    monkeypatch, capsys, extra, expected_fit,
+):
+    import json
+    import sys
+
+    script = Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+    monkeypatch.setattr(sys, "argv", [
+        str(script), "--peak-5v-a", "1", "--continuous-5v-a", ".6",
+        "--pack-length-mm", "55", "--pack-width-mm", "30",
+        "--pack-thickness-mm", "10", "--tray-length-mm", "68",
+        "--tray-width-mm", "35", "--tray-height-mm", "14",
+        *extra,
+    ])
+    runpy.run_path(str(script), run_name="__main__")
+    report = json.loads(capsys.readouterr().out)["protected_pack_screen"]
+    assert report["assembled_pack_fits_tray_on_paper"] is expected_fit
+    assert report["candidate_physically_qualified"] is False
+
+
 @pytest.mark.parametrize("peak,continuous,trip", [
     (8, 9, 10),
     (10, 6, 9),
