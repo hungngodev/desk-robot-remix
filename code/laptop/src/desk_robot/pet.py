@@ -538,6 +538,7 @@ class PetController:
     async def _store_observation(
         self, robot_id: str, change: SceneChange, *,
         camera_derived: bool = False, camera_generation: int | None = None,
+        camera_consent_generation: int | None = None,
         preemption_epoch: int | None = None,
         camera_received_at: float | None = None,
         camera_source_identity: tuple[int, int, int] | None = None,
@@ -548,6 +549,11 @@ class PetController:
         JPEG/PCM to another head and never claim a peer saw this firsthand.
         Operator must explicitly enable text sharing in local settings.
         """
+        admitted_camera_grant = (
+            self.settings.camera_consent_generation
+            if camera_consent_generation is None else camera_consent_generation
+        )
+
         def current_visual_epoch() -> bool:
             # SQLite work runs in a native thread and can outlive the awaiter.
             # Capture both the camera reconnect identity and the direct-look
@@ -559,7 +565,11 @@ class PetController:
                     and (camera_generation is None
                          or (self.multimodal is not None
                              and self.multimodal.hub._generation[robot_id]
-                             == camera_generation)))
+                             == camera_generation))
+                    and (self.settings.mode != "hardware"
+                         or (self.settings.voice_vision_tools_enabled
+                             and self.settings.camera_consent_generation
+                             == admitted_camera_grant)))
             )
 
         if (not current_visual_epoch()
@@ -1758,6 +1768,12 @@ class PetController:
         """Prevent pre-reconnect pixels from anchoring a new visual scene."""
         if self.multimodal is None:
             return None
+        if self.settings.mode == "hardware":
+            # The observer must retire the old JPEGs without waiting for
+            # the camera supervisor's next consent polling tick.
+            check_grant = getattr(self.multimodal, "_camera_grant_valid", None)
+            if callable(check_grant):
+                check_grant(robot_id, self.settings.camera_consent_generation)
         hub_generation = self.multimodal.hub._generation[robot_id]
         state = self.states[robot_id]
         if state.last_hub_generation != hub_generation:
@@ -1779,6 +1795,15 @@ class PetController:
         while state.enabled and state.generation == generation and not self._closed:
             try:
                 hub_generation = self._sync_visual_generation(robot_id)
+                camera_consent_generation = self.settings.camera_consent_generation
+
+                def current_camera_grant() -> bool:
+                    return (
+                        self.settings.mode != "hardware"
+                        or (self.settings.voice_vision_tools_enabled
+                            and self.settings.camera_consent_generation
+                            == camera_consent_generation)
+                    )
                 if (self.settings.mode == "hardware"
                         and not self.settings.voice_vision_tools_enabled):
                     state.gate.reset()
@@ -1877,7 +1902,7 @@ class PetController:
 
                 for jpeg, received, camera_identity in candidates:
                     if (not state.enabled or state.generation != generation
-                            or self._closed):
+                            or self._closed or not current_camera_grant()):
                         break
                     if (hub_generation is not None and
                             self.multimodal.hub._generation[robot_id] != hub_generation):
@@ -1911,7 +1936,7 @@ class PetController:
                     preemption_epoch = self._vision_preemption_epoch
                     gray = await asyncio.to_thread(state.gate._reduced, jpeg)
                     if (not state.enabled or state.generation != generation
-                            or self._closed
+                            or self._closed or not current_camera_grant()
                             or (self.settings.mode == "hardware"
                                 and not self.settings.voice_vision_tools_enabled)
                             or self._vision_preemption_epoch != preemption_epoch
@@ -1933,6 +1958,7 @@ class PetController:
                         # must yield, even if they lacked an inference task
                         # when the explicit question called preempt().
                         if (preemption_epoch != self._vision_preemption_epoch
+                                or not current_camera_grant()
                                 or (hub_generation is not None and
                                     self.multimodal.hub._generation[robot_id] != hub_generation)
                                 or self._direct_vision_requests
@@ -1979,6 +2005,7 @@ class PetController:
                             if self._vision_inflight is inference:
                                 self._vision_inflight = None
                     if (time.monotonic() - received > self.max_observation_age
+                            or not current_camera_grant()
                             # A direct visual question may take precedence
                             # just as the speculative VLM returns. The model
                             # result is not yet permission to persist/share
@@ -2001,24 +2028,28 @@ class PetController:
                         await self._store_observation(
                             robot_id, change, camera_derived=True,
                             camera_generation=hub_generation,
+                            camera_consent_generation=camera_consent_generation,
                             preemption_epoch=preemption_epoch,
                             camera_received_at=received,
                             camera_source_identity=camera_identity,
                         )
-                        if (hub_generation is not None and
-                                self.multimodal.hub._generation[robot_id] != hub_generation):
+                        if (not current_camera_grant()
+                                or (hub_generation is not None and
+                                    self.multimodal.hub._generation[robot_id]
+                                    != hub_generation)):
                             state.stale_camera_events += 1
                             continue
                         await self._cue_person_face(
                             robot_id, change, generation, received,
                             preemption_epoch,
+                            camera_consent_generation=camera_consent_generation,
                         )
                         # The cosmetic HTTP request may take a full second.
                         # A newer human turn, disabled camera consent or a
                         # replaced observation generation must win before
                         # even a passive event reaches the speech scheduler.
                         if (not state.enabled or state.generation != generation
-                                or self._closed
+                                or self._closed or not current_camera_grant()
                                 or self._vision_preemption_epoch != preemption_epoch
                                 or (hub_generation is not None and
                                     self.multimodal.hub._generation[robot_id] != hub_generation)
@@ -2040,6 +2071,7 @@ class PetController:
                                 robot_id, change, generation,
                                 camera_derived=True,
                                 received_at=received,
+                                camera_consent_generation=camera_consent_generation,
                             )
             except asyncio.CancelledError:
                 raise
@@ -2070,6 +2102,7 @@ class PetController:
     async def _cue_person_face(
         self, robot_id: str, change: SceneChange,
         generation: int, captured_at: float, preemption_epoch: int,
+        camera_consent_generation: int | None = None,
     ) -> None:
         """Animate this head only for a fresh, credible live person observation.
 
@@ -2083,6 +2116,9 @@ class PetController:
                 or not _initiative_evidence(change)
                 or not state.enabled or state.generation != generation
                 or self._closed or not self.settings.voice_vision_tools_enabled
+                or (camera_consent_generation is not None
+                    and self.settings.camera_consent_generation
+                        != camera_consent_generation)
                 or self._vision_preemption_epoch != preemption_epoch
                 or self._human_active_in_fleet(now)
                 or now - captured_at > self.max_observation_age
@@ -2233,12 +2269,19 @@ class PetController:
     def _consider_speech(
         self, robot_id: str, change: SceneChange, generation: int, *,
         camera_derived: bool = False, received_at: float | None = None,
+        camera_consent_generation: int | None = None,
     ) -> None:
+        admitted_camera_grant = (
+            self.settings.camera_consent_generation
+            if camera_consent_generation is None else camera_consent_generation
+        )
         state = self.states[robot_id]
         now = time.monotonic()
         if (self._closed or not state.enabled or state.generation != generation
                 or (camera_derived and self.settings.mode == "hardware"
-                    and not self.settings.voice_vision_tools_enabled)):
+                    and (not self.settings.voice_vision_tools_enabled
+                         or self.settings.camera_consent_generation
+                             != admitted_camera_grant))):
             state.suppressed += 1
             state.last_initiative_suppression = "pet_disabled_or_generation_changed"
             return
@@ -2322,7 +2365,8 @@ class PetController:
                                     and received_at is not None else now),
                         social_peer_id=peer_id,
                         social_peer_generation=peer_generation,
-                        camera_derived=camera_derived)
+                        camera_derived=camera_derived,
+                        camera_consent_generation=admitted_camera_grant)
         )
 
     async def _proactive_tool_receipt(
@@ -2697,6 +2741,7 @@ class PetController:
         *, offered_at: float, social_peer_id: str,
         social_peer_generation: int | None, camera_derived: bool,
         newer_human_turn: Callable[[], bool],
+        camera_consent_generation: int | None = None,
     ) -> None:
         """Reuse one fleet speech owner for a consent-fenced social event."""
         state = self.states[robot_id]
@@ -2707,7 +2752,10 @@ class PetController:
                 or not peer.enabled or peer.quiet
                 or peer.generation != social_peer_generation
                 or (camera_derived and self.settings.mode == "hardware"
-                    and not self.settings.voice_vision_tools_enabled)
+                    and (not self.settings.voice_vision_tools_enabled
+                         or (camera_consent_generation is not None
+                             and self.settings.camera_consent_generation
+                                 != camera_consent_generation)))
                 or not self.voice_monitor_ready
                 or self._human_active_in_fleet(time.monotonic())
                 or newer_human_turn()
@@ -2742,7 +2790,10 @@ class PetController:
                 and peer.generation == social_peer_generation
                 and (not camera_derived
                      or self.settings.mode != "hardware"
-                     or self.settings.voice_vision_tools_enabled)
+                     or (self.settings.voice_vision_tools_enabled
+                         and (camera_consent_generation is None
+                              or self.settings.camera_consent_generation
+                                  == camera_consent_generation)))
                 and not self._human_active_in_fleet(time.monotonic())
                 and not newer_human_turn()
             )
@@ -3004,6 +3055,7 @@ class PetController:
         *, offered_at: float, social_peer_id: str | None = None,
         social_peer_generation: int | None = None,
         camera_derived: bool = False,
+        camera_consent_generation: int | None = None,
     ) -> None:
         state = self.states[robot_id]
         robot = self.settings.robot(robot_id)
@@ -3014,7 +3066,10 @@ class PetController:
         memory_grant = self.settings.voice_memory_consent_generation
         # A rapid OFF/ON is a new media grant even if the final opt-in is True.
         # Bind it before the asynchronous memory/context collection begins.
-        camera_grant = self.settings.camera_consent_generation
+        camera_grant = (
+            self.settings.camera_consent_generation
+            if camera_consent_generation is None else camera_consent_generation
+        )
         room_grant = self.settings.room_station_consent_generation
         memory_revisions = getattr(
             self.conversation, "_private_memory_generation", {}
@@ -3089,6 +3144,7 @@ class PetController:
                     offered_at=offered_at, social_peer_id=social_peer_id,
                     social_peer_generation=social_peer_generation,
                     camera_derived=camera_derived,
+                    camera_consent_generation=camera_grant,
                     newer_human_turn=newer_human_turn,
                 )
                 return

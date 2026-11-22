@@ -2383,6 +2383,152 @@ async def test_revoked_camera_source_cannot_offer_proactive_speech(
         await pet.close()
 
 
+async def test_camera_regrant_during_eyewitness_sqlite_write_retracts_old_guess(
+    fleet, tmp_path, monkeypatch,
+):
+    """A rapid OFF/ON cannot preserve a private frame from the old camera grant."""
+    import threading
+
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    original_remember = memory.remember
+    entered, release = threading.Event(), threading.Event()
+
+    def slow_insert(*args, **kwargs):
+        stored = original_remember(*args, **kwargs)
+        if stored and kwargs.get("witnessed") and not entered.is_set():
+            entered.set()
+            assert release.wait(3)
+        return stored
+
+    monkeypatch.setattr(memory, "remember", slow_insert)
+    pet = PetController(
+        fleet, {}, Conversation(
+            fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+        ), memory, KeyScene(),
+    )
+    task = asyncio.create_task(pet._store_observation(
+        "robot-01", SceneChange("key", "A camera key before opt out", 0.98),
+        camera_derived=True,
+    ))
+    try:
+        assert await asyncio.to_thread(entered.wait, 2)
+        old_grant = fleet.camera_consent_generation
+        fleet.voice_vision_tools_enabled = False
+        fleet.voice_vision_tools_enabled = True
+        assert fleet.camera_consent_generation != old_grant
+        release.set()
+        await asyncio.wait_for(task, timeout=3)
+        assert memory.count("robot-01") == 0
+        assert all(memory.count(r.id) == 0 for r in fleet.robots[1:])
+        # A fresh authorized camera observation, unlike the old callback,
+        # remains eligible under the NEW grant.
+        await pet._store_observation(
+            "robot-01", SceneChange("key", "A fresh key after opt in", 0.98),
+            camera_derived=True,
+        )
+        assert memory.count("robot-01") == 1
+    finally:
+        release.set()
+        await pet.close()
+
+
+@pytest.mark.parametrize("social", [False, True])
+async def test_camera_regrant_before_queued_speech_prevents_stale_audio(
+    fleet, tmp_path, social,
+):
+    """The camera epoch must be captured at admission, not when TTS starts."""
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    fleet.fleet_text_sharing_enabled = social
+    fleet.fleet_social_autonomy_enabled = social
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {}, Conversation(
+            fleet, GroundedChat(), speaker, memory=memory,
+        ), memory, KeyScene(), speech_cooldown=0,
+    )
+    for robot_id in ("robot-01", "robot-02"):
+        pet.states[robot_id].enabled = True
+        pet.states[robot_id].generation = 91
+    pet.set_voice_monitor_ready(True)
+    old_grant = fleet.camera_consent_generation
+    try:
+        pet._consider_speech(
+            "robot-01",
+            SceneChange("key", "The camera noticed an old desk key", 0.99),
+            91, camera_derived=True,
+            camera_consent_generation=old_grant,
+        )
+        assert pet._speech_task is not None
+        # No task switch occurs between scheduling and revocation.
+        fleet.voice_vision_tools_enabled = False
+        fleet.voice_vision_tools_enabled = True
+        assert fleet.camera_consent_generation != old_grant
+        await wait_for(lambda: pet._speech_task is None, timeout=2)
+        assert speaker.spoken == []
+        assert all(memory.count(r.id) == 0 for r in fleet.robots)
+        # Ordinary physical evidence is independent of camera consent.
+        pet._consider_speech(
+            "robot-01", SceneChange("touch_tap", "A real touch", 1.0), 91,
+        )
+        await wait_for(lambda: pet._speech_task is None, timeout=2)
+        assert speaker.spoken
+    finally:
+        for state in pet.states.values():
+            state.enabled = False
+        await pet.close()
+
+
+async def test_camera_regrant_during_slow_scene_comparison_drops_old_candidate(
+    fleet, tmp_path,
+):
+    """A delayed VLM guess cannot cross camera grant and enter public events."""
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class PausedScene:
+        async def compare(self, before, after):
+            assert before == WHITE and after == RED
+            entered.set()
+            await release.wait()
+            return SceneChange("key", "An obsolete camera key", 0.99)
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {"robot-01": ChangingCamera()},
+        Conversation(
+            fleet, GroundedChat(), speaker, memory=memory,
+        ), memory, PausedScene(), interval=.01,
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation, state.quiet = True, 77, True
+    observer = asyncio.create_task(pet._observe("robot-01", 77))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        old_grant = fleet.camera_consent_generation
+        fleet.voice_vision_tools_enabled = False
+        fleet.voice_vision_tools_enabled = True
+        assert fleet.camera_consent_generation != old_grant
+        release.set()
+        await wait_for(lambda: state.stale_camera_events >= 1, timeout=2)
+        state.enabled = False
+        await asyncio.gather(observer, return_exceptions=True)
+        assert state.events == 0
+        assert memory.count("robot-01") == 0
+        assert speaker.spoken == []
+    finally:
+        release.set()
+        state.enabled = False
+        observer.cancel()
+        await asyncio.gather(observer, return_exceptions=True)
+        await pet.close()
+
+
 async def test_camera_derived_social_turn_revokes_before_group_speaker(
     fleet, tmp_path,
 ):
