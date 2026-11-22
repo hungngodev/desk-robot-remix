@@ -5,7 +5,10 @@ and no-retry behavior use the same httpx surface as the installed server.
 """
 from __future__ import annotations
 
+import hashlib
+import hmac
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -40,9 +43,28 @@ def bridge_tools(monkeypatch):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     monkeypatch.setenv("DESK_ROBOT_TOOL_TOKEN", "s" * 40)
+    monkeypatch.setenv("DESK_ROBOT_SPEECH_TOKEN", "r" * 40)
     module.registered_head = registered
     module.bridge = bridge
     return module
+
+
+@pytest.mark.parametrize("speech_token", ["", "s" * 40])
+async def test_tool_bridge_refuses_missing_or_shared_signing_secret_before_http(
+    bridge_tools, monkeypatch, speech_token,
+):
+    # A valid Mac API bearer alone must never mint a trusted speech receipt.
+    monkeypatch.setenv("DESK_ROBOT_SPEECH_TOKEN", speech_token)
+
+    class ForbiddenHTTP:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("Untrusted tool receipt reached Mac HTTP")
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", ForbiddenHTTP)
+    result = await bridge_tools.call(bridge_tools.registered_head, "status")
+    assert result == {
+        "error": "Current registered head or local tool credential missing"
+    }
 
 
 @pytest.mark.parametrize("route", [
@@ -77,6 +99,26 @@ async def test_real_xiaozhi_tool_failure_returns_bounded_no_retry_error(
         calls.append(request)
         assert request.headers["authorization"] == "Bearer " + "s" * 40
         assert request.headers["x-desk-robot-tool-receipt"] == "1"
+        assert request.headers["x-desk-robot-tool-receipt-device"] == "mac-head-01"
+        assert request.headers["x-desk-robot-tool-receipt-generation"] == "0"
+        receipt_id = request.headers["x-desk-robot-tool-receipt-id"]
+        assert len(receipt_id) == 32
+        issued_us = int(request.headers["x-desk-robot-tool-receipt-at-us"])
+        assert issued_us > 0
+        signed_fields = [
+            1, "robot-01", "mac-head-01", 0, request.method,
+            request.url.path, issued_us, receipt_id,
+        ]
+        signing_input = json.dumps(
+            signed_fields, separators=(",", ":"), ensure_ascii=True,
+        ).encode("ascii")
+        expected_signature = hmac.new(
+            ("r" * 40).encode("utf-8"), signing_input, hashlib.sha256,
+        ).hexdigest()
+        assert hmac.compare_digest(
+            request.headers["x-desk-robot-tool-receipt-signature"],
+            expected_signature,
+        )
         if failure == "connect":
             raise httpx.ConnectError("private host disconnected", request=request)
         if failure == "timeout":
