@@ -24,6 +24,16 @@ def _money(value, *, label: str) -> Decimal:
         ) from exc
     if not amount.is_finite() or amount < 0 or not representable:
         raise ValueError(f"{label} must be a finite non-negative amount")
+    # Historical planning output is converted to JSON floats. Nonzero
+    # subcent values must not underflow to an apparent free item or fee.
+    # Inspect the Decimal digits directly: quantize() can overflow for
+    # finite inputs such as 1e-999999 and must not silently round them.
+    if amount and amount.as_tuple().exponent < -2:
+        digits = amount.as_tuple().digits
+        extra_places = -amount.as_tuple().exponent - 2
+        if (extra_places >= len(digits)
+                or any(digit != 0 for digit in digits[-extra_places:])):
+            raise ValueError(f"{label} must use exact USD cents")
     return amount
 
 

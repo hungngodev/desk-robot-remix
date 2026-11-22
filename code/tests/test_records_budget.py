@@ -59,6 +59,32 @@ def test_legacy_budget_rejects_nonpositive_or_noninteger_quantities(quantity):
         module("check_budget").budget(data, 0, 0)
 
 
+@pytest.mark.parametrize("tiny", ["0.001", "1.230001", "1e-999999"])
+def test_legacy_budget_rejects_positive_subcent_money(tiny):
+    # A positive amount cannot underflow to a reported free historical item.
+    legacy = historical_quoted_budget()
+    legacy["items"][0]["unit_usd"] = tiny
+    with pytest.raises(ValueError, match="exact USD cents"):
+        module("check_budget").budget(legacy, 0, 0)
+
+    legacy["items"][0]["unit_usd"] = "10.00"
+    for fees in ((tiny, 0), (0, tiny)):
+        with pytest.raises(ValueError, match="exact USD cents"):
+            module("check_budget").budget(legacy, *fees)
+
+    legacy["cap_usd"] = tiny
+    with pytest.raises(ValueError, match="exact USD cents"):
+        module("check_budget").budget(legacy, 0, 0)
+
+
+def test_legacy_budget_accepts_exact_cents_with_trailing_decimal_zeroes():
+    legacy = historical_quoted_budget()
+    legacy["items"][0]["unit_usd"] = "10.2300"
+    result = module("check_budget").budget(legacy, "1.000", "0.00")
+    assert result["known_subtotal_usd"] == 20.46
+    assert result["quoted_total_usd"] == 21.46
+
+
 @pytest.mark.parametrize("unit_price", [
     -10, "-1.50", "NaN", "Infinity", "-Infinity", float("nan"),
     float("inf"), True, "not a quote",
