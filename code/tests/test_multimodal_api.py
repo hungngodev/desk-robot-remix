@@ -6,9 +6,8 @@ import secrets
 import time
 
 import pytest
-from fastapi.testclient import TestClient
-
 from desk_robot.api import create_app
+from fastapi.testclient import TestClient
 
 
 
