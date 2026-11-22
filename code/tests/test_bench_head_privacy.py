@@ -30,6 +30,33 @@ def test_boot_privacy_report_preflight_rejects_public_or_existing_path(
         bench.preflight_private_report(public / "privacy.json")
 
 
+def test_privacy_report_rejects_nested_ancestor_symlink_and_is_exclusive(
+    tmp_path,
+):
+    target = tmp_path / "attacker"
+    target.mkdir(mode=0o700)
+    (target / "reports").mkdir(mode=0o700)
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o777)
+    shared.chmod(0o777)
+    (shared / "alias").symlink_to(target, target_is_directory=True)
+    redirected = shared / "alias" / "reports" / "privacy.json"
+    assert not redirected.parent.is_symlink()
+    assert stat.S_IMODE(redirected.parent.stat().st_mode) == 0o700
+    with pytest.raises(ValueError, match="unsafe symlink"):
+        bench.preflight_private_report(redirected)
+    with pytest.raises(ValueError, match="unsafe symlink"):
+        bench.save_private_report(redirected, {"muted": True})
+    assert not (target / "reports" / "privacy.json").exists()
+
+    safe = tmp_path / "private" / "privacy.json"
+    bench.save_private_report(safe, {"raw_pcm_captured": False})
+    assert stat.S_IMODE(safe.stat().st_mode) == 0o600
+    with pytest.raises(FileExistsError):
+        bench.save_private_report(safe, {"raw_pcm_captured": True})
+    assert '"raw_pcm_captured": false' in safe.read_text()
+
+
 class Clock:
     def __init__(self):
         self.now = 0.0
