@@ -164,23 +164,34 @@ def _private_output_directory(path: Path) -> int:
         raise
 
 
-def preflight_private_output(path: Path) -> None:
+def preflight_private_output(path: Path) -> tuple[int, int]:
     """Reject unsafe or occupied evidence destinations before physical trials."""
     descriptor = _private_output_directory(path)
     try:
         try:
             os.stat(path.name, dir_fd=descriptor, follow_symlinks=False)
         except FileNotFoundError:
-            return
+            # Hold this exact identity across awaited operator/HTTP capture.
+            # The location must not change while real trials are collected.
+            parent = os.fstat(descriptor)
+            return parent.st_dev, parent.st_ino
         raise FileExistsError("Never overwrite previous physical side-range evidence")
     finally:
         os.close(descriptor)
 
 
-def write_private_rows(path: Path, rows: list[dict]) -> None:
+def write_private_rows(
+    path: Path, rows: list[dict], *, expected_parent: tuple[int, int],
+) -> None:
     """Exclusively create real hardware evidence with 0600, even under umask 000."""
     descriptor = _private_output_directory(path)
     try:
+        parent = os.fstat(descriptor)
+        if (type(expected_parent) is not tuple or len(expected_parent) != 2
+                or type(expected_parent[0]) is not int
+                or type(expected_parent[1]) is not int
+                or (parent.st_dev, parent.st_ino) != expected_parent):
+            raise RuntimeError("Private side-range directory changed since preflight")
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
         with os.fdopen(
             os.open(path.name, flags, 0o600, dir_fd=descriptor),
@@ -203,7 +214,7 @@ async def main() -> None:
     parser.add_argument("--interval", default=.18, type=float)
     args = parser.parse_args()
     _status_url(args.url, args.robot)
-    preflight_private_output(args.output)
+    output_parent = preflight_private_output(args.output)
     token = os.environ.get(args.token_env, "")
     if len(token) < 24 or not token.isascii():
         raise ValueError("Private operator bearer not configured")
@@ -227,7 +238,7 @@ async def main() -> None:
             last = phase[-1]["side_ranges"]
             boot = last["boot_id"]
             last_side[side] = last["sample_ms"][SIDES[side]]
-    write_private_rows(args.output, rows)
+    write_private_rows(args.output, rows, expected_parent=output_parent)
     print(f"Captured {len(rows)} read only WROOM samples")
     print(
         f"Analyze with: python scripts/calibrate_side_ranges.py "

@@ -180,10 +180,10 @@ async def test_invalid_sensor_clock_or_missing_boot_identity_rejected(invalid):
 def test_side_trial_output_is_exclusive_private_and_consumable(tmp_path):
     output_path = tmp_path / "side_ranges.jsonl"
     rows = [{"robot_id": "robot-01", "sample_id": 1}]
-    preflight_private_output(output_path)
+    original_parent = preflight_private_output(output_path)
     old_umask = os.umask(0)
     try:
-        write_private_rows(output_path, rows)
+        write_private_rows(output_path, rows, expected_parent=original_parent)
     finally:
         os.umask(old_umask)
     assert stat.S_IMODE(output_path.stat().st_mode) == 0o600
@@ -191,7 +191,7 @@ def test_side_trial_output_is_exclusive_private_and_consumable(tmp_path):
     with pytest.raises(FileExistsError):
         preflight_private_output(output_path)
     with pytest.raises(FileExistsError):
-        write_private_rows(output_path, [{"sample_id": 2}])
+        write_private_rows(output_path, [{"sample_id": 2}], expected_parent=original_parent)
     assert [json.loads(line) for line in output_path.read_text().splitlines()] == rows
 
 
@@ -203,7 +203,7 @@ def test_side_trial_preflight_rejects_symlinked_previous_report(tmp_path):
     with pytest.raises(FileExistsError):
         preflight_private_output(alias)
     with pytest.raises(FileExistsError):
-        write_private_rows(alias, [{"sample_id": 3}])
+        write_private_rows(alias, [{"sample_id": 3}], expected_parent=(0, 0))
     assert evidence.read_text() == "private original"
 
 
@@ -216,17 +216,45 @@ def test_side_trial_capture_never_follows_user_controlled_directory_alias(tmp_pa
     with pytest.raises(ValueError, match="symlink"):
         preflight_private_output(candidate)
     with pytest.raises(ValueError, match="symlink"):
-        write_private_rows(candidate, [{"sample_id": 1}])
+        write_private_rows(candidate, [{"sample_id": 1}], expected_parent=(0, 0))
     assert not (secure / "forged.jsonl").exists()
 
 
 def test_side_trial_capture_requires_private_parent_and_refuses_traversal(tmp_path):
     public = tmp_path / "shared"
     public.mkdir(mode=0o755)
+    public.chmod(0o755)
     with pytest.raises(ValueError, match="private mode"):
         preflight_private_output(public / "new.jsonl")
     with pytest.raises(ValueError, match="private mode"):
-        write_private_rows(public / "new.jsonl", [])
+        write_private_rows(public / "new.jsonl", [], expected_parent=(0, 0))
     assert not (public / "new.jsonl").exists()
     with pytest.raises(ValueError, match="traversal"):
         preflight_private_output(tmp_path / "shared" / ".." / "new.jsonl")
+
+
+def test_physical_side_capture_refuses_swapped_private_destination(tmp_path):
+    approved = tmp_path / "operator-private"
+    approved.mkdir(mode=0o700)
+    destination = approved / "measured.jsonl"
+    identity = preflight_private_output(destination)
+
+    # The data collection awaits 120 sensor conversions and 6 operator
+    # prompts; do not let a replaced output folder receive private evidence.
+    approved.rename(tmp_path / "former-private")
+    approved.mkdir(mode=0o700)
+    replacement = approved / "measured.jsonl"
+    with pytest.raises(RuntimeError, match="changed since preflight"):
+        write_private_rows(
+            replacement, [{"robot_id": "robot-01", "sample_id": 1}],
+            expected_parent=identity,
+        )
+    assert not replacement.exists()
+    assert not (tmp_path / "former-private" / "measured.jsonl").exists()
+
+
+def test_private_side_capture_requires_real_preflight_identity(tmp_path):
+    output = tmp_path / "side.jsonl"
+    with pytest.raises(RuntimeError, match="changed since preflight"):
+        write_private_rows(output, [], expected_parent=(0, 0))
+    assert not output.exists()
