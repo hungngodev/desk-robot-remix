@@ -516,6 +516,20 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             # speech, including a robot not in the requested peer subset.
             for robot_id in request.robot_ids:
                 settings.robot(robot_id)  # preserve unknown-ID 404, not coordinator's 409
+            pet = app.state.runtime.pet
+
+            def quiet_participants() -> list[str]:
+                return [
+                    robot_id for robot_id in request.robot_ids
+                    if pet.status(robot_id)["quiet"]
+                ]
+
+            quiet = quiet_participants()
+            if quiet:
+                raise HTTPException(
+                    409,
+                    "Quiet mode is active for requested pet(s): " + ", ".join(quiet),
+                )
             # A hardware group needs a distinct peer-text sharing grant.
             # Otherwise the second model never receives the first reply,
             # even though the endpoint reports a completed conversation.
@@ -523,7 +537,16 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             if settings.mode == "hardware" and not settings.fleet_text_sharing_enabled:
                 raise HTTPException(409, "Enable fleet peer text sharing consent before group dialogue")
             for robot in settings.robots:
-                await app.state.runtime.pet.interrupt(robot.id)
+                await pet.interrupt(robot.id)
+            # A pet may enter quiet while fleet preemption is awaiting a slow
+            # peer. Never let that explicit silence request reach synthesis.
+            quiet = quiet_participants()
+            if quiet:
+                raise HTTPException(
+                    409,
+                    "Quiet mode became active during conversation startup for pet(s): "
+                    + ", ".join(quiet),
+                )
             # Preemption awaits can allow revocation and immediate regrant.
             # An older request must not inherit a newer consent epoch.
             if settings.mode == "hardware" and (
