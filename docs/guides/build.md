@@ -116,18 +116,54 @@ After confirming the port belongs to the WROOM, upload explicitly with
 servo horns removed, separate actuator supply and common ground for the first
 test. No port has been selected and nothing has been uploaded in this session.
 
-For legacy servo-only bench work with motors disconnected, after wiring/centering:
-The helper cannot clear the guarded profile’s sensor latch or grant recovery.
+### Center the two hornless MG90S before measuring installed lift travel
+
+The old `esp32dev` DC reference is **actuator inert**, so its `arm` command
+cannot center either physical servo. The guarded `esp32_full` and
+`esp32_dc_full` builds intentionally refuse ARM until per-unit jaw and lift
+limits are measured. Do **not** bypass the guard to center a servo.
+
+An explicitly selected centering fixture reuses the production WROOM GPIO18
+(lift), GPIO19 (jaw), 50 Hz LEDC timer and 1500 us commanded center pulse.
+With **both servo horns and linkages removed**, unplug both drive motors,
+disconnect the charger/dock/battery path, and power one MG90S at a time from
+a separately current-limited regulated supply sharing ground with WROOM.
+Do not feed servo motor current from the WROOM 3.3 V pin or its USB port.
+Verify polarity and actual idle/current-limit behavior before energizing.
 
 ```sh
-uv run python scripts/serial_bench.py --port PORT --command "grip 95"
-uv run python scripts/serial_bench.py --port PORT --command "disarm"
+../.tools/body-pio-venv/bin/pio run -d firmware/body -e esp32_servo_center_bench
+../.tools/body-pio-venv/bin/pio run -d firmware/body -e esp32_servo_center_bench --target upload --upload-port PORT
+../.tools/body-pio-venv/bin/pio device monitor --port PORT --baud 115200
 ```
 
-The helper sends arm, one command, supervised keepalives for at most 1.5 seconds,
-then stop. Remove/support any load before `disarm`, which detaches servo PWM.
-It never retries an uncertain movement ACK. Start near 90°; first establish
-mechanical clearance before testing wider travel.
+Only on the confirmed **local USB0 serial monitor**, send `CENTER LIFT`
+followed by a newline, then `CENTER GRIP` after the first completion. Each
+command can run **once per boot**, operates **one servo at a time** at a fixed
+nominal 90 degrees for at most **400 ms**, and automatically detaches its
+PWM channel. There is no drive, arbitrary angle, remote control, battery
+charge or safety rearm command in the fixture. If an ACK or visible center
+position is missing, remove power and inspect wiring; do not assume an angle
+was physically reached.
+
+Once the outputs are detached, disconnect actuator power, mark each horn's
+center mechanically, and fit the two horns without moving the shafts.
+Measure the installed lift's safe **minimum and maximum commanded angles**
+around its 90 degree boot position on a collision-free fit fixture. The
+measured `DESK_ROBOT_LIFT_MIN_DEG` and `DESK_ROBOT_LIFT_MAX_DEG` must
+be inside the generic 60 to 120 degree parser envelope and contain 90.
+Record the installed MG90S, horn index, source SHA, load, current,
+linkage clearance and motion direction. Only after a supervised physical
+test may a dedicated build set `DESK_ROBOT_LIFT_LIMITS_QUALIFIED=1`
+and the two measured values. Do not set that flag for a stock image or
+reuse another robot's readings.
+
+After those measurements, switch back to the guarded full firmware and
+follow the jaw calibration, ToF/IMU, electrical cutoff and explicit USB
+rearm procedures. `scripts/serial_bench.py` is for an **already qualified
+guarded body**, not initial servo centering. It refuses implicit rearm,
+sends one bounded command and then STOP; a command ACK remains different
+from physical motion or successful grasp evidence.
 
 Host tests:
 

@@ -1,10 +1,13 @@
 # First physical step: gripper test
 
-Updated 2026-11-03: use the reported **positional MG90S**, two required, count
-unknown. Verify its pocket/horn fit against the source SG90 mechanism. SER0043
-is continuous rotation and cannot hold a commanded claw/lift angle. Use the explicit legacy DC profile only for servo-only tests with motors
-disconnected. The new stepper profile has tested control but no sensor I/O or
-calibration supplied, so it refuses arming.
+Use the reported **positional MG90S**, two required, actual ownership count
+still to be checked. Verify each pocket/horn against the source SG90 mechanism.
+SER0043 is continuous rotation and cannot hold a commanded claw/lift angle.
+The preserved legacy DC profile is intentionally **actuator inert**, not a
+servo-centering shortcut. The full guarded WROOM profiles include sensor
+drivers but cannot attach either servo until the actual lift and jaw travel
+calibrations are qualified. Follow the isolated one-shot centering fixture
+in [the build guide](build.md#center-the-two-hornless-mg90s-before-measuring-installed-lift-travel).
 
 Test your actual **flat key and candy** before buying the complete rover/head.
 The existing mechanism's floor clearance and gripping ability are unproven.
@@ -22,9 +25,14 @@ The existing mechanism's floor clearance and gripping ability are unproven.
    measured servo before slicing, and do not treat a valid file as verified fit.
 4. Measure the actual servo case and horn. Print one pocket/fit part first. Do not
    scale the whole rack and pinion to change a servo pocket.
-5. Follow [wiring](../hardware/wiring.md) and [body build](build.md). Remove horns
-   and loads first. `arm` centers the servos; attach horns only after centering.
-   Test the linkage near 90° before approaching either software limit.
+5. Follow [wiring](../hardware/wiring.md) and [body build](build.md). Physically
+   unplug drive motors and remove **both** servo horns, then use only the
+   isolated USB one-shot fixture to command each unloaded servo to nominal
+   90 degrees. Confirm its 400 ms PWM output has detached and **remove
+   servo power** before attaching the horns or linkage. `arm` on the normal
+   body firmware cannot be used for this unqualified step. Measure the
+   actual safe lift travel and jaw geometry on a collision-free fixture
+   before supplying any qualified firmware limits.
 
 The serial bench helper described in `build.md` runs one bounded servo job and
 maintains its control lease. Do not disable the 500 ms watchdog for manual tests.

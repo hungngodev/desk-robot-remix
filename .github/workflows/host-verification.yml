@@ -232,6 +232,8 @@ jobs:
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/room_station -e feather_nrf52840_room_bench
       - name: Compile full Feather room station including soil analog ADC
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/room_station -e feather_nrf52840_room_full
+      - name: Compile hornless one-shot WROOM MG90S centering fixture
+        run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_servo_center_bench
       - name: Compile preserved DC reference
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32dev
       - name: Compile five source-reused classic NEC bench dock beacons
