@@ -324,13 +324,25 @@ CRITICAL_TRIAL_GATES = {
         ),
     },
     "sense_speaker_mic_double_talk": {
-        "minimum_samples": 20,
+        # Twenty distinct human trials at EACH distance, plus a robot-only
+        # echo control and an independent quiet-mode control. Acceptance is
+        # physically scoped to the same installed head and audio settings.
+        "minimum_samples": 42,
         "quantities": (
-            ("ordinary_speech_attempts", "attempts", 20, 20, True),
-            ("audible_stops_within_500ms", "successes", 19, 20, True),
-            ("new_intents_retained", "successes", 18, 20, True),
-            ("echo_only_false_interruptions", "interruptions", 0, 0, True),
-            ("separate_quiet_run_minutes", "min", 10, None, False),
+            ("ordinary_speech_attempts_50cm", "attempts", 20, 20, True),
+            ("ordinary_speech_attempts_100cm", "attempts", 20, 20, True),
+            ("audible_stops_within_500ms_50cm", "successes", 19, 20, True),
+            ("audible_stops_within_500ms_100cm", "successes", 19, 20, True),
+            ("new_intents_retained_50cm", "successes", 18, 20, True),
+            ("new_intents_retained_100cm", "successes", 18, 20, True),
+            ("robot_only_observation_seconds", "s", 600, None, False),
+            ("robot_only_audible_speech_seconds", "s", 120, 600, False),
+            ("robot_only_minutes_with_5s_speech", "min", 10, 10, True),
+            ("robot_only_playback_volume_levels", "levels", 3, 3, True),
+            ("robot_only_false_interruptions", "interruptions", 0, 0, True),
+            ("quiet_observation_seconds", "s", 600, None, False),
+            ("quiet_unsolicited_speech_events", "events", 0, 0, True),
+            ("quiet_unsolicited_motion_events", "events", 0, 0, True),
         ),
     },
 }
@@ -354,7 +366,13 @@ def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
     if measurement["sample_count"] < specification["minimum_samples"]:
         return False
     conditions = measurement["conditions"]
-    for key in ("installed_hardware", "procedure_revision"):
+    keys = ["installed_hardware", "procedure_revision"]
+    if gate == "sense_speaker_mic_double_talk":
+        keys.extend((
+            "robot_id", "firmware_commit", "audio_config_id",
+            "mic_speaker_placement_id", "trial_capture_id",
+        ))
+    for key in keys:
         value = conditions.get(key)
         if (type(value) is not str or not value.strip()
                 or value.strip().casefold() in {"unknown", "tbd", "none", "pass"}):

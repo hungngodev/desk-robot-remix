@@ -40,6 +40,13 @@ def measurement_for_gate(scope, gate):
                 "instrument": "calibrated_measurement_tool",
                 "installed_hardware": "revision_A_assembled_robot",
                 "procedure_revision": "physical_acceptance_v1",
+                **({
+                    "robot_id": "robot-01",
+                    "firmware_commit": "a" * 40,
+                    "audio_config_id": "head_profile_01",
+                    "mic_speaker_placement_id": "measured_mount_01",
+                    "trial_capture_id": "aligned_a2_capture_01",
+                } if gate == "sense_speaker_mic_double_talk" else {}),
             },
             "quantities": quantities,
         }
@@ -904,8 +911,10 @@ def test_critical_product_trial_requires_actual_metric_scope_and_counts(gate):
 
 
 @pytest.mark.parametrize("gate,metric", [
-    ("sense_speaker_mic_double_talk", "audible_stops_within_500ms"),
-    ("sense_speaker_mic_double_talk", "new_intents_retained"),
+    ("sense_speaker_mic_double_talk", "audible_stops_within_500ms_50cm"),
+    ("sense_speaker_mic_double_talk", "audible_stops_within_500ms_100cm"),
+    ("sense_speaker_mic_double_talk", "new_intents_retained_50cm"),
+    ("sense_speaker_mic_double_talk", "new_intents_retained_100cm"),
     ("lift_and_grip_calibration", "flat_key_unassisted_successes"),
     ("lift_and_grip_calibration", "wrapped_candy_unassisted_successes"),
 ])
@@ -994,4 +1003,73 @@ def test_surface_sensor_pairs_need_eight_distinct_trials_not_four():
     assert not release.verified_scoped_record(
         insufficient, SHA,
         lambda url: lookup(url, records=[insufficient]),
+    )
+
+
+@pytest.mark.parametrize(("metric", "value"), [
+    ("ordinary_speech_attempts_50cm", 19),
+    ("ordinary_speech_attempts_100cm", 19),
+    ("audible_stops_within_500ms_50cm", 18),
+    ("audible_stops_within_500ms_100cm", 18),
+    ("new_intents_retained_50cm", 17),
+    ("new_intents_retained_100cm", 17),
+    ("robot_only_observation_seconds", 599),
+    ("robot_only_audible_speech_seconds", 119),
+    ("robot_only_minutes_with_5s_speech", 9),
+    ("robot_only_playback_volume_levels", 2),
+    ("robot_only_false_interruptions", 1),
+    ("quiet_observation_seconds", 599),
+    ("quiet_unsolicited_speech_events", 1),
+    ("quiet_unsolicited_motion_events", 1),
+])
+def test_a2_receipt_cannot_conflate_distances_or_omit_echo_quiet(metric, value):
+    case = receipt("system", "sense_speaker_mic_double_talk")
+    observed = next(
+        row for row in case["measurement"]["quantities"]
+        if row["name"] == metric
+    )
+    observed["value"] = value
+    assert not release.verified_scoped_record(
+        case, SHA, lambda url: lookup(url, records=[case]),
+    )
+
+
+def test_a2_receipt_requires_both_distances_and_two_controls():
+    import copy
+
+    case = receipt("system", "sense_speaker_mic_double_talk")
+    assert release.verified_scoped_record(
+        case, SHA, lambda url: lookup(url, records=[case]),
+    )
+    for row in case["measurement"]["quantities"]:
+        partial = copy.deepcopy(case)
+        partial["measurement"]["quantities"] = [
+            item for item in partial["measurement"]["quantities"]
+            if item["name"] != row["name"]
+        ]
+        assert not release.verified_scoped_record(
+            partial, SHA,
+            lambda url, record=partial: lookup(url, records=[record]),
+        )
+    limited = copy.deepcopy(case)
+    limited["measurement"]["sample_count"] = 20
+    assert not release.verified_scoped_record(
+        limited, SHA, lambda url: lookup(url, records=[limited]),
+    )
+
+
+@pytest.mark.parametrize("field", [
+    "robot_id", "firmware_commit", "audio_config_id",
+    "mic_speaker_placement_id", "trial_capture_id",
+])
+def test_a2_receipt_needs_capture_and_head_identity(field):
+    original = receipt("system", "sense_speaker_mic_double_talk")
+    missing = {**original, "measurement": {
+        **original["measurement"],
+        "conditions": {
+            **original["measurement"]["conditions"], field: "",
+        },
+    }}
+    assert not release.verified_scoped_record(
+        missing, SHA, lambda url: lookup(url, records=[missing]),
     )
