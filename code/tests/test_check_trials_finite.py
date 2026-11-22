@@ -252,3 +252,51 @@ def test_a5_other_robot_attempt_remains_independently_scoped():
     rows.append({**rows[0], "robot_id": "robot-02", "category": "key ",
                  "trial": "11", "assisted": "true"})
     assert check_trials.summarize(rows, "robot-01")["physical_acceptance_pass"]
+
+@pytest.mark.parametrize(("category", "field", "invalid"), [
+    ("key", "assisted", ""),
+    ("candy", "assisted", "unknown"),
+    ("key", "placed_under_control", "n/a"),
+    ("candy", "placed_under_control", ""),
+    ("key", "flat_start", ""),
+    ("key", "flat_start", "unmeasured"),
+])
+def test_a5_incomplete_outcome_cannot_fill_failed_trial_slots(category, field, invalid):
+    rows = trial_rows()
+    for row in rows:
+        if row["category"] == category and row["trial"] in ("9", "10"):
+            row[field] = invalid
+    with pytest.raises(ValueError, match=field):
+        check_trials.summarize(rows, "robot-01")
+
+
+@pytest.mark.parametrize(("category", "field"), [
+    ("key", "assisted"),
+    ("candy", "placed_under_control"),
+    ("key", "flat_start"),
+])
+def test_a5_cli_refuses_incomplete_failed_attempt_fields(tmp_path, category, field):
+    rows = trial_rows()
+    for row in rows:
+        if row["category"] == category and row["trial"] in ("9", "10"):
+            row[field] = ""
+    path = tmp_path / "incomplete-a5-evidence.csv"
+    with path.open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--file", str(path), "--require-pass"],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert field in result.stderr
+    assert '"physical_acceptance_pass": true' not in result.stdout
+
+
+def test_a5_candy_start_orientation_is_not_a_key_only_requirement():
+    rows = trial_rows()
+    for row in rows:
+        if row["category"] == "candy":
+            row["flat_start"] = ""
+    assert check_trials.summarize(rows, "robot-01")["physical_acceptance_pass"]

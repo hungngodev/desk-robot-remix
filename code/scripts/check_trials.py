@@ -55,6 +55,16 @@ def summarize(rows, robot_id):
                 accepted_setup = setup
             elif setup != accepted_setup:
                 raise ValueError("A5 trials must use the same firmware and calibration")
+            # Each attempt, including an unsuccessful one, needs an actual
+            # observation of assistance, placement and initial orientation.
+            # Otherwise an unmeasured attempt could silently fill the 10-trial
+            # denominator while eight measured successes certify the run.
+            fields = ("placed_under_control", "assisted")
+            if category == "key":
+                fields += ("flat_start",)
+            for field in fields:
+                if r.get(field) not in ("true", "false"):
+                    raise ValueError(f"Unmeasured A5 trial outcome: {field}")
             _finite_measurement(r, "mass_g", positive=True)
             lift_mm = _finite_measurement(r, "lift_mm")
             hold_seconds = _finite_measurement(r, "hold_seconds")
