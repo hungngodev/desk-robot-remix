@@ -137,12 +137,24 @@ def capture(
 
 def _private_report_directory_fd(parent: Path) -> int:
     """Open the real target directory without trusting replaceable links."""
-    absolute = Path(os.path.abspath(parent))
+    # Path.absolute preserves lexical ".." segments. os.path.abspath would
+    # erase them before inspection even though the filesystem resolves links
+    # before a parent traversal.
+    absolute = parent.absolute()
+    if ".." in absolute.parts:
+        raise ValueError("Unsafe room bench report parent traversal")
     descriptor = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
     try:
         for name in absolute.parts[1:]:
-            entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            # Each parent is already held open and checked. Creating the next
+            # directory through that descriptor prevents a rejected symlink
+            # ancestor from creating files or directories in its target.
             ancestor = os.fstat(descriptor)
+            try:
+                entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                os.mkdir(name, mode=0o700, dir_fd=descriptor)
+                entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
             # Honor only system-owned aliases under nonwritable root-owned
             # parents, including macOS /var. Reject mutable user symlinks.
             if stat.S_ISLNK(entry.st_mode) and (
@@ -168,7 +180,6 @@ def save_private_bench_report(path: Path, report: dict) -> None:
     """Record only a new private USB receipt, never overwrite old evidence."""
     if path.parent.is_symlink():
         raise ValueError("Unsafe room bench report directory symlink")
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     directory_fd = _private_report_directory_fd(path.parent)
     try:
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL

@@ -55,6 +55,32 @@ def test_room_bench_report_rejects_untrusted_symlink_ancestor(tmp_path):
     assert not (target / "nested" / "station.json").exists()
 
 
+def test_room_bench_symlink_rejection_has_no_directory_creation_side_effect(tmp_path):
+    save = BENCH["save_private_bench_report"]
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o777)
+    shared.chmod(0o777)
+    (shared / "alias").symlink_to(private, target_is_directory=True)
+    target = private / "not_yet_created"
+    with pytest.raises(ValueError, match="ancestor symlink"):
+        save(shared / "alias" / target.name / "station.json", {"valid": True})
+    assert not target.exists()
+
+
+def test_room_bench_rejects_parent_traversal_before_directory_creation(tmp_path):
+    save = BENCH["save_private_bench_report"]
+    parent = tmp_path / "private"
+    parent.mkdir(mode=0o700)
+    # The operating system resolves the alias before '..', while abspath
+    # would silently erase both segments prior to alias inspection.
+    destination = parent / "alias" / ".." / "created" / "station.json"
+    with pytest.raises(ValueError, match="parent traversal"):
+        save(destination, {"valid": True})
+    assert not (parent / "created").exists()
+
+
 def test_room_bench_cli_uses_exclusive_private_receipt_writer():
     source = (Path(__file__).resolve().parents[1]
               / "scripts/bench_room_station.py").read_text()
