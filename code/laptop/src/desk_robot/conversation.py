@@ -623,7 +623,7 @@ class Conversation:
 
             record = self._group_activity.get(peer.id)
 
-            def record_failure(exc: Exception) -> None:
+            def record_failure(exc: Exception, record=record) -> None:
                 # Never turn an optional SQLite write into an audio failure.
                 if record is not None:
                     record["memory_write_failures"] = (
@@ -631,7 +631,9 @@ class Conversation:
                     )
                     record["memory_write_error_type"] = type(exc).__name__
 
-            def observe_late_write(task: asyncio.Task) -> None:
+            def observe_late_write(
+                task: asyncio.Task, record=record, record_failure=record_failure
+            ) -> None:
                 # A timed-out or externally cancelled await cannot stop a
                 # running SQLite thread. Own its eventual result and report
                 # a failure only if the write really failed.
