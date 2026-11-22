@@ -2,10 +2,14 @@
 import asyncio
 import threading
 import time
+from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 import pytest
+from desk_robot.conversation import Conversation
+from desk_robot.pet import PetController
 from desk_robot.runtime import Runtime
+from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
 
 
 def configure_room_dispatch(runtime):
@@ -1484,3 +1488,150 @@ async def test_recovered_snapshot_does_not_revive_newer_speech_end():
     finally:
         release.set()
         await asyncio.gather(older, return_exceptions=True)
+
+class _FailingStopSpeaker(SimulatedSpeaker):
+    """Physical speaker fake whose decoder STOP can fail independently."""
+
+    supports_passive_speech_budget = True
+
+    def __init__(self):
+        super().__init__()
+        self.send_started = asyncio.Event()
+        self.block_send = True
+        self.fail_stop = True
+        self.interruptions = []
+
+    @asynccontextmanager
+    async def session(self, robots, *, passive=False):
+        del robots, passive
+        yield
+
+    async def say(self, robot, text, *, permission_check=None):
+        if permission_check is not None and not permission_check():
+            raise RuntimeError("Speech permission revoked")
+        self.send_started.set()
+        if self.block_send:
+            await asyncio.Event().wait()
+        await super().say(robot, text, permission_check=permission_check)
+
+    async def interrupt(self, robot):
+        self.interruptions.append(robot.id)
+        if self.fail_stop:
+            raise TimeoutError("XIAO decoder STOP timeout")
+
+
+def _runtime_for_speaker_failure(settings, conversation, pet):
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = settings
+    runtime.conversation = conversation
+    runtime.pet = pet
+    runtime.multimodal = None
+    runtime.coordinator = None
+    runtime.attention = None
+    runtime._closed = False
+    return runtime
+
+
+async def test_runtime_vad_failed_group_decoder_stop_blocks_successor_until_recovery(
+    settings,
+):
+    """A cancelled group is not a confirmed physical speaker STOP."""
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    for index, robot in enumerate(settings.robots, start=1):
+        robot.device_id = f"head-{index:02d}"
+
+    speaker = _FailingStopSpeaker()
+    conversation = Conversation(settings, SimulatedChat(), speaker)
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            settings.robot(robot_id)
+            return {"robot_id": robot_id}
+
+    runtime = _runtime_for_speaker_failure(settings, conversation, Pet())
+    group = asyncio.create_task(
+        conversation.run(["robot-01", "robot-02"], "Check the desk", 1)
+    )
+    await asyncio.wait_for(speaker.send_started.wait(), timeout=1)
+
+    with pytest.raises(RuntimeError, match="Unable to preempt"):
+        await runtime._on_voice_interrupt("robot-01", "normal")
+    await asyncio.gather(group, return_exceptions=True)
+
+    assert conversation.active is None
+    assert conversation.speaker_stop_unconfirmed is True
+    with pytest.raises(RuntimeError, match="speaker STOP unconfirmed"):
+        await conversation.run(["robot-01", "robot-02"], "Stale successor", 1)
+
+    speaker.fail_stop = False
+    await conversation.stop()
+    assert conversation.speaker_stop_unconfirmed is False
+
+    speaker.block_send = False
+    transcript = await conversation.run(
+        ["robot-01", "robot-02"], "Recovered successor", 1
+    )
+    assert transcript == [
+        {"robot_id": "robot-01", "text": "I see a candy on the desk."}
+    ]
+    assert speaker.spoken[-1] == ("robot-01", "I see a candy on the desk.")
+
+
+async def test_runtime_vad_failed_proactive_decoder_stop_blocks_successor_until_recovery(
+    settings,
+):
+    """Pet cancellation preserves the same failed decoder STOP latch."""
+    settings.mode = "hardware"
+    robot = settings.robot("robot-01")
+    robot.device_id = "head-01"
+
+    speaker = _FailingStopSpeaker()
+    conversation = Conversation(settings, SimulatedChat(), speaker)
+    speech = asyncio.create_task(
+        conversation.say_proactive(
+            robot,
+            "A proactive line",
+            permission_check=lambda: True,
+            deliberate=True,
+        )
+    )
+    await asyncio.wait_for(speaker.send_started.wait(), timeout=1)
+
+    owner = PetController.__new__(PetController)
+    owner._speech_task = speech
+    owner._speech_participants = {robot.id}
+    owner.conversation = conversation
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            await PetController._cancel_speech(owner, robot_id)
+            return {"robot_id": robot_id}
+
+    runtime = _runtime_for_speaker_failure(settings, conversation, Pet())
+    with pytest.raises(RuntimeError, match="Unable to preempt"):
+        await runtime._on_voice_interrupt(robot.id, "normal")
+    await asyncio.gather(speech, return_exceptions=True)
+
+    assert conversation.speaker_stop_unconfirmed is True
+    with pytest.raises(RuntimeError, match="speaker STOP unconfirmed"):
+        await conversation.say_proactive(
+            robot,
+            "Must stay blocked",
+            permission_check=lambda: True,
+            deliberate=True,
+        )
+
+    speaker.fail_stop = False
+    await conversation.stop()
+    assert conversation.speaker_stop_unconfirmed is False
+
+    speaker.block_send = False
+    assert await conversation.say_proactive(
+        robot,
+        "Recovered proactive line",
+        permission_check=lambda: True,
+        deliberate=True,
+    )
+    assert speaker.spoken[-1] == ("robot-01", "Recovered proactive line")
+
