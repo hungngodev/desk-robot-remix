@@ -114,6 +114,28 @@ void invalid_does_not_renew() {
   CHECK(send(body, "drive 20 20", 500) == "ERR drive disarmed");
 }
 
+void rejected_grip_does_not_renew_watchdog() {
+  BodyControl body;
+  body.require_grip_feedback(true);
+  CHECK(send(body, "arm", 0) == "OK arm");
+  // Parsed but rejected by the actual jaw feedback gate, not the parser.
+  CHECK(send(body, "grip 60", 499) == "ERR grip force_missing_or_stale");
+  CHECK(body.watchdog_remaining(499) == 1);
+  body.tick(500);
+  CHECK(!body.state().armed);
+  CHECK(send(body, "grip 60", 500) == "ERR grip disarmed");
+
+  BodyControl accepted;
+  accepted.require_grip_feedback(true);
+  CHECK(send(accepted, "arm", 0) == "OK arm");
+  CHECK(send(accepted, "keepalive", 499) == "OK keepalive");
+  CHECK(accepted.watchdog_remaining(499) == 500);
+  accepted.tick(500);
+  CHECK(accepted.state().armed);
+  accepted.tick(999);
+  CHECK(!accepted.state().armed);
+}
+
 void queries_do_not_renew() {
   BodyControl body;
   send(body, "arm", 0);
@@ -400,6 +422,7 @@ int main(int argc, char** argv) {
       {"drive_limits", drive_limits}, {"drive_duration", drive_duration},
       {"keepalive_does_not_extend_drive", keepalive_does_not_extend_drive},
       {"invalid_does_not_renew", invalid_does_not_renew},
+      {"rejected_grip_does_not_renew_watchdog", rejected_grip_does_not_renew_watchdog},
       {"queries_do_not_renew", queries_do_not_renew}, {"smooth_servos", smooth_servos},
       {"keepalive_extends_servo_lease", keepalive_extends_servo_lease},
       {"stop_freezes_servos", stop_freezes_servos},

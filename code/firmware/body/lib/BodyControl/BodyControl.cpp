@@ -1505,7 +1505,6 @@ void BodyControl::execute(const char* line, std::size_t length,
   } else if (!state_.armed) {
     std::snprintf(reply, capacity, "ERR %s disarmed", command);
   } else {
-    last_control_ms_ = now_ms;
     if (drive) {
       state_.left = limited_speed(first);
       state_.right = limited_speed(second);
@@ -1539,6 +1538,9 @@ void BodyControl::execute(const char* line, std::size_t length,
     } else {
       std::snprintf(reply, capacity, "OK keepalive");
     }
+    // A rejected feedback/endstop/force command is NOT a valid keepalive.
+    // Renew the remote control lease only after successful authorization.
+    last_control_ms_ = now_ms;
   }
 }
 
