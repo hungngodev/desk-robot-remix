@@ -1779,6 +1779,10 @@ static void battery_undervoltage_rejects_arm_and_stops_motion() {
   readings.gauge.cell_mv = 3190;
   body.set_accessories(readings, 2);
   CHECK(!body.state().armed);
+  // Even when voltage is below the ordinary 3300 mV arm threshold,
+  // the operator must see the persistent fault and USB-only recovery.
+  CHECK(send(body, "status", 2).find(
+      "\"fault\":\"battery_low_latched\"") != std::string::npos);
   CHECK(send(body, "arm", 2) == "ERR arm battery_low_latched");
 
   // Changing the voltage but reusing the last low sample is NOT evidence

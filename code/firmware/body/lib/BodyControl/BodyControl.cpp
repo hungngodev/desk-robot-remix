@@ -1232,9 +1232,11 @@ void BodyControl::execute(const char* line, std::size_t length,
             imu_.accel[2] == 0 ? "imu_zero_accel" :
         imu_motion_required_ && imu_provenance_bad_ ? "imu_sample_unordered" :
         imu_motion_required_ && !imu_valid ? "imu_missing_or_stale" :
-        battery_below_arm_min ? "battery_low" :
+        // Persistent physical protection faults outrank transient voltage.
+        // A recovered or still-low cell does not silently clear USB rearm.
         battery_fault_latched_ ? "battery_low_latched" :
         fuel_monitor_fault_latched_ ? "fuel_monitor_latched" :
+        battery_below_arm_min ? "battery_low" :
         fuel_monitor_required_ && !fuel_monitor_fresh(now_ms) ?
             "fuel_monitor_missing_or_stale" :
         !guarded_motion_profile() ? "not_required" : "none";
