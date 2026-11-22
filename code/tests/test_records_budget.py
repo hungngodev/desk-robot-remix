@@ -81,7 +81,7 @@ def trial(category, n):
         "trial": str(n),
         "object_description": "Unit test fixture, not a real trial",
         "mass_g": "1",
-        "date": "test",
+        "date": "2026-11-21",
         "firmware": "test",
         "calibration": "test",
         "flat_start": "true",

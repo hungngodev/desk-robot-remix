@@ -166,6 +166,7 @@ def test_slow_reed_pir_are_on_expander_not_the_ir_direct_input_pins():
     # receiver, valid NEC decoder or charger is implied by this source test.
     accessory = (ROOT / "code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp").read_text()
     main = (ROOT / "code/firmware/body/src/main.cpp").read_text()
+    evidence = (ROOT / "code/firmware/body/lib/BodyControl/McpContactEvidence.h").read_text()
     body = (ROOT / "code/firmware/body/include/BodyPins.h").read_text()
     bus = PLAN["bus"]
     assert bus["body_gpio"]["terminal_ir_left_reserved"] == 36
@@ -178,7 +179,8 @@ def test_slow_reed_pir_are_on_expander_not_the_ir_direct_input_pins():
     assert "read(0x20, 0x13, &bits, 1)" in accessory
     assert "data_.optional_inputs.valid = false;" in accessory
     assert "const auto& extension = accessories.readings().optional_inputs;" in main
-    assert "now_ms - extension.at_ms <= 250U" in main
+    assert "contact_evidence.observe(extension, now_ms)" in main
+    assert "now_ms - sample.at_ms > 250U" in evidence
     assert "digitalRead(body_pins::kTerminalIrLeftInput)" not in main
     assert "digitalRead(body_pins::kTerminalIrRightInput)" not in main
     assert bus["mcp23017_optional_inputs"]["physical_qualified"] is False
