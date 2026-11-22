@@ -10,7 +10,6 @@ from desk_robot.api import create_app
 from fastapi.testclient import TestClient
 
 
-
 def _signed_tool_headers(settings, tokens, robot_id, path, generation, monkeypatch):
     """Mint an independent, one-use Xiaozhi receipt for a real Mac route."""
     robot = settings.robot(robot_id)
