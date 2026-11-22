@@ -21,12 +21,21 @@ spec.loader.exec_module(release)
 
 def physical_reading(gate, *, value, minimum, maximum):
     name, unit = release.PHYSICAL_GATE_METRICS[gate]
+    conditions = {
+        "setup": "identified mounted test fixture",
+        "instrument": "calibrated measuring instrument",
+    }
+    if gate == "hardware_motor_driver_fails_low_after_cpu_stall":
+        # A structurally valid cutoff time still needs independent physical
+        # fault injection and timestamped oscilloscope/logic analyzer proof.
+        conditions.update({
+            "instrument": "calibrated logic analyzer",
+            "instrument_type": "logic_analyzer",
+            "fault_injection": "cpu_stall",
+        })
     return {
         "sample_count": 3,
-        "conditions": {
-            "setup": "identified mounted test fixture",
-            "instrument": "calibrated measuring instrument",
-        },
+        "conditions": conditions,
         "quantities": [{
             "name": name, "unit": unit,
             "value": value, "minimum": minimum, "maximum": maximum,
