@@ -44,6 +44,15 @@ def summarize(rows, robot_id):
     accepted_setup = None
     for category in ("key", "candy"):
         selected = [r for r in rows if r["robot_id"] == robot_id and r["category"] == category]
+        # CSV evidence names exactly ten attempts. Python int() silently
+        # accepts "0_1", "01", whitespace, booleans and fractional numeric
+        # values; none are an unambiguous physical trial label.
+        if any(
+            type(r.get("trial")) is not str
+            or re.fullmatch(r"(?:10|[1-9])", r["trial"]) is None
+            for r in selected
+        ):
+            raise ValueError("Each category needs canonical trial numbers 1..10")
         ids = [int(r["trial"]) for r in selected]
         if len(ids) != len(set(ids)) or any(i < 1 or i > 10 for i in ids):
             raise ValueError("Each category needs distinct trial numbers 1..10")

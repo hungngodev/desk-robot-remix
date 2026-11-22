@@ -57,6 +57,36 @@ def test_a5_rejects_invalid_selected_and_recorded_robot_ids(invalid_id):
         check_trials.summarize(rows, "robot-01")
 
 
+
+@pytest.mark.parametrize("invalid", [
+    "0_1", "01", " 1", "1 ", "1_0", "1.0", "+1", "１",
+    "", "0", "11", True, 1.9, 1, None,
+])
+def test_a5_trial_label_must_be_canonical_integer_string(invalid):
+    rows = trial_rows()
+    rows[0]["trial"] = invalid
+    with pytest.raises(ValueError, match="canonical trial numbers"):
+        check_trials.summarize(rows, "robot-01")
+
+
+def test_a5_cli_rejects_ambiguous_trial_number_that_int_would_accept(tmp_path):
+    rows = trial_rows()
+    rows[0]["trial"] = "0_1"  # int("0_1") == 1; previously certified as A5 success.
+    path = tmp_path / "ambiguous-trial.csv"
+    with path.open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--file", str(path),
+         "--robot", "robot-01", "--require-pass"],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "canonical trial numbers" in result.stderr
+    assert '"physical_acceptance_pass": true' not in result.stdout
+
+
 def test_a5_cli_cannot_certify_unidentified_20_trial_population(tmp_path):
     rows = trial_rows()
     for row in rows:
