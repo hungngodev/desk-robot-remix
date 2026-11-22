@@ -140,6 +140,7 @@ class CameraFrameHub:
         self, robot_ids: list[str], *,
         idle_fps: float = 0.30, speaking_fps: float = 1.0,
         active_fps: float = 0.8, max_frames: int = 3,
+        room_settings: "Settings | None" = None,
     ):
         if not robot_ids or len(set(robot_ids)) != len(robot_ids):
             raise ValueError("Unique camera source identities required")
@@ -218,15 +219,33 @@ class CameraFrameHub:
         # One shared, volatile USB measurement; NEVER copied to any pet memory
         # or treated as an eyewitness, VAD, tool receipt or motor permit.
         self.shared_room: RoomObservation | None = None
+        self._room_settings = room_settings
+        self._shared_room_grant: int | None = None
+
+    def _room_grant(self) -> tuple[bool, int | None]:
+        """Keep production USB evidence within its original room opt-in."""
+        settings = self._room_settings
+        if settings is None or getattr(settings, "mode", None) != "hardware":
+            return True, None  # Standalone/simulation hub has no hardware grant.
+        epoch = getattr(settings, "room_station_consent_generation", None)
+        allowed = (
+            getattr(settings, "room_station_context_enabled", False) is True
+            and type(epoch) is int and epoch >= 0
+        )
+        return allowed, epoch if allowed else None
 
     def remember_room(self, observation: RoomObservation) -> None:
         if (not isinstance(observation, RoomObservation)
                 or not _admissible_mac_event_clock(observation.received_at)):
             raise ValueError("Room provenance must come from validated USB source")
+        allowed, grant = self._room_grant()
+        if not allowed:
+            return  # Never admit a shared observation while access is revoked.
         previous = self.shared_room
         if previous is not None and observation.received_at <= previous.received_at:
             return  # An older asynchronous serial callback cannot regress state.
         self.shared_room = observation
+        self._shared_room_grant = grant
 
     def _check(self, robot_id: str) -> None:
         if robot_id not in self.robots:
@@ -666,7 +685,9 @@ class CameraFrameHub:
             raise ValueError("Invalid interaction timeline clock or limit")
         items = []
         room = self.shared_room
-        if room is not None and 0 <= now - room.received_at <= 12:
+        allowed, grant = self._room_grant()
+        if (allowed and grant == self._shared_room_grant
+                and room is not None and 0 <= now - room.received_at <= 12):
             items.append((room.received_at, {
                 "channel": "room_station",
                 "kind": "shared_room_raw_measurement",
@@ -906,6 +927,7 @@ class CameraFrameHub:
 
     def close(self) -> None:
         self.shared_room = None
+        self._shared_room_grant = None
         for robot_id in self.robots:
             self.clear(robot_id)
 
@@ -934,7 +956,9 @@ class MultimodalOrchestrator:
         self.preempt_background_vision = None  # Existing PetController VLM task owner.
         self.begin_direct_vision = None
         self.end_direct_vision = None
-        self.hub = CameraFrameHub([r.id for r in settings.robots])
+        self.hub = CameraFrameHub(
+            [r.id for r in settings.robots], room_settings=settings,
+        )
         self._capture_tasks: dict[str, asyncio.Task] = {}
         # One persistent XIAO JPEG feed per head; no second camera or model.
         self._stream_tasks: dict[str, asyncio.Task] = {}

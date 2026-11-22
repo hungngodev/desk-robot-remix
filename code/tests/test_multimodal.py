@@ -3061,6 +3061,67 @@ def test_future_vad_evidence_cannot_poison_speech_floor_or_later_end():
     assert not hub.spontaneous_floor_busy(now + 0.9)
 
 
+def test_room_cache_does_not_cross_revoke_and_regrant():
+    from desk_robot.room_station import RoomObservation
+
+    policy = SimpleNamespace(
+        mode="hardware", room_station_context_enabled=True,
+        room_station_consent_generation=7,
+    )
+    hub = CameraFrameHub(["robot-01", "robot-02"], room_settings=policy)
+    now = time.monotonic()
+    first = RoomObservation(
+        seq=1, at_ms=100, received_at=now,
+        readings={}, summary="OLD_GRANT_ROOM_SAMPLE",
+    )
+    hub.remember_room(first)
+    assert "OLD_GRANT_ROOM_SAMPLE" in str(
+        hub.interaction_timeline("robot-02", now + 0.1)
+    )
+
+    # Revocation must immediately hide the old sample. Regrant without a
+    # new USB measurement must not resurrect it on a different pet.
+    policy.room_station_context_enabled = False
+    assert "room_station" not in [
+        event["channel"] for event in hub.interaction_timeline(
+            "robot-01", now + 0.2
+        )
+    ]
+    hub.remember_room(RoomObservation(
+        seq=2, at_ms=200, received_at=now + 0.2,
+        readings={}, summary="NOT_CONSENTED",
+    ))
+    policy.room_station_consent_generation = 8
+    policy.room_station_context_enabled = True
+    for robot_id in ("robot-01", "robot-02"):
+        assert "room_station" not in [
+            event["channel"] for event in hub.interaction_timeline(
+                robot_id, now + 0.3
+            )
+        ]
+    assert hub.shared_room == first
+
+    second = RoomObservation(
+        seq=3, at_ms=300, received_at=now + 0.4,
+        readings={}, summary="NEW_GRANT_ROOM_SAMPLE",
+    )
+    hub.remember_room(second)
+    assert hub.shared_room == second
+    assert "NEW_GRANT_ROOM_SAMPLE" in str(
+        hub.interaction_timeline("robot-01", now + 0.5)
+    )
+    assert "OLD_GRANT_ROOM_SAMPLE" not in str(
+        hub.interaction_timeline("robot-01", now + 0.5)
+    )
+
+    # A bare hub remains suitable for a simulation or nonproduction fixture.
+    independent = CameraFrameHub(["robot-01"])
+    independent.remember_room(first)
+    assert "OLD_GRANT_ROOM_SAMPLE" in str(
+        independent.interaction_timeline("robot-01", now + 0.5)
+    )
+
+
 def test_future_camera_and_shared_room_receipts_cannot_block_real_observations():
     from desk_robot.room_station import RoomObservation
 
