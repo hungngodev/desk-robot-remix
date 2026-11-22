@@ -8,17 +8,50 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ipaddress
 import json
 import math
 import os
+import re
 import stat
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 from desk_robot.dock_ir import dock_beacon_code, validate_ir
 
 LABELS = ("left", "center", "right")
+
+_ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
+
+
+def _safe_ir_origin(base_url: str, robot_id: str) -> str:
+    """Reject unsafe destinations before attaching a live operator token."""
+    if type(robot_id) is not str or not _ROBOT_ID.fullmatch(robot_id):
+        raise ValueError("Require exact configured robot identity")
+    if (type(base_url) is not str or base_url != base_url.strip()
+            or any(ord(ch) < 32 for ch in base_url)):
+        raise ValueError("Invalid terminal IR capture API origin")
+    try:
+        parsed = urlsplit(base_url)
+        _ = parsed.port
+    except ValueError as exc:
+        raise ValueError("Invalid terminal IR capture API origin") from exc
+    if (parsed.scheme not in ("http", "https") or not parsed.hostname
+            or parsed.username is not None or parsed.password is not None
+            or parsed.path not in ("", "/") or parsed.query or parsed.fragment):
+        raise ValueError("Invalid terminal IR capture API origin")
+    if parsed.scheme == "http":
+        try:
+            loopback = (parsed.hostname == "localhost"
+                        or ipaddress.ip_address(parsed.hostname).is_loopback)
+        except ValueError:
+            loopback = False
+        if not loopback:
+            raise ValueError("Bearer token requires loopback HTTP or HTTPS")
+    return base_url.rstrip("/")
+
 
 def _private_trial_parent_fd(parent: Path) -> int:
     """Create private descendants through verified directory handles."""
@@ -238,9 +271,10 @@ async def capture(base_url: str, token: str, robot_id: str,
             or not .05 <= interval_s <= 2
             or not token or len(token) < 24):
         raise ValueError("A labeled read-only authenticated trial is required")
+    origin = _safe_ir_origin(base_url, robot_id)
     rows = []
     async with httpx.AsyncClient(
-        base_url=base_url.rstrip("/"),
+        base_url=origin,
         headers={"Authorization": f"Bearer {token}"},
         timeout=httpx.Timeout(4, connect=1),
         follow_redirects=False,

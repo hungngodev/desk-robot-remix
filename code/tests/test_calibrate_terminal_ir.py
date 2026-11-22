@@ -462,3 +462,39 @@ def test_terminal_ir_evidence_rejects_nonregular_fifo_without_blocking(tmp_path)
     os.mkfifo(fifo)
     with pytest.raises(OSError):
         cal.append_trial_rows(fifo, position_records()[:1])
+
+
+@pytest.mark.parametrize(("origin", "robot_id"), [
+    ("http://example.com:8765", "robot-01"),
+    ("http://192.168.1.100:8765", "robot-01"),
+    ("http://localhost:8765/other", "robot-01"),
+    ("http://user:pass@localhost:8765", "robot-01"),
+    ("http://localhost:8765?redirect=1", "robot-01"),
+    ("http://localhost:8765#fragment", "robot-01"),
+    ("ftp://localhost:8765", "robot-01"),
+    ("http://localhost:99999", "robot-01"),
+    ("http://localhost:8765\nInjected: yes", "robot-01"),
+    ("http://localhost:8765", "robot-01/other"),
+    ("http://localhost:8765", "robot-01?x=1"),
+    ("http://localhost:8765", "x" * 41),
+])
+async def test_ir_capture_rejects_untrusted_token_origin_before_http(
+    monkeypatch, origin, robot_id,
+):
+    def unexpected_client(*args, **kwargs):
+        pytest.fail("Unsafe origin attempted to create an authenticated HTTP client")
+
+    monkeypatch.setattr(cal.httpx, "AsyncClient", unexpected_client)
+    with pytest.raises(ValueError):
+        await cal.capture(origin, "T" * 32, robot_id, "left", 20, .05)
+
+
+@pytest.mark.parametrize(("origin", "expected"), [
+    ("http://127.0.0.1:8765", "http://127.0.0.1:8765"),
+    ("http://localhost:8765/", "http://localhost:8765"),
+    ("http://[::1]:8765", "http://[::1]:8765"),
+    ("https://robot.example.com", "https://robot.example.com"),
+])
+def test_ir_capture_allows_loopback_http_or_remote_https(origin, expected):
+    assert cal._safe_ir_origin(origin, "robot-01") == expected
+
