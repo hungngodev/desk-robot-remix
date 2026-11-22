@@ -47,6 +47,28 @@ int main() {
     CHECK(generic_zones == 0xA5);
     CHECK(generic_touch_wire.cap_main_control == 0);
     CHECK(generic_touch_wire.cap_interrupt_clears == 1);
+    // Release creates an interrupt even when no electrode is touched.
+    // Clear MAIN.INT and preserve unrelated control bits on a zero mask.
+    generic_touch_wire.cap_touch_bits = 0;
+    generic_touch_wire.cap_main_control = 0x81;
+    CHECK(generic_touch.poll(200, generic_zones));
+    CHECK(generic_zones == 0U);
+    CHECK(generic_touch_wire.cap_main_control == 0x80);
+    CHECK(generic_touch_wire.cap_interrupt_clears == 2);
+    CHECK(generic_touch_wire.ranges == 0 && generic_touch_wire.extras == 0);
+    // Failed release acknowledgement is not a valid reported release.
+    TwoWire release_clear_wire;
+    release_clear_wire.cap_touch_bits = 0;
+    release_clear_wire.cap_main_control = 0x81;
+    desk_robot::ExpansionTouch release_clear;
+    CHECK(release_clear.begin(release_clear_wire));
+    release_clear_wire.fail_cap_clear_write = true;
+    std::uint8_t release_zones = 0xA5;
+    CHECK(!release_clear.poll(100, release_zones));
+    CHECK(release_zones == 0xA5);
+    CHECK(!release_clear.verified());
+    CHECK(release_clear_wire.ranges == 0 && release_clear_wire.extras == 0);
+    CHECK(!release_clear_wire.unsafe_parallel_mux);
     // A lost MAIN.INT write must not publish the cached contact zone.
     TwoWire failed_clear_wire;
     desk_robot::ExpansionTouch failed_clear;

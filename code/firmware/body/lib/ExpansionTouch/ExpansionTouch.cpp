@@ -86,11 +86,12 @@ bool ExpansionTouch::poll(std::uint32_t now_ms, std::uint8_t& zones) {
   if (!select()) { close(); verified_ = false; return false; }
   std::uint8_t bits = 0;
   const bool sample_ok = read(0x03, bits);
-  // Follow the upstream touched() behavior: acknowledged contact needs
-  // MAIN.INT bit 0 cleared for subsequent touch interrupts. Preserve all
-  // other MAIN bits and fail closed on either failed I2C transaction.
+  // CAP1188 can assert MAIN.INT on RELEASE when the contact mask is zero.
+  // Follow the upstream touched() path and acknowledge every completed
+  // status read, while preserving unrelated MAIN bits. A failed clear
+  // invalidates this poll instead of publishing a false release.
   bool cleared = true;
-  if (sample_ok && bits != 0U) {
+  if (sample_ok) {
     std::uint8_t main_control = 0;
     cleared = read(0x00, main_control) &&
               write(0x00, static_cast<std::uint8_t>(main_control & ~0x01U));

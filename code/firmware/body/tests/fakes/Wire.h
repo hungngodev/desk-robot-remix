@@ -54,6 +54,7 @@ class TwoWire {
   bool fail_cap_register_write = false;
   bool fail_cap_clear_write = false;
   std::uint8_t cap_main_control = 0x01;
+  std::uint8_t cap_touch_bits = 0xA5; // CAP1188 sensor status mask, including release
   std::uint8_t cap_multi_touch_block = 0xff;
   unsigned cap_interrupt_clears = 0;
   bool cap_uses_0x29 = false; // common generic breakout address
@@ -230,7 +231,7 @@ class TwoWire {
     } else if (addr == 0x29 && extras == 1 && cap_uses_0x29) {
       if (register_address == 0xFD) inbound = {0x50};
       else if (register_address == 0xFE) inbound = {0x5D};
-      else if (register_address == 0x03) inbound = {0xA5};
+      else if (register_address == 0x03) inbound = {cap_touch_bits};
       else if (register_address == 0x00) inbound = {cap_main_control};
     } else if (addr == 0x29) {
       if (tof_register == 0x13 && count == 1) {
@@ -296,7 +297,7 @@ class TwoWire {
       pending_sht = false;
     } else if (addr == 0x28 && register_address == 0xFD) inbound = {0x50};
     else if (addr == 0x28 && register_address == 0xFE) inbound = {0x5D};
-    else if (addr == 0x28 && register_address == 0x03) inbound = {0xA5};
+    else if (addr == 0x28 && register_address == 0x03) inbound = {cap_touch_bits};
     else if (addr == 0x28 && register_address == 0x00) inbound = {cap_main_control};
     else if (addr == 0x57 && register_address == 0xFF) inbound = {0x15};
     else if (addr == 0x57 && register_address == 0x04)
