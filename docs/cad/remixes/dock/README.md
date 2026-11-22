@@ -85,6 +85,7 @@ uv run --extra vision python scripts/generate_dock_tag.py --dock-id 1 --marker-i
   --output ../docs/cad/remixes/dock/tag_dock01_id12.svg
 uv run --extra vision python scripts/generate_dock_tag.py --dock-id 1 --marker-id 12 \
   --output ../docs/cad/remixes/dock/tag_dock01_id12.svg --verify
+cd ..
 ```
 
 ID 12 is a **candidate example**, not evidence of a qualified dock.
