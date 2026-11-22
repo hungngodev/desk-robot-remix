@@ -215,13 +215,30 @@ def audit(evidence: dict | None = None, plan: dict | None = None) -> dict:
     }
 
 
+def strict_electrical_evidence_object(pairs: list[tuple[str, object]]) -> dict:
+    """Reject overwritten measurements at every JSON nesting level."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate I2C electrical evidence key: " + key)
+        result[key] = value
+    return result
+
+
+def reject_nonfinite_electrical_constant(token: str) -> None:
+    raise ValueError("Nonfinite I2C electrical evidence constant: " + token)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--evidence", type=Path,
                         help="Measured per branch board and wire RC evidence JSON")
     args = parser.parse_args()
-    values = (json.loads(args.evidence.read_text(encoding="utf-8"))
-              if args.evidence else {})
+    values = (json.loads(
+        args.evidence.read_text(encoding="utf-8"),
+        object_pairs_hook=strict_electrical_evidence_object,
+        parse_constant=reject_nonfinite_electrical_constant,
+    ) if args.evidence else {})
     print(json.dumps(audit(values), indent=2))
 
 

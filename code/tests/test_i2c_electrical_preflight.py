@@ -1,6 +1,9 @@
 """Electrical lane and pullup laws, source matched to actual WROOM topology."""
 import copy
 import importlib.util
+import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -173,3 +176,49 @@ def test_both_muxes_need_every_lane_qualified_even_if_15_pass():
     incomplete = tool.audit({"upstream": upstream, "branches": branches})
     assert not incomplete["all_16_lanes_paper_pass"]
     assert incomplete["lanes"][-1]["status"] == "HOLD_MISSING_ELECTRICAL_VALUES"
+
+
+@pytest.mark.parametrize("body", [
+    '{"upstream":{"sda":{"pullup_v":5.0,"pullup_v":3.3}},"branches":{}}',
+    '{"upstream":{},"branches":{"0x70:0":{},"0x70:0":{}}}',
+    '{"upstream":{},"branches":{},"upstream":{}}',
+])
+def test_cli_rejects_ambiguous_electrical_measurement(tmp_path, body):
+    evidence = tmp_path / "contradictory-i2c.json"
+    evidence.write_text(body, encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(SRC), "--evidence", str(evidence)],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "Duplicate I2C electrical evidence key" in result.stderr
+    assert '"all_16_lanes_paper_pass": true' not in result.stdout
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_cli_rejects_nonfinite_electrical_json_constants(tmp_path, constant):
+    evidence = tmp_path / "nonfinite-i2c.json"
+    evidence.write_text(
+        '{"upstream":{},"branches":{},"spurious":' + constant + '}',
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [sys.executable, str(SRC), "--evidence", str(evidence)],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "Nonfinite I2C electrical evidence constant" in result.stderr
+
+
+def test_cli_valid_unqualified_electrical_json_remains_on_hold(tmp_path):
+    evidence = tmp_path / "unqualified-i2c.json"
+    evidence.write_text('{"upstream":{},"branches":{}}', encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(SRC), "--evidence", str(evidence)],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["all_16_lanes_evaluated"]
+    assert not report["all_16_lanes_paper_pass"]
+    assert not report["all_16_lanes_physically_qualified"]
