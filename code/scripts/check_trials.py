@@ -39,6 +39,9 @@ def summarize(rows, robot_id):
                 raise ValueError("Invalid physical trial date") from exc
             if trial_date.isoformat() != r["date"]:
                 raise ValueError("Invalid physical trial date")
+            # A future-dated record cannot prove a completed physical trial.
+            if trial_date > date.today():
+                raise ValueError("Future physical trial date")
             _finite_measurement(r, "mass_g", positive=True)
             lift_mm = _finite_measurement(r, "lift_mm")
             hold_seconds = _finite_measurement(r, "hold_seconds")

@@ -78,6 +78,46 @@ def test_invalid_dates_rejected(invalid):
         check_trials.summarize(rows, "robot-01")
 
 
+@pytest.mark.parametrize("category", ["key", "candy"])
+def test_future_dated_a5_trial_cannot_count(category):
+    from datetime import date, timedelta
+
+    rows = trial_rows()
+    next(r for r in rows if r["category"] == category)["date"] = (
+        date.today() + timedelta(days=1)
+    ).isoformat()
+    with pytest.raises(ValueError, match="Future physical trial date"):
+        check_trials.summarize(rows, "robot-01")
+
+
+def test_current_and_past_trial_dates_remain_valid():
+    from datetime import date, timedelta
+
+    rows = trial_rows()
+    rows[0]["date"] = date.today().isoformat()
+    rows[10]["date"] = (date.today() - timedelta(days=365)).isoformat()
+    assert check_trials.summarize(rows, "robot-01")["physical_acceptance_pass"]
+
+
+def test_cli_cannot_release_future_dated_physical_trials(tmp_path):
+    from datetime import date, timedelta
+
+    rows = trial_rows()
+    rows[0]["date"] = (date.today() + timedelta(days=1)).isoformat()
+    path = tmp_path / "future-trials.csv"
+    with path.open("w", newline="") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--file", str(path), "--require-pass"],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "Future physical trial date" in result.stderr
+    assert '"physical_acceptance_pass": true' not in result.stdout
+
+
 def test_real_finite_failed_trial_does_not_count_as_a_success():
     rows = trial_rows()
     rows[0]["lift_mm"] = "0"
