@@ -137,3 +137,62 @@ async def test_jaw_physical_capture_rejects_changed_boot_after_valid_phase():
                 robot="robot-01", token="t" * 24,
                 count=5, interval=0.12, boot_state=state,
             )
+
+@pytest.mark.parametrize("payload,expected", [
+    ('{"robot_id":"robot-01","robot_id":"robot-02"}', "robot_id"),
+    ('{"measured":false,"measured":true}', "measured"),
+    ('{"force":{"boot_id":17,"boot_id":18}}', "boot_id"),
+    ('{"grip_force_limit_raw":50,"grip_force_limit_raw":10000}',
+     "grip_force_limit_raw"),
+    ('{"noise":NaN}', "Nonfinite"),
+    ('{"noise":Infinity}', "Nonfinite"),
+    ('{"noise":-Infinity}', "Nonfinite"),
+])
+def test_existing_jaw_source_rejects_ambiguous_json_before_capture(
+    tmp_path, payload, expected,
+):
+    source = tmp_path / "untrusted.json"
+    source.write_text(payload, encoding="utf-8")
+    with pytest.raises(ValueError, match=expected):
+        jaw.load_source_calibration(source)
+
+
+def test_existing_jaw_source_keeps_valid_builder_fields(tmp_path):
+    source = tmp_path / "valid.json"
+    source.write_text(
+        '{"measured":false,"robot_id":"robot-01",'
+        '"head_device_id":"xiaozhi-01","grip_force_limit_raw":500,'
+        '"extra":{"raw":[1,2,3]}}', encoding="utf-8",
+    )
+    assert jaw.load_source_calibration(source) == {
+        "measured": False, "robot_id": "robot-01",
+        "head_device_id": "xiaozhi-01", "grip_force_limit_raw": 500,
+        "extra": {"raw": [1, 2, 3]},
+    }
+
+
+async def test_jaw_cli_rejects_conflicted_identity_before_hardware_sampling(
+    tmp_path, monkeypatch,
+):
+    source = tmp_path / "wrong-identity.json"
+    source.write_text(
+        '{"robot_id":"robot-01","robot_id":"robot-02"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DESK_ROBOT_OPERATOR_TOKEN", "t" * 24)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["calibrate_jaw_fsr.py", "--calibration", str(source)],
+    )
+
+    def no_prompt(*_args, **_kwargs):
+        pytest.fail("Rejected provenance must not enter operator calibration")
+
+    async def no_hardware_capture(*_args, **_kwargs):
+        pytest.fail("Rejected provenance must not sample physical FSR")
+
+    monkeypatch.setattr("builtins.input", no_prompt)
+    monkeypatch.setattr(jaw, "capture", no_hardware_capture)
+    with pytest.raises(ValueError, match="Repeated jaw calibration JSON field"):
+        await jaw.main()
+    assert not (tmp_path / "wrong-identity.jaw_candidate.json").exists()

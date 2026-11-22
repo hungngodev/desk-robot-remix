@@ -20,6 +20,33 @@ import httpx
 from desk_robot.grasp_feedback import _fresh_jaw_sequence, force_observation
 
 
+
+def _strict_json_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """Refuse contradictory operator-entered calibration provenance."""
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Repeated jaw calibration JSON field: " + key)
+        result[key] = value
+    return result
+
+
+def _reject_nonfinite_json_constant(token: str) -> None:
+    raise ValueError("Nonfinite jaw calibration JSON constant: " + token)
+
+
+def load_source_calibration(path: Path) -> dict:
+    """Load the builder's existing geometry without last-key-wins JSON."""
+    source = json.loads(
+        path.read_text(encoding="utf-8"),
+        object_pairs_hook=_strict_json_object,
+        parse_constant=_reject_nonfinite_json_constant,
+    )
+    if not isinstance(source, dict):
+        raise ValueError("Calibration must be JSON object")
+    return source
+
+
 def propose_force_limits(phases: dict[str, list[tuple[int, int]]]) -> dict:
     """Use real independent ADS1115 sample sequence numbers, never duplicate HTTP frames."""
     if set(phases) != {"free", "contact", "upper"}:
@@ -140,9 +167,7 @@ async def main() -> None:
         raise ValueError("Private operator token required")
     if not args.calibration.is_file():
         raise ValueError("Existing measured camera calibration JSON required")
-    source = json.loads(args.calibration.read_text(encoding="utf-8"))
-    if not isinstance(source, dict):
-        raise ValueError("Calibration must be JSON object")
+    source = load_source_calibration(args.calibration)
     readings = {}
     boot_state = {}  # shared WROOM identity across all three manual phases
     async with httpx.AsyncClient() as client:
