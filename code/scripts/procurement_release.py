@@ -986,6 +986,19 @@ PILOT_SAMPLE_PRODUCTS = {
 # seller stock or carrier identity as an actionable evaluation order.
 # COM-05-067 is advertised as TCA9548A while its seller photograph shows
 # PCA9548A / PD548A. BOB-13282 has a backorder purchase control.
+# A storefront name is not proof of the physical module's maker. Only
+# explicitly identified part brands appear in the pilot's manufacturer column.
+# Generic ElectroPeak carriers and Newark's switch listing have no established
+# manufacturer here; leave that fact unknown until a board/package is verified.
+PILOT_IDENTIFIED_BRANDS = {
+    "amp": "DFRobot",
+    "speaker": "Challenge Electronics",
+    "sensor_3v3": "Pololu",
+    "rgb": "SparkFun",
+    "dock_ir_receivers": "Vishay",
+    "dock_ir_emitter_channels": "Vishay",
+}
+
 PILOT_SUPPLIER_QUOTE_HOLDS = {
     "i2c_mux": (
         "HOLD: COM-05-067 seller image indicates PCA9548A/PD548A; "
@@ -1197,7 +1210,7 @@ def pilot_supplier_cart(report: dict) -> dict:
             "implementation_source_is_code": source_path.startswith("code/"),
             "tests_executed_on_this_checkout": False,
             "id": role["id"], "name": role["name"], "vendor": seller,
-            "manufacturer_or_brand": seller,
+            "manufacturer_or_brand": PILOT_IDENTIFIED_BRANDS.get(role["id"]),
             "checkout_seller_candidate": checkout_seller,
             "sku": sku, "product_url": url, "quantity": qty,
             "supplier_quote_only_reason": role["supplier_quote_only_reason"],
@@ -1355,7 +1368,7 @@ def render_pilot_supplier_cart(report: dict) -> str:
                  else "not verified")
         lines.append(
             f"| {x['checkout_seller_candidate']} | "
-            f"{x['manufacturer_or_brand']} | {x['sku']} | "
+            f"{x['manufacturer_or_brand'] or 'unverified'} | {x['sku']} | "
             f"{str(x['name']).replace('|', '/')} | "
             f"{x['quantity']} | {quote} | {x['product_url']} | "
             f"{x['implementation_source']} ({x['implementation_state']}) | "

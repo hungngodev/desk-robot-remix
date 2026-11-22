@@ -1642,6 +1642,32 @@ def test_known_supplier_conflicts_are_quote_only_in_both_pilot_views():
         assert "BOB-13282" in view and "backorder" in view
 
 
+def test_pilot_cart_keeps_unverified_manufacturers_distinct_from_stores():
+    import json
+
+    cart = mod.pilot_supplier_cart(
+        mod.generate(json.loads(mod.PLAN.read_text(encoding="utf-8")))
+    )
+    by_sku = {row["sku"]: row for row in cart["items"]}
+    # Supplier-only listings cannot become maker-verified identities.
+    assert by_sku["D2F-01L3"]["checkout_seller_candidate"] == "Newark"
+    assert by_sku["D2F-01L3"]["manufacturer_or_brand"] is None
+    assert by_sku["SEN-19-006"]["checkout_seller_candidate"] == "ElectroPeak"
+    assert by_sku["SEN-19-006"]["manufacturer_or_brand"] is None
+    assert by_sku["COM-05-067"]["manufacturer_or_brand"] is None
+    # An explicit exact brand remains independent of the checkout storefront.
+    assert by_sku["CS20-02P110-04-1X"]["manufacturer_or_brand"] == "Challenge Electronics"
+    assert by_sku["CS20-02P110-04-1X"]["checkout_seller_candidate"] == "DigiKey"
+    assert by_sku["TSOP38438"]["manufacturer_or_brand"] == "Vishay"
+    assert by_sku["DFR0954"]["manufacturer_or_brand"] == "DFRobot"
+    rendered = mod.render_pilot_supplier_cart(
+        mod.generate(json.loads(mod.PLAN.read_text(encoding="utf-8")))
+    )
+    assert "| Newark | unverified | D2F-01L3 |" in rendered
+    assert "| ElectroPeak | unverified | SEN-19-006 |" in rendered
+    assert "| DigiKey | Challenge Electronics | CS20-02P110-04-1X |" in rendered
+
+
 def test_pilot_supplier_cart_exact_skus_prices_and_incomplete_channels():
     import json
     from collections import Counter
