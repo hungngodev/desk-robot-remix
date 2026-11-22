@@ -83,6 +83,35 @@ int main() {
     for (const auto& a : uninitialized.angle) CHECK(!a.present && !a.valid);
     CHECK(!uninitialized.gauge.fuel_valid);
     CHECK(!uninitialized.climate.valid);
+
+    // A transient timeout, malformed ACK, or reinitialization must never
+    // turn one uninterrupted NFC presentation into a second arrival.
+    desk_robot::NfcRaw tag{};
+    constexpr std::uint32_t kTagA = 0x12345678U;
+    constexpr std::uint32_t kTagB = 0x87654321U;
+    tag.completed_scan(true, kTagA, 4, 100);
+    CHECK(tag.valid && tag.tag_visible && tag.tag_events == 1U);
+    CHECK(tag.scan_seq == 1U && tag.tag_token == kTagA);
+    tag.transport_failed();
+    CHECK(!tag.present && !tag.valid);
+    CHECK(tag.tag_visible && tag.tag_token == kTagA);
+    tag.completed_scan(true, kTagA, 4, 200);
+    CHECK(tag.tag_events == 1U && tag.scan_seq == 2U);
+    // A DIFFERENT confirmed tag after recovery remains a real new event.
+    tag.transport_failed();
+    tag.completed_scan(true, kTagB, 7, 300);
+    CHECK(tag.tag_events == 2U && tag.tag_token == kTagB);
+    // Valid absence, unlike transport failure, ends a presentation.
+    tag.completed_scan(false, 0U, 0, 400);
+    CHECK(!tag.tag_visible && tag.tag_token == 0U);
+    CHECK(tag.tag_events == 2U);
+    tag.completed_scan(true, kTagB, 7, 500);
+    CHECK(tag.tag_events == 3U && tag.scan_seq == 5U);
+    // Preserve zero as the no-event sentinel after uint32 wrap.
+    tag.tag_events = 0xffffffffU;
+    tag.completed_scan(false, 0U, 0, 600);
+    tag.completed_scan(true, kTagA, 4, 700);
+    CHECK(tag.tag_events == 1U && tag.scan_seq == 7U);
     std::cout << "PASS manufacturer register conversions and no fake sensors\n";
   } catch(const std::exception& e) {
     std::cerr << "FAIL " << e.what() << "\n";

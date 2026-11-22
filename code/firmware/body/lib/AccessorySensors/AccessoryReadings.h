@@ -160,6 +160,30 @@ struct NfcRaw {
   std::uint32_t tag_events = 0; // increments on newly presented real tag
   std::uint32_t scan_seq = 0;   // completed independent PN532 scans
   std::uint32_t at_ms = 0;
+
+  // A failed PN532 transaction invalidates the public observation, not the
+  // last confirmed presentation. The next valid scan of the same tag must
+  // not invent an arrival; only a completed absent scan may clear identity.
+  void transport_failed() {
+    present = valid = false;
+  }
+  void completed_scan(bool visible, std::uint32_t token,
+                      std::uint8_t uid_len, std::uint32_t now_ms) {
+    present = valid = true;
+    at_ms = now_ms;
+    scan_seq = next_nonzero_sensor_sequence(scan_seq);
+    if (visible) {
+      if (!tag_visible || tag_token != token)
+        tag_events = next_nonzero_sensor_sequence(tag_events);
+      tag_visible = true;
+      tag_token = token;
+      uid_length = uid_len;
+    } else {
+      tag_visible = false;
+      tag_token = 0;
+      uid_length = 0;
+    }
+  }
 };
 struct AccessoryReadings {
   AngleRaw angle[3]{}; // index 0 nose, 1 left track, 2 right track

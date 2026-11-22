@@ -538,9 +538,9 @@ void AccessorySensors::nfc_poll(std::uint32_t now_ms) {
   if (nfc_stage_ == NfcStage::Disabled) return;
   auto& tag = data_.nfc;
   const auto fail = [&]() {
-    tag.present = tag.valid = tag.tag_visible = false;
-    tag.tag_token = 0;
-    tag.uid_length = 0;
+    // Keep last confirmed identity for duplicate suppression on recovery.
+    // Public AUX remains invalid until a complete checksum-valid scan.
+    tag.transport_failed();
     nfc_stage_ = NfcStage::StartSam;
     nfc_last_scan_at_ms_ = now_ms; // bounded retry, no I2C flood
   };
@@ -616,22 +616,9 @@ void AccessorySensors::nfc_poll(std::uint32_t now_ms) {
       std::uint8_t uid_length = 0;
       const auto result = pn532_tag(payload, payload_len, token, uid_length);
       if (result == Pn532TagResult::Invalid) { fail(); return; }
-      tag.present = tag.valid = true;
-      tag.at_ms = now_ms;
-      tag.scan_seq = next_nonzero_sensor_sequence(tag.scan_seq);
-      if (result == Pn532TagResult::Present) {
-        if (!tag.tag_visible || tag.tag_token != token) {
-          ++tag.tag_events;
-          if (tag.tag_events == 0U) ++tag.tag_events;
-        }
-        tag.tag_visible = true;
-        tag.tag_token = token;
-        tag.uid_length = uid_length;
-      } else {
-        tag.tag_visible = false;
-        tag.tag_token = 0;
-        tag.uid_length = 0;
-      }
+      // Only completed, validated scans may change presentation identity.
+      tag.completed_scan(result == Pn532TagResult::Present,
+                         token, uid_length, now_ms);
       nfc_stage_ = NfcStage::Idle;
       nfc_last_scan_at_ms_ = now_ms;
       return;
