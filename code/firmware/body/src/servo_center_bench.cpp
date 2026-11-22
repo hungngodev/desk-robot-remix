@@ -84,7 +84,12 @@ void loop() {
     gate.complete(now_ms);
     Serial.println("OK CENTER_DONE pwm_detached");
   }
-  while (Serial.available() > 0) {
+  // A continuous 115200-baud input stream cannot keep this loop busy
+  // indefinitely and postpone the next servo PWM detachment deadline.
+  const int available = Serial.available();
+  const std::size_t budget = gate.serial_budget(
+      available > 0 ? static_cast<std::size_t>(available) : 0U);
+  for (std::size_t scanned = 0; scanned < budget; ++scanned) {
     const int byte = Serial.read();
     if (byte < 0) break;
     if (byte == '\r') continue;  // Accept common CRLF terminal mode.

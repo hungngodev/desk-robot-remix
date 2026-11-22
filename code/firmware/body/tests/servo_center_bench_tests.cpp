@@ -6,6 +6,15 @@
 using Gate = desk_robot::ServoCenterBenchGate;
 
 int main() {
+  // Even a continuously refilled USB RX queue leaves each loop iteration
+  // bounded so deadline polling cannot be starved by parser throughput.
+  assert(Gate::serial_budget(0) == 0U);
+  assert(Gate::serial_budget(1) == 1U);
+  assert(Gate::serial_budget(31) == 31U);
+  assert(Gate::serial_budget(32) == 32U);
+  assert(Gate::serial_budget(33) == 32U);
+  assert(Gate::serial_budget(1000000) == 32U);
+
   Gate gate;
   assert(gate.active() == Gate::Channel::None);
   assert(!gate.request(nullptr, 0));

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 
@@ -12,6 +13,13 @@ class ServoCenterBenchGate {
  public:
   enum class Channel : std::uint8_t { None, Lift, Grip };
   static constexpr std::uint32_t kCenterWindowMs = 400U;
+  // Long or continuously refilled USB input must never starve the PWM
+  // deadline in the MCU loop. Service only one bounded slice per pass.
+  static constexpr std::size_t kMaxSerialBytesPerPoll = 32U;
+  static std::size_t serial_budget(std::size_t pending) {
+    return pending < kMaxSerialBytesPerPoll ?
+        pending : kMaxSerialBytesPerPoll;
+  }
 
   bool request(const char* command, std::uint32_t now_ms) {
     if (command == nullptr || active_ != Channel::None) return false;
