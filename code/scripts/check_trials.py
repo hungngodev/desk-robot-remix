@@ -91,7 +91,11 @@ if __name__ == "__main__":
                                for name in headers)
                 or len(headers) != len(set(headers))):
             raise ValueError("A5 physical trial CSV needs unique, nonempty column names")
-        result = summarize(list(reader), args.robot)
+        rows = list(reader)
+        if any(None in row or any(value is None for value in row.values())
+               for row in rows):
+            raise ValueError("A5 physical trial CSV row length differs from header")
+        result = summarize(rows, args.robot)
     print(json.dumps(result, indent=2))
     if args.require_pass and not result["physical_acceptance_pass"]:
         p.exit(1, "Physical trial target has not been met.\n")

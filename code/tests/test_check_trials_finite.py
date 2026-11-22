@@ -212,3 +212,27 @@ def test_a5_cli_rejects_duplicate_column_headers(tmp_path, duplicate):
     assert result.returncode != 0
     assert "unique, nonempty column names" in result.stderr
     assert '"physical_acceptance_pass": true' not in result.stdout
+
+
+@pytest.mark.parametrize("malformation", ["extra", "missing"])
+def test_a5_cli_rejects_row_width_mismatch(tmp_path, malformation):
+    rows = trial_rows()
+    csv_path = tmp_path / "malformed-a5-row.csv"
+    with csv_path.open("w", newline="") as stream:
+        writer = csv.writer(stream)
+        headers = list(rows[0])
+        writer.writerow(headers)
+        for index, row in enumerate(rows):
+            values = [row[header] for header in headers]
+            if index == 0 and malformation == "extra":
+                values.append("true")  # Contradictory omitted assisted evidence
+            elif index == 0 and malformation == "missing":
+                values.pop()  # Do not infer missing notes or future metadata
+            writer.writerow(values)
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--file", str(csv_path), "--require-pass"],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "A5 physical trial CSV row length differs from header" in result.stderr
+    assert '"physical_acceptance_pass": true' not in result.stdout
