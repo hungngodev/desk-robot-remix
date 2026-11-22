@@ -67,6 +67,13 @@ def inspect_status(status: dict) -> dict:
         or type(safety.get("ready")) is not bool
     ):
         raise ValueError("Malformed or out-of-range WROOM status")
+    fault = safety.get("fault")
+    if fault is not None and (type(fault) is not str or len(fault) > 80):
+        raise ValueError("Invalid WROOM local fault identity")
+    attitude_faults = {
+        "imu_attitude_latched", "imu_attitude_unqualified",
+        "imu_attitude_not_upright",
+    }
     imu = status.get("imu", {})
     if not isinstance(imu, dict):
         raise ValueError("Malformed optional IMU identity")
@@ -193,11 +200,15 @@ def inspect_status(status: dict) -> dict:
             "family": ("unverified", "berryimu_v1", "berryimu_v2", "berryimu_v3", "mpu6050")[family],
             "gyro_who_am_i": gyro,
             "aux_who_am_i": aux,
-            # A valid sample is diagnostic information, NOT an attitude
-            # interlock, drive authorization, gravity calibration or a
-            # proof of a correctly mounted breakout.
+            # The WROOM now has its own local MPU6050 attitude latch.
+            # Its status fault can PROVE an active latch, but a generic
+            # "none" or another higher-priority fault cannot prove the
+            # guard is absent, configured or physically qualified.
             "raw_six_axis_available": raw_valid,
-            "attitude_interlock_active": False,
+            "attitude_interlock_active": (
+                True if fault == "imu_attitude_latched" else None
+            ),
+            "attitude_local_fault": fault if fault in attitude_faults else None,
             "accelerometer_raw": accelerometer,
             "gyroscope_raw": gyroscope,
             "sample_age_ms": sample_age,
