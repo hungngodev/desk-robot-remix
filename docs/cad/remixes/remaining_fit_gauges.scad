@@ -52,8 +52,7 @@ module battery_boost_tray() {
         // Lift-out / cable slots in the rear and side walls.
         translate([l/2-5,-1,base+2]) cube([10,wall+2, h]);
         translate([-1,w/2-4,base+3]) cube([wall+2,8,h]);
-        // Keep the bore centered inside the left 8 x 9 mm tab.
-        translate([-4,14,base/2]) cylinder(h=base+1,d=m3_clearance,center=true);
+        translate([-4,9.5,base/2]) cylinder(h=base+1,d=m3_clearance,center=true);
         translate([l+4,w-9.5,base/2]) cylinder(h=base+1,d=m3_clearance,center=true);
         // Two accessible strap openings through the base.
         for(x=[l/3,2*l/3])
