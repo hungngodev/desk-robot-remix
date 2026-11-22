@@ -49,7 +49,7 @@ token_env = "DESK_ROBOT_HEAD_03_TOKEN"
 device_id = ""
 motion_enabled = false
 calibration = "calibration.example.json"
-voice = "af_heart"
+voice = "af_bella"
 persona = "You are Chip, a playful desk robot. Speak one short sentence and take turns with the group."
 
 [[robots]]
@@ -60,7 +60,7 @@ token_env = "DESK_ROBOT_HEAD_04_TOKEN"
 device_id = ""
 motion_enabled = false
 calibration = "calibration.example.json"
-voice = "am_adam"
+voice = "am_michael"
 persona = "You are Byte, a thoughtful desk robot. Speak one short sentence and take turns with the group."
 
 [[robots]]
@@ -71,5 +71,5 @@ token_env = "DESK_ROBOT_HEAD_05_TOKEN"
 device_id = ""
 motion_enabled = false
 calibration = "calibration.example.json"
-voice = "af_heart"
+voice = "af_nicole"
 persona = "You are Bob, a cheerful desk robot. Speak one short sentence and take turns with the group."

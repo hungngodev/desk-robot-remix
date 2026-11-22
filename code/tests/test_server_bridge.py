@@ -2556,9 +2556,30 @@ def test_native_voice_mapping_export_matches_fleet_and_rejects_duplicates():
         [{"id": "robot-01", "device_id": "mac-01", "voice": "bad value"}],
         [{"id": "robot-01", "device_id": "mac-01", "voice": "af_heart"},
          {"id": "robot-02", "device_id": "mac-01", "voice": "am_adam"}],
+        [{"id": "robot-01", "device_id": "mac-01", "voice": "af_heart"},
+         {"id": "robot-02", "device_id": "mac-02", "voice": "af_heart"}],
     ]:
         with pytest.raises(ValueError):
             module.fleet_device_and_voice_maps(invalid)
+
+    # Examples must not regress to the original 2 voices for 5 pets.
+    import tomllib
+
+    expected = ["af_heart", "am_adam", "af_bella", "am_michael", "af_nicole"]
+    for example in (
+        "fleet.example.toml", "robots.example.toml",
+        "fleet.hardware.example.toml",
+    ):
+        with (ROOT / "config" / example).open("rb") as stream:
+            robots = tomllib.load(stream)["robots"]
+        assert [robot["voice"] for robot in robots] == expected
+        provisioned = [
+            {**robot, "device_id": "mac-" + robot["id"][-2:]}
+            for robot in robots
+        ]
+        devices, voices = module.fleet_device_and_voice_maps(provisioned)
+        assert len(devices) == len(voices) == 5
+        assert len(set(voices.values())) == 5
 
 
 def test_pinned_upstream_connection_initializes_per_device_native_tts():

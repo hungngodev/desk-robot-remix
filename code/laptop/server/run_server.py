@@ -30,6 +30,8 @@ def fleet_device_and_voice_maps(robots: list[dict]) -> tuple[dict, dict]:
             raise ValueError("Provisioned robot needs an ID, device and Kokoro voice")
         if robot_id in devices or device in devices.values():
             raise ValueError("Xiaozhi device and robot identities must be unique")
+        if voice in voices.values():
+            raise ValueError("Provisioned Xiaozhi fleet voices must be distinct")
         devices[robot_id] = device
         voices[robot_id] = voice
     if not devices:
