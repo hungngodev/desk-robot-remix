@@ -19,12 +19,12 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Protocol
 
+from .api_robot_status import _aux_boot_epoch, _fresh_aux_acquisition
 from .brain_context import (
     active_job_timeline,
     compose_brain_context,
     repeated_spontaneous_line,
 )
-from .api_robot_status import _aux_boot_epoch, _fresh_aux_acquisition
 from .config import Settings
 from .conversation import Conversation
 from .handling import HandlingGate
