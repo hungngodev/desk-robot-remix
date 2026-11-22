@@ -13,6 +13,10 @@ from .dock_ir import validate_ir
 from .tof_optics import validate_optics
 
 
+# Sense emits signed int64 esp_timer_get_time() microseconds in both camera routes.
+_MAX_CAMERA_COMPLETE_US = (1 << 63) - 1
+
+
 class HeadError(RuntimeError):
     """A failed request may already have actuated: never automatically retry it."""
 
@@ -147,7 +151,8 @@ class _MjpegFrames:
                     and identity != self.expected_robot_id):
                 raise ValueError("MJPEG camera robot identity mismatch")
             if not (4 <= size <= 512 * 1024 and 0 <= boot <= 0xffffffff
-                    and 1 <= sequence <= 0xffffffff and completed > 0):
+                    and 1 <= sequence <= 0xffffffff
+                    and 1 <= completed <= _MAX_CAMERA_COMPLETE_US):
                 raise ValueError("MJPEG source bounds invalid")
             start = end + 4
             finish = start + size
@@ -390,7 +395,7 @@ class HttpHead:
                 or any(type(n) is not int for n in receipt[2])
                 or not 0 <= receipt[2][0] <= 0xffffffff
                 or not 1 <= receipt[2][1] <= 0xffffffff
-                or receipt[2][2] <= 0
+                or not 1 <= receipt[2][2] <= _MAX_CAMERA_COMPLETE_US
                 or type(receipt[3]) is not int or receipt[3] < 1):
             raise HeadError("Invalid or expired selected dock JPEG provenance")
         boot = receipt[2][0]
@@ -405,6 +410,9 @@ class HttpHead:
 
     def _accept_camera_identity(self, identity: tuple[int, int, int]) -> None:
         boot, sequence, completed = identity
+        if (type(completed) is not int
+                or not 1 <= completed <= _MAX_CAMERA_COMPLETE_US):
+            raise HeadError("Camera completion metadata out of bounds")
         earlier = self._last_camera
         if boot in self._retired_camera_boots:
             # A reconnect must not replay an earlier Sense boot as if it
@@ -610,7 +618,7 @@ class HttpHead:
                            for value in values):
                     raise HeadError("Camera completion metadata missing or malformed")
                 boot, sequence, completed = map(int, values)
-                if not 0 <= boot <= 0xffffffff or not 1 <= sequence <= 0xffffffff or completed <= 0:
+                if not 0 <= boot <= 0xffffffff or not 1 <= sequence <= 0xffffffff or not 1 <= completed <= _MAX_CAMERA_COMPLETE_US):
                     raise HeadError("Camera completion metadata out of bounds")
                 self._accept_camera_identity((boot, sequence, completed))
             return response.content

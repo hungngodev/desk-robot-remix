@@ -68,6 +68,81 @@ def test_large_network_read_keeps_incremental_mjpeg_buffer_bounded():
     assert reader.buffer.peak <= 512 * 1024 + 64 * 1024 + 1024
 
 
+
+@pytest.mark.asyncio
+async def test_camera_overflow_completion_cannot_poison_stream_reconnect(monkeypatch):
+    """A bogus 20-digit source clock must not retire a healthy same-boot camera."""
+    monkeypatch.setenv("SENSE_TEST_TOKEN", "x" * 32)
+    jpeg = b"\\xff\\xd8scene\\xff\\xd9"
+    huge = b"99999999999999999999"
+    original = _part(1, jpeg)
+    malformed = original.replace(
+        b"X-Desk-Camera-Complete-Us: 250000",
+        b"X-Desk-Camera-Complete-Us: " + huge,
+    )
+    assert malformed != original
+    with pytest.raises(ValueError, match="source bounds"):
+        _MjpegFrames(expected_robot_id="robot-01").feed(malformed)
+    maximum = (1 << 63) - 1
+    max_frame = original.replace(
+        b"X-Desk-Camera-Complete-Us: 250000",
+        f"X-Desk-Camera-Complete-Us: {maximum}".encode("ascii"),
+    )
+    assert _MjpegFrames(expected_robot_id="robot-01").feed(max_frame) == [
+        (jpeg, (19, 1, maximum))
+    ]
+
+    responses = iter((malformed, _part(2, jpeg)))
+
+    def respond(_request):
+        return httpx.Response(
+            200, content=next(responses),
+            headers={"content-type":
+                     "multipart/x-mixed-replace; boundary=deskrobotframe"},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        head = HttpHead(RobotConfig(
+            id="robot-01", name="Camera pet", token_env="SENSE_TEST_TOKEN",
+            head_url="http://head.example",
+        ), client)
+        with pytest.raises(HeadError, match="source bounds invalid"):
+            async for _ in head.stream_frames():
+                pass
+        assert head._last_camera is None
+        assert head._stream_latest is None
+        recovered = [frame async for frame, _ in head.stream_frames()]
+        assert recovered == [jpeg]
+        assert head._last_camera == (19, 2, 500000)
+
+
+@pytest.mark.asyncio
+async def test_camera_overflow_completion_cannot_poison_legacy_still(monkeypatch):
+    monkeypatch.setenv("SENSE_TEST_TOKEN", "x" * 32)
+    jpeg = b"\\xff\\xd8scene\\xff\\xd9"
+    clock = iter(("99999999999999999999", "500000"))
+    seq = iter(("1", "2"))
+
+    def respond(_request):
+        return httpx.Response(200, content=jpeg, headers={
+            "X-Desk-Camera-Robot-Id": "robot-01",
+            "X-Desk-Camera-Boot": "19",
+            "X-Desk-Camera-Sequence": next(seq),
+            "X-Desk-Camera-Complete-Us": next(clock),
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        head = HttpHead(RobotConfig(
+            id="robot-01", name="Camera pet", token_env="SENSE_TEST_TOKEN",
+            head_url="http://head.example",
+        ), client)
+        with pytest.raises(HeadError, match="completion metadata out of bounds"):
+            await head.snapshot()
+        assert head._last_camera is None
+        assert await head.snapshot() == jpeg
+        assert head._last_camera == (19, 2, 500000)
+
+
 def test_camera_stream_header_requires_per_frame_robot_provenance():
     jpeg = b"\xff\xd8cam\xff\xd9"
     valid = _part(1, jpeg)
