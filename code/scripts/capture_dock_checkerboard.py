@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import io
 import json
 import os
@@ -30,6 +31,7 @@ async def capture_checkerboards(
     folder.mkdir(mode=0o700)
     saved = []
     size = None
+    seen_pixels = set()
     success = False
     try:
         for index in range(count):
@@ -48,6 +50,14 @@ async def capture_checkerboards(
                     raise ValueError("Expected original XIAO JPEG capture")
                 frame_size = image.size
                 image.verify()
+            # A fresh stream sequence and operator prompt do not prove a
+            # different checkerboard image: a stuck camera can replay the
+            # same pixels with different JPEG metadata or encoded bytes.
+            with Image.open(io.BytesIO(jpeg)) as decoded:
+                pixel_hash = hashlib.sha256(decoded.convert("RGB").tobytes()).digest()
+            if pixel_hash in seen_pixels:
+                raise ValueError("Duplicate checkerboard pixels; reposition board and retry")
+            seen_pixels.add(pixel_hash)
             if size is not None and frame_size != size:
                 raise ValueError("XIAO camera resolution changed during calibration")
             size = frame_size

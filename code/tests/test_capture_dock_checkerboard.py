@@ -19,15 +19,15 @@ def capture_checkerboards(*args, **kwargs):
     return capture_module().capture_checkerboards(*args, **kwargs)
 
 
-def jpeg(width=640, height=480):
+def jpeg(width=640, height=480, color=(100, 110, 120)):
     buf = io.BytesIO()
-    Image.new("RGB", (width, height), (100, 110, 120)).save(buf, format="JPEG")
+    Image.new("RGB", (width, height), color).save(buf, format="JPEG")
     return buf.getvalue()
 
 
 @pytest.mark.asyncio
 async def test_capture_private_original_jpeg_bytes_while_disarmed(tmp_path):
-    data = jpeg()
+    originals = [jpeg(color=(60 + i * 12, 110, 120)) for i in range(12)]
 
     class Head:
         n = 0
@@ -37,7 +37,7 @@ async def test_capture_private_original_jpeg_bytes_while_disarmed(tmp_path):
 
         async def snapshot(self):
             self.n += 1
-            return data
+            return originals[self.n - 1]
 
     seen = []
 
@@ -51,11 +51,45 @@ async def test_capture_private_original_jpeg_bytes_while_disarmed(tmp_path):
     assert result["motor_authorized"] is False
     assert result["calibration_approved"] is False
     assert seen == list(range(1, 13))
-    assert all((folder / f"{index:02}.jpg").read_bytes() == data
+    assert all((folder / f"{index:02}.jpg").read_bytes() == originals[index - 1]
                for index in range(1, 13))
     assert folder.stat().st_mode & 0o777 == 0o700
     assert all((folder / f"{index:02}.jpg").stat().st_mode & 0o777 == 0o600
                for index in range(1, 13))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("metadata_changed", [False, True])
+async def test_repeated_checkerboard_pixels_abort_and_remove_private_media(
+    tmp_path, metadata_changed,
+):
+    """Frame sequence and JPEG metadata cannot fake distinct board views."""
+    original = jpeg()
+    # Valid JPEG COM marker alters the bytes without changing RGB pixels.
+    replay = (
+        original[:2] + b"\xff\xfe\x00\x04ok" + original[2:]
+        if metadata_changed else original
+    )
+    if metadata_changed:
+        assert replay != original
+
+    class Head:
+        n = 0
+
+        async def status(self):
+            return {"armed": False}
+
+        async def snapshot(self):
+            self.n += 1
+            return original if self.n == 1 else replay
+
+    async def confirm(_index):
+        pass
+
+    folder = tmp_path / "private"
+    with pytest.raises(ValueError, match="Duplicate checkerboard pixels"):
+        await capture_checkerboards(Head(), folder, count=12, prompt=confirm)
+    assert not folder.exists()
 
 
 @pytest.mark.asyncio
