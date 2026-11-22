@@ -2598,6 +2598,62 @@ static void mpu_static_attitude_fails_closed_and_needs_usb_recovery() {
 
 
 
+
+static void guarded_lift_never_replays_missed_servo_steps_in_one_pwm_write() {
+  auto cfg = config();
+  cfg.freshness_ms = 200U; // a valid allowed window longer than the slow loop
+  for (const auto profile : {
+      desk_robot::BodyProfile::StepperGuarded,
+      desk_robot::BodyProfile::DcGuarded}) {
+    desk_robot::CliffGuard guard;
+    CHECK(guard.configure(cfg));
+    fresh(guard, 100);
+    CHECK(guard.try_rearm(100));
+    desk_robot::BodyControl body(profile, &guard);
+    body.require_lift_travel_limits(true);
+    CHECK(body.configure_lift_travel_limits({80, 110}));
+    CHECK(send(body, "arm", 100) == "OK arm");
+    CHECK(send(body, "lift 110", 100) == "OK lift angle=110");
+
+    // All five critical ToF samples are still <200ms old, and the 500ms
+    // watchdog has not expired. Old code issued 8 degrees immediately.
+    body.tick(260);
+    CHECK(body.state().armed && body.state().servos_attached);
+    CHECK(body.state().lift == 91 && body.state().lift_target == 110);
+    body.tick(260); // multiple same-ms loop invocations cannot catch up
+    body.tick(261);
+    body.tick(279);
+    CHECK(body.state().lift == 91);
+    body.tick(280);
+    CHECK(body.state().lift == 92);
+
+    // The physical guard retains independent authority when later stale.
+    body.tick(301);
+    CHECK(!body.state().armed);
+    CHECK(body.state().lift == body.state().lift_target);
+    CHECK(body.state().servos_attached); // hold a possible payload
+  }
+
+  // The same bounded movement must survive the WROOM millis() rollover.
+  desk_robot::CliffGuard wrapped_guard;
+  CHECK(wrapped_guard.configure(cfg));
+  constexpr std::uint32_t before_wrap = 0xfffffff0U;
+  fresh(wrapped_guard, before_wrap);
+  CHECK(wrapped_guard.try_rearm(before_wrap));
+  desk_robot::BodyControl wrapped(
+      desk_robot::BodyProfile::StepperGuarded, &wrapped_guard);
+  wrapped.require_lift_travel_limits(true);
+  CHECK(wrapped.configure_lift_travel_limits({80, 110}));
+  CHECK(send(wrapped, "arm", before_wrap) == "OK arm");
+  CHECK(send(wrapped, "lift 110", before_wrap) == "OK lift angle=110");
+  wrapped.tick(0x40U); // 80ms elapsed across wrap: no 4-degree burst
+  CHECK(wrapped.state().lift == 91 && wrapped.state().armed);
+  wrapped.tick(0x41U);
+  CHECK(wrapped.state().lift == 91);
+  wrapped.tick(0x54U);
+  CHECK(wrapped.state().lift == 92);
+}
+
 static void full_profile_lift_requires_measured_startup_and_travel() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -2749,6 +2805,7 @@ int main() {
     mpu_static_attitude_fails_closed_and_needs_usb_recovery();
     guarded_startup_never_attaches_unmeasured_jaw_pwm();
     full_profile_lift_requires_measured_startup_and_travel();
+    guarded_lift_never_replays_missed_servo_steps_in_one_pwm_write();
     imu_replay_and_rollover_are_local_motion_safety_evidence();
     missing_mpu_interrupt_status_cannot_authorize_wheels();
     imu_status_preserves_physical_conversion_and_boot_identity();

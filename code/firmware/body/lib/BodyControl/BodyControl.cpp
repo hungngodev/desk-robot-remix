@@ -834,9 +834,24 @@ void BodyControl::tick(std::uint32_t now_ms) {
     state_.grip_target = state_.grip;
     jaw_sample_motion_budget_ = 0;
   }
-  const std::uint32_t steps = (now_ms - last_servo_step_ms_) / kServoStepMs;
-  if (steps != 0) {
-    last_servo_step_ms_ += steps * kServoStepMs;
+  const std::uint32_t due_steps =
+      (now_ms - last_servo_step_ms_) / kServoStepMs;
+  if (due_steps != 0) {
+    // A delayed WROOM loop can still be within its valid 200 ms cliff
+    // freshness and 500 ms link watchdog window. Catching up eight missed
+    // 20 ms intervals in ONE MG90S PWM write would bypass the commanded
+    // 50 degrees/s rate limit even though the sensors remain healthy.
+    // In physically guarded profiles issue ONE degree per executed tick
+    // and abandon old time credit; immediate subsequent ticks cannot replay
+    // a burst. The preserved actuator-inert DC bench profile retains its
+    // historic simulated catch-up semantics.
+    const bool physical_profile = guarded_motion_profile();
+    const std::uint32_t steps = physical_profile ? 1U : due_steps;
+    if (physical_profile) {
+      last_servo_step_ms_ = now_ms;
+    } else {
+      last_servo_step_ms_ += due_steps * kServoStepMs;
+    }
     move_toward(state_.lift, state_.lift_target, steps);
     std::uint32_t jaw_steps = steps;
     if (grip_feedback_required_) {
