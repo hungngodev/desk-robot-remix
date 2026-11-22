@@ -34,6 +34,24 @@ def test_audio_diagnostic_receipts_are_private_and_exclusive(tmp_path):
         bench.preflight_private_report(public / "leak.json")
 
 
+def test_audio_diagnostic_report_rejects_replaceable_ancestor_symlink(tmp_path):
+    # The immediate child is 0700 and not itself a symlink. An older
+    # preflight trusted it even though an ancestor redirected the write.
+    target = tmp_path / "attacker"
+    target.mkdir(mode=0o700)
+    (target / "reports").mkdir(mode=0o700)
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o777)
+    shared.chmod(0o777)
+    (shared / "alias").symlink_to(target, target_is_directory=True)
+    report = shared / "alias" / "reports" / "acoustic.json"
+    with pytest.raises(ValueError, match="unsafe symlink"):
+        bench.preflight_private_report(report)
+    with pytest.raises(ValueError, match="unsafe symlink"):
+        bench.save_private_report(report, {"private": True})
+    assert not (target / "reports" / "acoustic.json").exists()
+
+
 def _sample(n: int, *, robot_id: str = "robot-01", failure=False,
             underflow_reads: int = 8) -> dict:
     return {

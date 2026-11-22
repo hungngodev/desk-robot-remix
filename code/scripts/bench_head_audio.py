@@ -20,12 +20,45 @@ from desk_robot.config import load_settings
 from desk_robot.transport import HttpHead
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _private_report_directory_fd(parent: Path) -> int:
+    """Use directory descriptors to reject replaceable ancestor symlinks."""
+    absolute = Path(os.path.abspath(parent))
+    descriptor = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for name in absolute.parts[1:]:
+            entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            owner = os.fstat(descriptor)
+            # Root-owned system aliases such as macOS /var are stable only
+            # under a root-owned, non-writable parent. Other aliases can
+            # redirect an ostensibly private report to somebody else's tree.
+            if stat.S_ISLNK(entry.st_mode) and (
+                entry.st_uid != 0 or owner.st_uid != 0
+                or stat.S_IMODE(owner.st_mode) & 0o022
+            ):
+                raise ValueError("Audio bench report directory has unsafe symlink")
+            flags = os.O_RDONLY | os.O_DIRECTORY
+            if not stat.S_ISLNK(entry.st_mode):
+                flags |= os.O_NOFOLLOW
+            next_descriptor = os.open(name, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_descriptor
+        if stat.S_IMODE(os.fstat(descriptor).st_mode) & 0o077:
+            raise ValueError("Audio bench report directory must be private mode 0700")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
 def preflight_private_report(path: Path) -> None:
     """Refuse to record a benchmark against an existing or public report."""
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if (path.parent.is_symlink()
-            or stat.S_IMODE(path.parent.stat().st_mode) & 0o077):
+    if path.parent.is_symlink():
         raise ValueError("Audio bench report directory must be private mode 0700")
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory_fd = _private_report_directory_fd(path.parent)
+    os.close(directory_fd)
     if path.exists() or path.is_symlink():
         raise FileExistsError("Audio bench report already exists")
 
@@ -35,9 +68,16 @@ def save_private_report(path: Path, report: dict) -> None:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW
-    with os.fdopen(os.open(path, flags, 0o600), "w", encoding="utf-8") as out:
-        json.dump(report, out, indent=2)
-        out.write("\n")
+    directory_fd = _private_report_directory_fd(path.parent)
+    try:
+        with os.fdopen(
+            os.open(path.name, flags, 0o600, dir_fd=directory_fd),
+            "w", encoding="utf-8",
+        ) as out:
+            json.dump(report, out, indent=2)
+            out.write("\n")
+    finally:
+        os.close(directory_fd)
 
 
 COUNTERS = (
