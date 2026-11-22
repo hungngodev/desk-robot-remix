@@ -16,6 +16,13 @@ ROLES = frozenset({
     "body_and_tracks", "power_stack", "head_and_sense",
     "lift_and_gripper", "sensors_and_wiring", "payload",
 })
+# Only the head, articulated gripper and payload may shift their own COM
+# between poses. Extra unnamed ballast or accessories are stationary by
+# default; otherwise a measurement could silently move the battery or body
+# on paper to manufacture a safe support margin.
+ARTICULATED_COM_ROLES = frozenset({
+    "head_and_sense", "lift_and_gripper", "payload",
+})
 REQUIRED_POSES = frozenset({
     "stowed_empty", "key_grasp_extended",
     "candy_grasp_lifted", "docked_stopped",
@@ -123,6 +130,7 @@ def screen(measurement: object) -> dict:
         raise ValueError("Missing, unnamed or duplicated load pose")
     results = []
     baseline_components: dict[str, float] | None = None
+    baseline_fixed_centers: dict[str, tuple[float, float, float]] = {}
     baseline_roles: set[str] = set()
     baseline_pose_name: str = ""
     for case in cases:
@@ -160,6 +168,10 @@ def screen(measurement: object) -> dict:
             baseline_components = {
                 r: m for r, (m, _) in masses.items() if r != "payload"
             }
+            baseline_fixed_centers = {
+                r: center for r, (_, center) in masses.items()
+                if r not in ARTICULATED_COM_ROLES
+            }
             baseline_roles = set(masses.keys())
             baseline_pose_name = case["name"]
         else:
@@ -174,6 +186,15 @@ def screen(measurement: object) -> dict:
                         f"Fixed assembly role '{role}' mass changed between poses "
                         f"({base_mass}g in '{baseline_pose_name}' vs {masses[role][0]}g in '{case['name']}'); "
                         "stability screen requires consistent assembly mass evidence"
+                    )
+            for role, first_center in baseline_fixed_centers.items():
+                center = masses[role][1]
+                if any(not math.isclose(a, b, rel_tol=0, abs_tol=0.001)
+                       for a, b in zip(center, first_center, strict=True)):
+                    raise ValueError(
+                        f"Fixed assembly role '{role}' center changed between poses "
+                        f"('{baseline_pose_name}' to '{case['name']}'); "
+                        "stationary components cannot shift to improve paper stability"
                     )
 
         payload_mass = masses["payload"][0]

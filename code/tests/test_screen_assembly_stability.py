@@ -213,3 +213,42 @@ def test_cross_pose_assembly_role_substitution_fails_closed():
     with pytest.raises(ValueError, match="Assembly roles in pose 'key_grasp_extended' do not match baseline roles"):
         tool.screen(data)
 
+@pytest.mark.parametrize("role, shifted_center", [
+    ("body_and_tracks", [35, 0, 15]),
+    ("power_stack", [35, 0, 25]),
+    ("sensors_and_wiring", [35, 0, 28]),
+    ("extra_ballast", [35, 0, 10]),
+])
+def test_fixed_component_center_cannot_teleport_between_poses(
+    role, shifted_center,
+):
+    tool = load()
+    data = complete()
+    if role == "extra_ballast":
+        for pose in data["poses"]:
+            pose["components"].append({
+                "id": role, "mass_g": 40, "com_mm": [0, 0, 10],
+            })
+    pose = next(p for p in data["poses"] if p["name"] == "key_grasp_extended")
+    component = next(c for c in pose["components"] if c["id"] == role)
+    component["com_mm"] = shifted_center
+    with pytest.raises(
+        ValueError, match=f"Fixed assembly role '{role}' center changed",
+    ):
+        tool.screen(data)
+
+
+def test_articulated_head_gripper_and_payload_keep_pose_specific_centers():
+    data = complete()
+    lifted = next(p for p in data["poses"] if p["name"] == "candy_grasp_lifted")
+    centers = {
+        "head_and_sense": [3, 0, 68],
+        "lift_and_gripper": [26, 0, 30],
+        "payload": [30, 0, 70],
+    }
+    for part in lifted["components"]:
+        if part["id"] in centers:
+            part["com_mm"] = centers[part["id"]]
+    report = load().screen(data)
+    assert report["necessary_stability_on_paper"]
+    assert report["assembly_print_or_purchase_approved"] is False
