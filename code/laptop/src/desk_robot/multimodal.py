@@ -962,6 +962,8 @@ class MultimodalOrchestrator:
         self._capture_tasks: dict[str, asyncio.Task] = {}
         # One persistent XIAO JPEG feed per head; no second camera or model.
         self._stream_tasks: dict[str, asyncio.Task] = {}
+        # Watches operator grant changes without opening a second camera feed.
+        self._stream_supervisors: dict[str, asyncio.Task] = {}
         # Model subscribers observe selected images without polling Mac HTTP
         # or opening another camera capture. Condition has no media history.
         self._model_frame_conditions = {
@@ -1166,8 +1168,49 @@ class MultimodalOrchestrator:
             require_stream = getattr(head, "require_stream", None)
             if callable(require_stream):
                 require_stream()
-            task = self._stream_tasks.get(robot_id)
-            if task is None or task.done():
+            supervisor = self._stream_supervisors.get(robot_id)
+            if supervisor is not None and not supervisor.done():
+                continue
+            worker = self._stream_tasks.get(robot_id)
+            if worker is None or worker.done():
+                self._stream_tasks[robot_id] = asyncio.create_task(
+                    self._consume_stream(robot_id, head)
+                )
+            self._stream_supervisors[robot_id] = asyncio.create_task(
+                self._supervise_stream_grants(robot_id, head)
+            )
+
+    async def _supervise_stream_grants(self, robot_id: str, head) -> None:
+        """Restart a newly consented stream only after the old MJPEG lease ends.
+
+        The observer handles authorization, not images. Rapid OFF/ON still
+        revokes the old worker; cancellation-resistant work keeps camera
+        ownership until its async generator actually closes.
+        """
+        admitted_grant = getattr(self.settings, "camera_consent_generation", None)
+        while not self._closed:
+            await asyncio.sleep(0.05)
+            if self._closed:
+                return
+            grant = getattr(self.settings, "camera_consent_generation", None)
+            enabled = bool(self.settings.voice_vision_tools_enabled)
+            worker = self._stream_tasks.get(robot_id)
+            if grant != admitted_grant or not enabled:
+                self._camera_grant_valid(robot_id, admitted_grant)
+                if worker is not None and not worker.done():
+                    if not worker.cancelling():
+                        worker.cancel()
+                    # Never overlap a cancellation-resistant HTTP lease.
+                    continue
+                admitted_grant = grant
+            if not enabled:
+                continue
+            if worker is None or worker.done():
+                if worker is not None and not worker.cancelled():
+                    worker.exception()  # Observe unexpected worker errors.
+                if not self._camera_grant_valid(robot_id, admitted_grant):
+                    continue
+                self._last_stream_sample[robot_id] = -math.inf
                 self._stream_tasks[robot_id] = asyncio.create_task(
                     self._consume_stream(robot_id, head)
                 )
@@ -1960,7 +2003,8 @@ class MultimodalOrchestrator:
         tasks = (list(self._capture_tasks.values())
                  + list(self._sensor_tasks.values())
                  + list(self._look_tasks.values())
-                 + list(self._stream_tasks.values()))
+                 + list(self._stream_tasks.values())
+                 + list(self._stream_supervisors.values()))
         for task in set(tasks + list(self._proactive_snapshots.values())
                         + list(self._head_snapshot_tasks.values())):
             task.cancel()
@@ -1984,7 +2028,7 @@ class MultimodalOrchestrator:
         # Keep unfinished owners visible until their actual completion.
         # An old completion must never retire a newer task for the same pet.
         for registry in (self._capture_tasks, self._stream_tasks,
-                         self._sensor_tasks, self._look_tasks,
+                         self._stream_supervisors, self._sensor_tasks, self._look_tasks,
                          self._proactive_snapshots):
             for robot_id, task in tuple(registry.items()):
                 if task.done():

@@ -3326,33 +3326,104 @@ async def test_continuous_stream_regrant_during_decode_rejects_old_frame(setting
     entered, release = asyncio.Event(), asyncio.Event()
 
     class StreamingHead(Head):
-        async def stream_frames(self):
-            yield image(square=True), time.monotonic()
-            await asyncio.Event().wait()
+        def __init__(self):
+            super().__init__()
+            self.opens = 0
+            self.active = 0
+            self.maximum = 0
+            self.closed = []
 
+        async def stream_frames(self):
+            self.opens += 1
+            sequence = self.opens
+            self.active += 1
+            self.maximum = max(self.maximum, self.active)
+            try:
+                yield image(square=sequence == 1), time.monotonic()
+                await asyncio.Event().wait()
+            finally:
+                self.active -= 1
+                self.closed.append(sequence)
+
+    head = StreamingHead()
     service = MultimodalOrchestrator(
-        settings, {rid: StreamingHead()}, Vision(), asyncio.Lock(),
+        settings, {rid: head}, Vision(), asyncio.Lock(),
     )
 
     async def paused_decode(jpeg, *, priority=False):
-        entered.set()
-        await release.wait()
+        if not entered.is_set():
+            entered.set()
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                # Simulate image decode that resists the initial cancellation.
+                await release.wait()
         return _prepare(jpeg)
 
     service._prepare_bounded = paused_decode
     try:
         service.start_streams()
+        old_owner = service._stream_tasks[rid]
         await asyncio.wait_for(entered.wait(), timeout=2)
         settings.voice_vision_tools_enabled = False
         settings.voice_vision_tools_enabled = True
+        await asyncio.sleep(0.15)
+        assert head.opens == 1  # Still holding the old physical camera lease.
         release.set()
-        await asyncio.wait_for(service._stream_tasks[rid], timeout=2)
-        assert not service.hub.frames[rid]
-        assert service._metrics[rid]["stream_frames_selected"] == 0
+        await asyncio.wait_for(old_owner, timeout=2)
+        async with asyncio.timeout(3):
+            while head.opens < 2 or not service.hub.frames[rid]:
+                await asyncio.sleep(0.01)
+        assert head.closed == [1]
+        assert head.maximum == 1
+        assert service._metrics[rid]["stream_frames_selected"] == 1
+        assert service.hub.frames[rid][-1].jpeg == _prepare(image(square=False))[0]
     finally:
         release.set()
         await service.close()
 
+
+async def test_camera_stream_regrant_after_worker_stops(settings):
+    settings.voice_vision_tools_enabled = True
+    rid = settings.robots[0].id
+
+    class StreamingHead(Head):
+        def __init__(self):
+            super().__init__()
+            self.opens = 0
+            self.closed = []
+
+        async def stream_frames(self):
+            self.opens += 1
+            sequence = self.opens
+            try:
+                yield image(square=sequence == 1), time.monotonic()
+                await asyncio.Event().wait()
+            finally:
+                self.closed.append(sequence)
+
+    head = StreamingHead()
+    service = MultimodalOrchestrator(
+        settings, {rid: head}, Vision(), asyncio.Lock(),
+    )
+    try:
+        service.start_streams()
+        old_owner = service._stream_tasks[rid]
+        async with asyncio.timeout(3):
+            while not service.hub.frames[rid]:
+                await asyncio.sleep(0.01)
+        settings.voice_vision_tools_enabled = False
+        await asyncio.wait_for(old_owner, timeout=2)
+        assert head.closed == [1]
+        assert not service.hub.frames[rid]
+        settings.voice_vision_tools_enabled = True
+        async with asyncio.timeout(3):
+            while head.opens < 2 or not service.hub.frames[rid]:
+                await asyncio.sleep(0.01)
+        assert head.closed == [1]
+        assert service.hub.frames[rid][-1].jpeg == _prepare(image(square=False))[0]
+    finally:
+        await service.close()
 
 async def test_native_live_subscriber_does_not_cross_camera_regrant(settings):
     settings.voice_vision_tools_enabled = True
