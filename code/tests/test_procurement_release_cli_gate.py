@@ -92,7 +92,11 @@ def test_purchasing_release_rechecks_live_pr_after_receipts_before_output(
     plan = tmp_path / "plan.json"
     evidence = tmp_path / "evidence.json"
     plan.write_text("{}", encoding="utf-8")
-    evidence.write_text(json.dumps({"costs": {"lines": []}}), encoding="utf-8")
+    valid_paid_evidence = {"costs": {"lines": [], "paid_orders": [
+        {"order_reference": "synthetic-sense-payment", "total_paid_usd": "13.67",
+         "allocations": [{"role_key": "robot:xiao_sense", "quantity": 1}]}
+    ]}}
+    evidence.write_text(json.dumps(valid_paid_evidence), encoding="utf-8")
     monkeypatch.setattr(
         sys, "argv", [str(SCRIPT), "--plan", str(plan),
                       "--evidence", str(evidence),
@@ -111,7 +115,8 @@ def test_purchasing_release_rechecks_live_pr_after_receipts_before_output(
     monkeypatch.setattr(
         release, "cost_quote",
         lambda *_: {"calculation_complete_not_physical_approval": True,
-                    "within_prototype_cap": True, "awaiting_arrival_roles": []},
+                    "within_prototype_cap": True, "awaiting_arrival_roles": [],
+                    "prior_paid_orders_cents": 1367},
     )
     monkeypatch.setattr(verifier, "audit_release", lambda *args, **kwargs: [])
     # Isolate the head-moving race: successful job receipts are tested
@@ -125,6 +130,35 @@ def test_purchasing_release_rechecks_live_pr_after_receipts_before_output(
                         lambda report, **kwargs: report)
     monkeypatch.setattr(release, "render_first_robot_markdown",
                         lambda report: "synthetic cart, NOT approval")
+    # The November 3 confirmed XIAO payment must survive all synthetic
+    # receipt successes. Zero declared history or a missing role allocation
+    # cannot make an over-budget cart appear affordable.
+    evidence.write_text(
+        json.dumps({"costs": {"lines": [], "paid_orders": []}}),
+        encoding="utf-8",
+    )
+    assert release.main() == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "confirmed Sense payment is absent" in captured.err
+    evidence.write_text(json.dumps(valid_paid_evidence), encoding="utf-8")
+    monkeypatch.setattr(
+        release, "cost_quote",
+        lambda *_: {"calculation_complete_not_physical_approval": True,
+                    "within_prototype_cap": True, "awaiting_arrival_roles": [],
+                    "prior_paid_orders_cents": 0},
+    )
+    assert release.main() == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "confirmed Sense payment is absent" in captured.err
+    monkeypatch.setattr(
+        release, "cost_quote",
+        lambda *_: {"calculation_complete_not_physical_approval": True,
+                    "within_prototype_cap": True, "awaiting_arrival_roles": [],
+                    "prior_paid_orders_cents": 1367},
+    )
+
     revisions = iter(["a" * 40, "b" * 40])
     monkeypatch.setattr(verifier, "checkout_sha", lambda: next(revisions))
     assert release.main() == 2

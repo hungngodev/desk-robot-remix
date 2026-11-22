@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from landed_cost import account_landed_cost
+from landed_cost import account_landed_cost, cents
 
 ROOT = Path(__file__).resolve().parents[2]
 PLAN = ROOT / "docs/hardware/full-feature-plan.json"
@@ -2200,6 +2200,40 @@ def _load_cli_json(path: Path, label: str) -> object:
         ) from exc
 
 
+
+def _confirmed_first_unit_prior_payment_missing(cost: dict, evidence: dict) -> bool:
+    """A confirmed Sense purchase cannot disappear from the $50 spend ledger."""
+    reference = _load_cli_json(PLAN.parent / "bom.json", "confirmed paid reference")
+    if not isinstance(reference, dict) or reference.get("currency") != "USD":
+        raise ValueError("Confirmed prior payment reference is missing or invalid")
+    payment = reference.get("paid_reconciliation")
+    if not isinstance(payment, dict):
+        raise ValueError("Confirmed Sense payment reconciliation is missing")
+    paid_cents = cents(str(payment.get("payment_total_usd")), "Sense payment")
+    counted = cost.get("prior_paid_orders_cents")
+    if paid_cents < 1 or type(counted) is not int or counted < paid_cents:
+        return True
+    costs = evidence.get("costs")
+    orders = costs.get("paid_orders", []) if isinstance(costs, dict) else []
+    if not isinstance(orders, list):
+        return True
+    for order in orders:
+        if not isinstance(order, dict):
+            continue
+        allocations = order.get("allocations")
+        if not isinstance(allocations, list) or not any(
+            isinstance(item, dict)
+            and item.get("role_key") == "robot:xiao_sense"
+            and type(item.get("quantity")) is int
+            and item["quantity"] >= 1
+            for item in allocations
+        ):
+            continue
+        if cents(order.get("total_paid_usd"), "Sense paid order") >= paid_cents:
+            return False
+    return True
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, default=PLAN)
@@ -2256,6 +2290,19 @@ def main() -> int:
             print("HOLD: prerequisite component and system gates not qualified",
                   file=sys.stderr)
             return 2
+        if args.require_first_robot:
+            try:
+                known_payment_missing = _confirmed_first_unit_prior_payment_missing(
+                    cost, evidence,
+                )
+            except (OSError, ValueError, TypeError) as exc:
+                print("HOLD: cannot reconcile confirmed Sense payment: " + str(exc),
+                      file=sys.stderr)
+                return 2
+            if known_payment_missing:
+                print("HOLD: confirmed Sense payment is absent from prior paid "
+                      "order allocations or cumulative cost", file=sys.stderr)
+                return 2
         try:
             from verify_procurement_receipts import (
                 audit_release,
