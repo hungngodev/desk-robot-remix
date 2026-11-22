@@ -11,6 +11,7 @@ import copy
 import csv
 import io
 import json
+import math
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -2095,6 +2096,45 @@ def cost_quote_markdown(cost: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+
+def _unique_json_object(
+    pairs: list[tuple[str, object]],
+) -> dict[str, object]:
+    """Reject repeated object fields instead of silently taking the last one."""
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"duplicate object key: {key}")
+        result[key] = value
+    return result
+
+
+def _finite_json_float(token: str) -> float:
+    """Keep normal JSON float semantics while refusing overflow to infinity."""
+    value = float(token)
+    if not math.isfinite(value):
+        raise ValueError("JSON number overflows finite range")
+    return value
+
+
+def _reject_json_constant(token: str) -> object:
+    raise ValueError(f"nonstandard JSON numeric constant: {token}")
+
+
+def _load_cli_json(path: Path, label: str) -> object:
+    """Parse operator evidence without duplicate keys or nonfinite numbers."""
+    try:
+        return json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_unique_json_object,
+            parse_float=_finite_json_float,
+            parse_constant=_reject_json_constant,
+        )
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise ValueError(
+            f"{label} JSON is invalid or ambiguous: {exc}"
+        ) from exc
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, default=PLAN)
@@ -2113,9 +2153,12 @@ def main() -> int:
         "landed-cost-json", "landed-cost-markdown"
     ), default="json", help="Project the canonical ledger without buying permits")
     args = parser.parse_args()
-    plan = json.loads(args.plan.read_text(encoding="utf-8"))
-    evidence = (json.loads(args.evidence.read_text(encoding="utf-8"))
-                if args.evidence else {})
+    try:
+        plan = _load_cli_json(args.plan, "plan")
+        evidence = (_load_cli_json(args.evidence, "evidence")
+                    if args.evidence else {})
+    except ValueError as exc:
+        parser.error(str(exc))
     report = generate(plan, evidence)
     provided_costs = evidence.get("costs")
     requested_scope = (provided_costs.get("scope", "first_robot")

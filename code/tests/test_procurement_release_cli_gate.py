@@ -151,3 +151,81 @@ def test_purchasing_release_rechecks_live_pr_after_receipts_before_output(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "cannot recheck live purchasing revision" in captured.err
+
+
+def _run_projection_with_json(
+    tmp_path, *, plan_text: str | None = None, evidence_text: str | None = None,
+):
+    command = [sys.executable, str(SCRIPT), "--format", "first-robot-json"]
+    if plan_text is not None:
+        plan = tmp_path / "plan.json"
+        plan.write_text(plan_text, encoding="utf-8")
+        command += ["--plan", str(plan)]
+    if evidence_text is not None:
+        evidence = tmp_path / "evidence.json"
+        evidence.write_text(evidence_text, encoding="utf-8")
+        command += ["--evidence", str(evidence)]
+    return subprocess.run(
+        command,
+        cwd=ROOT / "code",
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=20,
+    )
+
+
+def test_procurement_cli_accepts_unambiguous_finite_evidence(tmp_path):
+    result = _run_projection_with_json(
+        tmp_path,
+        evidence_text='{"costs":{"scope":"evaluation","test_ratio":1.25}}',
+    )
+    assert result.returncode == 0
+    assert result.stderr == ""
+
+    import json
+
+    projection = json.loads(result.stdout)
+    assert projection["purchase_approved"] is False
+
+
+def test_procurement_cli_rejects_duplicate_json_keys_before_projection(tmp_path):
+    for raw in (
+        '{"costs":{"scope":"evaluation","scope":"fleet"}}',
+        '{"costs":{"scope":"evaluation","lines":['
+        '{"role_key":"first","role_key":"second"}]}}',
+    ):
+        result = _run_projection_with_json(tmp_path, evidence_text=raw)
+        assert result.returncode == 2
+        assert result.stdout == ""
+        assert "evidence JSON is invalid or ambiguous" in result.stderr
+        assert "duplicate object key" in result.stderr
+
+    result = _run_projection_with_json(
+        tmp_path,
+        plan_text='{"robots":[],"robots":[]}',
+    )
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "plan JSON is invalid or ambiguous" in result.stderr
+    assert "duplicate object key" in result.stderr
+
+
+def test_procurement_cli_rejects_nonfinite_json_numbers_before_projection(tmp_path):
+    for token in ("NaN", "Infinity", "-Infinity", "1e9999"):
+        result = _run_projection_with_json(
+            tmp_path,
+            evidence_text=(
+                '{"costs":{"scope":"evaluation","claimed_value":'
+                + token
+                + "}}"
+            ),
+        )
+        assert result.returncode == 2
+        assert result.stdout == ""
+        assert "evidence JSON is invalid or ambiguous" in result.stderr
+        assert (
+            "numeric constant" in result.stderr
+            or "overflows finite range" in result.stderr
+        )
+
