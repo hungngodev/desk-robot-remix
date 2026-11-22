@@ -2,6 +2,7 @@
 import json
 import runpy
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -79,6 +80,48 @@ def test_room_bench_rejects_parent_traversal_before_directory_creation(tmp_path)
     with pytest.raises(ValueError, match="parent traversal"):
         save(destination, {"valid": True})
     assert not (parent / "created").exists()
+
+
+def test_room_cli_preflights_private_destination_before_usb(monkeypatch, tmp_path):
+    main = BENCH["main"]
+
+    def forbidden_capture(*args, **kwargs):
+        raise AssertionError("Room USB capture must not start on invalid report path")
+
+    monkeypatch.setitem(main.__globals__, "capture", forbidden_capture)
+    argv = ["bench_room_station.py", "--port", "/dev/cu.test",
+            "--seconds", "1", "--report"]
+    public = tmp_path / "public"
+    public.mkdir(mode=0o755)
+    public.chmod(0o755)
+    destination = public / "report.json"
+    monkeypatch.setattr(sys, "argv", argv + [str(destination)])
+    with pytest.raises(ValueError, match="private mode"):
+        main()
+    assert not destination.exists()
+
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    occupied = private / "old.json"
+    occupied.write_text("original")
+    monkeypatch.setattr(sys, "argv", argv + [str(occupied)])
+    with pytest.raises(FileExistsError, match="already exists"):
+        main()
+    assert occupied.read_text() == "original"
+
+    def read_only_capture(port, *, seconds):
+        assert port == "/dev/cu.test"
+        assert seconds == 1
+        return {"station": "room-pod-01", "charging_verified": False}
+
+    monkeypatch.setitem(main.__globals__, "capture", read_only_capture)
+    ready = private / "new.json"
+    monkeypatch.setattr(sys, "argv", argv + [str(ready)])
+    main()
+    assert json.loads(ready.read_text()) == {
+        "station": "room-pod-01", "charging_verified": False,
+    }
+    assert stat.S_IMODE(ready.stat().st_mode) == 0o600
 
 
 def test_room_bench_cli_uses_exclusive_private_receipt_writer():

@@ -176,6 +176,23 @@ def _private_report_directory_fd(parent: Path) -> int:
         raise
 
 
+def preflight_private_bench_report(path: Path) -> None:
+    """Refuse unsafe or occupied report paths before opening the USB port."""
+    if path.parent.is_symlink():
+        raise ValueError("Unsafe room bench report directory symlink")
+    directory_fd = _private_report_directory_fd(path.parent)
+    try:
+        # The final writer repeats every check and uses exclusive O_NOFOLLOW,
+        # so replacement between preflight and capture cannot overwrite data.
+        try:
+            os.stat(path.name, dir_fd=directory_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        raise FileExistsError(f"Room bench report already exists: {path.name}")
+    finally:
+        os.close(directory_fd)
+
+
 def save_private_bench_report(path: Path, report: dict) -> None:
     """Record only a new private USB receipt, never overwrite old evidence."""
     if path.parent.is_symlink():
@@ -201,6 +218,7 @@ def main() -> None:
     parser.add_argument("--seconds", type=float, default=60.0)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
+    preflight_private_bench_report(args.report)
     result = capture(args.port, seconds=args.seconds)
     save_private_bench_report(args.report, result)
     print(json.dumps(result, indent=2))
