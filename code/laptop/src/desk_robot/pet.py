@@ -287,6 +287,9 @@ class PetController:
         # in rapid succession must not be merged. Descriptions remain model
         # assessments, not measured spatial event identities.
         self._event_kinds: dict[tuple[str | None, str, str], float] = {}
+        # Only admitted initiatives consume the short spoken-event budget.
+        # Preserve _event_kinds for cross-camera candidate bookkeeping.
+        self._admitted_event_kinds: dict[tuple[str | None, str, str], float] = {}
         self._closed = False
 
     def set_voice_monitor_ready(self, ready: bool) -> None:
@@ -2220,7 +2223,12 @@ class PetController:
             physical_owner, change.kind,
             ("camera:" if camera_derived else "other:") + description_key,
         )
-        previous = self._event_kinds.get(event_key, -math.inf)
+        if len(self._admitted_event_kinds) >= 64:
+            self._admitted_event_kinds = {
+                key: seen for key, seen in self._admitted_event_kinds.items()
+                if now - seen < self.group_window
+            }
+        previous = self._admitted_event_kinds.get(event_key, -math.inf)
         if len(self._event_kinds) >= 64:
             self._event_kinds = {
                 key: seen for key, seen in self._event_kinds.items()
@@ -2243,6 +2251,7 @@ class PetController:
             state.suppressed += 1
             state.last_initiative_suppression = "quiet_voice_or_group_budget"
             return
+        self._admitted_event_kinds[event_key] = now
         state.last_initiative_suppression = None
         peer_id = self._social_peer(robot_id, change.kind, now)
         peer_generation = (

@@ -3432,6 +3432,57 @@ async def test_unverified_voice_monitor_cannot_launch_spontaneous_speech(
         await pet.close()
 
 
+@pytest.mark.parametrize("suppression", ["human_vad", "quiet"])
+async def test_suppressed_touch_does_not_consume_later_touch_admission(
+    fleet, tmp_path, suppression,
+):
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(
+        fleet, GroundedChat(), speaker, memory=memory,
+    )
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(),
+        speech_cooldown=0, interaction_cooldown=0, group_window=3,
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 9
+    pet.set_voice_monitor_ready(True)
+    blocker = {"active": True}
+    pet._human_active_in_fleet = lambda _now: (
+        suppression == "human_vad" and blocker["active"]
+    )
+    state.quiet = suppression == "quiet"
+    touch = SceneChange(
+        "touch_tap", "Someone deliberately tapped my head", 1.0,
+    )
+    try:
+        # The first physical touch is intentionally NOT allowed to interrupt
+        # human VAD or quiet. It must not consume a future speech admission.
+        pet._consider_speech("robot-01", touch, 9)
+        assert pet._speech_task is None
+        assert state.last_initiative_suppression == "quiet_voice_or_group_budget"
+        assert not pet._admitted_event_kinds
+        assert speaker.spoken == []
+
+        blocker["active"] = False
+        state.quiet = False
+        pet._consider_speech("robot-01", touch, 9)
+        await wait_for(lambda: state.spoken == 1)
+        await wait_for(lambda: pet._speech_task is None or pet._speech_task.done())
+        assert len(speaker.spoken) == 1
+        assert len(pet._admitted_event_kinds) == 1
+
+        # A genuinely admitted same-description event DOES consume the 3s
+        # group window, so repeated taps cannot trigger a speech storm.
+        pet._consider_speech("robot-01", touch, 9)
+        assert state.last_initiative_suppression == "quiet_voice_or_group_budget"
+        assert len(speaker.spoken) == 1
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_deliberate_touch_can_reply_after_passive_speech_cooldown(fleet, tmp_path):
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
     conversation = Conversation(
