@@ -120,9 +120,11 @@ class MemoryStore:
         if (len(self.robot_ids) != len(robot_ids)
                 or len({robot.casefold() for robot in robot_ids}) != len(robot_ids)):
             raise ValueError("Duplicate robot memory identities are not allowed")
+        # An ancestor alias bypasses a check of the final directory alone.
+        # Refuse it BEFORE mkdir can create private records in another tree.
+        if any(part.is_symlink() for part in (self.root, *self.root.parents)):
+            raise ValueError("Memory root ancestry must not contain symlinks")
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        if self.root.is_symlink():
-            raise ValueError("Memory root must not be a symlink")
         try:
             os.chmod(self.root, 0o700)
         except OSError as exc:
@@ -262,6 +264,10 @@ class MemoryStore:
     def _connect(self, robot_id: str):
         if not isinstance(robot_id, str) or robot_id not in self.robot_ids:
             raise ValueError("Unknown robot memory identity")
+        # Repeat the ancestry check at each SQLite open: a linked parent
+        # introduced after boot must not redirect subsequent private reads.
+        if any(part.is_symlink() for part in (self.root, *self.root.parents)):
+            raise ValueError("Memory root ancestry must not contain symlinks")
         path = self.root / (robot_id + ".sqlite3")
         if path.is_symlink():
             raise ValueError("Refusing symlinked memory database")

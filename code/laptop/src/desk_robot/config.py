@@ -277,5 +277,7 @@ def load_settings(path: str | Path) -> Settings:
     if not settings.trials_file.is_absolute():
         settings.trials_file = (path.parent / settings.trials_file).resolve()
     if not settings.memory_dir.is_absolute():
-        settings.memory_dir = (path.parent / settings.memory_dir).resolve()
+        # Keep lexical ancestors visible to MemoryStore's private-path guard.
+        # resolve() would erase a symlink in the configured directory chain.
+        settings.memory_dir = path.parent / settings.memory_dir
     return settings
