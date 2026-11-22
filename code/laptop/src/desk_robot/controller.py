@@ -788,6 +788,16 @@ class Coordinator:
                 timeout_message="Camera snapshot timeout",
             )
             self._require_camera_motion_grant(camera_grant)
+            # Physical steering requires the selected Sense stream boot,
+            # frame sequence and camera generation. Compatibility JPEGs
+            # may be read by diagnostics but can never authorize a pulse.
+            if self.settings.mode == "hardware" and (
+                not isinstance(observation, tuple) or len(observation) != 4
+                or not callable(getattr(head, "dock_receipt_current", None))
+            ):
+                raise OperationError(
+                    "Dock motion requires authenticated live camera stream receipt"
+                )
             try:
                 jpeg, received_at = unpack_dock_frame(observation)
             except ValueError as exc:

@@ -15,7 +15,7 @@ from desk_robot.simulator import SimulationVision
     ("disarmed", 80), ("side_blocked", 80), ("front_blocked", 0),
     ("healthy", 0),
     ("slow_ir_left", 0), ("slow_ir_right", 0),
-    ("slow_body", 0),
+    ("slow_body", 0), ("stream_restarted", 0),
 ])
 async def test_dock_rechecks_real_body_safety_after_waiting_for_ir(
     settings, monkeypatch, changed, pose_x,
@@ -54,7 +54,13 @@ async def test_dock_rechecks_real_body_safety_after_waiting_for_ir(
             }
 
         async def snapshot_for_dock(self):
-            return b"valid-identity-placeholder", time.monotonic()
+            return (b"valid-identity-placeholder",
+                    time.monotonic(), (1234, 1, 1), 1)
+
+        async def dock_receipt_current(self, receipt):
+            if self.changed == "stream_restarted":
+                raise ValueError("Camera stream boot changed after IR wait")
+            assert receipt[2:] == ((1234, 1, 1), 1)
 
         async def snapshot(self):
             raise AssertionError("Dock must use its fresh camera entry")
@@ -99,7 +105,10 @@ async def test_dock_rechecks_real_body_safety_after_waiting_for_ir(
         await asyncio.wait_for(started.wait(), 1.5)
         head.changed = None if changed == "healthy" else changed
         release.set()
-        if changed in ("disarmed", "side_blocked", "slow_ir_left", "slow_ir_right"):
+        if changed in (
+            "disarmed", "side_blocked", "slow_ir_left", "slow_ir_right",
+            "stream_restarted",
+        ):
             with pytest.raises(OperationError):
                 await asyncio.wait_for(task, 2)
             assert head.commands == []

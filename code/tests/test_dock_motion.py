@@ -1,9 +1,24 @@
 """Dock motion remains operator permitted and disabled by default."""
 import json
+import time
 
 import pytest
 from desk_robot.controller import Coordinator, OperationError
 from desk_robot.simulator import SimulatedHead, SimulationVision
+
+
+class DockFrameFixture:
+    """Host stand-in for a bound camera boot, sequence and stream generation."""
+
+    async def snapshot_for_dock(self):
+        return (await self.snapshot(), time.monotonic(), (1234, 1, 1), 1)
+
+    async def dock_receipt_current(self, receipt):
+        if not (
+            isinstance(receipt, tuple) and len(receipt) == 4
+            and receipt[2:] == ((1234, 1, 1), 1)
+        ):
+            raise ValueError("Fixture camera stream was replaced")
 
 
 def make(settings):
@@ -66,7 +81,7 @@ async def test_dock_approach_rejects_turn_without_three_fresh_clear_ranges(
 
     settings.mode = "hardware"
 
-    class SensorHead:
+    class SensorHead(DockFrameFixture):
         def __init__(self):
             self.commands = []
 
@@ -125,7 +140,7 @@ async def test_dock_approach_moves_once_then_holds_before_contacts(
 
     settings.mode = "hardware"
 
-    class GuardedHead:
+    class GuardedHead(DockFrameFixture):
         def __init__(self):
             self.commands = []
 
@@ -148,7 +163,7 @@ async def test_dock_approach_moves_once_then_holds_before_contacts(
 
         async def snapshot_for_dock(self):
             import time
-            return b"simulated marker image", time.monotonic()
+            return b"simulated marker image", time.monotonic(), (1234, 1, 1), 1
 
         async def command(self, text):
             self.commands.append(text)
@@ -286,7 +301,7 @@ async def test_dock_turns_by_chassis_not_lens_axis(
 
     settings.mode = "hardware"
 
-    class SafeHead:
+    class SafeHead(DockFrameFixture):
         def __init__(self):
             self.commands = []
 
@@ -387,7 +402,7 @@ async def test_dock_refuses_stale_pre_camera_safety_after_sensor_fault(
 
     settings.mode = "hardware"
 
-    class HeadWithMidframeFault:
+    class HeadWithMidframeFault(DockFrameFixture):
         def __init__(self):
             self.commands = []
             self.armed = True
@@ -450,7 +465,7 @@ async def test_dock_refuses_new_side_obstacle_after_camera_frame(
 
     settings.mode = "hardware"
 
-    class SideChangedHead:
+    class SideChangedHead(DockFrameFixture):
         def __init__(self):
             self.commands = []
             self.blocked = False
@@ -516,7 +531,7 @@ async def test_dock_slow_marker_inference_never_drives_from_expired_image(
 
     settings.mode = "hardware"
 
-    class CameraHead:
+    class CameraHead(DockFrameFixture):
         def __init__(self):
             self.commands = []
 
@@ -581,7 +596,7 @@ async def test_dock_marker_expires_while_waiting_for_second_body_status(
 
     settings.mode = "hardware"
 
-    class SlowStatus:
+    class SlowStatus(DockFrameFixture):
         def __init__(self):
             self.reads = 0
             self.commands = []
@@ -643,7 +658,7 @@ async def test_dock_approach_refuses_parallel_native_detector_ownership(settings
 
     settings.mode = "hardware"
 
-    class HealthyHead:
+    class HealthyHead(DockFrameFixture):
         def __init__(self):
             self.commands = []
             self.captures = 0
@@ -696,7 +711,7 @@ async def test_dock_rejects_foreign_body_identity_after_camera_before_turn(
 
     settings.mode = "hardware"
 
-    class SwappedBody:
+    class SwappedBody(DockFrameFixture):
         def __init__(self):
             self.reads = 0
             self.commands = []
@@ -804,7 +819,7 @@ async def test_dock_approach_rejects_expired_stream_receipt_before_detector_or_d
 
     settings.mode = "hardware"
 
-    class StaleHead:
+    class StaleHead(DockFrameFixture):
         def __init__(self):
             self.commands = []
 
@@ -823,7 +838,7 @@ async def test_dock_approach_rejects_expired_stream_receipt_before_detector_or_d
             raise AssertionError("Unexpected generic camera request")
 
         async def snapshot_for_dock(self):
-            return b"synthetic image", time.monotonic() - 0.3
+            return b"synthetic image", time.monotonic() - 0.3, (1234, 1, 1), 1
 
         async def command(self, command):
             self.commands.append(command)

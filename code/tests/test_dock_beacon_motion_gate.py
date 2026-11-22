@@ -3,6 +3,8 @@
 These are simulated host contract tests. They do not certify beacon optics,
 local WROOM sensor geometry, battery charging, or loaded motor stopping.
 """
+import time
+
 import pytest
 from desk_robot.controller import Coordinator, Job, OperationError
 from desk_robot.dock_vision import DockCameraCalibration, DockPose
@@ -16,6 +18,7 @@ class SensorHead:
         self.matching = matching
         self.reads = 0
         self.commands = []
+        self.verified_receipts = 0
 
     async def status(self):
         return {
@@ -31,6 +34,14 @@ class SensorHead:
 
     async def snapshot(self):
         return b"test-only-camera-image"
+
+    async def snapshot_for_dock(self):
+        return (await self.snapshot(), time.monotonic(), (1234, 1, 1), 1)
+
+    async def dock_receipt_current(self, receipt):
+        if receipt[2:] != ((1234, 1, 1), 1):
+            raise ValueError("Fixture camera boot or generation changed")
+        self.verified_receipts += 1
 
     async def ir_status(self):
         self.reads += 1
@@ -106,6 +117,7 @@ async def test_assigned_dock_beacon_allows_only_guarded_standoff_pulse(
         assert result["charging_authorized"] is False
         assert result["physical_acceptance_pass"] is False
         assert head.commands == ["drive 20 20 100", "stop"]
+        assert head.verified_receipts == 1
         assert head.reads == 1
     finally:
         await controller.close()
@@ -146,5 +158,46 @@ async def test_no_joint_ir_visibility_stops_without_motor_or_charge(
         assert result["phase"] == "hold"
         assert result["charging_authorized"] is False
         assert head.commands == []
+    finally:
+        await controller.close()
+
+
+@pytest.mark.parametrize("receipt_variant", ["bytes", "pair", "missing_verifier"])
+async def test_hardware_dock_rejects_legacy_camera_before_inference_or_motor(
+    settings, monkeypatch, receipt_variant,
+):
+    """Old camera adapters cannot supply physical steering provenance."""
+    settings.mode = "hardware"
+    settings.robots[0].dock_beacon_id = 1
+
+    class LegacyHead(SensorHead):
+        async def snapshot_for_dock(self):
+            full = await super().snapshot_for_dock()
+            if receipt_variant == "bytes":
+                return full[0]
+            if receipt_variant == "pair":
+                return full[:2]
+            return full
+
+    head = LegacyHead()
+    if receipt_variant == "missing_verifier":
+        head.dock_receipt_current = None
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Unauthenticated JPEG reached native AprilTag")
+
+    monkeypatch.setattr("desk_robot.dock_runtime.detect_apriltag", forbidden)
+    controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        with pytest.raises(
+            OperationError, match="authenticated live camera stream receipt",
+        ):
+            await controller._dock_approach(
+                Job("legacy-frame", "robot-01", "dock_approach"),
+                camera(), 200, 1, 1,
+            )
+        assert head.commands == []
+        assert head.reads == 0
+        assert head.verified_receipts == 0
     finally:
         await controller.close()
