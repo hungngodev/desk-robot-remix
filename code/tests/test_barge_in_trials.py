@@ -268,6 +268,14 @@ def test_old_playback_replay_prevents_gate():
     assert not evaluate(rows)["meets_proposed_gate"]
 
 
+@pytest.mark.parametrize("trial_id", [" ", "\t", "\u2003", " \n "])
+def test_human_trial_id_requires_visible_identifier(trial_id):
+    rows = both_distances()
+    rows[0]["id"] = trial_id
+    with pytest.raises(ValueError, match="unique nonempty human trial IDs"):
+        evaluate(rows)
+
+
 def test_stage_boundary_cannot_precede_human_speech():
     rows = fake_rows()
     rows[0]["vad_arrival_ms"] = rows[0]["human_onset_ms"] - 1

@@ -49,8 +49,10 @@ def evaluate(records: list[dict]) -> dict:
             "Need 20 human trials per tested distance and separate robot-only/quiet controls"
         )
     ids = [r.get("id") for r in human]
-    if (any(type(x) is not str or not 1 <= len(x) <= 64 for x in ids)
-            or len(set(ids)) != len(human)):
+    if (any(
+        type(x) is not str or not 1 <= len(x) <= 64 or not x.strip()
+        for x in ids
+    ) or len(set(ids)) != len(human)):
         raise ValueError("Need unique nonempty human trial IDs")
 
     on_time = 0
