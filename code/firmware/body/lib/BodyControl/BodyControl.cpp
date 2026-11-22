@@ -393,9 +393,10 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
   state_.accessories = readings;
   if (imu_attitude_required_ &&
       (!imu_attitude_configured_ || imu_attitude_latched_)) {
+    // Attitude HOLD cannot suppress independent dock, nFAULT, fuel,
+    // or battery latches. Keep sampling those before any safe recovery.
     stop_motion();
     state_.armed = false;
-    return;
   }
   if (fuel_monitor_required_ && !fuel_monitor_fresh(now_ms)) {
     if (!fuel_monitor_fault_latched_) {

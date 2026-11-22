@@ -2230,18 +2230,34 @@ static void mpu_static_attitude_fails_closed_and_needs_usb_recovery() {
   fresh(guard, 500);
   CHECK(send(body, "arm", 500) == "ERR arm imu_attitude_latched");
   CHECK(send(body, "rearm", 500) == "ERR rearm local_only");
-  CHECK(send(body, "rearm", 500, true) == "OK rearm");
+  // Independent dock seating arrives while attitude is still latched.
+  // A fresh putdown must not hide the dock power lockout.
+  desk_robot::AccessoryReadings contact{};
+  contact.dock.present = contact.dock.valid = true;
+  contact.dock.left_seated = true;
+  contact.dock.sample_seq = 1;
+  contact.dock.at_ms = 500;
+  body.set_accessories(contact, 500);
+  CHECK(send(body, "status", 500).find(
+      "\"fault\":\"dock_power_connected\"") != std::string::npos);
+  CHECK(send(body, "rearm", 500, true) == "ERR rearm dock_power_connected");
+  contact.dock.left_seated = false;
+  contact.dock.sample_seq = 2; // distinct unseated GPIO conversion
+  contact.dock.at_ms = 501;
+  body.set_accessories(contact, 501);
+  fresh(guard, 501);
   CHECK(!body.state().armed && body.state().left == 0);
-  CHECK(send(body, "arm", 500) == "OK arm");
+  CHECK(send(body, "rearm", 501, true) == "OK rearm");
+  CHECK(send(body, "arm", 501) == "OK arm");
   CHECK(body.state().left == 0 && body.state().right == 0);
 
   // Same timestamp with contradictory axes is a replay, not a new permit.
   imu.accel[1] = 300;
   body.set_imu(imu);
-  fresh(guard, 500);
-  body.tick(500);
+  fresh(guard, 501);
+  body.tick(501);
   CHECK(!body.state().armed);
-  CHECK(send(body, "arm", 500) == "ERR arm imu_sensor_fault_latched");
+  CHECK(send(body, "arm", 501) == "ERR arm imu_sensor_fault_latched");
 }
 
 int main() {
