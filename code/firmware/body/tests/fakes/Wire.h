@@ -44,6 +44,9 @@ class TwoWire {
   bool fail_mcp_latch_readback = false;
   bool nfc_connected = false;
   bool nfc_tag_present = false;
+  // One complete I2C ACK with a broken PN532 checksum, not a tag removal.
+  bool nfc_corrupt_scan_ack_once = false;
+  unsigned nfc_corrupt_scan_acks = 0;
   std::uint8_t nfc_command = 0, nfc_phase = 0;
   unsigned nfc_scans = 0;
   unsigned dock_gpio_reads = 0;
@@ -253,6 +256,11 @@ class TwoWire {
     } else if (addr == 0x24 && nfc_connected) {
       if (nfc_phase == 1 && count == 7) {
         inbound = {1, 0, 0, 0xff, 0, 0xff, 0};
+        if (nfc_command == 0x4a && nfc_corrupt_scan_ack_once) {
+          nfc_corrupt_scan_ack_once = false;
+          ++nfc_corrupt_scan_acks;
+          inbound[5] = 0; // Invalid ACK checksum on an otherwise live bus.
+        }
         nfc_phase = 2;
       } else if (nfc_phase == 2 && count >= 10) {
         const std::vector<std::uint8_t> payload = nfc_command != 0x4a

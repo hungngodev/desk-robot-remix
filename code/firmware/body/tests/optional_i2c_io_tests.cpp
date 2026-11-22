@@ -515,6 +515,51 @@ int main() {
     CHECK(!nfc_accessories.readings().dock.valid);
     CHECK(!nfc_accessories.readings().nfc.valid);
     CHECK(nfc_wire.nfc_scans == previous_scans);
+    // Script one *actual PN532 ScanAck* corruption through the production
+    // AccessorySensors poller, not just the portable NfcRaw state helper.
+    // The UID stays continuously present on the fake antenna.
+    TwoWire recovery_wire;
+    recovery_wire.nfc_connected = true;
+    recovery_wire.nfc_tag_present = true;
+    desk_robot::AccessorySensors recovery;
+    CHECK(recovery.begin(recovery_wire));
+    for (std::uint32_t ms = 0; ms < 2600; ms += 12)
+      recovery.poll(ms);
+    const auto initial = recovery.readings().nfc;
+    CHECK(initial.valid && initial.tag_visible && initial.tag_events == 1U);
+    recovery_wire.nfc_corrupt_scan_ack_once = true;
+    bool saw_bad_ack = false;
+    for (std::uint32_t ms = 2604; ms < 5500; ms += 12) {
+      recovery.poll(ms);
+      const auto& current = recovery.readings().nfc;
+      if (recovery_wire.nfc_corrupt_scan_acks == 1 && !saw_bad_ack) {
+        CHECK(!current.valid && !current.present);
+        CHECK(current.tag_visible && current.tag_token == initial.tag_token);
+        CHECK(current.tag_events == initial.tag_events);
+        CHECK(current.scan_seq == initial.scan_seq);
+        saw_bad_ack = true;
+      }
+      CHECK(!recovery_wire.unsafe_parallel_mux);
+      CHECK(recovery_wire.ranges == 0 && recovery_wire.extras == 0);
+    }
+    const auto& recovered = recovery.readings().nfc;
+    CHECK(saw_bad_ack && recovery_wire.nfc_corrupt_scan_acks == 1U);
+    CHECK(recovered.valid && recovered.tag_visible);
+    CHECK(recovered.tag_token == initial.tag_token);
+    CHECK(recovered.tag_events == initial.tag_events);
+    CHECK(recovered.scan_seq > initial.scan_seq);
+    // A complete absent frame is the first permitted edge reset.
+    recovery_wire.nfc_tag_present = false;
+    for (std::uint32_t ms = 5508; ms < 7400; ms += 12)
+      recovery.poll(ms);
+    CHECK(recovered.valid && !recovered.tag_visible);
+    CHECK(recovered.tag_events == initial.tag_events);
+    recovery_wire.nfc_tag_present = true;
+    for (std::uint32_t ms = 7404; ms < 9400; ms += 12)
+      recovery.poll(ms);
+    CHECK(recovered.valid && recovered.tag_visible);
+    CHECK(recovered.tag_events == initial.tag_events + 1U);
+    CHECK(recovery_wire.ranges == 0 && recovery_wire.extras == 0);
     // A separate GPIOB read can host slow reed/PIR while GPIOA continues
     // owning the compulsory independent dock stop/PGOOD evidence.
     TwoWire optional_wire;
