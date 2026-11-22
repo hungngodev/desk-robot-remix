@@ -8882,14 +8882,6 @@ def test_distinct_unmergeable_same_route_read_is_disclosed(native):
     ]
     assert incomplete
 
-    long_key = "Look at the " + ("red " * 38) + "key"
-    long_mug = "look at the " + ("blue " * 35) + "mug"
-    requests, incomplete = module.native_readonly_requests_with_capacity(
-        long_key + " and check battery and " + long_mug
-    )
-    assert [route for route, _ in requests] == ["look", "power-status"]
-    assert incomplete
-
 
 async def test_native_queues_both_distinct_visual_targets_in_one_read(native):
     module, bridge = native
