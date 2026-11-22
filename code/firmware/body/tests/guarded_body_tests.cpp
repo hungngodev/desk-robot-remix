@@ -241,6 +241,14 @@ static void guarded_directional_drive_rejects_unqualified_sweep() {
                                   &timeout_guard);
   CHECK(send(timeout, "rearm", 0, true) == "OK rearm");
   CHECK(send(timeout, "arm", 0) == "OK arm");
+  // Real CliffGuard correctly latches a stalled optical sweep BEFORE its
+  // first replacement sample. Maintain independent fresh acquisitions while
+  // deliberately leaving the command watchdog without a keepalive.
+  for (std::uint32_t at = 80; at <= 480; at += 80) {
+    fresh(timeout_guard, at);
+    timeout.tick(at);
+    CHECK(timeout.state().armed);
+  }
   fresh(timeout_guard, 490);
   CHECK(send(timeout, "drive 20 -20 100", 490) ==
         "ERR drive directional_clearance_unqualified");
