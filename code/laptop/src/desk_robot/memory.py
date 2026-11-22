@@ -439,6 +439,27 @@ class MemoryStore:
         return Memory(robot_id, event, source, bool(witnessed),
                       kind, summary, at, score)
 
+    def witnessed_episode_revision(
+        self, robot_id: str, event_id: str,
+    ) -> tuple[str, int] | None:
+        """Return one retained eyewitness summary and edit/delete generation.
+
+        A pending automatic text fanout must not publish an old description
+        after the operator changes or deletes the source. Both fields come
+        from one private SQLite read; no peer's memories are inspected.
+        """
+        if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
+            raise ValueError("Invalid memory event ID")
+        with self._connect(robot_id) as db:
+            row = db.execute(
+                """SELECT m.summary, COALESCE(e.generation,0)
+                   FROM memories AS m
+                   LEFT JOIN episode_mutations AS e ON e.event_id=m.event_id
+                   WHERE m.event_id=? AND m.source_robot=? AND m.witnessed=1""",
+                (event_id, robot_id),
+            ).fetchone()
+        return (str(row[0]), int(row[1])) if row is not None else None
+
     def get_camera_provenance(
         self, robot_id: str, event_id: str,
     ) -> CameraProvenance | None:

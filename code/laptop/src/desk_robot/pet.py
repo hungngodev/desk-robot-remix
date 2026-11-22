@@ -14,6 +14,7 @@ import json
 import math
 import random
 import re
+import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -640,6 +641,27 @@ class PetController:
             sharing_grant = self.settings.fleet_sharing_consent_generation
             fanout_grant = self.settings.fleet_auto_fanout_consent_generation
             destinations = [r.id for r in self.settings.robots if r.id != robot_id]
+            # Captured after the newly inserted eyewitness record is durable.
+            # Operator PATCH/DELETE advances this generation, including a
+            # correction away from and back to the same description.
+            source_revision = await asyncio.to_thread(
+                self.memory.witnessed_episode_revision, robot_id, event_id,
+            )
+            if source_revision is None or source_revision[0] != change.description:
+                return
+
+            def source_current() -> bool:
+                # Invoke only inside a SQLite worker, NEVER the Mac event loop.
+                # The source can be removed or edited without a fleet consent
+                # change. Fail closed on busy/unavailable local SQLite.
+                try:
+                    return (
+                        self.memory.witnessed_episode_revision(robot_id, event_id)
+                        == source_revision
+                    )
+                except (sqlite3.Error, OSError):
+                    return False
+
             def permitted() -> bool:
                 return (
                     self.settings.fleet_text_sharing_enabled
@@ -659,7 +681,7 @@ class PetController:
                 # completed sibling cannot escape the old gather cleanup.
                 results, new_copies = [], []
                 for peer_id in destinations:
-                    if not permitted():
+                    if not permitted() or not source_current():
                         break
                     try:
                         inserted = self.memory.remember(
@@ -676,7 +698,7 @@ class PetController:
                         # One failed peer must not erase the eyewitness event
                         # or suppress independent peers.
                         results.append(exc)
-                if not permitted():
+                if not permitted() or not source_current():
                     for peer_id in new_copies:
                         # Only copies from THIS request, not older duplicates.
                         self.memory.forget_episode(peer_id, event_id)
@@ -687,12 +709,15 @@ class PetController:
                 return results + [False] * (len(destinations) - len(results))
 
             results = await asyncio.to_thread(persist_peer_batch)
+            # Reading the source here is offloaded too: the SQLite database
+            # can stall even after the peer worker has completed its check.
+            source_still_current = await asyncio.to_thread(source_current)
             for peer_id, result in zip(destinations, results, strict=True):
                 if isinstance(result, BaseException):
                     self.states[robot_id].last_error = (
                         f"Peer memory {peer_id}: {type(result).__name__}: {str(result)[:80]}"
                     )
-                elif result is True and not permitted():
+                elif result is True and (not permitted() or not source_still_current):
                     # A newly inserted peer copy may finish after the
                     # operator revokes sharing while SQLite is running.
                     # The original eyewitness record remains untouched;
