@@ -30,14 +30,14 @@ OLED face, speech, tracks and a lifting claw. A shared Mac handles the AI.
 
 **Next step.** First settle the day-zero architecture, part variant, final fit and full delivered cost gates, then check one MG90S servo in the saved gripper before printing the whole robot. Keep robot motion disabled during fit work.
 
-**Current status, 2026-11-16.** All integrated sensor, five-pet audio,
-vision and autonomous social source work belongs in one draft
-[PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17). Its source now
-contains four low-cost generic VL53L0X floor channels, one front clearance channel and
+**Historical source snapshot (November 16, 2026; not live verification).** On that date, integrated sensor, five-pet audio,
+vision and autonomous social source work belonged to the single draft
+[PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17). The code then
+contained four low-cost generic VL53L0X floor channels, one front clearance channel and
 three additional read-only directions; MPU6050/BerryIMU options, touch/gesture,
 FSR, rotary angle, climate, battery, optical paw and a bounded PN532 toy tag
-reader. New physical sensor events can request the existing camera asynchronously,
-and an explicitly consented two-pet dialogue uses the same one-speaker owner.
+reader. Physical sensor events could request the existing camera asynchronously,
+and an explicitly consented two-pet dialogue used the same one-speaker owner.
 See the [full source versus physical sensor matrix](hardware/full-feature-wiring-and-shopping.md#current-sensor-source-and-behavior-closure-matrix),
 [actual open-source incorporation audit](ATTRIBUTION.md#what-is-actually-reused-versus-locally-implemented-november-12-audit)
 and [multimodal social/camera data path](guides/multimodal-voice-video-orchestration.md#november-12-source-truthful-natural-social-behavior-and-active-camera-triggers).
