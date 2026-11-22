@@ -778,8 +778,8 @@ async def test_unidentified_or_wrong_sensor_cannot_steer_real_dock(
     from desk_robot.simulator import SimulatedHead
 
     settings.mode = "hardware"
-    head = SimulatedHead("robot-01")
-    controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    legacy = SimulatedHead("robot-01")
+    controller = Coordinator(settings, {"robot-01": legacy}, SimulationVision())
 
     async def healthy(*args, **kwargs):
         return None
@@ -790,19 +790,38 @@ async def test_unidentified_or_wrong_sensor_cannot_steer_real_dock(
         camera_sensor_pid="OV5640",
     )
     try:
+        # A compatibility snapshot is never an authenticated stream receipt.
+        # Reject it before even consulting the calibration's sensor label.
+        with pytest.raises(OperationError, match="authenticated live camera stream receipt"):
+            await controller._dock_approach(
+                Job("camera-legacy", "robot-01", "dock_approach"),
+                camera, 200, 1, 1,
+            )
+        assert legacy.commands == []
+
+        class AuthenticatedSensorHead(DockFrameFixture, SimulatedHead):
+            pass
+
+        head = AuthenticatedSensorHead("robot-01")
+        controller.heads["robot-01"] = head
+        # With a valid immutable boot/frame receipt, missing or wrong live
+        # PID must still be rejected before any motor command is possible.
         with pytest.raises(OperationError, match="live sensor identity unavailable"):
             await controller._dock_approach(
-                Job("camera-id", "robot-01", "dock_approach"), camera, 200, 1, 1,
+                Job("camera-missing-pid", "robot-01", "dock_approach"),
+                camera, 200, 1, 1,
             )
         assert head.commands == []
 
-        async def wrong_sensor():
+        async def wrong_sensor(receipt):
+            assert len(receipt) == 4
             return "OV3660"
 
         monkeypatch.setattr(head, "camera_identity", wrong_sensor, raising=False)
         with pytest.raises(OperationError, match="sensor PID differs"):
             await controller._dock_approach(
-                Job("camera-id", "robot-01", "dock_approach"), camera, 200, 1, 1,
+                Job("camera-wrong-pid", "robot-01", "dock_approach"),
+                camera, 200, 1, 1,
             )
         assert head.commands == []
     finally:

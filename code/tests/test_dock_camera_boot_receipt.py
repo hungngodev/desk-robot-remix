@@ -120,6 +120,7 @@ async def test_guarded_dock_reconnect_never_dispatches_motor_pulse():
     head._request = request
     head.command = command
     controller = object.__new__(Coordinator)
+    controller.settings = SimpleNamespace(mode="hardware")
     controller.heads = {"robot-01": head}
     controller.robot = lambda _id: SimpleNamespace(dock_beacon_id=1)
     controller._assert_armed_health = healthy
