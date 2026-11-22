@@ -133,8 +133,12 @@ RangeDiagnostic CliffGuard::diagnostic(std::uint8_t channel,
   // Status JSON must not advertise an expired measurement as live sensor
   // evidence. Raw mm and age remain available to diagnose a stale lane.
   // Motor permission still comes ONLY from the independent latched guard.
+  // A fresh, chip-valid measurement can still violate the calibrated desk
+  // envelope. Retain its raw value but never mark unsafe geometry as valid
+  // sensor evidence in status.ranges.valid_mask.
   result.valid = sample.present && sample.valid && configured_ &&
-                 result.age_ms < config_.freshness_ms;
+                 result.age_ms < config_.freshness_ms &&
+                 sample_fault(channel) == CliffFault::None;
   return result;
 }
 

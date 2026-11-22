@@ -310,6 +310,40 @@ void diagnostics_read_only_and_bounded() {
   CHECK(another.diagnostic(0, 0x10U).age_ms == 32U);
 }
 
+void diagnostics_reject_fresh_unsafe_distances_without_erasing_raw() {
+  // A functioning ToF chip is not proof that its measured desk clearance
+  // satisfies the local calibrated envelope. Status must agree with it.
+  for (const std::uint16_t distance : {std::uint16_t(29), std::uint16_t(61)}) {
+    CliffGuard guard;
+    ready(guard, 100);
+    guard.sample(0, distance, true, 101);
+    const auto unsafe = guard.diagnostic(0, 102);
+    CHECK(unsafe.present && !unsafe.valid);
+    CHECK(unsafe.distance_mm == distance && unsafe.age_ms == 1);
+    CHECK(guard.fault() == CliffFault::FloorOutOfRange);
+    guard.sample(0, 45, true, 103);
+    CHECK(guard.diagnostic(0, 104).valid);
+    CHECK(!guard.evaluate(104)); // a healthy sample cannot clear the latch
+    CHECK(guard.try_rearm(104));  // local authorized recovery is separate
+  }
+
+  for (const std::uint16_t distance : {std::uint16_t(100), std::uint16_t(801)}) {
+    CliffGuard guard;
+    ready(guard, 100);
+    guard.sample(4, distance, true, 101);
+    const auto unsafe = guard.diagnostic(4, 102);
+    CHECK(unsafe.present && !unsafe.valid);
+    CHECK(unsafe.distance_mm == distance && unsafe.age_ms == 1);
+    CHECK(guard.fault() ==
+          (distance == 100 ? CliffFault::FrontObstacle
+                           : CliffFault::FrontOutOfRange));
+    guard.sample(4, 300, true, 103);
+    CHECK(guard.diagnostic(4, 104).valid);
+    CHECK(!guard.evaluate(104));
+    CHECK(guard.try_rearm(104));
+  }
+}
+
 void diagnostics_expire_validity_without_clearing_raw_or_latched_fault() {
   CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -412,7 +446,9 @@ int main(int argc, char** argv) {
       {"fault_names", fault_names},
       {"diagnostics_read_only_and_bounded", diagnostics_read_only_and_bounded},
       {"diagnostics_expire_validity_without_clearing_raw_or_latched_fault",
-       diagnostics_expire_validity_without_clearing_raw_or_latched_fault}};
+       diagnostics_expire_validity_without_clearing_raw_or_latched_fault},
+      {"diagnostics_reject_fresh_unsafe_distances_without_erasing_raw",
+       diagnostics_reject_fresh_unsafe_distances_without_erasing_raw}};
   int ran = 0;
   for (const auto& test : tests) {
     if (argc > 1 && std::strcmp(argv[1], test.first) != 0) continue;
