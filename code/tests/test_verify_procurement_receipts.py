@@ -52,10 +52,19 @@ def measurement_for_gate(scope, gate):
         }
     if gate in release.PHYSICAL_GATE_METRICS:
         metric, unit = release.PHYSICAL_GATE_METRICS[gate]
+        conditions = {
+            "setup": "installed_bench_fixture",
+            "instrument": "calibrated_meter",
+        }
+        if gate == "hardware_motor_driver_fails_low_after_cpu_stall":
+            conditions.update({
+                "instrument": "calibrated_logic_analyzer",
+                "instrument_type": "logic_analyzer",
+                "fault_injection": "cpu_stall",
+            })
         return {
             "sample_count": 3,
-            "conditions": {"setup": "installed_bench_fixture",
-                           "instrument": "calibrated_meter"},
+            "conditions": conditions,
             "quantities": [{"name": metric, "unit": unit,
                             "value": 5.0, "minimum": 0.0, "maximum": 10.0}],
         }
@@ -1072,4 +1081,40 @@ def test_a2_receipt_needs_capture_and_head_identity(field):
     }}
     assert not release.verified_scoped_record(
         missing, SHA, lambda url: lookup(url, records=[missing]),
+    )
+
+
+def test_independent_motor_cutoff_receipt_enforces_100ms_real_cpu_stall():
+    import copy
+
+    gate = "hardware_motor_driver_fails_low_after_cpu_stall"
+    original = receipt("system", gate)
+    timing = original["measurement"]["quantities"][0]
+    timing["value"] = 100.0
+    timing["maximum"] = 200.0
+    assert release.verified_scoped_record(
+        original, SHA, lambda url: lookup(url, records=[original]),
+    )
+    for latency in (100.01, 101.0, 150.0):
+        slow = copy.deepcopy(original)
+        slow["measurement"]["quantities"][0]["value"] = latency
+        assert not release.verified_scoped_record(
+            slow, SHA, lambda url, row=slow: lookup(url, records=[row]),
+        )
+
+
+@pytest.mark.parametrize(("field", "invalid"), [
+    ("instrument_type", "voltmeter"),
+    ("instrument_type", None),
+    ("fault_injection", "normal_runtime"),
+    ("fault_injection", None),
+])
+def test_independent_cutoff_evidence_requires_real_scope_and_fault(field, invalid):
+    import copy
+
+    gate = "hardware_motor_driver_fails_low_after_cpu_stall"
+    bogus = copy.deepcopy(receipt("system", gate))
+    bogus["measurement"]["conditions"][field] = invalid
+    assert not release.verified_scoped_record(
+        bogus, SHA, lambda url: lookup(url, records=[bogus]),
     )

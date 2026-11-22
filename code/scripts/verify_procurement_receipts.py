@@ -465,6 +465,18 @@ def _qualified_gate_measurement(gate: object, measurement: object) -> bool:
     # temperature deliberately remain eligible for negative observations.
     if gate in NONNEGATIVE_PHYSICAL_GATES and any(n < 0 for n in bounds):
         return False
+    if gate == "hardware_motor_driver_fails_low_after_cpu_stall":
+        # The independent CD74HC123 / DRV8833 nSLEEP cutoff must be
+        # observed within 100 ms of a deliberately stalled CPU, not within
+        # an arbitrary reviewer-supplied maximum of e.g. 200 ms.
+        if (item["value"] > 100
+                or conditions.get("instrument_type") not in {
+                    "logic_analyzer", "oscilloscope",
+                }
+                or conditions.get("fault_injection") not in {
+                    "cpu_stall", "intentional_cpu_halt",
+                }):
+            return False
     return bounds[1] <= bounds[0] <= bounds[2]
 
 
