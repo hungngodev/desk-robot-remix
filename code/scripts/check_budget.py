@@ -108,6 +108,7 @@ if __name__ == "__main__":
         # from the one canonical source used by procurement_release.py.
         from procurement_release import (
             PLAN,
+            _load_cli_json,
             first_robot_projection,
             generate,
             pilot_supplier_cart,
@@ -116,7 +117,7 @@ if __name__ == "__main__":
         if args.shipping is not None or args.tax is not None:
             p.error("Current first-unit landed prices require verified receipts; "
                     "--shipping/--tax are only valid with an explicit --bom")
-        report = generate(json.loads(PLAN.read_text(encoding="utf-8")))
+        report = generate(_load_cli_json(PLAN, "canonical plan"))
         first = first_robot_projection(report)
         cart = pilot_supplier_cart(report)
         print(json.dumps({
@@ -133,8 +134,14 @@ if __name__ == "__main__":
             p.exit(2, "HOLD: use the strict first-robot receipt verifier; "
                       "historical quotes cannot authorize an order.\n")
     else:
+        from procurement_release import _load_cli_json
+
         try:
-            result = budget(json.loads(args.bom.read_text()), args.shipping, args.tax)
+            result = budget(
+                _load_cli_json(args.bom, "historical budget"),
+                args.shipping,
+                args.tax,
+            )
         except (ValueError, KeyError) as exc:
             p.error(f"Invalid historical budget: {exc}")
         # Explicit historical math is useful for comparison, but even an

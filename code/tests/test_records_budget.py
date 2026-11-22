@@ -422,6 +422,55 @@ def test_default_budget_cli_uses_canonical_first_unit_not_historical_bom():
     assert "HOLD" in denied.stderr
 
 
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (
+            '{"cap_usd":50,"cap_usd":1,"fit_confirmed":true,'
+            '"readiness_checks":{"power":true},"items":[]}',
+            "duplicate object key",
+        ),
+        (
+            '{"cap_usd":NaN,"fit_confirmed":true,'
+            '"readiness_checks":{"power":true},"items":[]}',
+            "numeric constant",
+        ),
+        (
+            '{"cap_usd":1e9999,"fit_confirmed":true,'
+            '"readiness_checks":{"power":true},"items":[]}',
+            "overflows finite range",
+        ),
+    ],
+)
+def test_legacy_budget_cli_rejects_ambiguous_json_before_math(
+    tmp_path, raw, expected,
+):
+    import subprocess
+    import sys
+
+    path = tmp_path / "ambiguous-historical.json"
+    path.write_text(raw, encoding="utf-8")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(ROOT / "scripts/check_budget.py"),
+            "--bom",
+            str(path),
+            "--shipping",
+            "0",
+            "--tax",
+            "0",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert completed.returncode == 2
+    assert not completed.stdout.strip()
+    assert "historical budget JSON is invalid or ambiguous" in completed.stderr
+    assert expected in completed.stderr
+
+
 def test_legacy_complete_bom_cannot_approve_purchase_cli(tmp_path):
     import subprocess
     import sys
