@@ -202,8 +202,14 @@ def test_side_trial_preflight_rejects_symlinked_previous_report(tmp_path):
     alias.symlink_to(evidence)
     with pytest.raises(FileExistsError):
         preflight_private_output(alias)
+    # Use a valid lease from this exact folder. An invalid inode lease
+    # correctly fails earlier, before O_EXCL can check the linked report.
+    expected_parent = preflight_private_output(tmp_path / "unused-report.jsonl")
     with pytest.raises(FileExistsError):
-        write_private_rows(alias, [{"sample_id": 3}], expected_parent=(0, 0))
+        write_private_rows(
+            alias, [{"sample_id": 3}], expected_parent=expected_parent,
+        )
+    assert not (tmp_path / "unused-report.jsonl").exists()
     assert evidence.read_text() == "private original"
 
 
