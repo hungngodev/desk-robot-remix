@@ -196,6 +196,61 @@ static void receiver_recovery_authority_is_not_shared() {
   CHECK(!body.state().armed);
 }
 
+static void guarded_directional_drive_rejects_unqualified_sweep() {
+  // Only the five mounted floor/front lanes are presently qualified for
+  // LOCAL motion policy; the three side/rear readings are diagnostics.
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 0);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  CHECK(send(body, "rearm", 0, true) == "OK rearm");
+  CHECK(send(body, "arm", 0) == "OK arm");
+  desk_robot::LineReceiver head;
+  char reply[desk_robot::kReplyCapacity]{};
+  for (char byte : std::string("drive -20 -20 100\n"))
+    head.feed(byte, 1, body, reply, sizeof(reply));
+  CHECK(std::string(reply) == "ERR drive directional_clearance_unqualified");
+  CHECK(body.state().armed && body.state().servos_attached &&
+        body.state().left == 0 && body.state().right == 0);
+  for (const char* command : {
+      "drive 20 -20 100", "drive -20 20 100", "drive 20 10 100",
+      "drive 20 0 100", "drive 0 20 100"}) {
+    CHECK(send(body, command, 2) ==
+          "ERR drive directional_clearance_unqualified");
+    CHECK(body.state().armed && body.state().left == 0 &&
+          body.state().right == 0);
+  }
+  // Forward pulses remain bounded and intact; a later unsafe turn
+  // immediately cancels an otherwise live forward command.
+  CHECK(send(body, "drive 20 20 100", 3) ==
+        "OK drive left=20 right=20 ms=100");
+  CHECK(body.state().left == 20 && body.state().right == 20);
+  CHECK(send(body, "drive 30 20 100", 4) ==
+        "ERR drive directional_clearance_unqualified");
+  CHECK(body.state().armed && body.state().servos_attached &&
+        body.state().left == 0 && body.state().right == 0);
+  CHECK(send(body, "drive 0 0 100", 5) ==
+        "OK drive left=0 right=0 ms=100");
+  CHECK(send(body, "stop", 6) == "OK stop");
+
+  // A rejected command must not refresh the independent body watchdog.
+  desk_robot::CliffGuard timeout_guard;
+  CHECK(timeout_guard.configure(config()));
+  fresh(timeout_guard, 0);
+  desk_robot::BodyControl timeout(desk_robot::BodyProfile::StepperGuarded,
+                                  &timeout_guard);
+  CHECK(send(timeout, "rearm", 0, true) == "OK rearm");
+  CHECK(send(timeout, "arm", 0) == "OK arm");
+  fresh(timeout_guard, 490);
+  CHECK(send(timeout, "drive 20 -20 100", 490) ==
+        "ERR drive directional_clearance_unqualified");
+  timeout.tick(501);
+  CHECK(!timeout.state().armed && timeout.state().left == 0 &&
+        timeout.state().right == 0);
+  CHECK(send(timeout, "status", 501).find("command_timeout_latched") !=
+        std::string::npos);
+}
+
 static void fault_holds_payload_and_requires_rearm() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -203,7 +258,7 @@ static void fault_holds_payload_and_requires_rearm() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
   CHECK(send(body, "rearm", 0, true) == "OK rearm");
   CHECK(send(body, "arm", 0) == "OK arm");
-  CHECK(send(body, "drive 40 -40 250", 0) == "OK drive left=40 right=-40 ms=250");
+  CHECK(send(body, "drive 40 40 250", 0) == "OK drive left=40 right=40 ms=250");
   send(body, "lift 120", 0);
   send(body, "grip 60", 0);
   body.tick(20);
@@ -2700,6 +2755,8 @@ int main() {
     std::cout << "PASS only local recovery can clear a healthy fault latch\n";
     receiver_recovery_authority_is_not_shared();
     std::cout << "PASS head receiver cannot borrow USB recovery authority\n";
+    guarded_directional_drive_rejects_unqualified_sweep();
+    std::cout << "PASS guarded reverse and turns need calibrated swept space\n";
     fault_holds_payload_and_requires_rearm();
     std::cout << "PASS fault holds payload and requires explicit rearm\n";
     stale_read_stops_before_watchdog();

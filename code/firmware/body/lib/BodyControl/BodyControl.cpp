@@ -1655,6 +1655,19 @@ void BodyControl::execute(const char* line, std::size_t length,
     std::snprintf(reply, capacity, "ERR %s disarmed", command);
   } else {
     if (drive) {
+      // The installed three side/rear ToF lanes are READ-ONLY context, not
+      // a qualified reverse/pivot swept-footprint safety guard. Even with
+      // fresh floor/front ranges, reject rearward travel and any turn until
+      // physical coverage and stopping clearance are explicitly qualified.
+      // Rejecting a live direction change stops both wheels immediately.
+      // It does NOT renew the 500 ms control lease or release grasp PWM.
+      if (guarded_motion_profile() &&
+          (first < 0 || second < 0 || first != second)) {
+        stop_motion();
+        std::snprintf(reply, capacity,
+                      "ERR drive directional_clearance_unqualified");
+        return;
+      }
       state_.left = limited_speed(first);
       state_.right = limited_speed(second);
       drive_started_ms_ = now_ms;
