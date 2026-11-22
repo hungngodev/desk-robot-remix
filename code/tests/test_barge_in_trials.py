@@ -342,3 +342,31 @@ def test_jsonl_parser_preserves_valid_full_acoustic_trial_population():
 def test_jsonl_parser_rejects_duplicate_fields_before_evidence_evaluation(line):
     with pytest.raises(ValueError, match="Duplicate JSON trial field"):
         parse_trial_jsonl(line)
+
+
+@pytest.mark.parametrize("invalid_robot_id", [
+    "robot/01", "robot.01", "robot 01", "robot:01",
+    "robot\u200b01", "x" * 41,
+])
+def test_a2_rejects_noncanonical_robot_identity(invalid_robot_id):
+    """Matching invalid labels across controls cannot certify a nonexistent pet."""
+    rows = both_distances()
+    for row in rows:
+        row["robot_id"] = invalid_robot_id
+    loaded = parse_trial_jsonl("\n".join(json.dumps(row) for row in rows))
+    with pytest.raises(ValueError, match="robot_id"):
+        evaluate(loaded)
+
+
+@pytest.mark.parametrize("valid_robot_id", [
+    "r", "robot-01", "robot_2", "X" * 40,
+])
+def test_a2_accepts_canonical_robot_identity(valid_robot_id):
+    """All runtime-valid robot identifiers retain the positive A2 trial path."""
+    rows = both_distances()
+    for row in rows:
+        row["robot_id"] = valid_robot_id
+    loaded = parse_trial_jsonl("\n".join(json.dumps(row) for row in rows))
+    result = evaluate(loaded)
+    assert result["robot_id"] == valid_robot_id
+    assert result["meets_proposed_gate"] is True

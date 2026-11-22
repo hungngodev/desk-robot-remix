@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from pathlib import Path
 
 
@@ -133,6 +134,9 @@ def evaluate(records: list[dict]) -> dict:
         audio_configs.add(r["audio_config_id"])
         placements.add(r["mic_speaker_placement_id"])
         robot_ids.add(r["robot_id"])
+        # Match the robot IDs accepted by the running RobotConfig schema.
+        if re.fullmatch(r"[A-Za-z0-9_-]{1,40}", r["robot_id"]) is None:
+            raise ValueError("Physical trial robot_id must match configured robot ID format")
         captured = r.get("new_utterance_captured")
         correct = r.get("new_intent_correct")
         beginning = r.get("utterance_beginning_intelligible")
