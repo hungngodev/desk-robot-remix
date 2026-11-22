@@ -87,9 +87,20 @@ uv run --extra vision python scripts/generate_dock_tag.py --dock-id 1 --marker-i
   --output ../docs/cad/remixes/dock/tag_dock01_id12.svg --verify
 ```
 
-ID 12 is an **example**, not a chosen real dock assignment. Configure the
-actual robot's `DockCalibration.marker_id` to the chosen printed number.
-Each independent dock must use a distinct documented marker number.
+ID 12 is a **candidate example**, not evidence of a qualified dock.
+`tag_assignments.json` now lists one distinct candidate AprilTag 36h11 marker
+for each of the five docks. Its `dock_id` equals the independent NEC
+`dock_beacon_id`; each robot's actual `DockCalibration.marker_id` must match
+the printed marker on its designated dock. The generator checks the **whole**
+five-dock assignment manifest before printing or verifying any tag, rejecting
+duplicate optical markers, duplicate beacon IDs, missing docks, and mismatched
+dock/marker pairs. The SVG provenance includes the manifest SHA256, so any
+assignment change requires fresh print verification and camera calibration.
+Change the reviewed candidate manifest and all affected calibrations together;
+do not reuse the same black marker pattern on two independent docks.
+
+These assignments remain **candidate only**. They do not prove installed
+geometry, physical camera calibration, NEC signal identity, seating or charging.
 The tool reads the active SCAD dimensions, prints exactly **60 mm** of
 8 by 8 tag modules with a **5 mm white quiet margin on every side**,
 and records the SCAD SHA256 inside the invisible SVG description.

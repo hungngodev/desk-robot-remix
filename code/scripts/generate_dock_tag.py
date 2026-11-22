@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import os
 import re
 import tempfile
@@ -16,9 +17,61 @@ from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[2]
 SCAD = ROOT / "docs/cad/remixes/dock/dock_passive_fit.scad"
+ASSIGNMENTS = ROOT / "docs/cad/remixes/dock/tag_assignments.json"
 FAMILY = "AprilTag 36h11"
 MODULES_PER_SIDE = 8
 MAX_MARKER_ID = 586
+
+
+
+def read_marker_assignments(path: Path = ASSIGNMENTS, *,
+                            raw: bytes | None = None) -> dict[int, int]:
+    """One reviewed optical identity per physical NEC dock beacon.
+
+    This is a candidate print manifest, not camera pose or motion approval.
+    Validate the entire five-dock set before printing any single marker.
+    """
+    try:
+        if raw is None:
+            raw = path.read_bytes()
+        document = json.loads(raw.decode("utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("Dock marker assignment manifest missing or unreadable") from exc
+    if (type(document) is not dict
+            or set(document) != {"schema_version", "status", "family", "docks"}
+            or type(document["schema_version"]) is not int
+            or document["schema_version"] != 1
+            or document["status"] != "candidate_only"
+            or document["family"] != FAMILY
+            or type(document["docks"]) is not list
+            or len(document["docks"]) != 5):
+        raise ValueError("Dock marker assignment manifest has invalid schema or scope")
+    selected: dict[int, int] = {}
+    beacons: set[int] = set()
+    markers: set[int] = set()
+    for row in document["docks"]:
+        if type(row) is not dict or set(row) != {"dock_id", "beacon_id", "marker_id"}:
+            raise ValueError("Dock marker assignment row is invalid")
+        dock_id, beacon_id, marker_id = (
+            row["dock_id"], row["beacon_id"], row["marker_id"]
+        )
+        if (type(dock_id) is not int or type(beacon_id) is not int
+                or type(marker_id) is not int
+                or not 1 <= dock_id <= 5
+                or not 1 <= beacon_id <= 5
+                or not 0 <= marker_id <= MAX_MARKER_ID
+                or beacon_id != dock_id):
+            raise ValueError("Dock marker assignment has invalid dock/beacon/marker identity")
+        if dock_id in selected or beacon_id in beacons:
+            raise ValueError("Duplicate dock or NEC beacon assignment")
+        if marker_id in markers:
+            raise ValueError("Duplicate optical marker across docks")
+        selected[dock_id] = marker_id
+        beacons.add(beacon_id)
+        markers.add(marker_id)
+    if set(selected) != set(range(1, 6)):
+        raise ValueError("Missing dock assignment: exactly docks 1 through 5 required")
+    return selected
 
 
 def read_dock_geometry(path: Path = SCAD) -> dict:
@@ -78,9 +131,20 @@ def marker_bits(marker_id: int) -> list[list[bool]]:
     return bits
 
 
-def build_svg(dock_id: int, marker_id: int, *, scad: Path = SCAD) -> str:
+def build_svg(dock_id: int, marker_id: int, *, scad: Path = SCAD,
+              assignments: Path = ASSIGNMENTS) -> str:
     if type(dock_id) is not int or not 1 <= dock_id <= 5:
         raise ValueError("Dock ID must be 1 through 5")
+    try:
+        assignment_bytes = assignments.read_bytes()
+    except OSError as exc:
+        raise ValueError("Dock marker assignment manifest missing or unreadable") from exc
+    mapping = read_marker_assignments(assignments, raw=assignment_bytes)
+    if type(marker_id) is not int or marker_id != mapping[dock_id]:
+        raise ValueError(
+            f"Dock {dock_id} requires marker {mapping[dock_id]} from the "
+            "reviewed five-dock assignment manifest; regenerate tag and calibration"
+        )
     dimensions = read_dock_geometry(scad)
     bits = marker_bits(marker_id)
     margin = dimensions["white_margin_mm"]
@@ -97,7 +161,8 @@ def build_svg(dock_id: int, marker_id: int, *, scad: Path = SCAD) -> str:
         f"{FAMILY} marker {marker_id} for dock {dock_id}; "
         f"black side {dimensions['black_mm']:g} mm; "
         f"white quiet margin {margin:g} mm each side; "
-        f"source sha256 {dimensions['source_sha256']}. "
+        f"source sha256 {dimensions['source_sha256']}; "
+        f"assignment sha256 {hashlib.sha256(assignment_bytes).hexdigest()}. "
         "Print at 100 percent actual size. Measure physical black square."
     )
     ElementTree.SubElement(svg, "rect", attrib={
@@ -119,13 +184,14 @@ def build_svg(dock_id: int, marker_id: int, *, scad: Path = SCAD) -> str:
 
 def save_or_verify(
     output: Path, dock_id: int, marker_id: int, *,
-    scad: Path = SCAD, verify: bool = False, overwrite: bool = False,
+    scad: Path = SCAD, assignments: Path = ASSIGNMENTS,
+    verify: bool = False, overwrite: bool = False,
 ) -> None:
     if output.suffix.lower() != ".svg":
         raise ValueError("Printed marker must be a vector .svg file")
     if verify and overwrite:
         raise ValueError("Verification cannot overwrite the source artifact")
-    expected = build_svg(dock_id, marker_id, scad=scad)
+    expected = build_svg(dock_id, marker_id, scad=scad, assignments=assignments)
     if verify:
         if output.read_text(encoding="utf-8") != expected:
             raise ValueError("Dock tag changed, wrong marker ID or stale SCAD revision")
@@ -152,13 +218,15 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--dock-id", type=int, required=True)
     parser.add_argument("--marker-id", type=int, required=True)
+    parser.add_argument("--assignments", type=Path, default=ASSIGNMENTS)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--verify", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
     save_or_verify(
         args.output, args.dock_id, args.marker_id,
-        verify=args.verify, overwrite=args.overwrite,
+        assignments=args.assignments, verify=args.verify,
+        overwrite=args.overwrite,
     )
     print(
         "SVG source geometry verified. Physical print scale, "

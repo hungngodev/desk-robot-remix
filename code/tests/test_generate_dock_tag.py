@@ -1,5 +1,6 @@
 """Exact paper AprilTag 36h11 geometry and source provenance tests."""
 import importlib.util
+import json
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -67,7 +68,7 @@ def test_dock_marker_provenance_verifier_rejects_edits_and_stale_source(
     module.save_or_verify(marker, 1, 12, verify=True)
     with pytest.raises(FileExistsError, match="overwrite"):
         module.save_or_verify(marker, 1, 12)
-    with pytest.raises(ValueError, match="stale SCAD"):
+    with pytest.raises(ValueError, match="requires marker 12"):
         module.save_or_verify(marker, 1, 13, verify=True)
     marker.write_text(marker.read_text() + "<!-- modified -->")
     with pytest.raises(ValueError, match="stale SCAD"):
@@ -122,17 +123,20 @@ def test_real_opencv_36h11_bits_match_vector_marker_exactly():
         actual = module.marker_bits(marker_id)
         assert actual == [[int(pixel) == 0 for pixel in row]
                           for row in expected]
-        svg = module.build_svg(1, marker_id)
-        _, rectangles = svg_rectangles(svg)
-        for y in range(8):
-            for x in range(8):
-                location = (5 + 7.5*x, 5 + 7.5*y)
-                painted_black = any(
-                    float(r.attrib["x"]) == location[0]
-                    and float(r.attrib["y"]) == location[1]
-                    for r in rectangles[1:]
-                )
-                assert painted_black is actual[y][x]
+    # The whole codebook may be tested, but only the assigned dock pair
+    # can produce printable artifacts for that real physical dock.
+    svg = module.build_svg(1, 12)
+    actual = module.marker_bits(12)
+    _, rectangles = svg_rectangles(svg)
+    for y in range(8):
+        for x in range(8):
+            location = (5 + 7.5*x, 5 + 7.5*y)
+            painted_black = any(
+                float(r.attrib["x"]) == location[0]
+                and float(r.attrib["y"]) == location[1]
+                for r in rectangles[1:]
+            )
+            assert painted_black is actual[y][x]
 
 
 def test_print_guide_commands_are_unescaped_markdown():
@@ -175,3 +179,80 @@ def test_real_open_cv_detector_reads_generated_vector_cells():
     assert ids is not None and ids.ravel().tolist() == [12]
     assert len(corners) == 1
     assert module.build_svg(2, 13) != svg
+
+
+
+def test_five_dock_marker_assignments_are_one_to_one(monkeypatch):
+    module = source()
+    monkeypatch.setattr(module, "marker_bits", synthetic_bits)
+    assert module.read_marker_assignments() == {
+        1: 12, 2: 13, 3: 14, 4: 15, 5: 16,
+    }
+    for dock_id, marker_id in module.read_marker_assignments().items():
+        svg = module.build_svg(dock_id, marker_id)
+        assert f"marker {marker_id} for dock {dock_id}" in svg
+        assert "assignment sha256" in svg
+
+
+def test_second_dock_cannot_print_first_docks_marker(monkeypatch, tmp_path):
+    module = source()
+    monkeypatch.setattr(module, "marker_bits", synthetic_bits)
+    first = tmp_path / "dock01.svg"
+    second = tmp_path / "dock02.svg"
+    module.save_or_verify(first, 1, 12)
+    with pytest.raises(ValueError, match="Dock 2 requires marker 13"):
+        module.save_or_verify(second, 2, 12)
+    assert first.exists()
+    assert not second.exists()
+    module.save_or_verify(second, 2, 13)
+    module.save_or_verify(second, 2, 13, verify=True)
+
+
+@pytest.mark.parametrize("mutation,reason", [
+    (lambda records: records[1].update(marker_id=12), "Duplicate optical marker"),
+    (lambda records: records[1].update(dock_id=1, beacon_id=1), "Duplicate dock"),
+    (lambda records: records[1].update(beacon_id=1), "invalid dock/beacon"),
+    (lambda records: records[1].update(marker_id=True), "invalid dock/beacon"),
+    (lambda records: records.pop(), "invalid schema"),
+])
+def test_malformed_or_reused_assignment_rejected_before_print(
+    monkeypatch, tmp_path, mutation, reason,
+):
+    module = source()
+    monkeypatch.setattr(module, "marker_bits", synthetic_bits)
+    manifest = json.loads(module.ASSIGNMENTS.read_text())
+    mutation(manifest["docks"])
+    path = tmp_path / "assignments.json"
+    path.write_text(json.dumps(manifest))
+    output = tmp_path / "dock01.svg"
+    with pytest.raises(ValueError, match=reason):
+        module.save_or_verify(output, 1, 12, assignments=path)
+    assert not output.exists()
+
+
+def test_old_print_fails_verification_after_manifest_revision(
+    monkeypatch, tmp_path,
+):
+    module = source()
+    monkeypatch.setattr(module, "marker_bits", synthetic_bits)
+    manifest = tmp_path / "assignments.json"
+    manifest.write_bytes(module.ASSIGNMENTS.read_bytes())
+    output = tmp_path / "dock01.svg"
+    module.save_or_verify(output, 1, 12, assignments=manifest)
+    # Even an unobservable change in a different dock's allocation
+    # invalidates previous print provenance until the full set is reviewed.
+    record = json.loads(manifest.read_text())
+    record["docks"][4]["marker_id"] = 17
+    manifest.write_text(json.dumps(record))
+    with pytest.raises(ValueError, match="stale SCAD revision"):
+        module.save_or_verify(
+            output, 1, 12, assignments=manifest, verify=True,
+        )
+
+
+def test_missing_assignment_manifest_fails_closed(monkeypatch, tmp_path):
+    module = source()
+    monkeypatch.setattr(module, "marker_bits", synthetic_bits)
+    with pytest.raises(ValueError, match="manifest missing"):
+        module.build_svg(1, 12, assignments=tmp_path / "missing.json")
+
