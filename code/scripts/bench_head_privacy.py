@@ -24,12 +24,22 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def _private_report_directory_fd(parent: Path) -> int:
     """Hold the verified private directory throughout report creation."""
-    absolute = Path(os.path.abspath(parent))
+    # Refuse lexical parent traversal before the filesystem resolves links.
+    # os.path.abspath would erase an alias/.. sequence prematurely.
+    absolute = parent.absolute()
+    if ".." in absolute.parts:
+        raise ValueError("Unsafe privacy trial report parent traversal")
     descriptor = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
     try:
         for name in absolute.parts[1:]:
-            entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
             owner = os.fstat(descriptor)
+            try:
+                entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                # Missing children may only be created beneath a previously
+                # verified directory handle, never through an unchecked alias.
+                os.mkdir(name, mode=0o700, dir_fd=descriptor)
+                entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
             # macOS /var is a stable root-owned alias only under an
             # equally root-owned and non-writable parent directory.
             if stat.S_ISLNK(entry.st_mode) and (
@@ -55,7 +65,6 @@ def preflight_private_report(path: Path) -> None:
     """Fail before physical BOOT trials if the measurement cannot be stored."""
     if path.parent.is_symlink():
         raise ValueError("Privacy trial report directory must be private mode 0700")
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     descriptor = _private_report_directory_fd(path.parent)
     os.close(descriptor)
     if path.exists() or path.is_symlink():

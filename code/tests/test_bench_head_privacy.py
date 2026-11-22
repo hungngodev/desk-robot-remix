@@ -13,6 +13,36 @@ bench = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(bench)
 
 
+def test_privacy_report_rejects_untrusted_ancestor_without_creating_directories(
+    tmp_path,
+):
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o777)
+    shared.chmod(0o777)
+    (shared / "alias").symlink_to(private, target_is_directory=True)
+    created = private / "not_yet_created"
+    output = shared / "alias" / created.name / "privacy.json"
+    with pytest.raises(ValueError, match="unsafe symlink"):
+        bench.preflight_private_report(output)
+    assert not created.exists()
+    with pytest.raises(ValueError, match="unsafe symlink"):
+        bench.save_private_report(output, {"privacy_muted": True})
+    assert not created.exists()
+
+
+def test_privacy_report_refuses_parent_traversal_before_mkdir(tmp_path):
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    output = private / "alias" / ".." / "created" / "privacy.json"
+    with pytest.raises(ValueError, match="parent traversal"):
+        bench.preflight_private_report(output)
+    with pytest.raises(ValueError, match="parent traversal"):
+        bench.save_private_report(output, {"privacy_muted": True})
+    assert not (private / "created").exists()
+
+
 def test_boot_privacy_report_preflight_rejects_public_or_existing_path(
     tmp_path,
 ):
