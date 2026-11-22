@@ -137,6 +137,8 @@ async def measure(head, robot_id: str, *, seconds: float,
         "reference_software_integrity_observed": (
             received >= 2 and invalid_receipts == 0
             and not integrity_failure_seen and not privacy_muted_seen
+            # A revoke and regrant between polls is still a broken interval.
+            and first["microphone_privacy_epoch"] == last["microphone_privacy_epoch"]
             and deltas is not None
             and deltas["reference_underflow_reads"] == 0
             and deltas["reference_overwrite_reads"] == 0

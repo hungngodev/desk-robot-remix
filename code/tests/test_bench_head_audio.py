@@ -174,6 +174,30 @@ async def test_audio_bench_rejects_mute_epoch_change_even_after_unmute():
     assert result["reference_software_integrity_observed"] is False
 
 
+async def test_audio_bench_rejects_privacy_regrant_between_samples():
+    # Both observations say unmuted, but the device privacy epoch proves
+    # a revoke and regrant occurred between samples.
+    class RegrantedHead:
+        def __init__(self):
+            self.calls = 0
+
+        async def audio_reference_status(self):
+            self.calls += 1
+            return dict(_sample(self.calls),
+                        microphone_privacy_epoch=7 if self.calls == 1 else 8)
+
+    report = await bench.measure(
+        RegrantedHead(), "robot-01", seconds=0.17, poll_period_s=0.05,
+    )
+    assert report["samples"] >= 2
+    assert report["probe_errors"] == 0
+    assert report["microphone_privacy_muted_observed"] is False
+    assert report["microphone_privacy_epoch_delta"] == 1
+    assert report["reference_software_integrity_observed"] is False
+    assert report["actual_speaker_playback_verified"] is False
+    assert report["physical_aec_delay_measured"] is False
+
+
 async def test_audio_bench_rejects_regressed_privacy_epoch():
     class EpochRewindHead:
         def __init__(self):
