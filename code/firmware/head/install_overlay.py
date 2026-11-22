@@ -469,9 +469,14 @@ bool Protocol::IsTimeout() const {""",
                         .media_position_ms = media_position_ms,
                         .payload = std::vector<uint8_t>(payload, payload + bp2->payload_size)}));""",
         )
-        websocket_source = websocket_source.replaceAll(
-            """                        .timestamp = 0,
-                        .payload = """,
+        legacy_packet_anchor = """                        .timestamp = 0,
+                        .payload = """
+        if websocket_source.count(legacy_packet_anchor) != 2:
+            raise ValueError(
+                "Upstream WebSocket packet layouts changed for playback metadata"
+            )
+        websocket_source = websocket_source.replace(
+            legacy_packet_anchor,
             """                        .timestamp = 0,
                         .playback_id = playback_id,
                         .media_position_ms = media_position_ms,
