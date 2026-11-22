@@ -18,6 +18,15 @@ from typing import Awaitable, Callable
 from PIL import Image
 
 
+def _reject_private_output_symlink_ancestors(folder: Path) -> None:
+    """Do not redirect operator-consented JPEGs through a linked parent."""
+    # abspath keeps the original path components for lstat-style symlink
+    # checks, unlike resolve(), which would conceal the redirection.
+    absolute = Path(os.path.abspath(folder))
+    if any(parent.is_symlink() for parent in absolute.parents):
+        raise ValueError("Private checkerboard output has a symlink ancestor")
+
+
 async def capture_checkerboards(
     head, folder: Path, *, count: int,
     prompt: Callable[[int], Awaitable[None]],
@@ -27,6 +36,8 @@ async def capture_checkerboards(
         raise ValueError("Require 12 to 40 distinct checkerboard captures")
     if not callable(prompt):
         raise ValueError("Explicit placement confirmation required")
+    # Reject a preexisting linked parent before creating any sensitive data.
+    _reject_private_output_symlink_ancestors(folder)
     # Do not merge private images with an existing folder or other session.
     folder.mkdir(mode=0o700)
     saved = []

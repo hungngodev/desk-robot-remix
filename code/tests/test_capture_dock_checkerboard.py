@@ -174,3 +174,30 @@ async def test_disk_write_failure_cleans_partial_private_image(tmp_path, monkeyp
             Head(), folder, count=12, prompt=prompt
         )
     assert not folder.exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("relative,nested", [(False, False), (False, True),
+                                              (True, False)])
+async def test_checkerboard_private_images_reject_symlink_ancestor(
+    tmp_path, monkeypatch, relative, nested,
+):
+    external = tmp_path / "shared-destination"
+    external.mkdir()
+    linked = tmp_path / "redirect"
+    linked.symlink_to(external, target_is_directory=True)
+    if nested:
+        (external / "nested").mkdir()
+    if relative:
+        monkeypatch.chdir(tmp_path)
+        folder = Path("redirect") / "capture"
+    else:
+        folder = linked / "nested" / "capture" if nested else linked / "capture"
+
+    async def no_prompt(_index):
+        raise AssertionError("No physical capture before path check")
+
+    with pytest.raises(ValueError, match="symlink ancestor"):
+        await capture_checkerboards(object(), folder, count=12, prompt=no_prompt)
+    assert not (external / "capture").exists()
+    assert not (external / "nested" / "capture").exists()
