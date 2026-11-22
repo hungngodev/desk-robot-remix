@@ -12,6 +12,7 @@ import ipaddress
 import json
 import os
 import re
+import stat
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -128,6 +129,69 @@ async def capture_phase(
     raise RuntimeError("Not enough distinct physical side range conversions")
 
 
+def _private_output_directory(path: Path) -> int:
+    """Open a private directory through checked handles, never path aliases.
+
+    The output's existing parent must be private mode 0700. Stable root-owned
+    aliases (such as macOS /var) are allowed only beneath root-owned,
+    non-writable ancestors. No folders are created before this inspection.
+    """
+    absolute = path.absolute()
+    if ".." in absolute.parts or absolute.name in ("", ".", ".."):
+        raise ValueError("Unsafe physical side-range output traversal")
+    descriptor = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for name in absolute.parent.parts[1:]:
+            parent = os.fstat(descriptor)
+            entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            alias = stat.S_ISLNK(entry.st_mode)
+            if alias and (
+                entry.st_uid != 0 or parent.st_uid != 0
+                or stat.S_IMODE(parent.st_mode) & 0o022
+            ):
+                raise ValueError("Unsafe side-range output directory symlink")
+            flags = os.O_RDONLY | os.O_DIRECTORY
+            if not alias:
+                flags |= os.O_NOFOLLOW
+            next_descriptor = os.open(name, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_descriptor
+        if stat.S_IMODE(os.fstat(descriptor).st_mode) & 0o077:
+            raise ValueError("Side-range output directory must be private mode 0700")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def preflight_private_output(path: Path) -> None:
+    """Reject unsafe or occupied evidence destinations before physical trials."""
+    descriptor = _private_output_directory(path)
+    try:
+        try:
+            os.stat(path.name, dir_fd=descriptor, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        raise FileExistsError("Never overwrite previous physical side-range evidence")
+    finally:
+        os.close(descriptor)
+
+
+def write_private_rows(path: Path, rows: list[dict]) -> None:
+    """Exclusively create real hardware evidence with 0600, even under umask 000."""
+    descriptor = _private_output_directory(path)
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        with os.fdopen(
+            os.open(path.name, flags, 0o600, dir_fd=descriptor),
+            "w", encoding="utf-8",
+        ) as output:
+            for row in rows:
+                output.write(json.dumps(row, separators=(",", ":")) + "\\n")
+    finally:
+        os.close(descriptor)
+
+
 async def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--url", default="http://127.0.0.1:8008")
@@ -139,8 +203,7 @@ async def main() -> None:
     parser.add_argument("--interval", default=.18, type=float)
     args = parser.parse_args()
     _status_url(args.url, args.robot)
-    if args.output.exists() or args.output.is_symlink():
-        raise FileExistsError("Never overwrite prior side range trial data")
+    preflight_private_output(args.output)
     token = os.environ.get(args.token_env, "")
     if len(token) < 24 or not token.isascii():
         raise ValueError("Private operator bearer not configured")
@@ -164,9 +227,7 @@ async def main() -> None:
             last = phase[-1]["side_ranges"]
             boot = last["boot_id"]
             last_side[side] = last["sample_ms"][SIDES[side]]
-    with args.output.open("x", encoding="utf-8") as output:
-        for row in rows:
-            output.write(json.dumps(row, separators=(",", ":")) + "\n")
+    write_private_rows(args.output, rows)
     print(f"Captured {len(rows)} read only WROOM samples")
     print(
         f"Analyze with: python scripts/calibrate_side_ranges.py "

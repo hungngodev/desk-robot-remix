@@ -1,7 +1,10 @@
 """Side-range capture uses actual WROOM conversion identity without motion."""
 from __future__ import annotations
 
+import json
+import os
 import runpy
+import stat
 from pathlib import Path
 
 import pytest
@@ -10,6 +13,8 @@ ROOT = Path(__file__).resolve().parents[1] / "scripts"
 capture = runpy.run_path(str(ROOT / "capture_side_ranges.py"))
 capture_phase = capture["capture_phase"]
 status_url = capture["_status_url"]
+preflight_private_output = capture["preflight_private_output"]
+write_private_rows = capture["write_private_rows"]
 analyze = runpy.run_path(str(ROOT / "calibrate_side_ranges.py"))["analyze"]
 
 
@@ -170,3 +175,58 @@ async def test_invalid_sensor_clock_or_missing_boot_identity_rejected(invalid):
     bad["side_ranges"]["boot_id"] = invalid
     with pytest.raises(RuntimeError, match="Invalid"):
         await get(FakeClient([bad]))
+
+
+def test_side_trial_output_is_exclusive_private_and_consumable(tmp_path):
+    output_path = tmp_path / "side_ranges.jsonl"
+    rows = [{"robot_id": "robot-01", "sample_id": 1}]
+    preflight_private_output(output_path)
+    old_umask = os.umask(0)
+    try:
+        write_private_rows(output_path, rows)
+    finally:
+        os.umask(old_umask)
+    assert stat.S_IMODE(output_path.stat().st_mode) == 0o600
+    assert [json.loads(line) for line in output_path.read_text().splitlines()] == rows
+    with pytest.raises(FileExistsError):
+        preflight_private_output(output_path)
+    with pytest.raises(FileExistsError):
+        write_private_rows(output_path, [{"sample_id": 2}])
+    assert [json.loads(line) for line in output_path.read_text().splitlines()] == rows
+
+
+def test_side_trial_preflight_rejects_symlinked_previous_report(tmp_path):
+    evidence = tmp_path / "previous.jsonl"
+    evidence.write_text("private original")
+    alias = tmp_path / "new.jsonl"
+    alias.symlink_to(evidence)
+    with pytest.raises(FileExistsError):
+        preflight_private_output(alias)
+    with pytest.raises(FileExistsError):
+        write_private_rows(alias, [{"sample_id": 3}])
+    assert evidence.read_text() == "private original"
+
+
+def test_side_trial_capture_never_follows_user_controlled_directory_alias(tmp_path):
+    secure = tmp_path / "actual"
+    secure.mkdir(mode=0o700)
+    alias = tmp_path / "alias"
+    alias.symlink_to(secure, target_is_directory=True)
+    candidate = alias / "forged.jsonl"
+    with pytest.raises(ValueError, match="symlink"):
+        preflight_private_output(candidate)
+    with pytest.raises(ValueError, match="symlink"):
+        write_private_rows(candidate, [{"sample_id": 1}])
+    assert not (secure / "forged.jsonl").exists()
+
+
+def test_side_trial_capture_requires_private_parent_and_refuses_traversal(tmp_path):
+    public = tmp_path / "shared"
+    public.mkdir(mode=0o755)
+    with pytest.raises(ValueError, match="private mode"):
+        preflight_private_output(public / "new.jsonl")
+    with pytest.raises(ValueError, match="private mode"):
+        write_private_rows(public / "new.jsonl", [])
+    assert not (public / "new.jsonl").exists()
+    with pytest.raises(ValueError, match="traversal"):
+        preflight_private_output(tmp_path / "shared" / ".." / "new.jsonl")
