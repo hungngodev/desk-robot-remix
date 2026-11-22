@@ -241,9 +241,17 @@ def verified_procedure_record(row: dict, sha: str, lookup=github_json) -> bool:
         content = raw.decode("utf-8-sig")
         if urlsplit(url).path.lower().endswith(".csv"):
             reader = csv.DictReader(io.StringIO(content), strict=True)
-            if not reader.fieldnames or len(reader.fieldnames) != len(set(reader.fieldnames)):
+            if (not reader.fieldnames
+                    or any(not field or field != field.strip()
+                           for field in reader.fieldnames)
+                    or len(reader.fieldnames) != len(set(reader.fieldnames))):
                 return False
             records = list(reader)
+            # DictReader permits overflow under key None and fills absent
+            # cells with None. A malformed physical row cannot be evidence.
+            if any(None in record or any(value is None for value in record.values())
+                   for record in records):
+                return False
         elif urlsplit(url).path.lower().endswith(".json"):
             document = json.loads(
                 content, object_pairs_hook=strict_receipt_object,

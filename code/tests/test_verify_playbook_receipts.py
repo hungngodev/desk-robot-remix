@@ -147,6 +147,34 @@ def test_existing_unrelated_record_cannot_promote_physical_procedure():
                    for error in verify.audit({"procedures": [row]}, altered))
 
 
+
+@pytest.mark.parametrize("invalid", ["extra", "missing", "unnamed_header"])
+def test_physical_csv_rejects_incomplete_or_overflowing_record(invalid):
+    row = promoted("MEASURED")["procedures"][0]
+    original = lookup(
+        "https://api.github.com/repos/hungngodev/"
+        "desk-robot-remix/contents/docs/records/bench.csv?ref=" + SHA
+    )
+    header, record = base64.b64decode(original["content"]).decode().splitlines()
+    if invalid == "extra":
+        # An omitted conflicting measurement must not disappear under None.
+        corrupt = header + "\n" + record + ",unsafe_lift\n"
+    elif invalid == "missing":
+        corrupt = header + "\n" + record.rsplit(",", 1)[0] + "\n"
+    else:
+        corrupt = header + ",\n" + record + ",hidden\n"
+    raw = corrupt.encode()
+
+    def altered(url):
+        if "/contents/docs/records/bench.csv" in url:
+            return {**original, "size": len(raw),
+                    "content": base64.b64encode(raw).decode()}
+        return lookup(url)
+
+    assert verify.verified_raw_record(RAW, SHA, altered)
+    assert not verify.verified_procedure_record(row, SHA, altered)
+
+
 def test_immutable_physical_record_binds_gate_signoff_and_json_measurements():
     row = promoted("MEASURED")["procedures"][0]
     assert verify.verified_procedure_record(row, SHA, lookup)
