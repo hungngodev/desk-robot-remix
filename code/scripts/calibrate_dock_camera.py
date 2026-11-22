@@ -108,13 +108,22 @@ def fit_corners(
 def calibrate_images(folder: Path, *, columns: int, rows: int,
                      square_mm: float, tag_side_mm: float,
                      marker_id: int, target_distance_mm: float,
-                     camera_sensor_pid: str) -> dict:
+                     camera_sensor_pid: str, robot_id: str | None = None,
+                     head_device_id: str | None = None) -> dict:
     """Require original same-mode JPEGs with many real board placements."""
     # Seeed has shipped both OV3660 and OV5640 Sense cameras. A candidate
     # produced without a recorded physical sensor identity cannot be reused
     # across the two modules even at identical JPEG dimensions.
     if camera_sensor_pid not in ("OV3660", "OV5640"):
         raise ValueError("Record actual XIAO camera sensor PID: OV3660 or OV5640")
+    for field_name, value in (
+        ("robot_id", robot_id), ("head_device_id", head_device_id),
+    ):
+        if value is not None and (
+            type(value) is not str or not value.strip()
+            or value.strip() != value or len(value) > 160
+        ):
+            raise ValueError(f"Record actual {field_name} for dock calibration")
     import cv2
     import numpy as np
 
@@ -153,6 +162,10 @@ def calibrate_images(folder: Path, *, columns: int, rows: int,
         target_distance_mm=target_distance_mm,
     )
     candidate["camera_sensor_pid"] = camera_sensor_pid
+    candidate["robot_id"] = robot_id
+    candidate["head_device_id"] = head_device_id
+    # A replaced camera module needs a new measured per-pet checkerboard trial.
+    # Operator-entered labels alone never prove physical module identity.
     # Caller supplied identity remains unverified until a live device PID
     # receipt is compared against it. No authority is granted by this string.
     candidate["camera_pid_runtime_verified"] = False
@@ -165,6 +178,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--images", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--robot-id", required=True,
+                        help="Pet whose assembled camera was measured")
+    parser.add_argument("--head-device-id", required=True,
+                        help="Configured Xiaozhi identity of the mounted head")
     parser.add_argument("--columns", type=int, required=True,
                         help="Number of INNER checkerboard corners across")
     parser.add_argument("--rows", type=int, required=True,
@@ -183,6 +200,7 @@ def main() -> None:
         square_mm=args.square_mm, tag_side_mm=args.tag_side_mm,
         marker_id=args.marker_id, target_distance_mm=args.target_distance_mm,
         camera_sensor_pid=args.camera_sensor_pid,
+        robot_id=args.robot_id, head_device_id=args.head_device_id,
     )
     with args.output.open("x", encoding="utf-8") as file:
         json.dump(candidate, file, indent=2)

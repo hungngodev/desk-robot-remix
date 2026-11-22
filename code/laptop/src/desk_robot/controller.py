@@ -741,7 +741,10 @@ class Coordinator:
         if robot.dock_turn_sign not in (-1, 1) or robot.dock_forward_sign not in (-1, 1):
             raise OperationError("Dock turn and forward motor polarity are not measured")
         try:
-            camera, target_mm = load_real_dock_calibration(robot.dock_calibration)
+            camera, target_mm = load_real_dock_calibration(
+                robot.dock_calibration, robot_id=robot.id,
+                head_device_id=robot.device_id,
+            )
         except (OSError, ValueError, TypeError) as exc:
             raise OperationError(f"Dock calibration required: {exc}") from exc
         # Read-only AprilTag diagnostics may retain legacy zero-distortion

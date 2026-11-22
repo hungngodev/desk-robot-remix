@@ -150,3 +150,20 @@ def test_known_camera_pid_passes_identity_check_but_not_image_gate(tmp_path, pid
             tag_side_mm=60, marker_id=2, target_distance_mm=200,
             camera_sensor_pid=pid,
         )
+
+
+@pytest.mark.parametrize(
+    ("robot_id", "head_id"),
+    [(0, "xiaozhi-01"), ("robot-01", ""), (" robot-01 ", "xiaozhi-01"),
+     ("robot-01", "  "), ("robot-01", None)],
+)
+def test_operator_recorded_calibration_identity_validation_before_cv2(
+    tmp_path, robot_id, head_id,
+):
+    with pytest.raises(ValueError, match="Record actual"):
+        fitter().calibrate_images(
+            tmp_path, columns=9, rows=6, square_mm=10,
+            tag_side_mm=60, marker_id=2, target_distance_mm=200,
+            camera_sensor_pid="OV5640", robot_id=robot_id,
+            head_device_id=head_id if head_id is not None else "",
+        )

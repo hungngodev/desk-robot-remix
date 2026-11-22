@@ -48,9 +48,10 @@ async def test_dock_does_not_consume_permit_without_measured_steering(settings, 
     robot.dock_forward_sign = 1
     dock = tmp_path / "dock.json"
     dock.write_text(json.dumps({
-        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 1, "target_distance_mm": 200,
     }))
+    robot.device_id = "xiaozhi-01"
     robot.dock_calibration = dock
     controller, head = make(settings)
     try:
@@ -209,9 +210,10 @@ async def test_dock_motion_refuses_unmeasured_lens_distortion_before_permit(
     robot.dock_forward_sign = 1
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
-        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 1, "target_distance_mm": 200,
     }))
+    robot.device_id = "xiaozhi-01"
     robot.dock_calibration = path
     controller, head = make(settings)
     try:
@@ -239,10 +241,11 @@ async def test_dock_motion_needs_calibrated_camera_resolution_even_with_distorti
     robot.dock_forward_sign = 1
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
-        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 1, "target_distance_mm": 200,
         "distortion_coeffs": [0.18, -0.07, 0.003, -0.002, 0.01],
     }))
+    robot.device_id = "xiaozhi-01"
     robot.dock_calibration = path
     controller, head = make(settings)
     try:
@@ -270,11 +273,12 @@ async def test_dock_refuses_motion_without_measured_camera_mount_before_permit(
     robot.dock_forward_sign = 1
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
-        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 1, "target_distance_mm": 200,
         "distortion_coeffs": [0.0, 0.0, 0.0, 0.0, 0.0],
         "image_width_px": 640, "image_height_px": 480,
     }))
+    robot.device_id = "xiaozhi-01"
     robot.dock_calibration = path
     controller, head = make(settings)
     try:
@@ -367,13 +371,14 @@ async def test_dock_approach_requires_operator_permit_after_qualification(settin
     robot.dock_forward_sign = 1
     path = tmp_path / "dock.json"
     path.write_text(json.dumps({
-        "measured": True, "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
         "tag_side_mm": 60, "marker_id": 1, "target_distance_mm": 200,
         "distortion_coeffs": [0.0, 0.0, 0.0, 0.0, 0.0],
         "image_width_px": 640, "image_height_px": 480,
         "mount_lateral_offset_mm": 0.0, "mount_yaw_deg": 0.0,
         "camera_sensor_pid": "OV5640",
     }))
+    robot.device_id = "xiaozhi-01"
     robot.dock_calibration = path
     controller, head = make(settings)
     try:
@@ -881,3 +886,42 @@ async def test_dock_approach_rejects_expired_stream_receipt_before_detector_or_d
         assert head.commands == []
     finally:
         await controller.close()
+
+
+async def test_second_pet_cannot_use_first_pet_dock_intrinsics_to_move(
+    settings, tmp_path,
+):
+    settings.mode = "hardware"
+    first, second = settings.robots
+    first.device_id, second.device_id = "xiaozhi-01", "xiaozhi-02"
+    for robot in (first, second):
+        robot.motion_enabled = True
+        robot.dock_motion_qualified = True
+        robot.dock_turn_sign = 1
+        robot.dock_forward_sign = 1
+        robot.dock_beacon_id = 1 if robot.id == first.id else 2
+    path = tmp_path / "only-pet-one.json"
+    path.write_text(json.dumps({
+        "measured": True, "robot_id": "robot-01",
+        "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640",
+        "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 1, "target_distance_mm": 200,
+        "distortion_coeffs": [0.0, 0.0, 0.0, 0.0, 0.0],
+        "image_width_px": 640, "image_height_px": 480,
+        "mount_lateral_offset_mm": 6.0, "mount_yaw_deg": 1.0,
+    }))
+    first.dock_calibration = second.dock_calibration = path
+    coordinator, head = make(settings)
+    other_head = coordinator.heads[second.id]
+    try:
+        with pytest.raises(OperationError, match="Dock calibration required:.*robot/head identity"):
+            coordinator.dock(second.id)
+        assert not coordinator.jobs
+        assert not head.commands and not other_head.commands
+        # A correctly bound record still requires a separate operator permit.
+        with pytest.raises(OperationError, match="permit"):
+            coordinator.dock(first.id)
+        assert not coordinator.jobs
+        assert not head.commands and not other_head.commands
+    finally:
+        await coordinator.close()

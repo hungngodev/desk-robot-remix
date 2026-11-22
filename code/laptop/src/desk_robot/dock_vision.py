@@ -39,6 +39,9 @@ class DockCameraCalibration:
     image_height_px: int | None = None
     # Camera PID is calibration provenance, not a self-attested motor permit.
     camera_sensor_pid: str | None = None
+    # Recorded builder provenance, not cryptographic camera attestation.
+    robot_id: str | None = None
+    head_device_id: str | None = None
     # Measured camera lens offset relative to the chassis centerline, right
     # positive, and horizontal yaw pointing right relative to chassis forward.
     # Image intrinsics alone cannot establish either mounting dimension.
@@ -74,6 +77,13 @@ class DockCameraCalibration:
             "OV3660", "OV5640"
         ):
             raise ValueError("Dock camera calibration names unsupported camera PID")
+        for field_name in ("robot_id", "head_device_id"):
+            value = getattr(self, field_name)
+            if value is not None and (
+                type(value) is not str or not value.strip()
+                or value.strip() != value or len(value) > 160
+            ):
+                raise ValueError(f"Invalid dock calibration {field_name}")
         if self.distortion_coeffs is not None:
             if (not isinstance(self.distortion_coeffs, tuple)
                     or len(self.distortion_coeffs) not in (4, 5, 8, 12, 14)

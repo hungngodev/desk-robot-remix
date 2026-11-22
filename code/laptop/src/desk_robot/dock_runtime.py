@@ -21,12 +21,28 @@ _DETECTOR_RESTART_REQUIRED = False
 
 
 
-def load_real_dock_calibration(path) -> tuple[DockCameraCalibration, float]:
+def load_real_dock_calibration(
+    path, *, robot_id: str | None = None, head_device_id: str | None = None,
+) -> tuple[DockCameraCalibration, float]:
     if path is None:
         raise ValueError("No dock calibration configured")
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict) or data.get("measured") is not True:
         raise ValueError("Dock camera geometry is not physically measured")
+    # A camera model, PID and frame size cannot establish the robot that
+    # physically produced these checkerboard and mount measurements.
+    if robot_id is not None and (
+        type(robot_id) is not str or not robot_id
+        or data.get("robot_id") != robot_id
+        or type(data.get("head_device_id")) is not str
+        or not data["head_device_id"]
+    ):
+        raise ValueError("Dock calibration robot/head identity missing or mismatched")
+    if head_device_id is not None and (
+        type(head_device_id) is not str or not head_device_id
+        or data.get("head_device_id") != head_device_id
+    ):
+        raise ValueError("Dock calibration head device identity missing or mismatched")
     props = ("fx", "fy", "cx", "cy", "tag_side_mm", "marker_id")
     if any(key not in data for key in props):
         raise ValueError("Dock calibration lacks measured camera parameters")
@@ -40,6 +56,8 @@ def load_real_dock_calibration(path) -> tuple[DockCameraCalibration, float]:
         image_width_px=data.get("image_width_px"),
         image_height_px=data.get("image_height_px"),
         camera_sensor_pid=data.get("camera_sensor_pid"),
+        robot_id=data.get("robot_id"),
+        head_device_id=data.get("head_device_id"),
         mount_lateral_offset_mm=data.get("mount_lateral_offset_mm"),
         mount_yaw_deg=data.get("mount_yaw_deg"),
     )
@@ -187,7 +205,10 @@ async def observe_actual_dock(
             source="camera_consent_revoked",
         )
     try:
-        calib, target = load_real_dock_calibration(robot.dock_calibration)
+        calib, target = load_real_dock_calibration(
+            robot.dock_calibration, robot_id=robot.id,
+            head_device_id=getattr(robot, "device_id", None),
+        )
     except (OSError, UnicodeError, json.JSONDecodeError, TypeError, ValueError) as exc:
         return _hold(robot.id, reason=f"Dock calibration required: {exc}", source="not_calibrated")
     # A camera model change invalidates checkerboard intrinsics even when
