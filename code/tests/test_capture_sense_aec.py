@@ -639,6 +639,47 @@ def test_private_raw_pcm_capture_rejects_untrusted_parent_symlink_before_start(
     assert list((destination_root / "recordings").iterdir()) == []
 
 
+def test_raw_pcm_preflight_rejects_untrusted_alias_without_mkdir(tmp_path):
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o777)
+    shared.chmod(0o777)
+    (shared / "alias").symlink_to(private, target_is_directory=True)
+    leaked = private / "not_yet_created"
+    redirected = shared / "alias" / leaked.name
+    with pytest.raises(ValueError, match="unsafe ancestor symlink"):
+        capture.preflight_private_destination(redirected)
+    assert not leaked.exists()
+    with pytest.raises(ValueError, match="unsafe ancestor symlink"):
+        capture.save_wavs(redirected, bytes(capture.BYTES), {"robot_id": "robot-01"})
+    assert not leaked.exists()
+
+
+def test_raw_pcm_preflight_rejects_lexical_parent_traversal_without_mkdir(
+    tmp_path,
+):
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    escaped = private / "alias" / ".." / "created"
+    with pytest.raises(ValueError, match="parent traversal"):
+        capture.preflight_private_destination(escaped)
+    assert not (private / "created").exists()
+
+
+def test_raw_pcm_directory_reopen_never_recreates_missing_destination(tmp_path):
+    private = tmp_path / "private"
+    moved = tmp_path / "moved"
+    capture.preflight_private_destination(private)
+    private.rename(moved)
+    # After initial consent, writer/cleanup cannot recreate a missing path
+    # while attempting to verify the original directory identity.
+    with pytest.raises(FileNotFoundError):
+        capture._private_destination_directory_fd(private)
+    assert not private.exists()
+    assert moved.is_dir()
+
+
 def test_destination_preflight_rejects_existing_audio_and_public_directory(tmp_path):
     private = tmp_path / "private"
     capture.preflight_private_destination(private)

@@ -322,18 +322,32 @@ def _check_private_directory(
         raise ValueError("AEC capture directory changed during write")
 
 
-def _private_destination_directory_fd(directory: Path) -> int:
+def _private_destination_directory_fd(
+    directory: Path, *, create_missing: bool = False,
+) -> int:
     """Anchor the raw PCM destination through trusted directory components.
 
     An immediate 0700 directory is not sufficient when a user-controlled
     ancestor link can redirect the entire four-second microphone recording.
     """
-    absolute = Path(os.path.abspath(directory))
+    # abspath would erase alias/.. before the kernel traverses the alias.
+    # Refuse that ambiguous parent traversal before any filesystem writes.
+    absolute = directory.absolute()
+    if ".." in absolute.parts:
+        raise ValueError("AEC capture destination parent traversal")
     descriptor = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
     try:
         for part in absolute.parts[1:]:
-            entry = os.stat(part, dir_fd=descriptor, follow_symlinks=False)
             owner = os.fstat(descriptor)
+            try:
+                entry = os.stat(part, dir_fd=descriptor, follow_symlinks=False)
+            except FileNotFoundError:
+                if not create_missing:
+                    raise
+                # Create a recording directory only during preflight and
+                # only below a previously checked, held directory handle.
+                os.mkdir(part, mode=0o700, dir_fd=descriptor)
+                entry = os.stat(part, dir_fd=descriptor, follow_symlinks=False)
             # macOS /var is a root-owned system alias under a nonwritable
             # root directory. Reject every replaceable user-owned link.
             if stat.S_ISLNK(entry.st_mode) and (
@@ -364,8 +378,7 @@ def preflight_private_destination(directory: Path) -> tuple[int, int]:
     """
     if directory.is_symlink():
         raise ValueError("AEC capture destination has unsafe ancestor symlink")
-    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-    descriptor = _private_destination_directory_fd(directory)
+    descriptor = _private_destination_directory_fd(directory, create_missing=True)
     try:
         identity = os.fstat(descriptor)
         paths = [directory / "microphone.wav", directory / "speaker_reference.wav",
