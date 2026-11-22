@@ -131,7 +131,9 @@ def source_unchanged_since_test(
             and isinstance(merge_base, dict)
             and merge_base.get("sha") == source_sha
             and type(files) is list
-            and 1 <= len(files) <= 300
+            # GitHub Compare truncates the file list at 300 entries. A
+            # 300th visible evidence file may hide an untested source change.
+            and 1 <= len(files) < 300
             and all(
                 type(item) is dict
                 and item.get("status") in {"added", "modified"}

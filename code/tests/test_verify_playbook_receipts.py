@@ -469,3 +469,31 @@ def test_standalone_audit_refuses_truncated_duplicate_or_foreign_ledgers():
     for invalid in variants:
         errors = verify.audit(invalid, lambda _: 1 / 0)
         assert any("incomplete procedure ledger" in error for error in errors)
+
+
+def test_source_comparison_fails_closed_at_github_file_cap():
+    # GitHub Compare returns at most 300 file entries even when more changed.
+    # A hidden 301st path may be test-relevant code, not allowed evidence.
+    evidence_sha = "b" * 40
+
+    def comparison(paths):
+        return {
+            "status": "ahead",
+            "ahead_by": 1,
+            "total_commits": 1,
+            "commits": [{"sha": evidence_sha}],
+            "merge_base_commit": {"sha": SHA},
+            "files": [{"status": "added", "filename": path} for path in paths],
+        }
+
+    def check(paths):
+        return verify.source_unchanged_since_test(
+            SHA, evidence_sha, lambda _: comparison(paths)
+        )
+
+    assert check(["docs/records/one.json"])
+    assert check([f"docs/records/receipt_{i}.json" for i in range(299)])
+    assert not check([f"docs/records/receipt_{i}.json" for i in range(300)])
+    assert not check([f"docs/records/receipt_{i}.json" for i in range(298)]
+                     + ["code/laptop/src/desk_robot/pet.py"])
+    assert not check([])
