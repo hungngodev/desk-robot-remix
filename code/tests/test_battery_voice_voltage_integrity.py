@@ -13,7 +13,7 @@ from types import SimpleNamespace
 import pytest
 from desk_robot.api_readonly_context import register_readonly_context_routes
 from desk_robot.controller import OperationError
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.routing import APIRoute
 
 
@@ -32,10 +32,17 @@ async def test_power_status_no_impossible_voltage_enters_current_human_turn(cell
         heads={"robot-01": SimpleNamespace(aux_status=aux_status)},
     )
     app = FastAPI()
+    visual = SimpleNamespace(_turn_epoch={"robot-01": 7})
+    owner = (visual, 7)
+    app.state.runtime = SimpleNamespace(multimodal=visual)
+    request = Request({
+        "type": "http", "method": "GET", "path": "/v1/pet/robot-01/power-status",
+        "headers": [(b"x-desk-robot-tool-receipt", b"1")],
+    })
     register_readonly_context_routes(
         app, SimpleNamespace(mode="hardware"), authorize=lambda: None,
         coordinator=lambda: coordinator,
-        requested_tool_context=lambda request, robot_id: "current-human-turn",
+        requested_tool_context=lambda request, robot_id: owner,
         remember_tool_context=lambda owner, robot_id, kind, summary:
             recorded.append((owner, robot_id, kind, summary)),
         native_pet_speech_policy=lambda *args: False,
@@ -47,16 +54,16 @@ async def test_power_status_no_impossible_voltage_enters_current_human_turn(cell
     )
     if not 2500 <= cell_mv <= 4500:
         with pytest.raises(OperationError, match="Malformed WROOM auxiliary fuel"):
-            await endpoint("robot-01", None)
+            await endpoint("robot-01", request)
         assert recorded == []
         return
-    result = await endpoint("robot-01", None)
+    result = await endpoint("robot-01", request)
     assert result["gauge_available"] is True
     assert result["reported_cell_mv"] == cell_mv
     assert result["reported_soc_centi"] == 6275
     assert result["charging_verified"] is False
     assert recorded == [
-        ("current-human-turn", "robot-01", "robot_status",
+        (owner, "robot-01", "robot_status",
          f"WROOM fuel gauge reports 62.8% estimate and {cell_mv}mV; "
          "sample freshness and charging unverified"),
     ]
