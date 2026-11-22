@@ -129,7 +129,8 @@ def register_readonly_planner_routes(
             # become a guessed physical action or stall live microphone I/O.
             parsed = {}
         if (type(turn_at_request) is int
-                and (not isinstance(getattr(visual, "_turn_epoch", None), dict)
+                and (getattr(app.state.runtime, "multimodal", None) is not visual
+                     or not isinstance(getattr(visual, "_turn_epoch", None), dict)
                      or visual._turn_epoch.get(robot_id) != turn_at_request)):
             raise HTTPException(409, "Read-only plan superseded by a newer human turn")
         # Slow Ollama planning may finish after live consent is withdrawn.
