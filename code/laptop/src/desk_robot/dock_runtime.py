@@ -21,12 +21,30 @@ _DETECTOR_RESTART_REQUIRED = False
 
 
 
+def _unique_calibration_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """No last-key-wins ambiguity in measured or device-bound dock geometry."""
+    fields: dict[str, object] = {}
+    for key, value in pairs:
+        if key in fields:
+            raise ValueError("Repeated dock calibration JSON field: " + key)
+        fields[key] = value
+    return fields
+
+
+def _reject_calibration_json_constant(token: str) -> None:
+    raise ValueError("Nonfinite dock calibration JSON constant: " + token)
+
+
 def load_real_dock_calibration(
     path, *, robot_id: str | None = None, head_device_id: str | None = None,
 ) -> tuple[DockCameraCalibration, float]:
     if path is None:
         raise ValueError("No dock calibration configured")
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(
+        path.read_text(encoding="utf-8"),
+        object_pairs_hook=_unique_calibration_object,
+        parse_constant=_reject_calibration_json_constant,
+    )
     if not isinstance(data, dict) or data.get("measured") is not True:
         raise ValueError("Dock camera geometry is not physically measured")
     # A camera model, PID and frame size cannot establish the robot that

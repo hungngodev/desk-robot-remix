@@ -1053,3 +1053,66 @@ async def test_matching_pet_camera_calibration_keeps_source_identity(tmp_path):
         dock_runtime.load_real_dock_calibration(
             path, robot_id="robot-02", head_device_id="xiaozhi-02",
         )
+
+@pytest.mark.parametrize("key,early_value", [
+    ("measured", False),
+    ("robot_id", "robot-02"),
+    ("head_device_id", "xiaozhi-other"),
+    ("marker_id", 13),
+    ("fx", 0),
+    ("camera_sensor_pid", "OV3660"),
+])
+async def test_ambiguous_dock_calibration_fields_fail_closed_before_camera(
+    tmp_path, key, early_value,
+):
+    """A second apparently valid JSON field cannot conceal contradictory data."""
+    record = {
+        "measured": True, "robot_id": "robot-01",
+        "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640",
+        "fx": 410, "fy": 408, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12,
+        "target_distance_mm": 120,
+    }
+    expected = json.dumps(record)
+    field = f'"{key}": {json.dumps(record[key])}'
+    assert expected.count(field) == 1
+    ambiguous = expected.replace(
+        field, f'"{key}": {json.dumps(early_value)}, {field}',
+    )
+    path = tmp_path / "contradictory_dock_calibration.json"
+    path.write_text(ambiguous, encoding="utf-8")
+    with pytest.raises(ValueError, match="Repeated dock calibration JSON field"):
+        dock_runtime.load_real_dock_calibration(
+            path, robot_id="robot-01", head_device_id="xiaozhi-01",
+        )
+    head = Head()
+    result = await dock_runtime.observe_actual_dock(
+        head, SimpleNamespace(
+            id="robot-01", device_id="xiaozhi-01", dock_calibration=path,
+        ),
+    )
+    assert result["phase"] == "hold"
+    assert result["source"] == "not_calibrated"
+    assert result["physical_acceptance_pass"] is False
+    assert not result["motor_authorized"] and not result["charging_authorized"]
+    assert head.captures == head.identity_checks == 0
+    assert not head.commands
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_dock_calibration_json_rejects_nonstandard_numeric_constants(
+    tmp_path, constant,
+):
+    record = {
+        "measured": True, "robot_id": "robot-01",
+        "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640",
+        "fx": 410, "fy": 408, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12,
+        "target_distance_mm": 120,
+    }
+    value = json.dumps(record)
+    assert value.count('"fx": 410') == 1
+    path = tmp_path / "nonfinite_calibration.json"
+    path.write_text(value.replace('"fx": 410', f'"fx": {constant}'))
+    with pytest.raises(ValueError, match="Nonfinite dock calibration JSON constant"):
+        dock_runtime.load_real_dock_calibration(path)
