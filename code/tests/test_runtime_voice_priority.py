@@ -742,6 +742,7 @@ async def test_monitor_loss_stalled_xiao_stop_cannot_starve_other_heads(monkeypa
     monkeypatch.setattr("desk_robot.runtime._MONITOR_STOP_TIMEOUT_S", 0.05)
     events = []
     release = asyncio.Event()
+    other_head_stopped = asyncio.Event()
 
     class Pet:
         def set_voice_monitor_ready(self, ready):
@@ -753,6 +754,8 @@ async def test_monitor_loss_stalled_xiao_stop_cannot_starve_other_heads(monkeypa
     class Speaker:
         async def monitor_lost(self, robot):
             events.append(("stop", robot.device_id))
+            if robot.device_id == "mac-02":
+                other_head_stopped.set()
             if robot.device_id == "mac-01":
                 try:
                     await asyncio.Event().wait()
@@ -775,11 +778,15 @@ async def test_monitor_loss_stalled_xiao_stop_cannot_starve_other_heads(monkeypa
     )
     runtime.pet = Pet()
     runtime.conversation = Conversation()
+    task = asyncio.create_task(runtime._on_voice_global("stream_unavailable"))
     try:
+        # A runnable second head must receive STOP before the stalled head
+        # acknowledges anything. This causal check is independent of runner
+        # scheduling while the production stop budget stays at 50 ms here.
+        await asyncio.wait_for(other_head_stopped.wait(), timeout=2)
+        assert not release.is_set()
         with pytest.raises(RuntimeError, match="physical speaker stop unconfirmed"):
-            await asyncio.wait_for(
-                runtime._on_voice_global("stream_unavailable"), timeout=0.3
-            )
+            await asyncio.wait_for(task, timeout=2)
         assert ("stop", "mac-01") in events
         assert ("stop", "mac-02") in events
         assert ("pet", "robot-01") in events
@@ -787,7 +794,9 @@ async def test_monitor_loss_stalled_xiao_stop_cannot_starve_other_heads(monkeypa
         assert ("group", "stop") in events
     finally:
         release.set()
-        await asyncio.sleep(0)
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 async def test_human_vad_camera_still_starts_when_fleet_audio_stop_fails():
