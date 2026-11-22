@@ -396,14 +396,14 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
         protocol_source = (target / path).read_text()
         protocol_source = replace_once(
             protocol_source,
-            """void Protocol::SendMcpMessage(const std::string& payload) {
+            r"""void Protocol::SendMcpMessage(const std::string& payload) {
     std::string message =
         "{\"session_id\":\"" + session_id_ + "\",\"type\":\"mcp\",\"payload\":" + payload + "}";
     SendText(message);
 }
 
 bool Protocol::IsTimeout() const {""",
-            """void Protocol::SendMcpMessage(const std::string& payload) {
+            r"""void Protocol::SendMcpMessage(const std::string& payload) {
     std::string message =
         "{\"session_id\":\"" + session_id_ + "\",\"type\":\"mcp\",\"payload\":" + payload + "}";
     SendText(message);
