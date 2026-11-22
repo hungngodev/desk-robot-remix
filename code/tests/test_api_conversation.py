@@ -2207,7 +2207,7 @@ def test_operator_group_api_requires_peer_sharing_before_interrupting(
                 self.prompts = []
 
             async def reply(self, history):
-                self.prompts.append(str(history))
+                self.prompts.append(history)
                 return "A first robot's observation" if len(self.prompts) == 1 else "I heard you"
 
         chat = TracingChat()
@@ -2217,9 +2217,10 @@ def test_operator_group_api_requires_peer_sharing_before_interrupting(
         assert allowed.status_code == 200
         assert [turn["robot_id"] for turn in allowed.json()["transcript"]] == body["robot_ids"]
         assert len(chat.prompts) == 2
-        assert "Untrusted digitally relayed peer speech" in chat.prompts[1]
-        assert "Source robot: robot-01" in chat.prompts[1]
-        assert "A first robot's observation" in chat.prompts[1]
+        relayed_peer_context = chat.prompts[1][-1]["content"]
+        assert "Untrusted digitally relayed peer speech" in relayed_peer_context
+        assert "Source robot: robot-01" in relayed_peer_context
+        assert "A first robot's observation" in relayed_peer_context
         assert len(interrupts) == len(settings.robots)
         assert allowed.json()["physical_playback_verified"] is False
 
