@@ -1057,3 +1057,25 @@ async def test_dock_stream_disconnect_while_waiting_for_camera_lock_never_polls(
         ):
             await capture
         assert paths == []
+
+@pytest.mark.parametrize(("field", "first_value"), [
+    ("measured", "false"),
+    ("measured", "true"),
+    ("ground_points_mm", "[[0, 0]]"),
+])
+def test_pickup_calibration_load_refuses_ambiguous_json_fields(
+    settings, tmp_path, field, first_value,
+):
+    # Coordinator.pickup calls Calibration.load before submitting any job.
+    data = json.loads(settings.robots[0].calibration.read_text())
+    data["measured"] = True
+    valid = tmp_path / "valid.json"
+    valid.write_text(json.dumps(data))
+    assert Calibration.load(valid).measured is True
+
+    ambiguous = tmp_path / "ambiguous.json"
+    ambiguous.write_text(
+        '{"' + field + '": ' + first_value + "," + json.dumps(data)[1:]
+    )
+    with pytest.raises(ValueError, match=f"Duplicate calibration JSON field: {field}"):
+        Calibration.load(ambiguous)

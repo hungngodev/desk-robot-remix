@@ -8,6 +8,16 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
+def _unique_calibration_json_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """Do not silently choose a physical permission or geometry value."""
+    fields: dict[str, object] = {}
+    for key, value in pairs:
+        if key in fields:
+            raise ValueError(f"Duplicate calibration JSON field: {key}")
+        fields[key] = value
+    return fields
+
+
 class Calibration(BaseModel):
     simulation_only: bool = False
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
@@ -114,7 +124,12 @@ class Calibration(BaseModel):
 
     @classmethod
     def load(cls, path: Path) -> "Calibration":
-        return cls.model_validate_json(path.read_text())
+        contents = path.read_text()
+        # Pydantic accepts repeated JSON keys with the final value winning.
+        # Refuse ambiguous measured permission and point geometry first, then
+        # retain Pydantic's existing strict JSON model validation behavior.
+        json.loads(contents, object_pairs_hook=_unique_calibration_json_fields)
+        return cls.model_validate_json(contents)
 
     def save(self, path: Path):
         path.write_text(json.dumps(self.model_dump(), indent=2) + "\n")
