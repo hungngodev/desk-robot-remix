@@ -187,7 +187,7 @@ def write_private_rows(path: Path, rows: list[dict]) -> None:
             "w", encoding="utf-8",
         ) as output:
             for row in rows:
-                output.write(json.dumps(row, separators=(",", ":")) + "\\n")
+                output.write(json.dumps(row, separators=(",", ":")) + "\n")
     finally:
         os.close(descriptor)
 
