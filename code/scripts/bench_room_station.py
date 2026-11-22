@@ -8,6 +8,8 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
+import stat
 import subprocess
 import time
 from datetime import datetime, timezone
@@ -133,6 +135,55 @@ def capture(
     }
 
 
+def _private_report_directory_fd(parent: Path) -> int:
+    """Open the real target directory without trusting replaceable links."""
+    absolute = Path(os.path.abspath(parent))
+    descriptor = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for name in absolute.parts[1:]:
+            entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
+            ancestor = os.fstat(descriptor)
+            # Honor only system-owned aliases under nonwritable root-owned
+            # parents, including macOS /var. Reject mutable user symlinks.
+            if stat.S_ISLNK(entry.st_mode) and (
+                entry.st_uid != 0 or ancestor.st_uid != 0
+                or stat.S_IMODE(ancestor.st_mode) & 0o022
+            ):
+                raise ValueError("Unsafe room bench report ancestor symlink")
+            flags = os.O_RDONLY | os.O_DIRECTORY
+            if not stat.S_ISLNK(entry.st_mode):
+                flags |= os.O_NOFOLLOW
+            next_descriptor = os.open(name, flags, dir_fd=descriptor)
+            os.close(descriptor)
+            descriptor = next_descriptor
+        if stat.S_IMODE(os.fstat(descriptor).st_mode) & 0o077:
+            raise ValueError("Room bench report directory must be private mode 0700")
+        return descriptor
+    except BaseException:
+        os.close(descriptor)
+        raise
+
+
+def save_private_bench_report(path: Path, report: dict) -> None:
+    """Record only a new private USB receipt, never overwrite old evidence."""
+    if path.parent.is_symlink():
+        raise ValueError("Unsafe room bench report directory symlink")
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory_fd = _private_report_directory_fd(path.parent)
+    try:
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        with os.fdopen(
+            os.open(path.name, flags, 0o600, dir_fd=directory_fd),
+            "w", encoding="utf-8",
+        ) as output:
+            json.dump(report, output, indent=2)
+            output.write("\n")
+    finally:
+        os.close(directory_fd)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", required=True, help="Actual /dev/ USB serial port")
@@ -140,8 +191,7 @@ def main() -> None:
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
     result = capture(args.port, seconds=args.seconds)
-    args.report.parent.mkdir(parents=True, exist_ok=True)
-    args.report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+    save_private_bench_report(args.report, result)
     print(json.dumps(result, indent=2))
 
 

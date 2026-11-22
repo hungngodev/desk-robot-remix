@@ -1,6 +1,7 @@
 """Read-only room station bench report never claims physical qualification."""
 import json
 import runpy
+import stat
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,55 @@ BENCH = runpy.run_path(
     str(Path(__file__).resolve().parents[1] / "scripts/bench_room_station.py")
 )
 capture = BENCH["capture"]
+
+
+def test_room_bench_report_is_private_and_cannot_replace_existing_receipt(tmp_path):
+    save = BENCH["save_private_bench_report"]
+    report = tmp_path / "private" / "station.json"
+    save(report, {"charging_verified": False})
+    assert stat.S_IMODE(report.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(report.stat().st_mode) == 0o600
+    assert json.loads(report.read_text()) == {"charging_verified": False}
+    with pytest.raises(FileExistsError):
+        save(report, {"charging_verified": True})
+    assert json.loads(report.read_text())["charging_verified"] is False
+
+    public = tmp_path / "public"
+    public.mkdir(mode=0o755)
+    public.chmod(0o755)
+    with pytest.raises(ValueError, match="private mode"):
+        save(public / "station.json", {})
+    assert not (public / "station.json").exists()
+
+    target = tmp_path / "private" / "existing.json"
+    target.write_text("original")
+    alias = tmp_path / "private" / "alias.json"
+    alias.symlink_to(target)
+    with pytest.raises(FileExistsError):
+        save(alias, {"overwritten": True})
+    assert target.read_text() == "original"
+
+
+def test_room_bench_report_rejects_untrusted_symlink_ancestor(tmp_path):
+    save = BENCH["save_private_bench_report"]
+    target = tmp_path / "private"
+    target.mkdir(mode=0o700)
+    (target / "nested").mkdir(mode=0o700)
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o777)
+    shared.chmod(0o777)
+    (shared / "alias").symlink_to(target, target_is_directory=True)
+    redirected = shared / "alias" / "nested" / "station.json"
+    with pytest.raises(ValueError, match="ancestor symlink"):
+        save(redirected, {"read_only_usb_sample_captured": True})
+    assert not (target / "nested" / "station.json").exists()
+
+
+def test_room_bench_cli_uses_exclusive_private_receipt_writer():
+    source = (Path(__file__).resolve().parents[1]
+              / "scripts/bench_room_station.py").read_text()
+    assert "save_private_bench_report(args.report, result)" in source
+    assert "args.report.write_text(" not in source
 
 
 def _packet(seq: int, station_ms: int) -> bytes:
