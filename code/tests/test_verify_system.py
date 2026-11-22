@@ -23,6 +23,7 @@ def test_every_real_host_and_firmware_stage_is_in_canonical_runner(tmp_path):
         "wroom-esp32_full_interaction_lab", "wroom-esp32_full_haptic_lab",
         "wroom-esp32_dc_full", "wroom-esp32_dc_watchdog_lab",
         "wroom-esp32_dc_integrated_lab",
+        "wroom-esp32_servo_center_bench",
         "wroom-esp32_stepper", "wroom-esp32dev",
         "wroom-esp32_vl53l0x_bench", "sense-build",
         "room-feather_nrf52840_room_bench",
@@ -36,7 +37,7 @@ def test_every_real_host_and_firmware_stage_is_in_canonical_runner(tmp_path):
     assert [job[0] for job in verify.steps("dock", tmp_path)] == [
         "dock-01", "dock-02", "dock-03", "dock-04", "dock-05"
     ]
-    assert len(verify.steps("all", tmp_path)) == 23
+    assert len(verify.steps("all", tmp_path)) == 24
     with pytest.raises(ValueError):
         verify.steps("physical-accepted-by-a-badge", tmp_path)
 
