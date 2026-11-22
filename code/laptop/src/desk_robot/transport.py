@@ -618,7 +618,9 @@ class HttpHead:
                            for value in values):
                     raise HeadError("Camera completion metadata missing or malformed")
                 boot, sequence, completed = map(int, values)
-                if not 0 <= boot <= 0xffffffff or not 1 <= sequence <= 0xffffffff or not 1 <= completed <= _MAX_CAMERA_COMPLETE_US):
+                if (not 0 <= boot <= 0xffffffff
+                        or not 1 <= sequence <= 0xffffffff
+                        or not 1 <= completed <= _MAX_CAMERA_COMPLETE_US):
                     raise HeadError("Camera completion metadata out of bounds")
                 self._accept_camera_identity((boot, sequence, completed))
             return response.content
