@@ -16,8 +16,11 @@ public:
         DisplayLockGuard lock(this);
         if (!lock || eye_layer_ || width() != 128 || height() != 64) return;
         eye_layer_ = lv_obj_create(lv_screen_active());
-        lv_obj_set_pos(eye_layer_, 0, 16);
         lv_obj_set_size(eye_layer_, 32, 48);
+        // Xiaozhi's 128x64 idle emotion cell is 32px wide, centered in
+        // the content row. Cover that cell without obscuring its top 16px
+        // network/voice status bar or allocating another display surface.
+        lv_obj_align(eye_layer_, LV_ALIGN_TOP_MID, 0, 16);
         lv_obj_set_style_radius(eye_layer_, 0, 0);
         lv_obj_set_style_pad_all(eye_layer_, 0, 0);
         lv_obj_set_style_border_width(eye_layer_, 0, 0);
