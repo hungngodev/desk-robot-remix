@@ -1635,3 +1635,103 @@ async def test_runtime_vad_failed_proactive_decoder_stop_blocks_successor_until_
     )
     assert speaker.spoken[-1] == ("robot-01", "Recovered proactive line")
 
+
+async def test_failed_recovered_vad_snapshot_retries_stop_without_restarting_camera():
+    """Repeated active VAD is not an ACK for a failed five-pet speaker STOP."""
+    from desk_robot.multimodal import CameraFrameHub
+
+    attempts = []
+    camera = []
+    hub = CameraFrameHub(["robot-01"])
+
+    class Pet:
+        async def interrupt(self, robot_id):
+            attempts.append(("pet", robot_id))
+            if len([x for x in attempts if x[0] == "pet"]) < 3:
+                raise RuntimeError("head decoder still playing")
+
+    class Conversation:
+        async def stop(self):
+            attempts.append(("group", "stop"))
+
+    class Visual:
+        def prepare_human_turn(self, robot_id, *, end_expected):
+            camera.append(("prepare", robot_id))
+            hub.notify(robot_id, "human_voice", time.monotonic())
+
+        def start_speech_frames(self, robot_id):
+            camera.append(("camera", robot_id))
+
+        def voice_ended(self, robot_id):
+            hub.speech_ended(robot_id, time.monotonic())
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(robots=[SimpleNamespace(id="robot-01")])
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    runtime.multimodal = Visual()
+    runtime.multimodal.hub = hub
+    for attempt in range(2):
+        with pytest.raises(RuntimeError, match="Unable to preempt"):
+            await runtime._on_voice_snapshot(frozenset({"robot-01"}))
+        assert runtime._voice_stop_unconfirmed is True
+        assert hub.voice_until["robot-01"] == float("inf")
+        assert len([x for x in attempts if x[0] == "pet"]) == attempt + 1
+    assert camera == [("prepare", "robot-01"), ("camera", "robot-01")]
+    await runtime._on_voice_snapshot(frozenset({"robot-01"}))
+    assert runtime._voice_stop_unconfirmed is False
+    assert len([x for x in attempts if x[0] == "pet"]) == 3
+    await runtime._on_voice_snapshot(frozenset({"robot-01"}))
+    assert len([x for x in attempts if x[0] == "pet"]) == 3
+    assert camera == [("prepare", "robot-01"), ("camera", "robot-01")]
+    await runtime._on_voice_snapshot(frozenset())
+    assert not hub.user_active("robot-01", time.monotonic())
+
+
+async def test_failed_monitor_outage_stop_requires_retry_before_monitor_recovery():
+    from desk_robot.multimodal import CameraFrameHub
+
+    hub = CameraFrameHub(["robot-01"])
+    hub.notify("robot-01", "human_voice", time.monotonic())
+    calls = []
+
+    class Pet:
+        def set_voice_monitor_ready(self, ready):
+            calls.append(("monitor", ready))
+
+        async def interrupt(self, robot_id):
+            calls.append(("pet", robot_id))
+            if len([x for x in calls if x[0] == "pet"]) < 2:
+                raise RuntimeError("Xiaozhi STOP failed")
+
+    class Conversation:
+        async def stop(self):
+            calls.append(("group", "stop"))
+
+    class Visual:
+        def __init__(self):
+            self.hub = hub
+            self._reconnect_needs_sampler = {"robot-01"}
+
+        def voice_transport_unavailable(self):
+            calls.append(("visual", "offline"))
+
+        def voice_started(self, robot_id):
+            calls.append(("visual", "recovered"))
+
+        def voice_ended(self, robot_id):
+            raise AssertionError("Human VAD did not end")
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(
+        robots=[SimpleNamespace(id="robot-01")], mode="simulation",
+    )
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    runtime.multimodal = Visual()
+    with pytest.raises(RuntimeError, match="physical speaker stop unconfirmed"):
+        await runtime._on_voice_global("stream_unavailable")
+    assert runtime._voice_stop_unconfirmed is True
+    await runtime._on_voice_snapshot(frozenset({"robot-01"}))
+    assert runtime._voice_stop_unconfirmed is False
+    assert len([x for x in calls if x[0] == "pet"]) == 2

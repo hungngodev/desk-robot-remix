@@ -1237,3 +1237,89 @@ async def test_cancelled_per_pet_audio_abort_raises_timeout_error():
         with pytest.raises(TimeoutError, match="Fleet interruption cancelled without ACK"):
             await listener._preempt_all("stream_unavailable")
 
+
+async def test_real_runtime_bootstrap_never_accepts_unacknowledged_speaker_stop():
+    """A repeated active VAD snapshot must retry an unconfirmed STOP."""
+    import time
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraFrameHub
+    from desk_robot.runtime import Runtime
+
+    requests = []
+    stops = []
+    frames = []
+    allowed = False
+    hub = CameraFrameHub(["robot-01"])
+
+    def mock(request):
+        requests.append(dict(request.url.params))
+        if request.url.params.get("bootstrap") != "1":
+            raise AssertionError("Cannot accept events until human STOP is acknowledged")
+        return httpx.Response(200, json={
+            "cursor": 19, "events": [], "reset": False, "lost": False,
+            "active_human_robots": ["robot-01"],
+        })
+
+    class Pet:
+        voice_monitor_ready = False
+
+        async def interrupt(self, robot_id):
+            stops.append(robot_id)
+            if not allowed:
+                raise RuntimeError("head STOP unacknowledged")
+
+        def set_voice_monitor_ready(self, value):
+            self.voice_monitor_ready = value
+
+    class Conversation:
+        async def stop(self):
+            return None
+
+    class Visual:
+        def __init__(self):
+            self.hub = hub
+
+        def prepare_human_turn(self, robot_id, *, end_expected):
+            frames.append(("prepare", robot_id))
+            hub.notify(robot_id, "human_voice", time.monotonic())
+
+        def start_speech_frames(self, robot_id):
+            frames.append(("start", robot_id))
+
+        def voice_ended(self, robot_id):
+            raise AssertionError("Active human speech must never be ended")
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(robots=[SimpleNamespace(id="robot-01")])
+    runtime.pet = Pet()
+    runtime.conversation = Conversation()
+    runtime.multimodal = Visual()
+
+    async def no_events(_robot_id, _reason):
+        raise AssertionError("No ordered voice events before bootstrap")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=no_events,
+            on_speech_snapshot=runtime._on_voice_snapshot,
+            on_monitor_ready=runtime._on_voice_monitor_ready,
+            require_snapshot=True,
+        )
+        for count in (1, 2):
+            with pytest.raises(RuntimeError, match="Unable to preempt"):
+                await listener.poll()
+            assert stops == ["robot-01"] * count
+            assert listener.cursor is None
+            assert not listener.monitor_ready
+            assert not runtime.pet.voice_monitor_ready
+            assert hub.voice_until["robot-01"] == float("inf")
+        allowed = True
+        assert await listener.poll() == 0
+        assert stops == ["robot-01"] * 3
+        assert listener.cursor == 19
+        assert listener.monitor_ready and runtime.pet.voice_monitor_ready
+        assert runtime._voice_stop_unconfirmed is False
+        assert frames == [("prepare", "robot-01"), ("start", "robot-01")]
+        assert all(request["bootstrap"] == "1" for request in requests)

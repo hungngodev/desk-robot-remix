@@ -107,6 +107,8 @@ class Runtime:
         self._room_dispatch_enqueued = False
         self.room_context_failures = 0
         self._closed = False
+        self._voice_stop_attempt = 0
+        self._voice_stop_unconfirmed = False
 
     def _on_room_observation(self, observation: RoomObservation) -> None:
         """One Mac owner shares only opt-in, ephemeral environmental facts."""
@@ -238,6 +240,20 @@ class Runtime:
                 if robot.device_id:
                     self.pet.start(robot.id)
 
+
+    def _begin_voice_stop(self) -> int:
+        """Keep a separate pending STOP receipt while cameras mark human VAD."""
+        attempt = getattr(self, "_voice_stop_attempt", 0) + 1
+        self._voice_stop_attempt = attempt
+        # Set before any await so cancellation and newer callbacks fail closed.
+        self._voice_stop_unconfirmed = True
+        return attempt
+
+    def _confirm_voice_stop(self, attempt: int) -> None:
+        # A slower older STOP cannot clear a newer unresolved preemption.
+        if getattr(self, "_voice_stop_attempt", None) == attempt:
+            self._voice_stop_unconfirmed = False
+
     async def _preempt_audio_floor(self) -> None:
         """Human and VAD transport failures share one five-pet audio owner."""
         # Independent five-pet and coordinated social audio owners must be
@@ -270,6 +286,8 @@ class Runtime:
             return
         visual = getattr(self, "multimodal", None)
         if visual is None:
+            if getattr(self, "_voice_stop_unconfirmed", False):
+                raise RuntimeError("Unconfirmed speaker STOP without voice owner")
             return
         # The authenticated snapshot describes the server state before
         # asynchronous decoder STOP. Later live VAD edges supersede it.
@@ -298,7 +316,11 @@ class Runtime:
         ]
         preempt_error = None
         prepared_epochs: dict[str, int] = {}
-        if missing_starts:
+        # Camera preparation already set voice_until=inf on a failed STOP.
+        # A matching retry snapshot must still retry the unresolved speaker
+        # abort instead of publishing a healthy monitor and cursor.
+        retry_unconfirmed_stop = getattr(self, "_voice_stop_unconfirmed", False)
+        if missing_starts or retry_unconfirmed_stop:
             attention = getattr(self, "attention", None)
             if attention is not None:
                 for robot_id in missing_starts:
@@ -320,6 +342,7 @@ class Runtime:
                             prepared_epochs[robot_id] = token
             # A recovered VAD snapshot can be the FIRST evidence of a
             # speaking human. Both speech and roaming stop concurrently.
+            stop_attempt = self._begin_voice_stop()
             outcomes = await asyncio.gather(
                 self._preempt_audio_floor(),
                 self._stop_autonomous_roaming_for_voice(),
@@ -333,6 +356,8 @@ class Runtime:
                 # Unconfirmed audio or body STOP remains visible; camera
                 # VAD reconciliation still occurs below.
                 preempt_error = failures[0]
+            else:
+                self._confirm_voice_stop(stop_attempt)
             if getattr(self, "_closed", False):
                 return
             if getattr(self, "_voice_edge_generation", 0) != voice_edges_at_snapshot:
@@ -366,7 +391,9 @@ class Runtime:
         # pretending a still-active human stopped speaking. Resume their
         # sampler ONLY after the authenticated monitor is healthy again.
         recovering = getattr(visual, "_reconnect_needs_sampler", None)
-        if recovering and getattr(self.pet, "voice_monitor_ready", False):
+        if (recovering and getattr(self.pet, "voice_monitor_ready", False)
+                and preempt_error is None
+                and not getattr(self, "_voice_stop_unconfirmed", False)):
             for robot_id in sorted(active & recovering):
                 if robot_id not in missing_starts:
                     visual.voice_started(robot_id)
@@ -410,6 +437,7 @@ class Runtime:
             if getattr(self.settings, "mode", None) == "hardware"
             and callable(stop) else []
         )
+        stop_attempt = self._begin_voice_stop()
         outcomes = await asyncio.gather(
             self._preempt_audio_floor(),
             self._stop_autonomous_roaming_for_voice(),
@@ -420,6 +448,7 @@ class Runtime:
                     if isinstance(result, BaseException)]
         if failures:
             raise RuntimeError("Voice monitor lost; physical speaker stop unconfirmed") from failures[0]
+        self._confirm_voice_stop(stop_attempt)
 
     async def _on_voice_interrupt(self, robot_id: str, kind: str) -> None:
         if getattr(self, "_closed", False):
@@ -453,6 +482,7 @@ class Runtime:
         # Human speech cancels one shared five-pet speech floor once. The
         # authenticated human camera must still start if audio STOP fails,
         # without treating the unresolved speaker lease as a success.
+        stop_attempt = self._begin_voice_stop()
         outcomes = await asyncio.gather(
             self._preempt_audio_floor(),
             self._stop_autonomous_roaming_for_voice(),
@@ -462,6 +492,8 @@ class Runtime:
             result for result in outcomes if isinstance(result, BaseException)
         ]
         preempt_error = failures[0] if failures else None
+        if preempt_error is None:
+            self._confirm_voice_stop(stop_attempt)
         if getattr(self, "_closed", False):
             return  # A late STOP completion must not reopen camera workers.
         if visual is not None:
