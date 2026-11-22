@@ -1532,7 +1532,8 @@ def _verified_checkout_quote(row: dict) -> str:
         if not isinstance(quote, dict):
             continue
         rendered.append(
-            f"{quote['seller']} {quote['sku']} rev {quote['pcb_revision']}; "
+            f"{quote['role_key']} {quote['seller']} {quote['sku']} "
+            f"rev {quote['pcb_revision']}; "
             f"{quote['quantity_packages']} package(s) x "
             f"{quote['units_per_package']} unit(s) at "
             f"USD {quote['package_price_usd']}/package; quoted "
@@ -2050,7 +2051,15 @@ def attach_verified_checkout_evidence(
         if not isinstance(line, dict):
             raise ValueError("Verified quote line must be an object")
         role = line.get("role_key")
-        if role not in rows:
+        # Four separately purchased power parts share one canonical assembly
+        # row, but each keeps its own quoted SKU and charge identity.
+        display_role = role
+        if isinstance(role, str) and role.startswith(POWER_PARENT_ROLE + ":"):
+            child = role[len(POWER_PARENT_ROLE) + 1:]
+            if (cost_evidence.get("power_package_mode") == "separate_components"
+                    and child in POWER_CHILDREN):
+                display_role = POWER_PARENT_ROLE
+        if not isinstance(role, str) or display_role not in rows:
             raise ValueError("Verified quote references unknown shopping role")
         normalized = {}
         for key in (
@@ -2062,7 +2071,7 @@ def attach_verified_checkout_evidence(
             if value is None:
                 raise ValueError("Verified quote line missing " + key)
             normalized[key] = value
-        rows[role].setdefault("verified_checkout_quotes", []).append(normalized)
+        rows[display_role].setdefault("verified_checkout_quotes", []).append(normalized)
     return output
 
 
