@@ -402,6 +402,54 @@ async def test_five_robot_conversation_persists_peer_hearsay_without_identity_le
     assert memory.count("robot-03") == 5
 
 
+
+@pytest.mark.parametrize("failure", ["sqlite_busy", "write_sealed"])
+async def test_group_speech_continues_when_one_pet_cannot_persist(
+    fleet, tmp_path, monkeypatch, failure,
+):
+    import sqlite3
+
+    from desk_robot.memory import MemoryWriteSealed
+
+    memory = MemoryStore(tmp_path, IDS)
+    original = memory.remember
+
+    def broken_second_robot(robot_id, *args, **kwargs):
+        if robot_id == "robot-02":
+            if failure == "sqlite_busy":
+                raise sqlite3.OperationalError("database is locked")
+            raise MemoryWriteSealed("No remaining private deletion fence capacity")
+        return original(robot_id, *args, **kwargs)
+
+    monkeypatch.setattr(memory, "remember", broken_second_robot)
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, SimulatedChat(), speaker, memory=memory)
+    transcript = await conversation.run(IDS[:2], "A desk game", 6)
+    assert len(transcript) == 6
+    assert len(speaker.spoken) == 6
+    assert memory.count("robot-01") == 6
+    assert memory.count("robot-02") == 0
+    failed = conversation.group_activity_timeline("robot-02")
+    assert len(failed) == 1
+    assert failed[0]["status"] == "completed"
+    assert failed[0]["memory_write_failures"] == 6
+    assert failed[0]["memory_write_error_type"] == (
+        "OperationalError" if failure == "sqlite_busy" else "MemoryWriteSealed"
+    )
+    assert conversation.group_activity_timeline("robot-01")[0][
+        "memory_write_failures"
+    ] == 0
+    # Later authorized dialogue can use the same real SQLite store.
+    monkeypatch.setattr(memory, "remember", original)
+    subsequent = await conversation.run(IDS[:2], "Try again", 2)
+    assert len(subsequent) == 2
+    assert len(speaker.spoken) == 8
+    assert memory.count("robot-02") == 2
+    assert conversation.group_activity_timeline("robot-02")[0][
+        "memory_write_failures"
+    ] == 0
+
+
 async def test_all_five_full_system_simulated_integration_and_persistent_motion(fleet, tmp_path):
     # One integrated runtime, NOT a five-system mock or independent plan:
     # five local head adapters, one coordinator, one speaker owner, five DBs.

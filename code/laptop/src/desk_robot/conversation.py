@@ -4,6 +4,7 @@ import asyncio
 import base64
 import json
 import math
+import sqlite3
 import time
 import uuid
 from contextlib import asynccontextmanager
@@ -14,7 +15,7 @@ import httpx
 
 from .brain_context import _memory_label, active_job_timeline, compose_brain_context
 from .config import RobotConfig, Settings, secret
-from .memory import MemoryStore
+from .memory import MemoryStore, MemoryWriteSealed
 from .streamed_ollama import ollama_speech_segments
 
 _SPEAKER_ABORT_TIMEOUT_S = 2.0
@@ -489,6 +490,8 @@ class Conversation:
             "age_ms": round(age * 1000),
             "playback_verified": False, "motor_authorized": False,
             "physical_action_verified": False,
+            "memory_write_failures": record.get("memory_write_failures", 0),
+            "memory_write_error_type": record.get("memory_write_error_type"),
         }]
 
     @property
@@ -617,7 +620,19 @@ class Conversation:
                     # Never retract the speaker's own transmitted words.
                     self.memory.forget_episode(peer.id, event_id)
 
-            await asyncio.to_thread(persist_with_consent_cleanup)
+            try:
+                await asyncio.to_thread(persist_with_consent_cleanup)
+            except (sqlite3.Error, MemoryWriteSealed, OSError) as exc:
+                # One pet's optional SQLite failure must not turn already
+                # transmitted speech into a speaker failure or stop peers.
+                # Never present an unpersisted episode as remembered.
+                record = self._group_activity.get(peer.id)
+                if record is not None:
+                    record["memory_write_failures"] = (
+                        record.get("memory_write_failures", 0) + 1
+                    )
+                    # Retain only the exception type, never private text.
+                    record["memory_write_error_type"] = type(exc).__name__
 
     async def run(
         self, robot_ids: list[str], topic: str, utterances: int | None = None,
@@ -707,7 +722,7 @@ class Conversation:
             self._group_activity[robot.id] = {
                 "epoch": epoch, "status": "waiting",
                 "topic": topic_excerpt, "origin": origin,
-                "sent_segments": 0,
+                "sent_segments": 0, "memory_write_failures": 0,
                 "updated_at": time.monotonic(),
             }
         # Mirror authenticated operator topics into the ONE Runtime-owned
