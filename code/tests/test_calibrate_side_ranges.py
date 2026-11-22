@@ -1,5 +1,6 @@
 """Read-only three-direction range calibration refuses fabricated acceptance."""
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -92,3 +93,48 @@ def test_separate_lenses_may_share_a_synchronized_capture_id():
     assert result["samples_total"] == 120
     assert result["independent_sample_provenance_verified"] is False
     assert result["physical_acceptance_pass"] is False
+
+def test_real_side_range_jsonl_preserves_current_candidate_result(tmp_path):
+    rows = samples()
+    path = tmp_path / "three_direction_near_far.jsonl"
+    path.write_text(
+        "".join(json.dumps(row) + "\n" for row in rows),
+        encoding="utf-8",
+    )
+    actual = module().load_trial_rows(path)
+    assert actual == rows
+    result = module().analyze(actual, "robot-01")
+    assert result["samples_total"] == 120
+    assert result["physical_acceptance_pass"] is False
+    assert result["no_motion_authority"] is True
+
+
+@pytest.mark.parametrize("field,earlier", [
+    ('"robot_id": "robot-01"', '"robot_id": "robot-02"'),
+    ('"direction": "left"', '"direction": "right"'),
+    ('"label": "near"', '"label": "far"'),
+    ('"sample_id": 1', '"sample_id": 2'),
+    ('"valid_mask": 7', '"valid_mask": 0'),
+    ('"motion_certified": false', '"motion_certified": true'),
+])
+def test_ambiguous_side_range_jsonl_cannot_change_physical_evidence(
+    tmp_path, field, earlier,
+):
+    line = json.dumps(samples()[0])
+    assert line.count(field) == 1
+    path = tmp_path / "ambiguous_three_range_samples.jsonl"
+    path.write_text(line.replace(field, earlier + ", " + field) + "\n")
+    with pytest.raises(ValueError, match="Duplicate side-range trial JSON field"):
+        module().load_trial_rows(path)
+
+
+@pytest.mark.parametrize("constant", ["NaN", "Infinity", "-Infinity"])
+def test_nonfinite_side_range_jsonl_never_reaches_threshold_fitter(
+    tmp_path, constant,
+):
+    line = json.dumps(samples()[0])
+    assert line.count('"sample_id": 1') == 1
+    path = tmp_path / "nonfinite_side_range_samples.jsonl"
+    path.write_text(line.replace('"sample_id": 1', f'"sample_id": {constant}') + "\n")
+    with pytest.raises(ValueError, match="Nonfinite side-range trial JSON constant"):
+        module().load_trial_rows(path)

@@ -18,6 +18,32 @@ from pathlib import Path
 SIDE = {"left": 0, "right": 1, "rear": 2}
 
 
+def _unique_side_trial_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """No last-key-wins change to a physical ToF trial or sensor mask."""
+    fields: dict[str, object] = {}
+    for key, value in pairs:
+        if key in fields:
+            raise ValueError("Duplicate side-range trial JSON field: " + key)
+        fields[key] = value
+    return fields
+
+
+def _reject_nonfinite_side_trial_json(token: str) -> None:
+    raise ValueError("Nonfinite side-range trial JSON constant: " + token)
+
+
+def load_trial_rows(path: Path) -> list[dict]:
+    """Preserve raw left/right/rear trial identity before threshold fitting."""
+    return [
+        json.loads(
+            line, object_pairs_hook=_unique_side_trial_fields,
+            parse_constant=_reject_nonfinite_side_trial_json,
+        )
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
 def percentile(values: list[int], proportion: float) -> int:
     if not values or not 0 <= proportion <= 1:
         raise ValueError("Missing samples or invalid percentile")
@@ -116,10 +142,7 @@ def main() -> None:
     parser.add_argument("--robot", required=True)
     parser.add_argument("--input", required=True, type=Path)
     args = parser.parse_args()
-    rows = []
-    for line in args.input.read_text().splitlines():
-        if line.strip():
-            rows.append(json.loads(line))
+    rows = load_trial_rows(args.input)
     print(json.dumps(analyze(rows, args.robot), indent=2))
 
 
