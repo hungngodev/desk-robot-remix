@@ -62,6 +62,12 @@ and `mic_speaker_placement_id`. The twenty rows must actually cover both
 positions, all three load profiles and intended speaker volumes, two
 human speakers and adjacent conversation turn numbers **in each twenty-trial set**.
 
+Each human trial must also declare `audible_robot_speech_at_onset=true` from
+observed robot playback when the person begins speaking. A trial with a silent
+robot is not a barge-in attempt and cannot count toward either twenty-trial
+population. This declaration remains operator-supplied: acoustic waveform
+capture and synchronized device logs are still required for physical proof.
+
 Each human row also supplies measured monotonic timestamps, in order:
 `human_onset_ms`, `vad_arrival_ms`, `abort_dispatch_ms`,
 `head_queue_clear_ms`, `i2s_stop_ms`, `audible_stop_ms`. Record

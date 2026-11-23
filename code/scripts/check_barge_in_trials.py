@@ -139,6 +139,12 @@ def evaluate(records: list[dict]) -> dict:
         # Match the robot IDs accepted by the running RobotConfig schema.
         if re.fullmatch(r"[A-Za-z0-9_-]{1,40}", r["robot_id"]) is None:
             raise ValueError("Physical trial robot_id must match configured robot ID format")
+        # A separate robot-only control cannot prove that each human trial
+        # actually interrupted audible speech. Silence is not barge-in.
+        if r.get("audible_robot_speech_at_onset") is not True:
+            raise ValueError(
+                "Each human interruption requires audible robot speech at onset"
+            )
         captured = r.get("new_utterance_captured")
         correct = r.get("new_intent_correct")
         beginning = r.get("utterance_beginning_intelligible")

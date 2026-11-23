@@ -22,6 +22,7 @@ def fake_rows():
         "head_queue_clear_ms": n * 1000 + 100,
         "i2s_stop_ms": n * 1000 + 120,
         "audible_stop_ms": n * 1000 + 200,
+        "audible_robot_speech_at_onset": True,
         "new_utterance_captured": True,
         "new_intent_correct": True,
         "utterance_beginning_intelligible": True,
@@ -125,6 +126,18 @@ def test_robot_only_acoustic_control_rejects_unrepresentative_speech(change):
     rows = both_distances()
     change(rows)
     with pytest.raises(ValueError, match="robot|Robot"):
+        evaluate(rows)
+
+
+
+@pytest.mark.parametrize("observation", [False, None, "yes", 1])
+def test_audible_barge_in_rejects_silent_or_unmeasured_human_trial(observation):
+    rows = both_distances()
+    if observation is None:
+        rows[0].pop("audible_robot_speech_at_onset")
+    else:
+        rows[0]["audible_robot_speech_at_onset"] = observation
+    with pytest.raises(ValueError, match="audible robot speech at onset"):
         evaluate(rows)
 
 
