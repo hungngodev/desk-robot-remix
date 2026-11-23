@@ -207,7 +207,7 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
             if (!already_ready && bench_window_.ready()) {
                 std::lock_guard<std::mutex> reference_lock(reference_mutex_);
                 bench_speaker_activity_in_window_ =
-                    speaker_frames_accepted_ > bench_speaker_at_start_;
+                    speaker_activity_.AdvancedSince(bench_speaker_at_start_);
             }
         }
     }
@@ -234,7 +234,7 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
     uint64_t started_generation = 0;
     {
         std::lock_guard<std::mutex> lock(reference_mutex_);
-        started_generation = reference_generation_;
+        started_generation = speaker_activity_.generation();
     }
     // The selected Sense overlay already bounds the pinned Xiaozhi writer's
     // I2S wait. Preserve its mutex, squared-volume PCM conversion and sole
@@ -262,7 +262,8 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
             reference_integrity_failed_ = true;
             log_short = short_writes == 1 || (short_writes % 32U) == 0U;
         }
-        if (accepted > 0 && started_generation == reference_generation_) {
+        speaker_activity_.RecordAccepted(started_generation, accepted);
+        if (accepted > 0 && started_generation == speaker_activity_.generation()) {
             PublishAcceptedLocked(data, accepted, volume, esp_timer_get_time());
         } else if (accepted > 0) {
             // The physical TX DMA may have accepted some old audio. It must
@@ -293,7 +294,7 @@ void SenseReferenceCodec::ClearReference() {
     std::lock_guard<std::mutex> lock(reference_mutex_);
     // Invalidate writes that entered the inherited blocking I2S path before
     // this reset. Never reset this generation with the ring write index.
-    ++reference_generation_;
+    speaker_activity_.Reset();
     consecutive_missing_reference_reads_ = 0;
     reference_read_seen_ = false;
     last_reference_read_write_index_ = 0;
@@ -391,7 +392,7 @@ bool SenseReferenceCodec::BeginBenchPcmCapture() {
         // The snapshot belongs to this authenticated START, not a later
         // asynchronous HTTP read of lifetime counters.
         std::lock_guard<std::mutex> reference_lock(reference_mutex_);
-        bench_speaker_at_start_ = speaker_frames_accepted_;
+        bench_speaker_at_start_ = speaker_activity_.SnapshotNow();
     }
     bench_speaker_activity_in_window_ = false;
     bench_capture_generation_.fetch_add(1, std::memory_order_acq_rel);

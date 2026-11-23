@@ -11,6 +11,7 @@
 #include "codecs/no_audio_codec.h"
 #include "config.h"  // Selected Sense board AUDIO_*_SAMPLE_RATE contract.
 #include "reference_timeline.h"
+#include "sense_speaker_activity.hpp"
 #include "sdkconfig.h"
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
 #include "sense_pcm_window.h"
@@ -137,7 +138,7 @@ private:
     std::atomic<uint64_t> bench_capture_generation_{0};
     bool bench_transfer_active_ = false;  // one RAM transfer at a time
     desk_robot::SensePcmWindow bench_window_{};
-    uint32_t bench_speaker_at_start_ = 0;
+    desk_robot::SenseSpeakerActivity::Snapshot bench_speaker_at_start_{};
     bool bench_speaker_activity_in_window_ = false;
     esp_timer_handle_t bench_expiry_timer_ = nullptr;
     int64_t bench_started_us_ = 0;
@@ -148,7 +149,7 @@ private:
     // Bump when playback is cancelled/reset. A blocked I2S writer must not
     // publish its old accepted frames after ClearReference() reset the ring.
     // Guarded by reference_mutex_, not a competing audio task/driver.
-    uint64_t reference_generation_ = 0;
+    desk_robot::SenseSpeakerActivity speaker_activity_{};
     uint32_t stale_publish_discards_ = 0;
     // I2S timeout/short output cannot be counted as fully delivered speech.
     uint32_t short_output_writes_ = 0;
