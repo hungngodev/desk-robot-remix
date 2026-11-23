@@ -325,3 +325,66 @@ def test_native_asr_replay_capacity_fails_closed_and_is_per_pet():
     assert not hub.remember_heard(
         "robot-01", "receipt-0", "Replay after clear", now,
     )
+
+def test_delayed_native_asr_post_cannot_relabel_prior_speech_as_new_vad(settings):
+    """Source stamped before a newer VAD stays historical after FIFO delivery."""
+    import time
+
+    from desk_robot.attention import AttentionLedger
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = False
+    settings.voice_transcript_memory_enabled = False
+    robot_id = settings.robots[0].id
+    hub = CameraFrameHub([robot_id])
+    attention = AttentionLedger([robot_id])
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        multimodal=SimpleNamespace(hub=hub), attention=attention, memory=None,
+    )
+    register_native_omni_routes(
+        app, settings, authorize=lambda: None,
+        coordinator=lambda: SimpleNamespace(robot=settings.robot),
+        native_pet_speech_policy=lambda _robot_id: {},
+    )
+    # The old item passed the overlay's current-turn check and was queued.
+    # Its source stamp must survive the queue, not become HTTP receipt time.
+    old_source_us = time.monotonic_ns() // 1000
+    time.sleep(0.005)
+    attention.human_started(robot_id, time.monotonic())
+    old_id = "omni_" + "a" * 12 + "_" + "a" * 20
+    fresh_id = "omni_" + "b" * 12 + "_" + "b" * 20
+    url = f"/v1/pet/{robot_id}/omni-heard"
+    with TestClient(app) as client:
+        delayed = client.post(url, json={
+            "event_id": old_id, "transcript": "Turn left from the old question",
+            "accepted_at_us": old_source_us,
+        })
+        assert delayed.status_code == 200
+        assert delayed.json()["ephemeral_context_added"] is False
+        assert old_id not in [entry[0] for entry in hub.heard_history[robot_id]]
+        assert "Turn left from the old question" not in str(
+            attention.timeline(robot_id, time.monotonic())
+        )
+
+        # An older authenticated client with no source stamp is not
+        # promoted to current live evidence just because HTTP arrived now.
+        legacy = client.post(url, json={
+            "event_id": "omni_" + "c" * 12 + "_" + "c" * 20,
+            "transcript": "Undated old words",
+        })
+        assert legacy.status_code == 200
+        assert legacy.json()["ephemeral_context_added"] is False
+
+        current = client.post(url, json={
+            "event_id": fresh_id, "transcript": "What is the temperature now?",
+            "accepted_at_us": time.monotonic_ns() // 1000,
+        })
+        assert current.status_code == 200
+        assert current.json()["ephemeral_context_added"] is True
+        assert [entry[0] for entry in hub.heard_history[robot_id]] == [fresh_id]
+        timeline = str(attention.timeline(robot_id, time.monotonic()))
+        assert "What is the temperature now?" in timeline
+        assert "Turn left from the old question" not in timeline
