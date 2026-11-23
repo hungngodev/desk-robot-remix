@@ -10,7 +10,7 @@ python3 code/scripts/export_fit_kit.py
 
 This renders seven adapter candidates including the rectangular speaker front to
 `docs/cad/remixes/adapter_stls/` for the Fusion scaffold and the
-current **13** provisional fit references across
+current **16** provisional fit references across
 `docs/cad/remixes/fit_stls/` and `docs/cad/remixes/dock_stls/`. Each STL is exported in deterministic binary
 format, checked for nonzero triangles and exact file length, and listed in
 `docs/cad/remixes/fit_kit_manifest.json`, including SHA256 digests of every
@@ -74,6 +74,22 @@ Print the fit coupon and measure real carrier width, thickness, connector,
 lens position and any mounting features before designing a captive clamp.
 Do not install eight of these as qualified cliff sensing mounts.
 
+**Downward optical standoff trial:** Three separate removable,
+nonconductive GY-530 open supports in the exporter, named
+`vl53l0x_gy530_height_trial_035`, `_045`, and `_055`, bracket
+nominal PCB rim heights of 35, 45, and 55 mm. These are staged in
+Fusion as unaligned **trial references only**. Start with the motor
+rail disconnected, position one actual PCB on a support without
+obscuring its lens, record the actual lens-to-target distance with
+calipers, and check the WROOM's own fresh ToF results over
+representative dark, light, matte and reflective surfaces. A nominal
+rim height is not lens-to-target height. Any result below the
+firmware's 30 mm minimum, uncertain beam clipping, invalid sensor
+age or no stable surface return keeps that location unqualified.
+Never use the temporary support to drive or approach a desk edge;
+the final eight mounts require measured lens centers and cable
+clearance, real coast-distance testing, and independent stop gates.
+
 **Grasp tuning**: Print the existing MG90S fit coupons first. The jaw FSR pocket is only a cable-safe pad; the controlled incremental closure is in `code/laptop/src/desk_robot/grasp_feedback.py`. It requires two distinct measured ADC conversions and actual calibration values. Neither a watertight STL nor a simulated code test proves lifting force.
 
 **Docking**: The passive cradle `dock/dock_passive_fit.scad` now exports a short rail entry coupon from the same geometry. Test actual track clearance before printing the full cradle. The separate AprilTag backplate is an alternative fixture, **not a drop-in insert** for the cradle's 71.2 mm paper pocket. Its provisional 76 mm square M3 pitch now makes the plate 85.35 mm square so the 3.35 mm bores retain at least 3 mm of edge web; the two bores crossing the rear stiffening rib are drilled through its full 12 mm height. Both mounting geometry and printed strength still need actual fit trials. The full `dock_passive_fit` cradle is also emitted as `temporary_fit_coupon: true`; it is a mechanical alignment prototype that must not become the permanently installed charging dock. Both are mechanical alignment prototypes, not wired charging electronics. **Do not energize dock contacts** without a protected, measured charging power path and safe interlock. Image tag detection is not contact confirmation.
@@ -82,7 +98,7 @@ Mechanical provenance remains separate: SMARS tracks/lift noncommercial/share-al
 
 ## Fusion assembly scaffold
 
-New [fusion_assembly_scaffold.py](fusion_assembly_scaffold.py) is a **Fusion GUI script**, not a generic system Python command. Place it within your cloned repository at `docs/cad/remixes/` and unzip the adapter STLs into `docs/cad/remixes/adapter_stls/`. Run in **Fusion > Utilities > Scripts and Add-Ins**. It creates a NEW direct design and stages **12 saved original STLs, up to seven adapters, and up to 13 provisional dock, battery, contact, jaw, speaker, and sensor fit references** as individually named components, interpreting unitless STL coordinates as millimeters. Generate the optional references with `python3 code/scripts/export_fit_kit.py` first. Missing original licensed meshes fail the import; missing optional fit references are omitted, not invented. It deliberately does **not** guess mesh transforms, join tracks, install a battery, make an electrical connector, or create joints. Ground/Align/Joint/Interference remains necessary after real measurements. Source and manifest are syntax checked, but Fusion GUI execution is not available in CI. See [Autodesk MeshBodies.add documentation](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/fusion_MeshBodies_add.htm).
+New [fusion_assembly_scaffold.py](fusion_assembly_scaffold.py) is a **Fusion GUI script**, not a generic system Python command. Place it within your cloned repository at `docs/cad/remixes/` and unzip the adapter STLs into `docs/cad/remixes/adapter_stls/`. Run in **Fusion > Utilities > Scripts and Add-Ins**. It creates a NEW direct design and stages **12 saved original STLs, up to seven adapters, and up to 16 provisional dock, battery, contact, jaw, speaker, and sensor fit references** as individually named components, interpreting unitless STL coordinates as millimeters. Generate the optional references with `python3 code/scripts/export_fit_kit.py` first. Missing original licensed meshes fail the import; missing optional fit references are omitted, not invented. It deliberately does **not** guess mesh transforms, join tracks, install a battery, make an electrical connector, or create joints. Ground/Align/Joint/Interference remains necessary after real measurements. Source and manifest are syntax checked, but Fusion GUI execution is not available in CI. See [Autodesk MeshBodies.add documentation](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/fusion_MeshBodies_add.htm).
 
 
 ## Measured printer build volume screen

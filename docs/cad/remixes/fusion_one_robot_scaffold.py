@@ -48,6 +48,12 @@ FIT_REFERENCES = (
     ("MG90S 0.45mm Case Coupon Only", "fit_stls/mg90s_fit_045.stl"),
     ("MG90S 0.60mm Case Coupon Only", "fit_stls/mg90s_fit_060.stl"),
     ("GY530 Sensor Fit Gauge Only", "fit_stls/vl53l0x_gy530_fit_gauge.stl"),
+    ("GY530 35mm Optical Height Trial Only",
+     "fit_stls/vl53l0x_gy530_height_trial_035.stl"),
+    ("GY530 45mm Optical Height Trial Only",
+     "fit_stls/vl53l0x_gy530_height_trial_045.stl"),
+    ("GY530 55mm Optical Height Trial Only",
+     "fit_stls/vl53l0x_gy530_height_trial_055.stl"),
 )
 
 

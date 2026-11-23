@@ -44,6 +44,8 @@ def test_provisional_dock_and_fit_references_stage_when_exported(tmp_path):
     assert "Passive Dock Fit Only" in names
     assert "Battery Tray Gauge Only" in names
     assert "GY530 Sensor Fit Gauge Only" in names
+    for height in (35, 45, 55):
+        assert f"GY530 {height}mm Optical Height Trial Only" in names
     (tmp_path / "docs/cad/remixes/dock_stls/dock_passive_fit.stl").unlink()
     names = [name for name, _ in module.build_manifest(tmp_path)]
     assert "Passive Dock Fit Only" not in names
@@ -53,6 +55,31 @@ def test_provisional_dock_and_fit_references_stage_when_exported(tmp_path):
     original.unlink()
     with pytest.raises(FileNotFoundError, match="Missing source mesh"):
         module.build_manifest(tmp_path)
+
+
+def test_fusion_importer_covers_entire_canonical_provisional_export():
+    """A verified new fit part must not vanish from the editable Fusion reference."""
+    importer = load()
+    exporter_path = ROOT / "code/scripts/export_fit_kit.py"
+    spec = importlib.util.spec_from_file_location("desk_fit_exporter", exporter_path)
+    assert spec and spec.loader
+    exporter = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(exporter)
+    expected_fits = {
+        f"fit_stls/{name}.stl"
+        for name in (
+            *exporter.GAUGES, *exporter.SPEAKER_FITS,
+            *exporter.RANGER_FITS, *exporter.MG90S_FITS,
+        )
+    }
+    expected_docks = {
+        f"dock_stls/{name}.stl" for name in exporter.DOCKS
+    }
+    staged_fit_paths = [relative for _, relative in importer.FIT_REFERENCES]
+    assert len(staged_fit_paths) == len(set(staged_fit_paths)) == 16
+    assert set(staged_fit_paths) == expected_fits | expected_docks
+    assert set(importer.ADAPTER_NAMES) == set(exporter.ADAPTERS)
+    assert len(importer.ADAPTER_NAMES) == len(exporter.ADAPTERS)
 
 
 def test_fusion_rejects_stale_stl_sources_before_import(tmp_path, monkeypatch):
