@@ -234,6 +234,20 @@ preferences. Both are cancelled on a newer human speech edge; physical STOP
 is deliberately excluded from this speculative cancellation. The two
 permissions must never be silently coupled.
 
+Native model ASR is uncertain, source-timed evidence, not a command. The
+existing Mac route binds accepted ASR in `AttentionLedger` to the *live consent
+generation*. The same `CameraFrameHub` carries the original trusted Mac
+`source_at` timestamp in its short-lived transcript entry. Both the native
+`/interaction-context` tool and proactive `PetController` compare that exact
+clock with the current grant start, rather than a rounded display `age_ms`.
+Revocation immediately hides the transcript, and an off/on regrant cannot
+revive it; a newly accepted transcript can still inform the conversation.
+WROOM safety, touch and permitted topic continuity survive independently.
+This is transcript prompt isolation, not a playback, identity or acoustic
+qualification. Source and regression commits: `a531994b6ffc` and
+`bf2da05c6af7`; exact latter-sha Mac suite 1,321 tests passed, with the
+Python/head host suite separately blocked by unrelated Ruff lint.
+
 `CameraFrameHub.spoken_history` keeps at most three actual transmitted Mac
 pet lines per robot for at most 30 seconds. That is **not** confirmation that
 a physical speaker played, that the human heard them, or that a separate
