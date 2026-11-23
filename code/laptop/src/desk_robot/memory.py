@@ -271,6 +271,10 @@ class MemoryStore:
         path = self.root / (robot_id + ".sqlite3")
         if path.is_symlink():
             raise ValueError("Refusing symlinked memory database")
+        # Two pet filenames must never share one SQLite inode, including
+        # aliases introduced after MemoryStore was initialized.
+        if path.exists() and path.stat().st_nlink > 1:
+            raise ValueError("Refusing hard-linked memory database")
         db = sqlite3.connect(path, timeout=3)
         try:
             # A private root is necessary but insufficient if an older

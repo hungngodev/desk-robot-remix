@@ -88,3 +88,31 @@ def test_private_memory_connections_restore_secure_delete_for_legacy_store(tmp_p
     assert store.correct_episode("pet_a", "private_note", "Corrected note")
     assert store.forget_episode("pet_a", "private_note")
     assert store.count("pet_a") == 0
+
+
+def test_hard_linked_database_cannot_alias_two_pets_at_boot_or_after_start(tmp_path):
+    import os
+
+    store = MemoryStore(tmp_path, ["pet_a", "pet_b"])
+    assert store.remember(
+        "pet_a", "private_note", "Pet A private observation",
+        kind="scene", source_robot="pet_a", witnessed=True,
+    )
+    own = tmp_path / "pet_a.sqlite3"
+    peer = tmp_path / "pet_b.sqlite3"
+    peer.unlink()
+    os.link(own, peer)
+
+    # Both names now point to the same physical SQLite database. Reject
+    # either owner rather than letting pet B read pet A private episodes.
+    with pytest.raises(ValueError, match="hard-linked memory database"):
+        store.recent("pet_b")
+    with pytest.raises(ValueError, match="hard-linked memory database"):
+        store.recent("pet_a")
+    with pytest.raises(ValueError, match="hard-linked memory database"):
+        MemoryStore(tmp_path, ["pet_a", "pet_b"])
+
+    # The operator can remove the alias without losing the original memory.
+    peer.unlink()
+    assert store.recent("pet_a")[0].summary == "Pet A private observation"
+    assert store.recent("pet_b") == []
