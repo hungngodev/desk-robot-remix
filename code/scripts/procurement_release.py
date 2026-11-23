@@ -863,6 +863,8 @@ def first_robot_projection(report: dict) -> dict:
             rows.append({
                 "id": ident, "name": part["name"], "scope": scope,
                 "prototype_target": target,
+                # Carry canonical selection and assembly reasons into the first-unit view.
+                "notes": part.get("notes", ""),
                 # Full reported inventory remains visible even if no first
                 # robot slot currently uses this variant. Do not erase the
                 # user's five owned steppers just because DC is undecided.
@@ -1678,8 +1680,8 @@ def render_first_robot_markdown(report: dict) -> str:
         "",
         "## 2. First-unit remaining slots and conditional alternatives",
         "",
-        "| Scope | Role | One-unit target | Remaining if stock verified | Decision | Reviewed carrier | Power reference | Verified checkout quote |",
-        "| --- | --- | ---: | ---: | --- | --- | --- | --- |",
+        "| Scope | Role | One-unit target | Remaining if stock verified | Decision | Reviewed carrier / reference | Role note or selection gap | Power reference | Verified checkout quote |",
+        "| --- | --- | ---: | ---: | --- | --- | --- | --- | --- |",
     ]
     for row in projection["roles"]:
         selected = row.get("selected_carrier") or {}
@@ -1691,19 +1693,39 @@ def render_first_robot_markdown(report: dict) -> str:
             )
             if selected.get("product_url"):
                 reviewed += f": {selected['product_url']}"
+        if not reviewed:
+            ref = row.get("reference_only") or {}
+            if ref:
+                reviewed = (
+                    "UNVERIFIED reference only: "
+                    + str(ref.get("vendor", "unknown vendor")) + " "
+                    + str(ref.get("sku", "unknown SKU")) + "; "
+                    + str(ref.get("url", "source not recorded"))
+                )
+            else:
+                reviewed = "UNRESOLVED: exact seller SKU or owned revision not reviewed"
+        role_note = row.get("notes") or (
+            "Exact physical selection, compatibility and fit evidence pending"
+        )
+        quote = _verified_checkout_quote(row) or (
+            "UNQUOTED: actual delivered seller total unknown"
+        )
         lines.append(
             f"| {cell(row['scope'])} | {cell(row['name'])} | "
             f"{row['prototype_target']} | {row['conditional_remaining']} | "
             f"{row['decision']} | {cell(reviewed)} | "
-            f"{cell(_power_reference_summary(row))} | "
-            f"{cell(_verified_checkout_quote(row))} |"
+            f"{cell(role_note)} | {cell(_power_reference_summary(row))} | "
+            f"{cell(quote)} |"
         )
     for item in projection["linked_decisions"]:
         lines.append(
             f"| linked detail, never additive | {cell(item['name'])} | "
             f"{item['conditional_one_robot_quantity']} if selected | "
             "not independently counted | "
-            f"{'REVIEWED' if item['reviewed'] else 'HOLD DECISION'} | | | |"
+            f"{'REVIEWED' if item['reviewed'] else 'HOLD DECISION'} | "
+            f"parent {cell(item['parent_role'])} | "
+            "Included in parent; do not duplicate checkout | | "
+            "UNQUOTED separately; parent owns delivered cost |"
         )
     lines += [
         "",

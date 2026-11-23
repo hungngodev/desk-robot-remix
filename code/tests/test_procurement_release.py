@@ -2095,3 +2095,38 @@ def test_strict_purchase_cli_requires_five_successful_exact_ci_jobs():
     assert "verified_required_ci_jobs" in source
     assert 'evidence.get("source_ci_run_url"), checked_sha' in source
     assert "if not verified_required_ci_jobs(" in source
+
+
+def test_first_unit_builder_list_keeps_role_note_and_explicit_unverified_source_cost():
+    """Unselected carrier and unquoted checkout stay explicit in the builder list."""
+    plan = fixture()
+    plan["parts"][0]["notes"] = "Confirm actual 3.3V PCB | pullup revision"
+    report = mod.generate(plan)
+    projection = mod.first_robot_projection(report)
+    cliff = next(x for x in projection["roles"] if x["id"] == "cliff_obstacle")
+    assert cliff["notes"] == "Confirm actual 3.3V PCB | pullup revision"
+    assert cliff["selected_carrier"] is None
+    assert cliff["verified_checkout_quotes"] == []
+    shown = mod.render_first_robot_markdown(report)
+    assert "| Role note or selection gap |" in shown
+    assert r"Confirm actual 3.3V PCB \| pullup revision" in shown
+    assert "UNVERIFIED reference only: ElectroPeak SEN-19-006;" in shown
+    assert "UNRESOLVED: exact seller SKU or owned revision not reviewed" in shown
+    assert "UNQUOTED: actual delivered seller total unknown" in shown
+    assert projection["purchase_approved"] is False
+
+
+def test_first_unit_49_parent_roles_and_14_child_details_remain_nonadditive():
+    import json
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    report = mod.generate(plan)
+    first = mod.first_robot_projection(report)
+    assert first["parent_role_count"] == 49
+    assert len(first["linked_decisions"]) == 14
+    assert all(x["additive_purchase_authorized"] is False
+               for x in first["linked_decisions"])
+    shown = mod.render_first_robot_markdown(report)
+    assert shown.count("Included in parent; do not duplicate checkout") == 14
+    assert shown.count("UNQUOTED separately; parent owns delivered cost") == 14
+    assert first["purchase_approved"] is False
