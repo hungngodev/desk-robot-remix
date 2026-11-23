@@ -14,7 +14,7 @@ JPEG = bytes.fromhex("ffd8696d616765ffd9")
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fault", ("body_reboot", "pose_replay"))
+@pytest.mark.parametrize("fault", ("body_reboot", "head_reboot", "foreign_robot", "pose_replay"))
 async def test_fresh_camera_frame_never_rescues_invalid_body_origin(
     settings, tokens, fault,
 ):
@@ -36,6 +36,16 @@ async def test_fresh_camera_frame_never_rescues_invalid_body_origin(
             return httpx.Response(200, json={
                 **packet, "body_boot": 9, "origin": 1,
                 "seq": 1, "sample_us": 10_000,
+            })
+        if sequence == 3 and fault == "head_reboot":
+            return httpx.Response(200, json={
+                **packet, "head_boot": 78,
+                "seq": 1, "sample_us": 10_000,
+            })
+        if sequence == 3 and fault == "foreign_robot":
+            return httpx.Response(200, json={
+                **packet, "robot_id": "foreign-pet", "seq": 3,
+                "sample_us": 1_060_000,
             })
         return httpx.Response(200, json={
             **packet, "seq": min(sequence, 2),
@@ -69,7 +79,9 @@ async def test_fresh_camera_frame_never_rescues_invalid_body_origin(
         assert head.pose_fence.needs_reanchor is True
 
         with pytest.raises(HeadError, match=(
-            "re-anchor" if fault == "body_reboot" else "Pose sequence"
+            "re-anchor" if fault in ("body_reboot", "head_reboot")
+            else "Pose robot identity" if fault == "foreign_robot"
+            else "Pose sequence"
         )):
             await head.pose_status()
         assert head.pose_fence.current(time.monotonic()) is None
