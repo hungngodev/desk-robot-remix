@@ -157,6 +157,7 @@ def compose_brain_context(
     seen_cues: set[tuple[str, str]] = set()
     heard_count = 0
     heard_requests: list[str] = []
+    omitted_current_tool_kinds: set[str] = set()
     # A newer authenticated VAD starts a different human turn. Older ASR
     # guesses must not influence which tool receipt is treated as requested.
     crossed_voice_boundary = False
@@ -185,6 +186,15 @@ def compose_brain_context(
         if channel == "human_transcript":
             if heard_count >= 2 or crossed_voice_boundary:
                 continue
+            missing = item.get("omitted_current_tool_kinds")
+            if isinstance(missing, list):
+                omitted_current_tool_kinds.update(
+                    kind for kind in missing
+                    if type(kind) is str and kind in {
+                        "visual_look", "robot_status", "pickup_status",
+                        "sensor_telemetry", "memory_recall",
+                    }
+                )
             identity = (channel, str(heard_count))
         else:
             identity = (
@@ -451,7 +461,7 @@ def compose_brain_context(
     ))
     selected: list[str] = []
     remaining = 400
-    omitted_requested_receipt = False
+    omitted_requested_receipt = bool(requested_tools & omitted_current_tool_kinds)
     for _, phrase, tool_kind, current_turn in cue_parts:
         cost = len(phrase) + (2 if selected else 0)
         if cost <= remaining:

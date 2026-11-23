@@ -778,6 +778,97 @@ def test_live_timeline_retains_all_distinct_tools_and_two_human_clauses():
     ) if entry["channel"] == "tool"]
 
 
+def test_full_multimodal_timeline_preserves_current_tool_kinds_before_idle_cues():
+    from desk_robot.multimodal import CameraEvidence
+    from desk_robot.room_station import RoomObservation
+
+    now = time.monotonic()
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.remember_room(RoomObservation(
+        1, 1000, now - 2.6, {},
+        "Shared temperature from USB, not robot eyewitness",
+    ))
+    hub.notify("robot-01", "handling_tilt", now - 15)
+    hub.notify("robot-01", "safety_fault", now - 4)
+    hub.notify("robot-01", "human_voice", now - 3.8)
+    for index, (kind, summary) in enumerate((
+        ("visual_look", "Possibly a blue cup"),
+        ("robot_status", "Battery at 42 percent"),
+        ("pickup_status", "Pickup incomplete, grasp unverified"),
+    )):
+        hub.remember_tool("robot-01", kind, summary, now - 3.5 + index * .1)
+    hub.remember_heard(
+        "robot-01", "compound_a", "Please look at the cup", now - 2.5,
+    )
+    hub.remember_heard(
+        "robot-01", "compound_b",
+        "Please look at the cup and check your battery and check the pickup",
+        now - 2.4,
+    )
+    hub.remember_spoken("robot-01", "I can inspect that", now - 2)
+    hub.frames["robot-01"].append(
+        CameraEvidence(b"jpeg", now - 1.8, .1, "speech")
+    )
+    hub.notify("robot-01", "touch_tap", now - .1)
+
+    timeline = hub.interaction_timeline("robot-01", now, limit=10)
+    kinds = {item["kind"] for item in timeline if item["channel"] == "tool"}
+    assert len(timeline) == 10
+    assert kinds == {"visual_look", "robot_status", "pickup_status"}
+    assert {item["channel"] for item in timeline} >= {
+        "human_voice", "human_transcript", "sensor", "tool",
+    }
+    assert sum(item["channel"] == "human_transcript" for item in timeline) == 2
+    assert any(item["kind"] == "safety_fault" for item in timeline)
+    prompt = compose_brain_context([], [], timeline).interaction
+    assert "latched safety fault" in prompt
+    assert "Recent model ASR guess" in prompt
+    assert all(
+        label in prompt or "Some requested tool results did not fit" in prompt
+        for label in (
+            "Earlier local VLM guess", "Recent head telemetry",
+            "Mac pickup job receipt",
+        )
+    )
+    assert len(prompt) <= 400
+    assert not any(
+        item["channel"] == "tool"
+        for item in hub.interaction_timeline("robot-02", now)
+    )
+
+    # A deliberately smaller read loses valid receipts. Warn the model
+    # instead of silently claiming all requested facts were included.
+    limited = hub.interaction_timeline("robot-01", now, limit=4)
+    assert any(
+        item.get("omitted_current_tool_kinds")
+        for item in limited if item["channel"] == "human_transcript"
+    )
+    limited_prompt = compose_brain_context([], [], limited).interaction
+    assert "Some requested tool results did not fit" in limited_prompt
+
+
+def test_newer_vad_does_not_promote_prior_turn_tools_into_current_answer():
+    now = time.monotonic()
+    hub = CameraFrameHub(["robot-01"])
+    hub.notify("robot-01", "human_voice", now - 6)
+    hub.remember_tool("robot-01", "visual_look", "Old blue cup", now - 5)
+    hub.notify("robot-01", "human_voice", now - 3)
+    hub.remember_heard(
+        "robot-01", "new_question", "Check your battery", now - 2,
+    )
+    hub.remember_tool(
+        "robot-01", "robot_status", "Current battery 31 percent", now - 1,
+    )
+    chosen = hub.interaction_timeline("robot-01", now, limit=3)
+    assert {item["kind"] for item in chosen if item["channel"] == "tool"} == {
+        "robot_status",
+    }
+    result = compose_brain_context([], [], chosen).interaction
+    assert "Current battery 31 percent" in result
+    assert "Old blue cup" not in result
+    assert "Some requested tool results did not fit" not in result
+
+
 def test_prompt_deduplicates_repetitive_camera_receipts_and_keeps_tool_results():
     timeline = [
         {"channel": "tool", "kind": "visual_look", "content": "The cup moved"},

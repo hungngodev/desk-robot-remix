@@ -839,49 +839,73 @@ class CameraFrameHub:
                     and entry["kind"] == "safety_fault"):
                 required.add(index)
                 break
-        for channel in modalities:
+        # Reserve the active human turn and its completed tool kinds before
+        # low-value camera or playback-unverified cues consume the timeline.
+        # The WROOM safety fault above always retains the first slot.
+        for channel in ("human_voice", "human_transcript"):
             if len(required) >= limit:
                 break
             for index in range(len(items) - 1, -1, -1):
                 if items[index][1]["channel"] == channel:
                     required.add(index)
                     break
-        # A fleet pet can finish a memory lookup, camera question and
-        # status tool within one short human utterance. Reserving only the
-        # latest generic "tool" would erase the other completed results
-        # during a sensor burst before the brain can format them.
-        if len(required) < limit:
-            # Preserve both clauses of a single recent human request before
-            # unrelated status/tool completions consume the last slots.
-            # Reserve exactly one earlier ASR here; the modality pass already
-            # selected the newest. This fixes a compound request losing its
-            # first clause after several tools and touch events arrive.
-            heard = sum(
-                items[i][1]["channel"] == "human_transcript"
-                for i in required
-            )
-            if heard == 1:
-                for index in range(len(items) - 1, -1, -1):
-                    if index not in required and items[index][1]["channel"] == "human_transcript":
-                        required.add(index)
-                        break
-            seen_tools = {
-                items[i][1].get("kind") for i in required
-                if items[i][1]["channel"] == "tool"
-            }
+        # An old receipt can still be historical context, but it cannot
+        # consume a priority slot for a newer authenticated human VAD.
+        current_voice_at = self.voice_started_at[robot_id]
+        seen_tools: set[str] = set()
+        for index in range(len(items) - 1, -1, -1):
+            if len(required) >= limit:
+                break
+            stamp, entry = items[index]
+            if (entry["channel"] == "tool"
+                    and stamp >= current_voice_at
+                    and entry["kind"] not in seen_tools):
+                required.add(index)
+                seen_tools.add(entry["kind"])
+        # Keep an earlier clause from the same human utterance after the
+        # distinct tool receipts it may have requested have been reserved.
+        if len(required) < limit and any(
+            items[i][1]["channel"] == "human_transcript" for i in required
+        ):
             for index in range(len(items) - 1, -1, -1):
-                if len(required) >= limit:
-                    break
-                entry = items[index][1]
-                if entry["channel"] == "tool" and entry.get("kind") not in seen_tools:
+                if (index not in required
+                        and items[index][1]["channel"] == "human_transcript"
+                        and items[index][0] >= current_voice_at):
                     required.add(index)
-                    seen_tools.add(entry.get("kind"))
+                    break
+        # Preserve the last event from other modalities when room remains.
+        # An older tool from before this VAD gets normal historical priority.
+        for channel in modalities[2:]:
+            if len(required) >= limit:
+                break
+            for index in range(len(items) - 1, -1, -1):
+                if items[index][1]["channel"] == channel:
+                    required.add(index)
+                    break
         selected = set(required)
         for index in range(len(items) - 1, -1, -1):
             if len(selected) >= limit:
                 break
             selected.add(index)
-        return [items[index][1] for index in sorted(selected)]
+        selected_entries = [dict(items[index][1]) for index in sorted(selected)]
+        # The composer cannot warn about a result it never receives. Attach
+        # bounded internal omission metadata to a retained ASR clause, not a
+        # fake completed tool receipt or a new instruction-bearing channel.
+        current_tools = {
+            entry["kind"] for stamp, entry in items
+            if entry["channel"] == "tool" and stamp >= current_voice_at
+        }
+        included_tools = {
+            entry["kind"] for entry in selected_entries
+            if entry["channel"] == "tool"
+        }
+        omitted_tools = sorted(current_tools - included_tools)
+        if omitted_tools:
+            for entry in reversed(selected_entries):
+                if entry["channel"] == "human_transcript":
+                    entry["omitted_current_tool_kinds"] = omitted_tools
+                    break
+        return selected_entries
 
     def discard_memory_tools(self, robot_id: str) -> None:
         """Retract cached private recall after operator memory correction."""
