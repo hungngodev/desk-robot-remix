@@ -22,7 +22,7 @@ def test_modular_head_guide_reconciles_paid_sense_and_pending_physical_gate():
     assert "**uninspected**" in intro
     assert "November 7" in intro
     assert "older **\u002418.87** displayed listing was not the paid amount" in intro
-    assert "earlier **\u002421.11 head subtotal**" in intro
+    assert "**$21.11 head subtotal**" in intro
     assert "one-complete-robot.md" in intro
     assert "Cozmars" in intro and "unprinted fallback" in intro
 
