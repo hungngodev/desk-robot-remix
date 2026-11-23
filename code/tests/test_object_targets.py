@@ -101,6 +101,28 @@ def test_capture_sequence_overrules_out_of_order_detection_completion(
         assert result.arrived is False and result.may_execute is False
 
 
+def test_oversized_camera_sequence_cannot_resurrect_a_hidden_object():
+    _, _, seen = fixtures()
+    absent = replace(seen, source="camera_not_seen", receipt_us=960_000,
+                     frame_seq=24, floor_mm=None, projection_qualified=False)
+    forged = replace(seen, receipt_us=970_000, frame_seq=0x1_0000_0000)
+    for rows in ([seen, absent, forged], [forged, absent, seen]):
+        result = resolve(rows)
+        assert result.status == "last_seen"
+        assert result.reason == "not_currently_confirmed"
+        assert result.confirmed_floor_mm is None
+        assert result.search_hint_mm == (120, 220)
+        assert result.arrived is False and result.may_execute is False
+
+
+def test_uint32_max_camera_sequence_is_accepted():
+    _, _, seen = fixtures()
+    result = resolve([replace(seen, frame_seq=0xFFFFFFFF)])
+    assert result.status == "current_sighting"
+    assert result.confirmed_floor_mm == (120, 220)
+    assert not result.arrived and not result.may_execute
+
+
 def test_seen_from_an_old_camera_boot_or_origin_is_only_historical():
     _, _, seen = fixtures()
     for e in [replace(seen, camera_boot=100), replace(seen, origin_id="prior")]:

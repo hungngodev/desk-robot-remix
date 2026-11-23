@@ -121,7 +121,7 @@ def _valid_evidence(e: object) -> bool:
             and type(e.camera_boot) is int and 0 <= e.camera_boot <= 0xFFFFFFFF
             and _identity(e.host_boot_id)
             and type(e.camera_grant) is int and 0 <= e.camera_grant <= 0xFFFFFFFF
-            and type(e.frame_seq) is int and e.frame_seq > 0
+            and type(e.frame_seq) is int and 0 < e.frame_seq <= 0xFFFFFFFF
             and _identity(e.origin_id) and type(e.epoch) is int and e.epoch >= 0
             and _identity(e.anchor_id) and _identity(e.calibration_id)
             and (e.floor_mm is None or _floor(e.floor_mm))
