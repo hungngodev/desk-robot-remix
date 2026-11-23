@@ -1,7 +1,6 @@
 import copy
 
 import pytest
-
 from desk_robot.spatial_pose import PoseError, PoseFence, decode_pose
 
 
