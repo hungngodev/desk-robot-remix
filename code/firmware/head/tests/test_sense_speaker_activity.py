@@ -28,33 +28,51 @@ def test_speaker_activity_epoch_rejects_cancelled_writes_and_old_capture(tmp_pat
 int main() {
     desk_robot::SenseSpeakerActivity activity;
     const auto old_generation = activity.generation();
-    const auto old_capture = activity.SnapshotNow();
-    activity.RecordAccepted(old_generation, 160);
-    assert(activity.AdvancedSince(old_capture));
+    const auto old_capture = activity.BeginWindow();
+    activity.RecordAccepted(old_generation, 160, 10000);
+    assert(activity.AdvancedSince(old_capture, 10000));
 
     // STOP invalidates a blocking I2S writer's original generation.
     activity.Reset();
-    const auto new_capture = activity.SnapshotNow();
-    activity.RecordAccepted(old_generation, 320);
-    assert(!activity.AdvancedSince(new_capture));
-    assert(!activity.AdvancedSince(old_capture));
-    activity.RecordAccepted(activity.generation(), 0);
-    activity.RecordAccepted(activity.generation(), -1);
-    assert(!activity.AdvancedSince(new_capture));
-    activity.RecordAccepted(activity.generation(), 160);
-    assert(activity.AdvancedSince(new_capture));
+    const auto new_capture = activity.BeginWindow();
+    activity.RecordAccepted(old_generation, 320, 15000);
+    assert(!activity.AdvancedSince(new_capture, 20000));
+    assert(!activity.AdvancedSince(old_capture, 10000));
+    activity.RecordAccepted(activity.generation(), 0, 15001);
+    activity.RecordAccepted(activity.generation(), -1, 15002);
+    assert(!activity.AdvancedSince(new_capture, 20000));
+    activity.RecordAccepted(activity.generation(), 160, 20000);
+    assert(activity.AdvancedSince(new_capture, 20000));
 
     // A newer STOP invalidates even the previously active capture.
     activity.Reset();
-    assert(!activity.AdvancedSince(new_capture));
-    const auto current = activity.SnapshotNow();
-    activity.RecordAccepted(old_generation, 160);
-    assert(!activity.AdvancedSince(current));
-    activity.RecordAccepted(activity.generation(), INT_MAX);
-    activity.RecordAccepted(activity.generation(), INT_MAX);
-    activity.RecordAccepted(activity.generation(), INT_MAX);
+    assert(!activity.AdvancedSince(new_capture, 20000));
+    const auto current = activity.BeginWindow();
+    activity.RecordAccepted(old_generation, 160, 10000);
+    assert(!activity.AdvancedSince(current, 30000));
+    activity.RecordAccepted(activity.generation(), INT_MAX, 30000);
+    activity.RecordAccepted(activity.generation(), INT_MAX, 30000);
+    activity.RecordAccepted(activity.generation(), INT_MAX, 30000);
     assert(activity.SnapshotNow().frames > UINT32_MAX);
-    assert(activity.AdvancedSince(current));
+    assert(activity.AdvancedSince(current, 30000));
+
+    // An accepted I2S callback AFTER the final mic sample cannot be
+    // misreported as speaker activity inside the recorded PCM window.
+    activity.Reset();
+    const auto before_last_mic_frame = activity.BeginWindow();
+    activity.RecordAccepted(activity.generation(), 320, 60001);
+    assert(!activity.AdvancedSince(before_last_mic_frame, 60000));
+    activity.RecordAccepted(activity.generation(), 320, 60002);
+    assert(!activity.AdvancedSince(before_last_mic_frame, 60000));
+    assert(activity.AdvancedSince(before_last_mic_frame, 60001));
+
+    // Later digital acceptance must not mask earlier valid activity.
+    activity.Reset();
+    const auto valid_window = activity.BeginWindow();
+    activity.RecordAccepted(activity.generation(), 160, 70000);
+    activity.RecordAccepted(activity.generation(), 160, 71000);
+    assert(activity.AdvancedSince(valid_window, 70500));
+    assert(!activity.AdvancedSince(valid_window, 69999));
 }
 """
     )
@@ -74,10 +92,12 @@ int main() {
 def test_selected_codec_requires_current_generation_activity_for_bench_capture():
     source = (SENSE / "sense_reference_codec.cc").read_text()
     header = (SENSE / "sense_reference_codec.h").read_text()
-    assert "speaker_activity_.RecordAccepted(started_generation, accepted);" in source
+    assert "speaker_activity_.RecordAccepted(" in source
+    assert "started_generation, accepted, accepted_at_us);" in source
+    assert "const int64_t accepted_at_us = esp_timer_get_time();" in source
     assert "speaker_activity_.Reset();" in source
-    assert "speaker_activity_.SnapshotNow();" in source
-    assert "speaker_activity_.AdvancedSince(bench_speaker_at_start_)" in source
+    assert "speaker_activity_.BeginWindow();" in source
+    assert "speaker_activity_.AdvancedSince(bench_speaker_at_start_, capture_end_us)" in source
     assert "desk_robot::SenseSpeakerActivity speaker_activity_{};" in header
     assert "desk_robot::SenseSpeakerActivity::Snapshot bench_speaker_at_start_{};" in header
     # Lifetime diagnostics still count old I2S accepts, but they cannot

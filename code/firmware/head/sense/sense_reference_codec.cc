@@ -207,7 +207,7 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
             if (!already_ready && bench_window_.ready()) {
                 std::lock_guard<std::mutex> reference_lock(reference_mutex_);
                 bench_speaker_activity_in_window_ =
-                    speaker_activity_.AdvancedSince(bench_speaker_at_start_);
+                    speaker_activity_.AdvancedSince(bench_speaker_at_start_, capture_end_us);
             }
         }
     }
@@ -262,9 +262,11 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
             reference_integrity_failed_ = true;
             log_short = short_writes == 1 || (short_writes % 32U) == 0U;
         }
-        speaker_activity_.RecordAccepted(started_generation, accepted);
+        const int64_t accepted_at_us = esp_timer_get_time();
+        speaker_activity_.RecordAccepted(
+            started_generation, accepted, accepted_at_us);
         if (accepted > 0 && started_generation == speaker_activity_.generation()) {
-            PublishAcceptedLocked(data, accepted, volume, esp_timer_get_time());
+            PublishAcceptedLocked(data, accepted, volume, accepted_at_us);
         } else if (accepted > 0) {
             // The physical TX DMA may have accepted some old audio. It must
             // NOT be relabeled as current-generation echo reference.
@@ -392,7 +394,7 @@ bool SenseReferenceCodec::BeginBenchPcmCapture() {
         // The snapshot belongs to this authenticated START, not a later
         // asynchronous HTTP read of lifetime counters.
         std::lock_guard<std::mutex> reference_lock(reference_mutex_);
-        bench_speaker_at_start_ = speaker_activity_.SnapshotNow();
+        bench_speaker_at_start_ = speaker_activity_.BeginWindow();
     }
     bench_speaker_activity_in_window_ = false;
     bench_capture_generation_.fetch_add(1, std::memory_order_acq_rel);
