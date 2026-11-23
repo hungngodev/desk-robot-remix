@@ -42,10 +42,20 @@ def test_optical_center_hits_measured_floor_and_positive_ray_directions():
 
 def test_mount_yaw_right_rotates_forward_ray_towards_negative_y():
     cal = calibration()
-    new_lens = replace(cal.lens, mount_yaw_deg=45)
+    # Keep the positive yaw fixture inside DockCameraCalibration's measured
+    # mount envelope, rather than bypassing the production +/-20 degree gate.
+    new_lens = replace(cal.lens, mount_yaw_deg=15)
     rotated = project(replace(cal, lens=new_lens), 320, 240)
-    assert rotated.x_mm == pytest.approx(122.474487, abs=0.01)
-    assert rotated.y_mm == pytest.approx(-122.474487, abs=0.01)
+    assert rotated.x_mm == pytest.approx(167.3032607476, abs=0.01)
+    assert rotated.y_mm == pytest.approx(-44.8287736084, abs=0.01)
+
+
+def test_mount_yaw_outside_measured_limits_cannot_project():
+    cal = calibration()
+    with pytest.raises(ValueError, match="mount offset or yaw outside measured limits"):
+        replace(cal.lens, mount_yaw_deg=45)
+    with pytest.raises(ValueError, match="mount offset or yaw outside measured limits"):
+        replace(cal.lens, mount_yaw_deg=-45)
 
 
 def test_horizon_grazing_and_crop_rejected():
