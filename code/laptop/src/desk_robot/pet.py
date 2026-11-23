@@ -2173,7 +2173,10 @@ class PetController:
         acknowledged = False
         try:
             await asyncio.wait_for(cue("mood:" + mood), timeout=0.7)
-            acknowledged = True
+            # A queued head request can outlive the Mac voice/consent grant.
+            # Do not count its late receipt as a current accepted expression.
+            # This cannot undo a frame already displayed by the device.
+            acknowledged = permitted()
         except (HeadError, TimeoutError, OSError, ValueError) as error:
             state.last_error = (
                 f"Optional contextual OLED cue unavailable: {type(error).__name__}"

@@ -5455,6 +5455,53 @@ async def test_failed_or_cancelled_face_post_does_not_consume_mood_cooldown(flee
     assert head.calls[-1] == "mood:neutral"
 
 
+async def test_model_face_receipt_after_permission_revocation_restores_cooldown(
+    fleet,
+):
+    """A late OLED response cannot consume a revoked decision's cue budget."""
+    from desk_robot.pet import PetState
+
+    class DelayedHead:
+        def __init__(self):
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+            self.calls = []
+
+        async def face_event(self, event):
+            self.calls.append(event)
+            self.entered.set()
+            await self.release.wait()
+
+    robot = fleet.robots[0]
+    head = DelayedHead()
+    pet = object.__new__(PetController)
+    pet.settings = SimpleNamespace(mode="hardware")
+    pet.heads = {robot.id: head}
+    pet.states = {robot.id: PetState(enabled=True, generation=3)}
+    state = pet.states[robot.id]
+    grant = {"allowed": True}
+    task = asyncio.create_task(
+        pet._cue_decided_face(robot.id, "thinking", lambda: grant["allowed"])
+    )
+    try:
+        await asyncio.wait_for(head.entered.wait(), timeout=0.5)
+        grant["allowed"] = False
+        head.release.set()
+        await asyncio.wait_for(task, timeout=1)
+        assert head.calls == ["mood:thinking"]  # request might have reached OLED
+        assert state.last_model_face_cue_at == float("-inf")
+        assert state.last_model_face_attempt_at > float("-inf")
+        # The existing one second attempt throttle still prevents flooding.
+        grant["allowed"] = True
+        await pet._cue_decided_face(
+            robot.id, "neutral", lambda: grant["allowed"]
+        )
+        assert head.calls == ["mood:thinking"]
+    finally:
+        head.release.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 @pytest.mark.parametrize("invalid_mood", [
     {}, ["happy"], True, 11, "mood:drive",
 ])
