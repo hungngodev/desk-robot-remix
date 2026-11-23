@@ -1630,6 +1630,70 @@ static void belly_adc_does_not_refresh_stale_jaw_sample() {
   CHECK(!body.state().armed);
 }
 
+static void belly_acquisition_identity_cannot_forge_contact() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  body.set_boot_epoch(123U);
+  desk_robot::AccessoryReadings readings{};
+  auto& f = readings.force;
+  f.present = f.valid = true;
+  f.valid_mask = 3U;
+  f.adc[0] = 111;
+  f.adc[1] = 555;
+  f.belly_sample_seq = 10U;
+  f.jaw_sample_seq = 1U;
+  f.belly_at_ms = f.jaw_at_ms = f.at_ms = 100U;
+  body.set_accessories(readings, 100U);
+  CHECK(send(body, "aux", 101U).find("\"belly_valid\":true") !=
+        std::string::npos);
+  // Altered ADC under the same completed conversion cannot forge contact.
+  f.adc[0] = 333;
+  body.set_accessories(readings, 110U);
+  const auto changed = send(body, "aux", 111U);
+  CHECK(changed.find("\"belly_valid\":false") != std::string::npos);
+  CHECK(changed.find("\"jaw_valid\":true,\"valid\":false") !=
+        std::string::npos);
+  f.adc[0] = 111;  // cached previously good value is not a recovery
+  body.set_accessories(readings, 112U);
+  CHECK(send(body, "aux", 113U).find("\"belly_valid\":false") !=
+        std::string::npos);
+  f.adc[0] = 444;
+  f.belly_sample_seq = 11U;
+  f.belly_at_ms = 114U;
+  body.set_accessories(readings, 114U);
+  CHECK(send(body, "aux", 115U).find("\"belly_valid\":true") !=
+        std::string::npos);
+  f.adc[0] = 555;
+  f.belly_sample_seq = 10U;  // backwards sequence, newer timestamp
+  f.belly_at_ms = 116U;
+  body.set_accessories(readings, 116U);
+  CHECK(send(body, "aux", 117U).find("\"belly_valid\":false") !=
+        std::string::npos);
+  f.adc[0] = 666;
+  f.belly_sample_seq = 12U;
+  f.belly_at_ms = 118U;
+  body.set_accessories(readings, 118U);
+  CHECK(send(body, "aux", 119U).find("\"belly_valid\":true") !=
+        std::string::npos);
+
+  // Sequence and hardware acquisition time can both legitimately wrap.
+  desk_robot::BodyControl wrapped(desk_robot::BodyProfile::DcPwm);
+  const std::uint32_t near_wrap = UINT32_MAX - 4U;
+  f.adc[0] = 777;
+  f.belly_sample_seq = UINT32_MAX;
+  f.belly_at_ms = near_wrap;
+  f.jaw_sample_seq = UINT32_MAX;
+  f.jaw_at_ms = f.at_ms = near_wrap;
+  wrapped.set_accessories(readings, near_wrap);
+  CHECK(send(wrapped, "aux", near_wrap).find("\"belly_valid\":true") !=
+        std::string::npos);
+  f.belly_sample_seq = 1U;
+  f.belly_at_ms = 4U;
+  f.adc[0] = 888;
+  wrapped.set_accessories(readings, 4U);
+  CHECK(send(wrapped, "aux", 5U).find("\"belly_valid\":true") !=
+        std::string::npos);
+}
+
 static void gripper_jaw_consumes_at_most_four_degrees_per_adc_conversion() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
   body.require_grip_feedback(true);
@@ -2820,6 +2884,7 @@ int main() {
     complete_robot_requires_boot_installed_and_fresh_dock_expander();
     dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof();
     belly_adc_does_not_refresh_stale_jaw_sample();
+    belly_acquisition_identity_cannot_forge_contact();
     physical_gripper_stops_ramping_when_adc_is_not_trustworthy();
     gripper_jaw_consumes_at_most_four_degrees_per_adc_conversion();
     jaw_acquisition_identity_prevents_forged_force_relief();

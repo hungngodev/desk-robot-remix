@@ -286,6 +286,11 @@ class BodyControl {
   // The ADS1115 producer advances channel-1 sequence AND acquisition
   // time only after a completed, channel-selected conversion. An altered
   // cached ADC word must never authorize a stronger squeeze.
+  // Independent read-only belly squeeze acquisitions must resist replay.
+  bool belly_sample_seen_ = false;
+  bool belly_provenance_bad_ = false;
+  std::uint32_t belly_last_seq_ = 0, belly_last_at_ms_ = 0;
+  std::int16_t belly_last_adc_ = 0;
   bool jaw_sample_seen_ = false;
   bool jaw_provenance_bad_ = false;
   std::uint32_t jaw_last_seq_ = 0, jaw_last_at_ms_ = 0;

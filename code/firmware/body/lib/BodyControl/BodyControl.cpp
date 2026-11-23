@@ -432,6 +432,35 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
   const bool was_armed = state_.armed;
   state_.accessories = readings;
   const auto& force = readings.force;
+  const bool belly_valid = (force.valid_mask & 1U) != 0U ||
+      (force.valid_mask == 0U && force.valid);
+  const bool belly_current = force.present && belly_valid &&
+      force.belly_sample_seq != 0U && now_ms - force.belly_at_ms < 500U &&
+      force.adc[0] != -32768 && force.adc[0] != 32767;
+  const std::uint32_t belly_seq_delta =
+      force.belly_sample_seq - belly_last_seq_;
+  const std::uint32_t belly_time_delta =
+      force.belly_at_ms - belly_last_at_ms_;
+  const bool belly_repeated = belly_current && belly_sample_seen_ &&
+      force.belly_sample_seq == belly_last_seq_ &&
+      force.belly_at_ms == belly_last_at_ms_ &&
+      force.adc[0] == belly_last_adc_;
+  const bool belly_new = belly_current &&
+      (!belly_sample_seen_ ||
+       (belly_seq_delta != 0U && belly_seq_delta < 0x80000000U &&
+        belly_time_delta != 0U && belly_time_delta < 0x80000000U));
+  if (belly_new) {
+    belly_sample_seen_ = true;
+    belly_last_seq_ = force.belly_sample_seq;
+    belly_last_at_ms_ = force.belly_at_ms;
+    belly_last_adc_ = force.adc[0];
+    belly_provenance_bad_ = false;
+  } else if ((belly_current && !belly_repeated) ||
+             (belly_sample_seen_ && !belly_current)) {
+    // Cached or altered readings are not new user contact. A genuinely
+    // newer completed channel-0 conversion restores read-only validity.
+    belly_provenance_bad_ = true;
+  }
   const bool jaw_valid = (force.valid_mask & 2U) != 0U ||
       (force.valid_mask == 0U && force.valid);
   const bool jaw_current = force.present && jaw_valid &&
@@ -1182,7 +1211,7 @@ void BodyControl::execute(const char* line, std::size_t length,
     // jaw channel must not suppress independent belly squeeze observation.
     const bool belly_unclipped = a.force.adc[0] != -32768 &&
                                  a.force.adc[0] != 32767;
-    const bool belly_fresh = ((a.force.valid_mask & 1U) != 0U ||
+    const bool belly_fresh = !belly_provenance_bad_ && a.force.present && ((a.force.valid_mask & 1U) != 0U ||
                               (a.force.valid_mask == 0U && a.force.valid)) &&
                              belly_unclipped &&
                              a.force.belly_sample_seq != 0U &&
