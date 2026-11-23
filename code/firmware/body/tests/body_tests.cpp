@@ -303,6 +303,42 @@ void framing() {
   CHECK(frame(body, receiver, "arm\nstop\nstatus\n", 0).size() == 3);
 }
 
+void serial_idle_frame_timeout() {
+  BodyControl body;
+  LineReceiver local_usb(true);
+  // A prior operator's incomplete prefix must never turn the next
+  // independent "arm" into a privileged local USB "rearm" command.
+  CHECK(frame(body, local_usb, "re", 100).empty());
+  const auto stale = frame(body, local_usb, "arm\\n", 100 + desk_robot::kWatchdogMs);
+  CHECK(stale.size() == 1 && stale[0] == "ERR input interbyte_timeout");
+  CHECK(!body.state().armed);
+  CHECK(frame(body, local_usb, "arm\\n", 601)[0] == "OK arm");
+  CHECK(frame(body, local_usb, "disarm\\n", 601)[0] == "OK disarm");
+
+  // Both a continued command within the budget and an ordinary new line
+  // remain valid, preserving normal UART fragmentation behavior.
+  LineReceiver remote;
+  CHECK(frame(body, remote, "ar", 1000).empty());
+  CHECK(frame(body, remote, "m\\n", 1000 + desk_robot::kWatchdogMs - 1)[0] ==
+        "OK arm");
+  CHECK(frame(body, remote, "disarm\\n", 1500)[0] == "OK disarm");
+
+  // CR before LF is still part of the unfinished frame; the timeout
+  // cannot authorize a command merely because LF arrives much later.
+  CHECK(frame(body, remote, "arm\\r", 1600).empty());
+  CHECK(frame(body, remote, "\\n", 1600 + desk_robot::kWatchdogMs)[0] ==
+        "ERR input interbyte_timeout");
+  CHECK(!body.state().armed);
+
+  // The serial acquisition clock is uint32 and legitimately wraps.
+  const std::uint32_t before_wrap = UINT32_MAX - 15U;
+  CHECK(frame(body, remote, "ar", before_wrap).empty());
+  CHECK(frame(body, remote, "m\\n", before_wrap + desk_robot::kWatchdogMs)[0] ==
+        "ERR input interbyte_timeout");
+  CHECK(frame(body, remote, "arm\\n", before_wrap + desk_robot::kWatchdogMs)[0] ==
+        "OK arm");
+}
+
 void independent_receivers() {
   BodyControl body;
   LineReceiver usb;
@@ -431,6 +467,7 @@ int main(int argc, char** argv) {
       {"rollover_timers", rollover_timers}, {"strict_integer_parser", strict_integer_parser},
       {"malformed_atomicity", malformed_atomicity},
       {"overlong_frame_recovery", overlong_frame_recovery}, {"framing", framing},
+      {"serial_idle_frame_timeout", serial_idle_frame_timeout},
       {"independent_receivers", independent_receivers}, {"status_honesty", status_honesty},
       {"guarded_head_timeout_cannot_rearm_from_reconnected_uart",
        guarded_head_timeout_cannot_rearm_from_reconnected_uart},

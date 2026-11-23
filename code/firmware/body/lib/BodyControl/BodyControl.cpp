@@ -1787,8 +1787,15 @@ void BodyControl::execute(const char* line, std::size_t length,
 bool LineReceiver::feed(char byte, std::uint32_t now_ms, BodyControl& control,
                         char* reply, std::size_t capacity, std::uint64_t sample_us) {
   control.tick(now_ms);
+  // The link may stall or reconnect between bytes. Reject the WHOLE stale
+  // line rather than joining an old command prefix to a later command.
+  // The uint32 elapsed comparison also works across millis() rollover.
+  if (frame_started_ && now_ms - last_byte_ms_ >= kWatchdogMs)
+    frame_timed_out_ = true;
   if (byte == '\n') {
-    if (overlong_) {
+    if (frame_timed_out_) {
+      std::snprintf(reply, capacity, "ERR input interbyte_timeout");
+    } else if (overlong_) {
       std::snprintf(reply, capacity, "ERR input line_too_long");
     } else if (invalid_) {
       std::snprintf(reply, capacity, "ERR input invalid_ascii");
@@ -1800,8 +1807,12 @@ bool LineReceiver::feed(char byte, std::uint32_t now_ms, BodyControl& control,
     saw_cr_ = false;
     invalid_ = false;
     overlong_ = false;
+    frame_started_ = false;
+    frame_timed_out_ = false;
     return true;
   }
+  frame_started_ = true;
+  last_byte_ms_ = now_ms;
   if (saw_cr_) invalid_ = true;  // CR is allowed only immediately before LF.
   if (byte == '\r') {
     saw_cr_ = true;

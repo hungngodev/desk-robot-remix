@@ -201,7 +201,7 @@ foreach(scenario
     queries_do_not_renew smooth_servos keepalive_extends_servo_lease
     stop_freezes_servos explicit_disarm_detaches watchdog_holds_servos
     rollover_timers strict_integer_parser malformed_atomicity
-    overlong_frame_recovery framing independent_receivers status_honesty
+    overlong_frame_recovery framing serial_idle_frame_timeout independent_receivers status_honesty
     deterministic_stream_stress)
   add_test(NAME ${scenario} COMMAND body_tests ${scenario})
 endforeach()

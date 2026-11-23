@@ -367,6 +367,11 @@ class LineReceiver {
   bool saw_cr_ = false;
   bool invalid_ = false;
   bool overlong_ = false;
+  // An unfinished serial line cannot span independent operator actions.
+  // Quarantine its suffix until LF if a gap exceeds the body watchdog.
+  bool frame_started_ = false;
+  bool frame_timed_out_ = false;
+  std::uint32_t last_byte_ms_ = 0;
 };
 
 }  // namespace desk_robot
