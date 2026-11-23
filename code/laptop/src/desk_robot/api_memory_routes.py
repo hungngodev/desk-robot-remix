@@ -267,7 +267,7 @@ def register_memory_routes(
 
 def register_voice_context_route(
     app: FastAPI, settings: Settings, *, authorize,
-    requested_tool_context, remember_tool_context,
+    requested_tool_context, remember_tool_context, current_tool_context,
 ) -> None:
     @app.get("/v1/pet/{robot_id}/voice-context", dependencies=[Depends(authorize)])
     async def pet_voice_context(
@@ -286,6 +286,8 @@ def register_voice_context_route(
         # Capture the current voice turn BEFORE off-thread SQLite lookups.
         # A completed older lookup must not become a new turn's memory cue.
         owner = requested_tool_context(request, robot_id)
+        if request.headers.get("x-desk-robot-tool-receipt") == "1" and owner is None:
+            raise HTTPException(409, "Voice memory tool turn identity unavailable")
         # SQLite lookups yield to operator edits. A valid voice turn token
         # alone cannot certify that retrieved private facts are still current.
         conversation = getattr(app.state.runtime, "conversation", None)
@@ -400,14 +402,9 @@ def register_voice_context_route(
         # Discard the entire private response, not merely its Mac timeline
         # receipt; the superseded caller has no authority to reuse these facts.
         if owner is not None:
-            if not isinstance(owner, tuple) or len(owner) != 2:
-                raise HTTPException(409, "Unverifiable voice tool turn identity")
-            turn_owner, turn_generation = owner
-            current_epochs = getattr(turn_owner, "_turn_epoch", None)
-            if (type(turn_generation) is not int
-                    or not isinstance(current_epochs, dict)
-                    or current_epochs.get(robot_id) != turn_generation):
-                raise HTTPException(409, "Voice tool turn superseded during memory retrieval")
+            current_tool_context(
+                owner, robot_id, "Voice tool turn superseded during memory retrieval"
+            )
         # Voice memory consent is independent from the vision opt-in.
         # Only a marked, still-current voice tool turn may publish a short
         # memory receipt; ordinary operator/dashboard reads cannot.

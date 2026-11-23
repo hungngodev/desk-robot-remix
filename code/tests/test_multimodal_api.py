@@ -999,6 +999,9 @@ def test_power_tool_does_not_write_old_sensor_receipt_into_new_human_turn(
             heads={robot: SlowSource()},
         ),
         multimodal=visual, start=noop, close=noop,
+        _voice_turn_generations={robot: 10},
+        voice_events=SimpleNamespace(monitor_ready=True, _event_generation=0),
+        pet=SimpleNamespace(voice_monitor_ready=True),
     )
     url = f"/v1/pet/{robot}/power-status"
     headers = _signed_tool_headers(
@@ -1050,6 +1053,9 @@ def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
     runtime = SimpleNamespace(
         coordinator=coord,
         multimodal=SimpleNamespace(hub=hub, _turn_epoch={rid: 0 for rid in ids}),
+        _voice_turn_generations={rid: 0 for rid in ids},
+        voice_events=SimpleNamespace(monitor_ready=True, _event_generation=0),
+        pet=SimpleNamespace(voice_monitor_ready=True),
     )
 
     async def start():
@@ -1947,6 +1953,9 @@ def test_native_memory_tool_receipt_respects_consent_turn_and_pet_isolation(
             settings.robot(rid)
         ))
         multimodal = SimpleNamespace(hub=hub, _turn_epoch={rid: 0 for rid in ids})
+        _voice_turn_generations = {rid: 0 for rid in ids}
+        voice_events = SimpleNamespace(monitor_ready=True, _event_generation=0)
+        pet = SimpleNamespace(voice_monitor_ready=True)
 
         async def start(self):
             pass
@@ -2172,6 +2181,9 @@ def test_sensor_tool_receipt_enters_same_mac_history_only_from_current_voice_too
             heads={robot: head},
         ),
         multimodal=visual,
+        _voice_turn_generations={robot: 5},
+        voice_events=SimpleNamespace(monitor_ready=True, _event_generation=0),
+        pet=SimpleNamespace(voice_monitor_ready=True),
         start=noop, close=noop,
     )
     token = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
@@ -2270,6 +2282,9 @@ def test_slow_readonly_tool_receipt_cannot_cross_into_new_human_turn(
                 heads={robot: Head()},
             ),
             memory=memory, multimodal=visual,
+            _voice_turn_generations={robot: 7},
+            voice_events=SimpleNamespace(monitor_ready=True, _event_generation=0),
+            pet=SimpleNamespace(voice_monitor_ready=True),
             conversation=SimpleNamespace(
                 _private_memory_generation={rid: 0 for rid in ids},
             ),
@@ -2287,6 +2302,7 @@ def test_slow_readonly_tool_receipt_cannot_cross_into_new_human_turn(
                 try:
                     assert entered.wait(2), "Slow real tool read did not start"
                     visual._turn_epoch[robot] += 1  # New authenticated VAD.
+                    runtime._voice_turn_generations[robot] += 1
                 finally:
                     release.set()
                 stale = pending.result(timeout=4)
@@ -3038,3 +3054,175 @@ def test_native_delayed_asr_never_gains_retroactive_storage_consent(
         assert old_parent.status_code == 200
         assert old_parent.json()["stored"] is False
         assert len(memory.recent(robot)) == 1
+
+
+def test_signed_tool_receipt_requires_current_xiaozhi_generation_not_mac_epoch(
+    settings, tokens, monkeypatch,
+):
+    """Unused old signed N cannot arrive after N+1 with an unchanged Mac epoch."""
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    robot = settings.robots[0].id
+    peer = settings.robots[1].id
+    hub = CameraFrameHub([r.id for r in settings.robots])
+    visual = SimpleNamespace(hub=hub, _turn_epoch={robot: 7, peer: 7})
+    calls = []
+
+    class Head:
+        async def status(self):
+            calls.append("status")
+            return {
+                "robot_id": robot, "armed": False,
+                "backend": "stepper_28byj48", "safety": {"fault": "none"},
+            }
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(
+            robot=lambda rid: settings.robot(rid), heads={robot: Head()},
+        ),
+        multimodal=visual, _voice_turn_generations={robot: 41},
+        voice_events=SimpleNamespace(monitor_ready=True, _event_generation=0),
+        pet=SimpleNamespace(voice_monitor_ready=True),
+        start=noop, close=noop,
+    )
+    path = f"/v1/robots/{robot}/status"
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        old_signed = _signed_tool_headers(
+            settings, tokens, robot, path, 41, monkeypatch,
+        )
+        runtime._voice_turn_generations[robot] = 42
+        assert client.get(path, headers=old_signed).status_code == 409
+        assert calls == []
+        assert visual._turn_epoch[robot] == 7
+        assert hub.recent_tool_context(robot, time.monotonic()) == []
+
+        current_signed = _signed_tool_headers(
+            settings, tokens, robot, path, 42, monkeypatch,
+        )
+        assert client.get(path, headers=current_signed).status_code == 200
+        assert [entry[0] for entry in hub.tool_history[robot]] == ["robot_status"]
+        assert client.get(path, headers=current_signed).status_code == 409
+        assert calls == ["status"]
+        assert hub.tool_history[peer] == []
+
+        foreign_signed = _signed_tool_headers(
+            settings, tokens, peer, f"/v1/robots/{peer}/status", 42,
+            monkeypatch,
+        )
+        assert client.get(path, headers=foreign_signed).status_code == 409
+        assert calls == ["status"]
+
+
+def test_signed_tool_receipt_fails_closed_on_monitor_loss_and_reconnect(
+    settings, tokens, monkeypatch,
+):
+    """Missing monitor, generation map, or changed stream epoch denies the tool."""
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    robot = settings.robots[0].id
+    hub = CameraFrameHub([robot])
+    visual = SimpleNamespace(hub=hub, _turn_epoch={robot: 9})
+    calls = []
+
+    class Head:
+        async def status(self):
+            calls.append("status")
+            return {"robot_id": robot, "safety": {"fault": "none"}}
+
+    async def noop():
+        pass
+
+    listener = SimpleNamespace(monitor_ready=False, _event_generation=0)
+    pet = SimpleNamespace(voice_monitor_ready=True)
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(
+            robot=lambda rid: settings.robot(rid), heads={robot: Head()},
+        ),
+        multimodal=visual, _voice_turn_generations={robot: 51},
+        voice_events=listener, pet=pet, start=noop, close=noop,
+    )
+    path = f"/v1/robots/{robot}/status"
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        denied = _signed_tool_headers(
+            settings, tokens, robot, path, 51, monkeypatch,
+        )
+        assert client.get(path, headers=denied).status_code == 409
+        listener.monitor_ready = True
+        pet.voice_monitor_ready = False
+        assert client.get(path, headers=denied).status_code == 409
+        pet.voice_monitor_ready = True
+        runtime._voice_turn_generations = None
+        assert client.get(path, headers=denied).status_code == 409
+        assert calls == []
+        # Once a new authenticated source generation is published, only
+        # its own newly signed request can enter conversational history.
+        listener._event_generation += 1
+        runtime._voice_turn_generations = {robot: 52}
+        assert client.get(path, headers=denied).status_code == 409
+        accepted = _signed_tool_headers(
+            settings, tokens, robot, path, 52, monkeypatch,
+        )
+        assert client.get(path, headers=accepted).status_code == 200
+        assert len(hub.tool_history[robot]) == 1
+
+
+def test_signed_status_result_drops_when_source_changes_during_head_await(
+    settings, tokens, monkeypatch,
+):
+    """N->N+1 while hardware read waits must not return old status or history."""
+    import asyncio
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    robot = settings.robots[0].id
+    hub = CameraFrameHub([robot])
+    visual = SimpleNamespace(hub=hub, _turn_epoch={robot: 15})
+    entered, release = threading.Event(), threading.Event()
+
+    class Head:
+        async def status(self):
+            entered.set()
+            assert await asyncio.to_thread(release.wait, 3)
+            return {"robot_id": robot, "safety": {"fault": "none"}}
+
+    async def noop():
+        pass
+
+    listener = SimpleNamespace(monitor_ready=True, _event_generation=0)
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(
+            robot=lambda rid: settings.robot(rid), heads={robot: Head()},
+        ),
+        multimodal=visual, _voice_turn_generations={robot: 61},
+        voice_events=listener, pet=SimpleNamespace(voice_monitor_ready=True),
+        start=noop, close=noop,
+    )
+    path = f"/v1/robots/{robot}/status"
+    old = _signed_tool_headers(settings, tokens, robot, path, 61, monkeypatch)
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(client.get, path, headers=old)
+            try:
+                assert entered.wait(2)
+                runtime._voice_turn_generations[robot] = 62
+                listener._event_generation += 1
+                assert visual._turn_epoch[robot] == 15
+            finally:
+                release.set()
+            result = pending.result(timeout=4)
+            assert result.status_code == 409
+            assert "superseded" in result.json()["detail"]
+    assert hub.tool_history[robot] == []

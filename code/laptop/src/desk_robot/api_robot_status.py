@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, Request
 
 from .config import Settings
 from .transport import HeadError
@@ -61,7 +61,7 @@ def _json_safe_telemetry(value: object) -> object:
 
 def register_robot_status_routes(
     app: FastAPI, settings: Settings, *, authorize, coordinator,
-    requested_tool_context, remember_tool_context,
+    requested_tool_context, remember_tool_context, current_tool_context,
 ) -> None:
     # Only accepted human-tool receipts advance this in-process cursor.
     # Dashboard polling still exposes historical raw diagnostics without
@@ -79,15 +79,9 @@ def register_robot_status_routes(
         """
         if request.headers.get("x-desk-robot-tool-receipt") != "1":
             return
-        if not isinstance(owner, tuple) or len(owner) != 2:
-            raise HTTPException(409, "Voice telemetry tool turn identity unavailable")
-        visual, generation = owner
-        epochs = getattr(visual, "_turn_epoch", None)
-        if (getattr(app.state.runtime, "multimodal", None) is not visual
-                or type(generation) is not int
-                or not isinstance(epochs, dict)
-                or epochs.get(robot_id) != generation):
-            raise HTTPException(409, "Voice telemetry tool turn superseded during read")
+        current_tool_context(
+            owner, robot_id, "Voice telemetry tool turn superseded during read"
+        )
 
     def previous_seq(key: tuple[str, str], boot: int) -> int | None:
         cursor = last_aux_context_seq.get(key)

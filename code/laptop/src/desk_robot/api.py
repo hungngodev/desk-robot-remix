@@ -232,9 +232,28 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         if not secrets.compare_digest(signature, expected):
             return None
 
-        visual = getattr(app.state.runtime, "multimodal", None)
+        runtime_owner = app.state.runtime
+        visual = getattr(runtime_owner, "multimodal", None)
         epochs = getattr(visual, "_turn_epoch", None)
-        if not isinstance(epochs, dict) or robot_id not in epochs:
+        source_generations = getattr(runtime_owner, "_voice_turn_generations", None)
+        listener = getattr(runtime_owner, "voice_events", None)
+        listener_epoch = getattr(listener, "_event_generation", None)
+        # Mac camera epochs cancel local work; they are NOT signed Xiaozhi
+        # voice generations. The active authenticated server stream must
+        # independently own the exact signed generation before any read.
+        if (
+            not isinstance(epochs, dict)
+            or type(epochs.get(robot_id)) is not int
+            or not isinstance(source_generations, dict)
+            or type(source_generations.get(robot_id)) is not int
+            or source_generations[robot_id] != generation
+            or getattr(listener, "monitor_ready", False) is not True
+            or type(listener_epoch) is not int
+            or listener_epoch < 0
+            or getattr(
+                getattr(runtime_owner, "pet", None), "voice_monitor_ready", False
+            ) is not True
+        ):
             return None
 
         # Every signed bridge request is a one-shot provenance receipt.
@@ -246,14 +265,39 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         if receipt_id in consumed_tool_receipts:
             return None
         consumed_tool_receipts[receipt_id] = now + _TOOL_RECEIPT_REPLAY_TTL_S
-        return visual, epochs[robot_id]
+        return visual, epochs[robot_id], generation, listener, listener_epoch
+
+    def current_tool_context(owner, robot_id: str, message: str) -> None:
+        """Reject a completed tool result if EITHER independent turn moved."""
+        runtime_owner = app.state.runtime
+        if not isinstance(owner, tuple) or len(owner) != 5:
+            raise HTTPException(409, message)
+        visual, mac_epoch, source_generation, listener, listener_epoch = owner
+        epochs = getattr(visual, "_turn_epoch", None)
+        source_generations = getattr(runtime_owner, "_voice_turn_generations", None)
+        if (
+            getattr(runtime_owner, "multimodal", None) is not visual
+            or not isinstance(epochs, dict)
+            or type(mac_epoch) is not int
+            or epochs.get(robot_id) != mac_epoch
+            or not isinstance(source_generations, dict)
+            or type(source_generation) is not int
+            or source_generations.get(robot_id) != source_generation
+            or getattr(runtime_owner, "voice_events", None) is not listener
+            or getattr(listener, "monitor_ready", False) is not True
+            or type(listener_epoch) is not int
+            or getattr(listener, "_event_generation", None) != listener_epoch
+            or getattr(
+                getattr(runtime_owner, "pet", None), "voice_monitor_ready", False
+            ) is not True
+        ):
+            raise HTTPException(409, message)
 
     def remember_tool_context(owner, robot_id: str, kind: str, summary: str) -> bool:
         if owner is None:
             return False
-        visual, generation = owner
-        if visual._turn_epoch.get(robot_id) != generation:
-            return False
+        current_tool_context(owner, robot_id, "Voice tool result superseded")
+        visual = owner[0]
         visual.hub.remember_tool(robot_id, kind, summary, time.monotonic())
         return True
 
@@ -284,6 +328,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         app, settings, authorize=authorize, coordinator=coordinator,
         requested_tool_context=requested_tool_context,
         remember_tool_context=remember_tool_context,
+        current_tool_context=current_tool_context,
     )
 
     @app.post("/v1/robots/{robot_id}/dock/approach",
@@ -526,6 +571,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         app, settings, authorize=authorize, coordinator=coordinator,
         requested_tool_context=requested_tool_context,
         remember_tool_context=remember_tool_context,
+        current_tool_context=current_tool_context,
         native_pet_speech_policy=native_pet_speech_policy,
     )
 
@@ -535,6 +581,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         app, settings, authorize=authorize,
         requested_tool_context=requested_tool_context,
         remember_tool_context=remember_tool_context,
+        current_tool_context=current_tool_context,
     )
 
     @app.post("/v1/pet/{robot_id}/share", dependencies=[Depends(operator)])
