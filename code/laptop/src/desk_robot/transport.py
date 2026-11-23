@@ -10,6 +10,7 @@ import httpx
 from .aux import validate_aux
 from .config import RobotConfig, secret
 from .dock_ir import validate_ir
+from .spatial_pose import PoseError, PoseFence, PoseReceipt
 from .tof_optics import validate_optics
 
 # Sense emits signed int64 esp_timer_get_time() microseconds in both camera routes.
@@ -26,6 +27,7 @@ class Head(Protocol):
     async def aux_status(self) -> dict: ...
     async def optics_status(self) -> dict: ...
     async def ir_status(self) -> dict: ...
+    async def pose_status(self) -> PoseReceipt: ...
     async def snapshot(self) -> bytes: ...
 
 
@@ -190,6 +192,7 @@ class HttpHead:
         *, strict_capture: bool = False
     ):
         self.config = config
+        self.pose_fence = PoseFence(config.id)
         self.client = client
         self.lock = asyncio.Lock()
         self.command_lock = asyncio.Lock()
@@ -288,6 +291,23 @@ class HttpHead:
             if not isinstance(data, dict) or data.get("robot_id") != self.config.id:
                 raise HeadError("Status robot identity mismatch")
             return data
+
+    async def pose_status(self) -> PoseReceipt:
+        """Read authenticated v1 odometry without giving it any motion permit.
+
+        Body timestamps are not Mac timestamps. The fence compares sample
+        duration against receipt duration and requires a separate map anchor.
+        Old head firmware can omit this endpoint without breaking status.
+        """
+        async with self.lock:
+            try:
+                data = _response_object(await self._request("GET", "/api/pose"))
+                return self.pose_fence.observe(data, time.monotonic())
+            except PoseError as exc:
+                raise HeadError(f"Rejected pose receipt: {exc}") from exc
+            except BaseException:
+                self.pose_fence.invalidate("pose_transport_unavailable")
+                raise
 
     async def audio_reference_status(self) -> dict:
         """Read device AEC reference integrity, never infer audible playback.
