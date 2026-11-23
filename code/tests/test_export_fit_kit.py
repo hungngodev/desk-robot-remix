@@ -164,8 +164,8 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     assert len(commands) == (
         len(source.ADAPTERS) + len(source.GAUGES) + len(source.SPEAKER_FITS)
         + len(source.RANGER_FITS) + len(source.MG90S_FITS) + len(source.DOCKS)
-    ) == 20
-    assert len(report["parts"]) == 20
+    ) == 23
+    assert len(report["parts"]) == 23
     assert (rendered / "adapter_stls/tof_adjustable.stl").is_file()
     assert (rendered / "fit_stls/dock_contact_recess_gauge.stl").is_file()
     assert (rendered / "fit_stls/speaker_rect_fit_gauge.stl").is_file()
@@ -175,6 +175,12 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
         for name in source.MG90S_FITS
     )
     assert (rendered / "fit_stls/vl53l0x_gy530_fit_gauge.stl").is_file()
+    for height in (35, 45, 55):
+        name = f"vl53l0x_gy530_height_trial_{height:03}"
+        assert (rendered / f"fit_stls/{name}.stl").is_file()
+        assert next(item for item in report["parts"] if item["part"] == name)[
+            "temporary_fit_coupon"
+        ] is True
     assert (rendered / "dock_stls/dock_passive_fit.stl").is_file()
     assert (rendered / "dock_stls/dock_rail_entry_coupon.stl").is_file()
     assert (rendered / "dock_stls/dock_ir_pair_position_coupon.stl").is_file()
@@ -473,6 +479,25 @@ def test_low_cost_gy530_sensor_envelope_coupon_watertight(tmp_path):
     length = max(x[1] for x in coords) - min(x[1] for x in coords)
     assert 15 < width < 16
     assert 17 < length <= 18.1
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+@pytest.mark.parametrize("height", (35, 45, 55))
+def test_unpowered_gy530_optical_height_trial_is_watertight(tmp_path, height):
+    """A board rim height trial is not measured lens height or an installed mount."""
+    source = ROOT / "docs/cad/remixes/vl53l0x_gy530_fit_gauge.scad"
+    text = source.read_text(encoding="utf-8")
+    assert "NO PCB clamp or chassis mounting feature" in text
+    name = f"vl53l0x_gy530_height_trial_{height:03}"
+    result = tmp_path / f"{name}.stl"
+    subprocess.run([
+        "openscad", "--export-format", "binstl", "-o", str(result),
+        "-D", f'part="{name}"', str(source),
+    ], check=True, capture_output=True, text=True, timeout=90)
+    assert module().closed_mesh_edges(result) > 0
+    assert module().mesh_bounds_mm(result)["dimensions_mm"] == [
+        36.0, 39.0, float(height)
+    ]
 
 
 @pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")

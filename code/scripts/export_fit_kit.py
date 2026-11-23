@@ -30,7 +30,12 @@ GAUGES = (
 )
 SPEAKER_FITS = ("speaker_rect_fit_gauge",
                 "speaker_rear_chamber_reference")
-RANGER_FITS = ("vl53l0x_gy530_fit_gauge",)
+RANGER_FITS = (
+    "vl53l0x_gy530_fit_gauge",
+    "vl53l0x_gy530_height_trial_035",
+    "vl53l0x_gy530_height_trial_045",
+    "vl53l0x_gy530_height_trial_055",
+)
 MG90S_FITS = ("mg90s_fit_015", "mg90s_fit_030",
               "mg90s_fit_045", "mg90s_fit_060")
 DOCKS = ("dock_passive_fit", "dock_rail_entry_coupon",

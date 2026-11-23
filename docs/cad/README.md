@@ -19,6 +19,19 @@ approved permanent installation quantities or proof of physical fit. Confirm
 actual part revisions, clearances, motion sweeps, licenses, pack enclosure,
 ToF optical geometry, dock seating and protected contact charging before release.
 
+**Provisional downward VL53L0X range qualification:** The source-only
+[GY-530 optical height trials](remixes/vl53l0x_gy530_fit_gauge.scad) render
+three stationary, nonconductive open supports at board-rim heights 35, 45 and
+55 mm, named `vl53l0x_gy530_height_trial_035`, `_045` and `_055`
+in the fit kit. Use one actual carrier, unpowered while positioning, and
+measure its **real lens-to-desk distance** and any cone obstruction before
+collecting reflectance/range evidence through the normal isolated WROOM
+sensor profile. The source heights are not lens heights; the PCB thickness,
+lens position, window and cable bend remain unverified. These are removable
+bench coupons, with zero approved installed quantity, not qualified floor
+brackets or permission to move toward an edge. Their original authored
+source is CC0; the selected GY-530 outline is only a nominal vendor drawing.
+
 **Appearance revision:** the selected look is rounder. Saved
 [Sparky v0.1.0](originals/sparky-head/README.md) remains an unprinted upstream
 head source considered by the Fusion fit guide, not a dimensionally qualified
