@@ -2136,7 +2136,21 @@ class PetController:
         acknowledged = False
         try:
             await asyncio.wait_for(cue("person_detected"), timeout=1.0)
-            acknowledged = True
+            # A delayed OLED receipt must still belong to the same live
+            # visual and human-voice grant before consuming the cue budget.
+            # A device frame already rendered cannot be recalled from Mac.
+            confirmed_at = time.monotonic()
+            acknowledged = (
+                self.settings.mode == "hardware"
+                and state.enabled and state.generation == generation
+                and not self._closed and self.settings.voice_vision_tools_enabled
+                and (camera_consent_generation is None
+                     or self.settings.camera_consent_generation
+                        == camera_consent_generation)
+                and self._vision_preemption_epoch == preemption_epoch
+                and not self._human_active_in_fleet(confirmed_at)
+                and confirmed_at - captured_at <= self.max_observation_age
+            )
         except (HeadError, TimeoutError, OSError) as error:
             state.last_error = f"Head cosmetic cue unavailable: {type(error).__name__}"
         finally:

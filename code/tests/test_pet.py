@@ -7061,6 +7061,61 @@ async def test_person_face_failed_or_cancelled_head_ack_retries_without_stale_cu
     assert len(head.calls) == 4
 
 
+@pytest.mark.parametrize("regrant", [False, True])
+async def test_person_face_delayed_head_receipt_cannot_reuse_old_camera_grant(
+    fleet, regrant,
+):
+    """Late head acknowledgment cannot count an obsolete person cue."""
+    from desk_robot.pet import PetState
+
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    robot = fleet.robots[0]
+
+    class DelayedHead:
+        def __init__(self):
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+            self.calls = []
+
+        async def face_event(self, event):
+            self.calls.append(event)
+            self.entered.set()
+            await self.release.wait()
+
+    head = DelayedHead()
+    pet = object.__new__(PetController)
+    pet.settings = fleet
+    pet.heads = {robot.id: head}
+    pet.states = {robot.id: PetState(enabled=True, generation=17)}
+    pet._closed = False
+    pet._vision_preemption_epoch = 8
+    pet.multimodal = None
+    pet.max_observation_age = 5.0
+    state = pet.states[robot.id]
+    initial_grant = fleet.camera_consent_generation
+    task = asyncio.create_task(pet._cue_person_face(
+        robot.id, SceneChange("person", "A person entered", 0.97),
+        17, time.monotonic(), 8,
+        camera_consent_generation=initial_grant,
+    ))
+    try:
+        await asyncio.wait_for(head.entered.wait(), timeout=0.5)
+        fleet.voice_vision_tools_enabled = False
+        if regrant:
+            fleet.voice_vision_tools_enabled = True
+        assert fleet.camera_consent_generation != initial_grant
+        head.release.set()
+        await asyncio.wait_for(task, timeout=1)
+        # The HTTP request may already have rendered on the physical OLED.
+        assert head.calls == ["person_detected"]
+        assert state.last_person_face_cue_at == float("-inf")
+        assert state.last_person_face_attempt_at > float("-inf")
+    finally:
+        head.release.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+
 async def test_person_face_cue_needs_fresh_credible_live_source(fleet, tmp_path):
     """No motor authority: a mock head only receives the one cosmetic cue."""
     from types import SimpleNamespace
