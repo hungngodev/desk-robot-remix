@@ -384,6 +384,18 @@ def reject_nonfinite_fit_kit_number(token: str) -> None:
     raise ValueError("Nonfinite fit kit manifest number: " + token)
 
 
+def same_json_evidence(left: object, right: object) -> bool:
+    """Preserve exact JSON scalar types when checking immutable CAD evidence.
+
+    Like the procurement receipt comparison, numeric equivalence is not
+    evidence equivalence: JSON true must not replace 1.0 or zero. Canonical
+    serialization also ignores irrelevant object key ordering.
+    """
+    return json.dumps(left, sort_keys=True, allow_nan=False) == json.dumps(
+        right, sort_keys=True, allow_nan=False
+    )
+
+
 def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict:
     """Reject stale or changed print files; does not certify fit or power."""
     output = output_dir or root / "docs/cad/remixes"
@@ -428,8 +440,9 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
         raise ValueError("Unsafe power fit scope")
     # A changed source chassis must invalidate an old packing screen.
     # Passing this reference-only screen can never authorize fit or charging.
-    if report.get("source_chassis_battery_footprint") != (
-        reference_body_footprint_screen(root, output)
+    if not same_json_evidence(
+        report.get("source_chassis_battery_footprint"),
+        reference_body_footprint_screen(root, output),
     ):
         raise ValueError("Source chassis / battery tray footprint screen changed")
     expected = {}
@@ -481,7 +494,7 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
         if (binary_stl_triangles(mesh) != item.get("triangles")
                 or closed_mesh_edges(mesh) != item.get("manifold_edges")):
             raise ValueError(f"Mesh geometry mismatch: {location}")
-        if item.get("bbox_mm") != mesh_bounds_mm(mesh):
+        if not same_json_evidence(item.get("bbox_mm"), mesh_bounds_mm(mesh)):
             raise ValueError(f"STL bounds changed: {location}")
     return report
 

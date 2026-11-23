@@ -265,6 +265,18 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     manifest.write_text(json.dumps(forged_bounds))
     with pytest.raises(ValueError, match="STL bounds changed"):
         source.verify_fit_kit(tmp_path, output_dir=rendered)
+    # Python compares True == 1.0, False == 0.0 and int(1) == 1.0.
+    # Changing immutable STL measurement types must nevertheless fail closed.
+    for field, forged_value in (
+        ("dimensions_mm", True),
+        ("maximum_mm", 1),
+        ("minimum_mm", False),
+    ):
+        changed = json.loads(original)
+        changed["parts"][0]["bbox_mm"][field][0] = forged_value
+        manifest.write_text(json.dumps(changed))
+        with pytest.raises(ValueError, match="STL bounds changed"):
+            source.verify_fit_kit(tmp_path, output_dir=rendered)
     manifest.write_text(original)
     forged_screen = json.loads(original)
     forged_screen["source_chassis_battery_footprint"][
