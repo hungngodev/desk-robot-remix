@@ -306,7 +306,6 @@ async def test_operator_cli_disables_ambient_proxy_for_device_bearer(
     import sys
 
     import httpx
-
     from desk_robot import config, transport
 
     module = capture_module()
