@@ -271,6 +271,7 @@ def test_native_asr_replay_after_four_display_slots_never_reenters_context(setti
             route, json={
                 "event_id": ids[0],
                 "transcript": "OLD REQUEST MUST NOT REENTER",
+                "accepted_at_us": time.monotonic_ns() // 1000,
             },
         )
         assert replay.status_code == 200
@@ -281,7 +282,9 @@ def test_native_asr_replay_after_four_display_slots_never_reenters_context(setti
         hub.heard_history[robot_id].clear()
         again = client.post(
             route, json={
-                "event_id": ids[0], "transcript": "OLD REQUEST AFTER RESET",
+                "event_id": ids[0],
+                "transcript": "OLD REQUEST AFTER RESET",
+                "accepted_at_us": time.monotonic_ns() // 1000,
             },
         )
         assert again.status_code == 200
