@@ -2813,6 +2813,9 @@ class PetController:
                                   == camera_consent_generation)))
                 and not self._human_active_in_fleet(time.monotonic())
                 and not newer_human_turn()
+                # Both the first robot and any later peer reply must still
+                # describe a live event after queued model/TTS work.
+                and time.monotonic() - offered_at <= self.max_observation_age
             )
         # Count the first successfully transmitted segment, not the second
         # reply or unverified physical playback. An interrupted first line

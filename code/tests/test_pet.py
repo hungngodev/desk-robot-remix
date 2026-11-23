@@ -5003,6 +5003,72 @@ async def test_partial_social_speech_consumes_budget_before_peer_reply(
         await pet.close()
 
 
+async def test_social_event_expires_while_first_robot_waits_to_speak(
+    fleet, tmp_path, monkeypatch,
+):
+    """A peer session cannot narrate stale contact after the speaker queue."""
+    import desk_robot.pet as pet_module
+
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_social_autonomy_enabled = True
+
+    class DelayedGroupSpeaker(SimulatedSpeaker):
+        def __init__(self):
+            super().__init__()
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def say(self, robot, text, *, permission_check=None):
+            self.entered.set()
+            await self.release.wait()
+            if permission_check is not None and not permission_check():
+                raise RuntimeError("Social observation expired before speaker send")
+            self.spoken.append((robot.id, text))
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = DelayedGroupSpeaker()
+    conversation = Conversation(
+        fleet, GroundedChat(), speaker, memory=memory,
+    )
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(),
+        max_observation_age=5,
+    )
+    pet.set_voice_monitor_ready(True)
+    for robot_id in ("robot-01", "robot-02"):
+        pet.states[robot_id].enabled = True
+        pet.states[robot_id].generation = 91
+    try:
+        pet._consider_speech(
+            "robot-01",
+            SceneChange("nfc_tag", "Someone tapped a tabletop card", 1.0),
+            91,
+        )
+        await asyncio.wait_for(speaker.entered.wait(), timeout=2)
+        # Keep asyncio's real clock intact while moving only the pet's
+        # observation age beyond its recorded lifetime during device wait.
+        expired = time.monotonic() + pet.max_observation_age + 1
+        monkeypatch.setattr(
+            pet_module, "time",
+            SimpleNamespace(monotonic=lambda: expired, time=time.time),
+        )
+        speaker.release.set()
+        await wait_for(lambda: pet._speech_task is None)
+        assert speaker.spoken == []
+        assert pet.states["robot-01"].spoken == 0
+        assert pet.states["robot-02"].spoken == 0
+        assert memory.count("robot-01") == 0
+        assert memory.count("robot-02") == 0
+        assert pet.states["robot-01"].last_error is not None
+        assert "Social observation expired" in pet.states["robot-01"].last_error
+        assert conversation.active is None
+    finally:
+        speaker.release.set()
+        for state in pet.states.values():
+            state.enabled = False
+        await pet.close()
+
+
 async def test_social_event_never_shares_without_explicit_local_consent(
     fleet, tmp_path,
 ):
