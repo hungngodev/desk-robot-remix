@@ -151,13 +151,15 @@ def test_parent_memory_disabled_never_retains_native_transcript(
         coordinator=lambda: SimpleNamespace(robot=settings.robot),
         native_pet_speech_policy=lambda _robot_id: {},
     )
+    source_stamp_us = time.monotonic_ns() // 1000
     with TestClient(app) as client:
         response = client.post(
             f"/v1/pet/{robot_id}/omni-heard",
             json={
                 "event_id": "omni_" + "d" * 12 + "_" + "e" * 20,
                 "transcript": "A sentence without durable memory permission",
-                "accepted_at_us": time.monotonic_ns() // 1000,
+                "accepted_at_us": source_stamp_us,
+                "audio_committed_at_us": source_stamp_us,
             },
         )
     assert response.status_code == (200 if live_context_enabled else 403)
@@ -257,12 +259,14 @@ def test_native_asr_replay_after_four_display_slots_never_reenters_context(setti
     route = f"/v1/pet/{robot_id}/omni-heard"
     with TestClient(app) as client:
         for index, event_id in enumerate(ids):
+            source_stamp_us = time.monotonic_ns() // 1000
             response = client.post(
                 route,
                 json={
                     "event_id": event_id,
                     "transcript": f"Current turn {index}",
-                    "accepted_at_us": time.monotonic_ns() // 1000,
+                    "accepted_at_us": source_stamp_us,
+                    "audio_committed_at_us": source_stamp_us,
                 },
             )
             assert response.status_code == 200
@@ -270,11 +274,13 @@ def test_native_asr_replay_after_four_display_slots_never_reenters_context(setti
             assert response.json()["retained_on_disk"] is False
         # The first ID has already fallen out of the four displayed slots.
         assert [item[0] for item in hub.heard_history[robot_id]] == ids[1:]
+        source_stamp_us = time.monotonic_ns() // 1000
         replay = client.post(
             route, json={
                 "event_id": ids[0],
                 "transcript": "OLD REQUEST MUST NOT REENTER",
-                "accepted_at_us": time.monotonic_ns() // 1000,
+                "accepted_at_us": source_stamp_us,
+                "audio_committed_at_us": source_stamp_us,
             },
         )
         assert replay.status_code == 200
@@ -283,11 +289,13 @@ def test_native_asr_replay_after_four_display_slots_never_reenters_context(setti
         # The voice path can drop live display context on reconnect without
         # renewing an already used source ID from an earlier session.
         hub.heard_history[robot_id].clear()
+        source_stamp_us = time.monotonic_ns() // 1000
         again = client.post(
             route, json={
                 "event_id": ids[0],
                 "transcript": "OLD REQUEST AFTER RESET",
-                "accepted_at_us": time.monotonic_ns() // 1000,
+                "accepted_at_us": source_stamp_us,
+                "audio_committed_at_us": source_stamp_us,
             },
         )
         assert again.status_code == 200
@@ -360,7 +368,8 @@ def test_delayed_native_asr_post_cannot_relabel_prior_speech_as_new_vad(settings
     with TestClient(app) as client:
         delayed = client.post(url, json={
             "event_id": old_id, "transcript": "Turn left from the old question",
-            "accepted_at_us": old_source_us,
+            "accepted_at_us": time.monotonic_ns() // 1000,
+            "audio_committed_at_us": old_source_us,
         })
         assert delayed.status_code == 200
         assert delayed.json()["ephemeral_context_added"] is False
@@ -378,9 +387,11 @@ def test_delayed_native_asr_post_cannot_relabel_prior_speech_as_new_vad(settings
         assert legacy.status_code == 200
         assert legacy.json()["ephemeral_context_added"] is False
 
+        source_stamp_us = time.monotonic_ns() // 1000
         current = client.post(url, json={
             "event_id": fresh_id, "transcript": "What is the temperature now?",
-            "accepted_at_us": time.monotonic_ns() // 1000,
+            "accepted_at_us": source_stamp_us,
+            "audio_committed_at_us": source_stamp_us,
         })
         assert current.status_code == 200
         assert current.json()["ephemeral_context_added"] is True

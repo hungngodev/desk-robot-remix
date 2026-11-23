@@ -30,6 +30,10 @@ class NativeHeardRequest(BaseModel):
     accepted_at_us: int | None = Field(
         default=None, gt=0, le=9_223_372_036_854_775_807, strict=True,
     )
+    # Earlier local Mac PCM commit time, distinct from model acceptance.
+    audio_committed_at_us: int | None = Field(
+        default=None, gt=0, le=9_223_372_036_854_775_807, strict=True,
+    )
 
 
 class NativeSpokenRequest(BaseModel):
@@ -178,6 +182,13 @@ def register_native_omni_routes(
         )
         if accepted_at > observed_at or observed_at - accepted_at > 90:
             raise HTTPException(409, "Native ASR source timestamp expired or in future")
+        audio_at = (
+            request.audio_committed_at_us / 1_000_000
+            if request.audio_committed_at_us is not None else None
+        )
+        if (audio_at is not None and (
+                audio_at > accepted_at or observed_at - audio_at > 90)):
+            raise HTTPException(409, "Native source audio commit timestamp invalid")
         live_consent_generation = settings.camera_consent_generation
         attention = getattr(app.state.runtime, "attention", None)
         # A delayed or legacy ASR must not appear even temporarily in the
@@ -185,11 +196,12 @@ def register_native_omni_routes(
         # source-stamped ASR from the current consent and voice epoch qualifies.
         live_source_current = (
             request.accepted_at_us is not None
-            and request.accepted_at_us >= int(
+            and audio_at is not None
+            and request.audio_committed_at_us >= int(
                 settings.camera_consent_started_at * 1_000_000
             )
             and (attention is None or attention.heard_is_current(
-                robot_id, accepted_at
+                robot_id, audio_at
             ))
         )
         ephemeral = False
@@ -198,7 +210,7 @@ def register_native_omni_routes(
             remember = getattr(visual.hub, "remember_heard", None)
             if callable(remember):
                 ephemeral = remember(
-                    robot_id, request.event_id, spoken[:240], accepted_at
+                    robot_id, request.event_id, spoken[:240], audio_at
                 )
         memory_opt_in = (
             settings.voice_transcript_memory_enabled
@@ -215,6 +227,14 @@ def register_native_omni_routes(
                 int(settings.voice_memory_consent_started_at * 1_000_000),
                 int(settings.transcript_consent_started_at * 1_000_000),
             )
+            # The selected live producer additionally provides an earlier
+            # audio clock. Do not persist pre-grant PCM just because its
+            # model completion arrived after storage opt-in.
+            and (request.audio_committed_at_us is None
+                 or request.audio_committed_at_us >= max(
+                     int(settings.voice_memory_consent_started_at * 1_000_000),
+                     int(settings.transcript_consent_started_at * 1_000_000),
+                 ))
         )
         memory_grant = settings.transcript_consent_generation if memory_opt_in else None
         parent_memory_grant = (
@@ -303,7 +323,7 @@ def register_native_omni_routes(
         # never an instruction or automatic permission to operate motors.
         if ephemeral and settings.voice_vision_tools_enabled and attention is not None:
             accepted = attention.heard(
-                robot_id, request.event_id, spoken[:240], accepted_at
+                robot_id, request.event_id, spoken[:240], audio_at
             )
             if not accepted:
                 # The ASR belonged to a superseded human voice turn. Remove

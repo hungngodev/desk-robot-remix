@@ -315,8 +315,9 @@ class NativeOmniSession:
         # Bind model-estimated ASR to its actual committed audio item. The
         # backend can deliver an OLD transcript after a NEW VAD turn starts.
         # Never infer a transcript's owner from receive time alone.
-        self._pending_audio_commits: deque[tuple[int, int]] = deque()
-        self._asr_item_turns: dict[str, tuple[int, int]] = {}
+        self._pending_audio_commits: deque[tuple[int, int] | tuple[int, int, int]] = deque()
+        self._asr_item_turns: dict[str, tuple[int, int] | tuple[int, int, int]] = {}
+        self._accepted_audio_committed_at_us = 0
         self._server_input_turn_id: int | None = None
         self._readonly_queue: asyncio.Queue[tuple[str, dict, int, int]] = (
             asyncio.Queue(maxsize=3)
@@ -347,7 +348,7 @@ class NativeOmniSession:
         self.native_tool_audio_sent = 0
         self.native_tool_speech_errors = 0
         self._heard_session = uuid.uuid4().hex[:12]
-        self._heard_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue(maxsize=12)
+        self._heard_queue: asyncio.Queue[tuple[str, str] | tuple[str, str, int] | tuple[str, str, int, int]] = asyncio.Queue(maxsize=12)
         # Native replies share Mac's existing live timeline only AFTER Opus
         # and TTS STOP were sent. Never persist model text as heard speech.
         self._spoken_queue: asyncio.Queue[tuple[str, str, int]] = (
@@ -640,11 +641,19 @@ class NativeOmniSession:
             return False
         original = self._asr_item_turns.pop(item, None)
         accepted = (
-            original == (self._input_generation, self._readonly_turn)
+            isinstance(original, tuple)
+            and original[:2] == (self._input_generation, self._readonly_turn)
             and not self.closed and self.connected
             and not self._user_was_talking
         )
-        if not accepted:
+        if accepted:
+            # Production audio commits carry their original Mac-host clock.
+            # Synthetic host fixtures may still bind a two-field turn.
+            self._accepted_audio_committed_at_us = (
+                original[2] if len(original) == 3 else time.monotonic_ns() // 1000
+            )
+        else:
+            self._accepted_audio_committed_at_us = 0
             self.native_readonly_tools_dropped += 1
         return accepted
 
@@ -687,7 +696,10 @@ class NativeOmniSession:
                 self._heard_seen.clear()  # Mac SQLite still dedupes event IDs.
             self._heard_seen.add(event_id)
             try:
-                self._heard_queue.put_nowait((event_id, part, accepted_at_us))
+                self._heard_queue.put_nowait((
+                    event_id, part, accepted_at_us,
+                    self._accepted_audio_committed_at_us or accepted_at_us,
+                ))
             except asyncio.QueueFull:
                 self.heard_memories_dropped += 1
 
@@ -696,19 +708,24 @@ class NativeOmniSession:
         url = f"http://127.0.0.1:8765/v1/pet/{self.robot}/omni-heard"
         while not self.closed:
             queued = await self._heard_queue.get()
-            if len(queued) == 3:
+            if len(queued) == 4:
+                event_id, transcript, accepted_at_us, audio_committed_at_us = queued
+            elif len(queued) == 3:
                 event_id, transcript, accepted_at_us = queued
+                audio_committed_at_us = accepted_at_us
             else:
                 # Compatibility with preexisting local queue fixtures.
                 # Real model events always carry the pre-queue source stamp.
                 event_id, transcript = queued
                 accepted_at_us = time.monotonic_ns() // 1000
+                audio_committed_at_us = accepted_at_us
             try:
                 async with http.post(
                     url,
                     headers={"Authorization": f"Bearer {self.token}"},
                     json={"event_id": event_id, "transcript": transcript,
-                          "accepted_at_us": accepted_at_us},
+                          "accepted_at_us": accepted_at_us,
+                          "audio_committed_at_us": audio_committed_at_us},
                     timeout=aiohttp.ClientTimeout(total=2),
                 ) as response:
                     if response.status in (401, 403):
@@ -2047,6 +2064,9 @@ class NativeOmniSession:
                         return
                     self._pending_audio_commits.append((
                         self._input_generation, self._readonly_turn,
+                        # This audio was sent before native model ASR and
+                        # cannot be retimed by HTTP queue backpressure.
+                        time.monotonic_ns() // 1000,
                     ))
                     await asyncio.wait_for(
                         self._send(self.wire.commit(final=True)), timeout=1.5,

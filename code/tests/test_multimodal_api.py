@@ -1583,7 +1583,9 @@ def test_native_queued_asr_cannot_impersonate_a_newer_human_vad(
     stale = {
         "event_id": "omni_" + "a" * 12 + "_" + "b" * 20,
         "transcript": "Old question about the key",
-        "accepted_at_us": int((now - 0.50) * 1_000_000),
+        # A model acceptance after the newer VAD cannot retime older PCM.
+        "accepted_at_us": time.monotonic_ns() // 1000,
+        "audio_committed_at_us": int((now - 0.50) * 1_000_000),
     }
     with TestClient(create_app(settings, runtime=runtime)) as client:
         old = client.post(url, json=stale, headers=headers)
@@ -1593,10 +1595,12 @@ def test_native_queued_asr_cannot_impersonate_a_newer_human_vad(
         assert not hub.heard_history[robot]
         assert not attention.timeline(robot, time.monotonic())
 
+        current_stamp_us = time.monotonic_ns() // 1000
         current = {
             "event_id": "omni_" + "a" * 12 + "_" + "c" * 20,
             "transcript": "New question about the robot",
-            "accepted_at_us": time.monotonic_ns() // 1000,
+            "accepted_at_us": current_stamp_us,
+            "audio_committed_at_us": current_stamp_us,
         }
         fresh = client.post(url, json=current, headers=headers)
         assert fresh.status_code == 200
@@ -1663,10 +1667,12 @@ def test_completed_native_asr_blends_with_live_camera_context_without_disk_conse
     runtime = Runtime()
     runtime.memory = memory
     headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    stamp_us = time.monotonic_ns() // 1000
     request = {
         "event_id": "omni_" + "a" * 12 + "_" + "b" * 20,
         "transcript": "The red key is beside the mug",
-        "accepted_at_us": time.monotonic_ns() // 1000,
+        "accepted_at_us": stamp_us,
+        "audio_committed_at_us": stamp_us,
     }
     with TestClient(create_app(settings, runtime=runtime)) as client:
         consent = client.get(f"/v1/pet/{pet.id}/omni-context", headers=headers)
@@ -1822,10 +1828,12 @@ async def test_cancelled_native_asr_sqlite_write_retracts_revoked_memory(
         route.endpoint for route in app.routes
         if getattr(route, "path", None) == "/v1/pet/{robot_id}/omni-heard"
     )
+    stamp_us = time.monotonic_ns() // 1000
     request = NativeHeardRequest(
         event_id="omni_" + "a" * 12 + "_" + "c" * 20,
         transcript="This private transcript should not survive opt out",
-        accepted_at_us=time.monotonic_ns() // 1000,
+        accepted_at_us=stamp_us,
+        audio_committed_at_us=stamp_us,
     )
     task = asyncio.create_task(endpoint(robot, request))
     try:

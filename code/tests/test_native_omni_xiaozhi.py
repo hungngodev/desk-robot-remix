@@ -2492,6 +2492,7 @@ async def test_native_completed_audio_transcript_has_opt_in_bounded_private_memo
             request = kwargs["json"]
             assert 1 <= len(request["transcript"]) <= 240
             assert request["event_id"].startswith("omni_")
+            assert 0 < request["audio_committed_at_us"] <= request["accepted_at_us"]
             stored.append(request)
             return Reply(request)
 
@@ -3106,6 +3107,38 @@ def test_native_completed_asr_rejects_older_committed_audio_item(
     })
     assert session.native_readonly_tools_dropped == 1
     assert not session.closed
+
+
+def test_native_audio_commit_clock_survives_delayed_asr_queue(native):
+    """A late model completion cannot redefine the original PCM turn time."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    old_audio_us = time.monotonic_ns() // 1000 - 30_000
+    session._pending_audio_commits.append((
+        session._input_generation, session._readonly_turn, old_audio_us,
+    ))
+    session._bind_native_audio_commit({
+        "item_id": "old_audio_item", "event": {"turn_id": 0},
+    })
+    event = {
+        "item_id": "old_audio_item",
+        "transcript": "This audio was committed before later human speech",
+    }
+    assert session._accept_current_audio_item(event)
+    session._accept_heard_transcript(event)
+    queued = session._heard_queue.get_nowait()
+    assert len(queued) == 4
+    _, transcript, model_accepted_us, source_audio_us = queued
+    assert "committed" in transcript
+    assert source_audio_us == old_audio_us
+    assert model_accepted_us >= source_audio_us
 
 
 def test_native_audio_output_preemption_does_not_erase_same_human_asr(native):
