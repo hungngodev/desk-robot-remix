@@ -97,7 +97,7 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
         title = ("GY-530 carrier reference" if name == "ranger"
                  else "Challenge speaker body reference")
     return ('<svg xmlns="http://www.w3.org/2000/svg" '
-            f'width="210mm" height="297mm" viewBox="0 0 210 297">'
+            'width="210mm" height="297mm" viewBox="0 0 210 297">'
             + _text(15, 20, title, size=6)
             + _text(15, 29, "FRONT / TOP of paper  ^  (not a PCB polarity mark)")
             + _text(15, 37, "PROVISIONAL / UNPOWERED / NOT FOR DRILLING")
