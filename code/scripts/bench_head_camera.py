@@ -26,6 +26,14 @@ ROOT = Path(__file__).resolve().parents[1]
 # This is a generous transport probe threshold, not a hardware FPS qualification.
 MAX_CAMERA_GAP_S = 1.2
 
+# Match the authenticated device AEC diagnostic fields; transport progress
+# without consent and codec continuity is not a valid simultaneous A/V trial.
+CONCURRENT_AUDIO_COUNTERS = (
+    "reference_underflow_reads", "reference_overwrite_reads",
+    "discarded_stale_writes", "short_output_writes",
+    "microphone_frames_read", "speaker_frames_accepted",
+)
+
 
 def _private_report_directory_fd(parent: Path) -> int:
     """Keep a validated directory open across the actual report creation."""
@@ -307,27 +315,26 @@ async def measure(
                         or type(sample.get("boot")) is not int
                         or not 0 <= sample["boot"] <= 0xffffffff
                         or sample.get("microphone_privacy_muted") is not False
+                        or type(sample.get("microphone_privacy_epoch")) is not int
+                        or not 0 <= sample["microphone_privacy_epoch"] <= 0xffffffff
                         or sample.get("reference_integrity_failed") is not False
                         or sample.get("speaker_playback_verified") is not False
                         or sample.get("aec_physically_qualified") is not False
                         or any(
                             type(sample.get(key)) is not int
                             or not 0 <= sample[key] <= 0xffffffff
-                            for key in (
-                                "microphone_frames_read",
-                                "speaker_frames_accepted",
-                                "reference_underflow_reads",
-                            )
+                            for key in CONCURRENT_AUDIO_COUNTERS
                         )):
                     raise ValueError("Invalid concurrent Sense AEC receipt")
                 if concurrent_audio_samples:
                     previous = concurrent_audio_samples[-1][1]
                     if (sample["boot"] != previous["boot"]
-                            or any(sample[key] < previous[key] for key in (
-                                "microphone_frames_read",
-                                "speaker_frames_accepted",
-                                "reference_underflow_reads",
-                            ))):
+                            # The mic can be revoked and regranted between two
+                            # unmuted polls. That interval cannot pass A/V.
+                            or sample["microphone_privacy_epoch"]
+                            != previous["microphone_privacy_epoch"]
+                            or any(sample[key] < previous[key]
+                                   for key in CONCURRENT_AUDIO_COUNTERS)):
                         raise ValueError("Concurrent Sense AEC reboot or counter regression")
                 concurrent_audio_samples.append((time.monotonic(), sample))
             except Exception as exc:
@@ -365,15 +372,20 @@ async def measure(
         last = concurrent_audio_samples[-1][1]
         concurrent_audio_delta = {
             key: last[key] - first[key]
-            for key in (
-                "microphone_frames_read", "speaker_frames_accepted",
-                "reference_underflow_reads",
-            )
+            for key in CONCURRENT_AUDIO_COUNTERS
         }
+    # AEC samples from a different Sense boot cannot witness activity
+    # alongside these camera frames, even when both counter sets advance.
+    camera_boots = {identity[0] for identity in seen_camera_identities}
+    audio_boot_matches_camera = (
+        len(camera_boots) == 1 and bool(concurrent_audio_samples)
+        and concurrent_audio_samples[0][1]["boot"] in camera_boots
+    )
     return {
         "concurrent_audio_samples": len(concurrent_audio_samples),
         "concurrent_audio_errors": concurrent_audio_errors[:20],
         "concurrent_audio_counter_delta": concurrent_audio_delta,
+        "concurrent_audio_boot_matches_camera": audio_boot_matches_camera,
         "concurrent_audio_mac_span_ms": (
             round(1000 * (
                 concurrent_audio_samples[-1][0] - concurrent_audio_samples[0][0]
@@ -382,9 +394,13 @@ async def measure(
         "concurrent_audio_driver_activity_observed": (
             stream and concurrent_audio_delta is not None
             and not concurrent_audio_errors
+            and audio_boot_matches_camera
             and concurrent_audio_delta["microphone_frames_read"] > 0
             and concurrent_audio_delta["speaker_frames_accepted"] > 0
-            and concurrent_audio_delta["reference_underflow_reads"] == 0
+            and all(concurrent_audio_delta[key] == 0 for key in (
+                "reference_underflow_reads", "reference_overwrite_reads",
+                "discarded_stale_writes", "short_output_writes",
+            ))
         ),
         "aec_reference_diagnostics": audio_reference,
         "aec_reference_probe_error": audio_reference_error,

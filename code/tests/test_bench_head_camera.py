@@ -5,6 +5,7 @@ import asyncio
 import importlib.util
 import json
 import stat
+import time
 from pathlib import Path
 
 import pytest
@@ -242,6 +243,10 @@ async def test_real_mjpeg_bench_receives_continuous_frames_without_snapshot_http
                 "robot_id": "robot-01", "boot": 31337,
                 "microphone_frames_read": self.audio_calls * 160,
                 "speaker_frames_accepted": self.audio_calls * 320,
+                "reference_overwrite_reads": 0,
+                "discarded_stale_writes": 0,
+                "short_output_writes": 0,
+                "microphone_privacy_epoch": 7,
                 "reference_underflow_reads": 8,
                 "microphone_privacy_muted": False,
                 "reference_integrity_failed": False,
@@ -309,6 +314,10 @@ async def test_camera_continuity_cannot_claim_simultaneous_speech_without_audio(
                 "robot_id": "robot-01", "boot": 8,
                 "microphone_frames_read": 10,
                 "speaker_frames_accepted": 10,
+                "reference_overwrite_reads": 0,
+                "discarded_stale_writes": 0,
+                "short_output_writes": 0,
+                "microphone_privacy_epoch": 7,
                 "reference_underflow_reads": 0,
                 "microphone_privacy_muted": False,
                 "reference_integrity_failed": False,
@@ -354,6 +363,10 @@ async def test_foreign_or_fabricated_audio_receipt_cannot_join_camera_bench(
                 "robot_id": "robot-01", "boot": 19,
                 "microphone_frames_read": 160,
                 "speaker_frames_accepted": 320,
+                "reference_overwrite_reads": 0,
+                "discarded_stale_writes": 0,
+                "short_output_writes": 0,
+                "microphone_privacy_epoch": 7,
                 "reference_underflow_reads": 0,
                 "microphone_privacy_muted": False,
                 "reference_integrity_failed": False,
@@ -371,6 +384,81 @@ async def test_foreign_or_fabricated_audio_receipt_cannot_join_camera_bench(
     assert report["concurrent_audio_samples"] == 0
     assert report["concurrent_audio_errors"]
     assert report["concurrent_audio_driver_activity_observed"] is False
+
+
+
+@pytest.mark.parametrize("failure", [
+    "privacy_regrant", "reference_overwrite", "discarded_write",
+    "short_output", "other_boot", "missing_privacy_epoch",
+])
+async def test_camera_aec_concurrency_cannot_hide_consent_or_codec_fault(failure):
+    """Changing mic permission or losing playback integrity voids A/V evidence."""
+    class Head:
+        def __init__(self):
+            self._last_camera = None
+            self.audio_reads = 0
+
+        async def stream_frames(self):
+            for seq in range(12):
+                await asyncio.sleep(.02)
+                self._last_camera = (73, seq + 1, (seq + 1) * 20_000)
+                yield JPEG, time.monotonic()
+
+        async def status(self):
+            return {"robot_id": "robot-01"}
+
+        async def audio_reference_status(self):
+            self.audio_reads += 1
+            sample = {
+                "robot_id": "robot-01", "boot": 73,
+                "microphone_frames_read": self.audio_reads * 160,
+                "speaker_frames_accepted": self.audio_reads * 320,
+                "reference_underflow_reads": 0,
+                "reference_overwrite_reads": 0,
+                "discarded_stale_writes": 0,
+                "short_output_writes": 0,
+                "microphone_privacy_muted": False,
+                "microphone_privacy_epoch": 7,
+                "reference_integrity_failed": False,
+                "speaker_playback_verified": False,
+                "aec_physically_qualified": False,
+            }
+            if failure == "privacy_regrant" and self.audio_reads > 1:
+                sample["microphone_privacy_epoch"] = 8
+            elif failure == "reference_overwrite" and self.audio_reads > 1:
+                sample["reference_overwrite_reads"] = self.audio_reads - 1
+            elif failure == "discarded_write" and self.audio_reads > 1:
+                sample["discarded_stale_writes"] = self.audio_reads - 1
+            elif failure == "short_output" and self.audio_reads > 1:
+                sample["short_output_writes"] = self.audio_reads - 1
+            elif failure == "other_boot":
+                sample["boot"] = 74
+            elif failure == "missing_privacy_epoch":
+                del sample["microphone_privacy_epoch"]
+            return sample
+
+    head = Head()
+    report = await bench.measure(
+        head, "robot-01", seconds=.17, status_period_s=.05, stream=True,
+    )
+    assert head.audio_reads >= 2
+    assert report["camera_frames_received"] >= 3
+    assert report["camera_error_count"] == 0
+    assert report["concurrent_audio_driver_activity_observed"] is False
+    assert not bench.bench_passed(report, require_audio=True)
+    if failure == "other_boot":
+        assert report["concurrent_audio_errors"] == []
+        assert report["concurrent_audio_boot_matches_camera"] is False
+    elif failure in ("privacy_regrant", "missing_privacy_epoch"):
+        assert report["concurrent_audio_errors"]
+    else:
+        counter = {
+            "reference_overwrite": "reference_overwrite_reads",
+            "discarded_write": "discarded_stale_writes",
+            "short_output": "short_output_writes",
+        }[failure]
+        assert report["concurrent_audio_errors"] == []
+        assert report["concurrent_audio_counter_delta"][counter] > 0
 
 
 async def test_cancelled_camera_bench_closes_stream_lease():
