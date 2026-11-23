@@ -2906,3 +2906,116 @@ async def test_failed_normal_barge_retries_stop_without_duplicate_vad_or_input_l
     assert not await bridge.interrupt_for_normal_voice(head, True)
     assert bridge.voice_event_cursor == 2
     assert stops == ["stop", "speaker", "stop", "speaker"]
+
+@pytest.mark.parametrize("failure", ("group", "normal"))
+async def test_installed_xiaozhi_keeps_first_human_pcm_when_head_stop_fails(
+    monkeypatch, caplog, failure,
+):
+    """Failed speaker STOP may not erase the current real human mic frame."""
+    import ast
+    import logging
+
+    spec = importlib.util.spec_from_file_location(
+        "overlay_stop_failure", ROOT / "laptop/server/install_overlay.py"
+    )
+    overlay = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(overlay)
+    files = overlay.files(
+        ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server"
+    )
+    handler = next(
+        node for node in ast.parse(
+            files["core/handle/receiveAudioHandle.py"]
+        ).body if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "handleAudioMessage"
+    )
+    calls, captured = [], []
+
+    async def group_stop(conn, voice):
+        calls.append("group")
+        if failure == "group":
+            raise ConnectionError("head socket disconnected")
+
+    async def normal_stop(conn, voice):
+        calls.append("normal")
+        if failure == "normal":
+            raise TimeoutError("head physical STOP timed out")
+
+    def observe_idle(conn, voice):
+        calls.append("vad")
+
+    def native_route(conn, pcm, voice):
+        calls.append("native")
+        captured.append(pcm)
+        return False
+
+    async def idle(conn, voice):
+        calls.append("idle")
+
+    class ASR:
+        async def receive_audio(self, conn, pcm, voice):
+            calls.append("asr")
+            captured.append(pcm)
+
+    monkeypatch.setitem(sys.modules, "desk_robot_bridge", types.SimpleNamespace(
+        interrupt_for_user_voice=group_stop,
+        interrupt_for_normal_voice=normal_stop,
+        observe_idle_human_voice=observe_idle,
+    ))
+    monkeypatch.setitem(sys.modules, "desk_robot_native_omni",
+                        types.SimpleNamespace(route_audio=native_route))
+    namespace = {"asyncio": asyncio, "no_voice_close_connect": idle}
+    exec(compile(ast.Module(body=[handler], type_ignores=[]),
+                 "pinned_xiaozhi_failed_stop.py", "exec"), namespace)
+    conn = types.SimpleNamespace(
+        vad=types.SimpleNamespace(is_vad=lambda conn, pcm: True),
+        client_aec=False, just_woken_up=False, asr=ASR(),
+    )
+    with caplog.at_level(logging.WARNING, logger="desk_robot_bridge"):
+        await namespace["handleAudioMessage"](conn, b"first-human-words")
+    assert calls == (
+        ["group", "vad", "native", "idle", "asr"] if failure == "group"
+        else ["group", "normal", "vad", "native", "idle", "asr"]
+    )
+    assert captured == [b"first-human-words", b"first-human-words"]
+    assert "speaker STOP unconfirmed" in caplog.text
+
+
+async def test_installed_xiaozhi_propagates_cancel_without_using_stale_pcm(
+    monkeypatch,
+):
+    """Task cancellation is not a benign failed decoder STOP."""
+    import ast
+
+    spec = importlib.util.spec_from_file_location(
+        "overlay_stop_cancel", ROOT / "laptop/server/install_overlay.py"
+    )
+    overlay = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(overlay)
+    handler = next(
+        node for node in ast.parse(overlay.files(
+            ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server"
+        )["core/handle/receiveAudioHandle.py"]).body
+        if isinstance(node, ast.AsyncFunctionDef)
+        and node.name == "handleAudioMessage"
+    )
+    seen = []
+    async def cancelled(conn, voice):
+        raise asyncio.CancelledError()
+    monkeypatch.setitem(sys.modules, "desk_robot_bridge", types.SimpleNamespace(
+        interrupt_for_user_voice=cancelled,
+        interrupt_for_normal_voice=cancelled,
+        observe_idle_human_voice=lambda conn, voice: seen.append("vad"),
+    ))
+    monkeypatch.setitem(sys.modules, "desk_robot_native_omni",
+                        types.SimpleNamespace(route_audio=lambda *args: seen.append("pcm")))
+    namespace = {"asyncio": asyncio, "no_voice_close_connect": lambda *args: None}
+    exec(compile(ast.Module(body=[handler], type_ignores=[]),
+                 "pinned_xiaozhi_cancelled_stop.py", "exec"), namespace)
+    conn = types.SimpleNamespace(
+        vad=types.SimpleNamespace(is_vad=lambda conn, pcm: True),
+        client_aec=False, just_woken_up=False,
+    )
+    with pytest.raises(asyncio.CancelledError):
+        await namespace["handleAudioMessage"](conn, b"obsolete-input")
+    assert seen == []
