@@ -184,6 +184,45 @@ def test_incomplete_far_band_is_rejected_not_rounded_to_twenty():
         evaluate(rows)
 
 
+@pytest.mark.parametrize("second_onset", [100, 200])
+def test_overlapping_human_attempts_do_not_count_as_independent_trials(second_onset):
+    rows = both_distances()
+    second = rows[1]
+    delta = second_onset - second["human_onset_ms"]
+    for field in (
+        "human_onset_ms", "vad_arrival_ms", "abort_dispatch_ms",
+        "head_queue_clear_ms", "i2s_stop_ms", "audible_stop_ms",
+    ):
+        second[field] += delta
+    # Distinct onsets and valid per-trial stage order previously passed.
+    assert rows[0]["human_onset_ms"] != second["human_onset_ms"]
+    assert second["human_onset_ms"] <= rows[0]["audible_stop_ms"]
+    with pytest.raises(ValueError, match="Overlapping human interruption"):
+        evaluate(rows)
+
+
+def test_overlapping_near_and_far_attempts_cannot_count_twice():
+    rows = both_distances()
+    previous = rows[19]
+    first_far = rows[20]
+    delta = previous["audible_stop_ms"] - 100 - first_far["human_onset_ms"]
+    for field in (
+        "human_onset_ms", "vad_arrival_ms", "abort_dispatch_ms",
+        "head_queue_clear_ms", "i2s_stop_ms", "audible_stop_ms",
+    ):
+        first_far[field] += delta
+    assert first_far["human_onset_ms"] > previous["human_onset_ms"]
+    with pytest.raises(ValueError, match="Overlapping human interruption"):
+        evaluate(rows)
+
+
+def test_out_of_order_nonoverlapping_acoustic_trials_remain_valid():
+    rows = both_distances()
+    rows[0], rows[20] = rows[20], rows[0]
+    loaded = parse_trial_jsonl("\n".join(json.dumps(row) for row in rows))
+    assert evaluate(loaded)["meets_proposed_gate"] is True
+
+
 def test_cross_distance_reused_trial_onset_is_not_new_acoustic_evidence():
     rows = both_distances()
     rows[20].update({

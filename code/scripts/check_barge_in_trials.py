@@ -71,6 +71,7 @@ def evaluate(records: list[dict]) -> dict:
         for name in ("50cm", "100cm")
     }
     onset_times = set()
+    attempt_intervals = []
     for r in human:
         volume = r.get("volume")
         if volume not in ("low", "medium", "high"):
@@ -108,6 +109,7 @@ def evaluate(records: list[dict]) -> dict:
         if stages[0] in onset_times:
             raise ValueError("Human acoustic trial onset timestamp reused")
         onset_times.add(stages[0])
+        attempt_intervals.append((stages[0], stages[-1]))
         distance = _number(r.get("speaker_distance_cm"), "speaker distance")
         noise = _number(r.get("room_noise_db_a"), "room background noise")
         if not 0 <= noise <= 100:
@@ -161,6 +163,17 @@ def evaluate(records: list[dict]) -> dict:
         band["on_time"] += stopped
         band["understood"] += retained
         band["no_replay"] &= no_replay
+
+    # A2 requires independent human interruptions on one physical head.
+    # Unique onsets alone can count two simultaneous overlapping attempts.
+    ordered_attempts = sorted(attempt_intervals)
+    if any(
+        next_onset <= prior_stop
+        for (_, prior_stop), (next_onset, _) in zip(
+            ordered_attempts, ordered_attempts[1:], strict=True
+        )
+    ):
+        raise ValueError("Overlapping human interruption trial intervals")
 
     if volumes != {"low", "medium", "high"}:
         raise ValueError("Human trials must cover all intended speaker volumes")
