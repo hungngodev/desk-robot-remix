@@ -185,6 +185,14 @@ def _reject_output_aliases(output: Path) -> None:
         path = output / name
         if path.is_symlink():
             raise ValueError(f"Symlinked paper template output path: {path}")
+    # A stale source-unpinned SVG alongside verified pages can be mistaken
+    # for an authorized, true-scale cut or drill template. Never delete it:
+    # make the operator inspect and remove the unexpected artifact first.
+    if output.is_dir():
+        declared = set(names)
+        for entry in output.iterdir():
+            if entry.suffix.lower() == ".svg" and entry.name not in declared:
+                raise ValueError(f"Undeclared A4 paper template: {entry}")
 
 
 def export(root: Path, output: Path) -> dict:

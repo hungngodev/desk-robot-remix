@@ -186,3 +186,26 @@ def test_power_overlay_rejects_a4_label_collision(tmp_path):
     with pytest.raises(ValueError, match="Power outline exceeds A4 printable layout"):
         source.export(tmp_path, output)
     assert not output.exists()
+
+
+@pytest.mark.parametrize("stale_name", [
+    "obsolete_holes_reference_A4.svg",
+    "old_layout.SVG",
+])
+def test_a4_export_verify_refuse_undeclared_stale_svg_before_writes(
+    tmp_path, stale_name,
+):
+    source = load()
+    setup_sources(tmp_path)
+    output = tmp_path / "paper"
+    output.mkdir()
+    stale = output / stale_name
+    sentinel = b"STALE UNVERIFIED DRILL ARTIFACT MUST NOT BE PUBLISHED"
+    stale.write_bytes(sentinel)
+    with pytest.raises(ValueError, match="Undeclared A4 paper template"):
+        source.export(tmp_path, output)
+    assert stale.read_bytes() == sentinel
+    assert not (output / "paper_manifest.json").exists()
+    assert not (output / "power_reference_A4.svg").exists()
+    with pytest.raises(ValueError, match="Undeclared A4 paper template"):
+        source.verify(tmp_path, output)
