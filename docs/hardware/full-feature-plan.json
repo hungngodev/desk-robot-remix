@@ -16,15 +16,11 @@
     "downstream_pullup_target_v": 3.3,
     "exact_vendor_pcb_verified": false,
     "physical_release": "HOLD for actual GY-530 board revision, pin order, soldered pullup rail, 3.3V sourcing and powered edge trials",
-    "references": [
-      "https://www.st.com/resource/en/datasheet/vl53l0x.pdf",
-      "https://www.ti.com/product/TCA9548A",
-      "https://www.espboards.dev/sensors/gy530/"
-    ]
+    "references": ["https://www.st.com/resource/en/datasheet/vl53l0x.pdf", "https://www.ti.com/product/TCA9548A", "https://www.espboards.dev/sensors/gy530/"]
   },
   "audio_output_power_contract": {
     "amplifier_ic": "MAX98357A",
-    "amplifier_vdd_v": 5,
+    "amplifier_vdd_v": 5.0,
     "speaker_nominal_impedance_ohm": 8,
     "speaker_nominal_rating_w": 2,
     "selection": "fixed_active_challenge_CS20_02P110_04_1X_2W_with_max98357a_5V_supply_pending_physical_trial",
@@ -252,7 +248,7 @@
       "name": "Rated switch, fuse, power leads, JST style keyed connectors, decoupling",
       "per_robot": 1,
       "reported_owned_total": 0,
-      "notes": "One rated assembly kit; no high current DuPont wires. Include a rated Schottky diode only in the external 5V feed to XIAO Sense (anode on fused robot boost, cathode on XIAO 5V) so USB flashing cannot backfeed servos. Source reuse: Seeed official XIAO external 5V instructions and MIT cgro00/desk-robot 1N5817 diode plus 470uF local 5V servo bulk. These are reference components, NOT proof this robot's two motor plus two servo supply is adequately sized. Design a local MAX98357A 0.1uF plus 10uF bypass per manufacturer, separately verify diode current and heat, power rail ripple, connector polarity and boost transients.",
+      "notes": "One rated assembly kit; no high current DuPont wires. Include a rated Schottky diode only in the external 5V feed to XIAO Sense (anode on fused robot boost, cathode on XIAO 5V) so USB flashing cannot backfeed servos. Source reuse: Seeed official XIAO external 5V instructions and MIT cgro00/desk-robot 1N5817 diode plus 470uF local 5V servo bulk. These are reference components, NOT proof this robot\u0027s two motor plus two servo supply is adequately sized. Design a local MAX98357A 0.1uF plus 10uF bypass per manufacturer, separately verify diode current and heat, power rail ripple, connector polarity and boost transients.",
       "group": "pet"
     },
     {
@@ -701,7 +697,7 @@
         "exact_carrier_current_qualified": false
       },
       "ld2410c": {
-        "rail_candidate_v": 5,
+        "rail_candidate_v": 5.0,
         "supply_capacity_ma_must_exceed": 200,
         "reference_average_current_ma": 79,
         "io_logic_v": 3.3,
@@ -773,104 +769,20 @@
   },
   "linked_subassemblies_note": "These 14 entries are motor, battery, charging, dock and station details or alternatives linked to the counted 49 visible roles, not 14 extra automatic purchases. Selected physical subparts require an explicit qualified decision and vendor, fit and electrical receipts. room_amg8833 and room_nfc_game_tokens remain visible as currently deferred conditional options and are not default checkout items.",
   "linked_subassemblies": [
-    {
-      "id": "n20_motor_candidate",
-      "parent_role": "stepper",
-      "fleet_quantity": 10,
-      "name": "N20 100:1 MP 6V motor alternative",
-      "disposition": "unresolved"
-    },
-    {
-      "id": "drv8833_driver_candidate",
-      "parent_role": "uln2003",
-      "fleet_quantity": 5,
-      "name": "DRV8833 dual H bridge alternative",
-      "disposition": "unresolved"
-    },
-    {
-      "id": "bq24075_charger_candidate",
-      "parent_role": "cap_power",
-      "fleet_quantity": 5,
-      "name": "BQ24075 power path plus BQ27441 gauge alternative",
-      "disposition": "unresolved"
-    },
-    {
-      "id": "boost_5v_candidate",
-      "parent_role": "cap_power",
-      "fleet_quantity": 5,
-      "name": "5V switching regulator",
-      "disposition": "unresolved"
-    },
-    {
-      "id": "protected_ntc_pack",
-      "parent_role": "cap_power",
-      "fleet_quantity": 5,
-      "name": "Protected 1S pack with connected NTC",
-      "disposition": "unresolved"
-    },
-    {
-      "id": "dock_5v_adapter",
-      "parent_role": "dock_fixture",
-      "fleet_quantity": 5,
-      "name": "Independent rated 5V dock adapter",
-      "disposition": "unresolved"
-    },
-    {
-      "id": "dock_ir_transistor_channels",
-      "parent_role": "dock_ir_emitter_channels",
-      "fleet_quantity": 10,
-      "name": "Dock IR transmitter transistor and resistor channels",
-      "disposition": "unresolved"
-    },
-    {
-      "id": "shared_room_controller",
-      "parent_role": "room_controller",
-      "fleet_quantity": 1,
-      "name": "Shared room controller actual board",
-      "disposition": "unresolved"
-    },
-    {
-      "id": "room_scd40",
-      "parent_role": "scd40",
-      "fleet_quantity": 1,
-      "name": "Shared station SCD40",
-      "disposition": "unresolved"
-    },
-    {
-      "id": "room_bme688",
-      "parent_role": "bme688",
-      "fleet_quantity": 1,
-      "name": "Shared station BME688",
-      "disposition": "unresolved"
-    },
-    {
-      "id": "room_ld2410c",
-      "parent_role": "ld2410c",
-      "fleet_quantity": 1,
-      "name": "Shared station LD2410C",
-      "disposition": "unresolved"
-    },
-    {
-      "id": "room_amg8833",
-      "parent_role": "amg8833",
-      "fleet_quantity": 1,
-      "name": "Shared station AMG8833",
-      "disposition": "deferred_optional"
-    },
-    {
-      "id": "room_soil_probe",
-      "parent_role": "soil_probe",
-      "fleet_quantity": 1,
-      "name": "Shared station soil probe",
-      "disposition": "unresolved"
-    },
-    {
-      "id": "room_nfc_game_tokens",
-      "parent_role": "nfc_game_props",
-      "fleet_quantity": 10,
-      "name": "Shared NFC toy tokens",
-      "disposition": "deferred_optional"
-    }
+    {"id": "n20_motor_candidate", "parent_role": "stepper", "fleet_quantity": 10, "name": "N20 100:1 MP 6V motor alternative", "disposition": "unresolved"},
+    {"id": "drv8833_driver_candidate", "parent_role": "uln2003", "fleet_quantity": 5, "name": "DRV8833 dual H bridge alternative", "disposition": "unresolved"},
+    {"id": "bq24075_charger_candidate", "parent_role": "cap_power", "fleet_quantity": 5, "name": "BQ24075 power path plus BQ27441 gauge alternative", "disposition": "unresolved"},
+    {"id": "boost_5v_candidate", "parent_role": "cap_power", "fleet_quantity": 5, "name": "5V switching regulator", "disposition": "unresolved"},
+    {"id": "protected_ntc_pack", "parent_role": "cap_power", "fleet_quantity": 5, "name": "Protected 1S pack with connected NTC", "disposition": "unresolved"},
+    {"id": "dock_5v_adapter", "parent_role": "dock_fixture", "fleet_quantity": 5, "name": "Independent rated 5V dock adapter", "disposition": "unresolved"},
+    {"id": "dock_ir_transistor_channels", "parent_role": "dock_ir_emitter_channels", "fleet_quantity": 10, "name": "Dock IR transmitter transistor and resistor channels", "disposition": "unresolved"},
+    {"id": "shared_room_controller", "parent_role": "room_controller", "fleet_quantity": 1, "name": "Shared room controller actual board", "disposition": "unresolved"},
+    {"id": "room_scd40", "parent_role": "scd40", "fleet_quantity": 1, "name": "Shared station SCD40", "disposition": "unresolved"},
+    {"id": "room_bme688", "parent_role": "bme688", "fleet_quantity": 1, "name": "Shared station BME688", "disposition": "unresolved"},
+    {"id": "room_ld2410c", "parent_role": "ld2410c", "fleet_quantity": 1, "name": "Shared station LD2410C", "disposition": "unresolved"},
+    {"id": "room_amg8833", "parent_role": "amg8833", "fleet_quantity": 1, "name": "Shared station AMG8833", "disposition": "deferred_optional"},
+    {"id": "room_soil_probe", "parent_role": "soil_probe", "fleet_quantity": 1, "name": "Shared station soil probe", "disposition": "unresolved"},
+    {"id": "room_nfc_game_tokens", "parent_role": "nfc_game_props", "fleet_quantity": 10, "name": "Shared NFC toy tokens", "disposition": "deferred_optional"}
   ],
   "owned_not_to_rebuy": [
     "BerryIMU spare",
