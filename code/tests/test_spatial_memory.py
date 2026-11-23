@@ -54,6 +54,19 @@ def test_duplicate_frame_and_correction_do_not_rewrite_spatial_evidence(tmp_path
     assert spatial.attach("robot-01", "first", evidence(when))
     assert not spatial.attach("robot-01", "first", replace(evidence(when), x_mm=200))
     assert not spatial.attach("robot-01", "second", evidence(when + 0.001))
+    assert not spatial.attach(
+        "robot-01", "second",
+        replace(evidence(when + 0.001), camera_complete_us=900_001),
+    )
+    # Distinct objects may legitimately be detected in one camera frame.
+    assert remember(db, "robot-01", "third", when + 0.002)
+    assert spatial.attach(
+        "robot-01", "third",
+        replace(evidence(when + 0.002), object_key="wrapped_candy"),
+    )
+    assert spatial.last_seen(
+        "robot-01", "wrapped_candy", now=when + 2,
+    ).event_id == "third"
     result = spatial.last_seen("robot-01", "flat_key", now=when + 2)
     assert result.event_id == "first"
     assert result.evidence.x_mm == 120

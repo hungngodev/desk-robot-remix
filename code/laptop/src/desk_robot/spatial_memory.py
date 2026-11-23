@@ -107,6 +107,17 @@ class SpatialMemory:
             if (episode[0] != robot_id or episode[1] != 1
                     or abs(episode[2] - evidence.observed_at) > 0.01):
                 raise ValueError("Spatial evidence requires same-robot firsthand episode time")
+            # Camera sequence identifies an image independently of completion timestamp.
+            # The same image can depict several objects, but cannot create a
+            # second sighting of one object just by changing complete_us.
+            # BEGIN IMMEDIATE makes this check atomic with the insert on legacy DBs.
+            if db.execute(
+                """SELECT 1 FROM spatial_observations
+                   WHERE object_key=? AND camera_boot=? AND camera_seq=?
+                   LIMIT 1""",
+                (evidence.object_key, evidence.camera_boot, evidence.camera_seq),
+            ).fetchone() is not None:
+                return False
             row = db.execute(
                 """INSERT OR IGNORE INTO spatial_observations
                    (event_id,object_key,observed_at,body_boot,origin_id,
