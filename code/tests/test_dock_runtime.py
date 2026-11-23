@@ -879,7 +879,7 @@ def test_invalid_dock_receipt_types_are_not_pose_evidence(bad_receipt):
 @pytest.mark.parametrize("timestamp", [10**1000, -(10**1000)])
 @pytest.mark.parametrize("receipt_shape", [2, 4])
 def test_unrepresentable_dock_receipt_time_is_rejected(timestamp, receipt_shape):
-    receipt = (b"\\xff\\xd8\\xff\\xd9", timestamp)
+    receipt = (b"\xff\xd8\xff\xd9", timestamp)
     if receipt_shape == 4:
         receipt += ((1, 1, 1), 1)
     with pytest.raises(ValueError, match="Invalid or stale dock camera receipt"):
@@ -901,7 +901,7 @@ async def test_unrepresentable_dock_receipt_holds_before_identity_or_detector(
     class ExtremeReceiptHead(Head):
         async def snapshot_for_dock(self):
             self.captures += 1
-            return b"\\xff\\xd8\\xff\\xd9", timestamp
+            return b"\xff\xd8\xff\xd9", timestamp
 
     head = ExtremeReceiptHead()
     monkeypatch.setattr(
