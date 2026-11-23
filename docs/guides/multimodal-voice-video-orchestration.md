@@ -248,6 +248,19 @@ qualification. Source and regression commits: `a531994b6ffc` and
 `bf2da05c6af7`; exact latter-sha Mac suite 1,321 tests passed, with the
 Python/head host suite separately blocked by unrelated Ruff lint.
 
+Durable **model-estimated transcript retention** is a separate, stricter
+permission: `accepted_at_us` and `audio_committed_at_us` must both be present,
+and the original audio commit must postdate both the voice-memory and the
+transcript-retention consent grant. Model completion after a grant cannot
+retroactively authorize previously captured or chronologically unknown audio.
+An older authenticated client may receive HTTP 200 for a nonstored estimate;
+`retention_consent_enabled` alone does not mean `stored` or
+`episode_persisted`. The route continues to retract in-flight inserts on
+consent cancellation and keeps each pet's private SQLite isolated. Regression:
+`test_native_durable_asr_requires_real_audio_commit_timestamp` and the
+corresponding existing positive storage and revoke fixtures; source commit
+`59b6e1265e3b`.
+
 `CameraFrameHub.spoken_history` keeps at most three actual transmitted Mac
 pet lines per robot for at most 30 seconds. That is **not** confirmation that
 a physical speaker played, that the human heard them, or that a separate
