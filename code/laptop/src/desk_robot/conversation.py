@@ -456,6 +456,11 @@ class Conversation:
         if self.speaker_stop_unconfirmed:
             raise RuntimeError("Xiaozhi speaker STOP unconfirmed; recovery required")
         async with self.speaker.session(robots):
+            # A failed urgent decoder STOP can latch while the bridge grant
+            # is awaiting the network. Never admit a newly granted talker
+            # under that now-unconfirmed audio floor; session exit releases it.
+            if self.speaker_stop_unconfirmed:
+                raise RuntimeError("Xiaozhi speaker STOP unconfirmed; recovery required")
             yield
 
     async def _abort_speaker_or_latch(self, robot: RobotConfig) -> None:
