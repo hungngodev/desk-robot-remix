@@ -1623,7 +1623,8 @@ def test_known_supplier_conflicts_are_quote_only_in_both_pilot_views():
     assert rows["i2c_mux"]["pilot_action"] == "QUOTE_ONLY_SUPPLIER_HOLD"
     assert "PCA9548A/PD548A" in rows["i2c_mux"]["supplier_quote_only_reason"]
     assert rows["rgb"]["pilot_action"] == "QUOTE_ONLY_SUPPLIER_HOLD"
-    assert "backorder" in rows["rgb"]["supplier_quote_only_reason"]
+    assert "product-page status is not a verified checkout" in rows["rgb"]["supplier_quote_only_reason"]
+    assert "backorder" not in rows["rgb"]["supplier_quote_only_reason"].lower()
     assert rows["cliff_obstacle"]["pilot_action"] == "SAMPLE_ONLY_FOR_BENCH_VERIFICATION"
     assert rows["cliff_obstacle"]["supplier_quote_only_reason"] is None
 
@@ -1637,12 +1638,15 @@ def test_known_supplier_conflicts_are_quote_only_in_both_pilot_views():
     assert all(not item["purchase_actionable_from_pilot_listing"]
                for item in cart["items"])
     assert "PCA9548A/PD548A" in by_sku["COM-05-067"]["supplier_quote_only_reason"]
-    assert "backorder" in by_sku["BOB-13282"]["supplier_quote_only_reason"]
+    assert "product-page status is not a verified checkout" in by_sku["BOB-13282"]["supplier_quote_only_reason"]
+    assert "missing headers" in by_sku["BOB-13282"]["supplier_quote_only_reason"]
     assert by_sku["SEN-19-006"]["supplier_quote_only_reason"] is None
     for view in (mod.render_first_robot_pilot_samples(report),
                  mod.render_pilot_supplier_cart(report)):
         assert "COM-05-067" in view and "PCA9548A/PD548A" in view
-        assert "BOB-13282" in view and "backorder" in view
+        assert "BOB-13282" in view
+        assert "product-page status is not a verified checkout" in view
+        assert "backorder" not in view.lower()
 
 
 def test_pilot_cart_keeps_unverified_manufacturers_distinct_from_stores():

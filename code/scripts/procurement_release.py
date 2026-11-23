@@ -1014,7 +1014,8 @@ PILOT_SAMPLE_PRODUCTS = {
 # Keep historical pilot quote rows visible, but do not present uncertain
 # seller stock or carrier identity as an actionable evaluation order.
 # COM-05-067 is advertised as TCA9548A while its seller photograph shows
-# PCA9548A / PD548A. BOB-13282 has a backorder purchase control.
+# PCA9548A / PD548A. BOB-13282 product-page stock can change; a
+# checkout-level stock and delivered-cost receipt is still required.
 # A storefront name is not proof of the physical module's maker. Only
 # explicitly identified part brands appear in the pilot's manufacturer column.
 # Generic ElectroPeak carriers and Newark's switch listing have no established
@@ -1034,8 +1035,8 @@ PILOT_SUPPLIER_QUOTE_HOLDS = {
         "confirm actual PCB IC, revision and reviewed TCA-role compatibility"
     ),
     "rgb": (
-        "HOLD: BOB-13282 seller purchase control shows backorder; "
-        "reconfirm current checkout stock or qualify an exact replacement"
+        "HOLD: BOB-13282 product-page status is not a verified checkout; "
+        "confirm stock, missing headers, 5V level shifting, fit and landed charges"
     ),
 }
 
