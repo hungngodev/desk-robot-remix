@@ -485,9 +485,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--peak-5v-a", type=float)
     parser.add_argument("--continuous-5v-a", type=float)
-    parser.add_argument("--low-cell-v", type=float, default=3.0)
-    parser.add_argument("--measured-efficiency", type=float, default=0.85)
-    parser.add_argument("--margin", type=float, default=1.3,
+    # None distinguishes an explicitly supplied undocked value from a
+    # default, so dock mode cannot silently ignore even a repeated default.
+    parser.add_argument("--low-cell-v", type=float)
+    parser.add_argument("--measured-efficiency", type=float)
+    parser.add_argument("--margin", type=float,
                         help="Conservative current reserve multiplier (1.0 to 2.0)")
     parser.add_argument("--boost-max-input-a", type=float)
     parser.add_argument("--boost-continuous-input-a", type=float)
@@ -577,6 +579,12 @@ def main() -> None:
             parser.error("Dock mode requires converter topology and actual input voltage ratings")
         if args.peak_5v_a is not None or args.continuous_5v_a is not None:
             parser.error("Use one mode: undocked peak load OR docked idle load")
+        if any(value is not None for value in (
+                args.low_cell_v, args.measured_efficiency, args.margin,
+                args.boost_max_input_a, args.boost_continuous_input_a,
+                args.boost_continuous_output_a,
+                args.protected_cell_continuous_a)):
+            parser.error("Undocked-only power sizing flags cannot be used in dock mode")
         if pack_requested:
             parser.error("Pack geometry screening is for undocked load mode only")
         result = assess_docked_load(
@@ -608,9 +616,10 @@ def main() -> None:
             parser.error("Undocked mode requires --peak-5v-a and --continuous-5v-a")
         result = size_5v_supply(
             args.peak_5v_a, args.continuous_5v_a,
-            cell_low_v=args.low_cell_v,
-            measured_boost_efficiency=args.measured_efficiency,
-            margin=args.margin,
+            cell_low_v=(3.0 if args.low_cell_v is None else args.low_cell_v),
+            measured_boost_efficiency=(
+                0.85 if args.measured_efficiency is None else args.measured_efficiency),
+            margin=(1.3 if args.margin is None else args.margin),
             boost_max_input_a=args.boost_max_input_a,
             boost_continuous_input_a=args.boost_continuous_input_a,
             boost_continuous_output_a=args.boost_continuous_output_a,

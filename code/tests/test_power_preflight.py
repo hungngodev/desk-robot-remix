@@ -659,6 +659,49 @@ def test_docked_cli_uses_exact_same_fail_closed_preflight(monkeypatch, capsys):
     assert checked["signed_battery_charge_current_measured"] is False
 
 
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [
+        ("--low-cell-v", "3.0"),
+        ("--measured-efficiency", "0.85"),
+        ("--margin", "1.3"),
+        ("--boost-max-input-a", "5"),
+        ("--boost-continuous-input-a", "5"),
+        ("--boost-continuous-output-a", "3"),
+        ("--protected-cell-continuous-a", "5"),
+    ],
+)
+def test_docked_cli_rejects_ignored_undocked_only_power_flags(
+    monkeypatch, capsys, flag, value,
+):
+    import sys
+
+    script = Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+    argv = [
+        str(script),
+        "--dock-idle-5v-a", "0.5", "--dock-requested-charge-a", "0.25",
+        "--dock-sys-v", "4.4", "--dock-boost-efficiency", "0.85",
+        "--dock-charger-variant", "BQ24074",
+        "--dock-regulator-topology", "boost_only",
+        "--dock-regulator-min-input-v", "2.8",
+        "--dock-regulator-max-input-v", "5.0",
+        "--dock-charger-input-limit-a", "1.5",
+        "--dock-board-thermal-input-a", "1.5",
+        "--dock-adapter-continuous-a", "3",
+        "--dock-boost-5v-continuous-a", "2",
+        "--dock-pack-charge-max-a", "1",
+        "--dock-motors-disarmed",
+        flag, value,
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit) as error:
+        runpy.run_path(str(script), run_name="__main__")
+    assert error.value.code == 2
+    output = capsys.readouterr()
+    assert "Undocked-only power sizing flags cannot be used in dock mode" in output.err
+    assert not output.out.strip()
+
+
 def test_docked_cli_refuses_to_guess_which_charger_is_fitted(
     monkeypatch, capsys,
 ):
