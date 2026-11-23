@@ -5,6 +5,7 @@ import json
 import os
 import runpy
 import stat
+import sys
 from pathlib import Path
 
 import pytest
@@ -264,3 +265,54 @@ def test_private_side_capture_requires_real_preflight_identity(tmp_path):
     with pytest.raises(RuntimeError, match="changed since preflight"):
         write_private_rows(output, [], expected_parent=(0, 0))
     assert not output.exists()
+
+
+async def test_side_capture_main_ignores_ambient_proxy_and_keeps_private_output(
+    monkeypatch, tmp_path,
+):
+    # Exercise the real operator CLI construction, without an actual robot.
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:7890")
+    monkeypatch.setenv("ALL_PROXY", "http://127.0.0.1:7890")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.setenv("DESK_ROBOT_API_TOKEN", "operator-private-demo-token")
+    output = tmp_path / "side-physical-provenance.jsonl"
+    monkeypatch.setattr(sys, "argv", [
+        "capture_side_ranges.py", "--robot", "robot-01",
+        "--firmware-commit", "flash-sha", "--mount-id", "measured-mount",
+        "--output", str(output),
+    ])
+    monkeypatch.setattr("builtins.input", lambda _: "")
+    recorded = {}
+    main = capture["main"]
+
+    class Client:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    def client_factory(**kwargs):
+        recorded.update(kwargs)
+        return Client()
+
+    async def fake_capture_phase(client, **kwargs):
+        assert isinstance(client, Client)
+        assert kwargs["token"] == "operator-private-demo-token"
+        assert kwargs["robot"] == "robot-01"
+        assert kwargs["count"] == 20
+        return [{
+            "robot_id": kwargs["robot"], "direction": kwargs["side"],
+            "label": kwargs["label"], "sample_id": kwargs["sample_id_start"],
+            "side_ranges": {"boot_id": 73, "sample_ms": [100, 200, 300]},
+        }]
+
+    monkeypatch.setattr(main.__globals__["httpx"], "AsyncClient", client_factory)
+    monkeypatch.setitem(main.__globals__, "capture_phase", fake_capture_phase)
+    await main()
+    assert recorded == {"trust_env": False, "follow_redirects": False}
+    rows = [json.loads(line) for line in output.read_text().splitlines()]
+    assert [(row["direction"], row["label"]) for row in rows] == list(
+        capture["PHASES"]
+    )
+    assert stat.S_IMODE(output.stat().st_mode) == 0o600

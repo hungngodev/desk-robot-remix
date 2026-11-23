@@ -24,6 +24,11 @@ PHASES = tuple((side, label) for side in SIDES for label in ("near", "far"))
 _ROBOT = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
 
 
+def _operator_status_client() -> httpx.AsyncClient:
+    """Never route a private operator bearer through ambient HTTP proxies."""
+    return httpx.AsyncClient(trust_env=False, follow_redirects=False)
+
+
 def _status_url(base_url: str, robot: str) -> str:
     """Preserve the private operator endpoint rules of capture_handling_trials."""
     if type(robot) is not str or not _ROBOT.fullmatch(robot):
@@ -221,7 +226,7 @@ async def main() -> None:
     rows = []
     last_side: dict[str, int] = {}
     boot = None
-    async with httpx.AsyncClient(follow_redirects=False) as client:
+    async with _operator_status_client() as client:
         for side, label in PHASES:
             input(
                 f"Disarm tracks. Hold a real {label} target beside the "
