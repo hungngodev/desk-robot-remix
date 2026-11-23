@@ -39,6 +39,19 @@ them into a second shopping list or hand-edit generated pin tables.
    `python3 code/scripts/export_fit_kit.py --verify`. Follow
    [the adapter kit instructions](../cad/remixes/one_robot_adapter_kit_README.md).
    These parts are fit references, not the final installed print set.
+   For source-derived A4 **paper** fit overlays, separately run from the repository root:
+
+   ```bash
+   python3 docs/cad/remixes/print_2d_fit_templates.py --output /tmp/robot-paper-fit
+   python3 docs/cad/remixes/print_2d_fit_templates.py --output /tmp/robot-paper-fit --verify
+   ```
+
+   Print the GY-530 carrier, speaker and dock reference SVGs at **100% / actual size**,
+   never fit-to-page. Measure their independent 100 mm and 25 mm scales with a
+   ruler, then compare carrier size and holes against the delivered parts. A
+   clipped, scaled or mismatched paper reference is a **STOP** before drilling,
+   purchasing final mounts or printing permanent solids. These are unpowered
+   provisional outlines, not approved mounting holes or a qualified dock.
 4. **Assemble and inspect mechanically.** Follow
    [the one robot Fusion assembly](../cad/FUSION_ONE_ROBOT_ASSEMBLY.md).
    Check track and servo swept spaces, camera and ToF visibility, battery
@@ -61,6 +74,15 @@ them into a second shopping list or hand-edit generated pin tables.
    [the jaw calibration helper](jaw-calibration-helper.md), and
    [the first gripper test](first-gripper-test.md), plus the camera, ToF,
    dock and acoustic procedures referenced by the live verification record.
+   The accepted first-unit object-return path additionally requires [Guide 50
+   calibrated map and per-robot spatial memory](../plans/spatial-first-unit/50-map-and-spatial-memory.md)
+   and [Guide 60 object recall and navigation](../plans/spatial-first-unit/60-object-recall-and-navigation.md).
+   Record the measured camera/body transform, stationary tag and map anchor,
+   AS5600 wheel coupling and odometry origin for the same physical unit.
+   Keep route proposals **read-only** until the actual body pose, safe desk
+   support, fresh visual target and local WROOM stop/cutoff are qualified.
+   Unavailable pose, moved/hidden target, pickup, new boot/origin, human STOP,
+   stale camera or wrong pet/session means no motion and no claimed arrival.
 9. **Operate, STOP and recover.** Start disarmed. Use the STOP and rearm rules
    in [the wiring guide](../hardware/wiring.md) and never treat reconnect,
    putdown or a recovered Mac session as permission to resume motion.
@@ -70,8 +92,13 @@ them into a second shopping list or hand-edit generated pin tables.
     before replacing a guard with a bypass.
 11. **Run acceptance.** Record exact build and calibration identity, then run
     the applicable A1 through A12 cases in
-    [the verification record](../records/verification.md). Software checks,
-    printed fit and physical qualification are distinct evidence.
+    [the verification record](../records/verification.md), and the separate
+    [first-unit object return trials](../plans/spatial-first-unit/60-object-recall-and-navigation.md):
+    at least 9/10 map re-anchors within 20 mm and 8/10 stationary object
+    returns from changed starting poses, with zero false arrivals or unsafe
+    commands in negative trials. Log each actual assembly and calibration ID,
+    pose/target receipt and operator observation. Software checks, printed fit
+    and physical qualification are distinct evidence.
 12. **Release the final print set only after qualification.** The current
     repository intentionally does not call the source meshes and fit coupons a
     production robot. Final installed quantities and dock charging remain
