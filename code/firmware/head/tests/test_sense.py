@@ -1698,6 +1698,12 @@ def test_authenticated_pose_bridge_is_read_only_bounded_and_versioned():
         reboot["body_boot"], reboot["origin"])
     assert reboot["quality"] == "valid" and reboot["seq"] == 1
     assert unavailable["quality"] == "unavailable" and unavailable["origin"] == 0
+    assert unavailable["seq"] > reboot["seq"] and unavailable["sample_us"] > reboot["sample_us"]
+    assert '!integer(seq, 1, 4294967295.0)' in bridge
+    assert '!integer(sample_us, 1, 9007199254740991.0)' in bridge
+    assert '!integer(get("x_mm"), -1000000.0, 1000000.0)' in bridge
+    assert '!integer(get("y_mm"), -1000000.0, 1000000.0)' in bridge
+    assert '!integer(get("yaw_mrad"), -3142.0, 3142.0)' in bridge
     assert set(valid) == set(same_origin) == set(reboot) == set(unavailable) == {
         "v", "body_boot", "origin", "seq", "sample_us",
         "x_mm", "y_mm", "yaw_mrad", "quality",

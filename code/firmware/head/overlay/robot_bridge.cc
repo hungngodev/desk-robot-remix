@@ -185,19 +185,19 @@ bool PoseValid(cJSON* json) {
     if (!integer(version, 1, 1) ||
         !integer(body_boot, 1, 4294967295.0) ||
         !integer(origin, 0, 4294967295.0) ||
-        !integer(seq, 0, 4294967295.0) ||
-        !integer(sample_us, 0, 9007199254740991.0) ||
-        !integer(get("x_mm"), -2147483648.0, 2147483647.0) ||
-        !integer(get("y_mm"), -2147483648.0, 2147483647.0) ||
-        !integer(get("yaw_mrad"), -2147483648.0, 2147483647.0) ||
+        !integer(seq, 1, 4294967295.0) ||
+        !integer(sample_us, 1, 9007199254740991.0) ||
+        !integer(get("x_mm"), -1000000.0, 1000000.0) ||
+        !integer(get("y_mm"), -1000000.0, 1000000.0) ||
+        !integer(get("yaw_mrad"), -3142.0, 3142.0) ||
         !cJSON_IsString(quality) || !quality->valuestring) return false;
     const bool usable = std::strcmp(quality->valuestring, "valid") == 0;
     const bool degraded = std::strcmp(quality->valuestring, "degraded") == 0;
     const bool unavailable = std::strcmp(quality->valuestring, "unavailable") == 0;
     if (!usable && !degraded && !unavailable) return false;
-    // A missing origin or a zero sample is never valid navigation evidence.
-    if ((usable || degraded) && (origin->valuedouble == 0 ||
-        seq->valuedouble == 0 || sample_us->valuedouble == 0)) return false;
+    // Body read stays source-timed even when localization is unavailable;
+    // only a valid/degraded pose requires a nonzero continuity origin.
+    if ((usable || degraded) && origin->valuedouble == 0) return false;
     return true;
 }
 

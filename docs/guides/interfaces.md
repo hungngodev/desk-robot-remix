@@ -173,7 +173,7 @@ The exact required nine body fields are `v=1`, `body_boot` (nonzero uint32),
 JSON integer range 2^53-1), `x_mm`, `y_mm` (signed 32 bit millimeters),
 `yaw_mrad` (signed 32 bit milliradians), and `quality` (only `valid`,
 `degraded`, or `unavailable`). All fields are integers except quality.
-A valid/degraded reading requires nonzero origin, sequence and sample time.
+A valid/degraded reading requires nonzero origin, sequence and sample time. Every quality, including unavailable, requires a nonzero sequence and source sample time. Coordinates are restricted to ±1,000,000 mm and yaw to ±3,142 mrad for the current Mac pose decoder.
 Unrecognized versions, omitted or extra fields, nonintegral/out-of-range
 values, malformed JSON and foreign acknowledgments cannot become a pose.
 No wrap/age conversion from body to head clocks is inferred by the head.
@@ -187,7 +187,7 @@ Illustrative wire fixtures only, NOT observations from installed hardware:
 * Rebooted body, new boot and new origin, first sample:
   `{"v":1,"body_boot":43,"origin":4,"seq":1,"sample_us":1000000,"x_mm":0,"y_mm":0,"yaw_mrad":0,"quality":"valid"}`
 * Body available but pose not localized:
-  `{"v":1,"body_boot":43,"origin":0,"seq":0,"sample_us":0,"x_mm":0,"y_mm":0,"yaw_mrad":0,"quality":"unavailable"}`
+  `{"v":1,"body_boot":43,"origin":0,"seq":2,"sample_us":1100000,"x_mm":0,"y_mm":0,"yaw_mrad":0,"quality":"unavailable"}`
 
 A body reboot invalidates the old frame even if its new sequence happens to
 match. A new origin also invalidates old spatial coordinates. Mac guide 50
