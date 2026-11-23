@@ -638,16 +638,21 @@ class SenseOverlayTests(unittest.TestCase):
         """Source contract only; physical DMA silence still needs A2 trials."""
         header = (HEAD / "sense/sense_reference_codec.h").read_text()
         code = (HEAD / "sense/sense_reference_codec.cc").read_text()
-        self.assertIn("uint64_t reference_generation_ = 0;", header)
+        self.assertIn("SenseSpeakerActivity speaker_activity_", header)
+        self.assertIn('#include "sense_speaker_activity.hpp"', header)
         writer = code.split("int SenseReferenceCodec::Write(", 1)[1]
         writer = writer.split("void SenseReferenceCodec::ClearReference()", 1)[0]
         self.assertLess(
-            writer.index("started_generation = reference_generation_;"),
+            writer.index("started_generation = speaker_activity_.generation();"),
             writer.index("NoAudioCodec::Write(data, samples)"),
         )
         self.assertLess(
             writer.index("NoAudioCodec::Write(data, samples)"),
-            writer.index("started_generation == reference_generation_"),
+            writer.index("speaker_activity_.RecordAccepted(started_generation, accepted);"),
+        )
+        self.assertLess(
+            writer.index("speaker_activity_.RecordAccepted(started_generation, accepted);"),
+            writer.index("started_generation == speaker_activity_.generation()"),
         )
         self.assertIn("if (stale_publish_discards_ != UINT32_MAX) ++stale_publish_discards_;", writer)
         self.assertIn("stale_discards = stale_publish_discards_;", writer)
@@ -655,7 +660,7 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn("PublishAcceptedLocked(data, accepted, volume", writer)
         clear = code.split("void SenseReferenceCodec::ClearReference()", 1)[1]
         self.assertLess(
-            clear.index("++reference_generation_;"),
+            clear.index("speaker_activity_.Reset();"),
             clear.index("reference_.fill(0);"),
         )
         self.assertIn('physical TX silence unverified', writer)

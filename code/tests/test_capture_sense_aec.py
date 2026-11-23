@@ -137,10 +137,14 @@ def test_sense_status_latches_speaker_activity_inside_pcm_window():
     codec = (root / "sense/sense_reference_codec.cc").read_text()
     header = (root / "sense/sense_reference_codec.h").read_text()
     bridge = (root / "overlay/robot_bridge.cc").read_text()
-    assert "bench_speaker_at_start_ = speaker_frames_accepted_;" in codec
+    assert "bench_speaker_at_start_ = speaker_activity_.SnapshotNow();" in codec
     assert "const bool already_ready = bench_window_.ready();" in codec
     assert "if (!already_ready && bench_window_.ready())" in codec
-    assert "speaker_frames_accepted_ > bench_speaker_at_start_" in codec
+    completion = codec.split("if (!already_ready && bench_window_.ready())", 1)[1]
+    completion = completion.split("}", 1)[0]
+    assert "bench_speaker_activity_in_window_" in completion
+    assert "speaker_activity_." in completion
+    assert "SenseSpeakerActivity::Snapshot bench_speaker_at_start_" in header
     assert "bench_window_.ready() && bench_speaker_activity_in_window_" in codec
     assert "bool speaker_activity_in_window;" in header
     assert '"speaker_activity_in_window"' in bridge
