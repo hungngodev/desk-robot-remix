@@ -3120,7 +3120,7 @@ def test_signed_tool_receipt_requires_current_xiaozhi_generation_not_mac_epoch(
         assert [entry[0] for entry in hub.tool_history[robot]] == ["robot_status"]
         assert client.get(path, headers=current_signed).status_code == 409
         assert calls == ["status"]
-        assert hub.tool_history[peer] == []
+        assert not hub.tool_history[peer]
 
         foreign_signed = _signed_tool_headers(
             settings, tokens, peer, f"/v1/robots/{peer}/status", 42,
