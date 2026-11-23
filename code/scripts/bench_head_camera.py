@@ -142,11 +142,12 @@ async def measure(
     camera_error_count = status_error_count = 0
     seen_camera_identities: set[tuple[int, int, int]] = set()
     snapshot_boot: int | None = None
+    snapshot_sequence: int | None = None
     started = time.monotonic()
     deadline = started + seconds
 
     async def poll_camera():
-        nonlocal camera_error_count, snapshot_boot
+        nonlocal camera_error_count, snapshot_boot, snapshot_sequence
         due = started
         while time.monotonic() < deadline:
             begin = time.monotonic()
@@ -167,7 +168,13 @@ async def measure(
                         raise RuntimeError("Sense camera rebooted during snapshot bench")
                     if identity in seen_camera_identities:
                         raise ValueError("Head returned duplicate camera identity")
+                    # The completion clock is not a sequence substitute:
+                    # a replay can carry a newly forged completion timestamp.
+                    if (snapshot_sequence is not None
+                            and identity[1] <= snapshot_sequence):
+                        raise ValueError("Head returned replayed camera sequence")
                     snapshot_boot = identity[0]
+                    snapshot_sequence = identity[1]
                     seen_camera_identities.add(identity)
                 camera_sizes.append(len(jpeg))
                 camera_times.append(time.monotonic() - begin)
@@ -226,6 +233,8 @@ async def measure(
                         if last_source_identity is not None:
                             if identity[0] != last_source_identity[0]:
                                 raise RuntimeError("Sense camera rebooted during continuous bench")
+                            if identity[1] <= last_source_identity[1]:
+                                raise ValueError("Sense camera sequence replayed")
                             # These are two elapsed times on the SAME Sense boot,
                             # not an ESP-to-Mac absolute clock synchronization.
                             source_gap = (

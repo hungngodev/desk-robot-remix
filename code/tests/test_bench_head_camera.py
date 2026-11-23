@@ -195,6 +195,40 @@ async def test_replayed_xiao_frame_identity_rejected_by_camera_bench():
     assert "duplicate camera identity" in report["camera_errors"][0]
 
 
+@pytest.mark.parametrize("later_sequence", [42, 41])
+async def test_changed_completion_timestamp_cannot_hide_snapshot_replay(
+    later_sequence,
+):
+    """A new completion clock never turns an old frame sequence into fresh JPEG."""
+    class ReplayedHead:
+        def __init__(self):
+            self.reads = 0
+            self._last_camera = None
+            self.status_calls = 0
+
+        async def snapshot(self):
+            self.reads += 1
+            sequence = 42 if self.reads == 1 else later_sequence
+            self._last_camera = (17, sequence, self.reads * 1_000)
+            return JPEG
+
+        async def status(self):
+            self.status_calls += 1
+            return {"robot_id": "robot-01"}
+
+    head = ReplayedHead()
+    result = await bench.measure(
+        head, "robot-01", seconds=.16,
+        camera_period_s=.05, status_period_s=.05,
+    )
+    assert result["camera_latency"]["count"] == 1
+    assert result["camera_error_count"] >= 1
+    assert "replayed camera sequence" in result["camera_errors"][0]
+    assert result["status_error_count"] == 0
+    assert head.status_calls >= 2
+    assert not bench.bench_passed(result, require_audio=False)
+
+
 async def test_snapshot_camera_bench_rejects_reboot_without_hiding_status():
     class RebootedHead:
         def __init__(self):
@@ -290,6 +324,39 @@ async def test_real_mjpeg_bench_receives_continuous_frames_without_snapshot_http
     assert result["physical_aec_latency_measured"] is False
     assert result["speaker_silence_verified"] is False
     assert result["camera_error_count"] == 0
+
+
+@pytest.mark.parametrize("later_sequence", [42, 41])
+async def test_changed_completion_timestamp_cannot_hide_mjpeg_replay(
+    later_sequence,
+):
+    """The source sequence must increase independently of network and source time."""
+    class ReplayedHead:
+        def __init__(self):
+            self._last_camera = None
+            self.status_calls = 0
+
+        async def stream_frames(self):
+            for i, sequence in enumerate((42, later_sequence)):
+                await asyncio.sleep(.02)
+                self._last_camera = (17, sequence, (i + 1) * 20_000)
+                yield JPEG, time.monotonic()
+
+        async def status(self):
+            self.status_calls += 1
+            return {"robot_id": "robot-01"}
+
+    head = ReplayedHead()
+    result = await bench.measure(
+        head, "robot-01", seconds=.16,
+        status_period_s=.05, stream=True,
+    )
+    assert result["camera_frames_received"] == 1
+    assert result["camera_error_count"] >= 1
+    assert "camera sequence replayed" in result["camera_errors"][0]
+    assert result["status_error_count"] == 0
+    assert head.status_calls >= 2
+    assert not bench.bench_passed(result, require_audio=False)
 
 
 async def test_camera_continuity_cannot_claim_simultaneous_speech_without_audio(
