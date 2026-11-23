@@ -135,8 +135,29 @@ def _expected(root: Path) -> tuple[dict, dict[str, bytes]]:
     return manifest, pages
 
 
+def _reject_output_aliases(output: Path) -> None:
+    """Keep SVG templates and their manifest inside the selected output."""
+    # macOS may expose root-owned /var or /tmp aliases; allow only system
+    # links beneath a nonwritable parent, never mutable project links.
+    for ancestor in (output, *output.parents):
+        if not ancestor.is_symlink():
+            continue
+        if (ancestor.lstat().st_uid == 0
+                and not (ancestor.parent.stat().st_mode & 0o022)):
+            continue
+        raise ValueError(f"Symlinked paper template output path: {ancestor}")
+    names = ["paper_manifest.json"] + [
+        f"{kind}_reference_A4.svg" for kind in SOURCES
+    ]
+    for name in names:
+        path = output / name
+        if path.is_symlink():
+            raise ValueError(f"Symlinked paper template output path: {path}")
+
+
 def export(root: Path, output: Path) -> dict:
     manifest, pages = _expected(root)
+    _reject_output_aliases(output)
     output.mkdir(parents=True, exist_ok=True)
     for name, data in pages.items():
         (output / name).write_bytes(data)
@@ -147,6 +168,7 @@ def export(root: Path, output: Path) -> dict:
 
 
 def verify(root: Path, output: Path) -> dict:
+    _reject_output_aliases(output)
     expected, pages = _expected(root)
     actual = json.loads((output / "paper_manifest.json").read_text(encoding="utf-8"))
     if actual != expected:

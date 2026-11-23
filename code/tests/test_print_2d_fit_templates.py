@@ -32,6 +32,41 @@ def setup_sources(tmp_path):
         path.write_text(contents, encoding="utf-8")
 
 
+@pytest.mark.parametrize("alias", ("output", "ancestor", "manifest", "page"))
+def test_a4_export_and_verify_reject_symlink_aliases_before_writes(
+    tmp_path, alias,
+):
+    source = load()
+    setup_sources(tmp_path)
+    # A fixture may run as root: make the parent explicitly mutable so an
+    # accidental root-owned test symlink is not a trusted system /var alias.
+    tmp_path.chmod(0o777)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "private.txt"
+    sentinel.write_text("unchanged", encoding="utf-8")
+    output = tmp_path / "paper"
+    if alias == "output":
+        output.symlink_to(outside, target_is_directory=True)
+    elif alias == "ancestor":
+        (outside / "nested").mkdir()
+        pivot = tmp_path / "pivot"
+        pivot.symlink_to(outside, target_is_directory=True)
+        output = pivot / "nested"
+    else:
+        output.mkdir()
+        target_name = ("paper_manifest.json" if alias == "manifest"
+                       else "ranger_reference_A4.svg")
+        (output / target_name).symlink_to(sentinel)
+
+    with pytest.raises(ValueError, match="Symlinked paper template output"):
+        source.export(tmp_path, output)
+    assert sentinel.read_text(encoding="utf-8") == "unchanged"
+    assert not (outside / "speaker_reference_A4.svg").exists()
+    with pytest.raises(ValueError, match="Symlinked paper template output"):
+        source.verify(tmp_path, output)
+
+
 def test_a4_real_scale_and_source_dimensions(tmp_path):
     source = load()
     setup_sources(tmp_path)
