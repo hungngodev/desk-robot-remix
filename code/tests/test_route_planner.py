@@ -102,6 +102,31 @@ def test_bad_or_stale_map_is_rejected(changed, reason):
     assert actual.reason == reason and actual.cells == ()
 
 
+@pytest.mark.parametrize(("observed_at_us", "expires_at_us"), [
+    (-1, 4000),
+    (0, 4000),
+    (500, 10_000_501),
+    (500, 10**18),
+])
+def test_invalid_or_unbounded_map_receipt_never_proposes_a_route(
+    observed_at_us, expires_at_us,
+):
+    grid, _, _ = fixtures()
+    result = route(grid=replace(grid, observed_at_us=observed_at_us,
+                                expires_at_us=expires_at_us))
+    assert result.reason == "unanchored_or_stale_map"
+    assert result.status == "rejected"
+    assert result.cells == () and result.may_execute is False
+
+
+def test_maximum_producer_map_lifetime_remains_readonly():
+    grid, _, _ = fixtures()
+    result = route(grid=replace(grid, observed_at_us=500,
+                                expires_at_us=10_000_500))
+    assert result.status == "planned"
+    assert result.may_execute is False
+
+
 def test_inflated_footprint_near_off_map_unknown_and_unsafe_goal():
     g, r, e = fixtures()
     e = replace(e, footprint_radius_mm=14)

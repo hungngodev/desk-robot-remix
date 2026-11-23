@@ -16,6 +16,9 @@ from typing import Callable
 # Grid states are explicit. Everything except observed-safe support is blocked.
 SAFE = "safe"
 _DIRECTIONS = ((1, 0), (0, 1), (-1, 0), (0, -1))  # +X, +Y, -X, -Y
+# SpatialGrid's last update may be up to 5 s old when a 5 s snapshot
+# is emitted. Any greater observation-to-expiry interval is not qualified.
+_MAX_MAP_OBSERVATION_TO_EXPIRY_US = 10_000_000
 
 
 @dataclass(frozen=True)
@@ -128,8 +131,10 @@ def plan_route(
     if (grid.anchored is not True
             or type(grid.observed_at_us) is not int
             or type(grid.expires_at_us) is not int
-            or grid.observed_at_us > now_us or grid.expires_at_us <= now_us
-            or grid.observed_at_us > grid.expires_at_us):
+            or grid.observed_at_us <= 0 or grid.observed_at_us > now_us
+            or grid.expires_at_us <= now_us
+            or not 0 < grid.expires_at_us - grid.observed_at_us
+            <= _MAX_MAP_OBSERVATION_TO_EXPIRY_US):
         return refuse("unanchored_or_stale_map")
     if type(request.deadline_us) is not int or request.deadline_us <= now_us:
         return refuse("deadline_expired")
