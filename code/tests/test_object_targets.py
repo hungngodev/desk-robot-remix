@@ -72,6 +72,35 @@ def test_latest_camera_not_seen_invalidates_current_sighting_not_memory():
     assert resolve([seen, absent, newer]).status == "current_sighting"
 
 
+@pytest.mark.parametrize(
+    ("positive_seq", "positive_receipt", "negative_seq", "negative_receipt",
+     "current"),
+    [
+        (23, 975_000, 24, 955_000, False),  # Old positive finishes last.
+        (25, 955_000, 24, 975_000, True),   # Old negative finishes last.
+        (24, 975_000, 24, 955_000, False),  # Contradictory same-frame results.
+        (25, 975_000, 24, 955_000, True),   # Genuine new positive restores view.
+    ],
+)
+def test_capture_sequence_overrules_out_of_order_detection_completion(
+    positive_seq, positive_receipt, negative_seq, negative_receipt, current,
+):
+    _, _, seen = fixtures()
+    positive = replace(seen, frame_seq=positive_seq,
+                       receipt_us=positive_receipt)
+    negative = replace(seen, source="camera_not_seen",
+                       frame_seq=negative_seq, receipt_us=negative_receipt,
+                       floor_mm=None, projection_qualified=False)
+    for evidence in ([positive, negative], [negative, positive]):
+        result = resolve(evidence)
+        assert result.status == ("current_sighting" if current else "last_seen")
+        assert result.confirmed_floor_mm == ((120, 220) if current else None)
+        assert result.reason == (
+            "fresh_projected_view" if current else "not_currently_confirmed"
+        )
+        assert result.arrived is False and result.may_execute is False
+
+
 def test_seen_from_an_old_camera_boot_or_origin_is_only_historical():
     _, _, seen = fixtures()
     for e in [replace(seen, camera_boot=100), replace(seen, origin_id="prior")]:

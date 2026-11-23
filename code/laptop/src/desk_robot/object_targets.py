@@ -216,13 +216,16 @@ def resolve_object_target(
 
     positives = [e for e in seen if fresh(e)]
     negatives = [e for e in records if e.source == "camera_not_seen" and fresh(e)]
-    latest_seen = max(positives, key=lambda e: (e.receipt_us, e.frame_seq),
+    # Native camera frames are ordered by frame sequence inside one
+    # authenticated camera boot. Inference can finish out of order: the
+    # receipt time of an OLD frame cannot override a newer missing-object
+    # frame. For conflicting results on the same frame, fail closed.
+    latest_seen = max(positives, key=lambda e: (e.frame_seq, e.receipt_us),
                       default=None)
-    latest_absent = max(negatives, key=lambda e: (e.receipt_us, e.frame_seq),
+    latest_absent = max(negatives, key=lambda e: (e.frame_seq, e.receipt_us),
                         default=None)
     if (latest_seen is not None and (latest_absent is None or
-            (latest_seen.receipt_us, latest_seen.frame_seq) >
-            (latest_absent.receipt_us, latest_absent.frame_seq))):
+            latest_seen.frame_seq > latest_absent.frame_seq)):
         if latest_seen.projection_qualified and latest_seen.floor_mm is not None:
             return result("current_sighting", "fresh_projected_view", latest_seen,
                           confirmed=latest_seen.floor_mm)
