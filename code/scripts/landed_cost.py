@@ -317,8 +317,8 @@ def account_landed_cost(
     for index, incoming in enumerate(incoming_items):
         try:
             role = _nonempty(incoming.get("role_key"), "in-flight role")
-            if role not in required_roles:
-                raise ValueError("unknown in-flight role")
+            if role not in required_roles or required_roles[role] == 0:
+                raise ValueError("unknown or excluded in-flight role")
             quantity = positive_count(incoming.get("quantity"), "in-flight units")
             ref = _nonempty(incoming.get("order_reference"), "in-flight order")
             if ref not in paid_orders:

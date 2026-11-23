@@ -171,6 +171,35 @@ def test_explicit_inventory_and_in_flight_are_distinct():
 
 
 
+def test_excluded_zero_target_paid_item_is_not_marked_awaiting_arrival():
+    # A paid order for a deferred role must not silently enter the two-list
+    # incoming stock view, even though the overall cost gate already holds.
+    ev = sample()
+    ev["lines"].pop()  # no new purchase for the excluded mux
+    ev["paid_orders"][0]["allocations"] = [
+        {"role_key": "robot:i2c_mux", "quantity": 1},
+    ]
+    ev["paid_in_flight"] = [{
+        "role_key": "robot:i2c_mux", "quantity": 1,
+        "order_reference": "already-paid",
+    }]
+    required = {"robot:cliff_obstacle": 1, "robot:i2c_mux": 0}
+    excluded = mod.account_landed_cost(
+        ev, required, CATEGORIES, expected_scope="evaluation",
+    )
+    assert not excluded["calculation_complete_not_physical_approval"]
+    assert excluded["payable_now_cents"] is None
+    assert any("unknown or excluded in-flight role" in error
+               for error in excluded["errors"])
+    assert "robot:i2c_mux" not in excluded["awaiting_arrival_roles"]
+
+    # The same inspected allocation is legitimate when the role is selected.
+    allowed = calculate(ev)
+    assert allowed["errors"] == []
+    assert allowed["calculation_complete_not_physical_approval"]
+    assert allowed["awaiting_arrival_roles"] == ["robot:i2c_mux"]
+
+
 def test_paid_delivered_inventory_and_in_flight_share_one_order_allocation():
     """One paid mux cannot cover both received and in-transit requirements."""
     ev = sample()
