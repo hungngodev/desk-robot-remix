@@ -256,3 +256,33 @@ def test_target_results_bind_exact_request_but_refusals_do_not():
     denied = resolve([seen], query=query, owner=replace(owner, turn_id="other"))
     assert denied.status == "rejected"
     assert denied.request_fence is None
+
+
+@pytest.mark.parametrize("now_us", [1_000_000, 1_300_001])
+@pytest.mark.parametrize("other_floor", [(240, 320), None])
+def test_same_frame_ambiguous_projection_never_selects_a_metric_target(now_us, other_floor):
+    _, _, seen = fixtures()
+    other = replace(seen, receipt_us=960_000, floor_mm=other_floor,
+                    projection_qualified=other_floor is not None)
+    for rows in ([seen, other], [other, seen]):
+        result = resolve(rows, now_us=now_us)
+        assert result.status == ("current_sighting" if now_us == 1_000_000 else "last_seen")
+        assert result.reason == "ambiguous_projected_view"
+        assert result.confirmed_floor_mm is None and result.search_hint_mm is None
+        assert result.arrived is False and result.may_execute is False
+
+
+def test_same_frame_identical_projection_is_not_ambiguous():
+    _, _, seen = fixtures()
+    duplicate = replace(seen, receipt_us=960_000)
+    assert resolve([seen, duplicate]).confirmed_floor_mm == seen.floor_mm
+    assert resolve([seen, duplicate], now_us=1_300_001).search_hint_mm == seen.floor_mm
+
+
+def test_new_distinct_frame_can_confirm_after_ambiguous_view():
+    _, _, seen = fixtures()
+    other = replace(seen, floor_mm=(240, 320))
+    newer = replace(seen, frame_seq=24, receipt_us=970_000, seen_at_wall_s=1800000001.0)
+    for rows in ([seen, other, newer], [newer, other, seen]):
+        assert resolve(rows).confirmed_floor_mm == newer.floor_mm
+        assert resolve(rows, now_us=1_300_001).search_hint_mm == newer.floor_mm

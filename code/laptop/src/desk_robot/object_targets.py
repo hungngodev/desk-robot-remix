@@ -214,6 +214,17 @@ def resolve_object_target(
                 and query.created_us <= e.receipt_us <= now_us
                 and now_us - e.receipt_us <= fresh_us)
 
+    def frame_identity(e: ObjectEvidence) -> tuple:
+        return (e.host_boot_id, e.camera_boot, e.camera_grant, e.frame_seq,
+                e.origin_id, e.epoch, e.anchor_id, e.calibration_id)
+
+    def projected_locations(selected: ObjectEvidence, candidates: list[ObjectEvidence]) -> set:
+        # Multiple detections of the same class in one frame do not identify
+        # which physical object the user meant. Identical receipts may coalesce.
+        return {tuple(e.floor_mm) if e.projection_qualified and e.floor_mm is not None
+                else None for e in candidates
+                if frame_identity(e) == frame_identity(selected)}
+
     positives = [e for e in seen if fresh(e)]
     negatives = [e for e in records if e.source == "camera_not_seen" and fresh(e)]
     # Native camera frames are ordered by frame sequence inside one
@@ -226,6 +237,9 @@ def resolve_object_target(
                         default=None)
     if (latest_seen is not None and (latest_absent is None or
             latest_seen.frame_seq > latest_absent.frame_seq)):
+        locations = projected_locations(latest_seen, positives)
+        if len(locations) > 1:
+            return result("current_sighting", "ambiguous_projected_view", latest_seen)
         if latest_seen.projection_qualified and latest_seen.floor_mm is not None:
             return result("current_sighting", "fresh_projected_view", latest_seen,
                           confirmed=latest_seen.floor_mm)
@@ -238,6 +252,8 @@ def resolve_object_target(
     if report is not None and (past is None or report.seen_at_wall_s > past.seen_at_wall_s):
         return result("user_reported", "unverified_user_location", report)
     if past is not None:
+        if len(projected_locations(past, seen)) > 1:
+            return result("last_seen", "ambiguous_projected_view", past)
         hint = (past.floor_mm if past.projection_qualified and
                 past.floor_mm is not None and same_map(past) else None)
         reason = "not_currently_confirmed" if latest_absent else "historical_sighting_only"
