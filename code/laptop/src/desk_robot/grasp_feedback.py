@@ -200,10 +200,21 @@ async def guarded_grasp(
             calibration.grip_open, calibration.grip_closed, calibration.grip_step_deg
         )[1:]:
             await confirmed_health()
-            await _bounded_head_reply(
+            reply = await _bounded_head_reply(
                 head.command(f"grip {angle}"), seconds=_GRIP_COMMAND_TIMEOUT_S,
                 timeout_message="Gripper servo command unconfirmed",
             )
+            # The production HttpHead verifies a full ACK already. Alternate
+            # typed adapters can return an explicit failed or foreign receipt
+            # without raising; do not treat that as a completed jaw pulse.
+            # Older simulation fakes return None and never qualify hardware.
+            if reply is not None and (
+                type(reply) is not dict
+                or reply.get("ok") is not True
+                or reply.get("robot_id") != robot_id
+                or reply.get("reply") != f"OK grip angle={angle}"
+            ):
+                raise OperationError("Unmatched gripper command ACK")
             await asyncio.sleep(0.18)
             await confirmed_health()
             try:

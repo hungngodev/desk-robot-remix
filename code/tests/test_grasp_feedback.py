@@ -957,3 +957,59 @@ async def test_matching_wroom_health_and_jaw_boot_allows_bounded_grasp(monkeypat
     )
     assert result["physical_acceptance_pass"] is False
     assert head.commands == ["grip 64", "grip 68", "grip 72"]
+
+@pytest.mark.parametrize("bad_ack", [
+    {"ok": False, "robot_id": "robot-01", "reply": "ERR grip rejected"},
+    {"ok": True, "robot_id": "robot-02", "reply": "OK grip angle=64"},
+    {"ok": True, "robot_id": "robot-01", "reply": "OK grip angle=68"},
+    {"ok": "true", "robot_id": "robot-01", "reply": "OK grip angle=64"},
+    "OK grip angle=64",
+])
+async def test_grasp_rejects_explicit_bad_command_ack_before_more_closing(
+    monkeypatch, bad_ack,
+):
+    """A returned failure is not physical servo completion or force contact."""
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([100, 101, 240, 245])
+
+    async def rejected_command(command):
+        head.commands.append(command)
+        if command == "grip 64":
+            return bad_ack
+        return {
+            "ok": True, "robot_id": "robot-01",
+            "reply": "OK grip angle=60",
+        }
+
+    head.command = rejected_command
+    with pytest.raises(OperationError, match="Unmatched gripper command ACK"):
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
+    # The uncertain first pulse gets only one health-gated relief attempt.
+    # No second closing pulse and no fabricated contact receipt are allowed.
+    assert head.commands == ["grip 64", "grip 60"]
+
+
+async def test_grasp_accepts_exact_structured_head_command_ack(monkeypatch):
+    """The normal authenticated command reply remains usable."""
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([100, 101, 130, 240, 245])
+
+    async def acknowledged_command(command):
+        head.commands.append(command)
+        return {
+            "ok": True,
+            "robot_id": "robot-01",
+            "reply": f"OK grip angle={int(command.split()[1])}",
+        }
+
+    head.command = acknowledged_command
+    result = await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
+    assert result["contact_delta_raw"] >= 120
+    assert result["physical_acceptance_pass"] is False
+    assert head.commands == ["grip 64", "grip 68", "grip 72"]
