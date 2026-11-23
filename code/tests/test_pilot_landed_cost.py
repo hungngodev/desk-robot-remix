@@ -4,6 +4,7 @@ Synthetic fixtures exercise accounting, not real supplier or hardware release.
 """
 import importlib.util
 import json
+import subprocess
 import sys
 from datetime import date
 from pathlib import Path
@@ -55,8 +56,8 @@ def quoted_evidence(cart):
         "paid_orders_complete": True,
         "paid_orders": [{
             "order_reference": "previous_spending",
-            "total_paid_usd": "12.00",
-            "allocations": [],
+            "total_paid_usd": "13.67",
+            "allocations": [{"role_key": "robot:xiao_sense", "quantity": 1}],
         }],
         "lines": lines,
         "seller_charges": charges,
@@ -75,8 +76,8 @@ def test_full_pilot_sample_landed_cost_accounts_for_sellers_and_prior_spend(pilo
     assert result["sample_component_quantity"] == 17
     assert result["calculation_complete_not_physical_approval"] is True
     assert result["payable_now_cents"] == 4191
-    assert result["prior_paid_orders_cents"] == 1200
-    assert result["prototype_cumulative_cents"] == 5391
+    assert result["prior_paid_orders_cents"] == 1367
+    assert result["prototype_cumulative_cents"] == 5558
     assert result["within_prototype_cap"] is False
     assert result["full_first_robot_purchase_approved"] is False
     assert result["motor_or_lithium_charge_authorized"] is False
@@ -86,6 +87,7 @@ def test_full_pilot_sample_landed_cost_accounts_for_sellers_and_prior_spend(pilo
     "empty", "missing_seller_charge", "mismatched_sku",
     "wrong_storefront", "untrusted_stock_url",
     "stale_quote", "unknown_prior_spend", "unverified_inventory",
+    "zero_prior_spend", "underpaid_sense", "unrelated_paid_allocation",
     "nonstring_role", "broken_url",
 ])
 def test_pilot_quote_fails_closed_for_missing_or_wrong_evidence(pilot, mutation):
@@ -107,6 +109,12 @@ def test_pilot_quote_fails_closed_for_missing_or_wrong_evidence(pilot, mutation)
         cost["lines"][0]["stock_checked_at"] = "2020-01-01"
     elif mutation == "unknown_prior_spend":
         del cost["paid_orders"]
+    elif mutation == "zero_prior_spend":
+        cost["paid_orders"] = []
+    elif mutation == "underpaid_sense":
+        cost["paid_orders"][0]["total_paid_usd"] = "13.66"
+    elif mutation == "unrelated_paid_allocation":
+        cost["paid_orders"][0]["allocations"][0]["role_key"] = "robot:oled"
     elif mutation == "nonstring_role":
         cost["lines"][0]["role_key"] = ["pilot:not-a-hashable-key"]
     elif mutation == "broken_url":
@@ -135,3 +143,25 @@ def test_pilot_samples_do_not_relabel_or_release_original_evaluation(pilot):
     assert unrelated["scope"] == "evaluation"
     assert not unrelated["calculation_complete_not_physical_approval"]
     assert not report["order_released"]
+
+
+def test_pilot_cli_does_not_claim_budget_with_zero_prior_spend(tmp_path, pilot):
+    """The real pilot JSON entry point cannot erase the confirmed Sense cost."""
+    _, cart = pilot
+    evidence = quoted_evidence(cart)
+    evidence["pilot_costs"]["paid_orders"] = []
+    path = tmp_path / "pilot-quote.json"
+    path.write_text(json.dumps(evidence), encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(SCRIPTS / "procurement_release.py"),
+         "--format", "pilot-landed-cost-json", "--evidence", str(path)],
+        cwd=ROOT / "code", capture_output=True, text=True, check=False,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stderr
+    output = json.loads(result.stdout)
+    assert not output["calculation_complete_not_physical_approval"]
+    assert output["payable_now_cents"] is None
+    assert output["prototype_cumulative_cents"] is None
+    assert output["within_prototype_cap"] is False
+    assert any("Sense" in error for error in output["errors"])

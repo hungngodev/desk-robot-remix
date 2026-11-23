@@ -1367,6 +1367,19 @@ def pilot_landed_cost(report: dict, evidence: dict) -> dict:
     # generator boundary. Do not deduct it again without a signed inspection.
     if claimed.get("inventory") or claimed.get("paid_in_flight"):
         problems.append("Pilot quote cannot deduct unverified inventory or incoming units")
+    # Pilot samples belong to the same $50 first-unit budget. Reuse the
+    # known-payment check instead of erasing the confirmed Sense purchase
+    # when a pilot quote falsely declares an empty paid-order register.
+    try:
+        if _confirmed_first_unit_prior_payment_missing(
+            cost, {"costs": claimed}
+        ):
+            problems.append(
+                "Pilot quote omits the confirmed Sense payment or "
+                "robot:xiao_sense paid allocation"
+            )
+    except (OSError, ValueError, TypeError):
+        problems.append("Pilot quote cannot reconcile confirmed Sense payment")
     if problems:
         cost["errors"].extend(problems)
         cost["calculation_complete_not_physical_approval"] = False
