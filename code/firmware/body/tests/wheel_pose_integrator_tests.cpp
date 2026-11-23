@@ -102,6 +102,28 @@ static void refuse_skew_stale_and_replay() {
   check(pose.observe(observed(2, 200), 210));
   check(!pose.observe(observed(2, 200), 210)); // duplicate sequence
   check(!pose.stationary_origin_ready());
+  // A second wheel pair cannot reuse the same IMU conversion, even when
+  // its gyro is still within the allowed skew and age envelope.
+  WheelPoseIntegrator repeated_gyro;
+  check(repeated_gyro.configure(calibration()));
+  auto first_gyro = observed(1, 100);
+  check(repeated_gyro.observe(first_gyro, 110));
+  auto same_gyro = observed(2, 120);
+  same_gyro.imu_at_ms = first_gyro.imu_at_ms;
+  check(!repeated_gyro.observe(same_gyro, 130));
+  check(repeated_gyro.state().origin == 0);
+  // A forged small skew field cannot override actual wheel source clocks.
+  WheelPoseIntegrator fake_skew;
+  check(fake_skew.configure(calibration()));
+  auto inconsistent = observed(1, 100);
+  inconsistent.wheel.right_ms = 150; // actual 50 ms, claim only 10 ms
+  check(!fake_skew.observe(inconsistent, 160));
+  // Arbitrary IMU uncertainty must not overflow uint32 addition to "valid".
+  WheelPoseIntegrator huge_error;
+  check(huge_error.configure(calibration()));
+  auto high = observed(1, 100);
+  high.imu_error_urad = 0xffffffffU;
+  check(!huge_error.observe(high, 110));
   auto bad_imu = observed(3, 300);
   bad_imu.imu_valid = false;
   check(!pose.observe(bad_imu, 310));

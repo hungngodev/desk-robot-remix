@@ -446,6 +446,18 @@ void verify_qualified_pose_is_never_implicit_navigation() {
   const auto wire = request(body, receiver, "pose\r\n", 512, 512000);
   check(wire.find("\"quality\":\"unavailable\"") != std::string::npos);
   check(wire.find("\"origin\":0") != std::string::npos);
+  check(body.wheel_pair_receipt().valid);
+  body.motor_watchdog_trip();
+  check(body.wheel_pose_state().origin == 0 &&
+        body.wheel_pose_state().quality ==
+            desk_robot::WheelPoseIntegrator::Quality::Unavailable);
+  check(!body.wheel_pair_receipt().valid &&
+        !body.wheel_angle_capture(false).continuous() &&
+        !body.wheel_angle_capture(true).continuous());
+  check(!body.start_local_pose_origin(514));
+  body.set_accessories(angles, 515); // a cached old packet cannot resurrect it
+  check(!body.wheel_pair_receipt().valid &&
+        body.wheel_pose_state().origin == 0);
   imu.low_g_irq = true;
   imu.at_ms = 600;
   body.set_imu(imu);

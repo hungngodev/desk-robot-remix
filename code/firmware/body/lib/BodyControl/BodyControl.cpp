@@ -459,6 +459,15 @@ bool BodyControl::configure_wheel_angle_capture(
   return true;
 }
 
+void BodyControl::invalidate_pose_continuity() {
+  if (wheel_pose_configured_) wheel_pose_.invalidate();
+  if (wheel_pair_configured_) wheel_pairs_.discard_continuity();
+  if (wheel_capture_configured_) {
+    wheel_angles_[0].discard_continuity();
+    wheel_angles_[1].discard_continuity();
+  }
+}
+
 bool BodyControl::configure_wheel_pose(
     const WheelPoseIntegrator::Calibration& calibration) {
   if (boot_epoch_ == 0 || !wheel_capture_configured_ ||
@@ -476,7 +485,9 @@ bool BodyControl::start_local_pose_origin(std::uint32_t now_ms) {
   if (!wheel_pose_configured_ || state_.armed || state_.servos_attached ||
       state_.touch_raw_active || state_.bumper_raw ||
       imu_low_g_latched_ || imu_attitude_latched_ ||
-      imu_provenance_bad_ || !imu_yaw_.fresh(now_ms))
+      imu_sensor_fault_latched_ || motor_watchdog_latched_ ||
+      command_timeout_latched_ || imu_provenance_bad_ ||
+      !imu_yaw_.fresh(now_ms))
     return false;
   return wheel_pose_.start_origin(now_ms);
 }
@@ -513,9 +524,7 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
       if (result == WheelPairCapture::Result::Invalid) {
         // Dropping either leg invalidates the entire movement interval.
         // Next successful acquisitions must establish two new baselines.
-        wheel_angles_[0].discard_continuity();
-        wheel_angles_[1].discard_continuity();
-        if (wheel_pose_configured_) wheel_pose_.invalidate();
+        invalidate_pose_continuity();
       } else if (result == WheelPairCapture::Result::Paired &&
                  wheel_pose_configured_) {
         WheelPoseIntegrator::Evidence sample{};
@@ -529,9 +538,9 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
         sample.imu_step_urad = imu_yaw_.last_delta_urad();
         sample.imu_error_urad = imu_yaw_.error_bound_urad();
         if (!wheel_pose_.observe(sample, now_ms)) {
-          // A failed pair cannot be bridged by a later fresh acquisition.
-          wheel_angles_[0].discard_continuity();
-          wheel_angles_[1].discard_continuity();
+          // A rejected source step must revoke both raw histories and its
+          // previously successful pair receipt *in the same sensor call*.
+          invalidate_pose_continuity();
         }
       }
     }
@@ -807,7 +816,7 @@ void BodyControl::set_imu(const BerryReading& reading) {
     if (imu_provenance_bad_) imu_yaw_.invalidate();
     else imu_yaw_.observe(reading, reading.at_ms);
     if (wheel_pose_configured_ && !imu_yaw_.continuous())
-      wheel_pose_.invalidate();
+      invalidate_pose_continuity();
   }
   if (imu_attitude_required_ && newly_acquired) {
     if (!imu_attitude_configured_ || !reading.valid ||
@@ -836,6 +845,10 @@ void BodyControl::set_imu(const BerryReading& reading) {
     stop_motion();
     state_.armed = false; // retain servo PWM on a held key
   }
+  if (wheel_pose_configured_ &&
+      (imu_low_g_latched_ || imu_attitude_latched_ ||
+       imu_sensor_fault_latched_))
+    invalidate_pose_continuity();
 }
 
 void BodyControl::inhibit_unqualified_motor_cutoff() {
@@ -845,6 +858,9 @@ void BodyControl::inhibit_unqualified_motor_cutoff() {
 }
 
 void BodyControl::motor_watchdog_trip() {
+  // The wheel may coast while the CPU cannot sample either encoder.
+  // Retire the local odometry origin and every old encoder pair immediately.
+  invalidate_pose_continuity();
   // A recovered CPU must never restart its old drive lease after cutoff.
   // Retain servo holding PWM instead of dropping a held payload.
   motor_watchdog_latched_ = true;

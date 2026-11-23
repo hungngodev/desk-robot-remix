@@ -27,6 +27,9 @@ class WheelPairCapture {
     return true;
   }
   void reset_for_boot() { *this = WheelPairCapture(); }
+  // Retain boot-time measured skew limits, but revoke an old successful
+  // wheel pair immediately on pickup, MPU invalidation or CPU watchdog.
+  void discard_continuity() { invalidate(); }
   const Receipt& receipt() const { return receipt_; }
 
   Result observe(WheelAngleCapture::Result left_result,

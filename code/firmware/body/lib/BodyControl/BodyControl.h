@@ -309,6 +309,7 @@ class BodyControl {
   ImuYawCapture imu_yaw_{};
   WheelPoseIntegrator wheel_pose_{};
   bool wheel_pose_configured_ = false;
+  void invalidate_pose_continuity();
   bool imu_yaw_configured_ = false;
   bool wheel_capture_configured_ = false;
   bool wheel_pair_configured_ = false;
