@@ -140,6 +140,10 @@ class SpatialGrid:
                 target.floor_received_us = batch.received_us
                 target.floor_calibration = batch.calibration_id
             else:
+                # Evidence from a different geometry must never cancel a fresh
+                # obstacle hit or lend false clearance after recalibration.
+                if target.obstacle_calibration != batch.calibration_id:
+                    target.obstacle_log_odds = 0.0
                 target.obstacle_log_odds = max(MIN_LOG_ODDS, min(MAX_LOG_ODDS,
                     target.obstacle_log_odds + _OBSTACLE_WEIGHT[batch.kind]))
                 target.obstacle_received_us = batch.received_us

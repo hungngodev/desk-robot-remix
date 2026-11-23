@@ -127,3 +127,37 @@ def test_late_or_future_receipt_and_bad_windows_fail_closed():
         g.record(evidence("floor_supported", 0), now_us=999_999)
     with pytest.raises(ValueError):
         g.snapshot(now_us=-1)
+
+
+def test_recalibration_cannot_reuse_old_clearance_or_blockage():
+    g = grid()
+    g.record(evidence("floor_supported", 0), now_us=1_000_010)
+    for seq in range(1, 7):
+        at = 1_000_000 + seq * 10
+        g.record(evidence("obstacle_clear", 4, seq, received_us=at), now_us=at)
+    assert g.log_odds(1, 1) == pytest.approx(-4.0)
+    assert g.state(1, 1, now_us=1_000_060) == "safe"
+
+    g.invalidate_calibration("camera-new")
+    assert g.state(1, 1, now_us=1_000_060) == "out_of_calibration"
+    new_floor = replace(evidence("floor_supported", 0, received_us=1_100_000),
+                        calibration_id="camera-new", epoch=1)
+    g.record(new_floor, now_us=1_100_000)
+    assert g.state(1, 1, now_us=1_100_000) == "out_of_calibration"
+    new_hit = replace(evidence("obstacle_hit", 4, received_us=1_100_010),
+                      calibration_id="camera-new", epoch=1)
+    g.record(new_hit, now_us=1_100_010)
+    # One qualified new hit must not inherit the old -4 free-space confidence.
+    assert g.log_odds(1, 1) == pytest.approx(1.2)
+    assert g.state(1, 1, now_us=1_100_010) == "occupied"
+
+    g.invalidate_calibration("camera-next")
+    new_floor = replace(evidence("floor_supported", 0, received_us=1_200_000),
+                        calibration_id="camera-next", epoch=2)
+    g.record(new_floor, now_us=1_200_000)
+    new_clear = replace(evidence("obstacle_clear", 4, received_us=1_200_010),
+                        calibration_id="camera-next", epoch=2)
+    g.record(new_clear, now_us=1_200_010)
+    # The obsolete occupied belief must not survive a fresh geometry change.
+    assert g.log_odds(1, 1) == pytest.approx(-0.8)
+    assert g.state(1, 1, now_us=1_200_010) == "safe"
