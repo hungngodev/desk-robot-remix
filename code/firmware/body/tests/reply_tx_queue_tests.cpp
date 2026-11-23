@@ -95,5 +95,24 @@ int main() {
 
   assert(!partial.enqueue_priority_line(std::string(63, 'x').c_str()));
   assert(partial.dropped() == 1);
+  // Malformed reply content must never create a second apparent UART
+  // command response. Reject before changing either queue's state.
+  desk_robot::ReplyTxQueue<64> framed;
+  assert(!framed.enqueue_line("status\r\nOK arm"));
+  assert(!framed.enqueue_line("status\nOK arm"));
+  assert(!framed.enqueue_priority_line("OK halt\r\nOK arm"));
+  assert(!framed.enqueue_priority_line("OK stop\nOK arm"));
+  assert(!framed.enqueue_line(std::string(100000, 'x').c_str()));
+  assert(!framed.enqueue_priority_line(std::string(100000, 'x').c_str()));
+  assert(framed.pending() == 0 && framed.dropped() == 6);
+  assert(framed.enqueue_line("status"));
+  assert(framed.enqueue_priority_line("OK stop"));
+  FakeSerial framed_serial;
+  while (framed.pending()) {
+    framed_serial.free = 128;
+    assert(framed.drain(framed_serial) > 0);
+  }
+  assert(framed_serial.sent == "OK stop\r\nstatus\r\n");
+
   std::cout << "PASS bounded independent WROOM UART reply queues with urgent stop receipts\n";
 }

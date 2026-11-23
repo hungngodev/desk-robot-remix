@@ -14,8 +14,9 @@ class ReplyTxQueue {
   static_assert(Capacity >= 4, "Reply TX queue needs a complete line");
   bool enqueue_line(const char* line) {
     if (line == nullptr) return false;
-    const std::size_t length = std::strlen(line);
-    if (length > Capacity - 2 || length + 2 > Capacity - count_) {
+    std::size_t length = 0;
+    if (!bounded_line_length(line, Capacity - 2, length) ||
+        length + 2 > Capacity - count_) {
       ++dropped_;
       return false;
     }
@@ -31,8 +32,9 @@ class ReplyTxQueue {
   // implementation. Never truncate a prior partially transmitted JSON line.
   bool enqueue_priority_line(const char* line) {
     if (line == nullptr) return false;
-    const std::size_t length = std::strlen(line);
-    if (length > kPriorityLineCapacity - 2 || priority_count_ == kPrioritySlots) {
+    std::size_t length = 0;
+    if (!bounded_line_length(line, kPriorityLineCapacity - 2, length) ||
+        priority_count_ == kPrioritySlots) {
       ++dropped_;
       return false;
     }
@@ -107,6 +109,19 @@ class ReplyTxQueue {
  private:
   static constexpr std::size_t kPrioritySlots = 2;
   static constexpr std::size_t kPriorityLineCapacity = 64;
+  // Reject an embedded frame delimiter before copying any bytes. The scan
+  // stops at the queue's capacity even when a caller supplies oversized text,
+  // so malformed replies cannot add unbounded work to the motor service loop.
+  static bool bounded_line_length(const char* line, std::size_t maximum,
+                                  std::size_t& length) {
+    for (length = 0; length <= maximum; ++length) {
+      const char value = line[length];
+      if (value == '\0') return true;
+      if (value == '\r' || value == '\n') return false;
+    }
+    return false;
+  }
+
   void push(char value) {
     bytes_[(front_ + count_) % Capacity] = value;
     ++count_;
