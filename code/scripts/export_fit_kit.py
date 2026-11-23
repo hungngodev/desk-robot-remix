@@ -435,6 +435,16 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
     )
     if not isinstance(report, dict):
         raise ValueError("Invalid fit kit manifest root")
+    # This is a provisional mesh receipt, not an extensible release record.
+    # Unknown fields must not smuggle physical fit or charge approval into
+    # a verified result even when the known safety flags remain false.
+    if set(report) != {
+        "provisional_fit_parts_only", "source_geometry_rendered",
+        "hardware_fit_verified", "full_printable_assembly_verified",
+        "dock_charge_contacts_approved", "commercial_manufacture_authorized",
+        "power_fit_scope", "source_chassis_battery_footprint", "parts",
+    }:
+        raise ValueError("Unexpected fit kit manifest fields")
     # Generated STLs are only reversible coupons. A hand-edited manifest
     # cannot turn any missing physical, assembly or licensing evidence into
     # a passing release claim without invalidating source verification.
@@ -475,6 +485,13 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
             or {item["location"] for item in items} != set(expected)):
         raise ValueError("Missing or duplicate fit kit parts")
     for item in items:
+        if set(item) != {
+            "part", "location", "source", "source_sha256", "mesh_sha256",
+            "units", "triangles", "manifold_edges", "bbox_mm",
+            "quantity_per_robot", "installed_quantity_per_robot",
+            "temporary_fit_coupon",
+        }:
+            raise ValueError("Unexpected fit kit part fields")
         location = item["location"]
         # A manifest is not a release BOM. Even a syntactically valid edit
         # must never turn a test coupon into an installed robot component.

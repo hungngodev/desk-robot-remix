@@ -239,6 +239,17 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
         with pytest.raises(ValueError, match="Missing or duplicate fit kit parts"):
             source.verify_fit_kit(tmp_path, output_dir=rendered)
     manifest.write_text(original)
+    forged_top_level = json.loads(original)
+    forged_top_level["physical_fit_approved"] = True
+    manifest.write_text(json.dumps(forged_top_level))
+    with pytest.raises(ValueError, match="Unexpected fit kit manifest fields"):
+        source.verify_fit_kit(tmp_path, output_dir=rendered)
+    forged_part = json.loads(original)
+    forged_part["parts"][0]["qualified_final_assembly"] = True
+    manifest.write_text(json.dumps(forged_part))
+    with pytest.raises(ValueError, match="Unexpected fit kit part fields"):
+        source.verify_fit_kit(tmp_path, output_dir=rendered)
+    manifest.write_text(original)
     for unsafe_flag in (
         "hardware_fit_verified", "full_printable_assembly_verified",
         "dock_charge_contacts_approved", "commercial_manufacture_authorized",
