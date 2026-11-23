@@ -111,6 +111,10 @@ def capture(
         and elapsed >= 3600
         and len(sequence) >= 3600
         and missing == 0
+        # Sequence gap totals alone cannot reject a duplicated extra report:
+        # 3,601 receptions with one repeated uint32 ID still have zero gaps.
+        and all(((b - a) & 0xffffffff) == 1
+                for a, b in zip(sequence[:-1], sequence[1:], strict=True))
         and reader.rejected == 0
         and reader.callback_failures == 0
         and error is None

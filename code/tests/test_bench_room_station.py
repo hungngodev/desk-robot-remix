@@ -311,7 +311,7 @@ def test_room_bench_requires_explicit_local_port_and_bounded_capture(port, secon
 
 @pytest.mark.parametrize("fault", [
     "none", "short_request", "short_run", "missing_frame", "sequence_gap",
-    "duplicate_sequence", "slow_receipt", "terminal_silence",
+    "duplicate_sequence", "extra_duplicate", "slow_receipt", "terminal_silence",
     "rejected_frame", "callback_failure", "serial_failure",
 ])
 def test_one_hour_usb_continuity_screen_requires_complete_read_only_receipts(fault):
@@ -329,16 +329,21 @@ def test_one_hour_usb_continuity_screen_requires_complete_read_only_receipts(fau
             self.callback_failures = int(fault == "callback_failure")
 
         def _read_port(self, running):
-            count = 3599 if fault == "missing_frame" else 3600
+            count = (3599 if fault == "missing_frame" else
+                     3601 if fault == "extra_duplicate" else 3600)
             for index in range(count):
                 seq = index
                 if fault == "sequence_gap" and index >= 100:
                     seq += 1
                 if fault == "duplicate_sequence" and index == 100:
                     seq -= 1
+                if fault == "extra_duplicate" and index == 3600:
+                    seq = 3599
                 received_at = index + 0.5
                 if fault == "slow_receipt" and index == 500:
                     received_at += 0.6
+                if fault == "extra_duplicate" and index == 3600:
+                    received_at = 3599.75
                 self.on_observation(RoomObservation(
                     seq=seq, at_ms=index, received_at=received_at,
                     readings={name: {"valid": False} for name in SENSORS},
@@ -362,5 +367,8 @@ def test_one_hour_usb_continuity_screen_requires_complete_read_only_receipts(fau
     assert result["motion_authorized"] is False
     if fault == "sequence_gap":
         assert result["missing_station_sequences"] == 1
+    if fault == "extra_duplicate":
+        assert result["accepted_frames"] == 3601
+        assert result["missing_station_sequences"] == 0
     if fault == "terminal_silence":
         assert result["trailing_receive_silence_ms"] == 2500.0
