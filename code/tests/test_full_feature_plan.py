@@ -425,3 +425,23 @@ def test_first_unit_spatial_retrieval_is_in_canonical_scope_and_not_confused_wit
             "cliff_obstacle", "i2c_mux", "bumper", "mg90s", "fsr", "ads1115",
             "dock_contacts", "dock_fixture", "cap_power"} <= parts
     assert {"room_controller", "scd40", "bme688", "ld2410c", "soil_probe"} <= station
+
+
+def test_first_unit_spatial_scope_required_in_machine_plan_without_duplicate_encoder_role():
+    """Guide 10 accepted mapping/navigation needs mounting, not phantom new slots."""
+    plan = load()
+    assert "FIRST complete unit must also find" in plan["fixed_scope"]
+    assert "verified wheel displacement" in plan["fixed_scope"]
+    assert "one read-only room station shared" in plan["fixed_scope"]
+    parts = {x["id"]: x for x in plan["parts"]}
+    assert len(parts) == 42
+    assert len(plan["room_pod"]["modules"]) == 7
+    assert len(plan["linked_subassemblies"]) == 14
+    assert parts["as5600"]["per_robot"] == 3
+    assert parts["encoder_magnets"]["per_robot"] == 3
+    assert "two actual measured wheel-angle/displacement channels" in parts["as5600"]["notes"]
+    assert "two physical wheel-encoder brackets" in parts["assembly"]["notes"]
+    assert "MUST NOT be charged again" in parts["assembly"]["notes"]
+    assert "Require the correct magnet size" in parts["encoder_magnets"]["notes"]
+    assert plan["physical_trial_count"] == 0
+    assert plan["prices_complete"] is False
