@@ -324,6 +324,56 @@ void verify_paired_wheel_acquisitions() {
         body.wheel_pair_receipt().skew_ms == 16);
   check(!body.state().armed);
 }
+void verify_imu_yaw_never_promotes_pose() {
+  desk_robot::BodyControl body;
+  desk_robot::LineReceiver receiver;
+  auto limits = desk_robot::ImuYawCapture::Calibration{};
+  limits.axis = 2;
+  limits.sign = 1;
+  limits.max_rate_raw = 500;
+  limits.bias_uncertainty_raw = 20;
+  limits.scale_error_ppm = 20000;
+  limits.accel_norm_min_raw = 12000;
+  limits.accel_norm_max_raw = 20000;
+  limits.temp_min_raw = -1000;
+  limits.temp_max_raw = 1000;
+  limits.max_gap_ms = 200;
+  limits.max_age_ms = 150;
+  limits.max_yaw_error_urad = 500000;
+  check(!body.configure_imu_yaw_capture(limits));
+  body.set_boot_epoch(302);
+  check(!body.configure_imu_yaw_capture(limits)); // unrecognized IMU
+  body.set_imu_identity(4, 0x68, 0);
+  check(body.configure_imu_yaw_capture(limits));
+  check(!body.configure_imu_yaw_capture(limits));
+  desk_robot::BerryReading r{};
+  r.model = desk_robot::BerryModel::Mpu6050;
+  r.valid = r.low_g_status_valid = true;
+  r.accel[2] = 16384;
+  r.gyro[2] = 131;
+  r.temperature_raw = 100;
+  r.at_ms = 100;
+  body.set_imu(r);
+  check(body.imu_yaw_capture().continuous());
+  r.at_ms = 200;
+  body.set_imu(r);
+  check(body.imu_yaw_capture().yaw_urad() == 1745);
+  check(body.imu_yaw_capture().fresh(200));
+  check(!body.imu_yaw_capture().fresh(400));
+  check(request(body, receiver, "pose\r\n", 210, 210000).find(
+      "\"quality\":\"unavailable\"") != std::string::npos);
+  r.at_ms = 300;
+  r.low_g_irq = true;
+  body.set_imu(r);
+  check(!body.imu_yaw_capture().continuous()); // pickup/low-g breaks origin
+  check(!body.state().armed);
+  body.set_boot_epoch(303);
+  check(!body.imu_yaw_capture().continuous());
+  check(!body.configure_wheel_pair_skew(25));
+  check(body.configure_imu_yaw_capture(limits)); // explicitly new boot-only cal
+  check(request(body, receiver, "pose\r\n", 2, 100).find(
+      "\"quality\":\"unavailable\"") != std::string::npos);
+}
 }  // namespace
 
 int main() {
@@ -333,5 +383,6 @@ int main() {
   verify_wheel_capture_stays_read_only();
   verify_angle_qualification_telemetry();
   verify_paired_wheel_acquisitions();
+  verify_imu_yaw_never_promotes_pose();
   return 0;
 }

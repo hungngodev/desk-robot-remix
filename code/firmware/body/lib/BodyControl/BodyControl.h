@@ -9,6 +9,7 @@
 #include "AccessoryReadings.h"
 #include "WheelAngleCapture.h"
 #include "WheelPairCapture.h"
+#include "ImuYawCapture.h"
 #include "NecBurst.h"
 
 namespace desk_robot {
@@ -175,6 +176,10 @@ class BodyControl {
   void set_imu_identity(std::uint8_t family, std::uint8_t gyro, std::uint8_t aux);
   // Raw, read-only diagnostics. No tilt or motor permission follows from it.
   void set_imu(const BerryReading& reading);
+  // Calibrated local MPU yaw is diagnostic until a trusted paired wheel
+  // displacement, pose origin and external physical qualification exist.
+  bool configure_imu_yaw_capture(const ImuYawCapture::Calibration& calibration);
+  const ImuYawCapture& imu_yaw_capture() const { return imu_yaw_; }
   // Accept only explicitly measured installed-shaft AS5600 speed bounds.
   // Never called by UART; never grants movement or turns angle into wheel mm.
   // Until physical qualification, production calls neither this nor odometry.
@@ -200,6 +205,8 @@ class BodyControl {
       wheel_angles_[0].reset_for_boot();
       wheel_angles_[1].reset_for_boot();
       wheel_pairs_.reset_for_boot();
+      imu_yaw_.reset_for_boot();
+      imu_yaw_configured_ = false;
       wheel_pair_configured_ = false;
       wheel_capture_configured_ = false;
     }
@@ -288,6 +295,8 @@ class BodyControl {
   // Default unconfigured so no unmeasured encoder rate is trusted.
   WheelAngleCapture wheel_angles_[2]{};
   WheelPairCapture wheel_pairs_{};
+  ImuYawCapture imu_yaw_{};
+  bool imu_yaw_configured_ = false;
   bool wheel_capture_configured_ = false;
   bool wheel_pair_configured_ = false;
   bool imu_motion_required_ = false;

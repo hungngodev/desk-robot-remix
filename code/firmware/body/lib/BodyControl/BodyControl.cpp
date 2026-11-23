@@ -425,6 +425,22 @@ void BodyControl::latch_dock_monitor_fault() {
   dock_monitor_fault_latched_ = true;
 }
 
+bool BodyControl::configure_imu_yaw_capture(
+    const ImuYawCapture::Calibration& calibration) {
+  // An identified MPU6050 and measured installed yaw axis/bias/thermal and
+  // drift limits are required. No UART or LLM code may create them.
+  if (boot_epoch_ == 0 || state_.imu_family != 4 ||
+      BerryImu::identify(state_.imu_gyro_id, state_.imu_aux_id) !=
+          BerryModel::Mpu6050 ||
+      imu_yaw_configured_ || state_.armed || state_.servos_attached)
+    return false;
+  ImuYawCapture qualified;
+  if (!qualified.configure(calibration)) return false;
+  imu_yaw_ = qualified;
+  imu_yaw_configured_ = true;
+  return true;
+}
+
 bool BodyControl::configure_wheel_angle_capture(
     std::uint32_t left_max_counts_per_s,
     std::uint32_t right_max_counts_per_s,
@@ -743,6 +759,12 @@ void BodyControl::set_imu(const BerryReading& reading) {
     }
   }
   imu_ = reading;
+  if (imu_yaw_configured_) {
+    // Use the original IMU acquisition clock, never UART poll time. A
+    // contradictory cached frame cannot add yaw even if its age is small.
+    if (imu_provenance_bad_) imu_yaw_.invalidate();
+    else imu_yaw_.observe(reading, reading.at_ms);
+  }
   if (imu_attitude_required_ && newly_acquired) {
     if (!imu_attitude_configured_ || !reading.valid ||
         reading.model != BerryModel::Mpu6050 || !reading.low_g_status_valid) {
