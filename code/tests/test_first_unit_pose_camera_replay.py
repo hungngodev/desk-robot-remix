@@ -10,7 +10,6 @@ import httpx
 import pytest
 from desk_robot.transport import HeadError, HttpHead
 
-
 JPEG = bytes.fromhex("ffd8696d616765ffd9")
 
 
