@@ -1,9 +1,12 @@
 # XIAO ESP32S3 Sense head target
 
-Active board: **Seeed XIAO ESP32S3 Sense, SKU 113991115**, with its camera/mic
-expansion attached. The user reports ordering at least one full Sense bundle;
-receipt quantity, arrival and delivered revision remain unconfirmed. This target is
-separate from the preserved CoreS3 and Freenove targets. No board is flashed.
+Active target: **Seeed XIAO ESP32S3 Sense, SKU 113991115**, with its
+camera/microphone expansion. The November 3, 2026 seller order and independent
+payment receipt confirm **one bundle paid at USD 13.67**; the carrier reported
+delivery November 7. The actual board, accessories, camera, microphone, PCB
+markings, revision, working condition and assembled fit remain **uninspected**.
+A delivery notice is not a hardware acceptance test. This target is separate
+from the preserved CoreS3 and Freenove targets. No board is flashed.
 
 Keep this purchased board. [RIO reuse research](../../../../docs/research/2026-11-03-sense-realtime-reuse.md)
 identifies software playback-reference/AEC code for Sense. The current
