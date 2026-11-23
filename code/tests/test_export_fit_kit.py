@@ -354,6 +354,30 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
         assert report[key] is False
 
 
+@pytest.mark.parametrize("group", (
+    "adapter_stls", "fit_stls", "dock_stls",
+))
+@pytest.mark.parametrize("extension", (".stl", ".STL"))
+def test_export_verify_reject_undeclared_mesh_before_manifest_mutation(
+    tmp_path, monkeypatch, group, extension,
+):
+    source = module()
+    output = tmp_path / "rendered"
+    (output / group).mkdir(parents=True)
+    extra = output / group / ("obsolete_final_robot" + extension)
+    extra.write_bytes(tetra_stl())
+    prior = output / "fit_kit_manifest.json"
+    prior.write_text("prior candidate manifest")
+    monkeypatch.setattr(source.shutil, "which", lambda _name: "/usr/bin/openscad")
+
+    with pytest.raises(ValueError, match="Undeclared fit kit STL"):
+        source.export_kit(ROOT, output_dir=output)
+    assert prior.read_text() == "prior candidate manifest"
+    assert extra.is_file()
+    with pytest.raises(ValueError, match="Undeclared fit kit STL"):
+        source.verify_fit_kit(ROOT, output_dir=output)
+
+
 @pytest.mark.parametrize("alias", [
     "root", "manifest", "adapter_dir", "fit_dir", "dock_dir", "mesh",
 ])

@@ -233,6 +233,17 @@ def _reject_fit_kit_output_aliases(output: Path) -> None:
     for path in paths:
         if path.is_symlink():
             raise ValueError(f"Symlinked fit kit output path: {path}")
+    # A passing manifest must describe the entire generated STL inventory.
+    # Earlier candidate names can otherwise remain beside the current 23
+    # signed parts and be mistaken for printable/installed assembly files.
+    for folder, names in groups:
+        part_dir = output / folder
+        if not part_dir.is_dir():
+            continue
+        declared = {f"{name}.stl" for name in names}
+        for entry in part_dir.iterdir():
+            if entry.suffix.lower() == ".stl" and entry.name not in declared:
+                raise ValueError(f"Undeclared fit kit STL: {entry}")
 
 
 def export_kit(
