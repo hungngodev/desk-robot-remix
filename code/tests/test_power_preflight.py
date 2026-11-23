@@ -495,6 +495,16 @@ def _qualified_dock_ratings():
     }
 
 
+@pytest.mark.parametrize("bad_rating", ["1.5", [], {}, True, 10 ** 1000])
+def test_direct_dock_screen_rejects_malformed_charger_input_rating(bad_rating):
+    # These inputs used to throw TypeError or OverflowError before the
+    # component rating check. A physical release CLI should fail closed.
+    ratings = _qualified_dock_ratings()
+    ratings["charger_input_limit_a"] = bad_rating
+    with pytest.raises(ValueError, match="charger input limit"):
+        docked(0.5, 0.25, **ratings)
+
+
 @pytest.mark.parametrize("variant", ["BQ24074", "BQ24075"])
 def test_direct_docked_load_rejects_fictional_bq2407x_two_amp_rating(variant):
     """The standalone API cannot evade the BQ2407x's 1.5A silicon limits."""
@@ -1073,6 +1083,14 @@ def plausible_hypothetical_one_cell_stack():
         charge_temperature_sensor_connected=True,
         charger_ts_fixed_resistor_removed=True, dock_motors_disarmed=True,
     )
+
+
+@pytest.mark.parametrize("bad_rating", ["1.5", [], {}, True, 10 ** 1000])
+def test_full_power_stack_rejects_malformed_charger_input_rating(bad_rating):
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg["charger_input_limit_a"] = bad_rating
+    with pytest.raises(ValueError, match="charger input limit"):
+        one_stack(**cfg)
 
 
 def test_full_power_stack_refuses_implicit_or_unknown_fitted_charger():

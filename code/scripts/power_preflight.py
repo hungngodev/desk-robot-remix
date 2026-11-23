@@ -300,8 +300,12 @@ def assess_docked_load(
     # only in the whole-stack wrapper, where direct callers can bypass it.
     if requested_cell_charge_a > 1.5:
         raise ValueError("BQ2407x cell charge request cannot exceed 1.5A")
-    if charger_input_limit_a is not None and charger_input_limit_a > 1.5:
-        raise ValueError("BQ2407x charger input limit cannot exceed 1.5A")
+    if charger_input_limit_a is not None:
+        # Reject malformed direct-API inputs before the numeric limit check.
+        if not _finite_number(charger_input_limit_a):
+            raise ValueError("BQ2407x charger input limit must be finite amperes")
+        if charger_input_limit_a > 1.5:
+            raise ValueError("BQ2407x charger input limit cannot exceed 1.5A")
     ratings = (charger_input_limit_a, charger_board_thermal_input_a,
                dock_adapter_continuous_a, rated_5v_boost_continuous_a,
                protected_pack_max_charge_a)
@@ -402,10 +406,12 @@ def screen_one_cell_power_stack(
     if not isinstance(pack_mm, (tuple, list)) or len(pack_mm) != 3 or (
             not isinstance(tray_mm, (tuple, list)) or len(tray_mm) != 3):
         raise ValueError("Require exact assembled pack and tray 3D envelopes")
-    if charger_input_limit_a is not None and (
-            not _finite_number(charger_input_limit_a)
-            or charger_input_limit_a > 1.5):
-        raise ValueError("BQ2407x maximum dock charger input is not above 1.5A")
+    if charger_input_limit_a is not None:
+        # Use the same type/finite guard as the standalone dock screen.
+        if not _finite_number(charger_input_limit_a):
+            raise ValueError("BQ2407x dock charger input limit must be finite amperes")
+        if charger_input_limit_a > 1.5:
+            raise ValueError("BQ2407x maximum dock charger input is not above 1.5A")
     # Source of truth: do not silently add a new third power-supply formula.
     undocked = size_5v_supply(
         active_peak_5v_a, active_sustained_5v_a,
