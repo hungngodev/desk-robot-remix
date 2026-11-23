@@ -361,3 +361,24 @@ def test_strict_prior_spend_requires_review_bound_to_exact_paid_register():
     # This guard is executed by the real strict CLI before CI/checkout release.
     source = SCRIPT.read_text(encoding="utf-8")
     assert "if _first_unit_paid_history_review_missing(cost, evidence):" in source
+
+
+
+def test_paid_spend_review_documented_at_builder_entrypoint():
+    """The strict gate's required review has an executable builder path."""
+    doc = (ROOT / "docs/hardware/one-robot-inventory-and-shopping.md"
+           ).read_text(encoding="utf-8")
+    for key in (
+        "all_desk_robot_remix_prior_paid_orders",
+        "all_project_prior_spend_reconciled",
+        "private_invoices_and_payment_statements",
+        "review_record_id", "reviewed_on", "reconciled_total_usd",
+        "paid_orders_sha256", "private_receipts_manifest_sha256",
+        "costs.paid_orders_complete", "costs.prior_spend_review",
+    ):
+        assert key in doc
+    assert "sort_keys=True" in doc
+    assert "ensure_ascii=False" in doc
+    assert "allow_nan=False" in doc
+    assert "A digest or self-attestation alone cannot prove" in doc
+    assert "private operator storage" in doc
