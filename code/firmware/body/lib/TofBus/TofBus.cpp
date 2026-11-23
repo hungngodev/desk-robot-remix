@@ -89,7 +89,11 @@ bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   // must not block prototype diagnostics. A fitted board is always set to
   // zero selected lanes before any critical ranging transaction.
   wire_.beginTransmission(kOptionalMuxAddress);
-  optional_mux_present_ = wire_.endTransmission(true) == 0;
+  const bool detected_optional_mux = wire_.endTransmission(true) == 0;
+  // Once another accessory has observed 0x71, a later transient NACK
+  // cannot downgrade the safety isolation requirement. A known mux that
+  // cannot be quiesced must keep every floor range unqualified.
+  optional_mux_present_ = optional_mux_present_ || detected_optional_mux;
   if (optional_mux_present_ && !quiesce_optional_mux()) return false;
   // The final WROOM allocation does not have a spare boot-safe output.
   // With mux_reset_pin = -1, physically tie TCA9548A RESET high to 3.3V.

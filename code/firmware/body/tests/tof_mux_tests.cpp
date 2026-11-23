@@ -210,6 +210,32 @@ int main() {
       faulted(guard);
     }
     {
+      // A later CAP1188/accessory discovery upgrades mux isolation
+      // permanently for this bus owner. Reinitialization during a transient
+      // 0x71 NACK must NOT forget that 0x29 can also be exposed on that mux.
+      Wire = TwoWire{};
+      Wire.optional_mux_installed = false;
+      desk_robot::TofBus bus;
+      CHECK(bus.begin(21, 22, -1)); // legitimate five-sensor startup
+      bus.note_optional_mux_present(); // independently observed later
+      Wire.extras = 1; // previous optional 0x29 lane might remain selected
+      const auto prior = Wire.tof_samples;
+      CHECK(!bus.begin(21, 22, -1)); // temporary 0x71 NACK: fail closed
+      CHECK(!bus.ready());
+      CHECK(Wire.tof_samples == prior);
+      desk_robot::CliffGuard guard;
+      CHECK(guard.configure(calibration()));
+      bus.poll(guard, 50);
+      CHECK(!guard.evaluate(50));
+      CHECK(!guard.try_rearm(50));
+      // The same object can recover only once the previously known mux
+      // acknowledges a verified disconnect of its selected branch.
+      Wire.optional_mux_installed = true;
+      CHECK(bus.begin(21, 22, -1));
+      CHECK(bus.ready());
+      CHECK(Wire.extras == 0);
+    }
+    {
       Wire = TwoWire{};
       Wire.optional_mux_installed = false; // five sensor bench profile
       desk_robot::TofBus bus;
