@@ -501,6 +501,9 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn("vTaskDelay(pdMS_TO_TICKS(250));", bridge)
         self.assertIn("bridge->camera_busy_.store(false);", bridge)
         self.assertIn('"camera_sensor_pid"', bridge)
+        # Older XIAO Sense OV2640 reports 0x26, not 0x2640.
+        # Recognition is not dock calibration or motion permission.
+        self.assertIn('pid == OV2640_PID ? "OV2640" :', bridge)
 
 
     def test_continuous_listening_can_render_mood_without_touching_voice(self):

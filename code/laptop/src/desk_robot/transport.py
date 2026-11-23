@@ -384,7 +384,7 @@ class HttpHead:
         if data.get("robot_id") != self.config.id:
             raise HeadError("Camera identity robot mismatch")
         pid = data.get("camera_sensor_pid")
-        expected_raw = {"OV3660": 0x3660, "OV5640": 0x5640}
+        expected_raw = {"OV2640": 0x26, "OV3660": 0x3660, "OV5640": 0x5640}
         if (type(pid) is not str or pid not in expected_raw
                 or type(data.get("camera_pid_raw")) is not int
                 or data["camera_pid_raw"] != expected_raw[pid]):

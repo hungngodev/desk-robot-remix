@@ -909,7 +909,8 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         const sensor_t* sensor = esp_camera_sensor_get();
         if (!sensor) return Json(req, 503, Envelope(false, "camera sensor unavailable"));
         const auto pid = sensor->id.PID;
-        const char* model = pid == OV3660_PID ? "OV3660" :
+        const char* model = pid == OV2640_PID ? "OV2640" :
+                            pid == OV3660_PID ? "OV3660" :
                             pid == OV5640_PID ? "OV5640" : nullptr;
         if (!model) return Json(req, 503, Envelope(false, "unsupported camera PID"));
         JsonPtr identity(cJSON_CreateObject(), cJSON_Delete);

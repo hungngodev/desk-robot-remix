@@ -915,7 +915,13 @@ async def test_person_face_cue_rejects_wrong_robot_or_missing_ack(
                 await head.face_event("person_detected")
 
 
-async def test_actual_xiao_camera_pid_is_bound_to_authenticated_jpeg_boot(settings, tokens):
+@pytest.mark.parametrize(
+    "sensor_pid, raw_pid",
+    [("OV2640", 0x26), ("OV3660", 0x3660), ("OV5640", 0x5640)],
+)
+async def test_actual_xiao_camera_pid_is_bound_to_authenticated_jpeg_boot(
+    settings, tokens, sensor_pid, raw_pid,
+):
     requests = []
 
     async def handler(request):
@@ -930,8 +936,8 @@ async def test_actual_xiao_camera_pid_is_bound_to_authenticated_jpeg_boot(settin
         if request.url.path == "/api/camera.identity":
             return httpx.Response(200, json={
                 "robot_id": settings.robots[0].id,
-                "camera_sensor_pid": "OV5640",
-                "camera_pid_raw": 0x5640,
+                "camera_sensor_pid": sensor_pid,
+                "camera_pid_raw": raw_pid,
                 "boot": 41,
             })
         raise AssertionError("Unexpected camera request")
@@ -939,13 +945,14 @@ async def test_actual_xiao_camera_pid_is_bound_to_authenticated_jpeg_boot(settin
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         head = HttpHead(settings.robots[0], client, strict_capture=True)
         assert (await head.snapshot()).startswith(b"\xff\xd8")
-        assert await head.camera_identity() == "OV5640"
+        assert await head.camera_identity() == sensor_pid
         assert requests == ["/api/camera.jpg", "/api/camera.identity"]
 
 
 @pytest.mark.parametrize("override", [
     {"camera_sensor_pid": "OV3660", "camera_pid_raw": 0x5640},
     {"camera_sensor_pid": "OV2640", "camera_pid_raw": 0x2642},
+    {"camera_sensor_pid": "OV2640", "camera_pid_raw": 0x2640},
     {"camera_sensor_pid": "OV5640", "camera_pid_raw": True},
     {"camera_sensor_pid": "OV5640", "camera_pid_raw": 0x3660},
     {"camera_sensor_pid": "OV5640", "boot": 42},
