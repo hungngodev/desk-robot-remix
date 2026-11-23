@@ -55,6 +55,9 @@ struct AngleRaw {
   std::uint16_t angle = 0;
   std::uint8_t magnet_status = 0;
   std::uint32_t at_ms = 0;
+  // One identity per successful full AS5600 status AND angle acquisition.
+  // This is measured magnet rotation only, not calibrated wheel travel.
+  std::uint32_t sample_seq = 0;
 };
 struct ClimateRaw {
   bool present = false, valid = false;

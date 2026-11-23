@@ -225,7 +225,10 @@ void AccessorySensors::angle(std::uint8_t index, std::uint32_t now_ms) {
   a.magnet_status = status & 0x38U;
   a.angle = raw & 0x0fffU;
   a.valid = a.valid && (a.magnet_status & 0x38U) == 0x20U;
-  if (a.valid) a.at_ms = now_ms;
+  if (a.valid) {
+    a.at_ms = now_ms;
+    a.sample_seq = next_nonzero_sensor_sequence(a.sample_seq);
+  }
   // Angle alone is NOT travelled distance or traction calibration.
 }
 void AccessorySensors::gesture_fifo(std::uint32_t now_ms) {

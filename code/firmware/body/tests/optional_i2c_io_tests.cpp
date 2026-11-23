@@ -326,6 +326,7 @@ int main() {
       CHECK(read.angle[i].valid);
       CHECK(read.angle[i].angle == 2000);
       CHECK(read.angle[i].magnet_status == 0x20);
+      CHECK(read.angle[i].sample_seq > 0U);
     }
     CHECK(read.proximity.present && read.proximity.valid);
     CHECK(read.proximity.raw == 42);
@@ -691,6 +692,41 @@ int main() {
     CHECK(fuel.fuel_valid);
     CHECK(fuel.fuel_sample_seq > last_good_fuel_seq);
     CHECK(fuel.fuel_at_ms > last_good_fuel_at);
+    // A completed AS5600 status + angle read, not a cached register, gets
+    // its own identity. A broken optional mux must leave old wheel evidence
+    // invalid with its former sequence and timestamp intact.
+    TwoWire encoder_wire;
+    desk_robot::AccessorySensors encoder_accessories;
+    CHECK(encoder_accessories.begin(encoder_wire));
+    for (std::uint32_t ms = 0; ms < 1008; ms += 12)
+      encoder_accessories.poll(ms);
+    std::uint32_t old_encoder_seq[3]{};
+    std::uint32_t old_encoder_at[3]{};
+    for (unsigned i = 0; i < 3; ++i) {
+      const auto& a = encoder_accessories.readings().angle[i];
+      CHECK(a.present && a.valid && a.sample_seq > 0U);
+      old_encoder_seq[i] = a.sample_seq;
+      old_encoder_at[i] = a.at_ms;
+    }
+    encoder_wire.fail_optional_mux_write = true;
+    for (std::uint32_t ms = 1008; ms < 1416; ms += 12)
+      encoder_accessories.poll(ms);
+    for (unsigned i = 0; i < 3; ++i) {
+      const auto& a = encoder_accessories.readings().angle[i];
+      CHECK(!a.valid);
+      CHECK(a.sample_seq == old_encoder_seq[i]);
+      CHECK(a.at_ms == old_encoder_at[i]);
+    }
+    encoder_wire.fail_optional_mux_write = false;
+    for (std::uint32_t ms = 1416; ms < 2424; ms += 12)
+      encoder_accessories.poll(ms);
+    for (unsigned i = 0; i < 3; ++i) {
+      const auto& a = encoder_accessories.readings().angle[i];
+      CHECK(a.valid && a.sample_seq > old_encoder_seq[i]);
+      CHECK(a.at_ms > old_encoder_at[i]);
+    }
+    CHECK(!encoder_wire.unsafe_parallel_mux);
+    CHECK(encoder_wire.ranges == 0 && encoder_wire.extras == 0);
     std::cout << "PASS optional sensor register IO, MCP GPIOB, NFC and isolated mux slots\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << '\n';
