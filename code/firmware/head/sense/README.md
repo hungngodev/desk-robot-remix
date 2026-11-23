@@ -270,9 +270,24 @@ See [voice acceptance](../../../../docs/guides/audio-barge-in.md).
 
 This adapter uses the pinned Xiaozhi `Esp32Camera`, `OledDisplay`, IDF SSD1306
 panel driver, `NoAudioCodecSimplexPdm` input and I²S speaker output. It retains
-our authenticated bridge, fresh-camera snapshot lock and disabled-by-default
-raw motion tools. No new camera/audio driver, RoboEyes/GPL face code or custom
-animation is incorporated. Stock OLED emotion/text UI is used initially.
+our authenticated bridge, single live camera owner and disabled-by-default
+raw motion tools. No second camera, microphone, speaker or OLED driver is added.
+
+The selected local expression stack uses the vendored MIT Stackchan HSM
+(`overlay/stackchan_behavior.hpp`) with the original
+`overlay/face_eye_animator.hpp` and `overlay/face_eye_display.hpp`.
+The real Sense `FaceTask` passes `Action.motion` into `FaceEyeAnimator::Step`,
+then updates bounded blinking and gaze pixels inside Xiaozhi's existing
+LVGL emotion slot under `DisplayLockGuard`. The upstream speaking,
+listening and safety status remains separately owned; WROOM faults suppress
+optional moods, and this face code cannot command a motor. GPL RoboEyes is a
+design reference only and was not imported.
+
+This source integration does not qualify the actual 128 by 64 OLED,
+fitted acoustic/display timing, or the registered twenty-expression
+repertoire. Gate A1 and feature G001 remain open until the assembled Sense
+passes the five-minute Mac-offline face and zero-motion observation and the
+remaining expressions are demonstrated.
 
 Camera SCCB must be I²C0 and OLED I²C1; compile guards reject the known conflicting
 camera setting. The8MB partition table is `partitions/v2/8m.csv`: two0x2f0000

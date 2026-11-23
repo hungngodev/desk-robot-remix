@@ -1635,3 +1635,19 @@ int main() {
             "-I", str(HEAD / "overlay"), str(cpp), "-o", str(binary),
         ], check=True, capture_output=True, text=True, env=native_cpp_env())
         subprocess.run([str(binary)], check=True, capture_output=True, text=True)
+
+def test_sense_builder_readme_matches_selected_local_expression_consumer():
+    """Do not call the landed HSM/gaze renderer an unselected stock face."""
+    board = (HEAD / "sense/desk_robot_sense.cc").read_text()
+    renderer = (HEAD / "overlay/face_eye_display.hpp").read_text()
+    instructions = (HEAD / "sense/README.md").read_text()
+    assert "const Action action = board->face_behavior_.update(obs);" in board
+    assert "now_ms, action.motion," in board
+    assert "board->local_eye_display_->ShowEyes(eyes);" in board
+    assert "DisplayLockGuard lock(this);" in renderer
+    assert "`overlay/face_eye_animator.hpp`" in instructions
+    assert "`overlay/face_eye_display.hpp`" in instructions
+    assert "GPL RoboEyes" in instructions
+    assert "Gate A1 and feature G001 remain open" in instructions
+    assert "No new camera/audio driver, RoboEyes/GPL face code or custom" not in instructions
+    assert "Stock OLED emotion/text UI is used initially." not in instructions
