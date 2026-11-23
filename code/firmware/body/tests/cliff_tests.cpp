@@ -203,6 +203,32 @@ void bus_fault_requires_new_samples() {
   CHECK(guard.evaluate(1));
 }
 
+void boot_bus_fault_reports_real_failure_before_full_sweep() {
+  CliffGuard guard;
+  CHECK(guard.configure(config()));
+  CHECK(guard.fault() == CliffFault::MissingSample);
+  guard.sample(0, 45, true, 10);
+  guard.sample(1, 45, true, 11);
+  guard.bus_fault();  // hardware I2C failure before other channels finish
+  CHECK(guard.fault() == CliffFault::BusFailure);
+  CHECK(guard.fault_sensor() == desk_robot::kNoFaultSensor);
+  for (std::uint8_t lane = 0; lane < desk_robot::kCliffSensorCount; ++lane)
+    CHECK(!guard.diagnostic(lane, 12).present);
+  CHECK(!guard.evaluate(12));
+  CHECK(!guard.try_rearm(12));
+  healthy_samples(guard, 20);
+  CHECK(!guard.evaluate(20)); // recovered samples never auto-rearm
+  CHECK(guard.try_rearm(20));  // explicit safe local recovery
+  CHECK(guard.evaluate(20));
+
+  // An invalid configuration is a separate, earlier fault and must not
+  // be disguised as a bus failure.
+  CliffGuard unconfigured;
+  CHECK(!unconfigured.configure(CliffConfig{}));
+  unconfigured.bus_fault();
+  CHECK(unconfigured.fault() == CliffFault::Unconfigured);
+}
+
 void configuration_replacement_invalidates_samples() {
   CliffGuard guard;
   ready(guard, 0);
@@ -434,6 +460,8 @@ int main(int argc, char** argv) {
       {"front_sensor_rules", front_sensor_rules},
       {"stale_and_missing_samples", stale_and_missing_samples},
       {"bus_fault_requires_new_samples", bus_fault_requires_new_samples},
+      {"boot_bus_fault_reports_real_failure_before_full_sweep",
+       boot_bus_fault_reports_real_failure_before_full_sweep},
       {"configuration_replacement_invalidates_samples", configuration_replacement_invalidates_samples},
       {"first_fault_and_invalid_channel", first_fault_and_invalid_channel},
       {"duplicate_conversion_timestamp_requires_new_sensor_evidence",

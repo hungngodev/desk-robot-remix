@@ -132,7 +132,16 @@ void CliffGuard::sample(std::uint8_t channel, std::uint16_t distance_mm,
 }
 
 void CliffGuard::bus_fault() {
-  latch(CliffFault::BusFailure);
+  // MissingSample is only the configured boot placeholder. If the mux or
+  // sensor bus actually fails before the first complete sweep, report the
+  // concrete failure without waiting for unavailable floor samples. Once
+  // rearmed, preserve the original first-fault-sticky runtime policy.
+  if (initial_sweep_pending_rearm_ && fault_ == CliffFault::MissingSample) {
+    fault_ = CliffFault::BusFailure;
+    fault_sensor_ = kNoFaultSensor;
+  } else {
+    latch(CliffFault::BusFailure);
+  }
   // Even a transient bus recovery requires all-new observations before rearm.
   for (auto& sample : samples_) sample = Sample{};
 }
