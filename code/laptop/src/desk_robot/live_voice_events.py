@@ -19,8 +19,11 @@ class VoiceEventListener:
         on_monitor_ready: Callable[[bool], Awaitable[None]] | None = None,
         on_speech_snapshot: Callable[[frozenset[str]], Awaitable[None]] | None = None,
         require_snapshot: bool = False,
+        on_voice_generations: Callable[[dict[str, int] | None], None] | None = None,
+        require_turn_generations: bool = False,
     ):
-        if not robot_ids or len(token) < 24 or type(require_snapshot) is not bool:
+        if (not robot_ids or len(token) < 24 or type(require_snapshot) is not bool
+                or type(require_turn_generations) is not bool):
             raise ValueError("Known robot IDs and private speech token required")
         self.client, self.url, self.token = client, url.rstrip("/"), token
         self.robot_ids = frozenset(robot_ids)
@@ -29,6 +32,8 @@ class VoiceEventListener:
         self.on_monitor_ready = on_monitor_ready
         self.on_speech_snapshot = on_speech_snapshot
         self.require_snapshot = require_snapshot
+        self.on_voice_generations = on_voice_generations
+        self.require_turn_generations = require_turn_generations
         self.monitor_ready = False
         # Retry failed health notifications even if local state already fell
         # silent; a failed callback must not permanently retain ready=True.
@@ -158,7 +163,32 @@ class VoiceEventListener:
             or len(set(active)) != len(active)
         ):
             raise ValueError("Invalid authenticated live VAD snapshot")
+        generations = data.get("voice_turn_generations")
+        if self.require_turn_generations and generations is None:
+            raise ValueError("Authenticated Xiaozhi turn generations required")
+        if generations is not None and (
+            not isinstance(generations, dict)
+            or len(generations) > len(self.robot_ids)
+            or any(
+                type(robot_id) is not str or robot_id not in self.robot_ids
+                or type(generation) is not int
+                or not 0 <= generation <= 0x7fffffffffffffff
+                for robot_id, generation in generations.items()
+            )
+        ):
+            raise ValueError("Invalid authenticated voice turn generation snapshot")
+        if generations is not None and active is not None and (
+            not set(active).issubset(generations)
+        ):
+            raise ValueError("Active human VAD lacks source turn generation")
         return data
+
+    def _publish_generations(self, data: dict | None) -> None:
+        """Atomically fence signed tools before awaiting slow audio callbacks."""
+        if self.on_voice_generations is not None:
+            self.on_voice_generations(
+                None if data is None else data.get("voice_turn_generations")
+            )
 
     async def _reconcile_snapshot(self, data: dict) -> None:
         # Supported by our pinned bridge; legacy fixtures without this field
@@ -174,6 +204,7 @@ class VoiceEventListener:
             # Commit bootstrap only after both downstream consumers accept it.
             # Otherwise a failed snapshot/health callback must retry bootstrap,
             # not consume later events with an uninitialized speech owner.
+            self._publish_generations(data)
             await self._reconcile_snapshot(data)
             await self._set_monitor_ready(True)
             self.cursor = data["cursor"]
@@ -181,6 +212,7 @@ class VoiceEventListener:
             return 0
         data = await self._fetch()
         if data["reset"]:
+            self._publish_generations(None)
             self._event_generation += 1
             # Safety first: a slow/failing monitoring callback must not delay
             # stopping obsolete speech after the authenticated bridge resets.
@@ -194,12 +226,14 @@ class VoiceEventListener:
         if data["cursor"] < self.cursor:
             raise ValueError("Voice event cursor rolled backward without a restart")
         if data["lost"]:
+            self._publish_generations(None)
             self._event_generation += 1
             # The audio abort is time critical even when UI/health callbacks
             # are blocked or unavailable. Fail monitor ready immediately.
             self.monitor_ready = False
             await self._preempt_all("gap")
             await self._set_monitor_ready(False)
+            self._publish_generations(data)
             await self._reconcile_snapshot(data)
             self.cursor = data["cursor"]
             self._stream_failed = False
@@ -218,15 +252,29 @@ class VoiceEventListener:
                     or event.get("kind") not in (
                         "normal", "group", "speech_start", "speech_end"
                     )
+                    or (self.require_turn_generations and type(
+                        event.get("voice_turn_generation")) is not int)
+                    or ("voice_turn_generation" in event and (
+                        type(event["voice_turn_generation"]) is not int
+                        or not 0 <= event["voice_turn_generation"] <= 0x7fffffffffffffff
+                    ))
                     or event.get("source") != (
                         "xiaozhi_server_vad"
                         if event.get("kind") in ("speech_start", "speech_end")
                         else "xiaozhi_aec_vad"
                     )):
                 raise ValueError("Invalid real voice source, identity or sequence")
+            generations = data.get("voice_turn_generations")
+            if (generations is not None and event["robot_id"] in generations
+                    and "voice_turn_generation" in event
+                    and event["voice_turn_generation"] > generations[event["robot_id"]]):
+                raise ValueError("Event generation exceeds authenticated current turn")
             expected = event["seq"]
         if expected != data["cursor"]:
             raise ValueError("Voice server skipped sequence without marking a gap")
+        # Publish newest authenticated head source generations before a slow
+        # decoder STOP for any earlier event in this batch.
+        self._publish_generations(data)
         current = self.cursor
         for event in data["events"]:
             # A head may hang after receiving its interrupt command. Keep
@@ -301,6 +349,10 @@ class VoiceEventListener:
                 # block during a head disconnect, and must never gate the
                 # emergency shared audio interruption attempt.
                 self.monitor_ready = False
+                try:
+                    self._publish_generations(None)
+                except Exception:
+                    self.last_error += "; voice generation invalidation failed"
                 # A failed abort must be retried on the next outage tick;
                 # do not mark it delivered before the real owner accepts it.
                 if not self._stream_failed:

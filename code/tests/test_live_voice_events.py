@@ -4,6 +4,106 @@ import pytest
 from desk_robot.live_voice_events import VoiceEventListener
 
 
+async def test_authenticated_turn_generations_precede_slow_vad_and_clear_on_reset():
+    observed = []
+    request_count = 0
+
+    def mock(request):
+        nonlocal request_count
+        request_count += 1
+        if request_count == 1:
+            return httpx.Response(200, json={
+                "cursor": 4, "events": [], "reset": False, "lost": False,
+                "active_human_robots": [],
+                "voice_turn_generations": {"robot-01": 5, "robot-02": 3},
+            })
+        if request_count == 2:
+            return httpx.Response(200, json={
+                "cursor": 5, "reset": False, "lost": False,
+                "active_human_robots": ["robot-01"],
+                "voice_turn_generations": {"robot-01": 6, "robot-02": 3},
+                "events": [{
+                    "seq": 5, "robot_id": "robot-01", "kind": "speech_start",
+                    "source": "xiaozhi_server_vad", "voice_turn_generation": 6,
+                }],
+            })
+        if request_count == 3:
+            return httpx.Response(200, json={
+                "cursor": 1, "events": [], "reset": True, "lost": False,
+                "active_human_robots": [],
+                "voice_turn_generations": {"robot-01": 0, "robot-02": 0},
+            })
+        return httpx.Response(200, json={
+            "cursor": 1, "events": [], "reset": False, "lost": False,
+            "active_human_robots": [],
+            "voice_turn_generations": {"robot-01": 0, "robot-02": 0},
+        })
+
+    snapshots = []
+
+    def owner(generations):
+        snapshots.append(None if generations is None else dict(generations))
+
+    async def interrupt(robot_id, kind):
+        assert snapshots[-1] == {"robot-01": 6, "robot-02": 3}
+        observed.append((robot_id, kind))
+
+    async def global_stop(reason):
+        assert reason == "reset"
+        assert snapshots[-1] is None
+        observed.append(("fleet", reason))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01", "robot-02"}, on_interrupt=interrupt,
+            on_global_interrupt=global_stop,
+            on_voice_generations=owner, require_turn_generations=True,
+        )
+        assert await listener.poll() == 0
+        assert snapshots[-1] == {"robot-01": 5, "robot-02": 3}
+        assert await listener.poll() == 1
+        assert observed == [("robot-01", "speech_start")]
+        assert await listener.poll() == 0 and listener.cursor is None
+        assert snapshots[-1] is None
+        assert await listener.poll() == 0
+        assert snapshots[-1] == {"robot-01": 0, "robot-02": 0}
+        assert observed[-1] == ("fleet", "reset")
+
+
+@pytest.mark.parametrize("generations", [
+    None, {"robot-01": True}, {"robot-01": -1},
+    {"robot-99": 2}, {"robot-01": 2**63},
+])
+async def test_strict_turn_generation_bootstrap_rejects_untrusted_provenance(
+    generations,
+):
+    def mock(request):
+        return httpx.Response(200, json={
+            "cursor": 4, "events": [], "reset": False, "lost": False,
+            "active_human_robots": [],
+            **({} if generations is None else {"voice_turn_generations": generations}),
+        })
+    delivered = []
+
+    def owner(snapshot):
+        delivered.append(snapshot)
+
+    async def interrupt(robot, kind):
+        raise AssertionError("Rejected provenance cannot dispatch VAD")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=interrupt,
+            on_voice_generations=owner, require_turn_generations=True,
+        )
+        with pytest.raises(ValueError, match="generation"):
+            await listener.poll()
+        assert listener.cursor is None
+        assert delivered == []
+
+
 async def test_mac_preempts_real_human_interruptions_once():
     delivered = []
     def mock(request):
