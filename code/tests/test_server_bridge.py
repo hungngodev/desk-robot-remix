@@ -3019,3 +3019,47 @@ async def test_installed_xiaozhi_propagates_cancel_without_using_stale_pcm(
     with pytest.raises(asyncio.CancelledError):
         await namespace["handleAudioMessage"](conn, b"obsolete-input")
     assert seen == []
+
+async def test_retired_head_callbacks_cannot_touch_replacement_voice_state(bridge):
+    """Old VAD callbacks must not reset new-head gates or stop its group speech."""
+    old = conn("mac-01")
+    old.client_listen_mode = "realtime"
+    bridge.register(old)
+    bridge.unregister(old)
+    replacement = conn("mac-01")
+    replacement.client_listen_mode = "realtime"
+    replacement.client_is_speaking = False
+    bridge.register(replacement)
+    now = time.monotonic()
+
+    # The newest socket has one real VAD frame and a still-active speech
+    # gate. A delayed negative PCM packet from the retired socket must not
+    # clear either, and an old positive packet cannot overwrite the count.
+    bridge.idle_voice_count["mac-01"] = 1
+    bridge.idle_voice_last_at["mac-01"] = now
+    bridge.idle_voice_emitted.add("mac-01")
+    bridge.idle_voice_quiet_frames["mac-01"] = 1
+    assert not bridge.observe_idle_human_voice(old, False)
+    assert not bridge.observe_idle_human_voice(old, True)
+    assert bridge.idle_voice_count["mac-01"] == 1
+    assert bridge.idle_voice_last_at["mac-01"] == now
+    assert "mac-01" in bridge.idle_voice_emitted
+    assert bridge.idle_voice_quiet_frames["mac-01"] == 1
+    assert bridge.voice_event_cursor == 0
+
+    # The newest head owns a concurrent multi-pet speaker lease. A VAD
+    # callback that was already queued on the retired socket must not
+    # preempt the replacement head, even though both share a device ID.
+    bridge.lease_ids = frozenset(["mac-01"])
+    bridge.lease_until = time.monotonic() + 5.0
+    bridge.active_device_id = "mac-01"
+    bridge.voice_frames["mac-01"] = 1
+    bridge.voice_last_frame_at["mac-01"] = time.monotonic()
+    old_generation = bridge.interrupt_generation["mac-01"]
+    assert not await bridge.interrupt_for_user_voice(old, True)
+    assert not await bridge.interrupt_for_user_voice(old, True)
+    assert bridge.voice_frames["mac-01"] == 1
+    assert bridge.interrupt_generation["mac-01"] == old_generation
+    assert bridge.voice_event_cursor == 0
+    assert not bridge.human_interrupted_devices
+    assert not bridge.lease_stopping

@@ -467,6 +467,9 @@ def observe_idle_human_voice(conn, have_voice: bool) -> bool:
     transcript. Double-talk is handled by the existing separate AEC path.
     """
     device = getattr(conn, "device_id", None)
+    # Old head sockets must not clear the replacement head's VAD counters.
+    if connections.get(device) is not conn:
+        return False
     if not have_voice:
         idle_voice_count.pop(device, None)
         idle_voice_last_at.pop(device, None)
@@ -664,6 +667,10 @@ async def interrupt_for_user_voice(conn, have_voice: bool) -> bool:
     """
     global lease_stopping
     device = conn.device_id
+    # The global speaker lease is not enough: a retired socket can reuse the
+    # device ID after reconnection, but never owns the current group turn.
+    if connections.get(device) is not conn:
+        return False
     if (
         not muted(device) or active_device_id != device
         or not duplex_available(conn) or lease_stopping
