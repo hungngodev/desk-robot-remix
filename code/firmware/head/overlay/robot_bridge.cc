@@ -677,7 +677,7 @@ void Bridge::CameraStreamTask(void* context) {
             } else {
                 // Per-part provenance is the same trusted monotonic camera
                 // completion metadata as the established snapshot endpoint.
-                const auto seq = ++bridge->camera_sequence_;
+                const auto seq = bridge->camera_sequence_ + 1;
                 const auto completed = esp_timer_get_time();
                 // Longest legal ID and 64-bit timestamp must fit together.
                 char headers[320] = {};
@@ -695,6 +695,8 @@ void Bridge::CameraStreamTask(void* context) {
                 if (n < 0 || static_cast<std::size_t>(n) >= sizeof(headers)) {
                     status = ESP_FAIL;
                 } else {
+                    // Invalid multipart headers must not consume a source frame identity.
+                    ++bridge->camera_sequence_;
                     status = httpd_resp_send_chunk(
                         req, kBoundary, sizeof(kBoundary) - 1);
                     if (status == ESP_OK)

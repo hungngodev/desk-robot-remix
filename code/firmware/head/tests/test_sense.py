@@ -1779,3 +1779,18 @@ def test_camera_snapshot_never_sends_jpeg_on_provenance_header_failure():
     assert failure < reject < guarded_success < advance < jpeg_send
     assert "++bridge->camera_sequence_" not in task[:failure]
 
+def test_camera_stream_never_spends_sequence_on_invalid_provenance_headers():
+    """A failed MJPEG multipart identity must not advance the source sequence."""
+    bridge = (HEAD / "overlay/robot_bridge.cc").read_text()
+    stream = bridge.split("void Bridge::CameraStreamTask(void* context) {", 1)[1].split(
+        "#if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3)", 1
+    )[0]
+    reserve = stream.index("const auto seq = bridge->camera_sequence_ + 1;")
+    format_headers = stream.index("const int n = snprintf(")
+    invalid = stream.index("if (n < 0 || static_cast<std::size_t>(n) >= sizeof(headers)) {")
+    reject = stream.index("status = ESP_FAIL;", invalid)
+    valid = stream.index("} else {", reject)
+    advance = stream.index("++bridge->camera_sequence_;")
+    send = stream.index("status = httpd_resp_send_chunk(", advance)
+    assert reserve < format_headers < invalid < reject < valid < advance < send
+    assert "++bridge->camera_sequence_" not in stream[:invalid]
