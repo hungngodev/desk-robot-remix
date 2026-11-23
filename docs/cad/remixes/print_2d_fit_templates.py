@@ -255,11 +255,32 @@ def export(root: Path, output: Path) -> dict:
     return manifest
 
 
+def _unique_manifest_keys(pairs: list[tuple[str, object]]) -> dict:
+    """Duplicate keys can hide contradictory paper release evidence."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate A4 paper manifest key")
+        result[key] = value
+    return result
+
+
+def _reject_nonfinite_number(token: str) -> None:
+    raise ValueError("Nonfinite A4 paper manifest number: " + token)
+
+
 def verify(root: Path, output: Path) -> dict:
     _reject_output_aliases(output)
     expected, pages = _expected(root)
-    actual = json.loads((output / "paper_manifest.json").read_text(encoding="utf-8"))
-    if actual != expected:
+    actual = json.loads(
+        (output / "paper_manifest.json").read_text(encoding="utf-8"),
+        object_pairs_hook=_unique_manifest_keys,
+        parse_constant=_reject_nonfinite_number,
+    )
+    # Python's ordinary dict equality considers true == 1 and false == 0.
+    # Preserve actual JSON scalar types for scale and safety flags instead.
+    if (json.dumps(actual, sort_keys=True, allow_nan=False)
+            != json.dumps(expected, sort_keys=True, allow_nan=False)):
         raise ValueError("Paper source, dimensions or manifest changed")
     for name, expected_bytes in pages.items():
         if (output / name).read_bytes() != expected_bytes:
