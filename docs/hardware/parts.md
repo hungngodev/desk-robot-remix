@@ -43,7 +43,8 @@ keep known subtotal separate from an incomplete total.
 | HiLetgo HW-104 PAM8403 | One visible, bag marked 5 pieces | Conditional speaker amplifier reuse with an analog source |
 | Adafruit DRV8833 #3297 and DFRobot FIT0774 | One each visible | Spare motor driver and optional vibration feedback |
 | 5 V USB power bank | At least one reported. Output current unknown | Possible bench supply after checking the output under load |
-| Adafruit Feather nRF52840, Adafruit USB-C breakout #4090 and DFRobot SER0043 continuous servo | One of each reported | Spares. The lift and gripper use positional MG90S servos |
+| Adafruit Feather nRF52840 | One reported owned | Candidate controller for ONE shared read-only room station serving five pets, not five robot controllers. Existing firmware bench/full profiles are source evidence only; PCB, sensor rails, USB continuity and physical assembly remain unqualified |
+| Adafruit USB-C breakout #4090 and DFRobot SER0043 continuous servo | One of each reported | Separate spares; the robot lift and jaw require positional MG90S servos |
 | Adafruit MAX9814, Adafruit BMP280, PIR motion detector, reflective IR obstacle module, IR remote receiver, likely tilt/vibration switch, separate camera board, magnetic reed-switch module and GY-61 accelerometer | Nine photographed types in addition to the BerryIMU | Spares and optional experiments. See the photo audit for confidence and possible uses |
 
 The earlier ESP32-S3 N8R8 mention was corrected by the user. The reported

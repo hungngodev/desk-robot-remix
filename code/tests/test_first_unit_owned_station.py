@@ -62,3 +62,12 @@ def test_station_and_imu_supersessions_retained_in_decision_log():
     assert "feather_nrf52840_room_bench" in decisions
     assert "not an authorized" in decisions
     assert "BerryIMU remains" in decisions
+
+
+def test_parts_table_allocates_feather_to_one_station_without_spare_confusion():
+    parts = (ROOT / "docs/hardware/parts.md").read_text(encoding="utf-8")
+    assert "| Adafruit Feather nRF52840 | One reported owned |" in parts
+    assert "ONE shared read-only room station serving five pets" in parts
+    assert "physical assembly remain unqualified" in parts
+    assert "Adafruit USB-C breakout #4090 and DFRobot SER0043 continuous servo" in parts
+    assert "Adafruit Feather nRF52840, Adafruit USB-C breakout" not in parts
