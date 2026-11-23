@@ -10,7 +10,6 @@ import math
 from fastapi import Depends, FastAPI, Request
 
 from .config import Settings
-from .spatial_pose import PoseReceipt
 from .transport import HeadError
 
 
@@ -118,39 +117,6 @@ def register_robot_status_routes(
             )
             remember_tool_context(context, robot_id, "robot_status", summary)
         return data
-
-    @app.get("/v1/robots/{robot_id}/pose", dependencies=[Depends(authorize)])
-    async def pose(robot_id: str, request: Request):
-        """Inspect fresh source odometry without claiming a map or motor permit."""
-        coordinator().robot(robot_id)
-        owner = requested_tool_context(request, robot_id)
-        require_current_voice_tool(request, robot_id, owner)
-        head = coordinator().heads[robot_id]
-        reader = getattr(head, "pose_status", None)
-        if settings.mode != "hardware" or not callable(reader):
-            return {
-                "robot_id": robot_id, "available": False,
-                "reason": "Physical pose adapter unavailable",
-                "motor_authorized": False, "physical_qualified": False,
-            }
-        receipt = await reader()
-        require_current_voice_tool(request, robot_id, owner)
-        if not isinstance(receipt, PoseReceipt) or receipt.robot_id != robot_id:
-            raise HeadError("Pose receipt robot identity or type mismatch")
-        # Body microseconds and Mac receipt seconds are unrelated epochs.
-        # The pose fence requires separate map anchoring even for valid odometry.
-        fence = getattr(head, "pose_fence", None)
-        return {
-            "robot_id": robot_id, "available": True, "v": 1,
-            "head_boot": receipt.head_boot,
-            "body_boot": receipt.body_boot, "origin": receipt.origin,
-            "seq": receipt.seq, "sample_us": receipt.sample_us,
-            "x_mm": receipt.x_mm, "y_mm": receipt.y_mm,
-            "yaw_mrad": receipt.yaw_mrad, "quality": receipt.quality,
-            "received_at_s": receipt.received_at,
-            "needs_reanchor": getattr(fence, "needs_reanchor", True) is not False,
-            "motor_authorized": False, "physical_qualified": False,
-        }
 
     @app.get("/v1/robots/{robot_id}/aux", dependencies=[Depends(authorize)])
     async def aux(robot_id: str, request: Request):
