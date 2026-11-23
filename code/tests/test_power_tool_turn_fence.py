@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from desk_robot.api_readonly_context import register_readonly_context_routes
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 
@@ -68,6 +68,14 @@ def test_power_tool_requires_same_live_human_turn_after_wroom_read(
         receipts.append((robot_id, kind, summary))
         return True
 
+    def current(owner, robot_id, detail):
+        # The production route rechecks ownership after a slow head read.
+        # Keep the standalone fixture equally strict on instance and epoch.
+        visual, generation = owner
+        if (runtime.multimodal is not visual
+                or visual._turn_epoch.get(robot_id) != generation):
+            raise HTTPException(409, detail)
+
     app = FastAPI()
     app.state.runtime = runtime
     register_readonly_context_routes(
@@ -75,6 +83,7 @@ def test_power_tool_requires_same_live_human_turn_after_wroom_read(
         coordinator=lambda: coordinator,
         requested_tool_context=requested,
         remember_tool_context=remember,
+        current_tool_context=current,
         native_pet_speech_policy=lambda robot_id: {},
     )
     headers = (
