@@ -1276,7 +1276,9 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"fifo_ir_first\":%s,\"fifo_layout_physically_verified\":false,"
         "\"bpm\":null,\"medical\":false},"
         "\"angles\":{\"raw\":[%u,%u,%u],\"present_mask\":%u,"
-        "\"valid_mask\":%u,\"magnet\":[%u,%u,%u]},"
+        "\"valid_mask\":%u,\"magnet\":[%u,%u,%u],"
+        "\"seq\":[%lu,%lu,%lu],\"age_ms\":[%lu,%lu,%lu],"
+        "\"boot_id\":%lu,\"wheel_travel_qualified\":false},"
         "\"force\":{\"adc\":[%d,%d],\"belly_seq\":%lu,\"belly_age_ms\":%lu,\"belly_valid\":%s,\"jaw_seq\":%lu,\"boot_id\":%lu,\"jaw_age_ms\":%lu,\"jaw_valid\":%s,\"valid\":%s,\"calibrated\":false},"
         "\"climate\":{\"temp_centi\":%d,\"rh_centi\":%d,\"valid\":%s,\"seq\":%lu,\"age_ms\":%lu},"
         "\"bmp280\":{\"present\":%s,\"valid\":%s,\"chip_id\":%u,"
@@ -1306,6 +1308,16 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned>(a.angle[0].magnet_status),
         static_cast<unsigned>(a.angle[1].magnet_status),
         static_cast<unsigned>(a.angle[2].magnet_status),
+        static_cast<unsigned long>(a.angle[0].sample_seq),
+        static_cast<unsigned long>(a.angle[1].sample_seq),
+        static_cast<unsigned long>(a.angle[2].sample_seq),
+        static_cast<unsigned long>(a.angle[0].sample_seq != 0U ?
+            now_ms - a.angle[0].at_ms : 0U),
+        static_cast<unsigned long>(a.angle[1].sample_seq != 0U ?
+            now_ms - a.angle[1].at_ms : 0U),
+        static_cast<unsigned long>(a.angle[2].sample_seq != 0U ?
+            now_ms - a.angle[2].at_ms : 0U),
+        static_cast<unsigned long>(boot_epoch_),
         static_cast<int>(a.force.adc[0]),
         static_cast<int>(a.force.adc[1]),
         static_cast<unsigned long>(a.force.belly_sample_seq),

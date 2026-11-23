@@ -190,6 +190,63 @@ void verify_wheel_capture_stays_read_only() {
   check(!body.configure_wheel_angle_capture(0, 4000, 200, 80));
   check(body.configure_wheel_angle_capture(4000, 4000, 200, 80));
 }
+void verify_angle_qualification_telemetry() {
+  desk_robot::BodyControl body;
+  desk_robot::LineReceiver receiver;
+  body.set_boot_epoch(123);
+  desk_robot::AccessoryReadings readings{};
+  auto& nose = readings.angle[0];
+  auto& left = readings.angle[1];
+  auto& right = readings.angle[2];
+  nose.present = nose.valid = true;
+  nose.magnet_status = 0x20;
+  nose.angle = 100;
+  nose.sample_seq = 1;
+  nose.at_ms = 970;
+  left.present = left.valid = true;
+  left.magnet_status = 0x20;
+  left.angle = 4094;
+  left.sample_seq = 7;
+  left.at_ms = 980;
+  right.present = right.valid = true;
+  right.magnet_status = 0x20;
+  right.angle = 12;
+  right.sample_seq = 9;
+  right.at_ms = 990;
+  body.set_accessories(readings, 1000);
+  auto reply = request(body, receiver, "aux\r\n", 1000, 0);
+  check(reply.find("\"seq\":[1,7,9]") != std::string::npos);
+  check(reply.find("\"age_ms\":[30,20,10]") != std::string::npos);
+  check(reply.find("\"boot_id\":123,\"wheel_travel_qualified\":false") != std::string::npos);
+  check(reply.find("\"valid_mask\":7") != std::string::npos);
+  check(reply.size() < desk_robot::kReplyCapacity);
+  check(!body.state().armed);
+  // Cached conversions age; AUX reads cannot change the AS5600 identity.
+  reply = request(body, receiver, "aux\r\n", 1100, 0);
+  check(reply.find("\"seq\":[1,7,9]") != std::string::npos);
+  check(reply.find("\"age_ms\":[130,120,110]") != std::string::npos);
+  left.valid = false; // A failed magnet or mux must not look valid.
+  body.set_accessories(readings, 1120);
+  reply = request(body, receiver, "aux\r\n", 1120, 0);
+  check(reply.find("\"valid_mask\":5") != std::string::npos);
+  check(reply.find("\"seq\":[1,7,9]") != std::string::npos);
+  // At timestamp zero after millis rollover, nonzero source sequence
+  // differentiates a real conversion from an uninitialized sample.
+  body.set_boot_epoch(124);
+  nose.at_ms = 0;
+  nose.sample_seq = 2;
+  nose.valid = true;
+  right.at_ms = 0xfffffff0U;
+  right.sample_seq = 10;
+  right.valid = true;
+  left.sample_seq = 0;
+  body.set_accessories(readings, 20);
+  reply = request(body, receiver, "aux\r\n", 20, 0);
+  check(reply.find("\"seq\":[2,0,10]") != std::string::npos);
+  check(reply.find("\"age_ms\":[20,0,36]") != std::string::npos);
+  check(reply.find("\"boot_id\":124,\"wheel_travel_qualified\":false") != std::string::npos);
+  check(!body.state().armed && body.state().left == 0 && body.state().right == 0);
+}
 }  // namespace
 
 int main() {
@@ -197,5 +254,6 @@ int main() {
   verify_poll_flood_and_malformed_frames();
   verify_pose_capacity_failure_preserves_clock_and_sequence();
   verify_wheel_capture_stays_read_only();
+  verify_angle_qualification_telemetry();
   return 0;
 }
