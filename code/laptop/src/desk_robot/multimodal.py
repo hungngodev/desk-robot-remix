@@ -798,6 +798,9 @@ class CameraFrameHub:
                     "channel": "human_transcript",
                     "kind": "model_asr_completed",
                     "age_ms": round(1000 * (now - stamp)),
+                    # Exact trusted Mac monotonic source time; the rounded
+                    # age is only UI presentation and cannot fence consent.
+                    "source_at": stamp,
                     "source": "native_model_estimated_asr",
                     "content": transcript,
                     "transcription_verified": False,

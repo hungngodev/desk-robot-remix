@@ -7268,7 +7268,7 @@ async def test_proactive_context_skip_overfull_hub_budget(
     limits = []
 
     class Attention:
-        def timeline(self, robot_id, now):
+        def timeline(self, robot_id, now, **_consent):
             assert robot_id == "robot-01"
             return [
                 {"channel": "human_voice", "kind": "human_voice",
@@ -7312,7 +7312,7 @@ async def test_hardware_attention_continuity_preserved_when_vision_disabled(
     pet = PetController(fleet, {}, conversation, memory, KeyScene())
 
     class Attention:
-        def timeline(self, robot_id, now):
+        def timeline(self, robot_id, now, **_consent):
             return [{
                 "channel": "mac_attention",
                 "kind": "conversation_continuity",

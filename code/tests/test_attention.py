@@ -818,3 +818,38 @@ def test_live_asr_grant_revocation_preserves_safety_and_regrant_isolation(monkey
     assert "PRIVATE_GRANT_SEVEN" not in fresh
     assert not ledger.heard("pet", "omni_" + "e" * 12 + "_" + "f" * 20,
                             "invalid", 17, consent_generation=True)
+
+
+def test_hub_asr_consent_uses_exact_source_time_not_rounded_age():
+    """Submillisecond valid evidence must not disable TTS revoke fences."""
+    from desk_robot.brain_context import live_asr_in_current_grant
+
+    now = 1000.0
+    current = {
+        "channel": "human_transcript", "kind": "model_asr_completed",
+        "source_at": now - 0.0002, "age_ms": 0,
+    }
+    assert live_asr_in_current_grant(
+        current, now=now, enabled=True,
+        consent_started_at=now - 0.0003,
+    )
+    assert not live_asr_in_current_grant(
+        current, now=now, enabled=True,
+        consent_started_at=now - 0.0001,
+    )
+    assert not live_asr_in_current_grant(
+        current, now=now, enabled=False,
+        consent_started_at=now - 0.0003,
+    )
+    assert not live_asr_in_current_grant(
+        dict(current, source_at=now + 1), now=now, enabled=True,
+        consent_started_at=now - 1,
+    )
+    assert not live_asr_in_current_grant(
+        {"channel": "human_transcript", "age_ms": 0},
+        now=now, enabled=True, consent_started_at=0,
+    )
+    assert live_asr_in_current_grant(
+        {"channel": "sensor", "kind": "safety_fault"},
+        now=now, enabled=False, consent_started_at=now,
+    )

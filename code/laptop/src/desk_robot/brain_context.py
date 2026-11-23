@@ -46,19 +46,19 @@ def is_camera_derived_timeline_item(entry: object) -> bool:
 def live_asr_in_current_grant(
     entry: dict, *, now: float, enabled: bool, consent_started_at: float,
 ) -> bool:
-    """Discard old model-ASR RAM cues after live opt-out or rapid regrant.
+    """Use the exact Mac source stamp, never a rounded display age.
 
-    Hub timestamps are rounded to milliseconds. Require a conservative 1 ms
-    margin so rounding cannot promote an older receipt into the new grant.
-    This only fences transcript text; WROOM and touch cues remain independent.
+    A newly admitted transcript must count as live evidence even when its
+    acquisition is less than 1 ms after opt-in. An older grant's source stamp
+    must fail the new grant even when its rounded age happens to be zero.
+    Physical WROOM and touch cues remain independent of media consent.
     """
     if entry.get("channel") != "human_transcript":
         return True
-    age = entry.get("age_ms")
-    elapsed_ms = (now - consent_started_at) * 1000
+    source_at = entry.get("source_at")
     return (
-        enabled is True and type(age) is int and age >= 0
-        and elapsed_ms >= 0 and age + 1 < elapsed_ms
+        enabled is True and type(source_at) in (int, float)
+        and consent_started_at <= source_at <= now
     )
 
 
