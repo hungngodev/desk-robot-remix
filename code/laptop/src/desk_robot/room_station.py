@@ -200,7 +200,7 @@ class RoomStationDecoder:
         self._soil_calibration = soil_calibration
         self._last_seq: int | None = None
         self._last_ms: int | None = None
-        self._first_ms: int | None = None
+        self._station_elapsed_ms = 0
         self._first_received_at: float | None = None
         self._last_received_at: float | None = None
 
@@ -240,14 +240,16 @@ class RoomStationDecoder:
         if (self._last_ms is not None
                 and not 0 < (clock - self._last_ms) & UINT32 < 0x80000000):
             raise ValueError("Replayed or backwards room station acquisition clock")
-        # The station's millis clock is not synchronized to the Mac, but it
-        # cannot gain minutes of uptime during milliseconds of Mac receipt.
-        # Compare cumulative forward progress since the FIRST accepted frame;
-        # per-frame checks alone can let a buffered burst accumulate fake time.
-        if self._first_ms is not None:
+        # Accumulate validated forward intervals, including every uint32 wrap.
+        # Subtracting the first raw millis value would reset the drift fence
+        # after 49.7 days and admit impossible source time from a live USB epoch.
+        step_ms = ((clock - self._last_ms) & UINT32
+                   if self._last_ms is not None else 0)
+        elapsed_ms = self._station_elapsed_ms + step_ms
+        if self._first_received_at is not None:
             if float(now) < self._last_received_at:
                 raise ValueError("Backwards Mac room station receipt time")
-            station_elapsed_s = ((clock - self._first_ms) & UINT32) / 1000.0
+            station_elapsed_s = elapsed_ms / 1000.0
             mac_elapsed_s = float(now) - self._first_received_at
             if station_elapsed_s > (mac_elapsed_s *
                                     (1.0 + STATION_CLOCK_DRIFT_RATIO)
@@ -260,11 +262,11 @@ class RoomStationDecoder:
             _valid_reading(sensor, readings[sensor], clock)
         # Invalid frames never mutate counter fences. A USB reconnect must
         # create a NEW decoder instance only after actual port reopening.
-        if self._first_ms is None:
-            self._first_ms = clock
+        if self._first_received_at is None:
             self._first_received_at = float(now)
         self._last_seq = seq
         self._last_ms = clock
+        self._station_elapsed_ms = elapsed_ms
         self._last_received_at = float(now)
         return RoomObservation(seq, clock, float(now), readings,
                                _summary(readings, self._soil_calibration))

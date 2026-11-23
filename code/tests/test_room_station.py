@@ -266,6 +266,34 @@ def test_future_usb_station_clock_does_not_poison_decoder_epoch():
     assert accept(frame(12, 3000), decoder=decoder, now=12.0).seq == 12
 
 
+
+def test_station_cumulative_clock_fence_survives_a_full_millis_wrap():
+    """A long-running USB session cannot launder source-time jumps at day 50."""
+    decoder = RoomStationDecoder()
+    assert accept(frame(1, 0), decoder=decoder, now=1.0).seq == 1
+    # Each gap is below the uint32 half-range, so all are valid forward
+    # acquisitions. Together they exceed one complete millis() cycle.
+    for seq, total_ms in enumerate(
+        (1_500_000_000, 3_000_000_000, 4_500_000_000), start=2
+    ):
+        assert accept(
+            frame(seq, total_ms & 0xffffffff),
+            decoder=decoder, now=1.0 + total_ms / 1000.0,
+        ).seq == seq
+
+    # Ten million fake source milliseconds in one Mac second. Subtracting
+    # only the first raw uint32 clock would wrongly accept this frame.
+    forged_clock = (4_500_000_000 + 10_000_000) & 0xffffffff
+    with pytest.raises(ValueError, match="jumped ahead of Mac"):
+        accept(frame(5, forged_clock), decoder=decoder, now=4_500_002.0)
+
+    # Rejection must preserve the previous clock/sequence state so genuinely
+    # fresh acquisition after the same rollover can still enter the brain.
+    next_clock = (4_500_000_000 + 1000) & 0xffffffff
+    assert accept(frame(5, next_clock), decoder=decoder,
+                  now=4_500_003.0).seq == 5
+
+
 def test_cumulative_usb_clock_advance_cannot_launder_future_station_time():
     decoder = RoomStationDecoder()
     accept(frame(1, 1000), decoder=decoder, now=1.0)
