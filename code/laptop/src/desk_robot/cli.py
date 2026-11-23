@@ -170,6 +170,8 @@ async def inspect_live_media(settings, robot_id: str, *, look: bool = False,
     async with httpx.AsyncClient(
         base_url="http://127.0.0.1:8765",
         headers={"Authorization": f"Bearer {secret(settings.tools_token_env)}"},
+        # The authenticated local Mac endpoint must ignore ambient proxies.
+        trust_env=False,
         timeout=8,
     ) as http:
         return await inspect(http)
@@ -199,7 +201,10 @@ async def demo(settings):
 
 async def request(args, settings):
     headers = {"Authorization": f"Bearer {secret(settings.coordinator_token_env)}"}
-    async with httpx.AsyncClient(base_url=args.url, headers=headers, timeout=310) as client:
+    # Explicit Mac API bearer credentials must not transit env HTTP proxies.
+    async with httpx.AsyncClient(
+        base_url=args.url, headers=headers, timeout=310, trust_env=False,
+    ) as client:
         if args.action == "status":
             result = await client.get(f"/v1/robots/{args.robot}/status")
         elif args.action == "job":

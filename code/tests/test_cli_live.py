@@ -113,6 +113,34 @@ async def test_live_doctor_fails_closed_on_mismatched_real_evidence(fault):
             )
 
 
+async def test_live_doctor_owned_client_ignores_proxy_environment(monkeypatch):
+    import desk_robot.cli as cli
+
+    original_client = httpx.AsyncClient
+    transport, calls = simulated_mac()
+    options = []
+
+    def factory(*args, **kwargs):
+        options.append(kwargs.get("trust_env"))
+        return original_client(*args, transport=transport, **kwargs)
+
+    monkeypatch.setenv("DESK_ROBOT_TOOL_TOKEN", "t" * 40)
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.invalid:8899")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.invalid:8899")
+    monkeypatch.setenv("ALL_PROXY", "http://proxy.invalid:8899")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.setattr(cli.httpx, "AsyncClient", factory)
+
+    settings = configured()
+    settings.tools_token_env = "DESK_ROBOT_TOOL_TOKEN"
+    result = await inspect_live_media(settings, "robot-01", look=True)
+    assert result["live_tool_tested"] is True
+    assert options == [False]
+    assert [method for method, _ in calls] == [
+        "GET", "GET", "GET", "GET", "POST",
+    ]
+
+
 async def test_live_doctor_refuses_simulation_and_unconsented_camera():
     config = configured()
     config.mode = "simulation"
@@ -132,8 +160,14 @@ async def test_real_camera_cli_commands_route_to_existing_mac_authorities(
     original_client = httpx.AsyncClient
     transport, observed = simulated_mac()
     monkeypatch.setenv("DESK_ROBOT_API_TOKEN", "a" * 40)
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.invalid:8899")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.invalid:8899")
+    monkeypatch.setenv("ALL_PROXY", "http://proxy.invalid:8899")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    options = []
 
     def fake_client(*args, **kwargs):
+        options.append(kwargs.get("trust_env"))
         return original_client(*args, transport=transport, **kwargs)
 
     monkeypatch.setattr(cli.httpx, "AsyncClient", fake_client)
@@ -162,9 +196,12 @@ async def test_real_camera_cli_commands_route_to_existing_mac_authorities(
     assert [item[0] for item in observed] == [
         "POST", "GET", "GET", "GET", "GET"
     ]
+    assert options == [False] * 5
     args.action = "look"
     with pytest.raises(ValueError, match="consent"):
         await request(args, settings)
+    # Even the rejected request must not configure a proxy for the bearer.
+    assert options == [False] * 6
 
 
 @pytest.mark.parametrize(
