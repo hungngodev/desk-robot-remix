@@ -238,7 +238,10 @@ def test_native_asr_replay_after_four_display_slots_never_reenters_context(setti
     app.state.runtime = SimpleNamespace(
         multimodal=SimpleNamespace(hub=hub),
         attention=SimpleNamespace(
-            heard=lambda *args: heard_calls.append(args),
+            heard_is_current=lambda *_args: True,
+            # The production attention ledger accepts fresh ASR with True.
+            # A list.append-only mock returns None and falsely rejects it.
+            heard=lambda *args: (heard_calls.append(args) or True),
         ),
         memory=None,
     )
@@ -253,7 +256,11 @@ def test_native_asr_replay_after_four_display_slots_never_reenters_context(setti
         for index, event_id in enumerate(ids):
             response = client.post(
                 route,
-                json={"event_id": event_id, "transcript": f"Current turn {index}"},
+                json={
+                    "event_id": event_id,
+                    "transcript": f"Current turn {index}",
+                    "accepted_at_us": time.monotonic_ns() // 1000,
+                },
             )
             assert response.status_code == 200
             assert response.json()["ephemeral_context_added"] is True
