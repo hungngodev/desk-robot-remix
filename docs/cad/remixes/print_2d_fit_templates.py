@@ -63,6 +63,8 @@ def values(root: Path) -> dict:
     each_side = scad_mm(dock, "side_clearance_each_mm")
     base_l = scad_mm(dock, "base_length_mm")
     guide_run = scad_mm(dock, "guide_run_mm")
+    backstop_thickness = scad_mm(dock, "backstop_thickness_mm")
+    entry_coupon = scad_mm(dock, "entry_coupon_length_mm")
     rail_wall = scad_mm(dock, "guide_wall_mm")
     rail_margin = scad_mm(dock, "wall_outside_margin_mm")
     entry_flare = scad_mm(dock, "entry_flare_each_mm")
@@ -78,6 +80,11 @@ def values(root: Path) -> dict:
             or entry_flare > rail_margin
             or channel_w <= 0 or outer_w <= channel_w):
         raise ValueError("Invalid nominal dock guide rail dimensions")
+    # Mirror the full dock and entry coupon OpenSCAD assertions. A paper
+    # layout for non-renderable source geometry must fail before export.
+    if (base_l <= guide_run + backstop_thickness
+            or not 37 < entry_coupon < guide_run):
+        raise ValueError("Invalid dock backstop or entry coupon dimensions")
     return {
         "ranger": (scad_mm(data["ranger"], "board_x"),
                    scad_mm(data["ranger"], "board_y")),

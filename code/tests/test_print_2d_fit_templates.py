@@ -27,6 +27,7 @@ def setup_sources(tmp_path):
             "tag_paper_slack_each_mm=0.6;\n"
             "track_outer_width_mm=96;\nside_clearance_each_mm=2;\n"
             "base_length_mm=138;\nguide_run_mm=107;\n"
+            "backstop_thickness_mm=5;\nentry_coupon_length_mm=48;\n"
             "guide_wall_mm=5;\nwall_outside_margin_mm=8;\n"
             "entry_flare_each_mm=7;\n",
         "docs/cad/remixes/remaining_fit_gauges.scad":
@@ -260,5 +261,29 @@ def test_a4_tag_pocket_must_fit_strictly_inside_dock_rail_channel(
     # both rejected by dock_passive_fit.scad's strict channel assertion.
     output = tmp_path / "paper"
     with pytest.raises(ValueError, match="Dock tag pocket exceeds nominal rail channel"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(("before", "after"), [
+    ("base_length_mm=138;", "base_length_mm=110;"),
+    ("base_length_mm=138;", "base_length_mm=112;"),
+    ("guide_run_mm=107;", "guide_run_mm=45;"),
+    ("entry_coupon_length_mm=48;", "entry_coupon_length_mm=107;"),
+])
+def test_a4_dock_rejects_impossible_backstop_or_entry_coupon(
+    tmp_path, before, after,
+):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    scad.write_text(
+        scad.read_text(encoding="utf-8").replace(before, after),
+        encoding="utf-8",
+    )
+    output = tmp_path / "paper"
+    with pytest.raises(
+        ValueError, match="Invalid dock backstop or entry coupon dimensions"
+    ):
         source.export(tmp_path, output)
     assert not output.exists()
