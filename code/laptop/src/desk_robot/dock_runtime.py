@@ -196,7 +196,9 @@ def unpack_dock_frame(observation) -> tuple[bytes, float]:
                 or any(type(n) is not int for n in identity)
                 or not 0 <= identity[0] <= 0xffffffff
                 or not 1 <= identity[1] <= 0xffffffff
-                or identity[2] <= 0
+                # Sense esp_timer_get_time() is signed int64 microseconds.
+                # Match HttpHead.dock_receipt_current before any detector work.
+                or not 1 <= identity[2] <= (1 << 63) - 1
                 or type(generation) is not int or generation < 1):
             raise ValueError("Invalid or stale dock camera receipt")
     return observation[0], received_at

@@ -1159,3 +1159,20 @@ def test_dock_calibration_json_rejects_nonstandard_numeric_constants(
     path.write_text(value.replace('"fx": 410', f'"fx": {constant}'))
     with pytest.raises(ValueError, match="Nonfinite dock calibration JSON constant"):
         dock_runtime.load_real_dock_calibration(path)
+
+
+@pytest.mark.parametrize("complete_us", [0, -1, 1 << 63, 10**100])
+def test_dock_receipt_rejects_non_int64_camera_completion_clock(complete_us):
+    received_at = dock_runtime.time.monotonic()
+    with pytest.raises(ValueError, match="Invalid or stale dock camera receipt"):
+        dock_runtime.unpack_dock_frame(
+            (b"\xff\xd8\xff\xd9", received_at, (1, 1, complete_us), 1)
+        )
+
+
+def test_dock_receipt_accepts_signed_int64_camera_completion_limit():
+    received_at = dock_runtime.time.monotonic()
+    receipt = (
+        b"\xff\xd8\xff\xd9", received_at, (1, 1, (1 << 63) - 1), 1
+    )
+    assert dock_runtime.unpack_dock_frame(receipt) == (receipt[0], received_at)
