@@ -23,6 +23,12 @@ LABELS = (("upright", 8), ("tilted", 4), ("shaking", 4))
 _ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
 
 
+
+def _operator_status_client() -> httpx.AsyncClient:
+    """Keep the operator bearer off ambient proxy routes and redirects."""
+    return httpx.AsyncClient(trust_env=False, follow_redirects=False)
+
+
 def _safe_endpoint(url: str, robot: str) -> str:
     if not isinstance(robot, str) or not _ROBOT_ID.fullmatch(robot):
         raise ValueError("Require exact configured robot identity")
@@ -166,7 +172,7 @@ async def main() -> None:
     if args.output.exists() or args.output.is_symlink():
         raise FileExistsError("Do not overwrite prior measured IMU evidence")
     rows: list[dict] = []
-    async with httpx.AsyncClient() as client:
+    async with _operator_status_client() as client:
         for label, count in LABELS:
             input(
                 f"Physically establish the {label} condition with wheels stopped. "

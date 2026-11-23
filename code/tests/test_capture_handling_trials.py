@@ -14,6 +14,7 @@ _capture_module = runpy.run_path(str(
 ))
 capture_phase = _capture_module["capture_phase"]
 _safe_endpoint = _capture_module["_safe_endpoint"]
+_operator_status_client = _capture_module["_operator_status_client"]
 save_private_trial_rows = _capture_module["save_private_trial_rows"]
 
 
@@ -241,3 +242,20 @@ def test_measured_trial_parent_replacement_cleans_original_directory(
     assert replaced
     assert list(displaced.iterdir()) == []
     assert list(redirect.iterdir()) == []
+
+def test_operator_status_client_does_not_use_environment_proxies(
+    monkeypatch,
+):
+    # HTTPX defaults to trust_env=True; with HTTP_PROXY present a loopback
+    # HTTP bearer can be sent through an unrelated proxy unless disabled.
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:7890")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    observed = {}
+
+    def client_factory(**kwargs):
+        observed.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(_capture_module["httpx"], "AsyncClient", client_factory)
+    _operator_status_client()
+    assert observed == {"trust_env": False, "follow_redirects": False}
