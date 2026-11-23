@@ -218,7 +218,7 @@ def register_native_omni_routes(
         )
         # A queued model estimate accepted before either storage consent
         # grant must not be retroactively stored after an opt-in or regrant.
-        # Legacy receipts without an authenticated source stamp are likewise
+        # Legacy receipts missing either authenticated source clock are
         # never durable evidence. Keep the consent status separate from the
         # eligibility of this particular historic audio item.
         source_within_storage_grants = (
@@ -227,14 +227,14 @@ def register_native_omni_routes(
                 int(settings.voice_memory_consent_started_at * 1_000_000),
                 int(settings.transcript_consent_started_at * 1_000_000),
             )
-            # The selected live producer additionally provides an earlier
-            # audio clock. Do not persist pre-grant PCM just because its
-            # model completion arrived after storage opt-in.
-            and (request.audio_committed_at_us is None
-                 or request.audio_committed_at_us >= max(
-                     int(settings.voice_memory_consent_started_at * 1_000_000),
-                     int(settings.transcript_consent_started_at * 1_000_000),
-                 ))
+            # Only source-stamped audio can establish permission at capture.
+            # A missing PCM commit timestamp is NOT a post-grant witness,
+            # even when the model accepted the transcript after opt-in.
+            and request.audio_committed_at_us is not None
+            and request.audio_committed_at_us >= max(
+                int(settings.voice_memory_consent_started_at * 1_000_000),
+                int(settings.transcript_consent_started_at * 1_000_000),
+            )
         )
         memory_grant = settings.transcript_consent_generation if memory_opt_in else None
         parent_memory_grant = (

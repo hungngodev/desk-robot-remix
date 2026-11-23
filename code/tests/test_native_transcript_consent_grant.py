@@ -412,3 +412,47 @@ def test_delayed_native_asr_post_cannot_relabel_prior_speech_as_new_vad(settings
         timeline = str(attention.timeline(robot_id, time.monotonic()))
         assert "What is the temperature now?" in timeline
         assert "Turn left from the old question" not in timeline
+
+
+def test_native_durable_asr_requires_real_audio_commit_timestamp(settings, tmp_path):
+    """Model completion alone cannot prove the microphone had consent."""
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = False
+    settings.voice_memory_tools_enabled = True
+    settings.voice_transcript_memory_enabled = True
+    ids = [r.id for r in settings.robots]
+    robot_id = ids[0]
+    store = MemoryStore(tmp_path / "private", ids)
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(memory=store)
+    register_native_omni_routes(
+        app, settings, authorize=lambda: None,
+        coordinator=lambda: SimpleNamespace(robot=settings.robot),
+        native_pet_speech_policy=lambda _robot_id: {},
+    )
+    route = f"/v1/pet/{robot_id}/omni-heard"
+    with TestClient(app) as client:
+        accepted = time.monotonic_ns() // 1000
+        unknown_audio = client.post(route, json={
+            "event_id": "omni_" + "a" * 12 + "_" + "b" * 20,
+            "transcript": "Recorded before consent but decoded after",
+            "accepted_at_us": accepted,
+        })
+        assert unknown_audio.status_code == 200
+        assert unknown_audio.json()["retention_consent_enabled"] is True
+        assert unknown_audio.json()["stored"] is False
+        assert unknown_audio.json()["episode_persisted"] is False
+        assert store.count(robot_id) == 0
+
+        valid_at = time.monotonic_ns() // 1000
+        current_audio = client.post(route, json={
+            "event_id": "omni_" + "c" * 12 + "_" + "d" * 20,
+            "transcript": "Current source-confirmed human words",
+            "accepted_at_us": valid_at,
+            "audio_committed_at_us": valid_at,
+        })
+        assert current_audio.status_code == 200
+        assert current_audio.json()["stored"] is True
+        assert current_audio.json()["episode_persisted"] is True
+        assert store.count(robot_id) == 1
+        assert store.count(ids[1]) == 0

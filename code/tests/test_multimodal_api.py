@@ -1437,10 +1437,12 @@ def test_native_asr_memory_requires_independent_consent_and_deduplicates(
     runtime = StubRuntime()
     runtime.memory = memory
     url = f"/v1/pet/{pet.id}/omni-heard"
+    source_stamp_us = time.monotonic_ns() // 1000
     request = {
         "event_id": "omni_" + "a" * 12 + "_" + "b" * 20,
         "transcript": "I put a key beside the robot",
-        "accepted_at_us": time.monotonic_ns() // 1000,
+        "accepted_at_us": source_stamp_us,
+        "audio_committed_at_us": source_stamp_us,
     }
     tool = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
     with TestClient(create_app(settings, runtime=runtime)) as client:
@@ -1503,8 +1505,10 @@ def test_native_asr_tombstone_and_immediate_eviction_do_not_claim_persistence(
     headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
     url = f"/v1/pet/{robot}/omni-heard"
     event_id = "omni_" + "a" * 12 + "_" + "c" * 20
+    source_stamp_us = time.monotonic_ns() // 1000
     payload = {"event_id": event_id, "transcript": "The red key is on the desk",
-               "accepted_at_us": time.monotonic_ns() // 1000}
+               "accepted_at_us": source_stamp_us,
+               "audio_committed_at_us": source_stamp_us}
     with TestClient(create_app(settings, runtime=runtime)) as client:
         stored = client.post(url, headers=headers, json=payload)
         assert stored.status_code == 200
@@ -1534,9 +1538,11 @@ def test_native_asr_tombstone_and_immediate_eviction_do_not_claim_persistence(
             )
 
         memory.remember = immediately_old
+        eviction_source_us = time.monotonic_ns() // 1000
         evicted = client.post(url, headers=headers, json={
             "event_id": old_id, "transcript": "An old discarded observation",
-            "accepted_at_us": time.monotonic_ns() // 1000,
+            "accepted_at_us": eviction_source_us,
+            "audio_committed_at_us": eviction_source_us,
         })
         assert evicted.status_code == 200
         assert evicted.json()["stored"] is False
@@ -1913,10 +1919,12 @@ def test_native_asr_live_optout_during_disk_write_retracts_only_ephemeral_item(
     headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
     event_id = "omni_" + "a" * 12 + "_" + "b" * 20
     with TestClient(create_app(settings, runtime=runtime)) as client:
+        source_stamp_us = time.monotonic_ns() // 1000
         response = client.post(
             f"/v1/pet/{robot}/omni-heard", headers=headers,
             json={"event_id": event_id, "transcript": "My private key is here",
-                  "accepted_at_us": time.monotonic_ns() // 1000},
+                  "accepted_at_us": source_stamp_us,
+                  "audio_committed_at_us": source_stamp_us},
         )
         assert response.status_code == 200
         assert response.json()["stored"] is True
@@ -3045,10 +3053,12 @@ def test_native_delayed_asr_never_gains_retroactive_storage_consent(
         assert legacy.status_code == 200
         assert legacy.json()["stored"] is False
 
+        fresh_source_us = time.monotonic_ns() // 1000
         fresh = client.post(url, headers=headers, json={
             "event_id": "omni_" + "a" * 12 + "_" + "d" * 20,
             "transcript": "Consented current human speech",
-            "accepted_at_us": time.monotonic_ns() // 1000,
+            "accepted_at_us": fresh_source_us,
+            "audio_committed_at_us": fresh_source_us,
         })
         assert fresh.status_code == 200
         assert fresh.json()["stored"] is True
