@@ -450,7 +450,8 @@ def test_audio_capture_abort_is_guarded_and_generation_scoped_in_sense_firmware(
     assert '"X-Desk-Audio-Generation", supplied' in bridge
     assert 'strcmp(expected, supplied) != 0' in bridge
     assert 'codec->AbortBenchPcmCapture();' in bridge
-    assert 'config.max_uri_handlers = 14;' in bridge
+    assert 'config.max_uri_handlers = 15;' in bridge
+    assert '{"/api/pose", HTTP_GET}' in bridge
 
 
 def test_audio_builder_guide_points_to_live_capture_without_claiming_qualification():

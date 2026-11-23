@@ -987,7 +987,8 @@ class SenseSelectionTests(unittest.TestCase):
         assert "httpd_resp_send_chunk(req" in bridge
         assert "X-Desk-Camera-Sequence: %u" in bridge
         assert "X-Desk-Camera-Complete-Us: %lld" in bridge
-        assert "config.max_uri_handlers = 14;" in bridge
+        assert 'config.max_uri_handlers = 15;' in bridge
+        assert '{"/api/pose", HTTP_GET}' in bridge
         assert '"/api/camera.identity", HTTP_GET' in bridge
 
     def test_vendor_stackchan_behavior_compiles_without_motor_framework(self):
@@ -1190,7 +1191,8 @@ def test_authenticated_mac_person_face_cue_is_cosmetic_only():
     header = (HEAD / "overlay/robot_bridge.h").read_text()
     board = (HEAD / "sense/desk_robot_sense.cc").read_text()
     assert '{"/api/face", HTTP_POST}' in bridge
-    assert 'config.max_uri_handlers = 14;' in bridge
+    assert 'config.max_uri_handlers = 15;' in bridge
+    assert '{"/api/pose", HTTP_GET}' in bridge
     assert '{"/api/audio.reference", HTTP_GET}' in bridge
     assert '{"/api/audio.capture.abort", HTTP_POST}' in bridge
     assert '"speaker_playback_verified", false' in bridge
