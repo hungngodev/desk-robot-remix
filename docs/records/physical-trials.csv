@@ -1,1 +1,1 @@
-robot_id,category,trial,object_description,mass_g,date,firmware,calibration,flat_start,lift_mm,hold_seconds,placed_under_control,assisted,notes
+robot_id,assembly_id,category,trial,object_description,mass_g,date,firmware,calibration,flat_start,lift_mm,hold_seconds,placed_under_control,assisted,notes

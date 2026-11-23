@@ -22,6 +22,7 @@ def trial_rows():
             rows.append(
                 {
                     "robot_id": "robot-01",
+                    "assembly_id": "robot-01-built-revA",
                     "category": category,
                     "trial": str(number),
                     "object_description": "ordinary key" if category == "key" else "wrapped candy",
@@ -39,6 +40,63 @@ def trial_rows():
             )
     return rows
 
+
+
+@pytest.mark.parametrize("invalid", [
+    "", " ", "../robot-01", "robot 01", "robot-01\\n",
+    "a" * 81, None, True,
+])
+def test_a5_rejects_missing_or_unidentifiable_physical_assembly(invalid):
+    rows = trial_rows()
+    rows[0]["assembly_id"] = invalid
+    with pytest.raises(ValueError, match="physical assembly_id"):
+        check_trials.summarize(rows, "robot-01")
+
+
+def test_a5_rejects_spliced_key_and_candy_assemblies():
+    rows = trial_rows()
+    # Every existing outcome meets 8/10; same firmware/calibration alone
+    # previously let two physically rebuilt machines combine into one pass.
+    for row in rows:
+        if row["category"] == "candy":
+            row["assembly_id"] = "robot-01-rebuilt-revB"
+    with pytest.raises(ValueError, match="same firmware and calibration and physical assembly"):
+        check_trials.summarize(rows, "robot-01")
+
+
+def test_a5_other_robot_can_use_a_separate_fitted_assembly():
+    rows = trial_rows()
+    rows.append({
+        **rows[0], "robot_id": "robot-02",
+        "assembly_id": "robot-02-built-revC",
+        "category": "key", "trial": "11",
+    })
+    report = check_trials.summarize(rows, "robot-01")
+    assert report["physical_acceptance_pass"]
+    assert report["assembly_id"] == "robot-01-built-revA"
+
+
+def test_a5_cli_rejects_missing_assembly_column_and_mixed_rebuilds(tmp_path):
+    for mode in ("missing_column", "mixed_rebuild"):
+        rows = trial_rows()
+        if mode == "missing_column":
+            for row in rows:
+                row.pop("assembly_id")
+        else:
+            rows[10]["assembly_id"] = "robot-01-rebuilt-revB"
+        path = tmp_path / f"{mode}.csv"
+        with path.open("w", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--file", str(path),
+             "--robot", "robot-01", "--require-pass"],
+            capture_output=True, text=True, check=False,
+        )
+        assert result.returncode != 0
+        assert '"physical_acceptance_pass": true' not in result.stdout
+        assert "physical assembly" in result.stderr
 
 @pytest.mark.parametrize("invalid_id", [
     "", " ", "\t", "robot 01", "../robot-01", "robot-01\n",
@@ -109,6 +167,8 @@ def test_a5_cli_cannot_certify_unidentified_20_trial_population(tmp_path):
 def test_finite_eight_of_ten_per_object_passes_without_overclaiming():
     result = check_trials.summarize(trial_rows(), "robot-01")
     assert result["physical_acceptance_pass"] is True
+    assert result["assembly_id"] == "robot-01-built-revA"
+    assert result["assembly_identity_physically_verified"] is False
     assert result["categories"]["key"] == {
         "attempts": 10,
         "successes": 8,

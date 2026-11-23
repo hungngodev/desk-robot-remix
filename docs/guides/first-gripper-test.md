@@ -45,7 +45,14 @@ record its shape. Check jaw opening, floor clearance and gear binding first.
 Perform ten independent grip/lift attempts per category. Proposed success: the
 object visibly leaves the surface by a measured 10 mm, stays held for three
 seconds and is placed down under control. Record failures, slips and assistance
-in [the physical trial sheet](../records/physical-trials.csv). Goal: at least 8/10 per category.
+in [the physical trial sheet](../records/physical-trials.csv). Every row must include an
+`assembly_id` identifying the same inspected physical chassis, power enclosure,
+servo and gripper build for all twenty attempts. Use a short revisioned identifier
+with letters, numbers, underscores, periods or hyphens. A rebuild requires a new
+assembly ID and a fresh set of both ten-trial categories; never combine trials
+from different physical assemblies even when firmware and jaw calibration match.
+`check_trials.py` verifies the recorded identifier is consistent but cannot
+physically authenticate it. Goal: at least 8/10 per category.
 
 Allowed remedies are small jaw tips, clearances, spacers and brackets. Fusion MCP
 must be available before CAD editing; inspect the active design and preserve

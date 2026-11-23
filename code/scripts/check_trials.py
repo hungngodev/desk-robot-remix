@@ -42,6 +42,8 @@ def summarize(rows, robot_id):
     # A5 is one acceptance run for one fitted robot, not an average of
     # attempts from different firmware images or jaw calibrations.
     accepted_setup = None
+    # Same configured ID can survive a chassis, gripper or power rebuild.
+    # A5 counts a single fitted physical assembly, not mixed hardware trials.
     for category in ("key", "candy"):
         selected = [r for r in rows if r["robot_id"] == robot_id and r["category"] == category]
         # CSV evidence names exactly ten attempts. Python int() silently
@@ -72,11 +74,15 @@ def summarize(rows, robot_id):
             # A future-dated record cannot prove a completed physical trial.
             if trial_date > date.today():
                 raise ValueError("Future physical trial date")
-            setup = (r["firmware"].strip(), r["calibration"].strip())
+            assembly_id = r.get("assembly_id")
+            if (type(assembly_id) is not str or re.fullmatch(
+                    r"[A-Za-z0-9][A-Za-z0-9_.-]{0,79}", assembly_id) is None):
+                raise ValueError("A5 trial requires a canonical physical assembly_id")
+            setup = (r["firmware"].strip(), r["calibration"].strip(), assembly_id)
             if accepted_setup is None:
                 accepted_setup = setup
             elif setup != accepted_setup:
-                raise ValueError("A5 trials must use the same firmware and calibration")
+                raise ValueError("A5 trials must use the same firmware and calibration and physical assembly")
             # Each attempt, including an unsuccessful one, needs an actual
             # observation of assistance, placement and initial orientation.
             # Otherwise an unmeasured attempt could silently fill the 10-trial
@@ -104,7 +110,10 @@ def summarize(rows, robot_id):
         }
     return {
         "robot_id": robot_id,
+        "assembly_id": accepted_setup[2] if accepted_setup is not None else None,
         "categories": result,
+        # This tool validates human-supplied records; it cannot inspect a robot.
+        "assembly_identity_physically_verified": False,
         "physical_acceptance_pass": all(r["passed"] for r in result.values()),
     }
 
