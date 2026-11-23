@@ -114,5 +114,6 @@ def test_hard_linked_database_cannot_alias_two_pets_at_boot_or_after_start(tmp_p
 
     # The operator can remove the alias without losing the original memory.
     peer.unlink()
-    assert store.recent("pet_a")[0].summary == "Pet A private observation"
-    assert store.recent("pet_b") == []
+    reopened = MemoryStore(tmp_path, ["pet_a", "pet_b"])
+    assert reopened.recent("pet_a")[0].summary == "Pet A private observation"
+    assert reopened.recent("pet_b") == []
