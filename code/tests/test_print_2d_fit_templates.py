@@ -241,3 +241,24 @@ def test_a4_dock_guide_refuses_impossible_or_clipped_source_layout(
     with pytest.raises(ValueError, match=message):
         source.export(tmp_path, output)
     assert not output.exists()
+
+
+@pytest.mark.parametrize("track_width", [60, 67.2])
+def test_a4_tag_pocket_must_fit_strictly_inside_dock_rail_channel(
+    tmp_path, track_width,
+):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    scad.write_text(
+        scad.read_text(encoding="utf-8").replace(
+            "track_outer_width_mm=96;", f"track_outer_width_mm={track_width};"
+        ),
+        encoding="utf-8",
+    )
+    # The source pocket is 71.2 mm. These channels are 64 and 71.2 mm,
+    # both rejected by dock_passive_fit.scad's strict channel assertion.
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="Dock tag pocket exceeds nominal rail channel"):
+        source.export(tmp_path, output)
+    assert not output.exists()

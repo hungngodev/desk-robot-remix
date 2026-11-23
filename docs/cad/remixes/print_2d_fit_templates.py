@@ -68,6 +68,11 @@ def values(root: Path) -> dict:
     entry_flare = scad_mm(dock, "entry_flare_each_mm")
     channel_w = track_w + 2 * each_side
     outer_w = channel_w + 2 * (rail_wall + rail_margin)
+    # The physical OpenSCAD dock rejects any tag pocket that cannot fit
+    # strictly inside its rail channel. A paper overlay must reject the
+    # same impossible source instead of signing a misleading A4 template.
+    if pocket >= channel_w:
+        raise ValueError("Dock tag pocket exceeds nominal rail channel")
     if (guide_run <= 37 or guide_run >= base_l
             or entry_flare >= rail_wall + rail_margin
             or entry_flare > rail_margin
