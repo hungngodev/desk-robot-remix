@@ -379,3 +379,25 @@ async def test_real_side_status_slow_transport_never_records_stale_firsthand_eve
     finally:
         state.enabled = False
         await pet.close()
+
+
+def test_rollback_receive_clock_disarms_side_event_votes():
+    tracker = SideRangeEvents()
+
+    def sample(mm, stamp):
+        return body(mm=(mm, 600, 600), sample_ms=(stamp, stamp, stamp),
+                    boot_id=901)
+
+    def observe(mm, stamp, now):
+        return tracker.observe(sample(mm, stamp), now=now, near_mm=170,
+                               require_hardware_identity=True)
+
+    assert observe(600, 100, 10.0) == []
+    assert observe(100, 200, 10.1) == []
+    # Newer physical conversions cannot create a Mac clock-rollback event.
+    assert observe(95, 300, 9.9) == []
+    assert observe(95, 400, 10.2) == []  # fresh baseline after reset
+    assert observe(600, 500, 10.3) == []
+    assert observe(600, 600, 10.4) == []
+    assert observe(100, 700, 10.5) == []
+    assert observe(95, 800, 10.6) == [("left", 95)]

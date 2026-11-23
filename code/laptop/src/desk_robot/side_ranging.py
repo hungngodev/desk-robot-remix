@@ -30,6 +30,7 @@ class SideRangeEvents:
     threshold_mm: int | None = None
     active_boot_id: int | None = None
     retired_boot_ids: set[int] = field(default_factory=set)
+    last_receive_at: float | None = None
 
     def observe(self, body: dict, *, now: float, near_mm: int,
                 require_hardware_identity: bool = False,
@@ -57,6 +58,13 @@ class SideRangeEvents:
         if (type(request_elapsed_ms) not in (int, float)
                 or not math.isfinite(elapsed_ms) or elapsed_ms < 0):
             raise ValueError("Finite side status request duration required")
+        # Hardware conversion sequence can advance independently of Mac time.
+        # A receive-clock rollback must discard prior near/far votes.
+        if self.last_receive_at is not None and now < self.last_receive_at:
+            self._reset()
+            self.last_receive_at = now
+            return []
+        self.last_receive_at = now
         # Changing a measured threshold is not a physical object arrival.
         # Start a new baseline instead of interpreting the same range twice.
         if self.threshold_mm != near_mm:
