@@ -1813,7 +1813,7 @@ def render_markdown(report: dict) -> str:
         return str(value).replace("|", r"\|").replace("\n", " ").strip()
 
     output = [
-        "> **HISTORICAL SUPPLIER RESEARCH (2026-11-16):** [Earlier fleet supplier candidates](2026-11-16-five-pet-purchase-register.md) are reference research, NOT a second checkout cart. The authoritative projection below has 42 pet/dock parent roles, 7 shared-station parent roles and 14 linked decisions ALREADY COVERED BY THEIR PARENTS. Do not add the 14 to the parent quantities. Historical seller links are not current delivered quotes or physical qualification; drivetrain, chargers, wiring, printing and loaded operation remain HOLD.",
+        "> **HISTORICAL SUPPLIER RESEARCH (2026-11-16):** [Earlier fleet supplier candidates](2026-11-16-five-pet-purchase-register.md) are reference research, NOT a second checkout cart. The authoritative projection below has 42 pet/dock parent roles, 7 shared-station parent roles and 14 linked decisions ALREADY COVERED BY THEIR PARENTS. Do not add the 14 to the parent quantities. One paid XIAO with carrier-reported delivery pending inspection remains the only confirmed historical payment in this register. Historical seller links are not current delivered quotes or physical qualification; drivetrain, chargers, wiring, printing and loaded operation remain HOLD.",
         "",
         "# Five desk pets, five docks, and the shared room station",
         "",
