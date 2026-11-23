@@ -1506,3 +1506,42 @@ async def test_old_end_cannot_release_newer_active_xiaozhi_human_turn():
         ("robot-01", "speech_start"),
         ("robot-01", "speech_end"),
     ]
+
+
+async def test_legacy_end_without_generation_is_not_silently_dropped():
+    """Optional compatibility mode must not invent missing turn provenance."""
+    polls = 0
+
+    def mock(request):
+        nonlocal polls
+        polls += 1
+        if polls == 1:
+            return httpx.Response(200, json={
+                "cursor": 3, "events": [], "reset": False, "lost": False,
+                "active_human_robots": [],
+                "voice_turn_generations": {"robot-01": 4},
+            })
+        return httpx.Response(200, json={
+            "cursor": 4, "reset": False, "lost": False,
+            "active_human_robots": ["robot-01"],
+            "voice_turn_generations": {"robot-01": 5},
+            "events": [
+                {"seq": 4, "robot_id": "robot-01", "kind": "speech_end",
+                 "source": "xiaozhi_server_vad"},
+            ],
+        })
+
+    received = []
+    async def on_event(robot_id, kind):
+        received.append((robot_id, kind))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=on_event,
+            require_snapshot=True, require_turn_generations=False,
+        )
+        assert await listener.poll() == 0
+        assert await listener.poll() == 1
+        assert listener.cursor == 4
+    assert received == [("robot-01", "speech_end")]

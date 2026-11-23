@@ -306,7 +306,8 @@ class VoiceEventListener:
                 and isinstance(active, list)
                 and isinstance(generations, dict)
                 and event["robot_id"] in active
-                and event.get("voice_turn_generation", -1)
+                and type(event.get("voice_turn_generation")) is int
+                and event["voice_turn_generation"]
                     < generations.get(event["robot_id"], -1)
             ):
                 self.cursor = seq
