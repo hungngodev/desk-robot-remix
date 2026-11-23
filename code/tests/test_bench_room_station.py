@@ -159,7 +159,9 @@ def test_room_bench_counts_real_decoder_receipts_without_sensor_person_claim():
             self.on_observation(first)
             self.on_observation(second)
 
-    result = capture("/dev/cu.room", seconds=1, feed_factory=Feed, clock=lambda: 0.0)
+    ticks = iter((0.0, 2.0))
+    result = capture("/dev/cu.room", seconds=1, feed_factory=Feed,
+                     clock=lambda: next(ticks))
     assert result["accepted_frames"] == 2
     assert result["rejected_frames"] == 1
     assert result["missing_station_sequences"] == 1
@@ -253,6 +255,51 @@ def test_room_bench_invalid_callback_metadata_cannot_become_usb_receipt(
     assert report["read_only_usb_sample_captured"] is False
     assert report["one_hour_usb_continuity_screen_pass"] is False
     assert report["valid_sensor_frames"]["scd40"] == 0
+
+
+@pytest.mark.parametrize(
+    ("received", "bounds", "expected"),
+    [
+        ((0.4, 0.8), (0.0, 1.0), True),
+        ((-0.1, 0.8), (0.0, 1.0), False),
+        ((0.4, 1.1), (0.0, 1.0), False),
+        ((0.8, 0.4), (0.0, 1.0), False),
+        ((0.4, 0.8), (1.0, 0.0), False),
+    ],
+)
+def test_room_bench_short_usb_receipts_require_real_capture_clock_order(
+    received, bounds, expected,
+):
+    from dataclasses import replace
+
+    decoder = RoomStationDecoder()
+    first = decoder.accept(_packet(7, 1000), now=0.4)
+    second = decoder.accept(_packet(8, 2000), now=0.8)
+    observations = (
+        replace(first, received_at=received[0]),
+        replace(second, received_at=received[1]),
+    )
+
+    class Feed:
+        rejected = 0
+        callback_failures = 0
+
+        def __init__(self, port, on_observation):
+            self.on_observation = on_observation
+
+        def _read_port(self, running):
+            for item in observations:
+                self.on_observation(item)
+
+    ticks = iter(bounds)
+    report = capture("/dev/cu.synthetic", seconds=1, feed_factory=Feed,
+                     clock=lambda: next(ticks))
+    assert report["accepted_frames"] == 2
+    assert report["receive_clock_consistent"] is expected
+    assert report["read_only_usb_sample_captured"] is expected
+    assert report["one_hour_usb_continuity_screen_pass"] is False
+    assert report["device_identity_authenticated"] is False
+    assert report["station_power_physically_qualified"] is False
 
 
 def test_room_bench_callback_failure_cannot_count_partial_usb_receipt():

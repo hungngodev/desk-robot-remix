@@ -146,6 +146,15 @@ def capture(
     # receipt cadence. Do not interpret any gap as a motor safety measurement.
     missing = sum(max(0, ((b - a) & 0xffffffff) - 1)
                   for a, b in zip(sequence[:-1], sequence[1:], strict=True))
+    # A read-only sample receipt must have capture-window chronology too.
+    # Ordinary short trials previously marked impossible future, earlier, or
+    # reversed receive clocks as captured even when the one-hour gate failed.
+    receive_clock_consistent = (
+        start <= finished
+        and all(start <= at <= finished for at in received_at)
+        and all(b >= a for a, b in
+                zip(received_at[:-1], received_at[1:], strict=True))
+    )
     # Diagnostic only: a full one-hour USB continuity trial must contain
     # at least 3,600 distinct consecutive nominal one-second reports with
     # bounded Mac receive silence. This cannot qualify radar accuracy,
@@ -162,7 +171,7 @@ def capture(
         and reader.rejected == 0
         and reader.callback_failures == 0
         and error is None
-        and start <= received_at[0] <= received_at[-1] <= finished
+        and receive_clock_consistent
         and all(0.0 < gap <= 1.5 for gap in gaps)
         and leading is not None and 0.0 <= leading <= 1.5
         and trailing is not None and 0.0 <= trailing <= 1.5
@@ -191,8 +200,10 @@ def capture(
         "new_sensor_acquisitions": new_sensor_acquisitions,
         "reused_sensor_samples": reused_sensor_samples,
         "one_hour_usb_continuity_screen_pass": one_hour_usb_continuity_screen_pass,
+        "receive_clock_consistent": receive_clock_consistent,
         "read_only_usb_sample_captured": (
-            bool(sequence) and error is None and reader.callback_failures == 0
+            bool(sequence) and receive_clock_consistent and error is None
+            and reader.callback_failures == 0
         ),
         "device_identity_authenticated": False,
         "sensor_accuracy_physically_qualified": False,
