@@ -15,6 +15,8 @@ charger, measured net charge, bounded retries and departure remain
 **PHYSICAL HOLD**, not implemented hardware acceptance. Neither a passing
 CI check nor an AprilTag image authorizes energizing contacts.
 
+**Accepted first-unit spatial retrieval, 2026-11-23:** The first complete robot must find and remember supported objects, localize relative to a calibrated map, plan only over verified safe desk support, and return to a previously seen stationary key or wrapped candy from a changed starting pose. This is an addition to the existing first-unit product, not a later fleet feature. The selected first-unit scope remains one robot, its dedicated safe charging dock, and one shared read-only room station. Returning to a person at arbitrary coordinates, unrestricted SLAM and simultaneous roaming are not implied. The [spatial contract](plans/spatial-first-unit/00-contract.md) and [object-recall acceptance](plans/spatial-first-unit/60-object-recall-and-navigation.md) govern the additional qualification; a route proposal alone never authorizes physical movement. These spatial capabilities have **not** passed the physical first-unit gate.
+
 
 Accepted requirements are not pending discovery: local Mac first; ordinary-speech
 interruption in robot one; camera observations and reactions without a spoken
@@ -218,9 +220,24 @@ unmatched binaries, sensor wiring or the new case.
 | A11 Handling | Verify intended tilt/shake/suspected pickup with fused motion/floor/context, rejecting normal motor/servo vibration. Unsafe/held state inhibits tracks; putdown/reconnect/reboot cannot resume canceled motion. |
 | A12 Sound/lighting, if enabled | External sound reactions remain responsive while self-speech/motors do not cause repeated startle; optional LED pin/voltage/current/quiet-mode behavior is qualified. |
 
-Initial success excludes SLAM, precise map navigation, returning to a person by
-known coordinates, force-controlled grasping, simultaneous unrestricted
-roaming/chasing and physical object handoff. Those need additional localization,
+### First-unit spatial acceptance in addition to A1–A12
+
+The accepted object-find and return scenario is a first-unit release requirement, not an A1–A12 waiver. The existing A2 ordinary-speech interruption, A3 control ownership, A4 local edge stop, A5 real grasp, A6 dedicated dock and protected charge, A8 initiative and A9 fresh visual observation still apply together. The one shared room station supplies timestamped read-only context and never motion or charging authority.
+
+| First-unit path | Existing product IDs and normal source route | Required evidence and owner |
+| --- | --- | --- |
+| Hear, yield and proactively notice | `xiao_sense`, `amp`, `speaker`, `head_touch`; Xiaozhi voice, Mac conversation and pet observer | A2/A8/A9, actual audible interruption, current consent and fresh observation. [Guide 40](plans/spatial-first-unit/40-voice-and-proactive-behavior.md) and [guide 30](plans/spatial-first-unit/30-sense-camera-and-interface.md). |
+| Anchor and remember an object's last supported location | `xiao_sense`, `imu`, `as5600`, `encoder_magnets`; existing camera and `code/laptop/src/desk_robot/route_planner.py` *read-only proposal* do not constitute working measured pose, spatial memory or a connected detector | Guide 20 owns real wheel-displacement evidence, guide 30 the authenticated pose bridge, guide 50 the typed calibrated map and per-robot spatial store, guide 60 detection and recall. Encoder carrier/bracket suitability and actual geometry remain unresolved, not included automatically in another kit. |
+| Travel to a remembered stationary key or wrapped candy and verify fresh arrival | `stepper` + `uln2003` reference profile, `cliff_obstacle` (8), `i2c_mux` (2), `bumper`, WROOM safety, Mac bounded control owner | A3/A4/A9 plus [guide 60](plans/spatial-first-unit/60-object-recall-and-navigation.md): at least 9/10 reanchors within 20 mm translation error and at least 8/10 stationary-target returns from moved starts, zero false arrivals or unsafe commands in negative trials. No automatic reverse, blind spin or stale-map travel. Guide 90 owns live entry point integration; tests of a read-only planner are not drive approval. |
+| Pick up and place the target | Two `mg90s`, `fsr`, `ads1115`, gripper and its actual mechanism | A5: at least 8/10 unassisted real keys and 8/10 wrapped candies, with measured lift, three-second hold and controlled placement; [guide 70](plans/spatial-first-unit/70-fit-power-manipulation-and-dock.md) fits and qualifies hardware. |
+| Return to and safely use the dock | `dock_ir_receivers`, `dock_ir_beacon_controller`, `dock_ir_emitter_channels`, `dock_contacts`, `dock_fixture`, `cap_power` | A6 including passive seating, independent contacts, protected charge and measured net pack charge. [Guide 70](plans/spatial-first-unit/70-fit-power-manipulation-and-dock.md); charging remains a physical HOLD. |
+| Read the shared station without granting control | One `room_controller` and selected `scd40`, `bme688`, `ld2410c`, `soil_probe` across the fleet | Source and dated freshness evidence, exact board/power qualification and [guide 90](plans/spatial-first-unit/90-integration-and-release-evidence.md) integration; conditional station options stay out of the default checkout. |
+
+The [canonical hardware quantity plan](hardware/full-feature-plan.json), [source ownership](hardware/full-63-role-source-ownership.json) and [generated first-unit buying projection](hardware/one-robot-inventory-and-shopping.md) must account for needed encoders, brackets, adapters, harnesses and shared assemblies without charging for nested parts twice. No complete delivered checkout quote or energized power qualification is recorded. The $50 delivered first-unit cap still includes the known $13.67 prior Sense spend, its dock and the one shared station.
+
+Initial success excludes unrestricted SLAM, arbitrary person-coordinate following,
+force-controlled grasping beyond the qualified A5 mechanism, simultaneous
+unrestricted roaming/chasing and physical object handoff. Those need additional localization,
 coverage and validation. **Autonomous docking and protected automatic charging
 are NOT excluded:** the first robot must qualify its own dock under A6, including
 safe approach, seated detection, normally unpowered contacts, actual charger and

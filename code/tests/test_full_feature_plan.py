@@ -402,3 +402,26 @@ def test_usb_bench_real_body_status_includes_native_low_g_without_release():
     for unguarded in ("dc_pwm", "simulator", "unknown"):
         with pytest.raises(ValueError, match="guarded"):
             bench["inspect_status"]({**dc, "backend": unguarded})
+
+
+def test_first_unit_spatial_retrieval_is_in_canonical_scope_and_not_confused_with_qualified_motion():
+    """Guide 10's accepted spatial decision must survive the old SLAM exclusion."""
+    docs = PLAN.parents[1]
+    product = (docs / "product-definition.md").read_text(encoding="utf-8")
+    decisions = (docs / "decision-log.md").read_text(encoding="utf-8")
+    assert "Accepted first-unit spatial retrieval, 2026-11-23" in product
+    assert "first complete robot must find and remember supported objects" in product
+    assert "First-unit spatial acceptance in addition to A1–A12" in product
+    assert "at least 9/10 reanchors within 20 mm" in product
+    assert "at least 8/10 stationary-target returns" in product
+    assert "Initial success excludes SLAM, precise map navigation" not in product
+    assert "read-only proposal" in product
+    assert "No complete delivered checkout quote" in product
+    assert "## 2026-11-23 accepted first-unit spatial retrieval" in decisions
+    assert "explicitly supersedes the earlier product-brief sentence" in decisions
+    parts = {p["id"] for p in load()["parts"]}
+    station = {p["id"] for p in load()["room_pod"]["modules"]}
+    assert {"xiao_sense", "as5600", "encoder_magnets", "stepper", "uln2003",
+            "cliff_obstacle", "i2c_mux", "bumper", "mg90s", "fsr", "ads1115",
+            "dock_contacts", "dock_fixture", "cap_power"} <= parts
+    assert {"room_controller", "scd40", "bme688", "ld2410c", "soil_probe"} <= station
