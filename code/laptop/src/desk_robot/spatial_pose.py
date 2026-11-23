@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-_MAX_SAMPLE_US = (1 << 63) - 1
+_MAX_SAMPLE_US = (1 << 53) - 1
 _MAX_COORD_MM = 1_000_000
 _MAX_RECEIPT_LAG_S = 0.25
 
@@ -57,13 +57,18 @@ def decode_pose(data: dict, robot_id: str, received_at: float) -> PoseReceipt:
     quality = data.get("quality")
     if type(quality) is not str or quality not in ("valid", "degraded", "unavailable"):
         raise PoseError("Invalid pose quality")
+    # Zero origin denotes unavailable odometry, never a usable local frame.
+    body_boot = _bounded_int(data, "body_boot", 1, 0xffffffff)
+    origin = _bounded_int(data, "origin", 0, 0xffffffff)
+    if quality != "unavailable" and origin == 0:
+        raise PoseError("Valid or degraded pose requires nonzero origin")
     head_boot = data.get("head_boot")
     if head_boot is not None:
         head_boot = _bounded_int(data, "head_boot", 0, 0xffffffff)
     return PoseReceipt(
         robot_id=robot_id,
-        body_boot=_bounded_int(data, "body_boot", 0, 0xffffffff),
-        origin=_bounded_int(data, "origin", 0, 0xffffffff),
+        body_boot=body_boot,
+        origin=origin,
         seq=_bounded_int(data, "seq", 1, 0xffffffff),
         sample_us=_bounded_int(data, "sample_us", 1, _MAX_SAMPLE_US),
         x_mm=_bounded_int(data, "x_mm", -_MAX_COORD_MM, _MAX_COORD_MM),

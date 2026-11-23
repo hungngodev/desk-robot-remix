@@ -31,7 +31,8 @@ def test_typed_mm_and_positive_rotation_and_first_sample_cannot_plan():
 @pytest.mark.parametrize("updates", [
     {"robot_id": "robot-02"}, {"robot_id": None}, {"v": 2},
     {"v": True}, {"seq": 0}, {"seq": True}, {"sample_us": -1},
-    {"sample_us": (1 << 63)}, {"body_boot": -1}, {"origin": -1},
+    {"sample_us": (1 << 53)}, {"body_boot": -1}, {"body_boot": 0},
+    {"origin": -1}, {"origin": 0}, {"origin": 0, "quality": "degraded"},
     {"head_boot": -1}, {"quality": "excellent"},
     {"yaw_mrad": 3143}, {"x_mm": 1_000_001}, {"y_mm": -1_000_001},
     {"x_mm": 1.0}, {"head_boot": False},
@@ -143,4 +144,18 @@ def test_failed_http_read_needs_two_new_samples_before_local_freshness():
     assert gate.current(10.2) is None
     gate.observe(pose(seq=4, sample_us=1_300_000), 10.3)
     assert gate.current(10.3) is not None
+    assert gate.needs_reanchor
+
+
+def test_exact_json_sample_bound_and_zero_origin_unavailable_diagnostic():
+    maximum = decode_pose(pose(sample_us=(1 << 53) - 1), "robot-01", 42.0)
+    assert maximum.sample_us == (1 << 53) - 1
+    unlocalized = pose(origin=0, quality="unavailable")
+    decoded = decode_pose(unlocalized, "robot-01", 42.0)
+    assert decoded.origin == 0 and decoded.quality == "unavailable"
+    gate = PoseFence("robot-01")
+    gate.observe(unlocalized, 100.0)
+    gate.observe(pose(origin=0, quality="unavailable", seq=2,
+                      sample_us=1_100_000), 100.1)
+    assert gate.current(100.1) is None
     assert gate.needs_reanchor
