@@ -2312,7 +2312,7 @@ def test_slow_readonly_tool_receipt_cannot_cross_into_new_human_turn(
         url = (f"/v1/robots/{robot}/aux" if route == "aux"
                else f"/v1/pet/{robot}/voice-context?query=blue%20key")
         headers = _signed_tool_headers(
-            settings, tokens, robot, url, visual._turn_epoch[robot],
+            settings, tokens, robot, url, runtime._voice_turn_generations[robot],
             monkeypatch,
         )
         with TestClient(create_app(settings, runtime=runtime)) as client:
@@ -2333,7 +2333,7 @@ def test_slow_readonly_tool_receipt_cannot_cross_into_new_human_turn(
             assert not hub.tool_history[robot]
             # A genuinely NEW tool request in that turn is still recorded.
             assert client.get(url, headers=_signed_tool_headers(
-                settings, tokens, robot, url, visual._turn_epoch[robot],
+                settings, tokens, robot, url, runtime._voice_turn_generations[robot],
                 monkeypatch,
             )).status_code == 200
             expected = ("sensor_telemetry" if route == "aux"
