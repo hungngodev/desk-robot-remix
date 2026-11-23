@@ -402,8 +402,12 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     @app.get("/v1/robots/{robot_id}/camera.jpg", dependencies=[Depends(operator)])
     async def camera(robot_id: str):
         coordinator().robot(robot_id)
+        head = coordinator().heads.get(robot_id)
+        snapshot = getattr(head, "snapshot", None)
+        if not callable(snapshot):
+            raise HTTPException(503, "Robot camera unavailable")
         return Response(
-            await coordinator().heads[robot_id].snapshot(),
+            await snapshot(),
             media_type="image/jpeg",
             headers={"Cache-Control": "no-store"},
         )
