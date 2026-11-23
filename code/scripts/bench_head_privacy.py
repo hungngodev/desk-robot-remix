@@ -238,7 +238,7 @@ async def main() -> int:
         parser.error("A unique actual Xiaozhi device identity is required")
     preflight_private_report(args.report)
     print("Start consented live Xiaozhi listening. Hold the BOOT button ready.", flush=True)
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(trust_env=False) as client:
         report = await measure(
             HttpHead(robot, client), robot.id, seconds=args.seconds,
             poll_period_s=args.poll_period, on_ready=lambda m: print(m, flush=True),

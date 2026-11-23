@@ -211,3 +211,71 @@ async def test_privacy_bench_refuses_invalid_trial_limits(duration, period, hold
             poll_period_s=period, hold_min_s=hold,
             quiet_grace_s=grace, clock=timer, sleeper=timer.sleep,
         )
+
+
+@pytest.mark.asyncio
+async def test_cli_ignores_ambient_proxy_for_authenticated_boot_privacy_bench(
+    tmp_path, monkeypatch,
+):
+    """Direct head privacy telemetry never inherits an ambient bearer proxy."""
+    import json
+    import sys
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://unexpected-proxy.invalid:8080")
+    monkeypatch.setenv("ALL_PROXY", "http://unexpected-proxy.invalid:8080")
+    monkeypatch.setattr(sys, "argv", [
+        "bench_head_privacy.py", "--robot", "robot-01",
+        "--seconds", "5", "--report", str(tmp_path / "privacy.json"),
+    ])
+
+    class Robot:
+        id = "robot-01"
+        device_id = "unique-sense-device"
+
+    class Settings:
+        mode = "hardware"
+
+        def robot(self, name):
+            assert name == "robot-01"
+            return Robot()
+
+    monkeypatch.setattr(bench, "load_settings", lambda _config: Settings())
+    client_options = []
+
+    class Client:
+        def __init__(self, **kwargs):
+            client_options.append(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(bench.httpx, "AsyncClient", Client)
+
+    def head_factory(robot, client):
+        assert robot.id == "robot-01"
+        assert isinstance(client, Client)
+        return object()
+
+    monkeypatch.setattr(bench, "HttpHead", head_factory)
+
+    async def fake_measure(head, robot_id, *, seconds, poll_period_s, on_ready):
+        assert head is not None
+        assert robot_id == "robot-01"
+        assert seconds == 5
+        assert poll_period_s == 0.1
+        assert callable(on_ready)
+        return {
+            "software_boot_privacy_cycle_observed": False,
+            "physical_audio_privacy_qualified": False,
+            "speaker_playback_verified": False,
+        }
+
+    monkeypatch.setattr(bench, "measure", fake_measure)
+    assert await bench.main() == 1
+    assert client_options == [{"trust_env": False}]
+    report = json.loads((tmp_path / "privacy.json").read_text())
+    assert report["speaker_playback_verified"] is False
+    assert report["physical_audio_privacy_qualified"] is False
