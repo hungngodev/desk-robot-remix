@@ -73,6 +73,18 @@ def capture(
         if (not isinstance(item, RoomObservation) or item.motion_authorized
                 or item.charging_authorized or item.person_identified):
             raise ValueError("Room USB data must never carry action or identity authority")
+        if type(item.seq) is not int or not 0 <= item.seq <= 0xffffffff:
+            raise ValueError("Invalid room station bench sequence")
+        if type(item.at_ms) is not int or not 0 <= item.at_ms <= 0xffffffff:
+            raise ValueError("Invalid room station bench source timestamp")
+        try:
+            receipt_clock_valid = (
+                type(item.received_at) in (int, float)
+                and math.isfinite(item.received_at))
+        except OverflowError:
+            receipt_clock_valid = False
+        if not receipt_clock_valid:
+            raise ValueError("Invalid room station bench receive clock")
         # Stage an entire decoded observation before counting anything.
         # If an alternate reader supplies an incomplete record, a callback
         # failure must never be counted as a successful physical USB receipt.

@@ -215,6 +215,46 @@ def test_room_bench_counts_distinct_sensor_acquisitions_not_cached_validity(
     assert report["sensor_accuracy_physically_qualified"] is False
 
 
+@pytest.mark.parametrize(
+    ("field", "bad_value"),
+    [
+        ("seq", True), ("seq", -1), ("seq", 0x100000000),
+        ("at_ms", "1000"), ("at_ms", -1), ("at_ms", True),
+        ("received_at", float("nan")), ("received_at", float("inf")),
+        ("received_at", 10 ** 1000), ("received_at", "1.0"),
+    ],
+)
+def test_room_bench_invalid_callback_metadata_cannot_become_usb_receipt(
+    field, bad_value,
+):
+    from dataclasses import replace
+
+    decoder = RoomStationDecoder()
+    legitimate = decoder.accept(_packet(7, 1000), now=1.0)
+    invalid = replace(legitimate, **{field: bad_value})
+
+    class MalformedFeed:
+        rejected = 0
+
+        def __init__(self, port, on_observation):
+            self.on_observation = on_observation
+            self.callback_failures = 0
+
+        def _read_port(self, running):
+            try:
+                self.on_observation(invalid)
+            except ValueError:
+                self.callback_failures += 1
+
+    report = capture("/dev/cu.synthetic", seconds=1, feed_factory=MalformedFeed,
+                     clock=lambda: 0.0)
+    assert report["accepted_frames"] == 0
+    assert report["callback_failures"] == 1
+    assert report["read_only_usb_sample_captured"] is False
+    assert report["one_hour_usb_continuity_screen_pass"] is False
+    assert report["valid_sensor_frames"]["scd40"] == 0
+
+
 def test_room_bench_callback_failure_cannot_count_partial_usb_receipt():
     from dataclasses import replace
 
