@@ -2174,3 +2174,21 @@ def test_fleet_supplier_reference_header_cannot_charge_linked_parts_twice():
     assert "plus 14 separately orderable" not in shown
     assert "2026-11-16-five-pet-purchase-register.md" in shown
     assert "HOLD" in shown
+
+
+def test_all_63_role_source_and_host_test_paths_exist():
+    """Buying traceability must never point to removed source or host tests."""
+    import json
+
+    ownership = json.loads((mod.ROOT / "docs/hardware/full-63-role-source-ownership.json").read_text(
+        encoding="utf-8"
+    ))
+    groups = ("pet_roles", "room_roles", "linked_roles")
+    assert [len(ownership[group]) for group in groups] == [42, 7, 14]
+    for group in groups:
+        for role, evidence in ownership[group].items():
+            for key in ("source", "host_test"):
+                relative = evidence.get(key)
+                assert isinstance(relative, str) and relative, (group, role, key)
+                assert (mod.ROOT / relative).is_file(), (group, role, key, relative)
+    # File existence is NOT an energized hardware or shopping receipt.
