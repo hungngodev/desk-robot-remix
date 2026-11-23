@@ -77,6 +77,8 @@ def test_full_pilot_sample_landed_cost_accounts_for_sellers_and_prior_spend(pilo
     assert result["calculation_complete_not_physical_approval"] is True
     assert result["payable_now_cents"] == 4191
     assert result["prior_paid_orders_cents"] == 1367
+    assert result["documented_prior_paid_minimum_cents"] == 1367
+    assert "Previously paid: $13.67" in procurement.cost_quote_markdown(result)
     assert result["prototype_cumulative_cents"] == 5558
     assert result["within_prototype_cap"] is False
     assert result["full_first_robot_purchase_approved"] is False
@@ -165,3 +167,34 @@ def test_pilot_cli_does_not_claim_budget_with_zero_prior_spend(tmp_path, pilot):
     assert output["prototype_cumulative_cents"] is None
     assert output["within_prototype_cap"] is False
     assert any("Sense" in error for error in output["errors"])
+
+
+def test_pilot_cli_invalid_zero_payment_reports_known_floor_not_zero(tmp_path, pilot):
+    """Both normal CLI views preserve the known receipt and withhold release."""
+    _, cart = pilot
+    evidence = quoted_evidence(cart)
+    evidence["pilot_costs"]["paid_orders"] = []
+    path = tmp_path / "no-sense-order.json"
+    path.write_text(json.dumps(evidence), encoding="utf-8")
+    for output_format in ("pilot-landed-cost-json", "pilot-landed-cost-markdown"):
+        completed = subprocess.run(
+            [sys.executable, str(SCRIPTS / "procurement_release.py"),
+             "--format", output_format, "--evidence", str(path)],
+            cwd=ROOT / "code", capture_output=True, text=True, check=False,
+            timeout=20,
+        )
+        assert completed.returncode == 0, completed.stderr
+        if output_format.endswith("json"):
+            report = json.loads(completed.stdout)
+            assert not report["calculation_complete_not_physical_approval"]
+            assert report["prior_paid_orders_cents"] is None
+            assert report["documented_prior_paid_minimum_cents"] == 1367
+            assert report["prototype_cumulative_cents"] is None
+            assert not report["within_prototype_cap"]
+        else:
+            assert (
+                "Previously paid: unknown (confirmed minimum $13.67)"
+                in completed.stdout
+            )
+            assert "Previously paid: $0.00" not in completed.stdout
+            assert "Payable now: unknown" in completed.stdout

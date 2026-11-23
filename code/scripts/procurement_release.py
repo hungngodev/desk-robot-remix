@@ -1371,6 +1371,8 @@ def pilot_landed_cost(report: dict, evidence: dict) -> dict:
     # known-payment check instead of erasing the confirmed Sense purchase
     # when a pilot quote falsely declares an empty paid-order register.
     try:
+        baseline = _documented_prior_spend_baseline()
+        cost["documented_prior_paid_minimum_cents"] = baseline["known_paid_cents"]
         if _confirmed_first_unit_prior_payment_missing(
             cost, {"costs": claimed}
         ):
@@ -1378,8 +1380,11 @@ def pilot_landed_cost(report: dict, evidence: dict) -> dict:
                 "Pilot quote omits the confirmed Sense payment or "
                 "robot:xiao_sense paid allocation"
             )
+            # An invalid prior-order register cannot override the paid floor.
+            cost["prior_paid_orders_cents"] = None
     except (OSError, ValueError, TypeError):
         problems.append("Pilot quote cannot reconcile confirmed Sense payment")
+        cost["prior_paid_orders_cents"] = None
     if problems:
         cost["errors"].extend(problems)
         cost["calculation_complete_not_physical_approval"] = False
@@ -2157,6 +2162,11 @@ def cost_quote_markdown(cost: dict) -> str:
         absolute = abs(value)
         return f"{sign}\u0024{absolute // 100}.{absolute % 100:02d}"
     complete = cost["calculation_complete_not_physical_approval"]
+    prior_paid = amount(cost["prior_paid_orders_cents"])
+    if cost["scope"] == "pilot_samples" and cost["prior_paid_orders_cents"] is None:
+        minimum = cost.get("documented_prior_paid_minimum_cents")
+        if type(minimum) is int:
+            prior_paid = "unknown (confirmed minimum " + amount(minimum) + ")"
     # Never let a partial or externally constructed report publish a payable
     # total or apparent remaining budget. The accountant returns None for
     # incomplete evidence; the presentation must independently fail closed.
@@ -2171,7 +2181,7 @@ def cost_quote_markdown(cost: dict) -> str:
         "Quote calculation complete: " +
         ("yes, not purchase approval" if complete else "NO"),
         "Payable now: " + amount(payable),
-        "Previously paid: " + amount(cost["prior_paid_orders_cents"]),
+        "Previously paid: " + prior_paid,
         ("Cumulative fleet spending: " if fleet_scope
          else "Cumulative prototype spending: ") + amount(cumulative),
         ("First-unit $50 cap does not apply to a five-robot fleet quote."
