@@ -44,20 +44,52 @@ def _safe_endpoint(url: str, robot: str) -> str:
 
 
 def save_private_trial_rows(output: Path, rows: list[dict]) -> None:
-    """Write complete measured trial JSONL with exclusive owner-only access."""
+    """Write the full trial to an unchanged directory, not a redirected path."""
     if not rows:
         raise ValueError("No captured IMU samples to write")
-    # Serialize before creating a new file. Invalid records never leave an
-    # empty or partially populated physical trial log.
+    # Serialize before opening any destination: a bad record cannot leave a
+    # partial physical calibration file.
     payload = "".join(
         json.dumps(row, separators=(",", ":")) + "\n" for row in rows
     )
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    parent = output.parent
+    # O_NOFOLLOW on the *file* alone cannot stop an output directory being
+    # replaced by a symlink. Bind every write and cleanup to a directory fd.
+    original = os.stat(parent, follow_symlinks=False)
+    if not stat.S_ISDIR(original.st_mode):
+        raise ValueError("Handling trial output parent must not be a symlink")
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY
     if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    fd = os.open(output, flags, 0o600)
-    with os.fdopen(fd, "w", encoding="utf-8") as file:
-        file.write(payload)
+        directory_flags |= os.O_NOFOLLOW
+    directory_fd = os.open(parent, directory_flags)
+    created = False
+    try:
+        held = os.fstat(directory_fd)
+        if (held.st_dev, held.st_ino) != (original.st_dev, original.st_ino):
+            raise ValueError("Handling trial output parent changed")
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        fd = os.open(output.name, flags, 0o600, dir_fd=directory_fd)
+        created = True
+        with os.fdopen(fd, "w", encoding="utf-8") as file:
+            file.write(payload)
+            file.flush()
+            os.fsync(file.fileno())
+        named = os.stat(parent, follow_symlinks=False)
+        if (not stat.S_ISDIR(named.st_mode)
+                or (named.st_dev, named.st_ino) != (held.st_dev, held.st_ino)):
+            raise ValueError("Handling trial output parent changed")
+    except BaseException:
+        if created:
+            # Never unlink via an attacker-retargeted pathname.
+            try:
+                os.unlink(output.name, dir_fd=directory_fd)
+            except FileNotFoundError:
+                pass
+        raise
+    finally:
+        os.close(directory_fd)
 
 
 async def capture_phase(

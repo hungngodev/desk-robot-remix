@@ -202,3 +202,42 @@ def test_measured_trial_output_rejects_symlink_and_invalid_rows(tmp_path):
     with pytest.raises(ValueError, match="No captured IMU samples"):
         save_private_trial_rows(invalid, [])
     assert not invalid.exists()
+
+def test_measured_trial_rejects_symlinked_output_parent(tmp_path):
+    actual = tmp_path / "actual"
+    actual.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(actual, target_is_directory=True)
+    with pytest.raises(ValueError, match="parent must not be a symlink"):
+        save_private_trial_rows(alias / "handling.jsonl", [{"label": "upright"}])
+    assert list(actual.iterdir()) == []
+
+
+def test_measured_trial_parent_replacement_cleans_original_directory(
+    tmp_path, monkeypatch,
+):
+    parent = tmp_path / "parent"
+    parent.mkdir()
+    displaced = tmp_path / "displaced"
+    redirect = tmp_path / "redirect"
+    redirect.mkdir()
+    real_open = os.open
+    replaced = False
+
+    def swap_parent_on_file_create(path, flags, *args, **kwargs):
+        nonlocal replaced
+        if (path == "handling.jsonl" and kwargs.get("dir_fd") is not None
+                and not replaced):
+            replaced = True
+            parent.rename(displaced)
+            parent.symlink_to(redirect, target_is_directory=True)
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(os, "open", swap_parent_on_file_create)
+    with pytest.raises(ValueError, match="output parent changed"):
+        save_private_trial_rows(
+            parent / "handling.jsonl", [{"label": "upright"}],
+        )
+    assert replaced
+    assert list(displaced.iterdir()) == []
+    assert list(redirect.iterdir()) == []
