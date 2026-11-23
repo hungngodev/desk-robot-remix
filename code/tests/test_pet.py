@@ -4737,6 +4737,57 @@ async def test_camera_original_receipt_expires_inside_speaker_queue(
         await pet.close()
 
 
+async def test_physical_contact_expires_while_waiting_in_speaker_queue(
+    fleet, tmp_path,
+):
+    """Old physical contact cannot be narrated after optional TTS delay."""
+    class DelayedSpeaker(SimulatedSpeaker):
+        def __init__(self):
+            super().__init__()
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+
+        async def say(self, robot, text, *, permission_check=None):
+            self.entered.set()
+            await self.release.wait()
+            if permission_check is not None and not permission_check():
+                raise RuntimeError("Physical contact expired before audible send")
+            self.spoken.append((robot.id, text))
+
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    speaker = DelayedSpeaker()
+    pet = PetController(
+        fleet, {},
+        Conversation(fleet, GroundedChat(), speaker, memory=memory),
+        memory, KeyScene(), max_observation_age=1.2,
+    )
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 85
+    task = asyncio.create_task(pet._speak(
+        "robot-01",
+        SceneChange("paw_contact", "A person pressed the paw", 1.0),
+        85, offered_at=time.monotonic() - 0.5,
+    ))
+    try:
+        await asyncio.wait_for(speaker.entered.wait(), timeout=1)
+        # The sensor was fresh when the model answered, but is obsolete
+        # before the queued physical speaker is permitted to send.
+        await asyncio.sleep(0.75)
+        speaker.release.set()
+        await asyncio.wait_for(task, timeout=2)
+        assert speaker.spoken == []
+        assert state.spoken == 0
+        assert memory.count("robot-01") == 0
+        assert state.last_error is not None
+        assert "Physical contact expired" in state.last_error
+    finally:
+        speaker.release.set()
+        await asyncio.gather(task, return_exceptions=True)
+        state.enabled = False
+        await pet.close()
+
+
 def test_camera_observer_passes_original_receipt_into_speech_scheduler():
     src = (
         Path(__file__).resolve().parents[1]

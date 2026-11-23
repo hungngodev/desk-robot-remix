@@ -3286,11 +3286,10 @@ class PetController:
                     and media_context_current()
                     and not self._human_active_in_fleet(time.monotonic())
                     and not newer_human_turn()
-                    # An old camera guess must never restart speech when TTS
-                    # or the head's playback queue takes longer than its TTL.
-                    and (not camera_derived
-                         or time.monotonic() - offered_at
-                            <= self.max_observation_age)
+                    # Every optional observation has a bounded lifetime,
+                    # including real touch/handling and camera evidence.
+                    # Slow TTS or decoder queues cannot revive old events.
+                    and time.monotonic() - offered_at <= self.max_observation_age
                 )
 
             transmitted = await self.conversation.say_proactive(
