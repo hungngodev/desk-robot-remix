@@ -388,6 +388,36 @@ class SenseOverlayTests(unittest.TestCase):
         )
 
 
+    def test_sense_websocket_playback_identity_rejects_fractional_id(self):
+        """Nonintegral IDs cannot alias a different playback on the real overlay."""
+        overlay.apply(self.root, "sense")
+        source = (
+            self.root / "main/protocols/websocket_protocol.cc"
+        ).read_text()
+        assert "desk_playback_id_ = 0;" in source
+        assert 'strcmp(state->valuestring, "start") == 0' in source
+        assert "playback_id->valuedouble >= 1" in source
+        assert "playback_id->valuedouble <= 2147483647" in source
+        assert (
+            "playback_id->valuedouble == static_cast<double>("
+            in source
+        )
+        assert (
+            "static_cast<uint32_t>(playback_id->valuedouble))) {"
+            in source
+        )
+        assert source.index("playback_id->valuedouble <= 2147483647") < (
+            source.index("playback_id->valuedouble == static_cast<double>(")
+        )
+        assert source.index("playback_id->valuedouble == static_cast<double>(") < (
+            source.index("desk_playback_id_ =\n")
+        )
+        assert 'strcmp(state->valuestring, "stop") == 0' in source
+        # The affected path is Sense-only. The original upstream copy is
+        # inspected but never rewritten by the disposable overlay installer.
+        original = (UPSTREAM / "main/protocols/websocket_protocol.cc").read_text()
+        assert 'desk_playback_id_' not in original
+
     def test_sense_pdm_mic_read_timeout_is_bounded(self):
         """A PDM DMA stall must yield to the existing Xiaozhi audio task.
 

@@ -495,7 +495,11 @@ bool Protocol::IsTimeout() const {""",
                         auto playback_id = cJSON_GetObjectItem(root, "desk_playback_id");
                         if (cJSON_IsNumber(playback_id) &&
                             playback_id->valuedouble >= 1 &&
-                            playback_id->valuedouble <= 2147483647) {
+                            playback_id->valuedouble <= 2147483647 &&
+                            // Never truncate a fractional server ID into
+                            // another response's completed playback lease.
+                            playback_id->valuedouble == static_cast<double>(
+                                static_cast<uint32_t>(playback_id->valuedouble))) {
                             desk_playback_id_ =
                                 static_cast<uint32_t>(playback_id->valuedouble);
                         }
