@@ -184,6 +184,8 @@ Illustrative wire fixtures only, NOT observations from installed hardware:
   `{"v":1,"body_boot":42,"origin":3,"seq":100,"sample_us":15000000,"x_mm":120,"y_mm":-20,"yaw_mrad":157,"quality":"valid"}`
 * Later sample, same boot and origin:
   `{"v":1,"body_boot":42,"origin":3,"seq":101,"sample_us":15050000,"x_mm":121,"y_mm":-20,"yaw_mrad":158,"quality":"degraded"}`
+* Rebooted body, new boot and new origin, first sample:
+  `{"v":1,"body_boot":43,"origin":4,"seq":1,"sample_us":1000000,"x_mm":0,"y_mm":0,"yaw_mrad":0,"quality":"valid"}`
 * Body available but pose not localized:
   `{"v":1,"body_boot":43,"origin":0,"seq":0,"sample_us":0,"x_mm":0,"y_mm":0,"yaw_mrad":0,"quality":"unavailable"}`
 

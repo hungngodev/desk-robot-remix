@@ -1664,6 +1664,7 @@ def test_sense_builder_readme_matches_selected_local_expression_consumer():
 def test_authenticated_pose_bridge_is_read_only_bounded_and_versioned():
     """Guide 30 pose remains a separate validated telemetry command, not a UART tunnel."""
     import json
+    import re
 
     protocol = (HEAD / "overlay/robot_protocol.h").read_text()
     bridge = (HEAD / "overlay/robot_bridge.cc").read_text()
@@ -1686,15 +1687,18 @@ def test_authenticated_pose_bridge_is_read_only_bounded_and_versioned():
     assert 'cJSON_AddStringToObject(body.get(), "robot_id", CONFIG_DESK_ROBOT_ID)' in bridge
     guide = (HEAD.parents[2] / "docs/guides/interfaces.md").read_text()
     examples = guide.split("### Read-only pose v1", 1)[1]
-    import re
     fixtures = re.findall(r'`({"v":1,"body_boot".+?})`', examples)
-    assert len(fixtures) == 3
-    valid, reboot, unavailable = map(json.loads, fixtures)
-    assert valid["quality"] == "valid" and valid["body_boot"] == reboot["body_boot"]
-    assert valid["origin"] == reboot["origin"]
-    assert valid["seq"] < reboot["seq"]
-    assert unavailable["quality"] == "unavailable"
-    assert set(valid) == set(reboot) == set(unavailable) == {
+    assert len(fixtures) == 4
+    valid, same_origin, reboot, unavailable = map(json.loads, fixtures)
+    assert valid["quality"] == "valid" and same_origin["quality"] == "degraded"
+    assert (valid["body_boot"], valid["origin"]) == (
+        same_origin["body_boot"], same_origin["origin"])
+    assert valid["seq"] < same_origin["seq"]
+    assert (valid["body_boot"], valid["origin"]) != (
+        reboot["body_boot"], reboot["origin"])
+    assert reboot["quality"] == "valid" and reboot["seq"] == 1
+    assert unavailable["quality"] == "unavailable" and unavailable["origin"] == 0
+    assert set(valid) == set(same_origin) == set(reboot) == set(unavailable) == {
         "v", "body_boot", "origin", "seq", "sample_us",
         "x_mm", "y_mm", "yaw_mrad", "quality",
     }
