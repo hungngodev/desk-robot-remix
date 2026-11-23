@@ -101,6 +101,8 @@ def evaluate(records: list[dict]) -> dict:
             "head_queue_clear_ms", "i2s_stop_ms", "audible_stop_ms",
         )
         stages = [_number(r.get(name), name) for name in stage_names]
+        if stages[0] < 0:
+            raise ValueError("Acoustic monotonic timestamps must be nonnegative")
         if any(later < earlier for earlier, later in zip(stages, stages[1:], strict=False)):
             raise ValueError("Audio stop stage timestamps are not monotonic")
         if stages[0] in onset_times:

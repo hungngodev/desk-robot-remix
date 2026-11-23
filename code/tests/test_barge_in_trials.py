@@ -296,6 +296,19 @@ def test_distinct_human_trial_id_with_surrounding_space_remains_valid():
     assert evaluate(records)["meets_proposed_gate"] is True
 
 
+def test_negative_monotonic_audio_stages_cannot_certify_acoustic_stop():
+    rows = both_distances()
+    # Every stage remains ordered and the stop is only 200 ms after onset;
+    # nevertheless a device monotonic clock cannot predate boot.
+    for field in (
+        "human_onset_ms", "vad_arrival_ms", "abort_dispatch_ms",
+        "head_queue_clear_ms", "i2s_stop_ms", "audible_stop_ms",
+    ):
+        rows[0][field] -= 1000
+    with pytest.raises(ValueError, match="monotonic timestamps must be nonnegative"):
+        evaluate(rows)
+
+
 def test_stage_boundary_cannot_precede_human_speech():
     rows = fake_rows()
     rows[0]["vad_arrival_ms"] = rows[0]["human_onset_ms"] - 1
