@@ -65,6 +65,9 @@ def capture(
     received_at: list[float] = []
     sequence: list[int] = []
     sensor_counts = dict.fromkeys(SENSORS, 0)
+    new_sensor_acquisitions = dict.fromkeys(SENSORS, 0)
+    reused_sensor_samples = dict.fromkeys(SENSORS, 0)
+    last_sensor_sample_ms: dict[str, int] = {}
 
     def observed(item: RoomObservation) -> None:
         if (not isinstance(item, RoomObservation) or item.motion_authorized
@@ -76,16 +79,33 @@ def capture(
         if not isinstance(item.readings, dict) or set(item.readings) != set(SENSORS):
             raise ValueError("Incomplete room station bench sensor record")
         valid_by_sensor = {}
+        sample_by_sensor = {}
         for name in SENSORS:
             reading = item.readings[name]
             if not isinstance(reading, dict) or type(reading.get("valid")) is not bool:
                 raise ValueError("Invalid room station bench sensor validity")
             valid_by_sensor[name] = reading["valid"]
+            if reading["valid"]:
+                sample_ms = reading.get("sample_ms")
+                if type(sample_ms) is not int or not 0 <= sample_ms <= 0xffffffff:
+                    raise ValueError("Invalid room sensor acquisition clock")
+                previous = last_sensor_sample_ms.get(name)
+                if previous is not None:
+                    advance = (sample_ms - previous) & 0xffffffff
+                    if advance >= 0x80000000:
+                        raise ValueError("Backwards room sensor acquisition clock")
+                sample_by_sensor[name] = sample_ms
         received_at.append(item.received_at)
         sequence.append(item.seq)
         for name, valid in valid_by_sensor.items():
             if valid:
                 sensor_counts[name] += 1
+                sample_ms = sample_by_sensor[name]
+                if last_sensor_sample_ms.get(name) == sample_ms:
+                    reused_sensor_samples[name] += 1
+                else:
+                    new_sensor_acquisitions[name] += 1
+                    last_sensor_sample_ms[name] = sample_ms
 
     reader = feed_factory(port, observed)
     start = clock()
@@ -156,6 +176,8 @@ def capture(
             round(max(silence_windows) * 1000, 1) if silence_windows else None
         ),
         "valid_sensor_frames": sensor_counts,
+        "new_sensor_acquisitions": new_sensor_acquisitions,
+        "reused_sensor_samples": reused_sensor_samples,
         "one_hour_usb_continuity_screen_pass": one_hour_usb_continuity_screen_pass,
         "read_only_usb_sample_captured": (
             bool(sequence) and error is None and reader.callback_failures == 0

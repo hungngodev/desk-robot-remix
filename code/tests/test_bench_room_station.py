@@ -167,6 +167,8 @@ def test_room_bench_counts_real_decoder_receipts_without_sensor_person_claim():
     assert result["last_station_sequence"] == 9
     assert result["largest_mac_receive_gap_ms"] == 500.0
     assert result["valid_sensor_frames"]["scd40"] == 2
+    assert result["new_sensor_acquisitions"]["scd40"] == 2
+    assert result["reused_sensor_samples"]["scd40"] == 0
     assert all(result["valid_sensor_frames"][name] == 0
                for name in SENSORS if name != "scd40")
     assert result["read_only_usb_sample_captured"] is True
@@ -175,6 +177,42 @@ def test_room_bench_counts_real_decoder_receipts_without_sensor_person_claim():
                 "motion_authorized"):
         assert result[key] is False
     assert "rail voltage" in result["notes"]
+
+
+
+@pytest.mark.parametrize(
+    ("first_ms", "second_station_ms", "second_sample_ms", "expected_new"),
+    [(1000, 2000, 1000, 1), (0xfffffffe, 1, 1, 2)],
+)
+def test_room_bench_counts_distinct_sensor_acquisitions_not_cached_validity(
+    first_ms, second_station_ms, second_sample_ms, expected_new,
+):
+    """Repeated cached values are not fresh acquisitions; uint32 wrap is valid."""
+    decoder = RoomStationDecoder()
+    first = decoder.accept(_packet(7, first_ms), now=1.0)
+    raw = json.loads(_packet(8, second_station_ms))
+    raw["readings"]["scd40"]["sample_ms"] = second_sample_ms
+    second = decoder.accept(json.dumps(raw).encode(), now=2.0)
+
+    class Feed:
+        rejected = 0
+        callback_failures = 0
+
+        def __init__(self, port, on_observation):
+            self.on_observation = on_observation
+
+        def _read_port(self, running):
+            self.on_observation(first)
+            self.on_observation(second)
+
+    ticks = iter((0.0, 3.0))
+    report = capture("/dev/cu.test", seconds=3,
+                     feed_factory=Feed, clock=lambda: next(ticks))
+    assert report["valid_sensor_frames"]["scd40"] == 2
+    assert report["new_sensor_acquisitions"]["scd40"] == expected_new
+    assert report["reused_sensor_samples"]["scd40"] == 2 - expected_new
+    assert report["one_hour_usb_continuity_screen_pass"] is False
+    assert report["sensor_accuracy_physically_qualified"] is False
 
 
 def test_room_bench_callback_failure_cannot_count_partial_usb_receipt():
