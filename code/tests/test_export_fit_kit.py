@@ -604,7 +604,7 @@ def test_real_openscad_renders_provisional_source_parts(tmp_path):
         len(source.ADAPTERS) + len(source.GAUGES)
         + len(source.SPEAKER_FITS) + len(source.RANGER_FITS)
         + len(source.MG90S_FITS) + len(source.DOCKS)
-    ) == 20
+    ) == 23
     assert (output / "adapter_stls/speaker_grille.stl").is_file()
     assert (output / "dock_stls/dock_passive_fit.stl").is_file()
     assert (output / "dock_stls/dock_rail_entry_coupon.stl").is_file()
@@ -974,7 +974,7 @@ def test_adapter_readme_fit_reference_count_tracks_exporter():
         + len(source.DOCKS)
     )
     assert len(source.MG90S_FITS) == 4
-    assert fit_count == 13
+    assert fit_count == 16
     assert f"current **{fit_count}** provisional fit references" in readme
     assert f"up to {fit_count} provisional dock, battery, contact" in readme
     assert "up to nine provisional" not in readme

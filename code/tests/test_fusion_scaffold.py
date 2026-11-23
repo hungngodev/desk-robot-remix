@@ -83,13 +83,13 @@ def test_mechanical_sheet_never_approves_premium_ranger_or_mismatched_pack():
 
 
 def test_exported_candidate_fits_survive_legacy_fusion_entrypoint(tmp_path):
-    """All thirteen optional fit references are preserved by the old GUI name.
+    """All sixteen optional fit references are preserved by the old GUI name.
 
     build_manifest() is a path plan only. The GUI run additionally verifies
     export_fit_kit's hash and unqualified flags before importing meshes.
     """
     source = load_script()
-    assert len(source.FIT_REFERENCES) == 13
+    assert len(source.FIT_REFERENCES) == 16
     for _, rel in source.SOURCE_MESHES:
         path = tmp_path / rel
         path.parent.mkdir(parents=True, exist_ok=True)
