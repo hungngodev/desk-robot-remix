@@ -83,3 +83,24 @@ def test_missing_or_ambiguous_measurement_fails_closed(tmp_path):
     with pytest.raises(ValueError, match="Missing or ambiguous"):
         source.export(tmp_path, tmp_path / "paper")
     assert not (tmp_path / "paper").exists()
+
+
+@pytest.mark.parametrize(("filename", "before", "after"), [
+    ("docs/cad/remixes/vl53l0x_gy530_fit_gauge.scad",
+     "board_x = 10.5;", "board_x = 250;"),
+    ("docs/cad/remixes/vl53l0x_gy530_fit_gauge.scad",
+     "board_x = 10.5;", "board_x = 200;"),
+    ("docs/cad/remixes/speaker_rect_fit_gauge.scad",
+     "speaker_w=16;", "speaker_w=90;"),
+])
+def test_a4_nominal_outline_cannot_clip_or_overlap_legend(
+    tmp_path, filename, before, after,
+):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / filename
+    scad.write_text(scad.read_text().replace(before, after), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="exceeds A4 printable layout"):
+        source.export(tmp_path, output)
+    assert not output.exists()

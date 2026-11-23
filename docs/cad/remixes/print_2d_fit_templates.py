@@ -91,6 +91,11 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
     else:
         width, height = dims
         x, y = (A4_WIDTH_MM-width)/2, 108
+        # The fixed A4 layout reserves 15 mm side margins and a legend
+        # starting at y=153. An oversized nominal body would print clipped
+        # or over its dimension label while still claiming true scale.
+        if x < 15 or y + height > 145:
+            raise ValueError("Nominal outline exceeds A4 printable layout")
         features = (_rect(x, y, width, height)
                     + _text(20, 153, f"Nominal body outline: {_num(width)} x {_num(height)} mm")
                     + _text(20, 161, "NO drilling centers, pad positions or lens centers qualified"))
