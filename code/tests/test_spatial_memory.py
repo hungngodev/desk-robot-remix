@@ -108,3 +108,13 @@ def test_episode_rolling_retention_removes_spatial_sidecar(tmp_path):
     for i in range(251):
         assert remember(db, "robot-01", f"event_{i}", when + 10 + i)
     assert spatial.last_seen("robot-01", "flat_key", now=time.time()) is None
+
+
+def test_human_correction_retires_old_spatial_coordinates(tmp_path):
+    db = MemoryStore(tmp_path / "private", ["robot-01"])
+    spatial = SpatialMemory(db)
+    when = time.time() - 1
+    assert remember(db, "robot-01", "seen1", when)
+    assert spatial.attach("robot-01", "seen1", evidence(when))
+    assert db.correct_episode("robot-01", "seen1", "The key was actually in a drawer")
+    assert spatial.last_seen("robot-01", "flat_key", now=time.time()) is None

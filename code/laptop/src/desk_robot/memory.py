@@ -265,6 +265,11 @@ class MemoryStore:
                        AFTER DELETE ON memories BEGIN
                           DELETE FROM spatial_observations WHERE event_id=old.event_id;
                        END;
+                       CREATE TRIGGER IF NOT EXISTS spatial_observations_correction
+                       AFTER UPDATE OF summary ON memories
+                       WHEN new.summary <> old.summary BEGIN
+                          DELETE FROM spatial_observations WHERE event_id=old.event_id;
+                       END;
                        CREATE TRIGGER IF NOT EXISTS camera_provenance_delete
                        AFTER DELETE ON memories BEGIN
                          DELETE FROM camera_provenance WHERE event_id=old.event_id;
