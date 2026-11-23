@@ -874,6 +874,10 @@ def first_robot_projection(report: dict) -> dict:
                     "ordered_unreceived_not_verified"],
                 **allocations,
                 "conditional_remaining": available,
+                "verified_inspected_first_unit": _count(
+                    part.get("verified_inspected_first_unit", 0),
+                    ident + ".verified_inspected_first_unit",
+                ),
                 "reference_only": part.get("reference_only"),
                 "selected_carrier": part.get("selected_carrier"),
                 "power_reference": copy.deepcopy(part.get("power_reference")),
@@ -943,6 +947,9 @@ def first_robot_projection(report: dict) -> dict:
             "owned stock before irreversible purchases."
         ),
         "roles": rows, "linked_decisions": linked,
+        "verified_linked_power_stock": copy.deepcopy(
+            report.get("verified_linked_power_stock", []),
+        ),
         "verified_checkout_cost": copy.deepcopy(
             report.get("verified_checkout_cost")
         ),
@@ -1640,26 +1647,33 @@ def render_first_robot_markdown(report: dict) -> str:
             "",
         ])
     lines += [
-        "## 1. Reported owned or ordered, still unverified",
+        "## 1. Reported owned or ordered, plus inspected usable stock",
         "",
-        "| Role | All reported on hand | All estimated on hand | All ordered, inspection pending | Allocated to first unit |",
-        "| --- | ---: | ---: | ---: | ---: |",
+        "| Role | Inspected usable for first unit | All reported on hand | All estimated on hand | All ordered, inspection pending | Conditionally allocated to first unit |",
+        "| --- | ---: | ---: | ---: | ---: | ---: |",
     ]
     for row in projection["roles"]:
         if any(row[k] for k in (
                 "fleet_reported_owned_not_verified",
                 "fleet_estimated_owned_not_verified",
-                "fleet_ordered_unreceived_not_verified")):
+                "fleet_ordered_unreceived_not_verified",
+                "verified_inspected_first_unit")):
             first_allocated = sum(row[k] for k in (
                 "reported_owned_not_verified", "estimated_owned_not_verified",
                 "ordered_unreceived_not_verified"))
             lines.append(
                 f"| {cell(row['name'])} | "
+                f"{row['verified_inspected_first_unit']} | "
                 f"{row['fleet_reported_owned_not_verified']} | "
                 f"{row['fleet_estimated_owned_not_verified']} | "
                 f"{row['fleet_ordered_unreceived_not_verified']} | "
                 f"{first_allocated} |"
             )
+    for item in projection["verified_linked_power_stock"]:
+        lines.append(
+            f"| {cell(item['name'])} | {item['usable_allocated']} | "
+            "0 | 0 | 0 | 0 |"
+        )
     lines += [
         "",
         "## 2. First-unit remaining slots and conditional alternatives",
@@ -1694,6 +1708,8 @@ def render_first_robot_markdown(report: dict) -> str:
     lines += [
         "",
         "One unit is built and qualified before another four are ordered. "
+        "Inspected usable quantities appear only after the strict supplier "
+        "and physical receipt audit, and must not be added to reported stock. "
         "A reported or estimated owned quantity is not physical stock proof. "
         "Linked parts are already owned by parent roles and must not be "
         "summed into a cart; unresolved motors and charger parts are not "
@@ -2125,6 +2141,42 @@ def attach_verified_checkout_evidence(
         rows[prefix + ":" + part["id"]] = part
     for part in output["room_pod"]:
         rows["station:" + part["id"]] = part
+    # Show inspected first-unit stock only after this strict audited checkout
+    # attachment. A charger, converter, pack and connector remain separate
+    # linked units; none represents another complete power assembly.
+    linked_power = {}
+    for stock in cost_evidence.get("inventory", []):
+        if not isinstance(stock, dict):
+            raise ValueError("Inspected first-unit stock must be an object")
+        role = stock.get("role_key")
+        quantity = stock.get("usable_allocated")
+        if type(quantity) is not int or quantity < 1:
+            raise ValueError("Inspected first-unit quantity must be positive")
+        if role in rows:
+            rows[role]["verified_inspected_first_unit"] = (
+                rows[role].get("verified_inspected_first_unit", 0) + quantity
+            )
+        elif (isinstance(role, str)
+              and role.startswith(POWER_PARENT_ROLE + ":")
+              and cost_evidence.get("power_package_mode") == "separate_components"):
+            child = role[len(POWER_PARENT_ROLE) + 1:]
+            if child not in POWER_CHILDREN:
+                raise ValueError("Unknown inspected linked power component")
+            linked_power[child] = linked_power.get(child, 0) + quantity
+        else:
+            raise ValueError("Inspected stock references unknown shopping role")
+    linked_names = {
+        item["id"]: item["name"]
+        for item in output.get("supplemental_decisions", [])
+    }
+    output["verified_linked_power_stock"] = [
+        {
+            "role_key": POWER_PARENT_ROLE + ":" + child,
+            "name": linked_names.get(child, child),
+            "usable_allocated": quantity,
+        }
+        for child, quantity in sorted(linked_power.items())
+    ]
     for line in quote_lines:
         if not isinstance(line, dict):
             raise ValueError("Verified quote line must be an object")

@@ -144,3 +144,75 @@ def test_legacy_parts_buying_guidance_retains_current_cap_and_head_status():
     assert "historical cap is not established" not in parts
     assert "One paid, carrier-reported delivered; board uninspected" in parts
     assert "quantity/arrival unknown" not in parts
+
+
+def test_inspected_first_unit_inventory_is_separate_from_reported_stock():
+    """Strict checkout attachment must show real units without guessing ownership."""
+    import json
+
+    plan = json.loads(release.PLAN.read_text(encoding="utf-8"))
+    source = release.generate(plan)
+    original = release.first_robot_projection(source)
+    assert all(x["verified_inspected_first_unit"] == 0 for x in original["roles"])
+    assert original["verified_linked_power_stock"] == []
+
+    cost = {
+        "calculation_complete_not_physical_approval": True,
+        "scope": "first_robot",
+        "payable_now_cents": 0,
+        "prior_paid_orders_cents": 1367,
+        "prototype_cumulative_cents": 1367,
+        "remaining_under_cap_cents": 3633,
+    }
+    checkout = {
+        "power_package_mode": "separate_components",
+        "inventory": [
+            {"role_key": "robot:imu", "usable_allocated": 1},
+            {"role_key": "station:room_controller", "usable_allocated": 1},
+            {"role_key": "robot:cap_power:bq24075_charger_candidate",
+             "usable_allocated": 1},
+        ],
+        "lines": [],
+        "seller_charges": [],
+    }
+    attached = release.attach_verified_checkout_evidence(source, cost, checkout)
+    projection = release.first_robot_projection(attached)
+    by_id = {x["id"]: x for x in projection["roles"]}
+    assert by_id["imu"]["verified_inspected_first_unit"] == 1
+    assert by_id["imu"]["fleet_reported_owned_not_verified"] == 1
+    assert by_id["room_controller"]["verified_inspected_first_unit"] == 1
+    assert by_id["cap_power"]["verified_inspected_first_unit"] == 0
+    assert projection["verified_linked_power_stock"] == [{
+        "role_key": "robot:cap_power:bq24075_charger_candidate",
+        "name": next(x["name"] for x in source["supplemental_decisions"]
+                     if x["id"] == "bq24075_charger_candidate"),
+        "usable_allocated": 1,
+    }]
+    output = release.render_first_robot_markdown(attached)
+    first_list = output.split("## 2. First-unit remaining slots")[0]
+    assert "Inspected usable for first unit" in first_list
+    assert f"| {by_id['imu']['name']} | 1 | 1 |" in first_list
+    assert f"| {by_id['room_controller']['name']} | 1 |" in first_list
+    assert projection["verified_linked_power_stock"][0]["name"] in first_list
+
+    # Reported stock is not silently upgraded for the normal preview.
+    preview = release.render_first_robot_markdown(source)
+    assert "Inspected usable for first unit" in preview
+    assert f"| {by_id['imu']['name']} | 0 | 1 |" in preview
+
+
+def test_checkout_attachment_rejects_bad_inspected_quantities():
+    import json
+
+    plan = json.loads(release.PLAN.read_text(encoding="utf-8"))
+    source = release.generate(plan)
+    cost = {"calculation_complete_not_physical_approval": True}
+    checkout = {"inventory": [
+        {"role_key": "robot:imu", "usable_allocated": True}
+    ], "lines": [], "seller_charges": []}
+    with pytest.raises(ValueError, match="quantity must be positive"):
+        release.attach_verified_checkout_evidence(source, cost, checkout)
+    checkout["inventory"][0]["usable_allocated"] = 1
+    checkout["inventory"][0]["role_key"] = "robot:unselected_role"
+    with pytest.raises(ValueError, match="unknown shopping role"):
+        release.attach_verified_checkout_evidence(source, cost, checkout)
