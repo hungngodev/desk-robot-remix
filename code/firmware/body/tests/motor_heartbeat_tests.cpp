@@ -46,5 +46,23 @@ int main() {
   CHECK(!heartbeat.update(0xffffffffU, true));
   CHECK(!heartbeat.update(0x30U, true)); // Deadline across millis rollover.
   CHECK(heartbeat.missed_deadline());
+  // A stalled loop can return after control.tick() has expired the drive.
+  // Losing current permission must not discard the previous active deadline.
+  heartbeat.reset();
+  CHECK(heartbeat.update(200U, true));
+  CHECK(!heartbeat.update(245U, false)); // exactly 45 ms, now unauthorized
+  CHECK(heartbeat.missed_deadline());
+  CHECK(!heartbeat.update(246U, true));
+  heartbeat.reset();
+  CHECK(heartbeat.update(247U, true));
+  CHECK(!heartbeat.update(291U, false)); // timely stop, 44 ms
+  CHECK(!heartbeat.missed_deadline());
+  CHECK(!heartbeat.update(1000U, false)); // already idle, no missed deadline
+  CHECK(heartbeat.update(1001U, true));
+  heartbeat.reset();
+  CHECK(heartbeat.update(0xfffffff0U, true));
+  CHECK(!heartbeat.update(0x1dU, false)); // 45 ms across millis rollover
+  CHECK(heartbeat.missed_deadline());
+  CHECK(!heartbeat.update(0x1eU, true));
   std::cout << "PASS DC CPU heartbeat: stall latch, wrap, USB recovery\n";
 }

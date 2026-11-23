@@ -27,6 +27,11 @@ class MotorHeartbeat {
   // Caller must already have run local floor, dock and body guards.
   // Return LOW if disarmed, stopped, unavailable or any guard is false.
   bool update(std::uint32_t now_ms, bool local_motion_authorized) {
+    // A CPU pause may let the external retriggerable one-shot expire.
+    // Check the previous active interval before clearing it on STOP or lease
+    // expiry: current permission may already be false when the CPU returns.
+    if (active_ && now_ms - last_toggle_ms_ >= kMissedDeadlineMs)
+      missed_deadline_ = true;
     if (!local_motion_authorized || missed_deadline_) {
       idle();
       return false;
@@ -36,13 +41,6 @@ class MotorHeartbeat {
       high_ = true;
       last_toggle_ms_ = now_ms;
       return high_;
-    }
-    // A CPU pause may let the external retriggerable one-shot expire. Never
-    // restart it from a stale drive command, even before the drive lease ends.
-    if (now_ms - last_toggle_ms_ >= kMissedDeadlineMs) {
-      missed_deadline_ = true;
-      idle();
-      return false;
     }
     if (now_ms - last_toggle_ms_ >= kToggleIntervalMs) {
       high_ = !high_;
