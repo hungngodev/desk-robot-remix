@@ -81,6 +81,11 @@ def test_tool_bearer_alone_cannot_promote_dashboard_read_to_voice_tool(
             heads={robot_id: Head()},
         ),
         multimodal=visual,
+        # Signed Xiaozhi generation is independent of the camera/Mac epoch.
+        # A valid HMAC without this authenticated live source must fail closed.
+        _voice_turn_generations={robot_id: 7},
+        voice_events=SimpleNamespace(monitor_ready=True, _event_generation=11),
+        pet=SimpleNamespace(voice_monitor_ready=True),
         start=noop,
         close=noop,
     )
@@ -123,6 +128,22 @@ def test_tool_bearer_alone_cannot_promote_dashboard_read_to_voice_tool(
         assert legitimate.status_code == 200
         assert len(hub.tool_history[robot_id]) == 1
         assert hub.tool_history[robot_id][0][0] == "robot_status"
+
+        # HMAC authenticity alone cannot grant a new or old speaking turn.
+        # The source monitor currently owns generation 7, not generation 6.
+        mismatched_generation = _signed_headers(
+            speech_token,
+            robot_id=robot_id,
+            device_id="mac-01",
+            generation=6,
+            method="GET",
+            path=url,
+            receipt_id="6" * 32,
+        )
+        assert client.get(
+            url, headers={**tool, **mismatched_generation},
+        ).status_code == 409
+        assert len(hub.tool_history[robot_id]) == 1
 
         replay = client.get(url, headers={**tool, **signed})
         assert replay.status_code == 409
