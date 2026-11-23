@@ -425,12 +425,37 @@ void BodyControl::latch_dock_monitor_fault() {
   dock_monitor_fault_latched_ = true;
 }
 
+bool BodyControl::configure_wheel_angle_capture(
+    std::uint32_t left_max_counts_per_s,
+    std::uint32_t right_max_counts_per_s,
+    std::uint32_t max_gap_ms, std::uint32_t max_age_ms) {
+  // Boot-time measured shaft speed, not a remotely configurable limit.
+  // Validate both sensors atomically; no partial left-only admission.
+  if (boot_epoch_ == 0 || wheel_capture_configured_ ||
+      state_.armed || state_.servos_attached) return false;
+  WheelAngleCapture left, right;
+  if (!left.configure(left_max_counts_per_s, max_gap_ms, max_age_ms) ||
+      !right.configure(right_max_counts_per_s, max_gap_ms, max_age_ms))
+    return false;
+  wheel_angles_[0] = left;
+  wheel_angles_[1] = right;
+  wheel_capture_configured_ = true;
+  return true;
+}
+
 void BodyControl::set_accessories(const AccessoryReadings& readings,
                                   std::uint32_t now_ms) {
   // Other simultaneous faults must not hide a dock GPIOA loss that happened
   // while a guarded motion session was still armed.
   const bool was_armed = state_.armed;
   state_.accessories = readings;
+  if (wheel_capture_configured_) {
+    // Capture only real per-conversion AS5600 provenance from the 0x71 bus.
+    // Independent channels may be sampled at different times, so these
+    // angular counts NEVER create a paired metric pose or motor permit.
+    wheel_angles_[0].observe(readings.angle[1], now_ms);
+    wheel_angles_[1].observe(readings.angle[2], now_ms);
+  }
   const auto& force = readings.force;
   const bool belly_valid = (force.valid_mask & 1U) != 0U ||
       (force.valid_mask == 0U && force.valid);

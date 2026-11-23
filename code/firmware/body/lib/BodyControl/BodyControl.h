@@ -7,6 +7,7 @@
 #include "BerryImu.h"
 #include "OpticalRaw.h"
 #include "AccessoryReadings.h"
+#include "WheelAngleCapture.h"
 #include "NecBurst.h"
 
 namespace desk_robot {
@@ -173,12 +174,25 @@ class BodyControl {
   void set_imu_identity(std::uint8_t family, std::uint8_t gyro, std::uint8_t aux);
   // Raw, read-only diagnostics. No tilt or motor permission follows from it.
   void set_imu(const BerryReading& reading);
+  // Accept only explicitly measured installed-shaft AS5600 speed bounds.
+  // Never called by UART; never grants movement or turns angle into wheel mm.
+  // Until physical qualification, production calls neither this nor odometry.
+  bool configure_wheel_angle_capture(std::uint32_t left_max_counts_per_s,
+                                     std::uint32_t right_max_counts_per_s,
+                                     std::uint32_t max_gap_ms,
+                                     std::uint32_t max_age_ms);
+  const WheelAngleCapture& wheel_angle_capture(bool right) const {
+    return wheel_angles_[right ? 1 : 0];
+  }
   // Per-boot provenance for read-only IMU observations; never grants motion.
   void set_boot_epoch(std::uint32_t epoch) {
     if (epoch != boot_epoch_) {
       boot_epoch_ = epoch;
       pose_seq_ = 0;
       pose_last_sample_us_ = 0;
+      wheel_angles_[0].reset_for_boot();
+      wheel_angles_[1].reset_for_boot();
+      wheel_capture_configured_ = false;
     }
   }
   // Physical WROOM assembly requires a fresh identified 6-axis sample, even
@@ -261,6 +275,10 @@ class BodyControl {
   // Never synthesize wheel travel from motor commands or emitted steps.
   std::uint32_t pose_seq_ = 0;
   std::uint64_t pose_last_sample_us_ = 0;
+  // Two independent raw magnet shaft angle histories: left=1, right=2.
+  // Default unconfigured so no unmeasured encoder rate is trusted.
+  WheelAngleCapture wheel_angles_[2]{};
+  bool wheel_capture_configured_ = false;
   bool imu_motion_required_ = false;
   bool imu_attitude_required_ = false;
   bool imu_attitude_configured_ = false;

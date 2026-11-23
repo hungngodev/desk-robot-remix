@@ -138,11 +138,64 @@ void verify_pose_capacity_failure_preserves_clock_and_sequence() {
   check(!body.state().armed && body.state().left == 0 &&
         body.state().right == 0);
 }
+void verify_wheel_capture_stays_read_only() {
+  desk_robot::BodyControl body;
+  desk_robot::LineReceiver receiver;
+  check(!body.configure_wheel_angle_capture(4000, 4000, 200, 80));
+  body.set_boot_epoch(101);
+  check(!body.configure_wheel_angle_capture(4000, 12000, 200, 80));
+  check(body.configure_wheel_angle_capture(4000, 4000, 200, 80));
+  check(!body.configure_wheel_angle_capture(4000, 4000, 200, 80));
+  desk_robot::AccessoryReadings readings{};
+  auto update = [](desk_robot::AngleRaw& a, std::uint16_t value,
+                   std::uint32_t sequence, std::uint32_t at_ms) {
+    a.present = a.valid = true;
+    a.magnet_status = 0x20;
+    a.angle = value;
+    a.sample_seq = sequence;
+    a.at_ms = at_ms;
+  };
+  update(readings.angle[1], 4000, 1, 100);
+  update(readings.angle[2], 20, 1, 100);
+  body.set_accessories(readings, 100);
+  check(body.wheel_angle_capture(false).continuous() &&
+        body.wheel_angle_capture(true).continuous());
+  update(readings.angle[1], 12, 2, 150);
+  update(readings.angle[2], 4080, 2, 150);
+  body.set_accessories(readings, 150);
+  check(body.wheel_angle_capture(false).angular_counts() == 108 &&
+        body.wheel_angle_capture(true).angular_counts() == -36);
+  body.set_accessories(readings, 160); // cached values are duplicates
+  check(body.wheel_angle_capture(false).angular_counts() == 108);
+  readings.angle[1].magnet_status = 0; // broken magnet cannot keep old ticks
+  update(readings.angle[2], 4070, 3, 180);
+  body.set_accessories(readings, 180);
+  check(!body.wheel_angle_capture(false).continuous() &&
+        body.wheel_angle_capture(true).angular_counts() == -46);
+  update(readings.angle[1], 20, 4, 190);
+  body.set_accessories(readings, 190); // new baseline, no bridged travel
+  check(body.wheel_angle_capture(false).continuous() &&
+        body.wheel_angle_capture(false).angular_counts() == 0);
+  update(readings.angle[1], 12, 2, 150); // old acquisition replay
+  body.set_accessories(readings, 195);
+  check(!body.wheel_angle_capture(false).continuous());
+  // No raw shaft reading may promote the UART pose, renew a watchdog or ARM.
+  check(request(body, receiver, "pose\r\n", 196, 196000).find(
+      "\"quality\":\"unavailable\"") != std::string::npos);
+  check(!body.state().armed && body.state().left == 0 &&
+        body.state().right == 0);
+  body.set_boot_epoch(102); // no prior shaft origin survives a reboot
+  check(!body.wheel_angle_capture(false).continuous() &&
+        !body.wheel_angle_capture(true).continuous());
+  check(!body.configure_wheel_angle_capture(0, 4000, 200, 80));
+  check(body.configure_wheel_angle_capture(4000, 4000, 200, 80));
+}
 }  // namespace
 
 int main() {
   verify();
   verify_poll_flood_and_malformed_frames();
   verify_pose_capacity_failure_preserves_clock_and_sequence();
+  verify_wheel_capture_stays_read_only();
   return 0;
 }
