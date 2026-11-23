@@ -222,7 +222,7 @@ def test_a4_export_verify_refuse_undeclared_stale_svg_before_writes(
         source.verify(tmp_path, output)
 
 
-@pytest.mark.parametrize((old, replacement, message), [
+@pytest.mark.parametrize("old, replacement, message", [
     ("track_outer_width_mm=96;", "track_outer_width_mm=190;",
      "Dock guide outline exceeds A4 printable layout"),
     ("base_length_mm=138;", "base_length_mm=240;",
