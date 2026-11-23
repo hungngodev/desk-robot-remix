@@ -1,17 +1,26 @@
-# Small-component head — purchased Sense
+# Small-component head — paid Sense, inspection pending
 
-Updated 2026-11-06. Reuse the owned **0.96-inch SSD1306 OLED**. User chose a rounder
-existing head: [Sparky v0.1.0](../cad/originals/sparky-head/README.md) is the current
-fit-check candidate; EVA remains a historical source.
-User reports buying a **XIAO ESP32S3 Sense camera/microphone bundle**, with a
-displayed price of **$18.87**. Quantity, receipt charges, arrival and revision
-remain unconfirmed. Keep this board for the voice-interruption work. The speaker
-baseline uses one MAX98357A I²S amplifier. The photographed HiLetgo PAM8403
-is a possible analog path if a suitable DAC is available. See the [parts list](../hardware/parts.md).
-The earlier **$21.11 head subtotal** came from the reported Sense price and
-historical amplifier and speaker prices before charges and mounts. See the
+Updated 2026-11-23 from the original 2026-11-06 fit study. Reuse the reported
+**0.96-inch SSD1306 OLED** after inspecting the actual board and glass. Compare
+[Cozmars packaging](../product-definition.md) first for the accepted rounded
+retro-TV head; the saved [Sparky v0.1.0](../cad/originals/sparky-head/README.md)
+remains an unprinted fallback fit study, not a fitted head. EVA is historical.
+
+One **XIAO ESP32S3 Sense camera/microphone bundle** is confirmed **$13.67 paid**
+by a seller order and independent payment receipt on November 3, 2026. The
+carrier reported delivery on November 7, but the actual board, camera, PDM
+microphone, included accessories, revision and condition remain **uninspected**.
+The older **$18.87** displayed listing was not the paid amount, and the earlier
+**$21.11 head subtotal** combined historical listing prices before shipping,
+tax, mounts, power and the rest of the robot. Neither is a qualified current
+checkout total. Consult the [canonical first-unit builder and buying route](one-complete-robot.md)
+and the [paid receipt reconciliation](../hardware/bom.json).
+Keep the Sense for voice and continuous video. The selected digital playback
+uses one MAX98357A I²S amplifier and a separately qualified speaker; the
+photographed HiLetgo PAM8403 is an analog spare, not a direct I²S substitute.
+See the [parts list](../hardware/parts.md) and historical
 [supplier comparison](../research/2026-11-03-head-budget.md).
-Confirm the delivery contains the full Sense kit with camera and microphone.
+Inspect the complete actual Sense kit before making mounts or audio connections.
 
 ## Reuse drivers, change the board configuration
 
@@ -27,15 +36,22 @@ and [verification](firmware-foundation.md). The existing modular build is Freeno
 INMP441 I²S; it cannot be flashed to Sense. CoreS3 and WROOM binaries are also
 incompatible. The Sense build passes; no physical Sense test has happened.
 
-**Ordinary-speech interruption is required in the first build.** The compiled
-Sense baseline has no playback reference/AEC and does not yet meet it. Reuse
-[RIO's exact-Sense software AEC and cancellation](../research/2026-11-03-sense-realtime-reuse.md),
-then qualify the final acoustics. RIO's speaker pins differ from ours, and its
-Arduino source is not a drop-in ESP-IDF binary. Its camera captures requested
-stills; Google's/Pipecat's live-session examples supply the next integration
-pattern for paced camera frames and idle observations. See
-[audio acceptance](audio-barge-in.md). An echo gate that mutes the microphone
-during playback cannot pass the interruption requirement.
+**Ordinary-speech interruption is required in the first build.** The early
+Sense baseline lacked playback reference/AEC; the current pinned
+`SenseReferenceCodec` is now integrated and supplies microphone and
+playback-reference PCM to the selected ESP-IDF AFE source path. That is software
+integration, **not** evidence of fitted-speaker AEC alignment, audible stopping,
+or preservation of a human's first words. The exact board, enclosure and
+firmware must still pass the [physical audio acceptance](audio-barge-in.md)
+at both speaking distances. Reuse the documented
+[RIO exact-Sense AEC and cancellation work](../research/2026-11-03-sense-realtime-reuse.md)
+and [Sense AEC port procedure](sense-aec-port.md); RIO's speaker pins differ
+from ours and its Arduino code is not a drop-in ESP-IDF binary. RIO captured
+requested stills, whereas the current Sense uses consented continuous
+authenticated MJPEG, with Mac frame selection and stale-frame rejection
+described below. Google's and Pipecat's session designs remain research
+references, not evidence of a second active voice stack. An echo gate that
+mutes the microphone during playback cannot pass the interruption requirement.
 
 Implemented, physically unqualified header budget: OLED2 + amplifier3 + UART2 = seven signals, with
 camera/PDM internally connected. The allocation was checked against official documentation and compiled; it is
