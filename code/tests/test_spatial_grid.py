@@ -216,3 +216,16 @@ def test_nonpositive_mac_receipt_time_is_not_fresh(received_us):
     with pytest.raises(GridEvidenceError, match="Invalid grid source"):
         g.record(batch, now_us=0)
     assert g.state(1, 1, now_us=0) == "unknown"
+
+
+def test_floor_unsafe_expires_to_stale_without_becoming_safe():
+    g = grid()
+    g.record(evidence("floor_unsafe", 0), now_us=1_000_010)
+    assert g.state(1, 1, now_us=1_000_010) == "unsafe"
+    # The conservative floor hazard does not require obstacle evidence.
+    assert g.state(1, 1, now_us=2_000_000) == "unsafe"
+    assert g.state(1, 1, now_us=2_000_001) == "stale"
+    assert g.snapshot(now_us=2_000_001).support[5] == "stale"
+    # A host clock rollback cannot make that expired reading current.
+    assert g.state(1, 1, now_us=999_999) == "stale"
+    assert "safe" not in g.snapshot(now_us=2_000_001).support

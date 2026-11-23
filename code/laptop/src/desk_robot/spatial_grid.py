@@ -185,6 +185,10 @@ class SpatialGrid:
                 or cell.floor_calibration and cell.floor_calibration != self.calibration_id):
             return "out_of_calibration"
         if cell.floor == "unsafe":
+            # An expired cliff observation is still nontraversable, but it is
+            # no longer current evidence. Keep stale provenance visible.
+            if not 0 <= now_us - cell.floor_received_us <= self.ttl_us:
+                return "stale"
             return "unsafe"
         if (cell.floor_received_us == 0 or cell.obstacle_received_us == 0):
             return "unknown"
