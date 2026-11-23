@@ -96,6 +96,28 @@ clearance, real coast-distance testing, and independent stop gates.
 
 Mechanical provenance remains separate: SMARS tracks/lift noncommercial/share-alike, Bluino gripper CC BY, and Sparky head CC BY-SA. These original files are not relicensed here.
 
+## A4 source-scale paper fit overlays
+
+Before printing the full tray or buying a pack, generate the four **unpowered**
+A4 SVG reference pages from the existing OpenSCAD dimensions:
+
+```sh
+python3 docs/cad/remixes/print_2d_fit_templates.py --output /tmp/desk-robot-paper
+python3 docs/cad/remixes/print_2d_fit_templates.py --output /tmp/desk-robot-paper --verify
+```
+
+Print at **100% actual size**, with any fit-to-page scaling turned off, and
+check both the horizontal 100 mm and vertical 25 mm printed rulers. The
+`power_reference_A4.svg` page outlines the candidate protected 1S pack BODY
+(86 x 35 mm) inside the provisional 91.6 x 40.6 mm tray outer walls. It is a
+paper collision check, **not** an approved pack housing. It excludes the actual
+connector and NTC exits, PCM overhang, wiring bends, charger, boost, switch,
+fuse, and mounting/service clearances. If the real assembly exceeds either
+outline, measure the whole stack and redesign before printing. These paper
+pages contain no approved drilling coordinates and confer no authority to
+power or charge the robot. The independent full-power, current and temperature
+gates remain mandatory.
+
 ## Fusion assembly scaffold
 
 New [fusion_assembly_scaffold.py](fusion_assembly_scaffold.py) is a **Fusion GUI script**, not a generic system Python command. Place it within your cloned repository at `docs/cad/remixes/` and unzip the adapter STLs into `docs/cad/remixes/adapter_stls/`. Run in **Fusion > Utilities > Scripts and Add-Ins**. It creates a NEW direct design and stages **12 saved original STLs, up to seven adapters, and up to 16 provisional dock, battery, contact, jaw, speaker, and sensor fit references** as individually named components, interpreting unitless STL coordinates as millimeters. Generate the optional references with `python3 code/scripts/export_fit_kit.py` first. Missing original licensed meshes fail the import; missing optional fit references are omitted, not invented. It deliberately does **not** guess mesh transforms, join tracks, install a battery, make an electrical connector, or create joints. Ground/Align/Joint/Interference remains necessary after real measurements. Source and manifest are syntax checked, but Fusion GUI execution is not available in CI. See [Autodesk MeshBodies.add documentation](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/fusion_MeshBodies_add.htm).

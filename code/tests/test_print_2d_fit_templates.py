@@ -25,6 +25,9 @@ def setup_sources(tmp_path):
         "docs/cad/remixes/dock/dock_passive_fit.scad":
             "tag_black_side_mm = 60;\ntag_white_margin_each_mm=5;\n"
             "tag_paper_slack_each_mm=0.6;\n",
+        "docs/cad/remixes/remaining_fit_gauges.scad":
+            "candidate_pack_body_l_mm = 86;\npower_l = 86;\n"
+            "power_w = 35;\nfit_xy = 0.4;\nwall = 2.4;\n",
     }
     for name, contents in data.items():
         path = tmp_path / name
@@ -75,8 +78,9 @@ def test_a4_real_scale_and_source_dimensions(tmp_path):
     assert report["source_dimensions_mm"] == {
         "ranger": [10.5, 13.3], "speaker": [20, 16],
         "dock": [60, 70, 71.2],
+        "power": [86, 35, 91.6, 40.6],
     }
-    assert len(report["pages"]) == 3
+    assert len(report["pages"]) == 4
     assert report["approved_drill_holes"] == 0
     assert report["actual_fit_verified"] is False
     for filename in report["pages"]:
@@ -91,6 +95,11 @@ def test_a4_real_scale_and_source_dimensions(tmp_path):
         assert "NOT FOR DRILLING" in data
     assert 'width="71.2" height="71.2"' in (
         output / "dock_reference_A4.svg").read_text()
+    power = (output / "power_reference_A4.svg").read_text()
+    assert 'width="86" height="35"' in power
+    assert 'width="91.6" height="40.6"' in power
+    assert "EXCLUDES leads, NTC, PCM overhang" in power
+    assert "No mounting holes, complete pack fit or charging approved." in power
     assert source.verify(tmp_path, output) == report
 
 
@@ -154,5 +163,26 @@ def test_a4_nominal_outline_cannot_clip_or_overlap_legend(
     scad.write_text(scad.read_text().replace(before, after), encoding="utf-8")
     output = tmp_path / "paper"
     with pytest.raises(ValueError, match="exceeds A4 printable layout"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+def test_power_overlay_rejects_undersized_candidate_pack_layout(tmp_path):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(scad.read_text().replace("power_l = 86;", "power_l = 68;"))
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="shorter than candidate protected pack"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+def test_power_overlay_rejects_a4_label_collision(tmp_path):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(scad.read_text().replace("power_w = 35;", "power_w = 90;"))
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="Power outline exceeds A4 printable layout"):
         source.export(tmp_path, output)
     assert not output.exists()

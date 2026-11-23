@@ -19,6 +19,7 @@ SOURCES = {
     "ranger": "docs/cad/remixes/vl53l0x_gy530_fit_gauge.scad",
     "speaker": "docs/cad/remixes/speaker_rect_fit_gauge.scad",
     "dock": "docs/cad/remixes/dock/dock_passive_fit.scad",
+    "power": "docs/cad/remixes/remaining_fit_gauges.scad",
 }
 
 
@@ -46,12 +47,23 @@ def values(root: Path) -> dict:
     pocket = paper + 2 * slack
     if not (0 < black < paper < pocket <= 120):
         raise ValueError("Invalid dock paper/pocket dimensions")
+    power = data["power"]
+    candidate_length = scad_mm(power, "candidate_pack_body_l_mm")
+    pack_l = scad_mm(power, "power_l")
+    pack_w = scad_mm(power, "power_w")
+    fit_xy = scad_mm(power, "fit_xy")
+    wall = scad_mm(power, "wall")
+    if pack_l < candidate_length:
+        raise ValueError("Power tray shorter than candidate protected pack body")
+    tray_l = pack_l + 2 * (fit_xy + wall)
+    tray_w = pack_w + 2 * (fit_xy + wall)
     return {
         "ranger": (scad_mm(data["ranger"], "board_x"),
                    scad_mm(data["ranger"], "board_y")),
         "speaker": (scad_mm(data["speaker"], "speaker_l"),
                     scad_mm(data["speaker"], "speaker_w")),
         "dock": (black, paper, pocket),
+        "power": (pack_l, pack_w, tray_l, tray_w),
     }
 
 
@@ -93,6 +105,21 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
             + _text(20, 185, f"Nominal dock pocket: {_num(pocket)} mm (dashed)")
         )
         title = "Dock paper / passive pocket outline"
+    elif name == "power":
+        pack_l, pack_w, tray_l, tray_w = dims
+        x, y = (A4_WIDTH_MM - tray_l) / 2, 88
+        if x < 15 or y + tray_w > 157:
+            raise ValueError("Power outline exceeds A4 printable layout")
+        features = (
+            _rect(x, y, tray_l, tray_w, dash=True)
+            + _rect(x + (tray_l - pack_l) / 2,
+                    y + (tray_w - pack_w) / 2, pack_l, pack_w)
+            + _text(20, 169, f"Pack body only: {_num(pack_l)} x {_num(pack_w)} mm")
+            + _text(20, 176, f"Nominal tray outside: {_num(tray_l)} x {_num(tray_w)} mm (dashed)")
+            + _text(20, 183, "EXCLUDES leads, NTC, PCM overhang, charger, boost and fuses.")
+            + _text(20, 190, "No mounting holes, complete pack fit or charging approved.")
+        )
+        title = "Protected 1S candidate body / nominal tray outline"
     else:
         width, height = dims
         x, y = (A4_WIDTH_MM-width)/2, 108
