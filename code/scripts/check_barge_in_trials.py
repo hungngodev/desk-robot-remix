@@ -170,7 +170,7 @@ def evaluate(records: list[dict]) -> dict:
     if any(
         next_onset <= prior_stop
         for (_, prior_stop), (next_onset, _) in zip(
-            ordered_attempts, ordered_attempts[1:], strict=True
+            ordered_attempts, ordered_attempts[1:], strict=False
         )
     ):
         raise ValueError("Overlapping human interruption trial intervals")
