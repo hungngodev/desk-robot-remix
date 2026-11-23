@@ -9,10 +9,12 @@ from __future__ import annotations
 import argparse
 import copy
 import csv
+import hashlib
 import io
 import json
 import math
 import sys
+from datetime import date
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -2434,6 +2436,59 @@ def _confirmed_first_unit_prior_payment_missing(cost: dict, evidence: dict) -> b
     return True
 
 
+
+PRIOR_SPEND_REVIEW_SCOPE = "all_desk_robot_remix_prior_paid_orders"
+
+
+def _first_unit_paid_history_review_missing(cost: dict, evidence: dict) -> bool:
+    """Require accountable reconciliation of prior spending in strict checkout.
+
+    The reviewer retains the actual invoices and payment statements privately.
+    Digests bind the reviewed register and private receipt manifest, but cannot
+    prove a reviewer's assertion true; release relies on that human attestation.
+    """
+    if not isinstance(cost, dict) or not isinstance(evidence, dict):
+        return True
+    costs = evidence.get("costs")
+    if not isinstance(costs, dict) or costs.get("paid_orders_complete") is not True:
+        return True
+    orders, review = costs.get("paid_orders"), costs.get("prior_spend_review")
+    if not isinstance(orders, list) or not isinstance(review, dict):
+        return True
+    if (review.get("scope") != PRIOR_SPEND_REVIEW_SCOPE
+            or review.get("all_project_prior_spend_reconciled") is not True
+            or review.get("review_basis") != "private_invoices_and_payment_statements"):
+        return True
+    reviewer, record_id = review.get("reviewer"), review.get("review_record_id")
+    if (not isinstance(reviewer, str)
+            or reviewer.strip().casefold() in {
+                "", "unknown", "tbd", "operator", "tester", "fixture",
+            }
+            or not isinstance(record_id, str) or not record_id.strip()):
+        return True
+    try:
+        reviewed_on = review["reviewed_on"]
+        reviewed_date = date.fromisoformat(reviewed_on)
+        if reviewed_date.isoformat() != reviewed_on or reviewed_date > date.today():
+            return True
+        total_cents = cents(review.get("reconciled_total_usd"), "review total")
+        register_digest = hashlib.sha256(
+            json.dumps(orders, sort_keys=True, separators=(",", ":"),
+                       ensure_ascii=False, allow_nan=False).encode("utf-8")
+        ).hexdigest()
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return True
+    private_digest = review.get("private_receipts_manifest_sha256")
+    return not (
+        type(cost.get("prior_paid_orders_cents")) is int
+        and cost["prior_paid_orders_cents"] == total_cents
+        and review.get("paid_orders_sha256") == register_digest
+        and isinstance(private_digest, str) and len(private_digest) == 64
+        and all(ch in "0123456789abcdef" for ch in private_digest)
+    )
+
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--plan", type=Path, default=PLAN)
@@ -2502,6 +2557,11 @@ def main() -> int:
             if known_payment_missing:
                 print("HOLD: confirmed Sense payment is absent from prior paid "
                       "order allocations or cumulative cost", file=sys.stderr)
+                return 2
+            if _first_unit_paid_history_review_missing(cost, evidence):
+                print("HOLD: all prior spending needs a dated, scoped reviewer "
+                      "attestation tied to the paid orders and private "
+                      "receipt manifest", file=sys.stderr)
                 return 2
         try:
             from verify_procurement_receipts import (

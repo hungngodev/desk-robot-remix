@@ -146,6 +146,11 @@ def test_purchasing_release_rechecks_live_pr_after_receipts_before_output(
         release, "first_robot_projection",
         lambda *_: {"purchase_approved": True},
     )
+    # This fixture isolates PR-head races; historical-spend reviews are
+    # independently covered below, never replaced by a real receipt.
+    monkeypatch.setattr(
+        release, "_first_unit_paid_history_review_missing", lambda *_: False,
+    )
     monkeypatch.setattr(
         release, "cost_quote",
         lambda *_: {"calculation_complete_not_physical_approval": True,
@@ -297,3 +302,62 @@ def test_procurement_cli_rejects_nonfinite_json_numbers_before_projection(tmp_pa
             or "overflows finite range" in result.stderr
         )
 
+
+
+
+def test_strict_prior_spend_requires_review_bound_to_exact_paid_register():
+    import hashlib
+    import importlib.util
+    import json
+
+    spec = importlib.util.spec_from_file_location(
+        "procurement_prior_spend_review_test", SCRIPT
+    )
+    assert spec and spec.loader
+    release = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(release)
+    orders = [{"order_reference": "synthetic-sense",
+               "total_paid_usd": "13.67",
+               "allocations": [{"role_key": "robot:xiao_sense",
+                                "quantity": 1}]}]
+    paid_digest = hashlib.sha256(
+        json.dumps(orders, sort_keys=True, separators=(",", ":"),
+                   ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+    review = {
+        "scope": release.PRIOR_SPEND_REVIEW_SCOPE,
+        "all_project_prior_spend_reconciled": True,
+        "review_basis": "private_invoices_and_payment_statements",
+        "reviewer": "Independent test witness",
+        "review_record_id": "synthetic-private-record",
+        "reviewed_on": "2026-11-23",
+        "reconciled_total_usd": "13.67",
+        "paid_orders_sha256": paid_digest,
+        "private_receipts_manifest_sha256": "a" * 64,
+    }
+    cost = {"prior_paid_orders_cents": 1367}
+    costs = {"paid_orders_complete": True, "paid_orders": orders,
+             "prior_spend_review": review}
+    helper = release._first_unit_paid_history_review_missing
+    assert helper(cost, {"costs": costs}) is False
+    assert helper(cost, {"costs": {**costs, "prior_spend_review": None}})
+    assert helper(cost, {"costs": {**costs, "paid_orders_complete": False}})
+    changed_orders = orders + [{"order_reference": "omitted-history",
+                               "total_paid_usd": "1.00", "allocations": []}]
+    assert helper(cost, {"costs": {**costs, "paid_orders": changed_orders}})
+    for field, bad in (
+        ("paid_orders_sha256", "f" * 64),
+        ("private_receipts_manifest_sha256", ""),
+        ("all_project_prior_spend_reconciled", False),
+        ("reconciled_total_usd", "13.66"),
+        ("reviewed_on", "2099-01-01"),
+        ("reviewer", "operator"),
+        ("scope", "just the Sense payment"),
+        ("review_record_id", ""),
+    ):
+        assert helper(cost, {"costs": {**costs,
+            "prior_spend_review": {**review, field: bad}}}), field
+    assert helper({"prior_paid_orders_cents": 1368}, {"costs": costs})
+    # This guard is executed by the real strict CLI before CI/checkout release.
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "if _first_unit_paid_history_review_missing(cost, evidence):" in source
