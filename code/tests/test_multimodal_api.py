@@ -1555,6 +1555,14 @@ def test_native_queued_asr_cannot_impersonate_a_newer_human_vad(
     ids = [entry.id for entry in settings.robots]
     hub = CameraFrameHub(ids)
     attention = AttentionLedger(ids)
+    admitted = []
+    actual_remember = hub.remember_heard
+
+    def trace_remember(*args, **kwargs):
+        admitted.append(args[1])
+        return actual_remember(*args, **kwargs)
+
+    hub.remember_heard = trace_remember
 
     async def noop():
         pass
@@ -1578,6 +1586,7 @@ def test_native_queued_asr_cannot_impersonate_a_newer_human_vad(
         old = client.post(url, json=stale, headers=headers)
         assert old.status_code == 200
         assert old.json()["ephemeral_context_added"] is False
+        assert admitted == []  # no transient read during a slow disk write
         assert not hub.heard_history[robot]
         assert not attention.timeline(robot, time.monotonic())
 
@@ -1589,12 +1598,22 @@ def test_native_queued_asr_cannot_impersonate_a_newer_human_vad(
         fresh = client.post(url, json=current, headers=headers)
         assert fresh.status_code == 200
         assert fresh.json()["ephemeral_context_added"] is True
+        assert len(admitted) == 1
         assert len(hub.heard_history[robot]) == 1
         assert hub.heard_history[robot][0][1] == current["transcript"]
         assert any(
             "Newer uncertain ASR" in str(cue)
             for cue in attention.timeline(robot, time.monotonic())
         )
+        settings.voice_vision_tools_enabled = False
+        settings.voice_vision_tools_enabled = True
+        revoked = client.post(url, headers=headers, json={
+            **current,
+            "event_id": "omni_" + "a" * 12 + "_" + "e" * 20,
+        })
+        assert revoked.status_code == 200
+        assert revoked.json()["ephemeral_context_added"] is False
+        assert len(admitted) == 1
         for bad_stamp in (
             int((now - 120) * 1_000_000),
             int((time.monotonic() + 2) * 1_000_000),
@@ -1644,6 +1663,7 @@ def test_completed_native_asr_blends_with_live_camera_context_without_disk_conse
     request = {
         "event_id": "omni_" + "a" * 12 + "_" + "b" * 20,
         "transcript": "The red key is beside the mug",
+        "accepted_at_us": time.monotonic_ns() // 1000,
     }
     with TestClient(create_app(settings, runtime=runtime)) as client:
         consent = client.get(f"/v1/pet/{pet.id}/omni-context", headers=headers)
@@ -1802,6 +1822,7 @@ async def test_cancelled_native_asr_sqlite_write_retracts_revoked_memory(
     request = NativeHeardRequest(
         event_id="omni_" + "a" * 12 + "_" + "c" * 20,
         transcript="This private transcript should not survive opt out",
+        accepted_at_us=time.monotonic_ns() // 1000,
     )
     task = asyncio.create_task(endpoint(robot, request))
     try:

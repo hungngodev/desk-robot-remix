@@ -179,8 +179,22 @@ def register_native_omni_routes(
         if accepted_at > observed_at or observed_at - accepted_at > 90:
             raise HTTPException(409, "Native ASR source timestamp expired or in future")
         live_consent_generation = settings.camera_consent_generation
+        attention = getattr(app.state.runtime, "attention", None)
+        # A delayed or legacy ASR must not appear even temporarily in the
+        # live hub while an optional SQLite write awaits completion. Only
+        # source-stamped ASR from the current consent and voice epoch qualifies.
+        live_source_current = (
+            request.accepted_at_us is not None
+            and request.accepted_at_us >= int(
+                settings.camera_consent_started_at * 1_000_000
+            )
+            and (attention is None or attention.heard_is_current(
+                robot_id, accepted_at
+            ))
+        )
         ephemeral = False
-        if settings.voice_vision_tools_enabled and visual is not None:
+        if (live_source_current and settings.voice_vision_tools_enabled
+                and visual is not None):
             remember = getattr(visual.hub, "remember_heard", None)
             if callable(remember):
                 ephemeral = remember(
@@ -275,7 +289,6 @@ def register_native_omni_routes(
         # Keep the same ephemeral and consented model ASR in the shared
         # Mac attention snapshot. A transcript is uncertain context only,
         # never an instruction or automatic permission to operate motors.
-        attention = getattr(app.state.runtime, "attention", None)
         if ephemeral and settings.voice_vision_tools_enabled and attention is not None:
             accepted = attention.heard(
                 robot_id, request.event_id, spoken[:240], accepted_at

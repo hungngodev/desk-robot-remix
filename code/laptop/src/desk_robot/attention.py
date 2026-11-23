@@ -147,6 +147,12 @@ class AttentionLedger:
         state.topic_updated_at = at
         return True
 
+    def heard_is_current(self, robot_id: str, at: float) -> bool:
+        """Source time must not precede a newer voice start or ASR cue."""
+        _clock(at)
+        state = self._state(robot_id)
+        return at >= max(state.voice_at, state.asr_at)
+
     def human_started(self, robot_id: str, at: float) -> None:
         _clock(at)
         state = self._state(robot_id)
@@ -155,6 +161,12 @@ class AttentionLedger:
         state.voice_at = at
         state.voice_active = True
         state.human_turns += 1
+        # The new human has priority even if their next words are too short
+        # for a finished ASR transcript. Do not keep the previous model guess
+        # labelled as the current task during that silence.
+        if state.asr_at < at:
+            state.asr = ""
+            state.last_heard_id = None
 
     def human_ended(self, robot_id: str, at: float) -> None:
         _clock(at)
@@ -169,7 +181,7 @@ class AttentionLedger:
         if (not isinstance(event_id, str)
                 or re.fullmatch(r"omni_[0-9a-f]{12}_[0-9a-f]{20}", event_id) is None):
             return False
-        if event_id in state.heard_ids or at < max(state.asr_at, state.voice_at):
+        if event_id in state.heard_ids or not self.heard_is_current(robot_id, at):
             # An old model transcript completing after a newer authenticated
             # VAD start cannot become that newer turn's conversational goal.
             return False

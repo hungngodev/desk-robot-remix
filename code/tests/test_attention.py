@@ -765,3 +765,21 @@ def test_old_operator_topic_expires_without_erasing_current_social_or_fault(
     assert "Earlier completed operator topic" not in (
         ledger.timeline("pet", 141)[0]["content"]
     )
+
+
+
+def test_new_human_voice_removes_old_current_asr_and_blocks_late_arrivals(
+    monkeypatch,
+):
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 300.0)
+    ledger = AttentionLedger(["pet"])
+    old = "omni_" + "a" * 12 + "_" + "b" * 20
+    late = "omni_" + "a" * 12 + "_" + "c" * 20
+    ledger.human_started("pet", 10)
+    assert ledger.heard("pet", old, "An older model guess", 11)
+    ledger.human_started("pet", 12)
+    assert "An older model guess" not in str(ledger.timeline("pet", 13))
+    assert not ledger.heard_is_current("pet", 11.5)
+    assert not ledger.heard("pet", late, "Delayed old human turn", 11.5)
+    assert ledger.heard("pet", late, "Current human turn", 12.5)
+    assert "Current human turn" in str(ledger.timeline("pet", 13))
