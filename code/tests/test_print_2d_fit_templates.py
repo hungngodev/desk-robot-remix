@@ -110,6 +110,23 @@ def test_changed_source_and_tampered_svg_refuse_verification(tmp_path):
         source.verify(tmp_path, output)
 
 
+def test_larger_dock_pocket_must_not_overprint_a4_captions(tmp_path):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    modified = scad.read_text(encoding="utf-8")
+    modified = modified.replace("tag_black_side_mm = 60;",
+                                "tag_black_side_mm = 75;")
+    modified = modified.replace("tag_white_margin_each_mm=5;",
+                                "tag_white_margin_each_mm=10;")
+    scad.write_text(modified, encoding="utf-8")
+    # Pocket 96.2 mm ends at y=172.2, crossing the first caption at 171.
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="Dock pocket outline exceeds A4"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
 def test_missing_or_ambiguous_measurement_fails_closed(tmp_path):
     source = load()
     setup_sources(tmp_path)

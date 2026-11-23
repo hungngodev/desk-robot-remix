@@ -79,6 +79,11 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
     if name == "dock":
         black, paper, pocket = dims
         x, y = (A4_WIDTH_MM-pocket)/2, 76
+        # The first legend baseline is y=171 (4 mm text). Preserve at
+        # least 4 mm whitespace after the nominal pocket outline; a wider
+        # measured tag must use a redesigned layout, not overlapping ink.
+        if x < 15 or y + pocket > 163:
+            raise ValueError("Dock pocket outline exceeds A4 printable layout")
         features = (
             _rect(x, y, pocket, pocket, dash=True)
             + _rect(x+(pocket-paper)/2, y+(pocket-paper)/2, paper, paper)
