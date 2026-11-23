@@ -10,6 +10,7 @@
 #include "WheelAngleCapture.h"
 #include "WheelPairCapture.h"
 #include "ImuYawCapture.h"
+#include "WheelPoseIntegrator.h"
 #include "NecBurst.h"
 
 namespace desk_robot {
@@ -196,6 +197,14 @@ class BodyControl {
   const WheelPairCapture::Receipt& wheel_pair_receipt() const {
     return wheel_pairs_.receipt();
   }
+  // No firmware profile invokes these automatically: installed geometry,
+  // gyro alignment and external motor cutoff require measured commissioning.
+  // No UART or model command can configure or reanchor physical odometry.
+  bool configure_wheel_pose(const WheelPoseIntegrator::Calibration& calibration);
+  bool start_local_pose_origin(std::uint32_t now_ms);
+  const WheelPoseIntegrator::State& wheel_pose_state() const {
+    return wheel_pose_.state();
+  }
   // Per-boot provenance for read-only IMU observations; never grants motion.
   void set_boot_epoch(std::uint32_t epoch) {
     if (epoch != boot_epoch_) {
@@ -206,6 +215,8 @@ class BodyControl {
       wheel_angles_[1].reset_for_boot();
       wheel_pairs_.reset_for_boot();
       imu_yaw_.reset_for_boot();
+      wheel_pose_.reset_for_boot();
+      wheel_pose_configured_ = false;
       imu_yaw_configured_ = false;
       wheel_pair_configured_ = false;
       wheel_capture_configured_ = false;
@@ -296,6 +307,8 @@ class BodyControl {
   WheelAngleCapture wheel_angles_[2]{};
   WheelPairCapture wheel_pairs_{};
   ImuYawCapture imu_yaw_{};
+  WheelPoseIntegrator wheel_pose_{};
+  bool wheel_pose_configured_ = false;
   bool imu_yaw_configured_ = false;
   bool wheel_capture_configured_ = false;
   bool wheel_pair_configured_ = false;

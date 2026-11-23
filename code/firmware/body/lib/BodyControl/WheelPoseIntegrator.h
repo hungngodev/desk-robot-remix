@@ -95,14 +95,18 @@ class WheelPoseIntegrator {
                              : w.pair_seq != last_pair_seq_ + 1U) ||
         !e.imu_valid || e.imu_segment == 0 ||
         e.imu_yaw_urad < -3141593LL || e.imu_yaw_urad > 3141593LL ||
+        w.skew_ms != skew(w.left_ms, w.right_ms) ||
         w.skew_ms > limits_.max_pair_skew_ms ||
         skew(later, e.imu_at_ms) > limits_.max_imu_skew_ms ||
         now_ms - earlier > limits_.max_age_ms ||
         now_ms - e.imu_at_ms > limits_.max_age_ms ||
-        e.imu_error_urad + limits_.imu_alignment_error_urad >
+        static_cast<std::uint64_t>(e.imu_error_urad) +
+                limits_.imu_alignment_error_urad >
             limits_.max_yaw_error_urad ||
         (have_source_ &&
          (w.segment != wheel_segment_ || e.imu_segment != imu_segment_ ||
+          (e.imu_at_ms - last_imu_ms_ == 0U ||
+           e.imu_at_ms - last_imu_ms_ >= 0x80000000U) ||
           earlier - last_sample_ms_ == 0U ||
           earlier - last_sample_ms_ >= 0x80000000U)))
       return reject();
@@ -194,6 +198,7 @@ class WheelPoseIntegrator {
     }
     last_pair_seq_ = w.pair_seq;
     last_sample_ms_ = earlier;
+    last_imu_ms_ = e.imu_at_ms;
     last_imu_yaw_urad_ = e.imu_yaw_urad;
     latest_imu_error_urad_ = e.imu_error_urad;
     return true;
@@ -212,7 +217,8 @@ class WheelPoseIntegrator {
         now_ms - last_sample_ms_ > limits_.max_age_ms ||
         next_origin_ == 0 || next_origin_ == 0xffffffffU)
       return false;
-    if (latest_imu_error_urad_ + limits_.imu_alignment_error_urad >
+    if (static_cast<std::uint64_t>(latest_imu_error_urad_) +
+            limits_.imu_alignment_error_urad >
         limits_.max_yaw_error_urad)
       return false;
     state_ = State{};
@@ -266,7 +272,7 @@ class WheelPoseIntegrator {
   bool configured_ = false, have_source_ = false;
   std::uint8_t stationary_streak_ = 0;
   std::uint32_t next_origin_ = 1, last_pair_seq_ = 0;
-  std::uint32_t last_sample_ms_ = 0;
+  std::uint32_t last_sample_ms_ = 0, last_imu_ms_ = 0;
   std::uint32_t wheel_segment_ = 0, imu_segment_ = 0;
   std::uint32_t latest_imu_error_urad_ = 0;
   std::int64_t last_imu_yaw_urad_ = 0, origin_yaw_urad_ = 0;

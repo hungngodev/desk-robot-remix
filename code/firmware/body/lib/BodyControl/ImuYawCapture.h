@@ -48,7 +48,6 @@ class ImuYawCapture {
   }
 
   Result observe(const BerryReading& r, std::uint32_t now_ms) {
-    last_delta_urad_ = 0;
     if (!configured_) return Result::Unqualified;
     if (drift_latched_) return Result::Invalid;
     const std::int32_t axis_raw = r.gyro[calibration_.axis];
@@ -88,6 +87,9 @@ class ImuYawCapture {
         return Result::Invalid;
       }
     }
+    // Cached identical IMU frames retain the last real delta, but are
+    // never themselves new motion/zero-velocity evidence downstream.
+    last_delta_urad_ = 0;
     if (!continuous_) {
       if (segment_ == 0xffffffffU) {
         invalidate();
@@ -155,6 +157,7 @@ class ImuYawCapture {
   }
   void reset_for_boot() { *this = ImuYawCapture(); }
   bool continuous() const { return continuous_; }
+  std::uint32_t acquisition_ms() const { return last_.at_ms; }
   bool fresh(std::uint32_t now_ms) const {
     return continuous_ && now_ms - last_.at_ms <= calibration_.max_age_ms;
   }

@@ -374,6 +374,89 @@ void verify_imu_yaw_never_promotes_pose() {
   check(request(body, receiver, "pose\r\n", 2, 100).find(
       "\"quality\":\"unavailable\"") != std::string::npos);
 }
+void verify_qualified_pose_is_never_implicit_navigation() {
+  desk_robot::BodyControl body;
+  desk_robot::LineReceiver receiver;
+  body.set_boot_epoch(502);
+  body.set_imu_identity(4, 0x68, 0);
+  desk_robot::ImuYawCapture::Calibration yaw{};
+  yaw.axis = 2; yaw.sign = 1;
+  yaw.max_rate_raw = 500; yaw.bias_uncertainty_raw = 20;
+  yaw.scale_error_ppm = 20000;
+  yaw.accel_norm_min_raw = 12000; yaw.accel_norm_max_raw = 20000;
+  yaw.temp_min_raw = -1000; yaw.temp_max_raw = 1000;
+  yaw.max_gap_ms = 200; yaw.max_age_ms = 150;
+  yaw.max_yaw_error_urad = 500000;
+  check(body.configure_imu_yaw_capture(yaw));
+  check(body.configure_wheel_angle_capture(4000, 4000, 200, 150));
+  check(body.configure_wheel_pair_skew(25));
+  desk_robot::WheelPoseIntegrator::Calibration geom{};
+  geom.left_nm_per_count = geom.right_nm_per_count = 100000;
+  geom.left_forward_sign = 1; geom.right_forward_sign = -1;
+  geom.track_width_mm = 100; geom.max_pair_step_mm = 25;
+  geom.max_pair_skew_ms = 25; geom.max_imu_skew_ms = 50;
+  geom.max_age_ms = 200; geom.wheel_error_ppm = 10000;
+  geom.imu_alignment_error_urad = 1000;
+  geom.max_wheel_gyro_residual_urad = 50000;
+  geom.max_xy_error_mm = 30; geom.max_yaw_error_urad = 500000;
+  geom.stationary_gyro_step_urad = 500; geom.stationary_pairs_required = 3;
+  check(body.configure_wheel_pose(geom));
+  check(!body.start_local_pose_origin(100));
+  desk_robot::BerryReading imu{};
+  imu.model = desk_robot::BerryModel::Mpu6050;
+  imu.valid = imu.low_g_status_valid = true;
+  imu.accel[2] = 16384;
+  imu.temperature_raw = 100;
+  desk_robot::AccessoryReadings angles{};
+  for (unsigned i = 1; i <= 2; ++i) {
+    angles.angle[i].present = angles.angle[i].valid = true;
+    angles.angle[i].magnet_status = 0x20;
+    angles.angle[i].angle = 100;
+  }
+  // Pair baselines and three DISTINCT stationary paired conversions.
+  for (std::uint32_t seq = 1; seq <= 4; ++seq) {
+    const auto at = seq * 100U;
+    imu.at_ms = at + 5;
+    body.set_imu(imu);
+    angles.angle[1].at_ms = at;
+    angles.angle[2].at_ms = at + 10;
+    angles.angle[1].sample_seq = seq;
+    angles.angle[2].sample_seq = seq;
+    body.set_accessories(angles, at + 10);
+  }
+  check(body.wheel_pose_state().origin == 0);
+  check(body.start_local_pose_origin(410));
+  check(body.wheel_pose_state().origin == 1);
+  imu.at_ms = 505;
+  body.set_imu(imu);
+  angles.angle[1].angle = 110;
+  angles.angle[2].angle = 90;
+  angles.angle[1].at_ms = 500;
+  angles.angle[2].at_ms = 510;
+  angles.angle[1].sample_seq = 5;
+  angles.angle[2].sample_seq = 5;
+  body.set_accessories(angles, 510);
+  check(body.wheel_pose_state().x_mm == 1);
+  check(body.wheel_pose_state().quality == desk_robot::WheelPoseIntegrator::Quality::Valid);
+  const auto pair_seq = body.wheel_pose_state().sample_seq;
+  body.set_accessories(angles, 511); // cached angle and gyro cannot advance pose
+  check(body.wheel_pose_state().sample_seq == pair_seq);
+  // UART has no calibrated sample-start clock and no hardware receipt:
+  // even host-calibrated synthetic math cannot create a valid body reply.
+  const auto wire = request(body, receiver, "pose\r\n", 512, 512000);
+  check(wire.find("\"quality\":\"unavailable\"") != std::string::npos);
+  check(wire.find("\"origin\":0") != std::string::npos);
+  imu.low_g_irq = true;
+  imu.at_ms = 600;
+  body.set_imu(imu);
+  check(body.wheel_pose_state().origin == 0);
+  check(!body.start_local_pose_origin(601));
+  body.set_boot_epoch(503);
+  check(!body.wheel_pose_state().origin && !body.wheel_pose_state().sample_seq);
+  check(!body.configure_wheel_pose(geom));
+  check(!body.state().armed && body.state().left == 0 &&
+        body.state().right == 0);
+}
 }  // namespace
 
 int main() {
@@ -384,5 +467,6 @@ int main() {
   verify_angle_qualification_telemetry();
   verify_paired_wheel_acquisitions();
   verify_imu_yaw_never_promotes_pose();
+  verify_qualified_pose_is_never_implicit_navigation();
   return 0;
 }

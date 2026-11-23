@@ -459,6 +459,28 @@ bool BodyControl::configure_wheel_angle_capture(
   return true;
 }
 
+bool BodyControl::configure_wheel_pose(
+    const WheelPoseIntegrator::Calibration& calibration) {
+  if (boot_epoch_ == 0 || !wheel_capture_configured_ ||
+      !wheel_pair_configured_ || !imu_yaw_configured_ ||
+      wheel_pose_configured_ || state_.armed || state_.servos_attached)
+    return false;
+  WheelPoseIntegrator candidate;
+  if (!candidate.configure(calibration)) return false;
+  wheel_pose_ = candidate;
+  wheel_pose_configured_ = true;
+  return true;
+}
+
+bool BodyControl::start_local_pose_origin(std::uint32_t now_ms) {
+  if (!wheel_pose_configured_ || state_.armed || state_.servos_attached ||
+      state_.touch_raw_active || state_.bumper_raw ||
+      imu_low_g_latched_ || imu_attitude_latched_ ||
+      imu_provenance_bad_ || !imu_yaw_.fresh(now_ms))
+    return false;
+  return wheel_pose_.start_origin(now_ms);
+}
+
 bool BodyControl::configure_wheel_pair_skew(
     std::uint32_t measured_max_skew_ms) {
   if (boot_epoch_ == 0 || !wheel_capture_configured_ ||
@@ -483,15 +505,35 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
     // angular counts NEVER create a paired metric pose or motor permit.
     const auto left = wheel_angles_[0].observe(readings.angle[1], now_ms);
     const auto right = wheel_angles_[1].observe(readings.angle[2], now_ms);
-    if (wheel_pair_configured_ &&
-        wheel_pairs_.observe(left, right, readings.angle[1], readings.angle[2],
-                             wheel_angles_[0].last_delta(),
-                             wheel_angles_[1].last_delta(), now_ms) ==
-            WheelPairCapture::Result::Invalid) {
-      // Dropping either leg invalidates the entire movement interval.
-      // Next successful acquisitions must establish two new baselines.
-      wheel_angles_[0].discard_continuity();
-      wheel_angles_[1].discard_continuity();
+    if (wheel_pair_configured_) {
+      const auto result =
+          wheel_pairs_.observe(left, right, readings.angle[1], readings.angle[2],
+                               wheel_angles_[0].last_delta(),
+                               wheel_angles_[1].last_delta(), now_ms);
+      if (result == WheelPairCapture::Result::Invalid) {
+        // Dropping either leg invalidates the entire movement interval.
+        // Next successful acquisitions must establish two new baselines.
+        wheel_angles_[0].discard_continuity();
+        wheel_angles_[1].discard_continuity();
+        if (wheel_pose_configured_) wheel_pose_.invalidate();
+      } else if (result == WheelPairCapture::Result::Paired &&
+                 wheel_pose_configured_) {
+        WheelPoseIntegrator::Evidence sample{};
+        sample.wheel = wheel_pairs_.receipt();
+        sample.imu_valid = imu_yaw_.fresh(now_ms) &&
+                           !imu_provenance_bad_ && !imu_attitude_latched_ &&
+                           !imu_low_g_latched_;
+        sample.imu_segment = imu_yaw_.segment();
+        sample.imu_at_ms = imu_yaw_.acquisition_ms();
+        sample.imu_yaw_urad = imu_yaw_.yaw_urad();
+        sample.imu_step_urad = imu_yaw_.last_delta_urad();
+        sample.imu_error_urad = imu_yaw_.error_bound_urad();
+        if (!wheel_pose_.observe(sample, now_ms)) {
+          // A failed pair cannot be bridged by a later fresh acquisition.
+          wheel_angles_[0].discard_continuity();
+          wheel_angles_[1].discard_continuity();
+        }
+      }
     }
   }
   const auto& force = readings.force;
@@ -764,6 +806,8 @@ void BodyControl::set_imu(const BerryReading& reading) {
     // contradictory cached frame cannot add yaw even if its age is small.
     if (imu_provenance_bad_) imu_yaw_.invalidate();
     else imu_yaw_.observe(reading, reading.at_ms);
+    if (wheel_pose_configured_ && !imu_yaw_.continuous())
+      wheel_pose_.invalidate();
   }
   if (imu_attitude_required_ && newly_acquired) {
     if (!imu_attitude_configured_ || !reading.valid ||
@@ -827,6 +871,7 @@ std::uint32_t BodyControl::drive_remaining(std::uint32_t now_ms) const {
 }
 
 void BodyControl::tick(std::uint32_t now_ms) {
+  if (wheel_pose_configured_) wheel_pose_.expire(now_ms);
   // Local gesture classification survives slow Mac camera polling.
   // Unsigned subtraction also handles millis rollover.
   if (state_.touch_active && !touch_hold_emitted_ &&
