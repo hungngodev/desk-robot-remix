@@ -181,3 +181,11 @@ def test_unhashable_untrusted_support_sample_is_finite_refusal():
     g, _, _ = fixtures()
     bad = replace(g, support=(["unsafe"],) + g.support[1:])
     assert route(grid=bad).reason == "invalid_grid"
+
+
+def test_monotonic_clock_rollback_invalidates_an_inflight_proposal():
+    sampled = [1600, 1500]
+    result = route(clock_us=lambda: sampled.pop(0) if sampled else 1500)
+    assert result.status == "rejected"
+    assert result.reason == "invalid_clock"
+    assert result.cells == () and result.may_execute is False

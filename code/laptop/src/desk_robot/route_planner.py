@@ -156,7 +156,10 @@ def plan_route(
         # Bound the maximum per-state raster footprint and cancellation lag.
         return refuse("unqualified_clearance")
 
+    last_clock_us = now_us
+
     def live() -> str | None:
+        nonlocal last_clock_us
         if request_is_current is not None:
             try:
                 if request_is_current() is not True:
@@ -169,8 +172,9 @@ def plan_route(
             current = clock_us()
         except Exception:
             return "invalid_clock"
-        if type(current) is not int or current < now_us:
+        if type(current) is not int or current < last_clock_us:
             return "invalid_clock"
+        last_clock_us = current
         if current >= request.deadline_us or current >= grid.expires_at_us:
             return "deadline_or_map_expired"
         return None
