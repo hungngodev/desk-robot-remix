@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from desk_robot.api_robot_status import register_robot_status_routes
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 
@@ -60,6 +60,11 @@ def _route(initial, *, before_reply=None):
         heard.append((owner, rid, kind, summary))
         return True
 
+    def current_tool_context(owner, robot_id, message):
+        # Only a genuinely current tool turn may return a slow raw sample.
+        if owner is None or owner[1] != current_turn.epoch:
+            raise HTTPException(409, message)
+
     register_robot_status_routes(
         app, settings, authorize=lambda: None, coordinator=lambda: fleet,
         requested_tool_context=lambda request, robot_id: (
@@ -67,6 +72,7 @@ def _route(initial, *, before_reply=None):
             if request.headers.get("x-test-turn") == "active" else None
         ),
         remember_tool_context=remember,
+        current_tool_context=current_tool_context,
     )
     return app, data, heard, (current_turn, 1)
 
@@ -81,7 +87,7 @@ def test_missing_ambient_acquisition_clock_is_diagnostic_only(sensor, missing):
     app, _data, heard, _owner = _route({sensor: value})
     with TestClient(app) as client:
         response = client.get(
-            "/v1/robots/robot-01/aux", headers={"x-test-turn": "active"},
+            "/v1/robots/robot-01/aux", headers={"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"},
         )
     assert response.status_code == 200
     assert response.json()[sensor]["valid"] is True
@@ -98,7 +104,7 @@ def test_stale_ambient_age_never_generates_new_tool_fact(sensor, age):
     with TestClient(app) as client:
         assert client.get(
             "/v1/robots/robot-01/aux",
-            headers={"x-test-turn": "active"},
+            headers={"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"},
         ).status_code == 200
     assert heard == []
 
@@ -111,7 +117,7 @@ def test_fresh_ambient_once_then_duplicate_and_replay_remain_silent(sensor):
         def request():
             return client.get(
                 "/v1/robots/robot-01/aux",
-                headers={"x-test-turn": "active"},
+                headers={"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"},
             )
         assert request().status_code == 200
         assert len(heard) == 1
@@ -137,7 +143,7 @@ def test_dashboard_does_not_consume_first_valid_human_ambient_receipt(sensor):
         assert heard == []
         assert client.get(
             "/v1/robots/robot-01/aux",
-            headers={"x-test-turn": "active"},
+            headers={"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"},
         ).status_code == 200
         assert len(heard) == 1
 
@@ -146,13 +152,13 @@ def test_ambient_provenance_is_source_scoped_and_aggregates_one_receipt():
     app, data, heard, _owner = _route({"climate": _climate(), "bmp280": _bmp()})
     with TestClient(app) as client:
         url = "/v1/robots/robot-01/aux"
-        assert client.get(url, headers={"x-test-turn": "active"}).status_code == 200
+        assert client.get(url, headers={"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"}).status_code == 200
         assert len(heard) == 1
         assert "SHT41" in heard[0][3] and "BMP280" in heard[0][3]
-        assert client.get(url, headers={"x-test-turn": "active"}).status_code == 200
+        assert client.get(url, headers={"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"}).status_code == 200
         assert len(heard) == 1
         data["bmp280"]["seq"] += 1
-        assert client.get(url, headers={"x-test-turn": "active"}).status_code == 200
+        assert client.get(url, headers={"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"}).status_code == 200
         assert len(heard) == 2
         assert "BMP280" in heard[-1][3] and "SHT41" not in heard[-1][3]
 
@@ -173,7 +179,7 @@ def test_ambient_malformed_legacy_value_is_not_promoted(sensor, field, bad):
     with TestClient(app) as client:
         response = client.get(
             "/v1/robots/robot-01/aux",
-            headers={"x-test-turn": "active"},
+            headers={"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"},
         )
     assert response.status_code == 200
     if isinstance(bad, float) and not math.isfinite(bad):
@@ -188,7 +194,7 @@ def test_new_wroom_boot_resets_sensor_cursor_without_replaying_retired_boot(sens
     with TestClient(app) as client:
         def request():
             return client.get(
-                "/v1/robots/robot-01/aux", headers={"x-test-turn": "active"},
+                "/v1/robots/robot-01/aux", headers={"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"},
             )
 
         assert request().status_code == 200
@@ -223,7 +229,7 @@ def test_missing_or_untyped_boot_epoch_keeps_ambient_diagnostic_only(boot):
         data["force"]["boot_id"] = boot
     with TestClient(app) as client:
         assert client.get(
-            "/v1/robots/robot-01/aux", headers={"x-test-turn": "active"},
+            "/v1/robots/robot-01/aux", headers={"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"},
         ).status_code == 200
     assert heard == []
 
@@ -245,10 +251,10 @@ def test_canceled_turn_does_not_consume_sensor_acquisition():
     with TestClient(app) as client:
         def request():
             return client.get(
-                "/v1/robots/robot-01/aux", headers={"x-test-turn": "active"},
+                "/v1/robots/robot-01/aux", headers={"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"},
             )
 
-        assert request().status_code == 200
+        assert request().status_code == 409
         assert heard == []
         assert request().status_code == 200
         assert len(heard) == 1

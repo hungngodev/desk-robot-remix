@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 from desk_robot.api_robot_status import register_robot_status_routes
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
 
 
@@ -74,6 +74,13 @@ def test_delayed_head_telemetry_rejects_superseded_voice_turn(
         receipts.append((robot_id, kind, summary))
         return True
 
+    def current_tool_context(owner, robot_id, message):
+        # The standalone fake must enforce the same owner and turn fence
+        # as the current authenticated app registration contract.
+        if (owner is None or owner[0] is not runtime.multimodal
+                or owner[0]._turn_epoch.get(robot_id) != owner[1]):
+            raise HTTPException(409, message)
+
     fleet = SimpleNamespace(
         robot=lambda robot_id: robot_id,
         heads={"robot-01": Head()},
@@ -85,6 +92,7 @@ def test_delayed_head_telemetry_rejects_superseded_voice_turn(
         coordinator=lambda: fleet,
         requested_tool_context=requested,
         remember_tool_context=remember,
+        current_tool_context=current_tool_context,
     )
     headers = (
         {} if scenario == "dashboard"
