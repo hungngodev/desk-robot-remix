@@ -3,6 +3,15 @@ from pathlib import Path
 
 import pytest
 from desk_robot.config import Settings, load_settings
+from fastapi import HTTPException
+
+
+def _check_fake_current_tool_owner(owner, robot_id, message):
+    """Standalone memory tests use the legacy Mac turn clock fixture."""
+    if (not isinstance(owner, tuple) or len(owner) != 2
+            or type(owner[1]) is not int
+            or getattr(owner[0], "_turn_epoch", {}).get(robot_id) != owner[1]):
+        raise HTTPException(409, message)
 
 
 def test_voice_memory_opt_in_defaults_off_in_both_modes():
@@ -144,6 +153,7 @@ def test_voice_memory_receipt_is_independent_of_camera_opt_in(settings):
             and robot_id == "robot-01" else None
         ),
         remember_tool_context=lambda *args: receipts.append(args),
+        current_tool_context=_check_fake_current_tool_owner,
     )
     with TestClient(app) as client:
         result = client.get(
@@ -227,6 +237,7 @@ def test_voice_retrieval_fences_private_edit_during_sqlite_read(
         app, settings, authorize=lambda: None,
         requested_tool_context=lambda request, robot_id: (turn_owner, 2),
         remember_tool_context=lambda *args: receipts.append(args),
+        current_tool_context=_check_fake_current_tool_owner,
     )
     with TestClient(app) as client:
         response = client.get("/v1/pet/robot-01/voice-context")
@@ -288,6 +299,7 @@ def test_vision_revocation_during_memory_read_clears_live_cues(settings):
         app, settings, authorize=lambda: None,
         requested_tool_context=lambda request, robot_id: None,
         remember_tool_context=lambda *args: None,
+        current_tool_context=_check_fake_current_tool_owner,
     )
     with TestClient(app) as client:
         response = client.get("/v1/pet/robot-01/voice-context")
@@ -350,6 +362,7 @@ def test_model_voice_memory_requires_revision_owner_before_any_read(
         app, settings, authorize=lambda: None,
         requested_tool_context=lambda *args: None,
         remember_tool_context=lambda *args: None,
+        current_tool_context=_check_fake_current_tool_owner,
     )
     with TestClient(app) as client:
         for suffix in ("", "?query=some%20private%20fact"):
@@ -424,6 +437,7 @@ def test_native_voice_recall_uses_relevant_operator_core_fact_without_episodes(
         app, settings, authorize=lambda: None,
         requested_tool_context=lambda *args: (turn, 7),
         remember_tool_context=lambda *args: receipts.append(args),
+        current_tool_context=_check_fake_current_tool_owner,
     )
     with TestClient(app) as client:
         response = client.get(
@@ -485,6 +499,7 @@ def test_native_curated_fact_recall_never_survives_memory_consent_change(
         app, settings, authorize=lambda: None,
         requested_tool_context=lambda *args: (turn, 1),
         remember_tool_context=lambda *args: receipts.append(args),
+        current_tool_context=_check_fake_current_tool_owner,
     )
     with TestClient(app) as client:
         response = client.get(

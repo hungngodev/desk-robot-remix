@@ -13,8 +13,15 @@ from types import SimpleNamespace
 import pytest
 from desk_robot.api_readonly_context import register_readonly_context_routes
 from desk_robot.controller import OperationError
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.routing import APIRoute
+
+
+def _check_fake_current_tool_owner(owner, robot_id, message):
+    """The battery route fixture retains its previous synthetic turn fence."""
+    if (not isinstance(owner, tuple) or len(owner) != 2
+            or getattr(owner[0], "_turn_epoch", {}).get(robot_id) != owner[1]):
+        raise HTTPException(409, message)
 
 
 @pytest.mark.parametrize("cell_mv", [0, 2499, 2500, 3875, 4500, 4501])
@@ -46,6 +53,7 @@ async def test_power_status_no_impossible_voltage_enters_current_human_turn(cell
         remember_tool_context=lambda owner, robot_id, kind, summary:
             recorded.append((owner, robot_id, kind, summary)),
         native_pet_speech_policy=lambda *args: False,
+        current_tool_context=_check_fake_current_tool_owner,
     )
     endpoint = next(
         route.endpoint for route in app.routes

@@ -13,8 +13,17 @@ from desk_robot.api import (
 from desk_robot.api_memory_routes import EpisodeMemoryCorrectionRequest
 from desk_robot.api_readonly_context import _active_robot_activity
 from desk_robot.config import load_settings
+from fastapi import HTTPException
 from fastapi.routing import APIRoute
 from pydantic import ValidationError
+
+
+def _check_fake_current_tool_owner(owner, robot_id, message):
+    """Standalone fixture models only the old Mac epoch; production API is stricter."""
+    if (not isinstance(owner, tuple) or len(owner) != 2
+            or type(owner[1]) is not int
+            or getattr(owner[0], "_turn_epoch", {}).get(robot_id) != owner[1]):
+        raise HTTPException(409, message)
 
 
 def test_power_and_live_context_routes_keep_existing_auth_and_paths():
@@ -397,6 +406,7 @@ def test_voice_memory_lookup_rejects_payload_after_turn_is_superseded(settings):
             turn_owner, turn_owner._turn_epoch[robot_id],
         ),
         remember_tool_context=lambda *args: receipts.append(args),
+        current_tool_context=_check_fake_current_tool_owner,
     )
     with TestClient(app) as client:
         good = client.get("/v1/pet/robot-01/voice-context")
@@ -442,6 +452,7 @@ def test_xiaozhi_live_context_drops_cached_room_on_station_consent_revoke(settin
         requested_tool_context=lambda *args: None,
         remember_tool_context=lambda *args: None,
         native_pet_speech_policy=lambda robot_id: {},
+        current_tool_context=_check_fake_current_tool_owner,
     )
     with TestClient(app) as client:
         allowed = client.get("/v1/pet/robot-01/interaction-context")
@@ -489,6 +500,7 @@ def test_live_context_private_revision_is_scoped_and_consent_gated(settings):
         requested_tool_context=lambda *args: None,
         remember_tool_context=lambda *args: None,
         native_pet_speech_policy=lambda robot_id: {},
+        current_tool_context=_check_fake_current_tool_owner,
     )
     with TestClient(app) as client:
         own = client.get("/v1/pet/robot-01/interaction-context")
@@ -597,6 +609,7 @@ def test_voice_memory_context_strips_room_if_station_opt_out_during_sqlite(setti
         app, settings, authorize=lambda: None,
         requested_tool_context=lambda *args: None,
         remember_tool_context=lambda *args: None,
+        current_tool_context=_check_fake_current_tool_owner,
     )
     with TestClient(app) as client:
         result = client.get("/v1/pet/robot-01/voice-context")
@@ -640,6 +653,7 @@ def test_interaction_context_serves_wroom_touch_and_fault_when_camera_disabled(s
         requested_tool_context=lambda *args: None,
         remember_tool_context=lambda *args: None,
         native_pet_speech_policy=lambda robot_id: {},
+        current_tool_context=_check_fake_current_tool_owner,
     )
     with TestClient(app) as client:
         result = client.get("/v1/pet/robot-01/interaction-context")
@@ -693,6 +707,7 @@ def test_voice_context_serves_wroom_touch_and_fault_when_camera_disabled(setting
         app, settings, authorize=lambda: None,
         requested_tool_context=lambda *args: None,
         remember_tool_context=lambda *args: None,
+        current_tool_context=_check_fake_current_tool_owner,
     )
     with TestClient(app) as client:
         result = client.get("/v1/pet/robot-01/voice-context")
@@ -804,6 +819,7 @@ def test_voice_context_excludes_camera_and_visual_look_when_camera_disabled(sett
         app, settings, authorize=lambda: None,
         requested_tool_context=lambda *args: None,
         remember_tool_context=lambda *args: None,
+        current_tool_context=_check_fake_current_tool_owner,
     )
     with TestClient(app) as client:
         result = client.get("/v1/pet/robot-01/voice-context")
@@ -870,6 +886,7 @@ def test_voice_context_discards_visual_cues_on_camera_consent_toggle_during_sqli
         app, settings, authorize=lambda: None,
         requested_tool_context=lambda *args: None,
         remember_tool_context=lambda *args: None,
+        current_tool_context=_check_fake_current_tool_owner,
     )
     with TestClient(app) as client:
         result = client.get(
@@ -928,6 +945,7 @@ def test_voice_context_memory_consent_regrant_invalidates_inflight_sqlite_read(
         app, settings, authorize=lambda: None,
         requested_tool_context=lambda *args: None,
         remember_tool_context=lambda *args: receipts.append(args),
+        current_tool_context=_check_fake_current_tool_owner,
     )
     with TestClient(app) as client:
         response = client.get(
