@@ -812,6 +812,13 @@ def first_robot_projection(report: dict) -> dict:
         raise ValueError("Unknown physical drivetrain selection")
     pet_rows = report["robots"]
     station_rows = report["room_pod"]
+    # Ownership metadata proves only the location of source and host tests,
+    # NEVER that this exact physical component is installed or qualified.
+    owners = json.loads(
+        (PLAN.parent / "full-63-role-source-ownership.json").read_text(encoding="utf-8")
+    )
+    if not isinstance(owners, dict):
+        raise ValueError("Missing first-unit source ownership")
     # First-unit source and physical qualification must be possible before
     # the other four units exist. The fleet still has additional cross-robot
     # trials, while all shared electrical, power, print, supplier and system
@@ -840,6 +847,10 @@ def first_robot_projection(report: dict) -> dict:
                            ("shared station", station_rows)):
         for part in entries:
             ident = part["id"]
+            owner_group = ("pet_roles" if scope == "pet or dock" else "room_roles")
+            source_owner = owners.get(owner_group, {}).get(ident, {})
+            if not isinstance(source_owner, dict):
+                source_owner = {}
             if scope == "pet or dock":
                 target = _count(part["per_robot"], ident + ".per_robot")
                 if part.get("excluded_from_order_as_alternative") or (
@@ -865,6 +876,10 @@ def first_robot_projection(report: dict) -> dict:
                 "prototype_target": target,
                 # Carry canonical selection and assembly reasons into the first-unit view.
                 "notes": part.get("notes", ""),
+                "implementation_source": source_owner.get("source"),
+                "implementation_test": source_owner.get("host_test"),
+                "implementation_state": source_owner.get("source_state"),
+                "remaining_qualification": source_owner.get("remaining_qualification"),
                 # Full reported inventory remains visible even if no first
                 # robot slot currently uses this variant. Do not erase the
                 # user's five owned steppers just because DC is undecided.
@@ -913,8 +928,14 @@ def first_robot_projection(report: dict) -> dict:
             # assembly's checkout quantity. Keep its linked decision visible
             # with zero orderable units and a machine-readable HOLD reason.
             target = 0
+        child_owner = owners.get("linked_roles", {}).get(item["id"], {})
+        if not isinstance(child_owner, dict):
+            child_owner = {}
         linked.append({
             "id": item["id"], "name": item["name"], "parent_role": parent,
+            "implementation_source": child_owner.get("source"),
+            "implementation_test": child_owner.get("host_test"),
+            "implementation_state": child_owner.get("source_state"),
             "conditional_one_robot_quantity": target,
             "parent_present_in_plan": parent in pet_ids | station_ids,
             "reviewed": item["reviewed"], "disposition": item["disposition"],
@@ -1680,8 +1701,8 @@ def render_first_robot_markdown(report: dict) -> str:
         "",
         "## 2. First-unit remaining slots and conditional alternatives",
         "",
-        "| Scope | Role | One-unit target | Remaining if stock verified | Decision | Reviewed carrier / reference | Role note or selection gap | Power reference | Verified checkout quote |",
-        "| --- | --- | ---: | ---: | --- | --- | --- | --- | --- |",
+        "| Scope | Role | One-unit target | Remaining if stock verified | Decision | Reviewed carrier / reference | Role note or selection gap | Source entry point, not proof of physical operation | Power reference | Verified checkout quote |",
+        "| --- | --- | ---: | ---: | --- | --- | --- | --- | --- | --- |",
     ]
     for row in projection["roles"]:
         selected = row.get("selected_carrier") or {}
@@ -1710,12 +1731,15 @@ def render_first_robot_markdown(report: dict) -> str:
         quote = _verified_checkout_quote(row) or (
             "UNQUOTED: actual delivered seller total unknown"
         )
+        source_owner = row.get("implementation_source") or "SOURCE OWNER NOT RECORDED"
+        if row.get("implementation_state"):
+            source_owner += " (source state: " + row["implementation_state"] + ")"
         lines.append(
             f"| {cell(row['scope'])} | {cell(row['name'])} | "
             f"{row['prototype_target']} | {row['conditional_remaining']} | "
             f"{row['decision']} | {cell(reviewed)} | "
-            f"{cell(role_note)} | {cell(_power_reference_summary(row))} | "
-            f"{cell(quote)} |"
+            f"{cell(role_note)} | {cell(source_owner)} | "
+            f"{cell(_power_reference_summary(row))} | {cell(quote)} |"
         )
     for item in projection["linked_decisions"]:
         lines.append(
@@ -1724,7 +1748,8 @@ def render_first_robot_markdown(report: dict) -> str:
             "not independently counted | "
             f"{'REVIEWED' if item['reviewed'] else 'HOLD DECISION'} | "
             f"parent {cell(item['parent_role'])} | "
-            "Included in parent; do not duplicate checkout | | "
+            "Included in parent; do not duplicate checkout | "
+            f"{cell(item.get('implementation_source') or 'SOURCE OWNER NOT RECORDED')} | | "
             "UNQUOTED separately; parent owns delivered cost |"
         )
     lines += [

@@ -2130,3 +2130,35 @@ def test_first_unit_49_parent_roles_and_14_child_details_remain_nonadditive():
     assert shown.count("Included in parent; do not duplicate checkout") == 14
     assert shown.count("UNQUOTED separately; parent owns delivered cost") == 14
     assert first["purchase_approved"] is False
+
+
+def test_first_unit_source_owner_paths_cover_all_parent_and_linked_rows():
+    """Source ownership labels are auditable but not purchasing receipts."""
+    import json
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    owners = json.loads((mod.PLAN.parent / "full-63-role-source-ownership.json").read_text(
+        encoding="utf-8"
+    ))
+    result = mod.generate(plan)
+    first = mod.first_robot_projection(result)
+    assert len(first["roles"]) == 49
+    assert len(first["linked_decisions"]) == 14
+    for row in first["roles"]:
+        group = "pet_roles" if row["scope"] == "pet or dock" else "room_roles"
+        owner = owners[group][row["id"]]
+        assert row["implementation_source"] == owner["source"]
+        assert row["implementation_test"] == owner["host_test"]
+        assert row["implementation_state"] == owner["source_state"]
+        assert row["remaining_qualification"] == owner["remaining_qualification"]
+        assert row["decision"] != "QUALIFIED FIRST ROBOT BOM"
+    for row in first["linked_decisions"]:
+        owner = owners["linked_roles"][row["id"]]
+        assert row["implementation_source"] == owner["source"]
+        assert row["implementation_test"] == owner["host_test"]
+        assert row["additive_purchase_authorized"] is False
+    markdown = mod.render_first_robot_markdown(result)
+    assert "| Source entry point, not proof of physical operation |" in markdown
+    assert "code/firmware/body/lib/TofBus/TofBus.cpp" in markdown
+    assert "SOURCE OWNER NOT RECORDED" not in markdown
+    assert first["purchase_approved"] is False
