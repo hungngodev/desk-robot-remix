@@ -97,6 +97,9 @@ class Runtime:
             self.multimodal.begin_direct_vision = self.pet.begin_direct_vision
             self.multimodal.end_direct_vision = self.pet.end_direct_vision
         self.voice_events: VoiceEventListener | None = None
+        # Authenticated Xiaozhi tool receipt owner, distinct from Mac turn epoch.
+        # None means disconnected or untrusted; absent robot IDs have no owner.
+        self._voice_turn_generations: dict[str, int] | None = None
         self._voice_task: asyncio.Task | None = None
         self._room_stop = asyncio.Event()
         self._room_task: asyncio.Task | None = None
@@ -230,7 +233,9 @@ class Runtime:
             on_global_interrupt=self._on_voice_global,
             on_monitor_ready=self._on_voice_monitor_ready,
             on_speech_snapshot=self._on_voice_snapshot,
+            on_voice_generations=self._on_voice_generations,
             require_snapshot=True,
+            require_turn_generations=True,
         )
         self._voice_task = asyncio.create_task(self.voice_events.run())
         if self.settings.pet_autostart_enabled:
@@ -242,6 +247,18 @@ class Runtime:
                 if robot.device_id:
                     self.pet.start(robot.id)
 
+
+    def _on_voice_generations(self, generations: dict[str, int] | None) -> None:
+        """Keep only current authenticated Xiaozhi source turn ownership.
+
+        The voice listener calls this before awaiting a slow human speaker
+        STOP. It is not a Mac turn counter, motor grant or tool execution.
+        """
+        if getattr(self, "_closed", False):
+            return
+        self._voice_turn_generations = (
+            None if generations is None else dict(generations)
+        )
 
     def _begin_voice_stop(self) -> int:
         """Keep a separate pending STOP receipt while cameras mark human VAD."""
@@ -408,6 +425,9 @@ class Runtime:
             return
         # Re-enable spontaneous voice only after a successful authenticated
         # event-stream bootstrap or ordered poll, never on a guessed timeout.
+        if not ready:
+            # A dead VAD monitor cannot certify a current signed tool turn.
+            self._voice_turn_generations = None
         self.pet.set_voice_monitor_ready(ready)
         if not ready:
             # A robot cannot keep autonomous roaming when the user has lost
@@ -419,6 +439,7 @@ class Runtime:
             return  # Shutdown owns the final physical STOP and teardown.
         if reason not in ("gap", "reset", "stream_unavailable"):
             raise ValueError("Unsupported global voice transport fault")
+        self._voice_turn_generations = None
         self.pet.set_voice_monitor_ready(False)
         visual = getattr(self, "multimodal", None)
         invalidate = getattr(visual, "voice_transport_unavailable", None)

@@ -104,6 +104,31 @@ async def test_strict_turn_generation_bootstrap_rejects_untrusted_provenance(
         assert delivered == []
 
 
+async def test_runtime_only_retains_authenticated_current_voice_owner_on_healthy_monitor():
+    """Mac tool authority stays empty until the signed Xiaozhi VAD feed arrives."""
+    from types import SimpleNamespace
+
+    from desk_robot.runtime import Runtime
+
+    states = []
+    runtime = Runtime.__new__(Runtime)
+    runtime._closed = False
+    runtime._voice_turn_generations = None
+    runtime.pet = SimpleNamespace(set_voice_monitor_ready=states.append)
+    runtime.coordinator = SimpleNamespace(stop_active_exploration=None)
+    runtime._on_voice_generations({"robot-01": 8, "robot-02": 4})
+    assert runtime._voice_turn_generations == {"robot-01": 8, "robot-02": 4}
+    runtime._on_voice_generations({"robot-01": 9})
+    assert runtime._voice_turn_generations == {"robot-01": 9}
+    await runtime._on_voice_monitor_ready(False)
+    assert runtime._voice_turn_generations is None and states == [False]
+    runtime._on_voice_generations({"robot-01": 10})
+    assert runtime._voice_turn_generations == {"robot-01": 10}
+    runtime._closed = True
+    runtime._on_voice_generations({"robot-01": 11})
+    assert runtime._voice_turn_generations == {"robot-01": 10}
+
+
 async def test_mac_preempts_real_human_interruptions_once():
     delivered = []
     def mock(request):
