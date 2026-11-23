@@ -307,3 +307,60 @@ def test_room_bench_transport_failure_does_not_promote_any_physical_gate():
 def test_room_bench_requires_explicit_local_port_and_bounded_capture(port, seconds):
     with pytest.raises(ValueError):
         capture(port, seconds=seconds)
+
+
+@pytest.mark.parametrize("fault", [
+    "none", "short_request", "short_run", "missing_frame", "sequence_gap",
+    "duplicate_sequence", "slow_receipt", "terminal_silence",
+    "rejected_frame", "callback_failure", "serial_failure",
+])
+def test_one_hour_usb_continuity_screen_requires_complete_read_only_receipts(fault):
+    """Only an uninterrupted 3,600-report USB run earns a diagnostic pass.
+
+    A fake reader checks the accounting, not a real Feather, power rail,
+    sensor calibration, or the station's physical acceptance.
+    """
+    from desk_robot.room_station import RoomObservation
+
+    class Feed:
+        def __init__(self, port, on_observation):
+            self.on_observation = on_observation
+            self.rejected = int(fault == "rejected_frame")
+            self.callback_failures = int(fault == "callback_failure")
+
+        def _read_port(self, running):
+            count = 3599 if fault == "missing_frame" else 3600
+            for index in range(count):
+                seq = index
+                if fault == "sequence_gap" and index >= 100:
+                    seq += 1
+                if fault == "duplicate_sequence" and index == 100:
+                    seq -= 1
+                received_at = index + 0.5
+                if fault == "slow_receipt" and index == 500:
+                    received_at += 0.6
+                self.on_observation(RoomObservation(
+                    seq=seq, at_ms=index, received_at=received_at,
+                    readings={name: {"valid": False} for name in SENSORS},
+                    summary="Simulated USB frame; not physical evidence",
+                ))
+            if fault == "serial_failure":
+                raise OSError("USB disconnected")
+
+    duration = 60 if fault == "short_request" else 3600
+    finished = 3599 if fault == "short_run" else (
+        3602 if fault == "terminal_silence" else 3600
+    )
+    ticks = iter((0.0, float(finished)))
+    result = capture("/dev/cu.synthetic", seconds=duration,
+                     feed_factory=Feed, clock=lambda: next(ticks))
+    assert result["one_hour_usb_continuity_screen_pass"] is (fault == "none")
+    assert result["device_identity_authenticated"] is False
+    assert result["sensor_accuracy_physically_qualified"] is False
+    assert result["station_power_physically_qualified"] is False
+    assert result["charging_verified"] is False
+    assert result["motion_authorized"] is False
+    if fault == "sequence_gap":
+        assert result["missing_station_sequences"] == 1
+    if fault == "terminal_silence":
+        assert result["trailing_receive_silence_ms"] == 2500.0

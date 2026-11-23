@@ -102,6 +102,23 @@ def capture(
     # receipt cadence. Do not interpret any gap as a motor safety measurement.
     missing = sum(max(0, ((b - a) & 0xffffffff) - 1)
                   for a, b in zip(sequence[:-1], sequence[1:], strict=True))
+    # Diagnostic only: a full one-hour USB continuity trial must contain
+    # at least 3,600 distinct consecutive nominal one-second reports with
+    # bounded Mac receive silence. This cannot qualify radar accuracy,
+    # environmental calibration, power, charger, or any motion authority.
+    one_hour_usb_continuity_screen_pass = (
+        seconds == 3600
+        and elapsed >= 3600
+        and len(sequence) >= 3600
+        and missing == 0
+        and reader.rejected == 0
+        and reader.callback_failures == 0
+        and error is None
+        and start <= received_at[0] <= received_at[-1] <= finished
+        and all(0.0 < gap <= 1.5 for gap in gaps)
+        and leading is not None and 0.0 <= leading <= 1.5
+        and trailing is not None and 0.0 <= trailing <= 1.5
+    )
     return {
         "station": STATION,
         "source_commit": _git_sha(),
@@ -123,6 +140,7 @@ def capture(
             round(max(silence_windows) * 1000, 1) if silence_windows else None
         ),
         "valid_sensor_frames": sensor_counts,
+        "one_hour_usb_continuity_screen_pass": one_hour_usb_continuity_screen_pass,
         "read_only_usb_sample_captured": (
             bool(sequence) and error is None and reader.callback_failures == 0
         ),
