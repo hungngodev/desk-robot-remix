@@ -127,10 +127,21 @@ command:
 
 ```bash
 cd code
+umask 077
+ROOM_TRIAL_DIR="$HOME/.desk-robot/room-trials"
+mkdir -p "$ROOM_TRIAL_DIR"
+chmod 700 "$ROOM_TRIAL_DIR"
 uv run --no-sync python scripts/bench_room_station.py \
   --port /dev/cu.YOUR_REAL_FEATHER_PORT --seconds 60 \
-  --report ../docs/records/reports/room-station-usb-trial.json
+  --report "$ROOM_TRIAL_DIR/room-usb-$(date -u +%Y%m%dT%H%M%SZ).json"
 ```
+
+Keep trial reports in this private directory, **outside the Git checkout**.
+The collector requires the final report directory to have mode 0700 and
+creates a new report with mode 0600. It refuses an existing filename rather
+than overwriting evidence. The repository's tracked `docs/records/reports`
+folder is not a private capture destination and must not receive raw trial
+receipts. Use a new filename for each attempt.
 
 Record the actual operator, board revision, connected exact sensor carrier
 revisions and independent voltage/current/temperature instrument readings

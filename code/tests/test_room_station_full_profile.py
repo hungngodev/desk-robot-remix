@@ -11,6 +11,26 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
+def test_station_bench_guide_uses_actual_private_receipt_destination():
+    # Match the collector's mode 0700, O_EXCL and no-private-data-in-Git gate.
+    guide = (ROOT / "code/firmware/room_station/README.md").read_text()
+    capture = guide.split("## Reproducible USB stream evidence capture", 1)[1]
+    command = capture.split("```bash", 1)[1].split("```", 1)[0]
+    assert 'ROOM_TRIAL_DIR="$HOME/.desk-robot/room-trials"' in command
+    assert 'mkdir -p "$ROOM_TRIAL_DIR"' in command
+    assert 'chmod 700 "$ROOM_TRIAL_DIR"' in command
+    assert "umask 077" in command
+    assert (
+        '--report "$ROOM_TRIAL_DIR/room-usb-$(date -u +%Y%m%dT%H%M%SZ).json"'
+        in command
+    )
+    assert "docs/records/reports/" not in command
+    assert "outside the Git checkout" in capture
+    collector = (ROOT / "code/scripts/bench_room_station.py").read_text()
+    assert "Room bench report directory must be private mode 0700" in collector
+    assert "os.O_WRONLY | os.O_CREAT | os.O_EXCL" in collector
+
+
 def test_station_has_both_full_soil_and_safe_bench_profiles():
     ini = (ROOT / "code/firmware/room_station/platformio.ini").read_text()
     assert "default_envs = feather_nrf52840_room_bench" in ini
