@@ -158,8 +158,8 @@ Only current frames reach proactive comparison and the pickup controller.
 
 ### Read-only pose v1
 
-This is the proposed guide 20 to guide 30 UART interface, pending actual WROOM
-producer integration and measured wheel/IMU calibration. A caller must not
+This is the source-implemented guide 20 to guide 30 UART interface, with
+real wheel/IMU displacement and mounted geometry still uncalibrated. A caller must not
 treat any sample as movement authority. The head issues the exact ASCII
 `pose\r\n` command on the existing 115200 baud 8N1 UART mutex; the body
 returns one complete JSON line. There is no arbitrary UART tunnel, background
@@ -204,6 +204,35 @@ no-reply returns HTTP 504 after the existing 350 ms UART bound. One pending
 read shares the existing nonurgent telemetry latch; urgent STOP preempts
 nonurgent UART reads at the current polling boundary. No `pose` query
 renews the 500 ms body watchdog.
+
+
+The Mac's separate operator-only `GET /v1/robots/{robot_id}/pose` endpoint
+uses the existing authenticated `HttpHead.pose_status()` reader. This is a
+diagnostic read, not a new UART bridge or a Xiaozhi model motion tool. It
+requires the coordinator operator bearer; an ordinary tool bearer is refused.
+From a locally running coordinator with the default CLI port, an operator with
+their token already configured may inspect one sample without arming motors:
+
+```sh
+curl --fail-with-body \
+  -H "Authorization: Bearer ${DESK_ROBOT_API_TOKEN}" \
+  http://127.0.0.1:8765/v1/robots/robot-01/pose
+```
+
+Legacy head/body firmware that responds with HTTP 404 or 501 is represented
+as HTTP 501 at this Mac route; invalid identities, replayed body sequences
+and failed head requests do not return a usable pose. A successful diagnostic
+response includes the version-one body values, head boot, quality and the
+`PoseFence` continuity result. Its `available: true` means that the
+head returned a typed packet, **not** calibrated displacement or localization.
+The first valid receipt is only a baseline. Two continuous fresh valid
+receipts can establish `local_odometry_continuous: true`, but the route
+still reports `needs_reanchor: true`, `map_anchored: false`,
+`navigation_authorized: false`, `motor_authorized: false`,
+`charging_authorized: false` and `physical_acceptance_pass: false`.
+An `unavailable` quality remains diagnostic only. Never use this route's
+values as an execution permit, a completed arrival or physical acceptance.
+Synthetic API fixtures: `code/tests/test_api_spatial_pose.py`.
 
 Camera JPEG identity is separate. Three illustrative accepted JPEG header
 fixtures, with independent headset monotonic microseconds, are:
