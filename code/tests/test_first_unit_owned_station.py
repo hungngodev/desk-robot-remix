@@ -71,3 +71,24 @@ def test_parts_table_allocates_feather_to_one_station_without_spare_confusion():
     assert "physical assembly remain unqualified" in parts
     assert "Adafruit USB-C breakout #4090 and DFRobot SER0043 continuous servo" in parts
     assert "Adafruit Feather nRF52840, Adafruit USB-C breakout" not in parts
+
+
+def test_historical_builder_table_uses_current_eight_ranges_and_two_muxes():
+    import re
+
+    plan = _record("docs/hardware/full-feature-plan.json")
+    roles = {part["id"]: part for part in plan["parts"]}
+    assert roles["cliff_obstacle"]["per_robot"] == 8
+    assert roles["i2c_mux"]["per_robot"] == 2
+    parts = (ROOT / "docs/hardware/parts.md").read_text(encoding="utf-8")
+    rows = [row for row in parts.splitlines() if row.startswith("| ")]
+    range_rows = [row for row in rows if "VL53L0X" in row]
+    assert len(range_rows) == 3
+    assert sorted(int(re.search(r"\\| (\\d+) /", row).group(1)) for row in range_rows) == [1, 3, 4]
+    assert any("0x70 lanes 5–7" in row and "3 / 15" in row for row in range_rows)
+    mux_rows = [row for row in rows if "TCA9548A mux" in row]
+    assert len(mux_rows) == 1
+    assert "| 2 / 10 |" in mux_rows[0]
+    assert "0x71 accessory mux" in mux_rows[0]
+    assert "eight matching carriers in all" in parts
+    assert "fallback only if the selected MPU6050 is proven unsuitable" in parts
