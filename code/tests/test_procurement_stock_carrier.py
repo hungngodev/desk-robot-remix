@@ -127,3 +127,20 @@ def test_empty_stock_evidence_preserves_existing_quote_only_release_fixture():
     assert release.stock_carrier_failures(record) == []
     record["costs"]["inventory"] = {}
     assert "expected an evidence list" in release.stock_carrier_failures(record)[0]
+
+
+def test_legacy_parts_buying_guidance_retains_current_cap_and_head_status():
+    """Old parts history must not undo the accepted budget or receipt state."""
+    import json
+
+    root = Path(__file__).resolve().parents[2]
+    bom = json.loads((root / "docs/hardware/bom.json").read_text())
+    parts = (root / "docs/hardware/parts.md").read_text()
+    assert bom["cap_usd"] == 50
+    assert any(item["unit_usd"] == 13.67
+               and "XIAO ESP32S3 Sense" in item["item"]
+               for item in bom["items"])
+    assert "The $50 delivered cap still applies" in parts
+    assert "historical cap is not established" not in parts
+    assert "One paid, carrier-reported delivered; board uninspected" in parts
+    assert "quantity/arrival unknown" not in parts

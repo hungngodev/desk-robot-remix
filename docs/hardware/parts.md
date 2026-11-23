@@ -1,6 +1,6 @@
 > **Procurement consolidation November 16:** All purchase quantities and remaining counts now come only from [full-feature-plan.json](full-feature-plan.json), with [generated two shopping lists](complete-shopping-checklist.md) and [generated fleet CSV](fleet-components.csv). This page preserves historical ownership notes and supplier research, not a production purchase list. Do not use the old L0X or one-multiplexer estimates.
 
-> **Current selected five robot shopping and wiring design:** [Complete full feature plan](full-feature-wiring-and-shopping.md) and [exact per-robot quantities](full-feature-plan.json). This file is an older combined ownership/prototype audit, not the purchase basket for all advanced add-ons. The $50 historical cap is not established for this selected full design.
+> **Current selected five robot shopping and wiring design:** [Complete full feature plan](full-feature-wiring-and-shopping.md) and [exact per-robot quantities](full-feature-plan.json). This file is an older combined ownership/prototype audit, not the purchase basket for all advanced add-ons. The $50 delivered cap still applies to the complete first prototype, including the previously paid XIAO; the full design has no approved costed checkout.
 
 > 2026-11-10 inventory correction: user reports using the popular **MPU6050**. The matching existing WROOM driver, Mac preflight, USB diagnostics and test family are now implemented. The old BerryIMU first choice references later in this document are superseded. Count/measure the user's MPU6050 before any replacement order.
 
@@ -25,7 +25,7 @@ keep known subtotal separate from an incomplete total.
 
 | Part | Per robot / five | Reported stock | Still to establish |
 | --- | ---: | --- | --- |
-| XIAO ESP32S3 Sense camera/PDM mic bundle |1 /5 | At least1 ordered; quantity/arrival unknown | Actual sensor/revision and delivered receipt. No separate camera/mic purchase |
+| XIAO ESP32S3 Sense camera/PDM mic bundle |1 /5 | One paid, carrier-reported delivered; board uninspected | Verify physical markings, condition, accessories and fit before use. Do not repurchase the first head |
 | ESP32-WROOM-32 |1 /5 | At least1; multiple reported, count unknown | Count and exact exposed board pins |
 |0.96in SSD1306 OLED |1 /5 | At least1 | Count/controller/pin order and fitted bezel |
 |5V28BYJ-48 |2 /10 |5 | **5 additional motors for the fleet**, subject to prototype validation |
