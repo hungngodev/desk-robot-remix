@@ -1,0 +1,129 @@
+from dataclasses import replace
+
+import pytest
+from desk_robot.spatial_grid import (
+    CELL_MM,
+    GridEvidenceError,
+    RangeCellBatch,
+    SpatialGrid,
+)
+
+
+def grid():
+    return SpatialGrid(
+        "robot-01", 7, "odom-1", "tag-4", "camera-abc", 4, 3,
+        ttl_us=1_000_000,
+    )
+
+
+def evidence(kind, lane, seq=1, *, received_us=1_000_000, cells=((1, 1),)):
+    return RangeCellBatch(
+        "robot-01", 7, "odom-1", 0, "camera-abc", lane, seq,
+        seq * 100_000, received_us, kind, cells, True,
+    )
+
+
+def test_only_fresh_floor_and_forward_clearance_can_make_a_safe_cell():
+    g = grid()
+    assert g.state(1, 1, now_us=1_000_010) == "unknown"
+    g.record(evidence("floor_supported", 0), now_us=1_000_010)
+    assert g.state(1, 1, now_us=1_000_010) == "unknown"
+    g.record(evidence("obstacle_clear", 4), now_us=1_000_020)
+    assert g.state(1, 1, now_us=1_000_020) == "safe"
+    snapshot = g.snapshot(now_us=1_000_020)
+    assert snapshot.cell_mm == CELL_MM == 20
+    assert snapshot.support[5] == "safe"
+    assert snapshot.support[0] == "unknown"
+    assert snapshot.anchored is False
+    assert snapshot.robot_id == "robot-01" and snapshot.anchor_id == "tag-4"
+
+
+def test_occupied_free_unknown_and_log_odds_clamp():
+    g = grid()
+    g.record(evidence("floor_supported", 0), now_us=1_000_010)
+    g.record(evidence("obstacle_clear", 4), now_us=1_000_010)
+    assert g.log_odds(1, 1) == pytest.approx(-0.8)
+    for seq in range(2, 12):
+        g.record(evidence("obstacle_hit", 4, seq, received_us=1_000_000 + seq * 10),
+                 now_us=1_000_000 + seq * 10)
+    assert g.log_odds(1, 1) == pytest.approx(4.0)
+    assert g.state(1, 1, now_us=1_000_110) == "occupied"
+    for seq in range(12, 30):
+        g.record(evidence("obstacle_clear", 4, seq, received_us=1_000_000 + seq * 10),
+                 now_us=1_000_000 + seq * 10)
+    assert g.log_odds(1, 1) == pytest.approx(-4.0)
+    assert g.state(1, 1, now_us=1_000_300) == "safe"
+
+
+def test_floor_unsafe_is_independent_and_overrides_free():
+    g = grid()
+    g.record(evidence("floor_supported", 0), now_us=1_000_010)
+    g.record(evidence("obstacle_clear", 4), now_us=1_000_010)
+    g.record(evidence("floor_unsafe", 1), now_us=1_000_010)
+    assert g.state(1, 1, now_us=1_000_010) == "unsafe"
+
+
+@pytest.mark.parametrize("bad", [
+    {"kind": "obstacle_clear", "lane": 5},
+    {"kind": "floor_supported", "lane": 4},
+    {"kind": "jpeg_free", "lane": 4},
+    {"kind": "apriltag_clear", "lane": 4},
+    {"kind": "obstacle_hit", "lane": 0},
+    {"kind": "obstacle_clear", "lane": 4, "geometry_qualified": False},
+    {"kind": "obstacle_clear", "lane": 4, "robot_id": "robot-02"},
+    {"kind": "obstacle_clear", "lane": 4, "origin_id": "odom-old"},
+    {"kind": "obstacle_clear", "lane": 4, "calibration_id": "wrong"},
+    {"kind": "obstacle_clear", "lane": 4, "epoch": 1},
+    {"kind": "obstacle_clear", "lane": 4, "cells": ((1, 1), (4, 1))},
+    {"kind": "obstacle_clear", "lane": 4, "cells": ((1, 1), (1, 1))},
+    {"kind": "obstacle_clear", "lane": 4, "cells": ((1, 1), ([1], 2))},
+])
+def test_unqualified_evidence_is_rejected_atomically(bad):
+    g = grid()
+    base = evidence("obstacle_clear", 4)
+    with pytest.raises(GridEvidenceError):
+        g.record(replace(base, **bad), now_us=1_000_010)
+    assert g.log_odds(1, 1) == 0
+    assert g.snapshot(now_us=1_000_010).support[5] == "unknown"
+
+
+def test_stale_and_out_of_calibration_are_explicit():
+    g = grid()
+    g.record(evidence("floor_supported", 0), now_us=1_000_010)
+    g.record(evidence("obstacle_clear", 4), now_us=1_000_010)
+    assert g.state(1, 1, now_us=2_000_001) == "stale"
+    g.invalidate_calibration("camera-new")
+    assert g.state(1, 1, now_us=1_000_010) == "out_of_calibration"
+    snap = g.snapshot(now_us=1_000_010)
+    assert snap.support[5] == "unsafe"
+    assert snap.epoch == 1 and not snap.anchored
+
+
+def test_duplicate_source_sample_rejected_no_partial_grid_change():
+    g = grid()
+    g.record(evidence("obstacle_hit", 4), now_us=1_000_010)
+    with pytest.raises(GridEvidenceError, match="Replayed"):
+        g.record(evidence("obstacle_clear", 4, cells=((2, 1),)), now_us=1_000_010)
+    assert g.log_odds(2, 1) == 0
+    assert g.log_odds(1, 1) == pytest.approx(1.2)
+
+
+def test_pickup_origin_change_invalidates_cells_and_older_batches():
+    g = grid()
+    g.record(evidence("floor_supported", 0), now_us=1_000_010)
+    g.record(evidence("obstacle_clear", 4), now_us=1_000_010)
+    g.invalidate_origin(8, "odom-2")
+    assert g.state(1, 1, now_us=1_000_010) == "unknown"
+    assert g.epoch == 1 and g.body_boot == 8 and not g.anchored
+    with pytest.raises(GridEvidenceError):
+        g.record(evidence("obstacle_clear", 4, 2), now_us=1_000_010)
+
+
+def test_late_or_future_receipt_and_bad_windows_fail_closed():
+    g = grid()
+    with pytest.raises(GridEvidenceError):
+        g.record(evidence("floor_supported", 0), now_us=1_300_001)
+    with pytest.raises(GridEvidenceError):
+        g.record(evidence("floor_supported", 0), now_us=999_999)
+    with pytest.raises(ValueError):
+        g.snapshot(now_us=-1)
