@@ -45,6 +45,20 @@ def test_fleet_examples_keep_identical_core_and_hardware_disarmed(fleet):
     assert all(r.calibration.name == "calibration.simulation.json" for r in fleet.robots)
 
 
+def test_fleet_rejects_case_aliases_before_private_memory_setup(fleet):
+    # Mac APFS can treat these names as one SQLite file even though the
+    # Python identifier comparison previously considered them different.
+    config = fleet.model_dump()
+    config["robots"][1]["id"] = config["robots"][0]["id"].upper()
+    with pytest.raises(ValueError, match="unique robot IDs"):
+        type(fleet).model_validate(config)
+
+    # Five distinct pet identities remain valid and individually addressable.
+    config["robots"][1]["id"] = IDS[1]
+    accepted = type(fleet).model_validate(config)
+    assert [robot.id for robot in accepted.robots] == IDS
+
+
 async def test_five_round_robin_broadcasts_every_line_to_all_peers(fleet):
     class UniqueChat:
         def __init__(self):

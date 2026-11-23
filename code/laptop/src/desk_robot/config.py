@@ -152,7 +152,9 @@ class Settings(BaseModel):
             from .soil_calibration import SoilCalibration
             SoilCalibration(soil_dry, soil_wet)
         ids = [r.id for r in self.robots]
-        if not ids or len(set(ids)) != len(ids):
+        # Per-pet SQLite filenames may alias on a case-insensitive Mac APFS
+        # volume. Reject case variants before initializing any fleet services.
+        if not ids or len({robot_id.casefold() for robot_id in ids}) != len(ids):
             raise ValueError("At least one robot and unique robot IDs are required")
         device_ids = [r.device_id for r in self.robots if r.device_id]
         if len(set(device_ids)) != len(device_ids):
