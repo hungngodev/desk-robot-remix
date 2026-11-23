@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <esp_system.h>
+#include <esp_timer.h>
 
 #include "BodyControl.h"
 #include "ReplyTxQueue.h"
@@ -350,8 +351,13 @@ void process_input(HardwareSerial& stream, desk_robot::LineReceiver& receiver,
   char reply[desk_robot::kReplyCapacity]{};
   // Bounded read prevents sustained input from starving the other port/timers.
   for (int bytes = 0; bytes < 64 && stream.available() > 0; ++bytes) {
-    const bool completed = receiver.feed(static_cast<char>(stream.read()),
-                                          millis(), control, reply, sizeof(reply));
+    const char received = static_cast<char>(stream.read());
+    // A completed pose reply uses the WROOM's 64-bit monotonic microsecond
+    // clock. Non-pose commands ignore the timestamp; UART reads stay bounded.
+    const std::uint64_t sample_us = received == '\\n' ?
+        static_cast<std::uint64_t>(esp_timer_get_time()) : 0ULL;
+    const bool completed = receiver.feed(received, millis(), control, reply,
+                                          sizeof(reply), sample_us);
     if (completed && !pwm_ready && strcmp(reply, "OK arm") == 0) {
       control.force_disarm();
       snprintf(reply, sizeof(reply), "ERR arm pwm_unavailable");

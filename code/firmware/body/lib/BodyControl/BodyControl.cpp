@@ -892,7 +892,8 @@ void BodyControl::tick(std::uint32_t now_ms) {
 
 void BodyControl::execute(const char* line, std::size_t length,
                           std::uint32_t now_ms, char* reply,
-                          std::size_t capacity, bool local_safety_rearm) {
+                          std::size_t capacity, bool local_safety_rearm,
+                          std::uint64_t sample_us) {
   tick(now_ms);
   if (length > kMaxLineLength) {
     std::snprintf(reply, capacity, "ERR input line_too_long");
@@ -941,13 +942,14 @@ void BodyControl::execute(const char* line, std::size_t length,
   const bool aux = std::strcmp(command, "aux") == 0;
   const bool ir = std::strcmp(command, "ir") == 0;
   const bool optics = std::strcmp(command, "optics") == 0;
+  const bool pose = std::strcmp(command, "pose") == 0;
   const bool calfloor = std::strcmp(command, "calfloor") == 0;
   const bool calfront = std::strcmp(command, "calfront") == 0;
   const bool calfresh = std::strcmp(command, "calfresh") == 0;
   const bool calcommit = std::strcmp(command, "calcommit") == 0;
   const bool calabort = std::strcmp(command, "calabort") == 0;
   const bool calibration = calfloor || calfront || calfresh || calcommit || calabort;
-  if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status || aux || ir || optics || halt || calibration)) {
+  if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status || aux || ir || optics || pose || halt || calibration)) {
     // Do not interpolate attacker-controlled input into reply lines.
     std::snprintf(reply, capacity, "ERR input unknown_command");
     return;
@@ -958,6 +960,32 @@ void BodyControl::execute(const char* line, std::size_t length,
       (calfloor && count != 4) ||
       (!(drive || lift || grip || calfloor || calfront || calfresh) && count != 1)) {
     std::snprintf(reply, capacity, "ERR %s bad_arguments", command);
+    return;
+  }
+
+  if (pose) {
+    // Until two installed encoders and calibrated yaw actually prove wheel
+    // displacement, only a clocked, explicitly unavailable observation may
+    // cross the Sense/Mac interface. Origin zero has NO navigation authority.
+    // ESP-IDF monotonic esp_timer_get_time() is sampled at UART frame close;
+    // never infer time from the 32-bit millis() control watchdog clock.
+    constexpr std::uint64_t kMaxJsonExactUs = 9007199254740991ULL;
+    if (boot_epoch_ == 0 || sample_us == 0 ||
+        sample_us > kMaxJsonExactUs ||
+        sample_us <= pose_last_sample_us_ ||
+        pose_seq_ == UINT32_MAX) {
+      std::snprintf(reply, capacity, "ERR pose clock_or_sequence_unavailable");
+      return;
+    }
+    ++pose_seq_;
+    pose_last_sample_us_ = sample_us;
+    std::snprintf(reply, capacity,
+        "{\"v\":1,\"body_boot\":%lu,\"origin\":0,\"seq\":%lu,"
+        "\"sample_us\":%llu,\"x_mm\":0,\"y_mm\":0,"
+        "\"yaw_mrad\":0,\"quality\":\"unavailable\"}",
+        static_cast<unsigned long>(boot_epoch_),
+        static_cast<unsigned long>(pose_seq_),
+        static_cast<unsigned long long>(sample_us));
     return;
   }
 
@@ -1750,7 +1778,7 @@ void BodyControl::execute(const char* line, std::size_t length,
 }
 
 bool LineReceiver::feed(char byte, std::uint32_t now_ms, BodyControl& control,
-                        char* reply, std::size_t capacity) {
+                        char* reply, std::size_t capacity, std::uint64_t sample_us) {
   control.tick(now_ms);
   if (byte == '\n') {
     if (overlong_) {
@@ -1758,7 +1786,8 @@ bool LineReceiver::feed(char byte, std::uint32_t now_ms, BodyControl& control,
     } else if (invalid_) {
       std::snprintf(reply, capacity, "ERR input invalid_ascii");
     } else {
-      control.execute(line_, length_, now_ms, reply, capacity, local_safety_rearm_);
+      control.execute(line_, length_, now_ms, reply, capacity, local_safety_rearm_,
+                      sample_us);
     }
     length_ = 0;
     saw_cr_ = false;

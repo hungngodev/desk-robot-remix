@@ -108,7 +108,8 @@ class BodyControl {
   // Only the local USB receiver grants recovery authority. Network/head jobs
   // may arm an already-clear guard, but cannot clear a latched safety fault.
   void execute(const char* line, std::size_t length, std::uint32_t now_ms,
-               char* reply, std::size_t capacity, bool local_safety_rearm = false);
+               char* reply, std::size_t capacity, bool local_safety_rearm = false,
+               std::uint64_t sample_us = 0);
   // Hardware adapter may force disarm on a fault without renewing the lease.
   void force_disarm();
   // A missed CPU heartbeat latches wheels off without dropping jaw PWM.
@@ -173,7 +174,13 @@ class BodyControl {
   // Raw, read-only diagnostics. No tilt or motor permission follows from it.
   void set_imu(const BerryReading& reading);
   // Per-boot provenance for read-only IMU observations; never grants motion.
-  void set_boot_epoch(std::uint32_t epoch) { boot_epoch_ = epoch; }
+  void set_boot_epoch(std::uint32_t epoch) {
+    if (epoch != boot_epoch_) {
+      boot_epoch_ = epoch;
+      pose_seq_ = 0;
+      pose_last_sample_us_ = 0;
+    }
+  }
   // Physical WROOM assembly requires a fresh identified 6-axis sample, even
   // though actual tilt thresholds are NOT yet calibrated. DC test profile
   // and host policy tests opt in explicitly rather than changing their ABI.
@@ -250,6 +257,10 @@ class BodyControl {
   State state_{};
   BerryReading imu_{};
   std::uint32_t boot_epoch_ = 0;
+  // Read-only unavailable pose replies carry a source clock, not odometry.
+  // Never synthesize wheel travel from motor commands or emitted steps.
+  std::uint32_t pose_seq_ = 0;
+  std::uint64_t pose_last_sample_us_ = 0;
   bool imu_motion_required_ = false;
   bool imu_attitude_required_ = false;
   bool imu_attitude_configured_ = false;
@@ -347,7 +358,7 @@ class LineReceiver {
       : local_safety_rearm_(local_safety_rearm) {}
   // True only when a newline completes a response; reply has no newline.
   bool feed(char byte, std::uint32_t now_ms, BodyControl& control,
-            char* reply, std::size_t capacity);
+            char* reply, std::size_t capacity, std::uint64_t sample_us = 0);
 
  private:
   const bool local_safety_rearm_;
