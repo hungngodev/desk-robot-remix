@@ -1593,7 +1593,7 @@ def test_native_queued_asr_cannot_impersonate_a_newer_human_vad(
         current = {
             "event_id": "omni_" + "a" * 12 + "_" + "c" * 20,
             "transcript": "New question about the robot",
-            "accepted_at_us": int((now - 0.05) * 1_000_000),
+            "accepted_at_us": time.monotonic_ns() // 1000,
         }
         fresh = client.post(url, json=current, headers=headers)
         assert fresh.status_code == 200

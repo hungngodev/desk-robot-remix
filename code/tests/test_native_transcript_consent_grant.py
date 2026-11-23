@@ -131,6 +131,8 @@ def test_parent_memory_disabled_never_retains_native_transcript(
     settings, tmp_path, live_context_enabled,
 ):
     """Transcript flag alone must not grant private storage at runtime."""
+    import time
+
     from desk_robot.multimodal import CameraFrameHub
 
     settings.mode = "hardware"
@@ -155,6 +157,7 @@ def test_parent_memory_disabled_never_retains_native_transcript(
             json={
                 "event_id": "omni_" + "d" * 12 + "_" + "e" * 20,
                 "transcript": "A sentence without durable memory permission",
+                "accepted_at_us": time.monotonic_ns() // 1000,
             },
         )
     assert response.status_code == (200 if live_context_enabled else 403)
