@@ -672,6 +672,11 @@ class NativeOmniSession:
                     cut = boundary
             chunks.append(words[:cut].strip())
             words = words[cut:].strip()
+        # The original model event was accepted while its audio item was
+        # current. Preserve that time across the serialized HTTP queue:
+        # network delivery can occur after the next authenticated VAD edge.
+        # Both processes run on the same Mac monotonic clock.
+        accepted_at_us = time.monotonic_ns() // 1000
         for index, part in enumerate(chunks):
             key = f"{item_id}:{index}"
             digest = hashlib.sha256(key.encode()).hexdigest()[:20]
@@ -682,7 +687,7 @@ class NativeOmniSession:
                 self._heard_seen.clear()  # Mac SQLite still dedupes event IDs.
             self._heard_seen.add(event_id)
             try:
-                self._heard_queue.put_nowait((event_id, part))
+                self._heard_queue.put_nowait((event_id, part, accepted_at_us))
             except asyncio.QueueFull:
                 self.heard_memories_dropped += 1
 
@@ -690,12 +695,20 @@ class NativeOmniSession:
         """Deliver uncertain ASR for live RAM context or opt-in disk memory."""
         url = f"http://127.0.0.1:8765/v1/pet/{self.robot}/omni-heard"
         while not self.closed:
-            event_id, transcript = await self._heard_queue.get()
+            queued = await self._heard_queue.get()
+            if len(queued) == 3:
+                event_id, transcript, accepted_at_us = queued
+            else:
+                # Compatibility with preexisting local queue fixtures.
+                # Real model events always carry the pre-queue source stamp.
+                event_id, transcript = queued
+                accepted_at_us = time.monotonic_ns() // 1000
             try:
                 async with http.post(
                     url,
                     headers={"Authorization": f"Bearer {self.token}"},
-                    json={"event_id": event_id, "transcript": transcript},
+                    json={"event_id": event_id, "transcript": transcript,
+                          "accepted_at_us": accepted_at_us},
                     timeout=aiohttp.ClientTimeout(total=2),
                 ) as response:
                     if response.status in (401, 403):

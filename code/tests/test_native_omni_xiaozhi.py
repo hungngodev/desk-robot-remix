@@ -8,6 +8,7 @@ import base64
 import importlib.util
 import json
 import sys
+import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -6827,6 +6828,10 @@ async def test_native_asr_live_only_context_does_not_count_as_saved_memory(nativ
     session._accept_heard_transcript(event)
     session._accept_heard_transcript(event)
     assert session._heard_queue.qsize() == 1
+    # This stamp belongs to the accepted model event, not the later POST.
+    queued_source_us = session._heard_queue._queue[0][2]
+    assert 0 < queued_source_us <= time.monotonic_ns() // 1000
+    await asyncio.sleep(0.02)
     delivered = []
 
     class Reply:
@@ -6861,6 +6866,7 @@ async def test_native_asr_live_only_context_does_not_count_as_saved_memory(nativ
                 await asyncio.sleep(.001)
         assert len(delivered) == 1
         assert delivered[0]["transcript"] == "That little key moved"
+        assert delivered[0]["accepted_at_us"] == queued_source_us
         assert session.heard_memories_stored == 0
         assert session.heard_memories_dropped == 0
     finally:

@@ -1537,6 +1537,77 @@ def test_native_asr_tombstone_and_immediate_eviction_do_not_claim_persistence(
         assert memory.get_episode(robot, old_id) is None
 
 
+def test_native_queued_asr_cannot_impersonate_a_newer_human_vad(
+    settings, tokens, tmp_path,
+):
+    """The real HTTP route must reject an ASR accepted before newer VAD."""
+    from types import SimpleNamespace
+
+    from desk_robot.attention import AttentionLedger
+    from desk_robot.memory import MemoryStore
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = False
+    settings.voice_transcript_memory_enabled = False
+    robot = settings.robots[0].id
+    ids = [entry.id for entry in settings.robots]
+    hub = CameraFrameHub(ids)
+    attention = AttentionLedger(ids)
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(robot=settings.robot),
+        memory=MemoryStore(tmp_path / "private", ids),
+        multimodal=SimpleNamespace(hub=hub),
+        attention=attention, start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    url = f"/v1/pet/{robot}/omni-heard"
+    now = time.monotonic()
+    attention.human_started(robot, now - 0.25)
+    stale = {
+        "event_id": "omni_" + "a" * 12 + "_" + "b" * 20,
+        "transcript": "Old question about the key",
+        "accepted_at_us": int((now - 0.50) * 1_000_000),
+    }
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        old = client.post(url, json=stale, headers=headers)
+        assert old.status_code == 200
+        assert old.json()["ephemeral_context_added"] is False
+        assert not hub.heard_history[robot]
+        assert not attention.timeline(robot, time.monotonic())
+
+        current = {
+            "event_id": "omni_" + "a" * 12 + "_" + "c" * 20,
+            "transcript": "New question about the robot",
+            "accepted_at_us": int((now - 0.05) * 1_000_000),
+        }
+        fresh = client.post(url, json=current, headers=headers)
+        assert fresh.status_code == 200
+        assert fresh.json()["ephemeral_context_added"] is True
+        assert len(hub.heard_history[robot]) == 1
+        assert hub.heard_history[robot][0][1] == current["transcript"]
+        assert any(
+            "Newer uncertain ASR" in str(cue)
+            for cue in attention.timeline(robot, time.monotonic())
+        )
+        for bad_stamp in (
+            int((now - 120) * 1_000_000),
+            int((time.monotonic() + 2) * 1_000_000),
+        ):
+            invalid = client.post(
+                url, headers=headers,
+                json={**current,
+                      "event_id": "omni_" + "a" * 12 + "_" + "d" * 20,
+                      "accepted_at_us": bad_stamp},
+            )
+            assert invalid.status_code == 409
+
+
 def test_completed_native_asr_blends_with_live_camera_context_without_disk_consent(
     settings, tokens, tmp_path,
 ):

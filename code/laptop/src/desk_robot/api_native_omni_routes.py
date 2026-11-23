@@ -24,6 +24,12 @@ class NativeHeardRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     event_id: str = Field(pattern=r"^omni_[0-9a-f]{12}_[0-9a-f]{20}$")
     transcript: str = Field(min_length=1, max_length=240)
+    # Mac-host monotonic time when the current native audio item completed.
+    # Optional only for older authenticated clients; the selected overlay
+    # always supplies it. This is not a device microphone capture clock.
+    accepted_at_us: int | None = Field(
+        default=None, gt=0, le=9_223_372_036_854_775_807, strict=True,
+    )
 
 
 class NativeSpokenRequest(BaseModel):
@@ -164,13 +170,21 @@ def register_native_omni_routes(
             raise HTTPException(400, "Invalid model-estimated transcript")
         visual = getattr(app.state.runtime, "multimodal", None)
         observed_at = time.monotonic()
+        # HTTP receive time cannot make a prior ASR item newer than a
+        # human VAD turn that began while the FIFO POST was delayed.
+        accepted_at = (
+            request.accepted_at_us / 1_000_000
+            if request.accepted_at_us is not None else observed_at
+        )
+        if accepted_at > observed_at or observed_at - accepted_at > 90:
+            raise HTTPException(409, "Native ASR source timestamp expired or in future")
         live_consent_generation = settings.camera_consent_generation
         ephemeral = False
         if settings.voice_vision_tools_enabled and visual is not None:
             remember = getattr(visual.hub, "remember_heard", None)
             if callable(remember):
                 ephemeral = remember(
-                    robot_id, request.event_id, spoken[:240], observed_at
+                    robot_id, request.event_id, spoken[:240], accepted_at
                 )
         memory_opt_in = (
             settings.voice_transcript_memory_enabled
@@ -263,9 +277,15 @@ def register_native_omni_routes(
         # never an instruction or automatic permission to operate motors.
         attention = getattr(app.state.runtime, "attention", None)
         if ephemeral and settings.voice_vision_tools_enabled and attention is not None:
-            attention.heard(
-                robot_id, request.event_id, spoken[:240], observed_at
+            accepted = attention.heard(
+                robot_id, request.event_id, spoken[:240], accepted_at
             )
+            if not accepted:
+                # The ASR belonged to a superseded human voice turn. Remove
+                # its transient hub entry too, leaving historical opt-in
+                # storage and its consent accounting independent.
+                visual.hub.discard_heard(robot_id, request.event_id)
+                ephemeral = False
         # Permission for SQLite retention is not evidence that this exact
         # episode survived a tombstone, replay or bounded-store eviction.
         # A reused event ID with different ASR text also cannot claim its
