@@ -51,3 +51,14 @@ def test_berryimu_spare_does_not_replace_selected_mpu6050():
     assert berry["functionality_tested"] is False
     assert "MPU6050 remains the selected first-unit IMU" in inventory["note"]
     assert "BerryIMU replaces new IMU procurement" not in inventory["note"]
+
+
+def test_station_and_imu_supersessions_retained_in_decision_log():
+    decisions = (ROOT / "docs/decision-log.md").read_text(encoding="utf-8")
+    assert "Feather/USB-C breakout/continuous servo are spares" in decisions
+    assert "**2026-11-23 owned station allocation supersession:**" in decisions
+    assert "ONE shared read-only room" in decisions
+    assert "reported_owned_total=1" in decisions
+    assert "feather_nrf52840_room_bench" in decisions
+    assert "not an authorized" in decisions
+    assert "BerryIMU remains" in decisions

@@ -43,6 +43,23 @@ This is a scope requirement, **not** charger, printing, motor or battery
 purchase approval. Keep contact power disabled until independent seat,
 protection, low cell regulation, NTC and measured charge evidence qualifies.
 
+**2026-11-23 owned station allocation supersession:** The November 3
+inventory decision called the reported-owned Adafruit Feather nRF52840 a
+spare because it was not a pet head or body MCU. The accepted November 21
+scope now uses it as a candidate controller for ONE shared read-only room
+station serving five pets, not five new station MCUs. The canonical
+`room_controller` has `quantity_per_room=1`, `reported_owned_total=1`, and
+normal source profiles `feather_nrf52840_room_bench` and
+`feather_nrf52840_room_full`. Reuse requires an inspected PCB and measured
+3.3 V and 5 V rails, I2C/UART and USB continuity. This is not an authorized
+powered station or a reason to purchase another Adafruit board. The older
+USB-C breakout and continuous servo remain separate spares.
+
+The selected per-pet IMU is the MPU6050. The photographed old BerryIMU remains
+an unqualified spare, superseding its earlier prototype selection without
+erasing the photo and research history.
+
+
 This is a **planning commitment**, not approval of an exact untested IP5306 board, VL53L4CD module, Mac provider or GPL face engine. No physical test status changes.
 
 ## Continuing recording rule
