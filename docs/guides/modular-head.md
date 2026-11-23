@@ -34,7 +34,7 @@ components. A **separate Sense board target**, pin map and 8 MB partition/asset 
 are now implemented and compiled. See [actual pins/build](../../code/firmware/head/sense/README.md)
 and [verification](firmware-foundation.md). The existing modular build is Freenove 16 MB + SH1106 +
 INMP441 I²S; it cannot be flashed to Sense. CoreS3 and WROOM binaries are also
-incompatible. The Sense build passes; no physical Sense test has happened.
+incompatible. The early Sense target compiled at the recorded source snapshot; this is not a claim that the current PR head has five successful required CI jobs. No fitted Sense trial has been recorded.
 
 **Ordinary-speech interruption is required in the first build.** The early
 Sense baseline lacked playback reference/AEC; the current pinned
@@ -60,10 +60,14 @@ camera/PDM and PSRAM pins. SD is disabled and CS21 held high; leave its slot emp
 sensor wiring or the old Freenove UART pin numbers blindly. The body owns all
 cliff sensors; the head owns OLED, so no shared two-master bus is required.
 
-The new Sense app is 2,503,664 bytes and passes the 0x2f0000-byte OTA-slot check;
-assets fit at 0x600000 in the 8 MB layout. The earlier Freenove merged image is
-not a Sense image; never truncate or substitute it. Firmware installation/private/build scripts now accept `--board sense`, using
-a separate ignored `xiaozhi-sense` copy.
+At the November 6 firmware snapshot, the Sense app measured 2,503,664 bytes
+and passed its 0x2f0000-byte OTA slot check, with assets beginning at 0x600000
+in the documented 8 MB layout. These are historical size and offset observations,
+not a compile report for the current PR head. Recheck the exact current ESP-IDF
+6.1 source job, generated partition table, image size and actual board identity
+before flashing. The earlier Freenove merged image is not a Sense image; never
+truncate or substitute it. Firmware installation/private/build scripts accept
+`--board sense`, using a separate ignored `xiaozhi-sense` copy.
 [Implementation milestone](../plans/2026-11-03-active-desk-pet.md#milestone-4--sense-head-and-original-face).
 
 ## Face and interaction

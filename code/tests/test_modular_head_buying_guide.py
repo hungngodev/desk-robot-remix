@@ -32,3 +32,10 @@ def test_modular_head_guide_reconciles_paid_sense_and_pending_physical_gate():
     assert "not a drop-in ESP-IDF binary" in guide
     assert "[physical audio acceptance](audio-barge-in.md)" in guide
     assert "The compiled\nSense baseline has no playback reference/AEC" not in guide
+    assert "The Sense build passes; no physical Sense test has happened." not in guide
+    assert "At the November 6 firmware snapshot" in guide
+    assert "2,503,664 bytes" in guide
+    assert "0x2f0000-byte OTA slot check" in guide
+    assert "not a compile report for the current PR head" in guide
+    assert "Recheck the exact current ESP-IDF" in guide
+
