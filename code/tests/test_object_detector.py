@@ -5,11 +5,11 @@ from dataclasses import replace
 from io import BytesIO
 
 import pytest
-from PIL import Image
 
 from desk_robot.object_detector import DetectorFrame, detect_object_frame
 from desk_robot.object_targets import ObjectOwner, ObjectQuery
 from desk_robot.vision import Detection
+from PIL import Image
 
 
 def fixtures():
