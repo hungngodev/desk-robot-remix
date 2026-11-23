@@ -354,7 +354,7 @@ void process_input(HardwareSerial& stream, desk_robot::LineReceiver& receiver,
     const char received = static_cast<char>(stream.read());
     // A completed pose reply uses the WROOM's 64-bit monotonic microsecond
     // clock. Non-pose commands ignore the timestamp; UART reads stay bounded.
-    const std::uint64_t sample_us = received == '\\n' ?
+    const std::uint64_t sample_us = received == '\n' ?
         static_cast<std::uint64_t>(esp_timer_get_time()) : 0ULL;
     const bool completed = receiver.feed(received, millis(), control, reply,
                                           sizeof(reply), sample_us);
