@@ -229,3 +229,45 @@ def test_floor_unsafe_expires_to_stale_without_becoming_safe():
     # A host clock rollback cannot make that expired reading current.
     assert g.state(1, 1, now_us=999_999) == "stale"
     assert "safe" not in g.snapshot(now_us=2_000_001).support
+
+
+@pytest.mark.parametrize(
+    ("old_kind", "fresh_kind", "old_confidence", "fresh_confidence", "expected"),
+    [
+        ("obstacle_clear", "obstacle_hit", -4.0, 1.2, "occupied"),
+        ("obstacle_hit", "obstacle_clear", 4.0, -0.8, "safe"),
+    ],
+)
+def test_expired_obstacle_confidence_never_biases_new_measurement(
+    old_kind, fresh_kind, old_confidence, fresh_confidence, expected,
+):
+    g = grid()
+    # Several mutually consistent old measurements saturate the log odds.
+    for seq in range(1, 6):
+        receipt = 1_000_000 + seq * 10
+        g.record(evidence(old_kind, 4, seq, received_us=receipt), now_us=receipt)
+    assert g.log_odds(1, 1) == pytest.approx(old_confidence)
+
+    # The new floor support is fresh, but the obstacle belief has expired.
+    now = 2_000_100
+    g.record(evidence("floor_supported", 0, received_us=now), now_us=now)
+    assert g.state(1, 1, now_us=now) == "stale"
+    new_sample = replace(
+        evidence(fresh_kind, 4, seq=6, received_us=now),
+        sample_us=1_500_050,
+    )
+    g.record(new_sample, now_us=now)
+    assert g.log_odds(1, 1) == pytest.approx(fresh_confidence)
+    assert g.state(1, 1, now_us=now) == expected
+
+
+def test_current_obstacle_evidence_still_accumulates_confidence():
+    g = grid()
+    g.record(evidence("obstacle_clear", 4, received_us=1_000_000),
+             now_us=1_000_000)
+    g.record(
+        replace(evidence("obstacle_clear", 4, seq=2, received_us=1_000_100),
+                sample_us=100_100),
+        now_us=1_000_100,
+    )
+    assert g.log_odds(1, 1) == pytest.approx(-1.6)

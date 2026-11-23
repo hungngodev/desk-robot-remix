@@ -162,7 +162,11 @@ class SpatialGrid:
             else:
                 # Evidence from a different geometry must never cancel a fresh
                 # obstacle hit or lend false clearance after recalibration.
-                if target.obstacle_calibration != batch.calibration_id:
+                if (target.obstacle_calibration != batch.calibration_id
+                        or target.obstacle_received_us == 0
+                        or not 0 <= batch.received_us - target.obstacle_received_us <= self.ttl_us):
+                    # An expired prior hit or clearance cannot bias fresh evidence.
+                    # Clock rollback also discards the prior belief, never revives it.
                     target.obstacle_log_odds = 0.0
                 target.obstacle_log_odds = max(MIN_LOG_ODDS, min(MAX_LOG_ODDS,
                     target.obstacle_log_odds + _OBSTACLE_WEIGHT[batch.kind]))
