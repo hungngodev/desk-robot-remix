@@ -163,6 +163,44 @@ bool OpticsValid(cJSON* json) {
     return true;
 }
 
+
+bool PoseValid(cJSON* json) {
+    // Guide 20 version 1: validate a complete, exact body-origin sample.
+    // The body owns quality and sample_us; the head must not invent either.
+    if (!cJSON_IsObject(json) || cJSON_GetArraySize(json) != 9) return false;
+    const auto get = [json](const char* key) {
+        return cJSON_GetObjectItemCaseSensitive(json, key);
+    };
+    const auto integer = [](cJSON* item, double low, double high) {
+        return cJSON_IsNumber(item) && std::isfinite(item->valuedouble) &&
+               std::floor(item->valuedouble) == item->valuedouble &&
+               item->valuedouble >= low && item->valuedouble <= high;
+    };
+    const auto version = get("v");
+    const auto body_boot = get("body_boot");
+    const auto origin = get("origin");
+    const auto seq = get("seq");
+    const auto sample_us = get("sample_us");
+    const auto quality = get("quality");
+    if (!integer(version, 1, 1) ||
+        !integer(body_boot, 1, 4294967295.0) ||
+        !integer(origin, 0, 4294967295.0) ||
+        !integer(seq, 0, 4294967295.0) ||
+        !integer(sample_us, 0, 9007199254740991.0) ||
+        !integer(get("x_mm"), -2147483648.0, 2147483647.0) ||
+        !integer(get("y_mm"), -2147483648.0, 2147483647.0) ||
+        !integer(get("yaw_mrad"), -2147483648.0, 2147483647.0) ||
+        !cJSON_IsString(quality) || !quality->valuestring) return false;
+    const bool usable = std::strcmp(quality->valuestring, "valid") == 0;
+    const bool degraded = std::strcmp(quality->valuestring, "degraded") == 0;
+    const bool unavailable = std::strcmp(quality->valuestring, "unavailable") == 0;
+    if (!usable && !degraded && !unavailable) return false;
+    // A missing origin or a zero sample is never valid navigation evidence.
+    if ((usable || degraded) && (origin->valuedouble == 0 ||
+        seq->valuedouble == 0 || sample_us->valuedouble == 0)) return false;
+    return true;
+}
+
 bool IrValid(cJSON* json) {
     // Explicit read-only RMT evidence; a matching carrier is not enough to
     // infer a bearing, permit a motor, or certify net cell charging.
@@ -328,7 +366,7 @@ void Bridge::Start() {
     config.server_port = 8081;
     config.ctrl_port = 32771;
     config.stack_size = 12288;
-    config.max_uri_handlers = 14;
+    config.max_uri_handlers = 15;
     config.recv_wait_timeout = 2;
     config.send_wait_timeout = 2;
     if (httpd_start(&server_, &config) != ESP_OK) {
@@ -338,6 +376,7 @@ void Bridge::Start() {
     for (const auto& entry : std::vector<std::pair<const char*, httpd_method_t>>{
              {"/api/status", HTTP_GET}, {"/api/aux", HTTP_GET},
              {"/api/ir", HTTP_GET}, {"/api/optics", HTTP_GET},
+             {"/api/pose", HTTP_GET},
              {"/api/command", HTTP_POST}, {"/api/face", HTTP_POST},
              {"/api/camera.jpg", HTTP_GET},
              {"/api/camera.mjpg", HTTP_GET},
@@ -400,15 +439,23 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
         if (uart_read_bytes(kUart, &c, 1, pdMS_TO_TICKS(10)) != 1) continue;
         if (c == '\r') continue;
         if (c == '\n') {
-            if (MatchingError(line, command)) return {400, false, line};
+            // Old WROOM builds reject this new read-only verb explicitly.
+            if (command.verb == "pose" && line == "ERR input unknown_command")
+                return {501, false, "pose unsupported by body firmware"};
+            if (MatchingError(line, command))
+                return {command.verb == "pose" ? 503 : 400, false, line};
             if (command.verb == "status" || command.verb == "aux" ||
-                command.verb == "ir" || command.verb == "optics") {
+                command.verb == "ir" || command.verb == "optics" ||
+                command.verb == "pose") {
                 auto json = Parse(line);
                 if (json && (command.verb == "status" ?
                              StatusValid(json.get()) : command.verb == "aux" ?
                              AuxValid(json.get()) : command.verb == "ir" ?
-                              IrValid(json.get()) : OpticsValid(json.get())))
+                             IrValid(json.get()) : command.verb == "pose" ?
+                             PoseValid(json.get()) : OpticsValid(json.get())))
                     return {200, true, line};
+                if (command.verb == "pose" && !line.empty() && line.front() == '{')
+                    return {503, false, "malformed or unsupported pose response"};
             } else if (line == ExpectedAck(command)) return {200, true, line};
             line.clear();  // EVT, startup output, and unrelated ACKs are never success.
         } else {
@@ -520,6 +567,7 @@ esp_err_t Bridge::Json(httpd_req_t* req, int status, const std::string& body) {
         case 401: status_text = "401 Unauthorized"; break;
         case 413: status_text = "413 Content Too Large"; break;
         case 415: status_text = "415 Unsupported Media Type"; break;
+        case 501: status_text = "501 Not Implemented"; break;
         case 503: status_text = "503 Service Unavailable"; break;
         case 504: status_text = "504 Gateway Timeout"; break;
     }
@@ -540,8 +588,9 @@ void Bridge::BodyReadTask(void* context) {
         const bool aux = strcmp(req->uri, "/api/aux") == 0;
         const bool ir = strcmp(req->uri, "/api/ir") == 0;
         const bool optics = strcmp(req->uri, "/api/optics") == 0;
+        const bool pose = strcmp(req->uri, "/api/pose") == 0;
         const auto reply = bridge->Transact(
-            optics ? "optics" : ir ? "ir" : aux ? "aux" : "status", false);
+            pose ? "pose" : optics ? "optics" : ir ? "ir" : aux ? "aux" : "status", false);
         if (!reply.ok) {
             bridge->Json(req, reply.status, Envelope(false, reply.text));
         } else {
@@ -903,7 +952,8 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
     if (strcmp(req->uri, "/api/status") == 0 ||
         strcmp(req->uri, "/api/aux") == 0 ||
         strcmp(req->uri, "/api/ir") == 0 ||
-        strcmp(req->uri, "/api/optics") == 0) {
+        strcmp(req->uri, "/api/optics") == 0 ||
+        strcmp(req->uri, "/api/pose") == 0) {
         if (body_read_busy_.exchange(true, std::memory_order_acq_rel))
             return Json(req, 503, Envelope(false, "body telemetry busy"));
         httpd_req_t* async_req = nullptr;

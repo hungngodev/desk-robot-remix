@@ -123,6 +123,10 @@ int main() {
     assert(c.verb == "aux");
     assert(ParseCommand("ir", false, c));
     assert(c.verb == "ir");
+    assert(ParseCommand("pose", false, c));
+    assert(c.verb == "pose");
+    assert(!ParseCommand("pose 0", false, c));
+    assert(!ParseCommand("pose raw", true, c));
     assert(ParseCommand("optics", false, c));
     assert(c.verb == "optics");
     assert(!ParseCommand("optics 1", false, c));

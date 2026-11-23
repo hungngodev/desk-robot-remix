@@ -172,7 +172,7 @@ inline bool ParseCommand(std::string_view line, bool operator_control, Command& 
         if (a.size() != 1 || a[0] < 60 || a[0] > 120) return false;
     } else if (v == "arm" || v == "disarm" || v == "keepalive") {
         if (!operator_control || !a.empty()) return false;
-    } else if (v == "stop" || v == "halt" || v == "status" || v == "aux" || v == "ir" || v == "optics" || v == "ping") {
+    } else if (v == "stop" || v == "halt" || v == "status" || v == "aux" || v == "ir" || v == "optics" || v == "pose" || v == "ping") {
         if (!a.empty()) return false;
     } else return false;
     result.wire = std::string(line);

@@ -1659,3 +1659,42 @@ def test_sense_builder_readme_matches_selected_local_expression_consumer():
     assert "Gate A1 and feature G001 remain open" in instructions
     assert "No new camera/audio driver, RoboEyes/GPL face code or custom" not in instructions
     assert "Stock OLED emotion/text UI is used initially." not in instructions
+
+
+def test_authenticated_pose_bridge_is_read_only_bounded_and_versioned():
+    """Guide 30 pose remains a separate validated telemetry command, not a UART tunnel."""
+    import json
+
+    protocol = (HEAD / "overlay/robot_protocol.h").read_text()
+    bridge = (HEAD / "overlay/robot_bridge.cc").read_text()
+    assert 'v == "pose"' in protocol
+    assert '{"/api/pose", HTTP_GET}' in bridge
+    assert 'strcmp(req->uri, "/api/pose") == 0' in bridge
+    assert 'pose ? "pose" : optics ? "optics"' in bridge
+    assert 'bool PoseValid(cJSON* json)' in bridge
+    assert 'cJSON_GetArraySize(json) != 9' in bridge
+    for field in ('"v"', '"body_boot"', '"origin"', '"seq"', '"sample_us"',
+                  '"x_mm"', '"y_mm"', '"yaw_mrad"', '"quality"'):
+        assert field in bridge.split("bool PoseValid(cJSON* json)", 1)[1].split("bool IrValid(", 1)[0]
+    assert 'command.verb == "pose" && line == "ERR input unknown_command"' in bridge
+    assert 'return {501, false, "pose unsupported by body firmware"};' in bridge
+    assert 'command.verb == "pose" && !line.empty() && line.front() == \'{\'' in bridge
+    assert 'const bool urgent = command.verb == "stop" || command.verb == "halt";' in bridge
+    assert 'urgent_stop_gate_.preempts(urgent)' in bridge
+    assert 'body_read_busy_.exchange(true, std::memory_order_acq_rel)' in bridge
+    assert 'if (!Authorize(req)) return Json(req, 401' in bridge
+    assert 'cJSON_AddStringToObject(body.get(), "robot_id", CONFIG_DESK_ROBOT_ID)' in bridge
+    guide = (HEAD.parents[2] / "docs/guides/interfaces.md").read_text()
+    examples = guide.split("### Read-only pose v1", 1)[1]
+    import re
+    fixtures = re.findall(r'`({"v":1,"body_boot".+?})`', examples)
+    assert len(fixtures) == 3
+    valid, reboot, unavailable = map(json.loads, fixtures)
+    assert valid["quality"] == "valid" and valid["body_boot"] == reboot["body_boot"]
+    assert valid["origin"] == reboot["origin"]
+    assert valid["seq"] < reboot["seq"]
+    assert unavailable["quality"] == "unavailable"
+    assert set(valid) == set(reboot) == set(unavailable) == {
+        "v", "body_boot", "origin", "seq", "sample_us",
+        "x_mm", "y_mm", "yaw_mrad", "quality",
+    }

@@ -60,6 +60,7 @@ access; reject oversized bodies and commands. Never auto-arm from an MCP tool.
   Body ERR => HTTP400; UART failure/timeout => 503/504, never pretend success.
 - `GET /api/aux`: raw body sensor data with independent dock seat GPIOA, no net battery charging assertion.
 - `GET /api/ir`: WROOM two-channel read-only RMT NEC evidence; 34-symbol classic NEC, code checksum and fresh per-side sequences. A matched code never authorizes movement or charging.
+- `GET /api/pose`: authenticated, bounded read-only WROOM pose v1. Old body firmware returns HTTP 501, not guessed coordinates.
 - `GET /api/camera.jpg`: fresh JPEG using the existing camera implementation and
   image-to-JPEG helpers. No new sensor driver. Return failure if capture fails.
 
@@ -153,3 +154,57 @@ These headers say when JPEG encoding finished on the head, not the sensor's
 precise exposure time. Device and Mac monotonic clocks are not synchronized;
 actual capture lag and camera/audio coexistence still require hardware tests.
 Only current frames reach proactive comparison and the pickup controller.
+
+
+### Read-only pose v1
+
+This is the proposed guide 20 to guide 30 UART interface, pending actual WROOM
+producer integration and measured wheel/IMU calibration. A caller must not
+treat any sample as movement authority. The head issues the exact ASCII
+`pose\r\n` command on the existing 115200 baud 8N1 UART mutex; the body
+returns one complete JSON line. There is no arbitrary UART tunnel, background
+keepalive or retry. The same per-robot bearer authentication and currently
+configured head `robot_id` apply as `GET /api/ir`. The head adds only that
+`robot_id` to the validated body response.
+
+The exact required nine body fields are `v=1`, `body_boot` (nonzero uint32),
+`origin` (uint32 origin identity), `seq` (uint32 sample sequence),
+`sample_us` (body monotonic sample-start microseconds, at most the exact
+JSON integer range 2^53-1), `x_mm`, `y_mm` (signed 32 bit millimeters),
+`yaw_mrad` (signed 32 bit milliradians), and `quality` (only `valid`,
+`degraded`, or `unavailable`). All fields are integers except quality.
+A valid/degraded reading requires nonzero origin, sequence and sample time.
+Unrecognized versions, omitted or extra fields, nonintegral/out-of-range
+values, malformed JSON and foreign acknowledgments cannot become a pose.
+No wrap/age conversion from body to head clocks is inferred by the head.
+
+Illustrative wire fixtures only, NOT observations from installed hardware:
+
+* Same boot and origin, first sample:
+  `{"v":1,"body_boot":42,"origin":3,"seq":100,"sample_us":15000000,"x_mm":120,"y_mm":-20,"yaw_mrad":157,"quality":"valid"}`
+* Later sample, same boot and origin:
+  `{"v":1,"body_boot":42,"origin":3,"seq":101,"sample_us":15050000,"x_mm":121,"y_mm":-20,"yaw_mrad":158,"quality":"degraded"}`
+* Body available but pose not localized:
+  `{"v":1,"body_boot":43,"origin":0,"seq":0,"sample_us":0,"x_mm":0,"y_mm":0,"yaw_mrad":0,"quality":"unavailable"}`
+
+A body reboot invalidates the old frame even if its new sequence happens to
+match. A new origin also invalidates old spatial coordinates. Mac guide 50
+must validate robot identity, boot/origin, sequence and age, and must not
+promote a degraded/unavailable or uncalibrated pose to safe navigation.
+
+For a legacy WROOM reply `ERR input unknown_command`, the head sends
+HTTP 501 and `{"ok":false,"reply":"pose unsupported by body firmware","robot_id":"robot-01"}`.
+Malformed pose JSON or body-side pose errors return HTTP 503; an uncertain
+no-reply returns HTTP 504 after the existing 350 ms UART bound. One pending
+read shares the existing nonurgent telemetry latch; urgent STOP preempts
+nonurgent UART reads at the current polling boundary. No `pose` query
+renews the 500 ms body watchdog.
+
+Camera JPEG identity is separate: for one illustrative request, frame
+headers may be `X-Desk-Camera-Boot: 123`,
+`X-Desk-Camera-Sequence: 1`, `X-Desk-Camera-Complete-Us: 250000`.
+The last value is head monotonic microseconds at completed JPEG encoding,
+not optical exposure time or body `sample_us`. A subsequent JPEG on
+the same boot increases sequence, while any head reboot changes the
+boot identity. Actual optical lag and audio/camera coexistence require
+physical measurement and remain unqualified.
