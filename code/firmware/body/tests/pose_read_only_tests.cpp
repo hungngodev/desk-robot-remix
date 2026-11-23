@@ -247,6 +247,83 @@ void verify_angle_qualification_telemetry() {
   check(reply.find("\"boot_id\":124,\"wheel_travel_qualified\":false") != std::string::npos);
   check(!body.state().armed && body.state().left == 0 && body.state().right == 0);
 }
+void verify_paired_wheel_acquisitions() {
+  desk_robot::BodyControl body;
+  desk_robot::LineReceiver receiver;
+  check(!body.configure_wheel_pair_skew(25));
+  body.set_boot_epoch(201);
+  check(body.configure_wheel_angle_capture(4000, 4000, 200, 150));
+  check(!body.configure_wheel_pair_skew(0));
+  check(!body.configure_wheel_pair_skew(101));
+  check(body.configure_wheel_pair_skew(25));
+  check(!body.configure_wheel_pair_skew(25));
+  desk_robot::AccessoryReadings reads{};
+  auto update = [](desk_robot::AngleRaw& a, std::uint16_t angle,
+                   std::uint32_t seq, std::uint32_t ms) {
+    a.present = a.valid = true;
+    a.magnet_status = 0x20;
+    a.angle = angle; a.sample_seq = seq; a.at_ms = ms;
+  };
+  update(reads.angle[1], 4000, 1, 100);
+  update(reads.angle[2], 20, 1, 112);
+  body.set_accessories(reads, 112);
+  check(!body.wheel_pair_receipt().valid);
+  update(reads.angle[1], 4010, 2, 200);
+  body.set_accessories(reads, 200);
+  check(!body.wheel_pair_receipt().valid);
+  update(reads.angle[2], 10, 2, 212);
+  body.set_accessories(reads, 212);
+  const auto first = body.wheel_pair_receipt();
+  check(first.valid && first.pair_seq == 1 && first.segment == 1);
+  check(first.left_delta == 10 && first.right_delta == -10);
+  check(first.left_seq == 2 && first.right_seq == 2);
+  check(first.skew_ms == 12 && first.left_ms == 200 && first.right_ms == 212);
+  body.set_accessories(reads, 213); // same read cannot advance pair sequence
+  check(body.wheel_pair_receipt().pair_seq == 1);
+  update(reads.angle[1], 4020, 3, 300);
+  body.set_accessories(reads, 300);
+  check(body.wheel_pair_receipt().valid); // latest confirmed pair is unchanged
+  body.set_accessories(reads, 326); // unmatched one-leg sample times out
+  check(!body.wheel_pair_receipt().valid);
+  check(!body.wheel_angle_capture(false).continuous());
+  check(!body.wheel_angle_capture(true).continuous());
+  update(reads.angle[1], 4030, 4, 340);
+  update(reads.angle[2], 5, 3, 352);
+  body.set_accessories(reads, 352); // new local segment
+  update(reads.angle[1], 4040, 5, 410);
+  body.set_accessories(reads, 410);
+  update(reads.angle[2], 4090, 4, 422);
+  body.set_accessories(reads, 422);
+  check(body.wheel_pair_receipt().valid &&
+        body.wheel_pair_receipt().pair_seq == 2 &&
+        body.wheel_pair_receipt().segment == 2);
+  reads.angle[1].magnet_status = 0; // fault on any wheel revokes pair
+  body.set_accessories(reads, 425);
+  check(!body.wheel_pair_receipt().valid);
+  check(request(body, receiver, "pose\r\n", 425, 425000).find(
+      "\"quality\":\"unavailable\"") != std::string::npos);
+  check(!body.state().armed && body.state().left == 0 &&
+        body.state().right == 0);
+  body.set_boot_epoch(202);
+  check(!body.wheel_pair_receipt().valid);
+  check(!body.configure_wheel_pair_skew(20));
+  check(body.configure_wheel_angle_capture(4000, 4000, 200, 150));
+  check(body.configure_wheel_pair_skew(25));
+  // The first pair after a new boot cannot reuse old body sequence/segment.
+  update(reads.angle[1], 4090, 1, 0xfffffff0U);
+  update(reads.angle[2], 10, 1, 0);
+  body.set_accessories(reads, 0);
+  update(reads.angle[1], 4093, 2, 0x20U);
+  body.set_accessories(reads, 0x20U);
+  update(reads.angle[2], 8, 2, 0x30U);
+  body.set_accessories(reads, 0x30U);
+  check(body.wheel_pair_receipt().valid &&
+        body.wheel_pair_receipt().pair_seq == 1 &&
+        body.wheel_pair_receipt().left_delta == 3 &&
+        body.wheel_pair_receipt().right_delta == -2 &&
+        body.wheel_pair_receipt().skew_ms == 16);
+  check(!body.state().armed);
+}
 }  // namespace
 
 int main() {
@@ -255,5 +332,6 @@ int main() {
   verify_pose_capacity_failure_preserves_clock_and_sequence();
   verify_wheel_capture_stays_read_only();
   verify_angle_qualification_telemetry();
+  verify_paired_wheel_acquisitions();
   return 0;
 }

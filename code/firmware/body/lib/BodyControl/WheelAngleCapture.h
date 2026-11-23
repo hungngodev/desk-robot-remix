@@ -103,6 +103,9 @@ class WheelAngleCapture {
   }
 
   void reset_for_boot() { *this = WheelAngleCapture(); }
+  // Lost paired acquisition invalidates angular continuity but preserves
+  // rate qualification and the source replay fence until a new baseline.
+  void discard_continuity() { lose_continuity(); }
   bool continuous() const { return continuous_; }
   std::int64_t angular_counts() const { return continuous_ ? ticks_ : 0; }
   int last_delta() const { return continuous_ ? delta_ : 0; }

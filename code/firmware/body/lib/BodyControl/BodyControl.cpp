@@ -443,6 +443,18 @@ bool BodyControl::configure_wheel_angle_capture(
   return true;
 }
 
+bool BodyControl::configure_wheel_pair_skew(
+    std::uint32_t measured_max_skew_ms) {
+  if (boot_epoch_ == 0 || !wheel_capture_configured_ ||
+      wheel_pair_configured_ || state_.armed || state_.servos_attached)
+    return false;
+  WheelPairCapture configured;
+  if (!configured.configure(measured_max_skew_ms)) return false;
+  wheel_pairs_ = configured;
+  wheel_pair_configured_ = true;
+  return true;
+}
+
 void BodyControl::set_accessories(const AccessoryReadings& readings,
                                   std::uint32_t now_ms) {
   // Other simultaneous faults must not hide a dock GPIOA loss that happened
@@ -453,8 +465,18 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
     // Capture only real per-conversion AS5600 provenance from the 0x71 bus.
     // Independent channels may be sampled at different times, so these
     // angular counts NEVER create a paired metric pose or motor permit.
-    wheel_angles_[0].observe(readings.angle[1], now_ms);
-    wheel_angles_[1].observe(readings.angle[2], now_ms);
+    const auto left = wheel_angles_[0].observe(readings.angle[1], now_ms);
+    const auto right = wheel_angles_[1].observe(readings.angle[2], now_ms);
+    if (wheel_pair_configured_ &&
+        wheel_pairs_.observe(left, right, readings.angle[1], readings.angle[2],
+                             wheel_angles_[0].last_delta(),
+                             wheel_angles_[1].last_delta(), now_ms) ==
+            WheelPairCapture::Result::Invalid) {
+      // Dropping either leg invalidates the entire movement interval.
+      // Next successful acquisitions must establish two new baselines.
+      wheel_angles_[0].discard_continuity();
+      wheel_angles_[1].discard_continuity();
+    }
   }
   const auto& force = readings.force;
   const bool belly_valid = (force.valid_mask & 1U) != 0U ||

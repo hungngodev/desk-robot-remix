@@ -8,6 +8,7 @@
 #include "OpticalRaw.h"
 #include "AccessoryReadings.h"
 #include "WheelAngleCapture.h"
+#include "WheelPairCapture.h"
 #include "NecBurst.h"
 
 namespace desk_robot {
@@ -184,6 +185,12 @@ class BodyControl {
   const WheelAngleCapture& wheel_angle_capture(bool right) const {
     return wheel_angles_[right ? 1 : 0];
   }
+  // Boot-only measured skew; no UART command can qualify pairing. Wheel
+  // travel and pose remain unavailable pending gear, yaw and geometry trials.
+  bool configure_wheel_pair_skew(std::uint32_t measured_max_skew_ms);
+  const WheelPairCapture::Receipt& wheel_pair_receipt() const {
+    return wheel_pairs_.receipt();
+  }
   // Per-boot provenance for read-only IMU observations; never grants motion.
   void set_boot_epoch(std::uint32_t epoch) {
     if (epoch != boot_epoch_) {
@@ -192,6 +199,8 @@ class BodyControl {
       pose_last_sample_us_ = 0;
       wheel_angles_[0].reset_for_boot();
       wheel_angles_[1].reset_for_boot();
+      wheel_pairs_.reset_for_boot();
+      wheel_pair_configured_ = false;
       wheel_capture_configured_ = false;
     }
   }
@@ -278,7 +287,9 @@ class BodyControl {
   // Two independent raw magnet shaft angle histories: left=1, right=2.
   // Default unconfigured so no unmeasured encoder rate is trusted.
   WheelAngleCapture wheel_angles_[2]{};
+  WheelPairCapture wheel_pairs_{};
   bool wheel_capture_configured_ = false;
+  bool wheel_pair_configured_ = false;
   bool imu_motion_required_ = false;
   bool imu_attitude_required_ = false;
   bool imu_attitude_configured_ = false;
