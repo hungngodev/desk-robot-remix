@@ -720,7 +720,9 @@ class Conversation:
                     )
                 worker.add_done_callback(observe_late_write)
                 raise
-            except (sqlite3.Error, MemoryWriteSealed, OSError) as exc:
+            except (sqlite3.Error, MemoryWriteSealed, OSError, ValueError) as exc:
+                # Private SQLite alias rejection is a persistence failure,
+                # never authority to abort an otherwise valid group dialogue.
                 record_failure(exc)
 
     async def run(

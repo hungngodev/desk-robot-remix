@@ -403,7 +403,7 @@ async def test_five_robot_conversation_persists_peer_hearsay_without_identity_le
 
 
 
-@pytest.mark.parametrize("failure", ["sqlite_busy", "write_sealed"])
+@pytest.mark.parametrize("failure", ["sqlite_busy", "write_sealed", "hard_linked"])
 async def test_group_speech_continues_when_one_pet_cannot_persist(
     fleet, tmp_path, monkeypatch, failure,
 ):
@@ -418,6 +418,8 @@ async def test_group_speech_continues_when_one_pet_cannot_persist(
         if robot_id == "robot-02":
             if failure == "sqlite_busy":
                 raise sqlite3.OperationalError("database is locked")
+            if failure == "hard_linked":
+                raise ValueError("Refusing hard-linked memory database")
             raise MemoryWriteSealed("No remaining private deletion fence capacity")
         return original(robot_id, *args, **kwargs)
 
@@ -433,9 +435,11 @@ async def test_group_speech_continues_when_one_pet_cannot_persist(
     assert len(failed) == 1
     assert failed[0]["status"] == "completed"
     assert failed[0]["memory_write_failures"] == 6
-    assert failed[0]["memory_write_error_type"] == (
-        "OperationalError" if failure == "sqlite_busy" else "MemoryWriteSealed"
-    )
+    assert failed[0]["memory_write_error_type"] == {
+        "sqlite_busy": "OperationalError",
+        "write_sealed": "MemoryWriteSealed",
+        "hard_linked": "ValueError",
+    }[failure]
     assert conversation.group_activity_timeline("robot-01")[0][
         "memory_write_failures"
     ] == 0
