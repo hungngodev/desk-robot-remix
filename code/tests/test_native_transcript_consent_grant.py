@@ -1,6 +1,7 @@
 """Revoking transcript retention aborts pending SQLite writes despite regrant."""
 
 from types import SimpleNamespace
+import time
 
 import pytest
 from desk_robot.api_native_omni_routes import register_native_omni_routes
@@ -46,12 +47,15 @@ def test_regrant_during_native_transcript_write_preserves_only_prior_data(
         coordinator=lambda: SimpleNamespace(robot=settings.robot),
         native_pet_speech_policy=lambda _robot_id: {},
     )
+    source_stamp_us = time.monotonic_ns() // 1000
     with TestClient(app) as client:
         response = client.post(
             f"/v1/pet/{robot_id}/omni-heard",
             json={
                 "event_id": event_id,
                 "transcript": "A private sentence sent before opt out",
+                "accepted_at_us": source_stamp_us,
+                "audio_committed_at_us": source_stamp_us,
             },
         )
     assert response.status_code == 403
@@ -105,12 +109,15 @@ def test_parent_memory_revocation_cleans_native_transcript_write(
         coordinator=lambda: SimpleNamespace(robot=settings.robot),
         native_pet_speech_policy=lambda _robot_id: {},
     )
+    source_stamp_us = time.monotonic_ns() // 1000
     with TestClient(app) as client:
         response = client.post(
             f"/v1/pet/{robot_id}/omni-heard",
             json={
                 "event_id": event_id,
                 "transcript": "A sentence before parent memory opt out",
+                "accepted_at_us": source_stamp_us,
+                "audio_committed_at_us": source_stamp_us,
             },
         )
     assert response.status_code == 403
@@ -203,17 +210,23 @@ def test_live_asr_revoke_during_durable_write_retracts_ephemeral_receipt(
     app = FastAPI()
     app.state.runtime = SimpleNamespace(
         memory=store, multimodal=SimpleNamespace(hub=hub),
-        attention=SimpleNamespace(heard=lambda *args: attention_calls.append(args)),
+        attention=SimpleNamespace(
+            heard_is_current=lambda *_args: True,
+            heard=lambda *args: attention_calls.append(args),
+        ),
     )
     register_native_omni_routes(
         app, settings, authorize=lambda: None,
         coordinator=lambda: SimpleNamespace(robot=settings.robot),
         native_pet_speech_policy=lambda _robot_id: {},
     )
+    source_stamp_us = time.monotonic_ns() // 1000
     with TestClient(app) as client:
         response = client.post(
             f"/v1/pet/{robot_id}/omni-heard",
-            json={"event_id": event_id, "transcript": "A fleeting live ASR cue"},
+            json={"event_id": event_id, "transcript": "A fleeting live ASR cue",
+                  "accepted_at_us": source_stamp_us,
+                  "audio_committed_at_us": source_stamp_us},
         )
     assert response.status_code == 200
     assert response.json()["stored"] is True
