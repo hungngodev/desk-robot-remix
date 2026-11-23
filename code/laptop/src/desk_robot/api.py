@@ -38,6 +38,7 @@ from .api_readonly_planner import (
     register_readonly_planner_routes,
 )
 from .api_robot_status import register_robot_status_routes
+from .api_spatial_pose import register_spatial_pose_route
 from .config import Settings, secret
 from .controller import OperationError
 from .conversation import conversation_turns
@@ -330,6 +331,8 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         remember_tool_context=remember_tool_context,
         current_tool_context=current_tool_context,
     )
+
+    register_spatial_pose_route(app, operator=operator, coordinator=coordinator)
 
     @app.post("/v1/robots/{robot_id}/dock/approach",
               dependencies=[Depends(operator)], status_code=202)
