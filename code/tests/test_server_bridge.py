@@ -2833,3 +2833,76 @@ def test_native_fleet_launcher_checks_auth_before_running_upstream_server():
     assert source.index("verified_xiaozhi_auth_config(local_config)") < source.index(
         'runpy.run_path(str(server / "app.py")'
     )
+
+@pytest.mark.parametrize("failure", ("socket", "stall"))
+async def test_failed_normal_barge_retries_stop_without_duplicate_vad_or_input_loss(
+    bridge, failure,
+):
+    """A repeated real VAD retries device STOP, not the same human turn."""
+    head = conn("mac-01")
+    bridge.register(head)
+    head.client_listen_mode = "realtime"
+    head.client_is_speaking = True
+    head.session_id = "head-stuck-stop"
+    queue_clears, stops = [], []
+    head.clear_queues = lambda: queue_clears.append("clear")
+    head.clearSpeakStatus = lambda: (
+        stops.append("speaker"),
+        setattr(head, "client_is_speaking", False),
+    )
+
+    class Unavailable:
+        async def send(self, _frame):
+            if failure == "socket":
+                raise ConnectionError("physical STOP unavailable")
+            await asyncio.Event().wait()
+
+    head.websocket = Unavailable()
+    assert not await bridge.interrupt_for_normal_voice(head, True)
+    with pytest.raises((ConnectionError, asyncio.TimeoutError)):
+        await bridge.interrupt_for_normal_voice(head, True)
+    assert bridge.voice_event_cursor == 1
+    assert bridge.voice_turn_generation[head.device_id] == 1
+    assert bridge.interrupt_generation[head.device_id] == 1
+    assert queue_clears == ["clear"]
+
+    # This is still the same interrupted utterance, not an instruction to
+    # advance the Mac tool generation or discard more upstream mic packets.
+    assert not await bridge.interrupt_for_normal_voice(head, True)
+    with pytest.raises((ConnectionError, asyncio.TimeoutError)):
+        await bridge.interrupt_for_normal_voice(head, True)
+    assert bridge.voice_event_cursor == 1
+    assert bridge.voice_turn_generation[head.device_id] == 1
+    assert bridge.interrupt_generation[head.device_id] == 1
+    assert queue_clears == ["clear"]
+
+    class Recovered:
+        async def send(self, frame):
+            stops.append(json.loads(frame)["state"])
+
+    head.websocket = Recovered()
+    assert not await bridge.interrupt_for_normal_voice(head, True)
+    assert await bridge.interrupt_for_normal_voice(head, True)
+    assert stops == ["stop", "speaker"]
+    assert bridge.voice_event_cursor == 1
+    assert queue_clears == ["clear"]
+
+    # A genuinely fresh upstream speech session resets abort before TTS.
+    head.client_abort = False
+    head.client_is_speaking = True
+    assert not await bridge.interrupt_for_normal_voice(head, True)
+    assert await bridge.interrupt_for_normal_voice(head, True)
+    assert bridge.voice_event_cursor == 2
+    assert bridge.voice_turn_generation[head.device_id] == 2
+    assert queue_clears == ["clear", "clear"]
+
+    # A detached socket may not stop the replacement head or publish VAD.
+    bridge.unregister(head)
+    successor = conn("mac-01")
+    bridge.register(successor)
+    head.client_is_speaking = True
+    head.client_abort = False
+    assert not await bridge.interrupt_for_normal_voice(head, True)
+    assert not await bridge.interrupt_for_normal_voice(head, True)
+    assert bridge.voice_event_cursor == 2
+    assert stops == ["stop", "speaker", "stop", "speaker"]

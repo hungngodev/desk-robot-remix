@@ -93,6 +93,9 @@ active_device_id: str | None = None
 voice_frames: dict[str, int] = {}
 voice_last_frame_at: dict[str, float] = {}
 human_interrupted_devices: set[str] = set()
+# A failed head STOP may be retried without publishing a second human turn
+# or clearing the new utterance's queued input. Reset on fresh speech or loss.
+_normal_barge_recorded: set[str] = set()
 # Authenticated, bounded, text-only events for the Mac cancellation owner.
 # PCM, transcripts, images and bearer tokens never enter this replay buffer.
 voice_event_cursor = 0
@@ -425,6 +428,7 @@ def unregister(conn):
         idle_voice_last_at.pop(conn.device_id, None)
         idle_voice_emitted.discard(conn.device_id)
         idle_voice_quiet_frames.pop(conn.device_id, None)
+        _normal_barge_recorded.discard(conn.device_id)
         human_vad_until.pop(conn.device_id, None)
         # A queued request may outlive this socket and a replacement register.
         interrupt_generation[conn.device_id] = (
@@ -592,24 +596,31 @@ async def interrupt_for_normal_voice(conn, have_voice: bool) -> bool:
     This does not claim unmeasured acoustic double-talk performance.
     """
     device = conn.device_id
-    if muted(device) or lease_stopping:
-        return False  # Coordinated sessions have their own interrupt path.
+    if connections.get(device) is not conn or muted(device) or lease_stopping:
+        return False  # Stale heads and coordinated sessions cannot interrupt.
     if (getattr(conn, "client_listen_mode", "") != "realtime"
             or not getattr(conn, "client_is_speaking", False)):
         voice_frames.pop(device, None)
         voice_last_frame_at.pop(device, None)
         return False
+    # A genuinely new speaker generation clears its earlier interruption.
+    # An unsuccessful STOP leaves client_abort asserted; retain the old VAD
+    # event but allow another physical STOP attempt without queue loss.
+    if not getattr(conn, "client_abort", False):
+        _normal_barge_recorded.discard(device)
     if not sustained_voice(device, have_voice):
         return False
     # Mirrored from the pinned upstream handleAbortMessage except the stop
     # includes flush:true to discard old decoder PCM and speaker DMA.
-    conn.close_after_chat = False
-    conn.client_abort = True
-    conn.clear_queues()
-    interrupt_generation[device] = interrupt_generation.get(device, 0) + 1
-    # Record authenticated VAD before awaiting a possibly disconnected
-    # head, so Mac and other pets can preempt independently of this STOP.
-    record_human_voice(conn, "normal")
+    if device not in _normal_barge_recorded:
+        conn.close_after_chat = False
+        conn.client_abort = True
+        conn.clear_queues()
+        interrupt_generation[device] = interrupt_generation.get(device, 0) + 1
+        # Record real VAD before a possibly disconnected head STOP. A retry
+        # must not manufacture a newer human intent or flush its first words.
+        if record_human_voice(conn, "normal"):
+            _normal_barge_recorded.add(device)
     try:
         native = _native_adapter()
     except ModuleNotFoundError:
