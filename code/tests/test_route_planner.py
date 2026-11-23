@@ -162,3 +162,23 @@ def test_version_and_live_generation_cancel_are_bounded():
     assert stopped.reason == "request_invalidated"
     assert stopped.cells == () and stopped.may_execute is False
     assert route(request_is_current=lambda: False).reason == "request_invalidated"
+
+
+def test_same_cell_is_not_a_stale_or_cancelled_arrival():
+    _, r, _ = fixtures()
+    same = replace(r, goal=r.start)
+    assert route(request=same, request_is_current=lambda: False).reason == "request_invalidated"
+    assert route(request=same, clock_us=lambda: 3000).reason == "deadline_or_map_expired"
+
+
+def test_clearance_budget_rejects_unbounded_tiny_cells():
+    g, _, e = fixtures()
+    tiny = replace(g, cell_mm=1)
+    result = route(grid=tiny, envelope=replace(e, swept_turn_radius_mm=400))
+    assert result.reason == "unqualified_clearance"
+
+
+def test_unhashable_untrusted_support_sample_is_finite_refusal():
+    g, _, _ = fixtures()
+    bad = replace(g, support=(["unsafe"],) + g.support[1:])
+    assert route(grid=bad).reason == "invalid_grid"

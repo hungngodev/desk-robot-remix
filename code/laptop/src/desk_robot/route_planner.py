@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import heapq
 import math
-from functools import lru_cache
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import Callable
 
 
@@ -105,8 +105,9 @@ def plan_route(
             or not 1 <= grid.cell_mm <= 100
             or not isinstance(grid.support, tuple)
             or len(grid.support) != grid.width * grid.height
-            or any(s not in {SAFE, "occupied", "unknown", "stale", "unsafe"}
-                   for s in grid.support)):
+            or any(type(s) is not str or s not in {
+                SAFE, "occupied", "unknown", "stale", "unsafe"
+            } for s in grid.support)):
         return refuse("invalid_grid")
     if (not all(isinstance(s, str) and s for s in (
             grid.robot_id, grid.origin_id, grid.anchor_id, grid.calibration_id,
@@ -151,8 +152,29 @@ def plan_route(
     turn_radius = (envelope.swept_turn_radius_mm + envelope.localization_error_mm
                    + envelope.stopping_margin_mm)
     # Bounds apply to inflated radii, not just each independently valid input.
-    if turn_radius > 400 or radius > 400:
+    if (turn_radius > 400 or radius > 400
+            or math.ceil(turn_radius / grid.cell_mm + 0.5) > 24):
+        # Bound the maximum per-state raster footprint and cancellation lag.
         return refuse("unqualified_clearance")
+
+    def live() -> str | None:
+        if request_is_current is not None:
+            try:
+                if request_is_current() is not True:
+                    return "request_invalidated"
+            except Exception:
+                return "request_invalidated"
+        if clock_us is None:
+            return None
+        try:
+            current = clock_us()
+        except Exception:
+            return "invalid_clock"
+        if type(current) is not int or current < now_us:
+            return "invalid_clock"
+        if current >= request.deadline_us or current >= grid.expires_at_us:
+            return "deadline_or_map_expired"
+        return None
 
     @lru_cache(maxsize=8192)
     def clear(x: int, y: int, clearance_mm: int) -> bool:
@@ -173,6 +195,9 @@ def plan_route(
                     return False
         return True
 
+    expired = live()
+    if expired:
+        return refuse(expired)
     if not clear(*request.start, radius):
         return refuse("unsafe_start")
     if not clear(*request.goal, radius):
@@ -181,25 +206,6 @@ def plan_route(
         return RouteResult("planned", "at_observation_pose", (request.start,),
                            request.robot_id, request.origin_id, request.epoch,
                            request.session_id, request.turn_id)
-
-    def live() -> str | None:
-        if request_is_current is not None:
-            try:
-                if request_is_current() is not True:
-                    return "request_invalidated"
-            except Exception:
-                return "request_invalidated"
-        if clock_us is None:
-            return None
-        try:
-            current = clock_us()
-        except Exception:
-            return "invalid_clock"
-        if type(current) is not int or current < now_us:
-            return "invalid_clock"
-        if current >= request.deadline_us or current >= grid.expires_at_us:
-            return "deadline_or_map_expired"
-        return None
 
     start_state = (*request.start, request.heading)
     best = {start_state: 0}
