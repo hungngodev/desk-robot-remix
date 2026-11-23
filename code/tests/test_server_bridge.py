@@ -1795,6 +1795,7 @@ async def test_real_xiaozhi_voice_events_are_authenticated_replayable_metadata(b
         assert await boot.json() == {
             "cursor": 2, "events": [], "lost": False, "reset": False,
             "active_human_robots": [],
+            "voice_turn_generations": {},
         }
         result = await client.get("/events?after=0", headers=headers)
         data = await result.json()
@@ -1807,6 +1808,45 @@ async def test_real_xiaozhi_voice_events_are_authenticated_replayable_metadata(b
         result = await client.get("/events?after=900", headers=headers)
         assert (await result.json())["reset"] is True
         assert (await client.get("/events?after=-1", headers=headers)).status == 400
+
+
+async def test_voice_event_turn_generations_track_each_registered_head(bridge):
+    first, peer = conn("mac-01"), conn("mac-02")
+    bridge.register(first)
+    bridge.register(peer)
+    assert bridge.current_voice_turn_generations() == {
+        "robot-01": 0, "robot-02": 0,
+    }
+    assert bridge.record_human_voice(first, "speech_start")
+    assert bridge.record_human_voice(first, "speech_end")
+    assert bridge.record_human_voice(peer, "group")
+    assert bridge.record_human_voice(first, "normal")
+    assert [
+        (event["robot_id"], event["kind"], event["voice_turn_generation"])
+        for event in bridge.voice_event_history
+    ] == [
+        ("robot-01", "speech_start", 1),
+        ("robot-01", "speech_end", 1),
+        ("robot-02", "group", 1),
+        ("robot-01", "normal", 2),
+    ]
+    headers = {"Authorization": "Bearer " + "s" * 40}
+    async with TestClient(TestServer(bridge.create_app())) as client:
+        snapshot = await client.get("/events?after=0&bootstrap=1", headers=headers)
+        assert (await snapshot.json())["voice_turn_generations"] == {
+            "robot-01": 2, "robot-02": 1,
+        }
+        response = await client.get("/events?after=0", headers=headers)
+        assert [event["voice_turn_generation"]
+                for event in (await response.json())["events"]] == [1, 1, 1, 2]
+    bridge.unregister(first)
+    assert bridge.current_voice_turn_generations() == {"robot-02": 1}
+    successor = conn("mac-01")
+    bridge.register(successor)
+    assert bridge.current_voice_turn_generations()["robot-01"] == 3
+    assert not bridge.record_human_voice(first, "normal")
+    assert bridge.record_human_voice(successor, "speech_start")
+    assert bridge.voice_event_history[-1]["voice_turn_generation"] == 4
 
 
 async def test_events_snapshot_recovers_missed_active_vad_and_cleans_up(bridge):
@@ -1870,6 +1910,7 @@ async def test_physical_normal_barge_in_emits_only_from_live_registered_connecti
     assert list(bridge.voice_event_history) == [{
         "seq": 1, "robot_id": "robot-01",
         "kind": "normal", "source": "xiaozhi_aec_vad",
+        "voice_turn_generation": 1,
     }]
     assert sent == [{
         "type": "tts", "state": "stop", "session_id": "live-device", "flush": True,

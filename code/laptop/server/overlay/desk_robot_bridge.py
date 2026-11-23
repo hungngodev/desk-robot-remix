@@ -130,6 +130,18 @@ def human_speech_active() -> bool:
     )
 
 
+def current_voice_turn_generations() -> dict[str, int]:
+    """Expose signed tool owner generations only for registered head identities.
+
+    These Xiaozhi source generations are not Mac camera turn counters.
+    """
+    return {
+        robot_id: voice_turn_generation.get(device, 0)
+        for robot_id, device in device_map().items()
+        if device in connections
+    }
+
+
 def _native_adapter():
     """Optional module is installed in real pinned Xiaozhi builds only.
 
@@ -162,16 +174,18 @@ def record_human_voice(conn, kind: str) -> bool:
         human_vad_until[device] = time.monotonic() + 0.15
     else:
         human_vad_until[device] = time.monotonic() + 1.0
+    if kind in ("speech_start", "normal", "group"):
+        voice_turn_generation[device] = voice_turn_generation.get(device, 0) + 1
+        _invalidate_tool_turn(device)
     voice_event_cursor += 1
     voice_event_history.append({
         "seq": voice_event_cursor, "robot_id": robot_id,
         "kind": kind,
         "source": "xiaozhi_server_vad" if kind in ("speech_start", "speech_end")
                   else "xiaozhi_aec_vad",
+        "voice_turn_generation": voice_turn_generation.get(device, 0),
     })
     if kind in ("speech_start", "normal", "group"):
-        voice_turn_generation[device] = voice_turn_generation.get(device, 0) + 1
-        _invalidate_tool_turn(device)
         try:
             native = _native_adapter()
         except ModuleNotFoundError:
@@ -1092,12 +1106,14 @@ def create_app():
                 "cursor": voice_event_cursor, "events": [],
                 "reset": False, "lost": False,
                 "active_human_robots": active_idle_speech_robots(),
+                "voice_turn_generations": current_voice_turn_generations(),
             })
         if after > voice_event_cursor:
             return web.json_response({
                 "cursor": voice_event_cursor, "events": [],
                 "reset": True, "lost": False,
                 "active_human_robots": active_idle_speech_robots(),
+                "voice_turn_generations": current_voice_turn_generations(),
             })
         earliest = voice_event_history[0]["seq"] if voice_event_history else voice_event_cursor + 1
         return web.json_response({
@@ -1105,6 +1121,7 @@ def create_app():
             "events": [item for item in voice_event_history if item["seq"] > after],
             "reset": False, "lost": after < earliest - 1,
             "active_human_robots": active_idle_speech_robots(),
+            "voice_turn_generations": current_voice_turn_generations(),
         })
 
     app.router.add_get("/events", voice_events)
