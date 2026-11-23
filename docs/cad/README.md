@@ -80,3 +80,27 @@ The stepper remix is a different variant; verify matching track/slave-wheel
 selection and forklift interface, not only motor mounting. STL source-coordinate
 bounds and byte integrity do not establish millimeters, manifoldness, printability
 or physical fit. No full assembly or cliff-coverage check has occurred.
+
+
+## A4 paper overlays for unpowered fit screening
+
+The source-derived [paper template exporter](remixes/print_2d_fit_templates.py)
+produces three A4 SVG pages for the nominal GY-530 PCB outline, rectangular
+Challenge speaker body and passive dock AprilTag paper/pocket dimensions.
+From the repository root, run:
+
+```sh
+python3 docs/cad/remixes/print_2d_fit_templates.py --output /tmp/robot-paper-fit
+python3 docs/cad/remixes/print_2d_fit_templates.py --output /tmp/robot-paper-fit --verify
+```
+
+Print each SVG at **100% / actual size**, never "fit to page", and independently
+measure both the horizontal **100 mm** and vertical **25 mm** reference
+features on the resulting paper. The pages label front/top and back/bottom,
+carry pinned source dimensions and a digest manifest, and deliberately
+contain **zero approved drilling holes**. The dock outline is not a usable
+AprilTag image. These are reversible, unpowered **nominal envelopes**, not
+measured carrier fit, final mounting/cut patterns, camera calibration, a
+safe charger or an approved final printable robot. Enter actual caliper,
+mounting and optical measurements in
+[Fusion measurement sheet](FUSION_MEASUREMENT_SHEET.md) before final parts.
