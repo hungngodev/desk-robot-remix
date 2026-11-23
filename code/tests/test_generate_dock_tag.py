@@ -58,6 +58,40 @@ def test_dock_marker_svg_keeps_true_60mm_black_tag_and_5mm_quiet_margin(
     assert "Print at 100 percent" in svg
 
 
+@pytest.mark.parametrize("alias", ("parent", "ancestor", "leaf"))
+def test_dock_tag_never_follows_mutable_output_symlinks(
+    monkeypatch, tmp_path, alias,
+):
+    module = source()
+    monkeypatch.setattr(module, "marker_bits", synthetic_bits)
+    # Keep this a mutable alias even when the test runner uses root.
+    tmp_path.chmod(0o777)
+    outside = tmp_path / "unrelated"
+    outside.mkdir()
+    sentinel = outside / "private.svg"
+    sentinel.write_text("unrelated evidence", encoding="utf-8")
+    output = tmp_path / "dock_01.svg"
+    if alias == "parent":
+        pivot = tmp_path / "alias"
+        pivot.symlink_to(outside, target_is_directory=True)
+        output = pivot / "dock_01.svg"
+    elif alias == "ancestor":
+        (outside / "nested").mkdir()
+        pivot = tmp_path / "alias"
+        pivot.symlink_to(outside, target_is_directory=True)
+        output = pivot / "nested/dock_01.svg"
+    else:
+        output.symlink_to(sentinel)
+
+    with pytest.raises(ValueError, match="Symlinked dock tag output path"):
+        module.save_or_verify(output, 1, 12, overwrite=True)
+    with pytest.raises(ValueError, match="Symlinked dock tag output path"):
+        module.save_or_verify(output, 1, 12, verify=True)
+    assert sentinel.read_text(encoding="utf-8") == "unrelated evidence"
+    assert not (outside / "dock_01.svg").exists()
+    assert not (outside / "nested/dock_01.svg").exists()
+
+
 def test_dock_marker_provenance_verifier_rejects_edits_and_stale_source(
     monkeypatch, tmp_path,
 ):

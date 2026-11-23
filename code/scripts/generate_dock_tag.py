@@ -194,6 +194,21 @@ def build_svg(dock_id: int, marker_id: int, *, scad: Path = SCAD,
     return ElementTree.tostring(svg, encoding="unicode") + "\n"
 
 
+def _reject_dock_tag_output_aliases(output: Path) -> None:
+    """Never stage, read or replace a marker through mutable path aliases."""
+    if output.is_symlink():
+        raise ValueError(f"Symlinked dock tag output path: {output}")
+    for parent in output.parents:
+        if not parent.is_symlink():
+            continue
+        # Root-owned /var or /tmp aliases under a nonwritable parent are
+        # normal on macOS. A mutable project or temp-directory alias is not.
+        if (parent.lstat().st_uid == 0
+                and not (parent.parent.stat().st_mode & 0o022)):
+            continue
+        raise ValueError(f"Symlinked dock tag output path: {parent}")
+
+
 def save_or_verify(
     output: Path, dock_id: int, marker_id: int, *,
     scad: Path = SCAD, assignments: Path = ASSIGNMENTS,
@@ -201,6 +216,7 @@ def save_or_verify(
 ) -> None:
     if output.suffix.lower() != ".svg":
         raise ValueError("Printed marker must be a vector .svg file")
+    _reject_dock_tag_output_aliases(output)
     if verify and overwrite:
         raise ValueError("Verification cannot overwrite the source artifact")
     expected = build_svg(dock_id, marker_id, scad=scad, assignments=assignments)
