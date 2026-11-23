@@ -293,6 +293,25 @@ class VoiceEventListener:
                 self._event_sequence = None
                 self._event_task_generation = None
                 task = None
+            # A queued speech_end from an older Xiaozhi human turn must
+            # not briefly release the currently active human speech floor.
+            # The authenticated latest snapshot is authoritative here.
+            # Only skip an end that has never entered the callback owner;
+            # an in-flight callback must still finish or fail its own ACK.
+            active = data.get("active_human_robots")
+            generations = data.get("voice_turn_generations")
+            if (
+                task is None
+                and event["kind"] == "speech_end"
+                and isinstance(active, list)
+                and isinstance(generations, dict)
+                and event["robot_id"] in active
+                and event.get("voice_turn_generation", -1)
+                    < generations.get(event["robot_id"], -1)
+            ):
+                self.cursor = seq
+                self.handled += 1
+                continue
             if task is None:
                 task = asyncio.create_task(
                     self.on_interrupt(event["robot_id"], event["kind"])

@@ -1448,3 +1448,61 @@ async def test_real_runtime_bootstrap_never_accepts_unacknowledged_speaker_stop(
         assert runtime._voice_stop_unconfirmed is False
         assert frames == [("prepare", "robot-01"), ("start", "robot-01")]
         assert all(request["bootstrap"] == "1" for request in requests)
+
+
+async def test_old_end_cannot_release_newer_active_xiaozhi_human_turn():
+    """Queued old VAD-negative must not open a gap in a newer human lease."""
+    responses = [
+        {
+            "cursor": 10, "events": [], "reset": False, "lost": False,
+            "active_human_robots": [],
+            "voice_turn_generations": {"robot-01": 4},
+        },
+        {
+            "cursor": 13, "reset": False, "lost": False,
+            "active_human_robots": ["robot-01"],
+            "voice_turn_generations": {"robot-01": 6},
+            "events": [
+                {"seq": 11, "robot_id": "robot-01", "kind": "speech_start",
+                 "source": "xiaozhi_server_vad", "voice_turn_generation": 5},
+                {"seq": 12, "robot_id": "robot-01", "kind": "speech_end",
+                 "source": "xiaozhi_server_vad", "voice_turn_generation": 5},
+                {"seq": 13, "robot_id": "robot-01", "kind": "speech_start",
+                 "source": "xiaozhi_server_vad", "voice_turn_generation": 6},
+            ],
+        },
+        {
+            "cursor": 14, "reset": False, "lost": False,
+            "active_human_robots": [],
+            "voice_turn_generations": {"robot-01": 6},
+            "events": [
+                {"seq": 14, "robot_id": "robot-01", "kind": "speech_end",
+                 "source": "xiaozhi_server_vad", "voice_turn_generation": 6},
+            ],
+        },
+    ]
+    events, active_states = [], []
+    def mock(request):
+        return httpx.Response(200, json=responses.pop(0))
+
+    async def on_event(robot_id, kind):
+        events.append((robot_id, kind))
+        active_states.append(kind != "speech_end")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=on_event,
+            require_snapshot=True, require_turn_generations=True,
+        )
+        assert await listener.poll() == 0
+        assert await listener.poll() == 3
+        assert active_states == [True, True]
+        assert listener.cursor == 13 and listener.handled == 3
+        assert await listener.poll() == 1
+    assert active_states == [True, True, False]
+    assert events == [
+        ("robot-01", "speech_start"),
+        ("robot-01", "speech_start"),
+        ("robot-01", "speech_end"),
+    ]
