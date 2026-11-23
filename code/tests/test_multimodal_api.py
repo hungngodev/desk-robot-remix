@@ -3111,7 +3111,7 @@ def test_signed_tool_receipt_requires_current_xiaozhi_generation_not_mac_epoch(
         assert client.get(path, headers=old_signed).status_code == 409
         assert calls == []
         assert visual._turn_epoch[robot] == 7
-        assert hub.recent_tool_context(robot, time.monotonic()) == []
+        assert not hub.recent_tool_context(robot, time.monotonic())
 
         current_signed = _signed_tool_headers(
             settings, tokens, robot, path, 42, monkeypatch,
@@ -3236,4 +3236,4 @@ def test_signed_status_result_drops_when_source_changes_during_head_await(
             result = pending.result(timeout=4)
             assert result.status_code == 409
             assert "superseded" in result.json()["detail"]
-    assert hub.tool_history[robot] == []
+    assert not hub.tool_history[robot]
