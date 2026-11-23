@@ -121,6 +121,40 @@ async def test_capture_aborts_and_removes_partial_private_media(tmp_path, failur
 
 
 @pytest.mark.asyncio
+async def test_arming_during_snapshot_discards_all_private_calibration_frames(
+    tmp_path,
+):
+    """Source disarm must still hold after a slow camera snapshot."""
+
+    class Head:
+        captured = 0
+        checks = 0
+
+        async def status(self):
+            self.checks += 1
+            # Pre and post checks for each JPEG. Motion begins while
+            # snapshot number two is pending, after one frame was saved.
+            return {"armed": self.captured >= 2 and self.checks % 2 == 0}
+
+        async def snapshot(self):
+            self.captured += 1
+            return jpeg(color=(70 + self.captured * 10, 90, 110))
+
+    async def confirm(_index):
+        pass
+
+    head = Head()
+    folder = tmp_path / "private"
+    with pytest.raises(RuntimeError, match="during checkerboard capture"):
+        await capture_checkerboards(head, folder, count=12, prompt=confirm)
+    assert head.captured == 2
+    assert head.checks == 4
+    # A failed session cannot leave an earlier successful JPEG behind as
+    # misleading calibration input.
+    assert not folder.exists()
+
+
+@pytest.mark.asyncio
 async def test_existing_private_folder_is_never_overwritten(tmp_path):
     folder = tmp_path / "private"
     folder.mkdir()

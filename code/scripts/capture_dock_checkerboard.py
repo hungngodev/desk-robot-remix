@@ -99,6 +99,14 @@ async def capture_checkerboards(
                 raise RuntimeError("Disarm the physical WROOM before positioning checkerboard")
             # HttpHead(strict_capture=True) rejects reused camera sequence IDs.
             jpeg = await asyncio.wait_for(head.snapshot(), timeout=4)
+            # JPEG IO may take four seconds. Reject a calibration sample if
+            # the independent WROOM armed or its status disappeared mid-read.
+            after_capture = await asyncio.wait_for(head.status(), timeout=3)
+            if (not isinstance(after_capture, dict)
+                    or after_capture.get("armed") is not False):
+                raise RuntimeError(
+                    "WROOM armed or status lost during checkerboard capture"
+                )
             if (not isinstance(jpeg, bytes) or not 100 <= len(jpeg) <= 512000
                     or not jpeg.startswith(b"\xff\xd8")
                     or not jpeg.endswith(b"\xff\xd9")):
