@@ -2162,3 +2162,15 @@ def test_first_unit_source_owner_paths_cover_all_parent_and_linked_rows():
     assert "code/firmware/body/lib/TofBus/TofBus.cpp" in markdown
     assert "SOURCE OWNER NOT RECORDED" not in markdown
     assert first["purchase_approved"] is False
+
+
+def test_fleet_supplier_reference_header_cannot_charge_linked_parts_twice():
+    """Historical shopping research must not invite duplicate parent checkout."""
+    report = mod.generate(fixture())
+    shown = mod.render_markdown(report)
+    assert "42 pet/dock parent roles, 7 shared-station parent roles" in shown
+    assert "14 linked decisions ALREADY COVERED BY THEIR PARENTS" in shown
+    assert "Do not add the 14 to the parent quantities" in shown
+    assert "plus 14 separately orderable" not in shown
+    assert "2026-11-16-five-pet-purchase-register.md" in shown
+    assert "HOLD" in shown

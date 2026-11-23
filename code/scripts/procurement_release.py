@@ -1813,7 +1813,7 @@ def render_markdown(report: dict) -> str:
         return str(value).replace("|", r"\|").replace("\n", " ").strip()
 
     output = [
-        "> **CANONICAL FIVE PET BUYING REGISTER (2026-11-16):** [42 required pet/dock roles plus 14 separately orderable DC motor, power and shared station parts](2026-11-16-five-pet-purchase-register.md). This is the only current full-fleet purchasing candidate table. It incorporates exact seller links, one paid XIAO with carrier-reported delivery pending inspection, estimated already owned MG90S/MAX30102, motor variant still unresolved and explicit first-pet qualification. This older checklist remains an engineering explanation, NOT an independently approved alternate cart. All power/contact/printing/loaded-drive hold conditions remain effective.",
+        "> **HISTORICAL SUPPLIER RESEARCH (2026-11-16):** [Earlier fleet supplier candidates](2026-11-16-five-pet-purchase-register.md) are reference research, NOT a second checkout cart. The authoritative projection below has 42 pet/dock parent roles, 7 shared-station parent roles and 14 linked decisions ALREADY COVERED BY THEIR PARENTS. Do not add the 14 to the parent quantities. Historical seller links are not current delivered quotes or physical qualification; drivetrain, chargers, wiring, printing and loaded operation remain HOLD.",
         "",
         "# Five desk pets, five docks, and the shared room station",
         "",
