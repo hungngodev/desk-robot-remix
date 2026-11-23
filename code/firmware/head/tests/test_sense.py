@@ -1581,6 +1581,7 @@ def test_sense_hsm_gaze_and_blink_reach_local_locked_oled_without_motor_motion()
     assert "display_ = local_eye_display_;" in source
     assert "face_behavior_.pick_min_ms = 6000;" in source
     assert "face_behavior_.pick_max_ms = 15000;" in source
+    assert "eye_animator_.Seed(pet_seed);" in source
     assert "void SetupUI() override" in renderer
     assert "OledDisplay::SetupUI();" in renderer
     assert "DisplayLockGuard lock(this);" in renderer
@@ -1621,6 +1622,13 @@ int main() {
     assert(eyes.Step(6900, Motion::kNod, true).y == 3);
     assert(eyes.Step(7450, Motion::kNone, true).y == -2);
     assert(!eyes.Step(8101, Motion::kNone, true).visible);
+    FaceEyeAnimator no_seed, other_pet;
+    other_pet.Seed(500);
+    assert(!no_seed.Step(1000, Motion::kNone, true).visible);
+    assert(!other_pet.Step(1000, Motion::kNone, true).visible);
+    assert(no_seed.Step(6000, Motion::kNone, true).visible);
+    assert(!other_pet.Step(6000, Motion::kNone, true).visible);
+    assert(other_pet.Step(6200, Motion::kNone, true).visible);
     FaceEyeAnimator rollover;
     assert(rollover.Step(0xfffffff0U, Motion::kLookLeft, true).visible);
     assert(rollover.Step(0x40U, Motion::kNone, true).visible);

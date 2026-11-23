@@ -16,6 +16,11 @@ struct EyeFrame {
 
 class FaceEyeAnimator {
 public:
+    // The same pet identity seed used by Stackchan also offsets idle blink
+    // phases so several freshly booted pets do not share one fixed cadence.
+    // This never changes the bounded 4.3 to 6.6 second blink interval.
+    void Seed(uint32_t seed) noexcept { seed_ = seed; }
+
     EyeFrame Step(uint32_t now_ms, stackchan::behavior::Motion motion, bool allowed) {
         using stackchan::behavior::Motion;
         if (!allowed) {
@@ -27,7 +32,7 @@ public:
         if (!started_) {
             started_ = true;
             blink_at_ms_ = now_ms;
-            next_blink_ms_ = 4600;
+            next_blink_ms_ = 4300U + ((seed_ + 300U) % 2300U);
             blink_active_ = false;
         }
         switch (motion) {
@@ -52,7 +57,7 @@ public:
         const uint32_t blink_age = now_ms - blink_at_ms_;
         if (blink_age >= next_blink_ms_) {
             blink_at_ms_ = now_ms;
-            next_blink_ms_ = 4300U + (blink_cycle_ * 733U) % 2300U;
+            next_blink_ms_ = 4300U + ((seed_ + blink_cycle_ * 733U) % 2300U);
             ++blink_cycle_;
             blink_active_ = true;
         }
@@ -76,6 +81,7 @@ public:
     }
 
 private:
+    uint32_t seed_ = 0;
     bool started_ = false;
     bool blink_active_ = false;
     uint32_t blink_at_ms_ = 0;

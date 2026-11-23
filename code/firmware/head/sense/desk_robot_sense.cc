@@ -500,6 +500,7 @@ public:
         for (const unsigned char c : std::string_view(CONFIG_DESK_ROBOT_ID))
             pet_seed = (pet_seed ^ c) * 16777619U;
         face_behavior_.seed(pet_seed);
+        eye_animator_.Seed(pet_seed);
         // Face rendering must keep running if a physical UART reply stalls.
         // The separate poll remains read-only on the same bridge/UART owner.
         if (!face_task_) {
