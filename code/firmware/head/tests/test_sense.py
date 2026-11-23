@@ -1751,3 +1751,31 @@ def test_authenticated_pose_bridge_is_read_only_bounded_and_versioned():
         "v", "body_boot", "origin", "seq", "sample_us",
         "x_mm", "y_mm", "yaw_mrad", "quality",
     }
+
+def test_camera_snapshot_never_sends_jpeg_on_provenance_header_failure():
+    """The accepted source sequence is committed only after all headers stage."""
+    bridge = (HEAD / "overlay/robot_bridge.cc").read_text()
+    task = bridge.split("void Bridge::CameraTask(void* context) {", 1)[1].split(
+        "void Bridge::CameraStreamTask(void* context) {", 1
+    )[0]
+    assert 'else if (!CompleteJpeg(jpeg->data(), jpeg->size()))' in task
+    assert 'esp_err_t header_status = httpd_resp_set_type(req, "image/jpeg");' in task
+    assert task.count("if (header_status == ESP_OK)") == 5
+    for name in (
+        "Cache-Control",
+        "X-Desk-Camera-Robot-Id",
+        "X-Desk-Camera-Boot",
+        "X-Desk-Camera-Sequence",
+        "X-Desk-Camera-Complete-Us",
+    ):
+        assert f'header_status = httpd_resp_set_hdr(req, "{name}", ' in task
+    failure = task.index("if (header_status != ESP_OK) {")
+    reject = task.index('bridge->Json(req, 503, Envelope(false, "camera provenance headers unavailable"));')
+    guarded_success = task.index("} else {", failure)
+    advance = task.index("++bridge->camera_sequence_;")
+    jpeg_send = task.index(
+        "httpd_resp_send(req, reinterpret_cast<const char*>(jpeg->data()), jpeg->size());"
+    )
+    assert failure < reject < guarded_success < advance < jpeg_send
+    assert "++bridge->camera_sequence_" not in task[:failure]
+

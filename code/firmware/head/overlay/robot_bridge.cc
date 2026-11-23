@@ -625,15 +625,28 @@ void Bridge::CameraTask(void* context) {
             // Completion, not guessed exposure time. The Mac can reject old
             // frames from the same boot without synchronizing ESP32/Mac clocks.
             const std::string nonce = std::to_string(bridge->boot_nonce_);
-            const std::string sequence = std::to_string(++bridge->camera_sequence_);
+            // Reserve, but do not consume, a frame sequence until every
+            // provenance header is staged. A header allocation failure must
+            // never publish an apparently fresh JPEG without its identity.
+            const std::string sequence = std::to_string(bridge->camera_sequence_ + 1);
             const std::string completed_us = std::to_string(esp_timer_get_time());
-            httpd_resp_set_type(req, "image/jpeg");
-            httpd_resp_set_hdr(req, "Cache-Control", "no-store");
-            httpd_resp_set_hdr(req, "X-Desk-Camera-Robot-Id", CONFIG_DESK_ROBOT_ID);
-            httpd_resp_set_hdr(req, "X-Desk-Camera-Boot", nonce.c_str());
-            httpd_resp_set_hdr(req, "X-Desk-Camera-Sequence", sequence.c_str());
-            httpd_resp_set_hdr(req, "X-Desk-Camera-Complete-Us", completed_us.c_str());
-            httpd_resp_send(req, reinterpret_cast<const char*>(jpeg->data()), jpeg->size());
+            esp_err_t header_status = httpd_resp_set_type(req, "image/jpeg");
+            if (header_status == ESP_OK)
+                header_status = httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+            if (header_status == ESP_OK)
+                header_status = httpd_resp_set_hdr(req, "X-Desk-Camera-Robot-Id", CONFIG_DESK_ROBOT_ID);
+            if (header_status == ESP_OK)
+                header_status = httpd_resp_set_hdr(req, "X-Desk-Camera-Boot", nonce.c_str());
+            if (header_status == ESP_OK)
+                header_status = httpd_resp_set_hdr(req, "X-Desk-Camera-Sequence", sequence.c_str());
+            if (header_status == ESP_OK)
+                header_status = httpd_resp_set_hdr(req, "X-Desk-Camera-Complete-Us", completed_us.c_str());
+            if (header_status != ESP_OK) {
+                bridge->Json(req, 503, Envelope(false, "camera provenance headers unavailable"));
+            } else {
+                ++bridge->camera_sequence_;
+                httpd_resp_send(req, reinterpret_cast<const char*>(jpeg->data()), jpeg->size());
+            }
         }
     }  // Destroy JPEG storage before vTaskDelete (which does not unwind C++ locals).
     bridge->camera_busy_.store(false);
