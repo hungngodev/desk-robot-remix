@@ -47,6 +47,9 @@ class RoomObservation:
     motion_authorized: bool = False
     charging_authorized: bool = False
     person_identified: bool = False
+    # The USB frame station field is validated above; this is protocol
+    # provenance, not cryptographic authentication of the attached Feather.
+    station_id: str = STATION
 
 
 def _pairs(items: list[tuple[str, object]]) -> dict:
@@ -269,7 +272,8 @@ class RoomStationDecoder:
         self._station_elapsed_ms = elapsed_ms
         self._last_received_at = float(now)
         return RoomObservation(seq, clock, float(now), readings,
-                               _summary(readings, self._soil_calibration))
+                               _summary(readings, self._soil_calibration),
+                               station_id=payload["station"])
 
 
 class RoomSerialFeed:

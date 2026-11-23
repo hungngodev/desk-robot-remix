@@ -1026,3 +1026,23 @@ def test_room_station_rejects_nonce_ack_after_read_deadline(
         feed._read_port(lambda: not opened or opened[0].samples < 2)
     assert observed == accepted
     assert feed.received == len(accepted)
+
+
+def test_decoded_room_observation_carries_validated_station_provenance():
+    decoder = RoomStationDecoder()
+    sample = frame(seq=23, clock=3000)
+    accepted = decoder.accept(json.dumps(sample), now=3.0)
+    assert accepted.station_id == sample["station"] == "room-pod-01"
+    assert accepted.seq == 23 and accepted.at_ms == 3000
+    assert accepted.source == "local_usb_shared_station_observation_not_identity"
+    assert accepted.motion_authorized is False
+    assert accepted.charging_authorized is False
+    assert accepted.person_identified is False
+
+    foreign = frame(seq=24, clock=4000)
+    foreign["station"] = "room-pod-02"
+    with pytest.raises(ValueError, match="Foreign room station source"):
+        decoder.accept(json.dumps(foreign), now=4.0)
+    # Rejected foreign frames cannot advance acquisition counters.
+    valid_next = decoder.accept(json.dumps(frame(seq=24, clock=4000)), now=4.0)
+    assert valid_next.station_id == "room-pod-01" and valid_next.seq == 24
