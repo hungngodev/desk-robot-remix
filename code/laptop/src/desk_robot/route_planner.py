@@ -13,7 +13,6 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Callable
 
-
 # Grid states are explicit. Everything except observed-safe support is blocked.
 SAFE = "safe"
 _DIRECTIONS = ((1, 0), (0, 1), (-1, 0), (0, -1))  # +X, +Y, -X, -Y
