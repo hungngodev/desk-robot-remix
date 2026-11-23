@@ -1,7 +1,7 @@
 {
   "robot_count": 5,
   "identical_core": true,
-  "inventory_corrected_at": "2026-11-10",
+  "inventory_corrected_at": "2026-11-23",
   "controller_model": "ESP32-WROOM-32",
   "controller_owned_count": null,
   "s3_owned_count": null,
@@ -304,17 +304,25 @@
       "note": "Preferred active IMU; original supplier part and breakout voltage/pullups must be checked before wiring. Firm MCU probes 0x68 WHO_AM_I at 0x75. Existing BerryIMU remains optional spare."
     }
   ],
-  "note": "At least one XIAO ESP32S3 Sense is reported purchased; exact quantity, arrival and hardware revision are not confirmed. WROOM, bank and OLED counts remain unknown; MG90S count is now estimated by the user at about 10, not confirmed. Power bank is unidentified and user reports no readable rating label; do not infer 2 A/3 A or usable whole-robot power. All five use the same full core with removable cosmetics. Latest quoted plan is not new inventory evidence. Touch and motion sensing are required. The owned AT42QT1010 is the prototype touch choice. RGB and haptics are optional. Matched1S kit replaces required bank purchase. Photo audit now establishes at least one BerryIMU and nine other module types; paired photos are not extra units. BerryIMU replaces new IMU procurement for prototype pending checks; optional spares do not replace required floor sensing, speaker output or power parts.\n2026-11-10: User reports using MPU6050 as motion sensor, superseding BerryIMU first choice; quantity not yet counted.\nExtra sensor stock: photo-identified PIR, reed module, BMP280, reflective IR, old Berry, GY61 and possible vibration switch; no quantities or electrical tests established. Optional bumper not inventoried as owned.",
+  "note": "One XIAO ESP32S3 Sense order (quantity one) and USD 13.67 payment were reconciled on 2026-11-22; carrier delivery was reported for 2026-11-07. Actual bench count, board markings, condition and hardware revision remain uninspected and unverified. WROOM, bank and OLED counts remain unknown; MG90S count is now estimated by the user at about 10, not confirmed. Power bank is unidentified and user reports no readable rating label; do not infer 2 A/3 A or usable whole-robot power. All five use the same full core with removable cosmetics. Latest quoted plan is not new inventory evidence. Touch and motion sensing are required. The owned AT42QT1010 is the prototype touch choice. RGB and haptics are optional. Matched1S kit replaces required bank purchase. Photo audit now establishes at least one BerryIMU and nine other module types; paired photos are not extra units. BerryIMU replaces new IMU procurement for prototype pending checks; optional spares do not replace required floor sensing, speaker output or power parts.\n2026-11-10: User reports using MPU6050 as motion sensor, superseding BerryIMU first choice; quantity not yet counted.\nExtra sensor stock: photo-identified PIR, reed module, BMP280, reflective IR, old Berry, GY61 and possible vibration switch; no quantities or electrical tests established. Optional bumper not inventoried as owned.",
   "voice_interruption_required_first_build": true,
   "s3_purchase": {
     "model": "XIAO ESP32S3 Sense complete camera/microphone kit as listed",
-    "status": "user_reported_purchased",
+    "status": "paid_order_reconciled_carrier_notice_hardware_uninspected",
     "quantity": null,
     "minimum_ordered": 1,
     "received_and_markings_verified": false,
     "pasted_display_price_usd": 18.87,
     "delivered_receipt_total_verified": false,
-    "source_url": "https://www.aliexpress.us/item/3256810060131517.html"
+    "source_url": "https://www.aliexpress.us/item/3256810060131517.html",
+    "paid_order_quantity": 1,
+    "payment_total_usd": 13.67,
+    "payment_total_verified": true,
+    "payment_reconciled_at": "2026-11-22",
+    "carrier_delivery_notice_date": "2026-11-07",
+    "display_price_historical_only": true,
+    "all_project_prior_spend_reconciled": false,
+    "purchase_evidence_record": "bom.json:paid_reconciliation"
   },
   "photo_audit": "photo-inventory-2026-11-04.json",
   "photo_source_rechecked_at": "2026-11-06"
