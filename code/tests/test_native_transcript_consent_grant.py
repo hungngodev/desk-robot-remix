@@ -1,7 +1,7 @@
 """Revoking transcript retention aborts pending SQLite writes despite regrant."""
 
-from types import SimpleNamespace
 import time
+from types import SimpleNamespace
 
 import pytest
 from desk_robot.api_native_omni_routes import register_native_omni_routes
