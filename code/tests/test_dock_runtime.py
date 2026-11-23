@@ -876,6 +876,49 @@ def test_invalid_dock_receipt_types_are_not_pose_evidence(bad_receipt):
         dock_runtime.unpack_dock_frame(bad_receipt)
 
 
+@pytest.mark.parametrize("timestamp", [10**1000, -(10**1000)])
+@pytest.mark.parametrize("receipt_shape", [2, 4])
+def test_unrepresentable_dock_receipt_time_is_rejected(timestamp, receipt_shape):
+    receipt = (b"\\xff\\xd8\\xff\\xd9", timestamp)
+    if receipt_shape == 4:
+        receipt += ((1, 1, 1), 1)
+    with pytest.raises(ValueError, match="Invalid or stale dock camera receipt"):
+        dock_runtime.unpack_dock_frame(receipt)
+
+
+@pytest.mark.parametrize("timestamp", [10**1000, -(10**1000)])
+async def test_unrepresentable_dock_receipt_holds_before_identity_or_detector(
+    tmp_path, monkeypatch, timestamp,
+):
+    calibration = tmp_path / "dock.json"
+    calibration.write_text(json.dumps({
+        "measured": True, "robot_id": "robot-01",
+        "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640",
+        "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
+    }))
+
+    class ExtremeReceiptHead(Head):
+        async def snapshot_for_dock(self):
+            self.captures += 1
+            return b"\\xff\\xd8\\xff\\xd9", timestamp
+
+    head = ExtremeReceiptHead()
+    monkeypatch.setattr(
+        dock_runtime, "detect_apriltag",
+        lambda *_args, **_kwargs: pytest.fail("Bad receipt entered native detector"),
+    )
+    result = await dock_runtime.observe_actual_dock(
+        head, SimpleNamespace(id="robot-01", dock_calibration=calibration),
+    )
+    assert result["source"] == "head_snapshot_invalid"
+    assert result["phase"] == "hold" and result["pose"] is None
+    assert result["physical_acceptance_pass"] is False
+    assert not result["motor_authorized"] and not result["charging_authorized"]
+    assert head.captures == 1 and head.identity_checks == 0
+    assert head.commands == []
+
+
 def test_original_dock_receipt_time_is_not_replaced_after_waiting():
     import time
 

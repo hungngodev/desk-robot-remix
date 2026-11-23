@@ -180,9 +180,15 @@ def unpack_dock_frame(observation) -> tuple[bytes, float]:
         return observation, now
     if (not isinstance(observation, tuple) or len(observation) not in (2, 4)
             or not isinstance(observation[0], bytes)
-            or type(observation[1]) not in (int, float)
-            or not math.isfinite(observation[1])
-            or not 0 <= now - observation[1] <= 0.20):
+            or type(observation[1]) not in (int, float)):
+        raise ValueError("Invalid or stale dock camera receipt")
+    try:
+        received_at = float(observation[1])
+    except OverflowError as exc:
+        # Python accepts arbitrarily large integers; math.isfinite(int)
+        # itself raises OverflowError before our diagnostic HOLD can run.
+        raise ValueError("Invalid or stale dock camera receipt") from exc
+    if not math.isfinite(received_at) or not 0 <= now - received_at <= 0.20:
         raise ValueError("Invalid or stale dock camera receipt")
     if len(observation) == 4:
         identity, generation = observation[2:]
@@ -193,7 +199,7 @@ def unpack_dock_frame(observation) -> tuple[bytes, float]:
                 or identity[2] <= 0
                 or type(generation) is not int or generation < 1):
             raise ValueError("Invalid or stale dock camera receipt")
-    return observation[0], float(observation[1])
+    return observation[0], received_at
 
 
 async def verify_selected_dock_frame(head, observation) -> None:
