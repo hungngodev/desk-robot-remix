@@ -114,10 +114,35 @@ void verify_poll_flood_and_malformed_frames() {
   check(!body.state().armed && body.state().left == 0 &&
         body.state().right == 0);
 }
+// A failed reply serialization must not invent a missing sample in the
+// downstream sequence, even if a future caller uses a smaller UART buffer.
+void verify_pose_capacity_failure_preserves_clock_and_sequence() {
+  desk_robot::BodyControl body;
+  desk_robot::LineReceiver receiver;
+  body.set_boot_epoch(88);
+  char small[48]{};
+  body.execute("pose", 4, 1, small, sizeof(small), false, 111111);
+  check(std::string(small) == "ERR pose reply_capacity");
+  const auto first = request(body, receiver, "pose\r\n", 1, 111111);
+  check(first.find("\"seq\":1,") != std::string::npos);
+  check(first.find("\"sample_us\":111111,") != std::string::npos);
+
+  // C99 snprintf permits capacity zero without writing to the destination.
+  // A failed zero-size response must not update sample provenance either.
+  char no_space[1] = {'X'};
+  body.execute("pose", 4, 2, no_space, 0, false, 111112);
+  check(no_space[0] == 'X');
+  const auto next = request(body, receiver, "pose\r\n", 2, 111112);
+  check(next.find("\"seq\":2,") != std::string::npos);
+  check(next.find("\"sample_us\":111112,") != std::string::npos);
+  check(!body.state().armed && body.state().left == 0 &&
+        body.state().right == 0);
+}
 }  // namespace
 
 int main() {
   verify();
   verify_poll_flood_and_malformed_frames();
+  verify_pose_capacity_failure_preserves_clock_and_sequence();
   return 0;
 }

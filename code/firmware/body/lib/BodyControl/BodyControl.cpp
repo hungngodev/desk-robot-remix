@@ -977,15 +977,22 @@ void BodyControl::execute(const char* line, std::size_t length,
       std::snprintf(reply, capacity, "ERR pose clock_or_sequence_unavailable");
       return;
     }
-    ++pose_seq_;
-    pose_last_sample_us_ = sample_us;
-    std::snprintf(reply, capacity,
+    // A reply that cannot be framed must not consume a source sequence
+    // or timestamp: the next complete read can still observe that sample.
+    const std::uint32_t next_seq = pose_seq_ + 1U;
+    const int written = std::snprintf(reply, capacity,
         "{\"v\":1,\"body_boot\":%lu,\"origin\":0,\"seq\":%lu,"
         "\"sample_us\":%llu,\"x_mm\":0,\"y_mm\":0,"
         "\"yaw_mrad\":0,\"quality\":\"unavailable\"}",
         static_cast<unsigned long>(boot_epoch_),
-        static_cast<unsigned long>(pose_seq_),
+        static_cast<unsigned long>(next_seq),
         static_cast<unsigned long long>(sample_us));
+    if (written < 0 || static_cast<std::size_t>(written) >= capacity) {
+      std::snprintf(reply, capacity, "ERR pose reply_capacity");
+      return;
+    }
+    pose_seq_ = next_seq;
+    pose_last_sample_us_ = sample_us;
     return;
   }
 
