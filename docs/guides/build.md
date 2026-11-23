@@ -46,8 +46,13 @@ them into a second shopping list or hand-edit generated pin tables.
    python3 docs/cad/remixes/print_2d_fit_templates.py --output /tmp/robot-paper-fit --verify
    ```
 
-   Print the GY-530 carrier, speaker and dock reference SVGs at **100% / actual size**,
-   never fit-to-page. Measure their independent 100 mm and 25 mm scales with a
+   Print **all five** source-derived A4 SVGs at **100% / actual size**:
+   `ranger_reference_A4.svg` (GY-530 carrier),
+   `speaker_reference_A4.svg` (speaker),
+   `dock_reference_A4.svg` (AprilTag paper pocket),
+   `dock_guide_reference_A4.svg` (front entry and back stop rails), and
+   `power_reference_A4.svg` (provisional protected 1S pack and tray footprint).
+   Never fit-to-page. Measure their independent 100 mm and 25 mm scales with a
    ruler, then compare carrier size and holes against the delivered parts. A
    clipped, scaled or mismatched paper reference is a **STOP** before drilling,
    purchasing final mounts or printing permanent solids. These are unpowered
