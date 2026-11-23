@@ -98,7 +98,7 @@ Mechanical provenance remains separate: SMARS tracks/lift noncommercial/share-al
 
 ## A4 source-scale paper fit overlays
 
-Before printing the full tray or buying a pack, generate the four **unpowered**
+Before printing the full tray or buying a pack, generate the five **unpowered**
 A4 SVG reference pages from the existing OpenSCAD dimensions:
 
 ```sh
@@ -115,7 +115,15 @@ connector and NTC exits, PCM overhang, wiring bends, charger, boost, switch,
 fuse, and mounting/service clearances. If the real assembly exceeds either
 outline, measure the whole stack and redesign before printing. These paper
 pages contain no approved drilling coordinates and confer no authority to
-power or charge the robot. The independent full-power, current and temperature
+power or charge the robot. The separate `dock_guide_reference_A4.svg`
+draws the actual **source-polygon** left and right rail shapes, 37 mm entry
+flare, nominal 100 mm straight channel and 126 x 138 mm passive cradle
+footprint. The arrow marks the approaching robot's entry end; the backstop
+is at the opposite end. The 96 mm chassis track width and 2 mm side
+clearances are still **nominal**, not a measured fit, and the paper drawing
+does not supply a usable charging-contact fixture. Compare a real unpowered
+track assembly with this sheet and the rail entry coupon before committing
+the full dock print. The independent full-power, current and temperature
 gates remain mandatory.
 
 ## Fusion assembly scaffold

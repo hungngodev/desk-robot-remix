@@ -24,7 +24,11 @@ def setup_sources(tmp_path):
             "speaker_l=20;\nspeaker_w=16;\n",
         "docs/cad/remixes/dock/dock_passive_fit.scad":
             "tag_black_side_mm = 60;\ntag_white_margin_each_mm=5;\n"
-            "tag_paper_slack_each_mm=0.6;\n",
+            "tag_paper_slack_each_mm=0.6;\n"
+            "track_outer_width_mm=96;\nside_clearance_each_mm=2;\n"
+            "base_length_mm=138;\nguide_run_mm=107;\n"
+            "guide_wall_mm=5;\nwall_outside_margin_mm=8;\n"
+            "entry_flare_each_mm=7;\n",
         "docs/cad/remixes/remaining_fit_gauges.scad":
             "candidate_pack_body_l_mm = 86;\npower_l = 86;\n"
             "power_w = 35;\nfit_xy = 0.4;\nwall = 2.4;\n",
@@ -78,9 +82,10 @@ def test_a4_real_scale_and_source_dimensions(tmp_path):
     assert report["source_dimensions_mm"] == {
         "ranger": [10.5, 13.3], "speaker": [20, 16],
         "dock": [60, 70, 71.2],
+        "dock_guide": [126, 138, 107, 5, 8, 7, 100],
         "power": [86, 35, 91.6, 40.6],
     }
-    assert len(report["pages"]) == 4
+    assert len(report["pages"]) == 5
     assert report["approved_drill_holes"] == 0
     assert report["actual_fit_verified"] is False
     for filename in report["pages"]:
@@ -100,6 +105,12 @@ def test_a4_real_scale_and_source_dimensions(tmp_path):
     assert 'width="91.6" height="40.6"' in power
     assert "EXCLUDES leads, NTC, PCM overhang" in power
     assert "No mounting holes, complete pack fit or charging approved." in power
+    rail = (output / "dock_guide_reference_A4.svg").read_text()
+    assert 'width="126" height="138"' in rail
+    assert '<polygon points="43,51 48,51 55,88 55,158 50,158 50,88"' in rail
+    assert '<polygon points="167,51 162,51 155,88 155,158 160,158 160,88"' in rail
+    assert "channel: 100 mm" in rail
+    assert "ENTRY at TOP, BACKSTOP at BOTTOM" in rail
     assert source.verify(tmp_path, output) == report
 
 
@@ -209,3 +220,24 @@ def test_a4_export_verify_refuse_undeclared_stale_svg_before_writes(
     assert not (output / "power_reference_A4.svg").exists()
     with pytest.raises(ValueError, match="Undeclared A4 paper template"):
         source.verify(tmp_path, output)
+
+
+@pytest.mark.parametrize((old, replacement, message), [
+    ("track_outer_width_mm=96;", "track_outer_width_mm=190;",
+     "Dock guide outline exceeds A4 printable layout"),
+    ("base_length_mm=138;", "base_length_mm=240;",
+     "Dock guide outline exceeds A4 printable layout"),
+    ("entry_flare_each_mm=7;", "entry_flare_each_mm=9;",
+     "Invalid nominal dock guide rail dimensions"),
+])
+def test_a4_dock_guide_refuses_impossible_or_clipped_source_layout(
+    tmp_path, old, replacement, message,
+):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    scad.write_text(scad.read_text().replace(old, replacement))
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match=message):
+        source.export(tmp_path, output)
+    assert not output.exists()

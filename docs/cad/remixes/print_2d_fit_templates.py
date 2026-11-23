@@ -19,6 +19,7 @@ SOURCES = {
     "ranger": "docs/cad/remixes/vl53l0x_gy530_fit_gauge.scad",
     "speaker": "docs/cad/remixes/speaker_rect_fit_gauge.scad",
     "dock": "docs/cad/remixes/dock/dock_passive_fit.scad",
+    "dock_guide": "docs/cad/remixes/dock/dock_passive_fit.scad",
     "power": "docs/cad/remixes/remaining_fit_gauges.scad",
 }
 
@@ -57,12 +58,29 @@ def values(root: Path) -> dict:
         raise ValueError("Power tray shorter than candidate protected pack body")
     tray_l = pack_l + 2 * (fit_xy + wall)
     tray_w = pack_w + 2 * (fit_xy + wall)
+    dock = data["dock"]
+    track_w = scad_mm(dock, "track_outer_width_mm")
+    each_side = scad_mm(dock, "side_clearance_each_mm")
+    base_l = scad_mm(dock, "base_length_mm")
+    guide_run = scad_mm(dock, "guide_run_mm")
+    rail_wall = scad_mm(dock, "guide_wall_mm")
+    rail_margin = scad_mm(dock, "wall_outside_margin_mm")
+    entry_flare = scad_mm(dock, "entry_flare_each_mm")
+    channel_w = track_w + 2 * each_side
+    outer_w = channel_w + 2 * (rail_wall + rail_margin)
+    if (guide_run <= 37 or guide_run >= base_l
+            or entry_flare >= rail_wall + rail_margin
+            or entry_flare > rail_margin
+            or channel_w <= 0 or outer_w <= channel_w):
+        raise ValueError("Invalid nominal dock guide rail dimensions")
     return {
         "ranger": (scad_mm(data["ranger"], "board_x"),
                    scad_mm(data["ranger"], "board_y")),
         "speaker": (scad_mm(data["speaker"], "speaker_l"),
                     scad_mm(data["speaker"], "speaker_w")),
         "dock": (black, paper, pocket),
+        "dock_guide": (outer_w, base_l, guide_run, rail_wall,
+                       rail_margin, entry_flare, channel_w),
         "power": (pack_l, pack_w, tray_l, tray_w),
     }
 
@@ -77,6 +95,12 @@ def _rect(x: float, y: float, width: float, height: float,
     return (f'<rect x="{_num(x)}" y="{_num(y)}" '
             f'width="{_num(width)}" height="{_num(height)}" '
             f'fill="none" stroke="black" stroke-width="0.3"{extra}/>')
+
+
+def _polygon(points: tuple[tuple[float, float], ...]) -> str:
+    coordinates = " ".join(f"{_num(x)},{_num(y)}" for x, y in points)
+    return ('<polygon points="' + coordinates
+            + '" fill="none" stroke="black" stroke-width="0.3"/>')
 
 
 def _text(x: float, y: float, value: str, *, size: int = 4) -> str:
@@ -105,6 +129,30 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
             + _text(20, 185, f"Nominal dock pocket: {_num(pocket)} mm (dashed)")
         )
         title = "Dock paper / passive pocket outline"
+    elif name == "dock_guide":
+        outer_w, base_l, run_l, wall_w, margin_w, flare_w, channel_w = dims
+        x, y = (A4_WIDTH_MM - outer_w) / 2, 51
+        if x < 15 or y + base_l > 196 or run_l < 37:
+            raise ValueError("Dock guide outline exceeds A4 printable layout")
+        # The two footprints use the EXACT 37 mm flared-entry polygons
+        # from dock_passive_fit.scad, translated onto an A4 sheet.
+        left_inner = wall_w + margin_w
+        left = (
+            (x + left_inner - wall_w - flare_w, y),
+            (x + left_inner - flare_w, y),
+            (x + left_inner, y + 37),
+            (x + left_inner, y + run_l),
+            (x + left_inner - wall_w, y + run_l),
+            (x + left_inner - wall_w, y + 37),
+        )
+        right = tuple((2*x + outer_w - px, py) for px, py in left)
+        features = (
+            _rect(x, y, outer_w, base_l, dash=True)
+            + _polygon(left) + _polygon(right)
+            + _text(20, 203, f"Nominal base: {_num(outer_w)} x {_num(base_l)} mm; channel: {_num(channel_w)} mm")
+            + _text(20, 210, "ENTRY at TOP, BACKSTOP at BOTTOM; no contact or drill marks.")
+        )
+        title = "Passive dock base and exact nominal flared rail footprints"
     elif name == "power":
         pack_l, pack_w, tray_l, tray_w = dims
         x, y = (A4_WIDTH_MM - tray_l) / 2, 88
