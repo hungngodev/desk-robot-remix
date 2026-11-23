@@ -32,9 +32,11 @@ class WheelAngleCapture {
   Result observe(const AngleRaw& reading, std::uint32_t now_ms) {
     delta_ = 0;
     if (!configured_) return Result::Unqualified;
+    // millis() == 0 is a legitimate completed acquisition at uint32 wrap;
+    // sample_seq != 0 distinguishes it from an uninitialized reading.
     if (!reading.present || !reading.valid || reading.magnet_status != 0x20 ||
         reading.angle > 4095 || reading.sample_seq == 0 ||
-        reading.at_ms == 0 || now_ms - reading.at_ms > max_age_) {
+        now_ms - reading.at_ms > max_age_) {
       lose_continuity();
       return Result::Invalid;
     }

@@ -80,6 +80,18 @@ static void source_rollover_and_reset() {
   check(wheel.angular_counts() == 16);
   check(wheel.observe(angle(13, 1, 0x40), 0x41) == Result::Delta);
   check(wheel.angular_counts() == 19);
+  // Exactly zero is a real millis() timestamp at rollover. It must not
+  // invalidate a completed AS5600 conversion with a fresh sequence.
+  WheelAngleCapture exact_wrap;
+  check(exact_wrap.configure(3000, 100, 60));
+  check(exact_wrap.observe(angle(4090, 99, 0xfffffff0U), 0xfffffff0U) ==
+        Result::Baseline);
+  check(exact_wrap.observe(angle(2, 100, 0U), 0U) == Result::Delta);
+  check(exact_wrap.angular_counts() == 8);
+  check(exact_wrap.observe(angle(8, 101, 0x20U), 0x20U) == Result::Delta);
+  check(exact_wrap.angular_counts() == 14);
+  // The default uninitialized reading must still be rejected.
+  check(exact_wrap.observe(AngleRaw{}, 0x21U) == Result::Invalid);
   // A replay from before wrap cannot be a new wheel sample.
   check(wheel.observe(angle(1, 0xffffffffU, 0x20), 0x42) == Result::Invalid);
   wheel.reset_for_boot();
