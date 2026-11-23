@@ -66,6 +66,10 @@ async def test_bridge_signs_current_device_generation_and_unique_request(monkeyp
     speech_token = "s" * 40
     monkeypatch.setenv("DESK_ROBOT_TOOL_TOKEN", tool_token)
     monkeypatch.setenv("DESK_ROBOT_SPEECH_TOKEN", speech_token)
+    # A developer or VPN proxy must never receive Xiaozhi tool credentials.
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.invalid:8899")
+    monkeypatch.setenv("ALL_PROXY", "http://proxy.invalid:8899")
+    monkeypatch.delenv("NO_PROXY", raising=False)
     connection = SimpleNamespace(device_id="mac-01")
     bridge.connections["mac-01"] = connection
     captured = []
@@ -82,9 +86,10 @@ async def test_bridge_signs_current_device_generation_and_unique_request(monkeyp
             }
 
     class Client:
-        def __init__(self, *, base_url, timeout, headers):
+        def __init__(self, *, base_url, timeout, trust_env, headers):
             assert base_url == "http://127.0.0.1:8765"
             assert timeout == 5
+            assert trust_env is False  # Ignore HTTP_PROXY even on local Mac.
             self.base_headers = headers
 
         async def __aenter__(self):
@@ -105,8 +110,10 @@ async def test_bridge_signs_current_device_generation_and_unique_request(monkeyp
 
     first = await module.call(connection, "status")
     second = await module.call(connection, "status")
-    assert first["robot_id"] == second["robot_id"] == "robot-01"
-    assert len(captured) == 2
+    third = await module.call(connection, "stop", {})
+    assert first["robot_id"] == second["robot_id"] == third["robot_id"] == "robot-01"
+    assert len(captured) == 3
+    assert [method for method, _, _ in captured] == ["GET", "GET", "POST"]
     first_id = captured[0][2]["X-Desk-Robot-Tool-Receipt-Id"]
     second_id = captured[1][2]["X-Desk-Robot-Tool-Receipt-Id"]
     assert first_id != second_id

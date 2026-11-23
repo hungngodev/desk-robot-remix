@@ -88,6 +88,8 @@ async def call(conn, route, payload=None):
         async with httpx.AsyncClient(
             base_url="http://127.0.0.1:8765",
             timeout=5,
+            # Never send the local tool bearer through ambient HTTP proxies.
+            trust_env=False,
             headers={"Authorization": f"Bearer {token}"},
         ) as client:
             async def signed_get(path, **kwargs):
