@@ -652,6 +652,9 @@ def test_entire_shopping_csv_and_two_lists_match_authoritative_source():
     )
     assert expected_md.count("## 1. Owned or ordered") == 1
     assert expected_md.count("## 2. Remaining components") == 1
+    assert "| Ordered, inspection pending |" in expected_md
+    assert "| Ordered, not received |" not in expected_md
+    assert "carrier-reported delivery pending inspection" in expected_md
 
 
 @pytest.mark.parametrize("where,key", [

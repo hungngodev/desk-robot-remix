@@ -1642,7 +1642,7 @@ def render_first_robot_markdown(report: dict) -> str:
     lines += [
         "## 1. Reported owned or ordered, still unverified",
         "",
-        "| Role | All reported on hand | All estimated on hand | All ordered, unreceived | Allocated to first unit |",
+        "| Role | All reported on hand | All estimated on hand | All ordered, inspection pending | Allocated to first unit |",
         "| --- | ---: | ---: | ---: | ---: |",
     ]
     for row in projection["roles"]:
@@ -1750,7 +1750,7 @@ def render_markdown(report: dict) -> str:
         return str(value).replace("|", r"\|").replace("\n", " ").strip()
 
     output = [
-        "> **CANONICAL FIVE PET BUYING REGISTER (2026-11-16):** [42 required pet/dock roles plus 14 separately orderable DC motor, power and shared station parts](2026-11-16-five-pet-purchase-register.md). This is the only current full-fleet purchasing candidate table. It incorporates exact seller links, one incoming XIAO, estimated already owned MG90S/MAX30102, motor variant still unresolved and explicit first-pet qualification. This older checklist remains an engineering explanation, NOT an independently approved alternate cart. All power/contact/printing/loaded-drive hold conditions remain effective.",
+        "> **CANONICAL FIVE PET BUYING REGISTER (2026-11-16):** [42 required pet/dock roles plus 14 separately orderable DC motor, power and shared station parts](2026-11-16-five-pet-purchase-register.md). This is the only current full-fleet purchasing candidate table. It incorporates exact seller links, one paid XIAO with carrier-reported delivery pending inspection, estimated already owned MG90S/MAX30102, motor variant still unresolved and explicit first-pet qualification. This older checklist remains an engineering explanation, NOT an independently approved alternate cart. All power/contact/printing/loaded-drive hold conditions remain effective.",
         "",
         "# Five desk pets, five docks, and the shared room station",
         "",
@@ -1769,7 +1769,7 @@ def render_markdown(report: dict) -> str:
     output += [
         "## 1. Owned or ordered, as reported",
         "",
-        "| Component | Reported on hand, unverified | Estimated on hand, unverified | Ordered, not received |",
+        "| Component | Reported on hand, unverified | Estimated on hand, unverified | Ordered, inspection pending |",
         "| --- | ---: | ---: | ---: |",
     ]
     for _, part in _purchase_rows(report):
