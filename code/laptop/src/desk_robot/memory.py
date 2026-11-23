@@ -164,6 +164,34 @@ class MemoryStore:
                          device_complete_us TEXT
                        )"""
                 )
+                # Spatial metadata shares this pet's existing private DB and
+                # episode lifecycle. Never store a raw JPEG or voice sample.
+                db.execute(
+                    """CREATE TABLE IF NOT EXISTS spatial_observations (
+                         event_id TEXT PRIMARY KEY,
+                         object_key TEXT NOT NULL,
+                         observed_at REAL NOT NULL,
+                         body_boot INTEGER NOT NULL,
+                         origin_id TEXT NOT NULL,
+                         pose_seq INTEGER NOT NULL,
+                         pose_sample_us INTEGER NOT NULL,
+                         camera_boot INTEGER NOT NULL,
+                         camera_seq INTEGER NOT NULL,
+                         camera_complete_us TEXT NOT NULL,
+                         calibration_id TEXT NOT NULL,
+                         x_mm INTEGER NOT NULL,
+                         y_mm INTEGER NOT NULL,
+                         yaw_mrad INTEGER NOT NULL,
+                         uncertainty_mm INTEGER NOT NULL,
+                         frame TEXT NOT NULL CHECK(frame IN ('odom', 'map')),
+                         anchor_id TEXT,
+                         UNIQUE(object_key,camera_boot,camera_seq,camera_complete_us)
+                       )"""
+                )
+                db.execute(
+                    """CREATE INDEX IF NOT EXISTS spatial_object_latest
+                       ON spatial_observations(object_key,observed_at DESC,event_id DESC)"""
+                )
                 # A deletion tombstone contains only the random event ID,
                 # never private episode text. Retain it across reconnects so
                 # an old delayed audio/vision callback cannot resurrect a
@@ -233,7 +261,11 @@ class MemoryStore:
                                   tokenize='porter unicode61')"""
                 )
                 db.executescript(
-                    """CREATE TRIGGER IF NOT EXISTS camera_provenance_delete
+                    """CREATE TRIGGER IF NOT EXISTS spatial_observations_delete
+                       AFTER DELETE ON memories BEGIN
+                          DELETE FROM spatial_observations WHERE event_id=old.event_id;
+                       END;
+                       CREATE TRIGGER IF NOT EXISTS camera_provenance_delete
                        AFTER DELETE ON memories BEGIN
                          DELETE FROM camera_provenance WHERE event_id=old.event_id;
                        END;
