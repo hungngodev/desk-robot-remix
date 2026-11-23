@@ -2192,3 +2192,112 @@ def test_all_63_role_source_and_host_test_paths_exist():
                 assert isinstance(relative, str) and relative, (group, role, key)
                 assert (mod.ROOT / relative).is_file(), (group, role, key, relative)
     # File existence is NOT an energized hardware or shopping receipt.
+
+
+def _synthetic_first_unit_net_order(report, *, inspected_role, inspected,
+                                     power_mode="complete_kit"):
+    """Presentation fixture only: never represents a signed purchase release."""
+    needed, categories = mod.cost_requirements(report, "first_robot")
+    needed, _ = mod.power_cost_requirements(needed, categories, power_mode)
+    applied = dict(needed)
+    applied[inspected_role] -= inspected
+    assert applied[inspected_role] >= 0
+    synthetic_cost = {
+        "calculation_complete_not_physical_approval": True,
+        "scope": "first_robot", "payable_now_cents": 0,
+        "prior_paid_orders_cents": 0, "prototype_cumulative_cents": 0,
+        "remaining_under_cap_cents": 5000, "seller_charges": [],
+        "quoted_units_applied_to_roles": applied,
+    }
+    synthetic_evidence = {
+        "power_package_mode": power_mode,
+        "inventory": [{"role_key": inspected_role,
+                       "usable_allocated": inspected}],
+        "lines": [], "seller_charges": [],
+    }
+    return mod.attach_verified_checkout_evidence(
+        report, synthetic_cost, synthetic_evidence
+    )
+
+
+@pytest.mark.parametrize("reported,unverified_gap", [(0, 8), (1, 7)])
+def test_first_unit_audited_net_order_avoids_inspected_stock_duplicate(
+    reported, unverified_gap
+):
+    """New inspected stock and previously reported stock both credit once."""
+    p = fixture()
+    p["parts"][0]["reported_owned_total"] = reported
+    original = mod.generate(p)
+    attached = _synthetic_first_unit_net_order(
+        original, inspected_role="robot:cliff_obstacle", inspected=1
+    )
+    one = mod.first_robot_projection(attached)
+    sensor = next(row for row in one["roles"] if row["id"] == "cliff_obstacle")
+    assert sensor["verified_inspected_first_unit"] == 1
+    assert sensor["conditional_remaining"] == unverified_gap
+    # The actual landed-cost accountant, unlike reported stock, has credited
+    # the one inspected unit; do not deduct overlapping reports a second time.
+    assert sensor["verified_checkout_order_units"] == 7
+    shown = mod.render_first_robot_markdown(attached)
+    assert "Preinspection gap if unverified stock works" in shown
+    assert "Audited net units to order" in shown
+    assert f"| 8 | {unverified_gap} | 7 |" in shown
+    assert one["purchase_approved"] is False
+
+
+def test_first_unit_split_power_reports_children_not_another_parent_kit():
+    import json
+
+    report = mod.generate(json.loads(mod.PLAN.read_text(encoding="utf-8")))
+    inspected_child = "bq24075_charger_candidate"
+    attached = _synthetic_first_unit_net_order(
+        report, inspected_role="robot:cap_power:" + inspected_child,
+        inspected=1, power_mode="separate_components"
+    )
+    power = next(
+        row for row in mod.first_robot_projection(attached)["roles"]
+        if row["id"] == "cap_power"
+    )
+    assert power["verified_checkout_order_units"] is None
+    assert power["verified_power_component_order_units"] == {
+        key: (0 if key == inspected_child else 1) for key in mod.POWER_CHILDREN
+    }
+    shown = mod.render_first_robot_markdown(attached)
+    assert "Separate power components:" in shown
+    assert "bq24075_charger_candidate=0" in shown
+    assert "polarized_battery_connector=1" in shown
+    assert "NOT A POWERED OR MOVING" not in shown
+    assert "PROTOTYPE BUYING STATUS: HOLD" in shown
+
+
+def test_first_unit_no_receipts_never_invents_a_net_purchase_quantity():
+    report = mod.generate(fixture())
+    projected = mod.first_robot_projection(report)
+    sensor = next(
+        row for row in projected["roles"] if row["id"] == "cliff_obstacle"
+    )
+    assert sensor["conditional_remaining"] == 8
+    assert sensor["verified_checkout_order_units"] is None
+    shown = mod.render_first_robot_markdown(report)
+    assert "NOT AUDITED" in shown
+    assert "PROTOTYPE BUYING STATUS: HOLD" in shown
+
+
+def test_first_unit_rejects_mismatched_audited_net_map():
+    report = mod.generate(fixture())
+    required, categories = mod.cost_requirements(report, "first_robot")
+    required, _ = mod.power_cost_requirements(
+        required, categories, "complete_kit"
+    )
+    bad_cost = {
+        "calculation_complete_not_physical_approval": True,
+        "quoted_units_applied_to_roles": {
+            **required, "robot:unselected": 1
+        },
+    }
+    with pytest.raises(ValueError, match="Audited net order units"):
+        mod.attach_verified_checkout_evidence(
+            report, bad_cost,
+            {"power_package_mode": "complete_kit",
+             "inventory": [], "lines": [], "seller_charges": []}
+        )

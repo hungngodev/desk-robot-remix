@@ -895,6 +895,12 @@ def first_robot_projection(report: dict) -> dict:
                     part.get("verified_inspected_first_unit", 0),
                     ident + ".verified_inspected_first_unit",
                 ),
+                "verified_checkout_order_units": part.get(
+                    "verified_checkout_order_units"
+                ),
+                "verified_power_component_order_units": copy.deepcopy(
+                    part.get("verified_power_component_order_units")
+                ),
                 "reference_only": part.get("reference_only"),
                 "selected_carrier": part.get("selected_carrier"),
                 "power_reference": copy.deepcopy(part.get("power_reference")),
@@ -1701,8 +1707,8 @@ def render_first_robot_markdown(report: dict) -> str:
         "",
         "## 2. First-unit remaining slots and conditional alternatives",
         "",
-        "| Scope | Role | One-unit target | Remaining if stock verified | Decision | Reviewed carrier / reference | Role note or selection gap | Source entry point, not proof of physical operation | Power reference | Verified checkout quote |",
-        "| --- | --- | ---: | ---: | --- | --- | --- | --- | --- | --- |",
+        "| Scope | Role | One-unit target | Preinspection gap if unverified stock works | Audited net units to order | Decision | Reviewed carrier / reference | Role note or selection gap | Source entry point, not proof of physical operation | Power reference | Verified checkout quote |",
+        "| --- | --- | ---: | ---: | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for row in projection["roles"]:
         selected = row.get("selected_carrier") or {}
@@ -1734,10 +1740,20 @@ def render_first_robot_markdown(report: dict) -> str:
         source_owner = row.get("implementation_source") or "SOURCE OWNER NOT RECORDED"
         if row.get("implementation_state"):
             source_owner += " (source state: " + row["implementation_state"] + ")"
+        component_units = row.get("verified_power_component_order_units")
+        net_units = row.get("verified_checkout_order_units")
+        if component_units is not None:
+            audited_order = "Separate power components: " + ", ".join(
+                f"{name}={quantity}" for name, quantity in component_units.items()
+            )
+        elif type(net_units) is int:
+            audited_order = str(net_units)
+        else:
+            audited_order = "NOT AUDITED"
         lines.append(
             f"| {cell(row['scope'])} | {cell(row['name'])} | "
             f"{row['prototype_target']} | {row['conditional_remaining']} | "
-            f"{row['decision']} | {cell(reviewed)} | "
+            f"{cell(audited_order)} | {row['decision']} | {cell(reviewed)} | "
             f"{cell(role_note)} | {cell(source_owner)} | "
             f"{cell(_power_reference_summary(row))} | {cell(quote)} |"
         )
@@ -2188,6 +2204,30 @@ def attach_verified_checkout_evidence(
         rows[prefix + ":" + part["id"]] = part
     for part in output["room_pod"]:
         rows["station:" + part["id"]] = part
+    # Only the landed-cost accountant knows how verified inventory, paid
+    # allocations and minimum packs cover each role. Never subtract signed
+    # stock a second time from the old unverified inventory projection.
+    audited_units = cost.get("quoted_units_applied_to_roles")
+    if audited_units is not None:
+        required, categories = cost_requirements(output, "first_robot")
+        required, _ = power_cost_requirements(
+            required, categories, cost_evidence.get("power_package_mode")
+        )
+        if (not isinstance(audited_units, dict)
+                or set(audited_units) != set(required)
+                or any(type(audited_units[key]) is not int
+                       or not 0 <= audited_units[key] <= required[key]
+                       for key in required)):
+            raise ValueError("Audited net order units differ from first-unit roles")
+        for role, part in rows.items():
+            if (role == POWER_PARENT_ROLE
+                    and cost_evidence.get("power_package_mode") == "separate_components"):
+                part["verified_power_component_order_units"] = {
+                    child: audited_units[POWER_PARENT_ROLE + ":" + child]
+                    for child in POWER_CHILDREN
+                }
+            else:
+                part["verified_checkout_order_units"] = audited_units[role]
     # Show inspected first-unit stock only after this strict audited checkout
     # attachment. A charger, converter, pack and connector remain separate
     # linked units; none represents another complete power assembly.
