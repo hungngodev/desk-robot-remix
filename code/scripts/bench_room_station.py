@@ -20,17 +20,29 @@ from desk_robot.room_station import SENSORS, STATION, RoomObservation, RoomSeria
 
 
 def _git_sha() -> str | None:
+    """Stamp an exact source commit only for a verified clean checkout.
+
+    A valid HEAD SHA alone does not identify locally modified bench code,
+    changed hardware profiles, or untracked source files.
+    """
     try:
-        result = subprocess.run(
+        revision = subprocess.run(
             ["git", "rev-parse", "HEAD"],
             cwd=Path(__file__).resolve().parents[2],
             capture_output=True, text=True, check=False, timeout=2,
         )
+        changes = subprocess.run(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+            cwd=Path(__file__).resolve().parents[2],
+            capture_output=True, text=True, check=False, timeout=5,
+        )
     except (OSError, subprocess.TimeoutExpired):
         return None
-    candidate = result.stdout.strip()
-    return (candidate if result.returncode == 0 and len(candidate) == 40
-            and all(c in "0123456789abcdef" for c in candidate) else None)
+    candidate = revision.stdout.strip()
+    return (candidate if revision.returncode == 0 and len(candidate) == 40
+            and all(c in "0123456789abcdef" for c in candidate)
+            and changes.returncode == 0 and not changes.stdout.strip()
+            else None)
 
 
 def capture(

@@ -372,3 +372,46 @@ def test_one_hour_usb_continuity_screen_requires_complete_read_only_receipts(fau
         assert result["missing_station_sequences"] == 0
     if fault == "terminal_silence":
         assert result["trailing_receive_silence_ms"] == 2500.0
+
+
+@pytest.mark.parametrize(
+    ("status_output", "status_returncode", "expected"),
+    [
+        ("", 0, "a" * 40),
+        (" M code/scripts/bench_room_station.py\n", 0, None),
+        ("?? code/firmware/room_station/src/untracked.cpp\n", 0, None),
+        ("", 128, None),
+    ],
+)
+def test_room_bench_exact_source_stamp_requires_clean_checkout(
+    monkeypatch, status_output, status_returncode, expected
+):
+    """A trial from modified, untracked or unverifiable source has no exact SHA."""
+    from types import SimpleNamespace
+
+    commands = []
+
+    def fake_git(argv, **kwargs):
+        commands.append(argv)
+        if argv == ["git", "rev-parse", "HEAD"]:
+            return SimpleNamespace(returncode=0, stdout="a" * 40 + "\n")
+        assert argv == ["git", "status", "--porcelain=v1", "--untracked-files=all"]
+        return SimpleNamespace(returncode=status_returncode, stdout=status_output)
+
+    source_sha = BENCH["_git_sha"]
+    monkeypatch.setattr(source_sha.__globals__["subprocess"], "run", fake_git)
+    assert source_sha() == expected
+    assert commands == [
+        ["git", "rev-parse", "HEAD"],
+        ["git", "status", "--porcelain=v1", "--untracked-files=all"],
+    ]
+
+
+def test_room_bench_exact_source_stamp_fails_closed_on_git_error(monkeypatch):
+    """Git I/O failure cannot attribute a hardware report to a reviewed commit."""
+    def failed_git(*args, **kwargs):
+        raise OSError("source tree unavailable")
+
+    source_sha = BENCH["_git_sha"]
+    monkeypatch.setattr(source_sha.__globals__["subprocess"], "run", failed_git)
+    assert source_sha() is None
