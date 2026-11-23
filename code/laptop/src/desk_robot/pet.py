@@ -2496,8 +2496,12 @@ class PetController:
                         "cell_mv": power["cell_mv"],
                         "qualified": False,
                     }
+            # Optional peripheral labels have no independent source clock.
+            # Never turn them into current model observations when the WROOM
+            # boot witnesses disagree, disappear or have been retired.
             proximity = result.get("proximity")
-            if isinstance(proximity, dict) and proximity.get("valid") is True:
+            if (boot is not None and isinstance(proximity, dict)
+                    and proximity.get("valid") is True):
                 if (type(proximity.get("gesture")) is int
                         and 0 <= proximity["gesture"] <= 4):
                     selected["proximity"] = {
@@ -2505,7 +2509,8 @@ class PetController:
                         "physically_qualified": False,
                     }
             nfc = result.get("nfc")
-            if isinstance(nfc, dict) and nfc.get("v") is True:
+            if (boot is not None and isinstance(nfc, dict)
+                    and nfc.get("v") is True):
                 if (type(nfc.get("e")) is int
                         and 0 <= nfc["e"] <= 0xffffffff):
                     selected["nfc"] = {"event_count": nfc["e"]}

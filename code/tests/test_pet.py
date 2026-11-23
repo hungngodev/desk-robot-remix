@@ -7562,3 +7562,61 @@ async def test_operator_peer_share_cannot_resurrect_receiver_deleted_episode(
         assert memory.count("robot-01") == 1
     finally:
         await pet.close()
+
+@pytest.mark.parametrize("boot_case", ("missing", "mismatched", "retired"))
+async def test_proactive_model_peripherals_reject_missing_mismatched_or_retired_boot(
+    fleet, tmp_path, boot_case,
+):
+    """An obsolete WROOM boot cannot create apparent new gesture or NFC context."""
+    from copy import deepcopy
+
+    value = {
+        "robot_id": "robot-01",
+        "force": {"boot_id": 53},
+        "proximity": {
+            "boot_id": 53, "valid": True,
+            "gesture": 2, "gesture_events": 4,
+        },
+        "nfc": {"v": True, "t": 0x1234, "e": 3, "s": 3},
+    }
+    if boot_case == "missing":
+        value["force"].pop("boot_id")
+        value["proximity"].pop("boot_id")
+    elif boot_case == "mismatched":
+        value["proximity"]["boot_id"] = 54
+
+    class Head:
+        async def aux_status(self):
+            return deepcopy(value)
+
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": Head()},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    try:
+        if boot_case == "retired":
+            pet._proactive_aux_retired_boots["robot-01"] = {53}
+        with pytest.raises(
+            RuntimeError, match="No bounded authenticated tool evidence"
+        ):
+            await pet._proactive_tool_receipt("robot-01", "aux_status")
+        assert pet._proactive_aux_cursors == {}
+        assert "robot-01" not in pet._proactive_aux_active_boot
+
+        # The same bounded diagnostic fields remain available to the
+        # current boot. This is an optional read-only receipt, not an
+        # eyewitness, a charged battery or motor permission.
+        pet._proactive_aux_retired_boots.pop("robot-01", None)
+        value["force"]["boot_id"] = 53
+        value["proximity"]["boot_id"] = 53
+        receipt = await pet._proactive_tool_receipt("robot-01", "aux_status")
+        assert receipt["data"]["proximity"] == {
+            "gesture": 2, "physically_qualified": False,
+        }
+        assert receipt["data"]["nfc"] == {"event_count": 3}
+        assert receipt["verified_motion"] is False
+        assert receipt["verified_charging"] is False
+    finally:
+        await pet.close()
