@@ -468,6 +468,33 @@ async def test_group_speech_continues_when_one_pet_cannot_persist(
     ] == 0
 
 
+async def test_runtime_shared_http_client_ignores_ambient_proxy(fleet, tmp_path, monkeypatch):
+    import desk_robot.runtime as runtime_module
+    from desk_robot.transport import HttpHead
+
+    fleet.memory_dir = tmp_path / "private_memories"
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.invalid:8899")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.invalid:8899")
+    monkeypatch.setenv("ALL_PROXY", "http://proxy.invalid:8899")
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    original = runtime_module.httpx.AsyncClient
+    client_options = []
+
+    def new_client(*args, **kwargs):
+        client_options.append(kwargs.get("trust_env"))
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(runtime_module.httpx, "AsyncClient", new_client)
+    runtime = Runtime(fleet)
+    try:
+        assert client_options == [False]
+        # The authenticated hardware adapter uses this same Runtime owner.
+        head = HttpHead(fleet.robots[0], runtime.client, strict_capture=True)
+        assert head.client is runtime.client
+    finally:
+        await runtime.close()
+
+
 async def test_all_five_full_system_simulated_integration_and_persistent_motion(fleet, tmp_path):
     # One integrated runtime, NOT a five-system mock or independent plan:
     # five local head adapters, one coordinator, one speaker owner, five DBs.

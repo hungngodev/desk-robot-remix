@@ -50,7 +50,9 @@ async def _bounded_monitor_stop(coro) -> None:
 class Runtime:
     def __init__(self, settings: Settings):
         self.settings = settings
-        self.client = httpx.AsyncClient()
+        # This shared client carries head, voice and model credentials.
+        # Ambient system proxies must not intercept private Mac/LAN traffic.
+        self.client = httpx.AsyncClient(trust_env=False)
         if settings.mode == "simulation":
             heads = {r.id: SimulatedHead(r.id) for r in settings.robots}
             vision, chat, speaker = SimulationVision(), SimulatedChat(), SimulatedSpeaker()
