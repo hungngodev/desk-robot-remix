@@ -1434,6 +1434,7 @@ def test_native_asr_memory_requires_independent_consent_and_deduplicates(
     request = {
         "event_id": "omni_" + "a" * 12 + "_" + "b" * 20,
         "transcript": "I put a key beside the robot",
+        "accepted_at_us": time.monotonic_ns() // 1000,
     }
     tool = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
     with TestClient(create_app(settings, runtime=runtime)) as client:
@@ -1496,7 +1497,8 @@ def test_native_asr_tombstone_and_immediate_eviction_do_not_claim_persistence(
     headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
     url = f"/v1/pet/{robot}/omni-heard"
     event_id = "omni_" + "a" * 12 + "_" + "c" * 20
-    payload = {"event_id": event_id, "transcript": "The red key is on the desk"}
+    payload = {"event_id": event_id, "transcript": "The red key is on the desk",
+               "accepted_at_us": time.monotonic_ns() // 1000}
     with TestClient(create_app(settings, runtime=runtime)) as client:
         stored = client.post(url, headers=headers, json=payload)
         assert stored.status_code == 200
@@ -1528,6 +1530,7 @@ def test_native_asr_tombstone_and_immediate_eviction_do_not_claim_persistence(
         memory.remember = immediately_old
         evicted = client.post(url, headers=headers, json={
             "event_id": old_id, "transcript": "An old discarded observation",
+            "accepted_at_us": time.monotonic_ns() // 1000,
         })
         assert evicted.status_code == 200
         assert evicted.json()["stored"] is False
@@ -1884,7 +1887,8 @@ def test_native_asr_live_optout_during_disk_write_retracts_only_ephemeral_item(
     with TestClient(create_app(settings, runtime=runtime)) as client:
         response = client.post(
             f"/v1/pet/{robot}/omni-heard", headers=headers,
-            json={"event_id": event_id, "transcript": "My private key is here"},
+            json={"event_id": event_id, "transcript": "My private key is here",
+                  "accepted_at_us": time.monotonic_ns() // 1000},
         )
         assert response.status_code == 200
         assert response.json()["stored"] is True
@@ -2955,3 +2959,71 @@ async def test_native_idle_frame_subscription_observes_revocation_in_under_400ms
             await asyncio.gather(waiting, return_exceptions=True)
         await frames.aclose()
         await observer.close()
+
+
+def test_native_delayed_asr_never_gains_retroactive_storage_consent(
+    settings, tokens, tmp_path,
+):
+    """A pre-grant queued estimate cannot become durable after consent starts."""
+    from types import SimpleNamespace
+
+    from desk_robot.memory import MemoryStore
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = False
+    settings.voice_memory_tools_enabled = True
+    settings.voice_transcript_memory_enabled = True
+    robot = settings.robots[0].id
+    memory = MemoryStore(tmp_path / "private", [r.id for r in settings.robots])
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(robot=settings.robot), memory=memory,
+        multimodal=None, start=noop, close=noop,
+    )
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    url = f"/v1/pet/{robot}/omni-heard"
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        before = time.monotonic_ns() // 1000 - 1000
+        settings.voice_transcript_memory_enabled = False
+        settings.voice_transcript_memory_enabled = True
+        stale = client.post(url, headers=headers, json={
+            "event_id": "omni_" + "a" * 12 + "_" + "b" * 20,
+            "transcript": "Audio from before transcript permission",
+            "accepted_at_us": before,
+        })
+        assert stale.status_code == 200
+        assert stale.json()["retention_consent_enabled"] is True
+        assert stale.json()["stored"] is False
+        assert stale.json()["retained_on_disk"] is False
+        assert memory.recent(robot) == []
+
+        legacy = client.post(url, headers=headers, json={
+            "event_id": "omni_" + "a" * 12 + "_" + "c" * 20,
+            "transcript": "Unknown source time",
+        })
+        assert legacy.status_code == 200
+        assert legacy.json()["stored"] is False
+
+        fresh = client.post(url, headers=headers, json={
+            "event_id": "omni_" + "a" * 12 + "_" + "d" * 20,
+            "transcript": "Consented current human speech",
+            "accepted_at_us": time.monotonic_ns() // 1000,
+        })
+        assert fresh.status_code == 200
+        assert fresh.json()["stored"] is True
+        assert len(memory.recent(robot)) == 1
+
+        before_parent_regrant = time.monotonic_ns() // 1000 - 1000
+        settings.voice_memory_tools_enabled = False
+        settings.voice_memory_tools_enabled = True
+        old_parent = client.post(url, headers=headers, json={
+            "event_id": "omni_" + "a" * 12 + "_" + "e" * 20,
+            "transcript": "Audio from before parent memory regrant",
+            "accepted_at_us": before_parent_regrant,
+        })
+        assert old_parent.status_code == 200
+        assert old_parent.json()["stored"] is False
+        assert len(memory.recent(robot)) == 1

@@ -73,6 +73,8 @@ class Settings(BaseModel):
     _camera_consent_started_at: float = PrivateAttr(default=0.0)
     _voice_memory_consent_generation: int = PrivateAttr(default=0)
     _transcript_consent_generation: int = PrivateAttr(default=0)
+    _voice_memory_consent_started_at: float = PrivateAttr(default=0.0)
+    _transcript_consent_started_at: float = PrivateAttr(default=0.0)
     _room_station_consent_generation: int = PrivateAttr(default=0)
     _fleet_sharing_consent_generation: int = PrivateAttr(default=0)
     _fleet_auto_fanout_consent_generation: int = PrivateAttr(default=0)
@@ -111,6 +113,10 @@ class Settings(BaseModel):
         # A boot-time live grant also needs a local monotonic admission fence.
         if self.voice_vision_tools_enabled:
             self._camera_consent_started_at = time.monotonic()
+        if self.voice_memory_tools_enabled:
+            self._voice_memory_consent_started_at = time.monotonic()
+        if self.voice_transcript_memory_enabled:
+            self._transcript_consent_started_at = time.monotonic()
 
     @model_validator(mode="after")
     def unique_ids(self):
@@ -207,6 +213,9 @@ class Settings(BaseModel):
             # Disabling memory access revokes outstanding asynchronous reads.
             # The next opt-in is a new grant even without SQLite edits.
             self._voice_memory_consent_generation += 1
+        elif (name == "voice_memory_tools_enabled"
+              and self.voice_memory_tools_enabled and not memory_was_granted):
+            self._voice_memory_consent_started_at = time.monotonic()
         if room_was_granted and not self.room_station_context_enabled:
             # Room-station text from a previous grant cannot be emitted by a
             # late Ollama plan if the operator has already opted out.
@@ -215,6 +224,9 @@ class Settings(BaseModel):
         if transcript_was_granted and not self.voice_transcript_memory_enabled:
             # Immediate regrant does not revive an in-flight transcript write.
             self._transcript_consent_generation += 1
+        elif (name == "voice_transcript_memory_enabled"
+              and self.voice_transcript_memory_enabled and not transcript_was_granted):
+            self._transcript_consent_started_at = time.monotonic()
         if sharing_was_granted and not self.fleet_text_sharing_enabled:
             # Peer relays and in-flight SQLite writes belong to the old grant.
             self._fleet_sharing_consent_generation += 1
@@ -237,6 +249,14 @@ class Settings(BaseModel):
     @property
     def transcript_consent_generation(self) -> int:
         return self._transcript_consent_generation
+
+    @property
+    def voice_memory_consent_started_at(self) -> float:
+        return self._voice_memory_consent_started_at
+
+    @property
+    def transcript_consent_started_at(self) -> float:
+        return self._transcript_consent_started_at
 
     @property
     def room_station_consent_generation(self) -> int:

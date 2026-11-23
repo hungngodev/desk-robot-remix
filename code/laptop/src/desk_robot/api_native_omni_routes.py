@@ -204,6 +204,18 @@ def register_native_omni_routes(
             settings.voice_transcript_memory_enabled
             and settings.voice_memory_tools_enabled
         )
+        # A queued model estimate accepted before either storage consent
+        # grant must not be retroactively stored after an opt-in or regrant.
+        # Legacy receipts without an authenticated source stamp are likewise
+        # never durable evidence. Keep the consent status separate from the
+        # eligibility of this particular historic audio item.
+        source_within_storage_grants = (
+            request.accepted_at_us is not None
+            and request.accepted_at_us >= max(
+                int(settings.voice_memory_consent_started_at * 1_000_000),
+                int(settings.transcript_consent_started_at * 1_000_000),
+            )
+        )
         memory_grant = settings.transcript_consent_generation if memory_opt_in else None
         parent_memory_grant = (
             settings.voice_memory_consent_generation if memory_opt_in else None
@@ -218,7 +230,7 @@ def register_native_omni_routes(
             )
 
         inserted = False
-        if memory_opt_in:
+        if memory_opt_in and source_within_storage_grants:
             def persist_transcript_with_cleanup() -> bool:
                 # Cancelling an asyncio.to_thread await never stops its SQLite
                 # worker. Keep the consent fence and compensating delete in
