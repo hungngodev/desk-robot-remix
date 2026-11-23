@@ -66,12 +66,18 @@ def test_voice_context_room_grant_is_fenced_across_sqlite(settings, change):
             _private_memory_generation={"robot-01": 0},
         ),
     )
+    def reject_unmarked_tool_validation(*args):
+        # These five tests use ordinary dashboard access, never a signed
+        # Xiaozhi request. Its turn checker must not run for this path.
+        raise AssertionError("Unmarked voice-context request cannot be a tool receipt")
+
     register_voice_context_route(
         app,
         settings,
         authorize=lambda: None,
         requested_tool_context=lambda *args: None,
         remember_tool_context=lambda *args: None,
+        current_tool_context=reject_unmarked_tool_validation,
     )
     with TestClient(app) as client:
         response = client.get(
