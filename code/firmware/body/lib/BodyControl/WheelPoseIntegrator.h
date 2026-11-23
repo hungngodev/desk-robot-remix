@@ -78,24 +78,34 @@ class WheelPoseIntegrator {
   bool observe(const Evidence& e, std::uint32_t now_ms) {
     if (!configured_) return false;
     const auto& w = e.wheel;
+    const auto reject = [this, &w]() {
+      // Even a rejected complete packet must not be replayed as a new
+      // stationary origin witness on a later call.
+      if (w.pair_seq > last_pair_seq_) last_pair_seq_ = w.pair_seq;
+      invalidate();
+      return false;
+    };
     const std::uint32_t later =
         (w.left_ms - w.right_ms < 0x80000000U) ? w.left_ms : w.right_ms;
     const std::uint32_t earlier =
         (later == w.left_ms) ? w.right_ms : w.left_ms;
     if (!w.valid || w.pair_seq == 0 || w.segment == 0 ||
+        w.left_seq == 0 || w.right_seq == 0 ||
+        (last_pair_seq_ == 0 ? w.pair_seq != 1U
+                             : w.pair_seq != last_pair_seq_ + 1U) ||
         !e.imu_valid || e.imu_segment == 0 ||
+        e.imu_yaw_urad < -3141593LL || e.imu_yaw_urad > 3141593LL ||
         w.skew_ms > limits_.max_pair_skew_ms ||
         skew(later, e.imu_at_ms) > limits_.max_imu_skew_ms ||
         now_ms - earlier > limits_.max_age_ms ||
         now_ms - e.imu_at_ms > limits_.max_age_ms ||
+        e.imu_error_urad + limits_.imu_alignment_error_urad >
+            limits_.max_yaw_error_urad ||
         (have_source_ &&
-         (w.pair_seq != last_pair_seq_ + 1U ||
-          (w.segment != wheel_segment_ || e.imu_segment != imu_segment_) ||
-          (earlier - last_sample_ms_ == 0U ||
-           earlier - last_sample_ms_ >= 0x80000000U)))) {
-      invalidate();
-      return false;
-    }
+         (w.segment != wheel_segment_ || e.imu_segment != imu_segment_ ||
+          earlier - last_sample_ms_ == 0U ||
+          earlier - last_sample_ms_ >= 0x80000000U)))
+      return reject();
     const std::int64_t left_nm =
         static_cast<std::int64_t>(w.left_delta) *
         limits_.left_nm_per_count * limits_.left_forward_sign;
@@ -106,19 +116,15 @@ class WheelPoseIntegrator {
         static_cast<std::int64_t>(limits_.max_pair_step_mm) * 1000000LL;
     if (w.left_delta < -2047 || w.left_delta > 2047 ||
         w.right_delta < -2047 || w.right_delta > 2047 ||
-        abs64(left_nm) > bound_nm || abs64(right_nm) > bound_nm) {
-      invalidate();
-      return false;
-    }
+        abs64(left_nm) > static_cast<std::uint64_t>(bound_nm) ||
+        abs64(right_nm) > static_cast<std::uint64_t>(bound_nm))
+      return reject();
+
     if (!have_source_) {
       wheel_segment_ = w.segment;
       imu_segment_ = e.imu_segment;
       have_source_ = true;
     }
-    last_pair_seq_ = w.pair_seq;
-    last_sample_ms_ = earlier;
-    last_imu_yaw_urad_ = e.imu_yaw_urad;
-    latest_imu_error_urad_ = e.imu_error_urad;
     if (state_.origin == 0) {
       if (left_nm == 0 && right_nm == 0 &&
           abs64(e.imu_step_urad) <= limits_.stationary_gyro_step_urad) {
@@ -127,12 +133,70 @@ class WheelPoseIntegrator {
       } else {
         stationary_streak_ = 0;
       }
-      return true;
+    } else {
+      const std::int64_t gyro_delta =
+          normalize(e.imu_yaw_urad - last_imu_yaw_urad_);
+      const std::int64_t wheel_delta =
+          (right_nm - left_nm) / limits_.track_width_mm;
+      const std::uint64_t residual = abs64(wheel_delta - gyro_delta);
+      if (residual > limits_.max_wheel_gyro_residual_urad)
+        return reject();
+      const std::uint32_t heading_error_urad =
+          e.imu_error_urad + limits_.imu_alignment_error_urad;
+      const std::int64_t traveled_nm = (left_nm + right_nm) / 2;
+      const std::int64_t midpoint_yaw =
+          normalize(heading_urad_ + gyro_delta / 2);
+      // Bounded one-pair midpoint integration, not motor open-loop steps.
+      // Max travel per pair and source skew are separately checked above.
+      const double mid_rad = static_cast<double>(midpoint_yaw) / 1000000.0;
+      const double dx_real = static_cast<double>(traveled_nm) *
+                             std::cos(mid_rad);
+      const double dy_real = static_cast<double>(traveled_nm) *
+                             std::sin(mid_rad);
+      if (!std::isfinite(dx_real) || !std::isfinite(dy_real))
+        return reject();
+      const std::int64_t new_x = x_nm_ + std::llround(dx_real);
+      const std::int64_t new_y = y_nm_ + std::llround(dy_real);
+      const std::int64_t max_coordinate_nm = 1000000000000LL;
+      if (abs64(new_x) > static_cast<std::uint64_t>(max_coordinate_nm) ||
+          abs64(new_y) > static_cast<std::uint64_t>(max_coordinate_nm))
+        return reject();
+      const std::uint64_t avg_abs_nm =
+          (abs64(left_nm) + abs64(right_nm) + 1ULL) / 2ULL;
+      const std::uint64_t wheel_error_nm =
+          (avg_abs_nm * limits_.wheel_error_ppm + 999999ULL) / 1000000ULL;
+      const std::uint64_t heading_error_nm =
+          (abs64(traveled_nm) * heading_error_urad + 999999ULL) / 1000000ULL;
+      const std::uint64_t error_increment_nm =
+          wheel_error_nm + heading_error_nm + 1000ULL;
+      const std::uint64_t max_xy_error_nm =
+          static_cast<std::uint64_t>(limits_.max_xy_error_mm) * 1000000ULL;
+      if (xy_error_nm_ > max_xy_error_nm ||
+          error_increment_nm > max_xy_error_nm - xy_error_nm_)
+        return reject();
+      xy_error_nm_ += error_increment_nm;
+      x_nm_ = new_x;
+      y_nm_ = new_y;
+      heading_urad_ = normalize(heading_urad_ + gyro_delta);
+      state_.x_mm = static_cast<std::int32_t>(x_nm_ / 1000000LL);
+      state_.y_mm = static_cast<std::int32_t>(y_nm_ / 1000000LL);
+      state_.yaw_mrad = static_cast<std::int32_t>(heading_urad_ / 1000LL);
+      state_.xy_error_mm =
+          static_cast<std::uint32_t>((xy_error_nm_ + 999999ULL) / 1000000ULL);
+      state_.yaw_error_mrad = (heading_error_urad + 999U) / 1000U;
+      const bool degraded =
+          xy_error_nm_ > max_xy_error_nm / 2ULL ||
+          heading_error_urad > limits_.max_yaw_error_urad / 2U ||
+          residual > limits_.max_wheel_gyro_residual_urad / 2U;
+      state_.quality = degraded ? Quality::Degraded : Quality::Valid;
+      state_.sample_seq = w.pair_seq;
+      state_.sample_ms = earlier;
     }
-
-    // NB: previous yaw must be retained independently from the fresh sample.
-    // It is saved by observe() before the last update to source identities.
-    return false;
+    last_pair_seq_ = w.pair_seq;
+    last_sample_ms_ = earlier;
+    last_imu_yaw_urad_ = e.imu_yaw_urad;
+    latest_imu_error_urad_ = e.imu_error_urad;
+    return true;
   }
 
   bool stationary_origin_ready() const {
@@ -147,6 +211,9 @@ class WheelPoseIntegrator {
     if (!stationary_origin_ready() ||
         now_ms - last_sample_ms_ > limits_.max_age_ms ||
         next_origin_ == 0 || next_origin_ == 0xffffffffU)
+      return false;
+    if (latest_imu_error_urad_ + limits_.imu_alignment_error_urad >
+        limits_.max_yaw_error_urad)
       return false;
     state_ = State{};
     state_.origin = next_origin_++;

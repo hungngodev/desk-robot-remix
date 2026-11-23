@@ -64,10 +64,32 @@ static void refuse_unqualified_and_reanchor() {
   check(pose.state().origin == 1 &&
         pose.state().quality == WheelPoseIntegrator::Quality::Valid);
   check(!pose.start_origin(311));
+  check(pose.observe(observed(4, 400, 10, -10), 410));
+  check(pose.state().quality == WheelPoseIntegrator::Quality::Valid);
+  check(pose.state().x_mm == 1 && pose.state().y_mm == 0 &&
+        pose.state().yaw_mrad == 0 && pose.state().sample_seq == 4);
+  check(pose.state().xy_error_mm > 0);
+  check(pose.observe(observed(5, 500, -10, 10), 510));
+  check(pose.state().x_mm == 0 && pose.state().y_mm == 0);
+  check(pose.observe(observed(6, 600, 0, -10, 10000), 610));
+  check(pose.state().yaw_mrad == 10 && pose.state().sample_seq == 6);
+  check(pose.state().origin == 1);
+  // A lost source cannot resurrect an earlier local origin. The next origin
+  // requires three independent stationary paired acquisitions and a new
+  // deliberate local call.
+  pose.expire(900);
+  check(pose.state().origin == 0);
+  check(!pose.start_origin(901));
+  check(pose.observe(observed(7, 920), 930));
+  check(pose.observe(observed(8, 1020), 1030));
+  check(pose.observe(observed(9, 1120), 1130));
+  check(pose.start_origin(1130));
+  check(pose.state().origin == 2 && pose.state().x_mm == 0 &&
+        pose.state().y_mm == 0);
   // Must never invent an origin after reboot or stale times.
-  pose.expire(601);
+  pose.expire(1600);
   check(pose.state().quality == WheelPoseIntegrator::Quality::Unavailable);
-  check(!pose.start_origin(602));
+  check(!pose.start_origin(1601));
   pose.reset_for_boot();
   check(!pose.configured() && pose.state().origin == 0);
 }
