@@ -161,3 +161,58 @@ def test_recalibration_cannot_reuse_old_clearance_or_blockage():
     # The obsolete occupied belief must not survive a fresh geometry change.
     assert g.log_odds(1, 1) == pytest.approx(-0.8)
     assert g.state(1, 1, now_us=1_200_010) == "safe"
+
+
+def test_delayed_body_conversion_revokes_clearance_without_trusting_receipt():
+    g = grid()
+    g.record(evidence("floor_supported", 0), now_us=1_000_000)
+    g.record(evidence("obstacle_clear", 4), now_us=1_000_000)
+    assert g.state(1, 1, now_us=1_000_010) == "safe"
+
+    # The head delivers a newly timed sample whose WROOM conversion barely
+    # advanced in half a second. Its increasing sequence is not freshness.
+    delayed = replace(
+        evidence("obstacle_clear", 4, seq=2, received_us=1_500_000),
+        sample_us=110_000,
+    )
+    with pytest.raises(GridEvidenceError, match="source clock diverged"):
+        g.record(delayed, now_us=1_500_000)
+    assert g.state(1, 1, now_us=1_500_000) == "unknown"
+    assert g.snapshot(now_us=1_500_000).observed_at_us == 0
+
+    # A later truthful conversion catches up to the same body clock. The
+    # earlier rejected packet never moved the replay fence forward.
+    fresh_floor = replace(
+        evidence("floor_supported", 0, seq=2, received_us=1_600_000),
+        sample_us=700_000,
+    )
+    fresh_clear = replace(
+        evidence("obstacle_clear", 4, seq=3, received_us=1_600_000),
+        sample_us=700_000,
+    )
+    g.record(fresh_floor, now_us=1_600_000)
+    assert g.state(1, 1, now_us=1_600_000) == "unknown"
+    g.record(fresh_clear, now_us=1_600_000)
+    assert g.state(1, 1, now_us=1_600_000) == "safe"
+
+
+def test_implausible_body_clock_leap_revokes_previous_grid():
+    g = grid()
+    g.record(evidence("floor_supported", 0), now_us=1_000_000)
+    g.record(evidence("obstacle_clear", 4), now_us=1_000_000)
+    leap = replace(
+        evidence("obstacle_hit", 4, seq=2, received_us=1_010_000),
+        sample_us=10_000_000,
+    )
+    with pytest.raises(GridEvidenceError, match="source clock diverged"):
+        g.record(leap, now_us=1_010_000)
+    assert g.state(1, 1, now_us=1_010_000) == "unknown"
+
+
+@pytest.mark.parametrize("received_us", (-1, 0))
+def test_nonpositive_mac_receipt_time_is_not_fresh(received_us):
+    g = grid()
+    batch = replace(evidence("obstacle_clear", 4), received_us=received_us)
+    with pytest.raises(GridEvidenceError, match="Invalid grid source"):
+        g.record(batch, now_us=0)
+    assert g.state(1, 1, now_us=0) == "unknown"

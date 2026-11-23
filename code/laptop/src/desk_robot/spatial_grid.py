@@ -12,6 +12,8 @@ from dataclasses import dataclass
 CELL_MM = 20
 MIN_LOG_ODDS = -4.0
 MAX_LOG_ODDS = 4.0
+_MAX_SOURCE_RECEIPT_LAG_US = 250_000
+_MAX_SOURCE_FORWARD_LEAP_US = 5_000_000
 _OBSTACLE_WEIGHT = {"obstacle_clear": -0.8, "obstacle_hit": 1.2}
 _FLOOR_KINDS = frozenset({"floor_supported", "floor_unsafe"})
 
@@ -109,7 +111,8 @@ class SpatialGrid:
                 or type(batch.sequence) is not int or not 1 <= batch.sequence <= 0xffffffff
                 or type(batch.sample_us) is not int or not 1 <= batch.sample_us < (1 << 63)
                 or type(batch.received_us) is not int
-                or not 0 <= now_us - batch.received_us <= 250_000
+                or not 0 < batch.received_us <= now_us
+                or now_us - batch.received_us > 250_000
                 or type(batch.cells) is not tuple or not batch.cells
                 or len(batch.cells) > 256
                 or any(not isinstance(cell, tuple) or len(cell) != 2
@@ -132,7 +135,24 @@ class SpatialGrid:
                                      or batch.sample_us <= previous[1]
                                      or batch.received_us < previous[2]):
             raise GridEvidenceError("Replayed or reset ToF source sequence")
-        # Validation above is complete before any cell or identity is modified.
+        if previous is not None:
+            # WROOM and Mac have unrelated clock epochs, but their elapsed
+            # durations must agree within transport lag tolerance. A newly
+            # received packet can still contain an old sensor conversion.
+            source_elapsed = batch.sample_us - previous[1]
+            receipt_elapsed = batch.received_us - previous[2]
+            if (receipt_elapsed - source_elapsed > _MAX_SOURCE_RECEIPT_LAG_US
+                    or source_elapsed - receipt_elapsed > _MAX_SOURCE_FORWARD_LEAP_US):
+                # Revoke prior free-space evidence immediately. Preserve the
+                # last trusted per-lane source fence so replay cannot recover
+                # the map. Later genuinely fresh samples must refill both
+                # floor and obstacle layers before any cell becomes safe.
+                self._cells.clear()
+                self._last_update_us = 0
+                self.anchored = False
+                raise GridEvidenceError("ToF source clock diverged from Mac receipt")
+        # Except for deliberate temporal-fault revocation above, all source
+        # validation precedes cell updates.
         for cell in batch.cells:
             target = self._cells.setdefault(cell, _Cell())
             if batch.kind in _FLOOR_KINDS:
