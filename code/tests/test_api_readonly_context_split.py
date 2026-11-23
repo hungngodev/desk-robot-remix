@@ -945,3 +945,22 @@ def test_voice_context_memory_consent_regrant_invalidates_inflight_sqlite_read(
         assert "private old fact" not in response.text
         assert settings.voice_memory_consent_generation > before
     assert receipts == []
+
+
+@pytest.mark.parametrize("kind, state", [
+    ([], "running"), ({}, "queued"), ("pickup", []), ("manual", {}),
+])
+def test_native_activity_context_skips_unhashable_job_metadata(kind, state):
+    bad = SimpleNamespace(
+        id="e" * 32, robot_id="pet-one", kind=kind, state=state,
+    )
+    # One bad coordinator record must not poison legitimate read-only
+    # activity for the same robot, and must never invent a motion receipt.
+    good = SimpleNamespace(
+        id="f" * 32, robot_id="pet-one", kind="pickup", state="running",
+    )
+    jobs = {"good": good, "bad": bad}
+    result = _active_robot_activity(jobs, "pet-one")
+    assert "pickup" in result and good.id[:12] in result
+    assert "physical progress and outcome unverified" in result
+    assert _active_robot_activity({"bad": bad}, "pet-one") == ""

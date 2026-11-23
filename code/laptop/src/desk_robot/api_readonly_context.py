@@ -33,9 +33,10 @@ def _active_robot_activity(jobs: object, robot_id: str) -> str:
             continue
         kind, state = getattr(job, "kind", None), getattr(job, "state", None)
         job_id = getattr(job, "id", None)
-        if kind not in {"manual", "exploration", "dock_approach", "pickup"} or state not in {
-            "queued", "running",
-        }:
+        if (type(kind) is not str
+                or kind not in {"manual", "exploration", "dock_approach", "pickup"}
+                or type(state) is not str
+                or state not in {"queued", "running"}):
             continue
         if (not isinstance(job_id, str) or len(job_id) != 32
                 or any(ch not in "0123456789abcdef" for ch in job_id)):
