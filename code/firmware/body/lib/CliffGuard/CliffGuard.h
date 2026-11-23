@@ -75,6 +75,10 @@ class CliffGuard {
   CliffConfig config_{};
   Sample samples_[kCliffSensorCount]{};
   bool configured_ = false;
+  // Before the first successful USB rearm, a complete unsafe boot sweep
+  // may replace the placeholder MissingSample with its true fault. Runtime
+  // faults retain the original immutable latch semantics.
+  bool initial_sweep_pending_rearm_ = true;
   CliffFault fault_ = CliffFault::Unconfigured;
   std::uint8_t fault_sensor_ = kNoFaultSensor;
 
@@ -83,6 +87,8 @@ class CliffGuard {
   bool current_health(std::uint32_t now_ms, CliffFault& reason,
                       std::uint8_t& sensor) const;
   void latch(CliffFault reason, std::uint8_t sensor = kNoFaultSensor);
+  void classify_complete_initial_sweep(CliffFault reason,
+                                       std::uint8_t sensor);
 };
 
 }  // namespace desk_robot

@@ -31,6 +31,54 @@ static void fresh(desk_robot::CliffGuard& guard, std::uint32_t now) {
     guard.sample(i, i < 4 ? 50 : 200, true, now);
 }
 
+static void cold_boot_complete_unsafe_sweep_reports_real_fault() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  CHECK(guard.fault() == desk_robot::CliffFault::MissingSample);
+  for (std::uint8_t lane = 0; lane < 5; ++lane)
+    guard.sample(lane, lane == 2 ? 80 : lane < 4 ? 50 : 200, true, 100);
+  CHECK(!guard.evaluate(100));
+  CHECK(guard.fault() == desk_robot::CliffFault::FloorOutOfRange);
+  CHECK(guard.fault_sensor() == 2);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  const auto status = send(body, "status", 100);
+  CHECK(status.find("\\"ready\\":false") != std::string::npos);
+  CHECK(status.find("\\"fault\\":\\"floor_out_of_range\\"") !=
+        std::string::npos);
+  CHECK(status.find("\\"sensor\\":2") != std::string::npos);
+  CHECK(send(body, "arm", 100) == "ERR arm safety_interlock");
+  // Fresh good samples never clear the first real fault without local rearm.
+  fresh(guard, 101);
+  CHECK(!guard.evaluate(101));
+  CHECK(guard.fault() == desk_robot::CliffFault::FloorOutOfRange);
+  CHECK(send(body, "arm", 101) == "ERR arm safety_interlock");
+  CHECK(send(body, "rearm", 101) == "ERR rearm local_only");
+  CHECK(send(body, "rearm", 101, true) == "OK rearm");
+  CHECK(!body.state().armed);
+
+  // After first successful rearm the ordinary first-fault-sticky policy wins.
+  guard.sample(1, 80, true, 102);
+  CHECK(!guard.evaluate(102));
+  CHECK(guard.fault() == desk_robot::CliffFault::FloorOutOfRange);
+  CHECK(guard.fault_sensor() == 1);
+  guard.sample(2, 0, false, 103);
+  CHECK(!guard.evaluate(103));
+  CHECK(guard.fault() == desk_robot::CliffFault::FloorOutOfRange);
+  CHECK(guard.fault_sensor() == 1);
+  fresh(guard, 104);
+  CHECK(!guard.evaluate(104));
+  CHECK(send(body, "rearm", 104, true) == "OK rearm");
+  CHECK(!body.state().armed);
+
+  desk_robot::CliffGuard healthy_boot;
+  CHECK(healthy_boot.configure(config()));
+  fresh(healthy_boot, 10);
+  CHECK(!healthy_boot.evaluate(10));
+  CHECK(healthy_boot.fault() == desk_robot::CliffFault::MissingSample);
+  CHECK(healthy_boot.try_rearm(10));
+  CHECK(healthy_boot.evaluate(10));
+}
+
 static void unqualified_stepper_cutoff_never_claims_motion_ready() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -2812,6 +2860,7 @@ int main() {
     std::cout << "PASS touch gestures, rollover and local stop interlock\\n";
     measured_local_calibration_is_atomic_and_never_arms();
     std::cout << "PASS USB calibration staged atomically with no arming\\n";
+    cold_boot_complete_unsafe_sweep_reports_real_fault();
     unqualified_stepper_cutoff_never_claims_motion_ready();
     cpu_heartbeat_fault_is_sticky_and_holds_gripper();
     std::cout << "PASS CPU heartbeat fault latches drive and holds gripper\n";

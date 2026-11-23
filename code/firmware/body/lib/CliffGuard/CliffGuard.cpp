@@ -24,6 +24,7 @@ bool CliffGuard::valid_config(const CliffConfig& config) {
 bool CliffGuard::configure(const CliffConfig& config) {
   config_ = config;
   configured_ = valid_config(config);
+  initial_sweep_pending_rearm_ = true;
   for (auto& sample : samples_) sample = Sample{};
   // Replacing calibration cannot retain a clear/armed state or old readings.
   fault_ = configured_ ? CliffFault::MissingSample : CliffFault::Unconfigured;
@@ -36,6 +37,20 @@ void CliffGuard::latch(CliffFault reason, std::uint8_t sensor) {
     fault_ = reason;
     fault_sensor_ = sensor;
   }
+}
+
+void CliffGuard::classify_complete_initial_sweep(
+    CliffFault reason, std::uint8_t sensor) {
+  // Only the initial boot placeholder may change, after all five distinct
+  // channels have produced a sample. An actual bus or runtime fault never
+  // becomes a replaceable initial fault, and this cannot rearm the guard.
+  if (!initial_sweep_pending_rearm_ || fault_ != CliffFault::MissingSample ||
+      reason == CliffFault::None || reason == CliffFault::MissingSample)
+    return;
+  for (const auto& sample : samples_)
+    if (!sample.present) return;
+  fault_ = reason;
+  fault_sensor_ = sensor;
 }
 
 CliffFault CliffGuard::sample_fault(std::uint8_t channel) const {
@@ -145,7 +160,10 @@ RangeDiagnostic CliffGuard::diagnostic(std::uint8_t channel,
 bool CliffGuard::evaluate(std::uint32_t now_ms) {
   CliffFault reason;
   std::uint8_t sensor;
-  if (!current_health(now_ms, reason, sensor)) latch(reason, sensor);
+  if (!current_health(now_ms, reason, sensor)) {
+    classify_complete_initial_sweep(reason, sensor);
+    latch(reason, sensor);
+  }
   return fault_ == CliffFault::None;
 }
 
@@ -153,11 +171,13 @@ bool CliffGuard::try_rearm(std::uint32_t now_ms) {
   CliffFault reason;
   std::uint8_t sensor;
   if (!current_health(now_ms, reason, sensor)) {
+    classify_complete_initial_sweep(reason, sensor);
     latch(reason, sensor);
     return false;
   }
   fault_ = CliffFault::None;
   fault_sensor_ = kNoFaultSensor;
+  initial_sweep_pending_rearm_ = false;
   return true;
 }
 
