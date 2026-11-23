@@ -164,8 +164,11 @@ treat any sample as movement authority. The head issues the exact ASCII
 `pose\r\n` command on the existing 115200 baud 8N1 UART mutex; the body
 returns one complete JSON line. There is no arbitrary UART tunnel, background
 keepalive or retry. The same per-robot bearer authentication and currently
-configured head `robot_id` apply as `GET /api/ir`. The head adds only that
-`robot_id` to the validated body response.
+configured head `robot_id` apply as `GET /api/ir`. The head appends
+`robot_id` and a head-local `head_boot` (its Sense boot nonce) to the
+nine validated body fields without modifying body timestamps or coordinates.
+The Mac source reader uses `head_boot` to invalidate old pose continuity
+if Sense alone reboots while WROOM remains powered.
 
 The exact required nine body fields are `v=1`, `body_boot` (nonzero uint32),
 `origin` (uint32 origin identity), `seq` (uint32 sample sequence),
@@ -202,11 +205,20 @@ read shares the existing nonurgent telemetry latch; urgent STOP preempts
 nonurgent UART reads at the current polling boundary. No `pose` query
 renews the 500 ms body watchdog.
 
-Camera JPEG identity is separate: for one illustrative request, frame
-headers may be `X-Desk-Camera-Boot: 123`,
-`X-Desk-Camera-Sequence: 1`, `X-Desk-Camera-Complete-Us: 250000`.
+Camera JPEG identity is separate. Three illustrative accepted JPEG header
+fixtures, with independent headset monotonic microseconds, are:
+
+* A: `X-Desk-Camera-Boot: 123`, `X-Desk-Camera-Sequence: 1`, `X-Desk-Camera-Complete-Us: 250000`
+* B: `X-Desk-Camera-Boot: 123`, `X-Desk-Camera-Sequence: 2`, `X-Desk-Camera-Complete-Us: 500000`
+* C after Sense reboot: `X-Desk-Camera-Boot: 124`, `X-Desk-Camera-Sequence: 1`, `X-Desk-Camera-Complete-Us: 10000`
+
 The last value is head monotonic microseconds at completed JPEG encoding,
-not optical exposure time or body `sample_us`. A subsequent JPEG on
-the same boot increases sequence, while any head reboot changes the
-boot identity. Actual optical lag and audio/camera coexistence require
-physical measurement and remain unqualified.
+not optical exposure time or body `sample_us`. A head reboot resets its
+camera sequence but changes both the JPEG boot and `GET /api/pose`
+`head_boot`. The Mac must not compare microsecond epochs across devices.
+The camera can bracket one stationary, motor-disarmed pose estimate only
+with fresh ordered pose before and after the JPEG, equal body boot and
+origin, equal head boot, no intervening movement or pickup, and measured
+source-to-optical latency bounds. Never treat an uncalibrated bracket as
+navigation authorization. Actual optical lag and audio/camera coexistence
+require physical measurement and remain unqualified.

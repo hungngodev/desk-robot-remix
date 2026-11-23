@@ -599,6 +599,10 @@ void Bridge::BodyReadTask(void* context) {
                 bridge->Json(req, 503, Envelope(false, "invalid body JSON"));
             } else {
                 cJSON_AddStringToObject(body.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
+                // Preserve body fields untouched and add the actual head
+                // transport boot for Mac to fence Sense-only restarts.
+                if (pose) cJSON_AddNumberToObject(
+                    body.get(), "head_boot", bridge->boot_nonce_);
                 bridge->Json(req, 200, Encode(body.get()));
             }
         }
