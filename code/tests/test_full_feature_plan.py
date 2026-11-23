@@ -302,6 +302,20 @@ def test_full_fleet_speaker_source_is_exact_2w_and_remains_physical_hold():
     assert "speaker_l=20;" in source
     assert "speaker_w=16;" in source
     assert "speaker_h=4.7;" in source
+    # The selected amp's nominal gain is a documented, inspectable hardware
+    # assumption, never an accidental generic-breakout default or AEC pass.
+    wiring = (Path(__file__).resolve().parents[2] /
+              "docs/hardware/wiring.md").read_text(encoding="utf-8")
+    assert "MAX98357A I2S GAIN and acoustic baseline" in wiring
+    assert "floating for the nominal **+9 dB I2S gain**" in wiring
+    assert "exact carrier revision, GAIN silkscreen" in wiring
+    assert "invalidates the previous acoustic tuning" in wiring
+    assert "at least 19/20 stops within 500 ms" in wiring
+    assert "Neither the proposed +9 dB gain" in wiring
+
+
+
+
 
 
 def test_usb_bench_exposes_only_raw_mpu_free_fall_counter():

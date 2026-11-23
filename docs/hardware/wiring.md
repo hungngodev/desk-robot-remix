@@ -124,6 +124,32 @@ BCLK7/LRC8/DIN9 and amplifier SD44. Those are **not** the compiled allocation
 above. Port software/reference handling to one checked map before wiring; do not
 mix the two tables or add an SD44 wire to the current build. Sense AEC software reference and urgent PCM flush are in the stacked firmware implementation. No hardware acoustic interruption gate has passed.
 
+**MAX98357A I2S GAIN and acoustic baseline (provisional, NOT physically qualified):**
+For the selected digital MAX98357A, plan to leave its GAIN input electrically
+floating for the nominal **+9 dB I2S gain**, rather than adopting an unknown
+seller's strap. This is a *proposed configuration*, not evidence of what the
+actual generic breakout supplies. Before wiring or powering it, inspect the
+exact carrier revision, GAIN silkscreen, onboard bias resistors/solder bridges
+and the manufacturer schematic; record the measured effective strap and do not
+assume an exposed pin is truly floating. The chip also supports +3 dB
+(100 kOhm to VDD), +6 dB (VDD), +12 dB (GND), and +15 dB (100 kOhm to GND)
+in I2S mode. Do not connect GAIN to an XIAO GPIO or blindly copy another
+breakout's solder jumper. Primary source: [Analog Devices MAX98357A](https://www.analog.com/en/products/max98357a.html)
+and [MAX98357A/MAX98357B Rev. 16 datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/MAX98357A-MAX98357B.pdf).
+
+Record the board/strap, regulated input voltage, selected **8 ohm 2 W**
+speaker, actual printed cavity/port and mic-to-speaker geometry. Under actual
+speech and simultaneous camera/WiFi load, measure clipping, SPL, amplifier and
+speaker temperature, reference delay, AEC echo return loss enhancement (ERLE)
+and self-speech false VAD. **Changing the GAIN strap, speaker or enclosure
+invalidates the previous acoustic tuning**: rerun the 20 audible interruption
+trials (at least 19/20 stops within 500 ms and 18/20 recognized new requests)
+plus the echo-only trial in [audio acceptance](../guides/audio-barge-in.md).
+Neither the proposed +9 dB gain nor a compiled I2S path clears the physical
+A1 acoustic gate or authorizes final assembly.
+
+
+
 Initial two-USB head/body test joins **TX, RX and GND only**; keep 5 V rails
 separate. Do not flash CoreS3/Freenove firmware onto Sense, or S3 firmware onto
 the classic WROOM.
