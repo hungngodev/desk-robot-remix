@@ -54,6 +54,7 @@ class _Attention:
     human_turns: int = 0
     asr: str = ""
     asr_at: float = -math.inf
+    asr_consent_generation: int | None = None
     last_heard_id: str | None = None
     heard_ids: deque[str] = field(default_factory=lambda: deque(maxlen=24))
     sent: str = ""
@@ -166,6 +167,7 @@ class AttentionLedger:
         # labelled as the current task during that silence.
         if state.asr_at < at:
             state.asr = ""
+            state.asr_consent_generation = None
             state.last_heard_id = None
 
     def human_ended(self, robot_id: str, at: float) -> None:
@@ -174,12 +176,18 @@ class AttentionLedger:
         if at >= state.voice_at:
             state.voice_active = False
 
-    def heard(self, robot_id: str, event_id: str, transcript: str, at: float) -> bool:
+    def heard(
+        self, robot_id: str, event_id: str, transcript: str, at: float, *,
+        consent_generation: int | None = None,
+    ) -> bool:
         """An authenticated model ASR receipt is not an operator instruction."""
         _clock(at)
         state = self._state(robot_id)
         if (not isinstance(event_id, str)
                 or re.fullmatch(r"omni_[0-9a-f]{12}_[0-9a-f]{20}", event_id) is None):
+            return False
+        if (consent_generation is not None
+                and (type(consent_generation) is not int or consent_generation < 0)):
             return False
         if event_id in state.heard_ids or not self.heard_is_current(robot_id, at):
             # An old model transcript completing after a newer authenticated
@@ -191,6 +199,7 @@ class AttentionLedger:
         state.heard_ids.append(event_id)
         state.asr = cleaned
         state.asr_at = at
+        state.asr_consent_generation = consent_generation
         state.last_heard_id = event_id
         return True
 
@@ -201,6 +210,7 @@ class AttentionLedger:
             return False
         state.asr = ""
         state.asr_at = -math.inf
+        state.asr_consent_generation = None
         state.last_heard_id = None
         return True
 
@@ -259,7 +269,11 @@ class AttentionLedger:
         state.sensor_edges.append((kind, at, state.generation))
         return True
 
-    def timeline(self, robot_id: str, now: float) -> list[dict]:
+    def timeline(
+        self, robot_id: str, now: float, *,
+        live_consent_enabled: bool = True,
+        live_consent_generation: int | None = None,
+    ) -> list[dict]:
         """One optional, source-labelled context cue with a fixed output cap."""
         _clock(now)
         state = self._state(robot_id)
@@ -267,8 +281,13 @@ class AttentionLedger:
         # The accepted model transcript belongs to a newer authenticated
         # human voice epoch than the previous topic. It is still uncertain
         # ASR, NEVER a motion command, but must not be masked by old dialogue.
+        asr_permitted = (
+            live_consent_enabled is True
+            and (live_consent_generation is None
+                 or state.asr_consent_generation == live_consent_generation)
+        )
         newer_asr = (
-            bool(state.asr) and 0 <= now - state.asr_at <= 90
+            asr_permitted and bool(state.asr) and 0 <= now - state.asr_at <= 90
             and state.asr_at > state.topic_updated_at
             and state.asr_at >= state.voice_at
         )
@@ -302,7 +321,8 @@ class AttentionLedger:
                 else "autonomous peer topic, not an operator command"
             )
             pieces.append(f"{label} ({qualifier}): {state.topic[:72]}")
-        elif state.asr and 0 <= now - state.asr_at <= 90 and not newer_asr:
+        elif (asr_permitted and state.asr
+              and 0 <= now - state.asr_at <= 90 and not newer_asr):
             pieces.append(
                 "Earlier uncertain ASR words (not verified command): "
                 + state.asr[:66]

@@ -14,6 +14,7 @@ from .brain_context import (
     active_job_timeline,
     compose_brain_context,
     is_camera_derived_timeline_item,
+    live_asr_in_current_grant,
 )
 from .config import Settings
 from .controller import OperationError
@@ -169,7 +170,11 @@ def register_readonly_context_routes(
         # stream, a transcript memory write, or a model motion permit.
         attention = getattr(app.state.runtime, "attention", None)
         continuity = (
-            attention.timeline(robot_id, now) if attention is not None else []
+            attention.timeline(
+                robot_id, now,
+                live_consent_enabled=settings.voice_vision_tools_enabled,
+                live_consent_generation=settings.camera_consent_generation,
+            ) if attention is not None else []
         )
         timeline = visual.hub.interaction_timeline(
             robot_id, now, limit=10 - len(activity) - len(continuity)
@@ -183,6 +188,14 @@ def register_readonly_context_routes(
             ]
         timeline.extend(activity)
         timeline.extend(continuity)
+        # Regrant cannot revive stale RAM ASR from the previous live grant.
+        timeline = [
+            item for item in timeline
+            if live_asr_in_current_grant(
+                item, now=now, enabled=settings.voice_vision_tools_enabled,
+                consent_started_at=settings.camera_consent_started_at,
+            )
+        ]
         if not settings.voice_vision_tools_enabled:
             # The live opt-out includes completed visual_look interpretations,
             # not just raw camera frames and camera_face sensor events.

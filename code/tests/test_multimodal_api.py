@@ -1618,8 +1618,19 @@ def test_native_queued_asr_cannot_impersonate_a_newer_human_vad(
             "Newer uncertain ASR" in str(cue)
             for cue in attention.timeline(robot, time.monotonic())
         )
+        live_url = f"/v1/pet/{robot}/interaction-context"
+        allowed = client.get(live_url, headers=headers)
+        assert allowed.status_code == 200
+        assert "New question about the robot" in allowed.json()["model_context"]
+        # Both transient hub ASR and attention copies belong to one grant.
         settings.voice_vision_tools_enabled = False
+        disabled = client.get(live_url, headers=headers)
+        assert disabled.status_code == 200
+        assert "New question about the robot" not in str(disabled.json())
         settings.voice_vision_tools_enabled = True
+        regranted = client.get(live_url, headers=headers)
+        assert regranted.status_code == 200
+        assert "New question about the robot" not in str(regranted.json())
         revoked = client.post(url, headers=headers, json={
             **current,
             "event_id": "omni_" + "a" * 12 + "_" + "e" * 20,

@@ -321,9 +321,12 @@ def register_native_omni_routes(
         # Keep the same ephemeral and consented model ASR in the shared
         # Mac attention snapshot. A transcript is uncertain context only,
         # never an instruction or automatic permission to operate motors.
-        if ephemeral and settings.voice_vision_tools_enabled and attention is not None:
+        if (ephemeral and settings.voice_vision_tools_enabled
+                and settings.camera_consent_generation == live_consent_generation
+                and attention is not None):
             accepted = attention.heard(
-                robot_id, request.event_id, spoken[:240], audio_at
+                robot_id, request.event_id, spoken[:240], audio_at,
+                consent_generation=live_consent_generation,
             )
             if not accepted:
                 # The ASR belonged to a superseded human voice turn. Remove

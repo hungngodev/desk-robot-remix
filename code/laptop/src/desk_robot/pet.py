@@ -24,6 +24,7 @@ from .api_robot_status import _aux_boot_epoch, _fresh_aux_acquisition
 from .brain_context import (
     active_job_timeline,
     compose_brain_context,
+    live_asr_in_current_grant,
     repeated_spontaneous_line,
 )
 from .config import Settings
@@ -2692,9 +2693,17 @@ class PetController:
         now = time.monotonic()
         attention = getattr(self, "attention", None)
         continuity = (
-            attention.timeline(robot_id, now)
-            if attention is not None
-            else []
+            attention.timeline(
+                robot_id, now,
+                live_consent_enabled=(
+                    self.settings.mode != "hardware"
+                    or self.settings.voice_vision_tools_enabled
+                ),
+                live_consent_generation=(
+                    self.settings.camera_consent_generation
+                    if self.settings.mode == "hardware" else None
+                ),
+            ) if attention is not None else []
         )
         timeline = []
         # A physical touch can still trigger curiosity after visual opt
@@ -2730,6 +2739,13 @@ class PetController:
                             if (self.settings.voice_memory_tools_enabled
                                 or not (item.get("channel") == "tool"
                                         and item.get("kind") == "memory_recall"))
+                            and (self.settings.mode != "hardware"
+                                 or live_asr_in_current_grant(
+                                     item, now=now, enabled=True,
+                                     consent_started_at=(
+                                         self.settings.camera_consent_started_at
+                                     ),
+                                 ))
                         ]
                     else:
                         timeline = [

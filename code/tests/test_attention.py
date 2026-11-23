@@ -783,3 +783,38 @@ def test_new_human_voice_removes_old_current_asr_and_blocks_late_arrivals(
     assert not ledger.heard("pet", late, "Delayed old human turn", 11.5)
     assert ledger.heard("pet", late, "Current human turn", 12.5)
     assert "Current human turn" in str(ledger.timeline("pet", 13))
+
+
+def test_live_asr_grant_revocation_preserves_safety_and_regrant_isolation(monkeypatch):
+    """Only the original grant may expose model ASR in attention."""
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 300.0)
+    ledger = AttentionLedger(["pet", "peer"])
+    ledger.begin_topic("pet", "Find the key", 10)
+    assert ledger.sensor("pet", "safety_fault", 11)
+    ledger.human_started("pet", 12)
+    first = "omni_" + "a" * 12 + "_" + "b" * 20
+    assert ledger.heard("pet", first, "PRIVATE_GRANT_SEVEN", 13, consent_generation=7)
+    assert "PRIVATE_GRANT_SEVEN" in str(ledger.timeline(
+        "pet", 14, live_consent_enabled=True, live_consent_generation=7,
+    ))
+    for enabled, generation in ((False, 7), (True, 8)):
+        snapshot = ledger.timeline(
+            "pet", 14, live_consent_enabled=enabled,
+            live_consent_generation=generation,
+        )
+        content = snapshot[0]["content"]
+        assert "PRIVATE_GRANT_SEVEN" not in content
+        assert "Find the key" in content
+        assert "WROOM safety_fault" in content
+        assert "historical, not current telemetry" in content
+    assert ledger.timeline("peer", 14) == []
+    second = "omni_" + "c" * 12 + "_" + "d" * 20
+    assert ledger.heard("pet", second, "PRIVATE_GRANT_EIGHT", 15,
+                        consent_generation=8)
+    fresh = str(ledger.timeline(
+        "pet", 16, live_consent_enabled=True, live_consent_generation=8,
+    ))
+    assert "PRIVATE_GRANT_EIGHT" in fresh
+    assert "PRIVATE_GRANT_SEVEN" not in fresh
+    assert not ledger.heard("pet", "omni_" + "e" * 12 + "_" + "f" * 20,
+                            "invalid", 17, consent_generation=True)

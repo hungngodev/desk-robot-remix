@@ -212,7 +212,7 @@ def test_live_asr_revoke_during_durable_write_retracts_ephemeral_receipt(
         memory=store, multimodal=SimpleNamespace(hub=hub),
         attention=SimpleNamespace(
             heard_is_current=lambda *_args: True,
-            heard=lambda *args: attention_calls.append(args),
+            heard=lambda *args, **kwargs: attention_calls.append((args, kwargs)),
         ),
     )
     register_native_omni_routes(
@@ -259,7 +259,7 @@ def test_native_asr_replay_after_four_display_slots_never_reenters_context(setti
             heard_is_current=lambda *_args: True,
             # The production attention ledger accepts fresh ASR with True.
             # A list.append-only mock returns None and falsely rejects it.
-            heard=lambda *args: (heard_calls.append(args) or True),
+            heard=lambda *args, **kwargs: (heard_calls.append((args, kwargs)) or True),
         ),
         memory=None,
     )

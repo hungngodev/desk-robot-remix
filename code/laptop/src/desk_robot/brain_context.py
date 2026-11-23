@@ -43,6 +43,25 @@ def is_camera_derived_timeline_item(entry: object) -> bool:
     )
 
 
+def live_asr_in_current_grant(
+    entry: dict, *, now: float, enabled: bool, consent_started_at: float,
+) -> bool:
+    """Discard old model-ASR RAM cues after live opt-out or rapid regrant.
+
+    Hub timestamps are rounded to milliseconds. Require a conservative 1 ms
+    margin so rounding cannot promote an older receipt into the new grant.
+    This only fences transcript text; WROOM and touch cues remain independent.
+    """
+    if entry.get("channel") != "human_transcript":
+        return True
+    age = entry.get("age_ms")
+    elapsed_ms = (now - consent_started_at) * 1000
+    return (
+        enabled is True and type(age) is int and age >= 0
+        and elapsed_ms >= 0 and age + 1 < elapsed_ms
+    )
+
+
 def _memory_label(entry: Memory) -> str:
     if entry.kind == "heard_human":
         return ("I may have heard (uncertain transcription)"
