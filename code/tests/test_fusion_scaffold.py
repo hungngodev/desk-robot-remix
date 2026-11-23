@@ -106,7 +106,10 @@ def test_exported_candidate_fits_survive_legacy_fusion_entrypoint(tmp_path):
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(b"generated candidate fixture")
     names_paths = source.build_manifest(tmp_path)
-    assert len(names_paths) == 12 + 7 + 13
+    assert len(names_paths) == (
+        len(source.SOURCE_MESHES) + len(source.ADAPTER_NAMES)
+        + len(source.FIT_REFERENCES)
+    )
     assert len({name for name, _ in names_paths}) == len(names_paths)
     assert {path for _, path in names_paths} == {
         *(tmp_path / rel for _, rel in source.SOURCE_MESHES),
@@ -116,7 +119,7 @@ def test_exported_candidate_fits_survive_legacy_fusion_entrypoint(tmp_path):
     # Only an optional candidate disappears when its file is absent;
     # a required source mesh must still fail hard.
     fits[-1].unlink()
-    assert len(source.build_manifest(tmp_path)) == 31
+    assert len(source.build_manifest(tmp_path)) == len(names_paths) - 1
     (tmp_path / source.SOURCE_MESHES[0][1]).unlink()
     try:
         source.build_manifest(tmp_path)
