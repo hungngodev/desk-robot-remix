@@ -127,6 +127,12 @@ def propose_object_search(
     if (target.robot_id != object_query.robot_id or target.label != object_query.label
             or target.may_execute is not False or target.arrived is not False):
         return refuse("target_identity_or_authority_invalid")
+    # A stale ObjectTarget may have the right robot/label and plausible floor
+    # hint while belonging to an earlier session, boot, origin or consent.
+    # Do not turn that historical result into a new viewpoint proposal.
+    if (type(target.request_fence) is not ObjectQuery
+            or target.request_fence != object_query):
+        return refuse("target_request_changed")
 
     last_clock_us = now_us
 

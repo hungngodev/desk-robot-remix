@@ -39,6 +39,7 @@ def test_fresh_calibrated_sighting_is_not_an_arrival_or_motor_permit():
         "current_sighting", "fresh_projected_view", (120, 220))
     assert result.search_hint_mm is None
     assert not result.arrived and not result.may_execute
+    assert result.request_fence == fixtures()[0]
 
 
 def test_fresh_unprojected_view_is_not_a_metric_target():
@@ -195,3 +196,12 @@ def test_huge_wall_time_and_threshold_do_not_crash_target_resolution():
     _, _, seen = fixtures()
     assert resolve([replace(seen, seen_at_wall_s=10**1000)]).status == "unknown"
     assert resolve(min_confidence=10**1000).status == "rejected"
+
+
+def test_target_results_bind_exact_request_but_refusals_do_not():
+    query, owner, seen = fixtures()
+    assert resolve([seen], query=query, owner=owner).request_fence == query
+    assert resolve([seen], query=query, owner=owner, now_us=1_300_001).request_fence == query
+    denied = resolve([seen], query=query, owner=replace(owner, turn_id="other"))
+    assert denied.status == "rejected"
+    assert denied.request_fence is None

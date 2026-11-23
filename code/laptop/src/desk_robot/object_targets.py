@@ -80,6 +80,9 @@ class ObjectTarget:
     search_hint_mm: tuple[int, int] | None = None
     may_execute: bool = False
     arrived: bool = False
+    # Bind a resolved target to the exact request. A historical floor hint
+    # alone does not authorize reuse after another turn, map or camera grant.
+    request_fence: ObjectQuery | None = None
 
 
 def _identity(value: object) -> bool:
@@ -149,7 +152,8 @@ def resolve_object_target(
                             query.label if isinstance(query, ObjectQuery) else "",
                             selected.source if selected else None,
                             selected.seen_at_wall_s if selected else None,
-                            confirmed, hint)
+                            confirmed, hint,
+                            request_fence=query if status != "rejected" else None)
 
     if (not isinstance(query, ObjectQuery) or not isinstance(owner, ObjectOwner)
             or not all(_identity(s) for s in (

@@ -20,6 +20,7 @@ def fixtures():
     target = ObjectTarget(
         "last_seen", "not_currently_confirmed", "robot-01", "key",
         "camera_seen", 1800000000.1, search_hint_mm=(120, 220),
+        request_fence=query,
     )
     grid = GridSnapshot(
         "robot-01", "origin-3", 8, "tag-4", "cal-5", 15, 15, 20,
@@ -220,3 +221,53 @@ def test_malformed_target_or_viewpoint_never_enters_route_planner():
         "no_same_map_last_seen_hint"
     )
 
+
+
+def test_unfenced_manually_created_target_cannot_reach_route_planner():
+    _, _, _, _, _, target, _ = fixtures()
+    result = search(target=replace(target, request_fence=None))
+    assert result.reason == "target_request_changed"
+    assert result.route is None and not result.may_execute
+
+
+@pytest.mark.parametrize(("query_change", "owner_change", "route_change"), [
+    ({"session_id": "new-session"}, {"session_id": "new-session"},
+     {"session_id": "new-session"}),
+    ({"turn_id": "new-turn"}, {"turn_id": "new-turn"},
+     {"turn_id": "new-turn"}),
+    ({"camera_boot": 102}, {"camera_boot": 102}, {}),
+    ({"host_boot_id": "new-mac"}, {"host_boot_id": "new-mac"}, {}),
+    ({"camera_grant": 13}, {"camera_grant": 13}, {}),
+    ({"deadline_us": 1_600_000}, {}, {}),
+])
+def test_old_last_seen_target_rejected_after_fresh_request_owner_change(
+    query_change, owner_change, route_change,
+):
+    _, request, _, query, owner, target, _ = fixtures()
+    result = search(
+        object_query=replace(query, **query_change),
+        live_owner=replace(owner, **owner_change),
+        route_request=replace(request, **route_change),
+        target=target,
+    )
+    assert result.reason == "target_request_changed"
+    assert result.status == "rejected"
+    assert result.route is None and not result.may_execute
+
+
+@pytest.mark.parametrize("change", [
+    {"origin_id": "new-body-boot"},
+    {"epoch": 9},
+    {"anchor_id": "new-tag"},
+])
+def test_old_last_seen_target_rejected_after_reanchoring(change):
+    grid, request, _, query, owner, target, _ = fixtures()
+    result = search(
+        grid=replace(grid, **change),
+        route_request=replace(request, **change),
+        object_query=replace(query, **change),
+        live_owner=replace(owner, **change),
+        target=target,
+    )
+    assert result.reason == "target_request_changed"
+    assert result.route is None and not result.may_execute
