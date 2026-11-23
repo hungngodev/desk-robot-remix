@@ -356,3 +356,67 @@ async def test_audio_bench_hung_endpoint_cannot_block_completion():
 async def test_audio_bench_rejects_unbounded_intervals(seconds, period):
     with pytest.raises(ValueError, match="Invalid bounded audio"):
         await bench.measure(None, "robot-01", seconds=seconds, poll_period_s=period)
+
+
+@pytest.mark.asyncio
+async def test_cli_ignores_ambient_proxy_for_authenticated_audio_bench(
+    tmp_path, monkeypatch,
+):
+    """The operator's bearer and AEC diagnostics stay on the selected device."""
+    import sys
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://unexpected-proxy.invalid:8080")
+    monkeypatch.setenv("ALL_PROXY", "http://unexpected-proxy.invalid:8080")
+    monkeypatch.setattr(sys, "argv", [
+        "bench_head_audio.py", "--robot", "robot-01",
+        "--seconds", "5", "--report", str(tmp_path / "audio.json"),
+    ])
+
+    class Robot:
+        id = "robot-01"
+        device_id = "unique-sense-device"
+
+    class Settings:
+        mode = "hardware"
+
+        def robot(self, name):
+            assert name == "robot-01"
+            return Robot()
+
+    monkeypatch.setattr(bench, "load_settings", lambda _config: Settings())
+    client_options = []
+
+    class Client:
+        def __init__(self, **kwargs):
+            client_options.append(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(bench.httpx, "AsyncClient", Client)
+
+    def head_factory(robot, client):
+        assert robot.id == "robot-01"
+        assert isinstance(client, Client)
+        return object()
+
+    monkeypatch.setattr(bench, "HttpHead", head_factory)
+
+    async def fake_measure(head, robot_id, *, seconds, poll_period_s):
+        assert head is not None
+        assert robot_id == "robot-01"
+        assert seconds == 5
+        assert poll_period_s == 0.2
+        return {
+            "reference_software_integrity_observed": False,
+            "actual_speaker_playback_verified": False,
+        }
+
+    monkeypatch.setattr(bench, "measure", fake_measure)
+    assert await bench.main() == 1
+    assert client_options == [{"trust_env": False}]
+    report = json.loads((tmp_path / "audio.json").read_text())
+    assert report["actual_speaker_playback_verified"] is False

@@ -514,3 +514,73 @@ async def test_stalled_continuous_mjpeg_is_reported_not_mistaken_for_live():
     assert report["status_latency"]["count"] >= 2
     assert head.status_calls >= 2
     assert report["speaker_silence_verified"] is False
+
+
+@pytest.mark.asyncio
+async def test_cli_ignores_ambient_proxy_for_authenticated_live_camera_bench(
+    tmp_path, monkeypatch,
+):
+    """The live MJPEG and status bearer cannot inherit a system HTTP proxy."""
+    import sys
+
+    monkeypatch.setenv("HTTPS_PROXY", "http://unexpected-proxy.invalid:8080")
+    monkeypatch.setenv("ALL_PROXY", "http://unexpected-proxy.invalid:8080")
+    monkeypatch.setattr(sys, "argv", [
+        "bench_head_camera.py", "--robot", "robot-01", "--stream",
+        "--seconds", "5", "--report", str(tmp_path / "camera.json"),
+    ])
+
+    class Robot:
+        id = "robot-01"
+        device_id = "unique-sense-device"
+
+    class Settings:
+        mode = "hardware"
+
+        def robot(self, name):
+            assert name == "robot-01"
+            return Robot()
+
+    monkeypatch.setattr(bench, "load_settings", lambda _config: Settings())
+    client_options = []
+
+    class Client:
+        def __init__(self, **kwargs):
+            client_options.append(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(bench.httpx, "AsyncClient", Client)
+
+    def head_factory(robot, client, *, strict_capture):
+        assert robot.id == "robot-01"
+        assert isinstance(client, Client)
+        assert strict_capture is True
+        return object()
+
+    monkeypatch.setattr(bench, "HttpHead", head_factory)
+
+    async def fake_measure(
+        head, robot_id, *, seconds, camera_period_s, status_period_s,
+        stream, score_motion,
+    ):
+        assert head is not None
+        assert robot_id == "robot-01"
+        assert seconds == 5
+        assert camera_period_s > 0
+        assert status_period_s > 0
+        assert stream is True
+        assert score_motion is False
+        return {"camera_frames_received": 0, "speaker_silence_verified": False}
+
+    monkeypatch.setattr(bench, "measure", fake_measure)
+    monkeypatch.setattr(bench, "bench_passed", lambda _r, *, require_audio: False)
+    assert await bench.main() == 1
+    assert client_options == [{"trust_env": False}]
+    report = json.loads((tmp_path / "camera.json").read_text())
+    assert report["speaker_silence_verified"] is False
+    assert report["concurrent_audio_required_by_operator"] is False

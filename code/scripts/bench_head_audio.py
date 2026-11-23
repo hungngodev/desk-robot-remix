@@ -220,7 +220,7 @@ async def main() -> int:
     if not robot.device_id:
         cli.error("Configure the unique Xiaozhi device identity")
     preflight_private_report(args.report)
-    async with httpx.AsyncClient() as client:
+    async with httpx.AsyncClient(trust_env=False) as client:
         head = HttpHead(robot, client)
         report = await measure(
             head, robot.id, seconds=args.seconds,
