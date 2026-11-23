@@ -185,3 +185,25 @@ def test_pose_route_registration_is_unique_and_operator_only(settings, tokens):
         )
         assert denied.status_code == 403
     assert commands == []
+
+def test_readonly_pose_missing_head_adapter_fails_closed(settings, tokens):
+    """A temporarily absent head is a 503, never an HTTP 500 or fake odometry."""
+    robot = settings.robots[0]
+    requests = []
+
+    def forbidden_request(request):
+        requests.append(request.url.path)
+        raise AssertionError("Missing head must not issue physical transport I/O")
+
+    client, commands, _ = _client(settings, forbidden_request)
+    route = f"/v1/robots/{robot.id}/pose"
+    operator = {"Authorization": "Bearer " + tokens["DESK_ROBOT_API_TOKEN"]}
+    tool = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with client:
+        client.app.state.runtime.coordinator.heads.pop(robot.id)
+        assert client.get(route, headers=tool).status_code == 403
+        result = client.get(route, headers=operator)
+        assert result.status_code == 503
+        assert result.json() == {"detail": "Pose head unavailable"}
+    assert requests == []
+    assert commands == []

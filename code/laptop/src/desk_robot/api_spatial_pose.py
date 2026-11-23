@@ -21,7 +21,9 @@ def register_spatial_pose_route(app: FastAPI, *, operator, coordinator) -> None:
         """Inspect one real head receipt without enabling a robot or navigation."""
         owner = coordinator()
         owner.robot(robot_id)
-        head = owner.heads[robot_id]
+        head = owner.heads.get(robot_id)
+        if head is None:
+            raise HTTPException(503, "Pose head unavailable")
         reader = getattr(head, "pose_status", None)
         if not callable(reader):
             raise HTTPException(501, "Pose unsupported by configured head")
