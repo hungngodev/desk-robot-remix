@@ -206,6 +206,10 @@ def plan_route(
     if not clear(*request.goal, radius):
         return refuse("unsafe_goal")
     if request.start == request.goal:
+        # A long clearance scan may outlive the request or its map epoch.
+        expired = live()
+        if expired:
+            return refuse(expired)
         return RouteResult("planned", "at_observation_pose", (request.start,),
                            request.robot_id, request.origin_id, request.epoch,
                            request.session_id, request.turn_id)
@@ -233,6 +237,11 @@ def plan_route(
                 state = parent[state]
                 route.append((state[0], state[1]))
             route.reverse()
+            # The goal pop and route reconstruction are not an execution lease.
+            # Refuse an obsolete proposal even if every earlier cell was safe.
+            expired = live()
+            if expired:
+                return refuse(expired)
             return RouteResult("planned", "simulation_proposal_only", tuple(route),
                                request.robot_id, request.origin_id, request.epoch,
                                request.session_id, request.turn_id)

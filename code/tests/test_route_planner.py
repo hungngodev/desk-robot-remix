@@ -3,6 +3,7 @@
 from dataclasses import replace
 
 import pytest
+from desk_robot import route_planner as planner
 from desk_robot.route_planner import (
     GridSnapshot,
     RouteRequest,
@@ -188,4 +189,42 @@ def test_monotonic_clock_rollback_invalidates_an_inflight_proposal():
     result = route(clock_us=lambda: sampled.pop(0) if sampled else 1500)
     assert result.status == "rejected"
     assert result.reason == "invalid_clock"
+    assert result.cells == () and result.may_execute is False
+
+def test_same_pose_request_revoked_during_clearance_cannot_be_planned():
+    grid, request, _ = fixtures()
+    current = True
+
+    class RevokingSupport(tuple):
+        def __getitem__(self, index):
+            nonlocal current
+            current = False
+            return super().__getitem__(index)
+
+    result = route(
+        grid=replace(grid, support=RevokingSupport(grid.support)),
+        request=replace(request, goal=request.start),
+        request_is_current=lambda: current,
+    )
+    assert result.status == "rejected"
+    assert result.reason == "request_invalidated"
+    assert result.cells == () and result.may_execute is False
+
+
+def test_goal_pop_after_deadline_cannot_produce_an_obsolete_route(monkeypatch):
+    _, request, _ = fixtures()
+    clock = 1000
+    original_pop = planner.heapq.heappop
+
+    def expire_on_goal_pop(queue):
+        nonlocal clock
+        item = original_pop(queue)
+        if (item[3], item[4]) == request.goal:
+            clock = request.deadline_us
+        return item
+
+    monkeypatch.setattr(planner.heapq, "heappop", expire_on_goal_pop)
+    result = route(clock_us=lambda: clock)
+    assert result.status == "rejected"
+    assert result.reason == "deadline_or_map_expired"
     assert result.cells == () and result.may_execute is False
