@@ -368,8 +368,10 @@ class MemoryStore:
             interpreted = camera_provenance.interpreted_at
             if (type(received) not in (int, float)
                     or type(interpreted) not in (int, float)
-                    or not math.isfinite(received) or not math.isfinite(interpreted)
+                    # Bound integers before math.isfinite can convert them
+                    # to float; huge device clocks must fail as ValueError.
                     or not 0 <= received <= interpreted <= time.time() + 60
+                    or not math.isfinite(received) or not math.isfinite(interpreted)
                     or abs(float(when) - received) > 0.01):
                 raise ValueError("Invalid camera chronology or receive clock")
             identity = camera_provenance.source_identity

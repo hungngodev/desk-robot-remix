@@ -43,3 +43,25 @@ def test_memory_rejects_far_future_observations(tmp_path):
         "pet1", "skew", "Head clock slightly ahead", kind="scene",
         source_robot="pet1", witnessed=True, observed_at=now + 5,
     )
+
+
+@pytest.mark.parametrize("field", ["received_at", "interpreted_at"])
+@pytest.mark.parametrize("bad_clock", [10**1000, -(10**1000), float("inf"), float("-inf"), float("nan")])
+def test_camera_provenance_rejects_unbounded_integer_and_float_clocks(
+    tmp_path, field, bad_clock,
+):
+    import time
+
+    from desk_robot.memory import CameraProvenance
+
+    store = MemoryStore(tmp_path, ["pet1"])
+    now = time.time()
+    clocks = {"received_at": now, "interpreted_at": now}
+    clocks[field] = bad_clock
+    with pytest.raises(ValueError, match="Invalid camera chronology"):
+        store.remember(
+            "pet1", "invalid-camera", "An uncertain camera observation",
+            kind="scene", source_robot="pet1", witnessed=True,
+            observed_at=now, camera_provenance=CameraProvenance(**clocks),
+        )
+    assert store.recent("pet1") == []
