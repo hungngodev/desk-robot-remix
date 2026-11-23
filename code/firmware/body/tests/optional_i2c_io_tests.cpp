@@ -212,6 +212,33 @@ int main() {
     CHECK(overflow_pulse.sample().sample_seq == 1U);
     CHECK(overflow_pulse_wire.pulse_fifo_read_pointer == 2);
     CHECK(overflow_pulse_wire.ranges == 0 && overflow_pulse_wire.extras == 0);
+    // A failed FIFO read may have already consumed one record in silicon.
+    // Remaining pre-failure frames have unknown capture time and must not
+    // be reissued later as a freshly touched paw.
+    TwoWire interrupted_fifo_wire;
+    desk_robot::PulsePad interrupted_fifo;
+    CHECK(interrupted_fifo.begin(interrupted_fifo_wire));
+    CHECK(interrupted_fifo.poll(0));
+    const auto observed_seq = interrupted_fifo.sample().sample_seq;
+    CHECK(observed_seq == 1U);
+    interrupted_fifo_wire.pulse_fifo_write_pointer = 7;
+    interrupted_fifo_wire.fail_pulse_fifo_read_once = true;
+    CHECK(!interrupted_fifo.poll(100));
+    CHECK(!interrupted_fifo.sample().valid);
+    CHECK(interrupted_fifo.sample().sample_seq == observed_seq);
+    CHECK(interrupted_fifo_wire.pulse_fifo_read_pointer == 5U);
+    CHECK(interrupted_fifo_wire.ranges == 0 &&
+          interrupted_fifo_wire.extras == 0);
+    CHECK(!interrupted_fifo.poll(200)); // discard two ambiguous old records
+    CHECK(!interrupted_fifo.sample().valid);
+    CHECK(interrupted_fifo.sample().sample_seq == observed_seq);
+    CHECK(interrupted_fifo_wire.pulse_fifo_read_pointer == 7U);
+    interrupted_fifo_wire.pulse_fifo_write_pointer = 8;
+    CHECK(interrupted_fifo.poll(300)); // only a subsequent conversion counts
+    CHECK(interrupted_fifo.sample().valid);
+    CHECK(interrupted_fifo.sample().sample_seq == observed_seq + 1U);
+    CHECK(interrupted_fifo_wire.ranges == 0 &&
+          interrupted_fifo_wire.extras == 0);
     // A rejected MAX30102 register write/read must still finish the Wire
     // transaction and must invalidate an old optical sample.
     TwoWire pulse_write_fault_wire;

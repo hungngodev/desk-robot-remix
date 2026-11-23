@@ -20,6 +20,8 @@ class PulsePad {
   OpticalRaw sample_{};
   std::uint32_t last_ms_ = 0;
   bool polled_ = false;
+  // After ambiguous I2C FIFO consumption, discard old records before reuse.
+  bool fifo_unsynced_ = false;
   bool select();
   bool close();
   bool select_mux(std::uint8_t address, std::uint8_t mask);

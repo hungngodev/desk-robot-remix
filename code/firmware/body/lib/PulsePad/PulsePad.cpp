@@ -59,6 +59,7 @@ bool PulsePad::begin(TwoWire& wire) {
   wire_ = &wire; // already set to 400kHz, 15ms Wire bound by TofBus
   sample_ = OpticalRaw{};
   polled_ = false;
+  fifo_unsynced_ = false;
   if (!select()) { close(); return false; }
   std::uint8_t part_id = 0;
   const bool recognized = read_reg(0xff, part_id) && part_id == 0x15U;
@@ -89,7 +90,12 @@ bool PulsePad::poll(std::uint32_t now_ms) {
   const bool missed_poll_window = polled_ && now_ms - last_ms_ > 250U;
   polled_ = true;
   last_ms_ = now_ms;
-  if (!select()) { close(); sample_.valid = false; return false; }
+  if (!select()) {
+    (void)close();
+    fifo_unsynced_ = true;
+    sample_.valid = false;
+    return false;
+  }
   std::uint8_t write_pointer = 0, read_pointer = 0, overflow = 0;
   bool ok = read_reg(0x04, write_pointer) &&
             read_reg(0x05, overflow) &&
@@ -97,7 +103,9 @@ bool PulsePad::poll(std::uint32_t now_ms) {
   // MAX30102 FIFO pointers and overflow counters are five-bit values.
   // Reject corrupt reserved bits rather than masking them into a plausible
   // fresh paw-contact sample. No sensor output is used to authorize motors.
-  if (ok && ((write_pointer | read_pointer | overflow) & 0xe0U) != 0U) {
+  if (!ok || ((write_pointer | read_pointer | overflow) & 0xe0U) != 0U) {
+    // A failed pointer read cannot establish which FIFO records remain.
+    fifo_unsynced_ = true;
     (void)close();
     sample_.valid = false;
     return false;
@@ -109,8 +117,8 @@ bool PulsePad::poll(std::uint32_t now_ms) {
   // elapsed polls exceeding 250ms as well as count and overflow anomalies.
   // Drop any ambiguous backlog without assigning it a new capture time.
   // A new reading must arrive on a later poll before an event is emitted.
-  if (ok && (missed_poll_window || available > 4U ||
-             (overflow & 31U) != 0U)) {
+  if (fifo_unsynced_ || missed_poll_window || available > 4U ||
+      (overflow & 31U) != 0U) {
     // A full FIFO can wrap both pointers to the same value. The hardware
     // overflow counter is independent evidence that samples were lost.
     // Clear both old data and the overflow flag before accepting new ones.
@@ -118,18 +126,23 @@ bool PulsePad::poll(std::uint32_t now_ms) {
         write_reg(0x06, static_cast<std::uint8_t>(write_pointer & 31U));
     const bool cleared = write_reg(0x05, 0);
     const bool closed = close();
+    // On a failed flush or mux close, keep quarantine for the next poll.
+    fifo_unsynced_ = !(discarded && cleared && closed);
     sample_.valid = false;
-    (void)discarded;
-    (void)cleared;
-    (void)closed;
     return false;
   }
   // At most four recent samples / 24 bytes in one safety-first iteration.
   const std::uint8_t n = available;
   std::uint8_t data[24]{};
-  if (ok && n > 0) ok = read_bytes(0x07, data, n * 6);
+  if (n > 0) ok = read_bytes(0x07, data, n * 6);
   const bool closed = close();
-  if (!ok || !closed) { sample_.valid = false; return false; }
+  if (!ok || !closed) {
+    // A partial FIFO transfer can consume samples before reporting failure.
+    // Never timestamp the remainder as a new physical paw interaction.
+    fifo_unsynced_ = true;
+    sample_.valid = false;
+    return false;
+  }
   if (n == 0) {
     // Do not keep reporting the last accepted sample as presently valid
     // when the hardware FIFO has no new conversion. Preserve provenance

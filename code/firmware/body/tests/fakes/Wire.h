@@ -25,6 +25,7 @@ class TwoWire {
   bool fail_optional_gpio = false;
   bool fail_mcp_register_write = false;
   bool fail_pulse_register_write = false;
+  bool fail_pulse_fifo_read_once = false; // simulate partial FIFO consumption
   bool fail_imu_register_write = false;
   unsigned failed_pulse_writes = 0;
   unsigned pulse_terminated_transmissions = 0;
@@ -223,6 +224,15 @@ class TwoWire {
     if (addr == 0x28 || (addr == 0x29 && extras == 1 && cap_uses_0x29))
       ++cap_register_requests;
     if (!connected(addr)) return 0;
+    if (addr == 0x57 && register_address == 0x07 &&
+        fail_pulse_fifo_read_once) {
+      // I2C transfer drops after silicon advanced one sample.
+      fail_pulse_fifo_read_once = false;
+      if (count >= 6)
+        pulse_fifo_read_pointer =
+            static_cast<std::uint8_t>((pulse_fifo_read_pointer + 1U) & 31U);
+      return 0;
+    }
     if (fail_fuel_register_read && addr == 0x36 && extras == 16 &&
         (register_address == 0x02 || register_address == 0x04)) return 0;
     if (addr == 0x70) {
