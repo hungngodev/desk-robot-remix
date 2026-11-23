@@ -82,7 +82,7 @@ def test_historical_builder_table_uses_current_eight_ranges_and_two_muxes():
     assert roles["i2c_mux"]["per_robot"] == 2
     parts = (ROOT / "docs/hardware/parts.md").read_text(encoding="utf-8")
     rows = [row for row in parts.splitlines() if row.startswith("| ")]
-    range_rows = [row for row in rows if "VL53L0X" in row]
+    range_rows = [row for row in rows if "VL53L0X" in row and "carriers" in row]
     assert len(range_rows) == 3
     assert sorted(int(re.search(r"\\| (\\d+) /", row).group(1)) for row in range_rows) == [1, 3, 4]
     assert any("0x70 lanes 5–7" in row and "3 / 15" in row for row in range_rows)
