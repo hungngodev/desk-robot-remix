@@ -651,12 +651,13 @@ class SenseOverlayTests(unittest.TestCase):
         )
         self.assertLess(
             writer.index("NoAudioCodec::Write(data, samples)"),
-            writer.index("speaker_activity_.RecordAccepted(started_generation, accepted);"),
+            writer.index("speaker_activity_.RecordAccepted("),
         )
         self.assertLess(
-            writer.index("speaker_activity_.RecordAccepted(started_generation, accepted);"),
+            writer.index("speaker_activity_.RecordAccepted("),
             writer.index("started_generation == speaker_activity_.generation()"),
         )
+        self.assertIn("started_generation, accepted, accepted_at_us);", writer)
         self.assertIn("if (stale_publish_discards_ != UINT32_MAX) ++stale_publish_discards_;", writer)
         self.assertIn("stale_discards = stale_publish_discards_;", writer)
         self.assertIn("reference_integrity_failed_ = true;", writer)
