@@ -72,10 +72,52 @@ void verify() {
   body.set_boot_epoch(99);
   check(request(body, head, "pose\r\n", 3, 9).find("\"seq\":2") !=
         std::string::npos);
+
+}
+
+// Heavy read-only polling and rejected UART input must not turn into either a
+// remote-control keepalive or an apparent new measured wheel observation.
+void verify_poll_flood_and_malformed_frames() {
+  desk_robot::BodyControl body;
+  desk_robot::LineReceiver receiver;
+  body.set_boot_epoch(73);
+  check(request(body, receiver, "arm\r\n", 10, 0) == "OK arm");
+  check(request(body, receiver, "drive 15 -15 250\r\n", 11, 0)
+            .find("OK drive") == 0);
+
+  std::uint32_t sequence = 0;
+  for (std::uint32_t now = 12; now <= 612; now += 24) {
+    const auto response = request(
+        body, receiver, "pose\r\n", now,
+        static_cast<std::uint64_t>(now) * 1000ULL);
+    check(response.find("\"seq\":" + std::to_string(++sequence) + ",") !=
+          std::string::npos);
+    check(response.find("\"origin\":0") != std::string::npos);
+    check(response.find("\"quality\":\"unavailable\"") != std::string::npos);
+    if (now >= 276)
+      check(body.state().left == 0 && body.state().right == 0);
+    if (now >= 516) check(!body.state().armed);
+  }
+  check(!body.state().armed);
+  check(request(body, receiver, "pose v=2\r\n", 650, 650000) ==
+        "ERR pose bad_arguments");
+  check(request(body, receiver, "pose\rjunk\n", 650, 650000) ==
+        "ERR input invalid_ascii");
+  check(request(body, receiver,
+                "pose" + std::string(desk_robot::kMaxLineLength + 1, 'x') +
+                    "\r\n", 650, 650000) ==
+        "ERR input line_too_long");
+  const auto next = request(body, receiver, "pose\r\n", 650, 650000);
+  check(next.find("\"seq\":" + std::to_string(sequence + 1) + ",") !=
+        std::string::npos);
+  check(next.find("\"quality\":\"unavailable\"") != std::string::npos);
+  check(!body.state().armed && body.state().left == 0 &&
+        body.state().right == 0);
 }
 }  // namespace
 
 int main() {
   verify();
+  verify_poll_flood_and_malformed_frames();
   return 0;
 }
