@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import httpx
 from desk_robot.api import create_app
 from desk_robot.transport import HttpHead
+from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
 
@@ -158,4 +159,29 @@ def test_readonly_pose_unqualified_source_never_looks_map_anchored(settings, tok
         assert result.json()["local_odometry_continuous"] is False
         assert result.json()["navigation_authorized"] is False
         assert result.json()["map_anchored"] is False
+    assert commands == []
+
+def test_pose_route_registration_is_unique_and_operator_only(settings, tokens):
+    """Never let a tool-token route shadow the established operator route."""
+    def no_device_request(request):
+        raise AssertionError("An unauthorized pose request reached the head")
+
+    client, commands, _ = _client(settings, no_device_request)
+    routes = [
+        route for route in client.app.routes
+        if isinstance(route, APIRoute)
+        and route.path == "/v1/robots/{robot_id}/pose"
+    ]
+    assert len(routes) == 1
+    route = routes[0]
+    assert route.methods == {"GET"}
+    assert route.endpoint.__module__ == "desk_robot.api_spatial_pose"
+    assert route.endpoint.__name__ == "read_body_pose"
+    assert {dep.call.__name__ for dep in route.dependant.dependencies} == {"operator"}
+    with client:
+        denied = client.get(
+            f"/v1/robots/{settings.robots[0].id}/pose",
+            headers={"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]},
+        )
+        assert denied.status_code == 403
     assert commands == []
