@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
@@ -100,10 +101,31 @@ class YoloWorldVision:
         # Letterbox/coordinate restoration is handled by the upstream model, not guessed here.
         image = Image.open(BytesIO(jpeg)).convert("RGB")
         result = self.model.predict(image, verbose=False, device="cpu")[0]
-        return [
-            Detection(label, float(box.conf.item()), tuple(map(float, box.xyxy[0].tolist())))
-            for box in result.boxes
-        ]
+        detections: list[Detection] = []
+        # Optional local model output is untrusted geometry. Reject invalid
+        # boxes before any caller can project them to desk coordinates.
+        # Bounding inspected boxes also bounds work after native inference.
+        for index, box in enumerate(result.boxes):
+            if index >= 128:
+                break
+            try:
+                raw_score = box.conf.item()
+                corners = box.xyxy[0].tolist()
+                if (type(raw_score) is bool or not isinstance(corners, (list, tuple))
+                        or len(corners) != 4
+                        or any(type(value) is bool for value in corners)):
+                    continue
+                confidence = float(raw_score)
+                x0, y0, x1, y1 = (float(value) for value in corners)
+            except (AttributeError, IndexError, TypeError, ValueError, OverflowError):
+                continue
+            if (not math.isfinite(confidence) or not 0 < confidence <= 1
+                    or not all(math.isfinite(value) for value in (x0, y0, x1, y1))
+                    or not 0 <= x0 < x1 <= image.width
+                    or not 0 <= y0 < y1 <= image.height):
+                continue
+            detections.append(Detection(label, confidence, (x0, y0, x1, y1)))
+        return detections
 
 
 def image_size(jpeg: bytes) -> tuple[int, int]:

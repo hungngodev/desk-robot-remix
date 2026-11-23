@@ -6,7 +6,7 @@ from io import BytesIO
 from types import SimpleNamespace
 
 import pytest
-from desk_robot.vision import VisualChangeGate, YoloWorldVision, image_size
+from desk_robot.vision import Detection, VisualChangeGate, YoloWorldVision, image_size
 from PIL import Image
 
 
@@ -82,3 +82,58 @@ def test_predecoded_visual_gate_cannot_store_malformed_jpeg_baseline():
     assert gate._hits == 0
     assert gate.observe_reduced(frame(), pixels) is None
     assert gate._baseline == frame()
+
+
+class FakeBox:
+    def __init__(self, confidence, corners):
+        self.conf = SimpleNamespace(item=lambda: confidence)
+        self.xyxy = [SimpleNamespace(tolist=lambda: corners)]
+
+
+class FakeBoxesModel(CountingModel):
+    def __init__(self, boxes):
+        super().__init__()
+        self.boxes = boxes
+
+    def predict(self, image, *, verbose, device):
+        super().predict(image, verbose=verbose, device=device)
+        return [SimpleNamespace(boxes=self.boxes)]
+
+
+def test_yolo_disposes_untrusted_confidence_and_geometry_before_recall(tmp_path):
+    weights = tmp_path / "local-model.pt"
+    weights.write_bytes(b"fixture only")
+    valid = FakeBox(0.92, [3, 5, 25, 30])
+    invalid = [
+        FakeBox(float("nan"), [3, 5, 25, 30]),
+        FakeBox(float("inf"), [3, 5, 25, 30]),
+        FakeBox(10**1000, [3, 5, 25, 30]),
+        FakeBox(True, [3, 5, 25, 30]),
+        FakeBox(0.7, [-1, 5, 25, 30]),
+        FakeBox(0.7, [30, 5, 25, 30]),
+        FakeBox(0.7, [3, 5, 129, 30]),
+        FakeBox(0.7, [3, 5, 25, 97]),
+        FakeBox(0.7, [float("nan"), 5, 25, 30]),
+        FakeBox(0.7, [float("inf"), 5, 25, 30]),
+        FakeBox(0.7, [3, 5, 10**1000, 30]),
+        FakeBox(0.7, [3, 5, 25]),
+        FakeBox(0.0, [3, 5, 25, 30]),
+    ]
+    detector = YoloWorldVision(weights)
+    detector.model = FakeBoxesModel(invalid + [valid])
+    assert detector._detect(frame(), "key") == [
+        Detection("key", 0.92, (3.0, 5.0, 25.0, 30.0))
+    ]
+    assert detector.model.calls == 2
+
+
+def test_yolo_caps_untrusted_number_of_model_boxes(tmp_path):
+    weights = tmp_path / "local-model.pt"
+    weights.write_bytes(b"fixture only")
+    detector = YoloWorldVision(weights)
+    detector.model = FakeBoxesModel([
+        FakeBox(0.8, [1, 1, 10, 10]) for _ in range(200)
+    ])
+    detections = detector._detect(frame(), "key")
+    assert len(detections) == 128
+    assert all(item.label == "key" and item.confidence == 0.8 for item in detections)
