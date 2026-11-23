@@ -296,3 +296,70 @@ async def test_parent_swap_during_prompt_cannot_redirect_private_jpegs(tmp_path)
         await capture_checkerboards(Head(), folder, count=12, prompt=confirm)
     assert not list((untrusted / "capture").glob("*.jpg"))
     assert not (relocated / "capture").exists()
+
+
+@pytest.mark.asyncio
+async def test_operator_cli_disables_ambient_proxy_for_device_bearer(
+    tmp_path, monkeypatch, capsys,
+):
+    """The real operator CLI must not proxy private authenticated JPEG IO."""
+    import httpx
+    import sys
+    from desk_robot import config, transport
+
+    module = capture_module()
+    monkeypatch.setenv("HTTPS_PROXY", "http://untrusted-proxy.invalid:8080")
+    monkeypatch.setenv("ALL_PROXY", "http://untrusted-proxy.invalid:8080")
+    monkeypatch.setattr(sys, "argv", [
+        "capture_dock_checkerboard.py",
+        "--config", str(tmp_path / "local.toml"),
+        "--robot", "robot-01",
+        "--images", str(tmp_path / "private-frames"),
+        "--consent-to-save-private-jpegs",
+    ])
+
+    class Settings:
+        mode = "hardware"
+        voice_vision_tools_enabled = True
+
+        def robot(self, robot_id):
+            assert robot_id == "robot-01"
+            return robot_id
+
+    monkeypatch.setattr(config, "load_settings", lambda _path: Settings())
+    clients = []
+
+    class Client:
+        def __init__(self, **kwargs):
+            clients.append(kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(httpx, "AsyncClient", Client)
+
+    def head_factory(robot, client, *, strict_capture):
+        assert robot == "robot-01"
+        assert isinstance(client, Client)
+        assert strict_capture is True
+        return object()
+
+    monkeypatch.setattr(transport, "HttpHead", head_factory)
+    calls = []
+
+    async def fake_capture(head, folder, *, count, prompt):
+        calls.append((head, folder, count, callable(prompt)))
+        return {"images": 0, "calibration_approved": False}
+
+    monkeypatch.setattr(module, "capture_checkerboards", fake_capture)
+    await module.main()
+
+    assert len(clients) == 1
+    assert clients[0].get("trust_env") is False
+    assert len(calls) == 1
+    assert calls[0][1] == tmp_path / "private-frames"
+    assert calls[0][2:] == (16, True)
+    assert '"calibration_approved": false' in capsys.readouterr().out

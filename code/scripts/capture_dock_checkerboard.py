@@ -192,7 +192,8 @@ async def main() -> None:
             input, f"Position measured board for view {index}/{args.count}; press Enter: "
         )
 
-    async with httpx.AsyncClient() as client:
+    # Device bearer traffic must bypass ambient HTTP(S)/ALL_PROXY settings.
+    async with httpx.AsyncClient(trust_env=False) as client:
         result = await capture_checkerboards(
             HttpHead(robot, client, strict_capture=True), args.images,
             count=args.count, prompt=wait_for_board,
