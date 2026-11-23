@@ -1759,10 +1759,13 @@ def test_native_asr_write_revoked_during_sqlite_commit_rolls_back_only_new_event
             before = memory.count(robot)
             monkeypatch.setattr(memory, "remember", revoke_during_write)
             settings.voice_transcript_memory_enabled = True
+            source_stamp_us = time.monotonic_ns() // 1000
             response = client.post(
                 url, headers=auth, json={
                     "event_id": event_id,
                     "transcript": "I left a key on the shelf",
+                    "accepted_at_us": source_stamp_us,
+                    "audio_committed_at_us": source_stamp_us,
                 },
             )
             assert response.status_code == 403
