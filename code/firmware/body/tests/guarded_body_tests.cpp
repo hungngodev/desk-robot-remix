@@ -42,10 +42,10 @@ static void cold_boot_complete_unsafe_sweep_reports_real_fault() {
   CHECK(guard.fault_sensor() == 2);
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
   const auto status = send(body, "status", 100);
-  CHECK(status.find("\\"ready\\":false") != std::string::npos);
-  CHECK(status.find("\\"fault\\":\\"floor_out_of_range\\"") !=
+  CHECK(status.find("\"ready\":false") != std::string::npos);
+  CHECK(status.find("\"fault\":\"floor_out_of_range\"") !=
         std::string::npos);
-  CHECK(status.find("\\"sensor\\":2") != std::string::npos);
+  CHECK(status.find("\"sensor\":2") != std::string::npos);
   CHECK(send(body, "arm", 100) == "ERR arm safety_interlock");
   // Fresh good samples never clear the first real fault without local rearm.
   fresh(guard, 101);
