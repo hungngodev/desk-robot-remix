@@ -120,10 +120,33 @@ static void check_tag_boundaries() {
   }
 }
 
+static void check_encoder_boundaries() {
+  const std::vector<std::uint8_t> body(17, 0xa5);
+  const std::vector<std::uint8_t> untouched(26, 0x55);
+  auto out = untouched;
+  CHECK(desk_robot::pn532_encode(0x4a, body.data(), 17, out.data(), out.size()) == 0);
+  CHECK(out == untouched);
+  CHECK(desk_robot::pn532_encode(0x4a, body.data(), 16, out.data(), 24) == 0);
+  CHECK(out == untouched);
+  CHECK(desk_robot::pn532_encode(0x4a, nullptr, 1, out.data(), out.size()) == 0);
+  CHECK(out == untouched);
+  CHECK(desk_robot::pn532_encode(0x4a, body.data(), 16, nullptr, 25) == 0);
+  CHECK(desk_robot::pn532_encode(0x4a, body.data(), 16, out.data(), 25) == 25);
+  CHECK(out[3] == 18 && out[4] == 0xee && out[23] == 0x92);
+  CHECK(out[24] == 0 && out[25] == 0x55);
+  for (std::size_t i = 7; i < 23; ++i) CHECK(out[i] == 0xa5);
+  out = untouched;
+  CHECK(desk_robot::pn532_encode(0x02, nullptr, 0, out.data(), 9) == 9);
+  const std::vector<std::uint8_t> expected = {0, 0, 0xff, 2, 0xfe, 0xd4, 2, 0x2a, 0};
+  CHECK(std::vector<std::uint8_t>(out.begin(), out.begin() + 9) == expected);
+  CHECK(out[9] == 0x55);
+}
+
 int main() {
   try {
     check_frame_boundaries();
     check_tag_boundaries();
+    check_encoder_boundaries();
     const std::uint8_t sam[] = {1, 0x14, 1};
     std::uint8_t encoded[32]{};
     const auto n = desk_robot::pn532_encode(0x14, sam, 3, encoded, sizeof(encoded));
