@@ -454,7 +454,157 @@ void guarded_head_timeout_cannot_rearm_from_reconnected_uart() {
   }
 }
 
+// Exercise the actual guarded controller, not an invented linear docking
+// enum. Dock GPIO is only a motion veto; CHG is not proof of charging.
+// Enumerate all three-event suffixes from boot, idle, moving, docked and
+// CPU-fault prefixes, independently checking authority and actuator state.
+void guarded_transition_sequences() {
+  enum Event {
+    Arm, Drive, Stop, Halt, Disarm, LeftSeat, RightSeat, InputGood,
+    ChargeIndicated, Undock, CpuFault, LocalRearm, RemoteRearm,
+    UnknownCommand, EventCount
+  };
+  desk_robot::CliffConfig calibration{};
+  calibration.calibrated = true;
+  calibration.freshness_ms = 100;
+  calibration.front_obstacle_mm = 30;
+  calibration.front_max_mm = 1000;
+  for (auto& floor : calibration.floor) {
+    floor.min_mm = 40;
+    floor.max_mm = 60;
+  }
+  for (const auto profile : {desk_robot::BodyProfile::StepperGuarded,
+                             desk_robot::BodyProfile::DcGuarded}) {
+    for (int prefix = 0; prefix < 5; ++prefix) {
+      for (int a = 0; a < EventCount; ++a) {
+        for (int b = 0; b < EventCount; ++b) {
+          for (int c = 0; c < EventCount; ++c) {
+            desk_robot::CliffGuard guard;
+            CHECK(guard.configure(calibration));
+            BodyControl body(profile, &guard);
+            body.require_dock_monitor(true);
+            LineReceiver local(true), remote(false);
+            std::uint32_t now = 0;
+            bool armed = false, attached = false, moving = false;
+            bool latched = true;  // initial cliff sweep requires local rearm
+            unsigned dock_pins = 0;
+            auto apply = [&](Event event) {
+              ++now;
+              if (event == LeftSeat) dock_pins = 1U;
+              if (event == RightSeat) dock_pins = 2U;
+              if (event == InputGood) dock_pins = 4U;
+              if (event == ChargeIndicated) dock_pins = 8U;
+              if (event == Undock) dock_pins = 0U;
+              for (std::uint8_t i = 0; i < 5; ++i)
+                guard.sample(i, i < 4 ? 50 : 200, true, now);
+              desk_robot::AccessoryReadings readings{};
+              readings.dock.present = readings.dock.valid = true;
+              readings.dock.sample_seq = readings.dock.at_ms = now;
+              readings.dock.left_seated = (dock_pins & 1U) != 0;
+              readings.dock.right_seated = (dock_pins & 2U) != 0;
+              readings.dock.input_good = (dock_pins & 4U) != 0;
+              readings.dock.charge_indicated = (dock_pins & 8U) != 0;
+              body.set_accessories(readings, now);
+              if (dock_pins != 0) armed = moving = false;
+              switch (event) {
+                case Arm: {
+                  const bool allowed = !latched && dock_pins == 0;
+                  CHECK((send(body, "arm", now) == "OK arm") == allowed);
+                  if (allowed) {
+                    armed = attached = true;
+                    moving = false;
+                  }
+                  break;
+                }
+                case Drive:
+                  CHECK((send(body, "drive 20 20 250", now) ==
+                         "OK drive left=20 right=20 ms=250") == armed);
+                  moving = armed;
+                  break;
+                case Stop:
+                  CHECK(send(body, "stop", now) == "OK stop");
+                  moving = false;
+                  break;
+                case Halt:
+                  CHECK(send(body, "halt", now) == "OK halt");
+                  armed = moving = false;
+                  break;
+                case Disarm:
+                  CHECK(send(body, "disarm", now) == "OK disarm");
+                  armed = attached = moving = false;
+                  break;
+                case CpuFault:
+                  body.motor_watchdog_trip();
+                  armed = moving = false;
+                  latched = true;
+                  break;
+                case LocalRearm: {
+                  const auto replies = frame(body, local, "rearm\n", now);
+                  CHECK(replies.size() == 1);
+                  CHECK((replies[0] == "OK rearm") == (dock_pins == 0));
+                  armed = moving = false;
+                  if (dock_pins == 0) latched = false;
+                  break;
+                }
+                case RemoteRearm: {
+                  const auto replies = frame(body, remote, "rearm\n", now);
+                  CHECK(replies.size() == 1);
+                  CHECK(replies[0] == "ERR rearm local_only");
+                  break;
+                }
+                case UnknownCommand:
+                  CHECK(send(body, "charging", now) ==
+                        "ERR input unknown_command");
+                  break;
+                case LeftSeat:
+                case RightSeat:
+                case InputGood:
+                case ChargeIndicated:
+                case Undock:
+                  break;
+                case EventCount:
+                  CHECK(false);
+                  break;
+              }
+              body.tick(now);
+              const auto& state = body.state();
+              CHECK(state.armed == armed);
+              CHECK(state.servos_attached == attached);
+              CHECK(state.left == (moving ? 20 : 0));
+              CHECK(state.right == (moving ? 20 : 0));
+              if (!armed) {
+                CHECK(body.watchdog_remaining(now) == 0);
+                CHECK(body.drive_remaining(now) == 0);
+                CHECK(state.lift_target == state.lift);
+                CHECK(state.grip_target == state.grip);
+              }
+              if (dock_pins != 0 || latched) CHECK(!armed && !moving);
+            };
+            try {
+              if (prefix != 0) { apply(LocalRearm); apply(Arm); }
+              if (prefix >= 2) apply(Drive);
+              if (prefix == 3) apply(LeftSeat);
+              if (prefix == 4) apply(CpuFault);
+              apply(static_cast<Event>(a));
+              apply(static_cast<Event>(b));
+              apply(static_cast<Event>(c));
+            } catch (const std::exception& error) {
+              throw std::runtime_error(
+                  std::string(error.what()) + " profile=" +
+                  std::to_string(static_cast<int>(profile)) +
+                  " prefix=" + std::to_string(prefix) +
+                  " events=" + std::to_string(a) + "," +
+                  std::to_string(b) + "," + std::to_string(c));
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 void deterministic_stream_stress() {
+  guarded_transition_sequences();
   BodyControl body;
   LineReceiver receiver;
   std::uint32_t random = 0xCAFE1234;
