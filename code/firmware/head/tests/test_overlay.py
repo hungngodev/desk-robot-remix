@@ -144,6 +144,15 @@ class OverlayPathTests(unittest.TestCase):
         self.board = self.root / overlay.BOARD
         self.board.parent.parent.mkdir(parents=True)
         self.plan = {f"{overlay.BOARD}/config.json": b"{}"}
+        self.recipe_root = Path(temp.name) / "recipe"
+        (self.recipe_root / "overlay").mkdir(parents=True)
+        (self.recipe_root / "install_overlay.py").write_bytes(b"installer")
+        (self.recipe_root / "BOARD_README.md").write_bytes(b"board readme")
+        self.driver = self.recipe_root / "overlay/driver.cc"
+        self.driver.write_bytes(b"driver v1")
+        recipe_root = patch.object(overlay, "HERE", self.recipe_root)
+        recipe_root.start()
+        self.addCleanup(recipe_root.stop)
         git = patch.object(
             overlay.subprocess, "check_output",
             side_effect=lambda args, **kwargs: overlay.PIN if "rev-parse" in args else "",
@@ -219,6 +228,70 @@ class OverlayPathTests(unittest.TestCase):
         self.assertTrue((self.board / "config.json").is_file())
         self.assertTrue((self.root / overlay.MARKER).is_file())
         self.assertTrue(other.is_symlink())
+
+    def test_reapply_refuses_stale_recipe_without_changing_installed_files(self):
+        overlay.apply(self.root)
+        marker = self.root / overlay.MARKER
+        original_marker = marker.read_bytes()
+        self.driver.write_bytes(b"driver v2")
+        self.plan[f"{overlay.BOARD}/config.json"] = b'{"version": 2}'
+        with self.assertRaisesRegex(ValueError, "recipe changed.*--remove"):
+            overlay.apply(self.root)
+        self.assertEqual(marker.read_bytes(), original_marker)
+        self.assertEqual((self.board / "config.json").read_bytes(), b"{}")
+        overlay.remove(self.root)
+        overlay.apply(self.root)
+        self.assertEqual((self.board / "config.json").read_bytes(), b'{"version": 2}')
+
+    def test_legacy_journal_remains_recoverable_but_not_current(self):
+        overlay.apply(self.root)
+        marker = self.root / overlay.MARKER
+        state = json.loads(marker.read_text())
+        for info in state.values():
+            del info["recipe_sha256"]
+        marker.write_text(json.dumps(state))
+        with self.assertRaisesRegex(ValueError, "predates recipe tracking"):
+            overlay.apply(self.root)
+        overlay.remove(self.root)
+        self.assertFalse(marker.exists())
+        self.assertFalse(self.board.exists())
+
+    def test_recipe_mutation_during_planning_refused_before_journal(self):
+        def changing_plan(*args):
+            self.driver.write_bytes(b"driver v2")
+            return self.plan
+
+        with patch.object(overlay, "planned_files", side_effect=changing_plan):
+            with self.assertRaisesRegex(ValueError, "recipe changed while planning"):
+                overlay.apply(self.root)
+        self.assertFalse((self.root / overlay.MARKER).exists())
+        self.assertFalse(self.board.exists())
+
+    def test_recipe_digest_distinguishes_board_sources_and_shared_inputs(self):
+        (self.recipe_root / "modular_snapshot.inc").write_bytes(b"snapshot")
+        for board in ("modular", "sense", "waveshare"):
+            folder = self.recipe_root / board
+            folder.mkdir()
+            (folder / "config.json").write_bytes(board.encode())
+        before = {board: overlay.overlay_recipe_digest(board) for board in overlay.BOARDS}
+        (self.recipe_root / "sense/config.json").write_bytes(b"sense v2")
+        self.assertNotEqual(overlay.overlay_recipe_digest("sense"), before["sense"])
+        for board in ("cores3", "modular", "waveshare"):
+            self.assertEqual(overlay.overlay_recipe_digest(board), before[board])
+        self.driver.write_bytes(b"driver v2")
+        for board in overlay.BOARDS:
+            self.assertNotEqual(overlay.overlay_recipe_digest(board), before[board])
+
+    def test_malformed_recipe_digest_refused_before_removal(self):
+        overlay.apply(self.root)
+        marker = self.root / overlay.MARKER
+        state = json.loads(marker.read_text())
+        next(iter(state.values()))["recipe_sha256"] = "invalid"
+        marker.write_text(json.dumps(state))
+        with self.assertRaisesRegex(ValueError, "Invalid head overlay journal recipe digest"):
+            overlay.remove(self.root)
+        self.assertTrue(marker.is_file())
+        self.assertEqual((self.board / "config.json").read_bytes(), b"{}")
 
 
 @unittest.skipUnless((UPSTREAM / "main/boards/common/esp_video.cc").is_file(), "Pinned upstream fixture unavailable")

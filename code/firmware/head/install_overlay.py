@@ -1162,6 +1162,26 @@ def atomic_replace_bytes(path: Path, contents: bytes) -> None:
         staged.unlink(missing_ok=True)
 
 
+def overlay_recipe_digest(board: str) -> str:
+    """Fingerprint the installer and local source inputs for this board."""
+    inputs = {HERE / "install_overlay.py", HERE / "BOARD_README.md"}
+    folders = [HERE / "overlay"]
+    if board != "cores3":
+        inputs.add(HERE / "modular_snapshot.inc")
+        folders.append(HERE / "modular")
+        if board != "modular":
+            folders.append(HERE / board)
+    for folder in folders:
+        inputs.update(
+            path for path in folder.iterdir()
+            if path.is_file() and path.suffix in (".cc", ".h", ".hpp", ".json", ".md")
+        )
+    manifest = {path.relative_to(HERE).as_posix(): digest(path.read_bytes())
+                for path in sorted(inputs)}
+    return digest(json.dumps({"pin": PIN, "board": board, "inputs": manifest},
+                             sort_keys=True).encode())
+
+
 def checked_overlay_path(target: Path, name: str) -> Path:
     """Reject symlink components even when their destination is absent."""
     path = target
@@ -1184,13 +1204,19 @@ def read_overlay_journal(target: Path, marker: Path) -> dict:
         if (not isinstance(name, str) or not name.startswith("main/")
                 or "\\" in name or any(part in ("", ".", "..") for part in name.split("/"))
                 or not isinstance(info, dict)
-                or set(info) != {"sha256", "original"}
+                or set(info) not in ({"sha256", "original"},
+                                     {"sha256", "original", "recipe_sha256"})
                 or type(info["sha256"]) is not str
                 or len(info["sha256"]) != 64
                 or any(ch not in "0123456789abcdef" for ch in info["sha256"])
                 or (info["original"] is not None and
                     type(info["original"]) is not str)):
             raise ValueError("Invalid head overlay journal entry")
+        if "recipe_sha256" in info:
+            recipe = info["recipe_sha256"]
+            if (type(recipe) is not str or len(recipe) != 64
+                    or any(ch not in "0123456789abcdef" for ch in recipe)):
+                raise ValueError("Invalid head overlay journal recipe digest")
         path = checked_overlay_path(target, name)
         if not path.parent.resolve().is_relative_to(root):
             raise ValueError("Overlay journal path escapes pinned checkout")
@@ -1269,6 +1295,12 @@ def apply(target: Path, board: str = "cores3") -> None:
                 raise ValueError(
                     f"Overlay drift: {name}; preserve your changes before reinstalling"
                 )
+        recipe = overlay_recipe_digest(board)
+        if any(info.get("recipe_sha256") != recipe for info in state.values()):
+            raise ValueError(
+                "Overlay recipe changed or journal predates recipe tracking; "
+                "preserve local changes, use --remove, then reinstall"
+            )
         print("Overlay already applied, unchanged")
         return
     changed = subprocess.check_output(
@@ -1278,12 +1310,16 @@ def apply(target: Path, board: str = "cores3") -> None:
         raise ValueError("Target has tracked changes; use a clean build copy")
     if any(checked_overlay_path(target, name).exists() for name in BOARDS.values()):
         raise ValueError("Target board directory already exists")
+    recipe = overlay_recipe_digest(board)
     files = planned_files(target, board)  # Validate every patch anchor before changing any source.
+    if overlay_recipe_digest(board) != recipe:
+        raise ValueError("Overlay recipe changed while planning; retry with stable sources")
     state = {}
     for name, data in files.items():
         path = checked_overlay_path(target, name)
         state[name] = {
             "sha256": digest(data),
+            "recipe_sha256": recipe,
             "original": base64.b64encode(path.read_bytes()).decode() if path.exists() else None,
         }
     # Journal FIRST, then atomically replace each file. If SIGKILL stops
