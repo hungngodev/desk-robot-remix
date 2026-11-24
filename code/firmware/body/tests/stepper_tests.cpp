@@ -150,6 +150,45 @@ void long_stall_does_not_catch_up() {
   CHECK(slow.rate_milli_steps_per_second() == 6400);  // Ramp advances at most20ms.
 }
 
+void irregular_cadence_reversal_preserves_phase_order() {
+  StepperDrive drive;
+  std::uint32_t now = std::numeric_limits<std::uint32_t>::max() - 30000U;
+  auto previous = drive.update(now, 40, true);
+  int phase = 0;
+  int previous_rate = 0;
+  int forward_steps = 0;
+  int reverse_steps = 0;
+  constexpr std::uint32_t gaps[] = {250, 1000, 6250, 9000, 20000, 37000};
+  for (int i = 0; i < 600; ++i) {
+    const int requested = (i / 100) % 2 == 0 ? 40 : -40;
+    const auto gap = gaps[i % 6];
+    now += gap;
+    const auto mask = drive.update(now, requested, true);
+    const int rate = drive.rate_milli_steps_per_second();
+    const auto capped = gap < 20000U ? gap : 20000U;
+    const int max_delta = static_cast<int>((capped * 320U + 999U) / 1000U);
+    CHECK(std::abs(rate - previous_rate) <= max_delta);
+    CHECK(!(previous_rate > 0 && rate < 0));
+    CHECK(!(previous_rate < 0 && rate > 0));
+    if (mask != previous) {
+      CHECK(rate != 0);
+      phase = (phase + (rate > 0 ? 1 : 7)) % 8;
+      CHECK(mask == kPhases[phase]);
+      if (rate > 0) ++forward_steps;
+      else ++reverse_steps;
+    }
+    CHECK(drive.update(now, requested, true) == mask);
+    CHECK(drive.rate_milli_steps_per_second() == rate);
+    previous = mask;
+    previous_rate = rate;
+  }
+  CHECK(forward_steps > 0 && reverse_steps > 0);
+  CHECK(drive.update(now, 40, false) == 0);
+  CHECK(drive.rate_milli_steps_per_second() == 0);
+  CHECK(drive.update(now, -40, true) == previous);
+  CHECK(drive.rate_milli_steps_per_second() == 0);
+}
+
 void clock_rollover_matches_normal_clock() {
   StepperDrive normal;
   StepperDrive wrapped;
@@ -174,6 +213,8 @@ int main(int argc, char** argv) {
       {"acceleration_and_reversal_through_zero", acceleration_and_reversal_through_zero},
       {"small_commands_and_no_zero_time_ramp", small_commands_and_no_zero_time_ramp},
       {"long_stall_does_not_catch_up", long_stall_does_not_catch_up},
+      {"irregular_cadence_reversal_preserves_phase_order",
+       irregular_cadence_reversal_preserves_phase_order},
       {"clock_rollover_matches_normal_clock", clock_rollover_matches_normal_clock}};
   int ran = 0;
   for (const auto& test : tests) {
