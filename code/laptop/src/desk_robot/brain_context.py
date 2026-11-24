@@ -62,7 +62,8 @@ def live_asr_in_current_grant(
     )
 
 
-def _memory_label(entry: Memory) -> str:
+def memory_provenance_label(entry: Memory) -> str:
+    """Describe evidence consistently in every model-facing memory consumer."""
     if entry.kind == "heard_human":
         return ("I may have heard (uncertain transcription)"
                 if entry.source_robot == entry.robot_id
@@ -135,7 +136,7 @@ def compose_brain_context(
         if entry.event_id in seen:
             continue
         seen.add(entry.event_id)
-        phrase = f"{_memory_label(entry)}: {_clean(entry.summary, limit=110)}"
+        phrase = f"{memory_provenance_label(entry)}: {_clean(entry.summary, limit=110)}"
         cost = len(phrase) + (2 if memory_parts else 0)
         if memory_used + cost > 600:
             continue

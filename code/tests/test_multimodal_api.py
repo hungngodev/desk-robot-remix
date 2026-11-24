@@ -1946,8 +1946,16 @@ def test_native_asr_live_optout_during_disk_write_retracts_only_ephemeral_item(
 
 
 
+@pytest.mark.parametrize(("kind", "from_peer", "provenance"), [
+    ("object", False, "My camera model suggested"),
+    ("object", True, "{peer} reported a camera model guess"),
+    ("heard_human", False, "I may have heard (uncertain transcription)"),
+    ("own_utterance", False, "I sent for speech (playback unverified)"),
+    ("peer_utterance", True, "{peer} said (peer report, not my sighting)"),
+    ("touch_tap", False, "I observed"),
+])
 def test_native_memory_tool_receipt_respects_consent_turn_and_pet_isolation(
-    settings, tokens, tmp_path, monkeypatch,
+    settings, tokens, tmp_path, monkeypatch, kind, from_peer, provenance,
 ):
     from types import SimpleNamespace
 
@@ -1963,7 +1971,8 @@ def test_native_memory_tool_receipt_respects_consent_turn_and_pet_isolation(
     memory = MemoryStore(tmp_path / "private", ids)
     memory.remember(
         pet.id, "old_key_sighting", "My key was beside the green mug",
-        kind="object", source_robot=pet.id, witnessed=True,
+        kind=kind, source_robot=peer.id if from_peer else pet.id,
+        witnessed=not from_peer,
     )
     hub = CameraFrameHub(ids)
 
@@ -1998,12 +2007,18 @@ def test_native_memory_tool_receipt_respects_consent_turn_and_pet_isolation(
         )
         assert recall.status_code == 200
         assert recall.json()["matched"] is True
+        assert recall.json()["memories"][0]["kind"] == kind
+        expected = provenance.format(peer=peer.id)
+        assert hub.tool_history[pet.id][-1][1] == (
+            expected + ": My key was beside the green mug"
+        )
         timeline = client.get(
             f"/v1/pet/{pet.id}/interaction-context", headers=headers
         )
         assert timeline.status_code == 200
         cues = timeline.json()["model_context"]
         assert "Opt-in private past memory" in cues
+        assert expected in cues
         assert "green mug" in cues
         assert "not current sight" in cues
         assert "green mug" not in client.get(

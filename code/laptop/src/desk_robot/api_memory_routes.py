@@ -11,7 +11,7 @@ import time
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from .brain_context import is_camera_derived_timeline_item
+from .brain_context import is_camera_derived_timeline_item, memory_provenance_label
 from .config import Settings
 from .memory import CoreMemoryMutationSuperseded, EpisodeMemoryMutationSuperseded
 
@@ -421,10 +421,9 @@ def register_voice_context_route(
                 )
             elif records:
                 item = records[0]
-                provenance = (
-                    "own observed event" if item.witnessed
-                    else f"reported by {item.source_robot}"
-                )
+                # A witnessed row can be a model guess or transmitted audio,
+                # not proof that the camera classification or playback occurred.
+                provenance = memory_provenance_label(item)
                 summary = provenance + ": " + item.summary[:160]
             else:
                 summary = "No matching historical memories for this query"
