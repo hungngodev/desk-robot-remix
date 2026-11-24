@@ -385,6 +385,144 @@ int main() {
           CHECK(!guard.diagnostic(lane, 50).present);
       }
     }
+    {
+      // A held SDA is not an ordinary NACK. Latch and invalidate BEFORE
+      // touching GPIO; only a later poll clears the bus.
+      Wire = TwoWire{};
+      fake_i2c_lines() = FakeI2cLines{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      auto& lines = fake_i2c_lines();
+      const auto samples = Wire.tof_samples;
+      const auto transactions = Wire.transactions;
+      lines.sda_stuck = true;
+      lines.release_after_pulses = 9;
+      bus.poll(guard, 60);
+      faulted(guard);
+      CHECK(Wire.transactions == transactions);
+      CHECK(lines.restore_calls == 0 && lines.clear_pulses == 0);
+      bus.poll(guard, 61);
+      CHECK(lines.clear_pulses == 9 && lines.stops == 1);
+      CHECK(!lines.unsafe_high && digitalRead(21) == HIGH &&
+            digitalRead(22) == HIGH);
+      CHECK(lines.restore_calls == 1 && Wire.tof_samples == samples);
+      CHECK(Wire.transactions == transactions);
+      CHECK(bus.new_optical_channel() == 255 && bus.new_extra_channel() == 255);
+      CHECK(!guard.try_rearm(61));
+      for (std::uint32_t at = 62; at < 68; ++at) bus.poll(guard, at);
+      CHECK(!guard.evaluate(70)); // recovery is not automatic rearm
+      CHECK(guard.try_rearm(70)); // fresh complete sweep + local operator
+      fake_i2c_lines() = FakeI2cLines{};
+    }
+    {
+      // Permanently held SDA: at most nine data-clear clocks per attempt,
+      // bounded retry cadence and no valid cached motion evidence.
+      Wire = TwoWire{};
+      fake_i2c_lines() = FakeI2cLines{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      auto& lines = fake_i2c_lines();
+      lines.sda_stuck = true;
+      bus.poll(guard, 60);
+      bus.poll(guard, 61);
+      CHECK(lines.clear_pulses == 9 && lines.stops == 0);
+      CHECK(!lines.unsafe_high && lines.restore_calls == 1);
+      const auto transactions = Wire.transactions;
+      for (std::uint32_t at = 62; at < 161; ++at) bus.poll(guard, at);
+      CHECK(lines.restore_calls == 1 && Wire.transactions == transactions);
+      CHECK(!guard.try_rearm(160));
+      bus.poll(guard, 161);
+      CHECK(lines.clear_pulses == 18 && lines.restore_calls == 2);
+      faulted(guard);
+      fake_i2c_lines() = FakeI2cLines{};
+    }
+    {
+      Wire = TwoWire{};
+      fake_i2c_lines() = FakeI2cLines{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      auto& lines = fake_i2c_lines();
+      lines.scl_stuck = true;
+      lines.sda_stuck = true;
+      bus.poll(guard, 60);
+      bus.poll(guard, 61);
+      CHECK(lines.clear_pulses == 0 && lines.stops == 0);
+      CHECK(!lines.unsafe_high && lines.restore_calls == 1);
+      faulted(guard);
+      fake_i2c_lines() = FakeI2cLines{};
+    }
+    {
+      // A pin matrix restore failure must not let idle GPIOs qualify
+      // samples. Shared Wire buffers are never torn down during recovery.
+      Wire = TwoWire{};
+      fake_i2c_lines() = FakeI2cLines{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      auto& lines = fake_i2c_lines();
+      lines.sda_stuck = true;
+      lines.release_after_pulses = 1;
+      lines.fail_restore = true;
+      bus.poll(guard, 60);
+      bus.poll(guard, 61);
+      const auto samples = Wire.tof_samples;
+      CHECK(lines.clear_pulses == 1 && lines.stops == 1);
+      bus.poll(guard, 62);
+      CHECK(Wire.tof_samples == samples && lines.restore_calls == 1);
+      CHECK(!guard.try_rearm(62));
+      lines.fail_restore = false;
+      bus.poll(guard, 161);
+      CHECK(Wire.tof_samples == samples && lines.restore_calls == 2);
+      for (std::uint32_t at = 162; at < 168; ++at) bus.poll(guard, at);
+      CHECK(guard.try_rearm(170));
+      fake_i2c_lines() = FakeI2cLines{};
+    }
+    {
+      // An ordinary NACK on idle lines uses the checked mux retry, not
+      // GPIO recovery. The original bus failure stays latched.
+      Wire = TwoWire{};
+      fake_i2c_lines() = FakeI2cLines{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      Wire.range_mux_write_nack = true;
+      bus.poll(guard, 60);
+      Wire.range_mux_write_nack = false;
+      bus.poll(guard, 61);
+      CHECK(fake_i2c_lines().restore_calls == 0);
+      CHECK(fake_i2c_lines().clear_pulses == 0);
+      CHECK(!guard.try_rearm(61));
+    }
+    {
+      // A newly connected downstream lane can hang the bus at the mux
+      // STOP. Skip the readback transaction, latch, then clear next poll.
+      Wire = TwoWire{};
+      fake_i2c_lines() = FakeI2cLines{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      auto& lines = fake_i2c_lines();
+      lines.release_after_pulses = 9;
+      Wire.hold_sda_on_range_mask = 32; // next side lane 5
+      const auto samples = Wire.tof_samples;
+      const auto transactions = Wire.transactions;
+      bus.poll(guard, 60);
+      CHECK(Wire.ranges == 32 && lines.sda_stuck);
+      // Optional mux write/readback and range mux write only.
+      CHECK(Wire.transactions - transactions == 3);
+      CHECK(Wire.tof_samples == samples && lines.clear_pulses == 0);
+      faulted(guard);
+      bus.poll(guard, 61);
+      CHECK(lines.clear_pulses == 9 && lines.stops == 1);
+      CHECK(Wire.transactions - transactions == 3);
+      for (std::uint32_t at = 62; at < 67; ++at) bus.poll(guard, at);
+      CHECK(!guard.evaluate(70));
+      CHECK(guard.try_rearm(70));
+      fake_i2c_lines() = FakeI2cLines{};
+    }
     std::cout << "PASS cheap VL53L0X TCA9548A selected-channel readback and fail-closed cliff paths\n";
     return 0;
   } catch (const std::exception& ex) {

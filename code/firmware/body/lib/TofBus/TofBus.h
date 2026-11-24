@@ -49,7 +49,8 @@ class TofBus {
  public:
   // These are board pins, not alternate addresses; every device is 0x29.
   bool begin(int sda, int scl, int mux_reset_pin);
-  // Poll exactly one channel per call. Never block waiting for ready.
+  // Poll at most one channel per call. Never block waiting for ready.
+  // A stuck line first faults the guard; a later poll may clear the bus.
   // Any bus fault or invalid data immediately feeds the local CliffGuard.
   void poll(CliffGuard& guard, std::uint32_t now_ms);
   bool ready() const { return initialized_; }
@@ -103,6 +104,13 @@ class TofBus {
   };
   ExtraSample extra_[3]{};
   bool initialized_ = false;
+  int sda_pin_ = -1;
+  int scl_pin_ = -1;
+  int mux_reset_pin_ = -1;
+  bool pins_restored_ = true;
+  bool recovery_pending_ = false;
+  bool recovery_attempted_ = false;
+  std::uint32_t last_recovery_ms_ = 0;
   bool optional_mux_present_ = false; // second 8-lane interaction bus if fitted
   std::uint32_t bus_errors_ = 0;
 
@@ -111,6 +119,8 @@ class TofBus {
   bool select(std::uint8_t channel);
   bool read_register(std::uint8_t reg, std::uint8_t* dest, std::uint8_t bytes);
   bool write_byte(std::uint8_t reg, std::uint8_t value);
+  bool bus_idle() const;
+  bool recover_bus();
   void failed(CliffGuard& guard);
 };
 

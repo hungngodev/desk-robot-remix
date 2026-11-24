@@ -4,6 +4,8 @@
 #if (defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER) || \
     (defined(DESK_ROBOT_FULL_SENSORS) && DESK_ROBOT_FULL_SENSORS)
 
+#include <driver/i2c.h>
+
 namespace desk_robot {
 
 bool TofBus::quiesce_optional_mux() {
@@ -14,10 +16,10 @@ bool TofBus::quiesce_optional_mux() {
   wire_.beginTransmission(kOptionalMuxAddress);
   const bool wrote = wire_.write(static_cast<std::uint8_t>(0)) == 1;
   const bool acknowledged = wire_.endTransmission(true) == 0;
-  if (!wrote || !acknowledged) return false;
+  if (!wrote || !acknowledged || !bus_idle()) return false;
   if (wire_.requestFrom(kOptionalMuxAddress, static_cast<size_t>(1), true) != 1 ||
       wire_.available() < 1) return false;
-  return wire_.read() == 0;
+  return wire_.read() == 0 && bus_idle();
 }
 
 bool TofBus::select(std::uint8_t channel) {
@@ -26,13 +28,16 @@ bool TofBus::select(std::uint8_t channel) {
   wire_.beginTransmission(kMuxAddress);
   const bool wrote = wire_.write(expected) == 1;
   const bool acknowledged = wire_.endTransmission(true) == 0;
-  if (!wrote || !acknowledged) return false;
+  // The STOP activates the new downstream lane. A hung sensor can
+  // pull SDA/SCL low here even though the mux write itself ACKed. Do not
+  // start another potentially blocking readback transaction on held lines.
+  if (!wrote || !acknowledged || !bus_idle()) return false;
   // TCA9548A SCPS207H, section 7.5.4: one-byte control register readback.
   // The explicit STOP above activates the selected channel before reading.
   // A wrong/multiple channel must never be accepted as a cliff measurement.
   if (wire_.requestFrom(kMuxAddress, static_cast<size_t>(1), true) != 1 ||
       wire_.available() < 1) return false;
-  return wire_.read() == expected;
+  return wire_.read() == expected && bus_idle();
 }
 
 bool TofBus::read_register(std::uint8_t reg, std::uint8_t* out, std::uint8_t length) {
@@ -63,6 +68,7 @@ bool TofBus::write_byte(std::uint8_t reg, std::uint8_t value) {
 
 void TofBus::failed(CliffGuard& guard) {
   ++bus_errors_;
+  recovery_pending_ = true;
   // Every range lane shares this mux and I2C controller. A bus fault
   // invalidates optional side/rear evidence too, not only the five critical
   // floor/front samples. Retain presence and last measured millimeters for
@@ -72,8 +78,91 @@ void TofBus::failed(CliffGuard& guard) {
   guard.bus_fault();
 }
 
+// The pinned ESP-IDF driver already attempts a nine-clock clear on some
+// transaction failures. Only take over the GPIOs if the physical lines
+// remain low on a later poll. All Wire clients run in the same body loop.
+bool TofBus::bus_idle() const {
+  return digitalRead(sda_pin_) == HIGH && digitalRead(scl_pin_) == HIGH;
+}
+
+bool TofBus::recover_bus() {
+  // No Wire.end()/begin(): Arduino ESP32 2.0.17 frees shared buffers
+  // during end(), and a failed reopen can strand another client's Wire
+  // mutex. The synchronous body loop owns the bus between transactions.
+  // Adapt the pinned IDF v4.4.7 driver/i2c.c i2c_master_clear_bus pattern
+  // (Apache-2.0): detach GPIO outputs temporarily, then restore the
+  // SAME I2C_NUM_0 pin matrix via the public i2c_set_pin API.
+  // NXP UM10204 section 3.1.16: use open drain, never push-pull HIGH.
+  // Preload the release latch before selecting GPIO output. The ESP32
+  // OUTPUT_OPEN_DRAIN mode includes input, so actual line levels are read.
+  digitalWrite(sda_pin_, HIGH);
+  digitalWrite(scl_pin_, HIGH);
+  pinMode(sda_pin_, OUTPUT_OPEN_DRAIN | PULLUP);
+  pinMode(scl_pin_, OUTPUT_OPEN_DRAIN | PULLUP);
+  pins_restored_ = false;
+  const auto scl_released = [this]() {
+    // A slave holding SCL low cannot be clocked out. Bound the stretch
+    // allowance instead of waiting indefinitely for a shorted line.
+    for (unsigned i = 0; i < 10; ++i) {
+      if (digitalRead(scl_pin_) == HIGH) return true;
+      delayMicroseconds(5);
+    }
+    return digitalRead(scl_pin_) == HIGH;
+  };
+
+  delayMicroseconds(5);
+  bool clear = scl_released();
+  if (clear && digitalRead(sda_pin_) == LOW) {
+    for (unsigned i = 0; i < 9 && digitalRead(sda_pin_) == LOW; ++i) {
+      digitalWrite(scl_pin_, LOW);
+      delayMicroseconds(5);
+      digitalWrite(scl_pin_, HIGH); // open-drain release
+      if (!scl_released()) {
+        clear = false;
+        break;
+      }
+      delayMicroseconds(5);
+    }
+    clear = clear && digitalRead(sda_pin_) == HIGH;
+    if (clear) {
+      // Generate STOP only after the slave releases SDA. The STOP setup
+      // edge is not a data-clear clock pulse.
+      digitalWrite(scl_pin_, LOW);
+      digitalWrite(sda_pin_, LOW);
+      delayMicroseconds(5);
+      digitalWrite(scl_pin_, HIGH);
+      clear = scl_released();
+      delayMicroseconds(5);
+      digitalWrite(sda_pin_, HIGH);
+      delayMicroseconds(5);
+    }
+  }
+  digitalWrite(sda_pin_, HIGH);
+  digitalWrite(scl_pin_, HIGH);
+  if ((!clear || !bus_idle()) && mux_reset_pin_ >= 0) {
+    // TI TCA9548A RESET disconnects downstream lanes. This is only
+    // available with an actual reset GPIO; production ties RESET high.
+    digitalWrite(mux_reset_pin_, LOW);
+    delayMicroseconds(10);
+    digitalWrite(mux_reset_pin_, HIGH);
+    delay(2);
+  }
+  // Restore on every path, including an unresponsive slave. Do not
+  // modify Wire's buffers, mutex, configured frequency or timeout.
+  // Arduino ESP32 2.0.17 defines global Wire as TwoWire(0).
+  pins_restored_ = i2c_set_pin(I2C_NUM_0, sda_pin_, scl_pin_, true, true,
+                              I2C_MODE_MASTER) == ESP_OK;
+  return pins_restored_ && bus_idle();
+}
+
 bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   initialized_ = false;
+  sda_pin_ = sda;
+  scl_pin_ = scl;
+  mux_reset_pin_ = mux_reset_pin;
+  pins_restored_ = true;
+  recovery_pending_ = false;
+  recovery_attempted_ = false;
   scan_.reset();
   new_extra_channel_ = 255;
   new_optical_channel_ = 255;
@@ -248,6 +337,31 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
     failed(guard);
     return;
   }
+  // Detect a held line before a transaction can block. On first
+  // detection return with the guard fault latched, without additional
+  // recovery work before the body loop can apply its safety stop.
+  if (!pins_restored_ || !bus_idle()) {
+    if (!recovery_pending_) {
+      failed(guard);
+      return;
+    }
+    // Do not hammer a permanently shorted bus. Unsigned elapsed time is
+    // rollover-safe; a successful recovery never supplies a range sample.
+    if (recovery_attempted_ && now_ms - last_recovery_ms_ < 100U) return;
+    recovery_attempted_ = true;
+    last_recovery_ms_ = now_ms;
+    if (!recover_bus()) {
+      failed(guard);
+      return;
+    }
+    recovery_pending_ = false;
+    recovery_attempted_ = false;
+    return;
+  }
+  // The pinned driver or removal of a fault may already have cleared
+  // the lines. Normal checked mux selection is still required below.
+  recovery_pending_ = false;
+  recovery_attempted_ = false;
   // Five mandatory floor/front reads always precede one extra side/rear
   // read, preserving the local guard cadence even on the full eight profile.
   const std::uint8_t channel = scan_.next();
@@ -259,7 +373,7 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
   // VL53L0X uses a single-byte register address, not the older 16-bit map.
   // Poll readiness once; never block waiting for an optical conversion.
   std::uint8_t ready = 0;
-  if (!read_register(0x13, &ready, 1)) {
+  if (!read_register(0x13, &ready, 1) || !bus_idle()) {
     failed(guard);
     return;
   }
@@ -269,7 +383,7 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
   }
   std::uint8_t result[kMaxSampleBytes]{};
   if (!read_register(0x14, result, kMaxSampleBytes) ||
-      !write_byte(0x0B, 0x01)) {
+      !write_byte(0x0B, 0x01) || !bus_idle()) {
     failed(guard);
     return;
   }

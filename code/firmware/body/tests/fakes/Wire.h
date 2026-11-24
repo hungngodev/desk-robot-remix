@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <vector>
 #include "AccessoryReadings.h"
+#include "Arduino.h"
 
 // Deterministic sensor protocol emulator. Not a real hardware test.
 class TwoWire {
@@ -80,6 +81,7 @@ class TwoWire {
   bool range_mux_write_nack = false;
   bool range_mux_read_nack = false;
   bool range_mux_bad_readback = false;
+  std::uint8_t hold_sda_on_range_mask = 0; // one-shot downstream hang on STOP
   std::uint16_t tof_register = 0;
   unsigned tof_samples = 0;
   bool tof_ready = true;
@@ -195,7 +197,13 @@ class TwoWire {
       if (outbound.empty()) return 0; // address-only I2C ACK probe
       if (outbound.size() != 1) return 4;
       if (range_mux_write_nack) return 4;
-      if (!range_mux_stuck) ranges = outbound[0];
+      if (!range_mux_stuck) {
+        ranges = outbound[0];
+        if (hold_sda_on_range_mask != 0 && ranges == hold_sda_on_range_mask) {
+          fake_i2c_lines().sda_stuck = true;
+          hold_sda_on_range_mask = 0;
+        }
+      }
     } else if (current_address == 0x71) {
       if (outbound.empty()) return 0; // address-only TCA9548A probe
       if (outbound.size() != 1) return 4;
