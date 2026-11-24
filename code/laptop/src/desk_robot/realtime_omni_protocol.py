@@ -255,13 +255,12 @@ class OmniDuplexWire:
             if self._needs_new_input:
                 return None
             response = event.get("response")
-            response_id = (
-                event.get("response_id") or (
-                    response.get("id") if isinstance(response, dict) else None
-                )
-            )
+            nested_id = response.get("id") if isinstance(response, dict) else None
+            response_id = event.get("response_id", nested_id)
             if not isinstance(response_id, str) or not 1 <= len(response_id) <= 128:
                 raise ValueError("Missing realtime response identity")
+            if isinstance(response, dict) and "id" in response and nested_id != response_id:
+                raise ValueError("Conflicting realtime response identity")
             metadata = response.get("metadata") if isinstance(response, dict) else None
             # Official vLLM-Omni OpenAI-compatible envelope nests the raw
             # duplex event under response.metadata.duplex_event, not directly
@@ -271,10 +270,17 @@ class OmniDuplexWire:
                 metadata.get("duplex_event")
                 if isinstance(metadata, dict) else None
             )
+            if (isinstance(native, dict) and "response_id" in native
+                    and native["response_id"] != response_id):
+                raise ValueError("Conflicting realtime response identity")
             server_epoch = (
                 native.get("epoch") if isinstance(native, dict)
                 else event.get("epoch")
             )
+            if isinstance(native, dict) and "epoch" in event and (
+                type(event["epoch"]) is not int or event["epoch"] != server_epoch
+            ):
+                raise ValueError("Conflicting realtime response epoch")
             if server_epoch is not None and (
                 type(server_epoch) is not int or server_epoch < 0
             ):

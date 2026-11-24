@@ -671,3 +671,46 @@ def test_response_replay_tracking_never_evicts_current_epoch_identity(monkeypatc
     assert wire.response_id == "two"
     wire.handle_event(created("three", epoch=1))
     assert wire.response_id == "three"
+
+@pytest.mark.parametrize("conflict", ["outer_id", "nested_id", "native_id", "epoch", "bool_epoch"])
+def test_response_created_rejects_conflicting_envelope_before_changing_authority(conflict):
+    wire = OmniDuplexWire()
+    wire.handle_event({"type": "session.created", "session": {"epoch": 1}})
+    wire.handle_event({
+        "type": "response.created", "response_id": "current",
+        "response": {"id": "current", "metadata": {"duplex_event": {"epoch": 1}}},
+    })
+    assert wire.handle_event(delta("current", epoch=1)) is not None
+
+    event = {
+        "type": "response.created", "response_id": "candidate",
+        "response": {"id": "candidate", "metadata": {"duplex_event": {
+            "response_id": "candidate", "epoch": 1,
+        }}},
+    }
+    if conflict == "outer_id":
+        event["response_id"] = None
+    elif conflict == "nested_id":
+        event["response"]["id"] = "foreign"
+    elif conflict == "native_id":
+        event["response"]["metadata"]["duplex_event"]["response_id"] = "foreign"
+    elif conflict == "epoch":
+        event["epoch"] = 2
+    else:
+        event["epoch"] = True
+
+    with pytest.raises(ValueError, match="identity|epoch"):
+        wire.handle_event(event)
+    assert wire.response_id == "current"
+    assert wire.generated_bytes == 4800
+    assert wire.handle_event(delta("candidate", epoch=1)) is None
+    assert wire.handle_event(delta("current", epoch=1)) is not None
+
+    wire.handle_event({
+        "type": "response.created", "response_id": "candidate", "epoch": 1,
+        "response": {"id": "candidate", "metadata": {"duplex_event": {
+            "response_id": "candidate", "epoch": 1,
+        }}},
+    })
+    assert wire.response_id == "candidate"
+    assert wire.handle_event(delta("candidate", epoch=1)) is not None
