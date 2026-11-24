@@ -263,6 +263,15 @@ def screen(measurements: dict, *, cad: Path = CAD,
             and z0 >= geometry["backstop_min_z_mm"] + margin
             and z1 <= geometry["backstop_max_z_mm"] - margin
         )
+        # The brace is full width and projects ahead of the backstop.
+        # Reserve its entire projected vertical envelope before fitting
+        # the switch or either emitter at the backstop plane.
+        brace_top = geometry["backstop_brace_top_z_mm"]
+        switch_brace_clear = z0 >= brace_top + margin
+        emitter_brace_clear = (
+            d[prefix + "ir_emitter_center_z_mm"]
+            - geometry["ir_hole_radius_mm"] >= brace_top + margin
+        )
         tag_clear = (
             x1 + margin <= paper[0] or x0 - margin >= paper[1]
             or z1 + margin <= paper[2] or z0 - margin >= paper[3]
@@ -296,6 +305,8 @@ def screen(measurements: dict, *, cad: Path = CAD,
             "source_body_z_mm": [z0, z1],
             "within_backstop_with_2mm_web": body_inside,
             "avoids_apriltag_paper_with_2mm_gap": tag_clear,
+            "avoids_backstop_brace_with_2mm_gap": switch_brace_clear,
+            "ir_aperture_avoids_backstop_brace_with_2mm_gap": emitter_brace_clear,
             "avoids_nominal_ir_hole_with_2mm_gap": ir_clear,
             "stop_displacement_inside_measured_travel": actuation,
             "ir_emitter_aperture_inside_backstop": emitter_inside,
@@ -362,6 +373,8 @@ def screen(measurements: dict, *, cad: Path = CAD,
         contact_floor_possible and
         all(c["within_backstop_with_2mm_web"]
             and c["avoids_apriltag_paper_with_2mm_gap"]
+            and c["avoids_backstop_brace_with_2mm_gap"]
+            and c["ir_aperture_avoids_backstop_brace_with_2mm_gap"]
             and c["avoids_nominal_ir_hole_with_2mm_gap"]
             for c in checks)
         and independent_separation and actuation

@@ -222,6 +222,36 @@ def test_printer_source_and_switch_screen_share_real_pocket_width():
     assert cg["electrical_contact_selected"] is False
 
 
+@pytest.mark.parametrize("side,index", [("left", 0), ("right", 1)])
+@pytest.mark.parametrize("field,value,check", [
+    ("switch_center_z_mm", 10, "avoids_backstop_brace_with_2mm_gap"),
+    ("ir_emitter_center_z_mm", 10, "ir_aperture_avoids_backstop_brace_with_2mm_gap"),
+])
+def test_low_switch_or_ir_aperture_cannot_overlap_forward_brace(
+    side, index, field, value, check,
+):
+    datum = example()
+    datum[f"{side}_{field}"] = value
+    result = load().screen(datum)
+    switch = result["switches"][index]
+    assert switch["within_backstop_with_2mm_web"]
+    assert switch["avoids_apriltag_paper_with_2mm_gap"]
+    assert switch["avoids_nominal_ir_hole_with_2mm_gap"]
+    assert switch["ir_emitter_aperture_inside_backstop"]
+    assert not switch[check]
+    assert not result["source_only_layout_possible"]
+    assert not result["charging_authorized"]
+
+
+def test_switch_at_brace_clearance_boundary_is_feasible_on_paper():
+    datum = example()
+    datum["left_switch_center_z_mm"] = 19
+    result = load().screen(datum)
+    assert result["switches"][0]["avoids_backstop_brace_with_2mm_gap"]
+    assert result["source_only_layout_possible"]
+    assert not result["charging_authorized"]
+
+
 def test_independent_right_switch_measurements_cannot_inherit_left_pass():
     source = load()
     datum = example()
