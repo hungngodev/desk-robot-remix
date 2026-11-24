@@ -451,3 +451,38 @@ def test_subminimum_range_clears_only_its_lane_and_recovers_at_valid_boundary():
     assert observe(600, 85, 400) == []
     assert observe(30, 85, 500) == []
     assert observe(30, 85, 600) == [("left", 30)]
+
+
+@pytest.mark.parametrize("valid", [6, 7])
+@pytest.mark.parametrize("sentinel", [8190, 65535])
+def test_invalid_raw_range_does_not_suppress_healthy_directions(valid, sentinel):
+    tracker = SideRangeEvents()
+
+    def observe(left, right, stamp, mask):
+        return tracker.observe(body(mm=(left, right, 600), sample_ms=(stamp,) * 3,
+                                    boot_id=901, valid=mask),
+                               now=10.0 + stamp / 1000, near_mm=170,
+                               require_hardware_identity=True)
+
+    assert observe(600, 600, 100, 7) == []
+    assert observe(sentinel, 80, 200, valid) == []
+    assert observe(sentinel, 85, 300, valid) == [("right", 85)]
+    assert observe(600, 85, 400, 7) == []
+    assert observe(100, 85, 500, 7) == []
+    assert observe(95, 85, 600, 7) == [("left", 95)]
+
+
+@pytest.mark.parametrize("malformed", [-1, 65536, True, "8190"])
+def test_side_ranges_still_reject_nonuint16_raw_data(malformed):
+    tracker = SideRangeEvents()
+
+    def observe(left, right, stamp):
+        return tracker.observe(body(mm=(left, right, 600), sample_ms=(stamp,) * 3,
+                                    boot_id=901, valid=6),
+                               now=10.0 + stamp / 1000, near_mm=170,
+                               require_hardware_identity=True)
+
+    assert observe(600, 600, 100) == []
+    assert observe(600, 80, 200) == []
+    assert observe(malformed, 85, 300) == []
+    assert observe(600, 85, 400) == []

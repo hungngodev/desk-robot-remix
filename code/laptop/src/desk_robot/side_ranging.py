@@ -93,7 +93,7 @@ class SideRangeEvents:
                 or data.get("motion_certified") is not False
                 or not isinstance(distances, list) or len(distances) != 3
                 or not isinstance(ages, list) or len(ages) != 3
-                or any(type(d) is not int or not 0 <= d <= 1300
+                or any(type(d) is not int or not 0 <= d <= 0xffff
                        for d in distances)
                 or any(type(a) is not int or not 0 <= a <= 0xffffffff
                        for a in ages)
