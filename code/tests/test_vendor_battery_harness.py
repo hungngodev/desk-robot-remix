@@ -143,7 +143,11 @@ def test_new_verified_large_pack_continuous_ratings_reject_false_10a_claims():
         assert report["complete_power_path_safe_to_buy"] is False
     thor = screen.evaluate("THOR-18650-1S2P-5200", supply,
                            tray_mm=(115, 55, 30))
-    assert thor["pack_peak_within_published_max_on_paper"]
+    assert thor["pack_peak_within_published_max_on_paper"] is None
+    assert thor["cell_level_max_discharge_a"] == 10.4
+    assert thor["assembled_pack_mm"] is None
+    assert thor["bare_pack_mm"] == (65.0, 37.0, 18.4)
+    assert "manufacturer_assembled_pack_peak_discharge_rating_missing" in thor["blocking_reasons"]
     assert thor["pack_current_enough_on_paper"] is None
     assert thor["ntc"] == "optional"
     assert "pack_ntc_10k_not_fitted_in_exact_variant" in thor["blocking_reasons"]
@@ -205,3 +209,19 @@ def test_default_battery_fit_screen_reads_current_cad_tray_not_stale_constants(
     revised_cad.write_text("power_l = 100; power_l = 120;")
     with pytest.raises(ValueError, match="Missing or ambiguous"):
         read_cad(revised_cad)
+
+
+@pytest.mark.parametrize(("peak", "expected"), [(0.5, None), (10.4, None), (10.401, False)])
+def test_thor_cell_ceiling_never_proves_assembled_pack_peak(peak, expected):
+    screen = module("screen_vendor_battery_harness")
+    report = screen.evaluate(
+        "THOR-18650-1S2P-5200",
+        {"minimum_rated_cell_and_boost_input_a": peak,
+         "minimum_continuous_cell_input_a": 0.5},
+        tray_mm=(115, 55, 30),
+    )
+    assert report["pack_peak_within_published_max_on_paper"] is expected
+    assert report["pack_current_enough_on_paper"] is None
+    assert "manufacturer_assembled_pack_peak_discharge_rating_missing" in report["blocking_reasons"]
+    assert ("cell_level_discharge_below_peak_budget" in report["blocking_reasons"]) == (expected is False)
+    assert report["complete_power_path_safe_to_buy"] is False

@@ -81,7 +81,9 @@ _PACKS = {
     "THOR-18650-1S2P-5200": {
         "source": "https://thorbattery.com/product/thor-18650-1s2p-5200/",
         "size_mm": (65.0, 37.0, 18.4),  # BARE PACK; unfinished PCM adds volume
-        "continuous_a": None, "max_discharge_a": 10.4,
+        # Vendor explicitly limits 10.4 A to the cells; the PCM sets the pack ceiling.
+        "continuous_a": None, "max_discharge_a": None,
+        "cell_level_max_discharge_a": 10.4,
         "ntc": "optional", "pcm": True,
         "connector": "Default PH2.0; optional NTC and PCM current are unspecified",
         "connector_continuous_a": None, "lead_continuous_a": None,
@@ -158,9 +160,8 @@ def evaluate(model: str, demand: dict, *, tray_mm=None,
              b + 2 * clearance_mm <= wt) or
             (b + wire_relief_mm + 2 * clearance_mm <= lt and
              a + 2 * clearance_mm <= wt)))
-    # THOR publishes an incomplete bare-cell envelope and optional NTC/PCM
-    # configuration. A chassis CANNOT be declared compatible from that size:
-    # the final protector, wiring exit and keyed connector add real volume.
+    # THOR includes a configurable PCM and optional NTC, but publishes only
+    # bare-pack dimensions. The final protector, wiring and connector add volume.
     if model == "THOR-18650-1S2P-5200":
         fit = None
     peak = demand["minimum_rated_cell_and_boost_input_a"]
@@ -168,7 +169,14 @@ def evaluate(model: str, demand: dict, *, tray_mm=None,
     # "Maximum discharge current" is not a published continuous rating.
     # All listed manufacturers require a confirmed thermal duty rating for
     # the actual terminal configuration before sustained robot operation.
-    peak_ok = src["max_discharge_a"] >= peak
+    pack_max = src["max_discharge_a"]
+    cell_ceiling = src.get("cell_level_max_discharge_a")
+    if pack_max is not None:
+        peak_ok = pack_max >= peak
+    else:
+        # A cell-level ceiling can rule a pack out, but cannot establish
+        # that an unspecified protection circuit supports the required load.
+        peak_ok = False if cell_ceiling is not None and cell_ceiling < peak else None
     pack_ok = (None if src["continuous_a"] is None else
                src["continuous_a"] >= cont and peak_ok)
     # A proven cell is still unsafe with a narrower connector/lead assembly.
@@ -181,7 +189,11 @@ def evaluate(model: str, demand: dict, *, tray_mm=None,
         reasons.append("full_protected_pack_dimensions_unknown")
     elif not fit:
         reasons.append("protected_pack_does_not_fit_existing_cavity")
-    if not peak_ok:
+    if pack_max is None:
+        reasons.append("manufacturer_assembled_pack_peak_discharge_rating_missing")
+        if peak_ok is False:
+            reasons.append("cell_level_discharge_below_peak_budget")
+    elif peak_ok is False:
         reasons.append("pack_max_discharge_below_peak_budget")
     if pack_ok is None:
         reasons.append("manufacturer_continuous_discharge_rating_missing")
@@ -202,7 +214,9 @@ def evaluate(model: str, demand: dict, *, tray_mm=None,
         "model": model, "vendor_source": src["source"],
         "protected": src["pcm"], "ntc": src["ntc"],
         "connector_variant": src["connector"],
-        "assembled_pack_mm": src["size_mm"],
+        "assembled_pack_mm": None if fit is None else src["size_mm"],
+        "bare_pack_mm": src["size_mm"] if fit is None else None,
+        "cell_level_max_discharge_a": cell_ceiling,
         "pack_fits_current_tray_on_paper": fit,
         "pack_peak_within_published_max_on_paper": peak_ok,
         "pack_current_enough_on_paper": pack_ok,
