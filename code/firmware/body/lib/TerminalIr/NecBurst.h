@@ -125,9 +125,14 @@ class DualIrEvidence {
       invalidate();
       return;
     }
-    if (static_cast<std::uint8_t>(code ^ (code >> 8)) != 0xff ||
+    const auto address = static_cast<std::uint8_t>(code);
+    const auto command = static_cast<std::uint8_t>(code >> 16);
+    // Match the five configured Nano dock senders and Mac validator.
+    // A generic classic NEC decode alone is not dock evidence.
+    if (address != 0x12U || command < 0x31U || command > 0x35U ||
+        static_cast<std::uint8_t>(code ^ (code >> 8)) != 0xff ||
         static_cast<std::uint8_t>((code >> 16) ^ (code >> 24)) != 0xff) {
-      // A corrupt observation from either receiver revokes the old pair.
+      // An unrelated or corrupt observation revokes the old pair.
       // Keeping an older valid side would allow stale bearing reuse.
       invalidate();
       return;

@@ -267,6 +267,45 @@ int main() {
     CHECK(result.same_code);
     CHECK(result.left_age_ms == 50 && result.right_age_ms == 16);
     CHECK(!result.motor_authorized && !result.charging_authorized);
+    // Generic classic NEC decoding is useful for protocol stress but is
+    // not sufficient for dock evidence. All five configured senders are
+    // accepted; unrelated remotes cannot advance or preserve a bearing.
+    for (unsigned id = 1; id <= 5; ++id) {
+      make_frame(frame, 0x12, static_cast<std::uint8_t>(0x30 + id));
+      std::uint32_t dock_code = 0;
+      CHECK(desk_robot::decode_nec(frame, 34, dock_code));
+      desk_robot::DualIrEvidence dock;
+      dock.accept(0, dock_code, 100);
+      dock.accept(1, dock_code, 105);
+      const auto reading = dock.assess(105);
+      CHECK(reading.same_code && reading.code == dock_code);
+      CHECK(!reading.motor_authorized && !reading.charging_authorized);
+    }
+    const std::uint8_t other_addresses[] = {0x13, 0x12, 0x12};
+    const std::uint8_t other_commands[] = {0x34, 0x30, 0x36};
+    for (unsigned i = 0; i < 3; ++i) {
+      make_frame(frame, other_addresses[i], other_commands[i]);
+      std::uint32_t other = 0;
+      CHECK(desk_robot::decode_nec(frame, 34, other));
+      desk_robot::DualIrEvidence dock;
+      dock.accept(0, other, 100);
+      CHECK(!dock.assess(100).left_fresh);
+      CHECK(dock.assess(100).left_seq == 0);
+      dock.accept(0, code, 110);
+      dock.accept(1, code, 115);
+      CHECK(dock.assess(115).same_code);
+      dock.accept(1, other, 120);
+      const auto rejected = dock.assess(120);
+      CHECK(!rejected.left_fresh && !rejected.right_fresh &&
+            !rejected.same_code && rejected.code == 0);
+      CHECK(rejected.left_seq == 1 && rejected.right_seq == 1);
+      CHECK(!rejected.motor_authorized && !rejected.charging_authorized);
+      dock.accept(0, code, 110);
+      CHECK(!dock.assess(121).left_fresh);
+      dock.accept(0, code, 130);
+      dock.accept(1, code, 135);
+      CHECK(dock.assess(135).same_code);
+    }
     // 100 independent classic NEC beacons, and 400 deterministic fault
     // mutations. This is protocol stress, NOT 100 physical robot iterations.
     for (unsigned seed = 0; seed != 100; ++seed) {
