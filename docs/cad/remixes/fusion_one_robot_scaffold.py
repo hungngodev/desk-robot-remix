@@ -187,6 +187,31 @@ def packaging_warning(verified_fit_kit: dict | None) -> str:
     return "Original chassis reference unavailable; battery footprint not checked."
 
 
+def jaw_topology_warning(root: Path) -> str:
+    """Reuse the strict STL checker; leave original meshes untouched."""
+    checker = root / "code/scripts/export_fit_kit.py"
+    check = runpy.run_path(str(checker))["closed_mesh_edges"]
+    failures = []
+    for _, relative in SOURCE_MESHES:
+        if not relative.startswith("docs/cad/originals/gripper/"):
+            continue
+        try:
+            check(root / relative)
+        except ValueError as exc:
+            failures.append(str(exc))
+    if failures:
+        return (
+            "JAW TOPOLOGY HOLD: " + "; ".join(failures)
+            + ". Import as unaligned references only. Repair a separate "
+            "attributed copy and recheck tooth profile, shaft and rack fit "
+            "before conversion, slicing or printing."
+        )
+    return (
+        "Jaw meshes passed only the source topology screen; actual backlash, "
+        "horn travel and loaded silicone contact remain unqualified."
+    )
+
+
 def run(context):
     import adsk.core
     import adsk.fusion
@@ -196,6 +221,7 @@ def run(context):
     try:
         repo = find_repo(Path(__file__).resolve())
         verify_original_source_revisions(repo)
+        jaw_warning = jaw_topology_warning(repo)
         fit_receipt = verify_optional_fit_references(repo)
         sources = build_manifest(repo)
         app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)
@@ -220,7 +246,7 @@ def run(context):
             "This is not the finished robot. Align shaft centers and gears, "
             "validate track compatibility and inspect collisions. Then model "
             "adapters to caliper measurements before printing.\\n"
-            + packaging_warning(fit_receipt)
+            + packaging_warning(fit_receipt) + "\n" + jaw_warning
         )
     except Exception:
         ui.messageBox("Desk robot Fusion import failure:\\n" + traceback.format_exc())
