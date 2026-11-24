@@ -20,8 +20,75 @@ static void make_frame(desk_robot::IrMarkSpace (&items)[34],
   items[33] = {560, 0};
 }
 
+static void check_envelope_and_noise() {
+  desk_robot::IrMarkSpace frame[34]{};
+  constexpr std::uint32_t expected = 0xcb34ed12U;
+  std::uint32_t code = expected;
+  // The receiver already removes the 38 kHz carrier. These are software
+  // envelope timing limits, not measured optical carrier duty cycle limits.
+  struct Boundary {
+    unsigned symbol;
+    bool mark;
+    std::uint16_t low, high;
+  };
+  const Boundary limits[] = {
+      {0, true, 7200, 10800}, {0, false, 3600, 5400},
+      {1, true, 350, 850}, {1, false, 350, 850},
+      {2, false, 1300, 2100}, {33, true, 350, 850}};
+  for (const auto& limit : limits) {
+    const std::uint16_t values[] = {
+        static_cast<std::uint16_t>(limit.low - 1), limit.low, limit.high,
+        static_cast<std::uint16_t>(limit.high + 1)};
+    for (unsigned i = 0; i != 4; ++i) {
+      make_frame(frame, 0x12, 0x34);
+      auto& symbol = frame[limit.symbol];
+      (limit.mark ? symbol.mark_us : symbol.space_us) = values[i];
+      code = expected;
+      const bool valid = i == 1 || i == 2;
+      CHECK(desk_robot::decode_nec(frame, 34, code) == valid);
+      CHECK(code == (valid ? expected : 0U));
+    }
+  }
+  // Exercise all data marks and spaces together, with opposite distortion
+  // directions. Both ends of each timing window must preserve every bit.
+  for (bool long_mark : {false, true}) {
+    make_frame(frame, 0x12, 0x34);
+    for (unsigned i = 1; i <= 32; ++i) {
+      auto& symbol = frame[i];
+      const bool one = symbol.space_us == 1690;
+      symbol.mark_us = long_mark ? 850 : 350;
+      symbol.space_us = one ? (long_mark ? 1300 : 2100)
+                            : (long_mark ? 350 : 850);
+    }
+    CHECK(desk_robot::decode_nec(frame, 34, code) && code == expected);
+  }
+  // Synthetic periodic disturbance envelopes at 100/120 Hz and short
+  // repetitive pulses are not recorded fluorescent lamp waveforms.
+  const desk_robot::IrMarkSpace noise[] = {
+      {500, 9500}, {500, 7833}, {100, 100}, {560, 560}, {560, 1690}};
+  for (const auto& pulse : noise) {
+    for (auto& symbol : frame) symbol = pulse;
+    code = expected;
+    CHECK(!desk_robot::decode_nec(frame, 34, code) && code == 0);
+    // Even a valid-looking leader and trailer cannot qualify periodic data.
+    frame[0] = {9000, 4500};
+    frame[33] = {560, 0};
+    code = expected;
+    CHECK(!desk_robot::decode_nec(frame, 34, code) && code == 0);
+  }
+  make_frame(frame, 0x12, 0x34);
+  desk_robot::IrMarkSpace extra[35]{};
+  for (unsigned i = 0; i != 34; ++i) extra[i] = frame[i];
+  extra[34] = {100, 100};
+  code = expected;
+  CHECK(!desk_robot::decode_nec(extra, 35, code) && code == 0);
+  CHECK(!desk_robot::decode_nec(frame, 0, code) && code == 0);
+  CHECK(desk_robot::decode_nec(frame, 34, code) && code == expected);
+}
+
 int main() {
   try {
+    check_envelope_and_noise();
     desk_robot::IrMarkSpace frame[34]{};
     make_frame(frame, 0x12, 0x34);
     std::uint32_t code = 0;
