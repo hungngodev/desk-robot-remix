@@ -103,9 +103,12 @@ https://github.com/adafruit/Adafruit_BME680/tree/2.0.5
 
 ## USB reconnect freshness handshake
 
-The Mac sends a fresh random `SYNC <16 lowercase hex>\n` challenge
+The Mac sends a fresh random `\nSYNC <16 lowercase hex>\n` challenge
 after opening the serial port and again before each accepted report. The
-Feather replies with `SYNC_ACK <nonce>\n`. Complete JSON frames received
+leading newline clears an unfinished request left by an interrupted USB
+write without requiring the independently powered Feather to reboot. If
+it completes an old nonce, the resulting old ACK is discarded by the Mac.
+The Feather replies with `SYNC_ACK <nonce>\n` (CRLF is also accepted). Complete JSON frames received
 before the current challenge ACK are discarded even if their fields appear
 valid. If the report is delayed more than 2.5 seconds after its ACK, the
 Mac discards the late frame and starts a new challenge. If the ACK itself

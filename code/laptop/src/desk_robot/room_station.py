@@ -343,7 +343,10 @@ class RoomSerialFeed:
             # after each report to exclude stale USB frames after a stall.
             def request_sync() -> tuple[bytes, float]:
                 nonce = secrets.token_hex(8).encode("ascii")
-                request = b"SYNC " + nonce + b"\n"
+                # Retire any partial command left in the powered Feather
+                # parser by an interrupted USB write. A stale ACK produced
+                # by that delimiter still cannot match the fresh nonce.
+                request = b"\nSYNC " + nonce + b"\n"
                 if port.write(request) != len(request):
                     raise RuntimeError("Room station SYNC write incomplete")
                 return (b"SYNC_ACK " + nonce + b"\n",

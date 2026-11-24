@@ -31,4 +31,22 @@ int main() {
   assert(!feed(parser, "1234567"));
   assert(feed(parser, "8\n"));
   assert(std::string(parser.token()) == "deadbeef12345678");
+  // A port can close after an incomplete write, without resetting the
+  // independently powered Feather. The next bare challenge is swallowed.
+  assert(!feed(parser, "SYNC dead"));
+  assert(!feed(parser, "SYNC 0123456789abcdef\n"));
+  const std::string next = "SYNC fedcba9876543210\n";
+  const std::string old = "SYNC 0123456789abcdef\n";
+  // Verify every interrupted write boundary, including a complete stale
+  // nonce lacking its final newline. Only the new nonce is authoritative.
+  for (size_t n = 0; n < old.size(); ++n) {
+    UsbEpochSync reconnect;
+    assert(!feed(reconnect, old.substr(0, n)));
+    assert(feed(reconnect, "\n" + next));
+    assert(std::string(reconnect.token()) == "fedcba9876543210");
+  }
+  UsbEpochSync overflow;
+  assert(!feed(overflow, std::string(100, 'x')));
+  assert(feed(overflow, "\n" + next));
+  assert(std::string(overflow.token()) == "fedcba9876543210");
 }

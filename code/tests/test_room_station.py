@@ -18,8 +18,9 @@ class SynchronizedFakePort:
     """Model the physical Feather causal ACK without accepting old USB JSON."""
 
     def write(self, request):
-        assert request.startswith(b"SYNC ") and request.endswith(b"\n")
-        nonce = request[5:-1]
+        # A reconnect may inherit an unfinished line in the Feather.
+        assert request.startswith(b"\nSYNC ") and request.endswith(b"\n")
+        nonce = request[6:-1]
         assert len(nonce) == 16 and all(c in b"0123456789abcdef" for c in nonce)
         self._session_reply = b"SYNC_ACK " + nonce + b"\r\n"
         return len(request)
