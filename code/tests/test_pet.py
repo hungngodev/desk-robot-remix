@@ -7122,6 +7122,7 @@ async def test_person_face_cue_requires_current_camera_generation(
 ):
     """Obsolete camera receipts cannot consume a current expression budget."""
     from types import SimpleNamespace
+
     from desk_robot.pet import PetState
 
     fleet.mode = "hardware"
