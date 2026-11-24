@@ -119,7 +119,7 @@ def active_job_timeline(jobs: Iterable[object], robot_id: str) -> list[dict]:
 
 def compose_brain_context(
     recent: Sequence[Memory], core: Sequence[CoreFact],
-    timeline: Sequence[dict],
+    timeline: Sequence[dict], *, topical_event_id: str | None = None,
 ) -> ContextBundle:
     """Format evidence by authority under independent, tight text budgets.
 
@@ -129,13 +129,15 @@ def compose_brain_context(
     """
     # MemoryStore.recent returns newest first, while a topical merge from
     # PetController arrives oldest first. Select by source timestamps rather
-    # than the input list's order; a long chat must not drop NEW memories.
+    # than the input list's order. When retrieval supplies a best match,
+    # reserve it before newer unrelated episodes consume the text budget.
     seen: set[str] = set()
-    memory_parts: list[str] = []
+    memory_parts: list[tuple[float, str, str]] = []
     memory_used = 0
     for entry in sorted(
-        recent, key=lambda item: (item.observed_at, item.event_id),
-        reverse=True,
+        recent, key=lambda item: (
+            item.event_id == topical_event_id, item.observed_at, item.event_id,
+        ), reverse=True,
     ):
         if entry.event_id in seen:
             continue
@@ -144,13 +146,13 @@ def compose_brain_context(
         cost = len(phrase) + (2 if memory_parts else 0)
         if memory_used + cost > 600:
             continue
-        memory_parts.append(phrase)
+        memory_parts.append((entry.observed_at, entry.event_id, phrase))
         memory_used += cost
         if len(memory_parts) == 6:
             break
-    # Older to newer for conversational flow, but NEVER at the expense of
-    # the newest memory in a fixed prompt budget.
-    recent_text = "; ".join(reversed(memory_parts))
+    # Restore chronological presentation after selecting the best topical
+    # match and the newest remaining evidence within the same fixed budget.
+    recent_text = "; ".join(phrase for _, _, phrase in sorted(memory_parts))
 
     # The core store also returns newest first; the previous [-6:] omitted
     # the most recently curated operator facts when more than six existed.

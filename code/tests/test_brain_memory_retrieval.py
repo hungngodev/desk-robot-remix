@@ -257,8 +257,9 @@ def test_voice_memory_tool_opt_in_and_same_pet_topical_recall(
         assert other.json()["memories"] == []  # separate private SQLite database
 
 
+@pytest.mark.parametrize("crowded", [False, True])
 async def test_proactive_reasoning_reuses_relevant_old_experience_not_only_last_four(
-    settings, tmp_path
+    settings, tmp_path, crowded
 ):
     import time
 
@@ -272,17 +273,29 @@ async def test_proactive_reasoning_reuses_relevant_old_experience_not_only_last_
     store = MemoryStore(tmp_path, ids)
     store.remember(
         "robot-01", "key_history",
-        "I saw a silver key next to the notebook yesterday",
+        "I saw a silver key next to the notebook yesterday"
+        + (" detail" * 15 if crowded else ""),
         kind="key", source_robot="robot-01", witnessed=True,
         observed_at=time.time() - 24 * 3600,
     )
+    if crowded:
+        store.remember(
+            "robot-01", "key_other", "A key appeared by a drawer" + " detail" * 20,
+            kind="key", source_robot="robot-01", witnessed=True,
+            observed_at=time.time() - 3600,
+        )
     for index in range(5):
         store.remember(
             "robot-01", f"recent_touch_{index}",
-            f"Someone tapped the desk {index} times",
+            f"Someone tapped the desk {index} times"
+            + (" detail" * 20 if crowded else ""),
             kind="touch", source_robot="robot-01", witnessed=True,
             observed_at=time.time() - 60 + index,
         )
+    if crowded:
+        assert store.search(
+            "robot-01", "A silver key appeared near the notebook", limit=3,
+        )[0].event_id == "key_history"
     prompts = []
 
     class NaturalChat:
@@ -308,6 +321,8 @@ async def test_proactive_reasoning_reuses_relevant_old_experience_not_only_last_
         assert len(prompts) == 1
         prompt = prompts[0][1]["content"]
         assert "silver key next to the notebook yesterday" in prompt
+        if crowded:
+            assert "Someone tapped the desk 4 times" in prompt
         assert "Recent context:" in prompt
         assert len(speaker.spoken) == 1
         # The recalled visual event remains distinct from the robot's spoken

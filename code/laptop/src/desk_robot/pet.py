@@ -2809,7 +2809,12 @@ class PetController:
             self.settings.mode == "hardware"
             and any(item.get("channel") == "room_station" for item in timeline)
         )
-        context = compose_brain_context(memory, core_memory, timeline)
+        context = compose_brain_context(
+            memory, core_memory, timeline,
+            topical_event_id=(
+                relevant_memory[0].event_id if relevant_memory else None
+            ),
+        )
         return (
             recent_memory, context, private_memory_allowed,
             live_context_used, room_context_used,
