@@ -69,6 +69,8 @@ class CliffGuard {
   struct Sample {
     bool present = false;
     bool valid = false;
+    // Once observed stale, this conversion cannot become fresh on millis wrap.
+    bool expired = false;
     std::uint16_t mm = 0;
     std::uint32_t at_ms = 0;
   };
@@ -85,7 +87,7 @@ class CliffGuard {
   static bool valid_config(const CliffConfig& config);
   CliffFault sample_fault(std::uint8_t channel) const;
   bool current_health(std::uint32_t now_ms, CliffFault& reason,
-                      std::uint8_t& sensor) const;
+                      std::uint8_t& sensor);
   void latch(CliffFault reason, std::uint8_t sensor = kNoFaultSensor);
   void classify_complete_initial_sweep(CliffFault reason,
                                        std::uint8_t sensor);

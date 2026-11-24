@@ -69,17 +69,24 @@ CliffFault CliffGuard::sample_fault(std::uint8_t channel) const {
 }
 
 bool CliffGuard::current_health(std::uint32_t now_ms, CliffFault& reason,
-                                std::uint8_t& sensor) const {
+                                std::uint8_t& sensor) {
   reason = CliffFault::Unconfigured;
   sensor = kNoFaultSensor;
   if (!configured_) return false;
+  // Mark every expired conversion even when another lane already faults.
+  // A 32-bit millisecond clock repeats after about 49.7 days; without this
+  // sticky per-sample bit an old cached conversion can appear fresh again.
+  for (auto& sample : samples_) {
+    if (sample.present && now_ms - sample.at_ms >= config_.freshness_ms)
+      sample.expired = true;
+  }
   for (std::uint8_t i = 0; i < kCliffSensorCount; ++i) {
     sensor = i;
     reason = sample_fault(i);
     if (reason != CliffFault::None) return false;
-    // Unsigned elapsed arithmetic works across millis rollover; the adapter
-    // must supply monotonic samples/evaluations without a full wrap hiatus.
-    if (now_ms - samples_[i].at_ms >= config_.freshness_ms) {
+    // Unsigned elapsed arithmetic handles ordinary rollover. Observed
+    // expiry stays sticky until a distinct newer conversion replaces it.
+    if (samples_[i].expired) {
       reason = CliffFault::StaleSample;
       return false;
     }
@@ -112,8 +119,7 @@ void CliffGuard::sample(std::uint8_t channel, std::uint16_t distance_mm,
   // data expired during a stalled loop. Check before replacement.
   CliffFault previous_reason;
   std::uint8_t previous_sensor;
-  if (fault_ == CliffFault::None &&
-      !current_health(now_ms, previous_reason, previous_sensor))
+  if (!current_health(now_ms, previous_reason, previous_sensor))
     latch(previous_reason, previous_sensor);
   if (channel >= kCliffSensorCount) {
     // The caller's sensor routing is untrustworthy. Do not rearm using the
@@ -126,6 +132,7 @@ void CliffGuard::sample(std::uint8_t channel, std::uint16_t distance_mm,
   auto& sample = samples_[channel];
   sample.present = true;
   sample.valid = valid;
+  sample.expired = false;
   sample.mm = distance_mm;
   sample.at_ms = now_ms;
   if (configured_) latch(sample_fault(channel), channel);
@@ -160,7 +167,8 @@ RangeDiagnostic CliffGuard::diagnostic(std::uint8_t channel,
   // A fresh, chip-valid measurement can still violate the calibrated desk
   // envelope. Retain its raw value but never mark unsafe geometry as valid
   // sensor evidence in status.ranges.valid_mask.
-  result.valid = sample.present && sample.valid && configured_ &&
+  result.valid = sample.present && sample.valid && !sample.expired &&
+                 configured_ &&
                  result.age_ms < config_.freshness_ms &&
                  sample_fault(channel) == CliffFault::None;
   return result;

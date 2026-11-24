@@ -307,6 +307,28 @@ void unsigned_clock_rollover() {
   CHECK(guard.evaluate(start + 82U));
 }
 
+void observed_stale_conversion_cannot_revive_after_full_clock_cycle() {
+  CliffGuard guard;
+  ready(guard, 10U);
+  // Lane 2 never reports ready again. The other four lanes keep producing
+  // distinct conversions, and the guard continues to observe elapsed time.
+  for (const std::uint32_t now : {90U, 0x7fff0000U, 0xfffe0000U, 10U}) {
+    for (std::uint8_t lane = 0; lane < desk_robot::kCliffSensorCount; ++lane) {
+      if (lane == 2) continue;
+      guard.sample(lane, lane == 4 ? 300 : 45, true, now);
+    }
+    CHECK(!guard.evaluate(now));
+  }
+  const auto old = guard.diagnostic(2, 10U);
+  CHECK(old.present && old.distance_mm == 45 && old.age_ms == 0U);
+  CHECK(!old.valid);  // modulo age is fresh, but this conversion expired
+  CHECK(!guard.try_rearm(10U));
+  CHECK(guard.fault() == CliffFault::StaleSample);
+  guard.sample(2, 45, true, 11U);
+  CHECK(guard.try_rearm(11U));
+  CHECK(guard.evaluate(11U));
+}
+
 void diagnostics_read_only_and_bounded() {
   CliffGuard guard;
   auto missing = guard.diagnostic(0, 0);
@@ -469,6 +491,8 @@ int main(int argc, char** argv) {
       {"invalid_channel_requires_five_new_measurements",
        invalid_channel_requires_five_new_measurements},
       {"unsigned_clock_rollover", unsigned_clock_rollover},
+      {"observed_stale_conversion_cannot_revive_after_full_clock_cycle",
+       observed_stale_conversion_cannot_revive_after_full_clock_cycle},
       {"delayed_range_sample_never_replaces_newer_evidence",
        delayed_range_sample_never_replaces_newer_evidence},
       {"fault_names", fault_names},
