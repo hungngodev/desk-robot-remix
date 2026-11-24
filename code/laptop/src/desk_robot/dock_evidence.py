@@ -12,6 +12,7 @@ from time import monotonic
 from .aux import validate_aux
 
 _DOCK_READ_TIMEOUT_S = 2.0
+_DOCK_SAMPLE_MAX_AGE_MS = 500
 
 
 def classify_dock(dock: dict) -> str:
@@ -51,23 +52,32 @@ async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> di
     sample_sequences = []
     raw_pack_samples = []
     boot_epochs = []
+    previous_received_at = None
     for index in range(3):
         # Do not let a cancellation-ignoring alternate telemetry adapter
         # freeze the read-only dock evidence request indefinitely.
         from .controller import _bounded_head_reply
         request_at = monotonic()
+        # Individual fresh replies do not establish a continuous observation
+        # after a suspended task. Permit the requested gap plus one existing
+        # source freshness budget for scheduling delay, not an unbounded pause.
+        if (previous_received_at is not None
+                and request_at - previous_received_at
+                > gap + _DOCK_SAMPLE_MAX_AGE_MS / 1000.0):
+            return _result(robot_id, "dock_observation_window_expired", False)
         reply = await _bounded_head_reply(
             head.aux_status(), seconds=_DOCK_READ_TIMEOUT_S,
             timeout_message="Dock GPIO evidence read timed out",
         )
         # The device's age was stamped before the HTTP response reached Mac.
         # Request latency is a conservative additional lower bound on age.
-        request_ms = max(0.0, (monotonic() - request_at) * 1000.0)
+        previous_received_at = monotonic()
+        request_ms = max(0.0, (previous_received_at - request_at) * 1000.0)
         sample = validate_aux(reply, robot_id)
         dock = sample.get("dock")
         if dock is None or not dock["valid"] or not dock["present"]:
             return _result(robot_id, "dock_telemetry_unavailable", False)
-        if dock["age_ms"] + request_ms >= 500:
+        if dock["age_ms"] + request_ms >= _DOCK_SAMPLE_MAX_AGE_MS:
             return _result(robot_id, "dock_telemetry_stale_at_consumer", False)
         # Source freshness is checked in validate_aux; transport time also counts. A new HTTP
         # response by itself does NOT mean a new physical GPIO conversion.
@@ -90,7 +100,7 @@ async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> di
             # An old WROOM image without this provenance may still
             # report read-only pins, but never fresh net pack current.
             type(pack_age_ms) is int
-            and pack_age_ms + request_ms < 500,
+            and pack_age_ms + request_ms < _DOCK_SAMPLE_MAX_AGE_MS,
         ))
         snapshots.append((
             dock["present"], dock["valid"], dock["left_seated"],

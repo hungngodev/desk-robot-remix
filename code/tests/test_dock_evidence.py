@@ -481,3 +481,38 @@ def test_wroom_pack_age_field_uses_real_monitor_sample_clock():
     assert r'\"pack_age_ms\":%lu' in source
     assert "now_ms - a.gauge.monitor_at_ms" in source
     assert "a.gauge.monitor_sample_seq != 0U" in source
+
+
+@pytest.mark.parametrize("pause_after", [1, 2])
+async def test_dock_observation_expires_after_scheduling_pause_and_retry_is_fresh(
+    monkeypatch, pause_after,
+):
+    import desk_robot.dock_evidence as evidence
+
+    now = [100.0]
+    sleep_calls = [0]
+    monkeypatch.setattr(evidence, "monotonic", lambda: now[0])
+
+    async def delayed_sleep(seconds):
+        sleep_calls[0] += 1
+        now[0] += seconds + (2.0 if sleep_calls[0] == pause_after else 0.05)
+
+    monkeypatch.setattr(evidence.asyncio, "sleep", delayed_sleep)
+    head = FakeHead(fresh_samples(pause_after + 3))
+
+    expired = await observe_dock_evidence(head, "robot-01")
+    assert expired["state"] == "dock_observation_window_expired"
+    assert not expired["stable_three_samples"]
+    assert not expired["raw_pack_samples_fresh"]
+    assert not expired["charging_authorized"]
+    assert not expired["motor_authorized"]
+
+    # A subsequent request must read three new samples, not use the
+    # aborted attempt's partial observations.
+    retry = await observe_dock_evidence(head, "robot-01")
+    assert retry["state"] == "charger_reports_active"
+    assert retry["stable_three_samples"]
+    assert not retry["charging_verified"]
+    assert not retry["charging_authorized"]
+    assert not retry["motor_authorized"]
+    assert head.commands == []
