@@ -109,11 +109,12 @@ bool BerryImu::begin(TwoWire& wire, BerryModel model,
          threshold == 150 && duration == 40 &&
          pin_cfg == 0 && int_enable == 0x80;
   } else if (reading_.model == BerryModel::V1Lsm9ds0) {
-    // LSM9DS0 CTRL_REG1_XM bit 2 and CTRL_REG4_G bit 7 enable
+    // LSM9DS0 CTRL_REG1_XM bit 3 (DocID024763 table 70)
+    // and CTRL_REG4_G bit 7 enable
     // block-data-update on both six-byte reads. Without gyro BDU,
     // the sensor may update an MSB between the LSB/MSB I2C transfers.
     // The 245 dps full-scale setting remains unchanged (FS=00).
-    ok = write_byte(extra_address_, 0x20, 0x67) &&  // 100Hz XYZ + XM BDU
+    ok = write_byte(extra_address_, 0x20, 0x6f) &&  // 100Hz XYZ + XM BDU
          write_byte(extra_address_, 0x21, 0x00) &&  // +/-2g
          write_byte(gyro_address_, 0x20, 0x0f) &&   // 95Hz XYZ gyro
          write_byte(gyro_address_, 0x23, 0x80);    // gyro BDU + 245dps

@@ -14,7 +14,8 @@ int main() {
     CHECK(imu.begin(wire, BerryModel::V1Lsm9ds0, 0x6b, 0x1d));
     CHECK(imu.configured());
     CHECK(wire.writes.size() == 4);
-    CHECK(wire.wrote(0x1d, 0x20, 0x67)); // XM BDU bit 2 set
+    CHECK(wire.wrote(0x1d, 0x20, 0x6f)); // 100 Hz + XYZ + XM BDU bit 3
+    CHECK(!wire.wrote(0x1d, 0x20, 0x67)); // bit 2 is AZEN, not BDU
     CHECK(wire.wrote(0x1d, 0x21, 0x00)); // +/-2 g unchanged
     CHECK(wire.wrote(0x6b, 0x20, 0x0f)); // gyro XYZ enabled
     CHECK(wire.wrote(0x6b, 0x23, 0x80)); // gyro BDU bit 7 set
