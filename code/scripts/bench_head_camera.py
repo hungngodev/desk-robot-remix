@@ -112,6 +112,20 @@ def summarize(values: list[float]) -> dict:
     }
 
 
+def _camera_window_audio_delta(
+    samples: list[tuple[float, float, dict]], first: float | None, last: float | None,
+) -> tuple[int, dict | None]:
+    """Only count codec reads whose entire request interval lies inside video."""
+    if first is None or last is None or first >= last:
+        return 0, None
+    inside = [sample for begin, end, sample in samples if first <= begin <= end <= last]
+    if len(inside) < 2:
+        return len(inside), None
+    return len(inside), {
+        key: inside[-1][key] - inside[0][key] for key in CONCURRENT_AUDIO_COUNTERS
+    }
+
+
 async def measure(
     head, robot_id: str, *, seconds: float,
     camera_period_s: float = 1.0, status_period_s: float = 0.2,
@@ -133,7 +147,7 @@ async def measure(
     stream_intervals: list[float] = []
     sense_capture_intervals: list[float] = []
     status_times: list[float] = []
-    concurrent_audio_samples: list[tuple[float, dict]] = []
+    concurrent_audio_samples: list[tuple[float, float, dict]] = []
     concurrent_audio_errors: list[str] = []
     read_audio_reference = getattr(head, "audio_reference_status", None)
     camera_sizes: list[int] = []
@@ -143,6 +157,8 @@ async def measure(
     seen_camera_identities: set[tuple[int, int, int]] = set()
     snapshot_boot: int | None = None
     snapshot_sequence: int | None = None
+    camera_window_first: float | None = None
+    camera_window_last: float | None = None
     started = time.monotonic()
     deadline = started + seconds
 
@@ -197,6 +213,7 @@ async def measure(
         """
         nonlocal camera_error_count, previous_fingerprint
         nonlocal previous_brightness, last_scored_at
+        nonlocal camera_window_first, camera_window_last
         last_frame_at: float | None = None
         last_source_identity: tuple[int, int, int] | None = None
         try:
@@ -248,6 +265,9 @@ async def measure(
                                     f"Sense camera capture stalled for {source_gap:.2f}s"
                                 )
                         last_source_identity = identity
+                        if camera_window_first is None:
+                            camera_window_first = received
+                        camera_window_last = received
                         seen_camera_identities.add(identity)
                         camera_sizes.append(len(jpeg))
                         if score_motion and received - last_scored_at >= 1.0:
@@ -336,7 +356,7 @@ async def measure(
                         )):
                     raise ValueError("Invalid concurrent Sense AEC receipt")
                 if concurrent_audio_samples:
-                    previous = concurrent_audio_samples[-1][1]
+                    previous = concurrent_audio_samples[-1][2]
                     if (sample["boot"] != previous["boot"]
                             # The mic can be revoked and regranted between two
                             # unmuted polls. That interval cannot pass A/V.
@@ -345,7 +365,7 @@ async def measure(
                             or any(sample[key] < previous[key]
                                    for key in CONCURRENT_AUDIO_COUNTERS)):
                         raise ValueError("Concurrent Sense AEC reboot or counter regression")
-                concurrent_audio_samples.append((time.monotonic(), sample))
+                concurrent_audio_samples.append((begin, time.monotonic(), sample))
             except Exception as exc:
                 if len(concurrent_audio_errors) < 20:
                     concurrent_audio_errors.append(
@@ -377,35 +397,41 @@ async def measure(
             audio_reference_error = type(exc).__name__ + ": " + str(exc)[:110]
     concurrent_audio_delta = None
     if len(concurrent_audio_samples) >= 2:
-        first = concurrent_audio_samples[0][1]
-        last = concurrent_audio_samples[-1][1]
+        first = concurrent_audio_samples[0][2]
+        last = concurrent_audio_samples[-1][2]
         concurrent_audio_delta = {
             key: last[key] - first[key]
             for key in CONCURRENT_AUDIO_COUNTERS
         }
+    window_count, window_delta = _camera_window_audio_delta(
+        concurrent_audio_samples, camera_window_first, camera_window_last,
+    )
     # AEC samples from a different Sense boot cannot witness activity
     # alongside these camera frames, even when both counter sets advance.
     camera_boots = {identity[0] for identity in seen_camera_identities}
     audio_boot_matches_camera = (
         len(camera_boots) == 1 and bool(concurrent_audio_samples)
-        and concurrent_audio_samples[0][1]["boot"] in camera_boots
+        and concurrent_audio_samples[0][2]["boot"] in camera_boots
     )
     return {
         "concurrent_audio_samples": len(concurrent_audio_samples),
         "concurrent_audio_errors": concurrent_audio_errors[:20],
         "concurrent_audio_counter_delta": concurrent_audio_delta,
+        "camera_window_audio_samples": window_count,
+        "camera_window_audio_counter_delta": window_delta,
         "concurrent_audio_boot_matches_camera": audio_boot_matches_camera,
         "concurrent_audio_mac_span_ms": (
             round(1000 * (
-                concurrent_audio_samples[-1][0] - concurrent_audio_samples[0][0]
+                concurrent_audio_samples[-1][1] - concurrent_audio_samples[0][1]
             ), 1) if len(concurrent_audio_samples) >= 2 else None
         ),
         "concurrent_audio_driver_activity_observed": (
             stream and concurrent_audio_delta is not None
             and not concurrent_audio_errors
             and audio_boot_matches_camera
-            and concurrent_audio_delta["microphone_frames_read"] > 0
-            and concurrent_audio_delta["speaker_frames_accepted"] > 0
+            and window_delta is not None
+            and window_delta["microphone_frames_read"] > 0
+            and window_delta["speaker_frames_accepted"] > 0
             and all(concurrent_audio_delta[key] == 0 for key in (
                 "reference_underflow_reads", "reference_overwrite_reads",
                 "discarded_stale_writes", "short_output_writes",
