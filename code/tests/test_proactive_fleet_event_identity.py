@@ -134,7 +134,7 @@ async def test_authenticated_camera_receipt_to_fleet_and_speaker(
     conversation = Conversation(settings, Chat(), speaker, memory=memory)
     pet = PetController(
         settings, {}, conversation, memory, Scene(),
-        interval=0.01, speech_cooldown=0, group_window=0,
+        interval=0.01, speech_cooldown=0,
     )
     hub = CameraFrameHub(ids)
     pet.multimodal = SimpleNamespace(

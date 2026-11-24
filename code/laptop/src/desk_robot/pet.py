@@ -2084,6 +2084,7 @@ class PetController:
                             camera_source_identity=camera_identity,
                         )
                         if not stored:
+                            state.stale_camera_events += 1
                             state.suppressed += 1
                             state.last_initiative_suppression = "camera_receipt_not_admitted"
                             continue
