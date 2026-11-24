@@ -11,7 +11,7 @@ from desk_robot.simulator import SimulationVision
 
 
 def _coordinator(head):
-    robot = SimpleNamespace(id="robot-01")
+    robot = SimpleNamespace(id="robot-01", motion_enabled=True)
     settings = SimpleNamespace(
         robots=[robot], robot=lambda robot_id: robot,
         mode="simulation", max_job_seconds=10,
