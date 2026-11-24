@@ -251,3 +251,66 @@ def test_invalid_freshness_read_revokes_cached_continuity(now, max_age_s):
     fresh = gate.observe(pose(seq=4, sample_us=1_300_000), 100.3)
     assert gate.current(100.3) == fresh
     assert gate.needs_reanchor
+
+
+def test_progressive_body_clock_lag_cannot_renew_current_pose():
+    gate = PoseFence("robot-01")
+    for i in range(2):
+        now = 100.0 + i * 0.30
+        gate.observe(pose(seq=i + 1, sample_us=1_000_000 + i * 100_000),
+                     now, request_started_at=now - 0.01)
+    assert gate.current(100.30) is not None
+    for i in range(2, 7):
+        now = 100.0 + i * 0.30
+        with pytest.raises(PoseError, match="lags"):
+            gate.observe(pose(seq=i + 1, sample_us=1_000_000 + i * 100_000),
+                         now, request_started_at=now - 0.01)
+        assert gate.current(now) is None
+        assert gate.needs_reanchor
+    # A transport failure must not erase the relative clock baseline.
+    gate.invalidate("http_unavailable")
+    with pytest.raises(PoseError, match="lags"):
+        gate.observe(pose(seq=8, sample_us=1_700_000), 102.1,
+                     request_started_at=102.09)
+    # Source catch-up restores only local continuity, never map localization.
+    gate.observe(pose(seq=9, sample_us=3_200_000), 102.2,
+                 request_started_at=102.19)
+    assert gate.current(102.2) is None
+    fresh = gate.observe(pose(seq=10, sample_us=3_300_000), 102.3,
+                         request_started_at=102.29)
+    assert gate.current(102.3) is fresh
+    assert gate.needs_reanchor
+
+
+def test_matching_rate_pose_remains_current_across_many_receipts():
+    gate = PoseFence("robot-01")
+    for i in range(100):
+        now = 100.0 + i * 0.30
+        reading = gate.observe(pose(seq=i + 1, sample_us=1_000_000 + i * 300_000),
+                               now, request_started_at=now - 0.01)
+        assert gate.current(now) is (reading if i else None)
+
+
+def test_relative_lag_consumes_current_pose_freshness_budget():
+    gate = PoseFence("robot-01")
+    gate.observe(pose(), 100.0, request_started_at=99.99)
+    fresh = gate.observe(pose(seq=2, sample_us=1_100_000), 100.3,
+                         request_started_at=100.29)
+    assert gate.current(100.32) is fresh
+    assert gate.current(100.36) is None
+    assert gate.needs_reanchor
+
+
+def test_relative_clock_baseline_resets_only_for_new_identity():
+    gate = PoseFence("robot-01")
+    gate.observe(pose(), 100.0)
+    gate.observe(pose(seq=2, sample_us=1_100_000), 100.3)
+    with pytest.raises(PoseError, match="lags"):
+        gate.observe(pose(seq=3, sample_us=1_200_000), 100.6)
+    with pytest.raises(PoseError, match="re-anchor"):
+        gate.observe(pose(body_boot=10, origin=1, sample_us=10), 101.0)
+    gate.observe(pose(body_boot=10, origin=1, seq=2, sample_us=100_010), 101.1)
+    assert gate.current(101.1) is None
+    fresh = gate.observe(pose(body_boot=10, origin=1, seq=3, sample_us=200_010), 101.2)
+    assert gate.current(101.2) is fresh
+    assert gate.needs_reanchor

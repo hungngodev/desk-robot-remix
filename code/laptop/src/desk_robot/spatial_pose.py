@@ -97,6 +97,7 @@ class PoseFence:
             raise ValueError("Pose fence needs a robot identity")
         self.robot_id = robot_id
         self.last: PoseReceipt | None = None
+        self._clock_reference: PoseReceipt | None = None
         self.needs_reanchor = True
         self.blocked_reason = "no_pose"
         self._continuous = False
@@ -140,6 +141,7 @@ class PoseFence:
             if identity != old_identity:
                 self._retired.add(old_identity)
                 self.last = reading
+                self._clock_reference = reading
                 self.invalidate("origin_changed")
                 raise PoseError("Pose body origin or head boot changed; re-anchor required")
             if (reading.seq <= old.seq or reading.sample_us <= old.sample_us
@@ -159,6 +161,16 @@ class PoseFence:
                 self._failed.add(identity)
                 self.invalidate("implausible_pose_clock")
                 raise PoseError("Pose sample clock advanced implausibly")
+        # Keep the best observed relative offset for this identity. Sliding the
+        # baseline on every packet would hide a slowly growing source backlog.
+        # This is a conservative relative bound, not a synchronized clock or
+        # proof that the first sample was fresh. No unmeasured drift allowance.
+        lag = self._relative_lag_s(reading)
+        if lag > _MAX_RECEIPT_LAG_S:
+            self.invalidate("stale_body_sample")
+            raise PoseError("Pose body sample cumulatively lags local receipt clock")
+        if self._clock_reference is None or lag < 0:
+            self._clock_reference = reading
         self.last = reading
         if reading.head_boot is None:
             # Legacy packets remain readable diagnostics and replay checked,
@@ -175,6 +187,13 @@ class PoseFence:
         else:
             self._receipts.append(reading)
         return reading
+
+    def _relative_lag_s(self, reading: PoseReceipt) -> float:
+        reference = self._clock_reference
+        if reference is None:
+            return 0.0
+        return ((reading.received_at - reference.received_at)
+                - (reading.sample_us - reference.sample_us) / 1_000_000)
 
     def invalidate(self, reason: str = "missing_pose") -> None:
         """An HTTP failure or older transport invalidates all cached planning evidence."""
@@ -198,6 +217,9 @@ class PoseFence:
             return None
         age_start = (self.last.request_started_at if self.last.request_started_at is not None
                      else self.last.received_at)
+        # HTTP duration and relative source lag may overlap; use the stricter
+        # age bound rather than renewing either one at the latest receipt.
+        age_start = min(age_start, self.last.received_at - self._relative_lag_s(self.last))
         if now < self.last.received_at or not 0 <= now - age_start <= max_age_s:
             self.invalidate("stale_receipt")
             return None
