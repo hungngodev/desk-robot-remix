@@ -126,23 +126,51 @@ int main() {
     CHECK(reply.find("\"low_g_valid\":true,\"low_g_irq\":false,\"low_g_seq\":7") != std::string::npos);
     CHECK(!body.state().armed);
     CHECK(status(body, 500).find("\"low_g_valid\":false,\"low_g_irq\":false,\"low_g_seq\":7") != std::string::npos);
-    // Switch back to Berry before the old expected status assertions.
+    // Keep acquisition and status clocks advancing. Replaying the original
+    // V1 timestamp here would test provenance instead of the age boundary.
     body.set_imu_identity(1, 212, 73);
+    reading.at_ms = 501;
     body.set_imu(reading);
-
-    reply = status(body, 301);
+    reply = status(body, 701);
+    CHECK(reply.find("\"aux_id\":73,\"valid\":true") != std::string::npos);
+    CHECK(reply.find("\"age_ms\":200") != std::string::npos);
+    reply = status(body, 702);
     CHECK(reply.find("\"aux_id\":73,\"valid\":false") != std::string::npos);
     CHECK(reply.find("\"temp_valid\":false") != std::string::npos);
     CHECK(!body.state().armed);
     reading.valid = false;
+    reading.at_ms = 703;
     body.set_imu(reading);
-    reply = status(body, 122);
+    reply = status(body, 703);
     CHECK(reply.find("\"aux_id\":73,\"valid\":false") != std::string::npos);
     CHECK(reply.find("\"age_ms\":0") != std::string::npos);
+
+    // A separate fresh controller isolates identity and IRQ evidence from
+    // the original fixture's expired samples and historical counter.
+    desk_robot::BodyControl evidence(desk_robot::BodyProfile::StepperGuarded);
+    evidence.set_imu_identity(4, 0x68, 0);
+    mpu.at_ms = 1000;
+    mpu.low_g_status_valid = false;
+    evidence.set_imu(mpu);
+    reply = status(evidence, 1000);
+    CHECK(reply.find("\"family\":4,\"gyro_id\":104,\"aux_id\":0,\"valid\":false") != std::string::npos);
+    CHECK(reply.find("\"temp_raw\":344,\"temp_valid\":true") != std::string::npos);
+    CHECK(reply.find("\"low_g_valid\":false,\"low_g_irq\":false,\"low_g_seq\":7") != std::string::npos);
+    mpu.at_ms = 1050;
+    mpu.low_g_status_valid = true;
+    mpu.low_g_irq = true;
+    evidence.set_imu_identity(4, 0x68, 0x49);
+    evidence.set_imu(mpu);
+    reply = status(evidence, 1050);
+    CHECK(reply.find("\"family\":4,\"gyro_id\":104,\"aux_id\":73,\"valid\":false") != std::string::npos);
+    CHECK(reply.find("\"temp_valid\":false") != std::string::npos);
+    CHECK(reply.find("\"low_g_valid\":false,\"low_g_irq\":false,\"low_g_seq\":7") != std::string::npos);
+    CHECK(!evidence.state().armed);
 
     // Worst-case telemetry, counters, and all five range ages still fit
     // the existing head 768-byte limit, including a terminating NUL.
     reading.valid = true;
+    reading.at_ms = 704;
     for (int i = 0; i < 3; ++i) {
       reading.accel[i] = -32768;
       reading.gyro[i] = -32768;
