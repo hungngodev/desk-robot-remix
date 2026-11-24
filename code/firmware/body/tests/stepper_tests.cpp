@@ -189,6 +189,83 @@ void irregular_cadence_reversal_preserves_phase_order() {
   CHECK(drive.rate_milli_steps_per_second() == 0);
 }
 
+// These are logical coil-mask deadlines, not measured shaft motion or ISR time.
+void steady_rate_phase_spacing() {
+  constexpr std::uint32_t period_us = 6250;  // 160 half-steps/s.
+  for (int direction : {1, -1}) {
+    StepperDrive drive;
+    const auto origin = std::numeric_limits<std::uint32_t>::max() - 650000U;
+    const int requested = direction * 40;
+    drive.update(origin, requested, true);
+    run_until(drive, origin, 600000, requested);
+    CHECK(drive.rate_milli_steps_per_second() == direction * 160000);
+    auto previous = drive.mask();
+    int phase = 0;
+    while (phase < 8 && kPhases[phase] != previous) ++phase;
+    CHECK(phase < 8);
+
+    // Synchronize to an observed transition after a delayed poll. A delayed
+    // call may advance one phase, never repay a backlog of missed steps.
+    std::uint32_t now = origin + 640000U;
+    phase = (phase + direction + 8) % 8;
+    previous = drive.update(now, requested, true);
+    CHECK(previous == kPhases[phase]);
+    const auto start = now;
+    for (int step = 0; step < 160; ++step) {
+      CHECK(drive.update(now + period_us - 1, requested, true) == previous);
+      now += period_us;
+      phase = (phase + direction + 8) % 8;
+      previous = drive.update(now, requested, true);
+      CHECK(previous == kPhases[phase]);
+      CHECK(drive.update(now, requested, true) == previous);
+    }
+    CHECK(now - start == 1000000U);  // Also crosses micros() rollover.
+
+    // Irregular calls, including long pauses and identical timestamps, must
+    // still enforce the minimum interval between actual mask transitions.
+    constexpr std::uint32_t gaps[] = {0, 1, 6248, 1, 1, 37000, 6249, 1};
+    auto last_edge = now;
+    for (int repeat = 0; repeat < 20; ++repeat) {
+      for (const auto gap : gaps) {
+        now += gap;
+        const bool due = now - last_edge >= period_us;
+        if (due) {
+          phase = (phase + direction + 8) % 8;
+          last_edge = now;
+        }
+        CHECK(drive.update(now, requested, true) == kPhases[phase]);
+        CHECK(drive.rate_milli_steps_per_second() == direction * 160000);
+      }
+    }
+  }
+}
+
+void fractional_period_rounds_up() {
+  // Every nonzero command below the ceiling must use the ceiling of the
+  // fractional microsecond period, not a truncated (too-fast) interval.
+  for (int percent = 1; percent < 40; ++percent) {
+    const auto rate = static_cast<std::uint32_t>(percent * 4);
+    const auto period_us = (1000000U + rate - 1U) / rate;
+    for (int direction : {1, -1}) {
+      StepperDrive drive;
+      const int requested = direction * percent;
+      drive.update(0, requested, true);
+      run_until(drive, 0, 600000, requested);
+      CHECK(drive.rate_milli_steps_per_second() == direction * percent * 4000);
+      int phase = 0;
+      const auto before = drive.mask();
+      while (phase < 8 && kPhases[phase] != before) ++phase;
+      CHECK(phase < 8);
+      constexpr std::uint32_t edge = 1000000U;
+      phase = (phase + direction + 8) % 8;
+      CHECK(drive.update(edge, requested, true) == kPhases[phase]);
+      CHECK(drive.update(edge + period_us - 1U, requested, true) == kPhases[phase]);
+      phase = (phase + direction + 8) % 8;
+      CHECK(drive.update(edge + period_us, requested, true) == kPhases[phase]);
+    }
+  }
+}
+
 void clock_rollover_matches_normal_clock() {
   StepperDrive normal;
   StepperDrive wrapped;
@@ -215,6 +292,8 @@ int main(int argc, char** argv) {
       {"long_stall_does_not_catch_up", long_stall_does_not_catch_up},
       {"irregular_cadence_reversal_preserves_phase_order",
        irregular_cadence_reversal_preserves_phase_order},
+      {"steady_rate_phase_spacing", steady_rate_phase_spacing},
+      {"fractional_period_rounds_up", fractional_period_rounds_up},
       {"clock_rollover_matches_normal_clock", clock_rollover_matches_normal_clock}};
   int ran = 0;
   for (const auto& test : tests) {
