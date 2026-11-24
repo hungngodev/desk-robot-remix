@@ -9,6 +9,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+# Match the canonical landed-cost receipt limits; historical JSON floats
+# additionally require the aggregate to stay within the same cent-safe bound.
+MAX_BUDGET_USD = Decimal("1000000000000")
+MAX_BUDGET_UNITS = 10_000
+
 
 def _money(value, *, label: str) -> Decimal:
     """Finite nonnegative planning money, not a proof of a payable quote."""
@@ -25,6 +30,8 @@ def _money(value, *, label: str) -> Decimal:
         ) from exc
     if not amount.is_finite() or amount < 0 or not representable:
         raise ValueError(f"{label} must be a finite non-negative amount")
+    if amount > MAX_BUDGET_USD:
+        raise ValueError(f"{label} exceeds historical USD bound")
     # Historical planning output is converted to JSON floats. Nonzero
     # subcent values must not underflow to an apparent free item or fee.
     # Inspect the Decimal digits directly: quantize() can overflow for
@@ -67,6 +74,8 @@ def budget(data, shipping=None, tax=None):
             raise ValueError("Every budget item needs a nonempty name")
         if type(quantity) is not int or quantity <= 0:
             raise ValueError(f"{name}: quantity must be a positive integer")
+        if quantity > MAX_BUDGET_UNITS:
+            raise ValueError(f"{name}: quantity exceeds historical unit bound")
         if not isinstance(status, str) or not status.strip():
             raise ValueError(f"{name}: price status is required")
         if row.get("currency", "USD") != "USD":
@@ -78,10 +87,9 @@ def budget(data, shipping=None, tax=None):
             known_subtotal += _money(price, label=f"{name} unit price") * quantity
         if status not in {"verified", "owned"} or price is None:
             unresolved.append(name)
-    # A collection of individually finite prices may still overflow a
-    # normal JSON number. Never present infinite headroom as a valid result.
-    if not math.isfinite(float(known_subtotal)):
-        raise ValueError("Historical budget subtotal is not finite")
+    # Bound aggregate costs too, so JSON floats retain cent resolution.
+    if known_subtotal > MAX_BUDGET_USD:
+        raise ValueError("Historical budget subtotal exceeds historical USD bound")
     total = known_subtotal
     unknown_fees = []
     for label, fee in (("shipping", freight), ("tax", taxes)):
@@ -89,8 +97,8 @@ def budget(data, shipping=None, tax=None):
             unknown_fees.append(label)
         else:
             total += fee
-    if not math.isfinite(float(total)):
-        raise ValueError("Historical budget total is not finite")
+    if total > MAX_BUDGET_USD:
+        raise ValueError("Historical budget total exceeds historical USD bound")
     all_costs_known = not unknown_prices and not unknown_fees
     complete = not unresolved and all_costs_known
     pending_checks = [name for name, passed in checks.items() if not passed]
@@ -103,7 +111,7 @@ def budget(data, shipping=None, tax=None):
         "parts_estimate_usd": None if unknown_prices else float(known_subtotal),
         "quoted_total_usd": float(total) if complete else None,
         "planning_total_usd": None if unknown_prices else float(total),
-        "cap_usd": data["cap_usd"],
+        "cap_usd": float(cap),
         "remaining_under_cap_usd": (
             float(cap - total) if all_costs_known else None
         ),
@@ -117,6 +125,29 @@ def budget(data, shipping=None, tax=None):
             "Allowances are targets, not verified shopping prices. Confirm mechanical fit separately."
         ),
     }
+
+
+def _load_historical_json(path: Path) -> object:
+    """Reuse strict parser hooks but retain exact decimal tokens for money."""
+    from procurement_release import (
+        _finite_json_float,
+        _reject_json_constant,
+        _unique_json_object,
+    )
+
+    def exact_float(token: str) -> Decimal:
+        _finite_json_float(token)  # Preserve existing finite-range rejection.
+        return Decimal(token)
+
+    try:
+        return json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=_unique_json_object,
+            parse_float=exact_float,
+            parse_constant=_reject_json_constant,
+        )
+    except (OSError, UnicodeError, ValueError, InvalidOperation) as exc:
+        raise ValueError(f"historical budget JSON is invalid or ambiguous: {exc}") from exc
 
 
 if __name__ == "__main__":
@@ -158,11 +189,9 @@ if __name__ == "__main__":
             p.exit(2, "HOLD: use the strict first-robot receipt verifier; "
                       "historical quotes cannot authorize an order.\n")
     else:
-        from procurement_release import _load_cli_json
-
         try:
             result = budget(
-                _load_cli_json(args.bom, "historical budget"),
+                _load_historical_json(args.bom),
                 args.shipping,
                 args.tax,
             )

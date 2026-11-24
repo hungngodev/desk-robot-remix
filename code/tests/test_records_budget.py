@@ -112,6 +112,78 @@ def test_legacy_budget_cli_warns_when_partial_cost_exceeds_cap(tmp_path):
     assert "WARNING: known planning costs exceed the USD cap." in completed.stderr
 
 
+@pytest.mark.parametrize("field", ["unit_usd", "cap_usd", "shipping", "tax"])
+def test_legacy_budget_rejects_money_above_cent_safe_bound(field):
+    data = historical_quoted_budget()
+    amount = "1000000000000.01"
+    fees = {"shipping": 0, "tax": 0}
+    if field == "unit_usd":
+        data["items"][0][field] = amount
+    elif field == "cap_usd":
+        data[field] = amount
+    else:
+        fees[field] = amount
+    with pytest.raises(ValueError, match="historical USD bound"):
+        module("check_budget").budget(data, **fees)
+
+
+def test_legacy_budget_bounds_quantity_and_aggregate_cost():
+    data = historical_quoted_budget()
+    data["items"][0].update(quantity=10**100, unit_usd=0)
+    with pytest.raises(ValueError, match="historical unit bound"):
+        module("check_budget").budget(data, 0, 0)
+    data["items"][0].update(quantity=2, unit_usd="500000000000.01")
+    with pytest.raises(ValueError, match="subtotal exceeds"):
+        module("check_budget").budget(data, 0, 0)
+    data["items"][0].update(quantity=1, unit_usd="1000000000000.00")
+    data["cap_usd"] = "1000000000000.00"
+    budget = module("check_budget").budget
+    assert budget(data, 0, 0)["purchase_ready"]
+    with pytest.raises(ValueError, match="total exceeds"):
+        budget(data, "0.01", None)
+
+
+@pytest.mark.parametrize("token", ["1e-999", "10.0000000000000001"])
+def test_legacy_budget_cli_rejects_subcent_json_tokens(tmp_path, token):
+    import subprocess
+    import sys
+
+    data = historical_quoted_budget()
+    data["items"][0]["unit_usd"] = "raw-price-token"
+    path = tmp_path / "historical.json"
+    path.write_text(
+        json.dumps(data).replace('"raw-price-token"', token), encoding="utf-8",
+    )
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/check_budget.py"),
+         "--bom", str(path), "--shipping", "0", "--tax", "0"],
+        capture_output=True, text=True, timeout=15,
+    )
+    assert completed.returncode == 2
+    assert "exact USD cents" in completed.stderr
+    assert not completed.stdout.strip()
+
+
+def test_legacy_budget_cli_preserves_exact_decimal_money(tmp_path):
+    import subprocess
+    import sys
+
+    data = historical_quoted_budget()
+    data["cap_usd"] = 20.46
+    data["items"][0]["unit_usd"] = 10.23
+    path = tmp_path / "historical.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/check_budget.py"),
+         "--bom", str(path), "--shipping", "0", "--tax", "0"],
+        capture_output=True, text=True, timeout=15, check=True,
+    )
+    output = json.loads(completed.stdout)
+    assert output["quoted_total_usd"] == output["cap_usd"] == 20.46
+    assert output["historical_math_ready"] is True
+    assert output["purchase_ready"] is False
+
+
 @pytest.mark.parametrize("quantity", [-1, 0, 1.5, True, False, "2", None])
 def test_legacy_budget_rejects_nonpositive_or_noninteger_quantities(quantity):
     data = historical_quoted_budget()
