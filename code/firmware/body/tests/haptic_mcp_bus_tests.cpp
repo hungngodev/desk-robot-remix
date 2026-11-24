@@ -99,8 +99,74 @@ static void check_dock_read_dropout() {
   CHECK(wire.mcp_iodirb == 0xFB && !wire.unsafe_parallel_mux);
 }
 
+// A previously HIGH latch must be cleared at boot; a readback failure
+// must not grant haptic authority even after communication recovers.
+static void check_boot_configuration() {
+  TwoWire wire;
+  wire.mcp_olatb = 0x04;
+  wire.dock_gpioA = 0x0C;
+  desk_robot::AccessorySensors bus;
+  CHECK(bus.begin(wire));
+  CHECK(bus.haptic_ready());
+  CHECK(wire.mcp_iodirb == 0xFB && wire.mcp_olatb == 0);
+  CHECK(wire.haptic_rising_edges == 0);
+  scan(bus, 0, 48);
+  CHECK(wire.haptic_rising_edges == 0);
+
+  TwoWire failed;
+  failed.dock_gpioA = 0x0C;
+  failed.fail_mcp_latch_readback = true;
+  desk_robot::AccessorySensors unverified;
+  CHECK(unverified.begin(failed));
+  CHECK(!unverified.haptic_ready() && !unverified.request_haptic(1));
+  failed.fail_mcp_latch_readback = false;
+  scan(unverified, 0, 48);
+  CHECK(failed.mcp_olatb == 0 && failed.haptic_rising_edges == 0);
+  CHECK(!unverified.haptic_ready() && !unverified.request_haptic(49));
+
+  TwoWire rejected;
+  rejected.fail_mcp_register_write = true;
+  desk_robot::AccessorySensors absent;
+  CHECK(absent.begin(rejected)); // mux exists; mandatory dock config failed
+  CHECK(!absent.readings().dock.present);
+  CHECK(!absent.haptic_ready() && !absent.request_haptic(1));
+  CHECK(rejected.failed_mcp_writes > 0);
+  CHECK(rejected.mcp_iodirb == 0xFF && rejected.mcp_olatb == 0);
+  rejected.fail_mcp_register_write = false;
+  scan(absent, 0, 48);
+  CHECK(!absent.readings().dock.valid);
+  CHECK(!absent.haptic_ready() && rejected.haptic_rising_edges == 0);
+}
+
+// A failed deassert transaction leaves physical latch state unknown.
+// Software must refuse further pulses and retry LOW without automatic rearm.
+static void check_failed_deassert_write() {
+  TwoWire wire;
+  wire.dock_gpioA = 0x0C;
+  desk_robot::AccessorySensors bus;
+  CHECK(bus.begin(wire));
+  CHECK(bus.request_haptic(1));
+  scan(bus, 0, 48);
+  CHECK(wire.mcp_olatb == 0x04 && wire.haptic_rising_edges == 1);
+  const auto ends = wire.mcp_terminated_transmissions;
+  wire.fail_mcp_register_write = true;
+  scan(bus, 60, 132);
+  CHECK(wire.failed_mcp_writes >= 2);
+  CHECK(wire.mcp_terminated_transmissions >= ends + 2);
+  CHECK(!bus.haptic_ready() && !bus.readings().dock.valid);
+  CHECK(!bus.request_haptic(133));
+  CHECK(wire.mcp_olatb == 0x04); // fake rejected the write; not a motor timer
+  wire.fail_mcp_register_write = false;
+  scan(bus, 144, 216);
+  CHECK(wire.mcp_olatb == 0 && wire.haptic_rising_edges == 1);
+  CHECK(!bus.haptic_ready() && !bus.request_haptic(1800));
+  CHECK(wire.mcp_iodirb == 0xFB && !wire.unsafe_parallel_mux);
+}
+
 int main() {
   try {
+    check_boot_configuration();
+    check_failed_deassert_write();
     check_dock_masks();
     check_shared_port_inputs();
     check_dock_read_dropout();
