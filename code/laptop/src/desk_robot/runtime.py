@@ -113,6 +113,7 @@ class Runtime:
         self.room_context_failures = 0
         self._closed = False
         self._close_task: asyncio.Task | None = None
+        self._fatal_service_error: RuntimeError | None = None
         self._voice_stop_attempt = 0
         self._voice_stop_unconfirmed = False
 
@@ -224,6 +225,9 @@ class Runtime:
             self._room_task = asyncio.create_task(
                 self.room_feed.run(self._room_stop),
             )
+            self._room_task.add_done_callback(
+                lambda task: self._on_service_done("Shared room USB", task)
+            )
         if not any(robot.device_id for robot in self.settings.robots):
             return
         self.voice_events = VoiceEventListener(
@@ -239,6 +243,9 @@ class Runtime:
             require_turn_generations=True,
         )
         self._voice_task = asyncio.create_task(self.voice_events.run())
+        self._voice_task.add_done_callback(
+            lambda task: self._on_service_done("Native voice monitor", task)
+        )
         if self.settings.pet_autostart_enabled:
             # Boot into autonomous observation only after explicit local
             # operator consent. Current voice monitor is NOT ready yet, so
@@ -561,13 +568,45 @@ class Runtime:
         if preempt_error is not None:
             raise preempt_error
 
-    async def close(self):
-        """Finish bounded owner cleanup before propagating caller cancellation."""
+    def _on_service_done(self, label: str, task: asyncio.Task) -> None:
+        """An unexpected permanent service exit closes every runtime owner."""
+        if getattr(self, "_closed", False):
+            return  # Normal shutdown collects the existing task itself.
+        cause = None if task.cancelled() else task.exception()
+        failure = RuntimeError(f"{label} stopped unexpectedly")
+        if cause is not None:
+            failure.__cause__ = cause
+        self._fatal_service_error = failure
+        logging.getLogger(__name__).error(str(failure), exc_info=cause)
+        # Fence late voice receipts before dispatching the one cleanup owner.
+        # Ordinary serial/voice reconnect errors are handled by their loops
+        # and do not reach this permanent-exit callback.
+        shutdown = self._begin_shutdown()
+        shutdown.add_done_callback(self._observe_fatal_shutdown)
+
+    @staticmethod
+    def _observe_fatal_shutdown(task: asyncio.Task) -> None:
+        # The service failure may happen without an API lifespan waiter.
+        # Consume the cleanup result, but retain it for the next close().
+        logger = logging.getLogger(__name__)
+        if task.cancelled():
+            logger.error("Fatal runtime shutdown cancelled without confirmation")
+        elif (error := task.exception()) is not None:
+            logger.error("Fatal runtime shutdown failed", exc_info=error)
+
+    def _begin_shutdown(self) -> asyncio.Task:
         self._closed = True
+        self._voice_turn_generations = None
         task = getattr(self, "_close_task", None)
-        if task is None or task.done():
+        fatal = getattr(self, "_fatal_service_error", None)
+        if task is None or (task.done() and fatal is None):
             task = asyncio.create_task(self._close_owners())
             self._close_task = task
+        return task
+
+    async def close(self):
+        """Finish bounded owner cleanup before propagating caller cancellation."""
+        task = self._begin_shutdown()
         try:
             await asyncio.shield(task)
         except asyncio.CancelledError:
@@ -589,9 +628,18 @@ class Runtime:
                         exc_info=error,
                     )
             raise
+        except Exception as error:
+            fatal = getattr(self, "_fatal_service_error", None)
+            if fatal is not None:
+                raise fatal from error
+            raise
         finally:
-            if task.done() and self._close_task is task:
+            if (task.done() and self._close_task is task
+                    and getattr(self, "_fatal_service_error", None) is None):
                 self._close_task = None
+        fatal = getattr(self, "_fatal_service_error", None)
+        if fatal is not None:
+            raise fatal
 
     async def _close_owners(self):
         """Attempt every owner cleanup even after one unconfirmed STOP."""

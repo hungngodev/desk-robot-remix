@@ -625,6 +625,9 @@ async def test_autonomous_observation_starts_without_voice_or_motor_authority(
         ]
         assert runtime._voice_task is not None
     finally:
+        # This partial fixture does not own hardware shutdown dependencies.
+        # Retiring its fake listener explicitly is not a service crash.
+        runtime._closed = True
         hold.set()
         if runtime._voice_task is not None:
             runtime._voice_task.cancel()

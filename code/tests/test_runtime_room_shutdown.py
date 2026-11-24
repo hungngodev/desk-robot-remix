@@ -190,3 +190,122 @@ def test_cancelled_shutdown_waiter_does_not_cancel_owner_cleanup():
             )
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("service", ["voice", "room"])
+@pytest.mark.parametrize("exit_kind", ["error", "return", "cancel"])
+def test_unexpected_runtime_service_exit_closes_all_owners(monkeypatch, service, exit_kind):
+    """A permanent service exit must not leave a live runtime or turn receipt."""
+    import sys
+
+    async def scenario():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        shutdown_started = asyncio.Event()
+
+        async def run_service():
+            entered.set()
+            await release.wait()
+            if exit_kind == "error":
+                raise ValueError("permanent service failure")
+
+        class VoiceListener:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def run(self):
+                await run_service()
+
+        class RoomFeed:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def run(self, stop):
+                await run_service()
+
+        async def stop_motion():
+            shutdown_started.set()
+
+        monkeypatch.setitem(sys.modules, "serial", SimpleNamespace())
+        monkeypatch.setattr("desk_robot.runtime.RoomSerialFeed", RoomFeed)
+        monkeypatch.setattr("desk_robot.runtime.VoiceEventListener", VoiceListener)
+        monkeypatch.setattr("desk_robot.runtime.secret", lambda name: "s" * 32)
+        monkeypatch.setattr("desk_robot.dock_runtime.close_detector_pool", AsyncMock())
+
+        runtime = Runtime.__new__(Runtime)
+        runtime.settings = SimpleNamespace(
+            mode="hardware",
+            room_station_enabled=service == "room",
+            room_station_port="fake",
+            room_station_soil_dry_adc=None,
+            speech_bridge_url="http://127.0.0.1:8766",
+            speech_bridge_token_env="SPEECH_TOKEN",
+            pet_autostart_enabled=False,
+            robots=[SimpleNamespace(
+                id="robot-01", device_id="head01" if service == "voice" else "",
+            )],
+        )
+        runtime.coordinator = SimpleNamespace(
+            close=AsyncMock(side_effect=stop_motion), shutdown_stop_failures={}
+        )
+        runtime.pet = SimpleNamespace(
+            close=AsyncMock(), set_voice_monitor_ready=lambda ready: None,
+        )
+        runtime.conversation = SimpleNamespace(
+            stop=AsyncMock(),
+            speaker=SimpleNamespace(monitor_lost=AsyncMock()),
+        )
+        runtime.client = SimpleNamespace(aclose=AsyncMock())
+        runtime.multimodal = None
+        runtime._voice_task = None
+        runtime._room_task = None
+        runtime._room_stop = asyncio.Event()
+        runtime._room_dispatch_lock = threading.Lock()
+        runtime._room_dispatch_pending = None
+        runtime._room_dispatch_enqueued = False
+        runtime._closed = False
+        runtime._voice_turn_generations = {"robot-01": 7}
+
+        await runtime.start()
+        task = runtime._voice_task if service == "voice" else runtime._room_task
+        assert task is not None
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            if exit_kind == "cancel":
+                task.cancel()
+            else:
+                release.set()
+            await asyncio.wait_for(shutdown_started.wait(), timeout=1)
+            assert runtime._closed
+            assert runtime._voice_turn_generations is None
+            with pytest.raises(RuntimeError, match="stopped unexpectedly") as failure:
+                await asyncio.wait_for(runtime.close(), timeout=2)
+            if exit_kind == "error":
+                assert isinstance(failure.value.__cause__, ValueError)
+            assert runtime._room_stop.is_set()
+            assert runtime._voice_task is None
+            assert runtime._room_task is None
+            assert task.done()
+            runtime.coordinator.close.assert_awaited_once()
+            runtime.pet.close.assert_awaited_once()
+            runtime.conversation.stop.assert_awaited_once()
+            runtime.client.aclose.assert_awaited_once()
+            if service == "voice":
+                runtime.conversation.speaker.monitor_lost.assert_awaited_once()
+            with pytest.raises(RuntimeError, match="Closed runtime"):
+                await runtime.start()
+            # The fatal result is retained; a second close cannot reopen IO.
+            with pytest.raises(RuntimeError, match="stopped unexpectedly"):
+                await runtime.close()
+            runtime.coordinator.close.assert_awaited_once()
+        finally:
+            release.set()
+            if not runtime._closed:
+                runtime._closed = True
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            shutdown = getattr(runtime, "_close_task", None)
+            if shutdown is not None:
+                await asyncio.gather(shutdown, return_exceptions=True)
+
+    asyncio.run(scenario())
