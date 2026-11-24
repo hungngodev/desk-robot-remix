@@ -32,7 +32,7 @@ def setup_sources(tmp_path):
             "entry_flare_each_mm=7;\n",
         "docs/cad/remixes/remaining_fit_gauges.scad":
             "candidate_pack_body_l_mm = 86;\npower_l = 86;\n"
-            "power_w = 35;\nfit_xy = 0.4;\nwall = 2.4;\n"
+            "power_w = 35;\npower_h = 14;\nfit_xy = 0.4;\nwall = 2.4;\n"
             "m3_clearance = 3.4;\n"
             "tray_tab_l_mm = 8;\ntray_tab_w_mm = 9;\ntray_tab_offset_mm = 5;\n",
     }
@@ -340,4 +340,50 @@ def test_a4_power_tabs_strictly_above_bore_remain_provisional(tmp_path):
     manifest = source.export(tmp_path, tmp_path / "paper")
     assert manifest["source_dimensions_mm"]["power"][4:6] == [3.5, 3.5]
     assert manifest["approved_drill_holes"] == 0
+    assert manifest["actual_fit_verified"] is False
+
+
+@pytest.mark.parametrize(("old", "new"), [
+    ("candidate_pack_body_l_mm = 86;\npower_l = 86;",
+     "candidate_pack_body_l_mm = 20;\npower_l = 25;"),
+    ("power_l = 86;", "power_l = 150;"),
+    ("power_w = 35;", "power_w = 12;"),
+    ("power_w = 35;", "power_w = 100;"),
+    ("power_h = 14;", "power_h = 4;"),
+    ("power_h = 14;", "power_h = 60;"),
+])
+def test_a4_power_tray_requires_renderable_envelope(tmp_path, old, new):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(scad.read_text().replace(old, new), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="Power tray dimensions exceed OpenSCAD limits"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+def test_a4_power_tray_rejects_missing_height(tmp_path):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(scad.read_text().replace("power_h = 14;", ""), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="Missing or ambiguous source dimension: power_h"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+def test_a4_power_tray_inside_envelope_remains_provisional(tmp_path):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(
+        scad.read_text().replace("power_w = 35;", "power_w = 12.1;")
+        .replace("power_h = 14;", "power_h = 4.1;"),
+        encoding="utf-8",
+    )
+    manifest = source.export(tmp_path, tmp_path / "paper")
+    assert manifest["source_dimensions_mm"]["power"][1] == 12.1
+    assert manifest["provisional_only"] is True
     assert manifest["actual_fit_verified"] is False

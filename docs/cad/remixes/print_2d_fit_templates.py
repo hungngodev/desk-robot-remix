@@ -52,6 +52,9 @@ def values(root: Path) -> dict:
     candidate_length = scad_mm(power, "candidate_pack_body_l_mm")
     pack_l = scad_mm(power, "power_l")
     pack_w = scad_mm(power, "power_w")
+    pack_h = scad_mm(power, "power_h")
+    if not (25 < pack_l < 150 and 12 < pack_w < 100 and 4 < pack_h < 60):
+        raise ValueError("Power tray dimensions exceed OpenSCAD limits")
     fit_xy = scad_mm(power, "fit_xy")
     wall = scad_mm(power, "wall")
     if pack_l < candidate_length:
