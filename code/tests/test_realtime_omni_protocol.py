@@ -625,3 +625,49 @@ def test_duplicate_created_never_reopens_or_resets_playback_progress():
     assert wire.generated_bytes == 0
     assert wire.played_ms == 0
     assert wire.accept_output
+
+def test_superseded_response_identity_cannot_reclaim_same_epoch():
+    wire = OmniDuplexWire()
+    wire.handle_event({"type": "session.created", "session": {"epoch": 5}})
+
+    def created(response_id, epoch=5):
+        return {
+            "type": "response.created", "response_id": response_id,
+            "response": {"id": response_id,
+                         "metadata": {"duplex_event": {"epoch": epoch}}},
+        }
+
+    wire.handle_event(created("first"))
+    assert wire.handle_event(delta("first", epoch=5)) is not None
+    wire.handle_event({"type": "response.done", "response_id": "first"})
+    wire.handle_event(created("second"))
+    assert wire.handle_event(delta("second", epoch=5)) is not None
+    wire.playback_ack(response_id="second", actually_played_ms=100)
+    wire.handle_event(created("first"))
+    assert wire.response_id == "second"
+    assert wire.generated_bytes == 4800
+    assert wire.played_ms == 100
+    assert wire.handle_event(delta("first", epoch=5)) is None
+    assert wire.handle_event(delta("second", epoch=5)) is not None
+    wire.handle_event(created("third", epoch=6))
+    assert wire.response_id == "third"
+    wire.handle_event(created("second"))
+    assert wire.response_id == "third"
+
+
+def test_response_replay_tracking_never_evicts_current_epoch_identity(monkeypatch):
+    wire = OmniDuplexWire()
+    monkeypatch.setattr(wire, "MAX_RESPONSES_PER_EPOCH", 2)
+
+    def created(response_id, epoch=0):
+        return {"type": "response.created", "response_id": response_id,
+                "epoch": epoch}
+
+    wire.handle_event(created("one"))
+    wire.handle_event(created("two"))
+    with pytest.raises(RuntimeError, match="replay window exhausted"):
+        wire.handle_event(created("three"))
+    wire.handle_event(created("one"))
+    assert wire.response_id == "two"
+    wire.handle_event(created("three", epoch=1))
+    assert wire.response_id == "three"
