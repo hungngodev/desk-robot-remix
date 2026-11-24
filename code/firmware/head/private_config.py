@@ -73,7 +73,14 @@ def main():
         "sense": ("xiaozhi-sense", "desk-robot-sense-s3"),
         "waveshare": ("xiaozhi-waveshare", "desk-robot-waveshare-s3-cam"),
     }[args.board]
-    board = ROOT / "firmware/head/build" / build / "main/boards/desk-robot" / variant
+    board = ROOT.resolve() / "firmware/head/build" / build / "main/boards/desk-robot" / variant
+    # The build tree is ignored by git, but a symlink in any directory below
+    # ROOT could redirect the credential file into tracked source instead.
+    try:
+        if board.resolve(strict=True) != board:
+            p.error("Refuse a symlinked private build directory")
+    except (OSError, RuntimeError):
+        p.error("Private build directory is missing or inaccessible")
     config = json.loads((board / "config.json").read_text())
     config["builds"][0]["sdkconfig_append"] = [
         x
