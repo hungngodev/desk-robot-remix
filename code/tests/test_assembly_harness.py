@@ -393,3 +393,20 @@ def test_wiring_guide_reconciles_parent_roles_and_cap1188_address():
     assert "planned 0x29 (or the supported strapped 0x28 alternative)" in guide
     assert "150 kΩ ADDR_COMM pull-down" in guide
     assert "0x28 with ADDR_COMM tied to VDD" in guide
+
+
+def test_wiring_guide_does_not_mix_drivetrain_variants():
+    guide = (ROOT / "docs/hardware/full-feature-wiring-and-shopping.md").read_text()
+    _, body, _ = sources()
+    assert "Motor variants are mutually exclusive" in guide
+    assert "left ULN2003 stepper (STEP only)" in guide
+    assert "right ULN2003 stepper (STEP only)" in guide
+    for name, gpio in (
+        ("kLeftIn1", 25), ("kLeftIn2", 26),
+        ("kRightIn1", 27), ("kRightIn2", 32), ("kDcHeartbeatPin", 23),
+    ):
+        assert f"{name} = {gpio};" in body
+    assert "GPIO25/26 to DRV8833 AIN1/AIN2" in guide
+    assert "GPIO27/32 to BIN1/BIN2" in guide
+    assert "not a direct connection to nSLEEP" in guide
+    assert "MCP23017 GPB3 on mux 0x71 channel 5" in guide

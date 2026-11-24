@@ -68,10 +68,18 @@ No purchase or physical release is granted by this audit.
 
 ## Fixed pin wiring
 
+**Motor variants are mutually exclusive.** The following ULN2003 pin rows
+apply only to the historical stepper build (`esp32_full` or
+`esp32_stepper`), not the guarded DRV8833 alternative. The final drivetrain
+purchase remains HOLD: the stepper build lacks a physically qualified
+independent CPU-halt motor-rail cutoff. The DC build also requires its
+independent CD74HC123 cutoff and nFAULT wiring to be physically qualified.
+Do not connect or order both drivers as a single robot configuration.
+
 | Body ESP32 WROOM GPIO | Function |
 | --- | --- |
-| 13, 14, 25, 26 | left stepper |
-| 27, 32, 33, 23 | right stepper |
+| 13, 14, 25, 26 | left ULN2003 stepper (STEP only) |
+| 27, 32, 33, 23 | right ULN2003 stepper (STEP only) |
 | 18 | lift servo |
 | 19 | grip servo |
 | 16 | head uart rx |
@@ -82,6 +90,17 @@ No purchase or physical release is granted by this audit.
 | 35 | bumper nc series |
 | 36 | reserved left 38 kHz terminal dock IR demodulated input, read-only source decoder, not physically qualified |
 | 39 | reserved right 38 kHz terminal dock IR demodulated input, read-only source decoder, not physically qualified |
+
+For the **DC alternative only** (`esp32_dc_full`), the current
+[firmware-checked signal harness](one-robot-signal-harness.generated.md)
+maps GPIO25/26 to DRV8833 AIN1/AIN2 and GPIO27/32 to BIN1/BIN2.
+GPIO23 is the CPU heartbeat input to the independent CD74HC123 channel 2,
+not a direct connection to nSLEEP. DRV8833 nFAULT is active LOW and routed
+to MCP23017 GPB3 on mux 0x71 channel 5 using the documented external bias
+network; a disconnected harness must fail LOW. Verify exact carrier
+exposure of nFAULT and nSLEEP, 3.3 V logic and cutoff behavior before any
+loaded motion. Use [the DC watchdog guide](dc-motor-independent-watchdog.md)
+and the generated harness rather than repurposing the stepper table.
 
 | Head XIAO ESP32S3 Sense GPIO | Function |
 | --- | --- |
