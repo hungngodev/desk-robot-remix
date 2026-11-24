@@ -1122,3 +1122,38 @@ def test_decoded_room_observation_carries_validated_station_provenance():
     # Rejected foreign frames cannot advance acquisition counters.
     valid_next = decoder.accept(json.dumps(frame(seq=24, clock=4000)), now=4.0)
     assert valid_next.station_id == "room-pod-01" and valid_next.seq == 24
+
+
+def test_cancelled_room_reader_does_not_reconnect_after_worker_error():
+    """A transport failure during shutdown cannot swallow cancellation."""
+    async def scenario():
+        entered = threading.Event()
+        exiting = threading.Event()
+        stop = asyncio.Event()
+        feed = RoomSerialFeed("/dev/cu.test", lambda observation: None)
+        calls = []
+
+        def failing_reader(running):
+            calls.append(1)
+            entered.set()
+            # Wait for the actual cancellation fence, not a timing guess.
+            while running():
+                if exiting.wait(timeout=0.01):
+                    return
+            raise OSError("USB disconnected during cancellation")
+
+        feed._read_port = failing_reader
+        task = asyncio.create_task(feed.run(stop))
+        try:
+            assert await asyncio.to_thread(entered.wait, 2)
+            task.cancel()
+            done, _ = await asyncio.wait({task}, timeout=0.75)
+            assert task in done
+            assert task.cancelled()
+            assert len(calls) == 1
+        finally:
+            stop.set()
+            exiting.set()
+            await asyncio.gather(task, return_exceptions=True)
+
+    asyncio.run(scenario())

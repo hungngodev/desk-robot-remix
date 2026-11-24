@@ -455,6 +455,10 @@ class RoomSerialFeed:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                # shield() can propagate a serial error during the join.
+                # Once cancellation was observed, never restart the reader.
+                if cancelled:
+                    raise asyncio.CancelledError from exc
                 self.last_error = type(exc).__name__
             finally:
                 reader_stop.set()
