@@ -1783,3 +1783,40 @@ async def test_explicit_stop_cannot_release_fleet_with_live_cancelled_child(sett
     finally:
         release.set()
         await c.close()
+
+
+async def test_stalled_keepalive_ack_aborts_manual_job_before_settling(settings):
+    c, head = make(settings)
+    entered = asyncio.Event()
+    halted = asyncio.Event()
+    original = head.command
+    attempts = 0
+
+    async def missing_heartbeat(command):
+        nonlocal attempts
+        if command == "keepalive":
+            attempts += 1
+            entered.set()
+            await asyncio.Event().wait()
+        result = await original(command)
+        if command == "halt":
+            halted.set()
+        return result
+
+    head.command = missing_heartbeat
+    await c.operator_arm("robot-01")
+    job = c.manual("robot-01", "lift 110")
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=0.5)
+        # Manual settling takes two seconds. A missing heartbeat must cancel
+        # that job, not wait for completion or the overall operation deadline.
+        await asyncio.wait_for(halted.wait(), timeout=1.0)
+        await asyncio.wait_for(c.tasks[job.id], timeout=0.5)
+        assert job.state == "failed"
+        assert "keepalive acknowledgement timeout" in job.error
+        assert job.result is None
+        assert attempts == 1
+        assert not head.armed
+        assert c._fleet_motion_owner is None
+    finally:
+        await c.close()

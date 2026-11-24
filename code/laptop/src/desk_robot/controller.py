@@ -458,15 +458,29 @@ class Coordinator:
         self.tasks[job.id] = asyncio.create_task(self._run(job, work))
         return job
 
-    async def _keepalive(self, robot_id: str):
+    async def _keepalive(self, robot_id: str, acknowledged: asyncio.Event):
         while True:
             await self.heads[robot_id].command("keepalive")
+            acknowledged.set()
             await asyncio.sleep(0.1)
+
+    async def _watch_keepalive(self, acknowledged: asyncio.Event):
+        # This separate task remains responsive even if the command adapter
+        # stalls or ignores cancellation. Allow less than the local 500 ms
+        # watchdog window between host receipts; this is not device timing.
+        while True:
+            try:
+                async with asyncio.timeout(0.4):
+                    await acknowledged.wait()
+            except TimeoutError as exc:
+                raise OperationError("WROOM keepalive acknowledgement timeout") from exc
+            acknowledged.clear()
 
     async def _run(self, job: Job, work):
         async with self.locks[job.robot_id]:
             job.state = "running"
             keeper = None
+            watchdog = None
             operation = None
             try:
                 # A head can disconnect, touch can be pressed and a floor
@@ -476,11 +490,13 @@ class Coordinator:
                 await self.heads[job.robot_id].command(
                     "arm"
                 )  # only after consuming operator permit
-                keeper = asyncio.create_task(self._keepalive(job.robot_id))
+                acknowledged = asyncio.Event()
+                keeper = asyncio.create_task(self._keepalive(job.robot_id, acknowledged))
+                watchdog = asyncio.create_task(self._watch_keepalive(acknowledged))
                 operation = asyncio.create_task(work(job))
                 # A parent task can finish or be cancelled again while one
                 # of these children is still unwinding. Keep the true owners.
-                self._motion_children[job.id] = (keeper, operation)
+                self._motion_children[job.id] = (keeper, watchdog, operation)
                 # A failed keepalive cancels the operation immediately; do not continue blindly.
                 # Exploration is a single persistent operator-approved job;
                 # never require another two-minute token while it is safely
@@ -489,8 +505,11 @@ class Coordinator:
                 timeout = None if job.kind == "exploration" else self.settings.max_job_seconds
                 async with asyncio.timeout(timeout):
                     done, _ = await asyncio.wait(
-                        {keeper, operation}, return_when=asyncio.FIRST_COMPLETED
+                        {keeper, watchdog, operation}, return_when=asyncio.FIRST_COMPLETED
                     )
+                    if watchdog in done:
+                        await watchdog
+                        raise OperationError("Keepalive watchdog ended unexpectedly")
                     if keeper in done:
                         await keeper
                         raise OperationError("Keepalive ended unexpectedly")
@@ -507,7 +526,7 @@ class Coordinator:
                 job.state = "failed"
                 job.error = str(exc) or type(exc).__name__
             finally:
-                for task in (operation, keeper):
+                for task in (operation, keeper, watchdog):
                     if task is not None and not task.done():
                         task.cancel()
                 # Dispatch WROOM stop before potentially slow canceled camera
@@ -522,7 +541,7 @@ class Coordinator:
                 except Exception as exc:
                     job.error = f"{job.error or ''}; STOP failed: {exc}; rely on body watchdog"
                     job.state = "failed"
-                pending = [t for t in (operation, keeper) if t is not None]
+                pending = [t for t in (operation, keeper, watchdog) if t is not None]
                 unresponsive: set[asyncio.Task] = set()
                 if pending:
                     done, unresponsive = await asyncio.wait(
