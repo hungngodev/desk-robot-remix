@@ -674,3 +674,21 @@ async def test_ollama_token_exhaustion_aborts_head_and_keeps_only_sent_private_t
         for message in history
     )
     assert conversation.active is None
+
+
+@pytest.mark.parametrize("fragments", [[""], [" \t\n"], [" " * 200, "\t\n"]])
+async def test_ollama_rejects_stream_without_speakable_content(fragments):
+    frames = [
+        {"message": {"content": fragment}, "done": index == len(fragments) - 1}
+        for index, fragment in enumerate(fragments)
+    ]
+    with pytest.raises(RuntimeError, match="empty streamed speech"):
+        _ = [segment async for segment in ollama_speech_segments(chunks(frames))]
+
+
+async def test_ollama_accepts_padding_around_emitted_sentence():
+    frames = [
+        {"message": {"content": "  Hello there. "}, "done": False},
+        {"message": {"content": " \t\n"}, "done": True},
+    ]
+    assert [s async for s in ollama_speech_segments(chunks(frames))] == ["Hello there."]

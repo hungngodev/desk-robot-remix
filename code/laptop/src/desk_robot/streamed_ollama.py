@@ -40,6 +40,7 @@ async def ollama_speech_segments(
         raise ValueError("Invalid streaming speech limits")
     buffered = ""
     count = 0
+    emitted = False
     done = False
     async for line in lines:
         if not line.strip():
@@ -81,6 +82,7 @@ async def ollama_speech_segments(
         while (piece := _cut(buffered, target)) is not None:
             sentence, buffered = piece
             if sentence:
+                emitted = True
                 yield sentence
         if packet.get("done") is True:
             done = True
@@ -89,5 +91,5 @@ async def ollama_speech_segments(
         raise RuntimeError("Ollama streaming response ended without done marker")
     if buffered.strip():
         yield buffered.strip()
-    if not count:
+    elif not emitted:
         raise RuntimeError("Ollama returned empty streamed speech")
