@@ -243,3 +243,39 @@ def test_handling_calibration_rejects_conflicting_quiet_gravity(opposing_count):
         row["body"]["imu"]["acc"] = [0, 0, -16384]
     with pytest.raises(ValueError, match="conflicting gravity vectors"):
         analyze(rows)
+
+
+def test_handling_calibration_preserves_identified_robot():
+    rows = trials()
+    for row in rows:
+        row["body"]["robot_id"] = "robot-01"
+    report = analyze(rows)
+    assert report["robot_id"] == "robot-01"
+    assert report["thresholds_physically_qualified"] is False
+    assert report["motor_authorization"] is False
+
+
+def test_handling_calibration_legacy_unidentified_log_remains_unattested():
+    report = analyze(trials())
+    assert report["robot_id"] is None
+    assert report["thresholds_physically_qualified"] is False
+
+
+@pytest.mark.parametrize("other_id", ["robot-02", None, "../robot-01", ""])
+def test_handling_calibration_rejects_mixed_or_invalid_robot_identity(other_id):
+    rows = trials()
+    for row in rows:
+        row["body"]["robot_id"] = "robot-01"
+    rows[8]["body"]["robot_id"] = other_id
+    with pytest.raises(ValueError, match="robot identit"):
+        analyze(rows)
+
+
+@pytest.mark.parametrize("missing_index", [0, 8])
+def test_handling_calibration_rejects_partial_robot_identity(missing_index):
+    rows = trials()
+    for row in rows:
+        row["body"]["robot_id"] = "robot-01"
+    del rows[missing_index]["body"]["robot_id"]
+    with pytest.raises(ValueError, match="Do not mix robot identities"):
+        analyze(rows)

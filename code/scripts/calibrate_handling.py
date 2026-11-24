@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import re
 from pathlib import Path
 
 from desk_robot.handling import (
@@ -60,7 +61,7 @@ def analyze(records: list[dict]) -> dict:
     groups: dict[str, list[tuple[tuple[float, ...], tuple[float, ...]]]] = {
         "upright": [], "tilted": [], "shaking": [],
     }
-    boot_id = firmware = mount = None
+    boot_id = firmware = mount = robot_id = None
     last_sample = last_time = None
     first_sample = first_time = None
     for record in records:
@@ -75,6 +76,16 @@ def analyze(records: list[dict]) -> dict:
         decoded = raw_mpu6050(body)
         if decoded is None:
             raise ValueError("Each frame needs fresh stationary WROOM MPU6050 evidence")
+        observed_robot = body.get("robot_id")
+        if "robot_id" in body and (
+            type(observed_robot) is not str
+            or not re.fullmatch(r"[A-Za-z0-9_-]{1,40}", observed_robot)
+        ):
+            raise ValueError("Invalid measured-trial robot identity")
+        if first_sample is None:
+            robot_id = observed_robot
+        elif observed_robot != robot_id:
+            raise ValueError("Do not mix robot identities or unidentified trials")
         imu = body["imu"]
         if boot_id is None:
             boot_id = imu["boot_id"]
@@ -185,6 +196,7 @@ def analyze(records: list[dict]) -> dict:
             shake_choice > lower - 50):
         raise ValueError("Measured normal and shaken acceleration do not separate")
     return {
+        "robot_id": robot_id,
         "firmware_commit": firmware,
         "mount_id": mount,
         "wroom_boot_id": boot_id,
