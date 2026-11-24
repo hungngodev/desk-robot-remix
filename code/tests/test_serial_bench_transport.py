@@ -153,3 +153,59 @@ def test_failed_transaction_does_not_publish_success_receipt(monkeypatch):
     with pytest.raises(TimeoutError):
         transact(port, "stop", receipt=receipt)
     assert receipt == {}
+
+
+@pytest.mark.parametrize("command", ["drive 10 10", "drive 10 10 100"])
+def test_valid_drive_duration_is_resolved_before_actuation(monkeypatch, capsys, command):
+    status = {
+        "backend": "stepper_28byj48", "armed": False,
+        "touch": {"active": False}, "safety": {"ready": False},
+        "ranges": {
+            "present_mask": 31, "valid_mask": 31,
+            "mm": [45] * 5, "age_ms": [3] * 5,
+        },
+    }
+
+    class CommandPort(FakePort):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def reset_input_buffer(self):
+            pass
+
+        def sleep(self, seconds):
+            self.now += seconds
+
+        def readline(self, size):
+            assert size == 1920
+            self.now += 0.1
+            current = self.writes[-1].decode("ascii").rstrip("\n")
+            if current == "status":
+                return json.dumps(status).encode("ascii") + b"\n"
+            if current == "rearm":
+                return b"OK rearm\n"
+            ack = transact.__globals__["expected_ack"](current)
+            return ack.encode("ascii") + b"\n"
+
+    port = CommandPort([])
+    monkeypatch.setitem(
+        transact.__globals__, "time",
+        SimpleNamespace(monotonic=lambda: port.now, sleep=port.sleep),
+    )
+    monkeypatch.setitem(
+        transact.__globals__, "serial", SimpleNamespace(Serial=lambda *a, **kw: port),
+    )
+    monkeypatch.setattr(sys, "argv", [
+        "serial_bench.py", "--port", "fake", "--command", command, "--local-rearm",
+    ])
+    transact.__globals__["main"]()
+    assert port.writes[:4] == [
+        b"status\n", b"rearm\n", b"arm\n", (command + "\n").encode("ascii"),
+    ]
+    assert port.writes[4:-1]
+    assert set(port.writes[4:-1]) == {b"keepalive\n"}
+    assert port.writes[-1] == b"stop\n"
+    assert "stop acknowledged" in capsys.readouterr().out

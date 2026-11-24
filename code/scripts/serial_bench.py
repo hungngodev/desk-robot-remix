@@ -320,6 +320,13 @@ def main():
             p.error("Choose bounded drive/lift/grip or a stop/disarm")
         if args.local_rearm and op in {"stop", "disarm"}:
             p.error("Stopping does not require and must not invoke rearm")
+        # validate_command accepts an omitted drive duration (250ms). Compute
+        # this before opening USB or issuing motion, never after actuation.
+        if op == "drive":
+            tokens = args.command.split()
+            duration = (int(tokens[3]) if len(tokens) == 4 else 250) / 1000 + 0.05
+        else:
+            duration = 1.5
 
     with serial.Serial(args.port, 115200, timeout=0.03, write_timeout=0.15) as port:
         # Opening USB may reset the dev board. Boot starts disarmed even if
@@ -403,9 +410,6 @@ def main():
             transact("rearm")  # Direct body USB only; the guard can reject it.
             transact("arm")
             transact(args.command)
-            duration = (
-                int(args.command.split()[3]) / 1000 + 0.05 if op == "drive" else 1.5
-            )
             deadline = time.monotonic() + duration
             while time.monotonic() < deadline:
                 transact("keepalive")
