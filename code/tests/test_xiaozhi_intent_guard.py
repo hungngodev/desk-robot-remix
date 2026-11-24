@@ -171,3 +171,80 @@ async def test_pinned_intent_remembers_generation_before_slow_llm_detection(
     resume.set()
     assert await asyncio.wait_for(task, 1) is True
     assert received == [4]
+
+
+@pytest.mark.parametrize("phase", [
+    "stt_tool", "stt_context", "dispatch_generation",
+    "dispatch_reconnect", "current", "nonrobot",
+])
+async def test_intent_dispatch_generation_boundary(monkeypatch, phase):
+    """A thread-side generation check cannot authorize later loop dispatch."""
+    bridge = ModuleType("desk_robot_bridge")
+    bridge.voice_turn_generation = {"head-01": 4}
+    monkeypatch.setitem(sys.modules, "desk_robot_bridge", bridge)
+    submitted, invoked, spoken, reports, history = [], [], [], [], []
+
+    async def send_stt(conn, _text):
+        if phase.startswith("stt_"):
+            bridge.voice_turn_generation["head-01"] = 5
+            conn.client_abort = True
+
+    async def run_tool(conn, arguments):
+        invoked.append(arguments["name"])
+        return SimpleNamespace(action=2, result=None, response="current result")
+
+    class Config(dict):
+        def get(self, key, default=None):
+            # This executes in the thread after its initial generation check
+            # but before run_coroutine_threadsafe schedules the tool.
+            if phase == "dispatch_generation":
+                bridge.voice_turn_generation["head-01"] = 5
+            elif phase == "dispatch_reconnect":
+                bridge.connections["head-01"] = object()
+            return super().get(key, default)
+
+    conn = SimpleNamespace(
+        device_id="head-01",
+        config=Config(tool_call_timeout=2),
+        executor=SimpleNamespace(submit=submitted.append),
+        func_handler=SimpleNamespace(handle_llm_function_call=run_tool),
+        logger=SimpleNamespace(bind=lambda **kw: SimpleNamespace(
+            error=lambda *_: None, debug=lambda *_: None)),
+        dialogue=SimpleNamespace(put=history.append),
+        loop=asyncio.get_running_loop(),
+        client_abort=False,
+    )
+    bridge.connections = {"head-01": conn}
+    namespace = {
+        "json": json, "uuid": uuid, "asyncio": asyncio, "TAG": "intent",
+        "Message": lambda **kw: SimpleNamespace(**kw),
+        "send_stt_message": send_stt,
+        "enqueue_tool_report": lambda *a, **kw: reports.append((a, kw)),
+        "speak_txt": lambda _conn, text: spoken.append(text),
+        "Action": SimpleNamespace(RESPONSE=2, REQLLM=3, ERROR=-1, NOTFOUND=0),
+        "ActionResponse": lambda **kw: SimpleNamespace(**kw),
+    }
+    exec(source_function("process_intent_result"), namespace)
+    function = (
+        "result_for_context" if phase == "stt_context" else "desk_robot_pickup"
+    )
+    intent = json.dumps({"function_call": {
+        "name": function, "arguments": {"target": "key"},
+    }})
+    result = await namespace["process_intent_result"](
+        conn, intent, "pick up key",
+        expected_generation=None if phase == "nonrobot" else 4,
+    )
+    assert result is True
+    if phase.startswith("stt_"):
+        assert submitted == []
+        assert conn.client_abort is True
+        assert reports == []
+    else:
+        assert len(submitted) == 1
+        await asyncio.wait_for(asyncio.to_thread(submitted[0]), 3)
+    if phase in {"current", "nonrobot"}:
+        assert invoked == ["desk_robot_pickup"]
+        assert spoken == ["current result"]
+    else:
+        assert invoked == spoken == history == []

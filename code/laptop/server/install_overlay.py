@@ -214,6 +214,36 @@ def patch_intent_speech_guard(source: str) -> str:
         '                        if current_utterance():\n'
         '                            speak_txt(conn, llm_result)\n',
     )
+    # STT delivery can suspend while a newer human turn sets client_abort.
+    for spaces in (12, 16):
+        indent = " " * spaces
+        stt = indent + "await send_stt_message(conn, original_text)\n"
+        reset = indent + "conn.client_abort = False\n"
+        source = once(
+            source, "\n" + stt + reset,
+            "\n" + stt + indent + "if not current_utterance():\n"
+            + indent + "    return True\n" + reset,
+        )
+    # The thread's check cannot authorize an event-loop coroutine that
+    # starts after a different human turn or a replacement head connects.
+    source = once(
+        source,
+        '            def process_function_call():\n',
+        '            async def dispatch_current_tool():\n'
+        '                if not current_utterance():\n'
+        '                    return None\n'
+        '                return await conn.func_handler.handle_llm_function_call(\n'
+        '                    conn, function_call_data\n'
+        '                )\n\n'
+        '            def process_function_call():\n',
+    )
+    source = once(
+        source,
+        '                        conn.func_handler.handle_llm_function_call(\n'
+        '                            conn, function_call_data\n'
+        '                        ),\n',
+        '                        dispatch_current_tool(),\n',
+    )
     # Synchronous result branches have no await once the turn is checked;
     # only the possibly slow nested replyResult requires a second fence.
     return source
