@@ -187,6 +187,9 @@ async def detect_object_frame(
         last_clock_us = current
         if current >= query.deadline_us:
             return "deadline_expired"
+        # Validate capture metadata before doing arithmetic on an untrusted frame.
+        if type(frame.captured_us) is not int or frame.captured_us < 0:
+            return "invalid_frame"
         if current - frame.captured_us > fresh_us:
             return "frame_expired"
         return _frame_valid(frame, query, owner, now_us=current, fresh_us=fresh_us)
