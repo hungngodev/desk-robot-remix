@@ -307,6 +307,73 @@ static void guarded_directional_drive_rejects_unqualified_sweep() {
         std::string::npos);
 }
 
+// Every local trip cancels the active pulse, not merely future ARM requests.
+// Reverse/pivot clearance is not qualified: recovery must never move blindly.
+static void local_trip_blocks_forward_and_reverse_replay() {
+  using desk_robot::BodyProfile;
+  for (const auto profile : {BodyProfile::StepperGuarded, BodyProfile::DcGuarded}) {
+    // Four floor lanes, front obstacle, raw bumper and CPU cutoff notification.
+    // A CPU cutoff notification is not a mechanical wheel-stall detector.
+    for (std::uint8_t fault = 0; fault < 7; ++fault) {
+      desk_robot::CliffGuard guard;
+      CHECK(guard.configure(config()));
+      fresh(guard, 10);
+      desk_robot::BodyControl body(profile, &guard);
+      CHECK(send(body, "rearm", 10, true) == "OK rearm");
+      CHECK(send(body, "arm", 10) == "OK arm");
+      CHECK(send(body, "drive 40 40 250", 10) ==
+            "OK drive left=40 right=40 ms=250");
+      CHECK(body.state().armed && body.state().left == 40 &&
+            body.state().right == 40 && body.drive_remaining(10) == 250);
+      if (fault < 5) {
+        guard.sample(fault, fault < 4 ? 80 : 30, true, 11);
+        // A queued drive arriving before the next scheduled tick must still
+        // execute the local safety policy before processing the command.
+        CHECK(send(body, "drive 40 40 250", 11) == "ERR drive disarmed");
+      } else if (fault == 5) {
+        body.sample_bumper_input(true);
+      } else {
+        body.motor_watchdog_trip();
+      }
+      CHECK(!body.state().armed && body.state().left == 0 &&
+            body.state().right == 0 && body.drive_remaining(11) == 0);
+      CHECK(body.state().servos_attached);
+
+      if (fault < 5)
+        CHECK(send(body, "rearm", 11, true) == "ERR rearm safety_interlock");
+      else if (fault == 5)
+        CHECK(send(body, "rearm", 11, true) == "ERR rearm bumper_active");
+      const char* arm_error = fault < 5 ? "ERR arm safety_interlock" :
+          fault == 5 ? "ERR arm bumper_latched" : "ERR arm motor_watchdog_latched";
+
+      fresh(guard, 12);
+      body.sample_bumper_input(false);
+      // Both command authorities must obey the latch. Neither healthy sensor
+      // recovery, STOP, keepalive nor another ARM may resurrect a drive lease.
+      for (bool local : {false, true}) {
+        CHECK(send(body, "stop", 12, local) == "OK stop");
+        CHECK(send(body, "keepalive", 12, local) == "ERR keepalive disarmed");
+        CHECK(send(body, "arm", 12, local) == arm_error);
+        for (const char* command : {"drive 40 40 250", "drive -40 -40 250",
+                                    "drive 40 -40 250"}) {
+          CHECK(send(body, command, 12, local) == "ERR drive disarmed");
+          CHECK(!body.state().armed && body.state().left == 0 &&
+                body.state().right == 0 && body.drive_remaining(12) == 0);
+        }
+      }
+      CHECK(send(body, "rearm", 12) == "ERR rearm local_only");
+      CHECK(send(body, "rearm", 12, true) == "OK rearm");
+      CHECK(!body.state().armed && body.drive_remaining(12) == 0);
+      CHECK(send(body, "arm", 12) == "OK arm");
+      CHECK(body.state().left == 0 && body.state().right == 0 &&
+            body.drive_remaining(12) == 0);
+      CHECK(send(body, "drive -40 -40 250", 12) ==
+            "ERR drive directional_clearance_unqualified");
+      CHECK(body.state().left == 0 && body.state().right == 0);
+    }
+  }
+}
+
 static void fault_holds_payload_and_requires_rearm() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -3075,6 +3142,7 @@ int main() {
     std::cout << "PASS head receiver cannot borrow USB recovery authority\n";
     guarded_directional_drive_rejects_unqualified_sweep();
     std::cout << "PASS guarded reverse and turns need calibrated swept space\n";
+    local_trip_blocks_forward_and_reverse_replay();
     fault_holds_payload_and_requires_rearm();
     std::cout << "PASS fault holds payload and requires explicit rearm\n";
     stale_read_stops_before_watchdog();
