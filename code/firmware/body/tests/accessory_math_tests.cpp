@@ -4,8 +4,48 @@
 #include <iostream>
 #include <stdexcept>
 #define CHECK(x) do { if (!(x)) throw std::runtime_error(#x); } while (false)
+// Verify quantization against exact rational intervals, not a second copy
+// of the production division. All intermediate arithmetic is signed 64-bit.
+static void check_floor(std::int64_t actual, std::int64_t numerator,
+                        std::int64_t denominator) {
+  CHECK(actual * denominator <= numerator);
+  CHECK(numerator < (actual + 1) * denominator);
+}
+static void check_register_precision() {
+  for (std::uint32_t code = 0; code <= 0xffffU; ++code) {
+    const auto raw = static_cast<std::uint16_t>(code);
+    const std::int64_t n = code;
+    check_floor(desk_robot::sht_temp_centi(raw),
+                17500LL * n - 4500LL * 65535, 65535);
+    const std::int64_t humidity = 12500LL * n - 600LL * 65535;
+    const auto rh = desk_robot::sht_humidity_centi(raw);
+    if (humidity <= 0) CHECK(rh == 0);
+    else if (humidity >= 10000LL * 65535) CHECK(rh == 10000);
+    else check_floor(rh, humidity, 65535);
+    // MAX17048 VCELL: 78.125 uV/LSB; SOC: 1/256 percent/LSB.
+    check_floor(desk_robot::max17048_cell_mv(raw), 78125LL * n, 1000000);
+    check_floor(desk_robot::max17048_soc_centi(raw), 100LL * n, 256);
+    // INA226 bus voltage has a 15-bit unsigned data field.
+    if (code <= 0x7fffU)
+      check_floor(desk_robot::ina226_bus_mv(raw), 1250LL * n, 1000);
+    int uv = 123456;
+    if (code == 0x7fffU || code == 0x8000U) {
+      CHECK(!desk_robot::ina226_shunt_uv_from_raw(raw, uv));
+      CHECK(uv == 123456);
+      continue;
+    }
+    // Explicit two's-complement oracle; avoid an implementation-defined
+    // narrowing cast in the expected value. Quantization is toward zero.
+    const std::int64_t signed_code = code < 0x8000U ? n : n - 65536;
+    CHECK(desk_robot::ina226_shunt_uv_from_raw(raw, uv));
+    if (signed_code < 0)
+      check_floor(-static_cast<std::int64_t>(uv), -5 * signed_code, 2);
+    else check_floor(uv, 5 * signed_code, 2);
+  }
+}
 int main() {
   try {
+    check_register_precision();
     const std::uint8_t known[2] = {0xBE, 0xEF};
     CHECK(desk_robot::sensirion_crc(known, 2) == 0x92);
     CHECK(desk_robot::sht_temp_centi(0) == -4500);
