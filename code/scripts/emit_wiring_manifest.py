@@ -197,6 +197,54 @@ def verify(plan: dict, body: str, head: str) -> None:
                 or {d["name"] for d in devices} != expected.keys()
                 or any(d["address"] not in expected[d["name"]] for d in devices)):
             raise ValueError(f"Accessory lane {channel} sensor identity drift")
+    # A haptic edge is NOT a motor supply. Preserve the selected candidate
+    # CD74HC123 channel 1 pinout and protected low-side topology; the
+    # independent channel 2 watchdog remains a mutually exclusive DC profile.
+    # TI CD74HC123 Rev F, page 2 (pinout and truth table).
+    haptic = plan.get("haptic_output_contract")
+    expected_haptic = {
+        "timer_ic": "CD74HC123",
+        "logic_supply_v": 3.3,
+        "mux_address_7bit": 113,
+        "mux_channel": 5,
+        "expander_address_7bit": 32,
+        "trigger_gpio": "GPB2",
+        "trigger_pin": 2,
+        "trigger_default": "LOW",
+        "input_a_pin": 1,
+        "input_a_level": "LOW",
+        "reset_pin": 3.0,
+        "reset_level": "HIGH",
+        "pulse_q_pin": 13,
+        "inverted_q_pin": 4,
+        "inverted_q_connection": "NC",
+        "vcc_pin": 16,
+        "gnd_pin": 8,
+        "timing_cx_pin": 14,
+        "timing_rxcx_pin": 15,
+        "timing_resistor_to": "3V3",
+        "timing_resistor_ohm": 180000,
+        "timing_capacitor_nf": 1000,
+        "decoupling_capacitor_nf": 100,
+        "driver_ic": "AO3400",
+        "driver_topology": "low_side",
+        "gate_series_resistor_required": True,
+        "trigger_pulldown_required": True,
+        "gate_pulldown_required": True,
+        "motor_nominal_v": 3.0,
+        "motor_positive_connection": "rated_motor_supply",
+        "motor_negative_connection": "mosfet_drain",
+        "mosfet_source_connection": "common_ground",
+        "flyback_anode_connection": "mosfet_drain",
+        "flyback_cathode_connection": "motor_positive",
+        "physical_qualified": False,
+    }
+    if (not isinstance(haptic, dict)
+            or any(type(haptic.get(key)) is not type(value) or haptic[key] != value
+                   for key, value in expected_haptic.items())
+            or not isinstance(haptic.get("physical_release"), str)
+            or not haptic["physical_release"].startswith("HOLD ")):
+        raise ValueError("Unqualified or changed haptic one-shot wiring contract")
     # Battery and wheel telemetry must not be silently moved to another
     # mux lane while retaining individually valid I2C addresses. This is
     # a declared harness contract, not proof of an assembled device.
@@ -323,9 +371,27 @@ def render(plan: dict, body: str, head: str) -> str:
         "3.3V input; closes LOW to GND", "Source polled; physically unqualified")
     row("MCP23017 GPB1", "optional PIR output",
         "3.3V input; active HIGH", "Source polled; physically unqualified")
-    row("MCP23017 GPB2", "CD74HC123 rising-edge haptic trigger",
+    row("MCP23017 GPB2", "CD74HC123 rising-edge haptic trigger (1B pin 2)",
         "3.3V lab-only edge, not motor current; external defined LOW at boot",
-        "Source gated in esp32_full_haptic_lab; physical one-shot NOT qualified")
+        "Source gated in esp32_full_haptic_lab and esp32_dc_integrated_lab; physical one-shot NOT qualified")
+    row("Regulated 3.3V logic rail", "CD74HC123 VCC pin 16",
+        "100nF local bypass to ground; HC not HCT",
+        "Haptic bench candidate only")
+    row("Common logic and motor return", "CD74HC123 GND pin 8 and AO3400 source",
+        "Shared reference; motor current stays off logic signal wires",
+        "Haptic bench candidate only")
+    row("Logic LOW / HIGH", "CD74HC123 1A pin 1 LOW / 1CLR pin 3 HIGH",
+        "GPB2 externally pulled LOW; verify startup and reset",
+        "Haptic bench candidate only")
+    row("180kOhm timing resistor to 3.3V", "CD74HC123 1RxCx pin 15",
+        "1uF candidate capacitor between pin 15 and 1Cx pin 14",
+        "Timing at actual 3.3V NOT measured")
+    row("CD74HC123 1Q pin 13", "AO3400 gate through series resistor",
+        "External gate pulldown; inverted Q pin 4 unused",
+        "Haptic bench candidate only")
+    row("Rated regulated 3V motor supply", "Coin motor positive; motor negative to AO3400 drain",
+        "Flyback diode cathode to motor positive, anode to drain",
+        "Current limit, stall, heat and independent pulse termination HOLD")
     row("WROOM GPIO36 reserved", "left 38kHz IR demodulator",
         "Demodulated NEC burst input, external bias; ESP32 erratum",
         "Bounded RMT decoder in source; NO physical receiver acceptance, do NOT wire yet")

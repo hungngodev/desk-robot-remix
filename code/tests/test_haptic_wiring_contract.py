@@ -35,9 +35,12 @@ def test_haptic_power_never_enabled_implicitly_in_normal_motor_profiles():
         return ini.split(label, 1)[1].split("\n[env:", 1)[0]
     for env in ("esp32_full", "esp32_dc_full", "esp32_stepper"):
         assert "DESK_ROBOT_ENABLE_HAPTIC=1" not in section(env)
-    lab = section("esp32_full_haptic_lab")
-    assert "extends = env:esp32_full" in lab
-    assert "-DDESK_ROBOT_ENABLE_HAPTIC=1" in lab
+    for env, parent in (("esp32_full_haptic_lab", "esp32_full"),
+                        ("esp32_dc_integrated_lab", "esp32_dc_full")):
+        lab = section(env)
+        assert f"extends = env:{parent}" in lab
+        assert "-DDESK_ROBOT_ENABLE_HAPTIC=1" in lab
+    assert ini.count("-DDESK_ROBOT_ENABLE_HAPTIC=1") == 2
 
 
 def test_only_one_owner_of_haptic_output_and_dock_status_precedes_it():
@@ -148,4 +151,48 @@ def test_generic_gy530_vin_stays_three_volt_three_and_excludes_5v():
         corrupt = copy.deepcopy(plan)
         corrupt["range_breakout_power_contract"][field] = wrong
         with pytest.raises(ValueError, match="ToF|GY-530"):
+            generator.verify(corrupt, body, head)
+
+
+def test_haptic_wiring_rejects_missing_or_changed_connections():
+    """The generated harness must refuse a different or qualified circuit."""
+    import copy
+    import importlib.util
+
+    import pytest
+
+    path = ROOT / "code/scripts/emit_wiring_manifest.py"
+    spec = importlib.util.spec_from_file_location("wiring_haptic", path)
+    assert spec and spec.loader
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    plan = json.loads((ROOT / generator.PLAN).read_text())
+    body = (ROOT / generator.BODY_PINS).read_text()
+    head = (ROOT / generator.HEAD_PINS).read_text()
+    rendered = generator.render(plan, body, head)
+    for connection in (
+        "1B pin 2", "VCC pin 16", "GND pin 8", "1A pin 1 LOW",
+        "1CLR pin 3 HIGH", "1Q pin 13", "inverted Q pin 4 unused",
+        "1RxCx pin 15", "1Cx pin 14", "AO3400 gate through series resistor",
+        "motor negative to AO3400 drain", "AO3400 source",
+        "Flyback diode cathode to motor positive, anode to drain",
+    ):
+        assert connection in rendered
+    for field in plan["haptic_output_contract"]:
+        corrupt = copy.deepcopy(plan)
+        del corrupt["haptic_output_contract"][field]
+        with pytest.raises(ValueError, match="haptic one-shot wiring contract"):
+            generator.verify(corrupt, body, head)
+    for field, wrong in (
+        ("logic_supply_v", 5.0), ("trigger_pin", 1), ("trigger_gpio", "GPB1"),
+        ("trigger_default", "HIGH"), ("pulse_q_pin", 4),
+        ("timing_cx_pin", 15), ("gate_pulldown_required", False),
+        ("trigger_pulldown_required", False), ("motor_nominal_v", 5.0),
+        ("motor_negative_connection", "expander"), ("flyback_anode_connection", "motor_positive"),
+        ("flyback_cathode_connection", "mosfet_drain"),
+        ("physical_qualified", True), ("physical_release", "APPROVED"),
+    ):
+        corrupt = copy.deepcopy(plan)
+        corrupt["haptic_output_contract"][field] = wrong
+        with pytest.raises(ValueError, match="haptic one-shot wiring contract"):
             generator.verify(corrupt, body, head)

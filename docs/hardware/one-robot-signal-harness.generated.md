@@ -40,7 +40,13 @@ Signal-only list. Never infer a power source from a logic voltage.
 | WROOM GPIO35 | NC bumper series OUT | 3.3V input; external bias required on GPIO34 through GPIO39 | Source allocated |
 | MCP23017 GPB0 | optional reed switch | 3.3V input; closes LOW to GND | Source polled; physically unqualified |
 | MCP23017 GPB1 | optional PIR output | 3.3V input; active HIGH | Source polled; physically unqualified |
-| MCP23017 GPB2 | CD74HC123 rising-edge haptic trigger | 3.3V lab-only edge, not motor current; external defined LOW at boot | Source gated in esp32_full_haptic_lab; physical one-shot NOT qualified |
+| MCP23017 GPB2 | CD74HC123 rising-edge haptic trigger (1B pin 2) | 3.3V lab-only edge, not motor current; external defined LOW at boot | Source gated in esp32_full_haptic_lab and esp32_dc_integrated_lab; physical one-shot NOT qualified |
+| Regulated 3.3V logic rail | CD74HC123 VCC pin 16 | 100nF local bypass to ground; HC not HCT | Haptic bench candidate only |
+| Common logic and motor return | CD74HC123 GND pin 8 and AO3400 source | Shared reference; motor current stays off logic signal wires | Haptic bench candidate only |
+| Logic LOW / HIGH | CD74HC123 1A pin 1 LOW / 1CLR pin 3 HIGH | GPB2 externally pulled LOW; verify startup and reset | Haptic bench candidate only |
+| 180kOhm timing resistor to 3.3V | CD74HC123 1RxCx pin 15 | 1uF candidate capacitor between pin 15 and 1Cx pin 14 | Timing at actual 3.3V NOT measured |
+| CD74HC123 1Q pin 13 | AO3400 gate through series resistor | External gate pulldown; inverted Q pin 4 unused | Haptic bench candidate only |
+| Rated regulated 3V motor supply | Coin motor positive; motor negative to AO3400 drain | Flyback diode cathode to motor positive, anode to drain | Current limit, stall, heat and independent pulse termination HOLD |
 | WROOM GPIO36 reserved | left 38kHz IR demodulator | Demodulated NEC burst input, external bias; ESP32 erratum | Bounded RMT decoder in source; NO physical receiver acceptance, do NOT wire yet |
 | WROOM GPIO39 reserved | right 38kHz IR demodulator | Demodulated NEC burst input, external bias; ESP32 erratum | Bounded RMT decoder in source; NO physical receiver acceptance, do NOT wire yet |
 | XIAO GPIO5 | SSD1306 SDA | 3.3V head signal | Source allocated |
