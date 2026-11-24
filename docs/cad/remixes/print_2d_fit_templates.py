@@ -58,6 +58,11 @@ def values(root: Path) -> dict:
         raise ValueError("Power tray shorter than candidate protected pack body")
     tray_l = pack_l + 2 * (fit_xy + wall)
     tray_w = pack_w + 2 * (fit_xy + wall)
+    tab_l = scad_mm(power, "tray_tab_l_mm")
+    tab_w = scad_mm(power, "tray_tab_w_mm")
+    tab_offset = scad_mm(power, "tray_tab_offset_mm")
+    if tab_offset + tab_w > tray_w:
+        raise ValueError("Power tab exceeds tray body width")
     dock = data["dock"]
     track_w = scad_mm(dock, "track_outer_width_mm")
     each_side = scad_mm(dock, "side_clearance_each_mm")
@@ -93,7 +98,7 @@ def values(root: Path) -> dict:
         "dock": (black, paper, pocket),
         "dock_guide": (outer_w, base_l, guide_run, rail_wall,
                        rail_margin, entry_flare, channel_w),
-        "power": (pack_l, pack_w, tray_l, tray_w),
+        "power": (pack_l, pack_w, tray_l, tray_w, tab_l, tab_w, tab_offset),
     }
 
 
@@ -166,18 +171,24 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
         )
         title = "Passive dock base and exact nominal flared rail footprints"
     elif name == "power":
-        pack_l, pack_w, tray_l, tray_w = dims
-        x, y = (A4_WIDTH_MM - tray_l) / 2, 88
-        if x < 15 or y + tray_w > 157:
+        pack_l, pack_w, tray_l, tray_w, tab_l, tab_w, tab_offset = dims
+        full_l = tray_l + 2 * tab_l
+        x, y = (A4_WIDTH_MM - full_l) / 2 + tab_l, 88
+        if x - tab_l < 15 or y + tray_w > 157:
             raise ValueError("Power outline exceeds A4 printable layout")
+        # Show the exact nominal external tab silhouettes, not their holes.
+        # This footprint must agree with battery_boost_tray() in OpenSCAD.
         features = (
             _rect(x, y, tray_l, tray_w, dash=True)
+            + _rect(x-tab_l, y+tab_offset, tab_l, tab_w, dash=True)
+            + _rect(x+tray_l, y+tray_w-tab_offset-tab_w, tab_l, tab_w, dash=True)
             + _rect(x + (tray_l - pack_l) / 2,
                     y + (tray_w - pack_w) / 2, pack_l, pack_w)
             + _text(20, 169, f"Pack body only: {_num(pack_l)} x {_num(pack_w)} mm")
-            + _text(20, 176, f"Nominal tray outside: {_num(tray_l)} x {_num(tray_w)} mm (dashed)")
-            + _text(20, 183, "EXCLUDES leads, NTC, PCM overhang, charger, boost and fuses.")
-            + _text(20, 190, "No mounting holes, complete pack fit or charging approved.")
+            + _text(20, 176, f"Nominal tray body: {_num(tray_l)} x {_num(tray_w)} mm (dashed)")
+            + _text(20, 183, f"Overall span including tabs: {_num(full_l)} x {_num(tray_w)} mm")
+            + _text(20, 190, "EXCLUDES leads, NTC, PCM overhang, charger, boost and fuses.")
+            + _text(20, 197, "No mounting holes, complete pack fit or charging approved.")
         )
         title = "Protected 1S candidate body / nominal tray outline"
     else:

@@ -32,7 +32,8 @@ def setup_sources(tmp_path):
             "entry_flare_each_mm=7;\n",
         "docs/cad/remixes/remaining_fit_gauges.scad":
             "candidate_pack_body_l_mm = 86;\npower_l = 86;\n"
-            "power_w = 35;\nfit_xy = 0.4;\nwall = 2.4;\n",
+            "power_w = 35;\nfit_xy = 0.4;\nwall = 2.4;\n"
+            "tray_tab_l_mm = 8;\ntray_tab_w_mm = 9;\ntray_tab_offset_mm = 5;\n",
     }
     for name, contents in data.items():
         path = tmp_path / name
@@ -84,7 +85,7 @@ def test_a4_real_scale_and_source_dimensions(tmp_path):
         "ranger": [10.5, 13.3], "speaker": [20, 16],
         "dock": [60, 70, 71.2],
         "dock_guide": [126, 138, 107, 5, 8, 7, 100],
-        "power": [86, 35, 91.6, 40.6],
+        "power": [86, 35, 91.6, 40.6, 8, 9, 5],
     }
     assert len(report["pages"]) == 5
     assert report["approved_drill_holes"] == 0
@@ -104,6 +105,9 @@ def test_a4_real_scale_and_source_dimensions(tmp_path):
     power = (output / "power_reference_A4.svg").read_text()
     assert 'width="86" height="35"' in power
     assert 'width="91.6" height="40.6"' in power
+    assert '<rect x="51.2" y="93" width="8" height="9"' in power
+    assert '<rect x="150.8" y="114.6" width="8" height="9"' in power
+    assert "Overall span including tabs: 107.6 x 40.6 mm" in power
     assert "EXCLUDES leads, NTC, PCM overhang" in power
     assert "No mounting holes, complete pack fit or charging approved." in power
     rail = (output / "dock_guide_reference_A4.svg").read_text()
@@ -285,5 +289,21 @@ def test_a4_dock_rejects_impossible_backstop_or_entry_coupon(
     with pytest.raises(
         ValueError, match="Invalid dock backstop or entry coupon dimensions"
     ):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+@pytest.mark.parametrize(("old", "new", "message"), [
+    ("tray_tab_l_mm = 8;", "tray_tab_l_mm = 60;",
+     "Power outline exceeds A4 printable layout"),
+    ("tray_tab_offset_mm = 5;", "tray_tab_offset_mm = 40;",
+     "Power tab exceeds tray body width"),
+])
+def test_a4_power_tabs_cannot_clip_or_leave_tray_body(tmp_path, old, new, message):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(scad.read_text().replace(old, new))
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match=message):
         source.export(tmp_path, output)
     assert not output.exists()

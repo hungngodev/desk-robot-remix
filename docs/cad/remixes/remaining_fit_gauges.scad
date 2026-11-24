@@ -15,6 +15,10 @@ power_h = 14;
 wall = 2.4;
 base = 2.8;
 tray_strap_slot_w = 3.2;
+// Provisional external tab footprint, also consumed by the A4 overlay.
+tray_tab_l_mm = 8;
+tray_tab_w_mm = 9;
+tray_tab_offset_mm = 5;
 
 // Dummy charging connector sizes only. Keep these printed parts NONCONDUCTIVE.
 contact_centers_mm = 20;
@@ -38,6 +42,8 @@ module battery_boost_tray() {
            "Battery tray shorter than selected candidate pack body");
     assert(power_w > 12 && power_w < 100);
     assert(power_h > 4 && power_h < 60);
+    assert(tray_tab_l_mm > m3_clearance && tray_tab_w_mm > m3_clearance);
+    assert(tray_tab_offset_mm > 0 && tray_tab_offset_mm + tray_tab_w_mm <= w);
     difference() {
         union() {
             cube([l, w, base]);
@@ -46,14 +52,18 @@ module battery_boost_tray() {
             cube([l, wall, h]);
             translate([0,w-wall,0]) cube([l, wall, h]);
             // External mounting tabs, not battery screw holes.
-            translate([-8, 5, 0]) cube([8, 9, base]);
-            translate([l, w-14, 0]) cube([8, 9, base]);
+            translate([-tray_tab_l_mm, tray_tab_offset_mm, 0])
+                cube([tray_tab_l_mm, tray_tab_w_mm, base]);
+            translate([l, w-tray_tab_offset_mm-tray_tab_w_mm, 0])
+                cube([tray_tab_l_mm, tray_tab_w_mm, base]);
         }
         // Lift-out / cable slots in the rear and side walls.
         translate([l/2-5,-1,base+2]) cube([10,wall+2, h]);
         translate([-1,w/2-4,base+3]) cube([wall+2,8,h]);
-        translate([-4,9.5,base/2]) cylinder(h=base+1,d=m3_clearance,center=true);
-        translate([l+4,w-9.5,base/2]) cylinder(h=base+1,d=m3_clearance,center=true);
+        translate([-tray_tab_l_mm/2,tray_tab_offset_mm+tray_tab_w_mm/2,base/2])
+            cylinder(h=base+1,d=m3_clearance,center=true);
+        translate([l+tray_tab_l_mm/2,w-tray_tab_offset_mm-tray_tab_w_mm/2,base/2])
+            cylinder(h=base+1,d=m3_clearance,center=true);
         // Two accessible strap openings through the base.
         for(x=[l/3,2*l/3])
             translate([x,w/2,base/2])
