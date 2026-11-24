@@ -837,6 +837,58 @@ int main() {
     }
     CHECK(!encoder_wire.unsafe_parallel_mux);
     CHECK(encoder_wire.ranges == 0 && encoder_wire.extras == 0);
+    // An uninstalled accessory mux is not a wedged shared bus. All
+    // optional drivers report unavailable and stay inert across later
+    // loop iterations. Required dock/fuel policy remains separate;
+    // tof_mux_tests exercises actual critical ranging without 0x71.
+    TwoWire missing_mux_wire;
+    missing_mux_wire.optional_mux_installed = false;
+    desk_robot::AccessorySensors missing_accessories;
+    desk_robot::ExpansionTouch missing_touch;
+    desk_robot::PulsePad missing_paw;
+    CHECK(!missing_accessories.begin(missing_mux_wire));
+    CHECK(!missing_touch.begin(missing_mux_wire));
+    CHECK(!missing_paw.begin(missing_mux_wire));
+    CHECK(!missing_touch.present() && !missing_touch.verified());
+    CHECK(!missing_paw.sample().present && !missing_paw.sample().valid);
+    const auto after_missing_probe = missing_mux_wire.transactions;
+    std::uint8_t missing_zones = 0x5a;
+    for (std::uint32_t ms = 0; ms < 1200; ms += 12) {
+      missing_accessories.poll(ms);
+      CHECK(!missing_touch.poll(ms, missing_zones));
+      CHECK(!missing_paw.poll(ms));
+      CHECK(missing_mux_wire.transactions == after_missing_probe);
+      CHECK(missing_mux_wire.ranges == 0 && missing_mux_wire.extras == 0);
+    }
+    CHECK(missing_zones == 0x5a);
+    CHECK(!missing_mux_wire.unsafe_parallel_mux);
+    CHECK(missing_paw.sample().sample_seq == 0U);
+    const auto& missing = missing_accessories.readings();
+    CHECK(!missing.proximity.present && !missing.proximity.valid);
+    CHECK(missing.proximity.gesture_events == 0U);
+    CHECK(!missing.climate.present && !missing.climate.valid);
+    CHECK(missing.climate.sample_seq == 0U);
+    CHECK(!missing.barometer.present && !missing.barometer.valid);
+    CHECK(missing.barometer.sample_seq == 0U);
+    CHECK(!missing.force.present && !missing.force.valid);
+    CHECK(missing.force.valid_mask == 0U);
+    CHECK(missing.force.belly_sample_seq == 0U &&
+          missing.force.jaw_sample_seq == 0U);
+    CHECK(!missing.gauge.fuel_present && !missing.gauge.fuel_valid);
+    CHECK(!missing.gauge.monitor_present && !missing.gauge.monitor_valid);
+    CHECK(!missing.gauge.pack_current_valid);
+    CHECK(missing.gauge.fuel_sample_seq == 0U &&
+          missing.gauge.monitor_sample_seq == 0U);
+    CHECK(!missing.dock.present && !missing.dock.valid);
+    CHECK(missing.dock.sample_seq == 0U);
+    CHECK(!missing.optional_inputs.present && !missing.optional_inputs.valid);
+    CHECK(missing.optional_inputs.sample_seq == 0U);
+    CHECK(!missing.nfc.present && !missing.nfc.valid);
+    CHECK(missing.nfc.scan_seq == 0U && missing.nfc.tag_events == 0U);
+    for (const auto& angle : missing.angle) {
+      CHECK(!angle.present && !angle.valid);
+      CHECK(angle.sample_seq == 0U);
+    }
     std::cout << "PASS optional sensor register IO, MCP GPIOB, NFC and isolated mux slots\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << '\n';
