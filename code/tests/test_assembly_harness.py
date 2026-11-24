@@ -7,6 +7,8 @@ from __future__ import annotations
 import copy
 import importlib.util
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -21,7 +23,7 @@ SPEC.loader.exec_module(harness)
 
 def sources():
     return (
-        json.loads((ROOT / harness.PLAN).read_text()),
+        harness.read_wiring_plan(ROOT / harness.PLAN),
         (ROOT / harness.BODY_PINS).read_text(),
         (ROOT / harness.HEAD_PINS).read_text(),
     )
@@ -269,3 +271,96 @@ def test_nonstandard_json_number_never_reaches_wiring_release(tmp_path, token):
     path.write_text(source.replace('"sda": 21', f'"sda": {token}'))
     with pytest.raises(ValueError, match="Nonfinite wiring plan JSON constant"):
         harness.read_wiring_plan(path)
+
+
+def test_wiring_manifest_cli_validates_before_replacing_output(tmp_path):
+    """Run the real CLI, not a mock of the parser or render function."""
+    for relative in (harness.PLAN, harness.BODY_PINS, harness.HEAD_PINS):
+        dest = tmp_path / relative
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes((ROOT / relative).read_bytes())
+
+    output = tmp_path / "harness.md"
+    command = [
+        sys.executable, str(ROOT / "code/scripts/emit_wiring_manifest.py"),
+        "--root", str(tmp_path), "--out", str(output),
+    ]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=15)
+    assert result.returncode == 0, result.stderr
+    expected = (
+        ROOT / "docs/hardware/one-robot-signal-harness.generated.md"
+    ).read_bytes()
+    assert output.read_bytes() == expected
+
+    plan_path = tmp_path / harness.PLAN
+    source = plan_path.read_text(encoding="utf-8")
+    assert source.count('"sda": 21') == 1
+    plan_path.write_text(
+        source.replace('"sda": 21', '"sda": 6, "sda": 21'),
+        encoding="utf-8",
+    )
+    result = subprocess.run(command, capture_output=True, text=True, timeout=15)
+    assert result.returncode != 0
+    assert "Duplicate wiring plan JSON field: sda" in result.stderr
+    assert output.read_bytes() == expected
+
+    plan_path.write_text(source, encoding="utf-8")
+    body_path = tmp_path / harness.BODY_PINS
+    body = body_path.read_text(encoding="utf-8")
+    changed = body.replace("constexpr int kLiftServo = 18;",
+                           "constexpr int kLiftServo = 4;")
+    assert changed != body
+    body_path.write_text(changed, encoding="utf-8")
+    result = subprocess.run(command, capture_output=True, text=True, timeout=15)
+    assert result.returncode != 0
+    assert "Firmware body pin drift: lift_servo" in result.stderr
+    assert output.read_bytes() == expected
+
+
+@pytest.mark.parametrize("channel", [4, 5, 6, 7])
+def test_accessory_safety_device_substitution_cannot_release_harness(channel):
+    plan, body, sense = sources()
+    lane = next(
+        lane for lane in plan["bus"]["mux_extras"]["channels"]
+        if lane["channel"] == channel
+    )
+    lane["devices"][0]["name"] = "unreviewed substitute"
+    message = (
+        "Dock accessory lane 5" if channel == 5
+        else f"Accessory lane {channel} battery/wheel identity drift"
+    )
+    with pytest.raises(ValueError, match=message):
+        harness.render(plan, body, sense)
+
+
+@pytest.mark.parametrize("field", [
+    "module_vin_v", "tca9548a_vcc_v",
+    "upstream_pullup_target_v", "downstream_pullup_target_v",
+])
+def test_range_power_contract_rejects_five_volt_substitution(field):
+    plan, body, sense = sources()
+    plan["range_breakout_power_contract"][field] = 5
+    with pytest.raises(ValueError, match="GY-530 power voltage"):
+        harness.render(plan, body, sense)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("amplifier_vdd_v", True),
+    ("speaker_nominal_impedance_ohm", 4),
+    ("speaker_nominal_rating_w", 1),
+    ("physical_release", "approved"),
+])
+def test_audio_contract_rejects_unreviewed_electrical_changes(field, value):
+    plan, body, sense = sources()
+    plan["audio_output_power_contract"][field] = value
+    with pytest.raises(ValueError, match="speaker amplifier power contract"):
+        harness.render(plan, body, sense)
+
+
+def test_dc_heartbeat_must_stay_on_mutually_exclusive_stepper_pin():
+    plan, body, sense = sources()
+    changed = body.replace("constexpr int kDcHeartbeatPin = 23;",
+                           "constexpr int kDcHeartbeatPin = 25;")
+    assert changed != body
+    with pytest.raises(ValueError, match="DC motor watchdog"):
+        harness.render(plan, changed, sense)
