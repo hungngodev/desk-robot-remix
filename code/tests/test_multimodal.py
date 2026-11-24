@@ -1519,6 +1519,62 @@ async def test_queued_visual_question_rechecks_camera_grant_before_dispatch(
         await service.close()
 
 
+@pytest.mark.parametrize("elapsed", [0.25, 0.75, 6.1])
+async def test_queued_visual_question_rejects_expired_temporal_frames(
+    settings, monkeypatch, elapsed,
+):
+    """Even when the latest image is fresh, an expired earlier image is not."""
+    settings.voice_vision_tools_enabled = True
+    settings.vision_model = "local-vlm"
+    robot_id = settings.robots[0].id
+    now = time.monotonic()
+    clock = [now]
+    monkeypatch.setattr(
+        "desk_robot.multimodal.time",
+        SimpleNamespace(monotonic=lambda: clock[0]),
+    )
+    queued = asyncio.Event()
+
+    class ObservedLock(asyncio.Lock):
+        async def acquire(self):
+            if self.locked():
+                queued.set()
+            return await super().acquire()
+
+    lock = ObservedLock()
+    scene = Vision()
+    service = MultimodalOrchestrator(
+        settings, {robot_id: Head()}, scene, lock,
+    )
+    task = None
+    try:
+        service.hub.offer(robot_id, image(), now - 5.5, source="speech")
+        service.hub.offer(robot_id, image(square=True), now - 0.1, source="speech")
+        async with lock:
+            task = asyncio.create_task(
+                service.look(robot_id, "What changed on the desk?")
+            )
+            await asyncio.wait_for(queued.wait(), timeout=2)
+            assert not scene.calls
+            clock[0] += elapsed
+        if elapsed == 0.25:
+            result = await asyncio.wait_for(task, timeout=2)
+            assert result["frames_used"] == 2
+            assert len(scene.calls) == 1
+        else:
+            with pytest.raises(RuntimeError, match="Camera observation expired while queued"):
+                await asyncio.wait_for(task, timeout=2)
+            assert not scene.calls
+            assert not service.hub.tool_history[robot_id]
+        assert not lock.locked()
+        assert not service._look_tasks
+    finally:
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await service.close()
+
+
 async def test_visual_model_revoke_during_inference_cannot_publish_answer_or_receipt():
     policy = config()
 

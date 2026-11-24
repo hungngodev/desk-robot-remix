@@ -32,6 +32,7 @@ from .sensor_event_contract import TRIGGERS  # retained public import name
 # A saturated identity fence refuses new context rather than evicting live IDs.
 _HEARD_REPLAY_SECONDS = 60.0
 _HEARD_REPLAY_MAX_IDS = 1024
+_VISUAL_FRAME_MAX_AGE_S = 6.0
 
 TEMPORAL_WORDS = re.compile(
     r"\b(chang(?:e|ed|ing)|mov(?:e|ed|ing)|happen(?:ed|ing)?|"
@@ -431,7 +432,7 @@ class CameraFrameHub:
             raise ValueError("Invalid clock")
         fresh = [
             item for item in self.frames[robot_id]
-            if 0 <= now - item.received_at <= 6
+            if 0 <= now - item.received_at <= _VISUAL_FRAME_MAX_AGE_S
         ]
         if not fresh:
             return []
@@ -1991,6 +1992,12 @@ class MultimodalOrchestrator:
                 # source exposure. Do not let a 45 second provider request
                 # claim a scene is still current or delay new user turns.
                 model_started = time.monotonic()
+                # Both images of a temporal comparison must still be fresh.
+                if not all(
+                    0 <= model_started - frame.received_at <= _VISUAL_FRAME_MAX_AGE_S
+                    for frame in chosen
+                ):
+                    raise RuntimeError("Camera observation expired while queued")
                 try:
                     # An alternate VLM client may swallow cancellation after
                     # the deadline. Its late response must not retain the
