@@ -12,6 +12,8 @@ entry_flare_each_mm = 7;
 guide_height_mm = 12;
 backstop_thickness_mm = 5;
 backstop_height_mm = 90;
+backstop_brace_depth_mm = 8;
+backstop_brace_height_mm = 10;
 wall_outside_margin_mm = 8;
 // The printable AprilTag must have a WHITE quiet border around the measured
 // black marker. Registration pocket is on the side facing the approaching pet.
@@ -26,6 +28,7 @@ channel_mm = track_outer_width_mm + 2 * side_clearance_each_mm;
 inner_wall_x = guide_wall_mm + wall_outside_margin_mm;
 outside_width_mm = channel_mm + 2 * inner_wall_x;
 backstop_front_y_mm = base_length_mm - backstop_thickness_mm;
+backstop_brace_front_y_mm = backstop_front_y_mm - backstop_brace_depth_mm;
 // The reversible coupon includes the 37 mm flare and straight guide.
 entry_coupon_length_mm = 48;
 // Unpowered IR pair LOCATION TEST: not an emitter holder or final beam aim.
@@ -38,6 +41,8 @@ ir_min_tag_web_mm = 3;
 assert(track_outer_width_mm > 40 && track_outer_width_mm < 200);
 assert(side_clearance_each_mm >= 0.5 && side_clearance_each_mm < 8);
 assert(base_length_mm > guide_run_mm + backstop_thickness_mm);
+assert(backstop_brace_depth_mm > 0 && backstop_brace_front_y_mm > guide_run_mm);
+assert(backstop_brace_height_mm > 0 && backstop_brace_height_mm <= backstop_height_mm);
 assert(entry_flare_each_mm > 0 && entry_flare_each_mm < inner_wall_x);
 assert(entry_coupon_length_mm > 37 && entry_coupon_length_mm < guide_run_mm);
 // Geometry invariants shared by the full dock and its entry coupon.
@@ -50,7 +55,7 @@ assert(tag_white_margin_each_mm >= 4 && tag_white_margin_each_mm <= 10);
 assert(tag_paper_slack_each_mm >= 0.25 && tag_paper_slack_each_mm <= 1.5);
 assert(tag_recess_depth_mm >= 0.4 && tag_recess_depth_mm < backstop_thickness_mm - 2);
 assert(tag_pocket_side_mm < outside_width_mm - 2 * inner_wall_x);
-assert(tag_bottom_z_mm >= base_thickness_mm + 10 + 2);
+assert(tag_bottom_z_mm >= base_thickness_mm + backstop_brace_height_mm + 2);
 assert(tag_bottom_z_mm + tag_pocket_side_mm + 3 <= base_thickness_mm + backstop_height_mm);
 
 module one_side_rail() {
@@ -84,8 +89,8 @@ module dock_passive_fit() {
             dock_rail_section();
             translate([0,backstop_front_y_mm,base_thickness_mm])
                 cube([outside_width_mm,backstop_thickness_mm,backstop_height_mm]);
-            translate([0,backstop_front_y_mm - 8,base_thickness_mm])
-                cube([outside_width_mm,8,10]);
+            translate([0,backstop_brace_front_y_mm,base_thickness_mm])
+                cube([outside_width_mm,backstop_brace_depth_mm,backstop_brace_height_mm]);
         }
         translate([(outside_width_mm - tag_pocket_side_mm) / 2,
                    backstop_front_y_mm - 0.01, tag_bottom_z_mm])

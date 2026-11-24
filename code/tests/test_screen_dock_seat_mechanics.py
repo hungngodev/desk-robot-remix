@@ -24,7 +24,7 @@ def example():
         "contact_cad_source_sha256": tool.contact_constants()["source_sha256"],
         "seat_pair_spacing_mm": 98,
         # Synthetic candidate floor location, NOT an actual pogo contact.
-        "contact_center_y_mm": 116,
+        "contact_center_y_mm": 110,
         "robot_underside_z_at_stop_mm": 15,
         "required_contact_top_gap_mm": 2,
         **{
@@ -185,6 +185,8 @@ def test_screen_rejects_ir_pair_coupons_breaching_paper_or_outer_web(
     ("tag_recess_depth_mm = 0.8;", "tag_recess_depth_mm = 3.5;"),
     ("ir_coupon_height_mm = 16;", "ir_coupon_height_mm = 8;"),
     ("guide_height_mm = 12;", "guide_height_mm = 0;"),
+    ("backstop_brace_depth_mm = 8;", "backstop_brace_depth_mm = 30;"),
+    ("backstop_brace_height_mm = 10;", "backstop_brace_height_mm = 100;"),
 ])
 def test_screen_rejects_nonrenderable_dock_source_dimensions(
     tmp_path, original, replacement,
@@ -209,6 +211,8 @@ def test_printer_source_and_switch_screen_share_real_pocket_width():
     assert g["ir_pair_spacing_mm"] == 98
     assert g["ir_hole_radius_mm"] == 2.75
     assert g["backstop_front_y_mm"] == 133
+    assert g["backstop_brace_front_y_mm"] == 125
+    assert g["backstop_brace_top_z_mm"] == 13
     assert g["clear_channel_x_min_mm"] == 13
     assert g["clear_channel_x_max_mm"] == 113
     cg = load().contact_constants()
@@ -240,12 +244,39 @@ def test_contact_floor_position_is_checked_against_source_geometry():
     result = load().screen(example())
     carrier = result["unpowered_contact_floor_layout"]
     assert carrier["source_carrier_x_mm"] == [36.0, 90.0]
-    assert carrier["source_carrier_y_mm"] == [103.5, 128.5]
+    assert carrier["source_carrier_y_mm"] == [97.5, 122.5]
     assert carrier["source_carrier_top_z_mm"] == 12
     assert carrier["inside_clear_channel_with_2mm_margin"]
     assert carrier["ahead_of_backstop_with_2mm_margin"]
+    assert carrier["ahead_of_backstop_brace_with_2mm_margin"]
     assert carrier["under_measured_robot_with_required_gap"]
     assert not carrier["physical_contact_mate_verified"]
+
+
+def test_contact_carrier_cannot_intersect_backstop_brace():
+    datum = example()
+    datum["contact_center_y_mm"] = 116
+    result = load().screen(datum)
+    floor = result["unpowered_contact_floor_layout"]
+    assert floor["ahead_of_backstop_with_2mm_margin"]
+    assert not floor["ahead_of_backstop_brace_with_2mm_margin"]
+    assert not result["source_only_layout_possible"]
+    assert not result["charging_authorized"]
+
+
+def test_contact_carrier_clearance_tracks_brace_revision(tmp_path):
+    tool = load()
+    changed = tmp_path / "deeper_brace.scad"
+    changed.write_text(
+        tool.CAD.read_text(encoding="utf-8").replace(
+            "backstop_brace_depth_mm = 8;", "backstop_brace_depth_mm = 9;"
+        ), encoding="utf-8",
+    )
+    datum = example()
+    datum["cad_source_sha256"] = tool.dock_constants(changed)["source_sha256"]
+    result = tool.screen(datum, cad=changed)
+    assert not result["contact_floor_layout_possible"]
+    assert not result["charging_authorized"]
 
 
 def test_contact_carrier_measured_floor_changes_do_not_grant_charge():

@@ -39,7 +39,8 @@ def dock_constants(source: Path = CAD) -> dict:
         "guide_run_mm", "guide_height_mm", "entry_flare_each_mm",
         "entry_coupon_length_mm",
         "base_length_mm", "backstop_thickness_mm",
-        "backstop_height_mm", "base_thickness_mm", "tag_black_side_mm",
+        "backstop_height_mm", "backstop_brace_depth_mm",
+        "backstop_brace_height_mm", "base_thickness_mm", "tag_black_side_mm",
         "tag_white_margin_each_mm", "tag_paper_slack_each_mm",
         "tag_recess_depth_mm",
         "tag_bottom_z_mm", "ir_pair_spacing_mm", "ir_probe_bore_d_mm",
@@ -66,6 +67,9 @@ def dock_constants(source: Path = CAD) -> dict:
             or not 37 < values["entry_coupon_length_mm"] < values["guide_run_mm"]
             or not values["base_length_mm"] >
                 values["guide_run_mm"] + values["backstop_thickness_mm"]
+            or not values["base_length_mm"] - values["backstop_thickness_mm"]
+                - values["backstop_brace_depth_mm"] > values["guide_run_mm"]
+            or not values["backstop_brace_height_mm"] <= values["backstop_height_mm"]
             or not 0 < values["entry_flare_each_mm"] <=
                 values["wall_outside_margin_mm"]
             or not values["entry_flare_each_mm"] < inner_wall
@@ -109,7 +113,7 @@ def dock_constants(source: Path = CAD) -> dict:
     channel = values["track_outer_width_mm"] + 2 * values["side_clearance_each_mm"]
     floor = values["base_thickness_mm"]
     if (paper >= channel
-            or values["tag_bottom_z_mm"] < floor + 12
+            or values["tag_bottom_z_mm"] < floor + values["backstop_brace_height_mm"] + 2
             or values["tag_bottom_z_mm"] + paper + 3 >
                 floor + values["backstop_height_mm"]):
         raise ValueError("Dock tag pocket exceeds printable CAD clearance")
@@ -119,6 +123,11 @@ def dock_constants(source: Path = CAD) -> dict:
         "backstop_front_y_mm": (
             values["base_length_mm"] - values["backstop_thickness_mm"]
         ),
+        "backstop_brace_front_y_mm": (
+            values["base_length_mm"] - values["backstop_thickness_mm"]
+            - values["backstop_brace_depth_mm"]
+        ),
+        "backstop_brace_top_z_mm": floor + values["backstop_brace_height_mm"],
         "clear_channel_x_min_mm": (
             values["guide_wall_mm"] + values["wall_outside_margin_mm"]
         ),
@@ -324,13 +333,15 @@ def screen(measurements: dict, *, cad: Path = CAD,
         carrier_y0 >= margin
         and carrier_y1 + margin <= geometry["backstop_front_y_mm"]
     )
+    # The floor carrier cannot overlap the full-width reinforcing brace.
+    before_brace = carrier_y1 + margin <= geometry["backstop_brace_front_y_mm"]
     fits_under_robot = (
         carrier_top_z + d["required_contact_top_gap_mm"]
         <= d["robot_underside_z_at_stop_mm"]
     )
     gap_is_measured = d["required_contact_top_gap_mm"] >= 2
     contact_floor_possible = (
-        in_rail_channel and before_backstop
+        in_rail_channel and before_backstop and before_brace
         and fits_under_robot and gap_is_measured
     )
     contact_floor = {
@@ -340,6 +351,7 @@ def screen(measurements: dict, *, cad: Path = CAD,
         "source_carrier_top_z_mm": carrier_top_z,
         "inside_clear_channel_with_2mm_margin": in_rail_channel,
         "ahead_of_backstop_with_2mm_margin": before_backstop,
+        "ahead_of_backstop_brace_with_2mm_margin": before_brace,
         "under_measured_robot_with_required_gap": fits_under_robot,
         "required_contact_gap_at_least_2mm": gap_is_measured,
         "actual_pogo_body_and_spring_travel_verified": False,
