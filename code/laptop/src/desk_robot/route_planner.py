@@ -75,6 +75,12 @@ class RouteResult:
     turn_id: str = ""
     # A proposal cannot authorize a motor command, even if source metadata is good.
     may_execute: bool = False
+    # Preserve the exact map provenance and validity window for downstream
+    # revalidation. These fields are evidence, never an actuator permit.
+    anchor_id: str = ""
+    calibration_id: str = ""
+    map_observed_at_us: int = 0
+    valid_until_us: int = 0
 
 
 def plan_route(
@@ -126,6 +132,8 @@ def plan_route(
     if (grid.origin_id != request.origin_id or grid.epoch != request.epoch
             or grid.anchor_id != request.anchor_id):
         return refuse("map_epoch_changed")
+    if type(request.cancelled) is not bool:
+        return refuse("invalid_cancellation_state")
     if request.cancelled:
         return refuse("cancelled")
     if (grid.anchored is not True
@@ -160,6 +168,17 @@ def plan_route(
             or math.ceil(turn_radius / grid.cell_mm + 0.5) > 24):
         # Bound the maximum per-state raster footprint and cancellation lag.
         return refuse("unqualified_clearance")
+
+    def proposal(reason: str, cells: tuple[tuple[int, int], ...]) -> RouteResult:
+        return RouteResult(
+            status="planned", reason=reason, cells=cells,
+            robot_id=request.robot_id, origin_id=request.origin_id,
+            epoch=request.epoch, session_id=request.session_id,
+            turn_id=request.turn_id, anchor_id=grid.anchor_id,
+            calibration_id=grid.calibration_id,
+            map_observed_at_us=grid.observed_at_us,
+            valid_until_us=min(grid.expires_at_us, request.deadline_us),
+        )
 
     last_clock_us = now_us
 
@@ -215,9 +234,7 @@ def plan_route(
         expired = live()
         if expired:
             return refuse(expired)
-        return RouteResult("planned", "at_observation_pose", (request.start,),
-                           request.robot_id, request.origin_id, request.epoch,
-                           request.session_id, request.turn_id)
+        return proposal("at_observation_pose", (request.start,))
 
     start_state = (*request.start, request.heading)
     best = {start_state: 0}
@@ -247,9 +264,7 @@ def plan_route(
             expired = live()
             if expired:
                 return refuse(expired)
-            return RouteResult("planned", "simulation_proposal_only", tuple(route),
-                               request.robot_id, request.origin_id, request.epoch,
-                               request.session_id, request.turn_id)
+            return proposal("simulation_proposal_only", tuple(route))
         # Straight, left, right. A 180-degree reverse or spin is never emitted.
         for new_heading in (heading, (heading + 1) % 4, (heading - 1) % 4):
             dx, dy = _DIRECTIONS[new_heading]

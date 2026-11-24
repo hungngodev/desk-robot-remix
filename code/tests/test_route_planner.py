@@ -253,3 +253,30 @@ def test_goal_pop_after_deadline_cannot_produce_an_obsolete_route(monkeypatch):
     assert result.status == "rejected"
     assert result.reason == "deadline_or_map_expired"
     assert result.cells == () and result.may_execute is False
+
+
+@pytest.mark.parametrize("same_pose", [False, True])
+@pytest.mark.parametrize("map_expiry", [2500, 4000])
+def test_route_proposal_retains_exact_map_provenance_and_earliest_expiry(
+    same_pose, map_expiry,
+):
+    grid, request, envelope = fixtures()
+    grid = replace(grid, expires_at_us=map_expiry)
+    if same_pose:
+        request = replace(request, goal=request.start)
+    result = route(grid=grid, request=request, envelope=envelope)
+    assert result.status == "planned"
+    assert result.anchor_id == grid.anchor_id
+    assert result.calibration_id == grid.calibration_id
+    assert result.map_observed_at_us == grid.observed_at_us
+    assert result.valid_until_us == min(map_expiry, request.deadline_us)
+    assert result.may_execute is False
+
+
+@pytest.mark.parametrize("invalid", [None, 0, "", [], {}])
+def test_malformed_cancellation_state_never_produces_route(invalid):
+    _, request, _ = fixtures()
+    result = route(request=replace(request, cancelled=invalid))
+    assert result.reason == "invalid_cancellation_state"
+    assert result.cells == () and result.may_execute is False
+    assert result.valid_until_us == 0
