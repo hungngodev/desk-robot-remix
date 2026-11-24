@@ -515,3 +515,64 @@ def test_native_curated_fact_recall_never_survives_memory_consent_change(
     assert response.status_code == 403
     assert "private blue" not in response.text
     assert receipts == []
+
+
+@pytest.mark.parametrize("elapsed", [1.0, 31.0])
+def test_voice_context_samples_volatile_cues_after_final_sqlite_read(
+    settings, monkeypatch, elapsed,
+):
+    """Slow persistent reads cannot prolong live sensor or tool evidence."""
+    import time
+    from types import SimpleNamespace
+
+    from desk_robot import api_memory_routes
+    from desk_robot.multimodal import CameraFrameHub
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.voice_memory_tools_enabled = True
+    settings.voice_vision_tools_enabled = True
+    started = time.monotonic()
+    clock = [started]
+    monkeypatch.setattr(
+        api_memory_routes, "time", SimpleNamespace(monotonic=lambda: clock[0]),
+    )
+    hub = CameraFrameHub(["robot-01"])
+    hub.event_history["robot-01"].append(("touch", started))
+    hub.remember_tool("robot-01", "memory_recall", "Past blue key", started)
+
+    class Memory:
+        def recent(self, robot_id, *, limit):
+            return []
+
+        def core_facts(self, robot_id, *, limit):
+            clock[0] += elapsed
+            return []
+
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        memory=Memory(), multimodal=SimpleNamespace(hub=hub),
+        conversation=SimpleNamespace(
+            _private_memory_generation={"robot-01": 0},
+        ),
+    )
+    api_memory_routes.register_voice_context_route(
+        app, settings, authorize=lambda: None,
+        requested_tool_context=lambda *args: None,
+        remember_tool_context=lambda *args: None,
+        current_tool_context=_check_fake_current_tool_owner,
+    )
+    with TestClient(app) as client:
+        response = client.get("/v1/pet/robot-01/voice-context")
+    assert response.status_code == 200
+    body = response.json()
+    if elapsed == 1.0:
+        assert body["live_sensor_cues"][0]["age_ms"] == 1000
+        assert body["recent_tool_interpretations"][0]["age_ms"] == 1000
+        assert {item["kind"] for item in body["current_interaction_timeline"]} == {
+            "touch", "memory_recall",
+        }
+    else:
+        assert body["live_sensor_cues"] == []
+        assert body["recent_tool_interpretations"] == []
+        assert body["current_interaction_timeline"] == []

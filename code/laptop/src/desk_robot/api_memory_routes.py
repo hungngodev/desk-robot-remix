@@ -344,6 +344,11 @@ def register_voice_context_route(
                 )
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from exc
+        core = await asyncio.to_thread(
+            app.state.runtime.memory.core_facts, robot_id, limit=8
+        )
+        # Sample volatile evidence only after the final SQLite await, so
+        # its original TTL and age apply at response time, not read start.
         # One existing per-head camera/sensor/tool hub, not an extra agent.
         # Keep historical text and current transient cues separate so a
         # model cannot reinterpret yesterday's memory as today's sighting.
@@ -367,9 +372,6 @@ def register_voice_context_route(
                     item for item in timeline
                     if not is_camera_derived_timeline_item(item)
                 ]
-        core = await asyncio.to_thread(
-            app.state.runtime.memory.core_facts, robot_id, limit=8
-        )
         # Each SQLite operation yields to the event loop. A local opt-out
         # during that read invalidates the entire current private tool reply.
         if (not settings.voice_memory_tools_enabled
