@@ -115,6 +115,12 @@ async def capture_checkerboards(
                 if image.format != "JPEG":
                     raise ValueError("Expected original XIAO JPEG capture")
                 frame_size = image.size
+                # Match the calibrator's supported sensor geometry before
+                # any RGB allocation or pixel hashing.
+                if not 80 <= frame_size[0] <= 2048 or not 80 <= frame_size[1] <= 1536:
+                    raise ValueError("Unsupported XIAO checkerboard JPEG dimensions")
+                if image.getexif().get(274, 1) != 1:
+                    raise ValueError("Noncanonical checkerboard JPEG orientation")
                 image.verify()
             # A fresh stream sequence and operator prompt do not prove a
             # different checkerboard image: a stuck camera can replay the

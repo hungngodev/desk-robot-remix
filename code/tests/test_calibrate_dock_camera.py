@@ -193,6 +193,38 @@ def test_fitter_rejects_impossible_geometry_without_physical_permission():
         )
 
 
+@pytest.mark.parametrize(("width", "height", "orientation", "message"), [
+    (2049, 80, 1, "dimensions"),
+    (80, 1537, 1, "dimensions"),
+    (79, 480, 1, "dimensions"),
+    (640, 79, 1, "dimensions"),
+    (320, 240, 6, "orientation"),
+    (320, 240, 3, "orientation"),
+])
+def test_calibration_rejects_bad_jpeg_header_before_native_decode(
+    tmp_path, monkeypatch, width, height, orientation, message,
+):
+    from PIL import Image
+
+    cv2 = pytest.importorskip("cv2")
+    image = Image.new("L", (width, height))
+    exif = image.getexif()
+    exif[274] = orientation
+    for index in range(12):
+        image.save(tmp_path / f"{index:02}.jpg", exif=exif)
+
+    def no_decode(*_args, **_kwargs):
+        pytest.fail("Unsupported JPEG reached the native decoder")
+
+    monkeypatch.setattr(cv2, "imdecode", no_decode)
+    with pytest.raises(ValueError, match=message):
+        fitter().calibrate_images(
+            tmp_path, columns=9, rows=6, square_mm=10,
+            tag_side_mm=60, marker_id=2, target_distance_mm=200,
+            camera_sensor_pid="OV5640",
+        )
+
+
 def test_camera_calibration_rejects_mixed_jpeg_modes(tmp_path):
     cv2 = pytest.importorskip("cv2")
     for index in range(12):

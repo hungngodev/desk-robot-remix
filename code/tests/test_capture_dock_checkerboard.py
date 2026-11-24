@@ -59,6 +59,44 @@ async def test_capture_private_original_jpeg_bytes_while_disarmed(tmp_path):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("width", "height", "orientation", "message"), [
+    (2049, 80, 1, "dimensions"),
+    (80, 1537, 1, "dimensions"),
+    (79, 480, 1, "dimensions"),
+    (640, 79, 1, "dimensions"),
+    (320, 240, 6, "orientation"),
+    (320, 240, 3, "orientation"),
+])
+async def test_capture_rejects_bad_jpeg_header_before_rgb_decode(
+    tmp_path, monkeypatch, width, height, orientation, message,
+):
+    image = Image.new("RGB", (width, height))
+    exif = image.getexif()
+    exif[274] = orientation
+    encoded = io.BytesIO()
+    image.save(encoded, format="JPEG", exif=exif)
+
+    class Head:
+        async def status(self):
+            return {"armed": False}
+
+        async def snapshot(self):
+            return encoded.getvalue()
+
+    async def confirm(_index):
+        pass
+
+    def no_decode(*_args, **_kwargs):
+        pytest.fail("Unsupported JPEG reached RGB conversion")
+
+    monkeypatch.setattr(Image.Image, "convert", no_decode)
+    folder = tmp_path / "private"
+    with pytest.raises(ValueError, match=message):
+        await capture_checkerboards(Head(), folder, count=12, prompt=confirm)
+    assert not folder.exists()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("metadata_changed", [False, True])
 async def test_repeated_checkerboard_pixels_abort_and_remove_private_media(
     tmp_path, metadata_changed,

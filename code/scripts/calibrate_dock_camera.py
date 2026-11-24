@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import errno
+import io
 import json
 import math
 import os
@@ -230,6 +231,7 @@ def calibrate_images(folder: Path, *, columns: int, rows: int,
     files = _original_camera_jpegs(folder)
 
     import numpy as np
+    from PIL import Image
 
     cv2 = _require_cv2()
     views = []
@@ -239,10 +241,25 @@ def calibrate_images(folder: Path, *, columns: int, rows: int,
                 or not blob.startswith(b"\xff\xd8")
                 or not blob.endswith(b"\xff\xd9")):
             raise ValueError("Invalid or oversized original JPEG: " + filename)
+        # JPEG byte size alone does not bound decoded pixel allocation.
+        # Preserve the sensor's encoded pixel coordinate system, not EXIF
+        # display rotations that OpenCV may apply automatically.
+        try:
+            with Image.open(io.BytesIO(blob)) as header:
+                encoded_size = header.size
+                if (header.format != "JPEG" or not 80 <= encoded_size[0] <= 2048
+                        or not 80 <= encoded_size[1] <= 1536):
+                    raise ValueError("Unsupported XIAO checkerboard JPEG dimensions: " + filename)
+                if header.getexif().get(274, 1) != 1:
+                    raise ValueError("Noncanonical checkerboard JPEG orientation: " + filename)
+        except (OSError, Image.DecompressionBombError) as exc:
+            raise ValueError("Invalid original JPEG header: " + filename) from exc
         gray = cv2.imdecode(np.frombuffer(blob, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
         if gray is None:
             raise ValueError("Undecodable source JPEG: " + filename)
         current = (gray.shape[1], gray.shape[0])
+        if current != encoded_size:
+            raise ValueError("Decoded checkerboard dimensions differ from JPEG header")
         if size is not None and current != size:
             raise ValueError("XIAO camera resolution changed across views")
         size = current
