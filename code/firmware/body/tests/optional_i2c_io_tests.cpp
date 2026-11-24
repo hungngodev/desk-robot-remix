@@ -171,6 +171,31 @@ int main() {
     CHECK(!stale_pulse.poll(200));
     CHECK(!stale_pulse.sample().valid); // FIFO empty: no fresh paw event
     CHECK(stale_pulse.sample().sample_seq == 1U);
+    // Setup can stall before the first poll, when the FIFO has no timestamps.
+    // A short, non-overflowed initial backlog is still old evidence.
+    TwoWire startup_pulse_wire;
+    desk_robot::PulsePad startup_pulse;
+    fake_arduino_millis() = 1000U;
+    CHECK(startup_pulse.begin(startup_pulse_wire));
+    startup_pulse_wire.pulse_fifo_write_pointer = 2;
+    CHECK(!startup_pulse.poll(1500));
+    CHECK(!startup_pulse.sample().valid);
+    CHECK(startup_pulse.sample().sample_seq == 0U);
+    CHECK(startup_pulse_wire.pulse_fifo_read_pointer == 2U);
+    CHECK(startup_pulse_wire.ranges == 0 && startup_pulse_wire.extras == 0);
+    startup_pulse_wire.pulse_fifo_write_pointer = 3;
+    CHECK(startup_pulse.poll(1570));
+    CHECK(startup_pulse.sample().valid);
+    CHECK(startup_pulse.sample().sample_seq == 1U);
+    CHECK(startup_pulse.sample().at_ms == 1570U);
+    // Initial acquisition across normal uint32 rollover remains valid.
+    TwoWire wrap_pulse_wire;
+    desk_robot::PulsePad wrap_pulse;
+    fake_arduino_millis() = 0xfffffff0U;
+    CHECK(wrap_pulse.begin(wrap_pulse_wire));
+    CHECK(wrap_pulse.poll(0x20U));
+    CHECK(wrap_pulse.sample().sample_seq == 1U);
+    fake_arduino_millis() = 0U;
     // A long delay is ambiguous even with just two queued FIFO records and
     // no overflow. Old paw contact must not gain a new source timestamp.
     TwoWire delayed_pulse_wire;

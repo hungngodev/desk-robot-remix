@@ -59,6 +59,9 @@ bool PulsePad::begin(TwoWire& wire) {
   wire_ = &wire; // already set to 400kHz, 15ms Wire bound by TofBus
   sample_ = OpticalRaw{};
   polled_ = false;
+  // Bound the first FIFO observation too: setup can spend hundreds of ms
+  // initializing other I2C devices before the main loop starts.
+  last_ms_ = millis();
   fifo_unsynced_ = false;
   if (!select()) { close(); return false; }
   std::uint8_t part_id = 0;
@@ -87,7 +90,7 @@ bool PulsePad::poll(std::uint32_t now_ms) {
     return false;
   // The FIFO has no capture timestamps. After a stalled body poll, even
   // one to four buffered records may be old, despite no FIFO overflow.
-  const bool missed_poll_window = polled_ && now_ms - last_ms_ > 250U;
+  const bool missed_poll_window = now_ms - last_ms_ > 250U;
   polled_ = true;
   last_ms_ = now_ms;
   if (!select()) {
