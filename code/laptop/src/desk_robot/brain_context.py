@@ -88,6 +88,10 @@ def memory_provenance_label(entry: Memory) -> str:
             else f"{entry.source_robot} reported")
 
 
+# Existing conversation consumers import this name; keep one implementation.
+_memory_label = memory_provenance_label
+
+
 def active_job_timeline(jobs: Iterable[object], robot_id: str) -> list[dict]:
     """Read one live Coordinator job without copying its untrusted task text.
 
