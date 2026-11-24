@@ -239,12 +239,22 @@ class SpatialGrid:
         # Route planner allows only these known support states. Its safe-only
         # admission translates uncalibrated to unsafe, never to free.
         route_states = tuple("unsafe" if s == "out_of_calibration" else s for s in states)
+        # A snapshot cannot renew the lifetime of any safe cell's evidence.
+        # The planner treats expiry as exclusive, including the TTL boundary.
+        expires_at_us = now_us + self.ttl_us
+        for index, state in enumerate(states):
+            if state == "safe":
+                cell = self._cells[(index % self.width, index // self.width)]
+                expires_at_us = min(
+                    expires_at_us,
+                    min(cell.floor_received_us, cell.obstacle_received_us) + self.ttl_us,
+                )
         return SpatialSnapshot(
             robot_id=self.robot_id, origin_id=self.origin_id, epoch=self.epoch,
             anchor_id=self.anchor_id, calibration_id=self.calibration_id,
             width=self.width, height=self.height, cell_mm=CELL_MM,
             support=route_states, observed_at_us=self._last_update_us,
-            expires_at_us=now_us + self.ttl_us, anchored=self.anchored,
+            expires_at_us=expires_at_us, anchored=self.anchored,
         )
 
     def to_route_snapshot(self, *, now_us: int):

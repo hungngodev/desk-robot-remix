@@ -271,3 +271,30 @@ def test_current_obstacle_evidence_still_accumulates_confidence():
         now_us=1_000_100,
     )
     assert g.log_odds(1, 1) == pytest.approx(-1.6)
+
+
+@pytest.mark.parametrize(
+    ("now_us", "expected_expiry", "first_state", "second_state"),
+    [
+        (1_900_000, 2_000_000, "safe", "safe"),
+        (2_000_000, 2_000_000, "safe", "safe"),
+        (2_000_001, 2_100_000, "stale", "safe"),
+        (2_100_001, 3_100_001, "stale", "stale"),
+    ],
+)
+def test_snapshot_expiry_never_renews_old_safe_cell_evidence(
+    now_us, expected_expiry, first_state, second_state,
+):
+    g = grid()
+    g.record(evidence("floor_supported", 0), now_us=1_000_000)
+    g.record(evidence("obstacle_clear", 4, received_us=1_100_000,
+                      cells=((2, 1),)), now_us=1_100_000)
+    g.record(evidence("obstacle_clear", 4, seq=2, received_us=1_400_000),
+             now_us=1_400_000)
+    g.record(evidence("floor_supported", 1, received_us=1_500_000,
+                      cells=((2, 1),)), now_us=1_500_000)
+    snapshot = g.snapshot(now_us=now_us)
+    assert snapshot.support[5:7] == (first_state, second_state)
+    assert snapshot.support[0] == "unknown"
+    assert snapshot.expires_at_us == expected_expiry
+    assert g.to_route_snapshot(now_us=now_us).expires_at_us == expected_expiry
