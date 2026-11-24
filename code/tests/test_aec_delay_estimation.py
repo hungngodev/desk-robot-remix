@@ -224,3 +224,49 @@ def test_noisy_delay_uses_only_overlapping_samples(lag):
     assert report["normalized_correlation"] == pytest.approx(expected, abs=0.00005)
     assert report["esp_idf_delay_setting_applicable"] == (lag <= 4000)
     assert not report["aec_physically_verified"]
+
+
+@pytest.mark.parametrize("lag, setting", [
+    (0, 0), (7, 0), (8, 1), (1128, 71), (3999, 250),
+    (4000, 250), (4001, None), (6400, None),
+])
+def test_integer_firmware_delay_setting_is_bounded(lag, setting):
+    rng = np.random.default_rng(351)
+    speaker = rng.normal(0, 0.1, 8000)
+    mic = np.concatenate((np.zeros(lag), speaker))[:8000]
+    report = estimate_delay(speaker, mic, max_delay_ms=400)
+    assert report["reference_delay_ms"] == round(lag / 16, 3)
+    assert report["esp_idf_delay_setting_ms"] == setting
+    assert report["esp_idf_delay_setting_applicable"] == (setting is not None)
+    if setting is not None:
+        assert type(report["esp_idf_delay_setting_ms"]) is int
+    assert not report["aec_physically_verified"]
+
+
+def test_cli_emits_integer_candidate_without_qualifying_hardware(tmp_path):
+    import json
+    import subprocess
+    import sys
+    import wave
+
+    rng = np.random.default_rng(352)
+    speaker = rng.integers(-6000, 6000, size=8000, dtype=np.int16)
+    mic = np.concatenate((np.zeros(1128, dtype=np.int16), speaker))[:8000]
+    for filename, samples in (("speaker.wav", speaker), ("mic.wav", mic)):
+        with wave.open(str(tmp_path / filename), "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(16000)
+            wav.writeframes(samples.astype("<i2").tobytes())
+    script = Path(__file__).resolve().parents[1] / "scripts/estimate_aec_delay.py"
+    result = subprocess.run([
+        sys.executable, str(script), "--speaker", str(tmp_path / "speaker.wav"),
+        "--microphone", str(tmp_path / "mic.wav"),
+    ], check=True, capture_output=True, text=True)
+    report = json.loads(result.stdout)
+    assert report["reference_delay_ms"] == 70.5
+    assert report["esp_idf_delay_setting_ms"] == 71
+    assert type(report["esp_idf_delay_setting_ms"]) is int
+    assert report["clock_drift_status"] == "unavailable"
+    assert not report["aec_physically_verified"]
+    assert not report["natural_barge_in_verified"]

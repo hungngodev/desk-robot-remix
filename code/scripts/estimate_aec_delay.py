@@ -54,7 +54,7 @@ def estimate_delay(
     reference: np.ndarray, microphone: np.ndarray,
     *, sample_rate: int = 16000, max_delay_ms: float = 250,
 ) -> dict:
-    """Positive lag is microphone capture after actual loudspeaker playback."""
+    """Positive lag is microphone capture after the supplied reference."""
     if sample_rate != 16000 or not 10 <= max_delay_ms <= 400:
         raise ValueError("Measure 16 kHz capture with 10 to 400 ms search")
     if (not isinstance(reference, np.ndarray)
@@ -126,13 +126,20 @@ def estimate_delay(
     alternate[max(0, lag - guard):min(len(alternate), lag + guard + 1)] = 0
     if float(alternate.max()) >= 0.90 * peak:
         raise ValueError("Ambiguous acoustic delay: periodic tone or competing echo")
+    samples_per_ms = sample_rate // 1000
+    setting_applicable = lag <= 250 * samples_per_ms
+    # Kconfig accepts integer milliseconds; round half up from exact samples.
+    # Do not round an out-of-range measurement back into an accepted setting.
+    setting_ms = ((lag + samples_per_ms // 2) // samples_per_ms
+                  if setting_applicable else None)
     return {
         "reference_delay_ms": round(lag * 1000 / sample_rate, 3),
         "sample_lag": lag,
         "normalized_correlation": round(confidence, 4),
         # Sense Kconfig only accepts 0..250 ms. Larger measured delays
         # remain useful diagnostics but cannot be copied into the build.
-        "esp_idf_delay_setting_applicable": lag <= sample_rate // 4,
+        "esp_idf_delay_setting_applicable": setting_applicable,
+        "esp_idf_delay_setting_ms": setting_ms,
         "esp_idf_delay_max_ms": 250,
         "aec_physically_verified": False,
         "natural_barge_in_verified": False,
