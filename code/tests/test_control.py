@@ -1710,11 +1710,13 @@ async def test_idle_stop_fences_fresh_permit_and_peer_motion_until_ack(settings)
 
 
 async def test_failed_idle_stop_requires_explicit_acknowledged_recovery(settings):
+    from desk_robot.transport import HeadError
+
     c, head = make(settings)
     await c.operator_arm("robot-02")
     head.fail_command = "halt"
     try:
-        with pytest.raises(Exception):
+        with pytest.raises(HeadError, match="Simulated uncertain ACK"):
             await c.stop("robot-01")
         with pytest.raises(OperationError, match="STOP pending or unconfirmed"):
             await c.operator_arm("robot-01")

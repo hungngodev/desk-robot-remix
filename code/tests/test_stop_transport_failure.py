@@ -7,6 +7,18 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from desk_robot.controller import Coordinator, Job
+from desk_robot.simulator import SimulationVision
+
+
+def _coordinator(head):
+    robot = SimpleNamespace(id="robot-01")
+    settings = SimpleNamespace(
+        robots=[robot], robot=lambda robot_id: robot,
+        mode="simulation", max_job_seconds=10,
+    )
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    coordinator.permits = {"robot-01": 123.0}
+    return coordinator
 
 
 class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
@@ -23,13 +35,7 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(head.armed)  # one authorized job can drive again
         await head.command("drive 20 20 100")
 
-        coordinator = object.__new__(Coordinator)
-        coordinator.settings = SimpleNamespace(robot=lambda robot_id: object())
-        coordinator.heads = {"robot-01": head}
-        coordinator.jobs = {}
-        coordinator.tasks = {}
-        coordinator.permits = {"robot-01": 123.0}
-        coordinator._permit_epoch = {"robot-01": 0}
+        coordinator = _coordinator(head)
 
         receipt = await coordinator.stop("robot-01")
         self.assertEqual(receipt["reply"], "OK halt")
@@ -53,13 +59,9 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
 
         task = asyncio.create_task(uncooperative_job())
         await started.wait()
-        coordinator = object.__new__(Coordinator)
-        coordinator.settings = SimpleNamespace(robot=lambda robot_id: object())
-        coordinator.heads = {"robot-01": object()}
+        coordinator = _coordinator(object())
         coordinator.jobs = {"job-01": Job("job-01", "robot-01", "pickup", state="running")}
         coordinator.tasks = {"job-01": task}
-        coordinator.permits = {"robot-01": 123.0}
-        coordinator._permit_epoch = {"robot-01": 0}
         try:
             with patch("desk_robot.controller._bounded_body_stop", side_effect=RuntimeError("USB STOP failed")):
                 with self.assertRaisesRegex(RuntimeError, "USB STOP failed"):
@@ -81,13 +83,8 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
             async def command(self, command):
                 return {"ok": True}
 
-        coordinator = object.__new__(Coordinator)
-        coordinator.settings = SimpleNamespace(robot=lambda robot_id: object(), mode="simulation", max_job_seconds=10)
-        coordinator.heads = {"robot-01": FakeHead()}
-        coordinator.locks = {"robot-01": asyncio.Lock()}
+        coordinator = _coordinator(FakeHead())
         coordinator.jobs = {"job-01": Job("job-01", "robot-01", "pickup")}
-        coordinator.permits = {"robot-01": 123.0}
-        coordinator._permit_epoch = {"robot-01": 0}
 
         async def work(job):
             started.set()
@@ -127,13 +124,9 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
 
         task = asyncio.create_task(cancellable_job())
         await started.wait()
-        coordinator = object.__new__(Coordinator)
-        coordinator.settings = SimpleNamespace(robot=lambda robot_id: object())
-        coordinator.heads = {"robot-01": object()}
+        coordinator = _coordinator(object())
         coordinator.jobs = {"job-01": Job("job-01", "robot-01", "pickup", state="running")}
         coordinator.tasks = {"job-01": task}
-        coordinator.permits = {"robot-01": 123.0}
-        coordinator._permit_epoch = {"robot-01": 0}
 
         async def failed_receipt(head):
             # Allow cooperative cancellation to finish before STOP fails.
@@ -188,13 +181,7 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
         )
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             head = HttpHead(config, client)
-            coordinator = object.__new__(Coordinator)
-            coordinator.settings = SimpleNamespace(robot=lambda robot_id: object())
-            coordinator.heads = {"robot-01": head}
-            coordinator.jobs = {}
-            coordinator.tasks = {}
-            coordinator.permits = {"robot-01": 123.0}
-            coordinator._permit_epoch = {"robot-01": 0}
+            coordinator = _coordinator(head)
             with patch("desk_robot.transport.secret", return_value="fixture-token"):
                 stalled_get = asyncio.create_task(head.status())
                 stalled_camera = asyncio.create_task(head.snapshot())
