@@ -166,3 +166,31 @@ def test_full_guarded_builds_enable_direct_nc_collision_contacts():
     assert "raw_bumper_trip_preempts_debounce_and_preserves_payload" in guarded
     assert "two normally closed bumpers wired in series" in wiring
     assert "External 3.3 V pullup is mandatory" in wiring
+
+
+def test_uart_and_output_paths_check_cpu_deadline_without_advancing_pulses():
+    """A resumed UART path must not drive PWM or refresh the one-shot."""
+    main = (BODY / "src/main.cpp").read_text(encoding="utf-8")
+    helper = main.split("void enforce_motor_heartbeat(bool advance) {", 1)[1].split(
+        "\n}\n", 1
+    )[0]
+    outputs = main.split("void apply_outputs() {", 1)[1].split("\n}\n", 1)[0]
+    uart = main.split("void process_input(", 1)[1].split("\n}\n", 1)[0]
+    loop = main.split("void loop() {", 1)[1]
+    assert main.count("motor_heartbeat.update(") == 1
+    assert main.count("enforce_motor_heartbeat(true);") == 1
+    assert "if (advance)" in helper
+    assert "motor_heartbeat.check_authority(millis(), allow_heartbeat)" in helper
+    assert "control.motor_watchdog_trip();" in helper
+    assert loop.index("control.tick(millis());") < loop.index(
+        "enforce_motor_heartbeat(true);"
+    ) < loop.index("apply_outputs();")
+    assert outputs.index("control.tick(millis());") < outputs.index(
+        "enforce_motor_heartbeat(false);"
+    ) < outputs.index("write_motor_pair(")
+    assert uart.index("enforce_motor_heartbeat(false);") < uart.index("receiver.feed(")
+    assert uart.index("apply_outputs();") < uart.index(
+        'ERR drive motor_watchdog_latched'
+    ) < uart.index("replies.enqueue_line(reply)")
+    assert 'ERR arm motor_watchdog_latched' in uart
+    assert 'completed && local_usb && strcmp(reply, "OK rearm") == 0' in uart

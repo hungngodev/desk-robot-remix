@@ -265,10 +265,34 @@ unsigned servo_duty(int degrees) {
   return pulse_us * 65535UL / 20000UL;
 }
 
+#if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
+void enforce_motor_heartbeat(bool advance) {
+  const auto& drive = control.state();
+  const bool allow_heartbeat = pwm_ready && drive.armed &&
+      (drive.left != 0 || drive.right != 0);
+  if (advance) {
+    // Only the full sensor loop can generate CPU heartbeat edges.
+    const bool pulse = motor_heartbeat.update(millis(), allow_heartbeat);
+    digitalWrite(body_pins::kDcHeartbeatPin, pulse ? HIGH : LOW);
+  } else if (!motor_heartbeat.check_authority(millis(), allow_heartbeat)) {
+    // UART/outputs must enforce a missed deadline or STOP without extending
+    // the independent one-shot or clearing the existing fault latch.
+    digitalWrite(body_pins::kDcHeartbeatPin, LOW);
+  }
+  if (motor_heartbeat.missed_deadline()) {
+    // Stop both wheels before writing PWM; preserve a held payload.
+    control.motor_watchdog_trip();
+  }
+}
+#endif
+
 void apply_outputs() {
   // All output paths, including commands received on either UART, recheck the
   // local interlock/timers immediately before writing the physical pins.
   control.tick(millis());
+#if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
+  enforce_motor_heartbeat(false);
+#endif
 #if !DESK_ROBOT_FULL_SENSORS
   // Historical unguarded DC profiles are diagnostic-only. Even a valid
   // remote/local ARM must never drive the H-bridge or attach a servo here.
@@ -356,6 +380,10 @@ void process_input(HardwareSerial& stream, desk_robot::LineReceiver& receiver,
     // clock. Non-pose commands ignore the timestamp; UART reads stay bounded.
     const std::uint64_t sample_us = received == '\n' ?
         static_cast<std::uint64_t>(esp_timer_get_time()) : 0ULL;
+#if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
+    // Latch a CPU pause before a pending command can reuse an old drive.
+    enforce_motor_heartbeat(false);
+#endif
     const bool completed = receiver.feed(received, millis(), control, reply,
                                           sizeof(reply), sample_us);
     if (completed && !pwm_ready && strcmp(reply, "OK arm") == 0) {
@@ -386,6 +414,15 @@ void process_input(HardwareSerial& stream, desk_robot::LineReceiver& receiver,
     (void)local_usb;
 #endif
     apply_outputs();  // apply accepted command/expired timer before acknowledging
+#if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
+    // A deadline can also expire while processing the command itself.
+    if (completed && motor_heartbeat.missed_deadline()) {
+      if (strcmp(reply, "OK arm") == 0)
+        snprintf(reply, sizeof(reply), "ERR arm motor_watchdog_latched");
+      else if (strncmp(reply, "OK drive ", 9) == 0)
+        snprintf(reply, sizeof(reply), "ERR drive motor_watchdog_latched");
+    }
+#endif
     if (completed) {
       // STOP/HALT already took effect before acknowledgement. Keep the
       // small final reply out of the normal status backlog without splicing
@@ -690,19 +727,7 @@ void loop() {
 #endif
   control.tick(millis());
 #if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
-  // CPU code toggles this ONLY after a full fresh sensor and dock pass.
-  // Never use autonomous LEDC hardware PWM as the heartbeat: PWM can keep
-  // oscillating when the main CPU stops executing its safety loop.
-  const auto& drive = control.state();
-  const bool allow_heartbeat = pwm_ready && drive.armed &&
-      (drive.left != 0 || drive.right != 0);
-  const bool pulse = motor_heartbeat.update(millis(), allow_heartbeat);
-  digitalWrite(body_pins::kDcHeartbeatPin, pulse ? HIGH : LOW);
-  if (motor_heartbeat.missed_deadline()) {
-    // Do not retrigger an expired one-shot from the old drive lease.
-    // BodyControl keeps the gripper's holding PWM while disarming wheels.
-    control.motor_watchdog_trip();
-  }
+  enforce_motor_heartbeat(true);
 #endif
   apply_outputs();
   process_input(head_uart, head_receiver, head_replies, false);

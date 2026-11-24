@@ -64,5 +64,27 @@ int main() {
   CHECK(!heartbeat.update(0x1dU, false)); // 45 ms across millis rollover
   CHECK(heartbeat.missed_deadline());
   CHECK(!heartbeat.update(0x1eU, true));
+  // UART/output checks cannot start or refresh the pulse clock.
+  heartbeat.reset();
+  CHECK(heartbeat.check_authority(0U, true));
+  CHECK(heartbeat.update(100U, true)); // no active heartbeat before sensor pass
+  CHECK(heartbeat.check_authority(115U, true));
+  CHECK(!heartbeat.update(115U, true)); // check did not toggle at 15 ms
+  CHECK(heartbeat.check_authority(159U, true));
+  CHECK(!heartbeat.check_authority(160U, true)); // deadline between sensor passes
+  CHECK(heartbeat.missed_deadline());
+  CHECK(!heartbeat.update(161U, true));
+  CHECK(!heartbeat.check_authority(162U, false));
+  CHECK(heartbeat.missed_deadline());
+  heartbeat.reset();
+  CHECK(heartbeat.update(200U, true));
+  CHECK(!heartbeat.check_authority(244U, false)); // timely UART STOP
+  CHECK(!heartbeat.missed_deadline());
+  CHECK(heartbeat.check_authority(245U, true)); // new drive, still no edge
+  CHECK(heartbeat.update(300U, true));
+  heartbeat.reset();
+  CHECK(heartbeat.update(0xfffffff0U, true));
+  CHECK(!heartbeat.check_authority(0x1dU, false));
+  CHECK(heartbeat.missed_deadline());
   std::cout << "PASS DC CPU heartbeat: stall latch, wrap, USB recovery\n";
 }
