@@ -99,10 +99,17 @@ def fit_corners(
                     "Checkerboard views include repeated or near-duplicate placements"
                 )
 
-    rms, camera, dist, _, _, intrinsic_std, _, _ = cv2.calibrateCameraExtended(
+    rms, camera, dist, _, _, intrinsic_std, _, per_view_errors = cv2.calibrateCameraExtended(
         [object_grid] * len(image_points), image_points, (width, height),
         None, None,
     )
+    # OpenCV also reports RMS for each view. A badly fitted placement can
+    # hide inside a small pooled RMS when many other views fit well.
+    # Apply the same existing pixel budget to every accepted view.
+    view_rms = np.asarray(per_view_errors).reshape(-1)
+    if (len(view_rms) != len(image_points) or not np.isfinite(view_rms).all()
+            or (view_rms < 0).any() or (view_rms > 1.5).any()):
+        raise ValueError("Excessive or invalid checkerboard per-view reprojection error")
     # Low pixel reprojection error alone can conceal unobservable focal
     # length or lens distortion. OpenCV estimates their uncertainty using
     # the same detected corners; reject an underconstrained candidate.
@@ -139,6 +146,7 @@ def fit_corners(
         "checkerboard_square_mm": square_mm,
         "checkerboard_views": len(views),
         "reprojection_rms_px": round(float(rms), 4),
+        "worst_view_reprojection_rms_px": round(float(view_rms.max()), 4),
         "physical_acceptance_pass": False,
         "motor_authorized": False, "charging_authorized": False,
         "requires_real_head_mount_review": True,

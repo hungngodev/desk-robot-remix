@@ -62,6 +62,7 @@ def test_opencv_recovers_synthetic_distorted_camera_but_cannot_approve_dock():
     assert candidate["charging_authorized"] is False
     assert candidate["checkerboard_views"] == 24
     assert candidate["reprojection_rms_px"] < .02
+    assert candidate["worst_view_reprojection_rms_px"] < .02
     assert abs(candidate["fx"] - 510) < 4
     assert abs(candidate["fy"] - 512) < 4
     assert candidate["image_width_px"] == 640
@@ -69,6 +70,48 @@ def test_opencv_recovers_synthetic_distorted_camera_but_cannot_approve_dock():
     assert len(candidate["distortion_coeffs"]) == 5
 
 
+
+
+def test_rejects_one_bad_view_hidden_by_low_pooled_rms():
+    """Actual OpenCV fit with one poor frame and well-constrained intrinsics."""
+    cv2 = pytest.importorskip("cv2")
+    rng = np.random.default_rng(123)
+    board = np.zeros((54, 3), dtype=np.float32)
+    board[:, :2] = np.mgrid[:9, :6].T.reshape(-1, 2) * 10
+    camera = np.array([[510., 0, 321.], [0, 512., 239.], [0, 0, 1.]])
+    distortion = np.array([.09, -.04, .001, -.002, .008])
+    views = []
+    for _ in range(200):
+        rotation = rng.uniform(-.6, .6, 3)
+        translation = np.array([
+            rng.uniform(-140, 90), rng.uniform(-90, 60), rng.uniform(170, 330),
+        ])
+        corners, _ = cv2.projectPoints(board, rotation, translation, camera, distortion)
+        if ((corners[..., 0] > 10).all() and (corners[..., 0] < 630).all()
+                and (corners[..., 1] > 10).all() and (corners[..., 1] < 470).all()):
+            views.append(corners)
+            if len(views) == 40:
+                break
+    assert len(views) == 40
+    views[-1] += rng.normal(0, 1.8, views[-1].shape).astype(np.float32)
+    with pytest.raises(ValueError, match="per-view reprojection error"):
+        fit(views)
+
+
+@pytest.mark.parametrize("bad_error", [float("nan"), -0.1])
+def test_rejects_invalid_native_per_view_error(monkeypatch, bad_error):
+    cv2 = pytest.importorskip("cv2")
+    original = cv2.calibrateCameraExtended
+
+    def invalid_error(*args, **kwargs):
+        data = list(original(*args, **kwargs))
+        data[7] = data[7].copy()
+        data[7][0, 0] = bad_error
+        return tuple(data)
+
+    monkeypatch.setattr(cv2, "calibrateCameraExtended", invalid_error)
+    with pytest.raises(ValueError, match="per-view reprojection error"):
+        fit(projected_views(cv2))
 
 
 def test_rejects_low_rms_with_unreliable_lens_parameter_uncertainty(monkeypatch):
