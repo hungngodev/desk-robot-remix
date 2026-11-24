@@ -5,9 +5,12 @@ exercise the real Mac consumer. This is not physical map or motor acceptance.
 """
 
 import time
+from types import SimpleNamespace
 
 import httpx
 import pytest
+from desk_robot import transport
+from desk_robot.spatial_bracket import BracketError, validate_stationary_bracket
 from desk_robot.transport import HeadError, HttpHead
 
 JPEG = bytes.fromhex("ffd8696d616765ffd9")
@@ -95,3 +98,131 @@ async def test_fresh_camera_frame_never_rescues_invalid_body_origin(
         assert newer_frame[2:] == ((77, 2, 20_000), 1)
         assert head.pose_fence.current(time.monotonic()) is None
     assert calls == ["/api/pose"] * 3
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ("foreign_robot", "stale_body_sample", "stream_reconnect"))
+async def test_stationary_camera_pose_bracket_recovers_with_new_receipts(
+    settings, tokens, monkeypatch, fault,
+):
+    """Synthetic receipt timing only: no calibrated optical or body lag claim."""
+    robot = settings.robots[0]
+    now = 100.0
+    response_at = now
+    packet = {}
+    calls = []
+    monkeypatch.setattr(transport, "time", SimpleNamespace(monotonic=lambda: now))
+
+    def handler(request):
+        nonlocal now
+        assert request.method == "GET" and request.url.path == "/api/pose"
+        assert request.headers["Authorization"] == "Bearer " + tokens[robot.token_env]
+        calls.append(request.url.path)
+        now = response_at
+        return httpx.Response(200, json=packet)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(robot, client)
+
+        async def forbidden_command(_command):
+            pytest.fail("Stationary receipt replay must not send a body command")
+
+        head.command = forbidden_command
+
+        async def read_pose(at, seq, **overrides):
+            nonlocal now, response_at, packet
+            now = at - 0.01
+            response_at = at
+            packet = {
+                "robot_id": robot.id, "v": 1, "head_boot": 77,
+                "body_boot": 8, "origin": 3, "seq": seq,
+                "sample_us": round(1_000_000 + (at - 100) * 1_000_000),
+                "x_mm": 25, "y_mm": -30, "yaw_mrad": 1000, "quality": "valid",
+                **overrides,
+            }
+            return await head.pose_status()
+
+        async def select_frame(at, seq, generation=1):
+            nonlocal now
+            now = at
+            # Replay the already selected authenticated-stream fixture.
+            head._stream_connected = True
+            head._stream_generation = generation
+            head._stream_latest = JPEG
+            head._stream_received_at = at
+            head._stream_version = seq
+            head._accept_camera_identity((77, seq, seq * 10_000))
+            receipt = await head.snapshot_for_dock()
+            assert receipt == (JPEG, at, (77, seq, seq * 10_000), generation)
+            return receipt
+
+        def bracket(previous, selected, before, after):
+            return validate_stationary_bracket(
+                fence=head.pose_fence, before=before, after=after,
+                previous_camera=previous[2], camera=selected[2],
+                camera_received_at=selected[1],
+                stream_generation_before=previous[3],
+                stream_generation_after=selected[3],
+                motion_epoch_before=4, motion_epoch_after=4,
+                disarmed_before=True, disarmed_after=True,
+                now=now, max_optical_lag_s=0.05, max_body_lag_s=0.05,
+            )
+
+        await read_pose(100.0, 1)
+        assert head.pose_fence.current(now) is None
+        previous = await select_frame(100.05, 1)
+        before = await read_pose(100.1, 2)
+        selected = await select_frame(100.2, 2)
+        after = await read_pose(100.3, 3)
+        accepted = bracket(previous, selected, before, after)
+        assert accepted.robot_id == robot.id
+        assert (accepted.body_boot, accepted.origin) == (8, 3)
+        assert accepted.camera_identity == selected[2]
+        assert (accepted.before_seq, accepted.after_seq) == (2, 3)
+        assert (accepted.odom_base.x_mm, accepted.odom_base.y_mm) == (25, -30)
+        assert accepted.odom_base.yaw_rad == pytest.approx(1.0)
+        assert head.pose_fence.needs_reanchor is True
+
+        generation = 1
+        frame_seq = 3
+        if fault == "stream_reconnect":
+            generation = 2
+            foreign_session = await select_frame(100.31, 3, generation)
+            frame_seq = 4
+            with pytest.raises(BracketError, match="stream generation"):
+                bracket(selected, foreign_session, before, after)
+        else:
+            overrides = (
+                {"robot_id": "foreign-pet"} if fault == "foreign_robot"
+                else {"sample_us": 1_310_000}
+            )
+            with pytest.raises(HeadError, match=(
+                "Pose robot identity" if fault == "foreign_robot"
+                else "sample lags local receipt clock"
+            )):
+                await read_pose(100.7, 4, **overrides)
+            assert head.pose_fence.current(now) is None
+            with pytest.raises(BracketError, match="current"):
+                bracket(previous, selected, before, after)
+
+        # Recovery needs a new camera baseline and two new pose samples after
+        # a rejected pose; no original bracket or map anchor may be reused.
+        await read_pose(100.8, 5)
+        if fault != "stream_reconnect":
+            assert head.pose_fence.current(now) is None
+        new_previous = await select_frame(100.85, frame_seq, generation)
+        new_before = await read_pose(100.9, 6)
+        new_selected = await select_frame(101.0, frame_seq + 1, generation)
+        new_after = await read_pose(101.1, 7)
+        recovered = bracket(new_previous, new_selected, new_before, new_after)
+        assert recovered.robot_id == robot.id
+        assert recovered.camera_identity == new_selected[2]
+        assert recovered.stream_generation == generation
+        assert (recovered.before_seq, recovered.after_seq) == (6, 7)
+        assert recovered.odom_base == accepted.odom_base
+        assert head.pose_fence.current(now) is new_after
+        assert head.pose_fence.needs_reanchor is True
+
+        with pytest.raises(BracketError, match="current"):
+            bracket(previous, selected, before, after)
+    assert calls == ["/api/pose"] * (6 if fault == "stream_reconnect" else 7)
