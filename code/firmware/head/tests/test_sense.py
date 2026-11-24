@@ -545,6 +545,33 @@ int main() {
         self.assertIn('#define AUDIO_OUTPUT_SAMPLE_RATE 32000', config)
         self.assertIn('constexpr int initial_decoder_rate = 24000;', audio)
 
+    def test_rejected_decoder_format_never_reaches_preserved_decoder(self):
+        """A failed decoder change must not play a packet in the old format."""
+        overlay.apply(self.root, "sense")
+        audio = (self.root / "main/audio/audio_service.cc").read_text()
+        worker = audio.split("void AudioService::OpusCodecTask()", 1)[1].split(
+            "void AudioService::SetDecodeSampleRate(", 1
+        )[0]
+        gate = (
+            "if (opus_decoder_ != nullptr &&\n"
+            "                decoder_sample_rate_ == packet->sample_rate &&\n"
+            "                decoder_duration_ms_ == packet->frame_duration) {"
+        )
+        assert worker.index("SetDecodeSampleRate(packet->sample_rate, packet->frame_duration)") < (
+            worker.index(gate)
+        ) < worker.index("esp_opus_dec_decode(")
+        assert worker.index(gate) < worker.index("task.pcm.resize(decoder_frame_size_);")
+        assert "if (decoded && generation == playback_generation_" in worker
+        setter = audio.split("void AudioService::SetDecodeSampleRate(", 1)[1].split(
+            "void AudioService::PushTaskToEncodeQueue(", 1
+        )[0]
+        retry = setter.split("decoder_duration_ms_ == frame_duration && opus_decoder_ != nullptr", 1)[1]
+        retry = retry.split("esp_opus_dec_cfg_t opus_dec_cfg", 1)[0]
+        assert "sample_rate != codec->output_sample_rate() && output_resampler_ == nullptr" in retry
+        assert retry.index("esp_ae_rate_cvt_open(&cfg, &output_resampler_)") < retry.index("return;")
+        assert "esp_opus_dec_open(" not in retry
+        assert "esp_opus_dec_close(" not in retry
+
     def test_stream_camera_configuration_and_single_client_ownership(self):
         """Source budget, not measured frame rate or audio contention."""
         board = (HEAD / "sense/desk_robot_sense.cc").read_text()

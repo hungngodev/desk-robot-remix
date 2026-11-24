@@ -654,6 +654,41 @@ static bool ParseDeskAudioFrame(int version, const char* data, size_t len,
     if (decoder_sample_rate_ == sample_rate &&
         decoder_duration_ms_ == frame_duration && opus_decoder_ != nullptr) {""",
         )
+        # Preserving an old decoder on a rejected format is not permission
+        # to decode the rejected packet with that decoder.
+        service = replace_once(
+            service,
+            """            SetDecodeSampleRate(packet->sample_rate, packet->frame_duration);
+            bool decoded = false;
+            if (opus_decoder_ != nullptr) {""",
+            """            SetDecodeSampleRate(packet->sample_rate, packet->frame_duration);
+            bool decoded = false;
+            if (opus_decoder_ != nullptr &&
+                decoder_sample_rate_ == packet->sample_rate &&
+                decoder_duration_ms_ == packet->frame_duration) {""",
+        )
+        # Retry the existing converter if its allocation failed at startup
+        # or on the previous rate change, without replacing a healthy decoder.
+        service = replace_once(
+            service,
+            """    if (decoder_sample_rate_ == sample_rate &&
+        decoder_duration_ms_ == frame_duration && opus_decoder_ != nullptr) {
+        return;
+    }""",
+            """    if (decoder_sample_rate_ == sample_rate &&
+        decoder_duration_ms_ == frame_duration && opus_decoder_ != nullptr) {
+        auto codec = Board::GetInstance().GetAudioCodec();
+        if (sample_rate != codec->output_sample_rate() && output_resampler_ == nullptr) {
+            esp_ae_rate_cvt_cfg_t cfg =
+                RATE_CVT_CFG(sample_rate, codec->output_sample_rate(), ESP_AUDIO_MONO);
+            auto resampler_ret = esp_ae_rate_cvt_open(&cfg, &output_resampler_);
+            if (output_resampler_ == nullptr) {
+                ESP_LOGE(TAG, "Failed to recover output resampler, error code: %d", resampler_ret);
+            }
+        }
+        return;
+    }""",
+        )
         # Replace the pinned upstream's close-then-open decoder transition
         # only in the selected disposable Sense overlay. A malformed packet
         # or failed replacement allocation must not destroy a working decoder.
