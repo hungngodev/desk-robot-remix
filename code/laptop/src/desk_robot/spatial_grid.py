@@ -192,6 +192,11 @@ class SpatialGrid:
                     # An expired prior hit or clearance cannot bias fresh evidence.
                     # Clock rollback also discards the prior belief, never revives it.
                     target.obstacle_log_odds = 0.0
+                if batch.kind == "obstacle_hit":
+                    # A new qualified hit contradicts earlier free-space evidence.
+                    # Discard negative confidence immediately; keep positive
+                    # occupancy confidence for bounded, ordered clearing.
+                    target.obstacle_log_odds = max(0.0, target.obstacle_log_odds)
                 target.obstacle_log_odds = max(MIN_LOG_ODDS, min(MAX_LOG_ODDS,
                     target.obstacle_log_odds + _OBSTACLE_WEIGHT[batch.kind]))
                 target.obstacle_received_us = batch.received_us
