@@ -220,7 +220,7 @@ async def test_truncated_camera_jpeg_is_rejected_before_model_work():
     output = BytesIO()
     Image.new("RGB", (32, 32)).save(output, "JPEG")
     frame = output.getvalue()
-    assert frame.endswith(b"\\xff\\xd9")
+    assert frame.endswith(b"\xff\xd9")
     truncated = frame[:-2]
     # Pillow can identify the format and dimensions without the end marker.
     with Image.open(BytesIO(truncated)) as image:
