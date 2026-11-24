@@ -109,6 +109,7 @@ class HandlingGate:
     last_boot_id: int | None = None
     last_sample_ms: int | None = None
     last_low_g_seq: int | None = None  # MPU FF interrupt counter for same boot
+    native_low_g_seen: bool = False  # session-sticky telemetry capability
     retired_boot_ids: list[int] = field(default_factory=list)
 
     def reset(self, *, preserve_shake_cooldown: bool = False) -> None:
@@ -137,6 +138,7 @@ class HandlingGate:
             # but let an explicit session restart recover after eight real
             # device boot changes. This never authorizes motors or motion.
             self.retired_boot_ids.clear()
+            self.native_low_g_seen = False
 
     def observe(
         self, body: dict, now: float, *, qualified: bool,
@@ -293,6 +295,13 @@ class HandlingGate:
         source = body["imu"]
         fields = ("low_g_valid", "low_g_irq", "low_g_seq")
         if any(key in source for key in fields):
+            self.native_low_g_seen = True
+        # Once native FF status is present, a partial or downgraded adapter
+        # cannot silently recover a trusted pose by omitting all three fields.
+        # Keep the capability fence across faults and WROOM reboots until an
+        # explicit operator session reset; legacy read-only adapters can still
+        # operate before any native FF metadata is observed.
+        if self.native_low_g_seen:
             seq = source.get("low_g_seq")
             valid = source.get("low_g_valid")
             irq = source.get("low_g_irq")

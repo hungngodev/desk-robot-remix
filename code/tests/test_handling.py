@@ -1105,7 +1105,9 @@ def test_native_low_g_status_faults_revoke_pose_and_preserve_event_fence():
     ):
         gate.reset(preserve_shake_cooldown=True)
         gate.last_low_g_seq = 4
-        calibrated(gate, 103)
+        for i in range(8):
+            assert qualified(gate, _mpu_native_low_g(4), 103 + i * 0.1) == ()
+        assert gate.reference is not None
         frame = _mpu_native_low_g(4)
         frame["imu"].update(override)
         assert qualified(gate, frame, 105) == ()
@@ -1130,3 +1132,42 @@ def test_low_g_status_read_failure_cannot_erase_counter_or_claim_event():
                      102.6) == ()
     assert gate.last_low_g_seq == 0
     assert gate.last_boot_id == 2
+
+
+@pytest.mark.parametrize("next_boot", [1, 2])
+def test_native_low_g_metadata_cannot_be_silently_downgraded(next_boot):
+    gate = HandlingGate()
+    calibrated(gate)
+    assert qualified(gate, _mpu_native_low_g(0), 102.0) == ()
+    assert gate.reference is not None
+    assert gate.native_low_g_seen
+
+    # Every fresh frame is otherwise stationary and valid, but none
+    # provides the native FF status already attested by this session.
+    for i in range(9):
+        frame = sample(boot_id=next_boot)
+        assert qualified(gate, frame, 102.2 + i * 0.1) == ()
+        assert gate.reference is None
+        assert gate.startup_samples == []
+    assert gate.native_low_g_seen
+
+    # Restoring complete metadata allows a new eight-conversion baseline.
+    for i in range(8):
+        frame = _mpu_native_low_g(0, boot_id=next_boot)
+        assert qualified(gate, frame, 103.2 + i * 0.1) == ()
+    assert gate.reference == (0, 0, 1)
+    gate.reset()
+    assert not gate.native_low_g_seen
+    calibrated(gate, 105)
+
+
+def test_partial_native_low_g_status_also_fences_legacy_downgrade():
+    gate = HandlingGate()
+    frame = sample()
+    frame["imu"]["low_g_valid"] = False
+    assert qualified(gate, frame, 100.0) == ()
+    assert gate.native_low_g_seen
+    for i in range(8):
+        assert qualified(gate, sample(), 100.2 + i * 0.1) == ()
+    assert gate.reference is None
+    assert gate.startup_samples == []
