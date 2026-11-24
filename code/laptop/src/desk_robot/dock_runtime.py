@@ -210,7 +210,22 @@ async def verify_selected_dock_frame(head, observation) -> None:
         verify = getattr(head, "dock_receipt_current", None)
         if not callable(verify):
             raise ValueError("Dock frame source verifier absent")
-        await verify(observation)
+        # The verifier may wait on the live stream lock or an alternate
+        # adapter. Its deadline is the original frame's remaining lifetime,
+        # not a new timeout that would extend stale camera evidence.
+        from .controller import _bounded_head_reply
+
+        _, received_at = unpack_dock_frame(observation)
+        remaining = 0.20 - (time.monotonic() - received_at)
+        if remaining <= 0:
+            raise ValueError("Invalid or stale dock camera receipt")
+        await _bounded_head_reply(
+            verify(observation), seconds=remaining,
+            timeout_message="Dock frame source verification timed out",
+        )
+        # Even an apparently successful reply can arrive after the receipt
+        # expired (for example while the event loop was busy).
+        unpack_dock_frame(observation)
 
 
 async def observe_actual_dock(

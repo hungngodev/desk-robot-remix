@@ -1176,3 +1176,54 @@ def test_dock_receipt_accepts_signed_int64_camera_completion_limit():
         b"\xff\xd8\xff\xd9", received_at, (1, 1, (1 << 63) - 1), 1
     )
     assert dock_runtime.unpack_dock_frame(receipt) == (receipt[0], received_at)
+
+
+async def test_selected_dock_frame_verification_rejects_expired_receipt_before_call():
+    class Verifier:
+        async def dock_receipt_current(self, receipt):
+            pytest.fail("Expired receipt entered stream verifier")
+
+    receipt = (
+        b"\xff\xd8\xff\xd9", dock_runtime.time.monotonic() - 1.0,
+        (1, 1, 1), 1,
+    )
+    with pytest.raises(ValueError, match="Invalid or stale dock camera receipt"):
+        await dock_runtime.verify_selected_dock_frame(Verifier(), receipt)
+
+
+async def test_selected_dock_frame_verification_is_bounded_even_if_cancel_ignored():
+    import asyncio
+
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+    release = asyncio.Event()
+    finished = asyncio.Event()
+
+    class Verifier:
+        async def dock_receipt_current(self, receipt):
+            entered.set()
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                await release.wait()
+            finally:
+                finished.set()
+
+    receipt = (
+        b"\xff\xd8\xff\xd9", dock_runtime.time.monotonic(),
+        (1, 1, 1), 1,
+    )
+    try:
+        with pytest.raises(TimeoutError, match="Dock frame source verification timed out"):
+            await asyncio.wait_for(
+                dock_runtime.verify_selected_dock_frame(Verifier(), receipt),
+                timeout=1.0,
+            )
+        assert entered.is_set()
+        await asyncio.wait_for(cancelled.wait(), timeout=1.0)
+        assert not finished.is_set()
+    finally:
+        release.set()
+        if entered.is_set():
+            await asyncio.wait_for(finished.wait(), timeout=1.0)
