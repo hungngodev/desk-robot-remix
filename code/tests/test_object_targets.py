@@ -310,3 +310,23 @@ def test_other_host_clock_is_not_compared_to_current_monotonic_time():
     assert result.status == "last_seen"
     assert result.search_hint_mm == historical.floor_mm
     assert result.confirmed_floor_mm is None
+
+@pytest.mark.parametrize("other_floor", [(240, 320), None])
+def test_staggered_same_frame_freshness_does_not_remove_ambiguity(other_floor):
+    _, _, seen = fixtures()
+    other = replace(seen, receipt_us=960_000, floor_mm=other_floor,
+                    projection_qualified=other_floor is not None)
+    for rows in ([seen, other], [other, seen]):
+        result = resolve(rows, now_us=1_205_001)
+        assert result.status == "current_sighting"
+        assert result.reason == "ambiguous_projected_view"
+        assert result.confirmed_floor_mm is None and result.search_hint_mm is None
+        assert not result.arrived and not result.may_execute
+
+
+def test_staggered_same_frame_identical_projection_stays_usable():
+    _, _, seen = fixtures()
+    duplicate = replace(seen, receipt_us=960_000)
+    result = resolve([seen, duplicate], now_us=1_205_001)
+    assert result.confirmed_floor_mm == seen.floor_mm
+    assert not result.arrived and not result.may_execute

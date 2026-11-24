@@ -242,7 +242,10 @@ def resolve_object_target(
                         default=None)
     if (latest_seen is not None and (latest_absent is None or
             latest_seen.frame_seq > latest_absent.frame_seq)):
-        locations = projected_locations(latest_seen, positives)
+        # Freshness selects the view, not which objects existed in that view.
+        # A conflicting detection from the same frame remains ambiguous even
+        # if its individual receipt has aged out.
+        locations = projected_locations(latest_seen, seen)
         if len(locations) > 1:
             return result("current_sighting", "ambiguous_projected_view", latest_seen)
         if latest_seen.projection_qualified and latest_seen.floor_mm is not None:
