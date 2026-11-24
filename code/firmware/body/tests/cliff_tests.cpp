@@ -457,6 +457,114 @@ void delayed_range_sample_never_replaces_newer_evidence() {
   CHECK(wrapped.evaluate(7U));
 }
 
+void silent_critical_lane_expires_despite_fresh_peers() {
+  for (std::uint8_t lost = 0; lost < desk_robot::kCliffSensorCount; ++lost) {
+    CliffGuard guard;
+    ready(guard, 100);
+    // A disconnected/not-ready lane stops producing conversions, while
+    // every other critical lane remains healthy and continues scanning.
+    for (const std::uint32_t now : {139U, 179U, 180U}) {
+      for (std::uint8_t lane = 0; lane < desk_robot::kCliffSensorCount; ++lane) {
+        if (lane != lost) guard.sample(lane, lane == 4 ? 300 : 45, true, now);
+      }
+      CHECK(guard.evaluate(now) == (now < 180U));
+    }
+    CHECK(guard.fault() == CliffFault::StaleSample);
+    CHECK(guard.fault_sensor() == lost);
+    for (std::uint8_t lane = 0; lane < desk_robot::kCliffSensorCount; ++lane)
+      CHECK(guard.diagnostic(lane, 180).valid == (lane != lost));
+    CHECK(!guard.try_rearm(180));
+    guard.sample(lost, lost == 4 ? 300 : 45, true, 181);
+    CHECK(guard.diagnostic(lost, 181).valid);
+    CHECK(!guard.evaluate(181));
+    CHECK(guard.try_rearm(181));
+    CHECK(guard.evaluate(181));
+  }
+}
+
+void invalid_return_never_grants_clearance() {
+  for (std::uint8_t lane = 0; lane < desk_robot::kCliffSensorCount; ++lane) {
+    const std::uint16_t plausible = lane == 4 ? 300 : 45;
+    for (const std::uint16_t raw : {plausible, std::uint16_t(0),
+                                    std::uint16_t(8190), std::uint16_t(65535)}) {
+      CliffGuard guard;
+      ready(guard, 100);
+      // CliffGuard receives the decoded validity bit, not chip status codes.
+      guard.sample(lane, raw, false, 101);
+      CHECK(guard.fault() == CliffFault::InvalidSample);
+      CHECK(guard.fault_sensor() == lane);
+      const auto bad = guard.diagnostic(lane, 101);
+      CHECK(bad.present && !bad.valid && bad.distance_mm == raw);
+      CHECK(!guard.evaluate(101));
+      CHECK(!guard.try_rearm(101));
+      guard.sample(lane, plausible, true, 102);
+      CHECK(!guard.evaluate(102));
+      CHECK(guard.try_rearm(102));
+      CHECK(guard.evaluate(102));
+    }
+  }
+}
+
+void exact_threshold_jitter_never_clears_latch() {
+  for (std::uint8_t lane = 0; lane < desk_robot::kCliffSensorCount; ++lane) {
+    for (const bool upper : {false, true}) {
+      CliffGuard guard;
+      ready(guard, 100);
+      const auto cfg = config();
+      const std::uint16_t boundary = lane < desk_robot::kFloorSensorCount
+          ? (upper ? cfg.floor[lane].max_mm : cfg.floor[lane].min_mm)
+          : (upper ? cfg.front_max_mm : cfg.front_obstacle_mm);
+      // Floor bounds and front maximum are inclusive; front obstacle
+      // equality is unsafe. Repeated jitter cannot auto-clear the latch.
+      const bool front_near = lane == 4 && !upper;
+      const std::uint16_t safe = front_near ? boundary + 1 : boundary;
+      const std::uint16_t unsafe = front_near ? boundary
+          : (upper ? boundary + 1 : boundary - 1);
+      const CliffFault expected = lane < desk_robot::kFloorSensorCount
+          ? CliffFault::FloorOutOfRange
+          : (upper ? CliffFault::FrontOutOfRange : CliffFault::FrontObstacle);
+      guard.sample(lane, safe, true, 101);
+      CHECK(guard.evaluate(101));
+      for (std::uint32_t now = 102; now <= 106; now += 2) {
+        guard.sample(lane, unsafe, true, now);
+        CHECK(guard.fault() == expected);
+        CHECK(guard.fault_sensor() == lane);
+        CHECK(!guard.evaluate(now));
+        CHECK(!guard.try_rearm(now));
+        guard.sample(lane, safe, true, now + 1);
+        CHECK(guard.diagnostic(lane, now + 1).valid);
+        CHECK(!guard.evaluate(now + 1));
+      }
+      CHECK(guard.try_rearm(107));
+      CHECK(guard.evaluate(107));
+      guard.sample(lane, unsafe, true, 108);
+      CHECK(!guard.evaluate(108)); // a new crossing must trip again
+      CHECK(guard.fault() == expected);
+    }
+  }
+}
+
+void recovery_requires_every_critical_lane_safe() {
+  CliffGuard guard;
+  ready(guard, 100);
+  guard.sample(0, 61, true, 101);
+  guard.sample(4, 100, true, 102);
+  guard.sample(2, 45, false, 103);
+  CHECK(guard.fault() == CliffFault::FloorOutOfRange);
+  CHECK(guard.fault_sensor() == 0);
+  guard.sample(0, 45, true, 104);
+  CHECK(!guard.try_rearm(104)); // front obstacle and invalid floor remain
+  guard.sample(4, 300, true, 105);
+  CHECK(!guard.try_rearm(105)); // invalid floor remains
+  guard.sample(2, 45, true, 106);
+  CHECK(!guard.evaluate(106));
+  CHECK(guard.fault_sensor() == 0);
+  CHECK(guard.try_rearm(106));
+  CHECK(guard.fault() == CliffFault::None);
+  CHECK(guard.fault_sensor() == desk_robot::kNoFaultSensor);
+  CHECK(guard.evaluate(106));
+}
+
 void fault_names() {
   CHECK(std::strcmp(CliffGuard::fault_name(CliffFault::None), "none") == 0);
   CHECK(std::strcmp(CliffGuard::fault_name(CliffFault::Unconfigured), "unconfigured") == 0);
@@ -495,6 +603,14 @@ int main(int argc, char** argv) {
        observed_stale_conversion_cannot_revive_after_full_clock_cycle},
       {"delayed_range_sample_never_replaces_newer_evidence",
        delayed_range_sample_never_replaces_newer_evidence},
+      {"silent_critical_lane_expires_despite_fresh_peers",
+       silent_critical_lane_expires_despite_fresh_peers},
+      {"invalid_return_never_grants_clearance",
+       invalid_return_never_grants_clearance},
+      {"exact_threshold_jitter_never_clears_latch",
+       exact_threshold_jitter_never_clears_latch},
+      {"recovery_requires_every_critical_lane_safe",
+       recovery_requires_every_critical_lane_safe},
       {"fault_names", fault_names},
       {"diagnostics_read_only_and_bounded", diagnostics_read_only_and_bounded},
       {"diagnostics_expire_validity_without_clearing_raw_or_latched_fault",
