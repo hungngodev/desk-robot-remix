@@ -7,6 +7,7 @@ uncertain actuator ACK. Reading status is not a physical qualification trial.
 
 import argparse
 import json
+import statistics
 import time
 
 import serial
@@ -249,9 +250,10 @@ def inspect_status(status: dict) -> dict:
     }
 
 
-def transact_serial(port, command: str) -> dict | str:
+def transact_serial(port, command: str, *, receipt: dict | None = None) -> dict | str:
     """One bounded USB request; never accept a partial or short-written frame."""
     request = (command + "\n").encode("ascii")
+    started_at = time.monotonic()
     if port.write(request) != len(request):
         raise RuntimeError("Short USB write; command delivery uncertain, no retry")
     deadline = time.monotonic() + 0.5
@@ -260,12 +262,14 @@ def transact_serial(port, command: str) -> dict | str:
         # pySerial readline can return partial bytes after its read timeout.
         # Preserve the bounded Sense UART reply cap across those fragments.
         pending.extend(port.readline(1920))
-        if time.monotonic() >= deadline:
+        received_at = time.monotonic()
+        if received_at >= deadline:
             break
         if len(pending) > 1920 or (len(pending) == 1920 and not pending.endswith(b"\n")):
             raise RuntimeError("USB response exceeds reply capacity")
         if not pending.endswith(b"\n"):
             continue
+        response_bytes = len(pending)
         raw = bytes(pending[:-1]).removesuffix(b"\r")
         pending.clear()
         if b"\r" in raw or b"\n" in raw:
@@ -277,11 +281,19 @@ def transact_serial(port, command: str) -> dict | str:
             response = json.loads(line)
             if not isinstance(response, dict):
                 raise ValueError("Expected one body JSON object")
-            return response
-        if command == "rearm" and line == "OK rearm":
-            return line
-        if command != "status" and command != "rearm" and line == expected_ack(command):
-            return line
+        elif command == "rearm" and line == "OK rearm":
+            response = line
+        elif command != "status" and command != "rearm" and line == expected_ack(command):
+            response = line
+        else:
+            continue
+        if receipt is not None:
+            receipt.update(
+                request_bytes=len(request),
+                matched_response_bytes=response_bytes,
+                round_trip_ms=(received_at - started_at) * 1000,
+            )
+        return response
     raise TimeoutError("Uncertain USB response; no movement command will be retried")
 
 
@@ -320,12 +332,46 @@ def main():
 
         if args.inspect:
             samples = []
+            receipts = []
+            started_at = time.monotonic()
             for i in range(args.samples):
-                samples.append(inspect_status(transact("status")))
+                receipt = {}
+                samples.append(inspect_status(
+                    transact_serial(port, "status", receipt=receipt)
+                ))
+                receipts.append(receipt)
                 if i + 1 < args.samples:
                     time.sleep(0.1)
+            elapsed = time.monotonic() - started_at
+            tx = sum(row["request_bytes"] for row in receipts)
+            rx = sum(row["matched_response_bytes"] for row in receipts)
+            latencies = [row["round_trip_ms"] for row in receipts]
             print(json.dumps({
                 "samples": samples,
+                "serial_bench": {
+                    "configured_baud": 115200,
+                    "successful_status_transactions": len(receipts),
+                    "request_bytes": tx,
+                    "matched_response_bytes": rx,
+                    "sample_window_ms": round(elapsed * 1000, 3),
+                    "status_transactions_per_second": (
+                        round(len(receipts) / elapsed, 3) if elapsed > 0 else None
+                    ),
+                    "matched_response_bytes_per_second": (
+                        round(rx / elapsed, 3) if elapsed > 0 else None
+                    ),
+                    "matched_request_response_bytes_per_second": (
+                        round((tx + rx) / elapsed, 3) if elapsed > 0 else None
+                    ),
+                    "round_trip_ms": {
+                        "min": round(min(latencies), 3),
+                        "median": round(statistics.median(latencies), 3),
+                        "max": round(max(latencies), 3),
+                    },
+                    "per_transaction": receipts,
+                    "physical_line_rate_verified": False,
+                    "note": "Host request/reply timing; goodput includes sample pacing",
+                },
                 "all_five_present_and_valid": all(
                     all(row["present"] and row["valid"] for row in s["ranges"])
                     for s in samples
