@@ -69,6 +69,80 @@ def verified_actions_run(url: str, sha: str, lookup=github_json) -> bool:
             and run.get("conclusion") == "success")
 
 
+REQUIRED_PURCHASE_CI_JOBS = frozenset({
+    "Mac conversation and memory regression",
+    "Python and head host tests",
+    "Body C++ host tests with sanitizers",
+    "ESP32 WROOM firmware compile",
+    "XIAO Sense ESP-IDF 6.1 firmware compile",
+})
+
+
+def verified_required_ci_jobs(
+    run_url: object, sha: str, lookup=None, *, propagate_lookup_errors: bool = False,
+) -> bool:
+    """Reject green workflow headlines with missing or skipped required lanes.
+
+    Every named job must belong to the exact successful workflow run, source
+    SHA and attempt. Callers may retain their own network-failure diagnostics.
+    """
+    if (type(run_url) is not str or type(sha) is not str
+            or not SHA.fullmatch(sha)):
+        return False
+    lookup = github_json if lookup is None else lookup
+    captured = {}
+
+    def fetch_run(url):
+        value = lookup(url)
+        captured["run"] = value
+        return value
+
+    try:
+        if not verified_actions_run(run_url, sha, fetch_run):
+            return False
+        match = RUN_PATH.fullmatch(urlsplit(run_url).path)
+        run = captured["run"]
+        if match is None or type(run.get("id")) is not int:
+            return False
+        run_id = int(match[1])
+        attempt = run.get("run_attempt")
+        if (run["id"] != run_id or type(attempt) is not int or attempt < 1
+                or run.get("path") != ".github/workflows/host-verification.yml"):
+            return False
+        response = lookup(
+            f"https://api.github.com/repos/{REPO}/actions/runs/"
+            f"{run_id}/jobs?per_page=100"
+        )
+        jobs = response.get("jobs")
+        count = response.get("total_count")
+        if (type(jobs) is not list or type(count) is not int
+                or count != len(jobs) or not 0 < count <= 100):
+            return False
+        passed = set()
+        for job in jobs:
+            if not isinstance(job, dict):
+                return False
+            name = job.get("name")
+            if name not in REQUIRED_PURCHASE_CI_JOBS:
+                continue
+            if (name in passed or type(job.get("run_id")) is not int
+                    or job["run_id"] != run_id
+                    or type(job.get("run_attempt")) is not int
+                    or job["run_attempt"] != attempt
+                    or job.get("head_sha") != sha
+                    or job.get("status") != "completed"
+                    or job.get("conclusion") != "success"):
+                return False
+            passed.add(name)
+        return passed == REQUIRED_PURCHASE_CI_JOBS
+    except (HTTPError, URLError, OSError, TimeoutError):
+        if propagate_lookup_errors:
+            raise
+        return False
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return False
+
+
 def verified_raw_record(url: str, sha: str, lookup=github_json) -> bool:
     if not isinstance(url, str):
         return False
@@ -424,7 +498,9 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
                     f"{type(exc).__name__}"
                 )
         try:
-            if not verified_actions_run(receipt.get("url", ""), sha, lookup):
+            if not verified_required_ci_jobs(
+                receipt.get("url", ""), sha, lookup, propagate_lookup_errors=True,
+            ):
                 errors.append(f"procedure {identifier}: CI run not verified")
         except (HTTPError, URLError, ValueError, TimeoutError, OSError) as exc:
             errors.append(f"procedure {identifier}: CI lookup failed: {type(exc).__name__}")

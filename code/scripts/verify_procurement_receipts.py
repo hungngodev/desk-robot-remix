@@ -22,6 +22,7 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 
+import verify_playbook_receipts
 from procurement_release import (
     CONDITIONAL_ROOM_PER_STATION,
     FIRST_ROBOT_ROOM_GATE,
@@ -32,14 +33,12 @@ from procurement_release import (
 )
 from verify_playbook_receipts import (
     REPO,
-    RUN_PATH,
     bounded_receipt_int,
     evidence_digest_matches,
     finite_receipt_float,
     reject_nonfinite_receipt_value,
     source_unchanged_since_test,
     strict_receipt_object,
-    verified_actions_run,
     verified_raw_record,
 )
 from verify_system import source_snapshot
@@ -48,75 +47,9 @@ ROOT = Path(__file__).resolve().parents[2]
 SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
-REQUIRED_PURCHASE_CI_JOBS = frozenset({
-    "Mac conversation and memory regression",
-    "Python and head host tests",
-    "Body C++ host tests with sanitizers",
-    "ESP32 WROOM firmware compile",
-    "XIAO Sense ESP-IDF 6.1 firmware compile",
-})
-
-
-def verified_required_ci_jobs(run_url: object, sha: str, lookup=None) -> bool:
-    """Do not approve a cart from a green headline with skipped build lanes.
-
-    The live head must already equal the clean source SHA via checkout_sha().
-    Each named job has to belong to that exact successful, immutable workflow
-    run and attempt, not a newer/older PR commit or synthetic receipt.
-    """
-    if (type(run_url) is not str or type(sha) is not str
-            or not SHA.fullmatch(sha)):
-        return False
-    from verify_playbook_receipts import github_json
-    lookup = github_json if lookup is None else lookup
-    captured = {}
-
-    def fetch_run(url):
-        value = lookup(url)
-        captured["run"] = value
-        return value
-
-    try:
-        if not verified_actions_run(run_url, sha, fetch_run):
-            return False
-        match = RUN_PATH.fullmatch(urlsplit(run_url).path)
-        run = captured["run"]
-        if match is None or type(run.get("id")) is not int:
-            return False
-        run_id = int(match[1])
-        attempt = run.get("run_attempt")
-        if (run["id"] != run_id or type(attempt) is not int or attempt < 1
-                or run.get("path") != ".github/workflows/host-verification.yml"):
-            return False
-        response = lookup(
-            f"https://api.github.com/repos/{REPO}/actions/runs/"
-            f"{run_id}/jobs?per_page=100"
-        )
-        jobs = response.get("jobs")
-        count = response.get("total_count")
-        if (type(jobs) is not list or type(count) is not int
-                or count != len(jobs) or not 0 < count <= 100):
-            return False
-        passed = set()
-        for job in jobs:
-            if not isinstance(job, dict):
-                return False
-            name = job.get("name")
-            if name not in REQUIRED_PURCHASE_CI_JOBS:
-                continue
-            if (name in passed or type(job.get("run_id")) is not int
-                    or job["run_id"] != run_id
-                    or type(job.get("run_attempt")) is not int
-                    or job["run_attempt"] != attempt
-                    or job.get("head_sha") != sha
-                    or job.get("status") != "completed"
-                    or job.get("conclusion") != "success"):
-                return False
-            passed.add(name)
-        return passed == REQUIRED_PURCHASE_CI_JOBS
-    except (HTTPError, URLError, OSError, ValueError, TypeError,
-            AttributeError, TimeoutError, KeyError):
-        return False
+# Keep the existing procurement API backed by the shared procedure verifier.
+REQUIRED_PURCHASE_CI_JOBS = verify_playbook_receipts.REQUIRED_PURCHASE_CI_JOBS
+verified_required_ci_jobs = verify_playbook_receipts.verified_required_ci_jobs
 
 
 def checkout_sha(lookup=None) -> str:

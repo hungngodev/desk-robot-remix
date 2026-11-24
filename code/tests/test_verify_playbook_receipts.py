@@ -29,11 +29,26 @@ def lookup(url):
                 "author_association": "OWNER",
                 "user": {"login": "physical_owner", "type": "User"}}
     if url.endswith("/actions/runs/42"):
-        return {"head_sha": SHA, "name": "Host verification",
+        return {"id": 42, "run_attempt": 2,
+                "path": ".github/workflows/host-verification.yml",
+                "head_sha": SHA, "name": "Host verification",
                 "event": "pull_request",
                 "head_branch": "impl/mac-hardware-safety-preflight-2026-11-10",
                 "head_repository": {"full_name": "hungngodev/desk-robot-remix"},
                 "status": "completed", "conclusion": "success"}
+    if url.endswith("/actions/runs/42/jobs?per_page=100"):
+        jobs = [
+            {"name": name, "run_id": 42, "run_attempt": 2, "head_sha": SHA,
+             "status": "completed", "conclusion": "success"}
+            for name in (
+                "Mac conversation and memory regression",
+                "Python and head host tests",
+                "Body C++ host tests with sanitizers",
+                "ESP32 WROOM firmware compile",
+                "XIAO Sense ESP-IDF 6.1 firmware compile",
+            )
+        ]
+        return {"jobs": jobs, "total_count": len(jobs)}
     if "/contents/docs/records/bench.csv?ref=" in url:
         raw = (
             "procedure_id,source_sha,gate,result,operator,device_revision,"
@@ -91,6 +106,50 @@ def test_verified_run_and_pinned_physical_record_paths():
     assert verify.audit(full_ledger_with(promoted("MEASURED")["procedures"][0]), lookup) == []
     assert verify.verified_actions_run(RUN, SHA, lookup)
     assert verify.verified_raw_record(RAW, SHA, lookup)
+
+
+@pytest.mark.parametrize("defect", [
+    "missing", "skipped", "wrong_attempt", "wrong_sha", "duplicate", "wrong_run",
+    "truncated",
+])
+def test_green_headline_cannot_promote_without_exact_required_jobs(defect):
+    row = promoted("TESTED")["procedures"][0]
+
+    def altered(url):
+        response = lookup(url)
+        if "jobs" not in response:
+            return response
+        jobs = response["jobs"]
+        if defect == "missing":
+            jobs.pop()
+        elif defect == "skipped":
+            jobs[0]["conclusion"] = "skipped"
+        elif defect == "wrong_attempt":
+            jobs[0]["run_attempt"] = 1
+        elif defect == "wrong_sha":
+            jobs[0]["head_sha"] = "b" * 40
+        elif defect == "duplicate":
+            jobs.append(dict(jobs[0]))
+        elif defect == "wrong_run":
+            jobs[0]["run_id"] = 43
+        response["total_count"] = len(jobs) + (defect == "truncated")
+        return response
+
+    assert verify.verified_actions_run(RUN, SHA, altered)
+    assert verify.audit(full_ledger_with(row), lookup) == []
+    assert any("CI run not verified" in error
+               for error in verify.audit(full_ledger_with(row), altered))
+
+
+def test_required_job_lookup_failure_stays_distinct_from_failed_ci():
+    def offline_jobs(url):
+        if "/jobs?" in url:
+            raise URLError("offline jobs endpoint")
+        return lookup(url)
+
+    row = promoted("TESTED")["procedures"][0]
+    assert any("CI lookup failed" in error
+               for error in verify.audit(full_ledger_with(row), offline_jobs))
 
 
 def test_ci_fails_if_github_reports_failure_or_wrong_sha():
