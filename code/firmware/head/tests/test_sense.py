@@ -303,6 +303,53 @@ class SenseOverlayTests(unittest.TestCase):
         self.assertIn("!board->audio_operator_touched_.load()", board)
 
 
+    def test_sense_display_and_bridge_ready_before_face_and_sensor_tasks(self):
+        """Guard startup ordering, without implying physical sensor qualification."""
+        overlay.apply(self.root, "sense")
+        source = (self.root / overlay.BOARDS["sense"] / "desk_robot_sense.cc").read_text()
+        display = source.split("void InitializeDisplay()", 1)[1].split(
+            "void InitializeCamera()", 1
+        )[0]
+        stages = (
+            "esp_lcd_panel_reset(panel)",
+            "esp_lcd_panel_init(panel)",
+            "esp_lcd_panel_disp_on_off(panel, true)",
+            "local_eye_display_ = new desk_robot::LocalEyeDisplay(",
+            "display_ = local_eye_display_;",
+        )
+        positions = [display.index(stage) for stage in stages]
+        self.assertEqual(positions, sorted(positions))
+        constructor = source.split("DeskRobotSenseBoard() :", 1)[1].split(
+            "void StartNetwork() override", 1
+        )[0]
+        self.assertLess(
+            constructor.index("InitializeDisplay();"),
+            constructor.index("InitializeCamera();"),
+        )
+        self.assertLess(
+            constructor.index("InitializeCamera();"),
+            constructor.index("boot_button_.On"),
+        )
+        app = (self.root / "main/application.cc").read_text()
+        initialize = app.split("void Application::Initialize()", 1)[1].split(
+            "board.StartNetwork();", 1
+        )
+        self.assertEqual(len(initialize), 2)
+        self.assertIn("display->SetupUI();", initialize[0])
+        startup = source.split("void StartNetwork() override", 1)[1].split(
+            "AudioCodec* GetAudioCodec()", 1
+        )[0]
+        for task in ("xTaskCreate(FaceTask,", "xTaskCreate(BodyPollTask,"):
+            for prerequisite in (
+                "robot_bridge.Start();",
+                "body_bridge_ = &robot_bridge;",
+                "face_behavior_.seed(pet_seed);",
+                "eye_animator_.Seed(pet_seed);",
+            ):
+                self.assertLess(startup.index(prerequisite), startup.index(task))
+        self.assertIn("std::atomic<bool> body_fault_active_{true};", source)
+        self.assertIn("std::atomic<uint32_t> body_last_valid_ms_{0};", source)
+
     def test_latched_body_fault_remains_visible_during_continuous_listening(self):
         """Xiaozhi may overwrite OLED status without an idle transition."""
         source = (HEAD / "sense/desk_robot_sense.cc").read_text()
