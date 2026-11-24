@@ -274,6 +274,42 @@ def test_sensor_acquisition_cannot_replay_in_a_fresh_report():
     assert accept(frame(4, 8000), decoder=decoder, now=8.0).seq == 4
 
 
+@pytest.mark.parametrize("sensor, field, changed_value", [
+    ("scd40", "co2_ppm", 900),
+    ("amg8833", "pixels_c", [24.0] * 64),
+])
+def test_same_acquisition_cannot_change_cached_values(sensor, field, changed_value):
+    decoder = RoomStationDecoder()
+    first = accept(frame(1, 5000), decoder=decoder, now=5.0)
+    # Consumer mutations must not change the decoder's private witness.
+    if sensor == "amg8833":
+        first.readings[sensor][field][0] = 24.0
+    else:
+        first.readings[sensor][field] = changed_value
+
+    cached = frame(2, 6000)
+    cached["readings"][sensor]["sample_ms"] = 5000
+    assert accept(cached, decoder=decoder, now=6.0).seq == 2
+
+    missing = frame(3, 7000)
+    missing["readings"][sensor] = {"valid": False}
+    accept(missing, decoder=decoder, now=7.0)
+
+    contradiction = frame(4, 8000)
+    contradiction["readings"][sensor]["sample_ms"] = 5000
+    contradiction["readings"][sensor][field] = changed_value
+    with pytest.raises(ValueError, match=f"Contradictory {sensor} acquisition values"):
+        accept(contradiction, decoder=decoder, now=8.0)
+
+    # Rejection is atomic, and the identical cached observation is allowed.
+    corrected = frame(4, 8000)
+    corrected["readings"][sensor]["sample_ms"] = 5000
+    assert accept(corrected, decoder=decoder, now=8.0).seq == 4
+    newer = frame(5, 9000)
+    newer["readings"][sensor][field] = changed_value
+    assert accept(newer, decoder=decoder, now=9.0).readings[sensor][field] == changed_value
+
+
 def test_sensor_acquisition_rollover_and_rejection_are_atomic():
     decoder = RoomStationDecoder()
     before = 0xffffff00

@@ -13,6 +13,7 @@ import math
 import secrets
 import threading
 import time
+from copy import deepcopy
 from dataclasses import dataclass
 from typing import Callable
 
@@ -205,6 +206,7 @@ class RoomStationDecoder:
         self._last_ms: int | None = None
         self._station_elapsed_ms = 0
         self._last_sensor_elapsed_ms: dict[str, int] = {}
+        self._last_sensor_readings: dict[str, dict] = {}
         self._first_received_at: float | None = None
         self._last_received_at: float | None = None
 
@@ -267,6 +269,7 @@ class RoomStationDecoder:
         # replace a newer acquisition with an older one, even across wrap
         # or an intervening invalid reading. Stage all updates atomically.
         sensor_elapsed_ms = self._last_sensor_elapsed_ms.copy()
+        sensor_readings = self._last_sensor_readings.copy()
         for sensor in SENSORS:
             reading = readings[sensor]
             if _valid_reading(sensor, reading, clock):
@@ -275,6 +278,13 @@ class RoomStationDecoder:
                 previous = sensor_elapsed_ms.get(sensor)
                 if previous is not None and acquired < previous:
                     raise ValueError(f"Backwards {sensor} acquisition clock")
+                if previous is not None and acquired == previous:
+                    if reading != sensor_readings[sensor]:
+                        raise ValueError(f"Contradictory {sensor} acquisition values")
+                else:
+                    # Returned observations contain mutable dictionaries/lists.
+                    # Keep a detached witness even if a consumer edits them.
+                    sensor_readings[sensor] = deepcopy(reading)
                 sensor_elapsed_ms[sensor] = acquired
         # Invalid frames never mutate counter fences. A USB reconnect must
         # create a NEW decoder instance only after actual port reopening.
@@ -284,6 +294,7 @@ class RoomStationDecoder:
         self._last_ms = clock
         self._station_elapsed_ms = elapsed_ms
         self._last_sensor_elapsed_ms = sensor_elapsed_ms
+        self._last_sensor_readings = sensor_readings
         self._last_received_at = float(now)
         return RoomObservation(seq, clock, float(now), readings,
                                _summary(readings, self._soil_calibration),
