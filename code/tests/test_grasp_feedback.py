@@ -1051,3 +1051,42 @@ async def test_transient_contact_requires_two_fresh_samples_at_one_angle(monkeyp
     result = await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert result["commanded_angle"] == 68
     assert head.commands == ["grip 64", "grip 68"]
+
+
+@pytest.mark.parametrize("expire_after_close", [False, True])
+async def test_jaw_evidence_must_still_be_fresh_at_closing_dispatch(
+    monkeypatch, expire_after_close,
+):
+    """A slow health check cannot spend an expired ADC observation."""
+    from types import SimpleNamespace
+
+    import desk_robot.grasp_feedback as feedback
+
+    clock = 100.0
+
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr(feedback.asyncio, "sleep", instant)
+    monkeypatch.setattr(feedback, "time", SimpleNamespace(monotonic=lambda: clock))
+
+    class AgingJaw(FakeHead):
+        async def aux_status(self):
+            reply = await super().aux_status()
+            if self.seq == (3 if expire_after_close else 2):
+                reply["force"]["jaw_age_ms"] = 400
+            return reply
+
+    head = AgingJaw([100, 100, 130, 240, 245])
+    checks = 0
+
+    async def slow_health():
+        nonlocal clock, checks
+        checks += 1
+        if checks == (3 if expire_after_close else 1):
+            clock += 0.15
+        return {"armed": True, "robot_id": "robot-01", "imu": {"boot_id": 5103}}
+
+    with pytest.raises(OperationError, match="expired before closing dispatch"):
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=slow_health)
+    assert head.commands == (["grip 64", "grip 60"] if expire_after_close else [])

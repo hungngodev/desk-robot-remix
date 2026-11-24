@@ -89,14 +89,13 @@ async def guarded_grasp(
     force_boot_id: int | None = None
     force_boot_changed = False
 
-    async def read_force() -> tuple[int, int]:
+    async def read_force() -> tuple[int, int, float]:
         nonlocal force_boot_seen, force_boot_id, force_boot_changed
         started = time.monotonic()
         sample = await _bounded_head_reply(
             head.aux_status(), seconds=_FORCE_READ_TIMEOUT_S,
             timeout_message="ADS1115 jaw force read timed out",
         )
-        request_elapsed_ms = max(0, int((time.monotonic() - started) * 1000))
         if not isinstance(sample, dict) or sample.get("robot_id") != robot_id:
             raise ValueError("Foreign or missing jaw sensor robot identity")
         # Fence a new or unknown WROOM epoch before decoding any jaw data.
@@ -126,12 +125,16 @@ async def guarded_grasp(
         # optional metadata allowance in force_observation for read-only
         # inspection, but require both fields at this motion boundary.
         age_ms = group.get("jaw_age_ms")
-        if (type(age_ms) is not int or not 0 <= age_ms < 500
-                or age_ms + request_elapsed_ms >= 500):
+        if type(age_ms) is not int or not 0 <= age_ms < 500:
+            raise ValueError("Missing or expired jaw ADC acquisition age")
+        # Charge the full AUX round trip against the acquisition lifetime.
+        # Preserve this deadline across every later awaited health check.
+        expires_at = started + (500 - age_ms) / 1000
+        if time.monotonic() >= expires_at:
             raise ValueError("Missing or expired jaw ADC acquisition age")
         force_boot_seen = True
         force_boot_id = observed_boot
-        return observation
+        return *observation, expires_at
 
     async def confirmed_health() -> None:
         nonlocal force_boot_changed
@@ -160,7 +163,7 @@ async def guarded_grasp(
                 force_boot_changed = True
                 raise OperationError("Gripper WROOM health boot mismatched jaw source")
 
-    async def read_new_jaw(previous_seq: int, failure: str) -> tuple[int, int]:
+    async def read_new_jaw(previous_seq: int, failure: str) -> tuple[int, int, float]:
         """Wait for one distinct same-boot conversion, not repeated cached ADC.
 
         Old/backward sequence values, invalid sample age, a changed boot or
@@ -170,9 +173,9 @@ async def guarded_grasp(
         """
         async with asyncio.timeout(_JAW_FRESH_WAIT_S):
             for attempt in range(_JAW_MAX_POLLS):
-                measured, seq = await read_force()
+                measured, seq, expires_at = await read_force()
                 if _fresh_jaw_sequence(seq, previous_seq):
-                    return measured, seq
+                    return measured, seq, expires_at
                 if seq != previous_seq or attempt == _JAW_MAX_POLLS - 1:
                     raise OperationError(failure)
                 await asyncio.sleep(_JAW_POLL_INTERVAL_S)
@@ -180,11 +183,11 @@ async def guarded_grasp(
         raise OperationError(failure)
 
     try:
-        baseline_a, seq_a = await read_force()
+        baseline_a, seq_a, _ = await read_force()
         # A seven-lane mux can expose the same last completed conversion
         # after 180 ms. Poll for a new hardware ID before declaring a stall.
         await asyncio.sleep(0.18)
-        baseline_b, seq_b = await read_new_jaw(
+        baseline_b, seq_b, jaw_expires_at = await read_new_jaw(
             seq_a, "No new ADS1115 jaw sample; jaw not moved",
         )
     except (KeyError, TypeError, ValueError, AttributeError,
@@ -194,11 +197,15 @@ async def guarded_grasp(
         raise OperationError("Gripper baseline unstable; jaw not moved")
     baseline = (baseline_a + baseline_b) // 2
     latest_seq = seq_b
+    motion_attempted = False
     try:
         for angle in grip_angles(
             calibration.grip_open, calibration.grip_closed, calibration.grip_step_deg
         )[1:]:
             await confirmed_health()
+            if time.monotonic() >= jaw_expires_at:
+                raise OperationError("Jaw ADC evidence expired before closing dispatch")
+            motion_attempted = True
             reply = await _bounded_head_reply(
                 head.command(f"grip {angle}"), seconds=_GRIP_COMMAND_TIMEOUT_S,
                 timeout_message="Gripper servo command unconfirmed",
@@ -222,7 +229,7 @@ async def guarded_grasp(
                 if confirmation:
                     await confirmed_health()
                 try:
-                    measured, seq = await read_new_jaw(
+                    measured, seq, jaw_expires_at = await read_new_jaw(
                         latest_seq, "No new jaw sample after servo movement",
                     )
                 except (KeyError, TypeError, ValueError, AttributeError,
@@ -245,8 +252,8 @@ async def guarded_grasp(
                     }
         raise OperationError("Closed jaw limit reached with no tactile contact")
     except (Exception, asyncio.CancelledError):
-        if force_boot_changed:
-            raise  # No commands of any kind after a newly observed reboot.
+        if force_boot_changed or not motion_attempted:
+            raise  # No relief across a reboot or before any attempted close.
         # Cancellation also can arrive AFTER a jaw command has moved the servo.
         # A failed partial grasp can leave a powered MG90S squeezing an object.
         # Transport failures and hardware timeout exceptions matter too: a
