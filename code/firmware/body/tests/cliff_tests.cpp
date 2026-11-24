@@ -565,6 +565,47 @@ void recovery_requires_every_critical_lane_safe() {
   CHECK(guard.evaluate(106));
 }
 
+void missing_lane_blocks_startup_and_bus_recovery() {
+  for (std::uint8_t missing = 0; missing < desk_robot::kCliffSensorCount; ++missing) {
+    CliffGuard guard;
+    CHECK(guard.configure(config()));
+    for (const bool recovering : {false, true}) {
+      if (recovering) guard.bus_fault();
+      const auto expected = recovering ? CliffFault::BusFailure : CliffFault::MissingSample;
+      const std::uint32_t now = recovering ? 110 : 100;
+      for (std::uint8_t lane = 0; lane < desk_robot::kCliffSensorCount; ++lane) {
+        CHECK(!guard.diagnostic(lane, now).present);
+        if (lane != missing) guard.sample(lane, lane == 4 ? 300 : 45, true, now);
+      }
+      CHECK(guard.fault() == expected);
+      CHECK(!guard.evaluate(now));
+      CHECK(!guard.try_rearm(now));
+      guard.sample(missing, missing == 4 ? 300 : 45, true, now + 1);
+      CHECK(!guard.evaluate(now + 1));
+      CHECK(guard.try_rearm(now + 1));
+      CHECK(guard.evaluate(now + 1));
+    }
+  }
+}
+
+void zero_return_vetoes_even_when_marked_valid() {
+  for (std::uint8_t lane = 0; lane < desk_robot::kCliffSensorCount; ++lane) {
+    CliffGuard guard;
+    CHECK(guard.configure(config()));
+    for (std::uint8_t peer = 0; peer < desk_robot::kCliffSensorCount; ++peer)
+      guard.sample(peer, peer == 4 ? 300 : 45, true, 100);
+    CHECK(guard.try_rearm(100));
+    guard.sample(lane, 0, true, 101);
+    CHECK(guard.fault() == CliffFault::InvalidSample);
+    CHECK(guard.fault_sensor() == lane);
+    CHECK(!guard.evaluate(101));
+    CHECK(!guard.try_rearm(101));
+    guard.sample(lane, lane == 4 ? 300 : 45, true, 102);
+    CHECK(!guard.evaluate(102));
+    CHECK(guard.try_rearm(102));
+  }
+}
+
 void fault_names() {
   CHECK(std::strcmp(CliffGuard::fault_name(CliffFault::None), "none") == 0);
   CHECK(std::strcmp(CliffGuard::fault_name(CliffFault::Unconfigured), "unconfigured") == 0);
@@ -611,6 +652,10 @@ int main(int argc, char** argv) {
        exact_threshold_jitter_never_clears_latch},
       {"recovery_requires_every_critical_lane_safe",
        recovery_requires_every_critical_lane_safe},
+      {"missing_lane_blocks_startup_and_bus_recovery",
+       missing_lane_blocks_startup_and_bus_recovery},
+      {"zero_return_vetoes_even_when_marked_valid",
+       zero_return_vetoes_even_when_marked_valid},
       {"fault_names", fault_names},
       {"diagnostics_read_only_and_bounded", diagnostics_read_only_and_bounded},
       {"diagnostics_expire_validity_without_clearing_raw_or_latched_fault",
