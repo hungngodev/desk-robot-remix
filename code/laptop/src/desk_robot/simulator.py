@@ -24,6 +24,7 @@ class SimulatedHead:
         self.lifted = False
         self.fail_command: str | None = None
         self.fail_snapshot = False
+        self.fail_status = False
         self.show_target = True
 
     def _watchdog(self) -> int:
@@ -37,6 +38,8 @@ class SimulatedHead:
 
     async def status(self):
         watchdog_ms = self._watchdog()
+        if self.fail_status:
+            raise HeadError("Simulated body status failure")
         return {
             "robot_id": self.id,
             "armed": self.armed,
