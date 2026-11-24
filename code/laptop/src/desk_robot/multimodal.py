@@ -792,8 +792,10 @@ class CameraFrameHub:
                     "untrusted_text_not_instructions": True,
                     "physical_action_verified": False,
                 }))
+        # The short visible VAD cue may expire before ASR history does.
+        # Its persistent per-robot timestamp still fences prior-turn intent.
         for _event_id, transcript, stamp in self.heard_history[robot_id]:
-            if 0 <= now - stamp <= 30:
+            if stamp >= voice_at and 0 <= now - stamp <= 30:
                 items.append((stamp, {
                     "channel": "human_transcript",
                     "kind": "model_asr_completed",

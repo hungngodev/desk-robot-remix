@@ -1107,6 +1107,37 @@ def test_new_voice_without_completed_asr_cannot_reuse_prior_question():
     assert "model ASR guess" not in output
 
 
+
+def test_expired_vad_cue_cannot_resurrect_previous_transcript():
+    now = time.monotonic()
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    robot = "robot-01"
+    hub.notify(robot, "human_voice", now - 20)
+    assert hub.remember_heard(robot, "old", "Check your battery", now - 19)
+    hub.notify(robot, "human_voice", now - 10)
+    hub.notify(robot, "touch_tap", now - 3)
+    for stamp in (now - 2.1, now - 1.9, now):
+        timeline = hub.interaction_timeline(robot, stamp)
+        assert not any(item["channel"] == "human_transcript" for item in timeline)
+        prompt = compose_brain_context([], [], timeline).interaction
+        assert "Check your battery" not in prompt
+        assert "Physical sensor edge: touch_tap" in prompt
+
+    assert hub.remember_heard(robot, "new1", "Tell me a joke", now - 9)
+    assert hub.remember_heard(robot, "new2", "Make it short", now - 8.5)
+    timeline = hub.interaction_timeline(robot, now)
+    assert [item["content"] for item in timeline
+            if item["channel"] == "human_transcript"] == [
+        "Tell me a joke", "Make it short",
+    ]
+    prompt = compose_brain_context([], [], timeline).interaction
+    assert "Tell me a joke" in prompt
+    assert "Make it short" in prompt
+    assert "Check your battery" not in prompt
+    assert hub.interaction_timeline("robot-02", now) == []
+
+
+
 def test_prior_turn_tool_cannot_steal_new_voice_requested_receipt_priority():
     # A stale visual result remains historical context, not the answer to a
     # newer human's visual question. A fresh status result must win budget.
