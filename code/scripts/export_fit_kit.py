@@ -54,6 +54,28 @@ POWER_FIT_SCOPE = {
 }
 
 
+# These are explicit leading source comments, not a grant inferred from
+# the repository MIT license (which expressly excludes CAD).
+CC0_SOURCE_NOTICES = frozenset({
+    "// ONE desk robot adapter kit. CC0 original code. Units mm.",
+    "// Desk robot remaining mechanical FIT TESTS. Units mm, original CC0 source.",
+    "// Challenge Electronics CS20-02P110-04-1X. Original CC0 adapter.",
+    "// Original CC0 source. Print a coupon and measure the ACTUAL part.",
+    "// CC0 original part. Nominal dimensions are an example, not measured robot fit.",
+    "// SPDX-License-Identifier: CC0-1.0",
+})
+
+
+def source_license_evidence(source: bytes) -> dict:
+    """Record explicit source declarations, never infer CAD rights from MIT."""
+    for line in source.decode("utf-8").splitlines():
+        if not line.startswith("//"):
+            break
+        if line in CC0_SOURCE_NOTICES:
+            return {"declared_spdx": "CC0-1.0", "source_notice": line[3:]}
+    return {"declared_spdx": None, "source_notice": None}
+
+
 def binary_stl_triangles(path: Path) -> int:
     """Reject empty, truncated or malformed binary STL output."""
     blob = path.read_bytes()
@@ -274,7 +296,9 @@ def export_kit(
     with tempfile.TemporaryDirectory(prefix="desk-fit-", dir=out) as folder:
         stage = Path(folder)
         for kind, source, parts in sources:
-            scad_digest = sha256(source.read_bytes()).hexdigest()
+            source_bytes = source.read_bytes()
+            scad_digest = sha256(source_bytes).hexdigest()
+            license_evidence = source_license_evidence(source_bytes)
             for name in parts:
                 target = stage / kind / (name + ".stl")
                 target.parent.mkdir(parents=True, exist_ok=True)
@@ -291,6 +315,7 @@ def export_kit(
                     "part": name, "location": f"{kind}/{name}.stl",
                     "source": source.relative_to(root).as_posix(),
                     "source_sha256": scad_digest,
+                    "source_license": dict(license_evidence),
                     "mesh_sha256": sha256(target.read_bytes()).hexdigest(),
                     "units": "mm",
                     "triangles": triangles, "manifold_edges": edges,
@@ -486,7 +511,8 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
         raise ValueError("Missing or duplicate fit kit parts")
     for item in items:
         if set(item) != {
-            "part", "location", "source", "source_sha256", "mesh_sha256",
+            "part", "location", "source", "source_sha256", "source_license",
+            "mesh_sha256",
             "units", "triangles", "manifold_edges", "bbox_mm",
             "quantity_per_robot", "installed_quantity_per_robot",
             "temporary_fit_coupon",
@@ -515,8 +541,13 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
             raise ValueError(f"Wrong source for {location}")
         source = root / expected[location]
         mesh = output / location
-        if sha256(source.read_bytes()).hexdigest() != item.get("source_sha256"):
+        source_bytes = source.read_bytes()
+        if sha256(source_bytes).hexdigest() != item.get("source_sha256"):
             raise ValueError(f"SCAD source changed: {location}")
+        if not same_json_evidence(
+            item.get("source_license"), source_license_evidence(source_bytes),
+        ):
+            raise ValueError(f"SCAD source license evidence changed: {location}")
         if sha256(mesh.read_bytes()).hexdigest() != item.get("mesh_sha256"):
             raise ValueError(f"STL changed: {location}")
         if (type(item.get("triangles")) is not int

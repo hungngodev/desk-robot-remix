@@ -137,6 +137,26 @@ def test_binary_stl_geometry_rejects_truncation_and_zero_triangles(tmp_path):
         source.closed_mesh_edges(output)
 
 
+
+def test_fit_source_license_declarations_are_not_inferred():
+    source = module()
+    folder = ROOT / "docs/cad/remixes"
+    for name in (
+        "one_robot_adapter_kit.scad", "remaining_fit_gauges.scad",
+        "speaker_rect_fit_gauge.scad", "vl53l0x_gy530_fit_gauge.scad",
+        "dock/dock_passive_fit.scad",
+    ):
+        evidence = source.source_license_evidence((folder / name).read_bytes())
+        assert evidence["declared_spdx"] == "CC0-1.0", name
+        assert "CC0" in evidence["source_notice"], name
+    assert source.source_license_evidence(
+        (folder / "mg90s_pocket_fit_gauges.scad").read_bytes()
+    ) == {"declared_spdx": None, "source_notice": None}
+    assert source.source_license_evidence(
+        b"// No CC0 grant.\ncube(1);"
+    ) == {"declared_spdx": None, "source_notice": None}
+
+
 def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatch, tmp_path):
     source = module()
     folder = tmp_path / "docs/cad/remixes"
@@ -148,6 +168,9 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     (folder / "dock").mkdir()
     (folder / "dock/dock_passive_fit.scad").write_text("cube([1,1,1]);\n")
     monkeypatch.setattr(source.shutil, "which", lambda _command: "/usr/bin/openscad")
+    (folder / "one_robot_adapter_kit.scad").write_text(
+        "// SPDX-License-Identifier: CC0-1.0\ncube([1,1,1]);\n",
+    )
     commands = []
 
     def fake_render(command, **kwargs):
@@ -166,6 +189,12 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
         + len(source.RANGER_FITS) + len(source.MG90S_FITS) + len(source.DOCKS)
     ) == 23
     assert len(report["parts"]) == 23
+    for item in report["parts"]:
+        declared = item["source"].endswith("one_robot_adapter_kit.scad")
+        assert item["source_license"] == {
+            "declared_spdx": "CC0-1.0" if declared else None,
+            "source_notice": "SPDX-License-Identifier: CC0-1.0" if declared else None,
+        }
     assert (rendered / "adapter_stls/tof_adjustable.stl").is_file()
     assert (rendered / "fit_stls/dock_contact_recess_gauge.stl").is_file()
     assert (rendered / "fit_stls/speaker_rect_fit_gauge.stl").is_file()
@@ -226,6 +255,17 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     import json
     manifest = rendered / "fit_kit_manifest.json"
     original = manifest.read_text()
+    for index, forged in (
+        (0, {"declared_spdx": None, "source_notice": None}),
+        (0, {"declared_spdx": "MIT", "source_notice": "MIT"}),
+        (7, {"declared_spdx": "CC0-1.0", "source_notice": "invented"}),
+    ):
+        changed = json.loads(original)
+        changed["parts"][index]["source_license"] = forged
+        manifest.write_text(json.dumps(changed))
+        with pytest.raises(ValueError, match="SCAD source license evidence changed"):
+            source.verify_fit_kit(tmp_path, output_dir=rendered)
+    manifest.write_text(original)
     # A hand-edited JSON manifest must fail closed with a validation error,
     # not crash on a non-object part or an unhashable location.
     manifest.write_text("[]")
