@@ -52,7 +52,8 @@ inline bool decode_nec(const IrMarkSpace* items, std::size_t count,
 struct IrSideEvidence {
   std::uint32_t code = 0;
   std::uint32_t seq = 0;       // accepted complete frames, not HTTP queries
-  std::uint32_t at_ms = 0;     // WROOM receive/poll time, NOT exposure time
+  std::uint32_t at_ms = 0;     // conservative RMT receipt lower bound
+  std::uint32_t receipt_window_ms = 0; // uncertainty, not optical exposure
   bool valid = false;
 };
 struct IrPairEvidence {
@@ -73,6 +74,7 @@ class IrFrameQueueGate {
   void reset() {
     started_ = false;
     last_ms_ = 0;
+    earliest_receipt_ms_ = 0;
     draining_[0] = draining_[1] = false;
   }
   bool on_poll(std::uint32_t now_ms) {
@@ -82,9 +84,12 @@ class IrFrameQueueGate {
     // independently completed NEC burst; reject untimestamped backlog.
     const bool timely = started_ && elapsed != 0U && elapsed <= 100U;
     started_ = true;
+    earliest_receipt_ms_ = last_ms_;
     last_ms_ = now_ms;
     return timely;
   }
+  // Only usable after a timely poll and successful drain of both queues.
+  std::uint32_t earliest_receipt_ms() const { return earliest_receipt_ms_; }
   bool draining(unsigned side) const {
     return side < 2 && draining_[side];
   }
@@ -103,6 +108,7 @@ class IrFrameQueueGate {
  private:
   bool started_ = false;
   std::uint32_t last_ms_ = 0;
+  std::uint32_t earliest_receipt_ms_ = 0;
   bool draining_[2] = {false, false};
 };
 
@@ -118,10 +124,11 @@ class DualIrEvidence {
     }
   }
   // Called only after an actual valid independent RMT frame for that side.
-  void accept(unsigned side, std::uint32_t code, std::uint32_t now_ms) {
+  void accept(unsigned side, std::uint32_t code, std::uint32_t now_ms,
+              std::uint32_t receipt_window_ms = 0) {
     // An impossible receiver index is a corrupt observation, not a reason
     // to keep a previously valid paired docking bearing alive.
-    if (side > 1) {
+    if (side > 1 || receipt_window_ms > 100U) {
       invalidate();
       return;
     }
@@ -147,6 +154,7 @@ class DualIrEvidence {
     }
     s.code = code;
     s.at_ms = now_ms;
+    s.receipt_window_ms = receipt_window_ms;
     s.valid = true;
     ++s.seq;
     if (s.seq == 0) ++s.seq;
@@ -159,18 +167,20 @@ class DualIrEvidence {
     out.right_seq = right.seq;
     out.left_age_ms = left.valid ? now_ms - left.at_ms : 0xffffffffU;
     out.right_age_ms = right.valid ? now_ms - right.at_ms : 0xffffffffU;
-    out.left_fresh = left.valid && out.left_age_ms <= 200U;
-    out.right_fresh = right.valid && out.right_age_ms <= 200U;
+    out.left_fresh = left.valid && out.left_age_ms <= 200U &&
+                     out.left_age_ms >= left.receipt_window_ms;
+    out.right_fresh = right.valid && out.right_age_ms <= 200U &&
+                      out.right_age_ms >= right.receipt_window_ms;
     // A 200 ms time window does not itself prove a bearing. Different
     // receivers must actually observe the SAME checksum-valid beacon.
-    // Ages are both relative to the SAME clock, so this difference is
-    // correct even when the 32-bit millis counter rolls over.
-    const std::uint32_t separation =
-        out.left_age_ms >= out.right_age_ms
-            ? out.left_age_ms - out.right_age_ms
-            : out.right_age_ms - out.left_age_ms;
-    out.same_code = out.left_fresh && out.right_fresh &&
-                    separation <= 120U && left.code == right.code;
+    // Compare the worst-case separation between receipt windows, not
+    // just their lower bounds. Only fresh ages have safe subtraction.
+    if (out.left_fresh && out.right_fresh && left.code == right.code) {
+      const auto left_min_age = out.left_age_ms - left.receipt_window_ms;
+      const auto right_min_age = out.right_age_ms - right.receipt_window_ms;
+      out.same_code = out.left_age_ms <= right_min_age + 120U &&
+                      out.right_age_ms <= left_min_age + 120U;
+    }
     if (out.same_code) out.code = left.code;
     return out;
   }

@@ -100,7 +100,12 @@ void TerminalIr::poll(std::uint32_t now_ms) {
     }
     if (!queue_.finish(side, packets, emptied, candidate_valid[side])) window_ok = false;
   }
-  if (!window_ok) {
+  // The previous poll start is no later than its empty-queue check.
+  // A received packet may have completed during this poll, so include
+  // the entire drain through the current clock in its uncertainty.
+  const auto earliest_ms = queue_.earliest_receipt_ms();
+  const std::uint32_t receipt_window_ms = millis() - earliest_ms;
+  if (!window_ok || receipt_window_ms > 100U) {
     // Also discard a candidate from the opposite receiver on any stall.
     // Quarantine lasts through a complete queue drain on both receivers.
     readings_.invalidate();
@@ -108,7 +113,7 @@ void TerminalIr::poll(std::uint32_t now_ms) {
   }
   for (unsigned side = 0; side != 2; ++side) {
     if (candidate_valid[side])
-      readings_.accept(side, candidate_code[side], now_ms);
+      readings_.accept(side, candidate_code[side], earliest_ms, receipt_window_ms);
   }
 }
 } // namespace desk_robot

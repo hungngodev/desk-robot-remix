@@ -203,6 +203,43 @@ int main() {
     CHECK(integrated.assess(200).same_code);
     CHECK(!integrated.assess(200).motor_authorized);
     CHECK(!integrated.assess(200).charging_authorized);
+    // A timely dequeue does not prove an exact acquisition timestamp.
+    // Report the oldest possible receipt and require coincidence across
+    // the entire bounded receipt windows, including clock rollover.
+    desk_robot::IrFrameQueueGate bound_gate;
+    desk_robot::DualIrEvidence bounded;
+    CHECK(!bound_gate.on_poll(100));
+    CHECK(bound_gate.finish(0, 0, true) && bound_gate.finish(1, 0, true));
+    CHECK(bound_gate.on_poll(200));
+    CHECK(bound_gate.finish(0, 1, true) && bound_gate.finish(1, 1, true));
+    CHECK(bound_gate.earliest_receipt_ms() == 100);
+    bounded.accept(0, code, bound_gate.earliest_receipt_ms(), 100);
+    bounded.accept(1, code, bound_gate.earliest_receipt_ms(), 100);
+    result = bounded.assess(200);
+    CHECK(result.same_code && result.left_age_ms == 100 && result.right_age_ms == 100);
+    CHECK(bounded.assess(300).same_code);
+    CHECK(!bounded.assess(301).same_code);
+    CHECK(!bounded.assess(301).motor_authorized && !bounded.assess(301).charging_authorized);
+    bounded.accept(0, code, 200, 100);
+    bounded.accept(1, code, 300, 100);
+    CHECK(!bounded.assess(400).same_code); // worst-case separation is 200ms
+    bounded.accept(0, code, 400, 50);
+    bounded.accept(1, code, 400, 50);
+    CHECK(bounded.assess(450).same_code);
+    bounded.accept(0, code, 450, 101); // drain exceeded timing budget
+    CHECK(!bounded.assess(551).same_code);
+    bound_gate.reset();
+    CHECK(!bound_gate.on_poll(0xfffffff0U));
+    CHECK(bound_gate.finish(0, 0, true) && bound_gate.finish(1, 0, true));
+    CHECK(bound_gate.on_poll(0x12U));
+    CHECK(bound_gate.earliest_receipt_ms() == 0xfffffff0U);
+    desk_robot::DualIrEvidence bounded_wrap;
+    bounded_wrap.accept(0, code, bound_gate.earliest_receipt_ms(), 34);
+    bounded_wrap.accept(1, code, bound_gate.earliest_receipt_ms(), 34);
+    CHECK(bounded_wrap.assess(0x12U).same_code);
+    CHECK(bounded_wrap.assess(0x12U).left_age_ms == 34);
+    CHECK(bounded_wrap.assess(0xb8U).same_code);
+    CHECK(!bounded_wrap.assess(0xb9U).same_code);
     // IDF 4.4 has no receive timestamp. An unqualified poll cannot relabel
     // queued old RMT frames as fresh directional evidence.
     desk_robot::IrFrameQueueGate queue;
