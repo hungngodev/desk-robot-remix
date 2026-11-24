@@ -928,7 +928,10 @@ async def test_second_pet_cannot_use_first_pet_dock_intrinsics_to_move(
         await coordinator.close()
 
 
-@pytest.mark.parametrize("outcome", ["standoff", "contact", "beacon_loss", "timeout"])
+@pytest.mark.parametrize(
+    "outcome", ["standoff", "contact", "beacon_loss", "timeout",
+                "marker_loss", "pulse_budget"],
+)
 async def test_public_dock_replay_stops_without_unqualified_recovery(
     settings, tmp_path, monkeypatch, outcome,
 ):
@@ -1023,6 +1026,10 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
                 self.armed = False
             elif command.startswith("drive "):
                 assert self.armed
+                if command == "drive 10 10 100":
+                    # A new explicit operator permit, not automatic dock recovery.
+                    assert outcome == "marker_loss"
+                    return {"ok": True}
                 assert self.ir_reads == sum(
                     c.startswith("drive ") for c in self.commands
                 )
@@ -1065,7 +1072,9 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
     poses = iter(((80, 500), (0, 450), (0, 150)))
 
     def detect(_jpeg, _camera, *, captured_at):
-        x, z = next(poses)
+        if outcome == "marker_loss" and head.frames == 2:
+            return None
+        x, z = (80, 500) if outcome == "pulse_budget" else next(poses)
         return DockPose(x, 0, z, 0.5, captured_at)
 
     monkeypatch.setattr("desk_robot.dock_runtime.detect_apriltag", detect)
@@ -1074,22 +1083,31 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
         await coordinator.operator_arm(robot.id)
         assert head.commands == []  # A permit alone does not arm the body.
         job = coordinator.dock(robot.id)
-        await asyncio.wait_for(coordinator.tasks[job.id], timeout=6)
+        await asyncio.wait_for(coordinator.tasks[job.id], timeout=10)
         commands = [c for c in head.commands if c != "keepalive"]
         expected = ["arm", "drive 20 -20 100", "stop"]
-        if outcome != "beacon_loss":
-            expected += ["drive 20 20 100", "stop"]
+        if outcome == "pulse_budget":
+            expected = ["arm"] + ["drive 20 -20 100", "stop"] * 16
+            assert head.frames == head.ir_reads == 16
+        elif outcome == "marker_loss":
+            assert head.frames == 2 and head.ir_reads == 1
+        else:
+            if outcome != "beacon_loss":
+                expected += ["drive 20 20 100", "stop"]
+            assert head.ir_reads == 2
         assert commands == expected + ["halt"]
-        assert head.ir_reads == 2
         assert not head.armed
-        if outcome in {"standoff", "beacon_loss"}:
+        if outcome in {"standoff", "beacon_loss", "marker_loss", "pulse_budget"}:
             assert job.state == "succeeded"
             assert job.result["phase"] == "hold"
             assert not job.result["charging_authorized"]
             assert not job.result["physical_acceptance_pass"]
-            reason = (
-                "contacts unverified" if outcome == "standoff" else "not jointly visible"
-            )
+            reason = {
+                "standoff": "contacts unverified",
+                "beacon_loss": "not jointly visible",
+                "marker_loss": "No identified, calibrated target",
+                "pulse_budget": "Maximum guarded approach pulses reached",
+            }[outcome]
             assert reason in job.result["reason"]
         else:
             assert job.state == "failed"
@@ -1114,6 +1132,20 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
         # No automatic reverse, retry, or new arm after any terminal outcome.
         with pytest.raises(OperationError, match="permit"):
             coordinator.dock(robot.id)
+        with pytest.raises(OperationError, match="permit"):
+            coordinator.manual(robot.id, "drive 10 10 100")
         assert [c for c in head.commands if c != "keepalive"] == commands
+        if outcome == "marker_loss":
+            # Recovery belongs to the operator only after the terminal HALT.
+            # A new permit can admit manual movement; it does not restart dock.
+            await coordinator.operator_arm(robot.id)
+            manual = coordinator.manual(robot.id, "drive 10 10 100")
+            await asyncio.wait_for(coordinator.tasks[manual.id], timeout=6)
+            assert manual.state == "succeeded"
+            assert not head.armed
+            assert [c for c in head.commands if c != "keepalive"] == (
+                commands + ["arm", "drive 10 10 100", "halt"]
+            )
+            assert head.frames == 2 and head.ir_reads == 1
     finally:
         await coordinator.close()
