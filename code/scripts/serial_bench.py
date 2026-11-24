@@ -249,6 +249,42 @@ def inspect_status(status: dict) -> dict:
     }
 
 
+def transact_serial(port, command: str) -> dict | str:
+    """One bounded USB request; never accept a partial or short-written frame."""
+    request = (command + "\n").encode("ascii")
+    if port.write(request) != len(request):
+        raise RuntimeError("Short USB write; command delivery uncertain, no retry")
+    deadline = time.monotonic() + 0.5
+    pending = bytearray()
+    while time.monotonic() < deadline:
+        # pySerial readline can return partial bytes after its read timeout.
+        # Preserve the bounded Sense UART reply cap across those fragments.
+        pending.extend(port.readline(1920))
+        if time.monotonic() >= deadline:
+            break
+        if len(pending) > 1920 or (len(pending) == 1920 and not pending.endswith(b"\n")):
+            raise RuntimeError("USB response exceeds reply capacity")
+        if not pending.endswith(b"\n"):
+            continue
+        raw = bytes(pending[:-1]).removesuffix(b"\r")
+        pending.clear()
+        if b"\r" in raw or b"\n" in raw:
+            raise RuntimeError("Malformed USB response framing")
+        line = raw.decode("ascii", errors="strict")
+        if line.startswith("ERR "):
+            raise RuntimeError(line)
+        if command == "status" and line.startswith("{"):
+            response = json.loads(line)
+            if not isinstance(response, dict):
+                raise ValueError("Expected one body JSON object")
+            return response
+        if command == "rearm" and line == "OK rearm":
+            return line
+        if command != "status" and command != "rearm" and line == expected_ack(command):
+            return line
+    raise TimeoutError("Uncertain USB response; no movement command will be retried")
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--port", required=True, help="Exact USB serial port for the WROOM")
@@ -280,25 +316,7 @@ def main():
         port.reset_input_buffer()
 
         def transact(command):
-            # One request, one strictly matched response, never resend a move.
-            port.write((command + "\n").encode("ascii"))
-            deadline = time.monotonic() + 0.5
-            while time.monotonic() < deadline:
-                # Match the Sense UART parser cap, including full-width optional
-                # sensor counters. A bench read must not truncate valid status.
-                line = port.readline(1920).decode("ascii", errors="strict").strip()
-                if line.startswith("ERR "):
-                    raise RuntimeError(line)
-                if command == "status" and line.startswith("{"):
-                    response = json.loads(line)
-                    if not isinstance(response, dict):
-                        raise ValueError("Expected one body JSON object")
-                    return response
-                if command == "rearm" and line == "OK rearm":
-                    return line
-                if command != "status" and command != "rearm" and line == expected_ack(command):
-                    return line
-            raise TimeoutError("Uncertain USB response; no movement command will be retried")
+            return transact_serial(port, command)
 
         if args.inspect:
             samples = []
