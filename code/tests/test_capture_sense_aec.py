@@ -167,6 +167,15 @@ def test_postcapture_i2s_output_cannot_qualify_silent_recording():
 
 def test_authenticated_head_pcm_delivers_one_bounded_private_wav_pair(tmp_path):
     http = fake_read()
+    original = http.open
+
+    def open_request(request, timeout):
+        if request.full_url.endswith("/api/audio.capture.raw"):
+            assert request.get_header("X-desk-audio-boot") == "7"
+            assert request.get_header("X-desk-audio-generation") == "1"
+        return original(request, timeout)
+
+    http.open = open_request
     raw, report = capture.capture_head(
         http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
         clock=iter([0.0, 0.1]).__next__, pause=lambda _: None,
@@ -329,6 +338,7 @@ def test_partial_pcm_failure_aborts_its_generation():
             aborted.append((
                 request.get_method(),
                 request.get_header("X-desk-audio-generation"),
+                request.get_header("X-desk-audio-boot"),
                 timeout,
             ))
             return Response({
@@ -343,7 +353,7 @@ def test_partial_pcm_failure_aborts_its_generation():
             http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
             clock=iter([0.0, 0.1]).__next__, pause=lambda _: None,
         )
-    assert aborted == [("POST", "17", 2.0)]
+    assert aborted == [("POST", "17", "7", 2.0)]
 
 
 def test_operator_keyboard_interrupt_aborts_same_private_capture():
@@ -387,7 +397,7 @@ def test_abort_ack_cannot_claim_another_pet_or_missing_identity(response):
     with pytest.raises(RuntimeError, match="identity unconfirmed"):
         capture._abort_capture(
             AbortHTTP(), "http://192.168.1.23:8081",
-            "x" * 32, "robot-01", 42,
+            "x" * 32, "robot-01", 42, 7,
         )
 
 
@@ -737,3 +747,24 @@ def test_cli_refuses_unwritable_destination_before_audio_capture(
     with pytest.raises(FileExistsError):
         capture.main()
     assert (folder / "speaker_reference.wav").read_bytes() == b"previous sample"
+
+
+def test_stale_pcm_raw_request_is_rejected_before_buffer_transfer():
+    """Both request identities fence the real firmware ownership transition."""
+    head = SOURCE.parents[1] / "firmware/head"
+    bridge = (head / "overlay/robot_bridge.cc").read_text()
+    raw = bridge.split('if (strcmp(req->uri, "/api/audio.capture.raw") == 0)', 1)[1]
+    take = raw.index("codec->TakeBenchPcmCapture(generation)")
+    assert raw.index("!matches_capture_boot()") < take
+    assert raw.index('"X-Desk-Audio-Generation", supplied') < take
+    assert raw.index("strcmp(expected, supplied) != 0") < take
+    abort = bridge.split('if (strcmp(req->uri, "/api/audio.capture.abort") == 0)', 1)[1]
+    assert abort.index("!matches_capture_boot()") < abort.index("codec->AbortBenchPcmCapture()")
+    assert '"X-Desk-Audio-Boot", supplied_boot' in bridge
+    assert "strcmp(expected_boot, supplied_boot) == 0" in bridge
+    codec = (head / "sense/sense_reference_codec.cc").read_text()
+    transfer = codec.split("SenseReferenceCodec::TakeBenchPcmCapture(", 1)[1]
+    take = transfer.index("bench_window_.take()")
+    assert transfer.index("lock(bench_mutex_)") < take
+    assert transfer.index("!= expected_generation") < take
+    assert transfer.index("microphone_privacy_muted_.load(") < take

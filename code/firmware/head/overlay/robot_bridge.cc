@@ -776,6 +776,19 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
     if (!Authorize(req)) return Json(req, 401, Envelope(false, "unauthorized"));
 
 #if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3) && defined(CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED)
+    // A capture generation is only unique within a head boot. Check both
+    // request identities before an old client can consume or cancel a newer
+    // private PCM window. The same HTTP dispatcher owns START and these checks.
+    const auto matches_capture_boot = [&]() {
+        char expected_boot[24] = {};
+        char supplied_boot[24] = {};
+        snprintf(expected_boot, sizeof(expected_boot), "%u",
+                 static_cast<unsigned>(boot_nonce_));
+        return httpd_req_get_hdr_value_str(
+                   req, "X-Desk-Audio-Boot", supplied_boot,
+                   sizeof(supplied_boot)) == ESP_OK &&
+               strcmp(expected_boot, supplied_boot) == 0;
+    };
     if (strcmp(req->uri, "/api/audio.capture.start") == 0) {
         if (req->content_len != 0)
             return Json(req, 400, Envelope(false, "Bench capture request must be empty"));
@@ -808,7 +821,8 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         char supplied[24] = {};
         snprintf(expected, sizeof(expected), "%llu",
                  static_cast<unsigned long long>(codec->BenchPcmGeneration()));
-        if (httpd_req_get_hdr_value_str(
+        if (!matches_capture_boot() ||
+            httpd_req_get_hdr_value_str(
                 req, "X-Desk-Audio-Generation", supplied,
                 sizeof(supplied)) != ESP_OK ||
             strcmp(expected, supplied) != 0)
@@ -843,7 +857,19 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         if (!audio_codec_) return Json(req, 503, Envelope(false, "Sense codec unavailable"));
         auto* codec = static_cast<SenseReferenceCodec*>(audio_codec_);
         const uint64_t generation = codec->BenchPcmGeneration();
-        const auto pcm = codec->TakeBenchPcmCapture();
+        char expected[24] = {};
+        char supplied[24] = {};
+        snprintf(expected, sizeof(expected), "%llu",
+                 static_cast<unsigned long long>(generation));
+        if (!matches_capture_boot() ||
+            httpd_req_get_hdr_value_str(
+                req, "X-Desk-Audio-Generation", supplied,
+                sizeof(supplied)) != ESP_OK ||
+            strcmp(expected, supplied) != 0)
+            return Json(req, 409, Envelope(false, "Bench capture generation mismatch"));
+        // Recheck the generation under the codec's buffer lock: BOOT privacy,
+        // expiry or a playback reset can invalidate it independently of HTTP.
+        const auto pcm = codec->TakeBenchPcmCapture(generation);
         if (!pcm.interleaved || pcm.frames != desk_robot::SensePcmWindow::kFrames)
             return Json(req, 409, Envelope(false, "Bench PCM not complete"));
         httpd_req_t* async_req = nullptr;

@@ -414,8 +414,12 @@ SenseReferenceCodec::GetBenchPcmProgress() {
     };
 }
 
-desk_robot::SensePcmWindow::Complete SenseReferenceCodec::TakeBenchPcmCapture() {
+desk_robot::SensePcmWindow::Complete SenseReferenceCodec::TakeBenchPcmCapture(
+    uint64_t expected_generation) {
     std::lock_guard<std::mutex> lock(bench_mutex_);
+    if (bench_capture_generation_.load(std::memory_order_acquire) != expected_generation ||
+        microphone_privacy_muted_.load(std::memory_order_acquire))
+        return {};
     // Transfer ownership to one authenticated HTTP worker. No second
     // capture may allocate PSRAM until this worker releases its old buffer.
     auto completed = bench_window_.take();

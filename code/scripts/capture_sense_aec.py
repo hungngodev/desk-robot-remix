@@ -173,7 +173,9 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
         request = urllib.request.Request(
             base + "/api/audio.capture.raw",
             headers={"Authorization": "Bearer " + token,
-                     "Accept": "application/octet-stream"},
+                     "Accept": "application/octet-stream",
+                     "X-Desk-Audio-Boot": str(boot),
+                     "X-Desk-Audio-Generation": str(generation)},
         )
         with opener.open(request, timeout=6.0) as response:
             if (response.status != 200
@@ -254,20 +256,21 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
         # This best-effort device abort is scoped to the START generation:
         # it must not destroy a later calibration trial.
         try:
-            _abort_capture(opener, base, token, robot_id, generation)
+            _abort_capture(opener, base, token, robot_id, generation, boot)
         except Exception:
             pass  # The independent 12-second head expiry remains authoritative.
         raise
 
 
 def _abort_capture(opener, base: str, token: str, robot_id: str,
-                   generation: int) -> None:
-    """Cancel only this authenticated bench generation after an exception."""
+                   generation: int, boot: int) -> None:
+    """Cancel only this authenticated boot and bench generation after an exception."""
     request = urllib.request.Request(
         base + "/api/audio.capture.abort", data=b"", method="POST",
         headers={
             "Authorization": "Bearer " + token,
             "X-Desk-Audio-Generation": str(generation),
+            "X-Desk-Audio-Boot": str(boot),
             "Accept": "application/json",
         },
     )

@@ -87,7 +87,7 @@ public:
     }
     void EndBenchPcmTransfer();
     BenchCaptureProgress GetBenchPcmProgress();
-    desk_robot::SensePcmWindow::Complete TakeBenchPcmCapture();
+    desk_robot::SensePcmWindow::Complete TakeBenchPcmCapture(uint64_t expected_generation);
     void AbortBenchPcmCapture();
     static void ReleaseBenchPcmCapture(int16_t* data);
 #endif
