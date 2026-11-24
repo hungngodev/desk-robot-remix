@@ -2,7 +2,7 @@
 
 Give a worker one card link from the [task catalog](catalog.md). Each card names the work, authority, source, shared rules, prerequisites, scoped paths and acceptance evidence. Start from [draft PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17) and refresh its head before assessing a claim or publishing.
 
-For the full backlog, use the [ten-worker runbook](tonight/README.md) and its ready-to-copy launch and resume prompts.
+For the full backlog, use the [ten-worker fire-and-forget runbook](tonight/README.md). Paste each numbered prompt once.
 
 ## Find an assignment
 

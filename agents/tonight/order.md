@@ -1,8 +1,8 @@
 # Card order for all ten slots
 
-The order below gives each of the 192 cards one starting owner. Resume claimed work first, then take the first item with the evidence it needs. The original catalog state is shown for reference. Use the live GitHub issue and PR checks on every pass.
+Each card has one preferred starting slot. Continue your own active claim, then take the first card with verified prerequisites. After the starter, an active worker may claim an unclaimed, newly enabled card from any slot when its scope and permissions fit and no live claim overlaps. The catalog states below are the original snapshot. Use the live GitHub evidence on every pass.
 
-A fixture can unblock an independently testable path where the card allows it. A card can finish when its required evidence is available. For a card awaiting an assembly, receipt or operator action, prepare the procedure and keep acceptance open.
+A fixture can unblock an independently testable path where the card allows it. Mark a card verified when its own acceptance evidence exists. If a card is awaiting an assembly, receipt or operator action, prepare its procedure and keep acceptance open.
 
 [Runbook and copy-paste prompts](README.md) · [Original task catalog](../catalog.md)
 

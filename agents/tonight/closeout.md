@@ -1,13 +1,13 @@
-# Closeout and next run
+# Closeout in the worker’s original run
 
-Paste the full box into slot 01’s existing chat about an hour before your cutoff. The other slots can continue their assigned work.
+Save evidence as work progresses. A platform cutoff can end the run before the final step.
 
-```text
-Run the Desk Robot Remix nightly closeout in Chat mode. Use draft PR #17 in hungngodev/desk-robot-remix. Read the runbook and check all ten slot queues and their current GitHub issues:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/README.md
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/order.md
+Before ending voluntarily, the worker runs this check and executes any useful authorized step it finds.
 
-Record the live head and exact-SHA checks. Reconcile all 192 card IDs using issue checkpoints, existing verified evidence, unresolved dependencies, and the current source. Count verified, in progress or waiting for CI, ready/unclaimed, externally blocked, and deferred. Each card has one current state. Keep a claimed card in progress while its worker is active. Cite the commit or evidence for every change you report. A CI result for a replaced commit does not verify the new head.
+- Check the latest PR head, each claimed card, and the reviews that affect its scope. Reconcile meaningful changes since the last checkpoint.
+- Look for newly runnable child cards and unclaimed work across the full order. Compare exact paths and test scopes against live claims before helping another slot.
+- Check any CI you own at the exact SHA. Keep pending, superseded and failed runs separate from verified results. Post the link and verification owner for follow-up.
+- Post a slot exit checkpoint with verified cards, exact SHAs and evidence, pending checks, external blockers, paths released, and the next runnable cards. Use the task issue, publication issue or tagged PR comment. If GitHub writes are unavailable, provide the same fields in the final response.
+- If you see no other active claim and have useful execution time, add a brief project summary to the publication record. Use the visible issue evidence. Leave uninspected and unresolved cards open.
 
-Run or finish one actionable verification from your own scope if time and access permit, then recheck the counts. Return the verified cards, actual commits, live CI URLs, open blockers with their required evidence, and the exact numbered prompt to paste next for any stopped slot with actionable work. If a slot has no issue checkpoints and cannot be confirmed done, leave it unresolved. Note who still needs to return from a physical trial or seller checkout. If available, add the publication checkpoint to the existing queue issue for the next run. Keep the draft PR and all commissioning and purchase gates. Do not create issues in bulk or relaunch workers for me.
-```
+The run can end when independent authorized work is exhausted, the remaining work requires specific external changes, or the execution limit arrives. A worker with a ready card should start it before closing out. [Full order](order.md), [Issue fallback](issue-recovery.md)
