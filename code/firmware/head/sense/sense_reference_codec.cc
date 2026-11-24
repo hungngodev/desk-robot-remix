@@ -132,10 +132,18 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
     // The head owns one realtime capture reader. A bounded mutex also
     // prevents concurrent callbacks from corrupting shared frame scratch.
     std::lock_guard<std::mutex> input_lock(input_read_mutex_);
+    // Consent may have changed while this callback waited for the reader
+    // mutex. Do not start a new hardware read on a revoked capture epoch.
+    if (microphone_privacy_muted_.load(std::memory_order_acquire) ||
+        privacy_epoch != microphone_privacy_epoch_.load(std::memory_order_acquire)) {
+        return 0;
+    }
     // Keep microphone/I2S read outside reference_mutex_: it can block for
     // samples and must never prevent output publishing an AEC reference.
     const int mic_read = NoAudioCodecSimplexPdm::Read(microphone_frame_.data(), frames);
     if (mic_read != frames) {
+        // An error or short PDM read can still have written raw microphone PCM.
+        std::fill_n(microphone_frame_.begin(), frames, 0);
         return 0; // AudioCodec::InputData is boolean; reject partial frames.
     }
     // Discard a PDM read that crossed a physical BOOT mute/unmute epoch.
