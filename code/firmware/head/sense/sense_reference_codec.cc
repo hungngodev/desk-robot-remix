@@ -207,9 +207,15 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
         if (!microphone_privacy_muted_.load(std::memory_order_acquire) &&
             privacy_epoch == microphone_privacy_epoch_.load(std::memory_order_acquire)) {
             const bool already_ready = bench_window_.ready();
+            const bool had_frames = bench_window_.frames_received() != 0;
             bench_window_.offer(microphone_frame_.data(), reference_frame_.data(),
                                 static_cast<uint32_t>(frames), capture_end_us,
                                 reference_ready);
+            if (!had_frames && bench_window_.frames_received() != 0) {
+                std::lock_guard<std::mutex> reference_lock(reference_mutex_);
+                speaker_activity_.FenceWindowStart(
+                    bench_speaker_at_start_, bench_window_.first_sample_us());
+            }
             // Snapshot activity at the final MIC callback. Later speaker
             // writes after raw capture completion cannot qualify this window.
             if (!already_ready && bench_window_.ready()) {

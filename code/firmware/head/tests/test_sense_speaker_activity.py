@@ -101,6 +101,31 @@ int main() {
     const auto completed = window.take();
     assert(completed.last_sample_us == end_us - 32000);
     assert(window.last_sample_us() == 0);
+
+    // Authorization can arrive in the middle of a callback. The discarded
+    // leading interval must not qualify the actual retained recording.
+    for (bool inside : {false, true}) {
+        activity.Reset();
+        assert(window.begin(storage.data(), 1000));
+        const auto waiting = activity.BeginWindow();
+        activity.RecordAccepted(activity.generation(), 160, 20000);
+        window.offer(data.data(), data.data(), 1024, 33000, true);
+        assert(window.frames_received() == 0);
+        if (inside) activity.RecordAccepted(activity.generation(), 160, 50000);
+        window.offer(data.data(), data.data(), 1024, 97000, true);
+        assert(window.frames_received() == 1024);
+        assert(window.first_sample_us() == 33000);
+        activity.FenceWindowStart(waiting, window.first_sample_us());
+        assert(activity.AdvancedSince(waiting, 97000) == inside);
+        if (!inside) {
+            activity.RecordAccepted(activity.generation(), 160, 32000);
+            assert(!activity.AdvancedSince(waiting, 97000));
+            activity.RecordAccepted(activity.generation(), 160, 98000);
+            assert(!activity.AdvancedSince(waiting, 97000));
+            assert(activity.AdvancedSince(waiting, 98000));
+        }
+        window.discard();
+    }
 }
 """
     )
@@ -125,6 +150,9 @@ def test_selected_codec_requires_current_generation_activity_for_bench_capture()
     assert "const int64_t accepted_at_us = esp_timer_get_time();" in source
     assert "speaker_activity_.Reset();" in source
     assert "speaker_activity_.BeginWindow();" in source
+    assert "if (!had_frames && bench_window_.frames_received() != 0)" in source
+    assert "speaker_activity_.FenceWindowStart(" in source
+    assert "bench_speaker_at_start_, bench_window_.first_sample_us());" in source
     assert "bench_speaker_at_start_, bench_window_.last_sample_us());" in source
     assert "desk_robot::SenseSpeakerActivity speaker_activity_{};" in header
     assert "desk_robot::SenseSpeakerActivity::Snapshot bench_speaker_at_start_{};" in header
