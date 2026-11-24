@@ -86,7 +86,12 @@ def test_historical_builder_table_uses_current_eight_ranges_and_two_muxes():
         row for row in rows if "VL53L0X" in row and re.search(r"\bcarriers?\b", row)
     ]
     assert len(range_rows) == 3
-    assert sorted(int(re.search(r"\\| (\\d+) /", row).group(1)) for row in range_rows) == [1, 3, 4]
+    quantities = []
+    for row in range_rows:
+        quantity = re.fullmatch(r"(\d+) / (\d+)", row.split("|")[2].strip())
+        assert quantity is not None, row
+        quantities.append(tuple(map(int, quantity.groups())))
+    assert sorted(quantities) == [(1, 5), (3, 15), (4, 20)]
     assert any("0x70 lanes 5–7" in row and "3 / 15" in row for row in range_rows)
     mux_rows = [row for row in rows if "TCA9548A mux" in row]
     assert len(mux_rows) == 1
