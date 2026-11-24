@@ -32,7 +32,6 @@ from procurement_release import (
     SYSTEM_GATES,
 )
 from verify_playbook_receipts import (
-    REPO,
     bounded_receipt_int,
     evidence_digest_matches,
     finite_receipt_float,
