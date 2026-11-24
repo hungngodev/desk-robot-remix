@@ -62,10 +62,11 @@ def test_gpio23_is_cpu_only_and_cannot_share_stepper_phase_or_ledc():
     assert "motor_heartbeat.update(millis(), allow_heartbeat)" in main
     assert "drive.armed" in main
     assert "drive.left != 0 || drive.right != 0" in main
-    assert "digitalWrite(body_pins::kDcHeartbeatPin, LOW);" in main
-    assert "pinMode(body_pins::kDcHeartbeatPin, OUTPUT);" in main
-    assert main.index("digitalWrite(body_pins::kDcHeartbeatPin, LOW);") < (
-        main.index("pinMode(body_pins::kDcHeartbeatPin, OUTPUT);"))
+    setup = main.split("void setup() {", 1)[1].split("\n}\n", 1)[0]
+    assert "digitalWrite(body_pins::kDcHeartbeatPin, LOW);" in setup
+    assert "pinMode(body_pins::kDcHeartbeatPin, OUTPUT);" in setup
+    assert setup.index("digitalWrite(body_pins::kDcHeartbeatPin, LOW);") < (
+        setup.index("pinMode(body_pins::kDcHeartbeatPin, OUTPUT);"))
     assert "kToggleIntervalMs = 15" in heartbeat
     # Firmware latches a missed CPU edge until deliberate local USB recovery.
     assert "if (!local_motion_authorized || missed_deadline_)" in heartbeat
@@ -194,3 +195,39 @@ def test_uart_and_output_paths_check_cpu_deadline_without_advancing_pulses():
     ) < uart.index("replies.enqueue_line(reply)")
     assert 'ERR arm motor_watchdog_latched' in uart
     assert 'completed && local_usb && strcmp(reply, "OK rearm") == 0' in uart
+
+
+def test_watchdog_halt_clears_both_dc_motor_pairs_and_retains_servo_hold():
+    """Check the complete logical path, not the physical nSLEEP voltage."""
+    main = (BODY / "src/main.cpp").read_text(encoding="utf-8")
+    control = (BODY / "lib/BodyControl/BodyControl.cpp").read_text(encoding="utf-8")
+    pins = (BODY / "include/BodyPins.h").read_text(encoding="utf-8")
+    trip = control.split("void BodyControl::motor_watchdog_trip() {", 1)[1].split(
+        "\n}\n", 1
+    )[0]
+    stop = control.split("void BodyControl::stop_motion() {", 1)[1].split("\n}\n", 1)[0]
+    zero = main.split("void zero_motor_pwm() {", 1)[1].split("\n}\n", 1)[0]
+    pair = main.split("void write_motor_pair(", 1)[1].split("\n}\n", 1)[0]
+    outputs = main.split("void apply_outputs() {", 1)[1].split("\n}\n", 1)[0]
+
+    assert "motor_watchdog_latched_ = true;" in trip
+    assert "stop_motion();" in trip
+    assert "state_.armed = false;" in trip
+    assert "state_.servos_attached = false;" not in trip
+    assert "state_.left = 0;" in stop
+    assert "state_.right = 0;" in stop
+    assert "drive_duration_ms_ = 0;" in stop
+    assert "state_.lift_target = state_.lift;" in stop
+    assert "state_.grip_target = state_.grip;" in stop
+    assert "constexpr int kMotorChannels[] = {0, 1, 2, 3};" in pins
+    assert "for (int channel : body_pins::kMotorChannels) ledcWrite(channel, 0);" in zero
+    assert "ledcWrite(forward_channel, 0);" in pair
+    assert "ledcWrite(reverse_channel, percent < 0 ? duty : 0);" in pair
+    assert (
+        "write_motor_pair(body_pins::kMotorChannels[0], "
+        "body_pins::kMotorChannels[1], state.left);"
+    ) in outputs
+    assert (
+        "write_motor_pair(body_pins::kMotorChannels[2], "
+        "body_pins::kMotorChannels[3], state.right);"
+    ) in outputs
