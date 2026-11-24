@@ -307,10 +307,16 @@ async def observe_actual_dock(
             robot.id, reason="Dock camera live sensor identity unavailable",
             source="camera_identity_unavailable",
         )
+    remaining = 0.20 - (time.monotonic() - received_at)
+    if remaining <= 0:
+        return _hold(
+            robot.id, reason="Dock camera receipt expired before identity check",
+            source="head_snapshot_invalid",
+        )
     try:
         observed_pid = await _bounded_head_reply(
             (read_identity(observation) if isinstance(observation, tuple)
-             and len(observation) == 4 else read_identity()), seconds=2.0,
+             and len(observation) == 4 else read_identity()), seconds=remaining,
             timeout_message="Dock camera live sensor identity timeout",
         )
     except Exception as exc:

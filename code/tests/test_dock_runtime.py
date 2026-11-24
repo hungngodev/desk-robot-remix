@@ -1336,3 +1336,65 @@ async def test_overlapping_detector_shutdown_does_not_latch_native_fault(monkeyp
     )
     assert recovered.z_mm == 400
     await dock_runtime.close_detector_pool()
+
+
+@pytest.mark.parametrize("strict_receipt", [False, True])
+async def test_dock_identity_lookup_expires_with_original_frame(
+    tmp_path, monkeypatch, strict_receipt,
+):
+    """A stalled PID lookup cannot extend the original camera evidence lifetime."""
+    import asyncio
+    import time
+
+    calibration = tmp_path / "dock.json"
+    calibration.write_text(json.dumps({
+        "measured": True, "robot_id": "robot-01",
+        "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640",
+        "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
+    }))
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+    release = asyncio.Event()
+    finished = asyncio.Event()
+    head = Head()
+
+    async def strict_snapshot():
+        head.captures += 1
+        return b"\xff\xd8\xff\xd9", time.monotonic(), (1, 1, 1), 1
+
+    async def stuck_identity(*args):
+        assert bool(args) is strict_receipt
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            await release.wait()
+            return "OV5640"
+        finally:
+            finished.set()
+
+    if strict_receipt:
+        monkeypatch.setattr(head, "snapshot_for_dock", strict_snapshot, raising=False)
+    monkeypatch.setattr(head, "camera_identity", stuck_identity)
+    monkeypatch.setattr(
+        dock_runtime, "detect_apriltag",
+        lambda *args, **kwargs: pytest.fail("Expired receipt reached native detector"),
+    )
+    try:
+        result = await asyncio.wait_for(dock_runtime.observe_actual_dock(
+            head, SimpleNamespace(id="robot-01", dock_calibration=calibration),
+        ), timeout=1.0)
+        assert entered.is_set()
+        assert result["phase"] == "hold" and result["pose"] is None
+        assert result["source"] == "camera_identity_unavailable"
+        assert not result["motor_authorized"] and not result["charging_authorized"]
+        assert not result["physical_acceptance_pass"]
+        assert head.captures == 1 and not head.commands
+        await asyncio.wait_for(cancelled.wait(), timeout=1.0)
+        assert not finished.is_set()
+    finally:
+        release.set()
+        if entered.is_set():
+            await asyncio.wait_for(finished.wait(), timeout=1.0)
