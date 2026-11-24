@@ -2080,6 +2080,7 @@ class NativeOmniSession:
                     self._latest_frame_receipt_us = None
 
     async def _receive_model(self) -> None:
+        terminal_response: tuple[int, str] | None = None
         async for message in self._socket:
             if self.closed:
                 break
@@ -2102,6 +2103,15 @@ class NativeOmniSession:
                     continue
             # A model response may be interrupted at any time. Use a bounded
             # FIFO and response identity, never detached unbounded audio tasks.
+            if kind == "response.done":
+                response_id = event.get("response_id")
+                if (not isinstance(response_id, str) or not response_id
+                        or response_id != self.wire.response_id):
+                    continue
+                terminal = (self.wire.epoch, response_id)
+                if terminal == terminal_response:
+                    continue
+                terminal_response = terminal
             pcm = self.wire.handle_event(event)
             if kind == "response.listen" and self.wire.model_listen_current(event):
                 # Only current native model silence counts. A reordered old

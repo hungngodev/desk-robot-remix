@@ -8519,6 +8519,57 @@ async def test_native_completed_response_never_waits_on_full_audio_queue(native)
 
 
 @pytest.mark.asyncio
+async def test_native_terminal_receipts_are_idempotent(native):
+    """Only one current, identified completion may close each native reply."""
+    from aiohttp import WSMsgType
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.outgoing = asyncio.Queue(maxsize=2)
+    session._live_transcript_enabled = True
+    wakeups = []
+    session._context_wakeup = SimpleNamespace(set=lambda: wakeups.append(True))
+
+    def created(response_id):
+        return {
+            "type": "response.created", "response_id": response_id,
+            "response": {
+                "id": response_id,
+                "metadata": {"duplex_event": {"epoch": 0}},
+            },
+        }
+
+    def done(response_id):
+        return {"type": "response.done", "response_id": response_id}
+
+    events = [
+        {"type": "response.done"}, done(None), done(""),
+        created("first"), done("foreign"), *([done("first")] * 8),
+        created("second"), done("first"), *([done("second")] * 8),
+    ]
+
+    class Model:
+        async def __aiter__(self):
+            for event in events:
+                yield SimpleNamespace(
+                    type=WSMsgType.TEXT, data=json.dumps(event),
+                )
+
+    session._socket = Model()
+    await asyncio.wait_for(session._receive_model(), timeout=0.3)
+    assert session.outgoing.qsize() == 2
+    assert session.outgoing.get_nowait() == ("first", None)
+    assert session.outgoing.get_nowait() == ("second", None)
+    assert len(wakeups) == 2
+    assert session.wire.accept_output is False
+
+
+@pytest.mark.asyncio
 async def test_native_counts_only_current_model_listen_after_barge(native):
     from aiohttp import WSMsgType
 
