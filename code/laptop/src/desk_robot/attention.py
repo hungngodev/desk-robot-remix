@@ -417,4 +417,11 @@ class AttentionLedger:
         # activity lease. An old completion must never match a new topic after
         # an operator reset, consent revoke or optional ledger failure.
         prior = self._state(robot_id)
-        self._robots[robot_id] = _Attention(generation=prior.generation + 1)
+        # Retraction is not a new VAD epoch. Preserve only bounded opaque
+        # receipt identities and ordering metadata, never the private words.
+        self._robots[robot_id] = _Attention(
+            generation=prior.generation + 1,
+            voice_at=prior.voice_at,
+            asr_order_at=prior.asr_order_at,
+            heard_ids=deque(prior.heard_ids, maxlen=prior.heard_ids.maxlen),
+        )

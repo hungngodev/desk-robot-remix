@@ -583,6 +583,29 @@ def test_cleared_attention_does_not_reissue_old_conversation_generation(monkeypa
     assert ledger.timeline("peer", 16) == []
 
 
+def test_attention_clear_preserves_newer_vad_and_asr_replay_fences(monkeypatch):
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 100.0)
+    ledger = AttentionLedger(["pet", "peer"])
+    old = "omni_" + "a" * 12 + "_" + "a" * 20
+    delayed = "omni_" + "a" * 12 + "_" + "b" * 20
+    current = "omni_" + "a" * 12 + "_" + "c" * 20
+    assert ledger.heard("pet", old, "Old private words", 11)
+    ledger.human_started("pet", 12)
+    ledger.clear("pet")  # Revoked group prompt after newer human VAD.
+    assert ledger.timeline("pet", 13) == []
+    assert not ledger.heard_is_current("pet", 11.5)
+    assert not ledger.heard("pet", delayed, "Old delayed words", 11.5)
+    assert not ledger.heard("pet", old, "Replayed words", 12.5)
+    assert ledger.timeline("pet", 13) == []
+    assert ledger.heard("pet", current, "Current question", 13)
+    assert ledger.heard("peer", old, "Independent words", 11)
+    assert "Current question" in ledger.timeline("pet", 13)[0]["content"]
+    ledger.clear("pet")
+    assert not ledger.heard("pet", delayed, "Superseded words", 12.5)
+    assert ledger.timeline("pet", 14) == []
+    assert "Independent words" in ledger.timeline("peer", 14)[0]["content"]
+
+
 def test_delayed_old_topic_start_cannot_overwrite_newer_activity(monkeypatch):
     monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 100.0)
     ledger = AttentionLedger(["pet"])
