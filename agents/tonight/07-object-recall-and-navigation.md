@@ -1,23 +1,17 @@
 # Slot 07 · Object recall and navigation
 
-Copy this box into a fresh Chat-mode worker. It performs one small check.
+Copy boxes from the [complete batch runbook](batches.md). This list groups the same cards by preferred starting slot.
 
-```text
-Work in Chat mode on hungngodev/desk-robot-remix draft PR #17. You are slot 07. This run has one card and one small check. Read the live head, your card and its issue.
-
-First choice is DRR-077:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tasks/navigation/077-benchmark-local-detector-candidates.md
-Starter check: Compare the current detector and one documented local candidate using one existing fixture or benchmark result. Record any missing runtime measurement.
-
-If that check is already verified, claimed or blocked, choose one eligible check from the same slot using the issue evidence and card order:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/order.md#slot-07
-Keep any fallback check to one scenario, one review finding, or one small authorized fix and its focused verification.
-
-Search for the exact DRR issue and reuse it. I authorize opening one issue if needed, claiming it, and posting evidence for the selected card. Follow its review, verification or implementation authority. Use an isolated branch for an authorized fix and the publication queue for a verified push. Keep the draft and all physical and purchase gates. If issue creation is unavailable, put one tagged claim or receipt on the existing PR conversation when permitted.
-
-Perform that one check. Post the full reviewed SHA, exact result, evidence link, and remaining acceptance. Mark the card verified only if its whole acceptance has evidence. A pending CI receipt gets its SHA and link. If access or an input is missing, say exactly what is needed. Release the claim after the checkpoint and stop. A fresh chat can take the next small unit. The broader continuation rules apply within this check.
-
-Runbook and receipt:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/README.md
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/closeout.md
-```
+| Card | Launch location |
+| --- | --- |
+| DRR-077 · Benchmark local detector candidates | [Batch 01 → copy prompt](batches.md#drr-077) |
+| DRR-078 · Pin the selected detector’s provenance | [Batch 11 → copy prompt](batches.md#drr-078) |
+| DRR-079 · Verify target and hard-negative fixtures | [Batch 02 → copy prompt](batches.md#drr-079) |
+| DRR-080 · Verify remembered-target lookup | [Batch 05 → copy prompt](batches.md#drr-080) |
+| DRR-082 · Verify planner footprint and stop margin | [Batch 04 → copy prompt](batches.md#drr-082) |
+| DRR-083 · Reject unsupported or stale travel | [Batch 05 → copy prompt](batches.md#drr-083) |
+| DRR-081 · Verify bounded search for moved or occluded targets | [Batch 07 → copy prompt](batches.md#drr-081) |
+| DRR-084 · Verify cancellation between motion requests | [Batch 06 → copy prompt](batches.md#drr-084) |
+| DRR-085 · Require fresh arrival evidence | [Batch 06 → copy prompt](batches.md#drr-085) |
+| DRR-158 · Review one error and recovery path | [Batch 13 → copy prompt](batches.md#drr-158) |
+| DRR-086 · Qualify re-anchor and moved-start returns | [Batch 19 → copy prompt](batches.md#drr-086) |

@@ -1,23 +1,21 @@
 # Slot 08 · Power, dock and station
 
-Copy this box into a fresh Chat-mode worker. It performs one small check.
+Copy boxes from the [complete batch runbook](batches.md). This list groups the same cards by preferred starting slot.
 
-```text
-Work in Chat mode on hungngodev/desk-robot-remix draft PR #17. You are slot 08. This run has one card and one small check. Read the live head, your card and its issue.
-
-First choice is DRR-087:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tasks/power-dock-station/087-resolve-the-exact-protected-1s-path.md
-Starter check: Trace one protected pack-to-charger interface, including polarity and NTC compatibility, against the existing design and exact component source.
-
-If that check is already verified, claimed or blocked, choose one eligible check from the same slot using the issue evidence and card order:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/order.md#slot-08
-Keep any fallback check to one scenario, one review finding, or one small authorized fix and its focused verification.
-
-Search for the exact DRR issue and reuse it. I authorize opening one issue if needed, claiming it, and posting evidence for the selected card. Follow its review, verification or implementation authority. Use an isolated branch for an authorized fix and the publication queue for a verified push. Keep the draft and all physical and purchase gates. If issue creation is unavailable, put one tagged claim or receipt on the existing PR conversation when permitted.
-
-Perform that one check. Post the full reviewed SHA, exact result, evidence link, and remaining acceptance. Mark the card verified only if its whole acceptance has evidence. A pending CI receipt gets its SHA and link. If access or an input is missing, say exactly what is needed. Release the claim after the checkpoint and stop. A fresh chat can take the next small unit. The broader continuation rules apply within this check.
-
-Runbook and receipt:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/README.md
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/closeout.md
-```
+| Card | Launch location |
+| --- | --- |
+| DRR-087 · Resolve the exact protected 1S path | [Batch 01 → copy prompt](batches.md#drr-087) |
+| DRR-088 · Verify rail and connector limits | [Batch 11 → copy prompt](batches.md#drr-088) |
+| DRR-089 · Verify signed shunt saturation endpoints | [Batch 07 → copy prompt](batches.md#drr-089) |
+| DRR-092 · Verify tag and IR provenance | [Batch 05 → copy prompt](batches.md#drr-092) |
+| DRR-093 · Verify contact and seat evidence | [Batch 05 → copy prompt](batches.md#drr-093) |
+| DRR-095 · Verify atomic station samples | [Batch 09 → copy prompt](batches.md#drr-095) |
+| DRR-096 · Verify station identity, timing and staleness | [Batch 04 → copy prompt](batches.md#drr-096) |
+| DRR-097 · Verify consented station-to-pet behavior | [Batch 11 → copy prompt](batches.md#drr-097) |
+| DRR-145 · Verify independent electrical docking boundary | [Batch 12 → copy prompt](batches.md#drr-145) |
+| DRR-132 · Reconcile historical BME688 assertions | [Existing disposition → copy prompt](batches.md#drr-132) |
+| DRR-090 · Prove independent cutoff under CPU stall | [Batch 17 → copy prompt](batches.md#drr-090) |
+| DRR-091 · Verify passive dock fit | [Batch 17 → copy prompt](batches.md#drr-091) |
+| DRR-094 · Measure net charge and thermal faults | [Batch 18 → copy prompt](batches.md#drr-094) |
+| DRR-143 · Qualify dock approach before electrical tests | [Batch 19 → copy prompt](batches.md#drr-143) |
+| DRR-164 · Verify physical station controller and transport | [Batch 19 → copy prompt](batches.md#drr-164) |

@@ -1,23 +1,22 @@
 # Slot 05 · Voice and behavior
 
-Copy this box into a fresh Chat-mode worker. It performs one small check.
+Copy boxes from the [complete batch runbook](batches.md). This list groups the same cards by preferred starting slot.
 
-```text
-Work in Chat mode on hungngodev/desk-robot-remix draft PR #17. You are slot 05. This run has one card and one small check. Read the live head, your card and its issue.
-
-First choice is DRR-055:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tasks/voice/055-verify-human-vad-takes-priority.md
-Starter check: Check one authenticated human cut-in during active TTS. Record the observed cancellation behavior and one exact check or source link.
-
-If that check is already verified, claimed or blocked, choose one eligible check from the same slot using the issue evidence and card order:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/order.md#slot-05
-Keep any fallback check to one scenario, one review finding, or one small authorized fix and its focused verification.
-
-Search for the exact DRR issue and reuse it. I authorize opening one issue if needed, claiming it, and posting evidence for the selected card. Follow its review, verification or implementation authority. Use an isolated branch for an authorized fix and the publication queue for a verified push. Keep the draft and all physical and purchase gates. If issue creation is unavailable, put one tagged claim or receipt on the existing PR conversation when permitted.
-
-Perform that one check. Post the full reviewed SHA, exact result, evidence link, and remaining acceptance. Mark the card verified only if its whole acceptance has evidence. A pending CI receipt gets its SHA and link. If access or an input is missing, say exactly what is needed. Release the claim after the checkpoint and stop. A fresh chat can take the next small unit. The broader continuation rules apply within this check.
-
-Runbook and receipt:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/README.md
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/closeout.md
-```
+| Card | Launch location |
+| --- | --- |
+| DRR-055 · Verify human VAD takes priority | [Batch 01 → copy prompt](batches.md#drr-055) |
+| DRR-057 · Verify interrupted speech onset is retained | [Batch 06 → copy prompt](batches.md#drr-057) |
+| DRR-058 · Verify echo-only rejection criteria | [Batch 06 → copy prompt](batches.md#drr-058) |
+| DRR-059 · Verify quiet mode changes | [Batch 09 → copy prompt](batches.md#drr-059) |
+| DRR-060 · Verify deliberate versus passive cooldowns | [Batch 07 → copy prompt](batches.md#drr-060) |
+| DRR-061 · Verify global speaking-floor ownership | [Batch 09 → copy prompt](batches.md#drr-061) |
+| DRR-062 · Reject obsolete tool results | [Batch 09 → copy prompt](batches.md#drr-062) |
+| DRR-056 · Verify obsolete playback cancellation | [Batch 05 → copy prompt](batches.md#drr-056) |
+| DRR-063 · Verify grounded spoken tool results | [Batch 11 → copy prompt](batches.md#drr-063) |
+| DRR-064 · Verify one real proactive behavior path | [Batch 09 → copy prompt](batches.md#drr-064) |
+| DRR-137 · Verify consent applies to live media | [Batch 09 → copy prompt](batches.md#drr-137) |
+| DRR-065 · Measure concurrent Mac and Xiaozhi sessions | [Batch 18 → copy prompt](batches.md#drr-065) |
+| DRR-141 · Verify a coordinated social activity outcome | [Batch 10 → copy prompt](batches.md#drr-141) |
+| DRR-142 · Qualify real fitted-head barge-in | [Batch 18 → copy prompt](batches.md#drr-142) |
+| DRR-162 · Verify tool and perception provenance under camera generation changes | [Batch 14 → copy prompt](batches.md#drr-162) |
+| DRR-163 · Verify isolated policy for user opt-in and silence | [Batch 14 → copy prompt](batches.md#drr-163) |

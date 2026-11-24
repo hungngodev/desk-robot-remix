@@ -1,23 +1,33 @@
 # Slot 03 · Body and odometry
 
-Copy this box into a fresh Chat-mode worker. It performs one small check.
+Copy boxes from the [complete batch runbook](batches.md). This list groups the same cards by preferred starting slot.
 
-```text
-Work in Chat mode on hungngodev/desk-robot-remix draft PR #17. You are slot 03. This run has one card and one small check. Read the live head, your card and its issue.
-
-First choice is DRR-040:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tasks/motion/040-verify-the-bounded-read-only-body-pose.md
-Starter check: Check one versioned read-only pose reply with a valid and an invalid fixture. Post the actual fixture and units if verified. Keep motion disabled.
-
-If that check is already verified, claimed or blocked, choose one eligible check from the same slot using the issue evidence and card order:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/order.md#slot-03
-Keep any fallback check to one scenario, one review finding, or one small authorized fix and its focused verification.
-
-Search for the exact DRR issue and reuse it. I authorize opening one issue if needed, claiming it, and posting evidence for the selected card. Follow its review, verification or implementation authority. Use an isolated branch for an authorized fix and the publication queue for a verified push. Keep the draft and all physical and purchase gates. If issue creation is unavailable, put one tagged claim or receipt on the existing PR conversation when permitted.
-
-Perform that one check. Post the full reviewed SHA, exact result, evidence link, and remaining acceptance. Mark the card verified only if its whole acceptance has evidence. A pending CI receipt gets its SHA and link. If access or an input is missing, say exactly what is needed. Release the claim after the checkpoint and stop. A fresh chat can take the next small unit. The broader continuation rules apply within this check.
-
-Runbook and receipt:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/README.md
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/closeout.md
-```
+| Card | Launch location |
+| --- | --- |
+| DRR-040 · Verify the bounded read-only body pose | [Batch 01 → copy prompt](batches.md#drr-040) |
+| DRR-024 · Verify local arm and disarm authority | [Batch 02 → copy prompt](batches.md#drr-024) |
+| DRR-025 · Verify the requested drive pulse cap | [Batch 04 → copy prompt](batches.md#drr-025) |
+| DRR-026 · Verify watchdog on control loss | [Batch 03 → copy prompt](batches.md#drr-026) |
+| DRR-027 · Keep UART work off the safety loop | [Batch 10 → copy prompt](batches.md#drr-027) |
+| DRR-028 · Verify the four downward lanes | [Batch 04 → copy prompt](batches.md#drr-028) |
+| DRR-029 · Verify forward ranging | [Batch 04 → copy prompt](batches.md#drr-029) |
+| DRR-031 · Exercise stale, invalid and missing ranging | [Batch 04 → copy prompt](batches.md#drr-031) |
+| DRR-032 · Exercise bumper and mux faults | [Batch 04 → copy prompt](batches.md#drr-032) |
+| DRR-041 · Verify pose origin invalidation | [Batch 05 → copy prompt](batches.md#drr-041) |
+| DRR-035 · Evaluate wheel encoder choice and fit | [Batch 07 → copy prompt](batches.md#drr-035) |
+| DRR-036 · Verify signed counts and wrap | [Batch 09 → copy prompt](batches.md#drr-036) |
+| DRR-037 · Separate measured wheel travel from commands | [Batch 10 → copy prompt](batches.md#drr-037) |
+| DRR-042 · Verify jaw force and feedback timing | [Batch 04 → copy prompt](batches.md#drr-042) |
+| DRR-135 · Verify operator recovery through ordinary controls | [Batch 12 → copy prompt](batches.md#drr-135) |
+| DRR-023 · Isolate legacy motor targets | [Batch 02 → copy prompt](batches.md#drr-023) |
+| DRR-030 · Verify side and rear lanes are read-only | [Batch 11 → copy prompt](batches.md#drr-030) |
+| DRR-033 · Qualify mounted IMU pickup and put-down | [Batch 18 → copy prompt](batches.md#drr-033) |
+| DRR-034 · Measure the swept stopping envelope | [Batch 18 → copy prompt](batches.md#drr-034) |
+| DRR-038 · Measure wheel radius and track width | [Batch 18 → copy prompt](batches.md#drr-038) |
+| DRR-039 · Verify stationary IMU correction | [Batch 11 → copy prompt](batches.md#drr-039) |
+| DRR-043 · Qualify fitted lift and jaw endpoints | [Batch 17 → copy prompt](batches.md#drr-043) |
+| DRR-044 · Qualify keys and wrapped candy separately | [Batch 19 → copy prompt](batches.md#drr-044) |
+| DRR-133 · Verify unsafe attitude and slow lift latch | [Batch 11 → copy prompt](batches.md#drr-133) |
+| DRR-134 · Trace real accessory events to one consumer | [Batch 09 → copy prompt](batches.md#drr-134) |
+| DRR-136 · Compare stepper and guarded DC candidates | [Batch 12 → copy prompt](batches.md#drr-136) |
+| DRR-161 · Verify accessory mux and same-address isolation | [Batch 13 → copy prompt](batches.md#drr-161) |

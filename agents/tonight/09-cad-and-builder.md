@@ -1,23 +1,20 @@
 # Slot 09 · CAD and builder
 
-Copy this box into a fresh Chat-mode worker. It performs one small check.
+Copy boxes from the [complete batch runbook](batches.md). This list groups the same cards by preferred starting slot.
 
-```text
-Work in Chat mode on hungngodev/desk-robot-remix draft PR #17. You are slot 09. This run has one card and one small check. Read the live head, your card and its issue.
-
-First choice is DRR-098:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tasks/builder/098-verify-cad-originals-and-derivative-licenses.md
-Starter check: Trace one selected original CAD file to its upstream license and record its exact revision and reuse obligations.
-
-If that check is already verified, claimed or blocked, choose one eligible check from the same slot using the issue evidence and card order:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/order.md#slot-09
-Keep any fallback check to one scenario, one review finding, or one small authorized fix and its focused verification.
-
-Search for the exact DRR issue and reuse it. I authorize opening one issue if needed, claiming it, and posting evidence for the selected card. Follow its review, verification or implementation authority. Use an isolated branch for an authorized fix and the publication queue for a verified push. Keep the draft and all physical and purchase gates. If issue creation is unavailable, put one tagged claim or receipt on the existing PR conversation when permitted.
-
-Perform that one check. Post the full reviewed SHA, exact result, evidence link, and remaining acceptance. Mark the card verified only if its whole acceptance has evidence. A pending CI receipt gets its SHA and link. If access or an input is missing, say exactly what is needed. Release the claim after the checkpoint and stop. A fresh chat can take the next small unit. The broader continuation rules apply within this check.
-
-Runbook and receipt:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/README.md
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/closeout.md
-```
+| Card | Launch location |
+| --- | --- |
+| DRR-098 · Verify CAD originals and derivative licenses | [Batch 01 → copy prompt](batches.md#drr-098) |
+| DRR-099 · Verify the selected assembly dimensions | [Batch 02 → copy prompt](batches.md#drr-099) |
+| DRR-106 · Reproduce clean-checkout CAD exports | [Batch 05 → copy prompt](batches.md#drr-106) |
+| DRR-104 · Verify the connector-to-connector harness | [Batch 03 → copy prompt](batches.md#drr-104) |
+| DRR-105 · Verify 2D scale and orientation | [Batch 05 → copy prompt](batches.md#drr-105) |
+| DRR-107 · Verify flashing and first-power instructions | [Batch 06 → copy prompt](batches.md#drr-107) |
+| DRR-165 · Publish the current builder route from verified references | [Batch 14 → copy prompt](batches.md#drr-165) |
+| DRR-166 · Verify the final print pack contents against actual measurements | [Batch 14 → copy prompt](batches.md#drr-166) |
+| DRR-100 · Verify pack restraint and connector fit | [Batch 17 → copy prompt](batches.md#drr-100) |
+| DRR-101 · Verify all eight optical paths and retention | [Batch 17 → copy prompt](batches.md#drr-101) |
+| DRR-102 · Verify servo sweep and interference | [Batch 17 → copy prompt](batches.md#drr-102) |
+| DRR-103 · Verify the speaker and microphone openings | [Batch 17 → copy prompt](batches.md#drr-103) |
+| DRR-108 · Walk the complete assembly and commissioning route | [Batch 18 → copy prompt](batches.md#drr-108) |
+| DRR-157 · Review the assembled builder route as a new user | [Batch 13 → copy prompt](batches.md#drr-157) |

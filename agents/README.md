@@ -2,7 +2,7 @@
 
 Give a worker one card link from the [task catalog](catalog.md). Each card names the work, authority, source, shared rules, prerequisites, scoped paths and acceptance evidence. Start from [draft PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17) and refresh its head before assessing a claim or publishing.
 
-For Chat mode, use the [short-run prompts](tonight/README.md). Each fresh chat handles one card and one small check.
+For Chat mode, use [all numbered launch batches and exact prompts](tonight/batches.md). Each fresh chat handles one card and one small check.
 
 ## Find an assignment
 

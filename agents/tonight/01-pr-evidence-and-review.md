@@ -1,23 +1,22 @@
 # Slot 01 · PR evidence and review
 
-Copy this box into a fresh Chat-mode worker. It performs one small check.
+Copy boxes from the [complete batch runbook](batches.md). This list groups the same cards by preferred starting slot.
 
-```text
-Work in Chat mode on hungngodev/desk-robot-remix draft PR #17. You are slot 01. This run has one card and one small check. Read the live head, your card and its issue.
-
-First choice is DRR-003:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tasks/repository/003-match-review-threads-to-current-behavior.md
-Starter check: Take one unresolved or outdated PR thread and compare it with the live source. Post one evidence-backed outcome. If the publication issue is absent and you can open it, initialize that single issue during setup.
-
-If that check is already verified, claimed or blocked, choose one eligible check from the same slot using the issue evidence and card order:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/order.md#slot-01
-Keep any fallback check to one scenario, one review finding, or one small authorized fix and its focused verification.
-
-Search for the exact DRR issue and reuse it. I authorize opening one issue if needed, claiming it, and posting evidence for the selected card. Follow its review, verification or implementation authority. Use an isolated branch for an authorized fix and the publication queue for a verified push. Keep the draft and all physical and purchase gates. If issue creation is unavailable, put one tagged claim or receipt on the existing PR conversation when permitted.
-
-Perform that one check. Post the full reviewed SHA, exact result, evidence link, and remaining acceptance. Mark the card verified only if its whole acceptance has evidence. A pending CI receipt gets its SHA and link. If access or an input is missing, say exactly what is needed. Release the claim after the checkpoint and stop. A fresh chat can take the next small unit. The broader continuation rules apply within this check.
-
-Runbook and receipt:
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/README.md
-https://github.com/hungngodev/desk-robot-remix/blob/impl/mac-hardware-safety-preflight-2026-11-10/agents/tonight/closeout.md
-```
+| Card | Launch location |
+| --- | --- |
+| DRR-003 · Match review threads to current behavior | [Batch 01 → copy prompt](batches.md#drr-003) |
+| DRR-002 · Find overlapping work before editing | [Batch 10 → copy prompt](batches.md#drr-002) |
+| DRR-004 · Reproduce the pinned host environment | [Batch 10 → copy prompt](batches.md#drr-004) |
+| DRR-008 · Check measured receipt validation | [Batch 05 → copy prompt](batches.md#drr-008) |
+| DRR-007 · Check evidence reviewer authority | [Batch 10 → copy prompt](batches.md#drr-007) |
+| DRR-151 · Review accepted requirement and real entry point gaps | [Batch 13 → copy prompt](batches.md#drr-151) |
+| DRR-156 · Review acceptance evidence against its claim | [Batch 13 → copy prompt](batches.md#drr-156) |
+| DRR-010 · Repair links to the evidence ledger | [Batch 10 → copy prompt](batches.md#drr-010) |
+| DRR-144 · Verify source coverage and accepted feature scope | [Batch 12 → copy prompt](batches.md#drr-144) |
+| DRR-001 · Pin the current PR and base revisions | [Existing disposition → copy prompt](batches.md#drr-001) |
+| DRR-005 · Check required CI jobs at one SHA | [Existing disposition → copy prompt](batches.md#drr-005) |
+| DRR-006 · Separate tested source from receipt identity | [Batch 10 → copy prompt](batches.md#drr-006) |
+| DRR-009 · Record the approved publishing visibility | [Existing disposition → copy prompt](batches.md#drr-009) |
+| DRR-152 · Review reuse and license of one active feature | [Batch 13 → copy prompt](batches.md#drr-152) |
+| DRR-159 · Review project scope and superseded requirements | [Batch 13 → copy prompt](batches.md#drr-159) |
+| DRR-160 · Review unresolved workflow responsibility and handoff | [Batch 13 → copy prompt](batches.md#drr-160) |
