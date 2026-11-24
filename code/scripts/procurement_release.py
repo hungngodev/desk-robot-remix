@@ -496,6 +496,12 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
                 for index, lane in enumerate(lanes)))
     if not cheap_range_layout:
         missing_system.append("invalid_selected_cheap_range_mux_layout")
+    # These two role counts must match the fixed physical topology, not
+    # just exceed the general minimum feature quantities. A spare module
+    # is not an additional installed sensor or multiplexer.
+    if (selected_pet.get("cliff_obstacle") != 8
+            or selected_pet.get("i2c_mux") != 2):
+        missing_system.append("invalid_selected_range_or_mux_quantity")
     # The chip's SDA/SCL absolute maximum is 3.6V. Common GY-530 modules
     # level-shift to VIN, so using a nominal 5V VIN can kill the ESP32 pin.
     # This is a selected wiring topology only, never actual PCB acceptance.

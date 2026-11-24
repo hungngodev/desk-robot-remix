@@ -964,6 +964,18 @@ def test_full_feature_scope_cannot_be_deleted_for_release():
         assert not report["order_released"]
         assert any(expected in gate for gate in report["missing_system_evidence"])
 
+    # Even complete synthetic receipts cannot approve installed quantities
+    # that exceed the fixed eight lanes and two isolated multiplexers.
+    for role, count in (("cliff_obstacle", 9), ("i2c_mux", 3)):
+        excess = copy.deepcopy(selected)
+        next(part for part in excess["parts"] if part["id"] == role)[
+            "per_robot"
+        ] = count
+        report = mod.generate(excess, evidence_for(excess))
+        assert "invalid_selected_range_or_mux_quantity" in report["missing_system_evidence"]
+        assert not report["order_released"]
+        assert not mod.first_robot_projection(report)["purchase_approved"]
+
 
 def test_all_fourteen_addon_quantities_match_one_fleet():
     """No motor, battery, dock, or shared-station add-on can drift in prose.
