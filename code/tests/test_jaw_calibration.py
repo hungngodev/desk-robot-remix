@@ -1,4 +1,5 @@
 """Grasp calibration arithmetic never replaces physical servo/force trials."""
+import json
 import runpy
 from pathlib import Path
 
@@ -181,3 +182,45 @@ async def test_jaw_calibration_rejects_bad_bearer_origin_before_http(
 ])
 def test_jaw_calibration_allows_loopback_http_or_verified_https(origin, expected):
     assert safe_endpoint(origin, "robot-01") == expected
+
+
+@pytest.mark.parametrize("step", [1, 2, 3, 4, None])
+async def test_jaw_candidate_preserves_existing_grasp_step(tmp_path, monkeypatch, step):
+    source = tmp_path / "grasp.json"
+    original = {"measured": True}
+    if step is not None:
+        original["grip_step_deg"] = step
+    source.write_text(json.dumps(original), encoding="utf-8")
+    monkeypatch.setenv("DESK_ROBOT_OPERATOR_TOKEN", "t" * 24)
+    monkeypatch.setattr("sys.argv", ["calibrate_jaw_fsr.py", "--calibration", str(source)])
+    monkeypatch.setattr("builtins.input", lambda _prompt: "")
+    main = tool["main"]
+    phases = iter(measured_samples().values())
+
+    async def fake_capture(*_args, **_kwargs):
+        return next(phases)
+
+    monkeypatch.setitem(main.__globals__, "capture", fake_capture)
+    await main()
+    candidate = json.loads(
+        (tmp_path / "grasp.jaw_candidate.json").read_text(encoding="utf-8")
+    )
+    assert candidate["grip_step_deg"] == (4 if step is None else step)
+    assert candidate["measured"] is False
+    assert json.loads(source.read_text(encoding="utf-8")) == original
+
+
+@pytest.mark.parametrize("step", [True, 0, 5, 1.0, "2", None])
+async def test_jaw_candidate_rejects_invalid_existing_grasp_step(tmp_path, monkeypatch, step):
+    source = tmp_path / "grasp.json"
+    source.write_text(json.dumps({"grip_step_deg": step}), encoding="utf-8")
+    monkeypatch.setenv("DESK_ROBOT_OPERATOR_TOKEN", "t" * 24)
+    monkeypatch.setattr("sys.argv", ["calibrate_jaw_fsr.py", "--calibration", str(source)])
+
+    def unexpected_prompt(_prompt):
+        pytest.fail("Invalid geometry must be rejected before operator prompts")
+
+    monkeypatch.setattr("builtins.input", unexpected_prompt)
+    with pytest.raises(ValueError, match="grip_step_deg"):
+        await tool["main"]()
+    assert not (tmp_path / "grasp.jaw_candidate.json").exists()

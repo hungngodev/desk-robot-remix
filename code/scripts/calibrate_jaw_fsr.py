@@ -261,6 +261,9 @@ async def main() -> None:
     if not args.calibration.is_file():
         raise ValueError("Existing measured camera calibration JSON required")
     source = load_source_calibration(args.calibration)
+    step = source.get("grip_step_deg", 4)
+    if type(step) is not int or not 1 <= step <= 4:
+        raise ValueError("Existing grip_step_deg must be an integer from 1 to 4")
     readings = {}
     boot_state = {}  # shared WROOM identity across all three manual phases
     async with httpx.AsyncClient() as client:
@@ -275,6 +278,8 @@ async def main() -> None:
                 token=token, count=args.samples, boot_state=boot_state,
             )
     proposed = propose_force_limits(readings)
+    # A manual FSR trial does not measure servo increments.
+    proposed["grip_step_deg"] = step
     # Never silently enable autonomous grasping based on raw ADC alone.
     source.update({
         key: proposed[key] for key in (
