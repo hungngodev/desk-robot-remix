@@ -489,6 +489,8 @@ class Coordinator:
             keeper = None
             watchdog = None
             operation = None
+            operation_result = None
+            operation_finished = False
             try:
                 # A head can disconnect, touch can be pressed and a floor
                 # sample can expire after the operator granted the permit.
@@ -520,8 +522,8 @@ class Coordinator:
                     if keeper in done:
                         await keeper
                         raise OperationError("Keepalive ended unexpectedly")
-                    job.result = await operation
-                job.state = "succeeded"
+                    operation_result = await operation
+                    operation_finished = True
             except asyncio.CancelledError:
                 # An operator STOP can already have failed at the transport.
                 # Cancellation of this Python task must never erase that
@@ -562,10 +564,15 @@ class Coordinator:
                             f"{job.error or ''}; cancellation cleanup timed out"
                         )
                         job.state = "failed"
-                if (stop_acknowledged and not unresponsive
-                        and getattr(self, "_fleet_motion_owner", None) == job.id):
-                    self._motion_children.pop(job.id, None)
-                    self._fleet_motion_owner = None
+                if stop_acknowledged and not unresponsive:
+                    # An operation result is not a completed job until the
+                    # terminal HALT receipt and cancelled children settle.
+                    if operation_finished and job.state == "running":
+                        job.result = operation_result
+                        job.state = "succeeded"
+                    if getattr(self, "_fleet_motion_owner", None) == job.id:
+                        self._motion_children.pop(job.id, None)
+                        self._fleet_motion_owner = None
 
     def manual(self, robot_id: str, command: str) -> Job:
         robot = self.robot(robot_id)

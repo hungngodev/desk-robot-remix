@@ -1863,3 +1863,46 @@ async def test_older_idle_stop_success_cannot_clear_newer_failed_stop(settings):
         release.set()
         await asyncio.gather(older, return_exceptions=True)
         await c.close()
+
+
+@pytest.mark.parametrize("halt_fails", [False, True])
+async def test_job_result_not_published_before_terminal_halt_receipt(settings, halt_fails):
+    from desk_robot.transport import HeadError
+
+    c, head = make(settings)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original = head.command
+
+    async def delayed_terminal_halt(command):
+        if command == "halt":
+            entered.set()
+            await release.wait()
+            if halt_fails:
+                raise HeadError("Terminal HALT acknowledgement lost")
+        return await original(command)
+
+    head.command = delayed_terminal_halt
+    await c.operator_arm("robot-01")
+    job = c.manual("robot-01", "drive 0 0 10")
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=0.5)
+        assert job.state == "running"
+        assert job.result is None
+        assert c._fleet_motion_owner == job.id
+        release.set()
+        await asyncio.wait_for(c.tasks[job.id], timeout=0.5)
+        if halt_fails:
+            assert job.state == "failed"
+            assert job.result is None
+            assert "STOP failed" in job.error
+            assert c._fleet_motion_owner == job.id
+        else:
+            assert job.state == "succeeded"
+            assert job.result["ok"] is True
+            assert c._fleet_motion_owner is None
+    finally:
+        release.set()
+        head.command = original
+        await c.stop("robot-01")
+        await c.close()
