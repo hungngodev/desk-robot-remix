@@ -648,7 +648,14 @@ class HttpHead:
                     raise HeadError("No fresh camera frame on live stream") from exc
             if self._stream_required or require_live_stream:
                 raise HeadError("Continuous XIAO camera stream is not connected")
+            generation = self._stream_generation
             response = await self._request("GET", "/api/camera.jpg")
+            # The still request may have started before streaming was
+            # enabled. Never relabel a new stream's cached JPEG with its
+            # standalone completion metadata, even after a failed reconnect.
+            if (generation != self._stream_generation
+                    or self._stream_connected or self._stream_required):
+                raise HeadError("Standalone camera capture superseded by live stream")
             # Both the Sense snapshot producer and MJPEG parser cap JPEG
             # payloads at 512 KiB. Do not let a legacy HTTP still bypass
             # that same camera evidence bound.

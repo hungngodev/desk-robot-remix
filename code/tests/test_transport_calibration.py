@@ -324,6 +324,74 @@ def _stream_part(seq, payload=b"\xff\xd8camera\xff\xd9", *, boot=17):
     ).encode("ascii") + payload + b"\r\n"
 
 
+@pytest.mark.parametrize("mode", ["connected", "failed", "required"])
+async def test_pending_still_capture_cannot_relabel_live_stream(settings, tokens, mode):
+    import asyncio
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    jpeg = b"\xff\xd8stream\xff\xd9"
+
+    async def handler(request):
+        if request.url.path == "/api/camera.jpg":
+            entered.set()
+            await release.wait()
+            return httpx.Response(
+                200, content=b"\xff\xd8still\xff\xd9",
+                headers={
+                    "X-Desk-Camera-Robot-Id": "robot-01",
+                    "X-Desk-Camera-Boot": "17",
+                    "X-Desk-Camera-Sequence": "2",
+                    "X-Desk-Camera-Complete-Us": "2000",
+                },
+            )
+        assert request.url.path == "/api/camera.mjpg"
+        if mode == "failed":
+            return httpx.Response(503)
+        return httpx.Response(
+            200, content=_stream_part(1, jpeg),
+            headers={"Content-Type": "multipart/x-mixed-replace; boundary=deskrobotframe"},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        still = asyncio.create_task(head.snapshot())
+        stream = None
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            if mode == "required":
+                head.require_stream()
+            else:
+                stream = head.stream_frames()
+                if mode == "connected":
+                    assert (await asyncio.wait_for(anext(stream), timeout=1))[0] == jpeg
+                else:
+                    with pytest.raises(HeadError, match="camera stream unavailable"):
+                        await asyncio.wait_for(anext(stream), timeout=1)
+            release.set()
+            with pytest.raises(HeadError, match="superseded by live stream"):
+                await asyncio.wait_for(still, timeout=1)
+            if mode == "connected":
+                assert head._last_camera == (17, 1, 1000)
+                assert head._stream_latest == jpeg
+                receipt = await head.snapshot(
+                    require_live_stream=True,
+                    include_stream_receipt=True,
+                    include_stream_identity=True,
+                )
+                assert receipt[0] == jpeg
+                assert receipt[2] == (17, 1, 1000)
+                assert receipt[3] == head._stream_generation
+            else:
+                assert head._last_camera is None
+                assert head._stream_latest is None
+        finally:
+            release.set()
+            await asyncio.gather(still, return_exceptions=True)
+            if stream is not None:
+                await stream.aclose()
+
+
 def test_mjpeg_stream_parser_handles_split_headers_and_frame_bodies():
     from desk_robot.transport import _MjpegFrames
 
