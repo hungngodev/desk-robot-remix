@@ -193,7 +193,6 @@ async def guarded_grasp(
     if abs(baseline_a - baseline_b) > max(40, threshold // 3):
         raise OperationError("Gripper baseline unstable; jaw not moved")
     baseline = (baseline_a + baseline_b) // 2
-    confirmed = 0
     latest_seq = seq_b
     try:
         for angle in grip_angles(
@@ -217,28 +216,33 @@ async def guarded_grasp(
                 raise OperationError("Unmatched gripper command ACK")
             await asyncio.sleep(0.18)
             await confirmed_health()
-            try:
-                measured, seq = await read_new_jaw(
-                    latest_seq, "No new jaw sample after servo movement",
-                )
-            except (KeyError, TypeError, ValueError, AttributeError,
-                    TimeoutError) as exc:
-                raise OperationError("Lost fresh force sensor during closing") from exc
-            latest_seq = seq
-            raw_delta = (measured - baseline) * calibration.grip_force_sign
-            if raw_delta > ceiling:
-                raise OperationError("Gripper raw force ceiling exceeded")
-            # Contradictory FSR polarity cannot mean that the jaws are clear.
-            # Stop rather than continue closing on reversed sensor evidence.
-            if raw_delta <= -threshold:
-                raise OperationError("Gripper feedback contradicts calibrated FSR polarity")
-            confirmed = confirmed + 1 if raw_delta >= threshold else 0
-            if confirmed >= 2:
-                return {
-                    "commanded_angle": angle, "contact_delta_raw": raw_delta,
-                    "baseline_raw": baseline, "position_measured": False,
-                    "force_newtons_measured": False, "physical_acceptance_pass": False,
-                }
+            # Confirm contact at the same commanded angle. A further
+            # closing pulse would compress the object before confirmation.
+            for confirmation in range(2):
+                if confirmation:
+                    await confirmed_health()
+                try:
+                    measured, seq = await read_new_jaw(
+                        latest_seq, "No new jaw sample after servo movement",
+                    )
+                except (KeyError, TypeError, ValueError, AttributeError,
+                        TimeoutError) as exc:
+                    raise OperationError("Lost fresh force sensor during closing") from exc
+                latest_seq = seq
+                raw_delta = (measured - baseline) * calibration.grip_force_sign
+                if raw_delta > ceiling:
+                    raise OperationError("Gripper raw force ceiling exceeded")
+                # Contradictory polarity is not evidence of a clear jaw.
+                if raw_delta <= -threshold:
+                    raise OperationError("Gripper feedback contradicts calibrated FSR polarity")
+                if raw_delta < threshold:
+                    break
+                if confirmation:
+                    return {
+                        "commanded_angle": angle, "contact_delta_raw": raw_delta,
+                        "baseline_raw": baseline, "position_measured": False,
+                        "force_newtons_measured": False, "physical_acceptance_pass": False,
+                    }
         raise OperationError("Closed jaw limit reached with no tactile contact")
     except (Exception, asyncio.CancelledError):
         if force_boot_changed:

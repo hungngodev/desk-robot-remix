@@ -116,7 +116,7 @@ async def test_contact_stops_before_full_closure(monkeypatch):
     head = FakeHead([100, 101, 130, 240, 245])
     result = await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert result["contact_delta_raw"] >= 120
-    assert head.commands == ["grip 64", "grip 68", "grip 72"]
+    assert head.commands == ["grip 64", "grip 68"]
     assert result["physical_acceptance_pass"] is False
 
 
@@ -141,7 +141,7 @@ async def test_repeated_adc_frame_cannot_confirm_twice(monkeypatch):
     ])
     with pytest.raises(OperationError, match="No new jaw sample"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
-    assert head.commands == ["grip 64", "grip 68", "grip 60"]
+    assert head.commands == ["grip 64", "grip 60"]
 
 
 async def test_overforce_and_bad_baseline_fail_closed(monkeypatch):
@@ -466,7 +466,7 @@ async def test_jaw_hardware_sequence_wraps_without_falsely_rejecting_fresh_force
     ])
     result = await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert result["contact_delta_raw"] >= Settings.grip_force_delta_raw
-    assert head.commands == ["grip 64", "grip 68", "grip 72"]
+    assert head.commands == ["grip 64", "grip 68"]
     assert result["physical_acceptance_pass"] is False
 
 
@@ -788,7 +788,7 @@ async def test_grasp_waits_for_real_mux_jaw_conversion_instead_of_aborting(
     result = await guarded_grasp(
         head, Settings(), robot_id="robot-01", health=healthy,
     )
-    assert head.commands == ["grip 64", "grip 68"]
+    assert head.commands == ["grip 64"]
     assert result["contact_delta_raw"] >= Settings.grip_force_delta_raw
     assert result["physical_acceptance_pass"] is False
 
@@ -956,7 +956,7 @@ async def test_matching_wroom_health_and_jaw_boot_allows_bounded_grasp(monkeypat
         head, Settings(), robot_id="robot-01", health=current_wroom_health,
     )
     assert result["physical_acceptance_pass"] is False
-    assert head.commands == ["grip 64", "grip 68", "grip 72"]
+    assert head.commands == ["grip 64", "grip 68"]
 
 @pytest.mark.parametrize("bad_ack", [
     {"ok": False, "robot_id": "robot-01", "reply": "ERR grip rejected"},
@@ -1012,4 +1012,42 @@ async def test_grasp_accepts_exact_structured_head_command_ack(monkeypatch):
     result = await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert result["contact_delta_raw"] >= 120
     assert result["physical_acceptance_pass"] is False
-    assert head.commands == ["grip 64", "grip 68", "grip 72"]
+    assert head.commands == ["grip 64", "grip 68"]
+
+
+async def test_contact_at_final_angle_can_be_confirmed_without_another_pulse(monkeypatch):
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+
+    class OneStep(Settings):
+        grip_closed = 64
+
+    head = FakeHead([100, 100, 240, 245])
+    result = await guarded_grasp(head, OneStep(), robot_id="robot-01", health=healthy)
+    assert result["commanded_angle"] == 64
+    assert head.commands == ["grip 64"]
+    assert result["physical_acceptance_pass"] is False
+
+
+async def test_contact_confirmation_overforce_relaxes_without_more_closure(monkeypatch):
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([100, 100, 240, 800])
+    with pytest.raises(OperationError, match="force ceiling exceeded"):
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
+    assert head.commands == ["grip 64", "grip 60"]
+
+
+async def test_transient_contact_requires_two_fresh_samples_at_one_angle(monkeypatch):
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([100, 100, 240, 101, 240, 245])
+    result = await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
+    assert result["commanded_angle"] == 68
+    assert head.commands == ["grip 64", "grip 68"]
