@@ -88,10 +88,12 @@ bool ExpansionTouch::begin(TwoWire& wire) {
     return (desired == old_value || write(reg, desired)) &&
            read(reg, actual) && (actual & mask) == (desired & mask);
   };
-  const bool configured = recognized && write(0x2A, 0x00) &&
+  const bool configured = recognized &&
+      configure_bits(0x2A, 0x80, 0x00) &&  // simultaneous touch enabled
       configure_bits(0x38, 0x03, 0x01) &&  // 37.5% noise threshold
       configure_bits(0x2F, 0x7F, 0x0A) &&  // 64 samples, 16 negative deltas
-      configure_bits(0x20, 0x38, 0x00);    // filters on, held recal off
+      configure_bits(0x20, 0x38, 0x00) &&  // filters on, held recal off
+      configure_bits(0x44, 0x04, 0x00);    // RF noise filter on
   const bool closed = close();
   verified_ = configured && closed;
   return verified_;

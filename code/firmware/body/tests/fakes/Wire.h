@@ -59,7 +59,9 @@ class TwoWire {
   bool fail_cap_clear_write = false;
   std::uint8_t cap_main_control = 0x01;
   std::uint8_t cap_touch_bits = 0xA5; // CAP1188 sensor status mask, including release
-  std::uint8_t cap_multi_touch_block = 0xff;
+  std::uint8_t cap_multi_touch_block = 0x80;
+  std::uint8_t cap_config2 = 0x40;
+  bool ignore_cap_multi_touch_write = false;
   std::uint8_t cap_config = 0x20;
   std::uint8_t cap_recal_config = 0x8A;
   std::uint8_t cap_noise_threshold = 0x01;
@@ -171,7 +173,9 @@ class TwoWire {
     const bool cap_target = current_address == 0x28 ||
         (current_address == 0x29 && extras == 1 && cap_uses_0x29);
     if (cap_target && outbound.size() == 2) {
-      if (outbound[0] == 0x2a) cap_multi_touch_block = outbound[1];
+      if (outbound[0] == 0x2a && !ignore_cap_multi_touch_write)
+        cap_multi_touch_block = outbound[1];
+      if (outbound[0] == 0x44) cap_config2 = outbound[1];
       if (outbound[0] == 0x20) {
         if (fail_cap_config_write) return 4;
         if (!ignore_cap_config_write) cap_config = outbound[1];
@@ -260,6 +264,8 @@ class TwoWire {
       else if (register_address == 0x20) inbound = {cap_config};
       else if (register_address == 0x2f) inbound = {cap_recal_config};
       else if (register_address == 0x38) inbound = {cap_noise_threshold};
+      else if (register_address == 0x2a) inbound = {cap_multi_touch_block};
+      else if (register_address == 0x44) inbound = {cap_config2};
     } else if (addr == 0x29) {
       if (tof_register == 0x13 && count == 1) {
         inbound = {static_cast<std::uint8_t>(tof_ready ? 0x07 : 0)};
@@ -334,6 +340,8 @@ class TwoWire {
     else if (addr == 0x28 && register_address == 0x20) inbound = {cap_config};
     else if (addr == 0x28 && register_address == 0x2f) inbound = {cap_recal_config};
     else if (addr == 0x28 && register_address == 0x38) inbound = {cap_noise_threshold};
+    else if (addr == 0x28 && register_address == 0x2a) inbound = {cap_multi_touch_block};
+    else if (addr == 0x28 && register_address == 0x44) inbound = {cap_config2};
     else if (addr == 0x57 && register_address == 0xFF) inbound = {0x15};
     else if (addr == 0x57 && register_address == 0x04)
       inbound = {pulse_fifo_write_pointer};

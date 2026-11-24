@@ -38,6 +38,7 @@ int main() {
     TwoWire generic_touch_wire;
     generic_touch_wire.cap_uses_0x29 = true;
     generic_touch_wire.cap_config = 0xF8; // unrelated bits + disabled filters
+    generic_touch_wire.cap_config2 = 0x45; // RF disabled; preserve unrelated bits
     generic_touch_wire.cap_recal_config = 0x7F;
     generic_touch_wire.cap_noise_threshold = 0x03;
     desk_robot::ExpansionTouch generic_touch;
@@ -47,6 +48,13 @@ int main() {
     CHECK(generic_touch_wire.cap_multi_touch_block == 0);
     CHECK(Wire.cap_config == 0x00); // strapped 0x28 also enables noise gate
     CHECK(generic_touch_wire.cap_config == 0xC0);
+    CHECK(generic_touch_wire.cap_config2 == 0x41);
+    TwoWire ignored_multi_wire;
+    ignored_multi_wire.ignore_cap_multi_touch_write = true;
+    desk_robot::ExpansionTouch ignored_multi;
+    CHECK(!ignored_multi.begin(ignored_multi_wire));
+    CHECK(!ignored_multi.verified());
+    CHECK(ignored_multi_wire.ranges == 0 && ignored_multi_wire.extras == 0);
     CHECK(generic_touch_wire.cap_recal_config == 0x0A);
     CHECK(generic_touch_wire.cap_noise_threshold == 0x01);
     for (const bool ignored : {false, true}) {
