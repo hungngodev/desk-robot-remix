@@ -49,6 +49,13 @@ std::string Encode(cJSON* value) {
     cJSON_free(text);
     return result;
 }
+std::string EncodeBodyRead(cJSON* body, bool pose, uint32_t head_boot) {
+    if (!cJSON_AddStringToObject(body, "robot_id", CONFIG_DESK_ROBOT_ID)) return {};
+    // Preserve body fields and bind the transport boot only for pose.
+    if (pose && !cJSON_AddNumberToObject(body, "head_boot", head_boot)) return {};
+    auto payload = Encode(body);
+    return payload == "{}" ? std::string{} : payload;
+}
 bool StatusValid(cJSON* json) {
     // A partial status can contain plausible motor numbers but omit local
     // safety evidence. Reject it before forwarding sensory MCP observations.
@@ -616,12 +623,12 @@ void Bridge::BodyReadTask(void* context) {
             if (!body) {
                 bridge->Json(req, 503, Envelope(false, "invalid body JSON"));
             } else {
-                cJSON_AddStringToObject(body.get(), "robot_id", CONFIG_DESK_ROBOT_ID);
-                // Preserve body fields untouched and add the actual head
-                // transport boot for Mac to fence Sense-only restarts.
-                if (pose) cJSON_AddNumberToObject(
-                    body.get(), "head_boot", bridge->boot_nonce_);
-                bridge->Json(req, 200, Encode(body.get()));
+                const auto payload = EncodeBodyRead(body.get(), pose, bridge->boot_nonce_);
+                if (payload.empty()) {
+                    bridge->Json(req, 503, Envelope(false, "body identity or encoding unavailable"));
+                } else {
+                    bridge->Json(req, 200, payload);
+                }
             }
         }
     }

@@ -1818,9 +1818,9 @@ def test_authenticated_pose_bridge_is_read_only_bounded_and_versioned():
     assert 'urgent_stop_gate_.preempts(urgent)' in bridge
     assert 'body_read_busy_.exchange(true, std::memory_order_acq_rel)' in bridge
     assert 'if (!Authorize(req)) return Json(req, 401' in bridge
-    assert 'cJSON_AddStringToObject(body.get(), "robot_id", CONFIG_DESK_ROBOT_ID)' in bridge
-    assert 'if (pose) cJSON_AddNumberToObject(' in bridge
-    assert 'body.get(), "head_boot", bridge->boot_nonce_' in bridge
+    assert 'if (!cJSON_AddStringToObject(body, "robot_id", CONFIG_DESK_ROBOT_ID))' in bridge
+    assert 'if (pose && !cJSON_AddNumberToObject(body, "head_boot", head_boot))' in bridge
+    assert 'EncodeBodyRead(body.get(), pose, bridge->boot_nonce_)' in bridge
     guide = (HEAD.parents[2] / "docs/guides/interfaces.md").read_text()
     examples = guide.split("### Read-only pose v1", 1)[1]
     fixtures = re.findall(r'`({"v":1,"body_boot".+?})`', examples)
