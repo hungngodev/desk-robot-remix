@@ -13,6 +13,18 @@ import math
 import os
 import stat
 from pathlib import Path
+from types import ModuleType
+
+
+def _require_cv2() -> ModuleType:
+    """Load optional OpenCV only when actual image processing is needed."""
+    try:
+        import cv2
+    except ImportError as exc:
+        raise RuntimeError(
+            "Install the existing vision extra for OpenCV dock camera calibration"
+        ) from exc
+    return cv2
 
 
 def fit_corners(
@@ -21,9 +33,6 @@ def fit_corners(
     tag_side_mm: float, marker_id: int, target_distance_mm: float,
 ) -> dict:
     """Calibrate from detected independent board corners, not a guessed FOV."""
-    import cv2
-    import numpy as np
-
     width, height = image_size
     if (type(width) is not int or type(height) is not int
             or not 80 <= width <= 2048 or not 80 <= height <= 1536
@@ -37,6 +46,9 @@ def fit_corners(
             or not 50 <= target_distance_mm <= 500
             or len(views) < 12):
         raise ValueError("Need 12+ independent real views and measured board/dock geometry")
+    import numpy as np
+
+    cv2 = _require_cv2()
     object_grid = np.zeros((rows * columns, 3), dtype=np.float32)
     object_grid[:, :2] = (
         np.mgrid[0:columns, 0:rows].T.reshape(-1, 2) * square_mm
@@ -209,8 +221,9 @@ def calibrate_images(folder: Path, *, columns: int, rows: int,
     # decoding; a swapped file or parent must not replace checked evidence.
     files = _original_camera_jpegs(folder)
 
-    import cv2
     import numpy as np
+
+    cv2 = _require_cv2()
     views = []
     size = None
     for filename, blob in files:

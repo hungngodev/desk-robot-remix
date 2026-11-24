@@ -189,6 +189,30 @@ def test_known_camera_pid_passes_identity_check_but_not_image_gate(tmp_path, pid
         )
 
 
+def test_missing_opencv_is_actionable_after_original_image_gate(tmp_path, monkeypatch):
+    from PIL import Image
+
+    for index in range(12):
+        Image.new("L", (640, 480), color=index).save(tmp_path / f"{index:02}.jpg")
+    monkeypatch.setitem(sys.modules, "cv2", None)
+    with pytest.raises(RuntimeError, match="vision extra for OpenCV") as error:
+        fitter().calibrate_images(
+            tmp_path, columns=9, rows=6, square_mm=10,
+            tag_side_mm=60, marker_id=2, target_distance_mm=200,
+            camera_sensor_pid="OV5640",
+        )
+    assert isinstance(error.value.__cause__, ImportError)
+
+
+def test_missing_opencv_does_not_mask_corner_geometry_preflight(monkeypatch):
+    monkeypatch.setitem(sys.modules, "cv2", None)
+    with pytest.raises(ValueError, match="12"):
+        fit([])
+    with pytest.raises(RuntimeError, match="vision extra for OpenCV") as error:
+        fit([np.zeros((54, 2)) for _ in range(12)])
+    assert isinstance(error.value.__cause__, ImportError)
+
+
 @pytest.mark.parametrize(
     ("robot_id", "head_id"),
     [(0, "xiaozhi-01"), ("robot-01", ""), (" robot-01 ", "xiaozhi-01"),
