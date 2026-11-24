@@ -298,3 +298,56 @@ def test_snapshot_expiry_never_renews_old_safe_cell_evidence(
     assert snapshot.support[0] == "unknown"
     assert snapshot.expires_at_us == expected_expiry
     assert g.to_route_snapshot(now_us=now_us).expires_at_us == expected_expiry
+
+
+@pytest.mark.parametrize("lag_lane,kind", [(0, "floor_supported"), (4, "obstacle_clear")])
+def test_gradual_range_clock_lag_revokes_grid_and_cannot_rebaseline(lag_lane, kind):
+    g = grid()
+    for lane, source_kind in [(0, "floor_supported"), (4, "obstacle_clear")]:
+        g.record(evidence(source_kind, lane), now_us=1_000_000)
+    g.anchored = True  # Simulated existing localization; not hardware evidence.
+    g.record(evidence(kind, lag_lane, seq=2, received_us=1_300_000),
+             now_us=1_300_000)
+    assert g.state(1, 1, now_us=1_300_000) == "safe"
+    for seq in range(3, 8):
+        now = 1_000_000 + (seq - 1) * 300_000
+        with pytest.raises(GridEvidenceError, match="source clock diverged"):
+            g.record(evidence(kind, lag_lane, seq=seq, received_us=now), now_us=now)
+        assert g.state(1, 1, now_us=now) == "unknown"
+        assert not g.snapshot(now_us=now).anchored
+        assert g.snapshot(now_us=now).observed_at_us == 0
+    # Catch-up is not map re-anchoring, and both layers must be repopulated.
+    now = 3_100_000
+    fresh = replace(evidence(kind, lag_lane, seq=8, received_us=now), sample_us=2_200_000)
+    g.record(fresh, now_us=now)
+    assert g.state(1, 1, now_us=now) == "unknown"
+    other_lane, other_kind = (4, "obstacle_clear") if lag_lane == 0 else (0, "floor_supported")
+    g.record(replace(evidence(other_kind, other_lane, seq=2, received_us=now),
+                     sample_us=2_200_000), now_us=now)
+    assert g.state(1, 1, now_us=now) == "safe"
+    assert not g.snapshot(now_us=now).anchored
+
+
+def test_matching_range_clocks_do_not_accumulate_lag():
+    g = grid()
+    for i in range(100):
+        now = 1_000_000 + i * 300_000
+        for lane, kind in [(0, "floor_supported"), (4, "obstacle_clear")]:
+            g.record(replace(evidence(kind, lane, seq=i + 1, received_us=now),
+                             sample_us=100_000 + i * 300_000), now_us=now)
+        assert g.state(1, 1, now_us=now) == "safe"
+
+
+def test_grid_clock_reference_restarts_with_explicit_new_origin():
+    g = grid()
+    g.record(evidence("obstacle_clear", 4), now_us=1_000_000)
+    g.record(evidence("obstacle_clear", 4, seq=2, received_us=1_300_000),
+             now_us=1_300_000)
+    with pytest.raises(GridEvidenceError, match="source clock diverged"):
+        g.record(evidence("obstacle_clear", 4, seq=3, received_us=1_600_000),
+                 now_us=1_600_000)
+    g.invalidate_origin(8, "odom-2")
+    g.record(replace(evidence("obstacle_clear", 4, received_us=1_700_000),
+                     body_boot=8, origin_id="odom-2", epoch=1), now_us=1_700_000)
+    assert g.log_odds(1, 1) == pytest.approx(-0.8)
+    assert not g.snapshot(now_us=1_700_000).anchored

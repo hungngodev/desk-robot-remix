@@ -95,6 +95,7 @@ class SpatialGrid:
         self.anchored = False  # Only future validated map-to-odom can change this.
         self._cells: dict[tuple[int, int], _Cell] = {}
         self._last_source: dict[int, tuple[int, int, int]] = {}
+        self._clock_reference: dict[int, tuple[int, int]] = {}
         self._last_update_us = 0
 
     def record(self, batch: RangeCellBatch, *, now_us: int) -> None:
@@ -139,6 +140,10 @@ class SpatialGrid:
                                      or batch.sample_us <= previous[1]
                                      or batch.received_us < previous[2]):
             raise GridEvidenceError("Replayed or reset ToF source sequence")
+        reference = self._clock_reference.get(batch.lane)
+        relative_lag_us = 0 if reference is None else (
+            (batch.received_us - reference[1]) - (batch.sample_us - reference[0])
+        )
         if previous is not None:
             # WROOM and Mac have unrelated clock epochs, but their elapsed
             # durations must agree within transport lag tolerance. A newly
@@ -146,7 +151,8 @@ class SpatialGrid:
             source_elapsed = batch.sample_us - previous[1]
             receipt_elapsed = batch.received_us - previous[2]
             if (receipt_elapsed - source_elapsed > _MAX_SOURCE_RECEIPT_LAG_US
-                    or source_elapsed - receipt_elapsed > _MAX_SOURCE_FORWARD_LEAP_US):
+                    or source_elapsed - receipt_elapsed > _MAX_SOURCE_FORWARD_LEAP_US
+                    or relative_lag_us > _MAX_SOURCE_RECEIPT_LAG_US):
                 # Revoke prior free-space evidence immediately. Preserve the
                 # last trusted per-lane source fence so replay cannot recover
                 # the map. Later genuinely fresh samples must refill both
@@ -206,6 +212,11 @@ class SpatialGrid:
         self._last_source[batch.lane] = (
             batch.sequence, batch.sample_us, batch.received_us
         )
+        # Retain the best observed relative clock offset for this lane/epoch.
+        # A sliding baseline hides queued conversions that grow older slowly.
+        # This does not attest absolute acquisition age or measured drift.
+        if reference is None or relative_lag_us < 0:
+            self._clock_reference[batch.lane] = (batch.sample_us, batch.received_us)
         self._last_update_us = max(self._last_update_us, batch.received_us)
 
     def state(self, x: int, y: int, *, now_us: int) -> str:
@@ -252,6 +263,7 @@ class SpatialGrid:
             self.epoch += 1
             self.anchored = False
             self._last_source.clear()
+            self._clock_reference.clear()
 
     def invalidate_origin(self, body_boot: int, origin_id: str) -> None:
         if (type(body_boot) is not int or not 0 <= body_boot <= 0xffffffff
@@ -263,6 +275,7 @@ class SpatialGrid:
         self.anchored = False
         self._cells.clear()
         self._last_source.clear()
+        self._clock_reference.clear()
         self._last_update_us = 0
 
     def snapshot(self, *, now_us: int) -> SpatialSnapshot:
