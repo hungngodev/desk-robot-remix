@@ -332,6 +332,48 @@ class OverlayTests(unittest.TestCase):
                 overlay.apply(self.root)
         self.git.start()
 
+    def test_sense_installed_component_inventory_and_exact_rollback(self):
+        """The selected build must receive every Sense and shared board file."""
+        overlay.apply(self.root, "sense")
+        board = self.root / overlay.BOARDS["sense"]
+        expected = {
+            path.name: path.read_bytes()
+            for folder in (HEAD / "sense", HEAD / "overlay")
+            for path in folder.iterdir()
+            if path.is_file() and path.suffix in (".cc", ".h", ".hpp", ".json", ".md")
+        }
+        required = {
+            "config.h", "config.json", "desk_robot_sense.cc",
+            "sense_reference_codec.cc", "sense_reference_codec.h",
+            "reference_timeline.h", "sense_pcm_window.h", "sense_speaker_activity.hpp",
+            "face_eye_display.hpp", "face_eye_animator.hpp", "stackchan_behavior.hpp",
+            "robot_bridge.cc", "robot_bridge.h", "robot_protocol.h", "real_touch_edges.h",
+        }
+        self.assertFalse(required - expected.keys(), "Missing required source component")
+        installed = {path.name: path.read_bytes() for path in board.iterdir() if path.is_file()}
+        self.assertEqual(installed, expected)
+        for variant, path in overlay.BOARDS.items():
+            if variant != "sense":
+                self.assertFalse((self.root / path).exists())
+        cmake = (self.root / "main/CMakeLists.txt").read_text()
+        self.assertIn(
+            'elseif(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3)\n'
+            '    set(BOARD_DIR "desk-robot/desk-robot-sense-s3")', cmake,
+        )
+        self.assertIn(
+            "if(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3)\n"
+            "    list(APPEND MAIN_PRIV_REQUIRES_EXTRA esp_http_server)", cmake,
+        )
+        kconfig = (self.root / "main/Kconfig.projbuild").read_text()
+        self.assertIn("config BOARD_TYPE_DESK_ROBOT_SENSE_S3", kconfig)
+        overlay.remove(self.root)
+        self.assertFalse(board.exists())
+        self.assertEqual(
+            {path.relative_to(self.root).as_posix(): path.read_bytes()
+             for path in self.root.rglob("*") if path.is_file()},
+            self.original,
+        )
+
     def test_sense_reuses_upstream_i2s_writer_with_finite_stop_bound(self):
         overlay.apply(self.root, "sense")
         codec_path = "main/audio/codecs/no_audio_codec.cc"
