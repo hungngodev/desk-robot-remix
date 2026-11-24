@@ -1,9 +1,10 @@
 """Guard against accidentally losing user-supplied HTML ideas and source links.
 
-This test checks exact archival parity with the uploaded original ESP32 Deskpet
+These tests guard the archived Markdown index of the original ESP32 Deskpet
 Ideas.html dated 2026-11-09 (1,074,994 bytes, SHA256
 12a0068f3bcec7daa6065cc180478294ccc1d0cc5e439250774684f3b2008b5d).
-It does not claim we have opened or successfully reused every external URL.
+The original HTML is not in the checkout. These tests do not rehash it,
+validate every idea's prose, or prove external URL access or reuse.
 """
 import hashlib
 import re
@@ -12,6 +13,37 @@ from pathlib import Path
 SOURCE_MAP = Path(__file__).resolve().parents[2] / "docs/source-map.md"
 EXPECTED_URL_SHA = "83d6250c7c3e632e32624ef90b4656b61e2fe7f30f41b01b19761c3a7b24efc8"
 EXPECTED_COUNTS = {"F": 39, "B": 30, "S": 75, "G": 46, "H": 10}
+
+
+# Original DOM IDs, archived in the 2026-11-09 crosswalk. Keep evolving
+# engineering interpretations editable while preserving section identity/order.
+EXPECTED_SECTION_IDS = """
+project-overview project-architecture project-build-order project-status
+project-parts max30102-add project-rules project-roadmap topic6-power
+topic4-drive-gripper topic1-cliff topic2-touch topic3-audio topic5-head-face
+topic7-mac-brain topic8-proactive project-research-map research-library
+start-here paths build-plan modpack1 modpack2 schedule top-picks
+brainstorm-sensors specs spec-pack sensor-menu finds reddit-youtube steal
+popular tweaks sensors ideas new-finds-2026-11-07 new-finds-2026-11-09
+reference diy-shopping-list repos
+""".split()
+
+
+def test_original_html_section_crosswalk_is_preserved():
+    text = SOURCE_MAP.read_text(encoding="utf-8")
+    section = text.split("## Original HTML DOM section crosswalk,", 1)[1]
+    section = section.split("\n## ", 1)[0]
+    rows = re.findall(
+        r"(?m)^\| (\d+) \| `([^`]+)` \| .+ \| \[View\]\(([^)]+)\) \|$",
+        section,
+    )
+    assert [int(index) for index, _, _ in rows] == list(range(1, 42))
+    assert [section_id for _, section_id, _ in rows] == EXPECTED_SECTION_IDS
+    docs = SOURCE_MAP.parent.resolve()
+    for _, section_id, target in rows:
+        path = (docs / target).resolve()
+        assert path.is_relative_to(docs), section_id
+        assert path.is_file(), (section_id, target)
 
 
 def test_full_original_html_links_are_preserved_with_same_url_bytes():
