@@ -1417,6 +1417,46 @@ static void guarded_dc_dock_loss_latches_until_fresh_local_usb_rearm() {
   }
 }
 
+static void repeated_dock_loss_retires_last_trusted_gpioa_acquisition() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 100);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcGuarded, &guard);
+  // Even an optional expander becomes compulsory once observed.
+  desk_robot::AccessoryReadings readings{};
+  readings.dock.present = readings.dock.valid = true;
+  readings.dock.sample_seq = 10;
+  readings.dock.at_ms = 100;
+  body.set_accessories(readings, 100);
+  CHECK(send(body, "rearm", 100, true) == "OK rearm");
+  CHECK(send(body, "arm", 100) == "OK arm");
+  CHECK(send(body, "drive 20 20 150", 100).find("OK drive") == 0);
+
+  // Complete disappearance of the formerly installed expander is a fault
+  // even without a separate profile-level require_dock_monitor flag.
+  const desk_robot::AccessoryReadings missing{};
+  body.set_accessories(missing, 101);
+  CHECK(!body.state().armed && body.state().left == 0);
+  CHECK(send(body, "arm", 101) == "ERR arm dock_monitor_latched");
+
+  readings.dock.sample_seq = 11;
+  readings.dock.at_ms = 102;
+  body.set_accessories(readings, 102);
+  // A second failure before USB recovery retires the newer acquisition.
+  body.set_accessories(missing, 103);
+  body.set_accessories(readings, 104);
+  CHECK(send(body, "rearm", 104, true) ==
+        "ERR rearm dock_monitor_no_new_sample");
+
+  readings.dock.sample_seq = 12;
+  readings.dock.at_ms = 105;
+  body.set_accessories(readings, 105);
+  fresh(guard, 105);
+  CHECK(send(body, "rearm", 105, true) == "OK rearm");
+  CHECK(send(body, "arm", 105) == "OK arm");
+  CHECK(body.state().left == 0 && body.state().right == 0);
+}
+
 static void complete_robot_requires_boot_installed_and_fresh_dock_expander() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
   body.require_dock_monitor(true);  // only the full physical firmware boot sets this
@@ -2929,6 +2969,7 @@ int main() {
     inconsistent_dock_acquisition_requires_new_sample_to_recover();
     installed_dock_i2c_loss_or_single_seat_stops_local_motors();
     guarded_dc_dock_loss_latches_until_fresh_local_usb_rearm();
+    repeated_dock_loss_retires_last_trusted_gpioa_acquisition();
     complete_robot_requires_boot_installed_and_fresh_dock_expander();
     dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof();
     belly_adc_does_not_refresh_stale_jaw_sample();

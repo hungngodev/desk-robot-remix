@@ -412,13 +412,15 @@ bool BodyControl::dock_telemetry_bad(std::uint32_t now_ms) const {
   // Once the optional physical MCP23017 was found at boot, its I2C
   // acquisition, independent sequence and timestamp are compulsory for
   // moving. A missing module is NOT manufactured into a fake valid sample.
-  return (dock.present || dock_monitor_required_) &&
+  return (dock_sample_seen_ || dock.present || dock_monitor_required_) &&
          (!dock.present || !dock.valid || dock.sample_seq == 0U ||
           now_ms - dock.at_ms >= 500U);
 }
 
 void BodyControl::latch_dock_monitor_fault() {
-  if (!dock_monitor_fault_latched_) {
+  // Every detected loss retires the most recent trusted GPIOA identity.
+  // Another loss before local recovery cannot reuse a pre-loss reading.
+  if (dock_sample_seen_) {
     dock_monitor_fault_seq_ = dock_last_seq_;
     dock_monitor_fault_at_ms_ = dock_last_at_ms_;
   }
@@ -744,9 +746,11 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
   // Preserve the last latch and fail closed until a fresh acquisition.
   state_.accessories.dock.valid =
       (new_sample || repeated) && !dock_provenance_fault_;
-  if (was_armed && guarded_motion_profile() && dock_telemetry_bad(now_ms)) {
-    // Losing compulsory GPIOA during a drive is a cancelled session. Fresh
-    // reads may restore telemetry but not remote ARM authorization.
+  if (guarded_motion_profile() &&
+      (was_armed || dock_sample_seen_ || dock_monitor_fault_latched_) &&
+      dock_telemetry_bad(now_ms)) {
+    // Once a GPIOA source has been observed, every loss requires fresh
+    // local recovery, including another loss while already disarmed.
     latch_dock_monitor_fault();
   }
   if (dock_power_lockout_) {
@@ -754,9 +758,7 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
     // Only an explicit disarm should deliberately release a grasped payload.
     stop_motion();
     state_.armed = false;
-  } else if ((dock.present || dock_monitor_required_) &&
-             (!state_.accessories.dock.valid || !dock.present ||
-              dock.sample_seq == 0U)) {
+  } else if (dock_telemetry_bad(now_ms)) {
     // A required but missing MCP23017 is not an optional absent sensor.
     // Preserve jaw PWM on transport loss to avoid dropping a held object.
     stop_motion();
@@ -905,7 +907,8 @@ void BodyControl::tick(std::uint32_t now_ms) {
     ++state_.touch_taps;
     touch_pending_tap_ = false;
   }
-  if (guarded_motion_profile() && state_.armed &&
+  if (guarded_motion_profile() &&
+      (state_.armed || dock_sample_seen_ || dock_monitor_fault_latched_) &&
       dock_telemetry_bad(now_ms)) {
     // Capture independently even when a simultaneous cliff fault wins the
     // immediate return below. Never make another safety lane mask GPIOA loss.
