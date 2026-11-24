@@ -698,3 +698,69 @@ async def test_smoke_ignores_superseded_completion_and_stale_listen(quiet_input)
     assert stats["input_duration_ms"] == 1000
     assert stats["model_decision"] == ("listen" if quiet_input else "speak")
     assert audio == (b"" if quiet_input else new_audio)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stall", ["greeting", "input"])
+async def test_probe_deadline_covers_negotiation_and_paced_input(stall):
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+
+    smoke = smoke_module()
+    input_events = []
+    commits = []
+
+    async def model_socket(request):
+        socket = web.WebSocketResponse()
+        await socket.prepare(request)
+        async for msg in socket:
+            event = json.loads(msg.data)
+            if event["type"] == "session.update" and stall == "input":
+                await socket.send_json({
+                    "type": "session.created",
+                    "session": {
+                        "model": "openbmb/MiniCPM-o-4_5",
+                        "input_audio_format": "pcm16",
+                        "output_audio_format": "pcm16",
+                        "audio": {
+                            "input": {"sample_rate_hz": 16000},
+                            "output": {"format": {"type": "audio/pcm", "rate": 24000}},
+                        },
+                        "capabilities": {
+                            "implementation_level": "model_native_duplex",
+                            "supports_input_append": True,
+                            "supports_barge_in": True,
+                            "chunk_period_ms": 1000,
+                        },
+                    },
+                })
+            elif event["type"] == "input_audio_buffer.append":
+                input_events.append(event)
+            elif event["type"] == "input_audio_buffer.commit":
+                commits.append(event)
+        return socket
+
+    app = web.Application()
+    app.router.add_get("/v1/realtime", model_socket)
+    async with TestServer(app) as server:
+        url = str(server.make_url("/v1/realtime?duplex=1")).replace("http://", "ws://")
+        # The outer wait only observes termination, never manufactures a
+        # TimeoutError that could be mistaken for the probe's own deadline.
+        task = asyncio.create_task(smoke.probe(
+            url, "openbmb/MiniCPM-o-4_5", bytes(32000 * 20), None,
+            deadline=5,
+        ))
+        try:
+            done, _ = await asyncio.wait({task}, timeout=8)
+            assert task in done, "Probe ignored its total communication deadline"
+            with pytest.raises(TimeoutError):
+                await task
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+    assert not commits
+    if stall == "greeting":
+        assert not input_events
+    else:
+        assert 0 < len(input_events) < 200

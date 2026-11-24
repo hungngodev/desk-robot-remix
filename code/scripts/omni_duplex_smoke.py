@@ -90,9 +90,12 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
     if jpeg is not None and len(pcm) < 32000:
         raise ValueError("Audiovisual probe requires at least one second of PCM")
 
-    async with aiohttp.ClientSession() as client:
+    # A single communication budget covers connection, negotiation, fleet
+    # admission, paced input, and the terminal model decision.
+    async with asyncio.timeout(deadline) as budget, aiohttp.ClientSession() as client:
         async with client.ws_connect(
             server_url(url), heartbeat=20, max_msg_size=2_000_000,
+            timeout=aiohttp.ClientWSTimeout(ws_close=1.0),
         ) as socket:
             await socket.send_json(wire.session_update())
             greeting = await socket.receive_json(timeout=10)
@@ -187,17 +190,22 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                 if not listener.done():
                     await socket.send_json(wire.commit())
                     # Propagate backend errors and interrupted turns promptly.
-                    await asyncio.wait_for(listener, timeout=deadline)
+                    await listener
                 if jpeg is not None and wire.frames_sent == 0:
                     raise RuntimeError("Native backend decided before receiving video")
             finally:
                 if not listener.done():
                     listener.cancel()
-                    await asyncio.gather(listener, return_exceptions=True)
-                try:
-                    await socket.send_json({"type": "session.close"})
-                except Exception:
-                    pass
+                # Always retrieve a concurrent reader exception, including
+                # when the writer failed or the deadline interrupted input.
+                await asyncio.gather(listener, return_exceptions=True)
+                if not budget.expired():
+                    try:
+                        await asyncio.wait_for(
+                            socket.send_json({"type": "session.close"}), timeout=1.0,
+                        )
+                    except Exception:
+                        pass
 
     results.update({
         "input_duration_ms": wire.input_ms,
@@ -260,7 +268,8 @@ def main() -> None:
     parser.add_argument("--input-wav", required=True, type=Path)
     parser.add_argument("--frame-jpeg", type=Path)
     parser.add_argument("--output-wav", required=True, type=Path)
-    parser.add_argument("--deadline-s", type=float, default=90.0)
+    parser.add_argument("--deadline-s", type=float, default=90.0,
+                        help="Total communication deadline; bounded socket cleanup may follow")
     parser.add_argument("--fleet-sessions", type=int, choices=range(1, 6),
                         default=1)
     parser.add_argument("--quiet-input", action="store_true",
