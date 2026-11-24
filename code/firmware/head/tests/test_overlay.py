@@ -131,6 +131,96 @@ class BuildSelectionTests(unittest.TestCase):
             subprocess.run([compiler, "-std=c++23", "-Wall", "-Wextra", "-Werror", "-I", str(HEAD), str(HEAD / "tests/snapshot_test.cc"), "-o", str(exe)], check=True, env=native_cpp_env())
             subprocess.run([str(exe)], check=True)
 
+class OverlayPathTests(unittest.TestCase):
+    """Exercise the installer transaction without requiring an upstream clone."""
+
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory()
+        self.addCleanup(temp.cleanup)
+        self.root = Path(temp.name) / "checkout"
+        self.root.mkdir()
+        self.external = Path(temp.name) / "external"
+        self.external.mkdir()
+        self.board = self.root / overlay.BOARD
+        self.board.parent.parent.mkdir(parents=True)
+        self.plan = {f"{overlay.BOARD}/config.json": b"{}"}
+        git = patch.object(
+            overlay.subprocess, "check_output",
+            side_effect=lambda args, **kwargs: overlay.PIN if "rev-parse" in args else "",
+        )
+        git.start()
+        self.addCleanup(git.stop)
+        planner = patch.object(overlay, "planned_files", return_value=self.plan)
+        planner.start()
+        self.addCleanup(planner.stop)
+
+    def assert_install_refused(self):
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            overlay.apply(self.root)
+        self.assertFalse((self.root / overlay.MARKER).is_file())
+        self.assertEqual(list(self.external.iterdir()), [])
+
+    def test_untracked_board_parent_symlink(self):
+        self.board.parent.symlink_to(self.external, target_is_directory=True)
+        self.assert_install_refused()
+        self.assertTrue(self.board.parent.is_symlink())
+
+    def test_dangling_board_symlink(self):
+        self.board.parent.mkdir()
+        self.board.symlink_to(self.external / "missing", target_is_directory=True)
+        self.assert_install_refused()
+        self.assertTrue(self.board.is_symlink())
+
+    def test_dangling_marker_symlink(self):
+        marker = self.root / overlay.MARKER
+        marker.symlink_to(self.external / "missing")
+        self.assert_install_refused()
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            overlay.remove(self.root)
+        self.assertTrue(marker.is_symlink())
+
+    def test_planned_file_symlink(self):
+        path = self.root / "main/foreign.txt"
+        path.symlink_to(self.external / "missing")
+        self.plan["main/foreign.txt"] = b"replacement"
+        self.assert_install_refused()
+        self.assertTrue(path.is_symlink())
+
+    def test_clean_install_reapply_remove(self):
+        overlay.apply(self.root)
+        marker = self.root / overlay.MARKER
+        before = marker.read_bytes()
+        overlay.apply(self.root)
+        self.assertEqual(marker.read_bytes(), before)
+        self.assertEqual((self.board / "config.json").read_bytes(), b"{}")
+        overlay.remove(self.root)
+        self.assertFalse(marker.exists())
+        self.assertFalse(self.board.exists())
+
+    def test_recovery_rejects_symlink_even_with_matching_bytes(self):
+        overlay.apply(self.root)
+        path = self.board / "config.json"
+        other = self.root / "local.json"
+        other.write_bytes(path.read_bytes())
+        path.unlink()
+        path.symlink_to(other)
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            overlay.remove(self.root)
+        self.assertTrue(path.is_symlink())
+        self.assertTrue((self.root / overlay.MARKER).is_file())
+        self.assertEqual(other.read_bytes(), b"{}")
+
+    def test_removal_preflights_other_board_paths(self):
+        overlay.apply(self.root)
+        other = self.root / overlay.BOARDS["sense"]
+        other.symlink_to(self.external, target_is_directory=True)
+        with self.assertRaisesRegex(ValueError, "symlink"):
+            overlay.remove(self.root)
+        self.assertTrue((self.board / "config.json").is_file())
+        self.assertTrue((self.root / overlay.MARKER).is_file())
+        self.assertTrue(other.is_symlink())
+
+
 @unittest.skipUnless((UPSTREAM / "main/boards/common/esp_video.cc").is_file(), "Pinned upstream fixture unavailable")
 class OverlayTests(unittest.TestCase):
     def setUp(self):

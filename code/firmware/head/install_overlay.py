@@ -1162,6 +1162,16 @@ def atomic_replace_bytes(path: Path, contents: bytes) -> None:
         staged.unlink(missing_ok=True)
 
 
+def checked_overlay_path(target: Path, name: str) -> Path:
+    """Reject symlink components even when their destination is absent."""
+    path = target
+    for part in name.split("/"):
+        path = path / part
+        if path.is_symlink():
+            raise ValueError(f"Overlay path contains a symlink: {name}")
+    return path
+
+
 def read_overlay_journal(target: Path, marker: Path) -> dict:
     """Reject malformed or escaping recovery journals before any file IO."""
     if not marker.is_file() or marker.is_symlink() or marker.stat().st_size > 16_000_000:
@@ -1181,8 +1191,8 @@ def read_overlay_journal(target: Path, marker: Path) -> dict:
                 or (info["original"] is not None and
                     type(info["original"]) is not str)):
             raise ValueError("Invalid head overlay journal entry")
-        path = target / name
-        if path.is_symlink() or not path.parent.resolve().is_relative_to(root):
+        path = checked_overlay_path(target, name)
+        if not path.parent.resolve().is_relative_to(root):
             raise ValueError("Overlay journal path escapes pinned checkout")
         if info["original"] is not None:
             try:
@@ -1193,10 +1203,12 @@ def read_overlay_journal(target: Path, marker: Path) -> dict:
 
 
 def remove(target: Path) -> None:
-    marker = target / MARKER
+    marker = checked_overlay_path(target, MARKER)
     if not marker.exists():
         return
     state = read_overlay_journal(target, marker)
+    for name in BOARDS.values():
+        checked_overlay_path(target, name)
     # The marker is committed before the overlaid files. A killed installer
     # can leave any file at its pinned original bytes, its overlaid bytes,
     # or (for a new board file) not yet created. Those are recoverable.
@@ -1246,7 +1258,7 @@ def apply(target: Path, board: str = "cores3") -> None:
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=target, text=True).strip()
     if head != PIN:
         raise ValueError(f"Requires Xiaozhi commit {PIN}, found {head}")
-    marker = target / MARKER
+    marker = checked_overlay_path(target, MARKER)
     if marker.exists():
         state = read_overlay_journal(target, marker)
         if not any(name.startswith(BOARDS[board] + "/") for name in state):
@@ -1264,12 +1276,12 @@ def apply(target: Path, board: str = "cores3") -> None:
     )
     if changed:
         raise ValueError("Target has tracked changes; use a clean build copy")
-    if any((target / name).exists() for name in BOARDS.values()):
+    if any(checked_overlay_path(target, name).exists() for name in BOARDS.values()):
         raise ValueError("Target board directory already exists")
     files = planned_files(target, board)  # Validate every patch anchor before changing any source.
     state = {}
     for name, data in files.items():
-        path = target / name
+        path = checked_overlay_path(target, name)
         state[name] = {
             "sha256": digest(data),
             "original": base64.b64encode(path.read_bytes()).decode() if path.exists() else None,
