@@ -2,7 +2,6 @@
 from types import SimpleNamespace
 
 import pytest
-
 from desk_robot import simulator
 from desk_robot.transport import HeadError
 
