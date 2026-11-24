@@ -310,6 +310,7 @@ class OverlayTests(unittest.TestCase):
             "main/protocols/protocol.cc", "main/protocols/protocol.h",
             "main/protocols/websocket_protocol.cc",
             "main/protocols/websocket_protocol.h",
+            "scripts/p3_tools/p3_gui_player.py",
         ]
         paths += ["main/boards/common/esp32_camera.h", "main/boards/common/esp32_camera.cc"]
         paths += [p.relative_to(UPSTREAM).as_posix() for p in (UPSTREAM / "main/boards/m5stack/core-s3").iterdir() if p.is_file()]

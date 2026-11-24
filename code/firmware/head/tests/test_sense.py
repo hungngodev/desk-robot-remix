@@ -43,7 +43,8 @@ class SenseOverlayTests(unittest.TestCase):
                  'main/audio/codecs/no_audio_codec.cc',
                  'main/protocols/protocol.cc', 'main/protocols/protocol.h',
                  'main/protocols/websocket_protocol.cc',
-                 'main/protocols/websocket_protocol.h']
+                 'main/protocols/websocket_protocol.h',
+                 'scripts/p3_tools/p3_gui_player.py']
         names += [f'main/boards/common/{name}' for name in (
             'camera.h', 'esp_video.h', 'esp_video.cc', 'esp32_camera.h', 'esp32_camera.cc')]
         names += [p.relative_to(UPSTREAM).as_posix()

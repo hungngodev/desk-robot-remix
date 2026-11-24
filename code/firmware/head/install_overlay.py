@@ -31,6 +31,83 @@ def replace_once(text: str, old: str, new: str) -> str:
     return text.replace(old, new, 1)
 
 
+def instrument_p3_player(source: str) -> str:
+    """Instrument the pinned host-only blocking PortAudio player."""
+    source = replace_once(
+        source,
+        '    stream.start()\n',
+        '''    metrics = {
+        "submitted_frames": 0,
+        "write_calls": 0,
+        "underflow_reports": 0,
+        "underflow_reports_first_write": 0,
+        "underflow_reports_after_pause": 0,
+        "output_overrun_reports": None,  # Not exposed by blocking OutputStream.
+        "writes_exceeding_available_frames": 0,
+        "min_write_available_frames": None,
+        "output_latency_estimate_ms": None,
+        "stream_start_to_first_write_return_ms": None,
+        "max_write_ms": None,
+    }
+    started_at = time.monotonic()
+    paused_since_write = False
+    stream.start()
+''',
+    )
+    source = replace_once(
+        source,
+        "    try:\n        with open(input_file, 'rb') as f:\n",
+        "    try:\n        metrics['output_latency_estimate_ms'] = stream.latency * 1000\n"
+        "        with open(input_file, 'rb') as f:\n",
+    )
+    source = replace_once(
+        source,
+        '                if pause_event and pause_event.is_set():\n',
+        '                if pause_event and pause_event.is_set():\n'
+        '                    paused_since_write = True\n',
+    )
+    source = replace_once(
+        source,
+        '                stream.write(audio_array)\n',
+        '''                # Headroom is not an overrun or a count of queued frames.
+                available = stream.write_available
+                previous_min = metrics["min_write_available_frames"]
+                metrics["min_write_available_frames"] = (
+                    available if previous_min is None else min(previous_min, available)
+                )
+                write_started = time.monotonic()
+                underflowed = stream.write(audio_array)
+                write_finished = time.monotonic()
+                write_ms = (write_finished - write_started) * 1000
+                previous_max = metrics["max_write_ms"]
+                metrics["max_write_ms"] = (
+                    write_ms if previous_max is None else max(previous_max, write_ms)
+                )
+                first_write = metrics["write_calls"] == 0
+                if first_write:
+                    metrics["stream_start_to_first_write_return_ms"] = (
+                        write_finished - started_at
+                    ) * 1000
+                metrics["write_calls"] += 1
+                metrics["submitted_frames"] += len(audio_array)
+                metrics["writes_exceeding_available_frames"] += int(
+                    len(audio_array) > available
+                )
+                if underflowed:
+                    metrics["underflow_reports"] += 1
+                    metrics["underflow_reports_first_write"] += int(first_write)
+                    metrics["underflow_reports_after_pause"] += int(paused_since_write)
+                paused_since_write = False
+''',
+    )
+    return replace_once(
+        source,
+        '        print("播放完成")\n',
+        '        print("P3 host playback metrics (not acoustic latency):", metrics)\n'
+        '    return metrics\n',
+    )
+
+
 def cores3_files(target: Path) -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     stock = target / "main/boards/m5stack/core-s3"
@@ -1076,6 +1153,9 @@ void Application::HandleStartListeningEvent() {""",
     NotifyPlayer notify_player_;""",
         )
         files[header_path] = header.encode()
+        # Host-only diagnostics for the pinned P3 player, not firmware latency.
+        path = "scripts/p3_tools/p3_gui_player.py"
+        files[path] = instrument_p3_player((target / path).read_text()).encode()
         return files
     files = cores3_files(target)
     if board == "cores3":
