@@ -10,8 +10,101 @@ static void scan(desk_robot::AccessorySensors& bus, unsigned lo, unsigned hi) {
   for (unsigned ms = lo; ms <= hi; ms += 12) bus.poll(ms);
 }
 
+// All four dock inputs are independent; unrelated GPA bits must not
+// change the decision. A rejected request must not replay on recovery.
+static void check_dock_masks() {
+  for (unsigned bits = 0; bits < 16; ++bits) {
+    TwoWire wire;
+    wire.dock_gpioA = static_cast<std::uint8_t>(0xF0U | bits);
+    desk_robot::AccessorySensors bus;
+    CHECK(bus.begin(wire));
+    CHECK(bus.haptic_ready());
+    CHECK(bus.request_haptic(1));
+    scan(bus, 0, 48);
+    const auto& dock = bus.readings().dock;
+    CHECK(dock.valid && dock.sample_seq != 0);
+    CHECK(dock.left_seated == ((bits & 1U) != 0));
+    CHECK(dock.right_seated == ((bits & 2U) != 0));
+    CHECK(dock.input_good == ((bits & 4U) == 0));
+    CHECK(dock.charge_indicated == ((bits & 8U) == 0));
+    CHECK(wire.mcp_olatb == (bits == 0x0CU ? 0x04U : 0U));
+    CHECK(wire.haptic_rising_edges == (bits == 0x0CU ? 1U : 0U));
+    wire.dock_gpioA = 0x0C;
+    scan(bus, 60, 132);
+    CHECK(wire.mcp_olatb == 0);
+    CHECK(wire.haptic_rising_edges == (bits == 0x0CU ? 1U : 0U));
+    CHECK(wire.mcp_iodirb == 0xFB);
+    CHECK(!wire.unsafe_parallel_mux);
+  }
+}
+
+// GPB0 reed, GPB1 PIR and GPB3 nFAULT remain independent of GPB2.
+// The fake injects pin levels, not electrical pullup or output behavior.
+static void check_shared_port_inputs() {
+  for (unsigned bits = 0; bits < 16; ++bits) {
+    TwoWire wire;
+    wire.dock_gpioA = 0x0C;
+    wire.optional_gpioB = static_cast<std::uint8_t>(0xF0U | bits);
+    desk_robot::AccessorySensors bus;
+    CHECK(bus.begin(wire));
+    CHECK(bus.request_haptic(1));
+    scan(bus, 0, 48);
+    const auto& input = bus.readings().optional_inputs;
+    CHECK(input.valid && input.sample_seq != 0);
+    CHECK(input.reed_closed == ((bits & 1U) == 0));
+    CHECK(input.pir_active == ((bits & 2U) != 0));
+    CHECK(input.driver_fault_active == ((bits & 8U) == 0));
+    CHECK(wire.mcp_iodirb == 0xFB && wire.mcp_olatb == 0x04);
+    const auto seq = input.sample_seq;
+    const unsigned changed = bits ^ 0x0FU;
+    wire.optional_gpioB = static_cast<std::uint8_t>(changed);
+    scan(bus, 60, 132);
+    CHECK(input.valid && input.sample_seq != seq);
+    CHECK(input.reed_closed == ((changed & 1U) == 0));
+    CHECK(input.pir_active == ((changed & 2U) != 0));
+    CHECK(input.driver_fault_active == ((changed & 8U) == 0));
+    CHECK(wire.mcp_iodirb == 0xFB && wire.mcp_olatb == 0);
+    CHECK(wire.haptic_rising_edges == 1);
+    CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+  }
+}
+
+static void check_dock_read_dropout() {
+  TwoWire wire;
+  wire.dock_gpioA = 0x0C;
+  desk_robot::AccessorySensors bus;
+  CHECK(bus.begin(wire));
+  CHECK(bus.request_haptic(1));
+  wire.fail_dock_gpio = true;
+  scan(bus, 0, 48);
+  CHECK(!bus.readings().dock.valid);
+  CHECK(!bus.readings().optional_inputs.valid);
+  CHECK(wire.optional_gpio_reads == 0);
+  CHECK(wire.haptic_rising_edges == 0 && wire.mcp_olatb == 0);
+  wire.fail_dock_gpio = false;
+  scan(bus, 60, 132);
+  CHECK(bus.readings().dock.valid);
+  CHECK(wire.haptic_rising_edges == 0);
+  CHECK(bus.request_haptic(133));
+  scan(bus, 144, 216);
+  CHECK(wire.haptic_rising_edges == 1 && wire.mcp_olatb == 0x04);
+  const auto seq = bus.readings().dock.sample_seq;
+  const auto optional_reads = wire.optional_gpio_reads;
+  wire.fail_dock_gpio = true;
+  scan(bus, 228, 300);
+  CHECK(!bus.readings().dock.valid && bus.readings().dock.sample_seq == seq);
+  CHECK(!bus.readings().optional_inputs.valid);
+  CHECK(wire.optional_gpio_reads == optional_reads);
+  CHECK(wire.mcp_olatb == 0 && wire.haptic_rising_edges == 1);
+  CHECK(wire.mcp_iodirb == 0xFB && !wire.unsafe_parallel_mux);
+}
+
 int main() {
   try {
+    check_dock_masks();
+    check_shared_port_inputs();
+    check_dock_read_dropout();
+
     // Full range bus stays disconnected, real dock GPIOA must be fresh.
     TwoWire wire;
     wire.dock_gpioA = 0x0C;  // two switches unseated, no PGOOD/CHG
