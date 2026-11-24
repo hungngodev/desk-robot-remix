@@ -1880,10 +1880,9 @@ async def test_native_asr_retention_read_offloads_and_rechecks_consent(
     from types import SimpleNamespace
 
     import pytest
-    from fastapi import HTTPException
-
     from desk_robot.api import NativeHeardRequest
     from desk_robot.memory import MemoryStore
+    from fastapi import HTTPException
 
     settings.mode = "hardware"
     settings.voice_vision_tools_enabled = False
