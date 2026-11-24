@@ -306,16 +306,87 @@ def screen_planar_cliff_coverage(
     }
 
 
+PLANAR_COORDINATE_FRAME = "body_x_forward_y_left"
+PLANAR_MEASUREMENT_FIELDS = (
+    "left_wheel_mm_s", "right_wheel_mm_s", "track_width_mm",
+    "support_points_mm", "floor_sensor_points_mm",
+    "chassis_mount_above_desk_mm", "detection_latency_ms",
+    "measured_worst_braking_mm", "engineering_margin_mm",
+    "optical_tilt_deg", "qualified_lateral_sensor_coverage_mm",
+)
+
+
+def planar_measurement_template() -> dict:
+    """Blank physical measurement record for one proposed command."""
+    return {
+        "coordinate_frame": PLANAR_COORDINATE_FRAME,
+        **dict.fromkeys(PLANAR_MEASUREMENT_FIELDS),
+        "support_points_mm": [],
+        "floor_sensor_points_mm": [],
+        "engineering_margin_mm": 10.0,
+        "qualified_lateral_sensor_coverage_mm": 0.0,
+    }
+
+
+def _unique_planar_fields(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate planar measurement field")
+        result[key] = value
+    return result
+
+
+def _reject_planar_constant(token: str) -> None:
+    raise ValueError("Nonfinite planar measurement: " + token)
+
+
+def screen_planar_record(record: object) -> dict:
+    if (not isinstance(record, dict)
+            or set(record) != {"coordinate_frame", *PLANAR_MEASUREMENT_FIELDS}
+            or record["coordinate_frame"] != PLANAR_COORDINATE_FRAME):
+        raise ValueError("Exact planar measurement fields and body frame required")
+    return {
+        "coordinate_frame": PLANAR_COORDINATE_FRAME,
+        **screen_planar_cliff_coverage(**{
+            key: record[key] for key in PLANAR_MEASUREMENT_FIELDS
+        }),
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--mount-above-desk-mm", type=float, required=True)
-    parser.add_argument("--tilt-deg", type=float, required=True)
-    parser.add_argument("--sensor-ahead-of-wheel-mm", type=float, required=True)
-    parser.add_argument("--measured-worst-stopping-mm", type=float, required=True,
+    planar = parser.add_mutually_exclusive_group()
+    planar.add_argument("--planar-template", action="store_true",
+                        help="Print blank measurements for one wheel command")
+    planar.add_argument("--planar-measurements", type=Path,
+                        help="Screen the measured planar JSON record")
+    parser.add_argument("--mount-above-desk-mm", type=float)
+    parser.add_argument("--tilt-deg", type=float)
+    parser.add_argument("--sensor-ahead-of-wheel-mm", type=float)
+    parser.add_argument("--measured-worst-stopping-mm", type=float,
                         help="Highest observed loaded stop, never p95 alone")
-    parser.add_argument("--latency-ms", type=float, required=True)
-    parser.add_argument("--speed-mm-s", type=float, required=True)
+    parser.add_argument("--latency-ms", type=float)
+    parser.add_argument("--speed-mm-s", type=float)
     args = parser.parse_args()
+    scalar = (args.mount_above_desk_mm, args.tilt_deg,
+              args.sensor_ahead_of_wheel_mm, args.measured_worst_stopping_mm,
+              args.latency_ms, args.speed_mm_s)
+    if args.planar_template or args.planar_measurements is not None:
+        if any(value is not None for value in scalar):
+            parser.error("Do not mix planar and straight-drive measurements")
+        if args.planar_template:
+            print(json.dumps(planar_measurement_template(), indent=2))
+        else:
+            record = json.loads(
+                args.planar_measurements.read_text(encoding="utf-8"),
+                object_pairs_hook=_unique_planar_fields,
+                parse_constant=_reject_planar_constant,
+            )
+            print(json.dumps(screen_planar_record(record), indent=2))
+        return
+    if any(value is None for value in scalar):
+        parser.error("All six straight-drive measurements are required")
     print(json.dumps(evaluate(
         chassis_mount_above_desk_mm=args.mount_above_desk_mm,
         optical_tilt_deg=args.tilt_deg,

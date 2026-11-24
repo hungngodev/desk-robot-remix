@@ -284,3 +284,96 @@ def test_planar_motion_contract_rejects_missing_or_malformed_geometry(update):
 def test_bad_or_missing_evidence_never_passes(kwargs):
     with pytest.raises(ValueError):
         evaluate(**kwargs)
+
+
+def test_planar_cli_matches_function_and_preserves_physical_hold(tmp_path):
+    import json
+    import subprocess
+    import sys
+
+    cmd = [sys.executable, str(SCRIPT)]
+    blank = subprocess.run(
+        [*cmd, "--planar-template"], capture_output=True, text=True, check=True,
+    )
+    record = json.loads(blank.stdout)
+    assert record == tool.planar_measurement_template()
+    assert record["left_wheel_mm_s"] is None
+    assert record["floor_sensor_points_mm"] == []
+    path = tmp_path / "planar.json"
+    path.write_text(json.dumps(record), encoding="utf-8")
+    missing = subprocess.run(
+        [*cmd, "--planar-measurements", str(path)],
+        capture_output=True, text=True,
+    )
+    assert missing.returncode != 0
+    record.update(
+        left_wheel_mm_s=100.0, right_wheel_mm_s=100.0,
+        track_width_mm=100.0,
+        support_points_mm=[[0, -10], [0, 10], [-10, 0]],
+        floor_sensor_points_mm=[[45, -10], [45, 10], [35, 0], [-45, 0]],
+        chassis_mount_above_desk_mm=20.0, detection_latency_ms=80.0,
+        measured_worst_braking_mm=10.0, optical_tilt_deg=0.0,
+    )
+    for speed in (100.0, -100.0):
+        record["left_wheel_mm_s"] = record["right_wheel_mm_s"] = speed
+        path.write_text(json.dumps(record), encoding="utf-8")
+        completed = subprocess.run(
+            [*cmd, "--planar-measurements", str(path)],
+            capture_output=True, text=True, check=True,
+        )
+        result = json.loads(completed.stdout)
+        assert result == tool.screen_planar_record(record)
+        assert result["necessary_planar_coverage_on_paper"] is (speed > 0)
+        assert not result["fully_safe_cliff_operation_proven"]
+    # The same normal entry point also reaches the spin calculation.
+    record.update(
+        left_wheel_mm_s=-100.0, right_wheel_mm_s=100.0,
+        support_points_mm=[[40, 0], [-40, 0], [0, 0]],
+        floor_sensor_points_mm=[[40, 60], [-40, -60], [40, -60], [-40, 60]],
+    )
+    path.write_text(json.dumps(record), encoding="utf-8")
+    spin = subprocess.run(
+        [*cmd, "--planar-measurements", str(path)],
+        capture_output=True, text=True, check=True,
+    )
+    assert json.loads(spin.stdout)["body_turn_rate_rad_s"] == 2.0
+    assert json.loads(spin.stdout)["necessary_planar_coverage_on_paper"]
+    record["coordinate_frame"] = "body_x_left_y_forward"
+    path.write_text(json.dumps(record), encoding="utf-8")
+    wrong = subprocess.run(
+        [*cmd, "--planar-measurements", str(path)],
+        capture_output=True, text=True,
+    )
+    assert wrong.returncode != 0
+    mixed = subprocess.run(
+        [*cmd, "--planar-template", "--tilt-deg", "0"],
+        capture_output=True, text=True,
+    )
+    assert mixed.returncode != 0
+    duplicate = json.dumps(record).replace(
+        '"track_width_mm": 100.0', '"track_width_mm": 100.0, "track_width_mm": 80.0'
+    )
+    path.write_text(duplicate, encoding="utf-8")
+    rejected = subprocess.run(
+        [*cmd, "--planar-measurements", str(path)],
+        capture_output=True, text=True,
+    )
+    assert rejected.returncode != 0
+    assert "Duplicate planar measurement field" in rejected.stderr
+
+
+def test_legacy_straight_drive_cli_remains_available():
+    import json
+    import subprocess
+    import sys
+
+    completed = subprocess.run(
+        [sys.executable, str(SCRIPT), "--mount-above-desk-mm", "20",
+         "--tilt-deg", "0", "--sensor-ahead-of-wheel-mm", "45",
+         "--measured-worst-stopping-mm", "10", "--latency-ms", "80",
+         "--speed-mm-s", "100"],
+        capture_output=True, text=True, check=True,
+    )
+    assert json.loads(completed.stdout) == evaluate(
+        chassis_mount_above_desk_mm=20.0
+    )

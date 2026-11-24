@@ -121,6 +121,21 @@ the original README files, including noncommercial and share alike restrictions.
    lens opening with the 10.5 mm pilot board. Design and verify a separate
    real PCB retainer after measuring the purchased carrier; do not treat
    eight imported aperture references as mounted cliff sensors.
+   For each intended straight, reverse or pivot command, use the same existing
+   planar cliff preflight through its builder CLI:
+
+   ```sh
+   python3 code/scripts/cliff_mount_preflight.py --planar-template
+   python3 code/scripts/cliff_mount_preflight.py --planar-measurements robot01_cliff_motion.json
+   ```
+
+   Save the blank template as a new local JSON record, fill the measured body
+   X-forward/Y-left optical centers and every load-bearing support contact,
+   track width, signed wheel velocities, mount datum, downward tilt, worst
+   loaded stop distance and detection latency. Keep lateral coverage at zero
+   until measured; the 10 mm paper margin is a design input, not a calibration.
+   Repeat for distinct motion commands. A positive paper result neither verifies
+   the real lens-to-desk height and optical orientation nor releases motion.
 8. Create small, independent mounting/vent openings for eight capacitive
    touch electrodes, the MAX30102 finger contact pad, APDS9960 gesture sensor,
    two FSR pads (belly and jaw), SHT41 vent, RGB heart, PN532 toy reader,
