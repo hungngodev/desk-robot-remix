@@ -75,6 +75,24 @@ def test_parallel_banked_breakout_pullups_cause_excess_sink_current():
     assert not report["selected_branch_paper_pass"]
 
 
+@pytest.mark.parametrize("line", ["sda", "scl"])
+@pytest.mark.parametrize("voltage, expected_ma, passes", [
+    (3.26, 2.989690722, True),
+    (3.3, 2.989690722, True),
+    (3.34, 3.010309278, False),
+])
+def test_pullup_voltage_tolerance_does_not_hide_excess_sink_current(
+        line, voltage, expected_ma, passes):
+    upstream, downstream = segment(
+        upstream_pullups=(1940,), downstream_pullups=(1940,))
+    downstream[line]["pullup_v"] = voltage
+    report = tool.screen_selected_segment(upstream, downstream)
+    assert report["lines"][line]["estimated_sink_ma"] == pytest.approx(
+        expected_ma, abs=.001)
+    assert report["selected_branch_paper_pass"] is passes
+    assert not report["qualified_hardware"]
+
+
 def test_four_k_seven_single_pullup_can_be_too_weak_for_400khz_rise():
     upstream, downstream = segment(upstream_pullups=(4700,),
                                    downstream_pullups=(), cap_down_pf=80)

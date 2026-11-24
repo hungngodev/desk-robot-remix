@@ -122,7 +122,7 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
             resistors = part.get("pullup_ohms")
             if not isinstance(resistors, list):
                 raise ValueError(f"{label}.{line}: installed pullups must be listed")
-            pullups.extend(_num(v, f"{label}.{line}.pullup_ohms")
+            pullups.extend((_num(v, f"{label}.{line}.pullup_ohms"), power)
                            for v in resistors)
             total_pf += _num(part.get("cap_pf"), f"{label}.{line}.cap_pf")
             if "measured_rise_ns" in part:
@@ -142,12 +142,15 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
                 measured_lows.append(float(v))
         if not pullups:
             raise ValueError(f"{line}: no verified pullup network")
-        reciprocal_sum = sum(1.0 / r for r in pullups)
+        reciprocal_sum = sum(1.0 / r for r, _ in pullups)
         if not math.isfinite(reciprocal_sum) or reciprocal_sum <= 0:
             raise ValueError(f"{line}: pullup network cannot be evaluated safely")
         effective = 1.0 / reciprocal_sum
         rise_ns = 0.8473 * effective * total_pf / 1000
-        sink_ma = (VCC - LOW_MAX_V) * reciprocal_sum * 1000
+        # TI SLVA689A: each pullup contributes (Vpullup - VOL) / R.
+        # Retain the nominal floor for measurements below the design target.
+        sink_ma = sum((max(VCC, voltage) - LOW_MAX_V) / r
+                      for r, voltage in pullups) * 1000
         if any(not math.isfinite(value) for value in
                (total_pf, effective, rise_ns, sink_ma)):
             raise ValueError(f"{line}: RC calculation overflowed")
