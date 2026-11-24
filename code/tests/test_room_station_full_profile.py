@@ -124,7 +124,7 @@ def test_bme_empty_upstream_conversion_cannot_reuse_old_gas_as_fresh():
     assert "bme.gas_resistance >= 1" in start
     assert "bme.gas_resistance <= 1000000000U" in start
     assert "bme_completed.publish(bme.temperature, bme.humidity, bme.pressure," in start
-    assert "bme.gas_resistance, now);" in start
+    assert "bme.gas_resistance, millis());" in start
 
 
 def test_bme_unstable_gas_sentinel_is_not_sent_as_valid():
@@ -726,3 +726,65 @@ def test_room_report_uses_completed_sensor_acquisitions():
     assert "analogRead(" not in soil_format
     assert "telemetry.print(soil_sample_ms);" in soil_format
     assert "scd_step(now);\n    soil_step();\n    now = millis();\n    report(now);" in loop
+
+
+def test_scd_completion_timestamp_is_not_poll_start(tmp_path):
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    step = "void scd_step(" + src.split("void scd_step(", 1)[1].split(
+        "void scd_observation(", 1
+    )[0]
+    harness = r"""
+#include <cassert>
+#include <cstdint>
+#include <cmath>
+#include "scd_sample_freshness.h"
+using std::isfinite;
+uint32_t clock_ms;
+uint32_t millis() { return clock_ms; }
+constexpr uint32_t kScdNoSampleMs = 15000;
+bool scd_started, scd_valid;
+uint32_t last_scd_ms, scd_started_ms;
+uint16_t co2_ppm;
+float scd_temp, scd_humidity;
+bool finite_temperature(float t) { return isfinite(t) && t >= -40 && t <= 85; }
+struct FakeScd {
+  bool ready = true;
+  int status = 0, measurement_status = 0;
+  int getDataReadyStatus(bool& r) { clock_ms += 3; r = ready; return status; }
+  int readMeasurement(uint16_t& p, float& t, float& rh) {
+    clock_ms += 7; p = 700; t = 22; rh = 40; return measurement_status;
+  }
+} scd;
+""" + step + r"""
+void run(uint32_t start) {
+  clock_ms = scd_started_ms = start;
+  scd_started = true; scd_valid = false; scd = FakeScd{};
+  scd_step(clock_ms);
+  assert(scd_valid && scd_started && last_scd_ms == start + 10U);
+  assert(co2_ppm == 700 && scd_temp == 22 && scd_humidity == 40);
+  scd.ready = false;
+  scd_step(clock_ms);
+  assert(scd_valid && last_scd_ms == start + 10U);
+  scd.status = 1;
+  scd_step(clock_ms);
+  assert(!scd_valid && !scd_started);
+  scd_started = true; scd.status = 0; scd.ready = true;
+  scd.measurement_status = 1;
+  scd_step(clock_ms);
+  assert(!scd_valid && !scd_started && last_scd_ms == start + 10U);
+}
+int main() { run(100); run(UINT32_MAX - 5); }
+"""
+    compiler = shutil.which("c++")
+    assert compiler is not None
+    source = tmp_path / "scd_completion.cpp"
+    source.write_text(harness)
+    executable = tmp_path / "scd_completion"
+    includes = ROOT / "code/firmware/room_station/src"
+    subprocess.run(
+        [compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
+         f"-I{includes}", str(source), "-o", str(executable)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    subprocess.run([str(executable)], check=True, capture_output=True,
+                   text=True, timeout=15)
