@@ -767,14 +767,12 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
   if (readings.gauge.fuel_valid &&
       readings.gauge.cell_mv < 3200U) {
     if (guarded_motion_profile()) {
-      const auto& fuel = readings.gauge;
-      const auto seq_delta = fuel.fuel_sample_seq - battery_fault_seq_;
-      const auto time_delta = fuel.fuel_at_ms - battery_fault_at_ms_;
-      if (!battery_fault_latched_ ||
-          (seq_delta != 0U && seq_delta < 0x80000000U &&
-           time_delta != 0U && time_delta < 0x80000000U)) {
-        battery_fault_seq_ = fuel.fuel_sample_seq;
-        battery_fault_at_ms_ = fuel.fuel_at_ms;
+      // Even a suspicious low reading must stop wheels. But its raw
+      // identity must not move the recovery threshold backwards or ahead
+      // of the most recent independently accepted gauge acquisition.
+      if (fuel_sample_seen_) {
+        battery_fault_seq_ = fuel_last_seq_;
+        battery_fault_at_ms_ = fuel_last_at_ms_;
       }
       // A later missing/invalid/healthy gauge result cannot let an old
       // head request restart motion. Local recovery needs a newer valid read.
@@ -1755,8 +1753,9 @@ void BodyControl::execute(const char* line, std::size_t length,
       const auto& fuel = state_.accessories.gauge;
       const auto seq_delta = fuel.fuel_sample_seq - battery_fault_seq_;
       const auto time_delta = fuel.fuel_at_ms - battery_fault_at_ms_;
-      if (!fuel.fuel_present || !fuel.fuel_valid ||
-          fuel.fuel_sample_seq == 0U || now_ms - fuel.fuel_at_ms >= 500U ||
+      // The low-cell latch requires trustworthy source provenance even
+      // in guarded profiles where the gauge is otherwise optional.
+      if (!fuel_monitor_fresh(now_ms) ||
           fuel.cell_mv < 3300U || seq_delta == 0U ||
           seq_delta >= 0x80000000U || time_delta == 0U ||
           time_delta >= 0x80000000U) {

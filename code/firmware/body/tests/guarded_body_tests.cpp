@@ -2226,6 +2226,54 @@ static void battery_undervoltage_rejects_arm_and_stops_motion() {
 
 
 
+static void optional_gauge_low_latch_requires_trusted_recovery() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 100);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  desk_robot::AccessoryReadings readings{};
+  readings.gauge.fuel_present = readings.gauge.fuel_valid = true;
+  readings.gauge.cell_mv = 3800;
+  readings.gauge.soc_centi = 5000;
+  readings.gauge.fuel_sample_seq = 10;
+  readings.gauge.fuel_at_ms = 100;
+  body.set_accessories(readings, 100);
+  CHECK(send(body, "rearm", 100, true) == "OK rearm");
+  CHECK(send(body, "arm", 100) == "OK arm");
+  CHECK(send(body, "drive 30 30 150", 100).find("OK drive") == 0);
+
+  // A suspicious low value must still stop wheels, but zeroed identity
+  // must not permit rearm using the preceding cached high-voltage read.
+  auto low = readings;
+  low.gauge.fuel_present = false;
+  low.gauge.cell_mv = 0;
+  low.gauge.fuel_sample_seq = 0;
+  low.gauge.fuel_at_ms = 0;
+  body.set_accessories(low, 101);
+  CHECK(!body.state().armed && body.state().left == 0);
+  CHECK(send(body, "arm", 101) == "ERR arm battery_low_latched");
+  body.set_accessories(readings, 102);
+  CHECK(send(body, "rearm", 102, true) ==
+        "ERR rearm battery_unsafe_or_stale");
+
+  readings.gauge.fuel_sample_seq = 11;
+  readings.gauge.fuel_at_ms = 103;
+  body.set_accessories(readings, 103);
+  readings.gauge.soc_centi = 6000; // altered identity, not a new conversion
+  body.set_accessories(readings, 104);
+  CHECK(!body.fuel_monitor_fresh(104));
+  CHECK(send(body, "rearm", 104, true) ==
+        "ERR rearm battery_unsafe_or_stale");
+
+  readings.gauge.fuel_sample_seq = 12;
+  readings.gauge.fuel_at_ms = 105;
+  body.set_accessories(readings, 105);
+  fresh(guard, 105);
+  CHECK(send(body, "rearm", 105, true) == "OK rearm");
+  CHECK(send(body, "arm", 105) == "OK arm");
+  CHECK(body.state().left == 0 && body.state().right == 0);
+}
+
 static void fuel_voltage_replay_cannot_rearm_or_restore_drive() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -2985,6 +3033,7 @@ int main() {
     optional_sensor_inputs_never_arm_or_forge_boot_events();
     battery_readiness_matches_stricter_arm_voltage();
     battery_undervoltage_rejects_arm_and_stops_motion();
+    optional_gauge_low_latch_requires_trusted_recovery();
     invalid_fuel_identity_cannot_rearm_from_cached_conversion();
     required_fuel_gauge_loss_stops_and_requires_local_rearm();
     fuel_voltage_replay_cannot_rearm_or_restore_drive();
