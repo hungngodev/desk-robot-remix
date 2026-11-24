@@ -127,3 +127,66 @@ def test_room_consumer_failure_does_not_break_subsequent_delivery(caplog):
 
     asyncio.run(scenario())
     assert "Room context consumer failed (1 total)" in caplog.text
+
+
+def test_cancelled_shutdown_waiter_does_not_cancel_owner_cleanup():
+    """Repeated lifespan cancellation cannot skip the USB or other owners."""
+    async def scenario():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        async def stop_motion():
+            entered.set()
+            await release.wait()
+
+        runtime = Runtime.__new__(Runtime)
+        runtime.settings = SimpleNamespace(mode="simulation")
+        runtime.coordinator = SimpleNamespace(
+            close=AsyncMock(side_effect=stop_motion), shutdown_stop_failures={}
+        )
+        runtime.pet = SimpleNamespace(close=AsyncMock())
+        runtime.conversation = SimpleNamespace(stop=AsyncMock())
+        runtime.client = SimpleNamespace(aclose=AsyncMock())
+        runtime.multimodal = SimpleNamespace(close=AsyncMock())
+        runtime._voice_task = None
+        runtime._room_stop = asyncio.Event()
+        runtime._room_dispatch_lock = threading.Lock()
+        runtime._room_dispatch_pending = None
+        runtime._room_dispatch_enqueued = False
+        reader = asyncio.create_task(runtime._room_stop.wait())
+        runtime._room_task = reader
+
+        waiter = asyncio.create_task(runtime.close())
+        peer = None
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            waiter.cancel()
+            await asyncio.sleep(0)
+            waiter.cancel()
+            await asyncio.sleep(0)
+            assert not waiter.done()
+            assert not runtime._room_stop.is_set()
+            peer = asyncio.create_task(runtime.close())
+            await asyncio.sleep(0)
+            runtime.coordinator.close.assert_awaited_once()
+            release.set()
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(waiter, timeout=1)
+            await asyncio.wait_for(peer, timeout=1)
+            assert runtime._room_stop.is_set()
+            assert reader.done() and not reader.cancelled()
+            assert runtime._room_task is None
+            assert runtime._close_task is None
+            runtime.pet.close.assert_awaited_once()
+            runtime.multimodal.close.assert_awaited_once()
+            runtime.conversation.stop.assert_awaited_once()
+            runtime.client.aclose.assert_awaited_once()
+        finally:
+            release.set()
+            runtime._room_stop.set()
+            await asyncio.gather(
+                reader, waiter, *([peer] if peer is not None else []),
+                return_exceptions=True,
+            )
+
+    asyncio.run(scenario())

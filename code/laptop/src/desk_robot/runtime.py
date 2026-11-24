@@ -112,6 +112,7 @@ class Runtime:
         self._room_dispatch_enqueued = False
         self.room_context_failures = 0
         self._closed = False
+        self._close_task: asyncio.Task | None = None
         self._voice_stop_attempt = 0
         self._voice_stop_unconfirmed = False
 
@@ -538,10 +539,39 @@ class Runtime:
             raise preempt_error
 
     async def close(self):
-        """Attempt every owner cleanup even after one unconfirmed STOP."""
-        # A timed out voice monitor might still be alive. Never authorize
-        # a second listener on this runtime after shutdown has begun.
+        """Finish bounded owner cleanup before propagating caller cancellation."""
         self._closed = True
+        task = getattr(self, "_close_task", None)
+        if task is None or task.done():
+            task = asyncio.create_task(self._close_owners())
+            self._close_task = task
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            # A cancelled lifespan waiter must not cancel the physical STOP
+            # owner or skip the remaining USB, audio, camera and HTTP cleanup.
+            # Repeated caller cancellation must not detach the cleanup either.
+            while not task.done():
+                try:
+                    await asyncio.shield(task)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            if not task.cancelled():
+                error = task.exception()
+                if error is not None:
+                    logging.getLogger(__name__).error(
+                        "Runtime shutdown failed during caller cancellation",
+                        exc_info=error,
+                    )
+            raise
+        finally:
+            if task.done() and self._close_task is task:
+                self._close_task = None
+
+    async def _close_owners(self):
+        """Attempt every owner cleanup even after one unconfirmed STOP."""
         with self._room_dispatch_lock:
             self._room_dispatch_pending = None
         errors: list[Exception] = []
