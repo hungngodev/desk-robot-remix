@@ -131,7 +131,7 @@ def test_voice_memory_receipt_is_independent_of_camera_opt_in(settings):
             assert robot_id == "robot-01" and limit == 6
             return [SimpleNamespace(
                 summary="The blue key was observed", witnessed=True,
-                source_robot="robot-01", kind="observation",
+                robot_id=robot_id, source_robot=robot_id, kind="observation",
             )]
 
         def core_facts(self, robot_id, *, limit):
@@ -164,7 +164,7 @@ def test_voice_memory_receipt_is_independent_of_camera_opt_in(settings):
         assert result.json()["matched"] is True
         assert receipts == [(
             (turn_owner, 1), "robot-01", "memory_recall",
-            "own observed event: The blue key was observed",
+            "I observed: The blue key was observed",
         )]
         # Forged or obsolete ownership must fail closed, never disclose
         # historical memory and never add a model tool receipt.
@@ -218,7 +218,7 @@ def test_voice_retrieval_fences_private_edit_during_sqlite_read(
             assert robot_id == "robot-01" and limit == 6
             return [SimpleNamespace(
                 summary="Private old preference", witnessed=True,
-                source_robot="robot-01", kind="own_observation",
+                robot_id=robot_id, source_robot=robot_id, kind="own_observation",
             )]
 
         def core_facts(self, robot_id, *, limit):

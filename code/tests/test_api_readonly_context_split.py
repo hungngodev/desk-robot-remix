@@ -384,7 +384,7 @@ def test_voice_memory_lookup_rejects_payload_after_turn_is_superseded(settings):
                 turn_owner._turn_epoch[robot_id] += 1
             return [SimpleNamespace(
                 summary="Private historical cobalt key", witnessed=True,
-                source_robot=robot_id, kind="key",
+                robot_id=robot_id, source_robot=robot_id, kind="key",
             )]
 
         def core_facts(self, robot_id, *, limit):
