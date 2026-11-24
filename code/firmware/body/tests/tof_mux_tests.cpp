@@ -523,6 +523,74 @@ int main() {
       CHECK(guard.try_rearm(70));
       fake_i2c_lines() = FakeI2cLines{};
     }
+    {
+      // Distinct results across all eight lanes expose wrong attribution
+      // that identical nominal floor readings cannot catch. Alternate with
+      // an accessory owner and skip one conversion without refreshing it.
+      Wire = TwoWire{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      const std::uint8_t order[] = {5, 0, 1, 2, 3, 4,
+                                    6, 0, 1, 2, 3, 4,
+                                    7, 0, 1, 2, 3, 4};
+      for (std::uint32_t step = 0; step < sizeof(order); ++step) {
+        const auto lane = order[step];
+        const auto now = 60U + step;
+        desk_robot::RangeDiagnostic before[8]{};
+        desk_robot::TofOpticalDiagnostic optical_before[8]{};
+        for (std::uint8_t i = 0; i < 8; ++i) {
+          before[i] = i < 5 ? guard.diagnostic(i, now)
+                            : bus.extra_diagnostic(i - 5, now);
+          optical_before[i] = bus.optical_diagnostic(i, now);
+        }
+        // Simulate the previous accessory transaction leaving its same-
+        // address CAP1188 lane selected, with the range mux disconnected.
+        Wire.ranges = 0;
+        Wire.extras = 1;
+        Wire.cap_uses_0x29 = true;
+        const auto cap_reads = Wire.cap_register_requests;
+        const auto samples = Wire.tof_samples;
+        Wire.tof_ready = step != 2; // floor 1 has no new conversion
+        Wire.tof_force_mm = static_cast<std::uint16_t>(
+            lane < 4 ? 35U + step : 200U + step);
+        Wire.tof_ambient_97 = static_cast<std::uint16_t>(0x1200U + step);
+        Wire.tof_signal_97 = static_cast<std::uint16_t>(0x3400U + step);
+        bus.poll(guard, now);
+        CHECK(Wire.extras == 0 && Wire.ranges == (1U << lane));
+        CHECK(Wire.cap_register_requests == cap_reads);
+        CHECK(!Wire.unsafe_parallel_mux);
+        CHECK(Wire.tof_samples == samples + (Wire.tof_ready ? 1U : 0U));
+        CHECK(bus.new_optical_channel() == (Wire.tof_ready ? lane : 255));
+        CHECK(bus.new_extra_channel() ==
+              (Wire.tof_ready && lane >= 5 ? lane - 5 : 255));
+        for (std::uint8_t i = 0; i < 8; ++i) {
+          const auto range = i < 5 ? guard.diagnostic(i, now)
+                                   : bus.extra_diagnostic(i - 5, now);
+          const auto optical = bus.optical_diagnostic(i, now);
+          if (i == lane && Wire.tof_ready) {
+            CHECK(range.present && range.valid && range.age_ms == 0);
+            CHECK(range.distance_mm == Wire.tof_force_mm);
+            CHECK(optical.present && optical.valid && optical.age_ms == 0);
+            CHECK(optical.ambient_97 == Wire.tof_ambient_97);
+            CHECK(optical.signal_97 == Wire.tof_signal_97);
+          } else {
+            CHECK(range.present == before[i].present);
+            CHECK(range.valid == before[i].valid);
+            CHECK(range.distance_mm == before[i].distance_mm);
+            CHECK(range.age_ms == before[i].age_ms);
+            CHECK(optical.present == optical_before[i].present);
+            CHECK(optical.valid == optical_before[i].valid);
+            CHECK(optical.age_ms == optical_before[i].age_ms);
+            CHECK(optical.ambient_97 == optical_before[i].ambient_97);
+            CHECK(optical.signal_97 == optical_before[i].signal_97);
+          }
+        }
+        CHECK(guard.evaluate(now));
+      }
+      // This fake checks digital isolation and sample ownership only.
+      // Actual bus-free timing and concurrent optical emitters need a bench.
+    }
     std::cout << "PASS cheap VL53L0X TCA9548A selected-channel readback and fail-closed cliff paths\n";
     return 0;
   } catch (const std::exception& ex) {
