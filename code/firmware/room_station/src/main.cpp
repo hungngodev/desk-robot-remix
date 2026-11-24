@@ -135,11 +135,23 @@ Adafruit_AMG88xx amg;
 class RadarObservedUart final : public Stream {
  public:
   explicit RadarObservedUart(Stream& source) : source_(source) {}
-  int available() override { return source_.available(); }
-  int peek() override { return source_.peek(); }
+  void begin_poll() { remaining_ = kReadBudget; }
+  int available() override {
+    if (remaining_ == 0) return 0;
+    const int count = source_.available();
+    if (count <= 0) return 0;
+    return count < remaining_ ? count : remaining_;
+  }
+  int peek() override { return remaining_ ? source_.peek() : -1; }
   int read() override {
+    if (remaining_ == 0) return -1;
+    --remaining_;
     const int value = source_.read();
-    if (value >= 0 && gate_.consume(static_cast<uint8_t>(value)))
+    if (value < 0) {
+      remaining_ = 0;
+      return value;
+    }
+    if (gate_.consume(static_cast<uint8_t>(value)))
       data_frame_complete_ = true;
     return value;
   }
@@ -156,6 +168,10 @@ class RadarObservedUart final : public Stream {
   }
 
  private:
+  // The pinned decoder drains until available() is zero. Bound one pass
+  // below its 256-byte ring size; frame parser state survives across polls.
+  static constexpr int kReadBudget = 128;
+  int remaining_ = 0;
   Stream& source_;
   desk_robot_room::RadarDataFrameGate gate_;
   bool data_frame_complete_ = false;
@@ -493,6 +509,7 @@ void loop() {
       usb_tx.queue_ack(usb_epoch_sync.token());
     }
   }
+  radar_uart.begin_poll();
   radar.read();
   uint32_t now = millis();
   // ld2410::read() returns true on any byte, even an incomplete frame.

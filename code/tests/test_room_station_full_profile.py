@@ -538,3 +538,91 @@ int main() {
     )
     subprocess.run([str(executable)], check=True, capture_output=True,
                    text=True, timeout=15)
+
+
+def test_room_radar_continuous_uart_has_bounded_poll_budget(tmp_path):
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    wrapper = "class RadarObservedUart" + src.split(
+        "class RadarObservedUart", 1
+    )[1].split("RadarObservedUart radar_uart", 1)[0]
+    assert "radar_uart.begin_poll();\n  radar.read();" in src
+    harness = r"""
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+#include "radar_data_frame_gate.h"
+class Print {
+ public:
+  virtual size_t write(uint8_t) = 0;
+  virtual ~Print() = default;
+};
+class Stream : public Print {
+ public:
+  virtual int available() = 0;
+  virtual int peek() = 0;
+  virtual int read() = 0;
+  virtual void flush() = 0;
+};
+""" + wrapper + r"""
+struct FakeStream : Stream {
+  bool continuous = false, failed_read = false;
+  size_t pos = 0, reads = 0;
+  std::vector<uint8_t> bytes;
+  int available() override {
+    return continuous ? 1 : static_cast<int>(bytes.size() - pos);
+  }
+  int peek() override { return available() ? 0xff : -1; }
+  int read() override {
+    ++reads;
+    if (failed_read) return -1;
+    return continuous ? 0xff : (pos < bytes.size() ? bytes[pos++] : -1);
+  }
+  void flush() override {}
+  size_t write(uint8_t) override { return 1; }
+};
+void drain(RadarObservedUart& uart) {
+  uart.begin_poll();
+  unsigned steps = 0;
+  while (uart.available()) {
+    uart.read();
+    assert(++steps <= 128);
+  }
+}
+int main() {
+  FakeStream source;
+  RadarObservedUart uart(source);
+  source.continuous = true;
+  drain(uart);
+  assert(source.reads == 128 && uart.read() == -1 && uart.peek() == -1);
+  drain(uart);
+  assert(source.reads == 256 && !uart.take_completed_data_frame());
+  source.failed_read = true;
+  drain(uart);
+  assert(source.reads == 257 && !uart.take_completed_data_frame());
+  source.failed_read = source.continuous = false;
+  source.bytes.assign(120, 0xff);
+  const uint8_t packet[] = {0xf4, 0xf3, 0xf2, 0xf1, 13, 0, 2, 0xaa,
+      1, 50, 0, 20, 0, 0, 0, 50, 0, 0x55, 0, 0xf8, 0xf7, 0xf6, 0xf5};
+  source.bytes.insert(source.bytes.end(), packet, packet + sizeof(packet));
+  drain(uart);
+  assert(source.pos == 128 && !uart.take_completed_data_frame());
+  drain(uart);
+  assert(source.pos == source.bytes.size() && uart.take_completed_data_frame());
+  assert(!uart.take_completed_data_frame());
+  assert(uart.completed_sample().moving && uart.completed_sample().moving_cm == 50);
+}
+"""
+    compiler = shutil.which("c++")
+    assert compiler is not None
+    source = tmp_path / "radar_runtime.cpp"
+    source.write_text(harness)
+    executable = tmp_path / "radar_runtime"
+    includes = ROOT / "code/firmware/room_station/src"
+    subprocess.run(
+        [compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
+         f"-I{includes}", str(source), "-o", str(executable)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    subprocess.run([str(executable)], check=True, capture_output=True,
+                   text=True, timeout=15)
