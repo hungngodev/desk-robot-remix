@@ -198,8 +198,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             or any(char not in "0123456789abcdef" for char in receipt_id)
             or len(signature) != 64
             or any(char not in "0123456789abcdef" for char in signature)
+            or not 1 <= len(issued_text) <= 19
             or not issued_text.isascii()
             or not issued_text.isdigit()
+            or not 1 <= len(generation_text) <= 19
             or not generation_text.isascii()
             or not generation_text.isdigit()
         ):

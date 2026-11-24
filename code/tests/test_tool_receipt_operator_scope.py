@@ -124,6 +124,17 @@ def test_tool_bearer_alone_cannot_promote_dashboard_read_to_voice_tool(
             path=url,
             receipt_id="1" * 32,
         )
+        # Reject malformed numeric headers before int conversion, without
+        # consuming the valid receipt or adding a spoken fact.
+        for header in (
+            "X-Desk-Robot-Tool-Receipt-At-Us",
+            "X-Desk-Robot-Tool-Receipt-Generation",
+        ):
+            for digits in ("9" * 20, "9" * 5000):
+                malformed = {**tool, **signed, header: digits}
+                assert client.get(url, headers=malformed).status_code == 409
+                assert not hub.tool_history[robot_id]
+
         legitimate = client.get(url, headers={**tool, **signed})
         assert legitimate.status_code == 200
         assert len(hub.tool_history[robot_id]) == 1
