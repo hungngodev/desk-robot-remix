@@ -175,10 +175,20 @@ class _MjpegFrames:
         return frames
 
 
+def _unique_json_object(pairs: list[tuple[str, object]]) -> dict:
+    """Refuse ambiguous fields at every depth of an authenticated receipt."""
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate authenticated head JSON field")
+        result[key] = value
+    return result
+
+
 def _response_object(response: httpx.Response) -> dict:
     """Never treat malformed authenticated JSON as an unexpected server fault."""
     try:
-        data = response.json()
+        data = response.json(object_pairs_hook=_unique_json_object)
     except ValueError as exc:
         raise HeadError("Malformed authenticated head JSON response") from exc
     if not isinstance(data, dict):

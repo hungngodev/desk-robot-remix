@@ -69,6 +69,50 @@ async def test_ack_must_match_command_and_robot(settings, tokens, reply, identit
         assert len(calls) == 1
 
 
+@pytest.mark.parametrize(
+    "payload",
+    [
+        b'{"ok":false,"ok":true,"reply":"OK halt","robot_id":"robot-01"}',
+        b'{"ok":true,"reply":"ERR denied","reply":"OK halt","robot_id":"robot-01"}',
+        b'{"ok":true,"reply":"OK halt","robot_id":"robot-02","robot_id":"robot-01"}',
+    ],
+)
+async def test_terminal_halt_refuses_ambiguous_json_receipt(settings, tokens, payload):
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        assert json.loads(request.content) == {"command": "halt"}
+        return httpx.Response(200, content=payload)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client)
+        with pytest.raises(HeadError, match="Malformed authenticated head JSON"):
+            await head.command("halt")
+        assert len(calls) == 1
+
+
+async def test_nested_status_fields_must_not_conflict(settings, tokens):
+    payload = b'{"robot_id":"robot-01","safety":{"ready":false,"ready":true}}'
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        assert request.url.path == "/api/status"
+        if len(calls) == 1:
+            return httpx.Response(200, content=payload)
+        return httpx.Response(
+            200, json={"robot_id": "robot-01", "safety": {"ready": False}},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client)
+        with pytest.raises(HeadError, match="Malformed authenticated head JSON"):
+            await head.status()
+        assert (await head.status())["safety"]["ready"] is False
+        assert len(calls) == 2
+
+
 async def test_camera_completion_sequence_and_boot_id_protect_five_pet_capture(settings, tokens):
     calls = 0
     frames = [
