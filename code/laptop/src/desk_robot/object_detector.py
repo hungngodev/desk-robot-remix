@@ -225,6 +225,10 @@ async def detect_object_frame(
                 task.cancel()
                 return reject("inference_timeout")
             await asyncio.wait((task,), timeout=min(0.025, remaining))
+        # A stalled event loop may resume after both the timeout and native
+        # completion. Never accept that result solely because task.done().
+        if loop.time() >= real_deadline:
+            return reject("inference_timeout")
         # Native completion, not merely request submission, is the receipt.
         try:
             results = task.result()

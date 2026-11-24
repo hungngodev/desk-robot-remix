@@ -255,3 +255,19 @@ async def test_exact_duplicate_boxes_can_coalesce():
     assert result.evidence is not None and result.evidence.confidence == 0.96
     assert result.box == box
     assert not result.may_execute and not result.arrived
+
+
+@pytest.mark.asyncio
+async def test_completion_after_real_deadline_is_not_evidence():
+    import time
+
+    class BlockingDetector:
+        async def detect(self, jpeg, label):
+            # Simulate a backend blocking the event loop past the deadline.
+            time.sleep(0.04)
+            return [Detection("key", 0.96, (4, 3, 15, 14))]
+
+    result = await inspect(BlockingDetector(), timeout_s=0.01)
+    assert result.reason == "inference_timeout"
+    assert result.evidence is None
+    assert not result.arrived and not result.may_execute
