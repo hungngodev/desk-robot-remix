@@ -94,8 +94,26 @@ the original README files, including noncommercial and share alike restrictions.
    Assemble the two **positional MG90S** envelopes as Lift and Jaw only.
    Install a sliding rack and servo-driven pinion; use joints for actual
    degrees of freedom. Print the four-pocket MG90S gauge first and correct
-   only the mounting pocket and horn interface. Use Fusion's **Inspect >
-   Interference** through the entire allowed 60 to 120 degree servo travel.
+   only the mounting pocket and horn interface. Do not scale either gear.
+   Follow the [first gripper test](../guides/first-gripper-test.md) to center
+   each hornless servo in the isolated fixture, detach PWM and remove servo
+   power before fitting the horn. In Fusion, align the pinion shaft to the
+   measured rack pitch line and couple a revolute joint to the slider using
+   measured travel per degree, not a guessed gear ratio. Use **Inspect >
+   Interference** throughout the collision-free measured range for each
+   servo and in combined lift/jaw poses. The old nominal 60 to 120 degree
+   sweep is not a qualified endpoint pair; do not power the installed
+   mechanism at either extreme before measurement.
+   With power disconnected, reverse the pinion at multiple rack positions
+   and measure lost rack travel, axial/radial play, tooth engagement, rack
+   retention and remaining tooth travel at both ends. Check actual printed
+   interference and tooth root/tip clearance, horn screw/fastener clearance,
+   and repeat with installed FSR, silicone, tail and representative object.
+   Record opening and closing backlash separately. Choose safe endpoints
+   inside the measured collision-free interval with reserve for backlash,
+   print tolerance, cable sweep and loaded deflection. The WROOM measured
+   lift and jaw travel/force limits and no-motion commissioning gate stay
+   authoritative; a command ACK is not a measured horn position.
 5. Insert the selected **Sparky v0.1** shell as a head reference, with center
    facing the vehicle's forward axis. Preserve its visible outside surface.
    Design a new small solid *adapter plate* between chassis and shell, with
