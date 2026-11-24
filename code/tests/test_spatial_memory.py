@@ -162,3 +162,47 @@ def test_reserved_or_corrected_episode_cannot_regain_coordinates(tmp_path):
     spatial = SpatialMemory(MemoryStore(root, ["robot-01"]))
     assert not spatial.attach("robot-01", "seen1", evidence(when))
     assert spatial.last_seen("robot-01", "flat_key", now=time.time()) is None
+
+
+@pytest.mark.parametrize(("frame", "anchor"), [
+    ("map", "forged-tag"), ("map", None), ("odom", "forged-tag"),
+])
+def test_unqualified_persisted_anchor_cannot_hide_pending_observation(
+        tmp_path, frame, anchor):
+    db = MemoryStore(tmp_path / "private", ["robot-01"])
+    spatial = SpatialMemory(db)
+    when = time.time() - 1
+    assert remember(db, "robot-01", "older", when)
+    assert spatial.attach("robot-01", "older", evidence(when))
+    newer = replace(evidence(when + 0.5), camera_seq=5,
+                    camera_complete_us=950_000)
+    assert remember(db, "robot-01", "newer", newer.observed_at,
+                    identity=(11, 5, 950_000))
+    assert spatial.attach("robot-01", "newer", newer)
+    with db._connect("robot-01") as conn:
+        conn.execute(
+            "UPDATE spatial_observations SET frame=?, anchor_id=? WHERE event_id=?",
+            (frame, anchor, "newer"),
+        )
+    sighting = spatial.last_seen(
+        "robot-01", "flat_key", now=when + 0.6,
+        current_origin=(7, "odom-1"), current_camera=(11, 5, 950_000),
+    )
+    assert sighting is not None and sighting.event_id == "older"
+    assert sighting.status == "pending_localization"
+    with db._connect("robot-01") as conn:
+        conn.execute("DELETE FROM spatial_observations WHERE event_id=?", ("older",))
+    assert spatial.last_seen("robot-01", "flat_key", now=when + 0.6) is None
+
+
+def test_plain_odometry_remains_pending_with_current_camera(tmp_path):
+    db = MemoryStore(tmp_path / "private", ["robot-01"])
+    spatial = SpatialMemory(db)
+    when = time.time() - 1
+    assert remember(db, "robot-01", "valid", when)
+    assert spatial.attach("robot-01", "valid", evidence(when))
+    sighting = spatial.last_seen(
+        "robot-01", "flat_key", now=when + 0.1,
+        current_origin=(7, "odom-1"), current_camera=(11, 4, 900_000),
+    )
+    assert sighting is not None and sighting.status == "pending_localization"

@@ -181,6 +181,8 @@ class SpatialMemory:
                 or not _integer(current_camera[1], 1, 0xffffffff)
                 or not _integer(current_camera[2], 1, _MAX_I64)):
             raise ValueError("Invalid current camera receipt")
+        # Until a qualified anchor producer exists, durable reads must enforce
+        # the same frame admission as attach, before selecting the newest row.
         with self.memory._connect(robot_id) as db:
             row = db.execute(
                 """SELECT s.event_id,s.object_key,s.observed_at,s.body_boot,
@@ -194,6 +196,7 @@ class SpatialMemory:
                    LEFT JOIN episode_mutations AS e ON e.event_id=m.event_id
                    WHERE s.object_key=? AND m.source_robot=? AND m.witnessed=1
                    AND COALESCE(e.generation,0)=0
+                   AND s.frame='odom' AND s.anchor_id IS NULL
                    AND p.device_boot=s.camera_boot AND p.device_frame=s.camera_seq
                    AND p.device_complete_us=s.camera_complete_us
                    AND ABS(m.observed_at-s.observed_at)<=0.01
