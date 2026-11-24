@@ -1,6 +1,8 @@
 """Operator measured double-talk gates, not simulated physical success."""
 import json
 import runpy
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -494,16 +496,17 @@ def test_echo_only_failure_independently_blocks_a2():
     assert report["meets_proposed_gate"] is False
 
 
-@pytest.mark.parametrize(("latency_ms", "expected_stops", "passes"), [
-    (499.999, 20, True),
-    (500, 20, True),
-    (500.001, 18, False),
+@pytest.mark.parametrize(("latency_ms", "trials", "expected_stops", "passes"), [
+    (499.999, 2, 20, True),
+    (500, 2, 20, True),
+    (500.001, 1, 19, True),
+    (500.001, 2, 18, False),
 ])
 def test_acoustic_stop_threshold_is_inclusive_and_per_distance(
-    latency_ms, expected_stops, passes,
+    latency_ms, trials, expected_stops, passes,
 ):
     rows = both_distances()
-    for row in rows[20:22]:
+    for row in rows[20:20 + trials]:
         row["audible_stop_ms"] = row["human_onset_ms"] + latency_ms
     report = evaluate(parse_trial_jsonl("\n".join(json.dumps(row) for row in rows)))
     near = report["distance_results"]["50cm"]
@@ -536,3 +539,19 @@ def test_correct_intent_cannot_be_claimed_if_utterance_start_was_lost():
     rows[0]["utterance_beginning_intelligible"] = False
     with pytest.raises(ValueError, match="Correct intent requires captured"):
         evaluate(rows)
+
+
+@pytest.mark.parametrize("echoes", [0, 1])
+def test_cli_reports_gate_without_claiming_physical_attestation(tmp_path, echoes):
+    rows = both_distances()
+    rows[-2]["self_interruptions"] = echoes
+    path = tmp_path / "trials.jsonl"
+    path.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+    checker = Path(__file__).resolve().parents[1] / "scripts/check_barge_in_trials.py"
+    completed = subprocess.run(
+        [sys.executable, str(checker), str(path)],
+        check=True, capture_output=True, text=True, timeout=10,
+    )
+    report = json.loads(completed.stdout)
+    assert report["meets_proposed_gate"] is (echoes == 0)
+    assert report["records_are_operator_supplied_not_independently_attested"] is True
