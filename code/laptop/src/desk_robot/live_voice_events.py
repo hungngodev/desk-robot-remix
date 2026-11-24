@@ -57,12 +57,16 @@ class VoiceEventListener:
     async def _set_monitor_ready(self, ready: bool) -> None:
         if self.monitor_ready == ready and self._monitor_delivered == ready:
             return
-        # Record failure before notifying the Mac. Only record delivery after
-        # the dependent pet owner accepts it; retry failed FALSE notifications.
-        self.monitor_ready = ready
+        # Silence immediately, but do not expose a healthy monitor until
+        # the dependent pet owner acknowledges the transition. A callback
+        # may change the remote state before raising, so its prior delivery
+        # receipt is no longer reliable and FALSE must be sent again.
+        self.monitor_ready = False
+        self._monitor_delivered = None
         if self.on_monitor_ready is not None:
             await self.on_monitor_ready(ready)
         self._monitor_delivered = ready
+        self.monitor_ready = ready
 
     async def _preempt_all(self, reason: str) -> None:
         # Loss of the voice event stream means a human interruption could have
@@ -209,6 +213,7 @@ class VoiceEventListener:
             await self._set_monitor_ready(True)
             self.cursor = data["cursor"]
             self._stream_failed = False
+            self.last_error = None
             return 0
         data = await self._fetch()
         if data["reset"]:
@@ -348,10 +353,10 @@ class VoiceEventListener:
             self.handled += 1
         if self.cursor != data["cursor"]:
             raise ValueError("Voice server skipped sequence without marking a gap")
-        self.last_error = None
         self._stream_failed = False
         await self._reconcile_snapshot(data)
         await self._set_monitor_ready(True)
+        self.last_error = None
         return len(data["events"])
 
     async def run(self) -> None:

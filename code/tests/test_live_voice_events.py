@@ -818,11 +818,49 @@ async def test_failed_bootstrap_health_notification_retries_bootstrap():
         with pytest.raises(OSError, match="Health consumer"):
             await listener.poll()
         assert listener.cursor is None
+        assert listener.monitor_ready is False
         assert listener._monitor_delivered is None
+        listener.last_error = "OSError: Health consumer unavailable"
         assert await listener.poll() == 0
         assert listener.cursor == 7 and ready_calls == [True, True]
+        assert listener.monitor_ready is True
+        assert listener.last_error is None
         assert len(requests) == 2
         assert all(request.get("bootstrap") == "1" for request in requests)
+
+
+async def test_failed_ready_transition_reasserts_unhealthy_after_partial_delivery():
+    """A failed recovery may have already changed the downstream health state."""
+    health = []
+    ready_during_callback = []
+
+    async def report(ready):
+        health.append(ready)
+        if ready:
+            ready_during_callback.append(listener.monitor_ready)
+            raise OSError("Health delivery failed after side effect")
+
+    async def interrupted(_robot_id, _reason):
+        raise AssertionError("No audio event expected")
+
+    async with httpx.AsyncClient() as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=interrupted,
+            on_monitor_ready=report,
+        )
+        await listener._set_monitor_ready(False)
+        with pytest.raises(OSError, match="Health delivery failed"):
+            await listener._set_monitor_ready(True)
+        assert ready_during_callback == [False]
+        assert listener.monitor_ready is False
+        assert listener._monitor_delivered is None
+        # run() clears local health before reporting an outage. The previous
+        # FALSE receipt cannot suppress this notification after failed TRUE.
+        listener.monitor_ready = False
+        await listener._set_monitor_ready(False)
+        assert health == [False, True, False]
+        assert listener._monitor_delivered is False
 
 
 async def test_cancellation_resistant_shared_abort_is_single_flight():
