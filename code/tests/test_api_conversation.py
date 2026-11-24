@@ -2347,3 +2347,77 @@ async def test_group_late_admission_grant_cannot_import_private_context(
     # A fresh session can use the newly granted memory permission.
     await dialogue.run(["robot-01", "robot-02"], "Discuss a key", 1)
     assert "PRIVATE_ADMISSION_MARKER" in prompts[1]
+
+
+async def test_sensor_memory_brain_conversation_replay_expires_live_cue(
+    settings, tmp_path, monkeypatch,
+):
+    """The same touch is historical SQLite evidence, not a perpetual live edge."""
+    import desk_robot.conversation as conversation_module
+    from desk_robot.pet import PetController
+    from desk_robot.simulator import SimulatedScene
+
+    ids = ["robot-01", "robot-02"]
+    settings.fleet_text_sharing_enabled = True
+    settings.fleet_text_auto_fanout_enabled = False
+    settings.voice_memory_tools_enabled = True
+    settings.voice_vision_tools_enabled = True
+    memory = MemoryStore(tmp_path, ids)
+    hub = CameraFrameHub(ids)
+    clock = [time.monotonic()]
+
+    class RecordingChat:
+        def __init__(self):
+            self.prompts = []
+
+        async def reply(self, history):
+            self.prompts.append([dict(message) for message in history])
+            # Advance only the conversation's clock, not asyncio or SQLite.
+            if len(self.prompts) == 1:
+                clock[0] += 9
+            return "Let us continue talking."
+
+    chat = RecordingChat()
+    agent = Conversation(settings, chat, SimulatedSpeaker(), memory=memory)
+    pet = PetController(settings, {}, agent, memory, SimulatedScene())
+    agent.multimodal = pet.multimodal = SimpleNamespace(hub=hub)
+    monkeypatch.setattr(pet, "_consider_speech", lambda *args, **kwargs: None)
+    state = pet.states[ids[0]]
+    state.enabled = True
+    description = "A distinct capacitive tap was observed on the shell"
+    try:
+        # Exercise the existing touch admission path, not a synthetic
+        # prepopulated prompt or independently inserted SQLite row.
+        await pet._remember_touch(
+            ids[0], state.generation, "touch_tap", description,
+        )
+    finally:
+        state.enabled = False
+    events = memory.recent(ids[0])
+    assert len(events) == 1
+    event = events[0]
+    assert event.kind == "touch_tap" and event.witnessed
+    assert event.source_robot == ids[0] and event.summary == description
+    assert memory.recent(ids[1]) == []
+
+    clock[0] = time.monotonic()
+    bundle = compose_brain_context(
+        events, [], hub.interaction_timeline(ids[0], clock[0]),
+    )
+    assert f"I observed: {description}" in bundle.recent
+    assert "Physical sensor edge: touch_tap" in bundle.interaction
+    monkeypatch.setattr(
+        conversation_module, "time", SimpleNamespace(monotonic=lambda: clock[0]),
+    )
+    result = await agent.run(ids, "Discuss our recent interactions", 3)
+    assert [turn["robot_id"] for turn in result] == [ids[0], ids[1], ids[0]]
+    fresh, peer, expired = (str(prompt) for prompt in chat.prompts)
+    assert description in fresh
+    assert "Physical sensor edge: touch_tap" in fresh
+    assert description not in peer and "touch_tap" not in peer
+    assert description in expired  # Retained historical text, not current state.
+    assert "Physical sensor edge: touch_tap" not in expired
+    assert "touch_tap" not in str(agent.histories[ids[0]])
+    assert memory.get_episode(ids[0], event.event_id) == event
+    assert not hub.interaction_timeline(ids[0], clock[0])
+    await pet.close()
