@@ -285,5 +285,133 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
                     )
 
 
+    async def _assert_uncertain_write_fences_control(self, *, cancel):
+        import httpx
+        from desk_robot.transport import HeadError, HttpHead
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        sent = []
+        fail_halt = True
+
+        async def handler(request):
+            nonlocal fail_halt
+            command = json.loads(request.content)["command"]
+            sent.append(command)
+            if command == "drive 20 20 100":
+                entered.set()
+                await release.wait()
+                raise httpx.ReadError("lost body receipt")
+            if command == "halt" and fail_halt:
+                fail_halt = False
+                raise httpx.ReadError("lost HALT receipt")
+            return httpx.Response(
+                200, json={"ok": True, "robot_id": "robot-01",
+                           "reply": f"OK {command}"},
+            )
+
+        config = SimpleNamespace(
+            id="robot-01", head_url="http://robot.invalid", token_env="HEAD_TOKEN"
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            head = HttpHead(config, client)
+            with patch("desk_robot.transport.secret", return_value="fixture-token"):
+                first = asyncio.create_task(head.command("drive 20 20 100"))
+                queued = None
+                try:
+                    await asyncio.wait_for(entered.wait(), timeout=1)
+                    queued = asyncio.create_task(head.command("keepalive"))
+                    await asyncio.sleep(0)
+                    if cancel:
+                        first.cancel()
+                        with self.assertRaises(asyncio.CancelledError):
+                            await first
+                    else:
+                        release.set()
+                        with self.assertRaisesRegex(HeadError, "no retry"):
+                            await asyncio.wait_for(first, timeout=1)
+                    with self.assertRaisesRegex(HeadError, "superseded"):
+                        await asyncio.wait_for(queued, timeout=1)
+                    self.assertFalse(head.lock.locked())
+                    self.assertFalse(head.command_lock.locked())
+                    self.assertEqual(sent, ["drive 20 20 100"])
+                    for command in ("arm", "keepalive", "drive 20 20 100"):
+                        with self.assertRaisesRegex(HeadError, "require acknowledged HALT"):
+                            await head.command(command)
+                    with self.assertRaisesRegex(HeadError, "no retry"):
+                        await head.command("halt")
+                    with self.assertRaisesRegex(HeadError, "require acknowledged HALT"):
+                        await head.command("arm")
+                    self.assertEqual(sent, ["drive 20 20 100", "halt"])
+                    self.assertEqual((await head.command("halt"))["reply"], "OK halt")
+                    # A NEW explicit arm is possible after recovery; no old
+                    # command or prior lease is silently resumed.
+                    self.assertEqual((await head.command("arm"))["reply"], "OK arm")
+                    self.assertEqual(sent, ["drive 20 20 100", "halt", "halt", "arm"])
+                finally:
+                    release.set()
+                    await asyncio.gather(
+                        *(task for task in (first, queued) if task is not None),
+                        return_exceptions=True,
+                    )
+
+    async def test_failed_write_fences_queued_and_new_control(self):
+        await self._assert_uncertain_write_fences_control(cancel=False)
+
+    async def test_cancelled_write_fences_queued_and_new_control(self):
+        await self._assert_uncertain_write_fences_control(cancel=True)
+
+    async def test_cancelled_pending_halt_does_not_restore_control(self):
+        import httpx
+        from desk_robot.transport import HeadError, HttpHead
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        sent = []
+
+        async def handler(request):
+            command = json.loads(request.content)["command"]
+            sent.append(command)
+            if command == "arm":
+                entered.set()
+                await release.wait()
+            return httpx.Response(
+                200, json={"ok": True, "robot_id": "robot-01",
+                           "reply": f"OK {command}"},
+            )
+
+        config = SimpleNamespace(
+            id="robot-01", head_url="http://robot.invalid", token_env="HEAD_TOKEN"
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            head = HttpHead(config, client)
+            with patch("desk_robot.transport.secret", return_value="fixture-token"):
+                first = asyncio.create_task(head.command("arm"))
+                halted = None
+                try:
+                    await asyncio.wait_for(entered.wait(), timeout=1)
+                    halted = asyncio.create_task(head.command("halt"))
+                    await asyncio.sleep(0)
+                    with self.assertRaisesRegex(HeadError, "require acknowledged HALT"):
+                        await head.command("keepalive")
+                    halted.cancel()
+                    with self.assertRaises(asyncio.CancelledError):
+                        await halted
+                    release.set()
+                    with self.assertRaisesRegex(HeadError, "superseded"):
+                        await asyncio.wait_for(first, timeout=1)
+                    with self.assertRaisesRegex(HeadError, "require acknowledged HALT"):
+                        await head.command("keepalive")
+                    self.assertEqual(sent, ["arm"])
+                    self.assertEqual((await head.command("halt"))["reply"], "OK halt")
+                    self.assertEqual(sent, ["arm", "halt"])
+                finally:
+                    release.set()
+                    await asyncio.gather(
+                        *(task for task in (first, halted) if task is not None),
+                        return_exceptions=True,
+                    )
+
+
 if __name__ == "__main__":
     unittest.main()

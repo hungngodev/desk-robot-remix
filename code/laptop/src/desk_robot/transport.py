@@ -197,6 +197,10 @@ def _response_object(response: httpx.Response) -> dict:
 
 
 class HttpHead:
+    # These operations cannot create a new moving/armed session. Only an
+    # acknowledged terminal HALT clears an uncertain command outcome.
+    _RECOVERY_COMMANDS = frozenset({"ping", "status", "stop", "disarm", "halt"})
+
     def __init__(
         self, config: RobotConfig, client: httpx.AsyncClient,
         *, strict_capture: bool = False
@@ -207,6 +211,7 @@ class HttpHead:
         self.lock = asyncio.Lock()
         self.command_lock = asyncio.Lock()
         self._command_generation = 0
+        self._command_uncertain = False
         self.capture_lock = asyncio.Lock()
         self.strict_capture = strict_capture
         self._last_camera: tuple[int, int, int] | None = None
@@ -244,21 +249,39 @@ class HttpHead:
     async def _ordered_command(
         self, command: str, expected: str, generation: int
     ) -> dict:
-        # All physical commands retain order even when HALT bypasses a GET.
-        # A queued command from before terminal HALT must never dispatch later.
+        # Retire queued control after either terminal HALT or uncertain writes.
         async with self.command_lock:
             if generation != self._command_generation:
-                raise HeadError("Command superseded by terminal WROOM HALT")
-            response = await self._request(
-                "POST", "/api/command", json={"command": command}
-            )
-            data = _response_object(response)
-            reply = data.get("reply", "")
-            if data.get("ok") is not True or data.get("robot_id") != self.config.id or reply != expected:
-                raise HeadError("Unmatched or failed command ACK; movement not retried")
+                raise HeadError("Command superseded by WROOM transport fence")
+            self._check_command_recovery(command)
+            try:
+                response = await self._request(
+                    "POST", "/api/command", json={"command": command}
+                )
+                data = _response_object(response)
+                reply = data.get("reply", "")
+                if (data.get("ok") is not True
+                        or data.get("robot_id") != self.config.id
+                        or reply != expected):
+                    raise HeadError("Unmatched or failed command ACK; movement not retried")
+            except (Exception, asyncio.CancelledError):
+                # Cancellation or failure AFTER admission cannot prove that a
+                # remote write did not execute. Fence before releasing either
+                # lock, without invalidating an already queued newer HALT.
+                if command not in {"ping", "status"}:
+                    self._command_uncertain = True
+                    if generation == self._command_generation:
+                        self._command_generation += 1
+                raise
             if generation != self._command_generation:
                 raise HeadError("Command receipt superseded by terminal WROOM HALT")
+            if command == "halt":
+                self._command_uncertain = False
             return data
+
+    def _check_command_recovery(self, command: str) -> None:
+        if self._command_uncertain and command not in self._RECOVERY_COMMANDS:
+            raise HeadError("WROOM command outcome unconfirmed; require acknowledged HALT")
 
     async def command(self, command: str) -> dict:
         expected = expected_ack(command)
@@ -266,10 +289,14 @@ class HttpHead:
             # Retire already queued commands immediately. An in-flight POST
             # must finish before HALT so its late ARM cannot undo the disarm.
             # HALT never waits for a stalled status GET or camera request.
+            self._command_uncertain = True
             self._command_generation += 1
             return await self._ordered_command(
                 command, expected, self._command_generation
             )
+        # A command submitted during pending recovery must not become valid
+        # just because a later HALT succeeds while the command is queued.
+        self._check_command_recovery(command)
         generation = self._command_generation
         async with self.lock:
             return await self._ordered_command(command, expected, generation)
