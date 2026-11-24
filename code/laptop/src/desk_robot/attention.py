@@ -54,6 +54,8 @@ class _Attention:
     human_turns: int = 0
     asr: str = ""
     asr_at: float = -math.inf
+    # Ordering fence survives retraction of the associated private text.
+    asr_order_at: float = -math.inf
     asr_consent_generation: int | None = None
     last_heard_id: str | None = None
     heard_ids: deque[str] = field(default_factory=lambda: deque(maxlen=24))
@@ -152,7 +154,7 @@ class AttentionLedger:
         """Source time must not precede a newer voice start or ASR cue."""
         _clock(at)
         state = self._state(robot_id)
-        return at >= max(state.voice_at, state.asr_at)
+        return at >= max(state.voice_at, state.asr_order_at)
 
     def human_started(self, robot_id: str, at: float) -> None:
         _clock(at)
@@ -199,12 +201,13 @@ class AttentionLedger:
         state.heard_ids.append(event_id)
         state.asr = cleaned
         state.asr_at = at
+        state.asr_order_at = at
         state.asr_consent_generation = consent_generation
         state.last_heard_id = event_id
         return True
 
     def discard_heard(self, robot_id: str, event_id: str) -> bool:
-        """Retract only a matching model ASR cue, retaining replay dedup."""
+        """Retract matching ASR text, retaining replay and ordering fences."""
         state = self._state(robot_id)
         if not isinstance(event_id, str) or state.last_heard_id != event_id:
             return False

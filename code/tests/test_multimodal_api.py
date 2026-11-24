@@ -1657,6 +1657,80 @@ def test_native_queued_asr_cannot_impersonate_a_newer_human_vad(
             assert invalid.status_code == 409
 
 
+def test_native_asr_delete_keeps_live_ordering_fence(settings, tokens, tmp_path):
+    """An operator deletion cannot promote a delayed older ASR into live context."""
+    from types import SimpleNamespace
+
+    from desk_robot.attention import AttentionLedger
+    from desk_robot.memory import MemoryStore
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = False
+    settings.voice_transcript_memory_enabled = False
+    robot = settings.robots[0].id
+    ids = [entry.id for entry in settings.robots]
+    hub = CameraFrameHub(ids)
+    attention = AttentionLedger(ids)
+    memory = MemoryStore(tmp_path / "private", ids)
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(robot=settings.robot), memory=memory,
+        multimodal=SimpleNamespace(hub=hub), attention=attention,
+        start=noop, close=noop,
+    )
+    tool = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    operator = {"Authorization": "Bearer " + tokens["DESK_ROBOT_API_TOKEN"]}
+    url = f"/v1/pet/{robot}/omni-heard"
+    deleted = "omni_" + "a" * 12 + "_" + "a" * 20
+    delayed = "omni_" + "a" * 12 + "_" + "b" * 20
+    fresh = "omni_" + "a" * 12 + "_" + "c" * 20
+
+    def receipt(event, transcript, audio_us):
+        return {
+            "event_id": event, "transcript": transcript,
+            "audio_committed_at_us": audio_us,
+            "accepted_at_us": time.monotonic_ns() // 1000,
+        }
+
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        newest_us = time.monotonic_ns() // 1000
+        old_us = newest_us - 1
+        attention.human_started(robot, old_us / 1_000_000 - 0.01)
+        accepted = client.post(url, headers=tool, json=receipt(
+            deleted, "Newest private words", newest_us,
+        ))
+        assert accepted.status_code == 200
+        assert accepted.json()["ephemeral_context_added"] is True
+        removed = client.delete(
+            f"/v1/pet/{robot}/memories/{deleted}", headers=operator,
+        )
+        assert removed.status_code == 200
+        assert not hub.heard_history[robot]
+        assert attention.timeline(robot, time.monotonic()) == []
+        stale = client.post(url, headers=tool, json=receipt(
+            delayed, "Older delayed words", old_us,
+        ))
+        assert stale.status_code == 200
+        assert stale.json()["ephemeral_context_added"] is False
+        assert not hub.heard_history[robot]
+        assert attention.timeline(robot, time.monotonic()) == []
+        live = client.get(f"/v1/pet/{robot}/interaction-context", headers=tool)
+        assert live.status_code == 200
+        assert "Older delayed words" not in str(live.json())
+        assert "Newest private words" not in str(live.json())
+        accepted = client.post(url, headers=tool, json=receipt(
+            fresh, "A fresh question", time.monotonic_ns() // 1000,
+        ))
+        assert accepted.status_code == 200
+        assert accepted.json()["ephemeral_context_added"] is True
+        assert hub.heard_history[robot][-1][1] == "A fresh question"
+
+
 def test_completed_native_asr_blends_with_live_camera_context_without_disk_consent(
     settings, tokens, tmp_path,
 ):

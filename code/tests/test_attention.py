@@ -631,6 +631,27 @@ def test_attention_retracts_only_deleted_asr_identity():
                for x in ledger.timeline("robot-02", time.monotonic()))
 
 
+def test_retracted_asr_does_not_promote_older_delayed_receipt(monkeypatch):
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 30.0)
+    ledger = AttentionLedger(["pet", "peer"])
+    deleted = "omni_" + "a" * 12 + "_" + "a" * 20
+    delayed = "omni_" + "a" * 12 + "_" + "b" * 20
+    fresh = "omni_" + "a" * 12 + "_" + "c" * 20
+    ledger.human_started("pet", 10)
+    assert ledger.heard("pet", deleted, "Private latest words", 12)
+    assert ledger.discard_heard("pet", deleted)
+    assert ledger.timeline("pet", 13) == []
+    assert not ledger.heard_is_current("pet", 11)
+    assert not ledger.heard("pet", delayed, "Earlier delayed words", 11)
+    assert not ledger.heard("pet", deleted, "Deleted replay", 12)
+    assert ledger.timeline("pet", 13) == []
+    # Retraction does not block newer speech or change another pet's fence.
+    assert ledger.heard("pet", fresh, "Fresh question", 13)
+    assert ledger.heard("peer", delayed, "Independent speech", 11)
+    assert "Fresh question" in ledger.timeline("pet", 13)[0]["content"]
+    assert "Independent speech" in ledger.timeline("peer", 13)[0]["content"]
+
+
 def test_long_nonfault_attention_preserves_new_human_and_historical_sensor(monkeypatch):
     """An ordinary sensor cue cannot bypass the bounded live context budget."""
     monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 300.0)
