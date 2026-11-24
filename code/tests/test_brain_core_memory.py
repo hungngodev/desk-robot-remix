@@ -142,6 +142,53 @@ def test_only_operator_can_edit_and_models_need_opt_in_to_read_core(
 
 
 
+
+def test_core_facts_survive_app_restart_and_deleted_facts_stay_absent(
+    settings, tokens, tmp_path,
+):
+    settings.memory_dir = tmp_path
+    settings.voice_memory_tools_enabled = False
+    operator = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
+    tool = {"Authorization": f"Bearer {tokens['DESK_ROBOT_TOOL_TOKEN']}"}
+    first = "/v1/pet/robot-01"
+    second = "/v1/pet/robot-02"
+    slot = "/core-memory/favorite_game"
+
+    with TestClient(create_app(settings)) as client:
+        for root, value in ((first, "checkers"), (second, "puzzles"),
+                            (first, "chess")):
+            response = client.put(
+                root + slot, headers=operator, json={"value": value},
+            )
+            assert response.status_code == 200
+            assert response.json()["changed"] is True
+        assert client.get(first + "/voice-context", headers=tool).status_code == 403
+
+    # Recreate the runtime and its SQLite store, rather than reading back
+    # through the original app's in-memory objects.
+    with TestClient(create_app(settings)) as client:
+        assert client.get(first + "/voice-context", headers=tool).status_code == 403
+        settings.voice_memory_tools_enabled = True
+        for root, value in ((first, "chess"), (second, "puzzles")):
+            response = client.get(root + "/voice-context", headers=tool)
+            assert response.status_code == 200
+            assert response.json()["core_facts"] == [
+                {"slot": "favorite_game", "value": value},
+            ]
+            assert response.json()["memories"] == []
+        removed = client.delete(first + slot, headers=operator)
+        assert removed.status_code == 200 and removed.json()["removed"] is True
+
+    with TestClient(create_app(settings)) as client:
+        for root, expected in (
+            (first, []), (second, [{"slot": "favorite_game", "value": "puzzles"}]),
+        ):
+            response = client.get(root + "/voice-context", headers=tool)
+            assert response.status_code == 200
+            assert response.json()["core_facts"] == expected
+            assert response.json()["memories"] == []
+
+
 def test_operator_core_preference_changes_invalidate_only_affected_private_prompt(
     settings, tokens, tmp_path,
 ):
