@@ -1,5 +1,6 @@
 """Offline OpenCV docking calibration must require diverse measured images."""
 import importlib.util
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -176,7 +177,10 @@ def test_calibration_rejects_unknown_or_unrecorded_camera_identity(tmp_path, pid
 
 
 @pytest.mark.parametrize("pid", ["OV3660", "OV5640"])
-def test_known_camera_pid_passes_identity_check_but_not_image_gate(tmp_path, pid):
+def test_known_camera_pid_passes_identity_check_but_not_image_gate(tmp_path, pid, monkeypatch):
+    # Prove the original-image gate works on a dev-only install, even in CI
+    # where the real calibration tests have already imported OpenCV.
+    monkeypatch.setitem(sys.modules, "cv2", None)
     with pytest.raises(ValueError, match="12 original checkerboard"):
         fitter().calibrate_images(
             tmp_path, columns=9, rows=6, square_mm=10,
