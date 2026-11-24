@@ -76,6 +76,11 @@ def values(root: Path) -> dict:
     guide_run = scad_mm(dock, "guide_run_mm")
     backstop_thickness = scad_mm(dock, "backstop_thickness_mm")
     entry_coupon = scad_mm(dock, "entry_coupon_length_mm")
+    # A zero-height rail has no printable guide even if its footprint fits.
+    scad_mm(dock, "guide_height_mm")
+    brace_depth = scad_mm(dock, "backstop_brace_depth_mm")
+    brace_height = scad_mm(dock, "backstop_brace_height_mm")
+    backstop_height = scad_mm(dock, "backstop_height_mm")
     rail_wall = scad_mm(dock, "guide_wall_mm")
     rail_margin = scad_mm(dock, "wall_outside_margin_mm")
     entry_flare = scad_mm(dock, "entry_flare_each_mm")
@@ -96,6 +101,9 @@ def values(root: Path) -> dict:
     if (base_l <= guide_run + backstop_thickness
             or not 37 < entry_coupon < guide_run):
         raise ValueError("Invalid dock backstop or entry coupon dimensions")
+    if (base_l - backstop_thickness - brace_depth <= guide_run
+            or brace_height > backstop_height):
+        raise ValueError("Invalid dock brace or guide geometry")
     return {
         "ranger": (scad_mm(data["ranger"], "board_x"),
                    scad_mm(data["ranger"], "board_y")),

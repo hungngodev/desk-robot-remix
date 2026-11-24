@@ -29,7 +29,9 @@ def setup_sources(tmp_path):
             "base_length_mm=138;\nguide_run_mm=107;\n"
             "backstop_thickness_mm=5;\nentry_coupon_length_mm=48;\n"
             "guide_wall_mm=5;\nwall_outside_margin_mm=8;\n"
-            "entry_flare_each_mm=7;\n",
+            "entry_flare_each_mm=7;\nguide_height_mm=12;\n"
+            "backstop_brace_depth_mm=8;\nbackstop_brace_height_mm=10;\n"
+            "backstop_height_mm=90;\n",
         "docs/cad/remixes/remaining_fit_gauges.scad":
             "candidate_pack_body_l_mm = 86;\npower_l = 86;\n"
             "power_w = 35;\npower_h = 14;\nfit_xy = 0.4;\nwall = 2.4;\n"
@@ -387,3 +389,30 @@ def test_a4_power_tray_inside_envelope_remains_provisional(tmp_path):
     assert manifest["source_dimensions_mm"]["power"][1] == 12.1
     assert manifest["provisional_only"] is True
     assert manifest["actual_fit_verified"] is False
+
+
+@pytest.mark.parametrize(("before", "after", "message"), [
+    ("backstop_brace_depth_mm=8;", "backstop_brace_depth_mm=30;",
+     "Invalid dock brace or guide geometry"),
+    ("backstop_brace_depth_mm=8;", "backstop_brace_depth_mm=26;",
+     "Invalid dock brace or guide geometry"),
+    ("backstop_brace_height_mm=10;", "backstop_brace_height_mm=100;",
+     "Invalid dock brace or guide geometry"),
+    ("guide_height_mm=12;", "guide_height_mm=0;",
+     "Out-of-range source dimension: guide_height_mm"),
+    ("guide_height_mm=12;", "",
+     "Missing or ambiguous source dimension: guide_height_mm"),
+])
+def test_a4_dock_requires_printable_brace_and_guide_height(
+    tmp_path, before, after, message,
+):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    original = scad.read_text(encoding="utf-8")
+    assert original.count(before) == 1
+    scad.write_text(original.replace(before, after), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match=message):
+        source.export(tmp_path, output)
+    assert not output.exists()
