@@ -105,6 +105,38 @@ Keep the head fixed under the two-servo lift/grip allocation. Small mounts,
 bezel/clearance corrections, jaw tips and costumes are allowed; do not silently
 redesign a drivetrain/arm to force compatibility.
 
+## Sourcing redundancy and substitution gates (EXP-056, 2026-11-24)
+
+This is supplier research, not a third shopping list. The canonical plan and
+its two generated shopping lists remain the only quantity and purchasing
+authority. Separate **same manufacturer ordering code from another seller**
+(supply-channel redundancy) from **another carrier or chip** (engineering
+change). Two sellers of the same manufacturer part do not provide independent
+silicon production. Catalog listings do not establish checkout stock, delivered
+cost, exact revision, authenticity, or physical qualification.
+
+| Selected role / supply risk | Secondary sourcing evidence | Compatibility disposition |
+| --- | --- | --- |
+| XIAO ESP32S3 Sense: single board manufacturer | Seeed SKU 113991115 from [Seeed](https://www.seeedstudio.com/XIAO-ESP32S3-Sense-p-5639.html) or [DigiKey](https://www.digikey.com/en/products/detail/seeed-technology-co-ltd/113991115/18724504) | Same ordering code, not independent manufacturer. Do not substitute the non-Sense 113991114. Seeed's [camera revision notice](https://files.seeedstudio.com/wiki/SeeedStudio-XIAO-ESP32S3/res/PCN-XIAO_ESP32-S3_Sense_Series_Camera_Upgrade.pdf) is a reminder to verify camera ID, PDM audio, connector fit, flash/PSRAM and capture before accepting a new lot. Do not rebuy the reported delivered first head. |
+| VL53L0X: one silicon source, unqualified low-cost carrier | [ElectroPeak GY-530 small carrier](https://electropeak.com/gy-530-vl53l0x-laser-range-finder); [Pololu 2490](https://www.pololu.com/product/2490) uses the same ST sensor; [ST bare IC at DigiKey](https://www.digikey.com/en/products/detail/stmicroelectronics/VL53L0CXV0DH-1/497-16538-1-ND/6023692) | Pololu is a different carrier, not a verified drop-in or a low-cost cart replacement. Bare IC is not a module. Compare PCB outline, holes, pin order, optical center, regulator and 3.3 V pullup rails; require identical 0x29 behavior, timeout/fault tests and measured loaded cliff stops. The double-hole GY-530 variant is also not an automatic fit. |
+| TCA9548A: two required muxes, one chip manufacturer for selected part | TI TCA9548APWR 24-pin TSSOP IC via [DigiKey](https://www.digikey.com/en/products/detail/texas-instruments/TCA9548APWR/3615448) or [Mouser](https://www.mouser.com/en/c/?q=TCA9548APWR); [TI product](https://www.ti.com/product/TCA9548A) | Same IC ordering code for a matching TSSOP PCB only, not an interchangeable completed breakout. Require address straps 0x70/0x71, 3.3 V rails, reset behavior, all channels off on reset, bus isolation and stuck-bus fault tests. Do not silently substitute PCA9548A or a clone. |
+| MPU6050 / GY521 and WROOM32: uncertain owned carrier revisions | Recount owned modules first; no exact alternative carrier has been qualified | Match exposed GPIO, pin order, supply/logic levels, IMU identity, scale, sample timing and mount axes. BerryIMU spare and LSM6DS3TR-C are not MPU6050 drop-ins. Do not infer compatibility from a board's marketplace title. |
+| MAX98357A: alternate breakout exists | [ElectroPeak](https://electropeak.com/max98357-i2s-audio-amplifier-module) and [SparkFun documented breakout](https://www.sparkfun.com/sparkfun-i2s-audio-breakout-max98357a.html); [Analog Devices](https://www.analog.com/en/products/MAX98357A.html) | Different carrier candidate only. Preserve standard I2S (not MAX98357B left-justified or PAM8403 analog), 32 kHz playback, 5 V audio supply, gain/shutdown strapping and isolated bridge-tied outputs. Verify pad order, dimensions, current, heat and real AEC. No premium board purchase implied. |
+| Challenge CS20-02P110-04-1X speaker: one confirmed distribution listing | [Manufacturer datasheet](https://www.challengeelectronics.com/speakers/pdf/CS20-02P110-04-1X.pdf) and existing DigiKey SKU | No independently verified identical second seller or alternate speaker. Require 8 ohms, at least 2 W nominal, 20 x 16 x 4.7 mm envelope, matching acoustic opening/lead clearance and qualified enclosure/thermal/double-talk behavior. Same impedance alone is insufficient. |
+| MCP23017 dock interlock, other I2C accessories and OLED | Exact carrier revisions remain unresolved; raw chip catalog listings are not evidence of module compatibility | Match chip/package, carrier footprint and pin order, 3.3 V pullups/logic, mux lane/address, register map, startup defaults and error handling. MCP23017 must retain required fresh GPIOA dock status and fail-closed behavior. For all optional accessories use their existing driver and qualification gates; no newly selected component. |
+| Motor/driver, positional MG90S servos, encoder magnets, switches, IR receivers, gripper FSR and haptic stage | Generic listings or matching names do not establish manufacturing equivalence | Require actual shaft/gear ratio, load and stall current, mounting and travel, NC switch behavior, IR frequency/pinout/NEC acquisition, FSR response, hardware cutoff and fault measurements as applicable. No blanket substitute approval. |
+| Protected 1S pack, charger/load sharing, boost, dock contacts and watchdog | Exact finished assembly not qualified; no second-source release | Require a reviewed netlist, protection/current/thermal limits, connector polarity and geometry, independent cutoff, actual charging-current evidence and mechanical fit. Keep contacts unpowered until independently qualified. |
+
+Before accepting an alternate lot, record manufacturer ordering code, seller
+SKU, PCB revision and photos, datasheet/PCN, dimensions and connector pin map,
+rail and signal limits, relevant firmware profile and acceptance test results.
+Repeat the corresponding physical tests on the new carrier or assembly;
+a passing host suite cannot establish drop-in fit, optical performance or power
+safety. For generic boards without traceable exact revisions, inspect a single
+sample before committing to multiples. Record actual landed price and checkout
+availability separately; neither is established by this review. No selected
+hardware, quantity, procurement gate or $50 delivered cap changes.
+
 ## Procurement and validation
 
 Amazon remains preferred where practical; historical supplier prices are not
