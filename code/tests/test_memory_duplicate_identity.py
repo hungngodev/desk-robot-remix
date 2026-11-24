@@ -117,3 +117,33 @@ def test_hard_linked_database_cannot_alias_two_pets_at_boot_or_after_start(tmp_p
     reopened = MemoryStore(tmp_path, ["pet_a", "pet_b"])
     assert reopened.recent("pet_a")[0].summary == "Pet A private observation"
     assert reopened.recent("pet_b") == []
+
+
+@pytest.mark.parametrize("old_id,new_id", [("pet_a", "PET_A"), ("PET_A", "pet_a")])
+def test_memory_restart_rejects_case_aliased_existing_database(tmp_path, old_id, new_id):
+    store = MemoryStore(tmp_path, [old_id])
+    assert store.remember(
+        old_id, "private_note", "Private observation",
+        kind="scene", source_robot=old_id, witnessed=True,
+    )
+
+    # Reject before opening SQLite, even on case-sensitive CI filesystems.
+    with pytest.raises(ValueError, match="Case-aliased robot memory database"):
+        MemoryStore(tmp_path, [new_id])
+    assert [path.name for path in tmp_path.glob("*.sqlite3")] == [
+        f"{old_id}.sqlite3",
+    ]
+    reopened = MemoryStore(tmp_path, [old_id, "pet_b"])
+    assert reopened.recent(old_id)[0].summary == "Private observation"
+    assert reopened.recent("pet_b") == []
+
+
+def test_case_aliased_database_introduced_after_start_is_rejected(tmp_path):
+    store = MemoryStore(tmp_path, ["pet_a"])
+    path = tmp_path / "pet_a.sqlite3"
+    intermediate = tmp_path / "temporary.sqlite3"
+    path.rename(intermediate)
+    intermediate.rename(tmp_path / "PET_A.sqlite3")
+
+    with pytest.raises(ValueError, match="Case-aliased robot memory database"):
+        store.recent("pet_a")

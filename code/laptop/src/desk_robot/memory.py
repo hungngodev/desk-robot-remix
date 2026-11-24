@@ -306,6 +306,13 @@ class MemoryStore:
         if any(part.is_symlink() for part in (self.root, *self.root.parents)):
             raise ValueError("Memory root ancestry must not contain symlinks")
         path = self.root / (robot_id + ".sqlite3")
+        # A renamed fleet identity must not inherit an old pet's private
+        # database on a case-insensitive Mac volume. Directory entries retain
+        # their actual spelling even when a differently cased lookup succeeds.
+        if any(entry.name != path.name
+               and entry.name.casefold() == path.name.casefold()
+               for entry in self.root.iterdir()):
+            raise ValueError("Case-aliased robot memory database")
         if path.is_symlink():
             raise ValueError("Refusing symlinked memory database")
         # Two pet filenames must never share one SQLite inode, including
