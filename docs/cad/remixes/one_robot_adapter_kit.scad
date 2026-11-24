@@ -39,7 +39,12 @@ speaker_h=4.7;
 speaker_grille_border=8;
 speaker_grille_hole_edge=3.5;
 speaker_grille_min_web=2;
-fsr_d=12;
+// Interlink FSR Integration Guide, figures 6 and 7: body OD 18.3 mm
+// and tail width up to 7.62 mm, NOT the electrical active-area diameter.
+// https://3899023.fs1.hubspotusercontent-na2.net/hubfs/3899023/Integration%20Guides/FSR%20Integration%20Guide%20-%20Interlink%20Electronics.pdf
+// Reference envelopes, not a measured generic supplier part.
+fsr_d=18.3;
+fsr_tail_w_mm=7.62;
 // Temporary FSR contact pad pocket. Previous 22mm plate had 1.5mm
 // screw-to-edge web, 1.325mm retaining ring, a 0.1mm ring/base union,
 // and screw holes that cut the raised retaining ring.
@@ -50,6 +55,13 @@ fsr_bore_d_mm=2;
 fsr_hole_edge_mm=3.5;
 fsr_min_ring_web_mm=2;
 fsr_min_plate_web_mm=2;
+// Provisional contact stack: measured sensor + adhesive + compliant silicone
+// actuator must reach the adjacent grip plane without preload. The relief
+// below that plane is a fit-test allowance, not measured compression margin.
+fsr_base_h_mm=2.5;
+fsr_grip_plane_mm=4;
+fsr_stack_h_mm=2.2;
+fsr_rim_relief_mm=0.5;
 dock_tag_black_square=60;
 dock_mount_spacing=76;
 // Minimum radial print web from M3 bolt bore to any free plate edge.
@@ -162,6 +174,13 @@ module fsr_jaw_pocket(){
   x=fsr_d+fsr_plate_extra_mm; y=x;
   ring_od=fsr_d+fsr_ring_extra_d_mm;
   hole_x=x/2-fsr_hole_edge_mm;
+  pocket_r=(fsr_d+fit_xy)/2;
+  tail_w=fsr_tail_w_mm+fit_xy;
+  floor_z=fsr_grip_plane_mm-fsr_stack_h_mm;
+  rim_z=fsr_grip_plane_mm-fsr_rim_relief_mm;
+  tail_end=-pocket_r+2;
+  assert(fsr_d>=18.3 && fsr_tail_w_mm>=7.62 && fit_xy>=0.35,
+         "FSR402 reference body or tail clearance undersized");
   assert(fsr_min_ring_web_mm>=2 && fsr_min_plate_web_mm>=2);
   assert((ring_od-fsr_d-fit_xy)/2>=fsr_min_ring_web_mm,
          "FSR retaining ring below printable radial web");
@@ -172,20 +191,25 @@ module fsr_jaw_pocket(){
          "FSR screw breaches outer plate printable web");
   assert(hole_x-fsr_bore_d_mm/2-ring_od/2>=0.75,
          "FSR screw bore intersects retaining ring");
+  assert(floor_z>=1.5 && floor_z<=fsr_base_h_mm &&
+         rim_z>fsr_base_h_mm && fsr_rim_relief_mm>0 &&
+         fsr_stack_h_mm>0.51+fsr_rim_relief_mm,
+         "FSR stack must retain a supported floor and relieved rigid rim");
+  assert(pow(tail_end,2)+pow(tail_w/2,2)<pow(pocket_r*cos(180/$fn),2),
+         "FSR tail groove must fully overlap the circular recess");
+  assert(hole_x-fsr_bore_d_mm/2-tail_w/2>=fsr_min_plate_web_mm,
+         "FSR tail groove breaches screw web");
   difference(){
     union(){
-      translate([0,0,1.25]) cube([x,y,2.5],center=true);
-      translate([0,0,2.5-fsr_ring_base_overlap_mm]) difference(){
-        cylinder(h=1.5+fsr_ring_base_overlap_mm,d=ring_od);
-        cylinder(h=2+fsr_ring_base_overlap_mm,d=fsr_d+fit_xy);
-      }
+      translate([-x/2,-y/2,0]) cube([x,y,fsr_base_h_mm]);
+      translate([0,0,fsr_base_h_mm-fsr_ring_base_overlap_mm])
+        cylinder(h=rim_z-fsr_base_h_mm+fsr_ring_base_overlap_mm,d=ring_od);
     }
-    translate([0,0,3.3]) cylinder(h=3,d=fsr_d+fit_xy,center=true);
-    // Cable exit is intentional, but NOT proof of FSR attachment strength.
-    translate([0,-y/2+2,2.5]) cube([3.5,9,5],center=true);
+    translate([0,0,floor_z]) cylinder(h=rim_z-floor_z+1,d=2*pocket_r);
+    translate([-tail_w/2,-y/2-1,floor_z])
+      cube([tail_w,tail_end+y/2+1,rim_z-floor_z+1]);
     for(xx=[-hole_x,hole_x])
-      translate([xx,0,1.25])
-        cylinder(h=5,d=fsr_bore_d_mm,center=true);
+      translate([xx,0,-1]) cylinder(h=rim_z+2,d=fsr_bore_d_mm);
   }
 }
 module dock_tag_backplate(){
