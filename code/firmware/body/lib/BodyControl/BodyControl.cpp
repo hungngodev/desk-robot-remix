@@ -650,9 +650,12 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
     state_.armed = false;
   }
   if (fuel_monitor_required_ && !fuel_monitor_fresh(now_ms)) {
-    if (!fuel_monitor_fault_latched_) {
-      fuel_monitor_fault_seq_ = readings.gauge.fuel_sample_seq;
-      fuel_monitor_fault_at_ms_ = readings.gauge.fuel_at_ms;
+    // Anchor recovery to the last accepted conversion, not an invalid
+    // incoming identity. If another acquisition is lost while already
+    // latched, require a conversion newer than that latest trusted one.
+    if (fuel_sample_seen_) {
+      fuel_monitor_fault_seq_ = fuel_last_seq_;
+      fuel_monitor_fault_at_ms_ = fuel_last_at_ms_;
     }
     fuel_monitor_fault_latched_ = true;
     stop_motion();
@@ -927,9 +930,12 @@ void BodyControl::tick(std::uint32_t now_ms) {
     return;
   }
   if (fuel_monitor_required_ && !fuel_monitor_fresh(now_ms)) {
-    if (!fuel_monitor_fault_latched_) {
-      fuel_monitor_fault_seq_ = state_.accessories.gauge.fuel_sample_seq;
-      fuel_monitor_fault_at_ms_ = state_.accessories.gauge.fuel_at_ms;
+    // Anchor recovery to the last accepted conversion, not an invalid
+    // incoming identity. If another acquisition is lost while already
+    // latched, require a conversion newer than that latest trusted one.
+    if (fuel_sample_seen_) {
+      fuel_monitor_fault_seq_ = fuel_last_seq_;
+      fuel_monitor_fault_at_ms_ = fuel_last_at_ms_;
     }
     fuel_monitor_fault_latched_ = true;
   }

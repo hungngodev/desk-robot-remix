@@ -2263,6 +2263,54 @@ static void fuel_voltage_replay_cannot_rearm_or_restore_drive() {
   CHECK(wrapped.fuel_monitor_fresh(5U));
 }
 
+static void invalid_fuel_identity_cannot_rearm_from_cached_conversion() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 100);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.require_fuel_monitor(true);
+  desk_robot::AccessoryReadings readings{};
+  readings.gauge.fuel_present = readings.gauge.fuel_valid = true;
+  readings.gauge.cell_mv = 3800;
+  readings.gauge.soc_centi = 5000;
+  readings.gauge.fuel_sample_seq = 10;
+  readings.gauge.fuel_at_ms = 100;
+  body.set_accessories(readings, 100);
+  CHECK(send(body, "rearm", 100, true) == "OK rearm");
+  CHECK(send(body, "arm", 100) == "OK arm");
+  CHECK(send(body, "drive 30 30 150", 100).find("OK drive") == 0);
+
+  // An invalid identity must not move the fault recovery threshold back
+  // to zero, even if the previously accepted cache is subsequently restored.
+  auto invalid = readings;
+  invalid.gauge.fuel_valid = false;
+  invalid.gauge.fuel_sample_seq = 0;
+  invalid.gauge.fuel_at_ms = 0;
+  body.set_accessories(invalid, 101);
+  CHECK(!body.state().armed && body.state().left == 0);
+  body.set_accessories(readings, 102);
+  CHECK(send(body, "rearm", 102, true) ==
+        "ERR rearm fuel_monitor_no_new_sample");
+
+  // A real new conversion followed by a second loss before local rearm
+  // must advance the recovery threshold too, not reuse that conversion.
+  readings.gauge.fuel_sample_seq = 11;
+  readings.gauge.fuel_at_ms = 103;
+  body.set_accessories(readings, 103);
+  body.set_accessories(invalid, 104);
+  body.set_accessories(readings, 105);
+  CHECK(send(body, "rearm", 105, true) ==
+        "ERR rearm fuel_monitor_no_new_sample");
+
+  readings.gauge.fuel_sample_seq = 12;
+  readings.gauge.fuel_at_ms = 106;
+  body.set_accessories(readings, 106);
+  fresh(guard, 106);
+  CHECK(send(body, "rearm", 106, true) == "OK rearm");
+  CHECK(send(body, "arm", 106) == "OK arm");
+  CHECK(body.state().left == 0 && body.state().right == 0);
+}
+
 static void required_fuel_gauge_loss_stops_and_requires_local_rearm() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -2896,6 +2944,7 @@ int main() {
     optional_sensor_inputs_never_arm_or_forge_boot_events();
     battery_readiness_matches_stricter_arm_voltage();
     battery_undervoltage_rejects_arm_and_stops_motion();
+    invalid_fuel_identity_cannot_rearm_from_cached_conversion();
     required_fuel_gauge_loss_stops_and_requires_local_rearm();
     fuel_voltage_replay_cannot_rearm_or_restore_drive();
     accessory_sensors_never_infer_grip_or_current_or_grant_arm();
