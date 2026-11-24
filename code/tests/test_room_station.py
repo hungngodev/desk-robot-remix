@@ -25,6 +25,10 @@ class SynchronizedFakePort:
         self._session_reply = b"SYNC_ACK " + nonce + b"\r\n"
         return len(request)
 
+    def read_until(self, expected=b"\n", size=None):
+        assert expected == b"\n" and size == MAX_FRAME_BYTES + 1
+        return self.readline(size)
+
     def _read_session_reply(self):
         reply = getattr(self, "_session_reply", None)
         if reply is not None:
@@ -1157,3 +1161,44 @@ def test_cancelled_room_reader_does_not_reconnect_after_worker_error():
             await asyncio.gather(task, return_exceptions=True)
 
     asyncio.run(scenario())
+
+
+def test_usb_trickle_cannot_extend_sync_deadline_to_frame_size(monkeypatch):
+    """Exercise pySerial 3.5's actual bounded line reader with a virtual clock."""
+    import io
+    from types import SimpleNamespace
+
+    import desk_robot.room_station as room_module
+    import serial
+    from serial.serialutil import SerialBase, Timeout
+
+    clock = [0.0]
+    monkeypatch.setattr(room_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    monkeypatch.setattr(Timeout, "TIME", staticmethod(lambda: clock[0]))
+
+    class TricklePort(io.RawIOBase):
+        # Reuse the real pinned pySerial implementation; inherited readline
+        # would instead wait for MAX_FRAME_BYTES + 1 individual byte reads.
+        read_until = SerialBase.read_until
+
+        def __init__(self, port, *, baudrate, timeout, write_timeout, exclusive):
+            self._timeout = timeout
+
+        def readable(self):
+            return True
+
+        def read(self, size=1):
+            assert size == 1
+            clock[0] += 0.1  # Every byte arrives within the per-read timeout.
+            return b"x"  # No newline or valid SYNC_ACK ever arrives.
+
+        def write(self, request):
+            return len(request)
+
+    monkeypatch.setattr(serial, "Serial", TricklePort)
+    feed = RoomSerialFeed("/dev/cu.test", lambda observation: pytest.fail("Unsolicited frame"))
+    with pytest.raises(RuntimeError, match="post-connect SYNC unacknowledged"):
+        feed._read_port(lambda: True)
+    # Whole-line read timeout plus one in-flight byte read, not 409.7s.
+    assert room_module.USB_SYNC_TIMEOUT_S <= clock[0] <= room_module.USB_SYNC_TIMEOUT_S + 0.5
+    assert feed.received == 0

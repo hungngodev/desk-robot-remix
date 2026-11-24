@@ -364,18 +364,21 @@ class RoomSerialFeed:
                 if synchronized and now >= frame_deadline:
                     expected, deadline = request_sync()
                     synchronized = False
-                line = port.readline(MAX_FRAME_BYTES + 1)
+                # pySerial readline() inherits RawIOBase's per-read timeout.
+                # A steady byte trickle can hide the outer SYNC/stop deadline
+                # until the size limit. read_until() adds a whole-line timeout.
+                line = port.read_until(b"\n", size=MAX_FRAME_BYTES + 1)
                 if not line:
                     continue
                 if not running():
                     break
                 now = time.monotonic()
                 if not synchronized and now >= deadline:
-                    # readline may return an exact nonce ACK after the timeout.
+                    # A read may return an exact nonce ACK after the timeout.
                     # Never turn that overdue response into fresh USB evidence.
                     raise RuntimeError("Room station post-connect SYNC unacknowledged")
                 if synchronized and now >= frame_deadline:
-                    # An old line may finish readline after a USB stall.
+                    # An old line may finish arriving after a USB stall.
                     # Discard it rather than assigning a new host timestamp.
                     expected, deadline = request_sync()
                     synchronized = False
@@ -390,7 +393,7 @@ class RoomSerialFeed:
                         frame_deadline = now + USB_POST_SYNC_FRAME_TIMEOUT_S
                         discard_until_newline = False
                     continue
-                # readline() may return partial bytes on timeout or the size
+                # read_until() may return partial bytes on timeout or the size
                 # limit. Do not accept a parseable suffix as a fresh, distinct
                 # Feather frame until the truncated line is terminated.
                 complete_line = line.endswith(b"\n")
@@ -407,7 +410,7 @@ class RoomSerialFeed:
                 except ValueError:
                     self.rejected += 1
                     continue
-                # A cancellation may arrive while readline is blocked. Never
+                # A cancellation may arrive while the read is blocked. Never
                 # deliver that completed read into a retired connection epoch.
                 if not running():
                     break
