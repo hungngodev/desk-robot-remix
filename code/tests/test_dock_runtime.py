@@ -1227,3 +1227,63 @@ async def test_selected_dock_frame_verification_is_bounded_even_if_cancel_ignore
         release.set()
         if entered.is_set():
             await asyncio.wait_for(finished.wait(), timeout=1.0)
+
+async def test_cancelled_detector_observer_retrieves_late_native_failure(monkeypatch):
+    """The asyncio wrapper must consume a late exception without freeing C work."""
+    import asyncio
+    import gc
+    import threading
+
+    entered, release = threading.Event(), threading.Event()
+    reports = []
+    loop = asyncio.get_running_loop()
+    previous_handler = loop.get_exception_handler()
+
+    def exception_handler(event_loop, context):
+        if (isinstance(context.get("exception"), RuntimeError)
+                and str(context["exception"]) == "late native AprilTag failure"):
+            reports.append(context["message"])
+        elif previous_handler is not None:
+            previous_handler(event_loop, context)
+        else:
+            event_loop.default_exception_handler(context)
+
+    def blocked_detector(*args, **kwargs):
+        entered.set()
+        if not release.wait(timeout=5):
+            raise TimeoutError("Detector test release was not signalled")
+        raise RuntimeError("late native AprilTag failure")
+
+    monkeypatch.setattr(dock_runtime, "detect_apriltag", blocked_detector)
+    loop.set_exception_handler(exception_handler)
+    observer = asyncio.create_task(dock_runtime.detect_bounded(
+        b"frame", SimpleNamespace(), captured_at=1.0,
+    ))
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)
+        observer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await observer
+        with pytest.raises(dock_runtime.DockDetectorBusy):
+            await dock_runtime.detect_bounded(
+                b"other frame", SimpleNamespace(), captured_at=2.0,
+            )
+    finally:
+        release.set()
+        if not observer.done():
+            observer.cancel()
+            await asyncio.gather(observer, return_exceptions=True)
+        try:
+            # Drain native work and its completion callback before checking
+            # the event loop's unobserved-exception reports.
+            barrier = dock_runtime._DETECTOR_POOL.submit(lambda: None)
+            await asyncio.to_thread(barrier.result, 2.0)
+            for _ in range(3):
+                await asyncio.sleep(0)
+                gc.collect()
+        finally:
+            loop.set_exception_handler(previous_handler)
+
+    assert not reports
+    assert dock_runtime._DETECTOR_SLOT.acquire(blocking=False)
+    dock_runtime._DETECTOR_SLOT.release()

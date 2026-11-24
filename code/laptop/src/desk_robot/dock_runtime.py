@@ -164,9 +164,13 @@ async def detect_bounded(jpeg: bytes, calibration: DockCameraCalibration, *,
     work.add_done_callback(finish_detection)
     # Shield only the asyncio awaiter. On timeout the native detector is
     # allowed to finish, and holds the slot until its real completion.
-    return await asyncio.wait_for(
-        asyncio.shield(asyncio.wrap_future(work)), timeout=2.0
+    wrapped = asyncio.wrap_future(work)
+    # The shield may be cancelled before the native future fails. Consuming
+    # the concurrent future's exception does not consume its asyncio copy.
+    wrapped.add_done_callback(
+        lambda done: None if done.cancelled() else done.exception()
     )
+    return await asyncio.wait_for(asyncio.shield(wrapped), timeout=2.0)
 
 
 def unpack_dock_frame(observation) -> tuple[bytes, float]:
