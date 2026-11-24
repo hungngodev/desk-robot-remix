@@ -57,6 +57,11 @@ def validate_ir(data: dict, robot_id: str, *,
         if (not data["left_valid"] or not data["right_valid"]
                 or data["code"] == 0):
             raise ValueError("Two physically independent fresh NEC frames required")
+        # WROOM also accounts for receipt-window uncertainty. The Mac only
+        # receives the conservative ages, so enforce this necessary bound
+        # without claiming it is sufficient to prove simultaneous reception.
+        if abs(data["left_age_ms"] - data["right_age_ms"]) > 120:
+            raise ValueError("NEC receiver age separation exceeds 120 ms")
     elif data["code"] != 0:
         raise ValueError("Mismatched or stale NEC frames must not identify a beacon")
     if data["match"] and data["code"] not in _KNOWN_DOCK_CODES:

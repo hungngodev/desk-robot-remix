@@ -65,10 +65,10 @@ def test_mismatched_reception_cannot_report_a_beacon_identity():
 
 
 @pytest.mark.parametrize(("left_age", "right_age", "elapsed", "valid"), [
-    (180, 25, 20, True),
-    (180, 25, 21, False),
-    (25, 185, 16, False),
-    (25, 185, 15, True),
+    (180, 70, 20, True),
+    (180, 70, 21, False),
+    (70, 185, 16, False),
+    (70, 185, 15, True),
     (0, 0, 201, False),
 ])
 def test_ir_decision_age_includes_transport_and_both_receiver_ages(
@@ -200,3 +200,23 @@ def test_matched_beacon_rejects_unknown_or_malformed_nec_codes(code):
     reading["code"] = code
     with pytest.raises(ValueError, match="Unknown NEC dock beacon code"):
         validate_ir(reading, "robot-01")
+
+
+@pytest.mark.parametrize(("left_age", "right_age", "valid"), [
+    (0, 120, True), (120, 0, True),
+    (0, 121, False), (121, 0, False),
+    (0, 200, False), (200, 0, False),
+])
+def test_matched_nec_receiver_age_separation_respects_firmware_bound(
+    left_age, right_age, valid,
+):
+    reading = evidence()
+    reading.update(left_age_ms=left_age, right_age_ms=right_age)
+    if valid:
+        assert validate_ir(reading, "robot-01") == reading
+    else:
+        with pytest.raises(ValueError, match="NEC receiver age separation"):
+            validate_ir(reading, "robot-01")
+        # Individual fresh observations can still be reported as unmatched.
+        reading.update(match=False, code=0)
+        assert validate_ir(reading, "robot-01") == reading
