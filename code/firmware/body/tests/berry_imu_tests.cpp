@@ -13,10 +13,45 @@ static std::string status(desk_robot::BodyControl& body, std::uint32_t now) {
   return std::string(buffer);
 }
 
+// Every signed 16-bit register value, on every axis and TEMP_OUT. Offset
+// each word independently so a swapped axis or byte order cannot pass.
+static void verify_mpu_register_decode() {
+  desk_robot::BerryReading sample{};
+  sample.model = desk_robot::BerryModel::Mpu6050;
+  sample.valid = true;
+  sample.at_ms = 123;
+  sample.low_g_status_valid = true;
+  sample.low_g_irq = true;
+  sample.low_g_event_seq = 9;
+  for (std::uint32_t value = 0; value < 65536U; ++value) {
+    std::uint8_t bytes[14]{};
+    std::int32_t expected[7]{};
+    for (unsigned word = 0; word < 7; ++word) {
+      const auto raw = (value + word * 7919U) & 0xffffU;
+      bytes[2 * word] = static_cast<std::uint8_t>(raw >> 8);
+      bytes[2 * word + 1] = static_cast<std::uint8_t>(raw & 0xffU);
+      expected[word] = static_cast<std::int32_t>(raw);
+      if (raw >= 32768U) expected[word] -= 65536;
+    }
+    desk_robot::BerryImu::decode_mpu6050(bytes, sample);
+    for (unsigned axis = 0; axis < 3; ++axis) {
+      CHECK(sample.accel[axis] == expected[axis]);
+      CHECK(sample.gyro[axis] == expected[axis + 4]);
+    }
+    CHECK(sample.temperature_raw == expected[3]);
+    // The decoder cannot grant freshness or overwrite acquisition metadata.
+    CHECK(sample.model == desk_robot::BerryModel::Mpu6050);
+    CHECK(sample.valid && sample.at_ms == 123);
+    CHECK(sample.low_g_status_valid && sample.low_g_irq);
+    CHECK(sample.low_g_event_seq == 9);
+  }
+}
+
 int main() {
   try {
     using desk_robot::BerryImu;
     using desk_robot::BerryModel;
+    verify_mpu_register_decode();
     CHECK(BerryImu::identify(0xd4, 0x49) == BerryModel::V1Lsm9ds0);
     CHECK(BerryImu::identify(0x68, 0x3d) == BerryModel::V2Lsm9ds1);
     CHECK(BerryImu::identify(0x6a, 0x3d) == BerryModel::V3Lsm6dsl);
