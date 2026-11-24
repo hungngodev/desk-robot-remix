@@ -626,3 +626,86 @@ int main() {
     )
     subprocess.run([str(executable)], check=True, capture_output=True,
                    text=True, timeout=15)
+
+
+def test_amg_recovery_waits_for_checked_writes_and_fresh_frames(tmp_path):
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    recovery = "class AmgRecovery" + src.split("class AmgRecovery", 1)[1].split(
+        "AmgRecovery amg_recovery;", 1
+    )[0]
+    assert "amg.begin(" not in src
+    assert "if (amg_recovery.take_ready()) amg_started = true;" in src
+    assert "if (amg_transaction) return;" in src
+    harness = r"""
+#include <cassert>
+#include <cstdint>
+#include <vector>
+constexpr uint8_t kAmgAddress = 0x69;
+constexpr uint8_t AMG88xx_PCTL = 0, AMG88xx_RST = 1,
+    AMG88xx_FPSC = 2, AMG88xx_INTC = 3, AMG88xx_NORMAL_MODE = 0,
+    AMG88xx_INITIAL_RESET = 0x3f, AMG88xx_FLAG_RESET = 0x30,
+    AMG88xx_FPS_10 = 0;
+uint32_t clock_ms;
+uint32_t millis() { return clock_ms; }
+""" + recovery + r"""
+struct FakeWire {
+  std::vector<uint8_t> bytes;
+  unsigned transfers = 0;
+  bool fail = false, short_write = false;
+  void beginTransmission(uint8_t address) { assert(address == kAmgAddress); }
+  int write(uint8_t value) { bytes.push_back(value); return short_write ? 0 : 1; }
+  int endTransmission() { ++transfers; clock_ms += 5; return fail ? 2 : 0; }
+};
+void run(uint32_t start) {
+  AmgRecovery amg;
+  FakeWire wire;
+  clock_ms = start;
+  amg.begin();
+  assert(amg.active() && amg.step(wire, clock_ms));
+  for (uint32_t wait : {50U, 2U, 50U, 2U}) {
+    clock_ms += wait - 1;
+    assert(!amg.step(wire, clock_ms) && !amg.take_ready());
+    ++clock_ms;
+    assert(amg.step(wire, clock_ms));
+  }
+  assert(amg.step(wire, clock_ms));
+  assert(amg.step(wire, clock_ms));
+  assert(wire.transfers == 7);
+  assert((wire.bytes == std::vector<uint8_t>{
+      0,0,0,0x10,0,0,1,0x3f,1,0x30,3,0,2,0}));
+  clock_ms += 249;
+  assert(!amg.step(wire, clock_ms) && amg.active() && !amg.take_ready());
+  ++clock_ms;
+  assert(!amg.step(wire, clock_ms) && !amg.active() && amg.take_ready());
+  assert(!amg.take_ready());
+}
+int main() {
+  run(0); run(UINT32_MAX - 80);
+  for (bool short_write : {false, true}) {
+    AmgRecovery amg; FakeWire wire;
+    clock_ms = 0; amg.begin();
+    assert(amg.step(wire, clock_ms));
+    clock_ms += 50;
+    wire.fail = !short_write; wire.short_write = short_write;
+    assert(amg.step(wire, clock_ms));
+    assert(!amg.active() && !amg.take_ready());
+    clock_ms += 1000;
+    assert(!amg.step(wire, clock_ms) && wire.transfers == 2);
+    wire.fail = wire.short_write = false;
+    amg.begin();
+    assert(amg.step(wire, clock_ms) && amg.active());
+  }
+}
+"""
+    compiler = shutil.which("c++")
+    assert compiler is not None
+    source = tmp_path / "amg_recovery.cpp"
+    source.write_text(harness)
+    executable = tmp_path / "amg_recovery"
+    subprocess.run(
+        [compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
+         str(source), "-o", str(executable)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    subprocess.run([str(executable)], check=True, capture_output=True,
+                   text=True, timeout=15)

@@ -5,7 +5,7 @@
 // Panasonic AMG8833 high-gain pixels: 0x80+2*n low/high, signed 12-bit
 // two's-complement, 0.25 C/LSB, specified object range 0..80 C.
 // Reference: https://industry.panasonic.eu/products/components/sensors/ir-thermophile-array-sensor-grid-eye
-// The pinned Adafruit AMG88xx driver owns initialization; bounded 16-byte
+// Initialization uses the pinned Adafruit AMG88xx register definitions; bounded 16-byte
 // reads reject invalid data rather than interpreting it as a fresh frame.
 namespace desk_robot_room {
 inline bool decode_thermal_pixel(std::uint8_t low, std::uint8_t high,

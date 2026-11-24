@@ -128,7 +128,79 @@ constexpr uint8_t kAmgAddress = 0x69;
 // and TX/RX exact voltage/pin orientation require the carrier schematic.
 SensirionI2cScd4x scd;
 Adafruit_BME680 bme(&Wire);
-Adafruit_AMG88xx amg;
+// Adapt the pinned AMG88xx initialization to checked, staged I2C writes.
+// Panasonic Grid-EYE I2C interface (I2C_interface.pdf), power/reset sequence:
+// after sleep -> normal wait 50 ms; initial reset -> flag reset wait 2 ms;
+// wait more than two frame periods before using pixels. Explicitly establish
+// sleep before waking because a previous failed recovery may leave any mode.
+class AmgRecovery {
+ public:
+  void begin() { phase_ = Phase::normalize; ready_ = false; }
+  bool active() const { return phase_ != Phase::idle; }
+  bool take_ready() {
+    const bool ready = ready_;
+    ready_ = false;
+    return ready;
+  }
+  template <typename WireLike>
+  bool step(WireLike& wire, uint32_t now) {
+    if (phase_ == Phase::idle) return false;
+    const uint32_t elapsed = now - phase_ms_;
+    if (phase_ == Phase::settle) {
+      if (elapsed >= 250U) {
+        phase_ = Phase::idle;
+        ready_ = true;
+      }
+      return false;
+    }
+    if ((phase_ == Phase::sleep || phase_ == Phase::initial_reset) &&
+        elapsed < 50U) return false;
+    if ((phase_ == Phase::wake || phase_ == Phase::flag_reset) &&
+        elapsed < 2U) return false;
+    uint8_t reg = 0, value = 0;
+    Phase next = Phase::idle;
+    switch (phase_) {
+      case Phase::normalize:
+        reg = AMG88xx_PCTL; value = AMG88xx_NORMAL_MODE;
+        next = Phase::sleep; break;
+      case Phase::sleep:
+        reg = AMG88xx_PCTL; value = 0x10; // Panasonic sleep mode
+        next = Phase::wake; break;
+      case Phase::wake:
+        reg = AMG88xx_PCTL; value = AMG88xx_NORMAL_MODE;
+        next = Phase::initial_reset; break;
+      case Phase::initial_reset:
+        reg = AMG88xx_RST; value = AMG88xx_INITIAL_RESET;
+        next = Phase::flag_reset; break;
+      case Phase::flag_reset:
+        reg = AMG88xx_RST; value = AMG88xx_FLAG_RESET;
+        next = Phase::interrupt; break;
+      case Phase::interrupt:
+        reg = AMG88xx_INTC; value = 0;
+        next = Phase::rate; break;
+      case Phase::rate:
+        reg = AMG88xx_FPSC; value = AMG88xx_FPS_10;
+        next = Phase::settle; break;
+      default: return false;
+    }
+    wire.beginTransmission(kAmgAddress);
+    const bool reg_ok = wire.write(reg) == 1;
+    const bool value_ok = wire.write(value) == 1;
+    const int result = wire.endTransmission();
+    phase_ = reg_ok && value_ok && result == 0 ? next : Phase::idle;
+    phase_ms_ = millis();
+    return true;
+  }
+
+ private:
+  enum class Phase : uint8_t {
+    idle, normalize, sleep, wake, initial_reset, flag_reset, interrupt, rate, settle
+  };
+  Phase phase_ = Phase::idle;
+  uint32_t phase_ms_ = 0;
+  bool ready_ = false;
+};
+AmgRecovery amg_recovery;
 // Pass every radar byte to the pinned decoder unchanged while independently
 // recognizing complete validated data frames. A stray UART byte or command
 // ACK must not refresh the timestamp of cached target data.
@@ -355,7 +427,7 @@ void soil_observation(uint32_t now) {
 }
 // The pinned Adafruit AMG88xx readPixels() returns void and its underlying
 // I2C read discards transfer failure. Reject a partial/failed pixel frame.
-// Retain Adafruit's normal device initialization and its contiguous pixel
+// Retain Adafruit's register definitions and its contiguous pixel
 // register layout and the portable tested eight 16-byte read helper.
 // This stationary sensor never authorizes motor or charging commands.
 // Read only one 16-byte I2C chunk per loop iteration. The LD2410C
@@ -432,8 +504,11 @@ void recover_sensors(uint32_t now) {
     scd_started_ms = millis();
     return;
   }
+  const bool amg_transaction = amg_recovery.step(Wire, now);
+  if (amg_recovery.take_ready()) amg_started = true;
+  if (amg_transaction) return;
   const bool active[] = {scd_started || scd_stop_pending,
-                         bme_started, amg_started};
+                         bme_started, amg_started || amg_recovery.active()};
   const int sensor = sensor_recovery.next(now, active);
   if (sensor == desk_robot_room::SensorRecoverySchedule::kScd) {
     scd_valid = false;
@@ -456,7 +531,8 @@ void recover_sensors(uint32_t now) {
   } else if (sensor == desk_robot_room::SensorRecoverySchedule::kAmg) {
     thermal_scan_active = false;
     thermal_valid = false;
-    amg_started = amg.begin(kAmgAddress);
+    amg_started = false;
+    amg_recovery.begin();
     thermal_ever_requested = false;
   }
 }
