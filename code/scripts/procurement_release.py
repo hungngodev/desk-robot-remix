@@ -470,6 +470,13 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
     ranges = plan.get("bus", {}).get("mux_ranges", {}) if isinstance(
         plan.get("bus", {}), dict) else {}
     lanes = ranges.get("channels", []) if isinstance(ranges, dict) else []
+    # The firmware treats channels 0..4 as safety-critical and 5..7 as
+    # read-only. Keep physical positions bound to the same lane numbers.
+    range_positions = (
+        "floor_front_left", "floor_front_right", "floor_rear_left",
+        "floor_rear_right", "front_obstacle", "left_obstacle",
+        "right_obstacle", "rear_obstacle",
+    )
     cheap_range_layout = (
         isinstance(ranges, dict)
         and type(ranges.get("address")) is int
@@ -479,6 +486,7 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
         and all(isinstance(lane, dict)
                 and type(lane.get("channel")) is int
                 and lane["channel"] == index
+                and lane.get("position") == range_positions[index]
                 and isinstance(lane.get("devices"), list)
                 and len(lane["devices"]) == 1
                 and isinstance(lane["devices"][0], dict)

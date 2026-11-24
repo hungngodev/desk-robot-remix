@@ -1328,6 +1328,15 @@ def test_premium_or_malformed_eight_range_mux_cannot_be_approved():
     duplicate_lane = copy.deepcopy(plan)
     duplicate_lane["bus"]["mux_ranges"]["channels"][1]["channel"] = 0
     mutants.append(duplicate_lane)
+    swapped_position = copy.deepcopy(plan)
+    channels = swapped_position["bus"]["mux_ranges"]["channels"]
+    channels[0]["position"], channels[5]["position"] = (
+        channels[5]["position"], channels[0]["position"]
+    )
+    mutants.append(swapped_position)
+    missing_position = copy.deepcopy(plan)
+    missing_position["bus"]["mux_ranges"]["channels"][4].pop("position")
+    mutants.append(missing_position)
     wrong_mux = copy.deepcopy(plan)
     wrong_mux["bus"]["mux_ranges"]["address"] = 0x71
     mutants.append(wrong_mux)
