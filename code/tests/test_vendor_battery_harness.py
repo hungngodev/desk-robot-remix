@@ -225,3 +225,36 @@ def test_thor_cell_ceiling_never_proves_assembled_pack_peak(peak, expected):
     assert "manufacturer_assembled_pack_peak_discharge_rating_missing" in report["blocking_reasons"]
     assert ("cell_level_discharge_below_peak_budget" in report["blocking_reasons"]) == (expected is False)
     assert report["complete_power_path_safe_to_buy"] is False
+
+
+def test_batteryspace_harness_pinout_is_variant_specific_and_not_physical_evidence():
+    screen = module("screen_vendor_battery_harness")
+    demand = module("power_preflight").size_5v_supply(1, 0.6)
+    bare = screen.evaluate("PR-CU-R512-22AWG", demand)
+    jst = screen.evaluate("PR-CU-R512-JST-SHR", demand)
+    molex = screen.evaluate("PR-CU-R512-Molex-26AWG", demand)
+    assert bare["published_terminal_roles"] == {
+        "red": "positive", "black": "negative_ntc_return", "white": "ntc",
+    }
+    assert jst["published_terminal_roles"] == {
+        "pin_1": "negative", "pin_2": "ntc", "pin_3": "positive",
+    }
+    assert molex["published_terminal_roles"] == {
+        "pin_1": "positive", "pin_2": "ntc", "pin_3": "negative_ntc_return",
+    }
+    unknown = screen.evaluate("LP103650", demand)
+    assert unknown["published_terminal_roles"] is None
+    assert "manufacturer_terminal_pinout_missing" in unknown["blocking_reasons"]
+    for report in (bare, jst, molex, unknown):
+        assert report["physical_harness_wiring_verified"] is False
+        assert "physical_harness_wiring_not_verified" in report["blocking_reasons"]
+        assert report["complete_power_path_safe_to_buy"] is False
+
+
+def test_unknown_connector_does_not_hide_known_undersized_lead():
+    screen = module("screen_vendor_battery_harness")
+    demand = module("power_preflight").size_5v_supply(2, 1.2)
+    report = screen.evaluate("PR-CU-R512-22AWG", demand)
+    assert report["harness_ampacity_enough_on_paper"] is False
+    assert "exact_connector_or_lead_ampacity_missing" in report["blocking_reasons"]
+    assert "exact_connector_or_lead_ampacity_insufficient" in report["blocking_reasons"]

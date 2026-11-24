@@ -37,6 +37,8 @@ _PACKS = {
         "ntc": "10k", "pcm": True,
         "connector": "open ends CU-J484", "connector_continuous_a": None,
         "lead_continuous_a": 4.0,
+        "terminal_roles": (("red", "positive"), ("black", "negative_ntc_return"),
+                           ("white", "ntc")),
     },
     "PR-CU-R512-JST-SHR": {
         "source": "https://www.batteryspace.com/custom-polymer-li-ion-battery-3-7v-2000mah-7-4-wh-4a-rate-with-10k-thermistor.aspx",
@@ -45,6 +47,8 @@ _PACKS = {
         "ntc": "10k", "pcm": True,
         "connector": "JST SHR-03V-S 30AWG", "connector_continuous_a": 0.86,
         "lead_continuous_a": 0.86,
+        "terminal_roles": (("pin_1", "negative"), ("pin_2", "ntc"),
+                           ("pin_3", "positive")),
     },
     "NX-MGL00850-1S2P": {
         "source": "https://www.allbatteries.co.uk/li-ion-battery-2x-18650-1s2p-st1-3-6v-6-7ah-22awg-ntc-10k-mgl00850.html",
@@ -95,6 +99,8 @@ _PACKS = {
         "ntc": "10k", "pcm": True,
         "connector": "Molex 51021-0300 26AWG", "connector_continuous_a": 2.2,
         "lead_continuous_a": 2.2,
+        "terminal_roles": (("pin_1", "positive"), ("pin_2", "ntc"),
+                           ("pin_3", "negative_ntc_return")),
     },
 }
 
@@ -201,8 +207,13 @@ def evaluate(model: str, demand: dict, *, tray_mm=None,
         reasons.append("pack_current_rating_below_load_budget")
     if conn is None or lead is None:
         reasons.append("exact_connector_or_lead_ampacity_missing")
-    elif not harness_ok:
+    if any(rating is not None and rating < peak for rating in (conn, lead)):
         reasons.append("exact_connector_or_lead_ampacity_insufficient")
+    # These are published assignments, not continuity or polarity measurements.
+    terminal_roles = src.get("terminal_roles")
+    if terminal_roles is None:
+        reasons.append("manufacturer_terminal_pinout_missing")
+    reasons.append("physical_harness_wiring_not_verified")
     if src["ntc"] != "10k":
         reasons.append("pack_ntc_10k_not_fitted_in_exact_variant")
     if model == "THOR-18650-1S2P-5200":
@@ -214,6 +225,8 @@ def evaluate(model: str, demand: dict, *, tray_mm=None,
         "model": model, "vendor_source": src["source"],
         "protected": src["pcm"], "ntc": src["ntc"],
         "connector_variant": src["connector"],
+        "published_terminal_roles": dict(terminal_roles) if terminal_roles else None,
+        "physical_harness_wiring_verified": False,
         "assembled_pack_mm": None if fit is None else src["size_mm"],
         "bare_pack_mm": src["size_mm"] if fit is None else None,
         "cell_level_max_discharge_a": cell_ceiling,
