@@ -271,6 +271,24 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     with pytest.raises(ValueError, match="Unsafe power fit scope"):
         source.verify_fit_kit(tmp_path, output_dir=rendered)
     manifest.write_text(original)
+    for field, forged in (
+        ("protected_pack_body_only", 1),
+        ("includes_boost", 0),
+        ("whole_power_stack_fit_verified", 0.0),
+    ):
+        forged_scope = json.loads(original)
+        forged_scope["power_fit_scope"][field] = forged
+        manifest.write_text(json.dumps(forged_scope))
+        with pytest.raises(ValueError, match="Unsafe power fit scope"):
+            source.verify_fit_kit(tmp_path, output_dir=rendered)
+    manifest.write_text(original)
+    for field in ("triangles", "manifold_edges"):
+        changed = json.loads(original)
+        changed["parts"][0][field] = float(changed["parts"][0][field])
+        manifest.write_text(json.dumps(changed))
+        with pytest.raises(ValueError, match="Mesh geometry mismatch"):
+            source.verify_fit_kit(tmp_path, output_dir=rendered)
+    manifest.write_text(original)
     forged_bounds = json.loads(original)
     forged_bounds["parts"][0]["bbox_mm"]["dimensions_mm"][0] = 999.0
     manifest.write_text(json.dumps(forged_bounds))

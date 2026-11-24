@@ -457,7 +457,7 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
                 "commercial_manufacture_authorized",
             ))):
         raise ValueError("Unsafe fit kit provenance flags")
-    if report.get("power_fit_scope") != POWER_FIT_SCOPE:
+    if not same_json_evidence(report.get("power_fit_scope"), POWER_FIT_SCOPE):
         raise ValueError("Unsafe power fit scope")
     # A changed source chassis must invalidate an old packing screen.
     # Passing this reference-only screen can never authorize fit or charging.
@@ -519,8 +519,10 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
             raise ValueError(f"SCAD source changed: {location}")
         if sha256(mesh.read_bytes()).hexdigest() != item.get("mesh_sha256"):
             raise ValueError(f"STL changed: {location}")
-        if (binary_stl_triangles(mesh) != item.get("triangles")
-                or closed_mesh_edges(mesh) != item.get("manifold_edges")):
+        if (type(item.get("triangles")) is not int
+                or type(item.get("manifold_edges")) is not int
+                or binary_stl_triangles(mesh) != item["triangles"]
+                or closed_mesh_edges(mesh) != item["manifold_edges"]):
             raise ValueError(f"Mesh geometry mismatch: {location}")
         if not same_json_evidence(item.get("bbox_mm"), mesh_bounds_mm(mesh)):
             raise ValueError(f"STL bounds changed: {location}")
