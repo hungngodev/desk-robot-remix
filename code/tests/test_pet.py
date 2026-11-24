@@ -3769,6 +3769,73 @@ async def test_touch_persistence_cannot_renew_initiative_receipt(
         await pet.close()
 
 
+async def test_body_batch_preserves_receipt_across_memory_and_human_turn(
+    fleet, tmp_path, monkeypatch,
+):
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    speaker = SimulatedSpeaker()
+    body = {
+        "touch": {"active": False, "count": 0},
+        "extras": {
+            "mask": 2, "bumper": False, "bumps": 0,
+            "reed": False, "reed_count": 0,
+            "pir": False, "pir_count": 0,
+            "cap": 0, "cap_ok": True, "cap_events": 0,
+        },
+    }
+
+    async def status():
+        return body
+
+    pet = PetController(
+        fleet, {"robot-01": SimpleNamespace(status=status)},
+        Conversation(fleet, GroundedChat(), speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0, interaction_cooldown=0,
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 9
+    entered, release = asyncio.Event(), asyncio.Event()
+    latest = [float("-inf")]
+    pet.multimodal = SimpleNamespace(
+        sensor_event=lambda *_: None,
+        latest_fleet_human_turn_at=lambda: latest[0],
+        hub=SimpleNamespace(spontaneous_floor_busy=lambda _now: False),
+    )
+    store = pet._store_observation
+
+    async def delayed_store(robot_id, change, **kwargs):
+        if change.kind == "petting_zone":
+            entered.set()
+            await release.wait()
+        await store(robot_id, change, **kwargs)
+
+    monkeypatch.setattr(pet, "_store_observation", delayed_store)
+    await pet._touch_from_body("robot-01", 9)
+    body["touch"]["count"] = 1
+    body["extras"].update(cap=1, cap_events=1, reed=True, reed_count=1)
+    task = asyncio.create_task(pet._touch_from_body("robot-01", 9))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        latest[0] = time.monotonic()
+        release.set()
+        await asyncio.wait_for(task, timeout=2)
+        events = memory.recent("robot-01")
+        assert sorted(event.kind for event in events) == [
+            "magnet", "petting_zone", "touch",
+        ]
+        assert all(event.witnessed for event in events)
+        assert state.suppressed == 3
+        assert state.last_initiative_suppression == "human_turn_superseded_event"
+        assert not pet._admitted_event_kinds
+        assert pet._speech_task is None
+        assert speaker.spoken == []
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+        pet.multimodal = None
+        await pet.close()
+
+
 async def test_deliberate_touch_can_reply_after_passive_speech_cooldown(fleet, tmp_path):
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
     conversation = Conversation(

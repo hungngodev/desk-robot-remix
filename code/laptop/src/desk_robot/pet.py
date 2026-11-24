@@ -904,12 +904,13 @@ class PetController:
             self.multimodal.hub.notify(robot_id, kind, time.monotonic())
 
     async def _remember_touch(
-        self, robot_id: str, generation: int, kind: str, description: str
+        self, robot_id: str, generation: int, kind: str, description: str,
+        *, received_at: float | None = None,
     ) -> None:
         state = self.states[robot_id]
         if not state.enabled or state.generation != generation:
             return
-        received_at = time.monotonic()
+        received_at = time.monotonic() if received_at is None else received_at
         change = SceneChange(kind, description, 1.0)
         if kind in ("touch", "touch_tap", "touch_double", "touch_hold"):
             self._notify_sensor(robot_id, kind)
@@ -989,6 +990,7 @@ class PetController:
 
     async def _observe_aux(self, robot_id: str, generation: int, data: dict) -> None:
         """Record only real, fresh and optionally calibrated sensor transitions."""
+        received_at = time.monotonic()
         if self.settings.mode != "hardware":
             return
         from .aux import validate_aux
@@ -1329,7 +1331,9 @@ class PetController:
             state.last_event = change.description
             state.last_aux_kind = change.kind
             await self._store_observation(robot_id, change)
-            self._consider_speech(robot_id, change, generation)
+            self._consider_speech(
+                robot_id, change, generation, received_at=received_at,
+            )
 
     async def _poll_touch(self, robot_id: str, generation: int) -> None:
         """Dedicated local body status reader; camera/VLM cannot starve touch.
@@ -1356,13 +1360,17 @@ class PetController:
                 state.last_error = f"{type(exc).__name__}: {str(exc)[:120]}"
             await asyncio.sleep(self.touch_interval)
 
-    async def _observe_imu(self, robot_id: str, generation: int, body: dict) -> None:
+    async def _observe_imu(
+        self, robot_id: str, generation: int, body: dict, *,
+        received_at: float | None = None,
+    ) -> None:
         """Connect genuine WROOM six-axis telemetry to contextual pet events.
 
         Only the MPU6050 with the actual +/-2g and 250dps firmware settings
         is currently accepted. Stationary startup posture is a relative
         reference; no claim of absolute tilt angle, grasp or motor safety.
         """
+        received_at = time.monotonic() if received_at is None else received_at
         state = self.states[robot_id]
         if not state.enabled or state.generation != generation or self._closed:
             return
@@ -1391,7 +1399,9 @@ class PetController:
             state.handling_events += 1
             state.last_event = description
             await self._store_observation(robot_id, change)
-            self._consider_speech(robot_id, change, generation)
+            self._consider_speech(
+                robot_id, change, generation, received_at=received_at,
+            )
 
     async def _observe_body_safety(
         self, robot_id: str, generation: int, body: dict
@@ -1469,12 +1479,16 @@ class PetController:
             "safety_fault", description, 1.0
         ))
 
-    async def _observe_cap(self, robot_id: str, generation: int, extra: dict) -> None:
+    async def _observe_cap(
+        self, robot_id: str, generation: int, extra: dict, *,
+        received_at: float | None = None,
+    ) -> None:
         """Record actual CAP1188 rising-zone counters, never assume optional contact.
 
         A missing module, reboot, counter wrap or reconnect establishes a new
         baseline. CAP touch may prompt a playful reaction but grants no motion.
         """
+        received_at = time.monotonic() if received_at is None else received_at
         if not {"cap", "cap_ok", "cap_events"}.issubset(extra):
             return  # Backward compatible with heads lacking optional touch
         mask, good, count = extra["cap"], extra["cap_ok"], extra["cap_events"]
@@ -1525,10 +1539,16 @@ class PetController:
         change = SceneChange("petting_zone", description, 1.0)
         self._notify_sensor(robot_id, "petting_zone")
         await self._store_observation(robot_id, change)
-        self._consider_speech(robot_id, change, generation)
+        self._consider_speech(
+            robot_id, change, generation, received_at=received_at,
+        )
 
-    async def _observe_optional(self, robot_id: str, generation: int, body: dict) -> None:
+    async def _observe_optional(
+        self, robot_id: str, generation: int, body: dict, *,
+        received_at: float | None = None,
+    ) -> None:
         """Use real WROOM mask and counters, without inventing sensor evidence."""
+        received_at = time.monotonic() if received_at is None else received_at
         extra = body.get("extras")
         if not isinstance(extra, dict):
             return
@@ -1567,7 +1587,9 @@ class PetController:
         elif state.last_extra_boot_id is not None:
             return  # never downgrade to identity-free packets mid-session
 
-        await self._observe_cap(robot_id, generation, extra)
+        await self._observe_cap(
+            robot_id, generation, extra, received_at=received_at,
+        )
 
         values = {key: extra[key] for key in keys}
         previous = state.last_extra_events
@@ -1610,13 +1632,17 @@ class PetController:
             self._notify_sensor(robot_id, kind)
             await self._store_observation(robot_id, change)
             if key != "bumps":
-                self._consider_speech(robot_id, change, generation)
+                self._consider_speech(
+                    robot_id, change, generation, received_at=received_at,
+                )
 
     async def _observe_side_ranges(
         self, robot_id: str, generation: int, body: dict, *,
         request_elapsed_ms: float = 0.0,
+        received_at: float | None = None,
     ) -> None:
         """Read real WROOM channels 5..7 with no new drive authority."""
+        received_at = time.monotonic() if received_at is None else received_at
         state = self.states[robot_id]
         robot = self.settings.robot(robot_id)
         if (self.settings.mode != "hardware" or not state.enabled
@@ -1643,7 +1669,9 @@ class PetController:
             state.last_aux_kind = change.kind
             self._notify_sensor(robot_id, "side_object")
             await self._store_observation(robot_id, change)
-            self._consider_speech(robot_id, change, generation)
+            self._consider_speech(
+                robot_id, change, generation, received_at=received_at,
+            )
 
     async def _touch_from_body(self, robot_id: str, generation: int) -> None:
         """Consume firmware edge and gesture counters, never manufacture touch frames.
@@ -1680,10 +1708,17 @@ class PetController:
             # foreign WROOM fault, touch, or side-range reading to this pet.
             # The poller handles HeadError by disabling background activity.
             raise HeadError("Pet WROOM status identity mismatch")
+        # All events in this authenticated response share the Mac receipt.
+        # Awaited safety handling or storage cannot make later events newer.
+        received_at = time.monotonic()
         if isinstance(body, dict):
             await self._observe_body_safety(robot_id, generation, body)
-            await self._observe_imu(robot_id, generation, body)
-            await self._observe_optional(robot_id, generation, body)
+            await self._observe_imu(
+                robot_id, generation, body, received_at=received_at,
+            )
+            await self._observe_optional(
+                robot_id, generation, body, received_at=received_at,
+            )
             # Only the read-only side arrival gets a conservative age budget;
             # WROOM safety continues to use its independent local watchdog.
             await self._observe_side_ranges(
@@ -1691,6 +1726,7 @@ class PetController:
                 request_elapsed_ms=max(
                     0.0, (time.monotonic() - request_started_at) * 1000.0
                 ) if self.settings.mode == "hardware" else 0.0,
+                received_at=received_at,
             )
         touch = body.get("touch") if isinstance(body, dict) else None
         if not isinstance(touch, dict):
@@ -1755,7 +1791,10 @@ class PetController:
                 ("tap_count", "touch_tap", "Someone has tapped me"),
             ):
                 if deltas[key]:
-                    await self._remember_touch(robot_id, generation, kind, phrase)
+                    await self._remember_touch(
+                        robot_id, generation, kind, phrase,
+                        received_at=received_at,
+                    )
             return
 
         if previous_count is None or count < previous_count:
@@ -1765,7 +1804,8 @@ class PetController:
         # Compatibility for a head flashed before typed touch counters existed.
         if 0 < count - previous_count <= 20:
             await self._remember_touch(
-                robot_id, generation, "touch", "Someone has just touched my body"
+                robot_id, generation, "touch", "Someone has just touched my body",
+                received_at=received_at,
             )
 
     def _sync_visual_generation(self, robot_id: str) -> int | None:
