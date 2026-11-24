@@ -442,9 +442,90 @@ bool Protocol::IsTimeout() const {""",
         websocket_source = (target / path).read_text()
         websocket_source = replace_once(
             websocket_source,
+            '#define TAG "WS"\n\n',
+            '''#define TAG "WS"
+
+// Validate the pinned Xiaozhi binary wire layouts before any payload access.
+static bool ParseDeskAudioFrame(int version, const char* data, size_t len,
+                                size_t& offset, uint32_t& timestamp) {
+    offset = 0;
+    timestamp = 0;
+    if (data == nullptr || len == 0) return false;
+    const auto* bytes = reinterpret_cast<const uint8_t*>(data);
+    if (version == 1) return true;
+    if (version == 2) {
+        if (len <= 16 || bytes[0] != 0 || bytes[1] != 2 ||
+            bytes[2] != 0 || bytes[3] != 0) return false;
+        const auto read32 = [bytes](size_t pos) {
+            return (uint32_t(bytes[pos]) << 24) |
+                   (uint32_t(bytes[pos + 1]) << 16) |
+                   (uint32_t(bytes[pos + 2]) << 8) |
+                   uint32_t(bytes[pos + 3]);
+        };
+        if (read32(12) != len - 16) return false;
+        offset = 16;
+        timestamp = read32(8);
+        return true;
+    }
+    if (version == 3) {
+        if (len <= 4 || bytes[0] != 0) return false;
+        const size_t payload_size = (size_t(bytes[2]) << 8) | bytes[3];
+        if (payload_size != len - 4) return false;
+        offset = 4;
+        return true;
+    }
+    return false;
+}
+
+''',
+        )
+        # Keep the original wire formats, but do not cast a receive buffer
+        # to mutable packed headers or trust its advertised payload length.
+        websocket_source = replace_once(
+            websocket_source,
             """        if (binary) {
-            if (on_incoming_audio_ != nullptr) {""",
+            if (on_incoming_audio_ != nullptr) {
+                if (version_ == 2) {
+                    BinaryProtocol2* bp2 = (BinaryProtocol2*)data;
+                    bp2->version = ntohs(bp2->version);
+                    bp2->type = ntohs(bp2->type);
+                    bp2->timestamp = ntohl(bp2->timestamp);
+                    bp2->payload_size = ntohl(bp2->payload_size);
+                    auto payload = (uint8_t*)bp2->payload;
+                    on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
+                        .sample_rate = server_sample_rate_,
+                        .frame_duration = server_frame_duration_,
+                        .timestamp = bp2->timestamp,
+                        .payload = std::vector<uint8_t>(payload, payload + bp2->payload_size)}));
+                } else if (version_ == 3) {
+                    BinaryProtocol3* bp3 = (BinaryProtocol3*)data;
+                    bp3->type = bp3->type;
+                    bp3->payload_size = ntohs(bp3->payload_size);
+                    auto payload = (uint8_t*)bp3->payload;
+                    on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
+                        .sample_rate = server_sample_rate_,
+                        .frame_duration = server_frame_duration_,
+                        .timestamp = 0,
+                        .payload = std::vector<uint8_t>(payload, payload + bp3->payload_size)}));
+                } else {
+                    on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
+                        .sample_rate = server_sample_rate_,
+                        .frame_duration = server_frame_duration_,
+                        .timestamp = 0,
+                        .payload = std::vector<uint8_t>((uint8_t*)data, (uint8_t*)data + len)}));
+                }
+            }
+""",
             """        if (binary) {
+            size_t payload_offset = 0;
+            uint32_t timestamp = 0;
+            if (!ParseDeskAudioFrame(version_, data, len, payload_offset, timestamp)) {
+                // A missing/invalid frame cannot later be credited as played.
+                desk_playback_id_ = 0;
+                desk_playback_position_ms_ = 0;
+                return;
+            }
+            if (on_incoming_audio_ == nullptr) return;
             uint32_t playback_id = 0;
             uint32_t media_position_ms = 0;
             if (desk_playback_id_ != 0 && server_frame_duration_ > 0) {
@@ -458,29 +539,15 @@ bool Protocol::IsTimeout() const {""",
                     desk_playback_position_ms_ = 0;
                 }
             }
-            if (on_incoming_audio_ != nullptr) {""",
-        )
-        websocket_source = replace_once(
-            websocket_source,
-            """                        .timestamp = bp2->timestamp,
-                        .payload = std::vector<uint8_t>(payload, payload + bp2->payload_size)}));""",
-            """                        .timestamp = bp2->timestamp,
-                        .playback_id = playback_id,
-                        .media_position_ms = media_position_ms,
-                        .payload = std::vector<uint8_t>(payload, payload + bp2->payload_size)}));""",
-        )
-        legacy_packet_anchor = """                        .timestamp = 0,
-                        .payload = """
-        if websocket_source.count(legacy_packet_anchor) != 2:
-            raise ValueError(
-                "Upstream WebSocket packet layouts changed for playback metadata"
-            )
-        websocket_source = websocket_source.replace(
-            legacy_packet_anchor,
-            """                        .timestamp = 0,
-                        .playback_id = playback_id,
-                        .media_position_ms = media_position_ms,
-                        .payload = """,
+            const auto* payload = reinterpret_cast<const uint8_t*>(data) + payload_offset;
+            on_incoming_audio_(std::make_unique<AudioStreamPacket>(AudioStreamPacket{
+                .sample_rate = server_sample_rate_,
+                .frame_duration = server_frame_duration_,
+                .timestamp = timestamp,
+                .playback_id = playback_id,
+                .media_position_ms = media_position_ms,
+                .payload = std::vector<uint8_t>(payload, payload + len - payload_offset)}));
+""",
         )
         websocket_source = replace_once(
             websocket_source,

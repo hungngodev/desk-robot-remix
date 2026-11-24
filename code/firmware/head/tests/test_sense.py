@@ -418,6 +418,72 @@ class SenseOverlayTests(unittest.TestCase):
         original = (UPSTREAM / "main/protocols/websocket_protocol.cc").read_text()
         assert 'desk_playback_id_' not in original
 
+    def test_sense_websocket_audio_frame_bounds(self):
+        """Compile the actual installed parser against malformed wire frames."""
+        overlay.apply(self.root, "sense")
+        source = (self.root / "main/protocols/websocket_protocol.cc").read_text()
+        parser = "static bool ParseDeskAudioFrame(" + source.split(
+            "static bool ParseDeskAudioFrame(", 1
+        )[1].split("WebsocketProtocol::WebsocketProtocol()", 1)[0]
+        receive = source.split("websocket_->OnData(", 1)[1].split(
+            "// Parse JSON data", 1
+        )[0]
+        assert receive.index("!ParseDeskAudioFrame(") < receive.index(
+            "desk_playback_position_ms_ += frame_ms"
+        )
+        rejected = receive.split("!ParseDeskAudioFrame(", 1)[1].split(
+            "if (on_incoming_audio_ == nullptr)", 1
+        )[0]
+        assert "desk_playback_id_ = 0;" in rejected
+        assert "desk_playback_position_ms_ = 0;" in rejected
+        assert "return;" in rejected
+        assert "payload + len - payload_offset" in receive
+        assert "BinaryProtocol2*" not in receive
+        assert "BinaryProtocol3*" not in receive
+        compiler = shutil.which("g++") or shutil.which("c++")
+        if compiler is None:
+            self.skipTest("Native C++ compiler unavailable")
+        program = self.root / "audio_frame_bounds.cc"
+        executable = self.root / "audio_frame_bounds"
+        program.write_text(
+            "#include <cassert>\n#include <cstddef>\n#include <cstdint>\n" + parser + r"""
+int main() {
+    size_t offset = 999;
+    uint32_t timestamp = 999;
+    const char v1[] = {1};
+    const char v2[] = {0,2,0,0,0,0,0,0,0,0,1,44,0,0,0,1,7};
+    const char v3[] = {0,0,0,1,7};
+    assert(ParseDeskAudioFrame(1, v1, sizeof(v1), offset, timestamp));
+    assert(offset == 0 && timestamp == 0);
+    assert(!ParseDeskAudioFrame(1, nullptr, 1, offset, timestamp));
+    assert(!ParseDeskAudioFrame(1, v1, 0, offset, timestamp));
+    assert(!ParseDeskAudioFrame(9, v1, 1, offset, timestamp));
+    for (size_t len = 0; len < sizeof(v2); ++len)
+        assert(!ParseDeskAudioFrame(2, v2, len, offset, timestamp));
+    for (size_t len = 0; len < sizeof(v3); ++len)
+        assert(!ParseDeskAudioFrame(3, v3, len, offset, timestamp));
+    assert(ParseDeskAudioFrame(2, v2, sizeof(v2), offset, timestamp));
+    assert(offset == 16 && timestamp == 300 && v2[11] == 44);
+    assert(ParseDeskAudioFrame(3, v3, sizeof(v3), offset, timestamp));
+    assert(offset == 4 && timestamp == 0);
+    const char oversized[] = {0,0,0,2,7};
+    const char trailing[] = {0,0,0,1,7,8};
+    const char wrong_type[] = {1,0,0,1,7};
+    const char wrong_version[] = {0,3,0,0,0,0,0,0,0,0,0,0,0,0,0,1,7};
+    assert(!ParseDeskAudioFrame(3, oversized, sizeof(oversized), offset, timestamp));
+    assert(!ParseDeskAudioFrame(3, trailing, sizeof(trailing), offset, timestamp));
+    assert(!ParseDeskAudioFrame(3, wrong_type, sizeof(wrong_type), offset, timestamp));
+    assert(!ParseDeskAudioFrame(2, wrong_version, sizeof(wrong_version), offset, timestamp));
+}
+"""
+        )
+        subprocess.run(
+            [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+             str(program), "-o", str(executable)],
+            check=True, capture_output=True, text=True, env=native_cpp_env(),
+        )
+        subprocess.run([str(executable)], check=True, capture_output=True, text=True)
+
     def test_sense_pdm_mic_read_timeout_is_bounded(self):
         """A PDM DMA stall must yield to the existing Xiaozhi audio task.
 
