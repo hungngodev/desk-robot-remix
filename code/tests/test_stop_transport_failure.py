@@ -153,23 +153,29 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
 
 
     async def test_urgent_halt_bypasses_stalled_status_request(self):
-        """A stalled status GET must not consume the terminal HALT budget."""
+        """Terminal STOP bypasses both pending reads and retires queued drive."""
         import httpx
-        from desk_robot.transport import HttpHead
+        from desk_robot.transport import HeadError, HttpHead
 
         entered = asyncio.Event()
+        camera_entered = asyncio.Event()
         release = asyncio.Event()
         halt_sent = asyncio.Event()
+        jpeg = b"\xff\xd8\xff\xd9"  # Synthetic transport envelope, not a decoded frame.
 
         async def handler(request):
+            self.assertEqual(
+                request.headers["Authorization"], "Bearer fixture-token"
+            )
             if request.method == "GET" and request.url.path == "/api/status":
                 entered.set()
                 await release.wait()
                 return httpx.Response(200, json={"robot_id": "robot-01"})
+            if request.method == "GET" and request.url.path == "/api/camera.jpg":
+                camera_entered.set()
+                await release.wait()
+                return httpx.Response(200, content=jpeg)
             if request.method == "POST" and request.url.path == "/api/command":
-                self.assertEqual(
-                    request.headers["Authorization"], "Bearer fixture-token"
-                )
                 self.assertEqual(json.loads(request.content), {"command": "halt"})
                 halt_sent.set()
                 return httpx.Response(
@@ -182,20 +188,48 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
         )
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             head = HttpHead(config, client)
+            coordinator = object.__new__(Coordinator)
+            coordinator.settings = SimpleNamespace(robot=lambda robot_id: object())
+            coordinator.heads = {"robot-01": head}
+            coordinator.jobs = {}
+            coordinator.tasks = {}
+            coordinator.permits = {"robot-01": 123.0}
+            coordinator._permit_epoch = {"robot-01": 0}
             with patch("desk_robot.transport.secret", return_value="fixture-token"):
                 stalled_get = asyncio.create_task(head.status())
+                stalled_camera = asyncio.create_task(head.snapshot())
+                queued_drive = None
                 try:
                     await asyncio.wait_for(entered.wait(), timeout=1.0)
+                    await asyncio.wait_for(camera_entered.wait(), timeout=1.0)
                     self.assertTrue(head.lock.locked())
+                    self.assertTrue(head.capture_lock.locked())
+                    queued_drive = asyncio.create_task(head.command("drive 20 20 100"))
+                    await asyncio.sleep(0)
+                    self.assertFalse(queued_drive.done())
                     receipt = await asyncio.wait_for(
-                        head.command("halt"), timeout=0.5
+                        coordinator.stop("robot-01"), timeout=0.5
                     )
                     self.assertTrue(halt_sent.is_set())
                     self.assertEqual(receipt["reply"], "OK halt")
+                    self.assertNotIn("robot-01", coordinator.permits)
+                    self.assertEqual(coordinator._permit_epoch["robot-01"], 1)
                     self.assertFalse(stalled_get.done())
-                finally:
+                    self.assertFalse(stalled_camera.done())
                     release.set()
                     await asyncio.wait_for(stalled_get, timeout=1.0)
+                    self.assertEqual(
+                        await asyncio.wait_for(stalled_camera, timeout=1.0), jpeg
+                    )
+                    with self.assertRaisesRegex(HeadError, "superseded"):
+                        await asyncio.wait_for(queued_drive, timeout=1.0)
+                finally:
+                    release.set()
+                    await asyncio.gather(
+                        *(task for task in (stalled_get, stalled_camera, queued_drive)
+                          if task is not None),
+                        return_exceptions=True,
+                    )
 
 
     async def test_halt_fences_queued_commands_without_overtaking_arm_post(self):
