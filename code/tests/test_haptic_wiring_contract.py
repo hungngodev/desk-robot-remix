@@ -258,7 +258,10 @@ def test_manifest_rejects_upstream_i2c_address_conflicts():
     plan = generator.read_wiring_plan(ROOT / generator.PLAN)
     body = (ROOT / generator.BODY_PINS).read_text()
     head = (ROOT / generator.HEAD_PINS).read_text()
-    for wrong in (0x70, 0x69, 104.0, True):
+    alternate = copy.deepcopy(plan)
+    alternate["bus"]["upstream"][0]["address"] = 0x69
+    assert "MPU6050 (0x69)" in generator.render(alternate, body, head)
+    for wrong in (0x70, 0x67, 104.0, True):
         corrupt = copy.deepcopy(plan)
         corrupt["bus"]["upstream"][0]["address"] = wrong
         with pytest.raises(ValueError, match="Upstream I2C"):
@@ -267,3 +270,46 @@ def test_manifest_rejects_upstream_i2c_address_conflicts():
     corrupt["bus"]["upstream"].pop()
     with pytest.raises(ValueError, match="Upstream I2C"):
         generator.verify(corrupt, body, head)
+
+
+def test_manifest_operator_rows_identify_safety_connections_and_physical_lanes():
+    import importlib.util
+
+    path = ROOT / "code/scripts/emit_wiring_manifest.py"
+    spec = importlib.util.spec_from_file_location("wiring_operator_rows", path)
+    assert spec and spec.loader
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    plan = generator.read_wiring_plan(ROOT / generator.PLAN)
+    output = generator.render(
+        plan, (ROOT / generator.BODY_PINS).read_text(),
+        (ROOT / generator.HEAD_PINS).read_text(),
+    )
+    rows = [line for line in output.splitlines() if line.startswith("|")]
+    assert all(line.count("|") == 5 and line.endswith("|") for line in rows)
+    for connection in (
+        "GPA0/GPA1 via 3.3V pullups", "open/HIGH on either input blocks motion",
+        "DRV8833 nFAULT (DC only) | MCP23017 GPB3",
+        "Disconnected lead must read LOW/fault",
+        "Both TCA9548A active-LOW RESET inputs",
+        "0x70 A2/A1/A0 LOW; 0x71 A2/A1 LOW, A0 HIGH",
+        "XIAO Sense onboard camera",
+    ):
+        assert connection in output
+    for index, position in enumerate((
+        "floor front left", "floor front right", "floor rear left",
+        "floor rear right", "front obstacle", "left obstacle",
+        "right obstacle", "rear obstacle",
+    )):
+        lane = next(row for row in rows if f"Range TCA9548A 0x70 CH{index} " in row)
+        assert position in lane
+        if index >= 5:
+            assert "no movement authority" in lane
+        else:
+            assert "critical" in lane
+    for index, side in ((6, "left"), (7, "right")):
+        lane = next(row for row in rows if f"Accessory TCA9548A 0x71 CH{index} " in row)
+        assert f"{side} wheel rotation" in lane
+    assert "**Assembly readiness: NO." in output
+    assert output.rstrip() == (HARDWARE /
+        "one-robot-signal-harness.generated.md").read_text().rstrip()

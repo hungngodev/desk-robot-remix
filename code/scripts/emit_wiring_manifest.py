@@ -101,6 +101,8 @@ def verify(plan: dict, body: str, head: str) -> None:
         if len(match) != 1 or [int(x) for x in match[0].split(",")] != bus["body_gpio"][label]:
             raise ValueError(f"Stepper phase pin drift: {label}")
     body_pins = bus["body_gpio"]
+    if any(len(body_pins[role]) != 4 for role in ("left_stepper", "right_stepper")):
+        raise ValueError("Each stepper requires exactly four phase GPIOs")
     for role, value in body_pins.items():
         pins = value if isinstance(value, list) else [value]
         if any(pin not in _WROOM32_GPIO_PADS for pin in pins):
@@ -150,6 +152,8 @@ def verify(plan: dict, body: str, head: str) -> None:
     # Native USB, flash/PSRAM, debug UART, strapping and onboard signals
     # are not spare external harness connections.
     sense_pins = bus["sense_gpio"]
+    if any(type(pin) is not int for pin in sense_pins.values()):
+        raise ValueError("Sense GPIO roles require one integer pin each")
     if set(sense_pins) != set(HEAD_SINGLE) | {"rgb_data"}:
         raise ValueError("Unknown or incomplete Sense GPIO roles")
     camera_symbols = (
@@ -187,15 +191,16 @@ def verify(plan: dict, body: str, head: str) -> None:
     # downstream lane is isolated. Require the actual three firmware owners.
     upstream = bus.get("upstream")
     expected_upstream = {
-        ("MPU6050", 0x68), ("TCA9548A ranges", 0x70),
-        ("TCA9548A interactions", 0x71),
+        "MPU6050": {0x68, 0x69},
+        "TCA9548A ranges": {0x70}, "TCA9548A interactions": {0x71},
     }
     if (not isinstance(upstream, list) or len(upstream) != len(expected_upstream)
             or any(not isinstance(device, dict)
                    or not isinstance(device.get("device"), str)
                    or type(device.get("address")) is not int for device in upstream)
-            or {(device["device"], device["address"]) for device in upstream}
-            != expected_upstream):
+            or {device["device"] for device in upstream} != expected_upstream.keys()
+            or any(device["address"] not in expected_upstream[device["device"]]
+                   for device in upstream)):
         raise ValueError("Upstream I2C device identity or address conflict")
     # Do not accept bool/float addresses that compare equal to an integer.
     # They would later break hex formatting or misstate the physical harness.
@@ -357,7 +362,8 @@ def render(plan: dict, body: str, head: str) -> str:
     row("WROOM GPIO27 + GPIO32", "right DRV8833 BIN1/BIN2 (DC FULL only)",
         "3.3V motor PWM signals, alternative to right ULN2003",
         "Guarded DC profile; physical load unqualified")
-    row("WROOM GPIO23 (DC only; same as STEP right coil 4)",
+    heartbeat_phase = bus["body_gpio"]["right_stepper"].index(23) + 1
+    row(f"WROOM GPIO23 (DC only; same as STEP right coil {heartbeat_phase})",
         "CD74HC123 channel 2 B rising-edge input",
         "CPU-only 15ms toggles, 3.3V; no LEDC, pull LOW at boot",
         "Source in esp32_dc_watchdog_lab and esp32_dc_integrated_lab; nSLEEP gate unqualified")
@@ -387,6 +393,10 @@ def render(plan: dict, body: str, head: str) -> str:
         "Kelvin sense across protected pack current shunt",
         "Opt-in signed 5mOhm current, fresh I2C seq, 3.3V logic",
         "Not physical calibration; NO software charge enable or approval")
+    row("Two independent normally closed dock stop switches",
+        "MCP23017 0x20 GPA0/GPA1 via 3.3V pullups",
+        "Each closes to GND; open/HIGH on either input blocks motion",
+        "Mandatory source interlock; actual switches and fault behavior HOLD")
     row("BQ24075 open drain PGOOD and CHG",
         "MCP23017 0x20 GPA2/GPA3 via 3.3V pullups",
         "Read-only; PGOOD=LOW input good, CHG=LOW charge indicated",
@@ -403,8 +413,17 @@ def render(plan: dict, body: str, head: str) -> str:
         "MAX98357A VIN with local 0.1uF + 10uF decoupling",
         "Common ground; amplifier outputs floating differential",
         "MAX98357A manufacturer datasheet bypass; current/acoustic tests HOLD")
-    row("WROOM GPIO21 SDA + GPIO22 SCL", "MPU6050 + 0x70 + 0x71 mux inputs",
+    imu_address = next(device["address"] for device in bus["upstream"]
+                       if device["device"] == "MPU6050")
+    row(f"WROOM GPIO{bus['body_gpio']['sda']} SDA + GPIO{bus['body_gpio']['scl']} SCL",
+        f"MPU6050 (0x{imu_address:02X}) + 0x70 + 0x71 mux inputs",
         "3.3V I2C; actual breakout pullups need checking")
+    row("3.3V logic via appropriate pullups", "Both TCA9548A active-LOW RESET inputs",
+        "Passive HIGH; no WROOM GPIO4 or other MCU RESET drive",
+        "Exact breakout and startup levels HOLD")
+    row("TCA9548A address straps", "0x70 ranges and 0x71 accessories",
+        "0x70 A2/A1/A0 LOW; 0x71 A2/A1 LOW, A0 HIGH",
+        "Verify actual board address straps before power-up")
     for signal, target in (("head_touch", "AT42QT1010 OUT"),
                            ("bumper_nc_series", "NC bumper series OUT")):
         row(f"WROOM GPIO{bus['body_gpio'][signal]}", target,
@@ -413,6 +432,9 @@ def render(plan: dict, body: str, head: str) -> str:
         "3.3V input; closes LOW to GND", "Source polled; physically unqualified")
     row("MCP23017 GPB1", "optional PIR output",
         "3.3V input; active HIGH", "Source polled; physically unqualified")
+    row("DRV8833 nFAULT (DC only)", "MCP23017 GPB3",
+        "Open drain active LOW; 4.7k 3.3V pullup at driver, 100k pulldown at expander",
+        "Disconnected lead must read LOW/fault; carrier and fault response HOLD")
     row("MCP23017 GPB2", "CD74HC123 rising-edge haptic trigger (1B pin 2)",
         "3.3V lab-only edge, not motor current; external defined LOW at boot",
         "Source gated in esp32_full_haptic_lab and esp32_dc_integrated_lab; physical one-shot NOT qualified")
@@ -434,10 +456,12 @@ def render(plan: dict, body: str, head: str) -> str:
     row("Rated regulated 3V motor supply", "Coin motor positive; motor negative to AO3400 drain",
         "Flyback diode cathode to motor positive, anode to drain",
         "Current limit, stall, heat and independent pulse termination HOLD")
-    row("WROOM GPIO36 reserved", "left 38kHz IR demodulator",
+    row(f"WROOM GPIO{bus['body_gpio']['terminal_ir_left_reserved']} reserved",
+        "left 38kHz IR demodulator",
         "Demodulated NEC burst input, external bias; ESP32 erratum",
         "Bounded RMT decoder in source; NO physical receiver acceptance, do NOT wire yet")
-    row("WROOM GPIO39 reserved", "right 38kHz IR demodulator",
+    row(f"WROOM GPIO{bus['body_gpio']['terminal_ir_right_reserved']} reserved",
+        "right 38kHz IR demodulator",
         "Demodulated NEC burst input, external bias; ESP32 erratum",
         "Bounded RMT decoder in source; NO physical receiver acceptance, do NOT wire yet")
     for signal, target in (("oled_sda", "SSD1306 SDA"), ("oled_scl", "SSD1306 SCL"),
@@ -450,6 +474,9 @@ def render(plan: dict, body: str, head: str) -> str:
     row("MAX98357A OUTP and OUTN", "8 ohm 2 W CS20-02P110-04-1X + and -",
         "Bridge tied differential outputs; NEVER connect either output to GND",
         "Manufacturer 5V 8ohm nominal 1.8W; real carrier/rectangular baffle heat HOLD")
+    row("XIAO Sense onboard camera", "Internal camera data, clocks and SCCB",
+        "Stock integrated camera; no external harness connection",
+        "Source allocation only; physical camera and SD isolation HOLD")
     row("XIAO onboard GPIO41 DIN + GPIO42 CLK", "Sense PDM microphone",
         "Integrated board pins, NOT connections to WROOM")
     row("XIAO GPIO9 reserved", "RGB heart data",
@@ -470,8 +497,19 @@ def render(plan: dict, body: str, head: str) -> str:
             if group == "Range":
                 signal = ("WROOM 3.3V logic ONLY; carrier VIN and external "
                           "SDA/SCL pullup voltage UNKNOWN; 5V exposure forbidden")
+                position = lane["position"].replace("_", " ")
+                if lane["channel"] < 4:
+                    role = "critical cliff"
+                elif lane["channel"] == 4:
+                    role = "critical obstacle"
+                else:
+                    role = "read-only observation; no movement authority"
+                devices = f"{devices}, {position} ({role})"
                 evidence = "Unqualified carrier; DO NOT ENERGIZE before voltage checks"
             else:
+                if lane["channel"] in (6, 7):
+                    side = "left" if lane["channel"] == 6 else "right"
+                    devices = f"{devices}, {side} wheel rotation"
                 signal = "Isolated 3.3V I2C lane; separately qualify GND/VCC"
                 evidence = "Source driver; physical carrier unqualified"
             row(f"{group} TCA9548A 0x{mux['address']:02X} CH{lane['channel']} SDA/SCL",
