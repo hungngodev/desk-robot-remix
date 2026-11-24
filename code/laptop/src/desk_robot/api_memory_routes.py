@@ -78,6 +78,31 @@ def register_memory_routes(
         worker.add_done_callback(consume_unclaimed_result)
         return await asyncio.shield(worker)
 
+    # A dispatched SQLite mutation can outlive a cancelled HTTP request.
+    # Its owner must also complete the event-loop prompt invalidation.
+    pending_mutations: set[asyncio.Task] = set()
+
+    async def apply_mutation(mutate, *args, generation, invalidate,
+                             always_invalidate=False):
+        async def owned_mutation():
+            changed = await asyncio.to_thread(
+                mutate, *args, mutation_generation=generation,
+            )
+            if changed or always_invalidate:
+                invalidate()
+            return changed
+
+        worker = asyncio.create_task(owned_mutation())
+        pending_mutations.add(worker)
+
+        def finished(done):
+            pending_mutations.discard(done)
+            if not done.cancelled():
+                done.exception()
+
+        worker.add_done_callback(finished)
+        return await asyncio.shield(worker)
+
     def invalidate_private_prompt(robot_id: str) -> None:
         """Revoke group prompts that may contain a changed private fact."""
         conversation = getattr(app.state.runtime, "conversation", None)
@@ -165,19 +190,15 @@ def register_memory_routes(
                 robot_id, app.state.runtime.memory.reserve_core_fact_mutation,
                 slot, request.value,
             )
-            changed = await asyncio.to_thread(
+            changed = await apply_mutation(
                 app.state.runtime.memory.set_core_fact,
-                robot_id, slot, request.value,
-                mutation_generation=generation,
+                robot_id, slot, request.value, generation=generation,
+                invalidate=lambda: invalidate_private_prompt(robot_id),
             )
         except CoreMemoryMutationSuperseded as exc:
             raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
-        if changed:
-            # Core preferences enter the same private dialogue prompts as
-            # episodes; an old model completion must not speak stale facts.
-            invalidate_private_prompt(robot_id)
         return {"robot_id": robot_id, "slot": slot, "changed": changed,
                 "operator_curated": True, "motor_authorized": False}
 
@@ -193,16 +214,15 @@ def register_memory_routes(
                 robot_id, app.state.runtime.memory.reserve_core_fact_mutation,
                 slot,
             )
-            removed = await asyncio.to_thread(
+            removed = await apply_mutation(
                 app.state.runtime.memory.forget_core_fact, robot_id, slot,
-                mutation_generation=generation,
+                generation=generation,
+                invalidate=lambda: invalidate_private_prompt(robot_id),
             )
         except CoreMemoryMutationSuperseded as exc:
             raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
-        if removed:
-            invalidate_private_prompt(robot_id)
         return {"robot_id": robot_id, "slot": slot, "removed": removed}
 
     @app.patch("/v1/pet/{robot_id}/memories/{event_id}",
@@ -220,17 +240,15 @@ def register_memory_routes(
                 robot_id, app.state.runtime.memory.reserve_episode_mutation,
                 event_id, request.summary,
             )
-            corrected = await asyncio.to_thread(
+            corrected = await apply_mutation(
                 app.state.runtime.memory.correct_episode,
-                robot_id, event_id, request.summary,
-                mutation_generation=generation,
+                robot_id, event_id, request.summary, generation=generation,
+                invalidate=lambda: retract_live_asr(robot_id, event_id),
             )
         except EpisodeMemoryMutationSuperseded as exc:
             raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
-        if corrected:
-            retract_live_asr(robot_id, event_id)
         return {
             "robot_id": robot_id,
             "event_id": event_id,
@@ -252,18 +270,18 @@ def register_memory_routes(
                 robot_id, app.state.runtime.memory.reserve_episode_mutation,
                 event_id,
             )
-            removed = await asyncio.to_thread(
+            # Even a missing episode gets a durable tombstone, so retract
+            # the volatile event regardless of the returned row count.
+            removed = await apply_mutation(
                 app.state.runtime.memory.forget_episode, robot_id, event_id,
-                mutation_generation=generation,
+                generation=generation,
+                invalidate=lambda: retract_live_asr(robot_id, event_id),
+                always_invalidate=True,
             )
         except EpisodeMemoryMutationSuperseded as exc:
             raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(422, str(exc)) from exc
-        # The durable tombstone applies even when a delayed transcript
-        # has not inserted its episode yet. Retract this same event in RAM
-        # whether or not a row existed at delete time.
-        retract_live_asr(robot_id, event_id)
         return {"robot_id": robot_id, "event_id": event_id,
                 "removed": removed, "local_only": True}
 
