@@ -239,6 +239,8 @@ class Coordinator:
         owner_epoch = self._permit_epoch[robot_id]
         self.permits.pop(robot_id, None)
         await self._hardware_preflight(robot_id)
+        if not self.robot(robot_id).motion_enabled:
+            raise OperationError("motion_enabled=false; no permit granted")
         if (self.closed or self._permit_epoch[robot_id] != owner_epoch
                 or self.locks[robot_id].locked()
                 or any(j.robot_id == robot_id and j.state in {"queued", "running"}
@@ -496,9 +498,15 @@ class Coordinator:
                 # sample can expire after the operator granted the permit.
                 # Recheck the real body immediately before requesting arm.
                 await self._hardware_preflight(job.robot_id)
+                if not self.robot(job.robot_id).motion_enabled:
+                    raise OperationError("motion_enabled=false; no arm sent")
                 await self.heads[job.robot_id].command(
                     "arm"
                 )  # only after consuming operator permit
+                # A changed configuration while ARM is in flight cannot
+                # authorize subsequent actuator commands. HALT in finally.
+                if not self.robot(job.robot_id).motion_enabled:
+                    raise OperationError("motion_enabled=false; no movement sent")
                 acknowledged = asyncio.Event()
                 keeper = asyncio.create_task(self._keepalive(job.robot_id, acknowledged))
                 watchdog = asyncio.create_task(self._watch_keepalive(acknowledged))

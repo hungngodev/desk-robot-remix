@@ -1908,3 +1908,107 @@ async def test_job_result_not_published_before_terminal_halt_receipt(settings, h
         head.command = original
         await c.stop("robot-01")
         await c.close()
+
+
+async def test_manual_command_rejection_precedes_permit_consumption_and_dispatch(settings):
+    c, head = make(settings)
+    try:
+        await c.operator_arm("robot-01")
+        expiry = c.permits["robot-01"]
+        for command in (
+            "drive 41 0 100", "drive 0 0 251", "drive 0 0 0",
+            "drive 0 0 nan", "drive 0  0 100", "drive 0 0 100\narm",
+            "lift 59", "grip 121", "rearm", "stop extra",
+        ):
+            with pytest.raises(ValueError):
+                c.manual("robot-01", command)
+        for command in ("arm", "keepalive", "stop", "halt", "disarm", "ping", "status"):
+            with pytest.raises(OperationError, match="Manual movement requires"):
+                c.manual("robot-01", command)
+        assert head.commands == []
+        assert not c.jobs and not c.tasks
+        assert c._fleet_motion_owner is None
+        assert c.permits["robot-01"] == expiry
+
+        job = c.manual("robot-01", "drive -40 40 1")
+        await asyncio.wait_for(c.tasks[job.id], timeout=2)
+        assert job.state == "succeeded", job.error
+        assert head.commands.count("drive -40 40 1") == 1
+        assert head.commands[-1] == "halt"
+        assert "robot-01" not in c.permits
+    finally:
+        await c.close()
+
+
+async def test_motion_disabled_during_operator_preflight_never_creates_permit(settings):
+    settings.mode = "hardware"
+    started, resume = asyncio.Event(), asyncio.Event()
+    head = HardwareStatusHead("robot-01")
+    original_status = head.status
+
+    async def delayed_status():
+        started.set()
+        await resume.wait()
+        return await original_status()
+
+    head.status = delayed_status
+    c = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    pending = asyncio.create_task(c.operator_arm("robot-01"))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        settings.robots[0].motion_enabled = False
+        resume.set()
+        with pytest.raises(OperationError, match="motion_enabled=false"):
+            await asyncio.wait_for(pending, timeout=1)
+        assert "robot-01" not in c.permits
+        assert head.commands == []
+    finally:
+        resume.set()
+        await asyncio.gather(pending, return_exceptions=True)
+        await c.close()
+
+
+@pytest.mark.parametrize("stage", ["queued", "preflight", "arm_receipt"])
+async def test_motion_disabled_before_manual_dispatch(settings, stage):
+    settings.mode = "hardware"
+    started, resume = asyncio.Event(), asyncio.Event()
+    head = HardwareStatusHead("robot-01")
+    original_status = head.status
+    original_command = head.command
+    c = Coordinator(settings, {"robot-01": head}, SimulationVision())
+
+    async def gated_status():
+        started.set()
+        await resume.wait()
+        return await original_status()
+
+    async def gated_command(command):
+        result = await original_command(command)
+        if command == "arm":
+            started.set()
+            await resume.wait()
+        return result
+
+    try:
+        await c.operator_arm("robot-01")
+        if stage == "preflight":
+            head.status = gated_status
+        elif stage == "arm_receipt":
+            head.command = gated_command
+        job = c.manual("robot-01", "drive 20 20 100")
+        if stage != "queued":
+            await asyncio.wait_for(started.wait(), timeout=1)
+        settings.robots[0].motion_enabled = False
+        resume.set()
+        await asyncio.wait_for(c.tasks[job.id], timeout=2)
+        assert job.state == "failed"
+        assert "motion_enabled=false" in job.error
+        assert job.result is None
+        assert head.commands == (
+            ["arm", "halt"] if stage == "arm_receipt" else ["halt"]
+        )
+        assert "robot-01" not in c.permits
+        assert c._fleet_motion_owner is None
+    finally:
+        resume.set()
+        await c.close()
