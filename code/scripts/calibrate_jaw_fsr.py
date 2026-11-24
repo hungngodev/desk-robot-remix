@@ -232,6 +232,8 @@ async def capture(
             if (type(boot) is not int or not 1 <= boot <= 0xffffffff
                     or type(age) is not int or not 0 <= age < 500):
                 raise ValueError("Physical jaw calibration requires WROOM boot and jaw age")
+            if force.get("jaw_valid") is not True:
+                raise ValueError("Physical jaw calibration requires independent jaw validity")
             if "boot_id" in boot_state and boot_state["boot_id"] != boot:
                 raise ValueError("WROOM reboot invalidated jaw force calibration")
             if age + max(0, int((time.monotonic() - started) * 1000)) >= 500:

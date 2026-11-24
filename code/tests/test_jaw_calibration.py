@@ -86,7 +86,7 @@ async def test_real_jaw_calibration_rejects_reboot_amid_independent_samples():
         sequence += 1
         return httpx.Response(200, json={
             "robot_id": "robot-01",
-            "force": {"valid": True, "calibrated": False,
+            "force": {"valid": True, "jaw_valid": True, "calibrated": False,
                       "adc": [0, 100], "jaw_seq": sequence,
                       "boot_id": 5 if sequence < 3 else 6,
                       "jaw_age_ms": 10},
@@ -106,7 +106,7 @@ async def test_real_jaw_calibration_preserves_boot_across_manual_phases():
         sequence += 1
         return httpx.Response(200, json={
             "robot_id": "robot-01",
-            "force": {"valid": True, "calibrated": False,
+            "force": {"valid": True, "jaw_valid": True, "calibrated": False,
                       "adc": [0, 100], "jaw_seq": sequence,
                       "boot_id": current_boot, "jaw_age_ms": 10},
         })
@@ -224,3 +224,37 @@ async def test_jaw_candidate_rejects_invalid_existing_grasp_step(tmp_path, monke
     with pytest.raises(ValueError, match="grip_step_deg"):
         await tool["main"]()
     assert not (tmp_path / "grasp.jaw_candidate.json").exists()
+
+
+async def test_physical_jaw_capture_requires_independent_channel_validity():
+    def respond(_request):
+        return httpx.Response(200, json={
+            "robot_id": "robot-01",
+            "force": {"valid": True, "calibrated": False,
+                      "adc": [0, 100], "jaw_seq": 1,
+                      "boot_id": 17, "jaw_age_ms": 10},
+        })
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(ValueError, match="independent jaw validity"):
+            await capture(client, base_url="http://127.0.0.1:8008",
+                          robot="robot-01", token="s" * 32,
+                          count=5, interval=0.12, boot_state={})
+
+
+async def test_physical_jaw_capture_accepts_jaw_when_belly_invalid():
+    sequence = 0
+
+    def respond(_request):
+        nonlocal sequence
+        sequence += 1
+        return httpx.Response(200, json={
+            "robot_id": "robot-01",
+            "force": {"valid": False, "jaw_valid": True, "belly_valid": False,
+                      "calibrated": False, "adc": [32767, 100],
+                      "jaw_seq": sequence, "boot_id": 17, "jaw_age_ms": 10},
+        })
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        rows = await capture(client, base_url="http://127.0.0.1:8008",
+                             robot="robot-01", token="s" * 32,
+                             count=5, interval=0.12, boot_state={})
+    assert rows == [(100, seq) for seq in range(1, 6)]
