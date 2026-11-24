@@ -64,6 +64,7 @@ def capture(
 
     received_at: list[float] = []
     sequence: list[int] = []
+    station_ms: list[int] = []
     sensor_counts = dict.fromkeys(SENSORS, 0)
     new_sensor_acquisitions = dict.fromkeys(SENSORS, 0)
     reused_sensor_samples = dict.fromkeys(SENSORS, 0)
@@ -109,6 +110,7 @@ def capture(
                 sample_by_sensor[name] = sample_ms
         received_at.append(item.received_at)
         sequence.append(item.seq)
+        station_ms.append(item.at_ms)
         for name, valid in valid_by_sensor.items():
             if valid:
                 sensor_counts[name] += 1
@@ -155,6 +157,14 @@ def capture(
         and all(b >= a for a, b in
                 zip(received_at[:-1], received_at[1:], strict=True))
     )
+    # The firmware schedules one report per 1000 source milliseconds.
+    # Receipt cadence alone cannot establish that the station clock advanced
+    # normally. Unsigned differences preserve legitimate millis rollover.
+    station_gaps = [(b - a) & 0xffffffff
+                    for a, b in zip(station_ms[:-1], station_ms[1:], strict=True)]
+    station_report_cadence_consistent = bool(station_gaps) and all(
+        1000 <= gap <= 1500 for gap in station_gaps
+    )
     # Diagnostic only: a full one-hour USB continuity trial must contain
     # at least 3,600 distinct consecutive nominal one-second reports with
     # bounded Mac receive silence. This cannot qualify radar accuracy,
@@ -172,6 +182,7 @@ def capture(
         and reader.callback_failures == 0
         and error is None
         and receive_clock_consistent
+        and station_report_cadence_consistent
         and all(0.0 < gap <= 1.5 for gap in gaps)
         and leading is not None and 0.0 <= leading <= 1.5
         and trailing is not None and 0.0 <= trailing <= 1.5
@@ -201,6 +212,7 @@ def capture(
         "reused_sensor_samples": reused_sensor_samples,
         "one_hour_usb_continuity_screen_pass": one_hour_usb_continuity_screen_pass,
         "receive_clock_consistent": receive_clock_consistent,
+        "station_report_cadence_consistent": station_report_cadence_consistent,
         "read_only_usb_sample_captured": (
             bool(sequence) and receive_clock_consistent and error is None
             and reader.callback_failures == 0

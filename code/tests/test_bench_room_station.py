@@ -438,6 +438,8 @@ def test_room_bench_requires_explicit_local_port_and_bounded_capture(port, secon
     "none", "short_request", "short_run", "missing_frame", "sequence_gap",
     "duplicate_sequence", "extra_duplicate", "slow_receipt", "terminal_silence",
     "rejected_frame", "callback_failure", "serial_failure",
+    "source_slow", "source_duplicate", "source_backward", "source_late",
+    "source_rollover",
 ])
 def test_one_hour_usb_continuity_screen_requires_complete_read_only_receipts(fault):
     """Only an uninterrupted 3,600-report USB run earns a diagnostic pass.
@@ -469,8 +471,19 @@ def test_one_hour_usb_continuity_screen_requires_complete_read_only_receipts(fau
                     received_at += 0.6
                 if fault == "extra_duplicate" and index == 3600:
                     received_at = 3599.75
+                at_ms = index * 1000
+                if fault == "source_slow":
+                    at_ms = index
+                if fault == "source_duplicate" and index == 500:
+                    at_ms -= 1000
+                if fault == "source_backward" and index == 500:
+                    at_ms -= 2000
+                if fault == "source_late" and index >= 500:
+                    at_ms += 501
+                if fault == "source_rollover":
+                    at_ms += 0xfffffff0
                 self.on_observation(RoomObservation(
-                    seq=seq, at_ms=index, received_at=received_at,
+                    seq=seq, at_ms=at_ms & 0xffffffff, received_at=received_at,
                     readings={name: {"valid": False} for name in SENSORS},
                     summary="Simulated USB frame; not physical evidence",
                 ))
@@ -484,7 +497,14 @@ def test_one_hour_usb_continuity_screen_requires_complete_read_only_receipts(fau
     ticks = iter((0.0, float(finished)))
     result = capture("/dev/cu.synthetic", seconds=duration,
                      feed_factory=Feed, clock=lambda: next(ticks))
-    assert result["one_hour_usb_continuity_screen_pass"] is (fault == "none")
+    assert result["one_hour_usb_continuity_screen_pass"] is (
+        fault in ("none", "source_rollover")
+    )
+    if fault in ("source_slow", "source_duplicate", "source_backward", "source_late"):
+        assert result["station_report_cadence_consistent"] is False
+        assert result["read_only_usb_sample_captured"] is True
+    if fault in ("none", "source_rollover"):
+        assert result["station_report_cadence_consistent"] is True
     assert result["device_identity_authenticated"] is False
     assert result["sensor_accuracy_physically_qualified"] is False
     assert result["station_power_physically_qualified"] is False
