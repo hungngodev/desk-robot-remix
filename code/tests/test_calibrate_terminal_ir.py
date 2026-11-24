@@ -498,3 +498,27 @@ async def test_ir_capture_rejects_untrusted_token_origin_before_http(
 def test_ir_capture_allows_loopback_http_or_remote_https(origin, expected):
     assert cal._safe_ir_origin(origin, "robot-01") == expected
 
+
+@pytest.mark.parametrize("stamp", [-.5, 10**1000, -(10**1000), True, 1e309])
+def test_saved_ir_trial_rejects_invalid_receive_clock(tmp_path, stamp):
+    rows = position_records()
+    rows[0]["received_monotonic"] = stamp
+    if stamp == float("inf"):
+        with pytest.raises(ValueError, match="Strictly increasing"):
+            cal.analyze(rows, "robot-01")
+        return
+    path = tmp_path / "clock.jsonl"
+    path.write_text("".join(json.dumps(row) + "\n" for row in rows))
+    with pytest.raises(ValueError, match="Strictly increasing"):
+        cal.analyze(cal.load_trial_rows(path), "robot-01")
+
+
+def test_saved_ir_trial_accepts_zero_monotonic_origin():
+    rows = position_records()
+    for row in rows:
+        row["received_monotonic"] -= 1000.0
+    result = cal.analyze(rows, "robot-01")
+    assert result["candidate_differential_signal"] is True
+    assert result["physical_acceptance_pass"] is False
+    assert result["motor_authorized"] is False
+    assert result["charging_authorized"] is False

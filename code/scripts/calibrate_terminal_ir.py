@@ -169,7 +169,15 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
                     "Mixed NEC dock beacons in trial: observations must share one assigned dock"
                 )
         stamp = row.get("received_monotonic")
-        if type(stamp) not in (int, float) or not math.isfinite(stamp) or stamp <= last_at:
+        try:
+            valid_stamp = (
+                type(stamp) in (int, float) and math.isfinite(stamp)
+                and 0 <= stamp and stamp > last_at
+            )
+        except OverflowError:
+            # JSON integers are unbounded; malformed clocks must fail closed.
+            valid_stamp = False
+        if not valid_stamp:
             raise ValueError("Strictly increasing recorded receive timestamps required")
         last_at = stamp
         sequences = (reading["left_seq"], reading["right_seq"])
