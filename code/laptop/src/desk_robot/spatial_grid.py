@@ -59,8 +59,10 @@ class SpatialSnapshot:
 class _Cell:
     obstacle_log_odds: float = 0.0
     obstacle_received_us: int = 0
+    obstacle_sample_us: int = 0
     floor: str = "unknown"
     floor_received_us: int = 0
+    floor_sample_us: int = 0
     obstacle_calibration: str = ""
     floor_calibration: str = ""
 
@@ -151,6 +153,22 @@ class SpatialGrid:
                 self._last_update_us = 0
                 self.anchored = False
                 raise GridEvidenceError("ToF source clock diverged from Mac receipt")
+        # Per-lane replay fences alone cannot order overlapping observations
+        # from different lanes of the same WROOM clock. Reject the whole batch
+        # before changing any cell; a tied capture cannot clear a hazard.
+        floor_layer = batch.kind in _FLOOR_KINDS
+        clearing = batch.kind in ("floor_supported", "obstacle_clear")
+        for cell in batch.cells:
+            target = self._cells.get(cell)
+            if target is None:
+                continue
+            calibration = target.floor_calibration if floor_layer else target.obstacle_calibration
+            sample = target.floor_sample_us if floor_layer else target.obstacle_sample_us
+            receipt = target.floor_received_us if floor_layer else target.obstacle_received_us
+            if calibration == batch.calibration_id and (
+                    batch.sample_us < sample or batch.received_us < receipt
+                    or (clearing and batch.sample_us == sample)):
+                raise GridEvidenceError("Out-of-order cell evidence")
         # Except for deliberate temporal-fault revocation above, all source
         # validation precedes cell updates.
         for cell in batch.cells:
@@ -158,6 +176,7 @@ class SpatialGrid:
             if batch.kind in _FLOOR_KINDS:
                 target.floor = "supported" if batch.kind == "floor_supported" else "unsafe"
                 target.floor_received_us = batch.received_us
+                target.floor_sample_us = batch.sample_us
                 target.floor_calibration = batch.calibration_id
             else:
                 # Evidence from a different geometry must never cancel a fresh
@@ -171,6 +190,7 @@ class SpatialGrid:
                 target.obstacle_log_odds = max(MIN_LOG_ODDS, min(MAX_LOG_ODDS,
                     target.obstacle_log_odds + _OBSTACLE_WEIGHT[batch.kind]))
                 target.obstacle_received_us = batch.received_us
+                target.obstacle_sample_us = batch.sample_us
                 target.obstacle_calibration = batch.calibration_id
         self._last_source[batch.lane] = (
             batch.sequence, batch.sample_us, batch.received_us
