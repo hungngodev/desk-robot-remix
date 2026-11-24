@@ -3664,3 +3664,62 @@ async def test_overlapping_aec_edge_replaces_live_fallback_speech_sampler():
     finally:
         released.set()
         await visual.close()
+
+@pytest.mark.parametrize("stage", ["queued", "running"])
+@pytest.mark.parametrize("invalidated", [None, "robot-01", "robot-02"])
+async def test_visual_answer_bound_to_selected_robot_camera_generation(
+    monkeypatch, stage, invalidated,
+):
+    selected, entered, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    calls = []
+
+    class HeldVision:
+        async def answer(self, question, frames):
+            calls.append(question)
+            entered.set()
+            await release.wait()
+            return "Observed object"
+
+    lock = asyncio.Lock()
+    service = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        HeldVision(), lock,
+    )
+    robot = "robot-01"
+    original_select = service.hub.selected
+
+    def select(*args):
+        result = original_select(*args)
+        selected.set()
+        return result
+
+    monkeypatch.setattr(service.hub, "selected", select)
+    service.hub.offer(robot, image(), time.monotonic(), source="proactive")
+    if stage == "queued":
+        await lock.acquire()
+    task = asyncio.create_task(service.look(robot, "What is on the table?"))
+    try:
+        await asyncio.wait_for(selected.wait(), timeout=1)
+        if stage == "running":
+            await asyncio.wait_for(entered.wait(), timeout=1)
+        if invalidated:
+            service.hub.discard_video(invalidated)
+        release.set()
+        if stage == "queued":
+            lock.release()
+        if invalidated == robot:
+            with pytest.raises(RuntimeError, match="Camera evidence invalidated"):
+                await asyncio.wait_for(task, timeout=1)
+            assert not service.hub.recent_tool_context(robot, time.monotonic())
+            assert len(calls) == int(stage == "running")
+        else:
+            result = await asyncio.wait_for(task, timeout=1)
+            assert result["answer"] == "Observed object"
+            assert len(calls) == 1
+            assert service.hub.recent_tool_context(robot, time.monotonic())
+        assert not service._look_tasks
+    finally:
+        release.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await service.close()

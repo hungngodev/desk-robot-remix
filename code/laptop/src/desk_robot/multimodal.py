@@ -1974,11 +1974,15 @@ class MultimodalOrchestrator:
             chosen = self.hub.selected(robot_id, question, time.monotonic())
             if not chosen:
                 raise RuntimeError("No fresh authenticated camera images available")
+            # Camera-only loss preserves the human turn but invalidates its frames.
+            camera_generation = self.hub._generation[robot_id]
             async with self.inference_lock:
                 # Higher-priority user turns can arrive while waiting for a
                 # busy five-robot VLM. Never evaluate a stale older question.
                 if not current_turn():
                     raise RuntimeError("Visual question superseded while queued")
+                if camera_generation != self.hub._generation[robot_id]:
+                    raise RuntimeError("Camera evidence invalidated while queued")
                 # Local 4B+ vision inference can be much slower than the
                 # source exposure. Do not let a 45 second provider request
                 # claim a scene is still current or delay new user turns.
@@ -2012,6 +2016,8 @@ class MultimodalOrchestrator:
                     and getattr(self.settings, "camera_consent_generation", None)
                     != camera_consent_generation):
                 raise RuntimeError("Camera consent revoked during visual analysis")
+            if camera_generation != self.hub._generation[robot_id]:
+                raise RuntimeError("Camera evidence invalidated during visual analysis")
             if time.monotonic() - chosen[-1].received_at > 16:
                 raise RuntimeError("Camera observation expired during visual analysis")
             metrics["visual_answers"] += 1
