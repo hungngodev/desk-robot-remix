@@ -109,11 +109,11 @@ class IrFrameQueueGate {
 class DualIrEvidence {
  public:
   // Drop all previously accepted sightings after a receive backlog or poll stall.
-  // Sequence counters intentionally remain monotonic for observability.
+  // Keep acquisition watermarks as well as sequence counters: quarantine
+  // must not allow old frames to be replayed as fresh sightings.
   void invalidate() {
     for (auto& side : sides_) {
       side.code = 0;
-      side.at_ms = 0;
       side.valid = false;
     }
   }
@@ -136,7 +136,7 @@ class DualIrEvidence {
     // Reject duplicate or regressed receive times even if a future caller
     // bypasses the queue gate. Unsigned half-range ordering permits wrap.
     const std::uint32_t elapsed = now_ms - s.at_ms;
-    if (s.valid && (elapsed == 0U || elapsed >= 0x80000000U)) {
+    if (s.seq != 0U && (elapsed == 0U || elapsed >= 0x80000000U)) {
       invalidate();
       return;
     }

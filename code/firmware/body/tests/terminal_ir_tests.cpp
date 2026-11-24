@@ -126,6 +126,28 @@ int main() {
     result = invalidated.assess(120);
     CHECK(!result.left_fresh && !result.right_fresh && !result.same_code);
     CHECK(result.left_seq == 1 && result.right_seq == 1);
+    // Quarantine invalidates the bearing, not the acquisition watermark.
+    invalidated.accept(0, code, 100);
+    invalidated.accept(1, code, 110);
+    result = invalidated.assess(120);
+    CHECK(!result.same_code && !result.left_fresh && !result.right_fresh);
+    CHECK(result.left_seq == 1 && result.right_seq == 1);
+    invalidated.accept(0, code, 99);
+    invalidated.accept(1, code, 109);
+    result = invalidated.assess(120);
+    CHECK(!result.same_code && result.left_seq == 1 && result.right_seq == 1);
+    desk_robot::DualIrEvidence quarantine_wrap;
+    quarantine_wrap.accept(0, code, 0xfffffff0U);
+    quarantine_wrap.accept(1, code, 0xfffffff1U);
+    quarantine_wrap.invalidate();
+    quarantine_wrap.accept(0, code, 0xfffffff0U);
+    quarantine_wrap.accept(1, code, 0xfffffff1U);
+    CHECK(!quarantine_wrap.assess(0x10U).same_code);
+    quarantine_wrap.accept(0, code, 0x12U);
+    quarantine_wrap.accept(1, code, 0x13U);
+    result = quarantine_wrap.assess(0x14U);
+    CHECK(result.same_code && result.left_seq == 2 && result.right_seq == 2);
+    CHECK(!result.motor_authorized && !result.charging_authorized);
     invalidated.accept(0, code, 130);
     CHECK(!invalidated.assess(130).same_code);
     invalidated.accept(1, code, 140);
