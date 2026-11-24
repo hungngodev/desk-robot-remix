@@ -225,3 +225,28 @@ async def test_external_task_cancellation_propagates_without_receipt():
         await task
     await asyncio.sleep(0)
     assert detector.cancelled
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scores", [(0.96, 0.92), (0.92, 0.96), (0.96, 0.96)])
+async def test_multiple_qualified_boxes_are_inconclusive(scores):
+    result = await inspect(FakeDetector([
+        Detection("key", scores[0], (4, 3, 15, 14)),
+        Detection("key", scores[1], (22, 3, 33, 14)),
+    ]))
+    assert result.status == "inconclusive"
+    assert result.reason == "inconclusive_multiple_candidates"
+    assert result.evidence is None and result.box is None
+    assert not result.may_execute and not result.arrived
+
+
+@pytest.mark.asyncio
+async def test_exact_duplicate_boxes_can_coalesce():
+    box = (4, 3, 15, 14)
+    result = await inspect(FakeDetector([
+        Detection("key", 0.92, box),
+        Detection("key", 0.96, box),
+    ]))
+    assert result.status == "camera_seen"
+    assert result.evidence is not None and result.evidence.confidence == 0.96
+    assert result.box == box
+    assert not result.may_execute and not result.arrived

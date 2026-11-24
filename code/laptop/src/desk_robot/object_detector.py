@@ -118,7 +118,9 @@ def _checked_detection(results: object, label: str, width: int, height: int,
         else:
             low_confidence = True
     if accepted:
-        # Stable on equal confidence; do not fabricate a unique object ID.
+        # Only exact duplicate boxes can coalesce without object association.
+        if len({d.box for d in accepted}) > 1:
+            return "inconclusive_multiple_candidates", None
         return "camera_seen", max(accepted, key=lambda d: d.confidence)
     return ("inconclusive_low_confidence" if low_confidence else "camera_not_seen"), None
 
@@ -232,7 +234,7 @@ async def detect_object_frame(
                                            min_confidence)
         if outcome == "invalid_detector_result":
             return reject(outcome)
-        if outcome == "inconclusive_low_confidence":
+        if outcome in ("inconclusive_low_confidence", "inconclusive_multiple_candidates"):
             return DetectorReceipt("inconclusive", outcome)
         # Source receipt remains the original Mac-frame receipt, NOT the time
         # a delayed model finished. Guide50 must separately project to floor.
