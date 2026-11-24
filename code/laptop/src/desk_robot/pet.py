@@ -1764,11 +1764,20 @@ class PetController:
         elif state.last_touch_boot_id is not None:
             return  # never downgrade to identity-free packets mid-session
         previous_count = state.last_touch_count
-        if previous_count is not None and 0 < count < previous_count:
-            # Firmware reboot resets the count to zero. A delayed old nonzero
-            # status must not rewind the active event baseline and replay a
-            # tap or quiet-mode hold on the next authenticated status read.
-            return
+        legacy_reset = (
+            not reported_boot_ids and previous_count is not None
+            and previous_count > 0 and count == 0
+        )
+        raw_delta = 0
+        if previous_count is not None and not legacy_reset:
+            if reported_boot_ids:
+                raw_delta = _sensor_counter_advance(count, previous_count) or 0
+                if count != previous_count and raw_delta == 0:
+                    return  # stale same-boot status, including delayed zero
+            else:
+                raw_delta = count - previous_count
+                if raw_delta < 0:
+                    return  # legacy nonzero backward count
         # This field set is emitted by the WROOM gesture classifier, not by a
         # Mac clock estimate from the much slower camera polling interval.
         keys = ("tap_count", "double_count", "hold_count")
@@ -1778,18 +1787,24 @@ class PetController:
                    for v in counters.values()):
                 return
             old = state.last_touch_events
-            if old is None or previous_count is None or count < previous_count:
+            if old is None or previous_count is None or legacy_reset:
                 state.last_touch_count = count
                 state.last_touch_events = counters
                 return  # initial baseline or reset, never replay stored touches
-            deltas = {key: counters[key] - old[key] for key in keys}
-            if any(delta < 0 for delta in deltas.values()):
-                # A release can increment a gesture counter without another
-                # raw press. An older same-count report must not rewind it.
-                return
+            if reported_boot_ids:
+                deltas = {
+                    key: _sensor_counter_advance(counters[key], old[key]) or 0
+                    for key in keys
+                }
+                if any(counters[key] != old[key] and deltas[key] == 0 for key in keys):
+                    return  # stale typed counter, not a genuine uint32 wrap
+            else:
+                deltas = {key: counters[key] - old[key] for key in keys}
+                if any(delta < 0 for delta in deltas.values()):
+                    return  # an older same-count report must not rewind gestures
             state.last_touch_count = count
             state.last_touch_events = counters
-            if count - previous_count > 20 or any(
+            if raw_delta > 20 or any(
                 delta > 20 for delta in deltas.values()
             ):
                 return  # skip an excessive forward backlog without replay
@@ -1805,13 +1820,17 @@ class PetController:
                     )
             return
 
+        if any(key in touch for key in keys):
+            return  # an incomplete typed report cannot become a generic touch
+        if state.last_touch_events is not None and not legacy_reset:
+            return  # no typed-to-legacy downgrade inside the current baseline
         state.last_touch_count = count
-        if previous_count is None or count < previous_count:
+        if previous_count is None or legacy_reset:
             state.last_touch_events = None
             return
 
         # Compatibility for a head flashed before typed touch counters existed.
-        if 0 < count - previous_count <= 20:
+        if 0 < raw_delta <= 20:
             await self._remember_touch(
                 robot_id, generation, "touch", "Someone has just touched my body",
                 received_at=received_at,

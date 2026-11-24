@@ -221,15 +221,15 @@ async def test_runtime_replayed_touch_release_dispatches_once(settings, tmp_path
 
     runtime.conversation.chat = Chat()
 
-    async def report(count, taps):
+    async def report(count, taps, *, boot=19, typed=True):
+        touch = {"active": False, "count": count}
+        if typed:
+            touch.update(tap_count=taps, double_count=0, hold_count=0)
         head.replay_body_status({
             "robot_id": "robot-01",
-            "imu": {"boot_id": 19},
-            "side_ranges": {"boot_id": 19},
-            "touch": {
-                "active": False, "count": count, "tap_count": taps,
-                "double_count": 0, "hold_count": 0,
-            },
+            "imu": {"boot_id": boot},
+            "side_ranges": {"boot_id": boot},
+            "touch": touch,
         })
         await pet._touch_from_body("robot-01", 7)
         task = pet._speech_task
@@ -255,14 +255,26 @@ async def test_runtime_replayed_touch_release_dispatches_once(settings, tmp_path
 
         await report(1, 0)  # late copy of the same raw press
         assert state.last_touch_events["tap_count"] == 1
+        await report(0, 0)  # delayed zero from the same authenticated boot
+        assert state.last_touch_count == 1
         await report(1, 1)  # same release again
         assert len(taps("robot-01")) == len(taps("robot-02")) == 1
         assert state.events == state.spoken == 1
         assert len(speaker.spoken) == 1
 
+        await report(2, 2, typed=False)  # cannot downgrade the typed source
+        assert state.events == 1 and state.last_touch_count == 1
         await report(2, 2)  # a distinct real counter edge is still recorded
         assert len(taps("robot-01")) == len(taps("robot-02")) == 2
         assert state.events == 2
+
+        # A real reboot sets a baseline; genuine uint32 rollover advances it.
+        await report(0xffffffff, 0xffffffff, boot=20)
+        await report(0, 0, boot=20)
+        await report(0xffffffff, 0xffffffff, boot=20)  # retired pre-wrap value
+        await report(0, 0, boot=20)
+        assert state.events == 3 and state.last_touch_count == 0
+        assert len(taps("robot-01")) == len(taps("robot-02")) == 3
         assert {row.event_id for row in taps("robot-01")} == {
             row.event_id for row in taps("robot-02")
         }
