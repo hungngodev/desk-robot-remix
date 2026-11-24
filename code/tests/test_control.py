@@ -1820,3 +1820,46 @@ async def test_stalled_keepalive_ack_aborts_manual_job_before_settling(settings)
         assert c._fleet_motion_owner is None
     finally:
         await c.close()
+
+
+async def test_older_idle_stop_success_cannot_clear_newer_failed_stop(settings):
+    from desk_robot.transport import HeadError
+
+    c, head = make(settings)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original = head.command
+    attempts = 0
+
+    async def overlapping_halt(command):
+        nonlocal attempts
+        if command == "halt":
+            attempts += 1
+            if attempts == 1:
+                entered.set()
+                await release.wait()
+            elif attempts == 2:
+                raise HeadError("Newer HALT acknowledgement failed")
+        return await original(command)
+
+    head.command = overlapping_halt
+    await c.operator_arm("robot-02")
+    older = asyncio.create_task(c.stop("robot-01"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=0.5)
+        with pytest.raises(HeadError, match="Newer HALT"):
+            await c.stop("robot-01")
+        release.set()
+        assert (await older)["ok"] is True
+        with pytest.raises(OperationError, match="STOP pending or unconfirmed"):
+            await c.operator_arm("robot-01")
+        with pytest.raises(OperationError, match="STOP pending or unconfirmed"):
+            c.manual("robot-02", "drive 10 10 100")
+        assert (await c.stop("robot-01"))["ok"] is True
+        job = c.manual("robot-02", "drive 10 10 100")
+        await c.tasks[job.id]
+        assert job.state == "succeeded"
+    finally:
+        release.set()
+        await asyncio.gather(older, return_exceptions=True)
+        await c.close()

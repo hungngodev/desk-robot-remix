@@ -127,6 +127,7 @@ class Coordinator:
         self.shutdown_stop_failures: dict[str, str] = {}
         self._permit_epoch = {r.id: 0 for r in settings.robots}
         self._pending_stops: dict[str, int] = {}
+        self._stop_generation = {r.id: 0 for r in settings.robots}
         self._unconfirmed_stops: set[str] = set()
 
     def robot(self, robot_id):
@@ -257,13 +258,19 @@ class Coordinator:
         # Fence new permits and fleet admission even for an idle body. An
         # explicit STOP without a job owner must still require a valid receipt.
         self._pending_stops[robot_id] = self._pending_stops.get(robot_id, 0) + 1
+        self._stop_generation[robot_id] += 1
+        generation = self._stop_generation[robot_id]
         try:
             acknowledgement = await self._stop(robot_id)
         except BaseException:
-            self._unconfirmed_stops.add(robot_id)
+            if self._stop_generation[robot_id] == generation:
+                self._unconfirmed_stops.add(robot_id)
             raise
         else:
-            self._unconfirmed_stops.discard(robot_id)
+            # An older HALT finishing cleanup cannot clear a newer failed
+            # receipt. Only the latest explicit attempt owns this evidence.
+            if self._stop_generation[robot_id] == generation:
+                self._unconfirmed_stops.discard(robot_id)
             return acknowledgement
         finally:
             self._pending_stops[robot_id] -= 1
