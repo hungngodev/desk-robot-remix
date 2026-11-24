@@ -271,3 +271,39 @@ async def test_completion_after_real_deadline_is_not_evidence():
     assert result.reason == "inference_timeout"
     assert result.evidence is None
     assert not result.arrived and not result.may_execute
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changes", [
+    {"timeout_s": 10**1000},
+    {"min_confidence": 10**1000},
+    {"timeout_s": float("nan")},
+    {"min_confidence": float("inf")},
+])
+async def test_oversized_detector_admission_values_fail_closed(changes):
+    detector = FakeDetector()
+    result = await inspect(detector, **changes)
+    assert result.reason == "invalid_detection_request"
+    assert result.evidence is None and detector.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_oversized_wall_timestamp_is_rejected_before_inference():
+    _, _, frame = fixtures()
+    detector = FakeDetector()
+    result = await inspect(detector, frame=replace(frame, seen_at_wall_s=10**1000))
+    assert result.reason == "invalid_frame"
+    assert result.evidence is None and detector.calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prediction", [
+    Detection("key", 10**1000, (4, 4, 14, 14)),
+    Detection("key", 0.96, (4, 4, 10**1000, 14)),
+    Detection("key", 0.96, (float("nan"), 4, 14, 14)),
+    Detection("key", 0.96, (4, 4, 14, float("inf"))),
+])
+async def test_unrepresentable_detector_numbers_return_finite_rejection(prediction):
+    result = await inspect(FakeDetector([prediction]))
+    assert result.reason == "invalid_detector_result"
+    assert result.evidence is None
+    assert not result.may_execute and not result.arrived

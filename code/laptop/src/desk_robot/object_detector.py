@@ -8,7 +8,6 @@ key/candy accuracy were measured. Never dispatch a motor or infer floor pose.
 from __future__ import annotations
 
 import asyncio
-import math
 from dataclasses import dataclass
 from typing import Callable
 
@@ -59,7 +58,6 @@ def _frame_valid(frame: DetectorFrame, query: ObjectQuery, owner: ObjectOwner,
             or any(type(x) is not int or x < 0
                    for x in (frame.captured_us, frame.received_us))
             or type(frame.seen_at_wall_s) not in (float, int)
-            or not math.isfinite(frame.seen_at_wall_s)
             or not 0 <= frame.seen_at_wall_s <= 4_102_444_800):
         return "invalid_frame"
     if (frame.robot_id, frame.session_id, frame.turn_id) != (
@@ -104,11 +102,9 @@ def _checked_detection(results: object, label: str, width: int, height: int,
             return "invalid_detector_result", None
         box = item.box
         if (type(item.confidence) not in (int, float)
-                or not math.isfinite(item.confidence)
                 or not 0 < item.confidence <= 1
                 or not isinstance(box, tuple) or len(box) != 4
-                or any(type(v) not in (int, float) or not math.isfinite(v)
-                       for v in box)):
+                or any(type(v) not in (int, float) for v in box)):
             return "invalid_detector_result", None
         x0, y0, x1, y1 = box
         if not 0 <= x0 < x1 <= width or not 0 <= y0 < y1 <= height:
@@ -156,9 +152,9 @@ async def detect_object_frame(
             or type(now_us) is not int or now_us < 0
             or type(fresh_us) is not int or not 1 <= fresh_us <= 5_000_000
             or type(timeout_s) not in (int, float)
-            or not math.isfinite(timeout_s) or not 0.01 <= timeout_s <= 5.0
+            or not 0.01 <= timeout_s <= 5.0
             or type(min_confidence) not in (int, float)
-            or not math.isfinite(min_confidence) or not 0 < min_confidence <= 1
+            or not 0 < min_confidence <= 1
             or not callable(clock_us) or not callable(request_is_current)
             or not callable(safety_clear)):
         return reject("invalid_detection_request")
