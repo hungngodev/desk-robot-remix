@@ -93,6 +93,55 @@ int main() {
     mpu.poll(650);
     CHECK(mpu.reading().low_g_event_seq == 4U);
 
+    // This driver polls direct output registers, not a FIFO. MPU6050
+    // INT_STATUS bit 4 (FIFO_OFLOW_INT) must not be mistaken for bit 7
+    // (FF_INT), nor invalidate or replace a successful direct conversion.
+    // Synthetic status bits exercise decoding, not actual FIFO draining.
+    TwoWire direct_wire;
+    BerryImu direct;
+    CHECK(direct.begin(direct_wire, BerryModel::Mpu6050, 0x68, 0x00));
+    for (const auto& write : direct_wire.writes) {
+      CHECK(write.reg != 0x23); // FIFO_EN not configured
+      CHECK(write.reg != 0x6a); // USER_CTRL FIFO_EN/reset not configured
+    }
+    direct_wire.registers[0x3b] = 0x40; // accel X = 16384
+    direct_wire.registers[0x45] = 0xff; // gyro Y = -128
+    direct_wire.registers[0x46] = 0x80;
+    direct.poll(100);
+    CHECK(direct.fresh(100));
+    CHECK(direct.reading().accel[0] == 16384);
+    CHECK(direct.reading().gyro[1] == -128);
+    direct_wire.registers[0x3a] = 0x10;
+    direct_wire.registers[0x3b] = 0x20; // new direct sample
+    direct.poll(150);
+    CHECK(direct.fresh(150) && direct.reading().at_ms == 150U);
+    CHECK(direct.reading().accel[0] == 8192);
+    CHECK(direct.reading().gyro[1] == -128);
+    CHECK(direct.reading().low_g_status_valid && !direct.reading().low_g_irq);
+    CHECK(direct.reading().low_g_event_seq == 0U);
+    CHECK(direct_wire.registers[0x3a] == 0U); // clear on status read
+    direct_wire.registers[0x3a] = 0x90; // simultaneous FF and overflow
+    direct.poll(200);
+    CHECK(direct.fresh(200) && direct.reading().at_ms == 200U);
+    CHECK(direct.reading().low_g_irq && direct.reading().low_g_event_seq == 1U);
+    direct_wire.registers[0x3a] = 0x10;
+    direct_wire.reject_read_reg = 0x3b;
+    direct.poll(250);
+    CHECK(!direct.fresh(250));
+    CHECK(direct.reading().at_ms == 200U); // no invented fresh sample
+    CHECK(direct.reading().accel[0] == 8192);
+    CHECK(direct.reading().gyro[1] == -128);
+    CHECK(!direct.reading().low_g_status_valid && !direct.reading().low_g_irq);
+    CHECK(direct.reading().low_g_event_seq == 1U);
+    direct_wire.reject_read_reg = -1;
+    direct_wire.registers[0x3b] = 0x10;
+    direct.poll(300);
+    CHECK(direct.fresh(300) && direct.reading().at_ms == 300U);
+    CHECK(direct.reading().accel[0] == 4096);
+    CHECK(direct.reading().gyro[1] == -128);
+    CHECK(direct.reading().low_g_status_valid && !direct.reading().low_g_irq);
+    CHECK(direct.reading().low_g_event_seq == 1U);
+
     TwoWire bad_readback;
     bad_readback.reject_read_reg = 0x1d;
     BerryImu unverified_ff;
