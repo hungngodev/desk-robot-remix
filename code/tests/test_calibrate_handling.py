@@ -215,3 +215,31 @@ def test_handling_trial_jsonl_rejects_nonfinite_tokens(tmp_path, constant):
     ) + "\n")
     with pytest.raises(ValueError, match="Nonfinite handling trial JSON constant"):
         load_trial_rows(source)
+
+
+@pytest.mark.parametrize("low_g_counts", [4096, 8191])
+def test_handling_calibration_rejects_runtime_low_g_pose_revocation(low_g_counts):
+    rows = trials()
+    for row in rows[12:]:
+        row["body"]["imu"]["acc"] = [0, 0, low_g_counts]
+    with pytest.raises(ValueError, match="Implausible MPU6050 acceleration"):
+        analyze(rows)
+
+
+def test_handling_calibration_accepts_runtime_half_g_boundary():
+    rows = trials()
+    for row in rows[12:]:
+        row["body"]["imu"]["acc"] = [0, 0, 8192]
+    report = analyze(rows)
+    assert report["shake_delta_mg_candidate"] == 300
+    assert report["thresholds_physically_qualified"] is False
+    assert report["motor_authorization"] is False
+
+
+@pytest.mark.parametrize("opposing_count", [1, 4])
+def test_handling_calibration_rejects_conflicting_quiet_gravity(opposing_count):
+    rows = trials()
+    for row in rows[:opposing_count]:
+        row["body"]["imu"]["acc"] = [0, 0, -16384]
+    with pytest.raises(ValueError, match="conflicting gravity vectors"):
+        analyze(rows)

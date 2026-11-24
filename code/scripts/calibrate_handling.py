@@ -119,7 +119,7 @@ def analyze(records: list[dict]) -> dict:
         # The runtime HandlingGate refuses implausible accelerations even
         # with otherwise valid raw bytes. Calibration must be at least as
         # strict as the consumer it proposes to tune.
-        if not 0.05 <= math.hypot(*accel) <= 3.5:
+        if not 0.5 <= math.hypot(*accel) <= 3.5:
             raise ValueError("Implausible MPU6050 acceleration in trial log")
         gyro = tuple(raw / GYRO_COUNTS_PER_DPS for raw in imu["gyro"])
         groups[record["label"]].append((accel, gyro))
@@ -136,6 +136,8 @@ def analyze(records: list[dict]) -> dict:
     gravity = tuple(sum(acc[i] for acc, _ in upright) / len(upright)
                     for i in range(3))
     norm = math.hypot(*gravity)
+    if not 0.91 <= norm <= 1.09:
+        raise ValueError("Upright reference has conflicting gravity vectors")
     baseline = tuple(v / norm for v in gravity)
     bias = tuple(sum(gyro[i] for _, gyro in upright) / len(upright)
                  for i in range(3))
