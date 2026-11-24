@@ -52,14 +52,17 @@ class SimulatedHead:
             self.armed = False
         elif op in {"drive", "lift", "grip", "keepalive"} and not self.armed:
             raise HeadError("Body disarmed")
-        if op in {"arm", "drive", "lift", "grip", "keepalive"}:
+        if op in {"arm", "drive", "lift", "grip", "keepalive"} or (
+            op == "stop" and self.armed
+        ):
             self.last_control = time.monotonic()
         if op == "drive":
             left, right = map(int, command.split()[1:3])
-            if left == -right:
-                self.position[0] -= 10 if left > 0 else -10
-            else:
-                self.position[1] -= 10 if left > 0 else -10
+            if left or right:
+                if left == -right:
+                    self.position[0] -= 10 if left > 0 else -10
+                else:
+                    self.position[1] -= 10 if left > 0 else -10
         elif op == "grip":
             self.gripped = int(command.split()[1]) > 90
         elif op == "lift":
