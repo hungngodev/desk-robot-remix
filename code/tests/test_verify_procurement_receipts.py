@@ -28,8 +28,11 @@ def measurement_for_gate(scope, gate):
         for name, unit, lower, upper, _ in specification["quantities"]:
             quantities.append({
                 "name": name, "unit": unit,
-                "value": 1 if name in release.POSITIVE_CLEARANCE_METRICS
-                else lower,
+                "value": 1 if (
+                    name in release.POSITIVE_CLEARANCE_METRICS
+                    or name in {"idle_head_current_ma", "active_head_peak_current_ma",
+                                "head_3v3_ramp_time_ms"}
+                ) else lower,
                 "minimum": 0, "maximum": upper if upper is not None
                 else max(10, lower),
             })
@@ -54,6 +57,13 @@ def measurement_for_gate(scope, gate):
                 } if gate == (
                     "sixteen_mux_channel_400khz_pullups_rise_and_sink_trials"
                 ) else {}),
+                **({
+                    "instrument_type": "oscilloscope_and_ammeter",
+                    "power_path_revision": "isolated_head_supply_A",
+                    "oscilloscope_capture_id": "head_ramp_capture_A",
+                    "current_capture_id": "head_current_capture_A",
+                    "head_firmware_commit": SHA,
+                } if gate == "xiao_usb_backfeed_diode_and_servo_brownout_trial" else {}),
                 **({
                     "instrument_type": "independent_ammeter",
                     "wroom_boot_epoch": "wroom_boot_01",
@@ -1371,4 +1381,16 @@ def test_immutable_procurement_record_accepts_bounded_integer():
     claimed["measurement"] = {"raw_adc": 32766}
     assert release.verified_scoped_record(
         claimed, SHA, lambda url: lookup(url, records=[claimed]),
+    )
+
+
+def test_xiao_trial_rejects_matching_immutable_but_text_only_measurement():
+    gate = "xiao_usb_backfeed_diode_and_servo_brownout_trial"
+    valid = receipt("system", gate)
+    assert release.verified_scoped_record(
+        valid, SHA, lambda url: lookup(url, records=[valid])
+    )
+    narrative = {**valid, "measurement": {"observed": "passed"}}
+    assert not release.verified_scoped_record(
+        narrative, SHA, lambda url: lookup(url, records=[narrative])
     )

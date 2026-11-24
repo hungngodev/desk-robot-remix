@@ -250,6 +250,25 @@ CRITICAL_TRIAL_GATES = {
             ("i2c_bus_recovery_events", "events", 0, 0, True),
         ),
     },
+    "xiao_usb_backfeed_diode_and_servo_brownout_trial": {
+        # The external diode is a design allocation, not a measured isolation
+        # result. Check both reverse-current directions, attach/detach, loaded
+        # startup, idle/active head current and a captured 3V3 ramp.
+        # Exact current/time limits depend on the inspected supply and board.
+        "minimum_samples": 4,
+        "quantities": (
+            ("usb_attach_trials", "trials", 1, None, True),
+            ("usb_detach_trials", "trials", 1, None, True),
+            ("cold_start_trials", "trials", 1, None, True),
+            ("loaded_servo_start_trials", "trials", 1, None, True),
+            ("usb_to_boost_reverse_current_ma", "mA", 0, None, False),
+            ("boost_to_usb_reverse_current_ma", "mA", 0, None, False),
+            ("idle_head_current_ma", "mA", 0, None, False),
+            ("active_head_peak_current_ma", "mA", 0, None, False),
+            ("head_3v3_ramp_time_ms", "ms", 0, None, False),
+            ("unexpected_head_resets", "events", 0, 0, True),
+        ),
+    },
     "signed_pack_current_three_new_samples_and_chg_mismatch_trial": {
         # CHG is status, never signed current. INA226's lab-only pack
         # direction needs the physical 5 mOhm Kelvin shunt and independent
@@ -380,6 +399,16 @@ def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
                 != "temperature_chamber_and_independent_ammeter"
                 or conditions.get("fixed_ts_bypass_removed") is not True):
             return False
+    if gate == "xiao_usb_backfeed_diode_and_servo_brownout_trial":
+        keys.extend((
+            "power_path_revision", "oscilloscope_capture_id",
+            "current_capture_id", "head_firmware_commit",
+        ))
+        firmware_commit = conditions.get("head_firmware_commit")
+        if (conditions.get("instrument_type") != "oscilloscope_and_ammeter"
+                or type(firmware_commit) is not str
+                or not SHA.fullmatch(firmware_commit)):
+            return False
     for key in keys:
         value = conditions.get(key)
         if (type(value) is not str or not value.strip()
@@ -411,6 +440,17 @@ def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
         if (minimum < 0 or minimum > value or value > maximum
                 or value < lower or (upper is not None and value > upper)
                 or (name in POSITIVE_CLEARANCE_METRICS and value <= 0)):
+            return False
+    if gate == "xiao_usb_backfeed_diode_and_servo_brownout_trial":
+        values = {item["name"]: item["value"] for item in observations}
+        phase_count = sum(values[name] for name in (
+            "usb_attach_trials", "usb_detach_trials",
+            "cold_start_trials", "loaded_servo_start_trials",
+        ))
+        if (phase_count > measurement["sample_count"]
+                or not 0 < values["idle_head_current_ma"]
+                <= values["active_head_peak_current_ma"]
+                or values["head_3v3_ramp_time_ms"] <= 0):
             return False
     if gate == "signed_pack_current_three_new_samples_and_chg_mismatch_trial":
         values = {item["name"]: item["value"] for item in observations}
