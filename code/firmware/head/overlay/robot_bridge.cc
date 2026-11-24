@@ -164,6 +164,13 @@ bool OpticsValid(cJSON* json) {
 }
 
 
+bool PoseWireByteValid(bool& pending_cr, uint8_t byte) {
+    // CR is allowed only immediately before LF, not inside JSON or error text.
+    if (pending_cr && byte != '\n') return false;
+    pending_cr = byte == '\r';
+    return true;
+}
+
 bool PoseWireValid(const std::string& line) {
     // cJSON C strings truncate escaped NUL in both keys and values.
     // Pose v1 has no free-text fields, so this spelling is never needed.
@@ -438,11 +445,14 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
         uart_wait_tx_done(kUart, pdMS_TO_TICKS(30)) != ESP_OK) return {503, false, "body UART write failed"};
     const auto deadline = esp_timer_get_time() + kTimeoutMs * 1000;
     std::string line;
+    bool pose_cr_pending = false;
     while (esp_timer_get_time() < deadline) {
         if (urgent_stop_gate_.preempts(urgent))
             return {503, false, "body response superseded by urgent stop"};
         uint8_t c = 0;
         if (uart_read_bytes(kUart, &c, 1, pdMS_TO_TICKS(10)) != 1) continue;
+        if (command.verb == "pose" && !PoseWireByteValid(pose_cr_pending, c))
+            return {503, false, "malformed body response"};
         if (c == '\r') continue;
         if (c == '\n') {
             // Old WROOM builds reject this new read-only verb explicitly.
