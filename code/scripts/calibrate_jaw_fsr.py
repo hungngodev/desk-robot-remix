@@ -21,6 +21,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
+from desk_robot.calibration import Calibration
 from desk_robot.grasp_feedback import _fresh_jaw_sequence, force_observation
 
 _ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
@@ -266,6 +267,11 @@ async def main() -> None:
     step = source.get("grip_step_deg", 4)
     if type(step) is not int or not 1 <= step <= 4:
         raise ValueError("Existing grip_step_deg must be an integer from 1 to 4")
+    # Validate the same geometry that the real grasp runtime loads. The
+    # documented unmeasured example remains a valid starting point.
+    existing = Calibration.model_validate(source)
+    if existing.simulation_only:
+        raise ValueError("Simulation-only geometry cannot calibrate a physical jaw")
     readings = {}
     boot_state = {}  # shared WROOM identity across all three manual phases
     async with httpx.AsyncClient() as client:
@@ -290,6 +296,7 @@ async def main() -> None:
         )
     })
     source["measured"] = False
+    Calibration.model_validate(source)
     target = args.calibration.with_name(args.calibration.stem + ".jaw_candidate.json")
     write_jaw_candidate(target, source)
     print(json.dumps(proposed, indent=2))

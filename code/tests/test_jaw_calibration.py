@@ -5,6 +5,7 @@ from pathlib import Path
 
 import httpx
 import pytest
+from desk_robot.calibration import Calibration
 
 ROOT = Path(__file__).resolve().parents[1]
 tool = runpy.run_path(str(ROOT / "scripts/calibrate_jaw_fsr.py"))
@@ -187,7 +188,8 @@ def test_jaw_calibration_allows_loopback_http_or_verified_https(origin, expected
 @pytest.mark.parametrize("step", [1, 2, 3, 4, None])
 async def test_jaw_candidate_preserves_existing_grasp_step(tmp_path, monkeypatch, step):
     source = tmp_path / "grasp.json"
-    original = {"measured": True}
+    original = json.loads((ROOT / "config/calibration.example.json").read_text())
+    original["measured"] = True
     if step is not None:
         original["grip_step_deg"] = step
     source.write_text(json.dumps(original), encoding="utf-8")
@@ -207,6 +209,12 @@ async def test_jaw_candidate_preserves_existing_grasp_step(tmp_path, monkeypatch
     )
     assert candidate["grip_step_deg"] == (4 if step is None else step)
     assert candidate["measured"] is False
+    restored = Calibration.load(tmp_path / "grasp.jaw_candidate.json")
+    assert restored.grip_step_deg == (4 if step is None else step)
+    assert restored.grip_force_sign == 1
+    assert restored.grip_force_limit_raw > restored.grip_force_delta_raw
+    with pytest.raises(ValueError, match="unmeasured"):
+        restored.verify_ready()
     assert json.loads(source.read_text(encoding="utf-8")) == original
 
 
@@ -258,3 +266,28 @@ async def test_physical_jaw_capture_accepts_jaw_when_belly_invalid():
                              robot="robot-01", token="s" * 32,
                              count=5, interval=0.12, boot_state={})
     assert rows == [(100, seq) for seq in range(1, 6)]
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("image_width", 0),
+    ("ground_points_mm", [[0, 0]] * 4),
+    ("simulation_only", True),
+    ("grip_force_delta_raw", 200),
+])
+async def test_jaw_cli_refuses_unusable_grasp_geometry_before_sampling(
+    tmp_path, monkeypatch, field, value,
+):
+    data = json.loads((ROOT / "config/calibration.example.json").read_text())
+    data[field] = value
+    source = tmp_path / "geometry.json"
+    source.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setenv("DESK_ROBOT_OPERATOR_TOKEN", "t" * 24)
+    monkeypatch.setattr("sys.argv", ["calibrate_jaw_fsr.py", "--calibration", str(source)])
+
+    def unexpected_prompt(_prompt):
+        pytest.fail("Unusable geometry must be rejected before operator prompts")
+
+    monkeypatch.setattr("builtins.input", unexpected_prompt)
+    with pytest.raises(ValueError):
+        await tool["main"]()
+    assert not (tmp_path / "geometry.jaw_candidate.json").exists()
