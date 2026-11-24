@@ -86,5 +86,42 @@ int main() {
   CHECK(heartbeat.update(0xfffffff0U, true));
   CHECK(!heartbeat.check_authority(0x1dU, false));
   CHECK(heartbeat.missed_deadline());
+  // A command-path authority probe must not extend the CPU pulse deadline.
+  // Cover both pin phases, both return paths and clock rollover. A resumed
+  // valid command is not an explicit local safety reset.
+  for (const std::uint32_t start : {100U, 0xfffffff0U}) {
+    for (const bool high : {false, true}) {
+      for (const bool authorized : {false, true}) {
+        for (const bool sensor_pass : {false, true}) {
+          for (std::uint32_t gap = 0; gap <= 60U; ++gap) {
+            heartbeat.reset();
+            CHECK(heartbeat.update(start, true));
+            const std::uint32_t last_edge = high ? start : start + 15U;
+            if (!high) CHECK(!heartbeat.update(last_edge, true));
+            for (std::uint32_t t = 1; t < gap && t < 45U; ++t)
+              CHECK(heartbeat.check_authority(last_edge + t, true));
+            const std::uint32_t now = last_edge + gap;
+            const bool result = sensor_pass ? heartbeat.update(now, authorized)
+                                            : heartbeat.check_authority(now, authorized);
+            const bool missed = gap >= 45U;
+            CHECK(heartbeat.missed_deadline() == missed);
+            const bool expected = authorized && !missed &&
+                (!sensor_pass || (gap < 15U ? high : !high));
+            CHECK(result == expected);
+            if (missed) {
+              CHECK(!heartbeat.check_authority(now + 1U, true));
+              CHECK(!heartbeat.update(now + 2U, true));
+              CHECK(!heartbeat.update(now + 3U, false));
+              CHECK(heartbeat.missed_deadline());
+              heartbeat.reset();
+              CHECK(!heartbeat.missed_deadline());
+              CHECK(!heartbeat.update(now + 4U, false));
+              CHECK(heartbeat.update(now + 5U, true));
+            }
+          }
+        }
+      }
+    }
+  }
   std::cout << "PASS DC CPU heartbeat: stall latch, wrap, USB recovery\n";
 }
