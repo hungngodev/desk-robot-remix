@@ -692,3 +692,57 @@ async def test_ollama_accepts_padding_around_emitted_sentence():
         {"message": {"content": " \t\n"}, "done": True},
     ]
     assert [s async for s in ollama_speech_segments(chunks(frames))] == ["Hello there."]
+
+
+async def test_ollama_consumes_terminal_http_body_and_decodes_byte_fragments():
+    class ByteStream(httpx.AsyncByteStream):
+        exhausted = False
+        closed = False
+
+        async def __aiter__(self):
+            frames = [
+                {"message": {"content": "Café time. "}, "done": False},
+                {"message": {"content": "Ready?"}, "done": True},
+            ]
+            payload = "".join(
+                json.dumps(frame, ensure_ascii=False) + "\r\n"
+                for frame in frames
+            ).encode("utf-8")
+            for byte in payload:
+                yield bytes([byte])
+            self.exhausted = True
+
+        async def aclose(self):
+            self.closed = True
+
+    body = ByteStream()
+
+    def respond(request):
+        return httpx.Response(200, stream=body)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        async with client.stream("POST", "http://local/api/chat") as response:
+            stream = ollama_speech_segments(response.aiter_lines())
+            assert await anext(stream) == "Café time."
+            assert not body.exhausted
+            assert [s async for s in stream] == ["Ready?"]
+            assert body.exhausted
+    assert body.closed
+
+
+async def test_ollama_rejects_data_after_terminal_marker():
+    frames = [
+        {"message": {"content": "Unsent tail"}, "done": True},
+        {"message": {"content": "Unexpected reply"}, "done": False},
+    ]
+    with pytest.raises(RuntimeError, match="data after done marker"):
+        _ = [s async for s in ollama_speech_segments(chunks(frames))]
+
+
+async def test_ollama_allows_blank_lines_after_terminal_marker():
+    async def lines():
+        yield json.dumps({"message": {"content": "Hello"}, "done": True})
+        yield ""
+        yield " \t"
+
+    assert [s async for s in ollama_speech_segments(lines())] == ["Hello"]

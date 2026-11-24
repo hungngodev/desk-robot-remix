@@ -45,6 +45,8 @@ async def ollama_speech_segments(
     async for line in lines:
         if not line.strip():
             continue
+        if done:
+            raise RuntimeError("Ollama streaming data after done marker")
         try:
             packet = json.loads(line)
         except (ValueError, TypeError) as exc:
@@ -85,8 +87,9 @@ async def ollama_speech_segments(
                 emitted = True
                 yield sentence
         if packet.get("done") is True:
+            # Consume the HTTP body to EOF so HTTPX can reuse the connection.
+            # Reject any additional nonblank records rather than speaking them.
             done = True
-            break
     if not done:
         raise RuntimeError("Ollama streaming response ended without done marker")
     if buffered.strip():
