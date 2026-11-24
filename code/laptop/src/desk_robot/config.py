@@ -3,10 +3,17 @@ from __future__ import annotations
 import os
 import time
 import tomllib
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, model_validator
+
+
+def _require_boolean_assignment(model: BaseModel, name: str, value: object) -> None:
+    field = type(model).model_fields.get(name)
+    if field is not None and field.annotation is bool and type(value) is not bool:
+        raise ValueError(f"{name} must be a boolean")
 
 
 class RobotConfig(BaseModel):
@@ -17,10 +24,10 @@ class RobotConfig(BaseModel):
     head_url: str = "http://127.0.0.1:8081"
     token_env: str
     device_id: str = ""
-    motion_enabled: bool = False
+    motion_enabled: StrictBool = False
     # Set only after verifying installed driver, wiring, and flashed WROOM.
     motor_backend: Literal["stepper_28byj48", "dc_pwm_guarded"] | None = None
-    exploration_qualified: bool = False  # Explicit real swept-path trial gate; not a simulation claim.
+    exploration_qualified: StrictBool = False  # Explicit real swept-path trial gate; not a simulation claim.
     # Optional physical sensor-triggered interactions. None means NOT calibrated.
     nose_twist_threshold_counts: int | None = Field(default=None, ge=80, le=1800)
     squeeze_raw_threshold: int | None = Field(default=None, ge=100, le=30000)
@@ -28,30 +35,34 @@ class RobotConfig(BaseModel):
     battery_low_percent: int = Field(default=20, ge=5, le=40)
     # An actual measured optical contact threshold, NOT a heart-rate model.
     paw_contact_ir_raw_threshold: int | None = Field(default=None, ge=1000, le=250000)
-    paw_contact_interactions_qualified: bool = False
+    paw_contact_interactions_qualified: StrictBool = False
     # Ambient change thresholds use actual SHT41 readings, never guessed room conditions.
-    ambient_interactions_qualified: bool = False
-    nfc_interactions_qualified: bool = False  # toy tags only, never access control
+    ambient_interactions_qualified: StrictBool = False
+    nfc_interactions_qualified: StrictBool = False  # toy tags only, never access control
     ambient_temp_change_centi: int | None = Field(default=None, ge=100, le=2000)
     ambient_humidity_change_centi: int | None = Field(default=None, ge=500, le=3000)
     # Only opt-in after observing repeatable BMP280 readings in the actual shell.
-    bmp280_interactions_qualified: bool = False
+    bmp280_interactions_qualified: StrictBool = False
     bmp280_pressure_change_pa: int | None = Field(default=None, ge=100, le=5000)
-    gesture_interactions_qualified: bool = False  # measured hardware gate
-    handling_interactions_qualified: bool = False  # measured MPU6050 mount and stationary baseline
+    gesture_interactions_qualified: StrictBool = False  # measured hardware gate
+    handling_interactions_qualified: StrictBool = False  # measured MPU6050 mount and stationary baseline
     handling_tilt_threshold_deg: int = Field(default=38, ge=25, le=75)
     handling_shake_delta_mg: int = Field(default=550, ge=300, le=1400)
     side_near_threshold_mm: int | None = Field(default=None, ge=35, le=1000)
-    side_interactions_qualified: bool = False  # measured 3-direction geometry, no motor permit
+    side_interactions_qualified: StrictBool = False  # measured 3-direction geometry, no motor permit
     calibration: Path | None = None
     dock_calibration: Path | None = None
-    dock_motion_qualified: bool = False
+    dock_motion_qualified: StrictBool = False
     # Actual AVR dock beacon is flashed per physical station. Never infer
     # an assigned dock from a pet name or from one matching IR observation.
     dock_beacon_id: int | None = Field(default=None, ge=1, le=5)
     dock_turn_sign: int | None = Field(default=None, ge=-1, le=1)
     dock_forward_sign: int | None = Field(default=None, ge=-1, le=1)
     voice: str = "af_heart"
+
+    def __setattr__(self, name: str, value: object) -> None:
+        _require_boolean_assignment(self, name, value)
+        super().__setattr__(name, value)
 
     @model_validator(mode="after")
     def local_http(self):
@@ -89,22 +100,22 @@ class Settings(BaseModel):
     speech_bridge_token_env: str = "DESK_ROBOT_SPEECH_TOKEN"
     vision_weights: Path | None = None
     vision_model: str = ""  # Explicit local Ollama VLM; never silently use a cloud model.
-    voice_memory_tools_enabled: bool = False  # Explicit opt-in for Xiaozhi to read own episodic text.
-    voice_transcript_memory_enabled: bool = False  # Separate consent to retain model-estimated spoken words as text.
-    voice_vision_tools_enabled: bool = False  # Explicit opt-in for Xiaozhi camera questions/voice frame selection.
-    pet_autostart_enabled: bool = False  # Explicit hardware opt-in for idle camera and sensor observation.
+    voice_memory_tools_enabled: StrictBool = False  # Explicit opt-in for Xiaozhi to read own episodic text.
+    voice_transcript_memory_enabled: StrictBool = False  # Separate consent to retain model-estimated spoken words as text.
+    voice_vision_tools_enabled: StrictBool = False  # Explicit opt-in for Xiaozhi camera questions/voice frame selection.
+    pet_autostart_enabled: StrictBool = False  # Explicit hardware opt-in for idle camera and sensor observation.
     pet_activity_min_interval_seconds: float = Field(default=30.0, ge=5.0, le=600.0)
     pet_activity_max_interval_seconds: float = Field(default=90.0, ge=5.0, le=600.0)
-    fleet_text_sharing_enabled: bool = False  # Opt-in local, provenance-tagged text only.
-    fleet_social_autonomy_enabled: bool = False  # Bounded pet-to-pet talk, explicit opt-in.
+    fleet_text_sharing_enabled: StrictBool = False  # Opt-in local, provenance-tagged text only.
+    fleet_social_autonomy_enabled: StrictBool = False  # Bounded pet-to-pet talk, explicit opt-in.
     fleet_social_min_interval_seconds: int = Field(default=300, ge=30, le=3600)
-    room_station_enabled: bool = False  # One explicit USB source, never an extra robot
+    room_station_enabled: StrictBool = False  # One explicit USB source, never an extra robot
     room_station_port: str | None = None  # Actual local /dev/tty.* device
-    room_station_context_enabled: bool = False  # Consent for all pets to read room facts
+    room_station_context_enabled: StrictBool = False  # Consent for all pets to read room facts
     # Optional actual ADC endpoints for one physical probe, never fake defaults.
     room_station_soil_dry_adc: int | None = Field(default=None, strict=True, ge=1, le=4094)
     room_station_soil_wet_adc: int | None = Field(default=None, strict=True, ge=1, le=4094)
-    fleet_text_auto_fanout_enabled: bool = True  # Keep existing broadcast behavior unless selective-only chosen.
+    fleet_text_auto_fanout_enabled: StrictBool = True  # Keep existing broadcast behavior unless selective-only chosen.
     max_job_seconds: float = Field(default=45, ge=1, le=120)
     trials_file: Path = Path("data/physical-trials.jsonl")
     memory_dir: Path = Path("../data/private/memory")
@@ -176,6 +187,7 @@ class Settings(BaseModel):
         return self
 
     def __setattr__(self, name: str, value: object) -> None:
+        _require_boolean_assignment(self, name, value)
         was_granted = (
             name == "voice_vision_tools_enabled"
             and getattr(self, "voice_vision_tools_enabled", False) is True
@@ -284,10 +296,20 @@ def secret(name: str) -> str:
     return value
 
 
-def load_settings(path: str | Path) -> Settings:
+def load_settings(
+    path: str | Path, *, overrides: Mapping[str, object] | None = None,
+) -> Settings:
+    """Load local settings with explicit, validated startup overrides.
+
+    Overrides replace entire top-level values, including the robot list.
+    They come from the trusted local caller, never environment or remote data.
+    """
     path = Path(path).resolve()
     with path.open("rb") as stream:
-        settings = Settings.model_validate(tomllib.load(stream))
+        data = tomllib.load(stream)
+    if overrides is not None:
+        data.update(overrides)
+    settings = Settings.model_validate(data)
     for robot in settings.robots:
         if robot.calibration and not robot.calibration.is_absolute():
             robot.calibration = (path.parent / robot.calibration).resolve()
