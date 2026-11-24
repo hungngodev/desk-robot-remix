@@ -1,7 +1,9 @@
 """Render candidate CAD parts reproducibly without claiming measured fit."""
 import importlib.util
+import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from struct import pack
 
@@ -252,7 +254,6 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     assert source.verify_fit_kit(tmp_path, output_dir=rendered) == report
     # A modified JSON receipt must never promote a reversible fit kit
     # to a physically qualified assembly, energized dock, or licensed product.
-    import json
     manifest = rendered / "fit_kit_manifest.json"
     original = manifest.read_text()
     for index, forged in (
@@ -702,9 +703,29 @@ def test_passive_dock_low_material_entry_coupon_matches_full_guide(tmp_path):
 
 @pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs real OpenSCAD CLI")
 def test_real_openscad_renders_provisional_source_parts(tmp_path):
+    """Exercise normal CLI export and verification from an empty output path."""
     source = module()
-    output = tmp_path / "rendered"
-    report = source.export_kit(ROOT, output_dir=output)
+    output = tmp_path / "fresh fit kit"
+    assert not output.exists()
+    command = [
+        sys.executable, str(SCRIPT), "--repo", str(ROOT),
+        "--output", str(output),
+    ]
+    exported = subprocess.run(
+        command, check=True, capture_output=True, text=True, timeout=900,
+    )
+    report = json.loads(exported.stdout)
+    verified = subprocess.run(
+        [*command, "--verify"], check=True, capture_output=True,
+        text=True, timeout=120,
+    )
+    assert json.loads(verified.stdout) == report
+    expected_files = {"fit_kit_manifest.json"}
+    expected_files.update(item["location"] for item in report["parts"])
+    assert {
+        path.relative_to(output).as_posix()
+        for path in output.rglob("*") if path.is_file()
+    } == expected_files
     assert len(report["parts"]) == (
         len(source.ADAPTERS) + len(source.GAUGES)
         + len(source.SPEAKER_FITS) + len(source.RANGER_FITS)
