@@ -1872,6 +1872,76 @@ def test_native_asr_write_revoked_during_sqlite_commit_rolls_back_only_new_event
 
 
 
+async def test_native_asr_retention_read_offloads_and_rechecks_consent(
+    settings, tmp_path, monkeypatch,
+):
+    """SQLite retention verification must not block VAD or outlive consent."""
+    import threading
+    from types import SimpleNamespace
+
+    import pytest
+    from fastapi import HTTPException
+
+    from desk_robot.api import NativeHeardRequest
+    from desk_robot.memory import MemoryStore
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = False
+    settings.voice_memory_tools_enabled = True
+    settings.voice_transcript_memory_enabled = True
+    robot = settings.robots[0].id
+    memory = MemoryStore(tmp_path / "private", [r.id for r in settings.robots])
+    original_get = memory.get_episode
+    loop_thread = threading.get_ident()
+    read_threads = []
+    revoke = False
+
+    def checked_get(*args, **kwargs):
+        read_threads.append(threading.get_ident())
+        result = original_get(*args, **kwargs)
+        if revoke:
+            settings.voice_transcript_memory_enabled = False
+        return result
+
+    monkeypatch.setattr(memory, "get_episode", checked_get)
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(robot=settings.robot),
+        memory=memory, multimodal=None, start=noop, close=noop,
+    )
+    app = create_app(settings, runtime=runtime)
+    app.state.runtime = runtime
+    endpoint = next(
+        route.endpoint for route in app.routes
+        if getattr(route, "path", None) == "/v1/pet/{robot_id}/omni-heard"
+    )
+
+    def request_for(suffix):
+        stamp_us = time.monotonic_ns() // 1000
+        return NativeHeardRequest(
+            event_id="omni_" + "a" * 12 + "_" + suffix * 20,
+            transcript="A private transcript",
+            accepted_at_us=stamp_us,
+            audio_committed_at_us=stamp_us,
+        )
+
+    first = request_for("d")
+    response = await endpoint(robot, first)
+    assert response["retained_on_disk"] is True
+    assert read_threads and all(t != loop_thread for t in read_threads)
+    revoke = True
+    second = request_for("e")
+    with pytest.raises(HTTPException) as exc:
+        await endpoint(robot, second)
+    assert exc.value.status_code == 403
+    assert read_threads and all(t != loop_thread for t in read_threads)
+    assert original_get(robot, first.event_id) is not None
+    assert original_get(robot, second.event_id) is None
+
+
 async def test_cancelled_native_asr_sqlite_write_retracts_revoked_memory(
     settings, tmp_path, monkeypatch,
 ):

@@ -250,28 +250,41 @@ def register_native_omni_routes(
             )
 
         inserted = False
-        if memory_opt_in and source_within_storage_grants:
-            def persist_transcript_with_cleanup() -> bool:
+        episode = None
+        if memory_opt_in:
+            def persist_transcript_with_cleanup():
                 # Cancelling an asyncio.to_thread await never stops its SQLite
-                # worker. Keep the consent fence and compensating delete in
-                # that same worker, even when the HTTP caller disconnects.
+                # worker. Keep writes, retention reads, and consent cleanup
+                # in that worker, away from the Mac VAD/abort event loop.
                 if not transcript_grant_valid():
-                    return False
-                added = app.state.runtime.memory.remember(
-                    robot_id, request.event_id,
-                    "Someone spoke (uncertain ASR): " + spoken[:240],
-                    kind="heard_human", source_robot=robot_id, witnessed=True,
-                    confidence=0.6,
-                )
-                if added and not transcript_grant_valid():
-                    app.state.runtime.memory.forget_episode(
-                        robot_id, request.event_id,
-                    )
-                    return False
-                return added
+                    return False, None
+                memory = app.state.runtime.memory
+                added = False
+                retained_episode = None
+                try:
+                    if source_within_storage_grants:
+                        added = memory.remember(
+                            robot_id, request.event_id,
+                            "Someone spoke (uncertain ASR): " + spoken[:240],
+                            kind="heard_human", source_robot=robot_id,
+                            witnessed=True, confidence=0.6,
+                        )
+                    if transcript_grant_valid():
+                        retained_episode = memory.get_episode(
+                            robot_id, request.event_id,
+                        )
+                finally:
+                    if not transcript_grant_valid():
+                        if added:
+                            memory.forget_episode(robot_id, request.event_id)
+                        added = False
+                        retained_episode = None
+                return added, retained_episode
 
             try:
-                inserted = await asyncio.to_thread(persist_transcript_with_cleanup)
+                inserted, episode = await asyncio.to_thread(
+                    persist_transcript_with_cleanup
+                )
             except asyncio.CancelledError:
                 # The HTTP request can be gone while its SQLite worker is
                 # still running. That worker owns durable consent cleanup,
@@ -340,9 +353,6 @@ def register_native_omni_routes(
         # uncommitted replacement transcript was retained.
         retained = False
         if memory_opt_in:
-            episode = app.state.runtime.memory.get_episode(
-                robot_id, request.event_id,
-            )
             retained = (
                 episode is not None
                 and episode.kind == "heard_human"
