@@ -27,6 +27,45 @@ Reported stock, reference links and this wiring guide are never checkout
 authority. Photo and ownership evidence stays in the dedicated photo inventory
 records instead of being copied into another cart.
 
+### Reading the 63-role audit without double-counting
+
+The canonical plan contains 42 robot/dock parent roles, 7 shared-station
+parent roles and 14 linked decisions (63 records total, **49 parent
+purchasing roles**). Linked decisions are already covered by their parent
+roles, not another 14 purchases. The
+[63-role source ownership map](full-63-role-source-ownership.json) assigns
+source, tests and remaining qualification to every record. The
+[generated signal harness](one-robot-signal-harness.generated.md) is the
+firmware-checked signal allocation, not a carrier pinout or a power schematic.
+The fleet CSV's manufacturer/datasheet links and the separate pilot sample
+references in `procurement_release.py` are not equivalent to exact qualified
+carrier SKUs or delivered checkout receipts.
+
+For example, the selected range sample candidate
+[ElectroPeak SEN-19-006](https://electropeak.com/gy-530-vl53l0x-laser-range-finder)
+is advertised as 2.8–5 V supply, 30 mA maximum and 30 mm–2 m range;
+the seller's [reference pinout](https://electropeak.com/learn/interfacing-gy-530-vl53l0x-laser-distance-module-with-arduino/)
+labels VCC, GND, SDA and SCL. The product also describes shutdown and
+interrupt signals; do not infer the delivered header order or pull-up voltage
+from that reference drawing. The selected WROOM bus is 3.3 V logic and remains
+unpowered until the actual carrier's VIN, regulator, pull-ups and GPIO levels
+are checked. One bench sample is not authorization for the remaining seven
+per robot. Likewise, the
+[Challenge CS20-02P110-04-1X](https://www.digikey.com/en/products/detail/challenge-electronics/CS20-02P110-04-1X/30407069)
+listing identifies an 8 Ω, 2 W speaker, not proof of the assembled acoustic
+enclosure. Do not ground either differential speaker terminal.
+
+To inspect the existing pilot evidence without creating a third shopping list,
+run `cd code` then
+`uv run --no-sync python scripts/procurement_release.py --format pilot-samples-markdown`.
+Every exact delivered module still needs its manufacturer or seller SKU,
+PCB revision, live supplier stock/checkout receipt, rated supply and logic
+levels, connector/pin orientation and applicable physical validation.
+Passive assembly roles need a measured drawing/fit and material specification,
+not an invented operating voltage. Unresolved linked designs need their
+parent circuit/mechanical decision before an exact SKU can be frozen.
+No purchase or physical release is granted by this audit.
+
 ## Fixed pin wiring
 
 | Body ESP32 WROOM GPIO | Function |
@@ -95,9 +134,9 @@ Upstream body SDA GPIO21, SCL GPIO22 at **3.3V logic** hosts MPU6050 at 0x68/0x6
 
 **MAX30102 paw interaction source update:** The selected pad's existing SparkFun-derived bounded FIFO parser now increments `pulse.seq` only when a new physical MAX30102 FIFO read succeeds. `BodyControl` carries that counter through the same read-only `/api/aux` path; Mac `PetController` now supports a per-robot, measured `paw_contact_ir_raw_threshold` and explicit `paw_contact_interactions_qualified` flag, two distinct new threshold-crossing acquisitions, a 25 percent release hysteresis, reset/replay handling, firsthand memory and the existing spontaneous speech arbiter. The flag defaults false for all five pet configurations. This treats a finger touching the LED pad as a playful optical interaction, **not** as real heart rate, SpO2, user identity or medical information. Real pad IR thresholds, finger geometry, LED exposure, susceptibility to room light and device current still require physical checks. Source and mock tests are committed in PR #17 but unverified by the failing GitHub Actions runner.
 
-**MAX30102 correction:** The original HTML approved one **robot-mounted** heartbeat paw pad and reported a box of around five MAX30102 boards. Photo confirmation is missing, so count stock before purchasing. Reserve WROOM 0x71 mux lane 0 at 0x57, share lane with CAP1188 0x28 after voltage and breakout checks. **Never** use XIAO Sense GPIO41/42 because those are the PDM microphone wires. Opt-in playful feedback only, not medical use.
+**MAX30102 correction:** The original HTML approved one **robot-mounted** heartbeat paw pad and reported a box of around five MAX30102 boards. Photo confirmation is missing, so count stock before purchasing. Reserve WROOM 0x71 mux lane 0 at 0x57, share lane with CAP1188 at the planned 0x29 (or the supported strapped 0x28 alternative) after voltage and breakout checks. **Never** use XIAO Sense GPIO41/42 because those are the PDM microphone wires. Opt-in playful feedback only, not medical use.
 
-**CAP1188 rather than MPR121:** Microchip marks CAP1188 in production, whereas NXP archives MPR121. Use a cheap CAP1188 breakout at its common default **0x29**, with legacy strapped **0x28** also recognized by chip ID. Safety mux 0x70 must report NO selected lanes before touch mux 0x71 CH0 opens, and all optional channels must be closed before a critical range read. Equal 0x29 addresses are permitted only behind those isolated muxes, not on the same I2C segment. Actual stuck-bus electrical tests are still required. Its 8 electrodes cover head, back and belly; retain the existing dedicated AT42QT1010 as the **local physical stop touch**, never routed through an optional mux. Check actual breakout address-selection circuitry before ordering.
+**CAP1188 rather than MPR121:** Microchip marks CAP1188 in production, whereas NXP archives MPR121. Use a cheap CAP1188 breakout at its common default **0x29**, with legacy strapped **0x28** also recognized by chip ID. Safety mux 0x70 must report NO selected lanes before touch mux 0x71 CH0 opens, and all optional channels must be closed before a critical range read. Equal 0x29 addresses are permitted only behind those isolated muxes, not on the same I2C segment. Actual stuck-bus electrical tests are still required. Its 8 electrodes cover head, back and belly; retain the existing dedicated AT42QT1010 as the **local physical stop touch**, never routed through an optional mux. Check actual breakout address-selection circuitry before ordering. Microchip [CAP1188 datasheet, Table 4-1](https://ww1.microchip.com/downloads/en/DeviceDoc/00001620C.pdf#page=12) specifies 0x29 with a 150 kΩ ADDR_COMM pull-down (±5%) and 0x28 with ADDR_COMM tied to VDD; these are IC strap definitions, not proof of the selected carrier wiring. Confirm the fitted resistor or strap and inspect the PCB-specific pinout before applying power.
 
 **MCP23017:** the implemented source reads physical dock seat and charger status pins only. PN532 now uses bounded nonblocking I2C ready-byte and frame reads on the same mux lane without driving optional expander IRQ/reset pins; an actual carrier may require a reset and must be measured before the final wiring is frozen. The haptic edge source is now **implemented only in opt-in `esp32_full_haptic_lab`**, using MCP23017 GPB2, verified OLATB readback, fresh dock GPIOA inhibit and local CAP1188 event gating. Real motor power is **not qualified**: a generic 3.3V CD74HC123 independent hardware one-shot, AO3400 low-side MOSFET, diode, gate pulldown, and measured fault pulses are mandatory because an I2C expander can leave an output latched HIGH. Full wiring and bench gates: [haptic-one-shot-wiring.md](haptic-one-shot-wiring.md). Production profiles leave the effect disabled; do not describe real vibration as verified. Never put motor phases, servo lift/grip outputs, emergency stops, required head touch or optical cliff timing through the expander.
 

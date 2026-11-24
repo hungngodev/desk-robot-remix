@@ -364,3 +364,32 @@ def test_dc_heartbeat_must_stay_on_mutually_exclusive_stepper_pin():
     assert changed != body
     with pytest.raises(ValueError, match="DC motor watchdog"):
         harness.render(plan, changed, sense)
+
+
+def test_wiring_guide_reconciles_parent_roles_and_cap1188_address():
+    plan = json.loads((ROOT / "docs/hardware/full-feature-plan.json").read_text())
+    owners = json.loads(
+        (ROOT / "docs/hardware/full-63-role-source-ownership.json").read_text()
+    )
+    guide = (ROOT / "docs/hardware/full-feature-wiring-and-shopping.md").read_text()
+    groups = (
+        (plan["parts"], owners["pet_roles"]),
+        (plan["room_pod"]["modules"], owners["room_roles"]),
+        (plan["linked_subassemblies"], owners["linked_roles"]),
+    )
+    for rows, mapping in groups:
+        assert {row["id"] for row in rows} == set(mapping)
+    counts = tuple(len(rows) for rows, _ in groups)
+    assert counts == (42, 7, 14)
+    assert "49 parent\npurchasing roles" in guide
+    assert "63 records total" in guide
+    assert "not another 14 purchases" in guide
+    assert "full-63-role-source-ownership.json" in guide
+    lane = plan["bus"]["mux_extras"]["channels"][0]
+    assert {dev["name"]: dev["address"] for dev in lane["devices"]} == {
+        "CAP1188": 0x29,
+        "MAX30102 paw pad": 0x57,
+    }
+    assert "planned 0x29 (or the supported strapped 0x28 alternative)" in guide
+    assert "150 kΩ ADDR_COMM pull-down" in guide
+    assert "0x28 with ADDR_COMM tied to VDD" in guide
