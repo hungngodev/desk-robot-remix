@@ -88,6 +88,7 @@ def evaluate(records: list[dict]) -> dict:
             raise ValueError("Record camera/WiFi and motor/servo stand load trials")
         if type(speaker) is not str or not speaker.strip() or len(speaker) > 64:
             raise ValueError("Record distinct human speaker identities")
+        speaker = speaker.strip()
         if type(turn) is not int or not 1 <= turn <= 100:
             raise ValueError("Record numbered consecutive conversation turns")
         positions.add(position)

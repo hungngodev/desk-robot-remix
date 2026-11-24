@@ -455,3 +455,29 @@ def test_a2_accepts_canonical_robot_identity(valid_robot_id):
     result = evaluate(loaded)
     assert result["robot_id"] == valid_robot_id
     assert result["meets_proposed_gate"] is True
+
+
+@pytest.mark.parametrize("distance", [50, 100, None])
+def test_speaker_whitespace_aliases_cannot_supply_second_human(distance):
+    rows = both_distances()
+    for index, row in enumerate(rows[:-2]):
+        if distance is None or row["speaker_distance_cm"] == distance:
+            row["speaker_id"] = ("speaker_a", " \tspeaker_a\u2003")[index % 2]
+    loaded = parse_trial_jsonl("\n".join(json.dumps(row) for row in rows))
+    if distance is None:
+        with pytest.raises(ValueError, match="second human speaker"):
+            evaluate(loaded)
+    else:
+        report = evaluate(loaded)
+        assert not report["distance_results"][f"{distance}cm"]["coverage_complete"]
+        assert not report["meets_proposed_gate"]
+
+
+def test_distinct_speaker_ids_with_whitespace_preserve_a2_coverage():
+    rows = both_distances()
+    for index, row in enumerate(rows[:-2]):
+        if index % 4 < 2:
+            row["speaker_id"] = f" \t{row['speaker_id']}\u2003"
+    report = evaluate(parse_trial_jsonl("\n".join(json.dumps(row) for row in rows)))
+    assert report["coverage"]["human_speakers"] == 2
+    assert report["meets_proposed_gate"] is True
