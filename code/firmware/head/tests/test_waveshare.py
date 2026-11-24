@@ -129,6 +129,54 @@ class WaveshareOverlayTests(unittest.TestCase):
         for other in ("sense", "modular", "cores3"):
             self.assertFalse((self.root / overlay.BOARDS[other]).exists())
 
+    def test_display_initialization_precedes_ui_and_network_consumers(self):
+        """Check installed board startup against the pinned display/application."""
+        overlay.apply(self.root, "waveshare")
+        board = self.root / overlay.BOARDS["waveshare"]
+        source = (board / "desk_robot_waveshare.cc").read_text()
+        display = source.split("void InitializeDisplay()", 1)[1].split(
+            "void InitializeCamera()", 1
+        )[0]
+        stages = (
+            "i2c_new_master_bus(&config, &display_bus_)",
+            "esp_lcd_new_panel_io_i2c(display_bus_",
+            "esp_lcd_new_panel_ssd1306(panel_io,",
+            "esp_lcd_panel_reset(panel)",
+            "esp_lcd_panel_init(panel)",
+            "esp_lcd_panel_invert_color(panel, false)",
+            "esp_lcd_panel_disp_on_off(panel, true)",
+            "display_ = new OledDisplay(",
+        )
+        positions = [display.index(stage) for stage in stages]
+        self.assertEqual(positions, sorted(positions))
+        for stage in stages[:-1]:
+            self.assertIn("ESP_ERROR_CHECK(" + stage, display)
+        constructor = source.split("DeskRobotWaveshareBoard() :", 1)[1].split(
+            "void StartNetwork() override", 1
+        )[0]
+        startup = (
+            "InitializeControlBus();",
+            "InitializeExpander();",
+            "InitializeDisplay();",
+            "InitializeCamera();",
+            "boot_button_.OnClick(",
+        )
+        positions = [constructor.index(stage) for stage in startup]
+        self.assertEqual(positions, sorted(positions))
+        app = (UPSTREAM / "main/application.cc").read_text()
+        initialize = app.split("void Application::Initialize()", 1)[1].split(
+            "board.StartNetwork();", 1
+        )[0]
+        self.assertLess(
+            initialize.index("display->SetupUI();"),
+            initialize.index("board.SetNetworkEventCallback("),
+        )
+        oled = (UPSTREAM / "main/display/oled_display.cc").read_text()
+        self.assertLess(
+            oled.index("display_ = lvgl_port_add_disp("),
+            oled.index("void OledDisplay::SetupUI()"),
+        )
+
     def test_reversible_aec_whitelist_and_drift_protection(self):
         overlay.apply(self.root, "waveshare")
         overlay.apply(self.root, "waveshare")
