@@ -1,13 +1,20 @@
-# Closeout in the worker’s original run
+# Receipt for one short task
 
-Save evidence as work progresses. A platform cutoff can end the run before the final step.
+Post this in the selected task issue or as a tagged PR comment.
 
-Before ending voluntarily, the worker runs this check and executes any useful authorized step it finds.
+```text
+DRR card and slot:
+Reviewed full SHA:
+One check performed:
+Observed outcome and evidence link:
+Card state: verified / partial / blocked / waiting for CI
+Remaining acceptance or exact next small check:
+Missing input and responsible owner, if blocked:
+Prepared commit or branch, if any:
+CI SHA and check URL, if pending:
+Claim released:
+```
 
-- Check the latest PR head, each claimed card, and the reviews that affect its scope. Reconcile meaningful changes since the last checkpoint.
-- Look for newly runnable child cards and unclaimed work across the full order. Compare exact paths and test scopes against live claims before helping another slot.
-- Check any CI you own at the exact SHA. Keep pending, superseded and failed runs separate from verified results. Post the link and verification owner for follow-up.
-- Post a slot exit checkpoint with verified cards, exact SHAs and evidence, pending checks, external blockers, paths released, and the next runnable cards. Use the task issue, publication issue or tagged PR comment. If GitHub writes are unavailable, provide the same fields in the final response.
-- If you see no other active claim and have useful execution time, add a brief project summary to the publication record. Use the visible issue evidence. Leave uninspected and unresolved cards open.
+Use **verified** when the card’s whole acceptance has evidence. Use **partial** when this run proved one check within a larger card. Distinguish observed code or fixture behavior from real operator evidence. Include the exact SHA and link for a check started but still pending.
 
-The run can end when independent authorized work is exhausted, the remaining work requires specific external changes, or the execution limit arrives. A worker with a ready card should start it before closing out. [Full order](order.md), [Issue fallback](issue-recovery.md)
+Once the receipt is recorded, end the run. If GitHub writes are unavailable, return the same receipt in chat. A fresh worker reads it to select the next small check. [Issue fallback](issue-recovery.md)

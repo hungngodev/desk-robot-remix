@@ -1,11 +1,11 @@
 # Record work when GitHub issue access is limited
 
-Workers apply this during their own run.
+Use this within the selected short task. Keep one receipt and one active claim.
 
 1. Search all issue states for the card’s exact DRR ID and read its current comments and linked review threads. If a matching issue exists and is accessible, use it.
 2. If the issue is absent and GitHub permits issue creation, open one issue for the card when it is ready to claim. Use the standard issue fields. Refresh the issue list before opening it. If creation races, use the earliest matching issue and link any duplicate only when it contains useful evidence.
 3. If the worker can comment on PR #17 but cannot create or write the task issue, use a PR conversation comment beginning with the exact card ID and one of the statuses below. Include the source card link and starting SHA. Find existing task comments, replies and issue claims before publishing another record.
-4. When the publication issue is absent and creation is unavailable, use a PR conversation comment labeled with the publication status. Check the issue and PR conversation for claims before publishing, even if workers started on different surfaces. When neither is writable, work on independent reviews and safe digital verification with the available access. Keep any unpublished evidence in the final response and avoid editing or publishing through an unverified claim.
+4. When the publication issue is absent and creation is unavailable, use a PR conversation comment labeled with the publication status. Check the issue and PR conversation for claims before publishing, even if workers started on different surfaces. When neither is writable, complete the selected read-only check with the available access. Keep any unpublished evidence in the final response and avoid editing or publishing through an unverified claim.
 
 Use these stable labels and include test or commit links so any active worker can pick up the work.
 
