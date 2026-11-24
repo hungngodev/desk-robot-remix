@@ -164,6 +164,12 @@ bool OpticsValid(cJSON* json) {
 }
 
 
+bool PoseWireValid(const std::string& line) {
+    // cJSON C strings truncate escaped NUL in both keys and values.
+    // Pose v1 has no free-text fields, so this spelling is never needed.
+    return line.find("\\u0000") == std::string::npos;
+}
+
 bool PoseValid(cJSON* json) {
     // Guide 20 version 1: validate a complete, exact body-origin sample.
     // The body owns quality and sample_us; the head must not invent either.
@@ -447,6 +453,8 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
             if (command.verb == "status" || command.verb == "aux" ||
                 command.verb == "ir" || command.verb == "optics" ||
                 command.verb == "pose") {
+                if (command.verb == "pose" && !PoseWireValid(line))
+                    return {503, false, "malformed or unsupported pose response"};
                 auto json = Parse(line);
                 if (json && (command.verb == "status" ?
                              StatusValid(json.get()) : command.verb == "aux" ?
