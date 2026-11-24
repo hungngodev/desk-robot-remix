@@ -3,12 +3,18 @@
 These tests guard the archived Markdown index of the original ESP32 Deskpet
 Ideas.html dated 2026-11-09 (1,074,994 bytes, SHA256
 12a0068f3bcec7daa6065cc180478294ccc1d0cc5e439250774684f3b2008b5d).
-The original HTML is not in the checkout. These tests do not rehash it,
-validate every idea's prose, or prove external URL access or reuse.
+The original HTML is not in the checkout. Set DESK_ROBOT_ORIGINAL_HTML to
+its path to rehash and inventory the raw file. Neither mode validates every
+idea's prose, external URL access, publisher rights, or reuse.
 """
 import hashlib
+import os
 import re
+from collections import Counter
+from html.parser import HTMLParser
 from pathlib import Path
+
+import pytest
 
 SOURCE_MAP = Path(__file__).resolve().parents[2] / "docs/source-map.md"
 EXPECTED_URL_SHA = "83d6250c7c3e632e32624ef90b4656b61e2fe7f30f41b01b19761c3a7b24efc8"
@@ -27,6 +33,75 @@ brainstorm-sensors specs spec-pack sensor-menu finds reddit-youtube steal
 popular tweaks sensors ideas new-finds-2026-11-07 new-finds-2026-11-09
 reference diy-shopping-list repos
 """.split()
+
+
+# SHA256 of the exact declared attribute value, not a download from its URL.
+# Embedded JPEGs have no original publisher URL or license in the HTML.
+EXPECTED_ASSET_REFERENCES = [
+    ("link:icon", "4ff286857945d8713fd2e6744ee452fb51aadd3bca707c9850cb95ef18bba878"),
+    # Google Fonts preconnect endpoints and stylesheet, not downloaded font files.
+    ("link:preconnect", "8e2e7efb6cf0362d10625ef770e91c616d0d443c87612a7a790e7727bc370737"),
+    ("link:preconnect", "fc9e1824b0e63191b9c26237bc1e3f710168b33e78dc4dd967e1f7f41dc94a3f"),
+    ("link:stylesheet", "7378f86fba0386c16e73148e660e37f98af056b862fdb94383ec721b793a5efa"),
+    # Embedded Cozmo, Eilik and StackChan JPEG data URIs in document order.
+    ("img:src", "6fe42f22d04208365ebbe8a62941226bfbf4ae3263c4faba86459b10a4aff6a5"),
+    ("img:src", "46feecb8f0f51d1634876eac15cd0f9ca8941ae9bc137cf995def0363ae95c22"),
+    ("img:src", "dadbe7d9d057ada4a2b46896ea3f0903909ca8fcf5261d1830bbabf2bce46083"),
+]
+
+
+class OriginalHTMLInventory(HTMLParser):
+    def __init__(self):
+        super().__init__()
+        self.sections = []
+        self.anchors = []
+        self.assets = []
+        self.tags = Counter()
+
+    def handle_starttag(self, tag, attrs):
+        self.tags[tag] += 1
+        attributes = dict(attrs)
+        if tag == "section":
+            self.sections.append(attributes.get("id"))
+        if tag == "a" and "href" in attributes:
+            self.anchors.append(attributes["href"])
+        for name, value in attrs:
+            if value is None:
+                continue
+            if name in {"src", "srcset", "poster", "data"}:
+                self.assets.append((f"{tag}:{name}", hashlib.sha256(value.encode()).hexdigest()))
+            elif tag == "link" and name == "href":
+                self.assets.append((
+                    f"link:{attributes.get('rel')}",
+                    hashlib.sha256(value.encode()).hexdigest(),
+                ))
+
+
+def test_original_html_bytes_and_assets_when_supplied():
+    """Opt-in source audit; private original bytes are not shipped in Git."""
+    path = os.environ.get("DESK_ROBOT_ORIGINAL_HTML")
+    if not path:
+        pytest.skip("Set DESK_ROBOT_ORIGINAL_HTML to the archived original HTML")
+    original = Path(path).read_bytes()
+    assert len(original) == 1_074_994
+    assert hashlib.sha256(original).hexdigest() == (
+        "12a0068f3bcec7daa6065cc180478294ccc1d0cc5e439250774684f3b2008b5d"
+    )
+    inventory = OriginalHTMLInventory()
+    inventory.feed(original.decode("utf-8"))
+    inventory.close()
+    assert inventory.sections == EXPECTED_SECTION_IDS
+    assert len(inventory.anchors) == 567
+    urls = [url for url in inventory.anchors if url.startswith(("http://", "https://"))]
+    assert len(urls) == 256
+    assert len(set(urls)) == 131
+    assert hashlib.sha256(("\n".join(sorted(set(urls))) + "\n").encode()).hexdigest() == (
+        EXPECTED_URL_SHA
+    )
+    assert inventory.assets == EXPECTED_ASSET_REFERENCES
+    assert {tag: inventory.tags[tag] for tag in ("style", "script", "svg")} == {
+        "style": 1, "script": 1, "svg": 1,
+    }
 
 
 def test_original_html_section_crosswalk_is_preserved():
