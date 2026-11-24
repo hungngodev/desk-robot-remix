@@ -342,3 +342,31 @@ def test_uncalibrated_pack_current_never_accepts_replay_or_forgery(patch):
     data["power"].update(patch)
     with pytest.raises(ValueError, match="INA226|battery"):
         validate_aux(data, "robot-01")
+
+
+@pytest.mark.parametrize("age", [0, 250])
+def test_pulse_validity_matches_wroom_inclusive_freshness_boundary(age):
+    data = sample()
+    data["pulse"]["age_ms"] = age
+    assert validate_aux(data, "robot-01")["pulse"]["valid"] is True
+
+
+@pytest.mark.parametrize("age", [251, 0xffffffff])
+def test_stale_pulse_is_only_an_invalid_raw_diagnostic(age):
+    data = sample()
+    data["pulse"]["age_ms"] = age
+    with pytest.raises(ValueError, match="MAX30102"):
+        validate_aux(data, "robot-01")
+    data["pulse"]["valid"] = False
+    assert validate_aux(data, "robot-01")["pulse"]["age_ms"] == age
+
+
+async def test_authenticated_head_rejects_stale_valid_pulse(settings, tokens):
+    data = sample()
+    data["pulse"]["age_ms"] = 251
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=data)
+    )) as client:
+        head = HttpHead(settings.robots[0], client)
+        with pytest.raises(HeadError, match="MAX30102"):
+            await head.aux_status()
