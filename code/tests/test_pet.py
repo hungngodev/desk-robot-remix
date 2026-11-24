@@ -3702,6 +3702,73 @@ async def test_suppressed_touch_does_not_consume_later_touch_admission(
         await pet.close()
 
 
+@pytest.mark.parametrize(
+    ("supersession", "reason"),
+    [
+        ("expired", "event_expired_before_admission"),
+        ("human_turn", "human_turn_superseded_event"),
+    ],
+)
+async def test_touch_persistence_cannot_renew_initiative_receipt(
+    fleet, tmp_path, monkeypatch, supersession, reason,
+):
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {}, Conversation(fleet, GroundedChat(), speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0, interaction_cooldown=0,
+        max_observation_age=10,
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 9
+    entered, release = asyncio.Event(), asyncio.Event()
+    store = pet._store_observation
+    latest = [float("-inf")]
+    pet.multimodal = SimpleNamespace(
+        sensor_event=lambda *_: None,
+        latest_fleet_human_turn_at=lambda: latest[0],
+        hub=SimpleNamespace(spontaneous_floor_busy=lambda _now: False),
+    )
+
+    async def delayed_store(*args, **kwargs):
+        entered.set()
+        await release.wait()
+        await store(*args, **kwargs)
+
+    monkeypatch.setattr(pet, "_store_observation", delayed_store)
+    description = "Someone deliberately tapped my head"
+    task = asyncio.create_task(
+        pet._remember_touch("robot-01", 9, "touch_tap", description)
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        if supersession == "expired":
+            # Shrink the test-only lifetime while the write is blocked.
+            pet.max_observation_age = 0.01
+            await asyncio.sleep(0.03)
+        else:
+            # A completed human turn (no current VAD) supersedes the event.
+            latest[0] = time.monotonic()
+        release.set()
+        await asyncio.wait_for(task, timeout=2)
+        assert memory.count("robot-01") == 1
+        assert state.last_initiative_suppression == reason
+        assert pet._speech_task is None
+        assert not pet._admitted_event_kinds
+        assert speaker.spoken == []
+        # A genuinely new identical contact remains eligible.
+        pet.multimodal = None
+        pet.max_observation_age = 10
+        await pet._remember_touch("robot-01", 9, "touch_tap", description)
+        await wait_for(lambda: state.spoken == 1)
+        assert len(speaker.spoken) == 1
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+        pet.multimodal = None
+        await pet.close()
+
+
 async def test_deliberate_touch_can_reply_after_passive_speech_cooldown(fleet, tmp_path):
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
     conversation = Conversation(
@@ -4794,7 +4861,7 @@ def test_camera_observer_passes_original_receipt_into_speech_scheduler():
         / "laptop/src/desk_robot/pet.py"
     ).read_text()
     assert "camera_derived=True,\n                                received_at=received," in src
-    assert "and received_at is not None else now" in src
+    assert "offered_at = received_at if received_at is not None else now" in src
     assert "or time.monotonic() - offered_at" in src
 
 

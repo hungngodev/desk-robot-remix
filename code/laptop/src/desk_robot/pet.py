@@ -909,6 +909,7 @@ class PetController:
         state = self.states[robot_id]
         if not state.enabled or state.generation != generation:
             return
+        received_at = time.monotonic()
         change = SceneChange(kind, description, 1.0)
         if kind in ("touch", "touch_tap", "touch_double", "touch_hold"):
             self._notify_sensor(robot_id, kind)
@@ -920,7 +921,9 @@ class PetController:
             await self.set_quiet(robot_id, True)
         await self._store_observation(robot_id, change)
         if state.enabled and state.generation == generation:
-            self._consider_speech(robot_id, change, generation)
+            self._consider_speech(
+                robot_id, change, generation, received_at=received_at,
+            )
 
 
     async def _poll_aux(self, robot_id: str, generation: int) -> None:
@@ -2328,6 +2331,19 @@ class PetController:
             state.suppressed += 1
             state.last_initiative_suppression = "camera_source_replaced"
             return
+        # Physical events, like camera receipts, may wait for SQLite or
+        # peer fanout. Never let persistence renew the initiative lifetime.
+        offered_at = received_at if received_at is not None else now
+        if (type(offered_at) not in (int, float)
+                or not 0 <= now - offered_at <= self.max_observation_age):
+            state.suppressed += 1
+            state.last_initiative_suppression = "event_expired_before_admission"
+            return
+        latest = getattr(self.multimodal, "latest_fleet_human_turn_at", None)
+        if callable(latest) and latest() > offered_at:
+            state.suppressed += 1
+            state.last_initiative_suppression = "human_turn_superseded_event"
+            return
         if not _initiative_evidence(change):
             state.suppressed += 1
             state.low_value_speech_candidates += 1
@@ -2402,10 +2418,9 @@ class PetController:
         )
         self._speech_task = asyncio.create_task(
             self._speak(robot_id, change, generation,
-                        # Camera evidence keeps its original Mac receipt
-                        # clock through all model and speaker admission.
-                        offered_at=(received_at if camera_derived
-                                    and received_at is not None else now),
+                        # Keep the original receipt through all model
+                        # and speaker admission, regardless of source.
+                        offered_at=offered_at,
                         social_peer_id=peer_id,
                         social_peer_generation=peer_generation,
                         camera_derived=camera_derived,
