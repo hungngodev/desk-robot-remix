@@ -11,6 +11,7 @@ from desk_robot.conversation import Conversation
 from desk_robot.memory import MemoryStore
 from desk_robot.multimodal import CameraFrameHub
 from desk_robot.pet import PetController
+from desk_robot.runtime import Runtime
 from desk_robot.simulator import SimulatedSpeaker
 from desk_robot.vision import SceneChange, VisualChangeGate
 from PIL import Image, ImageDraw
@@ -197,3 +198,74 @@ async def test_authenticated_camera_receipt_to_fleet_and_speaker(
         observer.cancel()
         await asyncio.gather(observer, return_exceptions=True)
         await pet.close()
+
+
+@pytest.mark.asyncio
+async def test_runtime_replayed_touch_release_dispatches_once(settings, tmp_path):
+    """A same-count stale report cannot rewind a completed gesture."""
+    settings.memory_dir = tmp_path
+    settings.fleet_text_sharing_enabled = True
+    settings.fleet_text_auto_fanout_enabled = True
+    runtime = Runtime(settings)
+    pet = runtime.pet
+    pet.speech_cooldown = 0
+    pet.interaction_cooldown = 0
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 7
+    head = pet.heads["robot-01"]
+    speaker = runtime.conversation.speaker
+
+    class Chat:
+        async def reply(self, history):
+            return "I felt that tap."
+
+    runtime.conversation.chat = Chat()
+
+    async def report(count, taps):
+        head.replay_body_status({
+            "robot_id": "robot-01",
+            "imu": {"boot_id": 19},
+            "side_ranges": {"boot_id": 19},
+            "touch": {
+                "active": False, "count": count, "tap_count": taps,
+                "double_count": 0, "hold_count": 0,
+            },
+        })
+        await pet._touch_from_body("robot-01", 7)
+        task = pet._speech_task
+        if task is not None:
+            await asyncio.wait_for(task, timeout=4)
+
+    def taps(robot_id):
+        return [
+            row for row in runtime.memory.recent(robot_id)
+            if row.kind == "touch_tap"
+        ]
+
+    try:
+        await report(0, 0)  # boot baseline
+        await report(1, 0)  # press, classifier has not completed the tap
+        await report(1, 1)  # release, one genuine event
+        assert state.events == state.spoken == 1
+        assert speaker.spoken == [("robot-01", "I felt that tap.")]
+        first, copy = taps("robot-01")[0], taps("robot-02")[0]
+        assert first.event_id == copy.event_id
+        assert first.witnessed and not copy.witnessed
+        assert first.source_robot == copy.source_robot == "robot-01"
+
+        await report(1, 0)  # late copy of the same raw press
+        assert state.last_touch_events["tap_count"] == 1
+        await report(1, 1)  # same release again
+        assert len(taps("robot-01")) == len(taps("robot-02")) == 1
+        assert state.events == state.spoken == 1
+        assert len(speaker.spoken) == 1
+
+        await report(2, 2)  # a distinct real counter edge is still recorded
+        assert len(taps("robot-01")) == len(taps("robot-02")) == 2
+        assert state.events == 2
+        assert {row.event_id for row in taps("robot-01")} == {
+            row.event_id for row in taps("robot-02")
+        }
+        assert not head.commands  # no autonomous physical authority
+    finally:
+        await runtime.close()

@@ -1769,8 +1769,6 @@ class PetController:
             # status must not rewind the active event baseline and replay a
             # tap or quiet-mode hold on the next authenticated status read.
             return
-        state.last_touch_count = count
-
         # This field set is emitted by the WROOM gesture classifier, not by a
         # Mac clock estimate from the much slower camera polling interval.
         keys = ("tap_count", "double_count", "hold_count")
@@ -1780,15 +1778,21 @@ class PetController:
                    for v in counters.values()):
                 return
             old = state.last_touch_events
-            state.last_touch_events = counters
-            if (
-                old is None or previous_count is None or
-                count < previous_count or count - previous_count > 20
-            ):
+            if old is None or previous_count is None or count < previous_count:
+                state.last_touch_count = count
+                state.last_touch_events = counters
                 return  # initial baseline or reset, never replay stored touches
             deltas = {key: counters[key] - old[key] for key in keys}
-            if any(delta < 0 or delta > 20 for delta in deltas.values()):
-                return  # reject the whole inconsistent frame, not partial events
+            if any(delta < 0 for delta in deltas.values()):
+                # A release can increment a gesture counter without another
+                # raw press. An older same-count report must not rewind it.
+                return
+            state.last_touch_count = count
+            state.last_touch_events = counters
+            if count - previous_count > 20 or any(
+                delta > 20 for delta in deltas.values()
+            ):
+                return  # skip an excessive forward backlog without replay
             for key, kind, phrase in (
                 ("hold_count", "touch_hold", "Someone has held my touch pad"),
                 ("double_count", "touch_double", "Someone has tapped me twice"),
@@ -1801,6 +1805,7 @@ class PetController:
                     )
             return
 
+        state.last_touch_count = count
         if previous_count is None or count < previous_count:
             state.last_touch_events = None
             return
