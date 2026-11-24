@@ -357,3 +357,42 @@ def test_pre_request_capture_with_new_receipt_is_historical_only():
     assert result.status == "last_seen"
     assert result.confirmed_floor_mm is None
     assert not result.arrived and not result.may_execute
+
+
+@pytest.mark.parametrize("new_wall", [1800000000.0, 1800000001.0])
+def test_stale_same_stream_frame_order_survives_wall_clock_rollback_or_tie(new_wall):
+    _, _, seen = fixtures()
+    older = replace(seen, seen_at_wall_s=1800000001.0)
+    newer = replace(seen, frame_seq=24, receipt_us=970_000, captured_us=960_000,
+                    seen_at_wall_s=new_wall, floor_mm=(240, 320))
+    for rows in ([older, newer], [newer, older]):
+        result = resolve(rows, now_us=1_300_001)
+        assert result.status == "last_seen"
+        assert result.search_hint_mm == newer.floor_mm
+        assert result.confirmed_floor_mm is None
+        assert not result.arrived and not result.may_execute
+
+
+def test_incomparable_old_host_streams_do_not_select_arbitrary_metric_hint():
+    _, _, seen = fixtures()
+    first = replace(seen, host_boot_id="prior-one")
+    second = replace(seen, host_boot_id="prior-two", captured_us=9_000_000,
+                     receipt_us=9_100_000, floor_mm=(240, 320))
+    for rows in ([first, second], [second, first]):
+        result = resolve(rows, now_us=1_300_001)
+        assert result.status == "last_seen"
+        assert result.reason == "historical_order_uncertain"
+        assert result.seen_at_wall_s is None
+        assert result.search_hint_mm is None and result.confirmed_floor_mm is None
+        assert not result.arrived and not result.may_execute
+
+
+def test_running_host_history_takes_precedence_over_incomparable_older_boot():
+    _, _, seen = fixtures()
+    prior = replace(seen, host_boot_id="prior-host", captured_us=9_000_000,
+                    receipt_us=9_100_000, seen_at_wall_s=1800000002.0,
+                    floor_mm=(240, 320))
+    for rows in ([prior, seen], [seen, prior]):
+        result = resolve(rows, now_us=1_300_001)
+        assert result.status == "last_seen" and result.search_hint_mm == seen.floor_mm
+        assert not result.arrived and not result.may_execute

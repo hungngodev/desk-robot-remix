@@ -261,8 +261,42 @@ def resolve_object_target(
 
     # Historical observations cannot prove where a moved/hidden target is now.
     # A later user correction takes precedence but stays explicitly reported.
-    past = max(seen, key=lambda e: e.seen_at_wall_s, default=None)
+    # Wall time is descriptive and may jump backwards. Select the latest
+    # frame within each authenticated stream before comparing streams.
+    streams: dict[tuple, ObjectEvidence] = {}
+    for observation in seen:
+        stream = (observation.host_boot_id, observation.camera_boot,
+                  observation.camera_grant)
+        previous = streams.get(stream)
+        rank = (observation.frame_seq, observation.receipt_us,
+                observation.seen_at_wall_s)
+        if previous is None or rank > (previous.frame_seq, previous.receipt_us,
+                                       previous.seen_at_wall_s):
+            streams[stream] = observation
+
+    candidates = list(streams.values())
+    # Evidence from the running host postdates prior host boots. Never compare
+    # monotonic timestamps across distinct host boots.
+    current_host = [e for e in candidates if e.host_boot_id == query.host_boot_id]
+    if current_host:
+        candidates = current_host
+    past = candidates[0] if len(candidates) == 1 else None
+    if (len(candidates) > 1
+            and len({e.host_boot_id for e in candidates}) == 1
+            and all(e.captured_us is not None for e in candidates)):
+        latest_capture = max(e.captured_us for e in candidates)
+        latest = [e for e in candidates if e.captured_us == latest_capture]
+        if len(latest) == 1:
+            past = latest[0]
+
     report = max(reports, key=lambda e: e.seen_at_wall_s, default=None)
+    if candidates and past is None:
+        if report is not None and all(
+                report.seen_at_wall_s > e.seen_at_wall_s for e in seen):
+            return result("user_reported", "unverified_user_location", report)
+        # No uniquely ordered historical view: do not invent its timestamp or
+        # pass an arbitrary metric search hint to the route planner.
+        return result("last_seen", "historical_order_uncertain")
     if report is not None and (past is None or report.seen_at_wall_s > past.seen_at_wall_s):
         return result("user_reported", "unverified_user_location", report)
     if past is not None:
