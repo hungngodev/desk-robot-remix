@@ -451,11 +451,17 @@ class Conversation:
 
 
     @asynccontextmanager
-    async def _confirmed_speaker_session(self, robots: list[RobotConfig]):
-        """Check the global STOP latch AFTER admission lock, BEFORE device grant."""
+    async def _confirmed_speaker_session(
+        self, robots: list[RobotConfig], *, passive: bool | None = None,
+    ):
+        """Fence both group and optional speaker grants on confirmed STOP."""
         if self.speaker_stop_unconfirmed:
             raise RuntimeError("Xiaozhi speaker STOP unconfirmed; recovery required")
-        async with self.speaker.session(robots):
+        session = (
+            self.speaker.session(robots) if passive is None
+            else self.speaker.session(robots, passive=passive)
+        )
+        async with session:
             # A failed urgent decoder STOP can latch while the bridge grant
             # is awaiting the network. Never admit a newly granted talker
             # under that now-unconfirmed audio floor; session exit releases it.
@@ -1319,15 +1325,15 @@ class Conversation:
                 raise RuntimeError(
                     "Hardware proactive speaker lacks shared passive speech budget"
                 )
-            speaker_session = (
-                # Only a caller holding an actual local interaction edge
-                # may bypass the *passive* fleet cooldown. The native bridge
-                # still enforces session exclusivity and human VAD priority.
-                self.speaker.session([robot], passive=not deliberate)
-                if passive_budget else self.speaker.session([robot])
-            )
-            async with speaker_session:
+            # Only a caller holding an actual local interaction edge may
+            # bypass the passive fleet cooldown. All grants still share the
+            # same confirmed STOP and human VAD priority boundary.
+            async with self._confirmed_speaker_session(
+                [robot], passive=not deliberate if passive_budget else None,
+            ):
                 async with self.speaker_lock:
+                    if self.speaker_stop_unconfirmed:
+                        raise RuntimeError("Xiaozhi speaker STOP unconfirmed; recovery required")
                     # A group can become active while either lease is awaited.
                     # Human/group speech must outrank a queued optional remark.
                     if (self.active is not None and not self.active.done()) or (

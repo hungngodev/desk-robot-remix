@@ -133,3 +133,69 @@ async def test_stop_recovery_cannot_flush_an_owned_session(monkeypatch):
         assert speaker.calls == []
         assert conversation.session_lock.locked()
     assert not conversation.session_lock.locked()
+
+
+@pytest.mark.parametrize("kind", ["legacy", "passive", "deliberate"])
+@pytest.mark.parametrize("latch", [False, True])
+async def test_proactive_grant_rechecks_unconfirmed_stop(kind, latch):
+    """The optional talker must use the same STOP fence as group speech."""
+
+    class LegacySpeaker(PausedGrantSpeaker):
+        def __init__(self):
+            super().__init__()
+            self.spoken = []
+
+        async def say(self, robot, text):
+            self.spoken.append((robot.id, text))
+
+    class BudgetSpeaker(LegacySpeaker):
+        supports_permission_checks = True
+        supports_passive_speech_budget = True
+
+        def __init__(self):
+            super().__init__()
+            self.passive = []
+
+        @asynccontextmanager
+        async def session(self, robots, *, passive=False):
+            self.passive.append(passive)
+            async with super().session(robots):
+                yield
+
+        async def say(self, robot, text, *, permission_check=None):
+            assert permission_check is None or permission_check()
+            await super().say(robot, text)
+
+    speaker = LegacySpeaker() if kind == "legacy" else BudgetSpeaker()
+    conversation = conversation_with(speaker)
+    conversation.settings = SimpleNamespace(
+        mode="simulation" if kind == "legacy" else "hardware",
+    )
+    conversation.active = None
+    conversation.session_lock = asyncio.Lock()
+    conversation.speaker_lock = asyncio.Lock()
+    robot = SimpleNamespace(id="robot-01")
+    pending = asyncio.create_task(conversation.say_proactive(
+        robot, "A fresh observation", deliberate=kind == "deliberate",
+    ))
+    try:
+        await asyncio.wait_for(speaker.grant_started.wait(), timeout=1)
+        conversation.speaker_stop_unconfirmed = latch
+        speaker.finish_grant.set()
+        if latch:
+            with pytest.raises(RuntimeError, match="STOP unconfirmed"):
+                await asyncio.wait_for(pending, timeout=1)
+            assert speaker.spoken == []
+        else:
+            assert await asyncio.wait_for(pending, timeout=1) is True
+            assert speaker.spoken == [("robot-01", "A fresh observation")]
+        assert speaker.released == 1
+        assert not conversation.session_lock.locked()
+        assert not conversation.speaker_lock.locked()
+        if kind != "legacy":
+            assert speaker.passive == [kind == "passive"]
+    finally:
+        speaker.finish_grant.set()
+        if not pending.done():
+            pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
