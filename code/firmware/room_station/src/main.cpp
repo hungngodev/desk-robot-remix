@@ -12,6 +12,7 @@
 #include <Adafruit_AMG88xx.h>
 #include <ld2410.h>
 #include <math.h>
+#include <string.h>
 #include "thermal_pixels.h"
 #include "soil_sample.h"
 #include "radar_sample_clock.h"
@@ -26,6 +27,91 @@
 #endif
 
 namespace {
+// Keep report formatting off the USB endpoint. The pinned TinyUSB CDC
+// write() spins while DTR remains asserted and its TX FIFO is full.
+constexpr size_t kMaxUsbLineBytes = 1536;
+constexpr size_t kUsbWriteChunkBytes = 64;
+class RoomUsbLine final : public Print {
+ public:
+  using Print::write;
+  size_t write(uint8_t value) override {
+    if (used_ == sizeof(bytes_)) {
+      overflow_ = true;
+      return 0;
+    }
+    bytes_[used_++] = value;
+    return 1;
+  }
+  void reset() { used_ = 0; overflow_ = false; }
+  bool valid() const {
+    return !overflow_ && used_ != 0 && bytes_[used_ - 1] == '\n';
+  }
+  size_t size() const { return used_; }
+  const uint8_t* data() const { return bytes_; }
+
+ private:
+  uint8_t bytes_[kMaxUsbLineBytes] = {};
+  size_t used_ = 0;
+  bool overflow_ = false;
+};
+
+// One in-flight line and the latest waiting SYNC ACK. A new challenge
+// retires any line that has not started; a partially sent line finishes
+// first. The leading ACK newline isolates any interrupted USB line, and
+// the host discards everything before its matching nonce.
+class RoomUsbTx {
+ public:
+  void queue_ack(const char* token) {
+    memcpy(ack_, "\nSYNC_ACK ", 10);
+    memcpy(ack_ + 10, token, 16);
+    ack_[26] = '\r';
+    ack_[27] = '\n';
+    ack_pending_ = true;
+    if (sent_ == 0) pending_size_ = 0;
+  }
+  bool queue_report(const RoomUsbLine& line) {
+    if (pending_size_ || ack_pending_ || !line.valid()) return false;
+    memcpy(pending_, line.data(), line.size());
+    pending_size_ = line.size();
+    return true;
+  }
+  template <typename Port>
+  void step(Port& port) {
+    if (!port) {
+      pending_size_ = sent_ = 0;
+      ack_pending_ = false;
+      return;
+    }
+    if (!pending_size_) {
+      if (!ack_pending_) return;
+      memcpy(pending_, ack_, sizeof(ack_));
+      pending_size_ = sizeof(ack_);
+      ack_pending_ = false;
+    }
+    const int capacity = port.availableForWrite();
+    if (capacity <= 0) return;
+    size_t count = pending_size_ - sent_;
+    if (count > static_cast<size_t>(capacity))
+      count = static_cast<size_t>(capacity);
+    if (count > kUsbWriteChunkBytes) count = kUsbWriteChunkBytes;
+    // This is the station's sole CDC writer. Never request more than the
+    // current FIFO space, and keep any short-write suffix for a later loop.
+    const size_t written = port.write(pending_ + sent_, count);
+    sent_ += written;
+    if (written) port.flush();
+    if (sent_ == pending_size_) pending_size_ = sent_ = 0;
+  }
+
+ private:
+  uint8_t pending_[kMaxUsbLineBytes] = {};
+  size_t pending_size_ = 0;
+  size_t sent_ = 0;
+  uint8_t ack_[28] = {};
+  bool ack_pending_ = false;
+};
+RoomUsbLine telemetry;
+RoomUsbTx usb_tx;
+
 constexpr uint32_t kReportMs = 1000;
 constexpr uint32_t kScdStaleMs = 8500;
 constexpr uint32_t kBmeStaleMs = 3000;
@@ -106,10 +192,10 @@ uint32_t thermal_sample_ms = 0;
 bool finite_temperature(float temp) {
   return isfinite(temp) && temp >= -40.0f && temp <= 125.0f;
 }
-void jsbool(bool value) { Serial.print(value ? F("true") : F("false")); }
+void jsbool(bool value) { telemetry.print(value ? F("true") : F("false")); }
 void number(float value, int decimals = 2) {
   // Only call after validating isfinite. Never emit NaN/Infinity JSON tokens.
-  Serial.print(value, decimals);
+  telemetry.print(value, decimals);
 }
 void scd_observation(uint32_t now) {
   if (scd_started) {
@@ -141,14 +227,14 @@ void scd_observation(uint32_t now) {
     }
   }
   const bool fresh = scd_started && scd_valid && now - last_scd_ms <= kScdStaleMs;
-  Serial.print(F("\"scd40\":{\"valid\":")); jsbool(fresh);
+  telemetry.print(F("\"scd40\":{\"valid\":")); jsbool(fresh);
   if (fresh) {
-    Serial.print(F(",\"sample_ms\":")); Serial.print(last_scd_ms);
-    Serial.print(F(",\"co2_ppm\":")); Serial.print(co2_ppm);
-    Serial.print(F(",\"temp_c\":")); number(scd_temp);
-    Serial.print(F(",\"humidity_pct\":")); number(scd_humidity);
+    telemetry.print(F(",\"sample_ms\":")); telemetry.print(last_scd_ms);
+    telemetry.print(F(",\"co2_ppm\":")); telemetry.print(co2_ppm);
+    telemetry.print(F(",\"temp_c\":")); number(scd_temp);
+    telemetry.print(F(",\"humidity_pct\":")); number(scd_humidity);
   }
-  Serial.print('}');
+  telemetry.print('}');
 }
 // Pinned Adafruit BME680 v2.0.5: beginReading starts a forced conversion;
 // remainingReadingMillis is nonblocking, and endReading must run only at
@@ -202,16 +288,16 @@ void bme_observation(uint32_t now) {
   // Serial reporting never starts or waits for a gas conversion.
   // Preserve the actual last completed sample time, not the report time.
   const bool fresh = bme_completed.fresh(now, kBmeStaleMs);
-  Serial.print(F("\"bme688\":{\"valid\":")); jsbool(fresh);
+  telemetry.print(F("\"bme688\":{\"valid\":")); jsbool(fresh);
   if (fresh) {
-    Serial.print(F(",\"sample_ms\":")); Serial.print(bme_completed.sample_ms);
-    Serial.print(F(",\"temp_c\":")); number(bme_completed.temperature_c);
-    Serial.print(F(",\"humidity_pct\":")); number(bme_completed.humidity_pct);
-    Serial.print(F(",\"pressure_pa\":")); number(bme_completed.pressure_pa, 0);
-    Serial.print(F(",\"gas_ohms\":")); Serial.print(bme_completed.gas_ohms);
+    telemetry.print(F(",\"sample_ms\":")); telemetry.print(bme_completed.sample_ms);
+    telemetry.print(F(",\"temp_c\":")); number(bme_completed.temperature_c);
+    telemetry.print(F(",\"humidity_pct\":")); number(bme_completed.humidity_pct);
+    telemetry.print(F(",\"pressure_pa\":")); number(bme_completed.pressure_pa, 0);
+    telemetry.print(F(",\"gas_ohms\":")); telemetry.print(bme_completed.gas_ohms);
     // Gas resistance is raw resistance, never calibrated VOC or AQI.
   }
-  Serial.print('}');
+  telemetry.print('}');
 }
 void radar_observation(uint32_t now) {
   // The pinned v0.2.2 driver's read_frame_ can leave queued frames, and
@@ -219,21 +305,21 @@ void radar_observation(uint32_t now) {
   // with the raw packet receipt clock. Expire the completed tuple locally.
   // A static/moving echo is not authentication or a particular human.
   const bool connected = radar_sample_clock.fresh(now, kRadarStaleMs);
-  Serial.print(F("\"ld2410c\":{\"valid\":")); jsbool(connected);
+  telemetry.print(F("\"ld2410c\":{\"valid\":")); jsbool(connected);
   if (connected) {
-    Serial.print(F(",\"sample_ms\":"));
-    Serial.print(radar_sample_clock.sample_ms());
-    Serial.print(F(",\"presence\":")); jsbool(radar_completed.presence);
-    Serial.print(F(",\"stationary\":")); jsbool(radar_completed.stationary);
-    Serial.print(F(",\"moving\":")); jsbool(radar_completed.moving);
-    Serial.print(F(",\"stationary_cm\":"));
-    Serial.print(radar_completed.stationary_cm);
-    Serial.print(F(",\"moving_cm\":")); Serial.print(radar_completed.moving_cm);
+    telemetry.print(F(",\"sample_ms\":"));
+    telemetry.print(radar_sample_clock.sample_ms());
+    telemetry.print(F(",\"presence\":")); jsbool(radar_completed.presence);
+    telemetry.print(F(",\"stationary\":")); jsbool(radar_completed.stationary);
+    telemetry.print(F(",\"moving\":")); jsbool(radar_completed.moving);
+    telemetry.print(F(",\"stationary_cm\":"));
+    telemetry.print(radar_completed.stationary_cm);
+    telemetry.print(F(",\"moving_cm\":")); telemetry.print(radar_completed.moving_cm);
   }
-  Serial.print('}');
+  telemetry.print('}');
 }
 void soil_observation(uint32_t now) {
-  Serial.print(F("\"soil\":{\"valid\":"));
+  telemetry.print(F("\"soil\":{\"valid\":"));
 #if ROOM_SOIL_FITTED
   // Each report uses three actual bounded Arduino ADC acquisitions. Rail,
   // saturation and gross noise faults must never appear as fresh plant
@@ -242,14 +328,14 @@ void soil_observation(uint32_t now) {
       []() { return analogRead(A0); });
   jsbool(sample.valid);
   if (sample.valid) {
-    Serial.print(F(",\"sample_ms\":")); Serial.print(now);
-    Serial.print(F(",\"raw_adc\":")); Serial.print(sample.raw_adc);
+    telemetry.print(F(",\"sample_ms\":")); telemetry.print(now);
+    telemetry.print(F(",\"raw_adc\":")); telemetry.print(sample.raw_adc);
   }
 #else
   (void)now;
   jsbool(false);
 #endif
-  Serial.print('}');
+  telemetry.print('}');
 }
 // The pinned Adafruit AMG88xx readPixels() returns void and its underlying
 // I2C read discards transfer failure. Reject a partial/failed pixel frame.
@@ -293,17 +379,17 @@ void thermal_step(uint32_t now) {
 void thermal_observation(uint32_t now) {
   // Never read I2C in the report path or stamp cached pixels with now.
   const bool valid = thermal_valid && now - thermal_sample_ms <= kThermalStaleMs;
-  Serial.print(F("\"amg8833\":{\"valid\":")); jsbool(valid);
+  telemetry.print(F("\"amg8833\":{\"valid\":")); jsbool(valid);
   if (valid) {
-    Serial.print(F(",\"sample_ms\":")); Serial.print(thermal_sample_ms);
-    Serial.print(F(",\"pixels_c\":["));
+    telemetry.print(F(",\"sample_ms\":")); telemetry.print(thermal_sample_ms);
+    telemetry.print(F(",\"pixels_c\":["));
     for (unsigned i = 0; i < AMG88xx_PIXEL_ARRAY_SIZE; ++i) {
-      if (i) Serial.print(',');
+      if (i) telemetry.print(',');
       number(thermal[i], 2);
     }
-    Serial.print(']');
+    telemetry.print(']');
   }
-  Serial.print('}');
+  telemetry.print('}');
 }
 // Retry only one missing I2C peripheral in each main-loop pass. Each
 // attempt is spaced by the same monotonic millis() gate, including rollover.
@@ -362,16 +448,20 @@ void report(uint32_t now) {
   // One bounded, newline-delimited source-of-observation frame each second.
   // Mac owns reconnect epochs, replay rejection, user consent and five pet
   // interpretation. The board does NOT speak, move, recognize or charge.
-  Serial.print(F("{\"v\":1,\"station\":\"room-pod-01\",\"seq\":"));
-  Serial.print(++sequence);
-  Serial.print(F(",\"at_ms\":")); Serial.print(now);
-  Serial.print(F(",\"readings\":{"));
-  scd_observation(now); Serial.print(',');
-  bme_observation(now); Serial.print(',');
-  radar_observation(now); Serial.print(',');
-  soil_observation(now); Serial.print(',');
+  // Always acquire on schedule, even when an older USB line is in flight.
+  telemetry.reset();
+  telemetry.print(F("{\"v\":1,\"station\":\"room-pod-01\",\"seq\":"));
+  telemetry.print(++sequence);
+  telemetry.print(F(",\"at_ms\":")); telemetry.print(now);
+  telemetry.print(F(",\"readings\":{"));
+  scd_observation(now); telemetry.print(',');
+  bme_observation(now); telemetry.print(',');
+  radar_observation(now); telemetry.print(',');
+  soil_observation(now); telemetry.print(',');
   thermal_observation(now);
-  Serial.println(F("}}"));
+  telemetry.println(F("}}"));
+  // No queue growth or sensor-loop wait when the laptop is not reading.
+  usb_tx.queue_report(telemetry);
 }
 }  // namespace
 
@@ -394,14 +484,13 @@ void setup() {
 }
 void loop() {
   // Bounded read-only causal handshake, never a command to actuate.
-  // The response is written before any subsequently generated JSON report.
+  // Queue the response ahead of any subsequently generated JSON report.
   // Read at most 32 bytes each pass so live radar UART remains serviced.
   for (uint8_t count = 0; count < 32 && Serial.available() > 0; ++count) {
     const int value = Serial.read();
     if (value < 0) break;
     if (usb_epoch_sync.consume(static_cast<uint8_t>(value))) {
-      Serial.print(F("SYNC_ACK "));
-      Serial.println(usb_epoch_sync.token());
+      usb_tx.queue_ack(usb_epoch_sync.token());
     }
   }
   radar.read();
@@ -424,4 +513,5 @@ void loop() {
     last_report_ms = now;
     report(now);
   }
+  usb_tx.step(Serial); // one FIFO-space-limited chunk; never wait for a reader
 }

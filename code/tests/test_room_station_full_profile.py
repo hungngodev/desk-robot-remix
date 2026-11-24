@@ -107,8 +107,8 @@ def test_amg8833_scan_is_bounded_incremental_and_never_fakes_frame_time():
     assert "kThermalScanMaxMs = 250;" in firmware
     assert "read_thermal_chunk" not in report
     assert "thermal_valid && now - thermal_sample_ms <= kThermalStaleMs" in report
-    assert "Serial.print(thermal_sample_ms);" in report
-    assert "Serial.print(now);" not in report
+    assert "telemetry.print(thermal_sample_ms);" in report
+    assert "telemetry.print(now);" not in report
 
 
 def test_bme_empty_upstream_conversion_cannot_reuse_old_gas_as_fresh():
@@ -170,7 +170,7 @@ def test_stale_radar_isolated_without_dropping_fresh_room_sensors():
     assert "radar_sample_clock.fresh(now, kRadarStaleMs)" in report
     assert "return has_sample_ && now_ms - sample_ms_ <= max_age_ms;" in clock
     assert "jsbool(connected)" in report
-    assert "Serial.print(radar_sample_clock.sample_ms());" in report
+    assert "telemetry.print(radar_sample_clock.sample_ms());" in report
 
 
 def test_bme688_gas_conversion_never_blocks_radar_uart_or_fakes_sample_age():
@@ -188,7 +188,7 @@ def test_bme688_gas_conversion_never_blocks_radar_uart_or_fakes_sample_age():
     assert "bme.beginReading()" not in report
     assert "bme.endReading()" not in report
     assert "const bool fresh = bme_completed.fresh(now, kBmeStaleMs);" in report
-    assert 'Serial.print(bme_completed.sample_ms);' in report
+    assert 'telemetry.print(bme_completed.sample_ms);' in report
     assert "constexpr uint32_t kBmeStaleMs = 3000;" in code
 
 
@@ -405,6 +405,132 @@ int main() {
     source = tmp_path / "thermal_runtime.cpp"
     source.write_text(harness)
     executable = tmp_path / "thermal_runtime"
+    subprocess.run(
+        [compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
+         str(source), "-o", str(executable)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    subprocess.run([str(executable)], check=True, capture_output=True,
+                   text=True, timeout=15)
+
+
+def test_room_usb_backpressure_does_not_block_sensor_loop(tmp_path):
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    classes = "constexpr size_t kMaxUsbLineBytes" + src.split(
+        "constexpr size_t kMaxUsbLineBytes", 1
+    )[1].split("RoomUsbLine telemetry;", 1)[0]
+    loop = src.split("void loop() {", 1)[1]
+    report = src.split("void report(uint32_t now) {", 1)[1].split(
+        "}  // namespace", 1
+    )[0]
+    assert "Serial.print" not in src
+    assert "usb_tx.queue_ack(usb_epoch_sync.token());" in loop
+    assert "scd_observation(now);" in report
+    assert "soil_observation(now);" in report
+    assert "usb_tx.queue_report(telemetry);" in report
+    assert loop.index("report(now);") < loop.index("usb_tx.step(Serial);")
+    harness = r"""
+#include <algorithm>
+#include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <string>
+class Print {
+ public:
+  virtual size_t write(uint8_t) = 0;
+  virtual ~Print() = default;
+};
+""" + classes + r"""
+struct FakePort {
+  bool connected = true;
+  int capacity = 0;
+  size_t short_max = 2;
+  unsigned calls = 0, flushes = 0;
+  std::string output;
+  explicit operator bool() const { return connected; }
+  int availableForWrite() const { return capacity; }
+  size_t write(const uint8_t* bytes, size_t count) {
+    assert(capacity > 0 && count <= static_cast<size_t>(capacity));
+    assert(count <= 64);
+    ++calls;
+    count = std::min(count, short_max);
+    output.append(reinterpret_cast<const char*>(bytes), count);
+    return count;
+  }
+  void flush() { ++flushes; }
+};
+void fill(RoomUsbLine& line, const char* str) {
+  line.reset();
+  while (*str) assert(line.write(static_cast<uint8_t>(*str++)) == 1);
+}
+void drain(RoomUsbTx& tx, FakePort& port) {
+  for (unsigned i = 0; i < 100; ++i) tx.step(port);
+}
+int main() {
+  RoomUsbLine line;
+  RoomUsbTx tx;
+  FakePort port;
+  fill(line, "{old}\r\n");
+  assert(tx.queue_report(line));
+  drain(tx, port);
+  assert(port.calls == 0 && port.output.empty());
+  assert(!tx.queue_report(line));
+  tx.queue_ack("0123456789abcdef");
+  drain(tx, port);
+  assert(port.calls == 0);
+  port.capacity = 3;
+  drain(tx, port);
+  assert(port.output == "\nSYNC_ACK 0123456789abcdef\r\n");
+  assert(port.calls == port.flushes);
+  port.output.clear();
+  fill(line, "{new}\r\n");
+  assert(tx.queue_report(line));
+  tx.step(port); // two bytes of an in-flight report
+  tx.queue_ack("1111111111111111");
+  tx.queue_ack("2222222222222222");
+  assert(!tx.queue_report(line));
+  drain(tx, port);
+  assert(port.output == "{new}\r\n\nSYNC_ACK 2222222222222222\r\n");
+  port.output.clear();
+  assert(tx.queue_report(line));
+  tx.step(port);
+  port.connected = false;
+  tx.step(port);
+  port.connected = true;
+  tx.queue_ack("3333333333333333");
+  drain(tx, port);
+  assert(port.output == "{n\nSYNC_ACK 3333333333333333\r\n");
+  fill(line, "not terminated");
+  assert(!tx.queue_report(line));
+  line.reset();
+  for (unsigned i = 0; i < kMaxUsbLineBytes; ++i)
+    assert(line.write('\n') == 1);
+  assert(line.write('\n') == 0);
+  assert(!tx.queue_report(line));
+  fill(line, "recovered\n");
+  assert(tx.queue_report(line));
+  port.output.clear();
+  port.capacity = 512;
+  port.short_max = 512;
+  drain(tx, port);
+  assert(port.output == "recovered\n");
+  line.reset();
+  for (unsigned i = 0; i < 100; ++i) assert(line.write('a') == 1);
+  assert(line.write('\n') == 1);
+  assert(tx.queue_report(line));
+  port.output.clear();
+  tx.step(port);
+  assert(port.output.size() == 64);
+  tx.step(port);
+  assert(port.output.size() == 101 && port.output.back() == '\n');
+}
+"""
+    compiler = shutil.which("c++")
+    assert compiler is not None
+    source = tmp_path / "usb_runtime.cpp"
+    source.write_text(harness)
+    executable = tmp_path / "usb_runtime"
     subprocess.run(
         [compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
          str(source), "-o", str(executable)],
