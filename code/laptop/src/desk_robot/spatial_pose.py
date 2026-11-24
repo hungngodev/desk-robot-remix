@@ -8,7 +8,7 @@ anchor a map, clear local safety faults, or grant an actuator lease.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 _MAX_SAMPLE_US = (1 << 53) - 1
 _MAX_COORD_MM = 1_000_000
@@ -32,6 +32,7 @@ class PoseReceipt:
     quality: str
     received_at: float
     head_boot: int | None = None
+    request_started_at: float | None = None
 
     @property
     def yaw_rad(self) -> float:
@@ -101,7 +102,9 @@ class PoseFence:
         self._retired: set[tuple[int, int, int | None]] = set()
         self._failed: set[tuple[int, int, int | None]] = set()
 
-    def observe(self, data: dict, received_at: float) -> PoseReceipt:
+    def observe(
+        self, data: dict, received_at: float, *, request_started_at: float | None = None,
+    ) -> PoseReceipt:
         try:
             reading = decode_pose(data, self.robot_id, received_at)
         except PoseError:
@@ -110,6 +113,16 @@ class PoseFence:
             self.needs_reanchor = True
             self.blocked_reason = "invalid_pose"
             raise
+        if request_started_at is not None:
+            # Local GET duration is a conservative transport age allowance,
+            # not proof of UART transaction correlation or device capture time.
+            if (type(request_started_at) not in (int, float)
+                    or not math.isfinite(request_started_at)
+                    or request_started_at < 0
+                    or not 0 <= received_at - request_started_at <= _MAX_RECEIPT_LAG_S):
+                self.invalidate("pose_transport_delayed")
+                raise PoseError("Pose request age exceeds local freshness budget")
+            reading = replace(reading, request_started_at=float(request_started_at))
         identity = (reading.body_boot, reading.origin, reading.head_boot)
         if identity in self._retired or identity in self._failed:
             self._continuous = False
@@ -189,7 +202,9 @@ class PoseFence:
             return None
         if self.last is None or not self._continuous or self.last.quality != "valid":
             return None
-        if not 0 <= now - self.last.received_at <= max_age_s:
+        age_start = (self.last.request_started_at if self.last.request_started_at is not None
+                     else self.last.received_at)
+        if now < self.last.received_at or not 0 <= now - age_start <= max_age_s:
             self.blocked_reason = "stale_receipt"
             self._continuous = False
             self._healthy_samples = 0

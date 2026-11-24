@@ -301,8 +301,11 @@ class HttpHead:
         """
         async with self.lock:
             try:
+                request_started_at = time.monotonic()
                 data = _response_object(await self._request("GET", "/api/pose"))
-                return self.pose_fence.observe(data, time.monotonic())
+                return self.pose_fence.observe(
+                    data, time.monotonic(), request_started_at=request_started_at,
+                )
             except PoseError as exc:
                 raise HeadError(f"Rejected pose receipt: {exc}") from exc
             except BaseException:

@@ -200,3 +200,32 @@ def test_identified_head_after_legacy_requires_new_baseline():
     assert gate.current(100.2) is None
     fresh = gate.observe(pose(seq=4, sample_us=1_300_000), 100.3)
     assert gate.current(100.3) == fresh
+
+
+def test_http_request_age_is_not_renewed_by_receipt():
+    gate = PoseFence("robot-01")
+    gate.observe(pose(), 100.0, request_started_at=99.95)
+    fresh = gate.observe(pose(seq=2, sample_us=1_200_000), 100.2,
+                         request_started_at=100.0)
+    assert fresh.received_at == 100.2
+    assert fresh.request_started_at == 100.0
+    assert gate.current(100.24) == fresh
+    assert gate.current(100.26) is None
+    assert gate.needs_reanchor
+
+
+def test_slow_http_pose_cannot_supply_a_new_baseline():
+    gate = PoseFence("robot-01")
+    for seq in (1, 2):
+        start = 100.0 + (seq - 1) * 0.6
+        with pytest.raises(PoseError, match="request age"):
+            gate.observe(pose(seq=seq, sample_us=seq * 600_000), start + 0.6,
+                         request_started_at=start)
+        assert gate.current(start + 0.6) is None
+        assert gate.blocked_reason == "pose_transport_delayed"
+    gate.observe(pose(seq=3, sample_us=1_800_000), 101.21,
+                 request_started_at=101.20)
+    assert gate.current(101.21) is None
+    fresh = gate.observe(pose(seq=4, sample_us=1_900_000), 101.31,
+                         request_started_at=101.30)
+    assert gate.current(101.31) == fresh
