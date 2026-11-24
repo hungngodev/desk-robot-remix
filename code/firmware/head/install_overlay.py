@@ -380,6 +380,44 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
     // This proves digital output progress, not acoustic diaphragm playback.
     std::function<void(uint32_t playback_id, uint32_t media_position_ms)> on_playback_committed;""",
         )
+        service_header = replace_once(
+            service_header,
+            """    uint32_t media_position_ms = 0;
+};
+
+struct DebugStatistics {""",
+            """    uint32_t media_position_ms = 0;
+    int desk_frame_duration_ms = 0;
+};
+
+// Digital I2S acceptance can certify only an uninterrupted media prefix.
+// Missing decode/queue output is visible as a gap in the next position.
+struct DeskPlaybackPrefix {
+    uint32_t id = 0;
+    uint32_t end_ms = 0;
+    bool failed = false;
+
+    bool Accept(uint32_t playback_id, uint32_t position_ms,
+                int duration_ms, bool fully_written) {
+        if (playback_id == 0) return false;
+        if (id != playback_id) {
+            id = playback_id;
+            end_ms = 0;
+            failed = false;
+        }
+        if (failed || !fully_written || duration_ms <= 0 ||
+            position_ms <= end_ms ||
+            position_ms - end_ms != static_cast<uint32_t>(duration_ms)) {
+            failed = true;
+            return false;
+        }
+        end_ms = position_ms;
+        return true;
+    }
+};
+
+struct DebugStatistics {""",
+        )
         files[path] = service_header.encode()
 
         path = "main/protocols/protocol.h"
@@ -727,28 +765,30 @@ static bool ParseDeskAudioFrame(int version, const char* data, size_t len,
         )
         service = replace_once(
             service,
+            "            task.media_position_ms = packet->media_position_ms;",
+            """            task.media_position_ms = packet->media_position_ms;
+            task.desk_frame_duration_ms = packet->frame_duration;""",
+        )
+        service = replace_once(
+            service,
             """void AudioService::AudioOutputTask() {
     while (true) {""",
             """void AudioService::AudioOutputTask() {
     // A cumulative media position is only trustworthy while every prior
     // frame in this playback lease completed its blocking I2S write.
-    uint32_t desk_robot_failed_playback_id = 0;
+    DeskPlaybackPrefix desk_robot_prefix;
     while (true) {""",
         )
         service = replace_once(
             service,
             "        codec_->OutputData(task.pcm);",
             """        const int transmitted_frames = codec_->OutputData(task.pcm);
-        if (task.playback_id != 0 &&
-            transmitted_frames != static_cast<int>(task.pcm.size())) {
-            // Future packets already carry later cumulative positions. Once
-            // this lease has a hole, suppress all later completion receipts
-            // instead of skipping over the failed interval.
-            desk_robot_failed_playback_id = task.playback_id;
-        } else if (transmitted_frames == static_cast<int>(task.pcm.size()) &&
-                   task.playback_id != 0 &&
-                   task.playback_id != desk_robot_failed_playback_id &&
-                   callbacks_.on_playback_committed) {
+        if (desk_robot_prefix.Accept(
+                task.playback_id, task.media_position_ms,
+                task.desk_frame_duration_ms,
+                !task.pcm.empty() &&
+                    transmitted_frames == static_cast<int>(task.pcm.size())) &&
+            callbacks_.on_playback_committed) {
             callbacks_.on_playback_committed(
                 task.playback_id, task.media_position_ms);
         }""",

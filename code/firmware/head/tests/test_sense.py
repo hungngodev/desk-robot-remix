@@ -572,6 +572,59 @@ int main() {
         assert "esp_opus_dec_open(" not in retry
         assert "esp_opus_dec_close(" not in retry
 
+    def test_digital_playback_receipt_cannot_skip_missing_decoded_pcm(self):
+        """Compile the real generated prefix guard and verify its output-task wiring."""
+        overlay.apply(self.root, "sense")
+        header = (self.root / "main/audio/audio_service.h").read_text()
+        source = (self.root / "main/audio/audio_service.cc").read_text()
+        assert "task.desk_frame_duration_ms = packet->frame_duration;" in source
+        output = source.split("void AudioService::AudioOutputTask()", 1)[1].split(
+            "void AudioService::OpusCodecTask()", 1
+        )[0]
+        assert "DeskPlaybackPrefix desk_robot_prefix;" in output
+        assert output.index("codec_->OutputData(task.pcm)") < output.index(
+            "desk_robot_prefix.Accept("
+        ) < output.index("callbacks_.on_playback_committed(")
+        assert "task.desk_frame_duration_ms," in output
+        assert "transmitted_frames == static_cast<int>(task.pcm.size())" in output
+        assert "!task.pcm.empty()" in output
+        guard = "struct DeskPlaybackPrefix {" + header.split(
+            "struct DeskPlaybackPrefix {", 1
+        )[1].split("struct DebugStatistics {", 1)[0]
+        compiler = shutil.which("c++")
+        assert compiler is not None, "Native C++ compiler required"
+        harness = self.root / "prefix_test.cc"
+        binary = self.root / "prefix_test"
+        harness.write_text(
+            "#include <cstdint>\n#include <cassert>\n" + guard + """
+int main() {
+    DeskPlaybackPrefix prefix;
+    assert(prefix.Accept(1, 60, 60, true));
+    assert(!prefix.Accept(1, 180, 60, true));
+    assert(!prefix.Accept(1, 240, 60, true));
+    assert(!prefix.Accept(2, 120, 60, true));
+    assert(!prefix.Accept(2, 180, 60, true));
+    assert(prefix.Accept(3, 60, 60, true));
+    assert(!prefix.Accept(3, 120, 60, false));
+    assert(!prefix.Accept(3, 180, 60, true));
+    assert(prefix.Accept(4, 20, 20, true));
+    assert(prefix.Accept(4, 60, 40, true));
+    assert(!prefix.Accept(4, 60, 40, true));
+    assert(!prefix.Accept(4, 100, 40, true));
+    assert(!prefix.Accept(0, 0, 0, true));
+    assert(prefix.Accept(5, 60, 60, true));
+    assert(!prefix.Accept(5, 120, 0, true));
+    assert(!prefix.Accept(5, 180, 60, true));
+}
+"""
+        )
+        subprocess.run(
+            [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+             str(harness), "-o", str(binary)],
+            check=True, env=native_cpp_env(),
+        )
+        subprocess.run([str(binary)], check=True)
+
     def test_stream_camera_configuration_and_single_client_ownership(self):
         """Source budget, not measured frame rate or audio contention."""
         board = (HEAD / "sense/desk_robot_sense.cc").read_text()
