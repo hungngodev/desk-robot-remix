@@ -114,7 +114,7 @@ class MemoryStore:
     def __init__(self, root: Path, robot_ids: list[str] | tuple[str, ...]):
         self.root = Path(root)
         if (not isinstance(robot_ids, (list, tuple)) or not robot_ids
-                or not all(isinstance(i, str) and _ROBOT_ID.fullmatch(i)
+                or not all(type(i) is str and _ROBOT_ID.fullmatch(i)
                            for i in robot_ids)):
             raise ValueError("Every robot ID must be a safe nonempty identifier")
         self.robot_ids = frozenset(robot_ids)
@@ -302,7 +302,9 @@ class MemoryStore:
 
     @contextmanager
     def _connect(self, robot_id: str):
-        if not isinstance(robot_id, str) or robot_id not in self.robot_ids:
+        # A str subclass can override hashing or filename construction. Only
+        # a plain schema string may select a private database.
+        if type(robot_id) is not str or robot_id not in self.robot_ids:
             raise ValueError("Unknown robot memory identity")
         # Repeat the ancestry check at each SQLite open: a linked parent
         # introduced after boot must not redirect subsequent private reads.
@@ -366,10 +368,10 @@ class MemoryStore:
         relay_token: str | None = None,
     ) -> bool:
         """Idempotently store one fact; duplicates do not rewrite earlier evidence."""
-        if (not isinstance(robot_id, str) or not isinstance(source_robot, str)
+        if (type(robot_id) is not str or type(source_robot) is not str
                 or robot_id not in self.robot_ids or source_robot not in self.robot_ids):
             raise ValueError("Unknown robot identity")
-        if (not isinstance(event_id, str) or not isinstance(kind, str)
+        if (type(event_id) is not str or type(kind) is not str
                 or not _EVENT_ID.fullmatch(event_id) or not _EVENT_KIND.fullmatch(kind)):
             raise ValueError("Invalid event ID or kind")
         if witnessed is not True and witnessed is not False:
@@ -497,7 +499,7 @@ class MemoryStore:
         The unique pending-insert receipt protects newer copies and explicit
         corrections from a late cancelled sharing task.
         """
-        if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
+        if type(event_id) is not str or not _EVENT_ID.fullmatch(event_id):
             raise ValueError("Invalid memory event ID")
         if type(relay_token) is not str or _RELAY_TOKEN.fullmatch(relay_token) is None:
             raise ValueError("Invalid secondhand relay receipt")
@@ -516,7 +518,7 @@ class MemoryStore:
         present in the complete 250-row per-pet store. This read does not
         resurrect deleted or trimmed episodes.
         """
-        if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
+        if type(event_id) is not str or not _EVENT_ID.fullmatch(event_id):
             raise ValueError("Invalid memory event ID")
         with self._connect(robot_id) as db:
             row = db.execute(
@@ -540,7 +542,7 @@ class MemoryStore:
         after the operator changes or deletes the source. Both fields come
         from one private SQLite read; no peer's memories are inspected.
         """
-        if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
+        if type(event_id) is not str or not _EVENT_ID.fullmatch(event_id):
             raise ValueError("Invalid memory event ID")
         with self._connect(robot_id) as db:
             row = db.execute(
@@ -556,7 +558,7 @@ class MemoryStore:
         self, robot_id: str, event_id: str,
     ) -> CameraProvenance | None:
         """Read only an active camera episode from one pet's local database."""
-        if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
+        if type(event_id) is not str or not _EVENT_ID.fullmatch(event_id):
             raise ValueError("Invalid memory event ID")
         with self._connect(robot_id) as db:
             row = db.execute(
@@ -594,7 +596,7 @@ class MemoryStore:
         Stored confidence, witnessed/secondhand provenance and event age
         remain secondary ranking signals. Empty matches invent nothing.
         """
-        if not isinstance(robot_id, str) or robot_id not in self.robot_ids:
+        if type(robot_id) is not str or robot_id not in self.robot_ids:
             raise ValueError("Unknown robot memory identity")
         if (not isinstance(query, str) or not 1 <= len(query.strip()) <= 240
                 or "\x00" in query or type(limit) is not int
@@ -636,9 +638,9 @@ class MemoryStore:
         self, robot_id: str, slot: str, value: str | None = None,
     ) -> int:
         """Order one operator request before its asynchronous SQLite write."""
-        if not isinstance(robot_id, str) or robot_id not in self.robot_ids:
+        if type(robot_id) is not str or robot_id not in self.robot_ids:
             raise ValueError("Unknown robot memory identity")
-        if not isinstance(slot, str) or not _CORE_SLOT.fullmatch(slot):
+        if type(slot) is not str or not _CORE_SLOT.fullmatch(slot):
             raise ValueError("Invalid core memory slot")
         if value is not None and (
             not isinstance(value, str) or not 1 <= len(value.strip()) <= 200
@@ -690,9 +692,9 @@ class MemoryStore:
         No model/tool automatically edits identity, user preferences or safety
         policy. This bounded core is separate from ephemeral episodes.
         """
-        if not isinstance(robot_id, str) or robot_id not in self.robot_ids:
+        if type(robot_id) is not str or robot_id not in self.robot_ids:
             raise ValueError("Unknown robot memory identity")
-        if not isinstance(slot, str) or not _CORE_SLOT.fullmatch(slot):
+        if type(slot) is not str or not _CORE_SLOT.fullmatch(slot):
             raise ValueError("Invalid core memory slot")
         if (not isinstance(value, str) or not 1 <= len(value.strip()) <= 200
                 or "\x00" in value):
@@ -734,7 +736,7 @@ class MemoryStore:
         self, robot_id: str, slot: str, *,
         mutation_generation: int | None = None,
     ) -> bool:
-        if not isinstance(slot, str) or not _CORE_SLOT.fullmatch(slot):
+        if type(slot) is not str or not _CORE_SLOT.fullmatch(slot):
             raise ValueError("Invalid core memory slot")
         with self._connect(robot_id) as db:
             db.execute("BEGIN IMMEDIATE")
@@ -747,9 +749,9 @@ class MemoryStore:
         self, robot_id: str, event_id: str, summary: str | None = None,
     ) -> int:
         """Order the authenticated request before its offloaded SQLite write."""
-        if not isinstance(robot_id, str) or robot_id not in self.robot_ids:
+        if type(robot_id) is not str or robot_id not in self.robot_ids:
             raise ValueError("Unknown robot memory identity")
-        if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
+        if type(event_id) is not str or not _EVENT_ID.fullmatch(event_id):
             raise ValueError("Invalid memory event ID")
         if summary is not None and (
             not isinstance(summary, str) or not 1 <= len(summary.strip()) <= 300
@@ -801,7 +803,7 @@ class MemoryStore:
         mutation_generation: int | None = None,
     ) -> bool:
         """Correct local episode text without rewriting its evidence provenance."""
-        if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
+        if type(event_id) is not str or not _EVENT_ID.fullmatch(event_id):
             raise ValueError("Invalid memory event ID")
         if (not isinstance(summary, str) or not 1 <= len(summary.strip()) <= 300
                 or "\x00" in summary):
@@ -835,7 +837,7 @@ class MemoryStore:
         mutation_generation: int | None = None,
     ) -> bool:
         """Explicit per-pet deletion; does not silently mutate peer memories."""
-        if not isinstance(event_id, str) or not _EVENT_ID.fullmatch(event_id):
+        if type(event_id) is not str or not _EVENT_ID.fullmatch(event_id):
             raise ValueError("Invalid memory event ID")
         with self._connect(robot_id) as db:
             db.execute("BEGIN IMMEDIATE")

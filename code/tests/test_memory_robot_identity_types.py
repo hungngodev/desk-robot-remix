@@ -75,3 +75,41 @@ def test_constructor_accepts_multiple_valid_robot_ids(tmp_path):
     store = MemoryStore(tmp_path / "memory", ["robot-01", "robot-02"])
     assert store.robot_ids == {"robot-01", "robot-02"}
     assert store.count("robot-01") == store.count("robot-02") == 0
+
+
+class _RedirectedRobotId(str):
+    def __add__(self, suffix):
+        return "pet_b.sqlite3"
+
+
+class _UnhashableRobotId(str):
+    __hash__ = None
+
+
+@pytest.mark.parametrize("identity_type", [_RedirectedRobotId, _UnhashableRobotId])
+def test_memory_rejects_string_subclass_robot_identities(tmp_path, identity_type):
+    store = MemoryStore(tmp_path, ["pet_a", "pet_b"])
+    assert store.remember(
+        "pet_b", "private_note", "Pet B private observation",
+        kind="scene", source_robot="pet_b", witnessed=True,
+    )
+    bad = identity_type("pet_a")
+
+    with pytest.raises(ValueError, match="Unknown robot memory identity"):
+        store.recent(bad)
+    with pytest.raises(ValueError, match="Unknown robot identity"):
+        store.remember(
+            bad, "bad_target", "Invalid target", kind="scene",
+            source_robot="pet_a", witnessed=True,
+        )
+    with pytest.raises(ValueError, match="Unknown robot identity"):
+        store.remember(
+            "pet_a", "bad_source", "Invalid source", kind="scene",
+            source_robot=bad, witnessed=True,
+        )
+    new_root = tmp_path / "new"
+    with pytest.raises(ValueError, match="Every robot ID"):
+        MemoryStore(new_root, [bad])
+    assert not new_root.exists()
+    assert store.recent("pet_a") == []
+    assert store.recent("pet_b")[0].summary == "Pet B private observation"
