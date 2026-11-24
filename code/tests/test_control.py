@@ -2012,3 +2012,122 @@ async def test_motion_disabled_before_manual_dispatch(settings, stage):
     finally:
         resume.set()
         await c.close()
+
+async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(settings, tmp_path):
+    """Replay real Mac grasp code with synthetic WROOM and live-frame receipts."""
+    import json
+
+    calibration = json.loads(settings.robots[0].calibration.read_text())
+    calibration.update(
+        simulation_only=False, hold_seconds=3,
+        grip_force_delta_raw=100, grip_force_limit_raw=500,
+    )
+    measured = tmp_path / "synthetic-grasp-calibration.json"
+    measured.write_text(json.dumps(calibration))
+    settings.robots[0].calibration = measured
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    c, _ = make(settings)
+    head = HardwareStatusHead("robot-01")
+    peer = HardwareStatusHead("robot-02")
+    c.heads.update({"robot-01": head, "robot-02": peer})
+    contact_pending = asyncio.Event()
+    allow_contact = asyncio.Event()
+    halt_pending = asyncio.Event()
+    allow_halt = asyncio.Event()
+    seq = 0
+    original_command = head.command
+    original_status = head.status
+
+    async def status():
+        body = await original_status()
+        head._watchdog()
+        return {**body, "armed": head.armed, "imu": {**body["imu"], "boot_id": 1}}
+
+    async def aux_status():
+        nonlocal seq
+        seq += 1
+        if head.gripped and not contact_pending.is_set():
+            contact_pending.set()
+            await allow_contact.wait()
+        return {
+            "robot_id": head.id,
+            "force": {
+                "jaw_valid": True, "calibrated": False,
+                "adc": [0, 350 if head.gripped else 100],
+                "jaw_seq": seq, "jaw_age_ms": 0, "boot_id": 1,
+            },
+        }
+
+    async def command(value):
+        receipt = await original_command(value)
+        if value == "halt" and not halt_pending.is_set():
+            halt_pending.set()
+            await allow_halt.wait()
+        return receipt
+
+    head.status = status
+    head.aux_status = aux_status
+    head.command = command
+    frames = []
+
+    async def wait_for_frame(robot_id, after, *, timeout_s):
+        assert robot_id == head.id
+        jpeg = await head.snapshot()
+        frames[:] = [SimpleNamespace(
+            source="proactive", jpeg=jpeg, received_at=time.monotonic(),
+        )]
+        return True
+
+    c.multimodal = SimpleNamespace(
+        settings=settings,
+        stream_owns_camera=lambda _id: True,
+        status=lambda _id: {"camera_stream_connected": True},
+        hub=SimpleNamespace(frames={head.id: frames}),
+        wait_for_proactive_frame=wait_for_frame,
+    )
+    try:
+        await c.operator_arm(head.id)
+        await c.operator_arm(peer.id)
+        job = c.pickup(head.id, "key")
+        # Admission is synchronous, even before the pickup task runs.
+        assert c._fleet_motion_owner == job.id
+        with pytest.raises(OperationError, match="one moving pet"):
+            c.manual(peer.id, "drive 10 10 100")
+        await asyncio.wait_for(contact_pending.wait(), timeout=12)
+        assert head.gripped and c._fleet_motion_owner == job.id
+        assert job.state == "running" and job.result is None
+        with pytest.raises(OperationError, match="one moving pet"):
+            c.manual(peer.id, "drive 10 10 100")
+        with pytest.raises(OperationError, match="Robot busy"):
+            await c.operator_arm(head.id)
+        assert "robot-02" in c.permits and peer.commands == []
+        contact_command_count = len(head.commands)
+        allow_contact.set()
+
+        await asyncio.wait_for(halt_pending.wait(), timeout=10)
+        # Verified placement and jaw opening alone cannot release ownership:
+        # the terminal HALT receipt is still in flight.
+        assert not head.gripped
+        assert c._fleet_motion_owner == job.id and job.result is None
+        assert not any(cmd.startswith("drive ") for cmd in head.commands[contact_command_count:])
+        with pytest.raises(OperationError, match="one moving pet"):
+            c.manual(peer.id, "drive 10 10 100")
+        assert peer.commands == []
+        allow_halt.set()
+        await c.tasks[job.id]
+        assert job.state == "succeeded", job.error
+        assert job.result["placed_visually_verified"]
+        assert job.result["physical_acceptance_pass"] is False
+        assert any(event.startswith("tactile contact delta=") for event in job.events)
+        assert c._fleet_motion_owner is None
+
+        next_job = c.manual(peer.id, "drive 10 10 100")
+        await c.tasks[next_job.id]
+        assert next_job.state == "succeeded", next_job.error
+        assert peer.commands.count("drive 10 10 100") == 1
+        assert peer.commands[-1] == "halt"
+    finally:
+        allow_contact.set()
+        allow_halt.set()
+        await c.close()
