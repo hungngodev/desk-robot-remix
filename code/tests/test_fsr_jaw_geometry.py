@@ -99,3 +99,33 @@ def test_fsr_invalid_geometry_is_rejected(tmp_path, override, reason):
     target, result = _render(tmp_path, override)
     assert reason in result.stderr + result.stdout
     assert not target.exists()
+
+
+def test_jaw_original_mesh_topology_warning():
+    """Originals are provenance checked, not silently repaired for conversion."""
+    import runpy
+
+    root = SOURCE.parents[3]
+    scaffold = runpy.run_path(str(SOURCE.parent / "fusion_one_robot_scaffold.py"))
+    warning = scaffold["jaw_topology_warning"](root)
+    assert "JAW TOPOLOGY HOLD" in warning
+    assert "arm_rack.stl" in warning
+    assert "servo_case_arm.stl" in warning
+    assert "unaligned references only" in warning
+
+
+def test_jaw_clean_topology_never_qualifies_physical_fit(monkeypatch, tmp_path):
+    import runpy
+
+    scaffold = runpy.run_path(str(SOURCE.parent / "fusion_one_robot_scaffold.py"))
+    checked = []
+
+    def check(path):
+        checked.append(path.name)
+        return 6
+
+    monkeypatch.setattr(runpy, "run_path", lambda _path: {"closed_mesh_edges": check})
+    warning = scaffold["jaw_topology_warning"](tmp_path)
+    assert sorted(checked) == ["arm_rack.stl", "pinion_gear.stl", "servo_case_arm.stl"]
+    assert "remain unqualified" in warning
+    assert "JAW TOPOLOGY HOLD" not in warning
