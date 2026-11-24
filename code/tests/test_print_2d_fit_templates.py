@@ -33,6 +33,7 @@ def setup_sources(tmp_path):
         "docs/cad/remixes/remaining_fit_gauges.scad":
             "candidate_pack_body_l_mm = 86;\npower_l = 86;\n"
             "power_w = 35;\nfit_xy = 0.4;\nwall = 2.4;\n"
+            "m3_clearance = 3.4;\n"
             "tray_tab_l_mm = 8;\ntray_tab_w_mm = 9;\ntray_tab_offset_mm = 5;\n",
     }
     for name, contents in data.items():
@@ -307,3 +308,36 @@ def test_a4_power_tabs_cannot_clip_or_leave_tray_body(tmp_path, old, new, messag
     with pytest.raises(ValueError, match=message):
         source.export(tmp_path, output)
     assert not output.exists()
+
+
+@pytest.mark.parametrize(("old", "new"), [
+    ("tray_tab_l_mm = 8;", "tray_tab_l_mm = 3.4;"),
+    ("tray_tab_l_mm = 8;", "tray_tab_l_mm = 3;"),
+    ("tray_tab_w_mm = 9;", "tray_tab_w_mm = 3.4;"),
+    ("tray_tab_w_mm = 9;", "tray_tab_w_mm = 3;"),
+    ("m3_clearance = 3.4;", "m3_clearance = 8;"),
+])
+def test_a4_power_tabs_must_exceed_mounting_bore(tmp_path, old, new):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(scad.read_text().replace(old, new), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="Power tab must exceed mounting bore"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+def test_a4_power_tabs_strictly_above_bore_remain_provisional(tmp_path):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    scad.write_text(
+        scad.read_text().replace("tray_tab_l_mm = 8;", "tray_tab_l_mm = 3.5;")
+        .replace("tray_tab_w_mm = 9;", "tray_tab_w_mm = 3.5;"),
+        encoding="utf-8",
+    )
+    manifest = source.export(tmp_path, tmp_path / "paper")
+    assert manifest["source_dimensions_mm"]["power"][4:6] == [3.5, 3.5]
+    assert manifest["approved_drill_holes"] == 0
+    assert manifest["actual_fit_verified"] is False

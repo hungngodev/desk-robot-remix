@@ -61,6 +61,9 @@ def values(root: Path) -> dict:
     tab_l = scad_mm(power, "tray_tab_l_mm")
     tab_w = scad_mm(power, "tray_tab_w_mm")
     tab_offset = scad_mm(power, "tray_tab_offset_mm")
+    mounting_bore = scad_mm(power, "m3_clearance")
+    if tab_l <= mounting_bore or tab_w <= mounting_bore:
+        raise ValueError("Power tab must exceed mounting bore")
     if tab_offset + tab_w > tray_w:
         raise ValueError("Power tab exceeds tray body width")
     dock = data["dock"]
