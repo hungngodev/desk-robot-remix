@@ -2211,7 +2211,10 @@ def attach_verified_checkout_evidence(
     # stock a second time from the old unverified inventory projection.
     audited_units = cost.get("quoted_units_applied_to_roles")
     if audited_units is not None:
-        required, categories = cost_requirements(output, "first_robot")
+        scope = cost.get("scope")
+        if scope not in ("first_robot", "fleet"):
+            raise ValueError("Audited net order units require a release scope")
+        required, categories = cost_requirements(output, scope)
         required, _ = power_cost_requirements(
             required, categories, cost_evidence.get("power_package_mode")
         )
@@ -2220,16 +2223,18 @@ def attach_verified_checkout_evidence(
                 or any(type(audited_units[key]) is not int
                        or not 0 <= audited_units[key] <= required[key]
                        for key in required)):
-            raise ValueError("Audited net order units differ from first-unit roles")
-        for role, part in rows.items():
-            if (role == POWER_PARENT_ROLE
-                    and cost_evidence.get("power_package_mode") == "separate_components"):
-                part["verified_power_component_order_units"] = {
-                    child: audited_units[POWER_PARENT_ROLE + ":" + child]
-                    for child in POWER_CHILDREN
-                }
-            else:
-                part["verified_checkout_order_units"] = audited_units[role]
+            raise ValueError("Audited net order units differ from release scope roles")
+        # Fleet quantities must never masquerade as a first-unit allocation.
+        if scope == "first_robot":
+            for role, part in rows.items():
+                if (role == POWER_PARENT_ROLE
+                        and cost_evidence.get("power_package_mode") == "separate_components"):
+                    part["verified_power_component_order_units"] = {
+                        child: audited_units[POWER_PARENT_ROLE + ":" + child]
+                        for child in POWER_CHILDREN
+                    }
+                else:
+                    part["verified_checkout_order_units"] = audited_units[role]
     # Show inspected first-unit stock only after this strict audited checkout
     # attachment. A charger, converter, pack and connector remain separate
     # linked units; none represents another complete power assembly.

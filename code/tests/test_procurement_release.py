@@ -2314,6 +2314,7 @@ def test_first_unit_rejects_mismatched_audited_net_map():
     )
     bad_cost = {
         "calculation_complete_not_physical_approval": True,
+        "scope": "first_robot",
         "quoted_units_applied_to_roles": {
             **required, "robot:unselected": 1
         },
@@ -2323,4 +2324,41 @@ def test_first_unit_rejects_mismatched_audited_net_map():
             report, bad_cost,
             {"power_package_mode": "complete_kit",
              "inventory": [], "lines": [], "seller_charges": []}
+        )
+
+
+@pytest.mark.parametrize("power_mode", ["complete_kit", "separate_components"])
+def test_fleet_checkout_attachment_preserves_scope(power_mode):
+    """A fleet checkout is not constrained by the first-unit count."""
+    import json
+
+    report = mod.generate(json.loads(mod.PLAN.read_text(encoding="utf-8")))
+    required, categories = mod.cost_requirements(report, "fleet")
+    required, _ = mod.power_cost_requirements(required, categories, power_mode)
+    assert required["robot:cliff_obstacle"] == 40
+    cost = {
+        "calculation_complete_not_physical_approval": True,
+        "scope": "fleet",
+        "quoted_units_applied_to_roles": required,
+    }
+    evidence = {
+        "power_package_mode": power_mode,
+        "inventory": [], "lines": [], "seller_charges": [],
+    }
+    attached = mod.attach_verified_checkout_evidence(report, cost, evidence)
+    assert attached["verified_checkout_cost"]["scope"] == "fleet"
+    assert all("verified_checkout_order_units" not in part
+               for part in attached["robots"])
+    assert all("verified_power_component_order_units" not in part
+               for part in attached["robots"])
+    assert report.get("verified_checkout_cost") is None
+    bad = {**cost, "quoted_units_applied_to_roles": {
+        **required, "robot:cliff_obstacle": 41,
+    }}
+    with pytest.raises(ValueError, match="Audited net order units"):
+        mod.attach_verified_checkout_evidence(report, bad, evidence)
+    # A fleet-sized quantity is still invalid in the first-unit scope.
+    with pytest.raises(ValueError, match="Audited net order units"):
+        mod.attach_verified_checkout_evidence(
+            report, {**cost, "scope": "first_robot"}, evidence
         )
