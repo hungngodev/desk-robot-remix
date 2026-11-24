@@ -72,9 +72,23 @@ module head_bridge(){
 }
 module tof_adjustable(){
   base_x=tof_pcb_w+12; face_z=tof_pcb_h+7;
+  // Preserve the 19 mm base envelope. Shorten and shift the mounting
+  // slots forward so the printable web stays >=2 mm and the cuts do
+  // not enter the support gusset envelope. Actual fastener fit remains open.
+  base_y=19;
+  slot_y=-4.5;
+  slot_span=3;
+  slot_extent=slot_span/2+m2_clearance_d/2;
+  gusset_front_y=3-9/2;
+  assert(base_y/2+slot_y-slot_extent>=2,
+         "ToF base slot breaches front printable web");
+  assert(base_x/4-m2_clearance_d/2>=2,
+         "ToF base slot breaches side printable web");
+  assert(slot_y+slot_extent<gusset_front_y,
+         "ToF base slot intersects support gusset envelope");
   difference(){
     union(){
-      translate([0,0,1.5]) cube([base_x,19,3],center=true);
+      translate([0,0,1.5]) cube([base_x,base_y,3],center=true);
       translate([0,7.5,face_z/2]) cube([base_x,3,face_z],center=true);
       for(x=[-base_x/2+4,base_x/2-4])
         hull(){
@@ -83,7 +97,7 @@ module tof_adjustable(){
         }
     }
     for(x=[-base_x/4,base_x/4])
-      translate([x,-4,1.5]) rotate([0,0,90]) oval_slot(5,m2_clearance_d,7);
+      translate([x,slot_y,1.5]) rotate([0,0,90]) oval_slot(slot_span,m2_clearance_d,7);
     translate([0,7.5,face_z/2+1]) rotate([90,0,0])
       cylinder(h=7,d=tof_lens_d+2,center=true);
     // No fake GY-530 PCB screw holes. The formerly assumed centers at
