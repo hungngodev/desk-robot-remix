@@ -48,3 +48,20 @@ def test_builder_guide_exposes_real_quiet_control_without_motion_authority():
     assert "operator-only" in text
     assert "tool token is intentionally not authorized" in text
     assert "does not arm movement" in text
+
+
+def test_both_authoritative_exits_require_physical_spatial_acceptance():
+    plan = (ROOT / "docs/PLAN.md").read_text(encoding="utf-8")
+    stage = plan.split("## Stage 9:", 1)[1].split("## Stage 10:", 1)[0]
+    final = GUIDE.read_text(encoding="utf-8").split("## 7. Final release decision", 1)[1]
+    for section in (stage, final):
+        for phrase in (
+            "60-object-recall-and-navigation.md#acceptance",
+            "9/10 valid re-anchors",
+            "at most 20 mm",
+            "8/10 remembered-object returns",
+            "zero false arrivals",
+            "zero unsafe commands",
+            "Missing or failed spatial trials prohibit duplication",
+        ):
+            assert phrase in section
