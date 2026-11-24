@@ -604,3 +604,97 @@ async def test_native_av_smoke_refuses_empty_completed_response_as_speech():
                 ),
                 timeout=8,
             )
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("quiet_input", [False, True])
+async def test_smoke_ignores_superseded_completion_and_stale_listen(quiet_input):
+    import asyncio
+    import base64
+    import json
+
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+
+    smoke = smoke_module()
+    appends = []
+    old_audio = bytes(4800)
+    new_audio = b"\x01\x00" * 2400
+
+    async def model_socket(request):
+        socket = web.WebSocketResponse()
+        await socket.prepare(request)
+        async for msg in socket:
+            event = json.loads(msg.data)
+            if event["type"] == "session.update":
+                await socket.send_json({
+                    "type": "session.created",
+                    "session": {
+                        "model": "openbmb/MiniCPM-o-4_5", "epoch": 3,
+                        "input_audio_format": "pcm16",
+                        "output_audio_format": "pcm16",
+                        "audio": {
+                            "input": {"sample_rate_hz": 16000},
+                            "output": {"format": {"type": "audio/pcm", "rate": 24000}},
+                        },
+                        "capabilities": {
+                            "implementation_level": "model_native_duplex",
+                            "supports_input_append": True,
+                            "supports_barge_in": True,
+                            "chunk_period_ms": 1000,
+                        },
+                    },
+                })
+            elif event["type"] == "input_audio_buffer.append":
+                appends.append(event)
+                if len(appends) == 1 and quiet_input:
+                    await socket.send_json({"type": "response.listen", "epoch": 2})
+                if len(appends) != 10:
+                    continue
+                if quiet_input:
+                    await socket.send_json({"type": "response.listen", "epoch": 3})
+                    continue
+
+                async def created(response_id):
+                    await socket.send_json({
+                        "type": "response.created", "response_id": response_id,
+                        "response": {"id": response_id, "metadata": {
+                            "duplex_event": {"epoch": 3},
+                        }},
+                    })
+
+                async def audio(response_id, pcm):
+                    await socket.send_json({
+                        "type": "response.output_audio.delta",
+                        "response_id": response_id, "format": "pcm16",
+                        "sample_rate_hz": 24000, "metadata": {"epoch": 3},
+                        "delta": base64.b64encode(pcm).decode("ascii"),
+                    })
+
+                async def done(response_id):
+                    await socket.send_json({
+                        "type": "response.done", "response_id": response_id,
+                        "response": {"id": response_id, "status": "completed"},
+                    })
+
+                await created("old")
+                await audio("old", old_audio)
+                await created("new")
+                await done("old")
+                await audio("new", new_audio)
+                await done("new")
+        return socket
+
+    app = web.Application()
+    app.router.add_get("/v1/realtime", model_socket)
+    async with TestServer(app) as server:
+        url = str(server.make_url("/v1/realtime?duplex=1")).replace(
+            "http://", "ws://",
+        )
+        audio, stats = await asyncio.wait_for(smoke.probe(
+            url, "openbmb/MiniCPM-o-4_5", bytes(32000), None,
+            deadline=5, quiet_input=quiet_input,
+        ), timeout=8)
+    assert len(appends) == 10
+    assert stats["input_duration_ms"] == 1000
+    assert stats["model_decision"] == ("listen" if quiet_input else "speak")
+    assert audio == (b"" if quiet_input else new_audio)

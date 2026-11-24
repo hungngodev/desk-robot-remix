@@ -112,13 +112,24 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                     if msg.type != aiohttp.WSMsgType.TEXT:
                         raise RuntimeError("Non-JSON response from native backend")
                     event = json.loads(msg.data)
-                    if event.get("type") in (
+                    previous_response = wire.response_id
+                    packet = wire.handle_event(event)
+                    if wire.response_id != previous_response:
+                        # The output file must contain one completed response,
+                        # not partial PCM from a superseded response.
+                        output.clear()
+                        transcript.clear()
+                        first_audio_at = None
+                    if (event.get("type") in (
                         "response.output_text.delta",
                         "response.output_audio_transcript.delta",
-                    ):
+                    ) and wire.accept_output
+                            and wire.response_id is not None
+                            and event.get("response_id") == wire.response_id
+                            and len(transcript) < 64):
                         transcript.append(str(event.get("delta", ""))[:512])
-                    packet = wire.handle_event(event)
-                    if event.get("type") == "response.listen" and quiet_input:
+                    if (quiet_input and not output
+                            and wire.model_listen_current(event)):
                         # In true duplex a silent room may correctly yield a
                         # model listen decision without response.created/done.
                         # It is not generated audio, a playback ACK, or a fail.
@@ -131,6 +142,9 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                             raise RuntimeError("Native audio output exceeds 30s bound")
                         output.extend(packet.pcm24k)
                     if event.get("type") == "response.done":
+                        if (wire.response_id is None
+                                or event.get("response_id") != wire.response_id):
+                            continue
                         response = event.get("response")
                         if (not isinstance(response, dict)
                                 or response.get("status") != "completed"
