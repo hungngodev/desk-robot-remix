@@ -316,7 +316,8 @@ def test_vision_revocation_during_memory_read_clears_live_cues(settings):
 @pytest.mark.parametrize("owner_type", [
     "missing_conversation", "missing_revision_dict", "invalid_dict",
     "missing_pet_revision", "bool_revision", "float_revision",
-    "negative_revision", "string_revision",
+    "negative_revision", "string_revision", "oversized_revision",
+    "missing_pet_revision_with_invalidator",
 ])
 def test_model_voice_memory_requires_revision_owner_before_any_read(
     settings, owner_type,
@@ -348,6 +349,8 @@ def test_model_voice_memory_requires_revision_owner_before_any_read(
             revisions = {
                 "invalid_dict": None,
                 "missing_pet_revision": {"robot-02": 3},
+                "missing_pet_revision_with_invalidator": {"robot-02": 3},
+                "oversized_revision": {"robot-01": 2**63},
                 "bool_revision": {"robot-01": True},
                 "float_revision": {"robot-01": 1.0},
                 "negative_revision": {"robot-01": -1},
@@ -356,6 +359,8 @@ def test_model_voice_memory_requires_revision_owner_before_any_read(
             runtime.conversation = SimpleNamespace(
                 _private_memory_generation=revisions,
             )
+            if owner_type == "missing_pet_revision_with_invalidator":
+                runtime.conversation.invalidate_private_memory = lambda robot_id: None
     app = FastAPI()
     app.state.runtime = runtime
     register_voice_context_route(
@@ -576,3 +581,63 @@ def test_voice_context_samples_volatile_cues_after_final_sqlite_read(
         assert body["live_sensor_cues"] == []
         assert body["recent_tool_interpretations"] == []
         assert body["current_interaction_timeline"] == []
+
+
+@pytest.mark.parametrize("mutation", ["missing", "bool", "float", "new_owner", "none"])
+def test_voice_memory_rejects_invalid_or_replaced_revision_after_read(
+    settings, mutation,
+):
+    from types import SimpleNamespace
+
+    from desk_robot.api_memory_routes import register_voice_context_route
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.voice_memory_tools_enabled = True
+    owner = SimpleNamespace(
+        _private_memory_generation={"robot-01": 0},
+        invalidate_private_memory=lambda robot_id: None,
+    )
+    receipts = []
+    turn = SimpleNamespace(_turn_epoch={"robot-01": 1})
+    runtime = SimpleNamespace(conversation=owner, multimodal=None)
+
+    class Memory:
+        def recent(self, robot_id, *, limit):
+            return [SimpleNamespace(
+                summary="Private prior session words", witnessed=True,
+                robot_id=robot_id, source_robot=robot_id, kind="heard_human",
+            )]
+
+        def core_facts(self, robot_id, *, limit):
+            if mutation == "missing":
+                owner._private_memory_generation.pop(robot_id)
+            elif mutation == "bool":
+                owner._private_memory_generation[robot_id] = False
+            elif mutation == "float":
+                owner._private_memory_generation[robot_id] = 0.0
+            elif mutation == "new_owner":
+                runtime.conversation = SimpleNamespace(
+                    _private_memory_generation={robot_id: 0},
+                )
+            return []
+
+    runtime.memory = Memory()
+    app = FastAPI()
+    app.state.runtime = runtime
+    register_voice_context_route(
+        app, settings, authorize=lambda: None,
+        requested_tool_context=lambda *args: (turn, 1),
+        remember_tool_context=lambda *args: receipts.append(args),
+        current_tool_context=_check_fake_current_tool_owner,
+    )
+    with TestClient(app) as client:
+        response = client.get("/v1/pet/robot-01/voice-context")
+    if mutation == "none":
+        assert response.status_code == 200
+        assert response.json()["private_memory_generation"] == 0
+        assert len(receipts) == 1
+    else:
+        assert response.status_code == 409
+        assert "Private prior session words" not in response.text
+        assert receipts == []
