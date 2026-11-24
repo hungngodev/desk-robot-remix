@@ -722,3 +722,50 @@ def test_legacy_esp32dev_firmware_is_actuator_inert_without_full_safety():
     assert "#if !DESK_ROBOT_FULL_SENSORS ||" in main
     assert "control.inhibit_unqualified_motor_cutoff();" in main
     assert '"ERR arm motor_cutoff_unqualified"' in control
+
+
+@pytest.mark.parametrize(("lane", "index", "field", "value"), [
+    (0, 0, "address", 0x2A),
+    (0, 1, "address", 0x56),
+    (0, 0, "name", "unapproved touch sensor"),
+    (1, 0, "address", 0x38),
+    (1, 1, "address", 0x37),
+    (2, 0, "address", 0x49),
+    (3, 0, "address", 0x45),
+    (3, 1, "address", 0x75),
+    (3, 1, "name", "BME280"),
+])
+def test_wiring_manifest_rejects_interaction_sensor_lane_drift(lane, index, field, value):
+    """A valid seven-bit address is insufficient if firmware cannot read it."""
+    import copy
+    import importlib.util
+
+    path = ROOT / "code/scripts/emit_wiring_manifest.py"
+    spec = importlib.util.spec_from_file_location("emit_wiring_manifest", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    plan = copy.deepcopy(PLAN)
+    plan["bus"]["mux_extras"]["channels"][lane]["devices"][index][field] = value
+    body = (ROOT / module.BODY_PINS).read_text()
+    head = (ROOT / module.HEAD_PINS).read_text()
+    with pytest.raises(ValueError, match=f"Accessory lane {lane} sensor identity drift"):
+        module.render(plan, body, head)
+
+
+@pytest.mark.parametrize(("lane", "index", "address"), [(0, 0, 0x28), (3, 1, 0x77)])
+def test_wiring_manifest_preserves_supported_accessory_address_straps(lane, index, address):
+    """The existing CAP1188 and BMP280 drivers support both address straps."""
+    import copy
+    import importlib.util
+
+    path = ROOT / "code/scripts/emit_wiring_manifest.py"
+    spec = importlib.util.spec_from_file_location("emit_wiring_manifest", path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    plan = copy.deepcopy(PLAN)
+    plan["bus"]["mux_extras"]["channels"][lane]["devices"][index]["address"] = address
+    body = (ROOT / module.BODY_PINS).read_text()
+    head = (ROOT / module.HEAD_PINS).read_text()
+    module.verify(plan, body, head)

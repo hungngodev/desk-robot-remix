@@ -180,6 +180,23 @@ def verify(plan: dict, body: str, head: str) -> None:
         ("PN532 I2C", 0x24), ("MCP23017", 0x20)
     } or len(dock_lane["devices"]) != 2:
         raise ValueError("Dock accessory lane 5 must retain PN532 and MCP23017")
+    # Other accessory lanes also have fixed firmware owners. A valid I2C
+    # address alone does not mean the driver will ever sample that device.
+    # Preserve the two address straps explicitly supported by the firmware.
+    interaction_roles = {
+        0: {"CAP1188": {0x28, 0x29}, "MAX30102 paw pad": {0x57}},
+        1: {"APDS9960": {0x39}, "AS5600 nose": {0x36}},
+        2: {"ADS1115": {0x48}},
+        3: {"SHT41": {0x44}, "BMP280": {0x76, 0x77}},
+    }
+    for channel, expected in interaction_roles.items():
+        lane = next(c for c in bus["mux_extras"]["channels"] if c["channel"] == channel)
+        devices = lane["devices"]
+        if (len(devices) != len(expected)
+                or any(not isinstance(d.get("name"), str) for d in devices)
+                or {d["name"] for d in devices} != expected.keys()
+                or any(d["address"] not in expected[d["name"]] for d in devices)):
+            raise ValueError(f"Accessory lane {channel} sensor identity drift")
     # Battery and wheel telemetry must not be silently moved to another
     # mux lane while retaining individually valid I2C addresses. This is
     # a declared harness contract, not proof of an assembled device.
