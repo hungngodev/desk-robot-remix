@@ -271,10 +271,12 @@ void thermal_step(uint32_t now) {
   }
   // A stalled or partially missing scan is not a completed frame.
   // These are sequential pixel readings, not a simultaneous thermal image.
-  if (now - thermal_started_ms >= kThermalScanMaxMs ||
-      !desk_robot_room::read_thermal_chunk(
+  const bool chunk_ok = now - thermal_started_ms < kThermalScanMaxMs &&
+      desk_robot_room::read_thermal_chunk(
           Wire, kAmgAddress, thermal_next_chunk,
-          thermal_staging + 8U * thermal_next_chunk)) {
+          thermal_staging + 8U * thermal_next_chunk);
+  now = millis();
+  if (!chunk_ok || now - thermal_started_ms >= kThermalScanMaxMs) {
     thermal_scan_active = false;
     thermal_valid = false;
     amg_started = false;
@@ -325,7 +327,7 @@ void recover_sensors(uint32_t now) {
   if (scd_stop_pending && desk_robot_room::scd_stop_settled(now, scd_stop_ms)) {
     scd_stop_pending = false;
     scd_started = scd.startPeriodicMeasurement() == 0;
-    scd_started_ms = now;
+    scd_started_ms = millis();
     return;
   }
   const bool active[] = {scd_started || scd_stop_pending,
@@ -342,7 +344,8 @@ void recover_sensors(uint32_t now) {
     Wire.write(0x3f);
     Wire.write(0x86);
     if (Wire.endTransmission() == 0) {
-      scd_stop_ms = now;
+      // The required settle interval starts after the successful transfer.
+      scd_stop_ms = millis();
       scd_stop_pending = true;
     }
   } else if (sensor == desk_robot_room::SensorRecoverySchedule::kBme) {
@@ -402,7 +405,7 @@ void loop() {
     }
   }
   radar.read();
-  const uint32_t now = millis();
+  uint32_t now = millis();
   // ld2410::read() returns true on any byte, even an incomplete frame.
   // Only a complete protocol-validated *data* packet can renew acquisition.
   if (radar_uart.take_completed_data_frame()) {
@@ -410,8 +413,13 @@ void loop() {
     radar_sample_clock.observe(true, true, now);
   }
   recover_sensors(now);
+  now = millis();
   bme_step(now); // no heater-time sleep; preserve 256000 baud radar service
+  now = millis();
   thermal_step(now); // one I2C chunk per loop, complete frame only
+  // A completed scan can advance sample_ms during the transfer. Refresh
+  // the report clock so its timestamp never predates that acquisition.
+  now = millis();
   if (now - last_report_ms >= kReportMs) {
     last_report_ms = now;
     report(now);

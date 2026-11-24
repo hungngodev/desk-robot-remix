@@ -332,3 +332,83 @@ def test_bme_completed_native_conversion_cache_with_sanitizers(tmp_path):
     subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=30)
     subprocess.run([str(executable)], check=True, capture_output=True,
                    text=True, timeout=15)
+
+
+def test_room_transaction_clocks_follow_completed_io():
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    recovery = src.split("void recover_sensors(", 1)[1].split("void report(", 1)[0]
+    stop = recovery.split("if (Wire.endTransmission() == 0) {", 1)[1]
+    assert "scd_stop_ms = millis();" in stop
+    assert "scd_started_ms = millis();" in recovery
+    loop = src.split("void loop() {", 1)[1]
+    assert "recover_sensors(now);\n  now = millis();" in loop
+    assert loop.index("thermal_step(now);") < loop.rindex("now = millis();")
+    assert loop.rindex("now = millis();") < loop.index("report(now);")
+
+
+def test_thermal_transfer_deadline_in_actual_firmware_function(tmp_path):
+    # Compile the actual runtime function with a fake I2C clock. A final
+    # successful chunk reaching 250 ms must not publish a completed frame.
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    step = "void thermal_step(" + src.split("void thermal_step(", 1)[1].split(
+        "void thermal_observation(", 1
+    )[0]
+    harness = r"""
+#include <cassert>
+#include <cstdint>
+constexpr uint32_t kReportMs = 1000, kThermalScanMaxMs = 250;
+constexpr unsigned AMG88xx_PIXEL_ARRAY_SIZE = 64;
+constexpr uint8_t kAmgAddress = 0x69;
+int Wire;
+uint32_t clock_ms, transfer_ms;
+uint32_t millis() { return clock_ms; }
+bool amg_started, thermal_scan_active, thermal_ever_requested, thermal_valid;
+uint8_t thermal_next_chunk;
+uint32_t thermal_requested_ms, thermal_started_ms, thermal_sample_ms;
+float thermal[64], thermal_staging[64];
+namespace desk_robot_room {
+bool read_thermal_chunk(int&, uint8_t, uint8_t chunk, float* pixels) {
+  clock_ms += transfer_ms;
+  for (unsigned i = 0; i < 8; ++i) pixels[i] = float(chunk + 1);
+  return true;
+}
+}
+""" + step + r"""
+void run(uint32_t start, uint32_t last_start, uint32_t last_duration, bool valid) {
+  amg_started = true;
+  thermal_scan_active = thermal_ever_requested = thermal_valid = false;
+  thermal_sample_ms = 123;
+  for (float& pixel : thermal) pixel = 99;
+  transfer_ms = 1;
+  for (unsigned chunk = 0; chunk < 7; ++chunk) {
+    clock_ms = start + chunk;
+    thermal_step(clock_ms);
+  }
+  clock_ms = start + last_start;
+  transfer_ms = last_duration;
+  thermal_step(clock_ms);
+  assert(thermal_valid == valid);
+  assert(!thermal_scan_active);
+  assert(amg_started == valid);
+  assert(thermal_sample_ms == (valid ? clock_ms : 123U));
+  assert(thermal[63] == (valid ? 8.0f : 99.0f));
+}
+int main() {
+  run(1000, 249, 1, false);
+  run(1000, 248, 1, true);
+  run(UINT32_MAX - 100, 249, 1, false);
+  run(UINT32_MAX - 100, 248, 1, true);
+}
+"""
+    compiler = shutil.which("c++")
+    assert compiler is not None
+    source = tmp_path / "thermal_runtime.cpp"
+    source.write_text(harness)
+    executable = tmp_path / "thermal_runtime"
+    subprocess.run(
+        [compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
+         str(source), "-o", str(executable)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    subprocess.run([str(executable)], check=True, capture_output=True,
+                   text=True, timeout=15)
