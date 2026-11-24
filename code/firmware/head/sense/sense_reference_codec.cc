@@ -207,7 +207,8 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
             if (!already_ready && bench_window_.ready()) {
                 std::lock_guard<std::mutex> reference_lock(reference_mutex_);
                 bench_speaker_activity_in_window_ =
-                    speaker_activity_.AdvancedSince(bench_speaker_at_start_, capture_end_us);
+                    speaker_activity_.AdvancedSince(
+                        bench_speaker_at_start_, bench_window_.last_sample_us());
             }
         }
     }

@@ -124,6 +124,7 @@ class SensePcmWindow {
   }
 
   bool ready() const noexcept { return ready_ && !failed_; }
+  std::int64_t last_sample_us() const noexcept { return last_sample_us_; }
   bool failed() const noexcept { return failed_; }
   bool occupied() const noexcept { return storage_ != nullptr; }
   std::uint32_t frames_received() const noexcept { return received_; }
