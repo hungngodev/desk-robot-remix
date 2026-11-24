@@ -279,17 +279,24 @@ class OverlayTests(unittest.TestCase):
         self.assertIn("virtual int OutputData", codec_header)
         self.assertIn("return Write(data.data(), data.size());", codec_base)
         self.assertIn("on_playback_committed", service_header)
-        self.assertIn("transmitted_frames", service)
-        self.assertIn("desk_robot_failed_playback_id", service)
+        output = service.split("void AudioService::AudioOutputTask()", 1)[1].split(
+            "void AudioService::OpusCodecTask()", 1
+        )[0]
+        # The contiguous-prefix guard replaces the old short-write-only latch.
+        self.assertIn("DeskPlaybackPrefix desk_robot_prefix;", output)
+        self.assertIn("task.playback_id, task.media_position_ms,", output)
+        self.assertIn("task.desk_frame_duration_ms,", output)
+        self.assertIn("!task.pcm.empty() &&", output)
         self.assertIn(
-            "transmitted_frames != static_cast<int>(task.pcm.size())", service
-        )
-        self.assertIn(
-            "task.playback_id != desk_robot_failed_playback_id", service
+            "transmitted_frames == static_cast<int>(task.pcm.size())", output
         )
         self.assertLess(
-            service.index("codec_->OutputData(task.pcm)"),
-            service.index("callbacks_.on_playback_committed"),
+            output.index("codec_->OutputData(task.pcm)"),
+            output.index("desk_robot_prefix.Accept("),
+        )
+        self.assertLess(
+            output.index("desk_robot_prefix.Accept("),
+            output.index("callbacks_.on_playback_committed("),
         )
         self.assertIn("SendI2sProgress", protocol_header)
         self.assertIn('"type\\":\\"desk_robot_i2s_progress', protocol_source)
