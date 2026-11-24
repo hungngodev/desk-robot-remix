@@ -208,3 +208,45 @@ def test_tool_bearer_alone_cannot_promote_dashboard_read_to_voice_tool(
         }
         assert client.get(url, headers={**tool, **bad_signature}).status_code == 409
         assert len(hub.tool_history[robot_id]) == 1
+
+        # The explicit Xiaozhi context tool uses the same signed provenance
+        # contract as status, unlike ordinary native context polling.
+        situation_url = f"/v1/pet/{robot_id}/interaction-context"
+        context_signed = _signed_headers(
+            speech_token,
+            robot_id=robot_id,
+            device_id="mac-01",
+            generation=7,
+            method="GET",
+            path=situation_url,
+            receipt_id="7" * 32,
+        )
+        context_wrong_generation = _signed_headers(
+            speech_token,
+            robot_id=robot_id,
+            device_id="mac-01",
+            generation=6,
+            method="GET",
+            path=situation_url,
+            receipt_id="8" * 32,
+        )
+        assert client.get(situation_url, headers=tool).status_code == 200
+        assert client.get(
+            situation_url, headers={**tool, **context_wrong_generation},
+        ).status_code == 409
+        assert client.get(
+            situation_url, headers={
+                **tool, **context_signed,
+                "X-Desk-Robot-Tool-Receipt-Signature": "0" * 64,
+            },
+        ).status_code == 409
+        accepted_context = client.get(
+            situation_url, headers={**tool, **context_signed},
+        )
+        assert accepted_context.status_code == 200
+        assert accepted_context.json()["robot_id"] == robot_id
+        assert accepted_context.json()["motor_authorized"] is False
+        assert client.get(
+            situation_url, headers={**tool, **context_signed},
+        ).status_code == 409
+        assert len(hub.tool_history[robot_id]) == 1

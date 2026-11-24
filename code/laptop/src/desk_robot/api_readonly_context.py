@@ -120,7 +120,7 @@ def register_readonly_context_routes(
 
     @app.get("/v1/pet/{robot_id}/interaction-context",
              dependencies=[Depends(authorize)])
-    async def pet_live_situation(robot_id: str):
+    async def pet_live_situation(robot_id: str, request: Request):
         """Live context is distinct from durable history permission.
 
         A person may opt into present camera/sensor interaction without
@@ -134,6 +134,13 @@ def register_readonly_context_routes(
         visual = getattr(app.state.runtime, "multimodal", None)
         if visual is None:
             raise OperationError("No current multimodal camera/sensor owner")
+        # Explicit voice-tool calls must have a current authenticated turn;
+        # unmarked native context polling keeps its existing bearer contract.
+        if request.headers.get("x-desk-robot-tool-receipt") == "1":
+            current_tool_context(
+                requested_tool_context(request, robot_id),
+                robot_id, "Voice tool receipt missing or superseded",
+            )
         now = time.monotonic()
         # The same Coordinator table supplies the active physical task to
         # both native Xiaozhi context and Mac pet dialogue. No new planner,
