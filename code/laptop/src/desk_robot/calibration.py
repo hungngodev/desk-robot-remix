@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import math
+from datetime import datetime, timezone
 from pathlib import Path
 
 import numpy as np
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 
 def _unique_calibration_json_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -22,6 +23,8 @@ class Calibration(BaseModel):
     simulation_only: bool = Field(default=False, strict=True)
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     measured: bool = Field(default=False, strict=True)
+    # Explicit operator expiry; legacy files have no known expiry.
+    expires_at: AwareDatetime | None = None
     image_width: int = Field(gt=0)
     image_height: int = Field(gt=0)
     pixel_points: list[tuple[float, float]] = Field(min_length=4)
@@ -122,6 +125,9 @@ class Calibration(BaseModel):
                 "Calibration is an unmeasured example; measure this robot before pickup"
             )
 
+        if self.expires_at is not None and datetime.now(timezone.utc) >= self.expires_at:
+            raise ValueError("Calibration expired; re-calibrate this robot before pickup")
+
     @classmethod
     def load(cls, path: Path) -> "Calibration":
         contents = path.read_text()
@@ -132,4 +138,4 @@ class Calibration(BaseModel):
         return cls.model_validate_json(contents)
 
     def save(self, path: Path):
-        path.write_text(json.dumps(self.model_dump(), indent=2) + "\n")
+        path.write_text(json.dumps(self.model_dump(mode="json"), indent=2) + "\n")
