@@ -481,21 +481,34 @@ class Conversation:
         """Explicit recovery requires new STOP receipts from every real head."""
         if not self.speaker_stop_unconfirmed:
             return
-        if self.active is not None and not self.active.done():
-            raise RuntimeError("Speaker recovery refused while dialogue is active")
-        interrupt = getattr(self.speaker, "interrupt", None)
-        targets = [
-            robot for robot in self.settings.robots
-            if getattr(robot, "device_id", None)
-        ]
-        if not callable(interrupt) or not targets:
-            raise RuntimeError("Xiaozhi speaker STOP unconfirmed; no recovery route")
+        # Recovery shares the same admission owner as group/proactive speech.
+        # Two overlapping recoveries must not clear the latch while another
+        # recovery still has an outstanding STOP for a newly admitted speaker.
         try:
-            for robot in targets:
-                await _bounded_speaker_abort(interrupt, robot)
-        except BaseException as exc:
-            raise RuntimeError("Xiaozhi speaker recovery STOP unconfirmed") from exc
-        self.speaker_stop_unconfirmed = False
+            async with asyncio.timeout(_CONVERSATION_STOP_TIMEOUT_S):
+                await self.session_lock.acquire()
+        except TimeoutError as exc:
+            raise RuntimeError("Xiaozhi speaker recovery session still active") from exc
+        try:
+            if not self.speaker_stop_unconfirmed:
+                return
+            if self.active is not None and not self.active.done():
+                raise RuntimeError("Speaker recovery refused while dialogue is active")
+            interrupt = getattr(self.speaker, "interrupt", None)
+            targets = [
+                robot for robot in self.settings.robots
+                if getattr(robot, "device_id", None)
+            ]
+            if not callable(interrupt) or not targets:
+                raise RuntimeError("Xiaozhi speaker STOP unconfirmed; no recovery route")
+            try:
+                for robot in targets:
+                    await _bounded_speaker_abort(interrupt, robot)
+            except BaseException as exc:
+                raise RuntimeError("Xiaozhi speaker recovery STOP unconfirmed") from exc
+            self.speaker_stop_unconfirmed = False
+        finally:
+            self.session_lock.release()
 
     def invalidate_private_memory(self, robot_id: str) -> None:
         """Revoke old prompt copies after a per-pet memory correction/delete."""

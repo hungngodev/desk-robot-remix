@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 
 import pytest
 from desk_robot.conversation import Conversation
@@ -73,3 +74,62 @@ async def test_preexisting_stop_uncertainty_never_requests_grant():
             pytest.fail("Unconfirmed STOP admitted a speaker")
     assert not speaker.grant_started.is_set()
     assert speaker.released == 0
+
+
+class PausedRecoverySpeaker:
+    def __init__(self):
+        self.started = asyncio.Event()
+        self.finish = asyncio.Event()
+        self.calls = []
+
+    async def interrupt(self, robot):
+        self.calls.append(robot.device_id)
+        self.started.set()
+        await self.finish.wait()
+
+
+def recovery_conversation(speaker):
+    conversation = conversation_with(speaker)
+    conversation.active = None
+    conversation.session_lock = asyncio.Lock()
+    conversation.settings = SimpleNamespace(robots=[
+        SimpleNamespace(device_id="head-01"),
+        SimpleNamespace(device_id="head-02"),
+    ])
+    conversation.speaker_stop_unconfirmed = True
+    return conversation
+
+
+async def test_concurrent_stop_recovery_only_flushes_each_head_once():
+    speaker = PausedRecoverySpeaker()
+    conversation = recovery_conversation(speaker)
+    first = asyncio.create_task(conversation.recover_speaker_stop())
+    await asyncio.wait_for(speaker.started.wait(), timeout=1)
+    second_started = asyncio.Event()
+
+    async def recover_again():
+        second_started.set()
+        await conversation.recover_speaker_stop()
+
+    second = asyncio.create_task(recover_again())
+    await asyncio.wait_for(second_started.wait(), timeout=1)
+    assert conversation.speaker_stop_unconfirmed is True
+    speaker.finish.set()
+    await asyncio.wait_for(asyncio.gather(first, second), timeout=1)
+
+    assert speaker.calls == ["head-01", "head-02"]
+    assert conversation.speaker_stop_unconfirmed is False
+    assert not conversation.session_lock.locked()
+
+
+async def test_stop_recovery_cannot_flush_an_owned_session(monkeypatch):
+    monkeypatch.setattr("desk_robot.conversation._CONVERSATION_STOP_TIMEOUT_S", 0.01)
+    speaker = PausedRecoverySpeaker()
+    conversation = recovery_conversation(speaker)
+    async with conversation.session_lock:
+        with pytest.raises(RuntimeError, match="recovery session still active"):
+            await conversation.recover_speaker_stop()
+        assert conversation.speaker_stop_unconfirmed is True
+        assert speaker.calls == []
+        assert conversation.session_lock.locked()
+    assert not conversation.session_lock.locked()
