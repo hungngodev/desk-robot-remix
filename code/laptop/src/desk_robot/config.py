@@ -5,9 +5,12 @@ import time
 import tomllib
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, model_validator
+
+
+CredentialEnvName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
 
 
 def _require_boolean_assignment(model: BaseModel, name: str, value: object) -> None:
@@ -22,7 +25,7 @@ class RobotConfig(BaseModel):
     name: str
     persona: str = "You are a friendly desk companion. Keep replies to one short sentence."
     head_url: str = "http://127.0.0.1:8081"
-    token_env: str
+    token_env: CredentialEnvName
     device_id: str = ""
     motion_enabled: StrictBool = False
     # Set only after verifying installed driver, wiring, and flashed WROOM.
@@ -68,11 +71,16 @@ class RobotConfig(BaseModel):
     def local_http(self):
         from urllib.parse import urlparse
 
+        if not self.name.strip():
+            raise ValueError("Robot name cannot be blank")
         if self.dock_turn_sign == 0 or self.dock_forward_sign == 0:
             raise ValueError("Dock movement polarity cannot be zero")
         u = urlparse(self.head_url)
         if u.scheme not in ("http", "https") or not u.hostname or u.username or u.password:
             raise ValueError("head_url must be an http(s) URL without embedded credentials")
+        # Accessing port also rejects malformed and out-of-range port strings.
+        if u.port == 0:
+            raise ValueError("head_url port must be nonzero")
         return self
 
 
@@ -91,13 +99,13 @@ class Settings(BaseModel):
     _fleet_auto_fanout_consent_generation: int = PrivateAttr(default=0)
     robots: list[RobotConfig]
     mode: Literal["hardware", "simulation"] = "hardware"
-    coordinator_token_env: str = "DESK_ROBOT_API_TOKEN"
-    tools_token_env: str = "DESK_ROBOT_TOOL_TOKEN"
+    coordinator_token_env: CredentialEnvName = "DESK_ROBOT_API_TOKEN"
+    tools_token_env: CredentialEnvName = "DESK_ROBOT_TOOL_TOKEN"
     ollama_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "qwen3:8b"
     kokoro_url: str = "http://127.0.0.1:8880"
     speech_bridge_url: str = "http://127.0.0.1:8766"
-    speech_bridge_token_env: str = "DESK_ROBOT_SPEECH_TOKEN"
+    speech_bridge_token_env: CredentialEnvName = "DESK_ROBOT_SPEECH_TOKEN"
     vision_weights: Path | None = None
     vision_model: str = ""  # Explicit local Ollama VLM; never silently use a cloud model.
     voice_memory_tools_enabled: StrictBool = False  # Explicit opt-in for Xiaozhi to read own episodic text.

@@ -91,3 +91,26 @@ def test_toml_string_cannot_enable_camera(tmp_path):
                                              'voice_vision_tools_enabled = "yes"'))
     with pytest.raises(ValueError, match="voice_vision_tools_enabled"):
         load_settings(path)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("name", ""),
+    ("name", "   "),
+    ("token_env", ""),
+    ("token_env", "9TOKEN"),
+    ("token_env", "HEAD TOKEN"),
+    ("token_env", "HEAD=TOKEN"),
+    ("head_url", "http://localhost:invalid"),
+    ("head_url", "http://localhost:65536"),
+])
+def test_required_robot_values_reject_malformed_input(field, value):
+    with pytest.raises(ValueError):
+        RobotConfig.model_validate({**_robot(), field: value})
+
+
+@pytest.mark.parametrize("field", [
+    "coordinator_token_env", "tools_token_env", "speech_bridge_token_env",
+])
+def test_global_credential_env_names_are_identifiers(field):
+    with pytest.raises(ValueError, match=field):
+        Settings.model_validate({"robots": [_robot()], field: "BAD TOKEN"})
