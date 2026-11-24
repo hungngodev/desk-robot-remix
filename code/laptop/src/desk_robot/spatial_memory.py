@@ -99,7 +99,13 @@ class SpatialMemory:
         with self.memory._connect(robot_id) as db:
             db.execute("BEGIN IMMEDIATE")
             episode = db.execute(
-                "SELECT source_robot, witnessed, observed_at FROM memories WHERE event_id=?",
+                """SELECT m.source_robot, m.witnessed, m.observed_at,
+                          p.device_boot, p.device_frame, p.device_complete_us,
+                          COALESCE(e.generation,0), p.mac_received_at
+                   FROM memories AS m
+                   LEFT JOIN camera_provenance AS p ON p.event_id=m.event_id
+                   LEFT JOIN episode_mutations AS e ON e.event_id=m.event_id
+                   WHERE m.event_id=?""",
                 (event_id,),
             ).fetchone()
             if episode is None:
@@ -107,6 +113,16 @@ class SpatialMemory:
             if (episode[0] != robot_id or episode[1] != 1
                     or abs(episode[2] - evidence.observed_at) > 0.01):
                 raise ValueError("Spatial evidence requires same-robot firsthand episode time")
+            # A corrected or mutation-reserved episode cannot regain old
+            # coordinates from a delayed callback, even across restarts.
+            # The retained camera receipt must match exactly; no clock mapping
+            # between the camera and Mac is invented here.
+            if (episode[6] != 0
+                    or episode[3:6] != (evidence.camera_boot, evidence.camera_seq,
+                                        str(evidence.camera_complete_us))
+                    or episode[7] is None
+                    or abs(episode[7] - evidence.observed_at) > 0.01):
+                return False
             # Camera sequence identifies an image independently of completion timestamp.
             # The same image can depict several objects, but cannot create a
             # second sighting of one object just by changing complete_us.
@@ -173,9 +189,17 @@ class SpatialMemory:
                           s.x_mm,s.y_mm,s.yaw_mrad,s.uncertainty_mm,
                           s.frame,s.anchor_id
                    FROM spatial_observations AS s JOIN memories AS m
-                   ON s.event_id=m.event_id WHERE s.object_key=?
+                   ON s.event_id=m.event_id
+                   JOIN camera_provenance AS p ON p.event_id=m.event_id
+                   LEFT JOIN episode_mutations AS e ON e.event_id=m.event_id
+                   WHERE s.object_key=? AND m.source_robot=? AND m.witnessed=1
+                   AND COALESCE(e.generation,0)=0
+                   AND p.device_boot=s.camera_boot AND p.device_frame=s.camera_seq
+                   AND p.device_complete_us=s.camera_complete_us
+                   AND ABS(m.observed_at-s.observed_at)<=0.01
+                   AND ABS(p.mac_received_at-s.observed_at)<=0.01
                    ORDER BY s.observed_at DESC,s.event_id DESC LIMIT 1""",
-                (object_key,),
+                (object_key, robot_id),
             ).fetchone()
         if row is None:
             return None

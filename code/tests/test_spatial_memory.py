@@ -2,7 +2,7 @@ import time
 from dataclasses import replace
 
 import pytest
-from desk_robot.memory import MemoryStore
+from desk_robot.memory import CameraProvenance, MemoryStore
 from desk_robot.spatial_memory import SpatialEvidence, SpatialMemory
 
 
@@ -17,10 +17,13 @@ def evidence(observed_at):
     )
 
 
-def remember(db, robot, event, when, *, source=None, witnessed=True):
+def remember(db, robot, event, when, *, source=None, witnessed=True,
+             identity=(11, 4, 900_000)):
     return db.remember(robot, event, "A key was seen", kind="vision",
                        source_robot=source or robot, witnessed=witnessed,
-                       observed_at=when)
+                       observed_at=when, camera_provenance=(
+                           CameraProvenance(when, when + 0.01, identity)
+                           if identity is not None else None))
 
 
 def test_spatial_insert_restart_migration_and_forget_are_per_robot(tmp_path):
@@ -130,4 +133,32 @@ def test_human_correction_retires_old_spatial_coordinates(tmp_path):
     assert remember(db, "robot-01", "seen1", when)
     assert spatial.attach("robot-01", "seen1", evidence(when))
     assert db.correct_episode("robot-01", "seen1", "The key was actually in a drawer")
+    assert spatial.last_seen("robot-01", "flat_key", now=time.time()) is None
+
+
+@pytest.mark.parametrize("identity", [None, (12, 4, 900_000),
+                                      (11, 5, 900_000), (11, 4, 900_001)])
+def test_attachment_requires_exact_original_camera_receipt(tmp_path, identity):
+    db = MemoryStore(tmp_path / "private", ["robot-01"])
+    when = time.time() - 1
+    assert remember(db, "robot-01", "seen1", when, identity=identity)
+    spatial = SpatialMemory(db)
+    assert not spatial.attach("robot-01", "seen1", evidence(when))
+    assert spatial.last_seen("robot-01", "flat_key", now=time.time()) is None
+
+
+def test_reserved_or_corrected_episode_cannot_regain_coordinates(tmp_path):
+    root = tmp_path / "private"
+    db = MemoryStore(root, ["robot-01"])
+    when = time.time() - 1
+    assert remember(db, "robot-01", "seen1", when)
+    spatial = SpatialMemory(db)
+    assert spatial.attach("robot-01", "seen1", evidence(when))
+    generation = db.reserve_episode_mutation("robot-01", "seen1", "Corrected")
+    assert spatial.last_seen("robot-01", "flat_key", now=time.time()) is None
+    assert not spatial.attach("robot-01", "seen1", evidence(when))
+    assert db.correct_episode("robot-01", "seen1", "Corrected",
+                              mutation_generation=generation)
+    spatial = SpatialMemory(MemoryStore(root, ["robot-01"]))
+    assert not spatial.attach("robot-01", "seen1", evidence(when))
     assert spatial.last_seen("robot-01", "flat_key", now=time.time()) is None
