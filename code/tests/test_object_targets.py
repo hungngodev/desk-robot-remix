@@ -93,11 +93,15 @@ def test_capture_sequence_overrules_out_of_order_detection_completion(
                        floor_mm=None, projection_qualified=False)
     for evidence in ([positive, negative], [negative, positive]):
         result = resolve(evidence)
-        assert result.status == ("current_sighting" if current else "last_seen")
+        if positive_seq == negative_seq:
+            assert (result.status, result.reason) == ("unknown", "contradictory_camera_frame")
+            assert result.search_hint_mm is None
+        else:
+            assert result.status == ("current_sighting" if current else "last_seen")
+            assert result.reason == (
+                "fresh_projected_view" if current else "not_currently_confirmed"
+            )
         assert result.confirmed_floor_mm == ((120, 220) if current else None)
-        assert result.reason == (
-            "fresh_projected_view" if current else "not_currently_confirmed"
-        )
         assert result.arrived is False and result.may_execute is False
 
 
@@ -396,3 +400,39 @@ def test_running_host_history_takes_precedence_over_incomparable_older_boot():
         result = resolve(rows, now_us=1_300_001)
         assert result.status == "last_seen" and result.search_hint_mm == seen.floor_mm
         assert not result.arrived and not result.may_execute
+
+
+@pytest.mark.parametrize("now_us", [1_000_000, 1_300_001])
+@pytest.mark.parametrize("negative_capture", [950_000, None])
+def test_conflicting_frame_never_supplies_sighting_or_hint(now_us, negative_capture):
+    _, _, seen = fixtures()
+    absent = replace(seen, source="camera_not_seen", receipt_us=960_000,
+                     captured_us=negative_capture, floor_mm=None,
+                     projection_qualified=False)
+    for rows in ([seen, absent], [absent, seen]):
+        result = resolve(rows, now_us=now_us)
+        assert (result.status, result.reason) == ("unknown", "contradictory_camera_frame")
+        assert result.confirmed_floor_mm is None and result.search_hint_mm is None
+        assert result.source is None and result.seen_at_wall_s is None
+        assert not result.arrived and not result.may_execute
+
+
+@pytest.mark.parametrize("now_us", [1_000_000, 1_300_001])
+def test_newer_distinct_positive_recovers_from_conflict(now_us):
+    _, _, seen = fixtures()
+    absent = replace(seen, source="camera_not_seen", floor_mm=None,
+                     projection_qualified=False)
+    newer = replace(seen, frame_seq=24, receipt_us=970_000, captured_us=960_000,
+                    floor_mm=(240, 320))
+    for rows in ([seen, absent, newer], [newer, absent, seen]):
+        result = resolve(rows, now_us=now_us)
+        location = result.confirmed_floor_mm if now_us == 1_000_000 else result.search_hint_mm
+        assert location == newer.floor_mm
+        assert not result.arrived and not result.may_execute
+
+
+def test_different_camera_boot_is_not_same_frame():
+    _, _, seen = fixtures()
+    absent = replace(seen, source="camera_not_seen", camera_boot=100,
+                     floor_mm=None, projection_qualified=False)
+    assert resolve([seen, absent]).confirmed_floor_mm == seen.floor_mm

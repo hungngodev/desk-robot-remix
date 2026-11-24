@@ -236,6 +236,9 @@ def resolve_object_target(
                 else None for e in candidates
                 if frame_identity(e) == frame_identity(selected)}
 
+    # Contradictions attach to the frame identity, not receipt freshness.
+    absent_frames = {frame_identity(e) for e in records
+                     if e.source == "camera_not_seen"}
     positives = [e for e in seen if fresh(e)]
     negatives = [e for e in records if e.source == "camera_not_seen" and fresh(e)]
     # Native camera frames are ordered by frame sequence inside one
@@ -246,8 +249,10 @@ def resolve_object_target(
                       default=None)
     latest_absent = max(negatives, key=lambda e: (e.frame_seq, e.receipt_us),
                         default=None)
-    if (latest_seen is not None and (latest_absent is None or
-            latest_seen.frame_seq > latest_absent.frame_seq)):
+    if (latest_seen is not None
+            and frame_identity(latest_seen) not in absent_frames
+            and (latest_absent is None or
+                 latest_seen.frame_seq > latest_absent.frame_seq)):
         # Freshness selects the view, not which objects existed in that view.
         # A conflicting detection from the same frame remains ambiguous even
         # if its individual receipt has aged out.
@@ -300,6 +305,8 @@ def resolve_object_target(
     if report is not None and (past is None or report.seen_at_wall_s > past.seen_at_wall_s):
         return result("user_reported", "unverified_user_location", report)
     if past is not None:
+        if frame_identity(past) in absent_frames:
+            return result("unknown", "contradictory_camera_frame")
         if len(projected_locations(past, seen)) > 1:
             return result("last_seen", "ambiguous_projected_view", past)
         hint = (past.floor_mm if past.projection_qualified and
