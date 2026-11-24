@@ -889,6 +889,33 @@ int main() {
       CHECK(!angle.present && !angle.valid);
       CHECK(angle.sample_seq == 0U);
     }
+    // A fitted accessory mux with missing individual peripherals must
+    // continue sampling the installed devices. The fake's default lane 3
+    // has SHT41 but no BMP280; lane 5 has MCP23017 but no PN532.
+    TwoWire partial_accessory_wire;
+    desk_robot::AccessorySensors partial_accessories;
+    CHECK(partial_accessories.begin(partial_accessory_wire));
+    for (std::uint32_t ms = 0; ms < 600; ms += 12)
+      partial_accessories.poll(ms);
+    const auto& partial = partial_accessories.readings();
+    CHECK(partial.climate.present && partial.climate.valid);
+    CHECK(partial.dock.present && partial.dock.valid);
+    const auto climate_before = partial.climate.sample_seq;
+    const auto dock_before = partial.dock.sample_seq;
+    CHECK(climate_before > 0U && dock_before > 0U);
+    for (std::uint32_t ms = 600; ms < 1800; ms += 12) {
+      partial_accessories.poll(ms);
+      CHECK(!partial.barometer.present && !partial.barometer.valid);
+      CHECK(partial.barometer.sample_seq == 0U);
+      CHECK(!partial.nfc.present && !partial.nfc.valid);
+      CHECK(partial.nfc.scan_seq == 0U && partial.nfc.tag_events == 0U);
+      CHECK(!partial_accessory_wire.unsafe_parallel_mux);
+      CHECK(partial_accessory_wire.ranges == 0 && partial_accessory_wire.extras == 0);
+    }
+    CHECK(partial.climate.valid && partial.climate.sample_seq > climate_before);
+    CHECK(partial.dock.valid && partial.dock.sample_seq > dock_before);
+    CHECK(partial.dock.sample_seq == partial_accessory_wire.dock_gpio_reads);
+    CHECK(partial_accessory_wire.nfc_scans == 0U);
     std::cout << "PASS optional sensor register IO, MCP GPIOB, NFC and isolated mux slots\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << '\n';
