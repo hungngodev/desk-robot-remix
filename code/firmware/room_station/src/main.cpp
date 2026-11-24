@@ -60,6 +60,9 @@ class RadarObservedUart final : public Stream {
   void flush() override { source_.flush(); }
   size_t write(uint8_t value) override { return source_.write(value); }
   using Print::write;
+  const desk_robot_room::RadarTargetSample& completed_sample() const {
+    return gate_.completed_sample();
+  }
   bool take_completed_data_frame() {
     const bool complete = data_frame_complete_;
     data_frame_complete_ = false;
@@ -74,6 +77,7 @@ class RadarObservedUart final : public Stream {
 RadarObservedUart radar_uart(Serial1);
 ld2410 radar;
 desk_robot_room::RadarSampleClock radar_sample_clock;
+desk_robot_room::RadarTargetSample radar_completed;
 desk_robot_room::UsbEpochSync usb_epoch_sync;
 desk_robot_room::SensorRecoverySchedule sensor_recovery;
 bool scd_started = false;
@@ -210,22 +214,21 @@ void bme_observation(uint32_t now) {
   Serial.print('}');
 }
 void radar_observation(uint32_t now) {
-  // read() only drains the existing upstream bounded UART parser.
+  // The pinned v0.2.2 driver's read_frame_ can leave queued frames, and
+  // isConnected() can parse another frame. Never mix those live getters
+  // with the raw packet receipt clock. Expire the completed tuple locally.
   // A static/moving echo is not authentication or a particular human.
-  // A connected decoder may still carry the last valid UART packet. Expire
-  // stale radar evidence locally rather than poisoning fresh room sensors.
-  const bool connected = radar.isConnected() &&
-      radar_sample_clock.fresh(now, kRadarStaleMs);
+  const bool connected = radar_sample_clock.fresh(now, kRadarStaleMs);
   Serial.print(F("\"ld2410c\":{\"valid\":")); jsbool(connected);
   if (connected) {
     Serial.print(F(",\"sample_ms\":"));
     Serial.print(radar_sample_clock.sample_ms());
-    Serial.print(F(",\"presence\":")); jsbool(radar.presenceDetected());
-    Serial.print(F(",\"stationary\":")); jsbool(radar.stationaryTargetDetected());
-    Serial.print(F(",\"moving\":")); jsbool(radar.movingTargetDetected());
+    Serial.print(F(",\"presence\":")); jsbool(radar_completed.presence);
+    Serial.print(F(",\"stationary\":")); jsbool(radar_completed.stationary);
+    Serial.print(F(",\"moving\":")); jsbool(radar_completed.moving);
     Serial.print(F(",\"stationary_cm\":"));
-    Serial.print(radar.stationaryTargetDistance());
-    Serial.print(F(",\"moving_cm\":")); Serial.print(radar.movingTargetDistance());
+    Serial.print(radar_completed.stationary_cm);
+    Serial.print(F(",\"moving_cm\":")); Serial.print(radar_completed.moving_cm);
   }
   Serial.print('}');
 }
@@ -402,8 +405,10 @@ void loop() {
   const uint32_t now = millis();
   // ld2410::read() returns true on any byte, even an incomplete frame.
   // Only a complete protocol-validated *data* packet can renew acquisition.
-  radar_sample_clock.observe(radar_uart.take_completed_data_frame(),
-                             radar.isConnected(), now);
+  if (radar_uart.take_completed_data_frame()) {
+    radar_completed = radar_uart.completed_sample();
+    radar_sample_clock.observe(true, true, now);
+  }
   recover_sensors(now);
   bme_step(now); // no heater-time sleep; preserve 256000 baud radar service
   thermal_step(now); // one I2C chunk per loop, complete frame only

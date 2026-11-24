@@ -144,7 +144,7 @@ def test_optional_radar_absence_never_blocks_shared_station_boot():
     assert "radar.begin(Serial1);" not in src
     assert "radar.begin(radar_uart);" not in src
     assert "radar.read();" in src
-    assert "radar.isConnected()" in src
+    assert "radar_uart.take_completed_data_frame()" in src
     assert "radar_sample_clock.fresh(now, kRadarStaleMs)" in src
 
 
@@ -159,7 +159,14 @@ def test_stale_radar_isolated_without_dropping_fresh_room_sensors():
     )[0]
     assert "constexpr uint32_t kRadarStaleMs = 3000;" in src
     assert '"ld2410c": 3000' in mac
-    assert "radar.isConnected() &&" in report
+    assert "radar.isConnected()" not in report.split("\n  const bool", 1)[1]
+    assert "radar_completed = radar_uart.completed_sample();" in src
+    assert "radar_sample_clock.observe(true, true, now);" in src
+    for field in ("presence", "stationary", "moving", "stationary_cm", "moving_cm"):
+        assert f"radar_completed.{field}" in report
+    for getter in ("presenceDetected", "stationaryTargetDetected",
+                   "movingTargetDetected", "stationaryTargetDistance", "movingTargetDistance"):
+        assert f"radar.{getter}()" not in report
     assert "radar_sample_clock.fresh(now, kRadarStaleMs)" in report
     assert "return has_sample_ && now_ms - sample_ms_ <= max_age_ms;" in clock
     assert "jsbool(connected)" in report

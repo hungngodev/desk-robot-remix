@@ -35,6 +35,9 @@ int main() {
   assert(feed(gate, kBasicFrame));
   clock.observe(true, true, 1010);
   assert(clock.has_sample() && clock.sample_ms() == 1010);
+  const auto first = gate.completed_sample();
+  assert(first.presence && first.moving && first.stationary);
+  assert(first.moving_cm == 42 && first.stationary_cm == 35);
   assert(clock.fresh(1010, 3000));
   assert(clock.fresh(4010, 3000));  // inclusive age limit
   assert(!clock.fresh(4011, 3000));
@@ -87,5 +90,27 @@ int main() {
   assert(clock.sample_ms() == 3);
   assert(clock.fresh(3003, 3000));
   assert(!clock.fresh(3004, 3000));
+  // Multiple complete frames in one UART drain must publish the latest
+  // packet, not the upstream decoder's potentially older live getters.
+  const uint8_t next[] = {
+      0xF4, 0xF3, 0xF2, 0xF1, 13, 0,
+      0x02, 0xAA, 0x02, 0, 0, 0, 0x2C, 0x01, 60, 80, 0, 0x55, 0x00,
+      0xF8, 0xF7, 0xF6, 0xF5,
+  };
+  assert(feed(gate, kBasicFrame));
+  assert(feed(gate, next));
+  const auto latest = gate.completed_sample();
+  clock.observe(true, true, 4);
+  assert(latest.presence && !latest.moving && latest.stationary);
+  assert(latest.moving_cm == 0 && latest.stationary_cm == 300);
+  assert(clock.sample_ms() == 4);
+  assert(first.moving_cm == 42 && first.stationary_cm == 35);
+  assert(!feed(gate, wrong_footer));
+  assert(!feed(gate, kBasicFrame, 0, 14));
+  assert(gate.completed_sample().stationary_cm == 300);
+  assert(!gate.completed_sample().moving);
+  assert(clock.sample_ms() == 4);
+  assert(feed(gate, kBasicFrame, 14));
+  assert(gate.completed_sample().moving_cm == 42);
   return 0;
 }

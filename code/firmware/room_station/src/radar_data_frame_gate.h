@@ -7,7 +7,16 @@ namespace desk_robot_room {
 // Observe the same LD2410C UART bytes handed to the pinned ld2410 v0.2.2
 // decoder, but count only complete validated *data* frames. Its read() return
 // value also means "received any byte", so cannot timestamp a measurement.
-// This bounded protocol gate does not decode targets or grant authority.
+// Keep the basic target fields from that same complete packet. They are
+// radar observations only, never identity or motion authority.
+struct RadarTargetSample {
+  bool presence = false;
+  bool stationary = false;
+  bool moving = false;
+  uint16_t stationary_cm = 0;
+  uint16_t moving_cm = 0;
+};
+
 class RadarDataFrameGate {
  public:
   bool consume(uint8_t byte) {
@@ -48,11 +57,28 @@ class RadarDataFrameGate {
         frame_[expected_ - 3] == kFooter[1] &&
         frame_[expected_ - 2] == kFooter[2] &&
         frame_[expected_ - 1] == kFooter[3];
+    if (valid) {
+      // LD2410 basic target data occupies the same offsets in basic and
+      // engineering packets. Distances are little-endian centimeters.
+      const uint8_t target = frame_[8];
+      completed_.presence = target != 0;
+      completed_.moving_cm = static_cast<uint16_t>(frame_[9]) |
+          (static_cast<uint16_t>(frame_[10]) << 8);
+      completed_.stationary_cm = static_cast<uint16_t>(frame_[12]) |
+          (static_cast<uint16_t>(frame_[13]) << 8);
+      completed_.moving = (target & 0x01) != 0 &&
+          completed_.moving_cm > 0 && frame_[11] > 0;
+      completed_.stationary = (target & 0x02) != 0 &&
+          completed_.stationary_cm > 0 && frame_[14] > 0;
+    }
     reset();
     return valid;
   }
 
+  const RadarTargetSample& completed_sample() const { return completed_; }
+
  private:
+  RadarTargetSample completed_;
   void reset() {
     position_ = 0;
     expected_ = 0;
