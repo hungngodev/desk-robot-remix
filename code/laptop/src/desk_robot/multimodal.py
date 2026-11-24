@@ -1588,6 +1588,13 @@ class MultimodalOrchestrator:
             else:
                 self.hub.discard_visual_tools(peer)
             self._cancel_proactive_snapshot(peer)
+            # The fallback speech sampler owns the previous turn too. Cancel
+            # it before the slow audio STOP so start_speech_frames can replace
+            # it even when an AEC edge arrives without a preceding speech_end.
+            sampler = self._capture_tasks.get(peer)
+            if (sampler is not None and not sampler.done()
+                    and not sampler.cancelling()):
+                sampler.cancel()
             pending_sensor = self._sensor_tasks.get(peer)
             if pending_sensor is not None and not pending_sensor.done():
                 pending_sensor.cancel()
@@ -1654,6 +1661,8 @@ class MultimodalOrchestrator:
                         if turn != self._turn_epoch[robot_id]:
                             return  # Older cancelled sampler cannot own a new VAD turn.
                     except RuntimeError as exc:
+                        if turn != self._turn_epoch[robot_id]:
+                            return  # Obsolete failure cannot clear new frames.
                         # A cancelled lower-priority sensor snapshot can still
                         # be the sole real device reader for one more event-loop
                         # tick. The strict single-owner gate must not kill the
@@ -1667,6 +1676,8 @@ class MultimodalOrchestrator:
                         self.hub.discard_video(robot_id)
                         break
                     except Exception:
+                        if turn != self._turn_epoch[robot_id]:
+                            return  # Obsolete failure cannot clear new frames.
                         # Camera failure does NOT prove the human stopped
                         # speaking. Only discard stale frames, never VAD state.
                         self.hub.discard_video(robot_id)

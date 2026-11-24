@@ -3600,3 +3600,67 @@ def test_native_sent_receipt_seen_ids_survive_twelve_history_entries():
     hub.clear("robot-01")
     assert not hub.native_spoken_seen["robot-01"]
     assert hub.native_spoken_seen["robot-02"]
+
+
+async def test_overlapping_aec_edge_replaces_live_fallback_speech_sampler():
+    """The old turn must yield even without a matching speech_end."""
+    entered, released = asyncio.Event(), asyncio.Event()
+
+    class SlowFirstHead(Head):
+        def __init__(self):
+            super().__init__()
+            self.active = self.max_active = 0
+
+        async def snapshot(self):
+            self.captures += 1
+            self.active += 1
+            self.max_active = max(self.active, self.max_active)
+            try:
+                if self.captures == 1:
+                    entered.set()
+                    try:
+                        await released.wait()
+                    except asyncio.CancelledError:
+                        # A physical reader can ignore cancellation briefly.
+                        await released.wait()
+                    return image("red")
+                return image(square=True)
+            finally:
+                self.active -= 1
+
+    head = SlowFirstHead()
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        visual.voice_started("robot-01")
+        first = visual._capture_tasks["robot-01"]
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        # An ordinary VAD start can be followed by an authenticated AEC
+        # interrupt while the first utterance has not produced speech_end.
+        new_turn_at = time.monotonic()
+        visual.voice_interrupted("robot-01")
+        second = visual._capture_tasks["robot-01"]
+        assert second is not first
+        assert first.cancelling()
+        # A repeated start for the same prepared epoch is idempotent.
+        visual.start_speech_frames(
+            "robot-01", prepared_epoch=visual.prepared_turn_epoch("robot-01"),
+        )
+        assert visual._capture_tasks["robot-01"] is second
+        assert head.captures == 1
+        released.set()
+        async with asyncio.timeout(2):
+            while not visual.hub.frames["robot-01"]:
+                await asyncio.sleep(0.01)
+        frames = visual.hub.frames["robot-01"]
+        assert len(frames) == 1
+        assert frames[-1].source == "speech"
+        assert frames[-1].received_at >= new_turn_at
+        assert head.captures == 2
+        assert head.max_active == 1
+        assert visual.hub.user_active("robot-01", time.monotonic())
+    finally:
+        released.set()
+        await visual.close()
