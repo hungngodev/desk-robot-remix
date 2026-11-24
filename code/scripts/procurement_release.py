@@ -1145,8 +1145,11 @@ def first_robot_pilot_samples(report: dict) -> dict:
         ident, remaining = part["id"], part["conditional_remaining"]
         source = PILOT_SAMPLE_PRODUCTS.get(ident)
         if not remaining:
-            action = ("VERIFY_OWNED_OR_INCOMING_STOCK" if part["prototype_target"]
-                      else "EXCLUDED_MOTOR_ALTERNATIVE")
+            if part["decision"] == "OPTIONAL NOT SELECTED, DO NOT BUY":
+                action = "OPTIONAL_NOT_SELECTED_DO_NOT_BUY"
+            else:
+                action = ("VERIFY_OWNED_OR_INCOMING_STOCK" if part["prototype_target"]
+                          else "EXCLUDED_MOTOR_ALTERNATIVE")
         elif ident in PILOT_PHYSICAL_SELECTION_HOLDS:
             action = "HOLD_POWER_MOTION_OR_FIT_SELECTION"
         elif source is not None:
@@ -1518,9 +1521,11 @@ def render_first_robot_pilot_samples(report: dict) -> str:
         "| --- | ---: | ---: | --- | --- |",
     ])
     for x in p["roles"]:
-        if not x["conditional_remaining"]:
+        deferred = x["pilot_action"] == "OPTIONAL_NOT_SELECTED_DO_NOT_BUY"
+        if not x["conditional_remaining"] and not deferred:
             continue
-        source = "Exact PCB, harness or mechanical selection still required"
+        source = ("Deferred optional station role; no purchase required" if deferred
+                  else "Exact PCB, harness or mechanical selection still required")
         if x["pilot_sample_quantity"]:
             quote = (f"USD {x['historical_unit_quote_usd']:.2f} per unit, old quote"
                      if x["historical_unit_quote_usd"] is not None

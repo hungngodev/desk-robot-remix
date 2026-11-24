@@ -1539,6 +1539,14 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
 
     assert rows["xiao_sense"]["pilot_sample_quantity"] == 0
     assert rows["xiao_sense"]["pilot_action"] == "VERIFY_OWNED_OR_INCOMING_STOCK"
+    for ident in ("amg8833", "nfc_game_props"):
+        assert rows[ident]["pilot_action"] == "OPTIONAL_NOT_SELECTED_DO_NOT_BUY"
+        assert rows[ident]["first_robot_target"] == 0
+        assert rows[ident]["conditional_remaining"] == 0
+        assert rows[ident]["pilot_sample_quantity"] == 0
+        assert rows[ident]["source_sku"] is None
+    for ident in ("stepper", "uln2003"):
+        assert rows[ident]["pilot_action"] == "EXCLUDED_MOTOR_ALTERNATIVE"
     for ident in (
         "cap_power", "ina226", "max17048", "switch_power",
         "dock_contacts", "assembly", "as5600",
@@ -1549,6 +1557,10 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     text = mod.render_first_robot_pilot_samples(report)
     assert text.count("## 1.") == 1
     assert text.count("## 2.") == 1
+    for ident in ("amg8833", "nfc_game_props"):
+        assert (f"| {rows[ident]['name']} | 0 | 0 | "
+                "OPTIONAL_NOT_SELECTED_DO_NOT_BUY | "
+                "Deferred optional station role; no purchase required |") in text
     assert "SEN-19-006" in text
     assert "40.41" in text
     assert "13.67" in text and "54.08" in text and "4.08" in text
