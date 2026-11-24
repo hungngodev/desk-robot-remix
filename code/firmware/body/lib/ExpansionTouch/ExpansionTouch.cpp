@@ -74,7 +74,24 @@ bool ExpansionTouch::begin(TwoWire& wire) {
   // Upstream CAP1188 init clears MTBLK (0x2A) for simultaneous electrodes.
   // Apply only after exact chip identity and while the optional mux is
   // isolated; unlike the upstream adapter, a failed write is explicit.
-  const bool configured = recognized && write(0x2A, 0x00);
+  // Microchip DS00001620C sections 5.5.2, 6.6, 6.17 and 6.19.
+  // Use the chip's baseline tracking, not host-side threshold guesses.
+  // Exclude sub-touch noise from the baseline, retain analog filtering,
+  // and never force recalibration just because a real touch is held.
+  // Preserve unrelated configuration bits and verify actual readback.
+  const auto configure_bits = [this](std::uint8_t reg, std::uint8_t mask,
+                                      std::uint8_t value) {
+    std::uint8_t old_value = 0, actual = 0;
+    if (!read(reg, old_value)) return false;
+    const auto desired = static_cast<std::uint8_t>(
+        (old_value & ~mask) | (value & mask));
+    return (desired == old_value || write(reg, desired)) &&
+           read(reg, actual) && (actual & mask) == (desired & mask);
+  };
+  const bool configured = recognized && write(0x2A, 0x00) &&
+      configure_bits(0x38, 0x03, 0x01) &&  // 37.5% noise threshold
+      configure_bits(0x2F, 0x7F, 0x0A) &&  // 64 samples, 16 negative deltas
+      configure_bits(0x20, 0x38, 0x00);    // filters on, held recal off
   const bool closed = close();
   verified_ = configured && closed;
   return verified_;

@@ -37,11 +37,30 @@ int main() {
     // without requiring a special 0x28 resistor-strap carrier.
     TwoWire generic_touch_wire;
     generic_touch_wire.cap_uses_0x29 = true;
+    generic_touch_wire.cap_config = 0xF8; // unrelated bits + disabled filters
+    generic_touch_wire.cap_recal_config = 0x7F;
+    generic_touch_wire.cap_noise_threshold = 0x03;
     desk_robot::ExpansionTouch generic_touch;
     CHECK(generic_touch.begin(generic_touch_wire));
     CHECK(generic_touch.verified());
     // Upstream multi-electrode init is now adopted on the isolated mux.
     CHECK(generic_touch_wire.cap_multi_touch_block == 0);
+    CHECK(Wire.cap_config == 0x00); // strapped 0x28 also enables noise gate
+    CHECK(generic_touch_wire.cap_config == 0xC0);
+    CHECK(generic_touch_wire.cap_recal_config == 0x0A);
+    CHECK(generic_touch_wire.cap_noise_threshold == 0x01);
+    for (const bool ignored : {false, true}) {
+      TwoWire failed_config_wire;
+      failed_config_wire.fail_cap_config_write = !ignored;
+      failed_config_wire.ignore_cap_config_write = ignored;
+      desk_robot::ExpansionTouch failed_config;
+      CHECK(!failed_config.begin(failed_config_wire));
+      CHECK(!failed_config.verified());
+      CHECK(failed_config_wire.ranges == 0 && failed_config_wire.extras == 0);
+      std::uint8_t untouched = 0x5A;
+      CHECK(!failed_config.poll(100, untouched));
+      CHECK(untouched == 0x5A);
+    }
     std::uint8_t generic_zones = 0;
     CHECK(generic_touch.poll(100, generic_zones));
     CHECK(generic_zones == 0xA5);
