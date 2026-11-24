@@ -1468,6 +1468,57 @@ async def test_visual_model_regrant_during_inference_cannot_restore_old_grant(
         await service.close()
 
 
+@pytest.mark.parametrize("grant_change", ["unchanged", "revoke", "regrant"])
+async def test_queued_visual_question_rechecks_camera_grant_before_dispatch(
+    settings, grant_change,
+):
+    """A queued question cannot send old-grant JPEGs to the VLM."""
+    settings.voice_vision_tools_enabled = True
+    settings.vision_model = "local-vlm"
+    robot_id = settings.robots[0].id
+    queued = asyncio.Event()
+
+    class ObservedLock(asyncio.Lock):
+        async def acquire(self):
+            if self.locked():
+                queued.set()
+            return await super().acquire()
+
+    lock = ObservedLock()
+    scene = Vision()
+    service = MultimodalOrchestrator(
+        settings, {robot_id: Head()}, scene, lock,
+    )
+    task = None
+    try:
+        async with lock:
+            task = asyncio.create_task(
+                service.look(robot_id, "What is on the desk?")
+            )
+            await asyncio.wait_for(queued.wait(), timeout=2)
+            assert not scene.calls
+            if grant_change != "unchanged":
+                settings.voice_vision_tools_enabled = False
+                if grant_change == "regrant":
+                    settings.voice_vision_tools_enabled = True
+        if grant_change == "unchanged":
+            assert (await asyncio.wait_for(task, timeout=2))["answer"]
+            assert len(scene.calls) == 1
+        else:
+            with pytest.raises(RuntimeError, match="Camera consent revoked"):
+                await asyncio.wait_for(task, timeout=2)
+            assert not scene.calls
+            assert not service.hub.tool_history[robot_id]
+            assert not service.hub.frames[robot_id]
+        assert not lock.locked()
+        assert not service._look_tasks
+    finally:
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await service.close()
+
+
 async def test_visual_model_revoke_during_inference_cannot_publish_answer_or_receipt():
     policy = config()
 

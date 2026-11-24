@@ -1981,6 +1981,10 @@ class MultimodalOrchestrator:
                 # busy five-robot VLM. Never evaluate a stale older question.
                 if not current_turn():
                     raise RuntimeError("Visual question superseded while queued")
+                # The grant can change while the fleet inference lock is held
+                # by another pet. Never dispatch old-grant JPEGs to the model.
+                if not self._camera_grant_valid(robot_id, camera_consent_generation):
+                    raise RuntimeError("Camera consent revoked while queued")
                 if camera_generation != self.hub._generation[robot_id]:
                     raise RuntimeError("Camera evidence invalidated while queued")
                 # Local 4B+ vision inference can be much slower than the
