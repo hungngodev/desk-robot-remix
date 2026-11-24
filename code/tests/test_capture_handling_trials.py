@@ -7,6 +7,7 @@ import runpy
 import stat
 from pathlib import Path
 
+import httpx
 import pytest
 
 _capture_module = runpy.run_path(str(
@@ -25,8 +26,8 @@ class FakeResponse:
     def raise_for_status(self):
         pass
 
-    def json(self):
-        return self.data
+    def json(self, **kwargs):
+        return json.loads(json.dumps(self.data), **kwargs)
 
 
 class FakeClient:
@@ -259,3 +260,37 @@ def test_operator_status_client_does_not_use_environment_proxies(
     monkeypatch.setattr(_capture_module["httpx"], "AsyncClient", client_factory)
     _operator_status_client()
     assert observed == {"trust_env": False, "follow_redirects": False}
+
+
+@pytest.mark.parametrize(
+    ("original", "replacement", "message"),
+    [
+        ('"robot_id": "robot-01"', '"robot_id": "robot-02", "robot_id": "robot-01"',
+         "Duplicate WROOM status JSON field: robot_id"),
+        ('"boot_id": 1', '"boot_id": 2, "boot_id": 1',
+         "Duplicate WROOM status JSON field: boot_id"),
+        ('"age_ms": 20', '"age_ms": NaN',
+         "Nonfinite WROOM status JSON constant: NaN"),
+    ],
+)
+async def test_capture_rejects_ambiguous_wire_json(original, replacement, message):
+    class RawStatusClient(FakeClient):
+        async def get(self, url, *, headers, timeout):
+            response = await super().get(url, headers=headers, timeout=timeout)
+            payload = json.dumps(response.data)
+            assert payload.count(original) == 1
+            return httpx.Response(
+                200, content=payload.replace(original, replacement),
+                request=httpx.Request("GET", url),
+            )
+
+    with pytest.raises(ValueError, match=message):
+        await read(RawStatusClient(), count=1)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_private_trial_output_rejects_nonfinite_values(tmp_path, value):
+    output = tmp_path / "trial.jsonl"
+    with pytest.raises(ValueError, match="Out of range float values"):
+        save_private_trial_rows(output, [{"body": {"extra": value}}])
+    assert not output.exists()

@@ -25,6 +25,20 @@ _ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
 
 
 
+def _unique_status_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """Reject ambiguous status before a JSON decoder can collapse evidence."""
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Duplicate WROOM status JSON field: {key}")
+        result[key] = value
+    return result
+
+
+def _reject_nonfinite_status_json(token: str) -> None:
+    raise ValueError(f"Nonfinite WROOM status JSON constant: {token}")
+
+
 def _operator_status_client() -> httpx.AsyncClient:
     """Keep the operator bearer off ambient proxy routes and redirects."""
     return httpx.AsyncClient(trust_env=False, follow_redirects=False)
@@ -57,7 +71,8 @@ def save_private_trial_rows(output: Path, rows: list[dict]) -> None:
     # Serialize before opening any destination: a bad record cannot leave a
     # partial physical calibration file.
     payload = "".join(
-        json.dumps(row, separators=(",", ":")) + "\n" for row in rows
+        json.dumps(row, separators=(",", ":"), allow_nan=False) + "\n"
+        for row in rows
     )
     parent = output.parent
     # O_NOFOLLOW on the *file* alone cannot stop an output directory being
@@ -124,7 +139,10 @@ async def capture_phase(
         )
         response.raise_for_status()
         observed = time.monotonic()
-        body = response.json()
+        body = response.json(
+            object_pairs_hook=_unique_status_fields,
+            parse_constant=_reject_nonfinite_status_json,
+        )
         if not isinstance(body, dict) or body.get("robot_id") != robot:
             raise RuntimeError("Authenticated WROOM status has wrong robot identity")
         if raw_mpu6050(body) is None:
