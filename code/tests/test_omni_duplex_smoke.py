@@ -537,6 +537,8 @@ async def test_quiet_mic_video_unit_accepts_intentional_listen_or_real_speech(
     assert stats["input_duration_ms"] == 1000
     assert stats["video_frames_sent"] == 1
     assert stats["model_decision"] == decision
+    assert stats["input_output_overlap_observed"] is False
+    assert stats["input_appends_after_first_audio"] == 0
     assert len(audio) == (0 if decision == "listen" else 4800)
     assert stats["actual_playback_acknowledged"] is False
 
@@ -817,3 +819,104 @@ async def test_direct_probe_rejects_invalid_jpeg_before_network(monkeypatch):
             "ws://127.0.0.1:8099/v1/realtime?duplex=1",
             "openbmb/MiniCPM-o-4_5", bytes(32000), b"not a JPEG", deadline=5,
         )
+
+
+@pytest.mark.asyncio
+async def test_probe_observes_actual_overlapping_input_and_output():
+    import base64
+
+    from aiohttp import web
+    from aiohttp.test_utils import TestServer
+
+    smoke = smoke_module()
+    appends = []
+    pcm = b"\x01\x00" * 2400
+
+    async def model_socket(request):
+        socket = web.WebSocketResponse()
+        await socket.prepare(request)
+        async for msg in socket:
+            event = json.loads(msg.data)
+            if event["type"] == "session.update":
+                await socket.send_json({
+                    "type": "session.created",
+                    "session": {
+                        "model": "openbmb/MiniCPM-o-4_5",
+                        "input_audio_format": "pcm16",
+                        "output_audio_format": "pcm16",
+                        "audio": {
+                            "input": {"sample_rate_hz": 16000},
+                            "output": {"format": {"type": "audio/pcm", "rate": 24000}},
+                        },
+                        "capabilities": {
+                            "implementation_level": "model_native_duplex",
+                            "supports_input_append": True,
+                            "supports_barge_in": True,
+                            "chunk_period_ms": 1000,
+                        },
+                    },
+                })
+            elif event["type"] == "input_audio_buffer.append":
+                appends.append(event)
+                if len(appends) == 1:
+                    await socket.send_json({
+                        "type": "response.created", "response_id": "overlap",
+                        "response": {"id": "overlap", "metadata": {
+                            "duplex_event": {"epoch": 0},
+                        }},
+                    })
+                    await socket.send_json({
+                        "type": "response.output_audio.delta",
+                        "response_id": "overlap", "format": "pcm16",
+                        "sample_rate_hz": 24000, "metadata": {"epoch": 0},
+                        "delta": base64.b64encode(pcm).decode("ascii"),
+                    })
+                elif len(appends) == 10:
+                    await socket.send_json({
+                        "type": "response.done", "response_id": "overlap",
+                        "response": {"id": "overlap", "status": "completed"},
+                    })
+        return socket
+
+    app = web.Application()
+    app.router.add_get("/v1/realtime", model_socket)
+    async with TestServer(app) as server:
+        url = str(server.make_url("/v1/realtime?duplex=1")).replace("http://", "ws://")
+        audio, stats = await smoke.probe(
+            url, "openbmb/MiniCPM-o-4_5", bytes(32000), None,
+            deadline=5,
+        )
+    assert len(appends) == 10
+    assert audio == pcm
+    assert stats["input_output_overlap_observed"] is True
+    assert 1 <= stats["input_appends_after_first_audio"] <= 9
+    assert stats["actual_playback_acknowledged"] is False
+
+
+def test_fleet_cli_does_not_label_audio_only_turns_as_full_av(monkeypatch, tmp_path, capsys):
+    import sys
+
+    smoke = smoke_module()
+    monkeypatch.setattr(smoke, "read_wav", lambda path: bytes(32000))
+
+    async def audio_only(*args, **kwargs):
+        return [
+            (bytes(4800), {
+                "video_frames_sent": 0, "input_output_overlap_observed": False,
+            }),
+            (bytes(4800), {
+                "video_frames_sent": 0, "input_output_overlap_observed": True,
+            }),
+        ]
+
+    monkeypatch.setattr(smoke, "probe_fleet", audio_only)
+    monkeypatch.setattr(sys, "argv", [
+        "omni_duplex_smoke.py", "--input-wav", str(tmp_path / "input.wav"),
+        "--output-wav", str(tmp_path / "output.wav"), "--fleet-sessions", "2",
+    ])
+    smoke.main()
+    report = json.loads(capsys.readouterr().out)
+    assert report["backend_turns_completed"] == 2
+    assert report["full_av_turns_completed"] == 0
+    assert report["input_output_overlap_sessions"] == 1
+    assert report["five_physical_robots_verified"] is False

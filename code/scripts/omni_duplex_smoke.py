@@ -97,6 +97,7 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
         "motion_authorized": False,
     }
     first_audio_at = None
+    input_appends_after_first_audio = 0
     model_decision = None
     started_at = time.monotonic()
     # This is a prerecorded operator-supplied test JPEG, NOT a live
@@ -129,7 +130,7 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                 )
 
             async def reader():
-                nonlocal first_audio_at, model_decision
+                nonlocal first_audio_at, model_decision, input_appends_after_first_audio
                 async for msg in socket:
                     if msg.type != aiohttp.WSMsgType.TEXT:
                         raise RuntimeError("Non-JSON response from native backend")
@@ -142,6 +143,7 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                         output.clear()
                         transcript.clear()
                         first_audio_at = None
+                        input_appends_after_first_audio = 0
                     if (event.get("type") in (
                         "response.output_text.delta",
                         "response.output_audio_transcript.delta",
@@ -201,7 +203,15 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                         camera_age_ms=0 if jpeg is not None else None,
                         frame_receipt_us=test_frame_receipt_us,
                     )
+                    # Count actual successful appends begun after the first
+                    # accepted audio of the same response, not a declared
+                    # duplex capability or audio arriving only after commit.
+                    response_at_send = wire.response_id if first_audio_at is not None else None
                     await socket.send_json(packet)
+                    if (response_at_send is not None
+                            and response_at_send == wire.response_id
+                            and first_audio_at is not None):
+                        input_appends_after_first_audio += 1
                     await asyncio.sleep(packet["duration_ms"] / 1000)
                     if listener.done():
                         await listener
@@ -232,6 +242,8 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
         "model_decision": model_decision,
         "video_frames_sent": wire.frames_sent,
         "generated_audio_ms": len(output) * 1000 // (24000 * 2),
+        "input_appends_after_first_audio": input_appends_after_first_audio,
+        "input_output_overlap_observed": input_appends_after_first_audio > 0,
         "first_audio_ms_since_connect": (
             round((first_audio_at - started_at) * 1000)
             if first_audio_at is not None else None
@@ -322,7 +334,11 @@ def main() -> None:
     else:
         print(json.dumps({
             "concurrent_backend_sessions_tested": args.fleet_sessions,
-            "full_av_turns_completed": len(reports),
+            "backend_turns_completed": len(reports),
+            "full_av_turns_completed": sum(row["video_frames_sent"] > 0 for row in reports),
+            "input_output_overlap_sessions": sum(
+                row["input_output_overlap_observed"] for row in reports
+            ),
             "five_physical_robots_verified": False,
             "head_speaker_playback_verified": False,
             "per_session": reports,
