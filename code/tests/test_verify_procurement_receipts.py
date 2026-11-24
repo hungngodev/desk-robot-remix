@@ -273,6 +273,10 @@ def test_common_physical_json_receipt_decoder_rejects_nonfinite_and_duplicates()
         '{"measurement":{"x":-1e9999}}',
         '{"measurement":{"x":1e-9999}}',
         '{"measurement":{"x":-1e-9999}}',
+        '{"measurement":{"x":1e999999999999999999999999999999}}',
+        '{"measurement":{"x":-1e999999999999999999999999999999}}',
+        '{"measurement":{"x":1e-999999999999999999999999999999}}',
+        '{"measurement":{"x":-1e-999999999999999999999999999999}}',
         '{"measurement":{"x":1.0000000000000001}}',
     ):
         with pytest.raises(ValueError):
@@ -281,14 +285,19 @@ def test_common_physical_json_receipt_decoder_rejects_nonfinite_and_duplicates()
                        parse_float=finite_receipt_float)
 
 
-def test_immutable_procurement_record_rejects_exponent_overflow():
+@pytest.mark.parametrize("exponent", [
+    "1e9999",
+    "1e999999999999999999999999999999",
+    "-1e-999999999999999999999999999999",
+])
+def test_immutable_procurement_record_rejects_exponent_overflow(exponent):
     gate = release.PART_GATES[0]
     claimed = receipt("part:imu", gate)
     claimed["measurement"] = {"lift_mm": float("inf")}
     # The local claim and source would compare equal as infinity without
     # checking parsed float finiteness at the immutable JSON boundary.
     raw = json.dumps({"receipts": [claimed]}).replace(
-        "Infinity", "1e9999",
+        "Infinity", exponent,
     ).encode("utf-8")
     response = {
         "type": "file", "size": len(raw), "encoding": "base64",

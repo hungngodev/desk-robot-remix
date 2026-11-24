@@ -20,7 +20,7 @@ import os
 import re
 import sys
 from datetime import date
-from decimal import Decimal
+from decimal import Decimal, DecimalException
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
@@ -253,10 +253,13 @@ def finite_receipt_float(value: str) -> float:
     """
     if len(value) > 64:
         raise ValueError("Overlong physical receipt JSON number")
-    exact = Decimal(value)
-    number = float(exact)
-    if not math.isfinite(number) or Decimal(str(number)) != exact:
-        raise ValueError("Lossy physical receipt JSON number: " + value)
+    try:
+        exact = Decimal(value)
+        number = float(exact)
+        if not math.isfinite(number) or Decimal(str(number)) != exact:
+            raise ValueError("Lossy physical receipt JSON number: " + value)
+    except (DecimalException, OverflowError) as exc:
+        raise ValueError("Invalid physical receipt JSON number: " + value) from exc
     return number
 
 

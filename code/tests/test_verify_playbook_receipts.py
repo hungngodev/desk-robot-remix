@@ -329,6 +329,10 @@ def test_physical_json_rejects_duplicate_pass_key_and_nonfinite_measurement():
         good.replace('"lift_mm": 10', '"lift_mm": -1e9999'),
         good.replace('"lift_mm": 10', '"lift_mm": 1e-9999'),
         good.replace('"lift_mm": 10', '"lift_mm": -1e-9999'),
+        good.replace('"lift_mm": 10', '"lift_mm": 1e999999999999999999999999999999'),
+        good.replace('"lift_mm": 10', '"lift_mm": -1e999999999999999999999999999999'),
+        good.replace('"lift_mm": 10', '"lift_mm": 1e-999999999999999999999999999999'),
+        good.replace('"lift_mm": 10', '"lift_mm": -1e-999999999999999999999999999999'),
         good.replace('"lift_mm": 10', '"lift_mm": 1.0000000000000001'),
     ):
         assert not verify.verified_procedure_record(
