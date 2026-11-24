@@ -23,8 +23,107 @@ static std::vector<std::uint8_t> response(std::uint8_t cmd,
   return wire;
 }
 
+// NXP UM0701-02 normal information frame, with the I2C READY byte.
+static void check_frame_boundaries() {
+  const std::vector<std::uint8_t> good = {
+      1, 0, 0, 0xff, 3, 0xfd, 0xd5, 0x4b, 0, 0xe0, 0
+  };
+  const std::uint8_t* payload = nullptr;
+  std::size_t size = 0;
+  const auto reject = [&](const std::uint8_t* data, std::size_t count) {
+    // Failure must erase a previous successful output, not expose stale UID.
+    payload = good.data();
+    size = good.size();
+    CHECK(!desk_robot::pn532_response(data, count, 0x4a, payload, size));
+    CHECK(payload == nullptr && size == 0);
+  };
+  CHECK(desk_robot::pn532_response(good.data(), good.size(), 0x4a, payload, size));
+  CHECK(payload == good.data() + 8 && size == 1 && payload[0] == 0);
+  reject(nullptr, good.size());
+  for (std::size_t n = 0; n < good.size(); ++n) {
+    const std::vector<std::uint8_t> short_frame(good.begin(), good.begin() + n);
+    reject(short_frame.data(), short_frame.size());
+  }
+  // All single-bit corruption in READY, preamble, start, LEN/LCS, TFI,
+  // response code, data, DCS and postamble must be rejected independently.
+  for (std::size_t i = 0; i < good.size(); ++i) {
+    for (unsigned bit = 0; bit < 8; ++bit) {
+      auto bad = good;
+      bad[i] ^= static_cast<std::uint8_t>(1U << bit);
+      reject(bad.data(), bad.size());
+    }
+  }
+  for (const std::uint8_t length : {0, 1, 25, 255}) {
+    auto bad = good;
+    bad[4] = length;
+    bad[5] = static_cast<std::uint8_t>(-length);
+    reject(bad.data(), bad.size());
+  }
+  // Largest complete response that fits the actual bounded Wire read.
+  const auto maximum = response(0x4a, std::vector<std::uint8_t>(21, 0xa5));
+  CHECK(maximum.size() == desk_robot::kPn532MaxWire);
+  CHECK(desk_robot::pn532_response(maximum.data(), maximum.size(), 0x4a, payload, size));
+  CHECK(size == 21 && payload[20] == 0xa5);
+  reject(maximum.data(), maximum.size() - 1);
+  const auto oversized = response(0x4a, std::vector<std::uint8_t>(22, 0xa5));
+  reject(oversized.data(), oversized.size());
+  // A fresh complete frame must parse after truncation/corruption.
+  CHECK(desk_robot::pn532_response(good.data(), good.size(), 0x4a, payload, size));
+  CHECK(size == 1 && payload[0] == 0);
+
+  const std::vector<std::uint8_t> ack = {1, 0, 0, 0xff, 0, 0xff, 0};
+  CHECK(!desk_robot::pn532_ack(nullptr, ack.size()));
+  for (std::size_t i = 0; i < ack.size(); ++i) {
+    const std::vector<std::uint8_t> short_ack(ack.begin(), ack.begin() + i);
+    CHECK(!desk_robot::pn532_ack(short_ack.data(), short_ack.size()));
+    for (unsigned bit = 0; bit < 8; ++bit) {
+      auto bad = ack;
+      bad[i] ^= static_cast<std::uint8_t>(1U << bit);
+      CHECK(!desk_robot::pn532_ack(bad.data(), bad.size()));
+    }
+  }
+  CHECK(desk_robot::pn532_ack(ack.data(), ack.size()));
+}
+
+static void check_tag_boundaries() {
+  using desk_robot::Pn532TagResult;
+  std::uint32_t token = 0;
+  std::uint8_t uid_size = 0;
+  const auto reject = [&](const std::uint8_t* data, std::size_t count) {
+    token = 123;
+    uid_size = 10;
+    CHECK(desk_robot::pn532_tag(data, count, token, uid_size) == Pn532TagResult::Invalid);
+    CHECK(token == 0 && uid_size == 0);
+  };
+  reject(nullptr, 10);
+  const std::uint8_t false_absence[] = {0, 1};
+  reject(false_absence, sizeof(false_absence));
+  for (const std::uint8_t length : {4, 7, 10}) {
+    std::vector<std::uint8_t> tag = {1, 1, 4, 0, 8, length};
+    for (std::uint8_t i = 0; i < length; ++i) tag.push_back(i + 1);
+    for (std::size_t n = 0; n < tag.size(); ++n) {
+      const std::vector<std::uint8_t> short_tag(tag.begin(), tag.begin() + n);
+      reject(short_tag.data(), short_tag.size());
+    }
+    auto bad = tag;
+    bad[0] = 2;
+    reject(bad.data(), bad.size());
+    bad = tag;
+    bad[1] = 0;
+    reject(bad.data(), bad.size());
+    CHECK(desk_robot::pn532_tag(tag.data(), tag.size(), token, uid_size) == Pn532TagResult::Present);
+    CHECK(uid_size == length && token != 0);
+    const auto previous = token;
+    tag.back() ^= 1;
+    CHECK(desk_robot::pn532_tag(tag.data(), tag.size(), token, uid_size) == Pn532TagResult::Present);
+    CHECK(uid_size == length && token != previous);
+  }
+}
+
 int main() {
   try {
+    check_frame_boundaries();
+    check_tag_boundaries();
     const std::uint8_t sam[] = {1, 0x14, 1};
     std::uint8_t encoded[32]{};
     const auto n = desk_robot::pn532_encode(0x14, sam, 3, encoded, sizeof(encoded));
