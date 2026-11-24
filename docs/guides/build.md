@@ -29,6 +29,12 @@ them into a second shopping list or hand-edit generated pin tables.
    [the first complete robot procurement entry point](../hardware/one-robot-inventory-and-shopping.md).
    Keep reported or ordered stock separate from still-to-buy items. A HOLD item
    stays out of checkout until its listed release evidence exists.
+   For a separately bounded evaluation sample, use the same canonical generator
+   from `code/`: `uv run --no-sync python scripts/procurement_release.py --format pilot-samples-markdown`.
+   Check the listed sample quantity, delivered price, electrical restrictions and
+   unresolved roles before checkout. A pilot sample is not final cart release
+   or authority to order the remaining fleet quantities. Keep private order
+   receipts outside this repository.
 2. **Measure before final CAD.** Fill
    [the Fusion measurement sheet](../cad/FUSION_MEASUREMENT_SHEET.md) from the
    actual delivered parts. Protected pack body, leads and connector, charger,
@@ -104,6 +110,24 @@ them into a second shopping list or hand-edit generated pin tables.
     commands in negative trials. Log each actual assembly and calibration ID,
     pose/target receipt and operator observation. Software checks, printed fit
     and physical qualification are distinct evidence.
+
+    **Dedicated dock:** follow the existing [charging design and validation](../hardware/charging-design-and-validation.md)
+    for unpowered alignment, independent seat confirmation and qualified
+    electrical enable. Stop before powered contact if seating, protection,
+    pack temperature, voltage/current or measured net-charge evidence is missing.
+
+    **One shared read-only room station:** follow the [Feather station build and
+    measurement procedure](../../code/firmware/room_station/README.md). Start
+    with the reported owned Feather alone on USB and the
+    `feather_nrf52840_room_bench` target; qualify exact carrier supplies,
+    3.3 V logic and pull-ups before attaching modules. Use
+    `feather_nrf52840_room_full` only after the installed soil probe's analog
+    output is verified. Run the documented `bench_room_station.py` capture
+    with a new private report outside the checkout; record board/carrier IDs,
+    supply minima, current, regulator temperature, and USB/sensor freshness.
+    Missing, stale or invalid readings and unqualified rails are STOP/HOLD
+    points. Enable shared context only by explicit opt-in; the station never
+    grants motion or charging permission.
 12. **Release the final print set only after qualification.** The current
     repository intentionally does not call the source meshes and fit coupons a
     production robot. Final installed quantities and dock charging remain
