@@ -56,6 +56,17 @@ _QUERY_FILLER = frozenset({
 })
 
 
+# These are conversational request wrappers, not topical search evidence.
+# Retain plain keyword queries (including a literal "recall button").
+_VOICE_RECALL_PREFIX = re.compile(
+    r"^(?:(?:could|would|can) you\s+(?:please\s+)?|please\s+)*"
+    r"(?:tell me what you remember|what do you remember|"
+    r"do you (?:remember|recall)|what did i (?:tell|say)(?: you)?|"
+    r"what did we (?:discuss|talk about)|have we (?:talked|discussed)|"
+    r"remind me)\b(?:\s+(?:about|of))?\s*"
+)
+
+
 def _fts_query(text: str) -> str:
     """Safely quote bounded Unicode query tokens for SQLite FTS5 MATCH.
 
@@ -66,6 +77,7 @@ def _fts_query(text: str) -> str:
     # Streaming ASR and clients can send canonically equivalent NFD text.
     # Combining marks otherwise split a Vietnamese word before FTS tokenization.
     normalized = unicodedata.normalize("NFC", text.casefold())
+    normalized = _VOICE_RECALL_PREFIX.sub("", normalized.strip(), count=1)
     terms = [
         term for term in _WORDS.findall(normalized)[:96]
         if term not in _QUERY_FILLER

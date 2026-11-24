@@ -641,3 +641,89 @@ def test_voice_memory_rejects_invalid_or_replaced_revision_after_read(
         assert response.status_code == 409
         assert "Private prior session words" not in response.text
         assert receipts == []
+
+
+def test_voice_transcript_persists_across_sessions_without_unrelated_recall(
+    settings, tokens, tmp_path,
+):
+    """Real authenticated routes and reopened private SQLite, no audio claim."""
+    import time
+    from types import SimpleNamespace
+
+    from desk_robot.api import create_app
+    from desk_robot.memory import MemoryStore
+    from fastapi.testclient import TestClient
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = True
+    settings.voice_transcript_memory_enabled = True
+    robot, peer = settings.robots[:2]
+    root = tmp_path / "private"
+    ids = [pet.id for pet in settings.robots]
+    headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+
+    async def noop():
+        pass
+
+    def runtime():
+        return SimpleNamespace(
+            coordinator=SimpleNamespace(robot=settings.robot),
+            memory=MemoryStore(root, ids), multimodal=None,
+            conversation=SimpleNamespace(
+                _private_memory_generation=dict.fromkeys(ids, 0),
+            ),
+            start=noop, close=noop,
+        )
+
+    first = runtime()
+    with TestClient(create_app(settings, runtime=first)) as client:
+        stamp = time.monotonic_ns() // 1000
+        heard = client.post(
+            f"/v1/pet/{robot.id}/omni-heard", headers=headers,
+            json={
+                "event_id": "omni_" + "a" * 12 + "_" + "b" * 20,
+                "transcript": "Do you remember the red mug?",
+                "accepted_at_us": stamp,
+                "audio_committed_at_us": stamp,
+            },
+        )
+        assert heard.status_code == 200
+        assert heard.json()["episode_persisted"] is True
+        assert heard.json()["speaker_identity_verified"] is False
+
+    second = runtime()
+    assert second.memory is not first.memory
+    with TestClient(create_app(settings, runtime=second)) as client:
+        startup = client.get(f"/v1/pet/{robot.id}/omni-context", headers=headers)
+        assert startup.status_code == 200
+        data = startup.json()
+        assert "red mug" in data["untrusted_historical_evidence"]["recent"]
+        assert "red mug" not in data["instructions"]
+        path = f"/v1/pet/{robot.id}/voice-context"
+        same = client.get(path, headers=headers, params={
+            "query": "Do you remember the red mug?",
+        })
+        assert same.status_code == 200
+        assert same.json()["matched"] is True
+        assert same.json()["memories"][0]["source_robot"] == robot.id
+        assert same.json()["memories"][0]["kind"] == "heard_human"
+        unrelated = client.get(path, headers=headers, params={
+            "query": "What do you remember about my violin?",
+        })
+        assert unrelated.status_code == 200
+        assert unrelated.json()["matched"] is False
+        assert unrelated.json()["memories"] == []
+        peer_result = client.get(
+            f"/v1/pet/{peer.id}/voice-context", headers=headers,
+            params={"query": "red mug"},
+        )
+        assert peer_result.status_code == 200
+        assert peer_result.json()["memories"] == []
+        settings.voice_memory_tools_enabled = False
+        assert client.get(path, headers=headers).status_code == 403
+        disabled = client.get(f"/v1/pet/{robot.id}/omni-context", headers=headers)
+        assert disabled.status_code == 200
+        assert disabled.json()["untrusted_historical_evidence"] == {
+            "core": "", "recent": "",
+        }
