@@ -198,7 +198,7 @@ class PoseFence:
         if (type(now) not in (int, float) or not math.isfinite(now)
                 or type(max_age_s) not in (int, float)
                 or not math.isfinite(max_age_s) or not 0 < max_age_s <= 1):
-            self.blocked_reason = "invalid_freshness_window"
+            self.invalidate("invalid_freshness_window")
             return None
         if self.last is None or not self._continuous or self.last.quality != "valid":
             return None

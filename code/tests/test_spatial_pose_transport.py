@@ -56,7 +56,7 @@ async def test_old_head_missing_pose_does_not_disable_normal_status(settings, to
 
 
 @pytest.mark.asyncio
-async def test_slow_pose_http_receipts_cannot_establish_freshness(settings, monkeypatch):
+async def test_slow_pose_http_receipts_cannot_establish_freshness(settings, tokens, monkeypatch):
     robot = settings.robots[0]
     now = 100.0
     sequence = 0
@@ -92,7 +92,7 @@ async def test_slow_pose_http_receipts_cannot_establish_freshness(settings, monk
 
 
 @pytest.mark.asyncio
-async def test_pose_http_age_excludes_wait_for_transport_lock(settings, monkeypatch):
+async def test_pose_http_age_excludes_wait_for_transport_lock(settings, tokens, monkeypatch):
     robot = settings.robots[0]
     now = 100.0
     monkeypatch.setattr(transport, "time", SimpleNamespace(monotonic=lambda: now))

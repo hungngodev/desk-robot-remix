@@ -229,3 +229,25 @@ def test_slow_http_pose_cannot_supply_a_new_baseline():
     fresh = gate.observe(pose(seq=4, sample_us=1_900_000), 101.31,
                          request_started_at=101.30)
     assert gate.current(101.31) == fresh
+
+
+@pytest.mark.parametrize("now, max_age_s", [
+    (float("nan"), 0.25), (float("inf"), 0.25), (True, 0.25),
+    (100.1, float("nan")), (100.1, 0), (100.1, 2), (100.1, True),
+])
+def test_invalid_freshness_read_revokes_cached_continuity(now, max_age_s):
+    gate = PoseFence("robot-01")
+    gate.observe(pose(), 100.0)
+    gate.observe(pose(seq=2, sample_us=1_100_000), 100.1)
+    assert gate.current(100.1) is not None
+
+    assert gate.current(now, max_age_s=max_age_s) is None
+    assert gate.blocked_reason == "invalid_freshness_window"
+    assert gate.needs_reanchor
+    assert gate.current(100.1) is None
+
+    gate.observe(pose(seq=3, sample_us=1_200_000), 100.2)
+    assert gate.current(100.2) is None
+    fresh = gate.observe(pose(seq=4, sample_us=1_300_000), 100.3)
+    assert gate.current(100.3) == fresh
+    assert gate.needs_reanchor
