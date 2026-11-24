@@ -4,7 +4,6 @@ import asyncio
 from contextlib import asynccontextmanager
 
 import pytest
-
 from desk_robot.conversation import Conversation
 
 
