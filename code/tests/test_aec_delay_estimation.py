@@ -209,3 +209,18 @@ def test_truncated_wav_header_cannot_be_used_for_acoustic_calibration(tmp_path):
     file.write_bytes(raw)
     with pytest.raises(ValueError, match="WAV file truncated"):
         source["read_wav"](file)
+
+
+@pytest.mark.parametrize("lag", [0, 1, 1120, 4000, 6400])
+def test_noisy_delay_uses_only_overlapping_samples(lag):
+    """Strong ambient noise must not dilute a valid long-lag overlap."""
+    rng = np.random.default_rng(350)
+    speaker = rng.normal(0, 0.1, 8000)
+    mic = (np.concatenate((np.zeros(lag), speaker))[:8000]
+           + rng.normal(0, 0.2, 8000))
+    report = estimate_delay(speaker, mic, max_delay_ms=400)
+    assert report["sample_lag"] == lag
+    expected = abs(np.corrcoef(speaker[:8000 - lag], mic[lag:])[0, 1])
+    assert report["normalized_correlation"] == pytest.approx(expected, abs=0.00005)
+    assert report["esp_idf_delay_setting_applicable"] == (lag <= 4000)
+    assert not report["aec_physically_verified"]

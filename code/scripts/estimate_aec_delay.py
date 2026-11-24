@@ -86,11 +86,34 @@ def estimate_delay(
         np.fft.rfft(mic, nfft) * np.conj(np.fft.rfft(ref, nfft)),
         nfft,
     )
-    lag_limit = requested_lag
-    strength = np.abs(corr[:lag_limit + 1])
+    # Normalize each FFT lag using only its overlapping samples. Whole-clip
+    # energy penalizes long delays and unrelated noise outside the overlap.
+    # Prefix sums give the local Pearson coefficient without a per-lag scan.
+    # The capture-length check above guarantees at least 100 ms per candidate.
+    lags = np.arange(requested_lag + 1)
+    counts = np.minimum(len(ref), len(mic) - lags)
+
+    def overlap_stats(values, starts, ends):
+        sums = np.concatenate(([0.0], np.cumsum(values)))
+        squares = np.concatenate(([0.0], np.cumsum(values * values)))
+        total = sums[ends] - sums[starts]
+        energy = np.maximum(
+            squares[ends] - squares[starts] - total * total / counts, 0.0,
+        )
+        return total, energy
+
+    ref_sum, ref_variance = overlap_stats(ref, 0, counts)
+    mic_sum, mic_variance = overlap_stats(mic, lags, lags + counts)
+    covariance = corr[:requested_lag + 1] - ref_sum * mic_sum / counts
+    denominator = np.sqrt(ref_variance * mic_variance)
+    strength = np.divide(
+        np.abs(covariance), denominator, out=np.zeros_like(denominator),
+        where=(ref_variance >= 1e-8) & (mic_variance >= 1e-8),
+    )
+    strength = np.clip(strength, 0.0, 1.0)
     lag = int(np.argmax(strength))
     peak = float(strength[lag])
-    confidence = peak / (ref_energy * mic_energy)
+    confidence = peak
     if not math.isfinite(confidence) or confidence < 0.15:
         raise ValueError("Playback and microphone capture insufficiently correlated")
     # One confidently correlated peak does not make the delay identifiable:
