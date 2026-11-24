@@ -4,9 +4,11 @@ Synthetic evidence only: no live detector, navigation executor or physical
 arrival is represented by this fixture.
 """
 
+import asyncio
 from dataclasses import replace
 
 import pytest
+from desk_robot.controller import Coordinator
 from desk_robot.object_search import SearchViewpoint, propose_object_search
 from desk_robot.object_targets import (
     ObjectEvidence,
@@ -15,6 +17,7 @@ from desk_robot.object_targets import (
     resolve_object_target,
 )
 from desk_robot.route_planner import GridSnapshot, RouteRequest, SafetyEnvelope
+from desk_robot.simulator import SimulatedHead, SimulationVision
 
 
 @pytest.fixture
@@ -148,3 +151,54 @@ def test_cancelled_owner_cannot_reuse_resolved_last_seen_target(navigation_repla
     assert stopped.status == "rejected"
     assert stopped.reason == "request_invalidated"
     assert stopped.route is None
+
+
+@pytest.mark.parametrize("fault_at", [1, 2])
+async def test_exploration_local_disarm_overrides_host_at_drive_dispatch(
+    settings, fault_at,
+):
+    """A local command rejection wins even after a successful host health read."""
+    for robot in settings.robots:
+        robot.motor_backend = "stepper_28byj48"
+    head = SimulatedHead("robot-01")
+    coordinator = Coordinator(
+        settings, {"robot-01": head, "robot-02": SimulatedHead("robot-02")},
+        SimulationVision(),
+    )
+    original_command = head.command
+    attempts = 0
+    accepted = 0
+    start = tuple(head.position)
+
+    async def command_with_local_fault(command):
+        nonlocal attempts, accepted
+        if command.startswith("drive "):
+            attempts += 1
+            if attempts == fault_at:
+                # The host already observed healthy status. Only the local
+                # simulated actuator sees this disarm at command admission.
+                assert head.armed
+                head.armed = False
+            receipt = await original_command(command)
+            accepted += 1
+            return receipt
+        return await original_command(command)
+
+    head.command = command_with_local_fault
+    try:
+        await coordinator.operator_arm("robot-01")
+        job = coordinator.explore("robot-01")
+        await asyncio.wait_for(coordinator.tasks[job.id], timeout=4)
+        assert job.state == "failed"
+        assert "Body disarmed" in job.error
+        assert job.result is None
+        assert attempts == fault_at
+        assert accepted == fault_at - 1
+        assert tuple(head.position) == (start[0], start[1] - 10 * accepted)
+        assert head.commands.count("arm") == 1
+        assert head.commands[-1] == "halt"
+        assert not head.armed
+        assert "robot-01" not in coordinator.permits
+        assert any("stop acknowledged" in event for event in job.events)
+    finally:
+        await coordinator.close()
