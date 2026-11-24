@@ -158,7 +158,7 @@ async def test_unknown_voice_source_cannot_interrupt_the_fleet():
 
 
 async def test_live_human_turn_fences_camera_before_slow_speaker_stop():
-    """Audio stop may block, but old autonomous camera work cannot survive."""
+    """VAD fences old camera work and dispatches motion STOP during audio abort."""
     import asyncio
     from io import BytesIO
 
@@ -166,6 +166,7 @@ async def test_live_human_turn_fences_camera_before_slow_speaker_stop():
     from PIL import Image
 
     ready, release = asyncio.Event(), asyncio.Event()
+    motion_stop_dispatched = asyncio.Event()
 
     class SlowStopPet:
         async def interrupt(self, robot_id):
@@ -176,6 +177,11 @@ async def test_live_human_turn_fences_camera_before_slow_speaker_stop():
     class Conversation:
         async def stop(self):
             return None
+
+    class Coordinator:
+        async def stop_active_exploration(self):
+            motion_stop_dispatched.set()
+            return ("robot-02",)
 
     class Camera:
         def __init__(self, blocking=False):
@@ -206,6 +212,7 @@ async def test_live_human_turn_fences_camera_before_slow_speaker_stop():
     runtime = Runtime.__new__(Runtime)
     runtime.settings, runtime.pet = settings, SlowStopPet()
     runtime.conversation, runtime.multimodal = Conversation(), visual
+    runtime.coordinator = Coordinator()
     background = asyncio.create_task(
         visual.capture("robot-02", source="proactive")
     )
@@ -222,11 +229,16 @@ async def test_live_human_turn_fences_camera_before_slow_speaker_stop():
         async with asyncio.timeout(1):
             while not heads["robot-02"].cancelled:
                 await asyncio.sleep(.01)
+        # The motion owner must receive STOP while the speaker is still blocked.
+        # This is software dispatch evidence, not a physical stopping time.
+        await asyncio.wait_for(motion_stop_dispatched.wait(), timeout=1)
+        assert runtime._voice_stop_unconfirmed is True
         assert heads["robot-01"].captures == 0
         assert not visual._capture_tasks.get("robot-01")
         assert not interrupt.done()
         release.set()
         await asyncio.wait_for(interrupt, timeout=1)
+        assert runtime._voice_stop_unconfirmed is False
         async with asyncio.timeout(2):
             while heads["robot-01"].captures < 1:
                 await asyncio.sleep(.01)
