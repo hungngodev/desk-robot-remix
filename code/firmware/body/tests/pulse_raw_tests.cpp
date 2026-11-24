@@ -19,6 +19,42 @@ int main() {
     CHECK(!desk_robot::optical_channels_saturated({262142U, 262142U}));
     CHECK(desk_robot::optical_channels_saturated({262143U, 0U}));
     CHECK(desk_robot::optical_channels_saturated({0U, 262143U}));
+    // Exercise every 18-bit ADC code in both channels. Upper six bits are
+    // outside the ADC payload; vary them independently of the sample values.
+    // This is a decoder test, not a measurement of conversion or UART jitter.
+    for (std::uint32_t red = 0; red <= 262143U; ++red) {
+      const std::uint32_t ir = 262143U - red;
+      const std::uint8_t frame[6] = {
+          static_cast<std::uint8_t>(red / 65536U + 4U * (red % 64U)),
+          static_cast<std::uint8_t>(red / 256U % 256U),
+          static_cast<std::uint8_t>(red % 256U),
+          static_cast<std::uint8_t>(ir / 65536U + 4U * (ir % 64U)),
+          static_cast<std::uint8_t>(ir / 256U % 256U),
+          static_cast<std::uint8_t>(ir % 256U)};
+      const auto normal = desk_robot::decode_optical_channels(frame, false);
+      const auto swapped = desk_robot::decode_optical_channels(frame, true);
+      CHECK(normal.red == red && normal.ir == ir);
+      CHECK(swapped.red == ir && swapped.ir == red);
+      const bool clipped = red == 262143U || ir == 262143U;
+      CHECK(desk_robot::optical_channels_saturated(normal) == clipped);
+      CHECK(desk_robot::optical_channels_saturated(swapped) == clipped);
+    }
+    // Four consecutive records fit the driver's 24-byte read bound. Adjacent
+    // records must not bleed into the channel pair at each six-byte offset.
+    const std::uint8_t burst[24] = {
+        0x00, 0x00, 0x01, 0x03, 0xff, 0xfe,
+        0x01, 0x00, 0x00, 0x02, 0x00, 0x01,
+        0x03, 0xff, 0xff, 0x00, 0x00, 0x00,
+        0x00, 0xff, 0xff, 0x02, 0xff, 0xff};
+    const std::uint32_t reds[4] = {1U, 65536U, 262143U, 65535U};
+    const std::uint32_t irs[4] = {262142U, 131073U, 0U, 196607U};
+    for (unsigned i = 0; i < 4; ++i) {
+      const auto normal = desk_robot::decode_optical_channels(burst + 6 * i, false);
+      const auto swapped = desk_robot::decode_optical_channels(burst + 6 * i, true);
+      CHECK(normal.red == reds[i] && normal.ir == irs[i]);
+      CHECK(swapped.red == irs[i] && swapped.ir == reds[i]);
+      CHECK(desk_robot::optical_channels_saturated(normal) == (i == 2));
+    }
     const desk_robot::OpticalRaw unknown{};
     CHECK(!unknown.present && !unknown.valid && unknown.ir == 0);
     CHECK(unknown.sample_seq == 0U); // boot cannot mimic a fresh touch
