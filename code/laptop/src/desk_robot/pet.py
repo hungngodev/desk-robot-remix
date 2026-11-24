@@ -543,12 +543,14 @@ class PetController:
         preemption_epoch: int | None = None,
         camera_received_at: float | None = None,
         camera_source_identity: tuple[int, int, int] | None = None,
-    ) -> None:
+    ) -> bool:
         """Same text/event ID, different eyewitness provenance per local DB.
 
         Use the existing MemoryStore and its provenance validation. Never send
         JPEG/PCM to another head and never claim a peer saw this firsthand.
         Operator must explicitly enable text sharing in local settings.
+        Return True only for a newly admitted observation; a replay or
+        invalidated source must not trigger a new proactive action.
         """
         admitted_camera_grant = (
             self.settings.camera_consent_generation
@@ -576,7 +578,7 @@ class PetController:
         if (not current_visual_epoch()
                 or (camera_derived and self.settings.mode == "hardware"
                     and not self.settings.voice_vision_tools_enabled)):
-            return
+            return False
         # Camera evidence retains the original authenticated Mac receive
         # chronology, not the later, variably delayed semantic completion.
         # Device capture-completion ticks cannot be converted to Mac time
@@ -592,7 +594,7 @@ class PetController:
                     or not math.isfinite(camera_received_at)
                     or not 0 <= now_mono - camera_received_at
                     <= self.max_observation_age):
-                return  # Stale or impossible Mac receipt cannot enter memory
+                return False  # Stale or impossible Mac receipt cannot enter memory
             observed_at -= now_mono - camera_received_at
             if camera_source_identity is not None:
                 identity = camera_source_identity
@@ -636,7 +638,7 @@ class PetController:
         if not inserted:
             # A late revoked observation or duplicate cannot be shared just
             # because camera consent changed back before this await resumed.
-            return
+            return False
         if (not current_visual_epoch()
                 or (camera_derived and self.settings.mode == "hardware"
                     and not self.settings.voice_vision_tools_enabled)):
@@ -647,7 +649,7 @@ class PetController:
                 await asyncio.to_thread(
                     self.memory.forget_episode, robot_id, event_id,
                 )
-            return
+            return False
         if (self.settings.fleet_text_sharing_enabled
                 and self.settings.fleet_text_auto_fanout_enabled
                 and current_visual_epoch()
@@ -666,7 +668,7 @@ class PetController:
                 self.memory.witnessed_episode_revision, robot_id, event_id,
             )
             if source_revision is None or source_revision[0] != change.description:
-                return
+                return False
 
             def source_current() -> bool:
                 # Invoke only inside a SQLite worker, NEVER the Mac event loop.
@@ -753,6 +755,8 @@ class PetController:
                 await asyncio.to_thread(
                     self.memory.forget_episode, robot_id, event_id
                 )
+                return False
+        return True
 
     async def share_with_peer(
         self, from_robot: str, to_robot: str, event_id: str
@@ -2071,7 +2075,7 @@ class PetController:
                             and (self.settings.mode != "hardware"
                                  or self.settings.voice_vision_tools_enabled)
                             and not self._human_active_in_fleet(time.monotonic())):
-                        await self._store_observation(
+                        stored = await self._store_observation(
                             robot_id, change, camera_derived=True,
                             camera_generation=hub_generation,
                             camera_consent_generation=camera_consent_generation,
@@ -2079,6 +2083,10 @@ class PetController:
                             camera_received_at=received,
                             camera_source_identity=camera_identity,
                         )
+                        if not stored:
+                            state.suppressed += 1
+                            state.last_initiative_suppression = "camera_receipt_not_admitted"
+                            continue
                         if (not current_camera_grant()
                                 or (hub_generation is not None and
                                     self.multimodal.hub._generation[robot_id]
