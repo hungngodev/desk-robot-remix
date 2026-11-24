@@ -401,3 +401,37 @@ def test_rollback_receive_clock_disarms_side_event_votes():
     assert observe(600, 600, 10.4) == []
     assert observe(100, 700, 10.5) == []
     assert observe(95, 800, 10.6) == [("left", 95)]
+
+
+@pytest.mark.parametrize("reset", ["invalid_lane", "invalid_response", "threshold", "rollback"])
+def test_same_boot_reset_cannot_replay_previously_seen_acquisitions(reset):
+    tracker = SideRangeEvents()
+    threshold = 170
+
+    def sample(distance, stamp, valid=7):
+        return body(mm=(distance, 600, 600), sample_ms=(stamp,) * 3,
+                    boot_id=901, valid=valid)
+
+    def observe(data, now):
+        return tracker.observe(data, now=now, near_mm=threshold,
+                               require_hardware_identity=True)
+
+    assert observe(sample(600, 400), 10.0) == []
+    assert observe(sample(100, 500), 10.1) == []
+    if reset == "invalid_lane":
+        assert observe(sample(100, 500, valid=6), 10.2) == []
+    elif reset == "invalid_response":
+        assert observe({}, 10.2) == []
+    elif reset == "threshold":
+        threshold = 180
+        assert observe(sample(600, 50), 10.2) == []
+    else:
+        assert observe(sample(100, 500), 9.9) == []
+    # Resetting proximity votes must not forget the boot's acquisition fence.
+    assert observe(sample(600, 100), 10.3) == []
+    assert observe(sample(100, 200), 10.4) == []
+    assert observe(sample(95, 300), 10.5) == []
+    # A fresh baseline and two newer conversions still recover normally.
+    assert observe(sample(600, 600), 10.6) == []
+    assert observe(sample(100, 700), 10.7) == []
+    assert observe(sample(95, 800), 10.8) == [("left", 95)]

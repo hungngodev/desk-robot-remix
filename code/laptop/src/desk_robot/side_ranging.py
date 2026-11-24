@@ -40,8 +40,8 @@ class SideRangeEvents:
         A range-age clock is WROOM local uptime; the Mac reconstructs a
         monotonic estimate as receive_time - sample_age. Require the inferred
         sample time to advance by >=60ms, guarding against duplicate polling.
-        A reconnect or invalid response forgets history; the first fresh
-        reading is a baseline, never a fabricated arrival.
+        A reconnect or invalid response clears proximity votes; the first
+        newer reading is a baseline, never a fabricated arrival.
         """
         if (type(now) not in (int, float) or not -1e15 <= now <= 1e15
                 or not math.isfinite(now)
@@ -122,7 +122,7 @@ class SideRangeEvents:
                     # by one small integer per actual distinct observed boot;
                     # only the explicit owner lifecycle can retire the tracker.
                     self.retired_boot_ids.add(self.active_boot_id)
-                self._reset()
+                self._reset(new_boot=True)
                 self.active_boot_id = boot_id
         elif self.active_boot_id is not None:
             self._reset()
@@ -133,7 +133,9 @@ class SideRangeEvents:
             track = self.directions[i]
             fresh = bool(valid & (1 << i)) and ages[i] + elapsed_ms <= 350
             if not fresh or not 1 <= distances[i] <= 1300:
-                self.directions[i] = Direction()
+                self.directions[i] = Direction(
+                    previous_sample_ms=track.previous_sample_ms
+                )
                 continue
             sample_at = now - ages[i] / 1000.0
             if has_hardware_identity:
@@ -179,5 +181,10 @@ class SideRangeEvents:
                     results.append((name, distances[i]))
         return results
 
-    def _reset(self) -> None:
-        self.directions = [Direction() for _ in range(3)]
+    def _reset(self, *, new_boot: bool = False) -> None:
+        # Reset votes, not same-boot acquisition history. Only a new boot
+        # can start a different WROOM conversion clock.
+        self.directions = [
+            Direction(previous_sample_ms=None if new_boot else track.previous_sample_ms)
+            for track in self.directions
+        ]
