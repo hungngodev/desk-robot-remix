@@ -209,6 +209,27 @@ class VoiceEventListener:
         self._stream_abort_pending = False
         self._stream_failed = True
 
+    def _validate_event_owner(self, events: list) -> None:
+        task = self._event_task
+        if task is None:
+            return
+        # An authenticated reset or gap rebases sequence identity. An old
+        # callback must actually exit before even an empty bootstrap or
+        # replay can restore readiness; its result is not a new epoch ACK.
+        if self._event_task_generation != self._event_generation:
+            if not task.done():
+                self.monitor_ready = False
+                task.cancel()
+                raise TimeoutError("Old VAD generation interruption still in flight")
+            self._event_task = None
+            self._event_sequence = None
+            self._event_task_generation = None
+        elif not events or self._event_sequence != events[0]["seq"]:
+            # The already validated sequence still needs its actual replay
+            # before its owned callback can be accepted as a receipt.
+            self.monitor_ready = False
+            raise TimeoutError("Previous voice interruption still unresolved")
+
     async def poll(self) -> int:
         if self._stream_abort_pending:
             # Finish the previous outage's shared audio interruption before
@@ -218,6 +239,7 @@ class VoiceEventListener:
             data = await self._fetch(bootstrap=True)
             if data["events"]:
                 raise ValueError("Bootstrapping must not replay stale audio events")
+            self._validate_event_owner(data["events"])
             # Commit bootstrap only after both downstream consumers accept it.
             # Otherwise a failed snapshot/health callback must retry bootstrap,
             # not consume later events with an uninitialized speech owner.
@@ -290,6 +312,7 @@ class VoiceEventListener:
             expected = event["seq"]
         if expected != data["cursor"]:
             raise ValueError("Voice server skipped sequence without marking a gap")
+        self._validate_event_owner(data["events"])
         # Publish newest authenticated head source generations before a slow
         # decoder STOP for any earlier event in this batch.
         self._publish_generations(data)
@@ -300,17 +323,6 @@ class VoiceEventListener:
             # refuse a duplicate callback while the first is still running.
             seq = event["seq"]
             task = self._event_task
-            if task is not None and self._event_task_generation != self._event_generation:
-                # A server restart or lost replay rebases sequence identity.
-                # If the previous transport still executes, do not create a
-                # second competing physical callback or consume its outcome.
-                if not task.done():
-                    task.cancel()
-                    raise TimeoutError("Old VAD generation interruption still in flight")
-                self._event_task = None
-                self._event_sequence = None
-                self._event_task_generation = None
-                task = None
             # A queued speech_end from an older Xiaozhi human turn must
             # not briefly release the currently active human speech floor.
             # The authenticated latest snapshot is authoritative here.

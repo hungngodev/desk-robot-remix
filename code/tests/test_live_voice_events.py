@@ -1279,6 +1279,10 @@ async def test_reset_or_gap_cannot_reuse_old_vad_callback_ack(rebase_kind):
                 "reset": rebase_kind == "reset",
                 "lost": rebase_kind == "gap",
             })
+        if ordinary_polls == 3 and rebase_kind == "gap":
+            return httpx.Response(200, json={
+                "cursor": 0, "events": [], "reset": False, "lost": False,
+            })
         return httpx.Response(200, json={
             "cursor": 1, "reset": False, "lost": False,
             "events": [{
@@ -1313,23 +1317,86 @@ async def test_reset_or_gap_cannot_reuse_old_vad_callback_ack(rebase_kind):
             assert entered.is_set() and watcher.cursor == 0
             assert await watcher.poll() == 0
             assert aborted == [rebase_kind]
-            if rebase_kind == "reset":
-                assert watcher.cursor is None
-                assert await watcher.poll() == 0
-                assert watcher.cursor == 0
+            assert watcher.monitor_ready is False
+            expected_cursor = None if rebase_kind == "reset" else 0
+            assert watcher.cursor == expected_cursor
 
+            # Neither an empty bootstrap after reset nor an empty normal
+            # replay after a gap can acknowledge the old in-flight callback.
             with pytest.raises(TimeoutError, match="Old VAD generation"):
                 await watcher.poll()
             assert len(deliveries) == 1
-            assert watcher.cursor == 0
+            assert watcher.cursor == expected_cursor
+            assert watcher.monitor_ready is False
 
             release.set()
             await asyncio.wait_for(watcher._event_task, timeout=1)
+            if rebase_kind == "reset":
+                assert await watcher.poll() == 0
+                assert watcher.cursor == 0
             assert await watcher.poll() == 1
             assert deliveries == [
                 ("robot-01", "normal"), ("robot-01", "normal"),
             ]
             assert watcher.cursor == 1 and watcher.handled == 1
+        finally:
+            release.set()
+            if watcher._event_task is not None:
+                await asyncio.wait_for(watcher._event_task, timeout=1)
+
+
+async def test_empty_replay_cannot_hide_current_unacknowledged_voice_event():
+    import asyncio
+
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    requests = 0
+    deliveries = []
+
+    def mock(_request):
+        nonlocal requests
+        requests += 1
+        if requests in (1, 3):
+            return httpx.Response(200, json={
+                "cursor": 0, "events": [], "reset": False, "lost": False,
+            })
+        return httpx.Response(200, json={
+            "cursor": 1, "reset": False, "lost": False,
+            "events": [{
+                "seq": 1, "robot_id": "robot-01",
+                "kind": "normal", "source": "xiaozhi_aec_vad",
+            }],
+        })
+
+    async def interrupt(robot, kind):
+        deliveries.append((robot, kind))
+        entered.set()
+        while not release.is_set():
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                continue
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        watcher = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01"}, on_interrupt=interrupt,
+        )
+        await watcher.poll()
+        try:
+            with pytest.raises(TimeoutError, match="Voice interruption incomplete"):
+                await watcher.poll()
+            assert entered.is_set() and watcher.cursor == 0
+            with pytest.raises(TimeoutError, match="Previous voice interruption"):
+                await watcher.poll()
+            assert watcher.monitor_ready is False
+            assert watcher.cursor == 0 and watcher.handled == 0
+            release.set()
+            await asyncio.wait_for(watcher._event_task, timeout=1)
+            assert await watcher.poll() == 1
+            assert watcher.monitor_ready is True
+            assert watcher.cursor == 1 and watcher.handled == 1
+            assert deliveries == [("robot-01", "normal")]
         finally:
             release.set()
             if watcher._event_task is not None:
