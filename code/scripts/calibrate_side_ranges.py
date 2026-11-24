@@ -136,13 +136,19 @@ def analyze(rows: list[dict], robot_id: str) -> dict:
     high = min(1000, min(percentile(
         [mm for _, mm in samples[side, "far"]], .05
     ) for side in SIDE) - 20)
+    # Runtime rearms only at threshold + 60 mm or farther. Bound the
+    # candidate before choosing its midpoint so a feasible lower threshold
+    # is not rejected. At most floor(n/20) far trials may miss this boundary.
+    for side in SIDE:
+        far = sorted(mm for _, mm in samples[side, "far"])
+        high = min(high, far[len(far) // 20] - 60)
     if low > high:
         raise ValueError("Near/far distributions overlap or exceed policy limits")
     proposed = (low + high) // 2
     # A strict 95% measured classification check for each independent side.
     if any(
         sum(value <= proposed for _, value in samples[side, "near"]) / len(samples[side, "near"]) < .95
-        or sum(value > proposed + 60 for _, value in samples[side, "far"]) / len(samples[side, "far"]) < .95
+        or sum(value >= proposed + 60 for _, value in samples[side, "far"]) / len(samples[side, "far"]) < .95
         for side in SIDE
     ):
         raise ValueError("Unable to meet 95% per-side near/far separation")

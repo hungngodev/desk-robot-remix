@@ -191,3 +191,28 @@ def test_nonfinite_side_range_jsonl_never_reaches_threshold_fitter(
     path.write_text(line.replace('"sample_id": 1', f'"sample_id": {constant}') + "\n")
     with pytest.raises(ValueError, match="Nonfinite side-range trial JSON constant"):
         module().load_trial_rows(path)
+
+
+def test_calibration_selects_feasible_threshold_before_hysteresis_check():
+    rows = samples(near_base=80, far_base=500)
+    for row in rows:
+        if row["label"] == "far" and row["direction"] == "right":
+            row["side_ranges"]["mm"][1] = 190 + row["sample_id"] - 21
+    result = module().analyze(rows, "robot-01")
+    threshold = result["suggested_side_near_threshold_mm"]
+    assert 118 <= threshold <= 131
+    assert result["physical_acceptance_pass"] is False
+    assert result["no_motion_authority"] is True
+
+
+def test_calibration_matches_inclusive_runtime_far_boundary():
+    rows = samples()
+    for row in rows:
+        channel = {"left": 0, "right": 1, "rear": 2}[row["direction"]]
+        row["side_ranges"]["mm"][channel] = 100 if row["label"] == "near" else 180
+    assert module().analyze(rows, "robot-01")["suggested_side_near_threshold_mm"] == 120
+    for row in rows:
+        if row["label"] == "far" and row["direction"] == "rear":
+            row["side_ranges"]["mm"][2] = 179
+    with pytest.raises(ValueError, match="overlap|separation"):
+        module().analyze(rows, "robot-01")
