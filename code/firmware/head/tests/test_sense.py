@@ -437,7 +437,7 @@ class SenseOverlayTests(unittest.TestCase):
         assert "desk_playback_id_ = 0;" in rejected
         assert "desk_playback_position_ms_ = 0;" in rejected
         assert "return;" in rejected
-        assert "payload + len - payload_offset" in receive
+        assert "payload + (len - payload_offset)" in receive
         assert "BinaryProtocol2*" not in receive
         assert "BinaryProtocol3*" not in receive
         compiler = shutil.which("g++") or shutil.which("c++")

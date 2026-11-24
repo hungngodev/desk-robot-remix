@@ -546,7 +546,7 @@ static bool ParseDeskAudioFrame(int version, const char* data, size_t len,
                 .timestamp = timestamp,
                 .playback_id = playback_id,
                 .media_position_ms = media_position_ms,
-                .payload = std::vector<uint8_t>(payload, payload + len - payload_offset)}));
+                .payload = std::vector<uint8_t>(payload, payload + (len - payload_offset))}));
 """,
         )
         websocket_source = replace_once(
