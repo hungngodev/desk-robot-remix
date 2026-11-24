@@ -457,6 +457,37 @@ int main() {
           climate_seq_before_pause);
     CHECK(stalled_sht.readings().climate.at_ms >
           climate_stamp_before_pause);
+    // Retire a pending SHT41 conversion on a shared mux fault, even
+    // when recovery occurs before the normal 200 ms age deadline.
+    TwoWire climate_fault_wire;
+    desk_robot::AccessorySensors climate_fault;
+    CHECK(climate_fault.begin(climate_fault_wire));
+    for (std::uint32_t ms = 0; ms <= 696; ms += 12)
+      climate_fault.poll(ms);
+    const auto pre_fault_climate = climate_fault.readings().climate;
+    CHECK(pre_fault_climate.valid && pre_fault_climate.sample_seq > 0U);
+    climate_fault_wire.optional_mux_stuck = true;
+    climate_fault_wire.extras = 0;
+    climate_fault.poll(708);
+    CHECK(!climate_fault.readings().climate.valid);
+    climate_fault_wire.optional_mux_stuck = false;
+    // Lane 3 at 780 must start a new conversion, not read the one
+    // launched at 696, before the mux fault.
+    for (std::uint32_t ms = 720; ms <= 780; ms += 12)
+      climate_fault.poll(ms);
+    CHECK(!climate_fault.readings().climate.valid);
+    CHECK(climate_fault.readings().climate.sample_seq ==
+          pre_fault_climate.sample_seq);
+    CHECK(climate_fault.readings().climate.at_ms ==
+          pre_fault_climate.at_ms);
+    for (std::uint32_t ms = 792; ms <= 864; ms += 12)
+      climate_fault.poll(ms);
+    CHECK(climate_fault.readings().climate.valid);
+    CHECK(climate_fault.readings().climate.sample_seq ==
+          pre_fault_climate.sample_seq + 1U);
+    CHECK(climate_fault.readings().climate.at_ms == 864U);
+    CHECK(!climate_fault_wire.unsafe_parallel_mux);
+    CHECK(climate_fault_wire.ranges == 0 && climate_fault_wire.extras == 0);
     // A shared mux failure invalidates BOTH ADS1115 channels, not only
     // the aggregate flag. One recovered conversion cannot reuse the old pair.
     TwoWire force_fault_wire;

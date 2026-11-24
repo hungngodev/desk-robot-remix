@@ -35,6 +35,9 @@ void AccessorySensors::invalidate_cached() {
   // post-fault conversion can combine with the other channel's stale bit.
   data_.force.valid_mask = 0;
   ads_pending_ = false;
+  // A single-shot climate result started before lost mux isolation is
+  // no longer a fresh acquisition. Command a new conversion on recovery.
+  sht_pending_ = false;
   data_.optional_inputs.valid = false;
 #if DESK_ROBOT_ENABLE_HAPTIC
   haptic_.fault();
