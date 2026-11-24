@@ -252,6 +252,8 @@ def test_increasing_tilt_reduces_available_cliff_margin_on_a_turn_or_drive():
     {"left_wheel_mm_s": 0, "right_wheel_mm_s": 0},
     {"optical_tilt_deg": 77.5},
     {"floor_sensor_points_mm": [[0,0]]},
+    {"floor_sensor_points_mm": [[45, -10], [45, 10], [35, 0], [35, 0]]},
+    {"support_points_mm": [[0, -10], [0, 10], [0, 10]]},
     {"support_points_mm": [[0,0], [1,1]]},
     {"support_points_mm": [[0,0], [1,1], ["bad",0]]},
     {"qualified_lateral_sensor_coverage_mm": 1000},

@@ -211,6 +211,13 @@ def screen_planar_cliff_coverage(
                 or any(abs(c) > 1_000_000 for c in point)):
             raise ValueError("Each measured chassis point needs plausible finite x,y")
 
+    # Four entries must represent four distinct mounted optical centers.
+    # Repeated support points likewise cannot replace omitted contacts.
+    if len(set(map(tuple, floor_sensor_points_mm))) != len(floor_sensor_points_mm):
+        raise ValueError("Duplicate floor sensor coordinates")
+    if len(set(map(tuple, support_points_mm))) != len(support_points_mm):
+        raise ValueError("Duplicate support contact coordinates")
+
     baseline = verify_source_contract()
     h = (chassis_mount_above_desk_mm
          + baseline["lens_center_above_adapter_mount_mm"])
