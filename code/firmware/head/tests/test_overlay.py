@@ -204,7 +204,7 @@ class OverlayPathTests(unittest.TestCase):
         other.write_bytes(path.read_bytes())
         path.unlink()
         path.symlink_to(other)
-        with self.assertRaisesRegex(ValueError, "symlink"):
+        with self.assertRaisesRegex(ValueError, "path escapes pinned checkout.*symlink"):
             overlay.remove(self.root)
         self.assertTrue(path.is_symlink())
         self.assertTrue((self.root / overlay.MARKER).is_file())

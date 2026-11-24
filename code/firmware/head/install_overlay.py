@@ -1168,7 +1168,7 @@ def checked_overlay_path(target: Path, name: str) -> Path:
     for part in name.split("/"):
         path = path / part
         if path.is_symlink():
-            raise ValueError(f"Overlay path contains a symlink: {name}")
+            raise ValueError(f"Overlay path escapes pinned checkout or aliases another path via symlink: {name}")
     return path
 
 
