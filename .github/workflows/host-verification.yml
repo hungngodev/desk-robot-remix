@@ -356,6 +356,7 @@ jobs:
         shell: bash
         run: |
           test -f build/desk-robot-sense-s3.bin || test -f build/merged-binary.bin
+          python3 ../../verify_sense_ci_assets.py .
           test -f build/partition_table/partition-table.bin
 
       - name: Prepare private opt-in Sense PCM compiler coverage
@@ -383,6 +384,7 @@ jobs:
           grep -qx 'CONFIG_DESK_ROBOT_AEC_DELAY_MS=0' sdkconfig
           grep -qx 'CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED=y' sdkconfig
           test -f build/desk-robot-sense-s3.bin || test -f build/merged-binary.bin
+          python3 ../../verify_sense_ci_assets.py .
 
 # This compiles the real ESP-IDF Sense target and both WROOM profiles but DOES
 # NOT flash hardware or verify physical AEC, cliff sensors, pickup or power.
