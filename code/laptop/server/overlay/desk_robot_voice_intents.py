@@ -345,14 +345,17 @@ def native_readonly_requests_with_capacity(
         if len(found) >= 4:
             break
     if len(found) < 2:
+        # Two distinct questions can share one unmergeable route. Preserve
+        # its first explicit request and disclose the missing second read,
+        # even when the whole utterance also matches the route grammar.
+        if unmerged_requested_read:
+            return tuple(found), True
         # Preserve the entire spoken memory/visual question where possible.
         # If the first clause was an unsupported physical command, still
         # permit an explicitly requested independent READ-ONLY second clause.
         return (
             (whole,) if whole is not None else tuple(found),
-            truncated_requested_read or (
-                whole is None and unmerged_requested_read
-            ),
+            truncated_requested_read,
         )
     return (tuple(found[:3]), len(found) > 3 or
             truncated_requested_read or unmerged_requested_read)

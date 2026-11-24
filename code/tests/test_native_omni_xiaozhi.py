@@ -9074,6 +9074,45 @@ def test_distinct_unmergeable_same_route_read_is_disclosed(native):
     assert incomplete
 
 
+def test_two_distinct_memory_questions_alone_disclose_omitted_read(native):
+    module, _ = native
+    requests, incomplete = module.native_readonly_requests_with_capacity(
+        "Do you remember the key and do you remember the mug?"
+    )
+    assert requests == (("voice-context", {"question": "Do you remember the key"}),)
+    assert incomplete
+
+    # An ordinary single question with two named objects is not split.
+    complete, incomplete = module.native_readonly_requests_with_capacity(
+        "Do you remember the key and the mug?"
+    )
+    assert complete == (("voice-context", {
+        "question": "Do you remember the key and the mug?",
+    }),)
+    assert not incomplete
+
+
+async def test_native_same_route_memory_overflow_reaches_turn_queue(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    session._live_transcript_enabled = True
+    assert session._queue_readonly_tool({
+        "item_id": "two_distinct_memory_questions",
+        "transcript": "Do you remember the key and do you remember the mug?",
+    })
+    queued = list(session._readonly_queue._queue)
+    assert len(queued) == 1
+    assert queued[0][0] == "voice-context"
+    assert queued[0][1]["question"] == "Do you remember the key"
+    assert session._readonly_capacity_exceeded == (0, 0)
+
+
 async def test_native_queues_both_distinct_visual_targets_in_one_read(native):
     module, bridge = native
     conn, _ = connection()
