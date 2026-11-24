@@ -1763,7 +1763,7 @@ def render_first_robot_markdown(report: dict) -> str:
         lines.append(
             f"| linked detail, never additive | {cell(item['name'])} | "
             f"{item['conditional_one_robot_quantity']} if selected | "
-            "not independently counted | "
+            "not independently counted | accounted under parent | "
             f"{'REVIEWED' if item['reviewed'] else 'HOLD DECISION'} | "
             f"parent {cell(item['parent_role'])} | "
             "Included in parent; do not duplicate checkout | "

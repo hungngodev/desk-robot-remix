@@ -2129,6 +2129,29 @@ def test_first_unit_49_parent_roles_and_14_child_details_remain_nonadditive():
     shown = mod.render_first_robot_markdown(report)
     assert shown.count("Included in parent; do not duplicate checkout") == 14
     assert shown.count("UNQUOTED separately; parent owns delivered cost") == 14
+
+    # Every linked row must have the same columns as the builder header,
+    # including an explicit nonadditive net-order cell.
+    import re
+
+    def columns(line):
+        return [cell.strip() for cell in re.split(r"(?<!\\)\|", line)[1:-1]]
+
+    header = next(line for line in shown.splitlines()
+                  if line.startswith("| Scope | Role |"))
+    linked_rows = [line for line in shown.splitlines()
+                   if line.startswith("| linked detail, never additive |")]
+    assert len(linked_rows) == 14
+    for line, item in zip(linked_rows, first["linked_decisions"], strict=True):
+        fields = columns(line)
+        assert len(fields) == len(columns(header)) == 11
+        assert fields[4] == "accounted under parent"
+        assert fields[5] == ("REVIEWED" if item["reviewed"] else "HOLD DECISION")
+        assert fields[6] == "parent " + item["parent_role"]
+        assert fields[7] == "Included in parent; do not duplicate checkout"
+        assert fields[8] == item["implementation_source"]
+        assert fields[9] == ""
+        assert fields[10] == "UNQUOTED separately; parent owns delivered cost"
     assert first["purchase_approved"] is False
 
 
