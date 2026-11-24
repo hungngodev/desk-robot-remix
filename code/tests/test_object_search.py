@@ -33,7 +33,7 @@ def fixtures():
     envelope = SafetyEnvelope(3, 2, 2, 32, True)
     viewpoint = SearchViewpoint(
         "robot-01", "origin-3", 8, "tag-4", "cal-5", "view-1",
-        (9, 7), 0, True,
+        (9, 7), 0, True, heading=0,
     )
     return grid, request, envelope, query, owner, target, viewpoint
 
@@ -59,6 +59,7 @@ def test_last_seen_selects_safe_viewpoint_not_arrival_or_motor_command():
     assert result.reason == "must_reobserve_target"
     assert result.viewpoint_id == "view-1"
     assert result.route is not None and result.route.cells[-1] == (9, 7)
+    assert result.route.final_heading == 0
     assert not result.arrived and not result.may_execute
     assert result.route.may_execute is False
     assert result.considered == 1
@@ -271,3 +272,28 @@ def test_old_last_seen_target_rejected_after_reanchoring(change):
     )
     assert result.reason == "target_request_changed"
     assert result.route is None and not result.may_execute
+
+
+def test_same_cell_wrong_camera_heading_is_not_an_observation_pose():
+    grid, request, _, _, _, _, view = fixtures()
+    support = ["unknown"] * len(grid.support)
+    for x in range(2, 12):
+        support[7 * grid.width + x] = "safe"
+    narrow = replace(grid, support=tuple(support))
+    wrong = replace(view, cell=request.start, heading=2)
+    denied = search(grid=narrow, candidates=(wrong,))
+    assert denied.status == "no_current_sighting" and denied.route is None
+    right = replace(wrong, heading=request.heading)
+    proposed = search(grid=narrow, candidates=(right,))
+    assert proposed.status == "viewpoint_proposal"
+    assert proposed.route is not None and proposed.route.cells == (request.start,)
+    assert proposed.route.final_heading == right.heading
+    assert not proposed.arrived and not proposed.may_execute
+
+
+@pytest.mark.parametrize("heading", [None, True, -1, 4, "0"])
+def test_missing_or_invalid_viewpoint_heading_is_rejected(heading):
+    _, _, _, _, _, _, view = fixtures()
+    result = search(candidates=(replace(view, heading=heading),))
+    assert result.reason == "invalid_viewpoint" and result.route is None
+    assert not result.arrived and not result.may_execute

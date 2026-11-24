@@ -52,6 +52,8 @@ class RouteRequest:
     deadline_us: int
     cancelled: bool = False
     schema_version: int = 1
+    # Optional exact lattice heading at the goal; None is a generic route.
+    goal_heading: int | None = None
 
 
 @dataclass(frozen=True)
@@ -81,6 +83,7 @@ class RouteResult:
     calibration_id: str = ""
     map_observed_at_us: int = 0
     valid_until_us: int = 0
+    final_heading: int | None = None
 
 
 def plan_route(
@@ -147,6 +150,8 @@ def plan_route(
     if type(request.deadline_us) is not int or request.deadline_us <= now_us:
         return refuse("deadline_expired")
     if (type(request.heading) is not int or request.heading not in range(4)
+            or (request.goal_heading is not None and
+                (type(request.goal_heading) is not int or request.goal_heading not in range(4)))
             or any(not isinstance(point, tuple) or len(point) != 2
                    or any(type(axis) is not int for axis in point)
                    for point in (request.start, request.goal))):
@@ -169,7 +174,8 @@ def plan_route(
         # Bound the maximum per-state raster footprint and cancellation lag.
         return refuse("unqualified_clearance")
 
-    def proposal(reason: str, cells: tuple[tuple[int, int], ...]) -> RouteResult:
+    def proposal(reason: str, cells: tuple[tuple[int, int], ...],
+                 final_heading: int) -> RouteResult:
         return RouteResult(
             status="planned", reason=reason, cells=cells,
             robot_id=request.robot_id, origin_id=request.origin_id,
@@ -178,6 +184,7 @@ def plan_route(
             calibration_id=grid.calibration_id,
             map_observed_at_us=grid.observed_at_us,
             valid_until_us=min(grid.expires_at_us, request.deadline_us),
+            final_heading=final_heading,
         )
 
     last_clock_us = now_us
@@ -229,12 +236,13 @@ def plan_route(
         return refuse("unsafe_start")
     if not clear(*request.goal, radius):
         return refuse("unsafe_goal")
-    if request.start == request.goal:
+    if (request.start == request.goal and
+            request.goal_heading in (None, request.heading)):
         # A long clearance scan may outlive the request or its map epoch.
         expired = live()
         if expired:
             return refuse(expired)
-        return proposal("at_observation_pose", (request.start,))
+        return proposal("at_observation_pose", (request.start,), request.heading)
 
     start_state = (*request.start, request.heading)
     best = {start_state: 0}
@@ -253,7 +261,8 @@ def plan_route(
         if cost != best.get(state):
             continue
         expanded += 1
-        if (x, y) == request.goal:
+        if ((x, y) == request.goal and
+                request.goal_heading in (None, heading)):
             route = [(x, y)]
             while state in parent:
                 state = parent[state]
@@ -264,7 +273,7 @@ def plan_route(
             expired = live()
             if expired:
                 return refuse(expired)
-            return proposal("simulation_proposal_only", tuple(route))
+            return proposal("simulation_proposal_only", tuple(route), heading)
         # Straight, left, right. A 180-degree reverse or spin is never emitted.
         for new_heading in (heading, (heading + 1) % 4, (heading - 1) % 4):
             dx, dy = _DIRECTIONS[new_heading]

@@ -32,6 +32,8 @@ class SearchViewpoint:
     priority: int
     previously_reachable: bool
     inspected_in_request: bool = False
+    # Required fixed-camera observation orientation in the map lattice.
+    heading: int | None = None
 
 
 @dataclass(frozen=True)
@@ -177,6 +179,7 @@ def propose_object_search(
                 or type(view.priority) is not int or not 0 <= view.priority <= 100
                 or type(view.previously_reachable) is not bool
                 or type(view.inspected_in_request) is not bool
+                or type(view.heading) is not int or view.heading not in range(4)
                 or not isinstance(view.cell, tuple) or len(view.cell) != 2
                 or any(type(v) is not int for v in view.cell)):
             return refuse("invalid_viewpoint")
@@ -213,6 +216,7 @@ def propose_object_search(
                 deadline_us=route_request.deadline_us,
                 cancelled=route_request.cancelled,
                 schema_version=route_request.schema_version,
+                goal_heading=view.heading,
             ), envelope, now_us=last_clock_us,
             max_expansions=max_expansions_per_view,
             clock_us=clock_us, request_is_current=request_is_current,
@@ -224,6 +228,8 @@ def propose_object_search(
             return refuse("unexpected_route_authority", considered)
         if proposal.status == "planned":
             if (not proposal.cells or proposal.cells[-1] != view.cell
+                    or type(proposal.final_heading) is not int
+                    or proposal.final_heading != view.heading
                     or proposal.robot_id != object_query.robot_id
                     or proposal.origin_id != object_query.origin_id
                     or proposal.epoch != object_query.epoch

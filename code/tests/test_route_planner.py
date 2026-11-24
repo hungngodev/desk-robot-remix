@@ -280,3 +280,32 @@ def test_malformed_cancellation_state_never_produces_route(invalid):
     assert result.reason == "invalid_cancellation_state"
     assert result.cells == () and result.may_execute is False
     assert result.valid_until_us == 0
+
+
+def test_wrong_heading_at_same_cell_requires_a_safe_forward_route():
+    grid, request, envelope = fixtures()
+    cells = ["unknown"] * len(grid.support)
+    for x in range(2, 12):
+        cells[7 * grid.width + x] = "safe"
+    narrow = replace(grid, support=tuple(cells))
+    facing_wrong = replace(request, goal=request.start, goal_heading=2)
+    denied = route(grid=narrow, request=facing_wrong, envelope=envelope)
+    assert denied.status == "rejected" and denied.reason == "no_safe_route"
+    assert denied.cells == () and denied.final_heading is None
+    facing_right = replace(facing_wrong, goal_heading=request.heading)
+    good = route(grid=narrow, request=facing_right, envelope=envelope)
+    assert good.cells == (request.start,) and good.final_heading == request.heading
+    assert not good.may_execute
+    # In open space a genuine forward loop may reach the required orientation.
+    loop = route(request=facing_wrong, envelope=envelope)
+    assert loop.status == "planned" and len(loop.cells) > 1
+    assert loop.cells[-1] == request.start and loop.final_heading == 2
+    assert not loop.may_execute
+
+
+@pytest.mark.parametrize("heading", [True, -1, 4, "0"])
+def test_invalid_goal_heading_cannot_produce_route(heading):
+    _, request, _ = fixtures()
+    result = route(request=replace(request, goal_heading=heading))
+    assert result.reason == "invalid_pose" and result.cells == ()
+    assert result.final_heading is None and not result.may_execute
