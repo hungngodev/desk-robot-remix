@@ -1750,3 +1750,86 @@ async def test_failed_monitor_outage_stop_requires_retry_before_monitor_recovery
     await runtime._on_voice_snapshot(frozenset({"robot-01"}))
     assert runtime._voice_stop_unconfirmed is False
     assert len([x for x in calls if x[0] == "pet"]) == 2
+
+
+async def test_runtime_shutdown_stops_native_voice_before_optional_worker_joins(monkeypatch):
+    """Blocked native vision or USB cleanup must not delay decoder STOP."""
+    from unittest.mock import AsyncMock
+
+    calls = []
+    monitor_started = asyncio.Event()
+    vision_entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def close_motion():
+        calls.append("wroom")
+
+    async def stop_native(robot):
+        assert robot.id == "robot-01"
+        calls.append("native speaker STOP")
+
+    async def close_vision():
+        calls.append("vision")
+        vision_entered.set()
+        await release.wait()
+
+    async def monitor():
+        monitor_started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            calls.append("voice monitor retired")
+
+    runtime = Runtime.__new__(Runtime)
+    configure_room_dispatch(runtime)
+    runtime.settings = SimpleNamespace(
+        mode="hardware",
+        robots=[SimpleNamespace(id="robot-01", device_id="head01")],
+    )
+    runtime._room_stop = asyncio.Event()
+
+    async def room_reader():
+        await runtime._room_stop.wait()
+        await release.wait()
+
+    runtime.coordinator = SimpleNamespace(
+        close=AsyncMock(side_effect=close_motion),
+        shutdown_stop_failures={},
+        vision=SimpleNamespace(close=AsyncMock(side_effect=close_vision)),
+    )
+    runtime.pet = SimpleNamespace(
+        close=AsyncMock(), set_voice_monitor_ready=lambda ready: None,
+    )
+    runtime.conversation = SimpleNamespace(
+        stop=AsyncMock(),
+        speaker=SimpleNamespace(monitor_lost=AsyncMock(side_effect=stop_native)),
+    )
+    runtime.client = SimpleNamespace(aclose=AsyncMock())
+    runtime.multimodal = None
+    monkeypatch.setattr("desk_robot.dock_runtime.close_detector_pool", AsyncMock())
+    voice_task = asyncio.create_task(monitor())
+    room_task = asyncio.create_task(room_reader())
+    runtime._voice_task = voice_task
+    runtime._room_task = room_task
+
+    await asyncio.wait_for(monitor_started.wait(), timeout=1)
+    shutdown = asyncio.create_task(runtime.close())
+    try:
+        await asyncio.wait_for(vision_entered.wait(), timeout=1)
+        assert calls == [
+            "wroom", "native speaker STOP", "voice monitor retired", "vision",
+        ]
+        assert runtime._room_stop.is_set()
+        assert voice_task.cancelled()
+        assert runtime._voice_task is None
+        assert not room_task.done()
+        assert runtime._room_task is room_task
+        release.set()
+        await asyncio.wait_for(shutdown, timeout=1)
+        assert room_task.done() and not room_task.cancelled()
+        assert runtime._room_task is None
+        runtime.client.aclose.assert_awaited_once()
+    finally:
+        release.set()
+        runtime._room_stop.set()
+        await asyncio.gather(shutdown, room_task, voice_task, return_exceptions=True)

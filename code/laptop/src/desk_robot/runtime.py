@@ -694,37 +694,6 @@ class Runtime:
             except Exception as exc:
                 errors.append(exc)
         await step("WROOM motion", self.coordinator.close(), 4.0)
-        # Cancelling a Coordinator job never terminates native CPU inference.
-        # Report an unconfirmed shutdown rather than abandoning a live worker.
-        vision_close = getattr(
-            getattr(self.coordinator, "vision", None), "close", None
-        )
-        if callable(vision_close):
-            await step("YOLO native inference", vision_close(), 2.0)
-        # The process-global AprilTag C worker also outlives canceled
-        # asyncio requests. Do not silently leave a hung detector reusable
-        # by another Runtime instance or any of the five robots.
-        if self.settings.mode == "hardware":
-            from .dock_runtime import close_detector_pool
-            await step("AprilTag native detector", close_detector_pool(), 2.0)
-        # Stop the one read-only USB producer after the urgent WROOM STOP and
-        # before tearing down per-pet camera and context owners.
-        room_stop = getattr(self, "_room_stop", None)
-        if room_stop is not None:
-            room_stop.set()
-        room_task = getattr(self, "_room_task", None)
-        if room_task is not None:
-            async def wait_room_shutdown():
-                # The generic shutdown deadline cancels its OWN waiter.
-                # Shield the real USB reader so timeout does not cancel its
-                # still-running OS worker or disguise unfinished ownership.
-                await asyncio.shield(room_task)
-            await step("Shared room USB", wait_room_shutdown(), 1.0)
-            # A stalled callback or serial worker may outlive the deadline.
-            # Retain ownership until the actual reader task has terminated;
-            # never turn an unconfirmed USB shutdown into an absent reader.
-            if room_task.done():
-                self._room_task = None
         unconfirmed = getattr(self.coordinator, "shutdown_stop_failures", {})
         if unconfirmed:
             # An idle robot can still have an uncertain prior motor pulse.
@@ -733,6 +702,13 @@ class Runtime:
                 "WROOM shutdown STOP unconfirmed for "
                 + ", ".join(sorted(unconfirmed))
             ))
+
+        # Signal the independent USB producer promptly after WROOM STOP.
+        # Its real thread may need time to drain; joining it must not delay
+        # an urgent native decoder STOP.
+        room_stop = getattr(self, "_room_stop", None)
+        if room_stop is not None:
+            room_stop.set()
 
         # Shutdown must explicitly stop every native Xiaozhi decoder even
         # when the VAD monitor never emitted its normal loss callback.
@@ -775,6 +751,33 @@ class Runtime:
                 self._voice_task = None
             # Otherwise retain the cancelled but still live task as owned.
 
+        # Slow optional inference and USB joins cannot delay speaker STOP.
+        # Cancelling a Coordinator job never terminates native CPU inference.
+        # Report an unconfirmed shutdown rather than abandoning a live worker.
+        vision_close = getattr(
+            getattr(self.coordinator, "vision", None), "close", None
+        )
+        if callable(vision_close):
+            await step("YOLO native inference", vision_close(), 2.0)
+        # The process-global AprilTag C worker also outlives canceled
+        # asyncio requests. Do not silently leave a hung detector reusable
+        # by another Runtime instance or any of the five robots.
+        if self.settings.mode == "hardware":
+            from .dock_runtime import close_detector_pool
+            await step("AprilTag native detector", close_detector_pool(), 2.0)
+        room_task = getattr(self, "_room_task", None)
+        if room_task is not None:
+            async def wait_room_shutdown():
+                # The generic shutdown deadline cancels its OWN waiter.
+                # Shield the real USB reader so timeout does not cancel its
+                # still-running OS worker or disguise unfinished ownership.
+                await asyncio.shield(room_task)
+            await step("Shared room USB", wait_room_shutdown(), 1.0)
+            # A stalled callback or serial worker may outlive the deadline.
+            # Retain ownership until the actual reader task has terminated;
+            # never turn an unconfirmed USB shutdown into an absent reader.
+            if room_task.done():
+                self._room_task = None
         await step("Pet observer", self.pet.close(), 5.0)
         camera = getattr(self, "multimodal", None)
         if camera is not None:
