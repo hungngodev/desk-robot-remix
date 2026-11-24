@@ -22,5 +22,5 @@ class SoilCalibration:
     def percentage(self, raw_adc: int) -> int:
         if type(raw_adc) is not int or not 1 <= raw_adc <= 4094:
             raise ValueError("Cannot calibrate an invalid soil ADC reading")
-        progress = (raw_adc - self.dry_adc) / (self.wet_adc - self.dry_adc)
-        return round(max(0.0, min(1.0, progress)) * 100)
+        percent = 100 * (raw_adc - self.dry_adc) / (self.wet_adc - self.dry_adc)
+        return round(max(0.0, min(100.0, percent)))

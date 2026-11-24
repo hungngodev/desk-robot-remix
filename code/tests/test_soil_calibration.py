@@ -29,3 +29,19 @@ def test_fake_missing_or_noise_level_calibration_rejected(dry, wet):
 def test_invalid_raw_probe_reading_never_becomes_moisture(raw):
     with pytest.raises(ValueError):
         SoilCalibration(3200, 1300).percentage(raw)
+
+
+@pytest.mark.parametrize("dry,wet,raw", [(1000, 1120, 1069), (1120, 1000, 1051)])
+def test_exact_half_percent_rounds_to_even(dry, wet, raw):
+    calibration = SoilCalibration(dry, wet)
+    assert calibration.percentage(raw) == 58
+
+
+@pytest.mark.parametrize("dry,wet", [(1, 4094), (4094, 1), (1000, 1100), (1100, 1000)])
+def test_full_adc_domain_matches_exact_clamped_ratio(dry, wet):
+    from fractions import Fraction
+
+    calibration = SoilCalibration(dry, wet)
+    for raw in range(1, 4095):
+        exact = Fraction(100 * (raw - dry), wet - dry)
+        assert calibration.percentage(raw) == round(max(0, min(100, exact)))
