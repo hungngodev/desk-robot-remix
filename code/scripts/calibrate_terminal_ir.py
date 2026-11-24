@@ -21,7 +21,9 @@ from urllib.parse import urlsplit
 import httpx
 from desk_robot.dock_ir import dock_beacon_code, validate_ir
 
-LABELS = ("left", "center", "right")
+POSITION_LABELS = ("left", "center", "right")
+REFLECTION_LABEL = "reflection_only"
+LABELS = (*POSITION_LABELS, REFLECTION_LABEL)
 
 _ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
 
@@ -150,7 +152,8 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
             expected_dock_id: int | None = None) -> dict:
     if not robot_id or not 10 <= min_per_position <= 500:
         raise ValueError("Invalid robot ID or minimum real sample count")
-    data: dict[str, list[dict]] = {name: [] for name in LABELS}
+    data: dict[str, list[dict]] = {name: [] for name in POSITION_LABELS}
+    reflection_valid: list[bool] = []
     previous: tuple[int, int] | None = None
     last_at = -1.0
     observed_dock_code: int | None = None
@@ -201,6 +204,11 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
         previous = sequences
         left_new = reading["left_valid"] and advances[0]
         right_new = reading["right_valid"] and advances[1]
+        if row["label"] == REFLECTION_LABEL:
+            # Any decoded signal with the direct path blocked is ambiguous,
+            # even if only one side sees it or its sequence is cached.
+            reflection_valid.append(reading["left_valid"] or reading["right_valid"])
+            continue
         data[row["label"]].append({
             "left_new": left_new,
             "right_new": right_new,
@@ -260,6 +268,13 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
         "observations_total": len(rows),
         "independent_fresh_minimum_met": enough_fresh,
         "candidate_differential_signal": separates,
+        "reflection_control_records": len(reflection_valid),
+        "reflection_control_valid_records": sum(reflection_valid),
+        "candidate_reflection_control_clear": (
+            separates and len(reflection_valid) >= min_per_position
+            and not any(reflection_valid)
+        ),
+        "multipath_rejection_physically_verified": False,
         "requires_human_optical_baffle_and_receiver_trial": True,
         "absolute_bearing_calibrated": False,
         "motor_authorized": False,
@@ -267,7 +282,9 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
         "physical_acceptance_pass": False,
         "note": (
             "Receiver bias is an observed signal rate, not an angle or distance. "
-            "Measure drift, baffle geometry and last-centimeter stopping separately."
+            "Reflection-only labels require human confirmation that the direct "
+            "path was blocked with the beacon active. Measure drift, baffle "
+            "geometry and last-centimeter stopping separately."
         ),
     }
 

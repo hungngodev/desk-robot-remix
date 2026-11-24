@@ -522,3 +522,49 @@ def test_saved_ir_trial_accepts_zero_monotonic_origin():
     assert result["physical_acceptance_pass"] is False
     assert result["motor_authorized"] is False
     assert result["charging_authorized"] is False
+
+
+def reflection_control(rows, *, left=False, right=False, count=20):
+    last = rows[-1]
+    left_seq, right_seq = last["ir"]["left_seq"], last["ir"]["right_seq"]
+    for index in range(count):
+        left_seq += int(left)
+        right_seq += int(right)
+        rows.append({
+            "label": "reflection_only",
+            "received_monotonic": last["received_monotonic"] + .25 * (index + 1),
+            "ir": {
+                **last["ir"], "left_valid": left, "right_valid": right,
+                "match": left and right, "left_seq": left_seq,
+                "right_seq": right_seq, "left_age_ms": 20 if left else 0xffffffff,
+                "right_age_ms": 20 if right else 0xffffffff,
+                "code": 0xCB34ED12 if left and right else 0,
+            },
+        })
+    return rows
+
+
+@pytest.mark.parametrize(("left", "right"), [(True, False), (False, True), (True, True)])
+def test_reflection_only_decode_blocks_candidate_control(left, right):
+    result = cal.analyze(
+        reflection_control(position_records(), left=left, right=right),
+        "robot-01", expected_dock_id=4,
+    )
+    assert result["candidate_differential_signal"] is True
+    assert result["reflection_control_valid_records"] == 20
+    assert result["candidate_reflection_control_clear"] is False
+    assert result["multipath_rejection_physically_verified"] is False
+    assert result["motor_authorized"] is False
+
+
+@pytest.mark.parametrize(("count", "clear"), [(0, False), (19, False), (20, True)])
+def test_reflection_control_requires_negative_observations(count, clear):
+    result = cal.analyze(
+        reflection_control(position_records(), count=count),
+        "robot-01", expected_dock_id=4,
+    )
+    assert result["reflection_control_records"] == count
+    assert result["candidate_reflection_control_clear"] is clear
+    assert result["multipath_rejection_physically_verified"] is False
+    assert result["physical_acceptance_pass"] is False
+    assert result["charging_authorized"] is False

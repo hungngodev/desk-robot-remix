@@ -16,3 +16,10 @@ Before any automatic terminal approach, select and document actual 38 kHz receiv
 
 ## Coordination
 Existing PR #17 remains the only integration PR. This note is a research and test plan, not a driver import, passing test, or physical certification. Implementation and QA should reuse the existing RMT path unless a concrete failing test proves replacement necessary. Charging and printable mechanical acceptance remain separate blockers.
+
+
+## EXP-066 reflection control (2026-11-24)
+
+The TSOP382/384 reference receiver provides demodulated digital pulses after automatic gain control, not raw optical intensity (Vishay https://www.vishay.com/docs/82491/tsop382.pdf). Both receivers can decode the same reflected NEC frame. Neither paired frame timing nor a differential decode-rate trial establishes line of sight. Keep existing camera and WROOM local safety gates; do not steer from inferred RSSI.
+
+Use the existing read-only `code/scripts/calibrate_terminal_ir.py` capture with `--label reflection_only` and the same assigned dock ID and private trial log. With motors physically disabled and charging disconnected, keep the beacon active, block only the direct optical path, and leave the glossy surface exposed. Confirm actual beacon activity and receiver placement independently. Repeat separate trials over matte and glossy surfaces, near reflective walls, across measured angles and distances and ambient lighting, with positive direct-path controls. The analyzer reports a candidate clear control only when the existing left/center/right differential test passes, at least the configured minimum control records exist, and neither receiver reports a valid frame during the reflection-only control. Any decoded signal (including one-sided reception) invalidates that candidate. The label is human-supplied and negative polls are not proof of independent optical transmissions. No physical acceptance, bearing, motor or charger authority follows. A failed or absent control cannot be marketed as reflection rejection. Measure baffle geometry and real false reception rates before enabling terminal homing.
