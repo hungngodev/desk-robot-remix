@@ -177,6 +177,49 @@ class WaveshareOverlayTests(unittest.TestCase):
             oled.index("void OledDisplay::SetupUI()"),
         )
 
+    def test_oled_draw_buffer_and_i2c_clock_contract(self):
+        """Check configuration, not physical DMA allocation or display timing."""
+        overlay.apply(self.root, "waveshare")
+        board = self.root / overlay.BOARDS["waveshare"]
+        source = (board / "desk_robot_waveshare.cc").read_text()
+        display = source.split("void InitializeDisplay()", 1)[1].split(
+            "void InitializeCamera()", 1
+        )[0]
+        for setting in (
+            "io_config.dev_addr = 0x3C;",
+            "io_config.scl_speed_hz = 400000;",
+            "panel_config.bits_per_pixel = 1;",
+            "ssd1306.height = DISPLAY_HEIGHT;",
+            "esp_lcd_new_panel_io_i2c(display_bus_",
+            "esp_lcd_new_panel_ssd1306(panel_io,",
+        ):
+            with self.subTest(setting=setting):
+                self.assertIn(setting, display)
+        header = (board / "config.h").read_text()
+        for setting in (
+            "#define DISPLAY_WIDTH 128",
+            "#define DISPLAY_HEIGHT 64",
+            "#define DISPLAY_I2C_PORT I2C_NUM_0",
+        ):
+            with self.subTest(setting=setting):
+                self.assertIn(setting, header)
+        # This candidate intentionally uses SSD1306, not the stock SPI LCD.
+        self.assertNotIn("spi_bus_initialize", source)
+        oled = (UPSTREAM / "main/display/oled_display.cc").read_text()
+        config = oled.split("const lvgl_port_display_cfg_t display_cfg = {", 1)[1].split(
+            "display_ = lvgl_port_add_disp", 1
+        )[0]
+        for setting in (
+            ".buffer_size = static_cast<uint32_t>(width_ * height_),",
+            ".double_buffer = false,",
+            ".trans_size = 0,",
+            ".monochrome = true,",
+            ".buff_dma = 1,",
+            ".buff_spiram = 0,",
+        ):
+            with self.subTest(setting=setting):
+                self.assertIn(setting, config)
+
     def test_reversible_aec_whitelist_and_drift_protection(self):
         overlay.apply(self.root, "waveshare")
         overlay.apply(self.root, "waveshare")
