@@ -7620,3 +7620,57 @@ async def test_proactive_model_peripherals_reject_missing_mismatched_or_retired_
         assert receipt["verified_charging"] is False
     finally:
         await pet.close()
+
+
+@pytest.mark.parametrize("social", [False, True])
+@pytest.mark.parametrize("replacement", ["same", "other", "none"])
+async def test_camera_reconnect_fences_pending_proactive_model(
+    fleet, tmp_path, social, replacement,
+):
+    """A new camera connection cannot inherit an old visual speech candidate."""
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class SlowChat:
+        async def reply(self, history):
+            entered.set()
+            await release.wait()
+            return "I noticed a little key."
+
+    fleet.fleet_text_sharing_enabled = social
+    fleet.fleet_social_autonomy_enabled = social
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {}, Conversation(fleet, SlowChat(), speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0,
+    )
+    hub = CameraFrameHub([r.id for r in fleet.robots])
+    pet.multimodal = SimpleNamespace(hub=hub)
+    for robot_id in ("robot-01", "robot-02"):
+        pet.states[robot_id].enabled = True
+        pet.states[robot_id].generation = 91
+    try:
+        pet._consider_speech(
+            "robot-01",
+            SceneChange("key", "A brass key appeared on the desk", 0.99),
+            91, camera_derived=True, received_at=time.monotonic(),
+        )
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        if replacement != "none":
+            hub.discard_video(
+                "robot-01" if replacement == "same" else "robot-02"
+            )
+        release.set()
+        await wait_for(lambda: pet._speech_task is None)
+        if replacement == "same":
+            assert speaker.spoken == []
+            assert pet.states["robot-01"].spoken == 0
+            assert pet._group_last_spoken == float("-inf")
+            assert all(memory.count(r.id) == 0 for r in fleet.robots)
+        else:
+            assert len(speaker.spoken) == (2 if social else 1)
+    finally:
+        release.set()
+        for state in pet.states.values():
+            state.enabled = False
+        await pet.close()

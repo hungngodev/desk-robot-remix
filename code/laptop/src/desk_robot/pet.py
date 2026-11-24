@@ -2075,6 +2075,7 @@ class PetController:
                                 camera_derived=True,
                                 received_at=received,
                                 camera_consent_generation=camera_consent_generation,
+                                camera_generation=hub_generation,
                             )
             except asyncio.CancelledError:
                 raise
@@ -2286,11 +2287,23 @@ class PetController:
             )
         )
 
+    def _camera_generation_current(
+        self, robot_id: str, generation: int | None,
+    ) -> bool:
+        if generation is None:
+            return True  # No hub-backed camera evidence (e.g. simulation).
+        hub = getattr(self.multimodal, "hub", None)
+        return getattr(hub, "_generation", {}).get(robot_id) == generation
+
     def _consider_speech(
         self, robot_id: str, change: SceneChange, generation: int, *,
         camera_derived: bool = False, received_at: float | None = None,
         camera_consent_generation: int | None = None,
+        camera_generation: int | None = None,
     ) -> None:
+        if camera_derived and camera_generation is None:
+            hub = getattr(self.multimodal, "hub", None)
+            camera_generation = getattr(hub, "_generation", {}).get(robot_id)
         admitted_camera_grant = (
             self.settings.camera_consent_generation
             if camera_consent_generation is None else camera_consent_generation
@@ -2304,6 +2317,12 @@ class PetController:
                              != admitted_camera_grant))):
             state.suppressed += 1
             state.last_initiative_suppression = "pet_disabled_or_generation_changed"
+            return
+        if camera_derived and not self._camera_generation_current(
+            robot_id, camera_generation,
+        ):
+            state.suppressed += 1
+            state.last_initiative_suppression = "camera_source_replaced"
             return
         if not _initiative_evidence(change):
             state.suppressed += 1
@@ -2386,7 +2405,8 @@ class PetController:
                         social_peer_id=peer_id,
                         social_peer_generation=peer_generation,
                         camera_derived=camera_derived,
-                        camera_consent_generation=admitted_camera_grant)
+                        camera_consent_generation=admitted_camera_grant,
+                        camera_generation=camera_generation)
         )
 
     async def _proactive_tool_receipt(
@@ -2797,6 +2817,7 @@ class PetController:
         social_peer_generation: int | None, camera_derived: bool,
         newer_human_turn: Callable[[], bool],
         camera_consent_generation: int | None = None,
+        camera_generation: int | None = None,
     ) -> None:
         """Reuse one fleet speech owner for a consent-fenced social event."""
         state = self.states[robot_id]
@@ -2806,6 +2827,8 @@ class PetController:
                 or state.generation != generation or self._closed
                 or not peer.enabled or peer.quiet
                 or peer.generation != social_peer_generation
+                or (camera_derived and not self._camera_generation_current(
+                    robot_id, camera_generation))
                 or (camera_derived and self.settings.mode == "hardware"
                     and (not self.settings.voice_vision_tools_enabled
                          or (camera_consent_generation is not None
@@ -2843,6 +2866,8 @@ class PetController:
                 and state.generation == generation
                 and peer.enabled and not peer.quiet
                 and peer.generation == social_peer_generation
+                and (not camera_derived or self._camera_generation_current(
+                    robot_id, camera_generation))
                 and (not camera_derived
                      or self.settings.mode != "hardware"
                      or (self.settings.voice_vision_tools_enabled
@@ -3114,6 +3139,7 @@ class PetController:
         social_peer_generation: int | None = None,
         camera_derived: bool = False,
         camera_consent_generation: int | None = None,
+        camera_generation: int | None = None,
     ) -> None:
         state = self.states[robot_id]
         robot = self.settings.robot(robot_id)
@@ -3144,7 +3170,16 @@ class PetController:
             latest = getattr(self.multimodal, "latest_fleet_human_turn_at", None)
             return callable(latest) and latest() > offered_at
 
+        def camera_source_current() -> bool:
+            return not camera_derived or self._camera_generation_current(
+                robot_id, camera_generation,
+            )
+
         try:
+            if not camera_source_current():
+                state.suppressed += 1
+                state.last_initiative_suppression = "camera_source_replaced"
+                return
             gathered = await self._load_proactive_context(robot_id, change)
             if gathered is None:
                 return
@@ -3153,7 +3188,8 @@ class PetController:
 
             def media_context_current() -> bool:
                 return (
-                    (not (live_context_used or camera_derived)
+                    camera_source_current()
+                    and (not (live_context_used or camera_derived)
                      or self.settings.mode != "hardware"
                      or (self.settings.voice_vision_tools_enabled
                          and self.settings.camera_consent_generation == camera_grant))
@@ -3203,6 +3239,7 @@ class PetController:
                     social_peer_generation=social_peer_generation,
                     camera_derived=camera_derived,
                     camera_consent_generation=camera_grant,
+                    camera_generation=camera_generation,
                     newer_human_turn=newer_human_turn,
                 )
                 return
@@ -3234,6 +3271,10 @@ class PetController:
                 model_context_permitted=model_context_permitted,
             )
             if text is None:
+                return
+            if not camera_source_current():
+                state.suppressed += 1
+                state.last_initiative_suppression = "camera_source_replaced"
                 return
             # Concise output is an actual speaker budget, not just an LLM
             # instruction. Do not arbitrarily truncate a long generated
