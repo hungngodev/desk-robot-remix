@@ -1017,6 +1017,23 @@ void Application::HandleStartListeningEvent() {""",
                 sense_audio_failure_epoch_.fetch_add(1, std::memory_order_acq_rel);
 #endif""",
         )
+        # The pinned application raises WiFi performance before opening audio.
+        # Allocation failure can return false without ever firing OnAudioChannelClosed.
+        # Restore the existing low-power policy in both explicit failure branches.
+        for failure_comment in (
+            """            // Return to idle so the device is not stuck in the connecting
+            // state (not every failure path reports a network error)""",
+            """            // Return to idle so the device is not stuck in the connecting
+            // state (not every failure path reports a network error), and
+            // wake word detection is re-enabled by the idle state handler.""",
+        ):
+            failure = failure_comment + "\n            SetDeviceState(kDeviceStateIdle);"
+            text = replace_once(
+                text, failure,
+                failure_comment
+                + "\n            board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);"
+                + "\n            SetDeviceState(kDeviceStateIdle);",
+            )
         files[path] = text.encode()
         # Only the disposable Sense clone changes upstream Application
         # declarations, so every other Xiaozhi board retains original code.

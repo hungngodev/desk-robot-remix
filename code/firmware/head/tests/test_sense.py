@@ -125,6 +125,97 @@ class SenseOverlayTests(unittest.TestCase):
         assert "app.StartListening();" not in face
         assert "app.StopListening();" not in face
 
+    def test_failed_audio_open_restores_existing_wifi_power_policy(self):
+        """Execute both actual overlaid open continuations with a failing transport."""
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if not compiler:
+            self.skipTest("Native C++ compiler unavailable")
+        overlay.apply(self.root, "sense")
+        app = (self.root / "main/application.cc").read_text()
+        normal = "void Application::ContinueOpenAudioChannel(" + app.split(
+            "void Application::ContinueOpenAudioChannel(", 1
+        )[1].split("void Application::HandleStartListeningEvent()", 1)[0]
+        wake = "void Application::ContinueWakeWordInvoke(" + app.split(
+            "void Application::ContinueWakeWordInvoke(", 1
+        )[1].split("void Application::HandleStateChangedEvent()", 1)[0]
+        code = self.root / "wifi_power_policy.cpp"
+        binary = self.root / "wifi_power_policy"
+        code.write_text(r"""
+#include <atomic>
+#include <cstdint>
+#include <string>
+#include <vector>
+#define CONFIG_SEND_WAKE_WORD_DATA 0
+#define ESP_LOGI(tag, format, argument) (void)(argument)
+enum DeviceState { kDeviceStateIdle, kDeviceStateConnecting, kDeviceStateListening };
+enum ListeningMode { kListeningModeRealtime };
+enum class PowerSaveLevel { LOW_POWER, PERFORMANCE };
+struct Board {
+    std::vector<PowerSaveLevel> levels;
+    static Board& GetInstance() { static Board board; return board; }
+    void SetPowerSaveLevel(PowerSaveLevel level) { levels.push_back(level); }
+};
+struct Protocol {
+    bool succeed = false;
+    bool opened = false;
+    bool IsAudioChannelOpened() const { return opened; }
+    bool OpenAudioChannel() { opened = succeed; return opened; }
+    void CloseAudioChannel() { opened = false; }
+};
+struct Application {
+    DeviceState state = kDeviceStateConnecting;
+    Protocol transport;
+    Protocol* protocol_ = &transport;
+    std::atomic<bool> sense_microphone_privacy_muted_{false};
+    std::atomic<uint32_t> sense_audio_failure_epoch_{0};
+    bool play_popup_on_listening_ = false;
+    DeviceState GetDeviceState() const { return state; }
+    void SetDeviceState(DeviceState value) { state = value; }
+    void SetListeningMode(ListeningMode) { state = kDeviceStateListening; }
+    ListeningMode GetDefaultListeningMode() const { return kListeningModeRealtime; }
+    void ContinueOpenAudioChannel(ListeningMode mode);
+    void ContinueWakeWordInvoke(const std::string& wake_word);
+};
+""" + normal + wake + r"""
+int main() {
+    using Level = PowerSaveLevel;
+    auto& levels = Board::GetInstance().levels;
+    // No close callback is simulated: allocation/open failures can occur
+    // before a transport exists. The actual continuation owns the rollback.
+    for (bool wake : {false, true}) {
+        for (bool success : {false, true}) {
+            levels.clear();
+            Application app;
+            app.transport.succeed = success;
+            if (wake) app.ContinueWakeWordInvoke("test");
+            else app.ContinueOpenAudioChannel(kListeningModeRealtime);
+            if (success) {
+                if (app.state != kDeviceStateListening) return 1;
+                if (levels != std::vector<Level>{Level::PERFORMANCE}) return 2;
+            } else {
+                if (app.state != kDeviceStateIdle) return 3;
+                if (levels != std::vector<Level>{Level::PERFORMANCE, Level::LOW_POWER})
+                    return 4;
+            }
+        }
+    }
+    levels.clear();
+    Application cancelled;
+    cancelled.state = kDeviceStateIdle;
+    cancelled.ContinueOpenAudioChannel(kListeningModeRealtime);
+    cancelled.ContinueWakeWordInvoke("obsolete");
+    if (!levels.empty()) return 5;
+    return 0;
+}
+""")
+        for flags in ([], ["-DCONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED=1"]):
+            subprocess.run(
+                [compiler, "-std=c++20", "-Wall", "-Wextra", "-Werror", *flags,
+                 str(code), "-o", str(binary)],
+                env=native_cpp_env(), check=True, timeout=60,
+            )
+            subprocess.run([str(binary)], check=True, timeout=10)
+
     def test_sense_camera_pdm_pin_budget_and_eight_mb_layout(self):
         overlay.apply(self.root, 'sense')
         board = self.root / overlay.BOARDS['sense']
