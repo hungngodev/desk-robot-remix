@@ -306,6 +306,64 @@ def screen_planar_cliff_coverage(
     }
 
 
+def floor_mount_template() -> list[dict]:
+    """One measured record for each downward TCA9548A lane (0 through 3).
+
+    Lens height is measured directly above the desk; tilt is the angular
+    deviation from downward vertical, not the bracket's rotation setting.
+    """
+    return [dict(channel=i, lens_height_mm=None, tilt_deg=None,
+                 min_mm=None, max_mm=None) for i in range(4)]
+
+
+def screen_floor_mounts(records: object) -> dict:
+    """Screen individual measured floor mounts, not live sensor detection."""
+    baseline = verify_source_contract()
+    low, high = baseline["firmware_valid_min_mm"], baseline["firmware_valid_max_mm"]
+    expected = set(range(4))
+    if not isinstance(records, list):
+        raise ValueError("Floor mount measurements must be a list")
+    checks = {}
+    for record in records:
+        if not isinstance(record, dict) or set(record) != set(floor_mount_template()[0]):
+            raise ValueError("Each floor mount requires channel, lens_height_mm, tilt_deg, min_mm, max_mm")
+        channel = record["channel"]
+        if type(channel) is not int or channel not in expected:
+            raise ValueError(f"Invalid downward floor sensor channel: {channel!r}")
+        if channel in checks:
+            raise ValueError(f"Duplicate floor sensor channel {channel}")
+        height, tilt = record["lens_height_mm"], record["tilt_deg"]
+        lo, hi = record["min_mm"], record["max_mm"]
+        failures = []
+        if not _finite_real(height) or height <= 0:
+            failures.append("invalid_lens_height")
+        half = ST_SYSTEM_FOV_DEG / 2
+        if not _finite_real(tilt) or not 0 <= tilt < 90 - half:
+            failures.append("invalid_mounting_angle")
+        if type(lo) is not int or type(hi) is not int or not low <= lo <= hi <= high:
+            failures.append("invalid_floor_thresholds")
+        near = far = None
+        if not failures:
+            near = height / math.cos(math.radians(max(0.0, tilt - half)))
+            far = height / math.cos(math.radians(tilt + half))
+            if not math.isfinite(near) or not math.isfinite(far):
+                near = far = None
+                failures.append("floor_path_overflow")
+            elif not lo <= near <= far <= hi:
+                failures.append("floor_path_outside_configured_thresholds")
+        checks[channel] = {"channel": channel, "failures": failures,
+                           "nearest_floor_path_mm": near,
+                           "farthest_floor_path_mm": far,
+                           "mount_possible_on_paper": not failures}
+    missing = sorted(expected - checks.keys())
+    return {"floor_sensor_checks": [checks[i] for i in sorted(checks)],
+            "missing_floor_channels": missing,
+            "all_floor_mounts_possible_on_paper": not missing and all(
+                c["mount_possible_on_paper"] for c in checks.values()),
+            "live_sensor_detection_verified": False,
+            "fully_safe_cliff_operation_proven": False}
+
+
 PLANAR_COORDINATE_FRAME = "body_x_forward_y_left"
 PLANAR_MEASUREMENT_FIELDS = (
     "left_wheel_mm_s", "right_wheel_mm_s", "track_width_mm",
@@ -361,6 +419,10 @@ def main():
                         help="Print blank measurements for one wheel command")
     planar.add_argument("--planar-measurements", type=Path,
                         help="Screen the measured planar JSON record")
+    planar.add_argument("--floor-mount-template", action="store_true",
+                        help="Print blank measurements for the four floor lanes")
+    planar.add_argument("--floor-mount-measurements", type=Path,
+                        help="Screen each measured floor lens and configured interval")
     parser.add_argument("--mount-above-desk-mm", type=float)
     parser.add_argument("--tilt-deg", type=float)
     parser.add_argument("--sensor-ahead-of-wheel-mm", type=float)
@@ -372,6 +434,19 @@ def main():
     scalar = (args.mount_above_desk_mm, args.tilt_deg,
               args.sensor_ahead_of_wheel_mm, args.measured_worst_stopping_mm,
               args.latency_ms, args.speed_mm_s)
+    if args.floor_mount_template or args.floor_mount_measurements is not None:
+        if any(value is not None for value in scalar):
+            parser.error("Do not mix floor lane and straight-drive measurements")
+        if args.floor_mount_template:
+            print(json.dumps(floor_mount_template(), indent=2))
+        else:
+            record = json.loads(
+                args.floor_mount_measurements.read_text(encoding="utf-8"),
+                object_pairs_hook=_unique_planar_fields,
+                parse_constant=_reject_planar_constant,
+            )
+            print(json.dumps(screen_floor_mounts(record), indent=2))
+        return
     if args.planar_template or args.planar_measurements is not None:
         if any(value is not None for value in scalar):
             parser.error("Do not mix planar and straight-drive measurements")

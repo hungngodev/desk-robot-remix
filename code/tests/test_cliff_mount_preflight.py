@@ -377,3 +377,68 @@ def test_legacy_straight_drive_cli_remains_available():
     assert json.loads(completed.stdout) == evaluate(
         chassis_mount_above_desk_mm=20.0
     )
+
+
+def floor_mount_records():
+    return [dict(r, lens_height_mm=32, tilt_deg=0, min_mm=30, max_mm=45)
+            for r in tool.floor_mount_template()]
+
+
+def test_individual_floor_mounts_never_certify_live_detection():
+    result = tool.screen_floor_mounts(floor_mount_records())
+    assert result["all_floor_mounts_possible_on_paper"]
+    assert not result["live_sensor_detection_verified"]
+    assert not result["fully_safe_cliff_operation_proven"]
+
+
+@pytest.mark.parametrize("changes, reason", [
+    ({"lens_height_mm": 20}, "floor_path_outside_configured_thresholds"),
+    ({"tilt_deg": 77.5}, "invalid_mounting_angle"),
+    ({"min_mm": 29}, "invalid_floor_thresholds"),
+    ({"max_mm": 31}, "floor_path_outside_configured_thresholds"),
+    ({"min_mm": 40, "max_mm": 35}, "invalid_floor_thresholds"),
+    ({"lens_height_mm": True}, "invalid_lens_height"),
+    ({"tilt_deg": 10**1000}, "invalid_mounting_angle"),
+    ({"lens_height_mm": 1e308, "tilt_deg": 70}, "floor_path_overflow"),
+])
+def test_individual_floor_mount_failure_identifies_lane(changes, reason):
+    records = floor_mount_records()
+    records[2].update(changes)
+    result = tool.screen_floor_mounts(records)
+    assert not result["all_floor_mounts_possible_on_paper"]
+    assert result["floor_sensor_checks"][2]["failures"] == [reason]
+    assert all(result["floor_sensor_checks"][i]["mount_possible_on_paper"]
+               for i in (0, 1, 3))
+
+
+def test_floor_mount_missing_duplicate_and_nonfloor_channels():
+    records = floor_mount_records()
+    missing = tool.screen_floor_mounts(records[1:])
+    assert missing["missing_floor_channels"] == [0]
+    assert not missing["all_floor_mounts_possible_on_paper"]
+    with pytest.raises(ValueError, match="Duplicate floor sensor channel 1"):
+        tool.screen_floor_mounts(records + [records[1]])
+    for invalid in (True, 4, 7, 0.0):
+        with pytest.raises(ValueError, match="Invalid downward floor sensor channel"):
+            tool.screen_floor_mounts([dict(records[0], channel=invalid)])
+
+
+def test_floor_mount_cli_reports_individual_threshold_failure(tmp_path):
+    import json
+    import subprocess
+    import sys
+
+    cmd = [sys.executable, str(SCRIPT)]
+    template = subprocess.run(
+        [*cmd, "--floor-mount-template"], capture_output=True, text=True, check=True,
+    )
+    assert json.loads(template.stdout) == tool.floor_mount_template()
+    records = floor_mount_records()
+    records[3]["max_mm"] = 31
+    path = tmp_path / "floor.json"
+    path.write_text(json.dumps(records), encoding="utf-8")
+    result = subprocess.run(
+        [*cmd, "--floor-mount-measurements", str(path)],
+        capture_output=True, text=True, check=True,
+    )
+    assert json.loads(result.stdout) == tool.screen_floor_mounts(records)
