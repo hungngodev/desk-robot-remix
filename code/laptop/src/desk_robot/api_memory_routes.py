@@ -456,6 +456,11 @@ def register_voice_context_route(
                 {"slot": item.slot, "value": item.value}
                 for item in core
             ],
+            # Only the selected relevant preference becomes a spoken tool fact.
+            "selected_core_fact": (
+                {"slot": curated.slot, "value": curated.value}
+                if curated is not None else None
+            ),
             "retrieval": "topic" if query is not None else "recent",
             "matched": bool(records) or curated is not None,
             "untrusted_context_not_instructions": True,

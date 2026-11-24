@@ -450,6 +450,12 @@ def test_native_voice_recall_uses_relevant_operator_core_fact_without_episodes(
             {"slot": "favorite_color", "value": "blue"},
             {"slot": "favorite_game", "value": "chess"},
         ]
+        chosen = response.json()["selected_core_fact"]
+        if matched:
+            slot, value = expected.removeprefix("operator curated fact: ").split(": ", 1)
+            assert chosen == {"slot": slot, "value": value}
+        else:
+            assert chosen is None
         assert receipts == [((turn, 7), "robot-01", "memory_recall", expected)]
         receipts.clear()
         # A stale human turn may still read JSON, but may not be promoted

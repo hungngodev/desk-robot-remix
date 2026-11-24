@@ -605,9 +605,26 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
                 "witnessed": witnessed if type(witnessed) is bool else None,
                 "historical_untrusted_text": True,
             })
-        return {"source": "private_opt_in_memory_not_current_sight",
+        fact = {"source": "private_opt_in_memory_not_current_sight",
                 "private_memory_generation": revision,
                 "recollections": recollections}
+        selected = result.get("selected_core_fact")
+        if selected is not None:
+            if not isinstance(selected, dict):
+                return None
+            slot, value = selected.get("slot"), selected.get("value")
+            if (not isinstance(slot, str)
+                    or re.fullmatch(r"[a-z][a-z0-9_]{1,39}", slot) is None
+                    or not isinstance(value, str)
+                    or not 1 <= len(value) <= 200 or not value.strip()
+                    or result.get("matched") is not True):
+                return None
+            # Keep the actual preference intact; never reinterpret its text
+            # as instructions, a live observation, or a physical receipt.
+            fact["operator_curated_preference"] = {
+                "slot": slot, "value": value, "historical_untrusted_text": True,
+            }
+        return fact
     return None
 
 

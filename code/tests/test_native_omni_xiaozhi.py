@@ -3530,6 +3530,48 @@ def test_native_memory_recall_refuses_unversioned_or_invalid_private_fact(
     }) is None
 
 
+@pytest.mark.parametrize("selected", [
+    {"slot": "bad:slot", "value": "blue"},
+    {"slot": "favorite_color", "value": True},
+    {"slot": "favorite_color", "value": " "},
+    {"slot": "favorite_color", "value": "x" * 201},
+    ["favorite_color", "blue"],
+])
+def test_native_recall_refuses_malformed_selected_preference(native, selected):
+    module, _ = native
+    assert module.native_grounded_fact("voice-context", {
+        "private_memory_generation": 7, "memories": [], "matched": True,
+        "selected_core_fact": selected,
+    }) is None
+
+
+def test_native_recall_projects_only_selected_curated_preference(native):
+    module, _ = native
+    response = {
+        "robot_id": "robot-01", "private_memory_generation": 7,
+        "memories": [], "matched": True,
+        "core_facts": [{"slot": "favorite_color", "value": "blue"},
+                       {"slot": "private_unrelated", "value": "do not include"}],
+        "selected_core_fact": {"slot": "favorite_color", "value": "blue"},
+    }
+    fact = module.native_grounded_fact("voice-context", response)
+    assert fact["recollections"] == []
+    assert fact["private_memory_generation"] == 7
+    assert fact["operator_curated_preference"] == {
+        "slot": "favorite_color", "value": "blue", "historical_untrusted_text": True,
+    }
+    packed = module.pack_grounded_facts([fact], limit=512)
+    assert json.loads(packed) == [fact]
+    assert "private_unrelated" not in packed
+    response["selected_core_fact"] = None
+    assert "operator_curated_preference" not in module.native_grounded_fact(
+        "voice-context", response,
+    )
+    response["selected_core_fact"] = {"slot": "favorite_color", "value": "blue"}
+    response["matched"] = False
+    assert module.native_grounded_fact("voice-context", response) is None
+
+
 def test_native_memory_tool_preserves_eyewitness_and_peer_provenance(native):
     module, _ = native
     fact = module.native_grounded_fact("voice-context", {
