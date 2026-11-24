@@ -32,6 +32,36 @@ These blank fields are **intentional** and are not permission to guess a fit.
 | Maximum mounted chassis roll and pitch during loaded approach, and required static perimeter reserve | | stability_roll_max_deg / stability_pitch_max_deg / static_edge_margin_mm |
 | Actual printer minimum wall and hole clearance | | print_wall, clearance_xy |
 
+## IMU, eight ranging brackets and cable sweep evidence
+
+The selected installed IMU is the MPU6050 / GY-521. The reported BerryIMU is
+a spare; record its envelope separately only if an explicitly approved
+alternative mount is being evaluated. Do not mount both by default.
+
+| Interface | Actual measured value | Fusion parameter / evidence |
+| --- | --- | --- |
+| GY-521 populated PCB, mounting pitch and hole diameters, tallest part, solder/header and connector envelope | | imu_board_mount_envelope |
+| GY-521 body-frame axis orientation and retention, mounting surface and minimum surrounding clearance | | imu_axes / imu_mount / imu_min_clearance |
+| Optional spare BerryIMU revision and complete envelope, if evaluated separately | | spare_imu_revision / spare_imu_envelope |
+| Front VL53L0X PCB/retainer clearance with jaw stowed, extended and lifted | | front_tof_min_clearance_by_pose |
+| Rear VL53L0X PCB/retainer clearance to dock guides, backstop, contacts and wires | | rear_tof_min_clearance_by_pose |
+| Each downward, front, left, right and rear module: lens center XYZ in body frame, aim, actual connector envelope and unobstructed optical path | | tof_lane_geometry[8] |
+| XIAO camera flex and each internal signal cable: part/revision, thickness/width, connector withdrawal envelope, specified static/dynamic bend radius and observed minimum radius | | cable_route_records |
+| Each cable route: minimum free clearance to closed shell, screw tips, head bridge, tracks, rack, jaw, brackets and dock through all allowed motion | | cable_min_clearance_by_pose |
+| Cable restraints: location, protected edge/exit, service loop, verified strain relief and connector retention | | cable_restraint_records |
+
+Use Fusion Inspect > Interference on the real populated component envelopes
+and retain a separate measurement record for each lane and cable. Sweep the
+full permitted gripper and drivetrain travel, head removal and dock seating;
+a single nominal assembly pose is insufficient. Measure the camera ribbon's
+specified bend radius for its exact flex and connector; do not assume the
+wire-clip slot is suitable for a camera ribbon or that a tie is strain relief.
+Reject pinching, rubbing, hard folds, contact with moving/fastener parts and
+any unsupported clearance or bend-radius claim. Record the smallest measured
+gap and its pose; do not substitute an arbitrary generic tolerance for a
+supplier constraint or measured manufacturing stack-up. Start these trials
+unpowered and retain all existing physical safety and release gates.
+
 ## Supplier reference envelopes, not measured fit (November 21)
 
 These are verified seller or manufacturer **nominal board dimensions**, not
