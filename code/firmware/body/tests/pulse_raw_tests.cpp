@@ -15,6 +15,10 @@ int main() {
     const auto reversed = desk_robot::decode_optical_channels(two_led_fifo, true);
     CHECK(datasheet.red == 0x1234U && datasheet.ir == 0x12345U);
     CHECK(reversed.red == datasheet.ir && reversed.ir == datasheet.red);
+    CHECK(!desk_robot::optical_channels_saturated({0U, 0U}));
+    CHECK(!desk_robot::optical_channels_saturated({262142U, 262142U}));
+    CHECK(desk_robot::optical_channels_saturated({262143U, 0U}));
+    CHECK(desk_robot::optical_channels_saturated({0U, 262143U}));
     const desk_robot::OpticalRaw unknown{};
     CHECK(!unknown.present && !unknown.valid && unknown.ir == 0);
     CHECK(unknown.sample_seq == 0U); // boot cannot mimic a fresh touch

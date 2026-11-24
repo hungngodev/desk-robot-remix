@@ -23,6 +23,11 @@ inline OpticalChannels decode_optical_channels(const std::uint8_t* bytes,
   return ir_first ? OpticalChannels{second, first}
                   : OpticalChannels{first, second};
 }
+// Reject the 18-bit ADC rail; zero remains a legitimate dark reading.
+// Preserve the portable decoder's raw units and channel ordering.
+inline bool optical_channels_saturated(const OpticalChannels& channels) {
+  return channels.red == 0x3ffffU || channels.ir == 0x3ffffU;
+}
 struct OpticalRaw {
   bool present = false;
   bool valid = false;

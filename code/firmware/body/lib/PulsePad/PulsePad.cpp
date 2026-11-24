@@ -12,6 +12,8 @@ namespace {
 constexpr std::uint8_t kTofMux = 0x70;
 constexpr std::uint8_t kExtraMux = 0x71;
 constexpr std::uint8_t kMax30102 = 0x57;
+// MAX30102 datasheet, pp. 12-13: ALC_OVF signals contaminated ADC data.
+constexpr std::uint8_t kAmbientOverflow = 0x20;
 }
 bool PulsePad::select_mux(std::uint8_t address, std::uint8_t mask) {
   wire_->beginTransmission(address);
@@ -76,6 +78,7 @@ bool PulsePad::begin(TwoWire& wire) {
                  write_reg(0x0a, 0x23) &&
                  write_reg(0x0c, 0x07) &&
                  write_reg(0x0d, 0x07) &&
+                 write_reg(0x02, kAmbientOverflow) &&
                  write_reg(0x04, 0x00) &&
                  write_reg(0x05, 0x00) &&
                  write_reg(0x06, 0x00);
@@ -113,6 +116,15 @@ bool PulsePad::poll(std::uint32_t now_ms) {
     sample_.valid = false;
     return false;
   }
+  // Capture overflow before FIFO_DATA can clear interrupt status.
+  // A flagged batch has ambiguous optical quality; never publish it as touch.
+  std::uint8_t interrupt_status = 0;
+  if (!read_reg(0x00, interrupt_status)) {
+    fifo_unsynced_ = true;
+    (void)close();
+    sample_.valid = false;
+    return false;
+  }
   const std::uint8_t available =
       static_cast<std::uint8_t>((write_pointer - read_pointer) & 31U);
   // The MAX30102 FIFO_RD_PTR (0x06) is writable. If the body loop was
@@ -121,7 +133,8 @@ bool PulsePad::poll(std::uint32_t now_ms) {
   // Drop any ambiguous backlog without assigning it a new capture time.
   // A new reading must arrive on a later poll before an event is emitted.
   if (fifo_unsynced_ || missed_poll_window || available > 4U ||
-      (overflow & 31U) != 0U) {
+      (overflow & 31U) != 0U ||
+      (interrupt_status & kAmbientOverflow) != 0U) {
     // A full FIFO can wrap both pointers to the same value. The hardware
     // overflow counter is independent evidence that samples were lost.
     // Clear both old data and the overflow flag before accepting new ones.
@@ -158,6 +171,11 @@ bool PulsePad::poll(std::uint32_t now_ms) {
   // the actual generic carrier's optical response with each LED isolated.
   const auto channels = decode_optical_channels(
       latest, DESK_ROBOT_MAX30102_FIFO_IR_FIRST == 1);
+  // Full-scale ADC data cannot distinguish reflection from clipping.
+  if (optical_channels_saturated(channels)) {
+    sample_.valid = false;
+    return false;
+  }
   sample_.red = channels.red;
   sample_.ir = channels.ir;
   sample_.valid = true;

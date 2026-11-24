@@ -264,6 +264,42 @@ int main() {
     CHECK(overflow_pulse.sample().sample_seq == 1U);
     CHECK(overflow_pulse_wire.pulse_fifo_read_pointer == 2);
     CHECK(overflow_pulse_wire.ranges == 0 && overflow_pulse_wire.extras == 0);
+    // ALC saturation is independent of FIFO overflow.
+    TwoWire ambient_pulse_wire;
+    desk_robot::PulsePad ambient_pulse;
+    CHECK(ambient_pulse.begin(ambient_pulse_wire));
+    CHECK(ambient_pulse_wire.pulse_interrupt_enable == 0x20U);
+    CHECK(ambient_pulse.poll(0));
+    const auto good_optical = ambient_pulse.sample();
+    ambient_pulse_wire.pulse_fifo_write_pointer = 6;
+    ambient_pulse_wire.pulse_interrupt_status = 0x20U;
+    CHECK(!ambient_pulse.poll(100));
+    CHECK(!ambient_pulse.sample().valid);
+    CHECK(ambient_pulse.sample().sample_seq == good_optical.sample_seq);
+    CHECK(ambient_pulse.sample().at_ms == good_optical.at_ms);
+    CHECK(ambient_pulse_wire.pulse_fifo_read_pointer == 6U);
+    CHECK(ambient_pulse_wire.ranges == 0 && ambient_pulse_wire.extras == 0);
+    ambient_pulse_wire.pulse_fifo_write_pointer = 7;
+    ambient_pulse_wire.pulse_clip_ir = true;
+    CHECK(!ambient_pulse.poll(200));
+    CHECK(!ambient_pulse.sample().valid);
+    CHECK(ambient_pulse.sample().sample_seq == good_optical.sample_seq);
+    CHECK(ambient_pulse.sample().ir == good_optical.ir);
+    ambient_pulse_wire.pulse_clip_ir = false;
+    ambient_pulse_wire.pulse_fifo_write_pointer = 8;
+    ambient_pulse_wire.fail_pulse_status_read = true;
+    CHECK(!ambient_pulse.poll(300));
+    CHECK(!ambient_pulse.sample().valid);
+    CHECK(ambient_pulse.sample().sample_seq == good_optical.sample_seq);
+    ambient_pulse_wire.fail_pulse_status_read = false;
+    CHECK(!ambient_pulse.poll(400)); // quarantine flush, not fresh contact
+    CHECK(ambient_pulse_wire.pulse_fifo_read_pointer == 8U);
+    ambient_pulse_wire.pulse_fifo_write_pointer = 9;
+    CHECK(ambient_pulse.poll(500));
+    CHECK(ambient_pulse.sample().valid);
+    CHECK(ambient_pulse.sample().sample_seq == good_optical.sample_seq + 1U);
+    CHECK(ambient_pulse.sample().at_ms == 500U);
+    CHECK(ambient_pulse_wire.ranges == 0 && ambient_pulse_wire.extras == 0);
     // A failed FIFO read may have already consumed one record in silicon.
     // Remaining pre-failure frames have unknown capture time and must not
     // be reissued later as a freshly touched paw.

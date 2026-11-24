@@ -33,6 +33,10 @@ class TwoWire {
   std::uint8_t pulse_fifo_write_pointer = 4;
   std::uint8_t pulse_fifo_read_pointer = 0;
   std::uint8_t pulse_fifo_overflow = 0;
+  std::uint8_t pulse_interrupt_status = 0;
+  std::uint8_t pulse_interrupt_enable = 0;
+  bool fail_pulse_status_read = false;
+  bool pulse_clip_ir = false;
   unsigned failed_imu_writes = 0;
   unsigned imu_terminated_transmissions = 0;
   unsigned failed_mcp_writes = 0;
@@ -219,6 +223,7 @@ class TwoWire {
         if (register_address == 0x01) mcp_iodirb = outbound[1];
       }
       if (current_address == 0x57 && outbound.size() == 2) {
+        if (register_address == 0x02) pulse_interrupt_enable = outbound[1];
         if (register_address == 0x06)
           pulse_fifo_read_pointer = outbound[1] & 31U;
         if (register_address == 0x05)
@@ -343,6 +348,11 @@ class TwoWire {
     else if (addr == 0x28 && register_address == 0x2a) inbound = {cap_multi_touch_block};
     else if (addr == 0x28 && register_address == 0x44) inbound = {cap_config2};
     else if (addr == 0x57 && register_address == 0xFF) inbound = {0x15};
+    else if (addr == 0x57 && register_address == 0x00) {
+      if (fail_pulse_status_read) return 0;
+      inbound = {pulse_interrupt_status};
+      pulse_interrupt_status = 0; // read-to-clear
+    }
     else if (addr == 0x57 && register_address == 0x04)
       inbound = {pulse_fifo_write_pointer};
     else if (addr == 0x57 && register_address == 0x05)
@@ -352,9 +362,10 @@ class TwoWire {
     else if (addr == 0x57 && register_address == 0x07 && count <= 24 &&
              count % 6 == 0) {
       for (unsigned i = 0; i < count / 6; ++i) {
-        const unsigned red = 1000 + i, ir = 5000 + i;
+        const unsigned red = 1000 + i;
+        const unsigned ir = pulse_clip_ir ? 0x3ffffU : 5000 + i;
         inbound.insert(inbound.end(), {0, static_cast<std::uint8_t>(red >> 8),
-             static_cast<std::uint8_t>(red), 0,
+             static_cast<std::uint8_t>(red), static_cast<std::uint8_t>(ir >> 16),
              static_cast<std::uint8_t>(ir >> 8),
              static_cast<std::uint8_t>(ir)});
       }
