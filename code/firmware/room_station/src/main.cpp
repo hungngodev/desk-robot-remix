@@ -285,7 +285,7 @@ void number(float value, int decimals = 2) {
   // Only call after validating isfinite. Never emit NaN/Infinity JSON tokens.
   telemetry.print(value, decimals);
 }
-void scd_observation(uint32_t now) {
+void scd_step(uint32_t now) {
   if (scd_started) {
     bool ready = false;
     const int readiness_status = scd.getDataReadyStatus(ready);
@@ -300,9 +300,10 @@ void scd_observation(uint32_t now) {
         co2_ppm = ppm;
         scd_temp = t;
         scd_humidity = rh;
-        last_scd_ms = now;
+        last_scd_ms = millis();
       }
     }
+    now = millis();
     // A read/transport failure or missing conversions after a sensor reset
     // retires this SCD generation. Do not publish cached pre-reset CO2.
     scd_valid = desk_robot_room::scd_sample_valid_after_poll(
@@ -314,6 +315,8 @@ void scd_observation(uint32_t now) {
       scd_valid = false;
     }
   }
+}
+void scd_observation(uint32_t now) {
   const bool fresh = scd_started && scd_valid && now - last_scd_ms <= kScdStaleMs;
   telemetry.print(F("\"scd40\":{\"valid\":")); jsbool(fresh);
   if (fresh) {
@@ -366,7 +369,7 @@ void bme_step(uint32_t now) {
     // Publish every field together with the actual completed-conversion time.
     // Upstream scratch may be reset while the next conversion is pending.
     bme_completed.publish(bme.temperature, bme.humidity, bme.pressure,
-                          bme.gas_resistance, now);
+                          bme.gas_resistance, millis());
   } else {
     bme_completed.invalidate();
     bme_started = false;
@@ -406,18 +409,26 @@ void radar_observation(uint32_t now) {
   }
   telemetry.print('}');
 }
+#if ROOM_SOIL_FITTED
+desk_robot_room::SoilSample soil_sample;
+uint32_t soil_sample_ms = 0;
+#endif
+void soil_step() {
+#if ROOM_SOIL_FITTED
+  // Three actual ADC acquisitions; no moisture calibration is inferred.
+  soil_sample = desk_robot_room::read_soil_sample(
+      []() { return analogRead(A0); });
+  soil_sample_ms = millis();
+#endif
+}
 void soil_observation(uint32_t now) {
   telemetry.print(F("\"soil\":{\"valid\":"));
 #if ROOM_SOIL_FITTED
-  // Each report uses three actual bounded Arduino ADC acquisitions. Rail,
-  // saturation and gross noise faults must never appear as fresh plant
-  // evidence. This remains raw ADC, not moisture % or proof of a live probe.
-  const auto sample = desk_robot_room::read_soil_sample(
-      []() { return analogRead(A0); });
-  jsbool(sample.valid);
-  if (sample.valid) {
-    telemetry.print(F(",\"sample_ms\":")); telemetry.print(now);
-    telemetry.print(F(",\"raw_adc\":")); telemetry.print(sample.raw_adc);
+  const bool fresh = soil_sample.valid && now - soil_sample_ms <= kReportMs;
+  jsbool(fresh);
+  if (fresh) {
+    telemetry.print(F(",\"sample_ms\":")); telemetry.print(soil_sample_ms);
+    telemetry.print(F(",\"raw_adc\":")); telemetry.print(soil_sample.raw_adc);
   }
 #else
   (void)now;
@@ -481,7 +492,8 @@ void thermal_observation(uint32_t now) {
 }
 // Retry only one missing I2C peripheral in each main-loop pass. Each
 // attempt is spaced by the same monotonic millis() gate, including rollover.
-// A healthy radar, USB handshake, or unrelated sensor never waits on recovery.
+// Wait phases are split across passes. The pinned Wire core still has
+// synchronous hardware event waits without an I2C transaction timeout.
 bool begin_bme() {
   if (!bme.begin(kBmePrimary) && !bme.begin(kBmeAlternate))
     return false;
@@ -515,7 +527,7 @@ void recover_sensors(uint32_t now) {
     last_scd_ms = 0;
     scd.begin(Wire, SCD41_I2C_ADDR_62);
     // The pinned Sensirion stopPeriodicMeasurement() internally delay(500).
-    // Send that same documented command as one bounded I2C transaction;
+    // Send that same documented command as one I2C transaction;
     // start only after 500 ms in a different main-loop pass.
     Wire.beginTransmission(SCD41_I2C_ADDR_62);
     Wire.write(0x3f);
@@ -540,7 +552,7 @@ void report(uint32_t now) {
   // One bounded, newline-delimited source-of-observation frame each second.
   // Mac owns reconnect epochs, replay rejection, user consent and five pet
   // interpretation. The board does NOT speak, move, recognize or charge.
-  // Always acquire on schedule, even when an older USB line is in flight.
+  // Formatting uses only already completed sensor acquisitions.
   telemetry.reset();
   telemetry.print(F("{\"v\":1,\"station\":\"room-pod-01\",\"seq\":"));
   telemetry.print(++sequence);
@@ -564,7 +576,7 @@ void setup() {
   Wire.begin();
   Wire.setClock(100000);
   // Probes now run through recover_sensors() so a missing module at boot
-  // is retried without rebooting the Feather or blocking radar/USB service.
+  // is retried without deliberately sleeping through radar/USB service.
   Serial1.begin(256000);  // LD2410C, different UART from USB CDC Serial
   // Pinned ld2410 v0.2.2 otherwise blocks probing the optional radar
   // firmware for up to one second when the board is missing. Keep the
@@ -604,6 +616,10 @@ void loop() {
   now = millis();
   if (now - last_report_ms >= kReportMs) {
     last_report_ms = now;
+    // Acquire periodic sensors even when an older USB line is in flight.
+    scd_step(now);
+    soil_step();
+    now = millis();
     report(now);
   }
   usb_tx.step(Serial); // one FIFO-space-limited chunk; never wait for a reader

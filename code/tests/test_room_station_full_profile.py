@@ -217,7 +217,7 @@ def test_scd40_readiness_failure_invalidates_cached_measurement_in_runtime():
     # accidentally stops calling it. Keep the actual firmware consumer wired.
     source = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
     helper = (ROOT / "code/firmware/room_station/src/scd_sample_freshness.h").read_text()
-    poll = source.split("void scd_observation(uint32_t now) {", 1)[1].split(
+    poll = source.split("void scd_step(uint32_t now) {", 1)[1].split(
         "void bme_step(", 1
     )[0]
     assert '#include "scd_sample_freshness.h"' in source
@@ -300,6 +300,7 @@ def test_bme_pending_conversion_reports_only_last_completed_tuple():
     assert "bme_completed.invalidate();" in failed_begin
     assert "bme_started = false;" in failed_begin
     assert "bme_completed.publish(" in scan
+    assert "bme.gas_resistance, millis());" in scan
     assert "bme_completed.invalidate();" in scan
     assert "bme_completed.fresh(now, kBmeStaleMs)" in report
     assert "now_ms - sample_ms <= max_age_ms" in helper
@@ -709,3 +710,19 @@ int main() {
     )
     subprocess.run([str(executable)], check=True, capture_output=True,
                    text=True, timeout=15)
+
+
+def test_room_report_uses_completed_sensor_acquisitions():
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    scd = src.split("void scd_step(", 1)[1].split("void scd_observation(", 1)[0]
+    scd_format = src.split("void scd_observation(", 1)[1].split("void bme_step(", 1)[0]
+    soil = src.split("void soil_step()", 1)[1].split("void soil_observation(", 1)[0]
+    soil_format = src.split("void soil_observation(", 1)[1].split("void thermal_step(", 1)[0]
+    loop = src.split("void loop() {", 1)[1]
+    assert scd.index("scd.readMeasurement(") < scd.index("last_scd_ms = millis();")
+    assert "scd.getDataReadyStatus" not in scd_format
+    assert "scd.readMeasurement" not in scd_format
+    assert soil.index("read_soil_sample(") < soil.index("soil_sample_ms = millis();")
+    assert "analogRead(" not in soil_format
+    assert "telemetry.print(soil_sample_ms);" in soil_format
+    assert "scd_step(now);\n    soil_step();\n    now = millis();\n    report(now);" in loop
