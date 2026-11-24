@@ -1815,6 +1815,32 @@ async def test_social_group_activity_never_impersonates_operator(
                                origin="untrusted_tool_result")
 
 
+@pytest.mark.parametrize(
+    ("question", "requested"),
+    [
+        ("Check your battery and do you remember the mug?", True),
+        ("Look at the desk; please remind me about the key", True),
+        ("Check your battery and then what did I say yesterday?", True),
+        ("What did I say yesterday and can you look at the mug?", True),
+        ("Look at the mug and the key", False),
+        ("Look at the mug and do you see the key?", False),
+    ],
+)
+def test_compound_memory_clause_discloses_omitted_current_receipt(
+    question, requested,
+):
+    # The bounded timeline may omit a completed receipt before composition.
+    # Explicit memory clauses count regardless of their position in ASR.
+    timeline = [
+        {"channel": "human_transcript", "kind": "model_asr_completed",
+         "content": question, "omitted_current_tool_kinds": ["memory_recall"]},
+    ]
+    result = compose_brain_context([], [], timeline).interaction
+    assert ("Some requested tool results did not fit" in result) is requested
+    assert "Recent model ASR guess" in result
+    assert len(result) <= 400
+
+
 def test_over_capacity_requested_tool_results_must_disclose_omission():
     # A real compound user question can exceed the fixed 400-character
     # context when a concurrent WROOM fault and large tool receipts arrive.

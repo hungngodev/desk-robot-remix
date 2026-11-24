@@ -397,12 +397,13 @@ def compose_brain_context(
     # uncertain language evidence, never a command or actuator permit.
     requested_tools: set[str] = set()
     for heard in heard_requests:
-        if re.match(
-            r"^(?:hey [a-z]+[, ]+|please )*"
+        if re.search(
+            r"(?:^(?:hey [a-z]+[, ]+|please )*|"
+            r"(?:\b(?:and|then|also)\s+|[,;]\s*)(?:please )*)"
             r"(?:what do you remember|do you (?:remember|recall)|"
             r"what did i (?:tell|say)|(?:can you )?remind me|"
             r"tell me what you remember|did we (?:talk|discuss)|"
-            r"what did we (?:discuss|talk))",
+            r"what did we (?:discuss|talk))\b",
             heard,
         ):
             requested_tools.add("memory_recall")
