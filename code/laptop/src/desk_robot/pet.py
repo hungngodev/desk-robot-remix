@@ -2046,6 +2046,7 @@ class PetController:
                             robot_id, change, generation, received,
                             preemption_epoch,
                             camera_consent_generation=camera_consent_generation,
+                            camera_generation=hub_generation,
                         )
                         # The cosmetic HTTP request may take a full second.
                         # A newer human turn, disabled camera consent or a
@@ -2107,6 +2108,7 @@ class PetController:
         self, robot_id: str, change: SceneChange,
         generation: int, captured_at: float, preemption_epoch: int,
         camera_consent_generation: int | None = None,
+        camera_generation: int | None = None,
     ) -> None:
         """Animate this head only for a fresh, credible live person observation.
 
@@ -2123,6 +2125,7 @@ class PetController:
                 or (camera_consent_generation is not None
                     and self.settings.camera_consent_generation
                         != camera_consent_generation)
+                or not self._camera_generation_current(robot_id, camera_generation)
                 or self._vision_preemption_epoch != preemption_epoch
                 or self._human_active_in_fleet(now)
                 or now - captured_at > self.max_observation_age
@@ -2149,6 +2152,7 @@ class PetController:
                 and (camera_consent_generation is None
                      or self.settings.camera_consent_generation
                         == camera_consent_generation)
+                and self._camera_generation_current(robot_id, camera_generation)
                 and self._vision_preemption_epoch == preemption_epoch
                 and not self._human_active_in_fleet(confirmed_at)
                 and confirmed_at - captured_at <= self.max_observation_age
