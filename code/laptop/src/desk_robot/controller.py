@@ -125,6 +125,8 @@ class Coordinator:
         self.permits: dict[str, float] = {}
         self.shutdown_stop_failures: dict[str, str] = {}
         self._permit_epoch = {r.id: 0 for r in settings.robots}
+        self._pending_stops: dict[str, int] = {}
+        self._unconfirmed_stops: set[str] = set()
 
     def robot(self, robot_id):
         try:
@@ -224,6 +226,8 @@ class Coordinator:
             raise OperationError("Coordinator closing")
         if not robot.motion_enabled:
             raise OperationError("motion_enabled=false; no arm sent")
+        if robot_id in self._pending_stops or robot_id in self._unconfirmed_stops:
+            raise OperationError("WROOM STOP pending or unconfirmed; require acknowledged halt")
         if self.locks[robot_id].locked() or any(
             j.robot_id == robot_id and j.state in {"queued", "running"} for j in self.jobs.values()
         ):
@@ -249,6 +253,23 @@ class Coordinator:
 
     async def stop(self, robot_id: str):
         self.robot(robot_id)
+        # Fence new permits and fleet admission even for an idle body. An
+        # explicit STOP without a job owner must still require a valid receipt.
+        self._pending_stops[robot_id] = self._pending_stops.get(robot_id, 0) + 1
+        try:
+            acknowledgement = await self._stop(robot_id)
+        except BaseException:
+            self._unconfirmed_stops.add(robot_id)
+            raise
+        else:
+            self._unconfirmed_stops.discard(robot_id)
+            return acknowledgement
+        finally:
+            self._pending_stops[robot_id] -= 1
+            if not self._pending_stops[robot_id]:
+                del self._pending_stops[robot_id]
+
+    async def _stop(self, robot_id: str):
         self._permit_epoch[robot_id] += 1
         self.permits.pop(robot_id, None)
         running = [
@@ -413,6 +434,8 @@ class Coordinator:
             raise OperationError(
                 "Fleet motion busy: one moving pet until WROOM STOP is acknowledged"
             )
+        if self._pending_stops or self._unconfirmed_stops:
+            raise OperationError("Fleet motion blocked: WROOM STOP pending or unconfirmed")
         # Retain only bounded history; never accumulate infinite tasks/results in a long-running server.
         if len(self.jobs) >= 100:
             for jid in list(self.jobs):

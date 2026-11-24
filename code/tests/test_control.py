@@ -1672,3 +1672,60 @@ async def test_motor_backend_change_during_status_never_creates_permit(settings)
     finally:
         resume.set()
         await coordinator.close()
+
+
+async def test_idle_stop_fences_fresh_permit_and_peer_motion_until_ack(settings):
+    c, head = make(settings)
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    original = head.command
+
+    async def delayed_halt(command):
+        if command == "halt":
+            entered.set()
+            await release.wait()
+        return await original(command)
+
+    head.command = delayed_halt
+    await c.operator_arm("robot-02")
+    stopping = asyncio.create_task(c.stop("robot-01"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=0.5)
+        with pytest.raises(OperationError, match="STOP pending"):
+            await c.operator_arm("robot-01")
+        with pytest.raises(OperationError, match="STOP pending"):
+            c.manual("robot-02", "drive 10 10 100")
+        assert "robot-01" not in c.permits
+        assert "robot-02" in c.permits
+        release.set()
+        assert (await stopping)["ok"] is True
+        await c.operator_arm("robot-01")
+        job = c.manual("robot-01", "drive 10 10 100")
+        await c.tasks[job.id]
+        assert job.state == "succeeded"
+    finally:
+        release.set()
+        await asyncio.gather(stopping, return_exceptions=True)
+        await c.close()
+
+
+async def test_failed_idle_stop_requires_explicit_acknowledged_recovery(settings):
+    c, head = make(settings)
+    await c.operator_arm("robot-02")
+    head.fail_command = "halt"
+    try:
+        with pytest.raises(Exception):
+            await c.stop("robot-01")
+        with pytest.raises(OperationError, match="STOP pending or unconfirmed"):
+            await c.operator_arm("robot-01")
+        with pytest.raises(OperationError, match="STOP pending or unconfirmed"):
+            c.manual("robot-02", "drive 10 10 100")
+        assert "robot-02" in c.permits
+        head.fail_command = None
+        assert (await c.stop("robot-01"))["ok"] is True
+        job = c.manual("robot-02", "drive 10 10 100")
+        await c.tasks[job.id]
+        assert job.state == "succeeded"
+    finally:
+        head.fail_command = None
+        await c.close()
