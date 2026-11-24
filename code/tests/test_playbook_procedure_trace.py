@@ -184,54 +184,56 @@ def test_physical_procedures_cannot_be_promoted_by_source_only_receipts():
         row["last_verified_sha"] = "a" * 40
         row["executed_test_receipt"] = {
             "sha": "a" * 40, "exit_code": 0,
-            "command": "cd code && python scripts/verify_system.py --suite all",
+            "command": row["verification_command"],
             "url": "https://github.com/hungngodev/desk-robot-remix/actions/runs/1",
         }
+        # A source-only receipt is otherwise structurally valid. Isolate
+        # the physical classification as the reason for rejection.
         assert not _valid_release_evidence(row), index
+        assert _valid_release_evidence({**row, "evidence_class": "source"}), index
 
 
-def test_physical_receipts_reject_placeholder_or_wrong_sha_urls():
+def _physical_receipt_fixture():
+    """A structurally valid synthetic receipt, never actual bench evidence."""
     row = json.loads(LEDGER.read_text())["procedures"][88].copy()
     assert row["evidence_class"] == "physical"
     sha = "a" * 40
     row.update(gate="MEASURED", last_verified_sha=sha)
     row["executed_test_receipt"] = {
-        "sha": sha, "exit_code": 0, "command": "cd code && true",
+        "sha": sha, "exit_code": 0, "command": row["verification_command"],
         "url": "https://github.com/hungngodev/desk-robot-remix/actions/runs/1",
     }
     row["physical_measurement_receipt"] = {
         "result": "pass", "operator": "fixture_operator_001",
         "device_revision": "fixture_pcb_rev_A",
-        "raw_data_url": "https://github.com/example/bench-trial",
-    }
-    assert not _valid_release_evidence(row)
-    row["physical_measurement_receipt"]["raw_data_url"] = (
-        "https://example.com/docs/records/bench.csv")
-    assert not _valid_release_evidence(row)
-    row["physical_measurement_receipt"]["raw_data_url"] = (
-        "https://github.com/hungngodev/desk-robot-remix/blob/"
-        + "b" * 40 + "/docs/records/bench.csv")
-    assert not _valid_release_evidence(row)
-
-
-def test_physical_receipts_reject_obvious_placeholder_people_and_devices():
-    row = json.loads(LEDGER.read_text())["procedures"][88].copy()
-    sha = "a" * 40
-    row.update(gate="MEASURED", last_verified_sha=sha)
-    row["executed_test_receipt"] = {
-        "sha": sha, "exit_code": 0, "command": "cd code && true",
-        "url": "https://github.com/hungngodev/desk-robot-remix/actions/runs/1",
-    }
-    row["physical_measurement_receipt"] = {
-        "result": "pass", "operator": "bench engineer",
-        "device_revision": "received carrier revision",
         "raw_data_url": ("https://github.com/hungngodev/desk-robot-remix/"
                          "blob/" + sha + "/docs/records/bench.csv"),
     }
-    assert not _valid_release_evidence(row)
-    row["physical_measurement_receipt"]["operator"] = "fixture_operator_001"
+    assert _valid_release_evidence(row)
+    return row
+
+
+@pytest.mark.parametrize("url", [
+    "https://github.com/example/bench-trial",
+    "https://example.com/docs/records/bench.csv",
+    ("https://github.com/hungngodev/desk-robot-remix/blob/"
+     + "b" * 40 + "/docs/records/bench.csv"),
+])
+def test_physical_receipts_reject_placeholder_or_wrong_sha_urls(url):
+    row = _physical_receipt_fixture()
+    row["physical_measurement_receipt"]["raw_data_url"] = url
     assert not _valid_release_evidence(row)
 
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("operator", "bench engineer"),
+    ("device_revision", "received carrier revision"),
+    ("result", "fail"),
+])
+def test_physical_receipts_reject_invalid_signoff(field, value):
+    row = _physical_receipt_fixture()
+    row["physical_measurement_receipt"][field] = value
+    assert not _valid_release_evidence(row)
 
 
 def test_manual_process_procedures_need_review_receipts_beyond_green_ci():
