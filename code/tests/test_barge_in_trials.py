@@ -481,3 +481,58 @@ def test_distinct_speaker_ids_with_whitespace_preserve_a2_coverage():
     report = evaluate(parse_trial_jsonl("\n".join(json.dumps(row) for row in rows)))
     assert report["coverage"]["human_speakers"] == 2
     assert report["meets_proposed_gate"] is True
+
+
+def test_echo_only_failure_independently_blocks_a2():
+    rows = both_distances()
+    rows[-2]["self_interruptions"] = 1
+    report = evaluate(rows)
+    assert report["self_interruptions"] == 1
+    assert all(
+        band["meets_human_gate"] for band in report["distance_results"].values()
+    )
+    assert report["meets_proposed_gate"] is False
+
+
+@pytest.mark.parametrize(("latency_ms", "expected_stops", "passes"), [
+    (499.999, 20, True),
+    (500, 20, True),
+    (500.001, 18, False),
+])
+def test_acoustic_stop_threshold_is_inclusive_and_per_distance(
+    latency_ms, expected_stops, passes,
+):
+    rows = both_distances()
+    for row in rows[20:22]:
+        row["audible_stop_ms"] = row["human_onset_ms"] + latency_ms
+    report = evaluate(parse_trial_jsonl("\n".join(json.dumps(row) for row in rows)))
+    near = report["distance_results"]["50cm"]
+    far = report["distance_results"]["100cm"]
+    assert near["meets_human_gate"] is True
+    assert far["audible_stops_within_500ms"] == expected_stops
+    assert far["new_intents_understood"] == 20
+    assert far["meets_human_gate"] is passes
+    assert report["meets_proposed_gate"] is passes
+
+
+@pytest.mark.parametrize(("lost_starts", "passes"), [(2, True), (3, False)])
+def test_lost_utterance_start_fails_intent_without_failing_stop(lost_starts, passes):
+    rows = both_distances()
+    for row in rows[20:20 + lost_starts]:
+        row["utterance_beginning_intelligible"] = False
+        row["new_intent_correct"] = False
+    report = evaluate(rows)
+    near = report["distance_results"]["50cm"]
+    far = report["distance_results"]["100cm"]
+    assert near["meets_human_gate"] is True
+    assert far["audible_stops_within_500ms"] == 20
+    assert far["new_intents_understood"] == 20 - lost_starts
+    assert far["meets_human_gate"] is passes
+    assert report["meets_proposed_gate"] is passes
+
+
+def test_correct_intent_cannot_be_claimed_if_utterance_start_was_lost():
+    rows = both_distances()
+    rows[0]["utterance_beginning_intelligible"] = False
+    with pytest.raises(ValueError, match="Correct intent requires captured"):
+        evaluate(rows)
