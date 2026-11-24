@@ -206,3 +206,59 @@ def test_plain_odometry_remains_pending_with_current_camera(tmp_path):
         current_origin=(7, "odom-1"), current_camera=(11, 4, 900_000),
     )
     assert sighting is not None and sighting.status == "pending_localization"
+
+
+def test_overlapping_robot_receipt_ids_recover_and_remain_private(tmp_path):
+    root = tmp_path / "private"
+    robots = ["robot-01", "robot-02"]
+    db = MemoryStore(root, robots)
+    spatial = SpatialMemory(db)
+    when = time.time() - 1
+    first = evidence(when)
+    second = replace(
+        first, origin_id="odom-2", calibration_id="cal-b", x_mm=-80, y_mm=60,
+    )
+    event = "shared_event_id"
+    for robot in robots:
+        assert remember(db, robot, event, when)
+
+    assert spatial.attach(robots[0], event, first)
+    with pytest.raises(ValueError, match="Unknown robot"):
+        spatial.attach("foreign-pet", event, second)
+    assert not spatial.attach(
+        robots[1], event, replace(second, camera_complete_us=900_001),
+    )
+    assert spatial.last_seen(robots[1], "flat_key", now=when + 0.1) is None
+    assert spatial.attach(robots[1], event, second)
+
+    # Same event and sensor counters are legitimate on different robots.
+    # Distinct private local origins are not claims of measured map anchors.
+    reopened = MemoryStore(root, robots)
+    spatial = SpatialMemory(reopened)
+    for robot, expected in zip(robots, (first, second), strict=True):
+        sighting = spatial.last_seen(
+            robot, "flat_key", now=when + 0.1,
+            current_origin=(expected.body_boot, expected.origin_id),
+            current_camera=(11, 4, 900_000),
+        )
+        assert sighting is not None
+        assert sighting.event_id == event
+        assert sighting.evidence == expected
+        assert sighting.status == "pending_localization"
+    assert spatial.last_seen(
+        robots[1], "flat_key", now=when + 0.1,
+        current_origin=(first.body_boot, first.origin_id),
+        current_camera=(11, 4, 900_000),
+    ).status == "invalid_origin"
+
+    assert reopened.forget_episode(robots[0], event)
+    assert not spatial.attach(robots[0], event, first)
+    assert not remember(reopened, robots[0], event, when)
+    assert spatial.last_seen(robots[0], "flat_key", now=when + 0.1) is None
+    remaining = spatial.last_seen(
+        robots[1], "flat_key", now=when + 0.1,
+        current_origin=(second.body_boot, second.origin_id),
+        current_camera=(11, 4, 900_000),
+    )
+    assert remaining is not None and remaining.evidence == second
+    assert remaining.status == "pending_localization"
