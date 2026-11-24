@@ -42,6 +42,7 @@ class VoiceEventListener:
         self.handled = 0
         self.last_error: str | None = None
         self._stream_failed = False
+        self._stream_abort_pending = False
         # A callback can suppress CancelledError; keep its real task as the
         # ownership token until it finishes instead of launching duplicates.
         self._global_abort_task: asyncio.Task | None = None
@@ -200,7 +201,19 @@ class VoiceEventListener:
         if self.on_speech_snapshot is not None and "active_human_robots" in data:
             await self.on_speech_snapshot(frozenset(data["active_human_robots"]))
 
+    async def _abort_unavailable(self) -> None:
+        # A recovered HTTP stream does not acknowledge the global audio
+        # abort. Retain the obligation through failure or cancellation.
+        self._stream_abort_pending = True
+        await self._preempt_all("stream_unavailable")
+        self._stream_abort_pending = False
+        self._stream_failed = True
+
     async def poll(self) -> int:
+        if self._stream_abort_pending:
+            # Finish the previous outage's shared audio interruption before
+            # consuming any new events or advertising monitor recovery.
+            await self._abort_unavailable()
         if self.cursor is None:
             data = await self._fetch(bootstrap=True)
             if data["events"]:
@@ -361,6 +374,7 @@ class VoiceEventListener:
 
     async def run(self) -> None:
         while True:
+            retrying_abort = self._stream_abort_pending
             try:
                 await self.poll()
                 await asyncio.sleep(0.1)
@@ -380,10 +394,13 @@ class VoiceEventListener:
                     self.last_error += "; voice generation invalidation failed"
                 # A failed abort must be retried on the next outage tick;
                 # do not mark it delivered before the real owner accepts it.
-                if not self._stream_failed:
+                if retrying_abort and self._stream_abort_pending:
+                    # poll() already attempted the outstanding abort.
+                    # Do not launch a second attempt in the same tick.
+                    self.last_error += f"; preempt failed: {type(exc).__name__}"
+                elif not self._stream_failed:
                     try:
-                        await self._preempt_all("stream_unavailable")
-                        self._stream_failed = True
+                        await self._abort_unavailable()
                     except Exception as cancel_exc:
                         self.last_error += f"; preempt failed: {type(cancel_exc).__name__}"
                 try:

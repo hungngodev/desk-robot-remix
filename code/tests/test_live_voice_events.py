@@ -659,6 +659,73 @@ async def test_failed_global_abort_is_retried_while_voice_stream_is_unavailable(
             await asyncio.gather(task, return_exceptions=True)
 
 
+async def test_recovered_transport_cannot_bypass_unconfirmed_global_abort():
+    """An authenticated reconnect is not a receipt for a failed fleet STOP."""
+    import asyncio
+
+    requests = 0
+    abort_attempts = []
+    health = []
+    next_transition = asyncio.Event()
+    allow_retry = asyncio.Event()
+
+    def mock(_request):
+        nonlocal requests
+        requests += 1
+        if requests == 2:
+            return httpx.Response(503, json={"error": "temporarily unavailable"})
+        return httpx.Response(200, json={
+            "cursor": 4, "events": [], "reset": False, "lost": False,
+        })
+
+    async def global_abort(reason):
+        abort_attempts.append(reason)
+        if len(abort_attempts) == 1:
+            raise OSError("Native head STOP unconfirmed")
+        next_transition.set()
+        await allow_retry.wait()
+
+    async def monitor(ready):
+        health.append(ready)
+        if ready and len(health) > 1:
+            next_transition.set()
+
+    async def on_event(_robot_id, _reason):
+        raise AssertionError("No voice events expected")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01", "robot-02"}, on_interrupt=on_event,
+            on_global_interrupt=global_abort, on_monitor_ready=monitor,
+        )
+        await listener.poll()
+        runner = asyncio.create_task(listener.run())
+        try:
+            await asyncio.wait_for(next_transition.wait(), timeout=3)
+            assert abort_attempts == ["stream_unavailable", "stream_unavailable"]
+            assert requests == 2
+            assert health == [True, False]
+            assert listener.monitor_ready is False
+            assert listener._stream_abort_pending is True
+            allow_retry.set()
+
+            async def recovered():
+                while not listener.monitor_ready:
+                    await asyncio.sleep(0)
+
+            await asyncio.wait_for(recovered(), timeout=2)
+            assert requests >= 3
+            assert health == [True, False, True]
+            assert listener._stream_abort_pending is False
+            assert listener._stream_failed is False
+            assert listener.last_error is None
+        finally:
+            allow_retry.set()
+            runner.cancel()
+            await asyncio.gather(runner, return_exceptions=True)
+
+
 async def test_slow_voice_head_cannot_block_other_fleet_interrupts():
     import asyncio
 
