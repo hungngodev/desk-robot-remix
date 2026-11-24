@@ -43,9 +43,49 @@ static void check_register_precision() {
     else check_floor(uv, 5 * signed_code, 2);
   }
 }
+static void check_gesture_boundaries() {
+  desk_robot::GestureDecoder g;
+  const auto classify = [&g](std::uint8_t u, std::uint8_t d,
+                              std::uint8_t l, std::uint8_t r) {
+    g.push(100, 100, 100, 100);
+    g.push(100, 100, 100, 100);
+    g.push(u, d, l, r);
+    return g.finish();
+  };
+  // Each pair sums to 200, so ratio differences are exact integers.
+  CHECK(classify(71, 129, 100, 100) == 0); // 29: below threshold
+  CHECK(classify(70, 130, 100, 100) == 1); // 30: inclusive
+  CHECK(classify(130, 70, 100, 100) == 2);
+  CHECK(classify(100, 100, 70, 130) == 3);
+  CHECK(classify(100, 100, 130, 70) == 4);
+  CHECK(classify(70, 130, 115, 85) == 0); // exact 2:1 rejected
+  CHECK(classify(70, 130, 114, 86) == 1); // strictly dominant
+  CHECK(classify(114, 86, 130, 70) == 4);
+  CHECK(classify(60, 140, 60, 140) == 0); // equal axes: diagonal
+  // A dark sample must not create a third qualified FIFO observation.
+  g.push(100, 100, 100, 100);
+  g.push(0, 39, 100, 100);
+  g.push(70, 130, 100, 100);
+  CHECK(g.finish() == 0);
+  g.push(100, 100, 100, 100);
+  g.push(100, 100, 39, 0);
+  g.push(100, 100, 130, 70);
+  CHECK(g.finish() == 0);
+  // The exact optical threshold of 40 is accepted.
+  g.push(20, 20, 20, 20);
+  g.push(20, 20, 20, 20);
+  g.push(14, 26, 20, 20);
+  CHECK(g.finish() == 1);
+  // Counter saturation must not wrap to zero and erase a long gesture.
+  for (unsigned i = 0; i < 256; ++i) g.push(100, 100, 100, 100);
+  g.push(70, 130, 100, 100);
+  CHECK(g.finish() == 1);
+  CHECK(g.finish() == 0);
+}
 int main() {
   try {
     check_register_precision();
+    check_gesture_boundaries();
     const std::uint8_t known[2] = {0xBE, 0xEF};
     CHECK(desk_robot::sensirion_crc(known, 2) == 0x92);
     CHECK(desk_robot::sht_temp_centi(0) == -4500);
