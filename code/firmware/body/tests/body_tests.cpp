@@ -395,14 +395,25 @@ void guarded_head_timeout_cannot_rearm_from_reconnected_uart() {
     CHECK(send(body, "arm", 0) == "OK arm");
     CHECK(send(body, "drive 20 20 250", 0) ==
           "OK drive left=20 right=20 ms=250");
-    for (std::uint32_t now = 50; now <= 500; now += 50) {
+    CHECK(body.watchdog_remaining(0) == 200);
+    for (const std::uint32_t now : {50U, 100U, 150U, 199U}) {
       refresh(now); // The cliff guard does not expire first.
       body.tick(now);
-      if (now == 200)
-        CHECK(body.state().armed && body.state().left == 20);
+      CHECK(body.state().armed && body.state().left == 20);
     }
-    CHECK(!body.state().armed);
+    CHECK(body.watchdog_remaining(199) == 1);
+    CHECK(send(body, "status", 199).find("\"watchdog_ms\":1") !=
+          std::string::npos);
+    refresh(200);
+    // A late keepalive cannot restore expired motion or avoid the latch.
+    CHECK(send(body, "keepalive", 200) == "ERR keepalive disarmed");
+    CHECK(!body.state().armed && body.state().servos_attached);
     CHECK(body.state().left == 0 && body.state().right == 0);
+    for (std::uint32_t now = 250; now <= 500; now += 50) {
+      refresh(now);
+      body.tick(now);
+      CHECK(!body.state().armed);
+    }
     const auto status = send(body, "status", 500);
     CHECK(status.find("\"fault\":\"command_timeout_latched\"") !=
           std::string::npos);
@@ -426,8 +437,20 @@ void guarded_head_timeout_cannot_rearm_from_reconnected_uart() {
     CHECK(body.state().left == 0 && body.state().right == 0);
     CHECK(send(body, "arm", 502) == "OK arm");
     CHECK(body.state().left == 0);
-    CHECK(send(body, "drive 20 20 100", 502) ==
-          "OK drive left=20 right=20 ms=100");
+    CHECK(send(body, "drive 20 20 250", 502) ==
+          "OK drive left=20 right=20 ms=250");
+    for (const std::uint32_t now : {552U, 602U, 652U, 702U, 751U}) {
+      refresh(now);
+      if (now == 602U)
+        CHECK(send(body, "keepalive", now) == "OK keepalive");
+      body.tick(now);
+      CHECK(body.state().armed && body.state().left == 20);
+    }
+    refresh(752);
+    body.tick(752); // original drive duration expires, not extended by keepalive
+    CHECK(body.state().armed && body.state().left == 0 &&
+          body.state().right == 0);
+    CHECK(body.watchdog_remaining(752) == 350);
   }
 }
 

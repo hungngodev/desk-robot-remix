@@ -6,6 +6,12 @@
 
 namespace desk_robot {
 namespace {
+// A live wheel command has a stricter host-silence limit than the idle
+// arm/servo lease. The CPU heartbeat is an independent 45 ms safety path.
+constexpr std::uint32_t kActiveWheelHostTimeoutMs = 200;
+static_assert(kActiveWheelHostTimeoutMs < kWatchdogMs,
+              "active wheel timeout must precede the idle lease");
+
 // This is a compile choice for the selected MAX30102 FIFO carrier, not
 // an optical proof that the received PCB routes its red and IR LEDs that way.
 #if defined(DESK_ROBOT_MAX30102_FIFO_IR_FIRST) && DESK_ROBOT_MAX30102_FIFO_IR_FIRST
@@ -880,7 +886,10 @@ void BodyControl::force_disarm() {
 std::uint32_t BodyControl::watchdog_remaining(std::uint32_t now_ms) const {
   if (!state_.armed) return 0;
   const std::uint32_t elapsed = now_ms - last_control_ms_;
-  return elapsed >= kWatchdogMs ? 0 : kWatchdogMs - elapsed;
+  const auto limit = guarded_motion_profile() &&
+      (state_.left != 0 || state_.right != 0) ?
+      kActiveWheelHostTimeoutMs : kWatchdogMs;
+  return elapsed >= limit ? 0 : limit - elapsed;
 }
 
 std::uint32_t BodyControl::drive_remaining(std::uint32_t now_ms) const {
@@ -972,7 +981,10 @@ void BodyControl::tick(std::uint32_t now_ms) {
   }
   if (!state_.armed) return;
   // Unsigned elapsed arithmetic remains correct when millis() wraps.
-  if (now_ms - last_control_ms_ >= kWatchdogMs) {
+  if (watchdog_remaining(now_ms) == 0) {
+    // Never ramp through an expired wheel lease: apply_outputs writes zero
+    // duty to both bridge inputs on this pass. Physical coast/current and
+    // supply transients require bench qualification, not a delayed STOP.
     // The head link expired. In a physically guarded build, a reconnecting
     // head must not silently restore drive permission with an old ARM.
     // A fresh USB recovery is required, even when ranges remain healthy.
