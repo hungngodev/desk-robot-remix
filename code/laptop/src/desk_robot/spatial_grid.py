@@ -65,6 +65,8 @@ class _Cell:
     floor_sample_us: int = 0
     obstacle_calibration: str = ""
     floor_calibration: str = ""
+    obstacle_epoch: int = -1
+    floor_epoch: int = -1
 
 
 class SpatialGrid:
@@ -163,9 +165,10 @@ class SpatialGrid:
             if target is None:
                 continue
             calibration = target.floor_calibration if floor_layer else target.obstacle_calibration
+            epoch = target.floor_epoch if floor_layer else target.obstacle_epoch
             sample = target.floor_sample_us if floor_layer else target.obstacle_sample_us
             receipt = target.floor_received_us if floor_layer else target.obstacle_received_us
-            if calibration == batch.calibration_id and (
+            if calibration == batch.calibration_id and epoch == batch.epoch and (
                     batch.sample_us < sample or batch.received_us < receipt
                     or (clearing and batch.sample_us == sample)):
                 raise GridEvidenceError("Out-of-order cell evidence")
@@ -178,10 +181,12 @@ class SpatialGrid:
                 target.floor_received_us = batch.received_us
                 target.floor_sample_us = batch.sample_us
                 target.floor_calibration = batch.calibration_id
+                target.floor_epoch = batch.epoch
             else:
                 # Evidence from a different geometry must never cancel a fresh
                 # obstacle hit or lend false clearance after recalibration.
                 if (target.obstacle_calibration != batch.calibration_id
+                        or target.obstacle_epoch != batch.epoch
                         or target.obstacle_received_us == 0
                         or not 0 <= batch.received_us - target.obstacle_received_us <= self.ttl_us):
                     # An expired prior hit or clearance cannot bias fresh evidence.
@@ -192,6 +197,7 @@ class SpatialGrid:
                 target.obstacle_received_us = batch.received_us
                 target.obstacle_sample_us = batch.sample_us
                 target.obstacle_calibration = batch.calibration_id
+                target.obstacle_epoch = batch.epoch
         self._last_source[batch.lane] = (
             batch.sequence, batch.sample_us, batch.received_us
         )
@@ -205,8 +211,10 @@ class SpatialGrid:
         cell = self._cells.get((x, y))
         if cell is None:
             return "unknown"
-        if (cell.obstacle_calibration and cell.obstacle_calibration != self.calibration_id
-                or cell.floor_calibration and cell.floor_calibration != self.calibration_id):
+        if (cell.obstacle_calibration and (cell.obstacle_calibration != self.calibration_id
+                                           or cell.obstacle_epoch != self.epoch)
+                or cell.floor_calibration and (cell.floor_calibration != self.calibration_id
+                                               or cell.floor_epoch != self.epoch)):
             return "out_of_calibration"
         if cell.floor == "unsafe":
             # An expired cliff observation is still nontraversable, but it is
@@ -226,7 +234,10 @@ class SpatialGrid:
         return "unknown"
 
     def log_odds(self, x: int, y: int) -> float:
-        return self._cells.get((x, y), _Cell()).obstacle_log_odds
+        cell = self._cells.get((x, y))
+        if cell is None or cell.obstacle_epoch != self.epoch:
+            return 0.0
+        return cell.obstacle_log_odds
 
     def invalidate_calibration(self, calibration_id: str) -> None:
         if type(calibration_id) is not str or not calibration_id:
