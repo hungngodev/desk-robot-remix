@@ -11,7 +11,11 @@ import time
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from .brain_context import is_camera_derived_timeline_item, memory_provenance_label
+from .brain_context import (
+    is_camera_derived_timeline_item,
+    live_asr_in_current_grant,
+    memory_provenance_label,
+)
 from .config import Settings
 from .memory import CoreMemoryMutationSuperseded, EpisodeMemoryMutationSuperseded
 
@@ -373,6 +377,18 @@ def register_voice_context_route(
                 item for item in timeline
                 if not is_camera_derived_timeline_item(item)
             ]
+        # Durable memory permission does not authorize cached live ASR.
+        # Compare its exact source clock to the current live grant, including
+        # revocation/regrant before this read or during either SQLite await.
+        timeline = [
+            item for item in timeline
+            if live_asr_in_current_grant(
+                item, now=time.monotonic(),
+                enabled=(vision_at_start and settings.voice_vision_tools_enabled
+                         and not camera_consent_toggled),
+                consent_started_at=settings.camera_consent_started_at,
+            )
+        ]
         # Room USB context has independent consent; a cached sample read
         # before SQLite yielded must disappear if the operator opted out.
         if (

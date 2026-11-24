@@ -836,6 +836,67 @@ def test_voice_context_excludes_camera_and_visual_look_when_camera_disabled(sett
         assert payload["core_facts"] == [{"slot": "pref", "value": "Secret violet tea fact"}]
 
 
+def test_voice_context_live_asr_requires_current_live_grant(settings):
+    """Private recall permission cannot expose ASR from an old live grant."""
+    import time
+
+    from desk_robot.api_memory_routes import register_voice_context_route
+    from desk_robot.multimodal import CameraFrameHub
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.mode = "hardware"
+    settings.voice_memory_tools_enabled = True
+    settings.voice_vision_tools_enabled = True
+    hub = CameraFrameHub(["robot-01"])
+    now = time.monotonic()
+    assert hub.remember_heard("robot-01", "old_grant", "OLD PRIVATE ASR", now)
+    hub.notify("robot-01", "touch_tap", now)
+    settings.voice_vision_tools_enabled = False
+
+    class Memory:
+        def recent(self, robot_id, *, limit):
+            return []
+
+        def core_facts(self, robot_id, *, limit):
+            return [SimpleNamespace(slot="fact", value="Durable core fact")]
+
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        memory=Memory(), multimodal=SimpleNamespace(hub=hub),
+        conversation=SimpleNamespace(
+            _private_memory_generation={"robot-01": 0},
+        ),
+    )
+    register_voice_context_route(
+        app, settings, authorize=lambda: None,
+        requested_tool_context=lambda *args: None,
+        remember_tool_context=lambda *args: None,
+        current_tool_context=_check_fake_current_tool_owner,
+    )
+    with TestClient(app) as client:
+        def read():
+            response = client.get("/v1/pet/robot-01/voice-context")
+            assert response.status_code == 200
+            payload = response.json()
+            assert "OLD PRIVATE ASR" not in str(payload)
+            assert "touch_tap" in str(payload["current_interaction_timeline"])
+            assert payload["core_facts"] == [
+                {"slot": "fact", "value": "Durable core fact"},
+            ]
+            return payload
+
+        read()
+        settings.voice_vision_tools_enabled = True
+        read()
+        assert hub.remember_heard(
+            "robot-01", "new_grant", "NEW GRANT ASR", time.monotonic(),
+        )
+        assert "NEW GRANT ASR" in str(read()["current_interaction_timeline"])
+        settings.voice_vision_tools_enabled = False
+        assert "NEW GRANT ASR" not in str(read())
+
+
 @pytest.mark.parametrize("toggle_during", ("recent", "search", "core"))
 def test_voice_context_discards_visual_cues_on_camera_consent_toggle_during_sqlite_read(settings, toggle_during):
     """Visual cues read before SQLite yield are discarded if camera was toggled ON->OFF->ON."""
