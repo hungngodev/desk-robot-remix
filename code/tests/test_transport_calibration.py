@@ -421,6 +421,46 @@ def test_mjpeg_stream_refuses_malformed_or_truncated_frames(corrupt):
         _MjpegFrames().feed(corrupt)
 
 
+@pytest.mark.parametrize("cut", [3, 45, -4, -1])
+async def test_mjpeg_eof_rejects_partial_part_and_clears_stream(settings, tokens, cut):
+    complete = _stream_part(1)
+    partial = _stream_part(2)[:cut]
+
+    async def handler(request):
+        return httpx.Response(
+            200,
+            headers={"content-type": "multipart/x-mixed-replace; boundary=deskrobotframe"},
+            content=complete + partial,
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        frames = head.stream_frames()
+        first, _ = await anext(frames)
+        assert first == b"\xff\xd8camera\xff\xd9"
+        with pytest.raises(HeadError, match="Truncated MJPEG part at end of stream"):
+            await anext(frames)
+        assert not head._stream_connected
+        assert head._stream_latest is None
+        assert head._last_camera == (17, 1, 1000)
+
+
+async def test_mjpeg_eof_accepts_complete_parts(settings, tokens):
+    async def handler(request):
+        return httpx.Response(
+            200,
+            headers={"content-type": "multipart/x-mixed-replace; boundary=deskrobotframe"},
+            content=_stream_part(1),
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(settings.robots[0], client, strict_capture=True)
+        frames = [jpeg async for jpeg, _ in head.stream_frames()]
+        assert frames == [b"\xff\xd8camera\xff\xd9"]
+        assert not head._stream_connected
+        assert head._stream_latest is None
+
+
 async def test_persistent_mjpeg_video_feeds_existing_snapshot_callers(settings, tokens):
     payload_a = b"\xff\xd8first\xff\xd9"
     payload_b = b"\xff\xd8second\xff\xd9"

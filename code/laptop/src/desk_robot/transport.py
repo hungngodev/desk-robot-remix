@@ -576,6 +576,8 @@ class HttpHead:
                             self._stream_condition.notify_all()
                     if latest is not None:
                         yield latest, received
+                if reader.buffer:
+                    raise HeadError("Truncated MJPEG part at end of stream")
         except (httpx.HTTPError, ValueError) as exc:
             raise HeadError(f"XIAO authenticated camera stream unavailable: {exc}") from exc
         finally:
