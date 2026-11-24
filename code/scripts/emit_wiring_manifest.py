@@ -126,6 +126,13 @@ def verify(plan: dict, body: str, head: str) -> None:
         raise ValueError("DC motor watchdog must share only mutually exclusive STEP GPIO23")
     if watchdog in (25, 26, 27, 32):
         raise ValueError("DC watchdog collides with active H bridge PWM input")
+    # The DC profile reuses only the stepper pins, not the sensor/servo/UART
+    # roles. A synchronized STEP remap can otherwise conceal a DC collision.
+    dc_pins = {25, 26, 27, 32, watchdog}
+    if any(body_pins[role] in dc_pins for role in BODY_SINGLE):
+        raise ValueError("DC profile GPIO collides with a nonmotor body signal")
+    if set(body_pins) != set(BODY_SINGLE) | {"left_stepper", "right_stepper"}:
+        raise ValueError("Unknown or incomplete body GPIO roles")
     for label, symbol in HEAD_SINGLE.items():
         actual = _pin(rf"#define {symbol} GPIO_NUM_(\d+)\b", head, symbol)
         if actual != bus["sense_gpio"][label]:
@@ -139,6 +146,27 @@ def verify(plan: dict, body: str, head: str) -> None:
     if ("#define AUDIO_PDM_MIC_GPIO_SCK GPIO_NUM_42" not in head
             or "#define AUDIO_PDM_MIC_GPIO_DIN GPIO_NUM_41" not in head):
         raise ValueError("Stock XIAO PDM pins changed")
+    # The selected Sense header exposes the eight allocated signal pads.
+    # Native USB, flash/PSRAM, debug UART, strapping and onboard signals
+    # are not spare external harness connections.
+    sense_pins = bus["sense_gpio"]
+    if set(sense_pins) != set(HEAD_SINGLE) | {"rgb_data"}:
+        raise ValueError("Unknown or incomplete Sense GPIO roles")
+    camera_symbols = (
+        *(f"CAMERA_PIN_D{i}" for i in range(8)),
+        "CAMERA_PIN_XCLK", "CAMERA_PIN_PCLK", "CAMERA_PIN_VSYNC",
+        "CAMERA_PIN_HREF", "CAMERA_PIN_SIOD", "CAMERA_PIN_SIOC",
+    )
+    fixed_head_pins = [
+        _pin(rf"#define {symbol} GPIO_NUM_(\d+)\b", head, symbol)
+        for symbol in (*camera_symbols, "AUDIO_PDM_MIC_GPIO_SCK",
+                       "AUDIO_PDM_MIC_GPIO_DIN", "BOOT_BUTTON_GPIO")
+    ]
+    if (len(fixed_head_pins) != len(set(fixed_head_pins))
+            or set(fixed_head_pins).intersection(sense_pins.values())):
+        raise ValueError("Sense GPIO collides with onboard camera, PDM or boot signal")
+    if not set(sense_pins.values()) <= {1, 2, 4, 5, 6, 7, 8, 9}:
+        raise ValueError("Sense GPIO is not an allocated external header pad")
     if bus["sense_gpio"]["rgb_data"] != 9:
         raise ValueError("RGB reservation changed; check SD J3")
     # Audio power must track the CURRENT selected 8ohm 2W rectangular speaker,
@@ -155,6 +183,20 @@ def verify(plan: dict, body: str, head: str) -> None:
             or audio["speaker_nominal_rating_w"] != 2
             or "HOLD" not in audio.get("physical_release", "")):
         raise ValueError("Unqualified or changed 2W speaker amplifier power contract")
+    # The mux inputs and IMU share the upstream bus even when every
+    # downstream lane is isolated. Require the actual three firmware owners.
+    upstream = bus.get("upstream")
+    expected_upstream = {
+        ("MPU6050", 0x68), ("TCA9548A ranges", 0x70),
+        ("TCA9548A interactions", 0x71),
+    }
+    if (not isinstance(upstream, list) or len(upstream) != len(expected_upstream)
+            or any(not isinstance(device, dict)
+                   or not isinstance(device.get("device"), str)
+                   or type(device.get("address")) is not int for device in upstream)
+            or {(device["device"], device["address"]) for device in upstream}
+            != expected_upstream):
+        raise ValueError("Upstream I2C device identity or address conflict")
     # Do not accept bool/float addresses that compare equal to an integer.
     # They would later break hex formatting or misstate the physical harness.
     for group, expected in (("mux_ranges", 0x70), ("mux_extras", 0x71)):

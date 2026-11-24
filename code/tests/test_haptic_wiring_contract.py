@@ -196,3 +196,74 @@ def test_haptic_wiring_rejects_missing_or_changed_connections():
         corrupt["haptic_output_contract"][field] = wrong
         with pytest.raises(ValueError, match="haptic one-shot wiring contract"):
             generator.verify(corrupt, body, head)
+
+
+def test_manifest_rejects_cross_profile_and_fixed_head_gpio_collisions():
+    """A matching plan/header is not sufficient when other owners use the pin."""
+    import copy
+    import importlib.util
+
+    import pytest
+
+    path = ROOT / "code/scripts/emit_wiring_manifest.py"
+    spec = importlib.util.spec_from_file_location("wiring_pin_owners", path)
+    assert spec and spec.loader
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    plan = generator.read_wiring_plan(ROOT / generator.PLAN)
+    body = (ROOT / generator.BODY_PINS).read_text()
+    head = (ROOT / generator.HEAD_PINS).read_text()
+    generator.verify(plan, body, head)
+
+    # Swap the STEP phase and lift pins in both declarations. STEP is
+    # collision-free, but GPIO25 remains a DC motor output.
+    corrupt = copy.deepcopy(plan)
+    corrupt["bus"]["body_gpio"]["left_stepper"][2] = 18
+    corrupt["bus"]["body_gpio"]["lift_servo"] = 25
+    changed_body = body.replace("{13, 14, 25, 26}", "{13, 14, 18, 26}")
+    changed_body = changed_body.replace(
+        "{13, 14, 25, 26, 27, 32, 33, 23}",
+        "{13, 14, 18, 26, 27, 32, 33, 23}",
+    ).replace("constexpr int kLiftServo = 18;", "constexpr int kLiftServo = 25;")
+    with pytest.raises(ValueError, match="DC profile GPIO collides"):
+        generator.verify(corrupt, changed_body, head)
+
+    for gpio, message in ((15, "Sense GPIO collides"), (20, "external header pad")):
+        corrupt = copy.deepcopy(plan)
+        corrupt["bus"]["sense_gpio"]["oled_sda"] = gpio
+        changed_head = head.replace(
+            "#define DISPLAY_SDA_PIN GPIO_NUM_5",
+            f"#define DISPLAY_SDA_PIN GPIO_NUM_{gpio}",
+        )
+        with pytest.raises(ValueError, match=message):
+            generator.verify(corrupt, body, changed_head)
+    changed_head = head.replace(
+        "#define CAMERA_PIN_D0 GPIO_NUM_15", "#define CAMERA_PIN_D0 GPIO_NUM_5"
+    )
+    with pytest.raises(ValueError, match="Sense GPIO collides"):
+        generator.verify(plan, body, changed_head)
+
+
+def test_manifest_rejects_upstream_i2c_address_conflicts():
+    import copy
+    import importlib.util
+
+    import pytest
+
+    path = ROOT / "code/scripts/emit_wiring_manifest.py"
+    spec = importlib.util.spec_from_file_location("wiring_upstream", path)
+    assert spec and spec.loader
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    plan = generator.read_wiring_plan(ROOT / generator.PLAN)
+    body = (ROOT / generator.BODY_PINS).read_text()
+    head = (ROOT / generator.HEAD_PINS).read_text()
+    for wrong in (0x70, 0x69, 104.0, True):
+        corrupt = copy.deepcopy(plan)
+        corrupt["bus"]["upstream"][0]["address"] = wrong
+        with pytest.raises(ValueError, match="Upstream I2C"):
+            generator.verify(corrupt, body, head)
+    corrupt = copy.deepcopy(plan)
+    corrupt["bus"]["upstream"].pop()
+    with pytest.raises(ValueError, match="Upstream I2C"):
+        generator.verify(corrupt, body, head)
