@@ -47,12 +47,17 @@ def validate_aux(data: dict, robot_id: str) -> dict:
             ))
             or pulse.get("bpm", "missing") is not None
             or pulse.get("medical") is not False
+            or ("fifo_ir_first" in pulse and not _bool(pulse["fifo_ir_first"]))
+            or ("fifo_layout_physically_verified" in pulse
+                and pulse["fifo_layout_physically_verified"] is not False)
             or (pulse["valid"] and not pulse["present"])):
         raise ValueError("Invalid raw MAX30102 paw source")
 
     present, valid = angles.get("present_mask"), angles.get("valid_mask")
     if (not _uint(present, 7) or not _uint(valid, 7)
             or valid & ~present
+            or ("wheel_travel_qualified" in angles
+                and angles["wheel_travel_qualified"] is not False)
             or not _array(angles.get("raw"), 3, lambda n: _uint(n, 4095))
             or not _array(angles.get("magnet"), 3, lambda n: _uint(n, 0x38))
             or any(valid & (1 << i) and angles["magnet"][i] != 0x20

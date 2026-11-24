@@ -370,3 +370,29 @@ async def test_authenticated_head_rejects_stale_valid_pulse(settings, tokens):
         head = HttpHead(settings.robots[0], client)
         with pytest.raises(HeadError, match="MAX30102"):
             await head.aux_status()
+
+
+@pytest.mark.parametrize("ir_first", [True, False])
+def test_aux_accepts_unqualified_fifo_layout_and_wheel_metadata(ir_first):
+    data = sample()
+    data["pulse"].update({
+        "fifo_ir_first": ir_first,
+        "fifo_layout_physically_verified": False,
+    })
+    data["angles"]["wheel_travel_qualified"] = False
+    assert validate_aux(data, "robot-01") == data
+
+
+@pytest.mark.parametrize("group,field,value", [
+    ("pulse", "fifo_ir_first", 1),
+    ("pulse", "fifo_ir_first", None),
+    ("pulse", "fifo_layout_physically_verified", True),
+    ("pulse", "fifo_layout_physically_verified", 0),
+    ("angles", "wheel_travel_qualified", True),
+    ("angles", "wheel_travel_qualified", 0),
+])
+def test_aux_rejects_forged_optional_physical_qualification(group, field, value):
+    data = sample()
+    data[group][field] = value
+    with pytest.raises(ValueError):
+        validate_aux(data, "robot-01")
