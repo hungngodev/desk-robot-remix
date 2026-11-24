@@ -1852,6 +1852,58 @@ async def test_new_human_on_one_head_cancels_other_heads_stale_visual_answer():
         await service.close()
 
 
+async def test_new_human_turn_rejects_late_cancellation_resistant_peer_vision():
+    """A cut-in retires a provider response even if its worker keeps running."""
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+    release = asyncio.Event()
+    late_finished = asyncio.Event()
+
+    class StubbornVision:
+        async def answer(self, question, frames):
+            if question == "What is next to me?":
+                entered.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    await release.wait()
+                    late_finished.set()
+                    return "Obsolete peer answer"
+            return "Current human answer"
+
+    service = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        StubbornVision(), asyncio.Lock(),
+    )
+    old = asyncio.create_task(service.look("robot-02", "What is next to me?"))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        service.voice_started("robot-01")
+        with pytest.raises(RuntimeError, match="newer speech"):
+            await asyncio.wait_for(old, timeout=1)
+        await asyncio.wait_for(cancelled.wait(), timeout=1)
+        # The new turn can use the model before the old provider exits.
+        current = await asyncio.wait_for(
+            service.look("robot-01", "What can you see now?"), timeout=2,
+        )
+        assert current["answer"] == "Current human answer"
+        assert not late_finished.is_set()
+        release.set()
+        await asyncio.wait_for(late_finished.wait(), timeout=1)
+        await asyncio.sleep(0)
+        assert not service._look_tasks
+        assert service.status("robot-02")["software_timings"]["visual_answers"] == 0
+        assert service.hub.recent_tool_context("robot-02", time.monotonic()) == []
+        assert service.status("robot-01")["software_timings"]["visual_answers"] == 1
+    finally:
+        release.set()
+        if not old.done():
+            old.cancel()
+        await asyncio.gather(old, return_exceptions=True)
+        await service.close()
+
+
 async def test_cross_head_visual_tools_wait_for_current_human_floor():
     heads = {"robot-01": Head(), "robot-02": Head()}
     model = Vision()
