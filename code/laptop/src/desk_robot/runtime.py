@@ -444,13 +444,17 @@ class Runtime:
             return
         # Re-enable spontaneous voice only after a successful authenticated
         # event-stream bootstrap or ordered poll, never on a guessed timeout.
-        if not ready:
-            # A dead VAD monitor cannot certify a current signed tool turn.
-            self._voice_turn_generations = None
-        self.pet.set_voice_monitor_ready(ready)
-        if not ready:
-            # A robot cannot keep autonomous roaming when the user has lost
-            # the ability to interrupt it through the voice monitor.
+        if ready:
+            if getattr(self, "_voice_stop_unconfirmed", False):
+                raise RuntimeError("Voice monitor recovery requires confirmed STOP")
+            self.pet.set_voice_monitor_ready(True)
+            return
+        # A dead VAD monitor cannot certify a current signed tool turn.
+        self._voice_turn_generations = None
+        try:
+            self.pet.set_voice_monitor_ready(False)
+        finally:
+            # A failed health notification must not skip stopping roaming.
             await self._stop_autonomous_roaming_for_voice()
 
     async def _on_voice_global(self, reason: str) -> None:
@@ -459,11 +463,21 @@ class Runtime:
         if reason not in ("gap", "reset", "stream_unavailable"):
             raise ValueError("Unsupported global voice transport fault")
         self._voice_turn_generations = None
-        self.pet.set_voice_monitor_ready(False)
+        stop_attempt = self._begin_voice_stop()
+        failures: list[BaseException] = []
+        # Neither synchronous callback may skip the independent native
+        # decoder, group audio, or roaming STOP owners.
+        try:
+            self.pet.set_voice_monitor_ready(False)
+        except Exception as exc:
+            failures.append(exc)
         visual = getattr(self, "multimodal", None)
         invalidate = getattr(visual, "voice_transport_unavailable", None)
         if callable(invalidate):
-            invalidate()  # Sync cancellation; no camera/network await here.
+            try:
+                invalidate()  # Sync cancellation; no camera/network await here.
+            except Exception as exc:
+                failures.append(exc)
         # The Mac's pet/group task cancellation does not itself flush an
         # autonomous native MiniCPM response already on the Xiaozhi head.
         # Reuse the bridge's existing ordinary interrupt, never the operator
@@ -479,15 +493,14 @@ class Runtime:
             if getattr(self.settings, "mode", None) == "hardware"
             and callable(stop) else []
         )
-        stop_attempt = self._begin_voice_stop()
         outcomes = await asyncio.gather(
             self._preempt_audio_floor(),
             self._stop_autonomous_roaming_for_voice(),
             *native_stops,
             return_exceptions=True,
         )
-        failures = [result for result in outcomes
-                    if isinstance(result, BaseException)]
+        failures.extend(result for result in outcomes
+                        if isinstance(result, BaseException))
         if failures:
             raise RuntimeError("Voice monitor lost; physical speaker stop unconfirmed") from failures[0]
         self._confirm_voice_stop(stop_attempt)

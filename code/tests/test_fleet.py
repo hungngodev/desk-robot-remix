@@ -721,3 +721,82 @@ async def test_fleet_active_peer_samplers_survive_new_voice_generation(
     finally:
         await visual.close()
         await asyncio.gather(*retired, return_exceptions=True)
+
+
+@pytest.mark.parametrize("failed_callback", ["health", "visual"])
+async def test_fleet_monitor_callback_failure_cannot_skip_stop_or_restore_health(
+    failed_callback,
+):
+    calls = []
+    broken = True
+
+    class Pet:
+        voice_monitor_ready = True
+
+        def set_voice_monitor_ready(self, ready):
+            self.voice_monitor_ready = ready
+            if not ready and broken and failed_callback == "health":
+                raise RuntimeError("Health callback failed")
+
+        async def interrupt(self, robot_id):
+            calls.append(("pet", robot_id))
+
+    class Speaker:
+        async def monitor_lost(self, robot):
+            calls.append(("native", robot.id))
+
+    class Talk:
+        speaker = Speaker()
+
+        async def stop(self):
+            calls.append(("group", None))
+
+    class Coordinator:
+        async def stop_active_exploration(self):
+            calls.append(("roaming", None))
+
+    class Visual:
+        def voice_transport_unavailable(self):
+            if broken and failed_callback == "visual":
+                raise RuntimeError("Visual invalidation failed")
+
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(
+        mode="hardware",
+        robots=[SimpleNamespace(id=robot_id, device_id=robot_id)
+                for robot_id in IDS],
+    )
+    runtime.pet = Pet()
+    runtime.conversation = Talk()
+    runtime.coordinator = Coordinator()
+    runtime.multimodal = Visual()
+    runtime._voice_turn_generations = {robot_id: 1 for robot_id in IDS}
+    expected = {("pet", robot_id) for robot_id in IDS}
+    expected.update(("native", robot_id) for robot_id in IDS)
+    expected.update({("group", None), ("roaming", None)})
+
+    with pytest.raises(RuntimeError, match="physical speaker stop unconfirmed"):
+        await runtime._on_voice_global("stream_unavailable")
+    assert set(calls) == expected and len(calls) == len(expected)
+    assert runtime._voice_turn_generations is None
+    assert runtime._voice_stop_unconfirmed
+    assert not runtime.pet.voice_monitor_ready
+    with pytest.raises(RuntimeError, match="requires confirmed STOP"):
+        await runtime._on_voice_monitor_ready(True)
+    assert not runtime.pet.voice_monitor_ready
+
+    if failed_callback == "health":
+        calls.clear()
+        with pytest.raises(RuntimeError, match="Health callback failed"):
+            await runtime._on_voice_monitor_ready(False)
+        assert calls == [("roaming", None)]
+
+    broken = False
+    calls.clear()
+    await runtime._on_voice_global("stream_unavailable")
+    assert set(calls) == expected and len(calls) == len(expected)
+    assert not runtime._voice_stop_unconfirmed
+    assert not runtime.pet.voice_monitor_ready
+    await runtime._on_voice_monitor_ready(True)
+    assert runtime.pet.voice_monitor_ready
+    assert runtime._voice_turn_generations is None
