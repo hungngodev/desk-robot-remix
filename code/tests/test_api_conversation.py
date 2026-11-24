@@ -1921,7 +1921,9 @@ async def test_kokoro_explicit_rejected_grant_preserves_other_fleet_lease(
     assert client.calls == [{"device_ids": ["head-01"], "enabled": True}]
 
 
-async def test_group_mid_session_sharing_enable_cannot_backfill_peer_dialogue(settings):
+async def test_group_mid_session_sharing_enable_cannot_backfill_peer_dialogue(
+    settings, tmp_path,
+):
     """Opting into sharing mid-session must not authorize an older session."""
     settings.mode = "hardware"
     settings.fleet_text_sharing_enabled = False
@@ -1936,7 +1938,8 @@ async def test_group_mid_session_sharing_enable_cannot_backfill_peer_dialogue(se
             return "This pet's original speech stays private to its own model."
 
     chat = Chat()
-    dialogue = Conversation(settings, chat, SimulatedSpeaker())
+    store = MemoryStore(tmp_path, ["robot-01", "robot-02"])
+    dialogue = Conversation(settings, chat, SimulatedSpeaker(), memory=store)
     transcript = await dialogue.run(
         ["robot-01", "robot-02"], "Talk about a desk toy", 2,
     )
@@ -1946,6 +1949,8 @@ async def test_group_mid_session_sharing_enable_cannot_backfill_peer_dialogue(se
         "Untrusted digitally relayed peer speech" not in str(history)
         for history in dialogue.histories.values()
     )
+    assert store.count("robot-01") == 1
+    assert store.count("robot-02") == 1
 
 
 async def test_group_room_station_revoke_prevents_speech_and_stale_reuse(settings):
@@ -2297,3 +2302,48 @@ def test_operator_group_api_refuses_revoke_regrant_during_preemption(
         assert settings.fleet_text_sharing_enabled is True
         assert settings.fleet_sharing_consent_generation > 0
         assert starts == [robot.id for robot in settings.robots]
+
+
+@pytest.mark.parametrize("late_grant", ["sharing", "memory"])
+async def test_group_late_admission_grant_cannot_import_private_context(
+    settings, tmp_path, late_grant,
+):
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = late_grant == "memory"
+    settings.voice_memory_tools_enabled = late_grant == "sharing"
+    settings.voice_vision_tools_enabled = True
+    store = MemoryStore(tmp_path, ["robot-01", "robot-02"])
+    store.remember(
+        "robot-01", "private_admission", "PRIVATE_ADMISSION_MARKER",
+        kind="key", source_robot="robot-01", witnessed=True,
+    )
+    prompts = []
+
+    class Chat:
+        async def reply(self, history):
+            prompts.append(str(history))
+            return "A public sentence."
+
+    def begin_topic(*args, **kwargs):
+        settings.fleet_text_sharing_enabled = True
+        settings.voice_memory_tools_enabled = True
+        return 1
+
+    dialogue = Conversation(settings, Chat(), SimulatedSpeaker(), memory=store)
+    dialogue.attention = SimpleNamespace(
+        begin_topic=begin_topic,
+        finish_topic=lambda *args, **kwargs: None,
+    )
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    hub.remember_heard(
+        "robot-01", "late_grant_asr", "PRIVATE_LIVE_MARKER", time.monotonic(),
+    )
+    dialogue.multimodal = SimpleNamespace(hub=hub)
+    await dialogue.run(["robot-01", "robot-02"], "Discuss a key", 1)
+    assert "PRIVATE_ADMISSION_MARKER" not in prompts[0]
+    if late_grant == "sharing":
+        assert "PRIVATE_LIVE_MARKER" not in prompts[0]
+        assert store.count("robot-02") == 0
+    # A fresh session can use the newly granted memory permission.
+    await dialogue.run(["robot-01", "robot-02"], "Discuss a key", 1)
+    assert "PRIVATE_ADMISSION_MARKER" in prompts[1]

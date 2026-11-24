@@ -893,21 +893,22 @@ class Conversation:
             # contention cannot block urgent Xiaozhi VAD and speaker abort on
             # the Mac event loop. The active lease is already held so another
             # social request cannot overtake this pending conversation.
-            personas = await asyncio.wait_for(
-                asyncio.gather(*(
-                    asyncio.to_thread(self._persona_with_memory, robot)
-                    for robot in robots
-                )),
-                timeout=5.0,
-            )
+            if self.settings.mode == "hardware" and not private_at_start:
+                # A later grant belongs to a new session, not an already
+                # admitted private-memory prompt or its revision fence.
+                personas = [robot.persona for robot in robots]
+            else:
+                personas = await asyncio.wait_for(
+                    asyncio.gather(*(
+                        asyncio.to_thread(self._persona_with_memory, robot)
+                        for robot in robots
+                    )),
+                    timeout=5.0,
+                )
             # Topic-specific memory is separate from the last six memories.
             # If the group starts talking about a key after many unrelated
             # interactions, each pet retrieves only its OWN relevant text.
-            if (self.memory is None or (
-                self.settings.mode == "hardware"
-                and not (self.settings.fleet_text_sharing_enabled
-                         and self.settings.voice_memory_tools_enabled)
-            )):
+            if not memory_context_at_start:
                 topical = [[] for _ in robots]
             else:
                 topical = await asyncio.wait_for(
@@ -926,7 +927,8 @@ class Conversation:
                 # Reuse the existing per-pet Mac timeline, not a second
                 # camera, microphone or sensor event owner. This snapshot
                 # may change between turns in the same group conversation.
-                if not self.settings.fleet_text_sharing_enabled:
+                if (not self.settings.fleet_text_sharing_enabled
+                        or (self.settings.mode == "hardware" and not sharing_at_start)):
                     return ""
                 # Operator-owned physical activity is not camera evidence.
                 # Preserve it even when vision consent is disabled, without
@@ -1149,7 +1151,13 @@ class Conversation:
                                         segment_sent(robot.id)
                             if not consent_still_valid():
                                 raise RuntimeError("Group conversation consent revoked")
-                            await self._persist_spoken_turn(robot, text, robots)
+                            # A new fleet opt-in cannot backfill peer SQLite
+                            # copies from a session admitted without sharing.
+                            recipients = (
+                                robots if self.settings.mode != "hardware"
+                                or sharing_at_start else [robot]
+                            )
+                            await self._persist_spoken_turn(robot, text, recipients)
                             # SQLite writes yield to other tasks. Revocation
                             # during persistence must not publish a completed
                             # turn or authorize another peer response.
