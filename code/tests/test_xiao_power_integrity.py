@@ -82,6 +82,9 @@ def _synthetic_power_measurement():
         ("idle_head_current_ma", "mA", 40, 100),
         ("active_head_peak_current_ma", "mA", 300, 500),
         ("head_3v3_ramp_time_ms", "ms", 2, 10),
+        ("head_3v3_minimum_operating_v", "V", 3.2, 3.6),
+        ("head_3v3_maximum_operating_v", "V", 3.4, 3.6),
+        ("head_rail_stable_before_chip_enable_us", "us", 100, 200),
         ("unexpected_head_resets", "events", 0, 0),
     )
     return {
@@ -119,6 +122,8 @@ def test_xiao_receipt_requires_measurements_not_narrative(receipt_verifier):
     "loaded_servo_start_trials", "usb_to_boost_reverse_current_ma",
     "boost_to_usb_reverse_current_ma", "idle_head_current_ma",
     "active_head_peak_current_ma", "head_3v3_ramp_time_ms",
+    "head_3v3_minimum_operating_v", "head_3v3_maximum_operating_v",
+    "head_rail_stable_before_chip_enable_us",
     "unexpected_head_resets",
 ])
 def test_xiao_receipt_rejects_missing_observation(receipt_verifier, metric):
@@ -139,6 +144,11 @@ def test_xiao_receipt_rejects_missing_observation(receipt_verifier, metric):
     ("active_head_peak_current_ma", float("nan")),
     ("head_3v3_ramp_time_ms", 0),
     ("head_3v3_ramp_time_ms", 11),
+    ("head_3v3_minimum_operating_v", 2.99),
+    ("head_3v3_minimum_operating_v", 3.5),
+    ("head_3v3_maximum_operating_v", 3.1),
+    ("head_3v3_maximum_operating_v", 3.61),
+    ("head_rail_stable_before_chip_enable_us", 49),
     ("unexpected_head_resets", 1),
 ])
 def test_xiao_receipt_rejects_failed_observation(receipt_verifier, metric, value):

@@ -254,7 +254,11 @@ CRITICAL_TRIAL_GATES = {
         # The external diode is a design allocation, not a measured isolation
         # result. Check both reverse-current directions, attach/detach, loaded
         # startup, idle/active head current and a captured 3V3 ramp.
-        # Exact current/time limits depend on the inspected supply and board.
+        # Exact current/ramp-duration limits depend on the inspected board.
+        # ESP32-S3 hardware design guidelines: 3.0–3.6 V operating supply,
+        # and t_STBL >= 50 us before CHIP_PU rises. Measure at the chip rail;
+        # exclude the unpowered/startup interval from operating extrema.
+        # https://docs.espressif.com/projects/esp-hardware-design-guidelines/en/latest/esp32s3/schematic-checklist.html
         "minimum_samples": 4,
         "quantities": (
             ("usb_attach_trials", "trials", 1, None, True),
@@ -266,6 +270,9 @@ CRITICAL_TRIAL_GATES = {
             ("idle_head_current_ma", "mA", 0, None, False),
             ("active_head_peak_current_ma", "mA", 0, None, False),
             ("head_3v3_ramp_time_ms", "ms", 0, None, False),
+            ("head_3v3_minimum_operating_v", "V", 3.0, 3.6, False),
+            ("head_3v3_maximum_operating_v", "V", 3.0, 3.6, False),
+            ("head_rail_stable_before_chip_enable_us", "us", 50, None, False),
             ("unexpected_head_resets", "events", 0, 0, True),
         ),
     },
@@ -450,7 +457,9 @@ def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
         if (phase_count > measurement["sample_count"]
                 or not 0 < values["idle_head_current_ma"]
                 <= values["active_head_peak_current_ma"]
-                or values["head_3v3_ramp_time_ms"] <= 0):
+                or values["head_3v3_ramp_time_ms"] <= 0
+                or values["head_3v3_minimum_operating_v"]
+                > values["head_3v3_maximum_operating_v"]):
             return False
     if gate == "signed_pack_current_three_new_samples_and_chg_mismatch_trial":
         values = {item["name"]: item["value"] for item in observations}
