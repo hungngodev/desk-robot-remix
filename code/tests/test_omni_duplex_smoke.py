@@ -764,3 +764,56 @@ async def test_probe_deadline_covers_negotiation_and_paced_input(stall):
         assert not input_events
     else:
         assert 0 < len(input_events) < 200
+
+
+def test_declared_wav_frames_must_actually_exist(tmp_path):
+    smoke = smoke_module()
+    path = tmp_path / "truncated.wav"
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(16000)
+        wav.writeframes(bytes(3200))
+    # Keep the declared frame count intact but remove real samples.
+    path.write_bytes(path.read_bytes()[:-2])
+    with pytest.raises(ValueError, match="Truncated PCM16 WAV data"):
+        smoke.read_wav(path)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pcm", [b"", b"\x01", bytes(32000 * 60 + 2), bytearray(32)])
+async def test_direct_probe_rejects_invalid_pcm_before_network(monkeypatch, pcm):
+    smoke = smoke_module()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Invalid PCM must never open a WebSocket client")
+
+    monkeypatch.setattr(smoke.aiohttp, "ClientSession", forbidden)
+    with pytest.raises(ValueError, match="complete PCM16 samples"):
+        await smoke.probe(
+            "ws://127.0.0.1:8099/v1/realtime?duplex=1",
+            "openbmb/MiniCPM-o-4_5", pcm, None, deadline=5,
+        )
+
+
+def test_read_jpeg_enforces_bounded_file_read(tmp_path):
+    smoke = smoke_module()
+    path = tmp_path / "oversized.jpg"
+    path.write_bytes(b"\xff\xd8" + bytes(1_000_000) + b"\xff\xd9")
+    with pytest.raises(ValueError, match="complete <=1MB JPEG"):
+        smoke.read_jpeg(path)
+
+
+@pytest.mark.asyncio
+async def test_direct_probe_rejects_invalid_jpeg_before_network(monkeypatch):
+    smoke = smoke_module()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Invalid JPEG must never open a WebSocket client")
+
+    monkeypatch.setattr(smoke.aiohttp, "ClientSession", forbidden)
+    with pytest.raises(ValueError, match="complete <=1MB JPEG"):
+        await smoke.probe(
+            "ws://127.0.0.1:8099/v1/realtime?duplex=1",
+            "openbmb/MiniCPM-o-4_5", bytes(32000), b"not a JPEG", deadline=5,
+        )

@@ -39,23 +39,39 @@ def server_url(url: str) -> str:
     return url
 
 
+def validate_pcm(pcm: bytes) -> None:
+    if (not isinstance(pcm, bytes) or not 0 < len(pcm) <= 32000 * 60
+            or len(pcm) % 2):
+        raise ValueError("Input must contain nonempty <=60s complete PCM16 samples")
+
+
 def read_wav(path: Path) -> bytes:
     with wave.open(str(path), "rb") as wav:
+        frames = wav.getnframes()
         if (wav.getnchannels() != 1 or wav.getsampwidth() != 2
                 or wav.getframerate() != 16000
-                or not 0 < wav.getnframes() <= 16000 * 60):
+                or not 0 < frames <= 16000 * 60):
             raise ValueError("Input must be <=60s mono 16kHz PCM16 WAV")
-        return wav.readframes(wav.getnframes())
+        pcm = wav.readframes(frames)
+        if len(pcm) != frames * 2:
+            raise ValueError("Truncated PCM16 WAV data")
+        validate_pcm(pcm)
+        return pcm
+
+
+def validate_jpeg(jpeg: bytes) -> None:
+    if (not isinstance(jpeg, bytes) or not 10 <= len(jpeg) <= 1_000_000
+            or not jpeg.startswith(b"\xff\xd8")
+            or not jpeg.endswith(b"\xff\xd9")):
+        raise ValueError("A complete <=1MB JPEG image is required")
 
 
 def read_jpeg(path: Path | None) -> bytes | None:
     if path is None:
         return None
-    jpeg = path.read_bytes()
-    if (not 10 <= len(jpeg) <= 1_000_000
-            or not jpeg.startswith(b"\xff\xd8")
-            or not jpeg.endswith(b"\xff\xd9")):
-        raise ValueError("A complete <=1MB JPEG image is required")
+    with path.open("rb") as stream:
+        jpeg = stream.read(1_000_001)
+    validate_jpeg(jpeg)
     return jpeg
 
 
@@ -67,6 +83,9 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
         raise ValueError("Probe deadline must be between 5 and 180 seconds")
     if type(quiet_input) is not bool:
         raise ValueError("Quiet input must be an explicit boolean")
+    validate_pcm(pcm)
+    if jpeg is not None:
+        validate_jpeg(jpeg)
     wire = OmniDuplexWire(model=model)
     output = bytearray()
     transcript = []
