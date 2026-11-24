@@ -3,7 +3,54 @@
 #include <cstdint>
 #include <iostream>
 using desk_robot::HapticPulse;
+
+// GPB2 schedules an edge, not the physical motor's waveform or amplitude.
+// The independent one-shot owns physical pulse duration.
+static void check_timing_boundaries(std::uint32_t start) {
+  using Action = HapticPulse::Action;
+  HapticPulse h;
+  h.configure(true);
+  assert(h.request(start));
+  assert(h.next(start + 250U, true) == Action::TurnOn);
+  const std::uint32_t ack = start + 250U;
+  h.completed(Action::TurnOn, true, ack);
+  assert(h.active());
+  assert(h.next(ack, false) == Action::TurnOff);
+  h.completed(Action::TurnOff, true, ack);
+  assert(h.next(ack + 1U, true) == Action::None);
+  assert(!h.request(ack + 1499U));
+  assert(h.request(ack + 1500U));
+  assert(h.next(ack + 1751U, true) == Action::None);
+  assert(h.next(ack + 1752U, true) == Action::None);
+  assert(h.request(ack + 1752U));
+}
+
+static void check_failed_edge_and_reconfigure() {
+  using Action = HapticPulse::Action;
+  HapticPulse h;
+  h.configure(true);
+  assert(h.request(10));
+  assert(h.next(20, true) == Action::TurnOn);
+  h.completed(Action::TurnOn, false, 20);
+  assert(!h.ready() && !h.active());
+  assert(h.next(21, true) == Action::None);
+  assert(!h.request(2000));
+  h.configure(false);
+  assert(!h.ready() && !h.request(2001));
+  h.configure(true);
+  assert(h.next(2002, true) == Action::None);
+  assert(h.request(2003));
+  h.configure(true);
+  assert(h.next(2004, true) == Action::None);
+  assert(h.request(2005));
+  assert(h.next(2006, false) == Action::None);
+  assert(h.next(2007, true) == Action::None);
+}
+
 int main(){
+ check_timing_boundaries(100U);
+ check_timing_boundaries(0xffffff80U);
+ check_failed_edge_and_reconfigure();
  HapticPulse h;
  assert(!h.request(10));
  h.configure(true);
