@@ -717,3 +717,75 @@ def test_dock_calibration_adds_identity_without_shifting_positional_mount():
     assert calibration.mount_yaw_deg == 2.0
     assert calibration.robot_id is None
     assert calibration.head_device_id is None
+
+
+@pytest.mark.parametrize("distance_mm", [80, 150, 400, 1000, 1900])
+@pytest.mark.parametrize("yaw_deg", [0, 1, 10, 30, 44])
+def test_front_facing_planar_pose_at_expected_distances(monkeypatch, distance_mm, yaw_deg):
+    """Real OpenCV PnP on ideal projected corners, not a hardware trial."""
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
+    import numpy as np
+
+    camera = DockCameraCalibration(410, 410, 320, 240, 60, 12)
+    square = np.array([[-30., 30., 0.], [30., 30., 0.],
+                       [30., -30., 0.], [-30., -30., 0.]])
+    intrinsics = np.array([[410., 0, 320], [0, 410., 240], [0, 0, 1]])
+    yaw = math.radians(yaw_deg)
+    rotation = np.array([[math.cos(yaw), 0, math.sin(yaw)], [0, 1, 0],
+                         [-math.sin(yaw), 0, math.cos(yaw)]]) @ np.diag([1., -1., -1.])
+    corners, _ = cv2.projectPoints(
+        square, cv2.Rodrigues(rotation)[0], np.array([0., 0., float(distance_mm)]),
+        intrinsics, np.zeros(5),
+    )
+
+    class Detector:
+        def __init__(self, dictionary):
+            pass
+
+        def detectMarkers(self, frame):
+            return [corners.astype(np.float32).reshape(1, 4, 2)], np.array([[12]]), []
+
+    monkeypatch.setattr(cv2.aruco, "ArucoDetector", Detector)
+    ok, jpeg = cv2.imencode(".jpg", np.zeros((480, 640), dtype=np.uint8))
+    assert ok
+    pose = detect_apriltag(jpeg.tobytes(), camera, captured_at=5)
+    assert pose is not None
+    assert abs(pose.x_mm) < 1.0
+    assert abs(pose.y_mm) < 1.0
+    assert abs(pose.z_mm - distance_mm) < 1.0
+    assert pose.reprojection_error_px <= 3.0
+
+
+@pytest.mark.parametrize("angle_deg", [0, 110])
+def test_accurate_back_facing_or_overtilted_pose_does_not_retry(monkeypatch, angle_deg):
+    """A valid fit outside the existing normal gate cannot be rescued."""
+    cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
+    import numpy as np
+
+    camera = DockCameraCalibration(410, 410, 320, 240, 60, 12)
+    square = np.array([[-30., 30., 0.], [30., 30., 0.],
+                       [30., -30., 0.], [-30., -30., 0.]])
+    intrinsics = np.array([[410., 0, 320], [0, 410., 240], [0, 0, 1]])
+    rvec = np.array([[math.radians(angle_deg)], [0.], [0.]])
+    tvec = np.array([[0.], [0.], [400.]])
+    corners, _ = cv2.projectPoints(square, rvec, tvec, intrinsics, np.zeros(5))
+
+    class Detector:
+        def __init__(self, dictionary):
+            pass
+
+        def detectMarkers(self, frame):
+            return [corners.astype(np.float32).reshape(1, 4, 2)], np.array([[12]]), []
+
+    methods = []
+
+    def solve(*args, flags):
+        methods.append(flags)
+        return True, rvec, tvec
+
+    monkeypatch.setattr(cv2.aruco, "ArucoDetector", Detector)
+    monkeypatch.setattr(cv2, "solvePnP", solve)
+    ok, jpeg = cv2.imencode(".jpg", np.zeros((480, 640), dtype=np.uint8))
+    assert ok
+    assert detect_apriltag(jpeg.tobytes(), camera, captured_at=5) is None
+    assert methods == [cv2.SOLVEPNP_IPPE_SQUARE]

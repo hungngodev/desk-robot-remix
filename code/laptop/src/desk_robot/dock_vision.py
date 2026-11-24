@@ -257,35 +257,40 @@ def detect_apriltag(
         calibration.distortion_coeffs if calibration.distortion_coeffs is not None
         else (0.0,) * 5, dtype=np.float64,
     ).reshape(-1, 1)
-    try:
-        success, rvec, tvec = cv2.solvePnP(
-            object_points, image_points, intrinsics, distortion,
-            flags=cv2.SOLVEPNP_IPPE_SQUARE,
-        )
-        if not success:
-            return None
-        projected, _ = cv2.projectPoints(object_points, rvec, tvec,
-                                         intrinsics, distortion)
-        normal = cv2.Rodrigues(rvec)[0][:, 2]
-        # AprilTag's physical printed face must point TOWARD the camera.
-        # IPPE_SQUARE can also fit an inverted/back-facing square to four
-        # synthetic corners with near-zero reprojection error. Steering
-        # toward such a pose is not a trustworthy dock approach.
+    # OpenCV #30402: IPPE's rotation-vector conversion can return a flipped
+    # high-error pose for a front-facing planar tag near 180 degrees. Retry
+    # once with OpenCV's planar iterative solver only when the reprojection
+    # is untrustworthy. A reliable but out-of-envelope pose must stay rejected.
+    for method in (cv2.SOLVEPNP_IPPE_SQUARE, cv2.SOLVEPNP_ITERATIVE):
+        try:
+            success, rvec, tvec = cv2.solvePnP(
+                object_points, image_points, intrinsics, distortion, flags=method,
+            )
+            if not success:
+                return None
+            projected, _ = cv2.projectPoints(object_points, rvec, tvec,
+                                             intrinsics, distortion)
+            normal = cv2.Rodrigues(rvec)[0][:, 2]
+            projected = np.asarray(projected, dtype=np.float64).reshape(4, 2)
+            translation = np.asarray(tvec, dtype=np.float64).reshape(3)
+        except (cv2.error, ValueError, TypeError, IndexError, OverflowError):
+            return None  # Native pose failure cannot authorize contact approach
+        error = float(np.sqrt(np.mean(np.sum(
+            (projected - image_points) ** 2, axis=1,
+        ))))
+        if not _finite_number(error) or error > max_reprojection_error_px:
+            continue
+        # The physical printed face must point toward the camera. A good
+        # reprojection is not permission to relax the existing angle gate.
         if (normal.shape != (3,) or not np.isfinite(normal).all()
                 or normal[2] > -math.cos(math.radians(45))):
             return None
-        projected = np.asarray(projected, dtype=np.float64).reshape(4, 2)
-        translation = np.asarray(tvec, dtype=np.float64).reshape(3)
-    except (cv2.error, ValueError, TypeError, IndexError, OverflowError):
-        return None  # Native pose failure cannot authorize contact approach
-    error = float(np.sqrt(np.mean(np.sum(
-        (projected - image_points) ** 2, axis=1,
-    ))))
-    x_mm, y_mm, z_mm = [float(v) for v in translation]
-    if (not all(_finite_number(v) for v in (x_mm, y_mm, z_mm, error))
-            or not 30 <= z_mm <= 2000 or error > max_reprojection_error_px):
-        return None
-    return DockPose(x_mm, y_mm, z_mm, error, captured_at)
+        x_mm, y_mm, z_mm = [float(v) for v in translation]
+        if (not all(_finite_number(v) for v in (x_mm, y_mm, z_mm))
+                or not 30 <= z_mm <= 2000):
+            return None
+        return DockPose(x_mm, y_mm, z_mm, error, captured_at)
+    return None
 
 
 @dataclass(frozen=True)
