@@ -355,8 +355,10 @@ class Runtime:
                 # visual generations. Read tokens only after the whole fleet
                 # snapshot has been prepared, before the slow speaker STOP.
                 read_epoch = getattr(visual, "prepared_turn_epoch", None)
-                if callable(read_epoch):
-                    for robot_id in missing_starts:
+                if callable(read_epoch) and missing_starts:
+                    # Preparing any new start also retired the fallback
+                    # samplers of peers whose human VAD is still active.
+                    for robot_id in active:
                         token = read_epoch(robot_id)
                         if type(token) is int:
                             prepared_epochs[robot_id] = token
@@ -388,7 +390,7 @@ class Runtime:
                 if preempt_error is not None:
                     raise preempt_error
                 return
-            for robot_id in sorted(missing_starts):
+            for robot_id in sorted(set(missing_starts) | prepared_epochs.keys()):
                 if callable(prepare):
                     token = prepared_epochs.get(robot_id)
                     if type(token) is int:
@@ -414,9 +416,18 @@ class Runtime:
         if (recovering and getattr(self.pet, "voice_monitor_ready", False)
                 and preempt_error is None
                 and not getattr(self, "_voice_stop_unconfirmed", False)):
+            read_epoch = getattr(visual, "prepared_turn_epoch", None)
             for robot_id in sorted(active & recovering):
-                if robot_id not in missing_starts:
-                    visual.voice_started(robot_id)
+                if robot_id not in missing_starts and robot_id not in prepared_epochs:
+                    if callable(read_epoch):
+                        # The outage already fenced every old visual turn.
+                        # Preparing another start here would cancel the
+                        # recovered sampler of every previously resumed peer.
+                        visual.start_speech_frames(
+                            robot_id, prepared_epoch=read_epoch(robot_id),
+                        )
+                    else:
+                        visual.voice_started(robot_id)
             recovering.clear()
         if preempt_error is not None:
             raise preempt_error
@@ -501,8 +512,18 @@ class Runtime:
         # work synchronously BEFORE awaiting slow audio STOP. This does not
         # launch another camera HTTP request, inference, or audio owner.
         prepared_epoch = None
+        prepared_peers: dict[str, int] = {}
         if callable(prepare) and kind in ("speech_start", "normal", "group"):
             prepared_epoch = prepare(robot_id, end_expected=kind == "speech_start")
+            read_epoch = getattr(visual, "prepared_turn_epoch", None)
+            if type(prepared_epoch) is int and callable(read_epoch):
+                # The new turn invalidates every peer's old fallback sampler,
+                # not just the initiating head. Save their new epochs before
+                # awaiting STOP; newer speech edges must fence this restart.
+                now = time.monotonic()
+                for peer in visual.hub.robots:
+                    if peer != robot_id and visual.hub.user_active(peer, now):
+                        prepared_peers[peer] = read_epoch(peer)
         # Human speech cancels one shared five-pet speech floor once. The
         # authenticated human camera must still start if audio STOP fails,
         # without treating the unresolved speaker lease as a success.
@@ -527,6 +548,8 @@ class Runtime:
                         visual.start_speech_frames(
                             robot_id, prepared_epoch=prepared_epoch,
                         )
+                        for peer, epoch in sorted(prepared_peers.items()):
+                            visual.start_speech_frames(peer, prepared_epoch=epoch)
                     else:
                         # Older test adapters have no turn token; the real
                         # multimodal owner always provides one.

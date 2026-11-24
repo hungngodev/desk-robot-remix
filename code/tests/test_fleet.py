@@ -648,3 +648,76 @@ async def test_busy_private_memory_does_not_delay_peer_speech(
         assert memory.count("robot-02") == 0
     else:
         assert memory.count("robot-02") == 2
+
+
+@pytest.mark.parametrize("transition", ["live_edge", "snapshot", "reconnect"])
+async def test_fleet_active_peer_samplers_survive_new_voice_generation(
+    transition, monkeypatch,
+):
+    from desk_robot.multimodal import MultimodalOrchestrator
+
+    class Pet:
+        voice_monitor_ready = True
+
+        async def interrupt(self, robot_id):
+            pass
+
+        def set_voice_monitor_ready(self, ready):
+            self.voice_monitor_ready = ready
+
+    class Talk:
+        async def stop(self):
+            pass
+
+    settings = SimpleNamespace(
+        robots=[SimpleNamespace(id=robot_id) for robot_id in IDS],
+        mode="simulation", voice_vision_tools_enabled=True,
+        vision_model="local-vlm",
+    )
+    visual = MultimodalOrchestrator(
+        settings, {robot_id: object() for robot_id in IDS},
+        object(), asyncio.Lock(),
+    )
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = settings
+    runtime.pet = Pet()
+    runtime.conversation = Talk()
+    runtime.multimodal = visual
+
+    async def hold_sampler(robot_id, epoch):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(visual, "_speech_frames", hold_sampler)
+    active = frozenset(IDS[:2])
+    retired = []
+    try:
+        if transition == "reconnect":
+            await runtime._on_voice_snapshot(active)
+            retired.extend(visual._capture_tasks.values())
+            await runtime._on_voice_global("stream_unavailable")
+            epochs = {robot_id: visual.prepared_turn_epoch(robot_id)
+                      for robot_id in active}
+            await runtime._on_voice_monitor_ready(True)
+            await runtime._on_voice_snapshot(active)
+            # Recovery must not manufacture another human turn per peer.
+            assert epochs == {robot_id: visual.prepared_turn_epoch(robot_id)
+                              for robot_id in active}
+        else:
+            await runtime._on_voice_interrupt(IDS[0], "speech_start")
+            retired.append(visual._capture_tasks[IDS[0]])
+            if transition == "live_edge":
+                await runtime._on_voice_interrupt(IDS[1], "speech_start")
+            else:
+                await runtime._on_voice_snapshot(active)
+        assert set(visual._capture_tasks) == active
+        assert all(task.done() or task.cancelling() for task in retired)
+        for robot_id in active:
+            task = visual._capture_tasks[robot_id]
+            assert task not in retired
+            assert not task.done() and not task.cancelling()
+        await runtime._on_voice_interrupt(IDS[0], "speech_end")
+        assert visual._capture_tasks[IDS[0]].cancelling()
+        assert not visual._capture_tasks[IDS[1]].cancelling()
+    finally:
+        await visual.close()
+        await asyncio.gather(*retired, return_exceptions=True)
