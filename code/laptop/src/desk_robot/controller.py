@@ -119,6 +119,7 @@ class Coordinator:
         # Keep ownership through WROOM STOP, not merely job-state changes.
         # A failed STOP latches the fleet until an explicit successful STOP.
         self._fleet_motion_owner: str | None = None
+        self._motion_children: dict[str, tuple[asyncio.Task, ...]] = {}
         self.jobs: dict[str, Job] = {}
         self.tasks: dict[str, asyncio.Task] = {}
         self.closed = False
@@ -334,10 +335,14 @@ class Coordinator:
             owner = self.jobs.get(owner_id)
             owner_task = self.tasks.get(owner_id)
             if (owner is not None and owner_task is not None
-                    and owner.robot_id == robot_id and owner_task.done()):
+                    and owner.robot_id == robot_id and owner_task.done()
+                    and all(task.done() for task in self._motion_children.get(owner_id, ()))):
                 # A completed abandoned job may have failed its final STOP.
                 # The operator's *new* acknowledged halt is the only explicit
                 # recovery; a STOP for some other pet cannot release it.
+                for child in self._motion_children.pop(owner_id, ()):
+                    if not child.cancelled():
+                        child.exception()
                 self._fleet_motion_owner = None
         return acknowledgement
 
@@ -473,6 +478,9 @@ class Coordinator:
                 )  # only after consuming operator permit
                 keeper = asyncio.create_task(self._keepalive(job.robot_id))
                 operation = asyncio.create_task(work(job))
+                # A parent task can finish or be cancelled again while one
+                # of these children is still unwinding. Keep the true owners.
+                self._motion_children[job.id] = (keeper, operation)
                 # A failed keepalive cancels the operation immediately; do not continue blindly.
                 # Exploration is a single persistent operator-approved job;
                 # never require another two-minute token while it is safely
@@ -530,6 +538,7 @@ class Coordinator:
                         job.state = "failed"
                 if (stop_acknowledged and not unresponsive
                         and getattr(self, "_fleet_motion_owner", None) == job.id):
+                    self._motion_children.pop(job.id, None)
                     self._fleet_motion_owner = None
 
     def manual(self, robot_id: str, command: str) -> Job:

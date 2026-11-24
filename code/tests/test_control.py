@@ -1729,3 +1729,57 @@ async def test_failed_idle_stop_requires_explicit_acknowledged_recovery(settings
     finally:
         head.fail_command = None
         await c.close()
+
+
+async def test_explicit_stop_cannot_release_fleet_with_live_cancelled_child(settings):
+    c, head = make(settings)
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+    release = asyncio.Event()
+    finished = asyncio.Event()
+    original = head.command
+
+    async def stubborn_lift(command):
+        if command != "lift 110":
+            return await original(command)
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancelled.set()
+            await release.wait()
+        finally:
+            finished.set()
+        return {"ok": True, "reply": "OK lift angle=110", "robot_id": "robot-01"}
+
+    head.command = stubborn_lift
+    await c.operator_arm("robot-01")
+    await c.operator_arm("robot-02")
+    job = c.manual("robot-01", "lift 110")
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=0.5)
+        await c.stop("robot-01")
+        await asyncio.wait_for(cancelled.wait(), timeout=0.5)
+        await asyncio.wait_for(c.tasks[job.id], timeout=1)
+        assert not finished.is_set()
+        # The parent is done, but its abandoned transport task still owns
+        # potential motion. A new HALT receipt alone cannot retire that task.
+        assert (await c.stop("robot-01"))["ok"] is True
+        assert c._fleet_motion_owner == job.id
+        with pytest.raises(OperationError, match="one moving pet"):
+            c.manual("robot-02", "drive 10 10 100")
+        release.set()
+        await asyncio.wait_for(finished.wait(), timeout=0.5)
+        # The manual work still has its existing servo-settling wait.
+        await asyncio.wait_for(
+            asyncio.gather(*c._motion_children[job.id], return_exceptions=True),
+            timeout=3,
+        )
+        assert (await c.stop("robot-01"))["ok"] is True
+        assert c._fleet_motion_owner is None
+        next_job = c.manual("robot-02", "drive 10 10 100")
+        await c.tasks[next_job.id]
+        assert next_job.state == "succeeded"
+    finally:
+        release.set()
+        await c.close()
