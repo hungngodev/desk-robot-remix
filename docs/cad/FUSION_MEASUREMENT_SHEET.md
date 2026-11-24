@@ -9,6 +9,12 @@ These blank fields are **intentional** and are not permission to guess a fit.
 | Main stepper motor shaft center spacing | | motor_center_spacing |
 | MG90S case length / width / body thickness | | servo_case_l / w / h |
 | MG90S horn shaft center and screw boss | | servo_horn_center |
+| Jaw pinion tooth count, measured pitch diameter, rack pitch, shaft-to-rack pitch line offset and engagement length | | jaw_pinion_teeth / pitch_d / rack_pitch / rack_offset / engagement |
+| Unpowered jaw reversal lost travel in mm at open, intermediate and closed positions, both directions; axial/radial play and tooth clearance | | jaw_backlash_by_pose / pinion_axial_play / pinion_radial_play / tooth_clearance |
+| Actual lift and jaw horn orientation at unloaded center, signed travel per commanded degree, collision-free endpoints and reserved travel before binding | | lift_center / jaw_center / lift_min_deg / lift_max_deg / jaw_open_deg / jaw_closed_deg / jaw_endpoint_margin |
+| FSR402 actual body OD, active region, thickness, adhesive, tail width/length and connector clearance | | fsr_d / fsr_active_d / fsr_sensor_h / fsr_adhesive_h / fsr_tail_w / fsr_tail_l / fsr_connector_clearance |
+| Installed uncompressed silicone stack and adjacent grip plane, recessed rigid rim and compressed pad height at representative contact | | fsr_stack_h_mm / fsr_grip_plane_mm / fsr_rim_relief_mm / compressed_pad_h |
+| Jaw pad flatness, measured clearance to rack/case/horn across combined lift/jaw poses, unloaded and loaded ADC channel 1 baseline/threshold/ceiling | | jaw_pad_flatness / jaw_swept_clearance / jaw_adc_baseline / jaw_adc_contact / jaw_adc_ceiling |
 | XIAO Sense assembled board width, height and camera depth | | sense_w / h / depth |
 | SSD1306 PCB width, height and window active area | | oled_pcb_w / h, oled_screen_w / h |
 | Exact Challenge CS20-02P110-04-1X 20 x 16 x 4.7 mm body, solder pads and gasket dimensions | | speaker_l / speaker_w / speaker_depth / acoustics_1cc |
