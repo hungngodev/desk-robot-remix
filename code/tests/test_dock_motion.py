@@ -926,3 +926,194 @@ async def test_second_pet_cannot_use_first_pet_dock_intrinsics_to_move(
         assert not head.commands and not other_head.commands
     finally:
         await coordinator.close()
+
+
+@pytest.mark.parametrize("outcome", ["standoff", "contact", "beacon_loss", "timeout"])
+async def test_public_dock_replay_stops_without_unqualified_recovery(
+    settings, tmp_path, monkeypatch, outcome,
+):
+    """Host replay: qualified approach is distinct from contact and charge proof."""
+    import asyncio
+
+    from desk_robot.dock_evidence import observe_dock_evidence
+    from desk_robot.dock_ir import dock_beacon_code
+    from desk_robot.dock_vision import DockPose
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.max_job_seconds = 2 if outcome == "timeout" else 20
+    robot = settings.robots[0]
+    robot.motion_enabled = True
+    robot.motor_backend = "dc_pwm_guarded"
+    robot.dock_motion_qualified = True
+    robot.dock_turn_sign = robot.dock_forward_sign = 1
+    robot.dock_beacon_id = 1
+    robot.device_id = "xiaozhi-01"
+    robot.dock_calibration = tmp_path / "replay-dock.json"
+    robot.dock_calibration.write_text(json.dumps({
+        "measured": True, "robot_id": robot.id, "head_device_id": robot.device_id,
+        "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410,
+        "cx": 320, "cy": 240, "tag_side_mm": 60, "marker_id": 1,
+        "target_distance_mm": 200, "distortion_coeffs": [0.0] * 5,
+        "image_width_px": 640, "image_height_px": 480,
+        "mount_lateral_offset_mm": 0.0, "mount_yaw_deg": 0.0,
+    }))
+
+    class ReplayHead:
+        def __init__(self):
+            self.armed = False
+            self.contacted = False
+            self.commands = []
+            self.frames = self.ir_reads = self.aux_reads = 0
+            self.last_verified = None
+            self.snapshot_cancelled = asyncio.Event()
+
+        async def status(self):
+            return {
+                "robot_id": robot.id, "backend": robot.motor_backend,
+                "armed": self.armed,
+                "safety": {"required": True, "ready": True, "fault": "none"},
+                "ranges": {"present_mask": 31, "valid_mask": 31,
+                           "mm": [50, 50, 50, 50, 700], "age_ms": [5] * 5},
+                "side_ranges": {"present_mask": 7, "valid_mask": 7,
+                                "mm": [600] * 3, "age_ms": [5] * 3},
+                "imu": {"family": 4, "valid": True, "age_ms": 5,
+                        "acc": [0, 0, 16384], "gyro": [0] * 3},
+                "touch": {"active": False},
+            }
+
+        async def snapshot(self):
+            raise AssertionError("Dock used an unbound camera snapshot")
+
+        async def snapshot_for_dock(self):
+            self.frames += 1
+            if outcome == "timeout" and self.frames == 3:
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    self.snapshot_cancelled.set()
+            return b"synthetic marker", time.monotonic(), (1234, self.frames, 1), 1
+
+        async def camera_identity(self, receipt):
+            await self.dock_receipt_current(receipt)
+            return "OV5640"
+
+        async def dock_receipt_current(self, receipt):
+            assert receipt[2:] == ((1234, self.frames, 1), 1)
+            self.last_verified = (self.frames, self.ir_reads)
+
+        async def ir_status(self):
+            self.ir_reads += 1
+            matching = not (outcome == "beacon_loss" and self.ir_reads == 2)
+            return {
+                "robot_id": robot.id, "left_valid": matching,
+                "right_valid": matching, "match": matching,
+                "left_seq": self.ir_reads, "right_seq": self.ir_reads,
+                "left_age_ms": 5, "right_age_ms": 5,
+                "code": dock_beacon_code(1) if matching else 0,
+                "motor_authorized": False, "charging_authorized": False,
+                "physical_qualified": False,
+            }
+
+        async def command(self, command):
+            self.commands.append(command)
+            if command == "arm":
+                self.armed = True
+            elif command == "halt":
+                self.armed = False
+            elif command.startswith("drive "):
+                assert self.armed
+                assert self.ir_reads == sum(
+                    c.startswith("drive ") for c in self.commands
+                )
+                assert self.last_verified == (self.frames, self.ir_reads)
+                if outcome == "contact" and command == "drive 20 20 100":
+                    # Inject the local WROOM contact interlock verdict, not a
+                    # simulated proof that the wheels actually reached a dock.
+                    self.contacted = True
+                    self.armed = False
+            return {"ok": True}
+
+        async def aux_status(self):
+            self.aux_reads += 1
+            return {
+                "robot_id": robot.id,
+                "pulse": {"present": False, "valid": False, "part_id": 0,
+                          "red": 0, "ir": 0, "age_ms": 0, "bpm": None,
+                          "medical": False},
+                "angles": {"raw": [0] * 3, "present_mask": 0,
+                           "valid_mask": 0, "magnet": [0] * 3},
+                "force": {"adc": [0, 0], "jaw_seq": 0, "valid": False,
+                          "calibrated": False, "boot_id": 17},
+                "climate": {"temp_centi": 0, "rh_centi": 0, "valid": False},
+                "power": {"cell_mv": 0, "soc_centi": 0, "bus_mv": 0,
+                          "shunt_uv": 0, "fuel_valid": False,
+                          "monitor_valid": False, "current_calibrated": False},
+                "proximity": {"raw": 0, "valid": False, "gesture": 0,
+                              "gesture_events": 0, "physically_qualified": False,
+                              "boot_id": 17},
+                "dock": {"present": True, "valid": True,
+                         "left_seated": self.contacted,
+                         "right_seated": self.contacted,
+                         "input_good": self.contacted,
+                         "charge_indicated": self.contacted,
+                         "charging_verified": False,
+                         "seq": self.aux_reads, "age_ms": 5},
+            }
+
+    head = ReplayHead()
+    poses = iter(((80, 500), (0, 450), (0, 150)))
+
+    def detect(_jpeg, _camera, *, captured_at):
+        x, z = next(poses)
+        return DockPose(x, 0, z, 0.5, captured_at)
+
+    monkeypatch.setattr("desk_robot.dock_runtime.detect_apriltag", detect)
+    coordinator = Coordinator(settings, {robot.id: head}, SimulationVision())
+    try:
+        await coordinator.operator_arm(robot.id)
+        assert head.commands == []  # A permit alone does not arm the body.
+        job = coordinator.dock(robot.id)
+        await asyncio.wait_for(coordinator.tasks[job.id], timeout=6)
+        commands = [c for c in head.commands if c != "keepalive"]
+        expected = ["arm", "drive 20 -20 100", "stop"]
+        if outcome != "beacon_loss":
+            expected += ["drive 20 20 100", "stop"]
+        assert commands == expected + ["halt"]
+        assert head.ir_reads == 2
+        assert not head.armed
+        if outcome in {"standoff", "beacon_loss"}:
+            assert job.state == "succeeded"
+            assert job.result["phase"] == "hold"
+            assert not job.result["charging_authorized"]
+            assert not job.result["physical_acceptance_pass"]
+            reason = (
+                "contacts unverified" if outcome == "standoff" else "not jointly visible"
+            )
+            assert reason in job.result["reason"]
+        else:
+            assert job.state == "failed"
+            assert job.result is None
+            if outcome == "contact":
+                assert "body disarmed" in job.error
+            else:
+                assert job.error == "TimeoutError"
+                await asyncio.wait_for(head.snapshot_cancelled.wait(), timeout=1)
+        # The diagnostic is the existing read-only pin observer, after HALT.
+        # Neither seat+PGOOD+CHG nor the approach result verifies charging.
+        if outcome == "contact":
+            report = await observe_dock_evidence(head, robot.id, gap=0.25)
+            assert report["state"] == "charger_reports_active"
+            assert report["stable_three_samples"]
+            assert not report["physical_contact_verified"]
+            assert not report["charging_verified"]
+            assert not report["charging_authorized"]
+            assert not report["motor_authorized"]
+            assert head.aux_reads == 3
+            assert [c for c in head.commands if c != "keepalive"] == commands
+        # No automatic reverse, retry, or new arm after any terminal outcome.
+        with pytest.raises(OperationError, match="permit"):
+            coordinator.dock(robot.id)
+        assert [c for c in head.commands if c != "keepalive"] == commands
+    finally:
+        await coordinator.close()
