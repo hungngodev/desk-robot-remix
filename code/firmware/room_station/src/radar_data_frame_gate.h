@@ -49,7 +49,10 @@ class RadarDataFrameGate {
     if (position_ < expected_) return false;
 
     const uint16_t payload_len = expected_ - 10;
-    const bool valid = (frame_[6] == 0x01 || frame_[6] == 0x02) &&
+    // LD2410C protocol (pinned ld2410 v0.2.2, Table 13) reserves all
+    // target states except 0x00..0x03. Noise must not renew acquisition.
+    const bool valid = frame_[8] <= 0x03 &&
+        (frame_[6] == 0x01 || frame_[6] == 0x02) &&
         frame_[7] == 0xAA &&
         frame_[payload_len + 4] == 0x55 &&
         frame_[payload_len + 5] == 0x00 &&

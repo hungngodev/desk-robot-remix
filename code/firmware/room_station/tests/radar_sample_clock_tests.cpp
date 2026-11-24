@@ -112,5 +112,27 @@ int main() {
   assert(clock.sample_ms() == 4);
   assert(feed(gate, kBasicFrame, 14));
   assert(gate.completed_sample().moving_cm == 42);
+  // Table 13 reserves every target state above 3. An otherwise valid
+  // frame must not change the last observation or renew its acquisition.
+  uint8_t reserved[] = {
+      0xF4, 0xF3, 0xF2, 0xF1, 13, 0,
+      0x02, 0xAA, 0xFF, 99, 0, 50, 35, 0, 60, 80, 0, 0x55, 0x00,
+      0xF8, 0xF7, 0xF6, 0xF5,
+  };
+  for (unsigned state = 4; state <= 255; ++state) {
+    reserved[8] = static_cast<uint8_t>(state);
+    const bool accepted = feed(gate, reserved);
+    clock.observe(accepted, true, 1000);
+    assert(!accepted);
+    assert(clock.sample_ms() == 4);
+    assert(gate.completed_sample().moving_cm == 42);
+  }
+  for (uint8_t state = 0; state <= 3; ++state) {
+    reserved[8] = state;
+    assert(feed(gate, reserved));
+    assert(gate.completed_sample().presence == (state != 0));
+    assert(gate.completed_sample().moving == ((state & 1) != 0));
+    assert(gate.completed_sample().stationary == ((state & 2) != 0));
+  }
   return 0;
 }
