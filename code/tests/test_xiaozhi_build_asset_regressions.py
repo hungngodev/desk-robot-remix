@@ -37,6 +37,7 @@ def upstream() -> Path:
         ("test_spiffs_assets.py", 120),
         ("test_build_default_assets.py", 120),
         ("test_build.py", 1200),
+        ("test_ci_selection.py", 300),
     ],
 )
 def test_pinned_xiaozhi_build_asset_suite(upstream: Path, suite: str, timeout: int) -> None:
