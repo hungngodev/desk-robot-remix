@@ -2,6 +2,8 @@
 
 Give a worker one card link from the [task catalog](catalog.md). Each card names the work, authority, source, shared rules, prerequisites, scoped paths and acceptance evidence. Start from [draft PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17) and refresh its head before assessing a claim or publishing.
 
+For the full backlog, use the [ten-worker runbook](tonight/README.md) and its ready-to-copy launch and resume prompts.
+
 ## Find an assignment
 
 The catalog contains **192 cards** from all 22 source tabs. At the reviewed revision, **94 are ready**, **91 are blocked**, **5 are already verified**, and **2 are deferred**. These are planning states. The issue holds live progress.
