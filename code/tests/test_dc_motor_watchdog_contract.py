@@ -82,7 +82,8 @@ def test_codegen_assembly_harness_and_hardware_note_agree_on_exclusion():
     note = (HARDWARE / "dc-motor-independent-watchdog.md").read_text(
         encoding="utf-8")
     assert "kDcHeartbeatPin" in emitter
-    assert 'row("WROOM GPIO23 (DC only; same as STEP right coil 4)"' in emitter
+    # The emitter computes the coil from the validated wiring plan; check the
+    # generated contract rather than requiring a hard-coded source literal.
     assert "| WROOM GPIO23 (DC only; same as STEP right coil 4) |" in harness
     assert "esp32_dc_watchdog_lab" in note
     assert "nSLEEP" in note
