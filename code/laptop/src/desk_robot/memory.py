@@ -30,6 +30,9 @@ _RELAY_TOKEN = re.compile(r"[0-9a-f]{32}\Z")
 # seal only NEW memory writes durably. Explicit forget remains available.
 _MAX_DELETED_EPISODE_IDS = 100_000
 
+# SQLite INTEGER is a signed 64-bit value. Mutation receipts use its positive range.
+_MAX_MUTATION_GENERATION = (1 << 63) - 1
+
 
 class MemoryWriteSealed(RuntimeError):
     """Private episode writes are disabled after the deletion fence fills."""
@@ -651,7 +654,7 @@ class MemoryStore:
         old = db.execute(
             "SELECT generation FROM core_fact_mutations WHERE slot=?", (slot,)
         ).fetchone()
-        if old is not None and old[0] >= (1 << 63) - 1:
+        if old is not None and old[0] >= _MAX_MUTATION_GENERATION:
             raise ValueError("Core memory generation exhausted")
         generation = 1 if old is None else old[0] + 1
         db.execute(
@@ -668,7 +671,7 @@ class MemoryStore:
         if generation is None:
             cls._advance_core_mutation(db, slot)
             return
-        if type(generation) is not int or generation <= 0:
+        if type(generation) is not int or not 1 <= generation <= _MAX_MUTATION_GENERATION:
             raise ValueError("Invalid core memory mutation generation")
         current = db.execute(
             "SELECT generation FROM core_fact_mutations WHERE slot=?", (slot,)
@@ -763,7 +766,7 @@ class MemoryStore:
             "SELECT generation FROM episode_mutations WHERE event_id=?",
             (event_id,),
         ).fetchone()
-        if old is not None and old[0] >= (1 << 63) - 1:
+        if old is not None and old[0] >= _MAX_MUTATION_GENERATION:
             raise ValueError("Episode memory generation exhausted")
         generation = 1 if old is None else old[0] + 1
         db.execute(
@@ -782,7 +785,7 @@ class MemoryStore:
             # older pending API correction without losing their semantics.
             cls._advance_episode_mutation(db, event_id)
             return
-        if type(generation) is not int or generation <= 0:
+        if type(generation) is not int or not 1 <= generation <= _MAX_MUTATION_GENERATION:
             raise ValueError("Invalid episode memory mutation generation")
         current = db.execute(
             "SELECT generation FROM episode_mutations WHERE event_id=?",

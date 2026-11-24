@@ -65,3 +65,61 @@ def test_camera_provenance_rejects_unbounded_integer_and_float_clocks(
             observed_at=now, camera_provenance=CameraProvenance(**clocks),
         )
     assert store.recent("pet1") == []
+
+
+@pytest.mark.parametrize("generation", [0, -1, True, 1.0, "1", 1 << 63, 10**1000])
+def test_memory_mutation_generation_bounds_fail_without_changing_data(tmp_path, generation):
+    store = MemoryStore(tmp_path, ["pet1"])
+    assert store.set_core_fact("pet1", "nickname", "original")
+    assert store.remember(
+        "pet1", "original", "Original touch", kind="touch",
+        source_robot="pet1", witnessed=True,
+    )
+
+    for action in (
+        lambda: store.set_core_fact(
+            "pet1", "nickname", "changed", mutation_generation=generation,
+        ),
+        lambda: store.forget_core_fact(
+            "pet1", "nickname", mutation_generation=generation,
+        ),
+        lambda: store.correct_episode(
+            "pet1", "original", "Changed touch", mutation_generation=generation,
+        ),
+        lambda: store.forget_episode(
+            "pet1", "original", mutation_generation=generation,
+        ),
+    ):
+        with pytest.raises(ValueError, match="Invalid .* mutation generation"):
+            action()
+
+    assert store.core_facts("pet1")[0].value == "original"
+    assert store.get_episode("pet1", "original").summary == "Original touch"
+
+
+def test_maximum_sqlite_mutation_generation_is_valid_but_cannot_advance(tmp_path):
+    store = MemoryStore(tmp_path, ["pet1"])
+    assert store.set_core_fact("pet1", "nickname", "original")
+    assert store.remember(
+        "pet1", "original", "Original touch", kind="touch",
+        source_robot="pet1", witnessed=True,
+    )
+    store.reserve_episode_mutation("pet1", "original")
+    maximum = (1 << 63) - 1
+    # Seed the boundary directly instead of performing 2**63 mutations.
+    with store._connect("pet1") as db:
+        db.execute("UPDATE core_fact_mutations SET generation=?", (maximum,))
+        db.execute("UPDATE episode_mutations SET generation=?", (maximum,))
+
+    assert store.set_core_fact(
+        "pet1", "nickname", "changed", mutation_generation=maximum,
+    )
+    assert store.correct_episode(
+        "pet1", "original", "Changed touch", mutation_generation=maximum,
+    )
+    with pytest.raises(ValueError, match="Core memory generation exhausted"):
+        store.reserve_core_fact_mutation("pet1", "nickname")
+    with pytest.raises(ValueError, match="Episode memory generation exhausted"):
+        store.reserve_episode_mutation("pet1", "original")
+    assert store.core_facts("pet1")[0].value == "changed"
+    assert store.get_episode("pet1", "original").summary == "Changed touch"
