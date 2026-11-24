@@ -126,6 +126,8 @@ def propose_force_limits(phases: dict[str, list[tuple[int, int]]]) -> dict:
     ceiling = int(min(30000, heavy * 0.80))
     if ceiling <= threshold + max(50, noise):
         raise ValueError("Contact threshold and operator upper level overlap")
+    if ceiling <= light + noise:
+        raise ValueError("Representative contact overlaps conservative stop ceiling")
     return {
         "grip_force_sign": sign,
         "grip_force_delta_raw": threshold,
@@ -264,8 +266,8 @@ async def main() -> None:
     if not args.calibration.is_file():
         raise ValueError("Existing measured camera calibration JSON required")
     source = load_source_calibration(args.calibration)
-    step = source.get("grip_step_deg", 4)
-    if type(step) is not int or not 1 <= step <= 4:
+    grip_step = source.get("grip_step_deg", 4)
+    if type(grip_step) is not int or not 1 <= grip_step <= 4:
         raise ValueError("Existing grip_step_deg must be an integer from 1 to 4")
     # Validate the same geometry that the real grasp runtime loads. The
     # documented unmeasured example remains a valid starting point.
@@ -287,7 +289,7 @@ async def main() -> None:
             )
     proposed = propose_force_limits(readings)
     # A manual FSR trial does not measure servo increments.
-    proposed["grip_step_deg"] = step
+    proposed["grip_step_deg"] = grip_step
     # Never silently enable autonomous grasping based on raw ADC alone.
     source.update({
         key: proposed[key] for key in (
