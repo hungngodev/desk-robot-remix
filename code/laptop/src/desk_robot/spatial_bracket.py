@@ -84,8 +84,10 @@ def validate_stationary_bracket(
             or not _number(max_optical_lag_s, 0.001, 0.20)
             or not _number(max_body_lag_s, 0.001, 0.25)):
         raise BracketError("Missing bounded timing or pose evidence")
-    if fence.current(now) != after:
+    if fence.current(now) is not after:
         raise BracketError("After pose is not current authenticated continuity")
+    if not fence.owns_continuous_receipt(before):
+        raise BracketError("Before pose is not from current authenticated continuity")
     if (before.robot_id != fence.robot_id or after.robot_id != fence.robot_id
             or before.head_boot is None or after.head_boot is None
             or not _integer(before.body_boot, 1, 0xffffffff)

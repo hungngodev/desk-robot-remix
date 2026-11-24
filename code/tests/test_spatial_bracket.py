@@ -89,3 +89,34 @@ def test_later_pose_or_pickup_invalidates_selected_bracket():
     kwargs["fence"].invalidate("pickup")
     with pytest.raises(BracketError, match="current"):
         validate_stationary_bracket(**kwargs)
+
+
+def test_bracket_rejects_before_receipt_from_prior_continuity_after_recovery():
+    kwargs = fixture()
+    fence = kwargs["fence"]
+    fence.invalidate("http_unavailable")
+    packet = {
+        "robot_id": "robot-01", "v": 1, "body_boot": 9, "origin": 3,
+        "x_mm": 25, "y_mm": -30, "yaw_mrad": 1000,
+        "quality": "valid", "head_boot": 12,
+    }
+    fence.observe(dict(packet, seq=4, sample_us=1_320_000), 100.32,
+                  request_started_at=100.31)
+    kwargs["after"] = fence.observe(
+        dict(packet, seq=5, sample_us=1_350_000), 100.35,
+        request_started_at=100.33,
+    )
+    kwargs["now"] = 100.36
+    assert fence.current(kwargs["now"]) is kwargs["after"]
+    with pytest.raises(BracketError, match="Before pose.*continuity"):
+        validate_stationary_bracket(**kwargs)
+
+
+@pytest.mark.parametrize("endpoint", ["before", "after"])
+def test_bracket_rejects_equal_receipt_from_another_fence(endpoint):
+    kwargs = fixture()
+    other = fixture()
+    assert kwargs[endpoint] == other[endpoint]
+    kwargs[endpoint] = other[endpoint]
+    with pytest.raises(BracketError, match="continuity"):
+        validate_stationary_bracket(**kwargs)

@@ -8,11 +8,13 @@ anchor a map, clear local safety faults, or grant an actuator lease.
 from __future__ import annotations
 
 import math
+from collections import deque
 from dataclasses import dataclass, replace
 
 _MAX_SAMPLE_US = (1 << 53) - 1
 _MAX_COORD_MM = 1_000_000
 _MAX_RECEIPT_LAG_S = 0.25
+_MAX_CONTINUITY_RECEIPTS = 64
 
 
 class PoseError(ValueError):
@@ -101,6 +103,9 @@ class PoseFence:
         self._healthy_samples = 0
         self._retired: set[tuple[int, int, int | None]] = set()
         self._failed: set[tuple[int, int, int | None]] = set()
+        # Retain only actual receipt objects from this uninterrupted fence.
+        # Bounded eviction fails closed for an old bracket, never restores it.
+        self._receipts: deque[PoseReceipt] = deque(maxlen=_MAX_CONTINUITY_RECEIPTS)
 
     def observe(
         self, data: dict, received_at: float, *, request_started_at: float | None = None,
@@ -108,10 +113,7 @@ class PoseFence:
         try:
             reading = decode_pose(data, self.robot_id, received_at)
         except PoseError:
-            self._continuous = False
-            self._healthy_samples = 0
-            self.needs_reanchor = True
-            self.blocked_reason = "invalid_pose"
+            self.invalidate("invalid_pose")
             raise
         if request_started_at is not None:
             # Local GET duration is a conservative transport age allowance,
@@ -125,9 +127,7 @@ class PoseFence:
             reading = replace(reading, request_started_at=float(request_started_at))
         identity = (reading.body_boot, reading.origin, reading.head_boot)
         if identity in self._retired or identity in self._failed:
-            self._continuous = False
-            self.needs_reanchor = True
-            self.blocked_reason = "retired_or_failed_origin"
+            self.invalidate("retired_or_failed_origin")
             raise PoseError("Retired or failed body/head pose origin")
         old = self.last
         if reading.head_boot is None and old is not None and old.head_boot is not None:
@@ -140,36 +140,24 @@ class PoseFence:
             if identity != old_identity:
                 self._retired.add(old_identity)
                 self.last = reading
-                self._continuous = False
-                self._healthy_samples = 0
-                self.needs_reanchor = True
-                self.blocked_reason = "origin_changed"
+                self.invalidate("origin_changed")
                 raise PoseError("Pose body origin or head boot changed; re-anchor required")
             if (reading.seq <= old.seq or reading.sample_us <= old.sample_us
                     or reading.received_at < old.received_at):
                 self._failed.add(identity)
-                self._continuous = False
-                self._healthy_samples = 0
-                self.needs_reanchor = True
-                self.blocked_reason = "replayed_or_reset_pose_clock"
+                self.invalidate("replayed_or_reset_pose_clock")
                 raise PoseError("Pose sequence, sample clock, or receipt clock reset")
             # Body and Mac clocks have unrelated epochs. A lagging source
             # duration cannot be rescued by a later, freshly timed HTTP GET.
             host_delta = reading.received_at - old.received_at
             body_delta = (reading.sample_us - old.sample_us) / 1_000_000
             if host_delta - body_delta > _MAX_RECEIPT_LAG_S:
-                self._continuous = False
-                self._healthy_samples = 0
-                self.needs_reanchor = True
-                self.blocked_reason = "stale_body_sample"
+                self.invalidate("stale_body_sample")
                 raise PoseError("Pose body sample lags local receipt clock")
             # A huge forward leap can be a reset or incorrectly encoded unit.
             if body_delta - host_delta > 5:
                 self._failed.add(identity)
-                self._continuous = False
-                self._healthy_samples = 0
-                self.needs_reanchor = True
-                self.blocked_reason = "implausible_pose_clock"
+                self.invalidate("implausible_pose_clock")
                 raise PoseError("Pose sample clock advanced implausibly")
         self.last = reading
         if reading.head_boot is None:
@@ -183,8 +171,9 @@ class PoseFence:
             "pose_not_valid" if reading.quality != "valid" else "awaiting_second_sample"
         )
         if reading.quality != "valid":
-            self._continuous = False
-            self.needs_reanchor = True
+            self.invalidate("pose_not_valid")
+        else:
+            self._receipts.append(reading)
         return reading
 
     def invalidate(self, reason: str = "missing_pose") -> None:
@@ -193,6 +182,11 @@ class PoseFence:
         self._healthy_samples = 0
         self.needs_reanchor = True
         self.blocked_reason = reason
+        self._receipts.clear()
+
+    def owns_continuous_receipt(self, receipt: PoseReceipt) -> bool:
+        """True only for an actual accepted receipt in the current continuity."""
+        return self._continuous and any(item is receipt for item in self._receipts)
 
     def current(self, now: float, *, max_age_s: float = 0.25) -> PoseReceipt | None:
         if (type(now) not in (int, float) or not math.isfinite(now)
@@ -205,9 +199,6 @@ class PoseFence:
         age_start = (self.last.request_started_at if self.last.request_started_at is not None
                      else self.last.received_at)
         if now < self.last.received_at or not 0 <= now - age_start <= max_age_s:
-            self.blocked_reason = "stale_receipt"
-            self._continuous = False
-            self._healthy_samples = 0
-            self.needs_reanchor = True
+            self.invalidate("stale_receipt")
             return None
         return self.last
