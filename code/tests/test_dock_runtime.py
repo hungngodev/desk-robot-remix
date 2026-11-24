@@ -1287,3 +1287,52 @@ async def test_cancelled_detector_observer_retrieves_late_native_failure(monkeyp
     assert not reports
     assert dock_runtime._DETECTOR_SLOT.acquire(blocking=False)
     dock_runtime._DETECTOR_SLOT.release()
+
+
+async def test_overlapping_detector_shutdown_does_not_latch_native_fault(monkeypatch):
+    """A second closer must not misidentify the first as active C detection."""
+    import asyncio
+    import threading
+
+    monkeypatch.setattr(dock_runtime, "_DETECTOR_RESTART_REQUIRED", False)
+    monkeypatch.setattr(dock_runtime, "_DETECTOR_SHUTTING_DOWN", False)
+    old = dock_runtime._DETECTOR_POOL
+    original_shutdown = old.shutdown
+    entered, release = threading.Event(), threading.Event()
+
+    def delayed_join(wait=True, *, cancel_futures=False):
+        if wait:
+            entered.set()
+            if not release.wait(timeout=5):
+                raise TimeoutError("Shutdown test release was not signalled")
+        return original_shutdown(wait=wait, cancel_futures=cancel_futures)
+
+    monkeypatch.setattr(old, "shutdown", delayed_join)
+    first = asyncio.create_task(dock_runtime.close_detector_pool())
+    try:
+        assert await asyncio.to_thread(entered.wait, 1.0)
+        with pytest.raises(RuntimeError, match="shutdown already in progress"):
+            await dock_runtime.close_detector_pool()
+        assert not dock_runtime._DETECTOR_RESTART_REQUIRED
+        with pytest.raises(dock_runtime.DockDetectorBusy, match="closing"):
+            await dock_runtime.detect_bounded(
+                b"frame", SimpleNamespace(), captured_at=1.0,
+            )
+    finally:
+        release.set()
+        await asyncio.wait_for(first, timeout=2.0)
+
+    assert not dock_runtime._DETECTOR_RESTART_REQUIRED
+    assert not dock_runtime._DETECTOR_SHUTTING_DOWN
+    assert dock_runtime._DETECTOR_POOL is not old
+    monkeypatch.setattr(
+        dock_runtime, "detect_apriltag",
+        lambda jpeg, calibration, *, captured_at: DockPose(
+            0, 0, 400, 0.5, captured_at,
+        ),
+    )
+    recovered = await dock_runtime.detect_bounded(
+        b"frame", SimpleNamespace(), captured_at=2.0,
+    )
+    assert recovered.z_mm == 400
+    await dock_runtime.close_detector_pool()

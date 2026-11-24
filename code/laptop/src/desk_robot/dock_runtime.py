@@ -111,10 +111,15 @@ async def close_detector_pool() -> None:
     global _DETECTOR_SHUTTING_DOWN, _DETECTOR_RESTART_REQUIRED, _DETECTOR_POOL
     if _DETECTOR_RESTART_REQUIRED:
         raise RuntimeError("AprilTag worker shutdown unconfirmed; restart Mac process")
-    _DETECTOR_SHUTTING_DOWN = True
     if not _DETECTOR_SLOT.acquire(blocking=False):
+        # An overlapping close holds the same slot while joining an already
+        # idle executor. Do not mistake that owner for a running detector.
+        if _DETECTOR_SHUTTING_DOWN:
+            raise RuntimeError("AprilTag worker shutdown already in progress")
+        _DETECTOR_SHUTTING_DOWN = True
         _DETECTOR_RESTART_REQUIRED = True
         raise RuntimeError("Native AprilTag still running; restart Mac process")
+    _DETECTOR_SHUTTING_DOWN = True
     try:
         previous = _DETECTOR_POOL
         previous.shutdown(wait=False, cancel_futures=False)
