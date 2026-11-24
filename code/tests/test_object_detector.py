@@ -6,7 +6,7 @@ from io import BytesIO
 
 import pytest
 from desk_robot.object_detector import DetectorFrame, detect_object_frame
-from desk_robot.object_targets import ObjectOwner, ObjectQuery
+from desk_robot.object_targets import ObjectOwner, ObjectQuery, resolve_object_target
 from desk_robot.vision import Detection
 from PIL import Image
 
@@ -70,6 +70,7 @@ async def test_qualified_detection_keeps_frame_receipt_and_never_grants_motion()
     assert result.evidence is not None
     assert result.evidence.frame_seq == 24
     assert result.evidence.receipt_us == 970_000
+    assert result.evidence.captured_us == 960_000
     assert result.evidence.camera_boot == 101
     assert result.evidence.floor_mm is None
     assert result.evidence.projection_qualified is False
@@ -307,3 +308,24 @@ async def test_unrepresentable_detector_numbers_return_finite_rejection(predicti
     assert result.reason == "invalid_detector_result"
     assert result.evidence is None
     assert not result.may_execute and not result.arrived
+
+
+@pytest.mark.asyncio
+async def test_detector_capture_age_is_preserved_at_target_resolution():
+    query, owner, frame = fixtures()
+    delayed = replace(frame, captured_us=900_000, received_us=1_100_000)
+    receipt = await inspect(FakeDetector(), query=query, owner=owner,
+                            frame=delayed, now_us=1_120_000,
+                            clock_us=lambda: 1_120_000)
+    assert receipt.status == "camera_seen" and receipt.evidence is not None
+    assert receipt.evidence.captured_us == 900_000
+    # Synthetic qualified projection supplied by the spatial producer fixture.
+    evidence = replace(receipt.evidence, floor_mm=(120, 220),
+                       projection_qualified=True)
+    timely = resolve_object_target(query, owner, [evidence], now_us=1_120_000)
+    assert timely.status == "current_sighting"
+    assert timely.confirmed_floor_mm == (120, 220)
+    late = resolve_object_target(query, owner, [evidence], now_us=1_310_000)
+    assert late.status == "last_seen"
+    assert late.confirmed_floor_mm is None
+    assert not late.arrived and not late.may_execute

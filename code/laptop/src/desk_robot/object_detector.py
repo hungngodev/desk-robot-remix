@@ -244,6 +244,7 @@ async def detect_object_frame(
         evidence = ObjectEvidence(
             robot_id=query.robot_id, label=query.label, source=outcome,
             seen_at_wall_s=frame.seen_at_wall_s, receipt_us=frame.received_us,
+            captured_us=frame.captured_us,
             origin_id=query.origin_id, epoch=query.epoch,
             anchor_id=query.anchor_id, calibration_id=query.calibration_id,
             camera_boot=query.camera_boot, host_boot_id=query.host_boot_id,

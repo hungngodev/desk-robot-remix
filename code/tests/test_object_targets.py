@@ -18,7 +18,7 @@ def fixtures():
                         "tag-4", "cal-5", 101, "mac-boot-5", 12, True, True)
     seen = ObjectEvidence(
         "robot-01", "key", "camera_seen", 1800000000.1,
-        receipt_us=950_000, origin_id="origin-3", epoch=8, anchor_id="tag-4",
+        receipt_us=950_000, captured_us=950_000, origin_id="origin-3", epoch=8, anchor_id="tag-4",
         calibration_id="cal-5", camera_boot=101,
         host_boot_id="mac-boot-5", camera_grant=12, frame_seq=23,
         floor_mm=(120, 220), projection_qualified=True, confidence=0.92,
@@ -175,7 +175,7 @@ def test_consent_revocation_blocks_live_and_private_recall():
 def test_newer_user_report_does_not_become_camera_fact_or_metric_goal():
     _, _, seen = fixtures()
     report = ObjectEvidence("robot-01", "key", "user_reported", 1800000001.0)
-    result = resolve([replace(seen, receipt_us=100), report])
+    result = resolve([replace(seen, receipt_us=100, captured_us=100), report])
     assert result.status == "user_reported"
     assert result.source == "user_reported"
     assert result.confirmed_floor_mm is None and result.search_hint_mm is None
@@ -185,7 +185,8 @@ def test_newer_user_report_does_not_become_camera_fact_or_metric_goal():
 def test_newer_witnessed_candy_beats_old_user_report():
     q, _, seen = fixtures()
     candy_q = replace(q, label="wrapped candy")
-    candy = replace(seen, label="wrapped candy", receipt_us=200_000)
+    candy = replace(seen, label="wrapped candy", receipt_us=200_000,
+                    captured_us=200_000)
     report = ObjectEvidence("robot-01", "wrapped candy", "user_reported", 1700000000.0)
     result = resolve([candy, report], query=candy_q)
     assert result.status == "last_seen"
@@ -296,7 +297,7 @@ def test_future_same_host_receipt_cannot_be_a_historical_search_hint():
     assert result.confirmed_floor_mm is None and result.search_hint_mm is None
     assert not result.arrived and not result.may_execute
 
-    historical = replace(seen, receipt_us=100)
+    historical = replace(seen, receipt_us=100, captured_us=100)
     for rows in ([historical, future], [future, historical]):
         result = resolve(rows)
         assert result.status == "last_seen"
@@ -318,7 +319,7 @@ def test_staggered_same_frame_freshness_does_not_remove_ambiguity(other_floor):
                     projection_qualified=other_floor is not None)
     for rows in ([seen, other], [other, seen]):
         result = resolve(rows, now_us=1_205_001)
-        assert result.status == "current_sighting"
+        assert result.status == "last_seen"
         assert result.reason == "ambiguous_projected_view"
         assert result.confirmed_floor_mm is None and result.search_hint_mm is None
         assert not result.arrived and not result.may_execute
@@ -328,5 +329,31 @@ def test_staggered_same_frame_identical_projection_stays_usable():
     _, _, seen = fixtures()
     duplicate = replace(seen, receipt_us=960_000)
     result = resolve([seen, duplicate], now_us=1_205_001)
-    assert result.confirmed_floor_mm == seen.floor_mm
+    assert result.status == "last_seen"
+    assert result.search_hint_mm == seen.floor_mm
+    assert result.confirmed_floor_mm is None
+    assert not result.arrived and not result.may_execute
+
+
+def test_legacy_receipt_only_evidence_is_not_a_live_sighting():
+    _, _, seen = fixtures()
+    result = resolve([replace(seen, captured_us=None)])
+    assert result.status == "last_seen"
+    assert result.confirmed_floor_mm is None
+    assert not result.arrived and not result.may_execute
+
+
+@pytest.mark.parametrize("capture", [True, -1, 960_000, "950000"])
+def test_malformed_capture_metadata_cannot_supply_a_metric_hint(capture):
+    _, _, seen = fixtures()
+    result = resolve([replace(seen, captured_us=capture)])
+    assert result.status == "unknown"
+    assert result.confirmed_floor_mm is None and result.search_hint_mm is None
+
+
+def test_pre_request_capture_with_new_receipt_is_historical_only():
+    _, _, seen = fixtures()
+    result = resolve([replace(seen, captured_us=899_999)])
+    assert result.status == "last_seen"
+    assert result.confirmed_floor_mm is None
     assert not result.arrived and not result.may_execute

@@ -66,6 +66,9 @@ class ObjectEvidence:
     floor_mm: tuple[int, int] | None = None
     projection_qualified: bool = False
     confidence: float = 0.0
+    # Original capture mapped to the same Mac monotonic host boot. Legacy
+    # receipt-only evidence may be historical but never a current sighting.
+    captured_us: int | None = None
 
 
 @dataclass(frozen=True)
@@ -113,11 +116,13 @@ def _valid_evidence(e: object) -> bool:
         return False
     if e.source == "user_reported":
         # A human report never silently acquires a camera, pose or metric proof.
-        return (e.receipt_us is None and e.camera_boot is None
+        return (e.receipt_us is None and e.captured_us is None and e.camera_boot is None
                 and e.host_boot_id is None and e.camera_grant is None
                 and e.frame_seq is None and e.floor_mm is None
                 and e.projection_qualified is False)
     return (type(e.receipt_us) is int and e.receipt_us >= 0
+            and (e.captured_us is None or
+                 (type(e.captured_us) is int and 0 <= e.captured_us <= e.receipt_us))
             and type(e.camera_boot) is int and 0 <= e.camera_boot <= 0xFFFFFFFF
             and _identity(e.host_boot_id)
             and type(e.camera_grant) is int and 0 <= e.camera_grant <= 0xFFFFFFFF
@@ -216,8 +221,9 @@ def resolve_object_target(
                 and e.host_boot_id == query.host_boot_id
                 and e.camera_grant == query.camera_grant
                 and e.receipt_us is not None
-                and query.created_us <= e.receipt_us <= now_us
-                and now_us - e.receipt_us <= fresh_us)
+                and e.captured_us is not None
+                and query.created_us <= e.captured_us <= e.receipt_us <= now_us
+                and now_us - e.captured_us <= fresh_us)
 
     def frame_identity(e: ObjectEvidence) -> tuple:
         return (e.host_boot_id, e.camera_boot, e.camera_grant, e.frame_seq,
