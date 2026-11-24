@@ -208,3 +208,37 @@ async def test_runtime_shutdown_retires_yolo_executor_and_is_repeatable():
     with pytest.raises(RuntimeError, match="YOLO detector is closed"):
         await vision.detect(b"later frame", "candy")
     await runtime.close()
+
+
+async def test_truncated_camera_jpeg_is_rejected_before_model_work():
+    from io import BytesIO
+    from unittest.mock import AsyncMock
+
+    from desk_robot.vision import OllamaScene, image_size
+    from PIL import Image
+
+    output = BytesIO()
+    Image.new("RGB", (32, 32)).save(output, "JPEG")
+    frame = output.getvalue()
+    assert frame.endswith(b"\\xff\\xd9")
+    truncated = frame[:-2]
+    # Pillow can identify the format and dimensions without the end marker.
+    with Image.open(BytesIO(truncated)) as image:
+        assert image.size == (32, 32)
+    assert image_size(frame) == (32, 32)
+    client = AsyncMock()
+    scene = OllamaScene(client, url="http://localhost:11434", model="local-vlm")
+    with pytest.raises(ValueError, match="Bounded JPEG"):
+        await scene.compare(frame, truncated)
+    with pytest.raises(ValueError, match="Bounded JPEG"):
+        await scene.answer("What do you see?", [truncated])
+    client.post.assert_not_awaited()
+    with pytest.raises(ValueError, match="Bounded JPEG"):
+        image_size(truncated)
+    detector = YoloWorldVision(None)
+    try:
+        with pytest.raises(ValueError, match="Bounded JPEG"):
+            await detector.detect(truncated, "key")
+        assert detector.model is None
+    finally:
+        await detector.close()

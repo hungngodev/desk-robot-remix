@@ -227,7 +227,8 @@ class VisualChangeGate:
 def _check_camera_jpeg(frame: bytes, *, max_bytes: int = 1_000_000) -> None:
     """Reject unbounded camera images before any native decode or model work."""
     if (not isinstance(frame, bytes) or not 12 <= len(frame) <= max_bytes
-            or not frame.startswith(b"\xff\xd8")):
+            or not frame.startswith(b"\xff\xd8")
+            or not frame.endswith(b"\xff\xd9")):
         raise ValueError("Bounded JPEG scene evidence required")
     with Image.open(BytesIO(frame)) as candidate:
         if (candidate.format != "JPEG" or not 1 <= candidate.width <= 4096
