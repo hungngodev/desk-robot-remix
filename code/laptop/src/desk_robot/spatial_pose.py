@@ -117,6 +117,11 @@ class PoseFence:
             self.blocked_reason = "retired_or_failed_origin"
             raise PoseError("Retired or failed body/head pose origin")
         old = self.last
+        if reading.head_boot is None and old is not None and old.head_boot is not None:
+            # An incomplete reply is not evidence of a different boot. Preserve
+            # the last identified sequence fence so recovery cannot replay it.
+            self.invalidate("missing_head_boot")
+            raise PoseError("Missing head boot identity")
         if old is not None:
             old_identity = (old.body_boot, old.origin, old.head_boot)
             if identity != old_identity:
@@ -154,6 +159,11 @@ class PoseFence:
                 self.blocked_reason = "implausible_pose_clock"
                 raise PoseError("Pose sample clock advanced implausibly")
         self.last = reading
+        if reading.head_boot is None:
+            # Legacy packets remain readable diagnostics and replay checked,
+            # but cannot establish camera-bound local odometry continuity.
+            self.invalidate("missing_head_boot")
+            return reading
         self._healthy_samples = self._healthy_samples + 1 if reading.quality == "valid" else 0
         self._continuous = self._healthy_samples >= 2
         self.blocked_reason = "unanchored" if self._continuous else (

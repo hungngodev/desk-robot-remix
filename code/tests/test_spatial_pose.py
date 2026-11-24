@@ -159,3 +159,44 @@ def test_exact_json_sample_bound_and_zero_origin_unavailable_diagnostic():
                       sample_us=1_100_000), 100.1)
     assert gate.current(100.1) is None
     assert gate.needs_reanchor
+
+
+def test_legacy_head_pose_is_diagnostic_only():
+    gate = PoseFence("robot-01")
+    gate.observe(pose(head_boot=None), 100.0)
+    packet = pose(seq=2, sample_us=1_100_000)
+    del packet["head_boot"]
+    receipt = gate.observe(packet, 100.1)
+    assert receipt.head_boot is None
+    assert gate.current(100.1) is None
+    assert gate.needs_reanchor
+    assert gate.blocked_reason == "missing_head_boot"
+    with pytest.raises(PoseError, match="Pose sequence"):
+        gate.observe(packet, 100.2)
+
+
+def test_missing_head_identity_invalidates_without_retiring_known_boot():
+    gate = PoseFence("robot-01")
+    gate.observe(pose(), 100.0)
+    gate.observe(pose(seq=2, sample_us=1_100_000), 100.1)
+    assert gate.current(100.1) is not None
+    with pytest.raises(PoseError, match="head boot identity"):
+        gate.observe(pose(head_boot=None, seq=3, sample_us=1_200_000), 100.2)
+    assert gate.current(100.2) is None
+    assert gate.blocked_reason == "missing_head_boot"
+    gate.observe(pose(seq=4, sample_us=1_300_000), 100.3)
+    assert gate.current(100.3) is None
+    fresh = gate.observe(pose(seq=5, sample_us=1_400_000), 100.4)
+    assert gate.current(100.4) == fresh
+    assert gate.needs_reanchor
+
+
+def test_identified_head_after_legacy_requires_new_baseline():
+    gate = PoseFence("robot-01")
+    gate.observe(pose(head_boot=None), 100.0)
+    with pytest.raises(PoseError, match="re-anchor"):
+        gate.observe(pose(seq=2, sample_us=1_100_000), 100.1)
+    gate.observe(pose(seq=3, sample_us=1_200_000), 100.2)
+    assert gate.current(100.2) is None
+    fresh = gate.observe(pose(seq=4, sample_us=1_300_000), 100.3)
+    assert gate.current(100.3) == fresh
