@@ -19,9 +19,9 @@ def _unique_calibration_json_fields(pairs: list[tuple[str, object]]) -> dict[str
 
 
 class Calibration(BaseModel):
-    simulation_only: bool = False
+    simulation_only: bool = Field(default=False, strict=True)
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
-    measured: bool = False
+    measured: bool = Field(default=False, strict=True)
     image_width: int = Field(gt=0)
     image_height: int = Field(gt=0)
     pixel_points: list[tuple[float, float]] = Field(min_length=4)
