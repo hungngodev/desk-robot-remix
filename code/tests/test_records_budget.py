@@ -51,6 +51,67 @@ def historical_quoted_budget():
     }
 
 
+@pytest.mark.parametrize("shipping,tax,missing", [(31, None, "tax"), (None, 31, "shipping")])
+def test_legacy_budget_counts_known_fee_when_other_fee_is_missing(shipping, tax, missing):
+    result = module("check_budget").budget(historical_quoted_budget(), shipping, tax)
+    assert result["known_landed_subtotal_usd"] == 51
+    assert result["planning_total_usd"] == 51
+    assert result["unknown_landed_fees"] == [missing]
+    assert result["planning_over_cap"] is True
+    assert result["remaining_under_cap_usd"] is None
+    assert result["quoted_total_usd"] is None
+    assert not result["purchase_ready"]
+
+
+def test_legacy_budget_over_cap_is_tristate_with_incomplete_costs():
+    data = historical_quoted_budget()
+    budget = module("check_budget").budget
+    assert budget(data)["planning_over_cap"] is None
+    assert budget(data, 30, 0)["planning_over_cap"] is False
+    assert budget(data, "30.01", 0)["planning_over_cap"] is True
+    data["items"].append({"item": "unpriced", "quantity": 1,
+                          "unit_usd": None, "price_status": "quote_pending"})
+    assert budget(data, 0, 0)["planning_over_cap"] is None
+    result = budget(data, 31, None)
+    assert result["planning_over_cap"] is True
+    assert result["known_landed_subtotal_usd"] == 51
+    assert result["planning_total_usd"] is None
+    assert not result["purchase_ready"]
+
+
+@pytest.mark.parametrize("currency", ["EUR", "VND", None, "usd"])
+@pytest.mark.parametrize("item_level", [False, True])
+def test_legacy_budget_rejects_non_usd_currency(currency, item_level):
+    data = historical_quoted_budget()
+    data["currency"] = "USD"
+    target = data["items"][0] if item_level else data
+    target["currency"] = currency
+    with pytest.raises(ValueError, match="currency must be USD"):
+        module("check_budget").budget(data, 0, 0)
+
+
+def test_legacy_budget_accepts_explicit_usd_currency():
+    data = historical_quoted_budget()
+    data["currency"] = data["items"][0]["currency"] = "USD"
+    assert module("check_budget").budget(data, 0, 0)["purchase_ready"]
+
+
+def test_legacy_budget_cli_warns_when_partial_cost_exceeds_cap(tmp_path):
+    import subprocess
+    import sys
+
+    path = tmp_path / "historical.json"
+    path.write_text(json.dumps(historical_quoted_budget()), encoding="utf-8")
+    completed = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/check_budget.py"),
+         "--bom", str(path), "--shipping", "31"],
+        capture_output=True, text=True, timeout=15,
+    )
+    assert completed.returncode == 0
+    assert json.loads(completed.stdout)["planning_over_cap"] is True
+    assert "WARNING: known planning costs exceed the USD cap." in completed.stderr
+
+
 @pytest.mark.parametrize("quantity", [-1, 0, 1.5, True, False, "2", None])
 def test_legacy_budget_rejects_nonpositive_or_noninteger_quantities(quantity):
     data = historical_quoted_budget()

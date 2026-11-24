@@ -3,6 +3,7 @@
 import argparse
 import json
 import math
+import sys
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -40,6 +41,8 @@ def _money(value, *, label: str) -> Decimal:
 def budget(data, shipping=None, tax=None):
     if not isinstance(data, dict) or not isinstance(data.get("items"), list):
         raise ValueError("Historical budget needs an items list")
+    if data.get("currency", "USD") != "USD":
+        raise ValueError("Historical budget currency must be USD")
     cap = _money(data.get("cap_usd"), label="Budget cap")
     freight = _money(shipping, label="Shipping") if shipping is not None else None
     taxes = _money(tax, label="Tax") if tax is not None else None
@@ -66,6 +69,8 @@ def budget(data, shipping=None, tax=None):
             raise ValueError(f"{name}: quantity must be a positive integer")
         if not isinstance(status, str) or not status.strip():
             raise ValueError(f"{name}: price status is required")
+        if row.get("currency", "USD") != "USD":
+            raise ValueError(f"{name}: budget currency must be USD")
         price = row.get("unit_usd")
         if price is None:
             unknown_prices.append(name)
@@ -78,28 +83,37 @@ def budget(data, shipping=None, tax=None):
     if not math.isfinite(float(known_subtotal)):
         raise ValueError("Historical budget subtotal is not finite")
     total = known_subtotal
-    if freight is not None and taxes is not None:
-        total += freight + taxes
+    unknown_fees = []
+    for label, fee in (("shipping", freight), ("tax", taxes)):
+        if fee is None:
+            unknown_fees.append(label)
+        else:
+            total += fee
     if not math.isfinite(float(total)):
         raise ValueError("Historical budget total is not finite")
-    complete = not unresolved and freight is not None and taxes is not None
+    all_costs_known = not unknown_prices and not unknown_fees
+    complete = not unresolved and all_costs_known
     pending_checks = [name for name, passed in checks.items() if not passed]
     return {
         "known_subtotal_usd": float(known_subtotal),
+        "known_landed_subtotal_usd": float(total),
+        "unknown_landed_fees": unknown_fees,
+        "planning_over_cap": True if total > cap else (False if all_costs_known else None),
         "unknown_price_items": unknown_prices,
         "parts_estimate_usd": None if unknown_prices else float(known_subtotal),
         "quoted_total_usd": float(total) if complete else None,
         "planning_total_usd": None if unknown_prices else float(total),
         "cap_usd": data["cap_usd"],
         "remaining_under_cap_usd": (
-            None if unknown_prices else float(cap - total)
+            float(cap - total) if all_costs_known else None
         ),
         "unquoted_items": unresolved,
         "fit_confirmed": fit,
         "pending_checks": pending_checks,
         "purchase_ready": complete and fit and not pending_checks and total <= cap,
         "note": (
-            "Missing prices remain unknown; known subtotal is not a whole-robot total. "
+            "Missing prices and fees remain unknown; known landed subtotal includes "
+            "only supplied costs. "
             "Allowances are targets, not verified shopping prices. Confirm mechanical fit separately."
         ),
     }
@@ -160,6 +174,8 @@ if __name__ == "__main__":
         result["purchase_ready"] = False
         result["source"] = "explicit_legacy_bom_not_release_authority"
         print(json.dumps(result, indent=2))
+        if result["planning_over_cap"] is True:
+            print("WARNING: known planning costs exceed the USD cap.", file=sys.stderr)
         if args.require_ready:
             p.exit(2, "HOLD: legacy BOM cannot approve a purchase. Use "
                       "the strict canonical first-robot receipt verifier.\n")
