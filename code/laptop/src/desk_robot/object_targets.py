@@ -194,8 +194,13 @@ def resolve_object_target(
         return result("rejected", "memory_consent_revoked")
 
     # Reject evidence from another robot even if a store accidentally mixes rows.
+    # A receipt in the future of this same Mac monotonic clock is impossible.
+    # Do not downgrade it into a historical metric search hint. Other host
+    # boots have incomparable monotonic clocks and remain historical only.
     records = [e for e in evidence if _valid_evidence(e)
-               and e.robot_id == query.robot_id and e.label == query.label]
+               and e.robot_id == query.robot_id and e.label == query.label
+               and not (e.host_boot_id == query.host_boot_id
+                        and e.receipt_us is not None and e.receipt_us > now_us)]
     seen = [e for e in records if e.source == "camera_seen"
             and e.confidence >= min_confidence]
     reports = [e for e in records if e.source == "user_reported"]

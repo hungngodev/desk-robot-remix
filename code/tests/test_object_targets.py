@@ -286,3 +286,27 @@ def test_new_distinct_frame_can_confirm_after_ambiguous_view():
     for rows in ([seen, other, newer], [newer, other, seen]):
         assert resolve(rows).confirmed_floor_mm == newer.floor_mm
         assert resolve(rows, now_us=1_300_001).search_hint_mm == newer.floor_mm
+
+def test_future_same_host_receipt_cannot_be_a_historical_search_hint():
+    _, _, seen = fixtures()
+    future = replace(seen, receipt_us=1_000_001, floor_mm=(240, 320),
+                     seen_at_wall_s=1800000001.0)
+    result = resolve([future])
+    assert result.status == "unknown"
+    assert result.confirmed_floor_mm is None and result.search_hint_mm is None
+    assert not result.arrived and not result.may_execute
+
+    historical = replace(seen, receipt_us=100)
+    for rows in ([historical, future], [future, historical]):
+        result = resolve(rows)
+        assert result.status == "last_seen"
+        assert result.search_hint_mm == historical.floor_mm
+
+
+def test_other_host_clock_is_not_compared_to_current_monotonic_time():
+    _, _, seen = fixtures()
+    historical = replace(seen, host_boot_id="older-host", receipt_us=9_000_000)
+    result = resolve([historical])
+    assert result.status == "last_seen"
+    assert result.search_hint_mm == historical.floor_mm
+    assert result.confirmed_floor_mm is None
