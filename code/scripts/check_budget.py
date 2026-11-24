@@ -185,6 +185,16 @@ if __name__ == "__main__":
                     "procurement_release.py --require-first-robot with "
                     "verified physical evidence for a purchase release.",
         }, indent=2))
+        hypothetical_excess = cart["historical_first_unit_budget"][
+            "historical_over_cap_before_tax_shipping_usd"
+        ]
+        if hypothetical_excess > 0:
+            print(
+                f"WARNING: hypothetical historical sample selection exceeds the USD cap "
+                f"by ${hypothetical_excess:.2f} before tax and shipping; "
+                "not incurred spending or a current quote.",
+                file=sys.stderr,
+            )
         if args.require_ready:
             p.exit(2, "HOLD: use the strict first-robot receipt verifier; "
                       "historical quotes cannot authorize an order.\n")

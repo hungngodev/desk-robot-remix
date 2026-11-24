@@ -574,6 +574,15 @@ def test_default_budget_cli_uses_canonical_first_unit_not_historical_bom():
     assert current["evaluation_cart"]["exact_sku_count"] == 13
     assert current["evaluation_cart"]["component_quantity"] == 17
     assert current["evaluation_cart"]["historical_priced_partial_subtotal_usd"] == 40.41
+    budget = current["evaluation_cart"]["historical_first_unit_budget"]
+    assert budget["first_unit_cap_usd"] == 50
+    assert budget["reported_prior_spend_usd"] == 13.67
+    assert budget["historical_combined_before_tax_shipping_usd"] == 54.08
+    assert budget["historical_over_cap_before_tax_shipping_usd"] == 4.08
+    assert budget["historical_over_cap_is_hypothetical"] is True
+    assert "WARNING: hypothetical historical sample selection" in completed.stderr
+    assert "by $4.08 before tax and shipping" in completed.stderr
+    assert "not incurred spending or a current quote" in completed.stderr
     assert all("VL53L4CD" not in item["name"]
                for item in current["evaluation_cart"]["items"])
     denied = subprocess.run([*cmd, "--require-ready"],
