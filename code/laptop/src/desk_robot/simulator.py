@@ -26,18 +26,23 @@ class SimulatedHead:
         self.fail_snapshot = False
         self.show_target = True
 
-    def _watchdog(self):
-        if time.monotonic() - self.last_control > 0.5:
+    def _watchdog(self) -> int:
+        if not self.armed:
+            return 0
+        elapsed = time.monotonic() - self.last_control
+        if elapsed >= 0.5:
             self.armed = False
+            return 0
+        return 500 - int(elapsed * 1000)
 
     async def status(self):
-        self._watchdog()
+        watchdog_ms = self._watchdog()
         return {
             "robot_id": self.id,
             "armed": self.armed,
             "motor": {"m0": 0, "m1": 0},
             "servo": {"position_source": "commanded"},
-            "watchdog_ms": 500 if self.armed else 0,
+            "watchdog_ms": watchdog_ms,
         }
 
     async def command(self, command):

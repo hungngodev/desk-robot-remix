@@ -32,3 +32,20 @@ async def test_stop_renews_only_an_armed_control_lease(monkeypatch):
     assert (await head.status())["armed"] is False
     with pytest.raises(HeadError, match="disarmed"):
         await head.command("drive 20 20")
+
+
+@pytest.mark.asyncio
+async def test_watchdog_reports_remaining_lease_and_expires_at_boundary(monkeypatch):
+    clock = [10.0]
+    monkeypatch.setattr(simulator, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    head = simulator.SimulatedHead("robot-01")
+    await head.command("arm")
+    assert (await head.status())["watchdog_ms"] == 500
+    clock[0] = 10.25
+    assert (await head.status())["watchdog_ms"] == 250
+    clock[0] = 10.5
+    with pytest.raises(HeadError, match="disarmed"):
+        await head.command("drive 20 20")
+    status = await head.status()
+    assert status["armed"] is False
+    assert status["watchdog_ms"] == 0
