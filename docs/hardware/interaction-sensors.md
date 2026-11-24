@@ -124,6 +124,18 @@ it cannot identify different accessories by itself. Keep the module optional
 until its pin/mount/voltage checks pass. A simple light sensor can support dark-room sleep;
 camera auto-exposure is not a calibrated lux reading. A small jaw/contact switch
 can provide contact evidence, but not gripping force or proof of pickup.
+
+The selected jaw FSR402 is separate from that optional switch and from the
+belly FSR: ADS1115 channel 1 measures jaw contact; channel 0 is belly squeeze.
+Use the [FSR jaw fit coupon](../cad/remixes/one_robot_adapter_kit_README.md)
+and [measured linkage interfaces](../cad/FUSION_MEASUREMENT_SHEET.md). Fit
+on a flat supported seat with the tail uncreased and its vent unobstructed.
+The compliant silicone actuator must transfer normal contact through the
+actual active area, with no adhesive/rim load bypass or unloaded preload;
+measure compressed height, force response and baseline after installation.
+Do not infer force in newtons, finger contact, or grasp success from ADC
+counts alone. Follow [no-motion jaw calibration](../guides/jaw-calibration-helper.md)
+and retain the WROOM force and travel qualification gates.
 Battery-aware behavior requires the selected power module's qualified status or
 a real monitor; no mood meter or raw assumed voltage means remaining capacity.
 All of these stay optional until their small mount/pin/cost benefit is established.
