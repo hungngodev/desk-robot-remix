@@ -51,8 +51,12 @@ class RadarDataFrameGate {
     const uint16_t payload_len = expected_ - 10;
     // LD2410C protocol (pinned ld2410 v0.2.2, Table 13) reserves all
     // target states except 0x00..0x03. Noise must not renew acquisition.
+    // Basic payload is exactly 13 bytes. The pinned driver's engineering
+    // layout has two gate counts, nine energies per target and tail bytes
+    // (at least 33 bytes); additional retained bytes are supported.
     const bool valid = frame_[8] <= 0x03 &&
-        (frame_[6] == 0x01 || frame_[6] == 0x02) &&
+        ((frame_[6] == 0x02 && payload_len == 13) ||
+         (frame_[6] == 0x01 && payload_len >= 33)) &&
         frame_[7] == 0xAA &&
         frame_[payload_len + 4] == 0x55 &&
         frame_[payload_len + 5] == 0x00 &&

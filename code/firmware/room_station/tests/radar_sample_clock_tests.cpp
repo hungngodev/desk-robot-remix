@@ -134,5 +134,33 @@ int main() {
     assert(gate.completed_sample().moving == ((state & 1) != 0));
     assert(gate.completed_sample().stationary == ((state & 2) != 0));
   }
+  // A complete footer is not enough: basic reports have 13 payload
+  // bytes; engineering reports need the full fixed gate-energy section.
+  const uint8_t short_engineering[] = {
+      0xF4, 0xF3, 0xF2, 0xF1, 13, 0,
+      0x01, 0xAA, 0x03, 42, 0, 50, 35, 0, 60, 80, 0, 0x55, 0x00,
+      0xF8, 0xF7, 0xF6, 0xF5,
+  };
+  const uint8_t long_basic[] = {
+      0xF4, 0xF3, 0xF2, 0xF1, 14, 0,
+      0x02, 0xAA, 0x03, 42, 0, 50, 35, 0, 60, 80, 0, 0, 0x55, 0x00,
+      0xF8, 0xF7, 0xF6, 0xF5,
+  };
+  assert(!feed(gate, short_engineering));
+  assert(!feed(gate, long_basic));
+  assert(gate.completed_sample().moving_cm == 99);
+  // Pinned LD2410C protocol Table 14: engineering example with both
+  // targets, nine moving and nine stationary gates and retained bytes.
+  const uint8_t engineering[] = {
+      0xF4, 0xF3, 0xF2, 0xF1, 0x23, 0,
+      0x01, 0xAA, 0x03, 0x1E, 0, 0x3C, 0, 0, 0x39, 0, 0,
+      8, 8, 0x3C, 0x22, 5, 3, 3, 4, 3, 6, 5,
+      0, 0, 0x39, 0x10, 0x13, 6, 6, 8, 4,
+      3, 5, 0x55, 0,
+      0xF8, 0xF7, 0xF6, 0xF5,
+  };
+  assert(feed(gate, engineering));
+  assert(gate.completed_sample().presence);
+  assert(gate.completed_sample().moving_cm == 30);
   return 0;
 }
