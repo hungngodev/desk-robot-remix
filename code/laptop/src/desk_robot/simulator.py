@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from io import BytesIO
 
 import numpy as np
@@ -26,6 +27,19 @@ class SimulatedHead:
         self.fail_snapshot = False
         self.fail_status = False
         self.show_target = True
+        self._body_replay: dict | None = None
+
+    def replay_body_status(self, sample: dict) -> None:
+        """Install one raw synthetic receipt; replay grants no motor authority.
+
+        Preserve caller-provided identity, missing fields and bad readings so
+        the actual Mac validators, not this fixture, decide what to accept.
+        A new head is required to resume ordinary movement simulation.
+        """
+        if not isinstance(sample, dict):
+            raise ValueError("Simulated body replay requires a status dictionary")
+        self._body_replay = deepcopy(sample)
+        self.armed = False
 
     def _watchdog(self) -> int:
         if not self.armed:
@@ -40,6 +54,8 @@ class SimulatedHead:
         watchdog_ms = self._watchdog()
         if self.fail_status:
             raise HeadError("Simulated body status failure")
+        if self._body_replay is not None:
+            return deepcopy(self._body_replay)
         return {
             "robot_id": self.id,
             "armed": self.armed,
@@ -54,6 +70,8 @@ class SimulatedHead:
         self._watchdog()
         if self.fail_command and command.startswith(self.fail_command):
             raise HeadError("Simulated uncertain ACK")
+        if self._body_replay is not None and op in {"arm", "drive", "lift", "grip", "keepalive"}:
+            raise HeadError("Simulated body replay has no motion authority")
         if op == "arm":
             self.armed = True
         elif op in {"disarm", "halt"}:
