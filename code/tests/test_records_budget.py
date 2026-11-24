@@ -193,6 +193,7 @@ def trial(category, n):
         "category": category,
         "trial": str(n),
         "object_description": "Unit test fixture, not a real trial",
+        "assembly_id": "synthetic-test-assembly",
         "mass_g": "1",
         "date": "2026-11-21",
         "firmware": "test",
