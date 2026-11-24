@@ -29,6 +29,7 @@ from .vision import OllamaScene, YoloWorldVision
 
 _MONITOR_STOP_TIMEOUT_S = 0.35
 _RUNTIME_VOICE_STOP_TIMEOUT_S = 2.5
+_RUNTIME_PET_STOP_TIMEOUT_S = 5.0
 
 
 async def _bounded_monitor_stop(coro) -> None:
@@ -113,6 +114,7 @@ class Runtime:
         self.room_context_failures = 0
         self._closed = False
         self._close_task: asyncio.Task | None = None
+        self._shutdown_step_tasks: dict[str, asyncio.Task] = {}
         self._fatal_service_error: RuntimeError | None = None
         self._voice_stop_attempt = 0
         self._voice_stop_unconfirmed = False
@@ -654,15 +656,37 @@ class Runtime:
         if fatal is not None:
             raise fatal
 
+    def _retire_shutdown_step(self, label: str, task: asyncio.Task) -> None:
+        """Keep ownership until the task, not just its waiter, is terminal."""
+        if not task.cancelled():
+            error = task.exception()
+            if task.cancelling() and error is not None:
+                logging.getLogger(__name__).error(
+                    "Late %s shutdown failure", label, exc_info=error,
+                )
+        if self._shutdown_step_tasks.get(label) is task:
+            self._shutdown_step_tasks.pop(label)
+
     async def _close_owners(self):
         """Attempt every owner cleanup even after one unconfirmed STOP."""
         with self._room_dispatch_lock:
             self._room_dispatch_pending = None
         errors: list[Exception] = []
+        pending = getattr(self, "_shutdown_step_tasks", None)
+        if pending is None:
+            pending = self._shutdown_step_tasks = {}
 
         async def step(label: str, operation, deadline: float) -> None:
-            task = asyncio.create_task(operation)
+            task = pending.get(label)
             try:
+                # The previous close may have timed out without terminating
+                # this owner. Join it again rather than launching a duplicate.
+                if task is None or task.done():
+                    task = asyncio.create_task(operation())
+                    pending[label] = task
+                    task.add_done_callback(
+                        lambda done: self._retire_shutdown_step(label, done)
+                    )
                 done, _ = await asyncio.wait({task}, timeout=deadline)
                 if not done:
                     raise TimeoutError(f"{label} shutdown unconfirmed")
@@ -680,11 +704,9 @@ class Runtime:
             except Exception as exc:
                 errors.append(exc)
             finally:
-                if not task.done():
+                if task is not None and not task.done() and not task.cancelling():
                     task.cancel()
-                    task.add_done_callback(
-                        lambda done: None if done.cancelled() else done.exception()
-                    )
+                    # The registry and terminal callback retain and observe it.
 
         # Physical motor STOP is always attempted before expensive voice
         # and camera teardown. A stuck pet cannot starve its four peers.
@@ -693,7 +715,7 @@ class Runtime:
                 self.pet.set_voice_monitor_ready(False)
             except Exception as exc:
                 errors.append(exc)
-        await step("WROOM motion", self.coordinator.close(), 4.0)
+        await step("WROOM motion", self.coordinator.close, 4.0)
         unconfirmed = getattr(self.coordinator, "shutdown_stop_failures", {})
         if unconfirmed:
             # An idle robot can still have an uncertain prior motor pulse.
@@ -736,7 +758,9 @@ class Runtime:
 
         if self._voice_task is not None:
             task = self._voice_task
-            task.cancel()
+            # A repeated close must not interrupt an owner's ongoing cleanup.
+            if not task.done() and not task.cancelling():
+                task.cancel()
             done, _ = await asyncio.wait({task}, timeout=_RUNTIME_VOICE_STOP_TIMEOUT_S)
             if not done:
                 errors.append(TimeoutError("Native voice monitor shutdown unconfirmed"))
@@ -758,13 +782,13 @@ class Runtime:
             getattr(self.coordinator, "vision", None), "close", None
         )
         if callable(vision_close):
-            await step("YOLO native inference", vision_close(), 2.0)
+            await step("YOLO native inference", vision_close, 2.0)
         # The process-global AprilTag C worker also outlives canceled
         # asyncio requests. Do not silently leave a hung detector reusable
         # by another Runtime instance or any of the five robots.
         if self.settings.mode == "hardware":
             from .dock_runtime import close_detector_pool
-            await step("AprilTag native detector", close_detector_pool(), 2.0)
+            await step("AprilTag native detector", close_detector_pool, 2.0)
         room_task = getattr(self, "_room_task", None)
         if room_task is not None:
             async def wait_room_shutdown():
@@ -772,17 +796,17 @@ class Runtime:
                 # Shield the real USB reader so timeout does not cancel its
                 # still-running OS worker or disguise unfinished ownership.
                 await asyncio.shield(room_task)
-            await step("Shared room USB", wait_room_shutdown(), 1.0)
+            await step("Shared room USB", wait_room_shutdown, 1.0)
             # A stalled callback or serial worker may outlive the deadline.
             # Retain ownership until the actual reader task has terminated;
             # never turn an unconfirmed USB shutdown into an absent reader.
             if room_task.done():
                 self._room_task = None
-        await step("Pet observer", self.pet.close(), 5.0)
+        await step("Pet observer", self.pet.close, _RUNTIME_PET_STOP_TIMEOUT_S)
         camera = getattr(self, "multimodal", None)
         if camera is not None:
-            await step("Camera orchestration", camera.close(), 3.0)
-        await step("Conversation", self.conversation.stop(), 3.0)
-        await step("Mac HTTP client", self.client.aclose(), 3.0)
+            await step("Camera orchestration", camera.close, 3.0)
+        await step("Conversation", self.conversation.stop, 3.0)
+        await step("Mac HTTP client", self.client.aclose, 3.0)
         if errors:
             raise errors[0]

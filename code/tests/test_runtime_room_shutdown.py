@@ -309,3 +309,76 @@ def test_unexpected_runtime_service_exit_closes_all_owners(monkeypatch, service,
                 await asyncio.gather(shutdown, return_exceptions=True)
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("owner", ["pet", "voice"])
+def test_repeated_shutdown_retains_cancellation_resistant_owner(monkeypatch, owner):
+    """A deadline is not permission to abandon or duplicate an async owner."""
+    monkeypatch.setattr("desk_robot.runtime._RUNTIME_PET_STOP_TIMEOUT_S", 0.03)
+    monkeypatch.setattr("desk_robot.runtime._RUNTIME_VOICE_STOP_TIMEOUT_S", 0.03)
+
+    async def scenario():
+        release = asyncio.Event()
+        started = asyncio.Event()
+        cancellation_seen = asyncio.Event()
+        tasks = []
+
+        async def stubborn_owner():
+            tasks.append(asyncio.current_task())
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancellation_seen.set()
+                await release.wait()
+
+        runtime = Runtime.__new__(Runtime)
+        runtime.settings = SimpleNamespace(mode="simulation")
+        runtime.coordinator = SimpleNamespace(
+            close=AsyncMock(), shutdown_stop_failures={}
+        )
+        runtime.pet = SimpleNamespace(close=AsyncMock(
+            side_effect=stubborn_owner if owner == "pet" else None,
+        ))
+        runtime.conversation = SimpleNamespace(stop=AsyncMock())
+        runtime.client = SimpleNamespace(aclose=AsyncMock())
+        runtime.multimodal = None
+        runtime._voice_task = (
+            asyncio.create_task(stubborn_owner()) if owner == "voice" else None
+        )
+        runtime._room_stop = asyncio.Event()
+        runtime._room_dispatch_lock = threading.Lock()
+        runtime._room_dispatch_pending = None
+        runtime._room_dispatch_enqueued = False
+        if owner == "voice":
+            await asyncio.wait_for(started.wait(), timeout=1)
+
+        message = (
+            "Pet observer shutdown unconfirmed" if owner == "pet"
+            else "Native voice monitor shutdown unconfirmed"
+        )
+        try:
+            with pytest.raises(TimeoutError, match=message):
+                await runtime.close()
+            await asyncio.wait_for(cancellation_seen.wait(), timeout=1)
+            task = tasks[0]
+            assert not task.done() and task.cancelling() == 1
+            with pytest.raises(TimeoutError, match=message):
+                await runtime.close()
+            assert tasks == [task]
+            assert not task.done() and task.cancelling() == 1
+            if owner == "pet":
+                assert runtime._shutdown_step_tasks["Pet observer"] is task
+                runtime.pet.close.assert_awaited_once()
+            else:
+                assert runtime._voice_task is task
+            release.set()
+            await asyncio.wait_for(task, timeout=1)
+            assert not task.cancelled()
+            if owner == "pet":
+                assert "Pet observer" not in runtime._shutdown_step_tasks
+        finally:
+            release.set()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+    asyncio.run(scenario())
