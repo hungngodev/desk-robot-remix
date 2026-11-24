@@ -80,7 +80,7 @@ def analyze(rows: list[dict], robot_id: str) -> dict:
                 or (valid & ~present) or not valid & (1 << channel)
                 or data.get("motion_certified") is not False
                 or type(mm[channel]) is not int
-                or not 1 <= mm[channel] <= 1300
+                or not 30 <= mm[channel] <= 1300
                 or type(age[channel]) is not int
                 or not 0 <= age[channel] <= 350
                 or not isinstance(stamps, list) or len(stamps) != 3

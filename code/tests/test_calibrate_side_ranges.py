@@ -216,3 +216,11 @@ def test_calibration_matches_inclusive_runtime_far_boundary():
             row["side_ranges"]["mm"][2] = 179
     with pytest.raises(ValueError, match="overlap|separation"):
         module().analyze(rows, "robot-01")
+
+
+def test_calibration_rejects_subminimum_measurement_even_when_mask_claims_valid():
+    rows = samples(near_base=30)
+    assert module().analyze(rows, "robot-01")["physical_acceptance_pass"] is False
+    rows[0]["side_ranges"]["mm"][0] = 29
+    with pytest.raises(ValueError, match="Invalid"):
+        module().analyze(rows, "robot-01")

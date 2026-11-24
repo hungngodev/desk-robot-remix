@@ -132,7 +132,9 @@ class SideRangeEvents:
         for i, name in enumerate(SIDE_NAMES):
             track = self.directions[i]
             fresh = bool(valid & (1 << i)) and ages[i] + elapsed_ms <= 350
-            if not fresh or not 1 <= distances[i] <= 1300:
+            # Match TofBus's accepted VL53L0X conversion range. Even a
+            # contradictory valid bit cannot make a subminimum range usable.
+            if not fresh or not 30 <= distances[i] <= 1300:
                 self.directions[i] = Direction(
                     previous_sample_ms=track.previous_sample_ms
                 )

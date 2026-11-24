@@ -435,3 +435,19 @@ def test_same_boot_reset_cannot_replay_previously_seen_acquisitions(reset):
     assert observe(sample(600, 600), 10.6) == []
     assert observe(sample(100, 700), 10.7) == []
     assert observe(sample(95, 800), 10.8) == [("left", 95)]
+
+
+def test_subminimum_range_clears_only_its_lane_and_recovers_at_valid_boundary():
+    tracker = SideRangeEvents()
+
+    def observe(left, right, stamp):
+        return tracker.observe(body(mm=(left, right, 600), sample_ms=(stamp,) * 3,
+                                    boot_id=901), now=10.0 + stamp / 1000,
+                               near_mm=170, require_hardware_identity=True)
+
+    assert observe(600, 600, 100) == []
+    assert observe(29, 80, 200) == []
+    assert observe(28, 85, 300) == [("right", 85)]
+    assert observe(600, 85, 400) == []
+    assert observe(30, 85, 500) == []
+    assert observe(30, 85, 600) == [("left", 30)]
