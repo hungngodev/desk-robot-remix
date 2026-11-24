@@ -135,6 +135,19 @@ def verify(plan: dict, body: str, head: str) -> None:
         raise ValueError("DC profile GPIO collides with a nonmotor body signal")
     if set(body_pins) != set(BODY_SINGLE) | {"left_stepper", "right_stepper"}:
         raise ValueError("Unknown or incomplete body GPIO roles")
+    # These arrays drive actual GPIO initialization, clearing and PWM attachment.
+    # Checking only the individual declarations misses a divergent aggregate.
+    motor_arrays = re.findall(r"(?m)^[ \t]*constexpr int kMotorPins\[\] = \{([^{}\n]+)\};", body)
+    motor_pins = [[pin.strip() for pin in array.split(",")] for array in motor_arrays]
+    expected_stepper = [str(pin) for role in ("left_stepper", "right_stepper")
+                        for pin in body_pins[role]]
+    expected_dc = ["kLeftIn1", "kLeftIn2", "kRightIn1", "kRightIn2"]
+    if motor_pins != [expected_stepper, expected_dc]:
+        raise ValueError("Motor initialization pin array drift")
+    servo_arrays = re.findall(r"(?m)^[ \t]*constexpr int kServoPins\[\] = \{([^{}\n]+)\};", body)
+    servo_pins = [[pin.strip() for pin in array.split(",")] for array in servo_arrays]
+    if servo_pins != [["kLiftServo", "kGripServo"]]:
+        raise ValueError("Servo initialization pin array drift")
     for label, symbol in HEAD_SINGLE.items():
         actual = _pin(rf"#define {symbol} GPIO_NUM_(\d+)\b", head, symbol)
         if actual != bus["sense_gpio"][label]:

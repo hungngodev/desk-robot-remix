@@ -313,3 +313,33 @@ def test_manifest_operator_rows_identify_safety_connections_and_physical_lanes()
     assert "**Assembly readiness: NO." in output
     assert output.rstrip() == (HARDWARE /
         "one-robot-signal-harness.generated.md").read_text().rstrip()
+
+
+def test_manifest_rejects_divergent_motor_and_servo_initialization_arrays():
+    """A STOP/initialization array must not omit an output or target another owner."""
+    import importlib.util
+
+    import pytest
+
+    path = ROOT / "code/scripts/emit_wiring_manifest.py"
+    spec = importlib.util.spec_from_file_location("wiring_output_arrays", path)
+    assert spec and spec.loader
+    generator = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(generator)
+    plan = generator.read_wiring_plan(ROOT / generator.PLAN)
+    body = (ROOT / generator.BODY_PINS).read_text()
+    head = (ROOT / generator.HEAD_PINS).read_text()
+    generator.verify(plan, body, head)
+    for before, after, message in (
+        ("kMotorPins[] = {13, 14, 25, 26, 27, 32, 33, 23}",
+         "kMotorPins[] = {13, 14, 25, 26, 27, 32, 33, 21}", "Motor initialization"),
+        ("kMotorPins[] = {kLeftIn1, kLeftIn2, kRightIn1, kRightIn2}",
+         "kMotorPins[] = {kLeftIn1, kLeftIn2, kRightIn1, kLiftServo}", "Motor initialization"),
+        ("kMotorPins[] = {kLeftIn1, kLeftIn2, kRightIn1, kRightIn2}",
+         "kMotorPins[] = {kLeftIn1, kLeftIn2, kRightIn2, kRightIn1}", "Motor initialization"),
+        ("kServoPins[] = {kLiftServo, kGripServo}",
+         "kServoPins[] = {kLiftServo, kLiftServo}", "Servo initialization"),
+    ):
+        assert before in body
+        with pytest.raises(ValueError, match=message):
+            generator.verify(plan, body.replace(before, after), head)
