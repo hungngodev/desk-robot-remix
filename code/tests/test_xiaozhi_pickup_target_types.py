@@ -8,6 +8,8 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 SOURCE = Path(__file__).resolve().parents[1] / "laptop/server/overlay/desk_robot_tools.py"
 
 
@@ -40,17 +42,23 @@ def _handler():
     return scope["desk_robot_pickup"], calls
 
 
-def test_malformed_pickup_targets_do_not_reach_mac():
+@pytest.mark.parametrize("target", [
+    [], {}, ["key"], {"target": "key"}, 0, 1.5, True, False, None, b"key",
+    "", "Key", "CANDY", " key", "candy ", "key\n", "key\x00", "coin", "../stop",
+])
+def test_malformed_pickup_targets_do_not_reach_mac(target):
     handler, calls = _handler()
-    for target in ([], {}, ["key"], {"target": "key"}, 0, True, None, b"key"):
-        response = asyncio.run(handler(object(), target))
-        assert response.result == {"error": "Target must be key or candy"}
+    response = asyncio.run(handler(object(), target))
+    assert response.action == "request_llm"
+    assert response.result == {"error": "Target must be key or candy"}
     assert calls == []
 
 
-def test_valid_pickup_targets_reach_existing_mac_owner():
+@pytest.mark.parametrize("target", ["key", "candy"])
+def test_valid_pickup_targets_reach_existing_mac_owner(target):
     handler, calls = _handler()
-    for target in ("key", "candy"):
-        response = asyncio.run(handler(object(), target))
-        assert response.result["id"] == "job1"
-    assert [request[2]["target"] for request in calls] == ["key", "candy"]
+    conn = object()
+    response = asyncio.run(handler(conn, target))
+    assert response.action == "request_llm"
+    assert response.result == {"robot_id": "pet1", "id": "job1"}
+    assert calls == [(conn, "pickup", {"target": target})]
