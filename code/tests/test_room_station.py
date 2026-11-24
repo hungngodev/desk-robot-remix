@@ -252,6 +252,45 @@ def test_uint32_clock_and_sequence_wrap_uses_real_forward_progress():
 
 
 
+
+def test_sensor_acquisition_cannot_replay_in_a_fresh_report():
+    decoder = RoomStationDecoder()
+    accept(frame(1, 5000), decoder=decoder, now=5.0)
+
+    # A slow CO2 conversion may legitimately be repeated.
+    repeated = frame(2, 6000)
+    repeated["readings"]["scd40"]["sample_ms"] = 5000
+    assert accept(repeated, decoder=decoder, now=6.0).seq == 2
+
+    # An invalid sensor report does not erase its prior acquisition fence.
+    missing = frame(3, 7000)
+    missing["readings"]["scd40"] = {"valid": False}
+    accept(missing, decoder=decoder, now=7.0)
+
+    replay = frame(4, 8000)
+    replay["readings"]["scd40"]["sample_ms"] = 4999
+    with pytest.raises(ValueError, match="Backwards scd40 acquisition clock"):
+        accept(replay, decoder=decoder, now=8.0)
+    assert accept(frame(4, 8000), decoder=decoder, now=8.0).seq == 4
+
+
+def test_sensor_acquisition_rollover_and_rejection_are_atomic():
+    decoder = RoomStationDecoder()
+    before = 0xffffff00
+    accept(frame(1, before), decoder=decoder, now=1.0)
+    bad = frame(2, 744)
+    # The earlier SCD field would advance, but a later sensor regresses.
+    bad["readings"]["bme688"]["sample_ms"] = before - 1
+    with pytest.raises(ValueError, match="Backwards bme688 acquisition clock"):
+        accept(bad, decoder=decoder, now=2.0)
+
+    corrected = frame(2, 744)
+    corrected["readings"]["scd40"]["sample_ms"] = before
+    corrected["readings"]["bme688"]["sample_ms"] = before
+    assert accept(corrected, decoder=decoder, now=2.0).seq == 2
+    assert accept(frame(3, 1744), decoder=decoder, now=3.0).seq == 3
+
+
 def test_future_usb_station_clock_does_not_poison_decoder_epoch():
     decoder = RoomStationDecoder()
     assert accept(frame(10, 1000), decoder=decoder, now=10.0).seq == 10

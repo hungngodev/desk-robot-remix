@@ -204,6 +204,7 @@ class RoomStationDecoder:
         self._last_seq: int | None = None
         self._last_ms: int | None = None
         self._station_elapsed_ms = 0
+        self._last_sensor_elapsed_ms: dict[str, int] = {}
         self._first_received_at: float | None = None
         self._last_received_at: float | None = None
 
@@ -261,8 +262,20 @@ class RoomStationDecoder:
         readings = payload["readings"]
         if not isinstance(readings, dict) or set(readings) != set(SENSORS):
             raise ValueError("Missing or forbidden room station sensors")
+        # Map each bounded sample age onto the cumulative station timeline.
+        # A fresh report may repeat a slow sensor's sample, but must never
+        # replace a newer acquisition with an older one, even across wrap
+        # or an intervening invalid reading. Stage all updates atomically.
+        sensor_elapsed_ms = self._last_sensor_elapsed_ms.copy()
         for sensor in SENSORS:
-            _valid_reading(sensor, readings[sensor], clock)
+            reading = readings[sensor]
+            if _valid_reading(sensor, reading, clock):
+                age = (clock - reading["sample_ms"]) & UINT32
+                acquired = elapsed_ms - age
+                previous = sensor_elapsed_ms.get(sensor)
+                if previous is not None and acquired < previous:
+                    raise ValueError(f"Backwards {sensor} acquisition clock")
+                sensor_elapsed_ms[sensor] = acquired
         # Invalid frames never mutate counter fences. A USB reconnect must
         # create a NEW decoder instance only after actual port reopening.
         if self._first_received_at is None:
@@ -270,6 +283,7 @@ class RoomStationDecoder:
         self._last_seq = seq
         self._last_ms = clock
         self._station_elapsed_ms = elapsed_ms
+        self._last_sensor_elapsed_ms = sensor_elapsed_ms
         self._last_received_at = float(now)
         return RoomObservation(seq, clock, float(now), readings,
                                _summary(readings, self._soil_calibration),
