@@ -847,7 +847,8 @@ int main() {
         # Both initial/reconnect and failure paths must share the throttle.
         self.assertIn(
             "if ((!board->continuous_audio_started_ || failed_since_attempt) &&\n"
-            "                    AudioListenRetryDue(uptime_ms, board->last_audio_listen_attempt_ms_))",
+            "                    AudioListenRetryDue(uptime_ms, "
+            "board->last_audio_listen_attempt_ms_))",
             face,
         )
         self.assertIn(
