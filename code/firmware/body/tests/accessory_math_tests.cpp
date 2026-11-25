@@ -82,10 +82,47 @@ static void check_gesture_boundaries() {
   CHECK(g.finish() == 1);
   CHECK(g.finish() == 0);
 }
+static void check_gesture_session_recovery() {
+  using desk_robot::GestureDecoder;
+  using Action = GestureDecoder::PollAction;
+  const auto batch = [](GestureDecoder& g, std::uint32_t now) {
+    g.begin_batch(now);
+    g.push(180, 30, 85, 85);
+    g.push(90, 90, 85, 85);
+    g.push(30, 180, 85, 85);
+  };
+  for (const auto start : {100U, 0xffffff80U}) {
+    for (unsigned fault = 0; fault < 3; ++fault) {
+      GestureDecoder g;
+      std::uint8_t direction = 99;
+      CHECK(g.poll_status(1, start, direction) == Action::Read && direction == 0);
+      batch(g, start);
+      if (fault == 0) g.invalidate(); // bus or FIFO read failure
+      if (fault == 1)
+        CHECK(g.poll_status(3, start + 100U, direction) == Action::Clear);
+      if (fault == 2)
+        CHECK(g.poll_status(1, start + 701U, direction) == Action::Clear);
+      CHECK(g.poll_status(1, start + 702U, direction) == Action::Clear && direction == 0);
+      CHECK(g.poll_status(0, start + 703U, direction) == Action::None && direction == 0);
+      CHECK(g.poll_status(1, start + 704U, direction) == Action::Read && direction == 0);
+      batch(g, start + 704U);
+      CHECK(g.poll_status(0, start + 1404U, direction) == Action::None && direction == 1);
+      CHECK(g.poll_status(0, start + 1405U, direction) == Action::None && direction == 0);
+    }
+    // GVALID clearing AFTER the deadline must not publish a stale swipe.
+    GestureDecoder g;
+    std::uint8_t direction = 99;
+    CHECK(g.poll_status(1, start, direction) == Action::Read);
+    batch(g, start);
+    CHECK(g.poll_status(0, start + 701U, direction) == Action::None && direction == 0);
+  }
+}
+
 int main() {
   try {
     check_register_precision();
     check_gesture_boundaries();
+    check_gesture_session_recovery();
     const std::uint8_t known[2] = {0xBE, 0xEF};
     CHECK(desk_robot::sensirion_crc(known, 2) == 0x92);
     CHECK(desk_robot::sht_temp_centi(0) == -4500);

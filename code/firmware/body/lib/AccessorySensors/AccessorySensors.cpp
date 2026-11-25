@@ -39,6 +39,7 @@ void AccessorySensors::invalidate_cached() {
   // no longer a fresh acquisition. Command a new conversion on recovery.
   sht_pending_ = false;
   data_.optional_inputs.valid = false;
+  gesture_.invalidate();
 #if DESK_ROBOT_ENABLE_HAPTIC
   haptic_.fault();
   haptic_needs_low_ = true;  // retry deassertion after a bus/mux fault
@@ -116,8 +117,7 @@ bool AccessorySensors::begin(TwoWire& wire) {
   next_lane_ = 1;
   started_ = false;
   sht_pending_ = ads_pending_ = false;
-  gesture_.reset();
-  gesture_collecting_ = false;
+  gesture_.restart();
   nfc_stage_ = NfcStage::Disabled;
   nfc_phase_at_ms_ = nfc_last_scan_at_ms_ = 0;
   if (!mux_present_) return false;
@@ -237,47 +237,40 @@ void AccessorySensors::angle(std::uint8_t index, std::uint32_t now_ms) {
 void AccessorySensors::gesture_fifo(std::uint32_t now_ms) {
   auto& p = data_.proximity;
   if (!p.gesture_decoder_available) return;
-  std::uint8_t state = 0;
-  if (!read(0x39, 0xAF, &state, 1)) { gesture_.reset(); gesture_collecting_ = false; return; }
-  if (state & 0x02U) { // gesture FIFO overrun is not a real gesture event
-    gesture_.reset();
-    gesture_collecting_ = false;
+  std::uint8_t state = 0, direction = 0;
+  if (!read(0x39, 0xAF, &state, 1)) {
+    gesture_.invalidate();
     return;
   }
-  if ((state & 0x01U) == 0) {
-    if (gesture_collecting_) {
-      const auto result = gesture_.finish();
-      if (result != 0) {
-        p.gesture_direction = result;
-        ++p.gesture_events;
-        p.at_ms = now_ms;
-      }
-      gesture_collecting_ = false;
-    }
+  const auto action = gesture_.poll_status(state, now_ms, direction);
+  if (action == GestureDecoder::PollAction::Clear) {
+    // APDS9960 GCONF4 bit 2 clears FIFO, overflow and GVALID. GIEN and
+    // GMODE stay zero, so the next session must enter on optical evidence.
+    // A failed write leaves the decoder quarantined until clean idle.
+    write8(0x39, 0xAB, 0x04);
     return;
   }
-  if (gesture_collecting_ && now_ms - gesture_started_ms_ > 700U) {
-    gesture_.reset();
-    gesture_collecting_ = false;
-    return;
+  if (direction != 0) {
+    p.gesture_direction = direction;
+    ++p.gesture_events;
+    p.at_ms = now_ms;
   }
+  if (action != GestureDecoder::PollAction::Read) return;
   std::uint8_t available = 0;
-  if (!read(0x39, 0xAE, &available, 1)) return;
+  if (!read(0x39, 0xAE, &available, 1) || available > 32U) {
+    gesture_.invalidate();
+    return;
+  }
   const std::uint8_t n = available > 4 ? 4 : available;
   if (!n) return;
   std::uint8_t records[16]{};
   // Only up to four (U,D,L,R) quads per pass, never SparkFun's
   // long repeated I2C loop or a delayed safety/cliff refresh.
   if (!read(0x39, 0xFC, records, n * 4)) {
-    gesture_.reset();
-    gesture_collecting_ = false;
+    gesture_.invalidate();
     return;
   }
-  if (!gesture_collecting_) {
-    gesture_collecting_ = true;
-    gesture_started_ms_ = now_ms;
-    gesture_.reset();
-  }
+  gesture_.begin_batch(now_ms);
   for (std::uint8_t i = 0; i < n; ++i)
     gesture_.push(records[i * 4], records[i * 4 + 1],
                   records[i * 4 + 2], records[i * 4 + 3]);
@@ -288,8 +281,13 @@ void AccessorySensors::gesture_proximity(std::uint32_t now_ms) {
   if (p.present) {
     std::uint8_t raw = 0;
     p.valid = read(0x39, 0x9C, &raw, 1);
-    if (p.valid) { p.raw = raw; p.at_ms = now_ms; }
-    gesture_fifo(now_ms);
+    if (p.valid) {
+      p.raw = raw;
+      p.at_ms = now_ms;
+      gesture_fifo(now_ms);
+    } else {
+      gesture_.invalidate();
+    }
   }
   angle(0, now_ms);
 }
