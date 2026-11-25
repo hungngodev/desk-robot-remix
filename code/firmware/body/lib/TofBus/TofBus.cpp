@@ -23,6 +23,16 @@ bool TofBus::quiesce_optional_mux() {
   return wire_.read() == 0 && bus_idle();
 }
 
+bool TofBus::quiesce_range_mux() {
+  if (!bus_accessible()) return false;
+  wire_.beginTransmission(kMuxAddress);
+  const bool disconnected = wire_.write(static_cast<std::uint8_t>(0)) == 1;
+  const bool acknowledged = wire_.endTransmission(true) == 0;
+  return disconnected && acknowledged && bus_idle() &&
+         wire_.requestFrom(kMuxAddress, static_cast<size_t>(1), true) == 1 &&
+         wire_.available() >= 1 && wire_.read() == 0 && bus_idle();
+}
+
 bool TofBus::select(std::uint8_t channel) {
   if (channel >= kRangeCount || !quiesce_optional_mux()) return false;
   const auto expected = static_cast<std::uint8_t>(1U << channel);
@@ -216,6 +226,11 @@ bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
     sensor.startContinuous();
     if (sensor.last_status != 0 || sensor.timeoutOccurred()) return false;
   }
+  // Continuous ranging runs inside each sensor with its mux lane closed.
+  // Verify both muxes are isolated before reporting startup ready.
+  const bool optional_closed = quiesce_optional_mux();
+  const bool range_closed = quiesce_range_mux();
+  if (!optional_closed || !range_closed) return false;
   next_channel_ = 0;
   initialized_ = true;
   return true;
@@ -230,13 +245,7 @@ ImuIdentity TofBus::probe_imu() {
   // TCA9548A may have left a downstream branch selected. Disconnect it for
   // the upstream IMU read, without changing the active ToF measurement plan.
   if (!quiesce_optional_mux()) return ImuIdentity{};
-  wire_.beginTransmission(kMuxAddress);
-  const bool disconnected = wire_.write(static_cast<std::uint8_t>(0)) == 1;
-  const bool acknowledged = wire_.endTransmission(true) == 0;
-  if (!disconnected || !acknowledged || !bus_idle() ||
-      wire_.requestFrom(kMuxAddress, static_cast<size_t>(1), true) != 1 ||
-      wire_.available() < 1 || wire_.read() != 0 || !bus_idle())
-    return ImuIdentity{}; // Never probe a potentially selected 0x70 lane.
+  if (!quiesce_range_mux()) return ImuIdentity{};
 
   auto identity = [this](std::uint8_t address, std::uint8_t& value) {
     if (!bus_idle()) return false;

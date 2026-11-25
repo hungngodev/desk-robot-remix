@@ -25,7 +25,7 @@ static void ready(desk_robot::TofBus& bus, desk_robot::CliffGuard& guard) {
   CHECK(Wire.getTimeOut() == 15);
   CHECK(Wire.tof_init_timeouts.size() == (DESK_ROBOT_EXTRA_RANGERS ? 8U : 5U));
   for (auto timeout : Wire.tof_init_timeouts) CHECK(timeout == 80);
-  CHECK(Wire.extras == 0);
+  CHECK(Wire.ranges == 0 && Wire.extras == 0);
   for (std::uint32_t i = 0; i < 5; ++i)
     bus.poll(guard, 10U * i);
   CHECK(Wire.tof_samples == 5);
@@ -524,6 +524,17 @@ int main() {
     }
     {
       Wire = TwoWire{};
+      fake_i2c_lines() = FakeI2cLines{};
+      Wire.hold_sda_on_range_disconnect = true;
+      desk_robot::TofBus bus;
+      CHECK(!bus.begin(21, 22, -1));
+      CHECK(!bus.ready() && !bus.bus_accessible());
+      CHECK(Wire.ranges == 0 && Wire.extras == 0);
+      CHECK(!Wire.hold_sda_on_range_disconnect);
+      fake_i2c_lines() = FakeI2cLines{};
+    }
+    {
+      Wire = TwoWire{};
       Wire.range_mux_stuck = true; // init must reject unverified lane
       desk_robot::TofBus bus;
       CHECK(!bus.begin(21, 22, -1));
@@ -533,8 +544,10 @@ int main() {
       Wire = TwoWire{};
       desk_robot::TofBus bus;
       CHECK(bus.begin(21, 22, -1));
-      // The last initialized range lane is still selected (channel 7).
+      CHECK(Wire.ranges == 0 && Wire.extras == 0);
+      // Simulate a previous selected range lane.
       // An ACKed but ineffective disconnect must NOT probe a downstream IMU.
+      Wire.ranges = 1;
       Wire.range_mux_stuck = true;
       CHECK(bus.probe_imu().family == 0);
       CHECK(Wire.imu_probe_attempts == 0);

@@ -122,6 +122,7 @@ class TofBus {
 
   // Always quiesce any fitted interaction mux before a critical range read.
   bool quiesce_optional_mux();
+  bool quiesce_range_mux();
   bool select(std::uint8_t channel);
   bool read_register(std::uint8_t reg, std::uint8_t* dest, std::uint8_t bytes);
   bool write_byte(std::uint8_t reg, std::uint8_t value);
