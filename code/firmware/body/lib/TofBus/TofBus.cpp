@@ -408,6 +408,20 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
     failed(guard);
     return;
   }
+  // ST VL53L0X_GetInterruptMaskStatus: bits 3/4 indicate range
+  // error independently of readiness. Never publish a stale result.
+  if ((ready & 0x18U) != 0) {
+    optical_[channel].valid = false;
+    if (channel < kFloorAndFrontCount) {
+      // Zero is an invalid sentinel: no distance was acquired.
+      guard.sample(channel, 0, false, now_ms);
+    } else {
+      extra_[channel - kFloorAndFrontCount].valid = false;
+    }
+    // Acknowledge without granting clearance. Failed clear is a bus fault.
+    if (!write_byte(0x0B, 0x01) || !bus_idle()) failed(guard);
+    return;
+  }
   if ((ready & 0x07U) == 0) {
     // No new conversion: CliffGuard must reject stale floor samples.
     return;

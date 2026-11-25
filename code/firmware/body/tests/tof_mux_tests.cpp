@@ -849,6 +849,67 @@ int main() {
       // This fake checks digital isolation and sample ownership only.
       // Actual bus-free timing and concurrent optical emitters need a bench.
     }
+    {
+      // Error bits override readiness even with a plausible status-11
+      // distance in the unread result block. Exercise every lane.
+      const std::uint8_t order[] = {5, 0, 1, 2, 3, 4,
+                                    6, 0, 1, 2, 3, 4,
+                                    7, 0, 1, 2, 3, 4};
+      for (const std::uint8_t bits : {0x08, 0x10, 0x18}) {
+        for (const bool conversion_ready : {false, true}) {
+          for (std::uint8_t target = 0; target < 8; ++target) {
+            Wire = TwoWire{};
+            fake_i2c_lines() = FakeI2cLines{};
+            desk_robot::TofBus bus;
+            desk_robot::CliffGuard guard;
+            ready(bus, guard);
+            for (std::uint32_t now = 60; now < 78; ++now)
+              bus.poll(guard, now);
+            std::uint32_t now = 80;
+            for (const auto lane : order) {
+              if (lane == target) break;
+              bus.poll(guard, now++);
+            }
+            const auto prior = bus.optical_diagnostic(target, now);
+            CHECK(prior.present && prior.valid);
+            const auto prior_samples = Wire.tof_samples;
+            Wire.tof_ready = conversion_ready;
+            Wire.tof_interrupt_error_bits = bits;
+            bus.poll(guard, now);
+            CHECK(bus.last_channel() == target);
+            CHECK(Wire.tof_samples == prior_samples);
+            CHECK(bus.new_optical_channel() == 255);
+            CHECK(bus.new_extra_channel() == 255);
+            const auto optical = bus.optical_diagnostic(target, now);
+            CHECK(optical.present && !optical.valid);
+            CHECK(optical.age_ms == prior.age_ms);
+            CHECK(optical.signal_97 == prior.signal_97);
+            if (target < 5) {
+              CHECK(guard.fault() == desk_robot::CliffFault::InvalidSample);
+              CHECK(guard.fault_sensor() == target);
+              CHECK(!guard.evaluate(now));
+              CHECK(!guard.try_rearm(now));
+            } else {
+              const auto extra = bus.extra_diagnostic(target - 5, now);
+              CHECK(extra.present && !extra.valid);
+              CHECK(extra.age_ms == prior.age_ms);
+              CHECK(guard.evaluate(now)); // optional lane is read-only
+            }
+            Wire.tof_interrupt_error_bits = 0;
+            Wire.tof_ready = true;
+            for (std::uint32_t step = 1; step <= 18; ++step)
+              bus.poll(guard, now + step);
+            CHECK(bus.optical_diagnostic(target, now + 18).valid);
+            if (target < 5) {
+              CHECK(!guard.evaluate(now + 18));
+              CHECK(guard.try_rearm(now + 18));
+            } else {
+              CHECK(guard.evaluate(now + 18));
+            }
+          }
+        }
+      }
+    }
     std::cout << "PASS cheap VL53L0X TCA9548A selected-channel readback and fail-closed cliff paths\n";
     return 0;
   } catch (const std::exception& ex) {

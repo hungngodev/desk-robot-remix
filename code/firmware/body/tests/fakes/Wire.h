@@ -99,6 +99,7 @@ class TwoWire {
   std::uint16_t tof_register = 0;
   unsigned tof_samples = 0;
   bool tof_ready = true;
+  std::uint8_t tof_interrupt_error_bits = 0;
   bool hold_sda_after_tof_result = false;
   bool fail_tof_register_write = false;
   unsigned rejected_tof_register_writes = 0;
@@ -337,7 +338,8 @@ class TwoWire {
       else if (register_address == 0x44) inbound = {cap_config2};
     } else if (addr == 0x29) {
       if (tof_register == 0x13 && count == 1) {
-        inbound = {static_cast<std::uint8_t>(tof_ready ? 0x07 : 0)};
+        inbound = {static_cast<std::uint8_t>(
+            (tof_ready ? 0x07 : 0) | tof_interrupt_error_bits)};
         // A missing conversion must NOT manufacture freshness.
       } else if (tof_register == 0x14 && count == 12) {
         inbound.assign(12, 0);
