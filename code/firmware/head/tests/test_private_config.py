@@ -104,7 +104,7 @@ def test_private_config_failed_replace_preserves_previous_settings(tmp_path, mon
     original = target.read_bytes()
     monkeypatch.setenv("EXP037_TEST_TOKEN", "y" * 40)
 
-    def replace_failed(*args):
+    def replace_failed(*args, **kwargs):
         raise OSError("injected replace failure")
 
     monkeypatch.setattr(private.os, "replace", replace_failed)
@@ -140,3 +140,83 @@ def test_private_config_rejects_insecure_input_credentials(tmp_path, monkeypatch
     assert error.value.code == 2
     assert not (board / "config.private.json").exists()
     assert SYNTHETIC_TOKEN not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("depth", range(1, len(BOARD.parts) + 1))
+def test_private_config_refuses_directory_swap_after_template_read(
+    tmp_path, monkeypatch, capsys, depth
+):
+    configure(tmp_path, monkeypatch)
+    board = tmp_path / BOARD
+    template(board)
+    private.main()
+    target = board / "config.private.json"
+    original = target.read_bytes()
+    ancestor = tmp_path.joinpath(*BOARD.parts[:depth])
+    displaced = ancestor.with_name(ancestor.name + ".displaced")
+    tracked = tmp_path / "tracked-source"
+    redirected_board = tracked.joinpath(*BOARD.parts[depth:])
+    template(redirected_board)
+    loads = json.loads
+
+    def swap_directory(*args, **kwargs):
+        config = loads(*args, **kwargs)
+        ancestor.rename(displaced)
+        ancestor.symlink_to(tracked, target_is_directory=True)
+        return config
+
+    monkeypatch.setattr(private.json, "loads", swap_directory)
+    monkeypatch.setenv("EXP037_TEST_TOKEN", "y" * 40)
+    with pytest.raises(SystemExit) as error:
+        private.main()
+    assert error.value.code == 2
+    assert not (redirected_board / "config.private.json").exists()
+    old_board = displaced.joinpath(*BOARD.parts[depth:])
+    assert (old_board / "config.private.json").read_bytes() == original
+    assert not list(tmp_path.rglob(".config.private.*.tmp"))
+    output = capsys.readouterr()
+    assert SYNTHETIC_TOKEN not in output.out + output.err
+    assert "y" * 40 not in output.out + output.err
+
+
+@pytest.mark.parametrize("depth", range(1, len(BOARD.parts) + 1))
+def test_private_config_refuses_dangling_ancestor(tmp_path, monkeypatch, capsys, depth):
+    configure(tmp_path, monkeypatch)
+    ancestor = tmp_path.joinpath(*BOARD.parts[:depth])
+    ancestor.parent.mkdir(parents=True, exist_ok=True)
+    missing = tmp_path / "missing-directory"
+    ancestor.symlink_to(missing, target_is_directory=True)
+    with pytest.raises(SystemExit) as error:
+        private.main()
+    assert error.value.code == 2
+    assert not missing.exists()
+    assert SYNTHETIC_TOKEN not in capsys.readouterr().err
+
+
+def test_private_config_removes_staged_secret_after_directory_swap(tmp_path, monkeypatch, capsys):
+    configure(tmp_path, monkeypatch)
+    board = tmp_path / BOARD
+    template(board)
+    private.main()
+    original = (board / "config.private.json").read_bytes()
+    displaced = board.with_name("displaced")
+    tracked = tmp_path / "tracked-source"
+    template(tracked)
+    fsync = private.os.fsync
+
+    def swap_after_fsync(descriptor):
+        fsync(descriptor)
+        board.rename(displaced)
+        board.symlink_to(tracked, target_is_directory=True)
+
+    monkeypatch.setattr(private.os, "fsync", swap_after_fsync)
+    monkeypatch.setenv("EXP037_TEST_TOKEN", "y" * 40)
+    with pytest.raises(SystemExit) as error:
+        private.main()
+    assert error.value.code == 2
+    assert (displaced / "config.private.json").read_bytes() == original
+    assert not (tracked / "config.private.json").exists()
+    assert not list(tmp_path.rglob(".config.private.*.tmp"))
+    output = capsys.readouterr()
+    assert SYNTHETIC_TOKEN not in output.out + output.err
+    assert "y" * 40 not in output.out + output.err

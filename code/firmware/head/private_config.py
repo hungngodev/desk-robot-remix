@@ -5,8 +5,9 @@ import ipaddress
 import json
 import os
 import re
+import secrets
+import stat
 import sys
-import tempfile
 import tomllib
 from pathlib import Path
 
@@ -29,6 +30,85 @@ def robot_token_env(config_path, robot_id):
     if sum(robot.get("token_env") == name for robot in robots) != 1:
         raise ValueError("Each head needs its own credential environment name")
     return name
+
+
+def open_board_directory(root, relative):
+    """Open every component without following links; retain the final directory identity."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    directory = os.open(root, flags)
+    try:
+        for part in relative.parts:
+            child = os.open(part, flags, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        return directory
+    except BaseException:
+        os.close(directory)
+        raise
+
+
+def require_same_directory(root, relative, directory, parser):
+    """Reject a renamed or replaced path before publishing private settings."""
+    try:
+        current = open_board_directory(root, relative)
+    except OSError:
+        parser.error("Private build directory changed or is inaccessible")
+    try:
+        if not os.path.samestat(os.fstat(current), os.fstat(directory)):
+            parser.error("Private build directory changed")
+    finally:
+        os.close(current)
+
+
+def read_template(directory, parser):
+    try:
+        descriptor = os.open("config.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             dir_fd=directory)
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise ValueError("Not a regular template")
+            with os.fdopen(descriptor, encoding="utf-8", closefd=False) as stream:
+                return json.load(stream)
+        finally:
+            os.close(descriptor)
+    except (OSError, ValueError):
+        parser.error("Private build template is missing or invalid")
+
+
+def require_regular_target(directory, parser):
+    try:
+        mode = os.stat("config.private.json", dir_fd=directory, follow_symlinks=False).st_mode
+    except FileNotFoundError:
+        return
+    if not stat.S_ISREG(mode):
+        parser.error("Refuse a nonregular private build settings target")
+
+
+def write_private_settings(root, relative, directory, config, parser):
+    require_same_directory(root, relative, directory, parser)
+    require_regular_target(directory, parser)
+    # All IO stays relative to the held directory descriptor, including cleanup.
+    # A path swap between validation and replace cannot redirect the bearer.
+    temporary = f".config.private.{secrets.token_hex(16)}.tmp"
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                         0o600, dir_fd=directory)
+    try:
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8", closefd=False) as stream:
+                os.fchmod(stream.fileno(), 0o600)
+                json.dump(config, stream, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+        finally:
+            os.close(descriptor)
+        require_same_directory(root, relative, directory, parser)
+        require_regular_target(directory, parser)
+        os.replace(temporary, "config.private.json", src_dir_fd=directory, dst_dir_fd=directory)
+    finally:
+        try:
+            os.unlink(temporary, dir_fd=directory)
+        except FileNotFoundError:
+            pass
 
 
 def main():
@@ -77,66 +157,45 @@ def main():
         "sense": ("xiaozhi-sense", "desk-robot-sense-s3"),
         "waveshare": ("xiaozhi-waveshare", "desk-robot-waveshare-s3-cam"),
     }[args.board]
-    board = ROOT.resolve() / "firmware/head/build" / build / "main/boards/desk-robot" / variant
-    # The build tree is ignored by git, but a symlink in any directory below
-    # ROOT could redirect the credential file into tracked source instead.
+    root = ROOT.resolve()
+    relative = Path("firmware/head/build") / build / "main/boards/desk-robot" / variant
     try:
-        if board.resolve(strict=True) != board:
-            p.error("Refuse a symlinked private build directory")
-    except (OSError, RuntimeError):
-        p.error("Private build directory is missing or inaccessible")
-    config = json.loads((board / "config.json").read_text())
-    config["builds"][0]["sdkconfig_append"] = [
-        x
-        for x in config["builds"][0]["sdkconfig_append"]
-        if not x.startswith(
-            ("CONFIG_DESK_ROBOT_ID=", "CONFIG_DESK_ROBOT_TOKEN=", "CONFIG_OTA_URL=")
-        )
-    ]
-    config["builds"][0]["sdkconfig_append"] += [
-        f'CONFIG_DESK_ROBOT_ID="{args.robot}"',
-        f'CONFIG_DESK_ROBOT_TOKEN="{token}"',
-        f'CONFIG_OTA_URL="http://{address}:8003/xiaozhi/ota/"',
-    ]
-    if args.board == "sense":
+        directory = open_board_directory(root, relative)
+    except OSError:
+        p.error("Private build directory is missing, symlinked or inaccessible")
+    try:
+        config = read_template(directory, p)
         config["builds"][0]["sdkconfig_append"] = [
-            item for item in config["builds"][0]["sdkconfig_append"]
-            if not item.startswith((
-                "CONFIG_DESK_ROBOT_AEC_DELAY_MS=",
-                "CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED=",
-                "CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED=",
-            ))
+            x
+            for x in config["builds"][0]["sdkconfig_append"]
+            if not x.startswith(
+                ("CONFIG_DESK_ROBOT_ID=", "CONFIG_DESK_ROBOT_TOKEN=", "CONFIG_OTA_URL=")
+            )
         ]
-        config["builds"][0]["sdkconfig_append"].extend([
-            f"CONFIG_DESK_ROBOT_AEC_DELAY_MS={args.aec_delay_ms}",
-            "CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED="
-            + ("y" if args.continuous_audio else "n"),
-            "CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED="
-            + ("y" if args.bench_aec_capture else "n"),
-        ])
-    target = board / "config.private.json"
-    if target.is_symlink():
-        p.error("Refuse a symlinked private build settings target")
-    # A failed write must preserve the previous usable settings. Never open
-    # the destination with O_TRUNC: that would follow a planted symlink and
-    # could leak a real device bearer into an unrelated tracked file.
-    temporary = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=board,
-            prefix=".config.private.", suffix=".tmp", delete=False,
-        ) as stream:
-            temporary = Path(stream.name)
-            os.fchmod(stream.fileno(), 0o600)
-            json.dump(config, stream, indent=2)
-            stream.flush()
-            os.fsync(stream.fileno())
-        if target.is_symlink():
-            p.error("Private build settings target became a symlink")
-        os.replace(temporary, target)
+        config["builds"][0]["sdkconfig_append"] += [
+            f'CONFIG_DESK_ROBOT_ID="{args.robot}"',
+            f'CONFIG_DESK_ROBOT_TOKEN="{token}"',
+            f'CONFIG_OTA_URL="http://{address}:8003/xiaozhi/ota/"',
+        ]
+        if args.board == "sense":
+            config["builds"][0]["sdkconfig_append"] = [
+                item for item in config["builds"][0]["sdkconfig_append"]
+                if not item.startswith((
+                    "CONFIG_DESK_ROBOT_AEC_DELAY_MS=",
+                    "CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED=",
+                    "CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED=",
+                ))
+            ]
+            config["builds"][0]["sdkconfig_append"].extend([
+                f"CONFIG_DESK_ROBOT_AEC_DELAY_MS={args.aec_delay_ms}",
+                "CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED="
+                + ("y" if args.continuous_audio else "n"),
+                "CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED="
+                + ("y" if args.bench_aec_capture else "n"),
+            ])
+        write_private_settings(root, relative, directory, config, p)
     finally:
-        if temporary is not None:
-            temporary.unlink(missing_ok=True)
+        os.close(directory)
     print(f"Private build settings prepared for {args.robot}; token hidden. Nothing flashed.")
 
 
