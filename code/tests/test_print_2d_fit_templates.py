@@ -1,5 +1,7 @@
 """Real A4 page scale and failure on changed source, never fictitious holes."""
 import importlib.util
+import shutil
+import subprocess
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -454,3 +456,33 @@ def test_a4_power_rejects_unprintable_tray_geometry(tmp_path, old, new, message)
     with pytest.raises(ValueError, match=message):
         source.export(tmp_path, output)
     assert not output.exists()
+
+
+@pytest.mark.parametrize(("old", "new", "message"), [
+    ("side_clearance_each_mm = 2;", "side_clearance_each_mm = 0.1;",
+     "Invalid nominal dock guide rail dimensions"),
+    ("side_clearance_each_mm = 2;", "side_clearance_each_mm = 8;",
+     "Invalid nominal dock guide rail dimensions"),
+    ("tag_white_margin_each_mm = 5;", "tag_white_margin_each_mm = 1;",
+     "Invalid dock paper/pocket dimensions"),
+    ("tag_paper_slack_each_mm = 0.6;", "tag_paper_slack_each_mm = 0.1;",
+     "Invalid dock paper/pocket dimensions"),
+    ("tag_black_side_mm = 60;", "tag_black_side_mm = 5;",
+     "Invalid dock paper/pocket dimensions"),
+])
+def test_a4_dock_rejects_source_clearances_and_tag_dimensions(tmp_path, old, new, message):
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    original = (SCRIPT.parent / "dock/dock_passive_fit.scad").read_text(encoding="utf-8")
+    assert original.count(old) == 1
+    scad.write_text(original.replace(old, new), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match=message):
+        load().export(tmp_path, output)
+    assert not output.exists()
+    if shutil.which("openscad"):
+        rendered = subprocess.run(
+            ["openscad", "--hardwarnings", "-o", str(tmp_path / "dock.stl"), str(scad)],
+            capture_output=True, text=True, timeout=90,
+        )
+        assert rendered.returncode != 0

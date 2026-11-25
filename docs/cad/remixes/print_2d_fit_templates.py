@@ -46,7 +46,8 @@ def values(root: Path) -> dict:
     slack = scad_mm(data["dock"], "tag_paper_slack_each_mm")
     paper = black + 2 * quiet
     pocket = paper + 2 * slack
-    if not (0 < black < paper < pocket <= 120):
+    if not (10 <= black <= 75 and 4 <= quiet <= 10
+            and 0.25 <= slack <= 1.5 and 0 < black < paper < pocket <= 120):
         raise ValueError("Invalid dock paper/pocket dimensions")
     power = data["power"]
     candidate_length = scad_mm(power, "candidate_pack_body_l_mm")
@@ -102,7 +103,8 @@ def values(root: Path) -> dict:
     # same impossible source instead of signing a misleading A4 template.
     if pocket >= channel_w:
         raise ValueError("Dock tag pocket exceeds nominal rail channel")
-    if (guide_run <= 37 or guide_run >= base_l
+    if (not 40 < track_w < 200 or not 0.5 <= each_side < 8
+            or guide_run <= 37 or guide_run >= base_l
             or entry_flare >= rail_wall + rail_margin
             or entry_flare > rail_margin
             or channel_w <= 0 or outer_w <= channel_w):
