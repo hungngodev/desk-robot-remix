@@ -16,6 +16,7 @@ import httpx
 from .brain_context import _memory_label, active_job_timeline, compose_brain_context
 from .config import RobotConfig, Settings, quiet_hours_active, secret
 from .conversation_consent import GroupContextConsent
+from .fleet_dialogue_budget import RollingGroupBudget, group_utterance_limit
 from .memory import MemoryStore, MemoryWriteSealed
 from .streamed_ollama import ollama_speech_segments
 
@@ -87,7 +88,7 @@ def conversation_turns(robot_ids: list[str], utterances: int | None = None) -> i
             or any(not isinstance(robot_id, str) or not robot_id for robot_id in robot_ids)
             or len(set(robot_ids)) != len(robot_ids)):
         raise ValueError("Choose two to five distinct robots")
-    limit = max(6, 2 * len(robot_ids))
+    limit = group_utterance_limit(len(robot_ids))
     if utterances is None:
         return limit
     if (
@@ -464,6 +465,7 @@ class Conversation:
         self.memory = memory
         self.speaker_lock = asyncio.Lock()
         self.session_lock = asyncio.Lock()  # One owned device-audio session across group and pet.
+        self._group_budget = RollingGroupBudget()
         self.active: asyncio.Task | None = None
         # A STOP also invalidates API admission awaiting pet preemption.
         self.stop_generation = 0
@@ -921,11 +923,21 @@ class Conversation:
                 and (permission_check is None or permission_check())
             )
 
+        if not consent_still_valid():
+            raise RuntimeError("Group conversation consent revoked")
+        turns = min(turns, self._group_budget.remaining(len(robots)))
+        if not turns:
+            return []
+
         last_audio_robot: RobotConfig | None = None
+        turn_claimed = False
 
         async def say_group(robot: RobotConfig, text: str) -> None:
             def mark_transmission() -> None:
-                nonlocal last_audio_robot
+                nonlocal last_audio_robot, turn_claimed
+                if not turn_claimed:
+                    self._group_budget.claim(len(robots))
+                    turn_claimed = True
                 last_audio_robot = robot
 
             await self._say_with_permission(
@@ -1168,6 +1180,7 @@ class Conversation:
                         completed_segments: list[str] = []
                         full_receipt_started = False
                         for index in range(turns):
+                            turn_claimed = False
                             # A revoked next turn must not re-record the
                             # previous turn's already completed segments.
                             completed_segments = []

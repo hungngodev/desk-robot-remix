@@ -285,6 +285,8 @@ async def test_lost_fleet_head_cleans_session_and_leaves_future_chat_usable(flee
 
     speaker = LostSpeaker()
     conversation = Conversation(fleet, SimulatedChat(), speaker)
+    now = [1000.0]
+    conversation._group_budget._clock = lambda: now[0]
     survivors = [robot_id for robot_id in IDS if robot_id != lost_id]
     with pytest.raises(RuntimeError, match="disconnected"):
         await conversation.run(IDS, "Play a word game")
@@ -298,6 +300,7 @@ async def test_lost_fleet_head_cleans_session_and_leaves_future_chat_usable(flee
 
     # Keep the original speaker and conversation, including their actual
     # ownership state. A fresh adapter would hide a leaked session.
+    now[0] += 300
     transcript = await conversation.run(survivors, "Continue the game")
     assert [line["robot_id"] for line in transcript] == survivors * 2
     assert speaker.owner is None and speaker.releases == 2
@@ -310,6 +313,7 @@ async def test_lost_fleet_head_cleans_session_and_leaves_future_chat_usable(flee
 
     # The disconnected identity is admitted again only after simulated recovery.
     speaker.offline.remove(lost_id)
+    now[0] += 300
     transcript = await conversation.run(IDS, "A new game")
     assert [line["robot_id"] for line in transcript] == IDS * 2
     assert speaker.owner is None and speaker.releases == 3
@@ -565,6 +569,8 @@ async def test_group_speech_continues_when_one_pet_cannot_persist(
     monkeypatch.setattr(memory, "remember", broken_second_robot)
     speaker = SimulatedSpeaker()
     conversation = Conversation(fleet, SimulatedChat(), speaker, memory=memory)
+    now = [1000.0]
+    conversation._group_budget._clock = lambda: now[0]
     transcript = await conversation.run(IDS[:2], "A desk game", 6)
     assert len(transcript) == 6
     assert len(speaker.spoken) == 6
@@ -584,6 +590,8 @@ async def test_group_speech_continues_when_one_pet_cannot_persist(
     ] == 0
     # Later authorized dialogue can use the same real SQLite store.
     monkeypatch.setattr(memory, "remember", original)
+    assert await conversation.run(IDS[:2], "Too soon", 2) == []
+    now[0] += 300
     subsequent = await conversation.run(IDS[:2], "Try again", 2)
     assert len(subsequent) == 2
     assert len(speaker.spoken) == 8
@@ -1057,3 +1065,39 @@ async def test_five_pet_sharing_revoked_during_peer_write_keeps_one_own_receipt(
     assert not conversation.session_lock.locked()
     assert not conversation.speaker_lock.locked()
     assert len(await conversation.run(IDS, "Try again", 1)) == 1
+
+
+async def test_group_budget_is_shared_across_sessions_and_origins(fleet):
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, SimulatedChat(), speaker)
+    now = [1000.0]
+    conversation._group_budget._clock = lambda: now[0]
+    assert len(await conversation.run(IDS[:2], "First game")) == 6
+    assert await conversation.run(
+        IDS[2:4], "Different pets", 2, origin="autonomous_social",
+    ) == []
+    assert len(await conversation.run(IDS[:4], "Four pets")) == 2
+    assert len(await conversation.run(IDS, "Five pets")) == 2
+    assert await conversation.run(IDS, "Another topic") == []
+    assert len(speaker.spoken) == 10
+    now[0] = 1299.999
+    assert await conversation.run(IDS, "Not yet") == []
+    now[0] = 1300.0
+    assert len(await conversation.run(
+        IDS[2:4], "New window", 2, origin="autonomous_social",
+    )) == 2
+    assert len(speaker.spoken) == 12
+
+
+async def test_group_budget_counts_streamed_turn_once(fleet):
+    class StreamingChat:
+        async def stream_reply(self, history):
+            yield "First sentence."
+            yield "Second sentence."
+
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, StreamingChat(), speaker)
+    conversation._group_budget._clock = lambda: 1000.0
+    assert len(await conversation.run(IDS[:2], "Stream")) == 6
+    assert len(speaker.spoken) == 12
+    assert await conversation.run(IDS[:2], "No new allowance") == []

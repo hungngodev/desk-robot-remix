@@ -23,7 +23,14 @@ models or verify physical robot interaction.
 
 A session supports two to five distinct IDs. Defaults and hard limits are six
 utterances for two/three, eight for four, ten for five, with a five-minute overall
-timeout. Each robot has its own persona/history; every spoken line is delivered
+timeout. One rolling five-minute allowance is shared by all group sessions,
+including autonomous peer dialogue. Each logical utterance consumes one slot at
+its first speaker attempt, even if interrupted; audio chunks do not each consume
+a slot. Changing topics or participants does not reset the counter. The current
+participant count determines the ceiling; requests are shortened to the remaining
+allowance or return an empty transcript when exhausted. Individual human replies
+are not subject to this peer-dialogue limit. The allowance is in-process only.
+Each robot has its own persona/history; every spoken line is delivered
 digitally to all the other histories. One transmission at a time, with all
 participating microphones suppressed during coordinated speech. Stop/disconnect
 paths are tested; measured sound/playback timing still needs physical tests.
