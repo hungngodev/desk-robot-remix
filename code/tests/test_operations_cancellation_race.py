@@ -4,7 +4,7 @@ import asyncio
 import gc
 
 import pytest
-from desk_robot.operations import _bounded_head_reply
+from desk_robot.operations import _bounded_head_reply, require_active_operation
 
 
 @pytest.mark.asyncio
@@ -61,3 +61,35 @@ async def test_late_result_not_accepted():
     finally:
         release.set()
         await asyncio.wait_for(finished.wait(), 1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["cancelled", "failed", "succeeded", "queued"])
+async def test_revoked_operation_cannot_continue(state):
+    with pytest.raises(asyncio.CancelledError):
+        require_active_operation(state)
+
+
+@pytest.mark.asyncio
+async def test_swallowed_cancellation_cannot_continue_running_operation():
+    entered = asyncio.Event()
+
+    async def worker():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            pass
+        require_active_operation("running")
+        return {"ok": True}
+
+    task = asyncio.create_task(worker())
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+
+@pytest.mark.asyncio
+async def test_active_operation_may_continue():
+    require_active_operation("running")

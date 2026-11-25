@@ -7,6 +7,13 @@ from typing import Awaitable, TypeVar
 _T = TypeVar("_T")
 
 
+def require_active_operation(state: str) -> None:
+    """Reject a revoked job even if an adapter swallowed cancellation."""
+    task = asyncio.current_task()
+    if state != "running" or (task is not None and task.cancelling()):
+        raise asyncio.CancelledError
+
+
 async def _bounded_head_reply(coro: Awaitable[_T], *, seconds: float,
                               timeout_message: str) -> _T:
     """Bound even adapters that suppress task cancellation; ignore late replies."""

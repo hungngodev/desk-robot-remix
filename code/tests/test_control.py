@@ -2524,3 +2524,34 @@ async def test_pickup_final_inference_cannot_hide_body_disarm(settings):
         assert "two frames support placement after jaw withdrawal" not in job.events
     finally:
         await c.close()
+
+
+async def test_cancelled_arm_receipt_cannot_start_motion_workers(settings):
+    c, head = make(settings)
+    entered = asyncio.Event()
+    original = head.command
+
+    async def stubborn_arm(command):
+        if command == "arm":
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                pass
+        return await original(command)
+
+    head.command = stubborn_arm
+    try:
+        await c.operator_arm("robot-01")
+        job = c.manual("robot-01", "drive 20 20 100")
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        c.tasks[job.id].cancel()
+        await asyncio.wait_for(c.tasks[job.id], timeout=2)
+        assert job.state == "cancelled"
+        assert job.result is None
+        assert head.commands[-1] == "halt"
+        assert "drive 20 20 100" not in head.commands
+        assert "keepalive" not in head.commands
+        assert not head.armed
+    finally:
+        await c.close()

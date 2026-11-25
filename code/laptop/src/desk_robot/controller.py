@@ -21,7 +21,7 @@ from .grasp_feedback import await_commanded_jaw_target, guarded_grasp
 from .motion_authority import StopConfirmationTracker
 from .object_search import ObjectSearchResult, summarize_search_observation
 from .object_targets import ObjectTarget
-from .operations import OperationError, _bounded_head_reply
+from .operations import OperationError, _bounded_head_reply, require_active_operation
 from .transport import Head, HeadError, drive_duration_ms, expected_ack, validate_command
 from .vision import Detection, Vision, image_size
 
@@ -770,6 +770,7 @@ class Coordinator:
                 # sample can expire after the operator granted the permit.
                 # Recheck the real body immediately before requesting arm.
                 await self._hardware_preflight(job.robot_id)
+                require_active_operation(job.state)
                 if not self.robot(job.robot_id).motion_enabled:
                     raise OperationError("motion_enabled=false; no arm sent")
                 voice_reason = self.voice_blocks_motion()
@@ -778,6 +779,7 @@ class Coordinator:
                 await self.heads[job.robot_id].command(
                     "arm"
                 )  # only after consuming operator permit
+                require_active_operation(job.state)
                 # A changed configuration while ARM is in flight cannot
                 # authorize subsequent actuator commands. HALT in finally.
                 if not self.robot(job.robot_id).motion_enabled:
@@ -809,6 +811,7 @@ class Coordinator:
                         await keeper
                         raise OperationError("Keepalive ended unexpectedly")
                     operation_result = await operation
+                    require_active_operation(job.state)
                     operation_finished = True
             except asyncio.CancelledError:
                 # An operator STOP can already have failed at the transport.
