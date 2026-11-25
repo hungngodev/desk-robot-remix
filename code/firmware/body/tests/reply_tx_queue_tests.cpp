@@ -71,7 +71,8 @@ int main() {
   assert(backlog.drain(backlog_serial) == 0);
   while (backlog.pending()) {
     backlog_serial.free = 128;
-    assert(backlog.drain(backlog_serial) <= 32);
+    const auto written = backlog.drain(backlog_serial);
+    assert(written > 0 && written <= 32);
   }
   assert(backlog_serial.sent == "OK halt\r\nOK stop\r\n" +
          one + "\r\n" + two + "\r\n");
@@ -88,8 +89,11 @@ int main() {
   assert(partial.enqueue_priority_line("OK halt"));
   while (partial.pending()) {
     partial_serial.free = 128;
-    partial_serial.per_write = 5;
-    assert(partial.drain(partial_serial) <= 5);
+    // A nondivisor of the remaining first frame forces the drain to
+    // stop at its delimiter even when the next status fits in this write.
+    partial_serial.per_write = 7;
+    const auto written = partial.drain(partial_serial);
+    assert(written > 0 && written <= 7);
   }
   assert(partial_serial.sent == one + "\r\nOK halt\r\n" + two + "\r\n");
 
