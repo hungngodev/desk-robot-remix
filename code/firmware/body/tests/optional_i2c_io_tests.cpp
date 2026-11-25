@@ -21,6 +21,30 @@ int main() {
                 << " outbound_bytes=" << Wire.outbound.size() << '\n';
     }
     CHECK(accessories_initialized);
+    {
+      // A STOP on the range mux can ACK and then expose a held SDA.
+      // The accessory client must yield immediately, not spend another
+      // timeout on readback or best-effort close before the safety loop.
+      TwoWire hung_wire;
+      desk_robot::AccessorySensors hung_bus;
+      CHECK(hung_bus.begin(hung_wire, [] {
+        return digitalRead(21) == HIGH && digitalRead(22) == HIGH;
+      }));
+      for (unsigned ms = 0; ms <= 48; ms += 12) hung_bus.poll(ms);
+      CHECK(hung_bus.readings().dock.valid);
+      hung_wire.hold_sda_on_range_disconnect = true;
+      const auto before = hung_wire.transactions;
+      hung_bus.poll(60);
+      CHECK(fake_i2c_lines().sda_stuck);
+      CHECK(hung_wire.transactions == before + 1);
+      CHECK(!hung_bus.readings().dock.valid);
+      CHECK(!hung_bus.readings().gauge.fuel_valid);
+      fake_i2c_lines() = FakeI2cLines{};
+      hung_bus.poll(72);
+      CHECK(hung_wire.transactions > before + 1);
+      CHECK(!hung_bus.readings().dock.valid); // no new GPIOA acquisition yet
+      CHECK(!hung_wire.unsafe_parallel_mux);
+    }
     CHECK(desk_robot::next_nonzero_sensor_sequence(0U) == 1U);
     CHECK(desk_robot::next_nonzero_sensor_sequence(0xfffffffeU) == 0xffffffffU);
     CHECK(desk_robot::next_nonzero_sensor_sequence(0xffffffffU) == 1U);

@@ -17,7 +17,9 @@ namespace desk_robot {
 // that block for entire gestures/multiple conversion cycles in the guard loop.
 class AccessorySensors {
  public:
-  bool begin(TwoWire& wire);
+  // The live owner supplies its physical line / pin-matrix availability check.
+  // Host protocol-only callers may omit it when no physical GPIO exists.
+  bool begin(TwoWire& wire, bool (*bus_accessible)() = nullptr);
   void poll(std::uint32_t now_ms);
   const AccessoryReadings& readings() const { return data_; }
   // No bus transaction: invalidate every cached conversion when another
@@ -44,6 +46,9 @@ class AccessorySensors {
   }
  private:
   TwoWire* wire_ = nullptr;
+  bool (*bus_accessible_)() = nullptr;
+  bool bus_blocked_ = false;
+  bool bus_available();
   bool mux_present_ = false;
   std::uint8_t next_lane_ = 1;
   std::uint32_t last_ms_ = 0;

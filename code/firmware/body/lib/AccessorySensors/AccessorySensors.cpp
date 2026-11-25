@@ -8,19 +8,28 @@
 #if (defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER) || \
     (defined(DESK_ROBOT_FULL_SENSORS) && DESK_ROBOT_FULL_SENSORS)
 namespace desk_robot {
+bool AccessorySensors::bus_available() {
+  // Once a line is observed held, stop this entire polling slice even if
+  // the slave releases it before the next helper. Only the body loop owns
+  // recovery and must get control back before additional Wire transactions.
+  if (!bus_blocked_ && bus_accessible_ && !bus_accessible_())
+    bus_blocked_ = true;
+  return !bus_blocked_;
+}
 bool AccessorySensors::mux(std::uint8_t address, std::uint8_t mask) {
+  if (!bus_available()) return false;
   wire_->beginTransmission(address);
   const bool wrote = wire_->write(mask) == 1;
   const bool acknowledged = wire_->endTransmission(true) == 0;
-  return wrote && acknowledged; // Always release failed partial writes.
+  return bus_available() && wrote && acknowledged; // Always release failed partial writes.
 }
 bool AccessorySensors::verified_mux(std::uint8_t address, std::uint8_t mask) {
   // TI TCA9548A SCPS207H: a write ACK is not a verified channel change.
   // Read the control register after STOP, including on mux close. Otherwise
   // a stuck optional lane can leave cached dock/seat evidence appearing live.
-  if (!mux(address, mask) ||
-      wire_->requestFrom(address, static_cast<std::size_t>(1), true) != 1 ||
-      wire_->available() < 1) return false;
+  if (!mux(address, mask)) return false;
+  const auto received = wire_->requestFrom(address, static_cast<std::size_t>(1), true);
+  if (!bus_available() || received != 1 || wire_->available() < 1) return false;
   return wire_->read() == mask;
 }
 void AccessorySensors::invalidate_cached() {
@@ -53,21 +62,27 @@ bool AccessorySensors::select(std::uint8_t lane) {
 }
 bool AccessorySensors::close() { return verified_mux(0x71, 0); }
 bool AccessorySensors::probe(std::uint8_t address) {
+  if (!bus_available()) return false;
   wire_->beginTransmission(address);
-  return wire_->endTransmission(true) == 0;
+  const bool acknowledged = wire_->endTransmission(true) == 0;
+  return bus_available() && acknowledged;
 }
 bool AccessorySensors::read(std::uint8_t address, std::uint8_t reg,
                              std::uint8_t* dest, std::uint8_t count) {
   if (!dest || !count || count > 16) return false;
+  if (!bus_available()) return false;
   wire_->beginTransmission(address);
   const bool wrote = wire_->write(reg) == 1;
   // Always terminate a failed partial transmission with STOP. Otherwise a
   // rejected write may leave Wire in a transaction while the dock GPIOA
   // freshness gate thinks the optional controller simply vanished.
   const bool acknowledged = wire_->endTransmission(!wrote) == 0;
-  if (!wrote || !acknowledged) return false;
-  if (wire_->requestFrom(address, static_cast<std::size_t>(count), true) != count)
+  if (!wrote || !acknowledged) {
+    bus_available();  // STOP completed on a rejected pointer write.
     return false;
+  }
+  const auto received = wire_->requestFrom(address, static_cast<std::size_t>(count), true);
+  if (!bus_available() || received != count) return false;
   for (std::uint8_t i = 0; i < count; ++i) {
     if (wire_->available() < 1) return false;
     const int value = wire_->read();
@@ -85,30 +100,39 @@ bool AccessorySensors::read16(std::uint8_t address, std::uint8_t reg,
 }
 bool AccessorySensors::write8(std::uint8_t address, std::uint8_t reg,
                                std::uint8_t value) {
+  if (!bus_available()) return false;
   wire_->beginTransmission(address);
   const bool wrote = wire_->write(reg) == 1 && wire_->write(value) == 1;
   const bool acknowledged = wire_->endTransmission(true) == 0;
-  return wrote && acknowledged;
+  return bus_available() && wrote && acknowledged;
 }
 bool AccessorySensors::write16(std::uint8_t address, std::uint8_t reg,
                                 std::uint16_t value) {
+  if (!bus_available()) return false;
   wire_->beginTransmission(address);
   const bool wrote = wire_->write(reg) == 1 &&
                      wire_->write(static_cast<std::uint8_t>(value >> 8)) == 1 &&
                      wire_->write(static_cast<std::uint8_t>(value)) == 1;
   const bool acknowledged = wire_->endTransmission(true) == 0;
-  return wrote && acknowledged;
+  return bus_available() && wrote && acknowledged;
 }
 bool AccessorySensors::write_command(std::uint8_t address, std::uint8_t cmd) {
+  if (!bus_available()) return false;
   wire_->beginTransmission(address);
   const bool wrote = wire_->write(cmd) == 1;
   const bool acknowledged = wire_->endTransmission(true) == 0;
-  return wrote && acknowledged;
+  return bus_available() && wrote && acknowledged;
 }
-bool AccessorySensors::begin(TwoWire& wire) {
+bool AccessorySensors::begin(TwoWire& wire, bool (*bus_accessible)()) {
   wire_ = &wire;
-  wire_->beginTransmission(0x71);
-  mux_present_ = wire_->endTransmission(true) == 0;
+  bus_accessible_ = bus_accessible;
+  bus_blocked_ = false;
+  mux_present_ = false;
+  if (bus_available()) {
+    wire_->beginTransmission(0x71);
+    mux_present_ = wire_->endTransmission(true) == 0;
+    bus_available();
+  }
   data_ = AccessoryReadings{};
 #if DESK_ROBOT_ENABLE_HAPTIC
   haptic_.configure(false);
@@ -120,7 +144,7 @@ bool AccessorySensors::begin(TwoWire& wire) {
   gesture_.restart();
   nfc_stage_ = NfcStage::Disabled;
   nfc_phase_at_ms_ = nfc_last_scan_at_ms_ = 0;
-  if (!mux_present_) return false;
+  if (!mux_present_ || !bus_available()) return false;
   // Validate APDS9960 manufacturer ID before enabling low-level proximity.
   if (select(1)) {
     std::uint8_t id = 0;
@@ -381,8 +405,10 @@ void AccessorySensors::climate(std::uint32_t now_ms) {
   if (now_ms - sht_started_ < 12U) return;
   std::uint8_t b[6]{};
   // SHT4x data read has no register pointer after a measurement command.
-  c.valid = wire_->requestFrom(static_cast<std::uint8_t>(0x44),
-                               static_cast<std::size_t>(6), true) == 6;
+  c.valid = bus_available() &&
+      wire_->requestFrom(static_cast<std::uint8_t>(0x44),
+                         static_cast<std::size_t>(6), true) == 6;
+  c.valid = bus_available() && c.valid;
   for (int i = 0; i < 6 && c.valid; ++i) {
     if (wire_->available() < 1) c.valid = false;
     else { const int v = wire_->read(); if (v < 0) c.valid = false;
@@ -537,22 +563,24 @@ bool AccessorySensors::nfc_write(
     std::uint8_t command, const std::uint8_t* body, std::size_t size) {
   std::uint8_t frame[32]{};
   const std::size_t n = pn532_encode(command, body, size, frame, sizeof(frame));
-  if (!n) return false;
+  if (!n || !bus_available()) return false;
   wire_->beginTransmission(kPn532Address);
   for (std::size_t i = 0; i < n; ++i) {
     if (wire_->write(frame[i]) != 1) {
       wire_->endTransmission(true); // always release an incomplete I2C write
+      bus_available();
       return false;
     }
   }
-  return wire_->endTransmission(true) == 0;
+  const bool acknowledged = wire_->endTransmission(true) == 0;
+  return bus_available() && acknowledged;
 }
 
 int AccessorySensors::nfc_read(std::uint8_t* frame, std::uint8_t count) {
   // One bounded Wire transaction. Never use Seeed's blocking wait loops.
-  if (!frame || count == 0 || count > kPn532MaxWire ||
-      wire_->requestFrom(kPn532Address, static_cast<std::size_t>(count), true) != count)
-    return -1;
+  if (!frame || count == 0 || count > kPn532MaxWire || !bus_available()) return -1;
+  const auto received = wire_->requestFrom(kPn532Address, static_cast<std::size_t>(count), true);
+  if (!bus_available() || received != count) return -1;
   for (std::uint8_t i = 0; i < count; ++i) {
     if (wire_->available() < 1) return -1;
     const int byte = wire_->read();
@@ -661,6 +689,7 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
   if (!mux_present_ || (started_ && now_ms - last_ms_ < 12U)) return;
   started_ = true;
   last_ms_ = now_ms;
+  bus_blocked_ = false;
   const std::uint8_t lane = next_lane_;
   next_lane_ = lane >= 7 ? 1 : lane + 1;
   if (!select(lane)) {

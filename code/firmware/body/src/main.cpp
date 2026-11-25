@@ -645,7 +645,8 @@ void setup() {
 #else
   Serial.println("INFO max30102_fifo_red_first_compiled_unqualified");
 #endif
-  const bool accessory_mux = tof.bus_accessible() && accessories.begin(Wire);
+  const bool accessory_mux = tof.bus_accessible() && accessories.begin(
+      Wire, [] { return tof.bus_accessible(); });
 #if defined(DESK_ROBOT_REQUIRE_FUEL_MONITOR) && DESK_ROBOT_REQUIRE_FUEL_MONITOR
   // Full battery robot cannot move when its fuel gauge is missing/stale.
   // A valid digital voltage read does not certify the pack or charger.
