@@ -68,7 +68,9 @@ def verify_source_contract() -> dict:
     }
 
 
-def evaluate(*, chassis_mount_above_desk_mm: float, optical_tilt_deg: float,
+def evaluate(*, chassis_mount_above_desk_mm: float | None = None,
+             measured_lens_above_desk_mm: float | None = None,
+             optical_tilt_deg: float,
              leading_wheel_behind_sensor_mm: float,
              measured_p95_stopping_distance_mm: float,
              remaining_vision_or_sensor_latency_ms: float,
@@ -79,7 +81,11 @@ def evaluate(*, chassis_mount_above_desk_mm: float, optical_tilt_deg: float,
     # MUST NOT authorize a desk-edge geometry. A 95th percentile ignores
     # the slowest 5% of stopping trials. Accept only a separately named
     # observed worst-case distance with a nondecreasing bound.
-    vals = (chassis_mount_above_desk_mm, optical_tilt_deg,
+    if (chassis_mount_above_desk_mm is None) == (measured_lens_above_desk_mm is None):
+        raise ValueError("Provide exactly one chassis datum or measured lens height")
+    height_input = (measured_lens_above_desk_mm if measured_lens_above_desk_mm is not None
+                    else chassis_mount_above_desk_mm)
+    vals = (height_input, optical_tilt_deg,
             leading_wheel_behind_sensor_mm, measured_p95_stopping_distance_mm,
             remaining_vision_or_sensor_latency_ms, measured_travel_speed_mm_s,
             engineering_margin_mm)
@@ -91,7 +97,8 @@ def evaluate(*, chassis_mount_above_desk_mm: float, optical_tilt_deg: float,
             or measured_worst_stopping_distance_mm <
             measured_p95_stopping_distance_mm):
         raise ValueError("Worst observed stop must be finite and at least p95")
-    if (chassis_mount_above_desk_mm < 0
+    if (height_input < 0
+            or (measured_lens_above_desk_mm is not None and height_input == 0)
             # The forward cone extremity must intersect the floor. A beam
             # at or above the horizon has no finite horizontal footprint.
             or not 0 <= optical_tilt_deg < 90 - ST_SYSTEM_FOV_DEG / 2
@@ -102,8 +109,13 @@ def evaluate(*, chassis_mount_above_desk_mm: float, optical_tilt_deg: float,
             or engineering_margin_mm < 0):
         raise ValueError("Invalid cliff sensor clearance or stopping envelope")
     baseline = verify_source_contract()
-    height = chassis_mount_above_desk_mm + baseline[
-        "lens_center_above_adapter_mount_mm"]
+    if measured_lens_above_desk_mm is not None:
+        height = measured_lens_above_desk_mm
+        height_source = "measured_lens_input"
+    else:
+        height = chassis_mount_above_desk_mm + baseline[
+            "lens_center_above_adapter_mount_mm"]
+        height_source = "nominal_adapter_offset"
     slant = height / math.cos(math.radians(optical_tilt_deg))
     half_fov = ST_SYSTEM_FOV_DEG / 2
     rear_angle = optical_tilt_deg - half_fov
@@ -142,6 +154,7 @@ def evaluate(*, chassis_mount_above_desk_mm: float, optical_tilt_deg: float,
     clearance_ok = leading_wheel_behind_sensor_mm > required_physical_lead
     return {
         **baseline,
+        "lens_height_source": height_source,
         "nominal_lens_above_desk_mm": height,
         "nominal_optical_floor_path_mm": slant,
         "nominal_floor_in_firmware_valid_range": center_range_ok,
@@ -423,7 +436,11 @@ def main():
                         help="Print blank measurements for the four floor lanes")
     planar.add_argument("--floor-mount-measurements", type=Path,
                         help="Screen each measured floor lens and configured interval")
-    parser.add_argument("--mount-above-desk-mm", type=float)
+    height_args = parser.add_mutually_exclusive_group()
+    height_args.add_argument("--mount-above-desk-mm", type=float,
+                             help="Chassis datum plus provisional CAD aperture offset")
+    height_args.add_argument("--lens-above-desk-mm", type=float,
+                             help="Measured optical center above tabletop, not coupon rim")
     parser.add_argument("--tilt-deg", type=float)
     parser.add_argument("--sensor-ahead-of-wheel-mm", type=float)
     parser.add_argument("--measured-worst-stopping-mm", type=float,
@@ -431,7 +448,7 @@ def main():
     parser.add_argument("--latency-ms", type=float)
     parser.add_argument("--speed-mm-s", type=float)
     args = parser.parse_args()
-    scalar = (args.mount_above_desk_mm, args.tilt_deg,
+    scalar = (args.mount_above_desk_mm, args.lens_above_desk_mm, args.tilt_deg,
               args.sensor_ahead_of_wheel_mm, args.measured_worst_stopping_mm,
               args.latency_ms, args.speed_mm_s)
     if args.floor_mount_template or args.floor_mount_measurements is not None:
@@ -460,10 +477,12 @@ def main():
             )
             print(json.dumps(screen_planar_record(record), indent=2))
         return
-    if any(value is None for value in scalar):
-        parser.error("All six straight-drive measurements are required")
+    if ((args.mount_above_desk_mm is None and args.lens_above_desk_mm is None)
+            or any(value is None for value in scalar[2:])):
+        parser.error("A height and all five other straight-drive measurements are required")
     print(json.dumps(evaluate(
         chassis_mount_above_desk_mm=args.mount_above_desk_mm,
+        measured_lens_above_desk_mm=args.lens_above_desk_mm,
         optical_tilt_deg=args.tilt_deg,
         leading_wheel_behind_sensor_mm=args.sensor_ahead_of_wheel_mm,
         measured_p95_stopping_distance_mm=args.measured_worst_stopping_mm,

@@ -442,3 +442,56 @@ def test_floor_mount_cli_reports_individual_threshold_failure(tmp_path):
         capture_output=True, text=True, check=True,
     )
     assert json.loads(result.stdout) == tool.screen_floor_mounts(records)
+
+
+@pytest.mark.parametrize("height, setback", [(35, 7.7593), (45, 9.9763), (55, 12.1932)])
+def test_measured_lens_height_uses_no_adapter_offset(height, setback):
+    result = evaluate(chassis_mount_above_desk_mm=None, measured_lens_above_desk_mm=height)
+    assert result["lens_height_source"] == "measured_lens_input"
+    assert result["nominal_optical_floor_path_mm"] == height
+    assert result["rear_floor_return_setback_mm"] == pytest.approx(setback, abs=0.001)
+    assert result["full_fov_floor_path_in_valid_range"]
+    assert not result["sensor_mount_and_optical_alignment_physically_verified"]
+    assert not result["40_sensor_fleet_purchase_approved"]
+
+
+def test_measured_below_firmware_minimum_cannot_gain_adapter_offset():
+    result = evaluate(chassis_mount_above_desk_mm=None, measured_lens_above_desk_mm=29.9)
+    assert result["nominal_optical_floor_path_mm"] == 29.9
+    assert not result["full_fov_floor_path_in_valid_range"]
+    assert not result["candidate_geometry_possible_on_paper"]
+    assert evaluate(chassis_mount_above_desk_mm=29.9)["candidate_geometry_possible_on_paper"]
+
+
+@pytest.mark.parametrize("height", [0, -1, True, float("nan"), float("inf"), 10**1000])
+def test_invalid_measured_lens_height_rejected(height):
+    with pytest.raises(ValueError):
+        evaluate(chassis_mount_above_desk_mm=None, measured_lens_above_desk_mm=height)
+
+
+def test_lens_height_datum_is_exclusive():
+    with pytest.raises(ValueError, match="exactly one"):
+        evaluate(measured_lens_above_desk_mm=35)
+    with pytest.raises(ValueError, match="exactly one"):
+        evaluate(chassis_mount_above_desk_mm=None)
+    legacy = evaluate(chassis_mount_above_desk_mm=20)
+    assert legacy["lens_height_source"] == "nominal_adapter_offset"
+    assert legacy["nominal_optical_floor_path_mm"] == 31.15
+
+
+def test_measured_lens_cli_preserves_datum_and_rejects_conflicts():
+    import json
+    import subprocess
+    import sys
+
+    cmd = [sys.executable, str(SCRIPT), "--lens-above-desk-mm", "35",
+           "--tilt-deg", "0", "--sensor-ahead-of-wheel-mm", "45",
+           "--measured-worst-stopping-mm", "10", "--latency-ms", "80",
+           "--speed-mm-s", "100"]
+    completed = subprocess.run(cmd, capture_output=True, text=True, check=True)
+    assert json.loads(completed.stdout) == evaluate(
+        chassis_mount_above_desk_mm=None, measured_lens_above_desk_mm=35)
+    for conflicting in (["--mount-above-desk-mm", "20"], ["--planar-template"],
+                        ["--floor-mount-template"]):
+        rejected = subprocess.run([*cmd, *conflicting], capture_output=True, text=True)
+        assert rejected.returncode == 2

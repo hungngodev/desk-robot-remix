@@ -46,6 +46,19 @@ Execute `python code/scripts/cliff_mount_preflight.py
 --mount-above-desk-mm VALUE --tilt-deg VALUE
 --sensor-ahead-of-wheel-mm VALUE --measured-worst-stopping-mm VALUE
 --latency-ms VALUE --speed-mm-s VALUE` with actual numbers.
+
+For an actual measured optical center use `--lens-above-desk-mm VALUE`
+instead of `--mount-above-desk-mm VALUE` (never both). The latter remains
+a provisional CAD datum calculation that adds 11.15 mm; it is not a
+direct lens height. The straight-drive report records `lens_height_source`
+to distinguish these modes. The separate 35/45/55 mm GY-530 trial coupons
+specify support rim heights only; measure the installed lens above the
+tabletop rather than entering the printed rim dimension. The per-lane
+`--floor-mount-measurements` screen accepts direct measurements for
+each of the four floor sensors. The planar coverage screen still uses
+the provisional adapter datum and must not be confused with measured
+per-lane lens geometry. None of these paper checks qualify the physical
+cliff detector.
 The script independently checks the firmware distance acceptance,
 actual CAD lens position and ST's **25 degree system field of view**, then
 calculates the available stopping offset. Primary source: [ST VL53L0X
