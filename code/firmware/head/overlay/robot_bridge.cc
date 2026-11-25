@@ -470,7 +470,10 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
         return {503, false, "body read superseded by urgent stop"};
     if (!uart_ready_) return {503, false, "body UART unavailable"};
     // No retries: an uncertain ACK may still mean that physical movement happened.
-    uart_flush_input(kUart);
+    // A failed RX flush cannot establish that a matching line is fresh.
+    // Still attempt STOP/HALT; RX failure must not suppress a stop write.
+    const bool rx_clean = uart_flush_input(kUart) == ESP_OK;
+    if (!rx_clean && !urgent) return {503, false, "body UART receive cleanup failed"};
     const std::string wire = command.wire + "\r\n";
     // A stalled read must not resurrect old operator intent or feed the
     // body watchdog with an aged keepalive. Never expire STOP or HALT.
@@ -478,6 +481,7 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
         return {503, false, "body control expired before UART write"};
     if (uart_write_bytes(kUart, wire.data(), wire.size()) != static_cast<int>(wire.size()) ||
         uart_wait_tx_done(kUart, pdMS_TO_TICKS(30)) != ESP_OK) return {503, false, "body UART write failed"};
+    if (!rx_clean) return {503, false, "body stop sent; ACK uncertain after receive cleanup failure"};
     const auto deadline = esp_timer_get_time() + kTimeoutMs * 1000;
     std::string line;
     bool body_cr_pending = false;
@@ -485,7 +489,9 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
         if (urgency.preempted())
             return {503, false, "body response superseded by urgent stop"};
         uint8_t c = 0;
-        if (uart_read_bytes(kUart, &c, 1, pdMS_TO_TICKS(10)) != 1) continue;
+        const int received = uart_read_bytes(kUart, &c, 1, pdMS_TO_TICKS(10));
+        if (received < 0) return {503, false, "body UART read failed; command outcome uncertain"};
+        if (received != 1) continue;
         if (urgency.preempted())
             return {503, false, "body response superseded by urgent stop"};
         if (!BodyWireByteValid(body_cr_pending, c))
