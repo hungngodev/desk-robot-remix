@@ -308,7 +308,10 @@ def run_stages(jobs: list[tuple[str, list[str], Path, int]]) -> list[dict]:
               f"(exit={record['exit_code']}, time={record['elapsed_s']}s)",
               flush=True)
         if not record["pass"]:
-            print(record["output_tail"][-2000:] or record["error"], file=sys.stderr)
+            if record["error"]:
+                print(record["error"], file=sys.stderr)
+            if record["output_tail"].strip():
+                print(record["output_tail"][-2000:], file=sys.stderr)
     return records
 
 

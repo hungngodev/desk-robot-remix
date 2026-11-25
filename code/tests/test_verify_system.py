@@ -631,3 +631,23 @@ def test_independent_stages_continue_and_failed_dependencies_skip(
         assert by_name[name]["exit_code"] is None
         assert by_name[name]["error"].startswith("SKIPPED:")
     assert by_name["dock-05"]["pass"] is True
+
+
+@pytest.mark.parametrize("stderr", [b"", b"partial compiler diagnostic\n"])
+def test_stage_timeout_surfaces_error_and_partial_output(
+    monkeypatch, tmp_path, capsys, stderr,
+):
+    def timeout(*args, **kwargs):
+        raise verify.subprocess.TimeoutExpired(
+            cmd=["cmake"], timeout=1, stderr=stderr,
+        )
+
+    monkeypatch.setattr(verify.subprocess, "run", timeout)
+    records = verify.run_stages([("body-cmake", ["cmake"], tmp_path, 1)])
+    assert records[0]["pass"] is False
+    assert records[0]["exit_code"] is None
+    assert records[0]["error"].startswith("TimeoutExpired")
+    captured = capsys.readouterr()
+    assert "TimeoutExpired" in captured.err
+    if stderr:
+        assert stderr.decode().strip() in captured.err
