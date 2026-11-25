@@ -93,7 +93,15 @@ def _json_response(opener, url: str, token: str, *, method: str = "GET",
         raw = response.read(8193)
     if len(raw) > 8192:
         raise ValueError("Oversized Sense capture status")
-    data = json.loads(raw)
+    def unique_keys(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Duplicate Sense capture status field")
+            result[key] = value
+        return result
+
+    data = json.loads(raw, object_pairs_hook=unique_keys)
     if type(data) is not dict:
         raise ValueError("Malformed Sense capture status")
     return data

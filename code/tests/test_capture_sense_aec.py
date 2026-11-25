@@ -777,3 +777,30 @@ def test_stale_pcm_raw_request_is_rejected_before_buffer_transfer():
     assert transfer.index("lock(bench_mutex_)") < take
     assert transfer.index("!= expected_generation") < take
     assert transfer.index("microphone_privacy_muted_.load(") < take
+
+
+@pytest.mark.parametrize("raw", [
+    b'{"microphone_privacy_muted":true,"microphone_privacy_muted":false}',
+    b'{"capture_generation":"2","capture_generation":"1"}',
+    b'{"boot":7,"boot":7}',
+])
+def test_ambiguous_live_capture_status_rejected(raw):
+    """Do not select the last privacy, boot or generation claim."""
+    http = HeadHTTP([Response(raw)])
+    with pytest.raises(ValueError, match="Duplicate Sense capture status field"):
+        capture._json_response(
+            http, "http://192.168.1.23:8081/api/audio.reference", "x" * 32,
+        )
+
+
+def test_duplicate_privacy_receipt_prevents_capture_start():
+    http = fake_read()
+    original = http.responses[0].getvalue()
+    http.responses[0] = Response(
+        original[:-1] + b', "microphone_privacy_muted": true, '
+        b'"microphone_privacy_muted": false}',
+    )
+    with pytest.raises(ValueError, match="Duplicate Sense capture status field"):
+        capture.capture_head(http, "http://192.168.1.23:8081", "robot-01", "x" * 32)
+    assert len(http.calls) == 1
+    assert http.calls[0][1] == "GET"
