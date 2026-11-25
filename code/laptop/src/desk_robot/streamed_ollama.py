@@ -80,6 +80,10 @@ async def ollama_speech_segments(
         count += len(fragment)
         if count > max_total:
             raise RuntimeError("Ollama streaming response exceeds speech limit")
+        try:
+            fragment.encode("utf-8")
+        except UnicodeEncodeError as exc:
+            raise RuntimeError("Ollama streaming content is not valid UTF-8") from exc
         buffered += fragment
         while (piece := _cut(buffered, target)) is not None:
             sentence, buffered = piece
