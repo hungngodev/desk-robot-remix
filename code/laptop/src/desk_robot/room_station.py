@@ -20,6 +20,7 @@ from typing import Callable
 from .soil_calibration import SoilCalibration
 
 STATION = "room-pod-01"
+ROOM_OBSERVATION_SOURCE = "local_usb_shared_station_observation_not_identity"
 SENSORS = ("scd40", "bme688", "ld2410c", "soil", "amg8833")
 MAX_FRAME_BYTES = 4096
 # Per-port unpredictable causal marker. A delayed USB JSON frame written
@@ -44,7 +45,7 @@ class RoomObservation:
     readings: dict
     summary: str
     # Explicitly separate from the per-pet camera or sensed-human memory.
-    source: str = "local_usb_shared_station_observation_not_identity"
+    source: str = ROOM_OBSERVATION_SOURCE
     motion_authorized: bool = False
     charging_authorized: bool = False
     person_identified: bool = False

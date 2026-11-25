@@ -412,6 +412,33 @@ def test_cumulative_usb_clock_advance_cannot_launder_future_station_time():
     assert accept(frame(5, 5000), decoder=decoder, now=5.0).seq == 5
 
 
+@pytest.mark.parametrize(("field", "value"), [
+    ("motion_authorized", True),
+    ("charging_authorized", True),
+    ("person_identified", True),
+    ("motion_authorized", 0),
+    ("source", "authenticated_xiaozhi_vad"),
+    ("station_id", "room-pod-02"),
+])
+def test_room_hub_rejects_contradictory_authority_without_replacing_context(field, value):
+    ids = [f"robot-0{i}" for i in range(1, 6)]
+    hub = CameraFrameHub(ids)
+    evidence = accept(frame(), now=12.0)
+    hub.remember_room(evidence)
+    contradictory = replace(evidence, received_at=12.5, **{field: value})
+    with pytest.raises(ValueError, match="read-only and anonymous"):
+        hub.remember_room(contradictory)
+    assert hub.shared_room is evidence
+    for ident in ids:
+        timeline = hub.interaction_timeline(ident, now=13.0)
+        assert len(timeline) == 1
+        assert timeline[0]["channel"] == "room_station"
+        assert timeline[0]["identity_verified"] is False
+        assert timeline[0]["physical_action_verified"] is False
+        assert not hub.event_history[ident]
+        assert not hub.tool_history[ident]
+
+
 def test_shared_room_is_one_short_lived_context_not_robot_memory_or_vision():
     ids = [f"robot-0{i}" for i in range(1, 6)]
     hub = CameraFrameHub(ids)

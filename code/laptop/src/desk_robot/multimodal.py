@@ -25,7 +25,7 @@ from PIL import Image, ImageOps, ImageStat
 if TYPE_CHECKING:
     from .config import Settings
     from .transport import Head
-from .room_station import RoomObservation, fresh_room_summary
+from .room_station import ROOM_OBSERVATION_SOURCE, STATION, RoomObservation, fresh_room_summary
 from .sensor_event_contract import DIRECT_INTERACTION_KINDS, TRIGGERS  # public names
 from .vision import OllamaScene
 
@@ -317,6 +317,14 @@ class CameraFrameHub:
         if (not isinstance(observation, RoomObservation)
                 or not _admissible_mac_event_clock(observation.received_at)):
             raise ValueError("Room provenance must come from validated USB source")
+        # A typed in-process observation still cannot promote itself into
+        # an actuator, charger, identity source or another sensor channel.
+        if (observation.source != ROOM_OBSERVATION_SOURCE
+                or observation.station_id != STATION
+                or observation.motion_authorized is not False
+                or observation.charging_authorized is not False
+                or observation.person_identified is not False):
+            raise ValueError("Room provenance must remain read-only and anonymous")
         if epoch is None:
             epoch = getattr(self, "_room_connection_epoch", 0)
         if epoch != getattr(self, "_room_connection_epoch", 0):
