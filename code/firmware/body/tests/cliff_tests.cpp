@@ -34,6 +34,17 @@ CliffConfig config() {
   return value;
 }
 
+void stored_calibration_flag_rejects_noncanonical_bytes() {
+  static_assert(sizeof(bool) == 1, "v1 WROOM calibration flag is one byte");
+  auto value = config();
+  CHECK(desk_robot::valid_stored_calibrated_flag(value));
+  for (unsigned raw = 0; raw < 256; ++raw) {
+    const auto byte = static_cast<unsigned char>(raw);
+    std::memcpy(&value.calibrated, &byte, sizeof(byte));
+    CHECK(desk_robot::valid_stored_calibrated_flag(value) == (raw == 1));
+  }
+}
+
 void healthy_samples(CliffGuard& guard, std::uint32_t now_ms) {
   for (std::uint8_t sensor = 0; sensor < desk_robot::kFloorSensorCount; ++sensor)
     guard.sample(sensor, 45, true, now_ms);
@@ -627,6 +638,8 @@ int main(int argc, char** argv) {
       {"boot_and_configuration", boot_and_configuration},
       {"invalid_configuration", invalid_configuration},
       {"each_floor_sensor_latches", each_floor_sensor_latches},
+      {"stored_calibration_flag_rejects_noncanonical_bytes",
+       stored_calibration_flag_rejects_noncanonical_bytes},
       {"invalid_then_good_is_sticky", invalid_then_good_is_sticky},
       {"front_sensor_rules", front_sensor_rules},
       {"stale_and_missing_samples", stale_and_missing_samples},

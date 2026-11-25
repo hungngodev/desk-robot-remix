@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 
 namespace desk_robot {
 
@@ -33,6 +34,14 @@ struct CliffConfig {
   std::uint16_t front_max_mm = 0;
   std::uint32_t freshness_ms = 0;
 };
+
+// A native v1 NVS blob contains a bool. Inspect its object representation
+// before any typed read (including checksum calculation): malformed bool bytes
+// have undefined behavior. Only an explicitly calibrated record may load.
+inline bool valid_stored_calibrated_flag(const CliffConfig& config) {
+  const bool expected = true;
+  return std::memcmp(&config.calibrated, &expected, sizeof(expected)) == 0;
+}
 
 enum class CliffFault : std::uint8_t {
   None,

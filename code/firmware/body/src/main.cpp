@@ -203,6 +203,7 @@ bool load_calibration() {
   if (read != sizeof(saved) ||
       saved.magic != kCalibrationMagic ||
       saved.version != kCalibrationVersion ||
+      !desk_robot::valid_stored_calibrated_flag(saved.config) ||
       saved.checksum != calibration_checksum(saved.config)) return false;
   return cliff_guard.configure(saved.config);
 }
