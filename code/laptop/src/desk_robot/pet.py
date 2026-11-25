@@ -1967,20 +1967,23 @@ class PetController:
 
         # A GPIOB outage must not discard a simultaneously observed bumper edge.
         # Rebaseline only sources whose own enable bit changed, as on WROOM.
-        state.last_extra_mask = mask
+        # Their counters remain monotonic within a boot even while disabled.
         for key, bit, kind, description in (
             ("bumps", 1, "bumper", "My optional bumper registered a contact and stopped my tracks"),
             ("reed_count", 2, "magnet", "My optional reed switch detected a magnetic accessory closure"),
             ("pir_count", 4, "pir", "My optional PIR detected changing infrared motion, not an identified person"),
         ):
-            if not (mask & bit and previous_mask & bit):
-                state.last_extra_events[key] = values[key]
-                continue
             current = values[key]
             prior = previous.get(key)
             advance = _sensor_counter_advance(current, prior)
+            if advance == 0 and current != prior:
+                continue  # stale counter cannot rewind its baseline or enable bit
+            state.last_extra_mask = (state.last_extra_mask & ~bit) | (mask & bit)
+            if not (mask & bit and previous_mask & bit) or advance is None:
+                state.last_extra_events[key] = current
+                continue
             if advance == 0:
-                continue  # duplicate or backwards/stale sample: do NOT rewind baseline
+                continue  # duplicate
             if advance > 20:
                 state.last_extra_events[key] = current
                 continue

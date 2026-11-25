@@ -3931,6 +3931,15 @@ async def test_optional_mask_changes_preserve_continuously_enabled_events(fleet,
         await pet._observe_optional("robot-01", 3, status(1, 12, 26, 36))
         assert cancellations == ["robot-01", "robot-01"]
         assert kinds() == ["bumper", "bumper", "magnet", "pir"]
+
+        # Delayed disabled and enabled packets must not rewind reed/PIR.
+        await pet._observe_optional("robot-01", 3, status(7, 12, 26, 36))
+        await pet._observe_optional("robot-01", 3, status(1, 12, 25, 35))
+        await pet._observe_optional("robot-01", 3, status(7, 12, 25, 35))
+        await pet._observe_optional("robot-01", 3, status(7, 12, 26, 36))
+        assert kinds() == ["bumper", "bumper", "magnet", "pir"]
+        await pet._observe_optional("robot-01", 3, status(7, 12, 27, 37))
+        assert kinds() == ["bumper", "bumper", "magnet", "magnet", "pir", "pir"]
     finally:
         state.enabled = False
         await pet.close()
@@ -3947,7 +3956,7 @@ async def test_optional_counters_reject_stale_replays_and_handle_uint32_wrap_and
     state = pet.states["robot-01"]
     state.enabled = True
     state.generation = 5
-    def status(mask, bumps, reed, pir, boot_id=None):
+    def status(mask, bumps, reed, pir, boot_id=98):
         payload = {"extras": {
             "mask": mask, "bumper": bool(bumps), "bumps": bumps,
             "reed": bool(reed), "reed_count": reed,
@@ -3992,25 +4001,23 @@ async def test_optional_counters_reject_stale_replays_and_handle_uint32_wrap_and
         assert len([m for m in memory.recent("robot-01") if m.kind == "pir"]) == 1
 
         # 3. Uint32 wrap: 0xfffffffe -> 0xffffffff -> 0
-        # Reconfigure mask or establish large baseline
-        # Disable and reenable the bumper itself to establish the wrap baseline.
-        await pet._observe_optional("robot-01", 5, status(0, 0xfffffffe, 0, 0))
-        await pet._observe_optional("robot-01", 5, status(1, 0xfffffffe, 0, 0))
+        # Establish a near-wrap baseline in a distinct WROOM boot epoch.
+        await pet._observe_optional("robot-01", 5, status(1, 0xfffffffe, 0, 0, boot_id=99))
         bumps_before = len([m for m in memory.recent("robot-01") if m.kind == "bumper"])
 
-        await pet._observe_optional("robot-01", 5, status(1, 0xffffffff, 0, 0))
+        await pet._observe_optional("robot-01", 5, status(1, 0xffffffff, 0, 0, boot_id=99))
         assert len([m for m in memory.recent("robot-01") if m.kind == "bumper"]) == bumps_before + 1
 
         # 0xffffffff -> 0 is valid 32-bit forward wrap (delta=1)
-        await pet._observe_optional("robot-01", 5, status(1, 0, 0, 0))
+        await pet._observe_optional("robot-01", 5, status(1, 0, 0, 0, boot_id=99))
         assert len([m for m in memory.recent("robot-01") if m.kind == "bumper"]) == bumps_before + 2
 
         # Stale backward sample 0xffffffff must not rewind baseline
-        await pet._observe_optional("robot-01", 5, status(1, 0xffffffff, 0, 0))
+        await pet._observe_optional("robot-01", 5, status(1, 0xffffffff, 0, 0, boot_id=99))
         assert len([m for m in memory.recent("robot-01") if m.kind == "bumper"]) == bumps_before + 2
 
         # Repeated 0 does not fire
-        await pet._observe_optional("robot-01", 5, status(1, 0, 0, 0))
+        await pet._observe_optional("robot-01", 5, status(1, 0, 0, 0, boot_id=99))
         assert len([m for m in memory.recent("robot-01") if m.kind == "bumper"]) == bumps_before + 2
 
         # 4. WROOM boot epoch tracking & reboot
