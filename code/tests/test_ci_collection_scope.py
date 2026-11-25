@@ -1,4 +1,4 @@
-"""Default pytest discovery must include both host test suites."""
+"""Default pytest discovery must include only the configured host test suites."""
 
 import os
 import shutil
@@ -14,7 +14,11 @@ def test_default_pytest_collects_mac_and_head(tmp_path):
         "tests/test_mac_probe.py": "test_mac_probe",
         "firmware/head/tests/test_head_probe.py": "test_head_probe",
     }
-    for relative, name in probes.items():
+    outside_scope = {
+        "test_root_probe.py": "test_root_probe",
+        "firmware/body/tests/test_body_probe.py": "test_body_probe",
+    }
+    for relative, name in (probes | outside_scope).items():
         path = tmp_path / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"def {name}():\n    pass\n")
@@ -27,6 +31,5 @@ def test_default_pytest_collects_mac_and_head(tmp_path):
         cwd=tmp_path, env=env, capture_output=True, text=True, timeout=30,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert {f"{relative}::{name}" for relative, name in probes.items()} <= set(
-        result.stdout.splitlines()
-    )
+    collected = {line for line in result.stdout.splitlines() if "::" in line}
+    assert collected == {f"{relative}::{name}" for relative, name in probes.items()}
