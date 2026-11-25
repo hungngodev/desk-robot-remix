@@ -350,6 +350,16 @@ def assess_docked_load(
         "candidate_physically_qualified": False,
     }
 
+def _ts_fault_inhibit_checks(open_inhibit: bool, short_inhibit: bool) -> dict[str, bool]:
+    """Require independent source-reviewed charger TS open and short protection."""
+    if type(open_inhibit) is not bool or type(short_inhibit) is not bool:
+        raise ValueError("TS fault inhibit evidence must be explicit booleans")
+    return {
+        "charger_ts_open_inhibits_charge_on_paper": open_inhibit,
+        "charger_ts_short_inhibits_charge_on_paper": short_inhibit,
+    }
+
+
 def screen_one_cell_power_stack(
     *,
     active_peak_5v_a: float,
@@ -381,6 +391,8 @@ def screen_one_cell_power_stack(
     boost_efficiency_low_cell: float = 0.85,
     boost_efficiency_docked: float = 0.85,
     guaranteed_charge_window_c: tuple[float, float] | None = None,
+    ts_open_inhibit_on_paper: bool = False,
+    ts_short_inhibit_on_paper: bool = False,
 ) -> dict:
     """Join existing 1S equations into ONE real purchase architecture screen.
 
@@ -390,6 +402,8 @@ def screen_one_cell_power_stack(
     guaranteed_charge_window_c is the reviewed worst-case permitted charge
     interval (including trip tolerance and hysteresis), not a nominal NTC
     rating or live temperature. None means the interval is unknown.
+    The two TS fault flags require independent source-reviewed protection for
+    the exact circuit; an unknown or missing flag fails the paper screen.
     A returned paper pass is NEVER PCB, thermal, protection or dock approval.
     """
     if any(type(v) is not bool for v in (
@@ -417,6 +431,8 @@ def screen_one_cell_power_stack(
     charge_window_compatible = (guaranteed_charge_window_c is not None
                                 and 0 <= guaranteed_charge_window_c[0]
                                 and guaranteed_charge_window_c[1] <= 45)
+    ts_fault_checks = _ts_fault_inhibit_checks(
+        ts_open_inhibit_on_paper, ts_short_inhibit_on_paper)
     # Source of truth: do not silently add a new third power-supply formula.
     undocked = size_5v_supply(
         active_peak_5v_a, active_sustained_5v_a,
@@ -471,6 +487,7 @@ def screen_one_cell_power_stack(
             charge_temperature_sensor_connected and
             charger_ts_fixed_resistor_removed),
         "hardware_charge_window_within_0_to_45_c_on_paper": charge_window_compatible,
+        **ts_fault_checks,
         "physical_motor_commands_inhibited_on_dock": dock_motors_disarmed,
     }
     return {

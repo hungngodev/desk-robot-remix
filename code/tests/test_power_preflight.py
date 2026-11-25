@@ -1126,6 +1126,7 @@ def plausible_hypothetical_one_cell_stack():
         charge_temperature_sensor_connected=True,
         charger_ts_fixed_resistor_removed=True, dock_motors_disarmed=True,
         guaranteed_charge_window_c=(0, 45),  # hypothetical worst-case bounds
+        ts_open_inhibit_on_paper=True, ts_short_inhibit_on_paper=True,
     )
 
 
@@ -1182,6 +1183,37 @@ def test_stack_rejects_invalid_hardware_charge_window(window):
     cfg["guaranteed_charge_window_c"] = window
     with pytest.raises(ValueError, match="guaranteed charge window"):
         one_stack(**cfg)
+
+
+@pytest.mark.parametrize("opened,shorted", [
+    (False, False), (True, False), (False, True), (True, True),
+])
+def test_stack_requires_independent_ts_open_and_short_inhibit(opened, shorted):
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg.update(ts_open_inhibit_on_paper=opened, ts_short_inhibit_on_paper=shorted)
+    report = one_stack(**cfg)
+    assert report["checks"]["charger_ts_open_inhibits_charge_on_paper"] is opened
+    assert report["checks"]["charger_ts_short_inhibits_charge_on_paper"] is shorted
+    assert report["all_power_stages_compatible_on_paper"] is (opened and shorted)
+    assert report["qualified_1s_dock_safe_to_buy"] is False
+
+
+@pytest.mark.parametrize("missing", [
+    "ts_open_inhibit_on_paper", "ts_short_inhibit_on_paper",
+])
+def test_stack_missing_ts_fault_evidence_fails_closed(missing):
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg.pop(missing)
+    assert one_stack(**cfg)["all_power_stages_compatible_on_paper"] is False
+
+
+@pytest.mark.parametrize("bad", [None, 1, 0, "true", [], {}])
+def test_stack_ts_fault_evidence_requires_explicit_boolean(bad):
+    for field in ("ts_open_inhibit_on_paper", "ts_short_inhibit_on_paper"):
+        cfg = plausible_hypothetical_one_cell_stack()
+        cfg[field] = bad
+        with pytest.raises(ValueError, match="TS fault inhibit evidence"):
+            one_stack(**cfg)
 
 
 def test_stack_rejects_wrong_regulator_only_rated_at_five_volts():
