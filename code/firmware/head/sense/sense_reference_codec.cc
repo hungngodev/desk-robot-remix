@@ -243,6 +243,7 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
         privacy_epoch != microphone_privacy_epoch_.load(std::memory_order_acquire)) {
         std::fill_n(dest, samples, 0);
         std::fill_n(microphone_frame_.begin(), frames, 0);
+        std::fill_n(reference_frame_.begin(), frames, 0);
         return 0;
     }
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
@@ -273,12 +274,15 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
         }
     }
 #endif
+    // The live output and optional consented bench window now own their copies.
+    // Do not retain PCM in reusable scratch between reads, including during mute.
+    std::fill_n(microphone_frame_.begin(), frames, 0);
+    std::fill_n(reference_frame_.begin(), frames, 0);
     // BOOT may arrive during a bounded private capture copy. The mute
     // setter invalidates the buffer and these samples never reach Opus.
     if (microphone_privacy_muted_.load(std::memory_order_acquire) ||
         privacy_epoch != microphone_privacy_epoch_.load(std::memory_order_acquire)) {
         std::fill_n(dest, samples, 0);
-        std::fill_n(microphone_frame_.begin(), frames, 0);
         return 0;
     }
     return samples;
