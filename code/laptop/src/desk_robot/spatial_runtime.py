@@ -483,6 +483,17 @@ class SpatialRuntime:
             created_us=min(now_us, frame.captured_us),
             deadline_us=now_us + 2_000_000,
         )
+        def live_owner_current() -> bool:
+            # An immutable admission snapshot is not a live owner. A caller's
+            # job can still be running while its camera/map/grant was replaced.
+            return (
+                request_is_current() is True
+                and self.states.get(frame.robot_id) is state
+                and self.make_owner(
+                    frame.robot_id, session_id=session_id, turn_id=turn_id,
+                ) == owner
+            )
+
         return await detect_object_frame(
             detector,
             frame,
@@ -491,7 +502,9 @@ class SpatialRuntime:
             model_qualified=model_qualified,
             now_us=now_us,
             clock_us=self.now_us,
-            request_is_current=request_is_current,
+            request_is_current=(
+                live_owner_current if callable(request_is_current) else request_is_current
+            ),
             safety_clear=safety_clear,
         )
 

@@ -665,6 +665,83 @@ async def test_spatial_navigate_barrier_cancellation_and_pre_pickup_rejection(
         await rt.close()
 
 
+@pytest.mark.parametrize("change", ["epoch", "camera_boot", "camera_grant", "turn", None])
+async def test_detector_revalidates_live_owner_after_inference(
+    settings, monkeypatch, change,
+):
+    """A running job cannot revive a result from an earlier spatial owner."""
+    from desk_robot.object_detector import DetectorFrame
+    from desk_robot.runtime import Runtime
+
+    settings.voice_vision_tools_enabled = True
+    rt = Runtime(settings)
+    entered, release = asyncio.Event(), asyncio.Event()
+    live = True
+    task = None
+
+    class HeldVision:
+        async def detect(self, _jpeg: bytes, target: str):
+            entered.set()
+            await release.wait()
+            return [Detection(label=target, confidence=0.95, box=(10, 10, 40, 40))]
+
+    try:
+        robot_id = settings.robots[0].id
+        _seed_safe_grid(rt.spatial, robot_id, SpatialHead(robot_id))
+        st = rt.spatial.state(robot_id)
+        now_us = rt.spatial.now_us()
+        monkeypatch.setattr(rt.spatial, "now_us", lambda: now_us)
+        frame = DetectorFrame(
+            robot_id=robot_id,
+            session_id="operator-session",
+            turn_id="operator-turn",
+            origin_id=st.origin_id,
+            epoch=st.epoch,
+            anchor_id=st.anchor_id,
+            calibration_id=st.calibration_id,
+            camera_boot=st.camera_boot,
+            host_boot_id=rt.spatial.host_boot_id,
+            camera_grant=settings.camera_consent_generation,
+            frame_seq=1,
+            captured_us=now_us,
+            received_us=now_us,
+            seen_at_wall_s=time.time(),
+            jpeg=_valid_jpeg(),
+        )
+        task = asyncio.create_task(rt.spatial.confirm_target_frame(
+            HeldVision(), frame, label="key", model_qualified=True,
+            safety_clear=lambda: True, request_is_current=lambda: live,
+        ))
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        if change == "epoch":
+            rt.spatial.invalidate_robot(robot_id, reason="test_epoch_changed")
+        elif change == "camera_boot":
+            st.camera_boot += 1
+        elif change == "camera_grant":
+            settings.voice_vision_tools_enabled = False
+            settings.voice_vision_tools_enabled = True
+        elif change == "turn":
+            live = False
+        release.set()
+        receipt = await asyncio.wait_for(task, timeout=1)
+        if change is None:
+            assert receipt.status == "camera_seen"
+            assert receipt.evidence is not None
+        else:
+            assert receipt.status == "rejected"
+            assert receipt.reason == "request_invalidated"
+            assert receipt.evidence is None
+        assert receipt.may_execute is False
+        assert receipt.arrived is False
+        assert not st.observations
+    finally:
+        release.set()
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await rt.close()
+
+
 async def test_navigation_rechecks_swept_neighbor_after_pose_io(settings, tmp_path):
     """An unsafe cell outside the centerline vetoes the pending turn."""
     from desk_robot.runtime import Runtime
