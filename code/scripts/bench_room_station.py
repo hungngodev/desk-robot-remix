@@ -236,6 +236,11 @@ def _private_report_directory_fd(parent: Path) -> int:
     absolute = parent.absolute()
     if ".." in absolute.parts:
         raise ValueError("Unsafe room bench report parent traversal")
+    checkout_path = Path(__file__).resolve().parents[2]
+    resolved = absolute.resolve()
+    if resolved == checkout_path or checkout_path in resolved.parents:
+        raise ValueError("Room bench reports must remain outside the Git checkout")
+    checkout = checkout_path.stat()
     descriptor = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
     try:
         for name in absolute.parts[1:]:
@@ -243,6 +248,8 @@ def _private_report_directory_fd(parent: Path) -> int:
             # directory through that descriptor prevents a rejected symlink
             # ancestor from creating files or directories in its target.
             ancestor = os.fstat(descriptor)
+            if (ancestor.st_dev, ancestor.st_ino) == (checkout.st_dev, checkout.st_ino):
+                raise ValueError("Room bench reports must remain outside the Git checkout")
             try:
                 entry = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
             except FileNotFoundError:
@@ -261,7 +268,10 @@ def _private_report_directory_fd(parent: Path) -> int:
             next_descriptor = os.open(name, flags, dir_fd=descriptor)
             os.close(descriptor)
             descriptor = next_descriptor
-        if stat.S_IMODE(os.fstat(descriptor).st_mode) & 0o077:
+        final = os.fstat(descriptor)
+        if (final.st_dev, final.st_ino) == (checkout.st_dev, checkout.st_ino):
+            raise ValueError("Room bench reports must remain outside the Git checkout")
+        if stat.S_IMODE(final.st_mode) & 0o077:
             raise ValueError("Room bench report directory must be private mode 0700")
         return descriptor
     except BaseException:

@@ -560,3 +560,28 @@ def test_room_bench_exact_source_stamp_fails_closed_on_git_error(monkeypatch):
     source_sha = BENCH["_git_sha"]
     monkeypatch.setattr(source_sha.__globals__["subprocess"], "run", failed_git)
     assert source_sha() is None
+
+
+@pytest.mark.parametrize("writer", ["preflight_private_bench_report", "save_private_bench_report"])
+def test_room_bench_refuses_checkout_even_when_private(monkeypatch, tmp_path, writer):
+    checkout = tmp_path / "repo"
+    checkout.mkdir(mode=0o700)
+    private = checkout / "private"
+    private.mkdir(mode=0o700)
+    method = BENCH[writer]
+    monkeypatch.setitem(method.__globals__, "__file__",
+                        str(checkout / "code/scripts/bench_room_station.py"))
+    alias = tmp_path / "alias"
+    alias.symlink_to(private, target_is_directory=True)
+    for destination in (checkout / "report.json", private / "report.json",
+                        private / "not_created" / "report.json",
+                        alias / "not_created" / "report.json"):
+        args = (destination, {}) if writer == "save_private_bench_report" else (destination,)
+        with pytest.raises(ValueError, match="outside the Git checkout"):
+            method(*args)
+        assert not destination.exists()
+    assert not (private / "not_created").exists()
+    outside = tmp_path / "outside" / "report.json"
+    args = (outside, {}) if writer == "save_private_bench_report" else (outside,)
+    method(*args)
+    assert outside.parent.is_dir()
