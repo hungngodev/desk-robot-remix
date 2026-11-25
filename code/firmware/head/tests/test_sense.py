@@ -1912,7 +1912,7 @@ def test_private_pcm_transfer_revoked_by_boot_mute_and_reference_reset():
     assert "uint64_t BenchPcmGeneration() const noexcept" in header
     assert "bench_capture_generation_.fetch_add(" in codec
     assert "if (muted) AbortBenchPcmCapture();" in header
-    assert "AbortBenchPcmCapture();" in codec.split(
+    assert "AbortBenchPcmCapture(false);" in codec.split(
         "void SenseReferenceCodec::ClearReference()", 1
     )[1].split("void SenseReferenceCodec::", 1)[0]
     worker = bridge.split("void Bridge::BenchPcmTask(", 1)[1].split(

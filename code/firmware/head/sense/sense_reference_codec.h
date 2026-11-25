@@ -79,6 +79,8 @@ public:
         // not on a later HTTP diagnostics poll. Never acoustic playback ACK.
         bool speaker_activity_in_window;
     };
+    // Only the physical BOOT calibration gesture may issue this one-use grant.
+    void GrantBenchPcmConsent();
     bool BeginBenchPcmCapture();
     // A physical BOOT mute or playback cancellation invalidates any
     // asynchronous raw PCM transfer, even after its buffer was taken.
@@ -88,7 +90,7 @@ public:
     void EndBenchPcmTransfer();
     BenchCaptureProgress GetBenchPcmProgress();
     desk_robot::SensePcmWindow::Complete TakeBenchPcmCapture(uint64_t expected_generation);
-    void AbortBenchPcmCapture();
+    void AbortBenchPcmCapture(bool revoke_consent = true);
     static void ReleaseBenchPcmCapture(int16_t* data);
 #endif
 
@@ -135,6 +137,7 @@ private:
     std::mutex reference_mutex_;
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
     std::mutex bench_mutex_;
+    desk_robot::FreshBenchPcmConsent bench_consent_{};
     std::atomic<uint64_t> bench_capture_generation_{0};
     bool bench_transfer_active_ = false;  // one RAM transfer at a time
     desk_robot::SensePcmWindow bench_window_{};

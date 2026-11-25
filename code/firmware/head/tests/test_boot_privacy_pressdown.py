@@ -111,3 +111,55 @@ int main() {
         check=True, timeout=25,
     )
     subprocess.run([str(exe)], check=True, timeout=5)
+
+
+def test_bench_pcm_requires_distinct_physical_gesture_and_one_use_grant(tmp_path):
+    head = SOURCE.parents[1]
+    board = SOURCE.read_text()
+    codec = (head / "sense/sense_reference_codec.cc").read_text()
+    header = (head / "sense/sense_reference_codec.h").read_text()
+    press, click = _callbacks()
+    assert "boot_privacy_gesture_.Held()" in press
+    assert "!boot_press_muted_.load(" in press
+    assert "bench_hold_consent_.Grant(esp_timer_get_time())" in press
+    assert "bench_hold_consent_.Take(esp_timer_get_time())" in click
+    assert "held && !now_muted && state == kDeviceStateIdle" in click
+    assert board.count("->GrantBenchPcmConsent()") == 1
+    assert "WIFI_EVENT_STA_DISCONNECTED || event == WIFI_EVENT_STA_STOP" in board
+    assert "static_cast<DeskRobotSenseBoard*>(context)->RevokeBenchConsent()" in board
+    assert "board->RevokeBenchConsent();" in board
+    begin = codec.split("bool SenseReferenceCodec::BeginBenchPcmCapture() {", 1)[1]
+    begin = begin.split("SenseReferenceCodec::BenchCaptureProgress", 1)[0]
+    assert begin.index("bench_consent_.Take(") < begin.index("heap_caps_malloc(")
+    assert "if (revoke_consent) bench_consent_.Revoke();" in codec
+    assert "if (muted) AbortBenchPcmCapture();" in header
+
+    compiler = shutil.which("c++")
+    if not compiler:
+        pytest.skip("native C++ compiler unavailable")
+    cpp = tmp_path / "bench_consent.cc"
+    exe = tmp_path / "bench_consent"
+    cpp.write_text(r'''
+#include "sense_pcm_window.h"
+#include <cassert>
+#include <limits>
+int main() {
+    desk_robot::FreshBenchPcmConsent consent;
+    assert(!consent.Take(1));
+    consent.Grant(0); assert(!consent.Take(1));
+    consent.Grant(100); assert(!consent.Take(99)); assert(!consent.Take(100));
+    consent.Grant(100); assert(consent.Take(100)); assert(!consent.Take(101));
+    consent.Grant(100); assert(consent.Take(30'000'100));
+    consent.Grant(100); assert(!consent.Take(30'000'101));
+    consent.Grant(100); consent.Revoke(); assert(!consent.Take(100));
+    const auto high = std::numeric_limits<std::int64_t>::max();
+    consent.Grant(high - 10); assert(consent.Take(high));
+    consent.Grant(1); assert(!consent.Take(high));
+}
+''', encoding="utf-8")
+    subprocess.run(
+        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+         "-I", str(head / "sense"), str(cpp), "-o", str(exe)],
+        check=True, timeout=25,
+    )
+    subprocess.run([str(exe)], check=True, timeout=5)

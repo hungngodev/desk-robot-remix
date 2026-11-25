@@ -319,7 +319,7 @@ void SenseReferenceCodec::ClearReference() {
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
     // The operator's mute, barge-in or playback reset invalidates the
     // calibration trial and securely erases any retained microphone PCM.
-    AbortBenchPcmCapture();
+    AbortBenchPcmCapture(false);  // Playback reset invalidates PCM, not an unused grant.
 #endif
     std::lock_guard<std::mutex> lock(reference_mutex_);
     // Invalidate writes that entered the inherited blocking I2S path before
@@ -388,10 +388,19 @@ void SenseReferenceCodec::BenchPcmExpiry(void* context) {
     ReleaseBenchPcmCapture(expired);
 }
 
+void SenseReferenceCodec::GrantBenchPcmConsent() {
+    std::lock_guard<std::mutex> lock(bench_mutex_);
+    if (!microphone_privacy_muted_.load(std::memory_order_acquire))
+        bench_consent_.Grant(esp_timer_get_time());
+}
+
 bool SenseReferenceCodec::BeginBenchPcmCapture() {
     std::lock_guard<std::mutex> lock(bench_mutex_);
     if (bench_window_.occupied() || bench_transfer_active_ ||
         microphone_privacy_muted_.load(std::memory_order_acquire)) return false;
+    // Consume before allocation or timer setup: failed START must not
+    // authorize a second network request without another physical gesture.
+    if (!bench_consent_.Take(esp_timer_get_time())) return false;
     if (!bench_expiry_timer_) {
         esp_timer_create_args_t args = {};
         args.callback = &SenseReferenceCodec::BenchPcmExpiry;
@@ -460,10 +469,11 @@ void SenseReferenceCodec::EndBenchPcmTransfer() {
     bench_transfer_active_ = false;
 }
 
-void SenseReferenceCodec::AbortBenchPcmCapture() {
+void SenseReferenceCodec::AbortBenchPcmCapture(bool revoke_consent) {
     int16_t* data = nullptr;
     {
         std::lock_guard<std::mutex> lock(bench_mutex_);
+        if (revoke_consent) bench_consent_.Revoke();
         // Revoke ownership before freeing the in-codec allocation.
         // A moved HTTP buffer stays owned by the worker but its generation
         // fence is invalidated immediately.

@@ -118,6 +118,16 @@ can continue serving emergency STOP. Firmware wipes the PSRAM buffer
 after transfer, timeout, revocation or failed capture.
 
 The operator must explicitly consent to recording microphone data.
+A private firmware build and bearer alone do not grant raw recording.
+For EACH trial, mute with BOOT, hold BOOT while already muted until the
+long-press event, release, then deliberately tap within 30 seconds to
+unmute while connected and idle. This distinct calibration gesture
+authorizes exactly one START within the next 30 seconds. Ordinary unmute
+does not authorize PCM. BOOT mute, double click, WiFi loss, an observed
+audio failure or explicit abort revokes the grant. Failed START after
+consumption requires another gesture. Failed WiFi event registration
+leaves the recorder unavailable. Playback reset invalidates existing PCM
+but does not issue a grant. Repeat the physical gesture for each recording.
 Use a private isolated network and disable/reflash the capture setting
 after measurements. Do not transmit the bearer token as a command-line
 argument, record other people without permission, commit the WAVs or
@@ -135,7 +145,7 @@ store them outside the local protected trial directory.
    sound afterward produces a failed trial rather than useful WAVs.
    Use a repeatable broadband signal and keep the head's ordinary
    microphone/AFE task active. Do not substitute synthetic reference PCM.
-3. Capture the four-second source-tagged device window:
+3. Within 30 seconds of physical consent, capture the four-second source-tagged device window:
 
    ```sh
    cd code

@@ -11,6 +11,21 @@
 
 namespace desk_robot {
 
+// Serialized by the owning button or codec mutex. Never grants on boot.
+class FreshBenchPcmConsent {
+ public:
+  static constexpr std::int64_t kLifetimeUs = 30'000'000;
+  void Grant(std::int64_t now_us) noexcept { granted_us_ = now_us > 0 ? now_us : 0; }
+  void Revoke() noexcept { granted_us_ = 0; }
+  bool Take(std::int64_t now_us) noexcept {
+    const auto granted = granted_us_;
+    Revoke();
+    return granted > 0 && now_us >= granted && now_us - granted <= kLifetimeUs;
+  }
+ private:
+  std::int64_t granted_us_ = 0;
+};
+
 class SensePcmWindow {
  public:
   static constexpr std::uint32_t kSampleRate = 16000;

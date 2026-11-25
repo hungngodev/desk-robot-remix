@@ -18,6 +18,10 @@
 #endif
 
 #include <esp_timer.h>
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+#include <esp_event.h>
+#include <esp_wifi.h>
+#endif
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <algorithm>
@@ -53,6 +57,7 @@ public:
         pressed_ = false;
         click_ready_ = !cancelled_;
     }
+    bool Held() const { return pressed_ && !cancelled_; }
     void Cancel() {
         cancelled_ = true;
         click_ready_ = false;
@@ -129,6 +134,22 @@ private:
     bool continuous_audio_started_ = false;
     uint64_t last_audio_listen_attempt_ms_ = 0;
     uint32_t last_audio_failure_epoch_seen_ = 0;
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+    std::mutex bench_gesture_mutex_;
+    desk_robot::FreshBenchPcmConsent bench_hold_consent_{};
+    std::atomic<bool> bench_wifi_events_ready_{false};
+
+    void RevokeBenchConsent() {
+        std::lock_guard<std::mutex> lock(bench_gesture_mutex_);
+        bench_hold_consent_.Revoke();
+        static_cast<SenseReferenceCodec*>(GetAudioCodec())->AbortBenchPcmCapture();
+    }
+
+    static void BenchWifiEvent(void* context, esp_event_base_t, int32_t event, void*) {
+        if (event == WIFI_EVENT_STA_DISCONNECTED || event == WIFI_EVENT_STA_STOP)
+            static_cast<DeskRobotSenseBoard*>(context)->RevokeBenchConsent();
+    }
+#endif
 #endif
 
     static const char* MoodName(stackchan::behavior::Mood mood) {
@@ -185,6 +206,9 @@ private:
         // but never flood the shared I2C display every 100 ms.
         uint32_t last_fault_status_refresh_ms = 0;
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+        uint32_t last_bench_failure_epoch = 0;
+#endif
         bool last_mic_privacy_overlay = false;
         uint32_t last_mic_privacy_refresh_ms = 0;
 #endif
@@ -232,6 +256,12 @@ private:
                 board->continuous_audio_started_ = false;
             }
             const uint32_t failure_epoch = app.GetSenseAudioFailureEpoch();
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+            if (failure_epoch != last_bench_failure_epoch) {
+                last_bench_failure_epoch = failure_epoch;
+                board->RevokeBenchConsent();
+            }
+#endif
             // Initial launch or a proved channel closure/open failure ONLY.
             // A healthy intentional Idle transition must not force a new
             // session. Space every attempt by at least 5s, including WiFi flaps.
@@ -494,10 +524,35 @@ public:
                 app.SetDeviceState(kDeviceStateIdle);
             }
             app.StopListening();
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+            {
+                std::lock_guard<std::mutex> lock(bench_gesture_mutex_);
+                bench_hold_consent_.Revoke();
+            }
+#endif
         });
         boot_button_.OnPressUp([this]() { boot_privacy_gesture_.PressUp(); });
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+        boot_button_.OnLongPress([this]() {
+            // Hold only while ALREADY muted, then release and deliberately tap.
+            const bool eligible = boot_privacy_gesture_.Held() &&
+                !boot_press_muted_.load(std::memory_order_acquire);
+            boot_privacy_gesture_.Cancel();
+            std::lock_guard<std::mutex> lock(bench_gesture_mutex_);
+            bench_hold_consent_.Revoke();
+            if (eligible && audio_operator_muted_.load(std::memory_order_acquire) &&
+                bench_wifi_events_ready_.load(std::memory_order_acquire) &&
+                WifiManager::GetInstance().IsConnected())
+                bench_hold_consent_.Grant(esp_timer_get_time());
+        });
+        boot_button_.OnDoubleClick([this]() {
+            boot_privacy_gesture_.Cancel();
+            RevokeBenchConsent();
+        });
+#else
         boot_button_.OnLongPress([this]() { boot_privacy_gesture_.Cancel(); });
         boot_button_.OnDoubleClick([this]() { boot_privacy_gesture_.Cancel(); });
+#endif
 #endif
         boot_button_.OnClick([this]() {
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
@@ -530,6 +585,16 @@ public:
             app.SetSenseMicrophonePrivacyMuted(now_muted);
             static_cast<SenseReferenceCodec*>(GetAudioCodec())
                 ->SetMicrophonePrivacyMuted(now_muted);
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+            {
+                std::lock_guard<std::mutex> lock(bench_gesture_mutex_);
+                const bool held = bench_hold_consent_.Take(esp_timer_get_time());
+                if (held && !now_muted && state == kDeviceStateIdle &&
+                    bench_wifi_events_ready_.load(std::memory_order_acquire) &&
+                    WifiManager::GetInstance().IsConnected())
+                    static_cast<SenseReferenceCodec*>(GetAudioCodec())->GrantBenchPcmConsent();
+            }
+#endif
 #endif
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
             // Physical mute wins in setup audio testing too. An explicit
@@ -562,6 +627,17 @@ public:
 
     void StartNetwork() override {
         WifiBoard::StartNetwork();
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+        // A real disconnect event catches WiFi flaps between FaceTask polls.
+        // Failed event registration leaves the private recorder unavailable.
+        static std::once_flag bench_wifi_once;
+        std::call_once(bench_wifi_once, [this] {
+            bench_wifi_events_ready_.store(
+                esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID,
+                    &DeskRobotSenseBoard::BenchWifiEvent, this) == ESP_OK,
+                std::memory_order_release);
+        });
+#endif
         static desk_robot::Bridge robot_bridge(camera_, GetAudioCodec());
         static std::once_flag bridge_once;
         std::call_once(bridge_once, [] { robot_bridge.Start(); });
