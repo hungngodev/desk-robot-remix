@@ -1517,7 +1517,13 @@ async def test_group_activity_does_not_require_camera_consent(settings):
     settings.voice_memory_tools_enabled = False
     ids = [robot.id for robot in settings.robots]
     hub = CameraFrameHub(ids)
-    hub.notify(ids[1], "handling_tilt", time.monotonic())
+    now = time.monotonic()
+    hub.notify(ids[1], "safety_fault", now - 1)
+    for index in range(12):
+        hub.notify(ids[1], "handling_tilt", now - .6 + index * .04)
+    hub.frames[ids[1]].append(
+        CameraEvidence(b"jpeg", now - .05, 0.0, "speech")
+    )
     jobs = {"active": SimpleNamespace(
         robot_id=ids[1], kind="exploration", state="running",
     )}
@@ -1535,6 +1541,7 @@ async def test_group_activity_does_not_require_camera_consent(settings):
     assert "Mac operator-submitted exploration job is running" in prompts[1]
     # WROOM sensor events remain contextual despite camera opt-out.
     assert "Physical sensor edge: handling_tilt" in prompts[1]
+    assert "latched safety fault" in prompts[1]
     assert "XIAO frame received" not in prompts[1]
     assert "Keep singing" in prompts[1]
 
@@ -1904,3 +1911,34 @@ def test_unhashable_tool_and_group_cues_cannot_crash_brain_context():
     # A valid authenticated group record still contributes continuity.
     rendered = compose_brain_context([], [], [valid_group]).interaction
     assert "Group dialogue speaking" in rendered
+
+
+
+async def test_proactive_privacy_filter_preserves_reserved_safety_fault(settings):
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = False
+    settings.voice_memory_tools_enabled = False
+    ids = [robot.id for robot in settings.robots]
+    conversation = Conversation(settings, None, SimulatedSpeaker())
+    pet = PetController(settings, {}, conversation, None, scene=None)
+    hub = CameraFrameHub(ids)
+    pet.multimodal = SimpleNamespace(hub=hub)
+    now = time.monotonic()
+    hub.notify(ids[0], "safety_fault", now - 1)
+    for index in range(12):
+        hub.notify(ids[0], "touch_tap", now - .6 + index * .04)
+    hub.frames[ids[0]].append(
+        CameraEvidence(b"jpeg", now - .05, 0.0, "speech")
+    )
+    try:
+        loaded = await pet._load_proactive_context(
+            ids[0], SceneChange("touch_tap", "A deliberate tap", .97)
+        )
+        assert loaded is not None
+        prompt = loaded[1].interaction
+        assert "latched safety fault" in prompt
+        assert "Physical sensor edge: touch_tap" in prompt
+        assert "XIAO frame received" not in prompt
+        assert len(prompt) <= 400
+    finally:
+        await pet.close()

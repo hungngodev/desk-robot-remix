@@ -1027,7 +1027,9 @@ class Conversation:
                         else:
                             timeline = [
                                 item for item in raw if independent_nonvisual(item)
-                            ][-remaining:]
+                            ]
+                            # Keep the hub's reserved fault through privacy
+                            # filtering; the composer owns the text budget.
                         if not self.settings.room_station_context_enabled:
                             timeline = [
                                 item for item in timeline

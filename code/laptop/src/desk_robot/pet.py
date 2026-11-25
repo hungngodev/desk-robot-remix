@@ -3195,7 +3195,9 @@ class PetController:
                                 and item.get("source") == "wroom_event_history")
                             or (item.get("channel") == "room_station"
                                 and item.get("shared_not_robot_eyewitness") is True)
-                        ][-remaining:]
+                        ]
+                        # The hub already bounds and prioritizes these 16 cues.
+                        # A second recency slice can evict its reserved fault.
             else:
                 hints = hub.recent_events(robot_id, now)
                 timeline = [
