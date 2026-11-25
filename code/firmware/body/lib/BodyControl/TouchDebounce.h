@@ -7,14 +7,14 @@ namespace desk_robot {
 // publish a stable edge. Unsigned elapsed time tolerates millis() wrap.
 class TouchDebounce {
  public:
-  void observe(bool active, std::uint32_t now_ms) {
+  void observe(bool active, std::uint32_t now_ms) noexcept {
     if (active == candidate_) return;
     candidate_ = active;
     samples_ = 1;
     last_ms_ = now_ms;
   }
 
-  bool poll(bool active, std::uint32_t now_ms) {
+  bool poll(bool active, std::uint32_t now_ms) noexcept {
     observe(active, now_ms);
     if (now_ms - last_ms_ < 25U) return false;
     last_ms_ = now_ms;
@@ -24,7 +24,7 @@ class TouchDebounce {
     return true;
   }
 
-  bool stable() const { return stable_; }
+  bool stable() const noexcept { return stable_; }
 
  private:
   bool stable_ = false;

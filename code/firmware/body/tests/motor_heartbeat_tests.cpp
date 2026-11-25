@@ -1,4 +1,5 @@
 #include "MotorHeartbeat.h"
+#include "TouchDebounce.h"
 #include <stdexcept>
 #define CHECK(expr) do { if (!(expr)) throw std::runtime_error(#expr); } while (false)
 #include <cstdint>
@@ -49,7 +50,38 @@ void lease_boundary_handoff() {
   }
 }
 
+using desk_robot::TouchDebounce;
+static_assert(noexcept(std::declval<TouchDebounce&>().observe(false, 0U)),
+              "raw touch observation must not throw");
+static_assert(noexcept(std::declval<TouchDebounce&>().poll(false, 0U)),
+              "touch polling must not throw");
+static_assert(noexcept(std::declval<const TouchDebounce&>().stable()),
+              "stable touch query must not throw");
+
+// Both portable body timing policies use unsigned millisecond arithmetic.
+void touch_timing_boundary() {
+  for (const std::uint32_t start : {100U, 0xfffffff0U}) {
+    TouchDebounce touch;
+    CHECK(!touch.stable());
+    touch.observe(true, start);
+    CHECK(!touch.poll(true, start + 24U));
+    CHECK(!touch.poll(true, start + 25U));
+    CHECK(!touch.poll(true, start + 49U));
+    CHECK(touch.poll(true, start + 50U));
+    CHECK(touch.stable());
+    touch.observe(false, start + 51U);
+    touch.observe(true, start + 52U);  // raw bounce resets release candidate
+    CHECK(!touch.poll(true, start + 102U));
+    CHECK(touch.stable());
+    touch.observe(false, start + 103U);
+    CHECK(!touch.poll(false, start + 128U));
+    CHECK(touch.poll(false, start + 153U));
+    CHECK(!touch.stable());
+  }
+}
+
 int main() {
+  touch_timing_boundary();
   lease_boundary_handoff();
   MotorHeartbeat heartbeat;
   CHECK(!heartbeat.update(0, false));
