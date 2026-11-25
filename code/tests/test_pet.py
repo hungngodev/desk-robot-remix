@@ -7673,7 +7673,8 @@ async def test_proactive_context_stage_never_reads_private_memory_without_optin(
         # The Mac context owner now reports independently consented
         # room station evidence as a fifth return value. None may leak
         # through disabled hardware camera or memory permissions.
-        recent, context, private_allowed, live_used, room_used = gathered
+        recent, context, private_allowed, live_used, room_used, camera_generation = gathered
+        assert camera_generation is None
         assert recent == []
         assert private_allowed is False
         assert live_used is False
@@ -7760,7 +7761,8 @@ async def test_hardware_attention_continuity_preserved_when_vision_disabled(
             "robot-01", SceneChange("touch", "Robot was touched", 1.0),
         )
         assert result is not None
-        _, context, _, _, _ = result
+        _, context, _, _, _, camera_generation = result
+        assert camera_generation is None
         assert "WROOM touch edge" in context.interaction
     finally:
         await pet.close()
@@ -7806,7 +7808,8 @@ async def test_hardware_wroom_sensed_event_survives_camera_privacy(
             "robot-01", SceneChange("handling_shake", "Robot shaken", 1.0),
         )
         assert result is not None
-        _, context, _, _, _ = result
+        _, context, _, _, _, camera_generation = result
+        assert camera_generation is None
         assert "handling_shake" in context.interaction
         assert "Secret image" not in context.interaction
     finally:
@@ -8104,6 +8107,78 @@ async def test_camera_reconnect_fences_pending_proactive_model(
         release.set()
         for state in pet.states.values():
             state.enabled = False
+        await pet.close()
+
+
+
+@pytest.mark.parametrize("visual_context", [False, True])
+@pytest.mark.parametrize("replacement", ["same", "other", "none"])
+@pytest.mark.parametrize("stage", ["model", "tts"])
+async def test_tactile_reply_fences_admitted_camera_context(
+    fleet, tmp_path, visual_context, replacement, stage,
+):
+    """Physical initiative may not repeat a superseded visual interpretation."""
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    fleet.fleet_text_sharing_enabled = False
+    fleet.fleet_social_autonomy_enabled = False
+    ids = [robot.id for robot in fleet.robots]
+    hub = CameraFrameHub(ids)
+    now = time.monotonic()
+    hub.notify("robot-01", "touch_tap", now)
+    if visual_context:
+        hub.remember_tool(
+            "robot-01", "visual_look", "OLD_VISUAL_CANARY brass key", now,
+        )
+    entered, resume = asyncio.Event(), asyncio.Event()
+
+    class Chat:
+        async def reply(self, history):
+            assert ("OLD_VISUAL_CANARY" in str(history)) is visual_context
+            if stage == "model":
+                entered.set()
+                await resume.wait()
+            return "That sounds interesting."
+
+    class DelayedSpeaker(SimulatedSpeaker):
+        async def say(self, robot, text, *, permission_check=None):
+            if stage == "tts":
+                entered.set()
+                await resume.wait()
+            await super().say(robot, text, permission_check=permission_check)
+
+    memory = MemoryStore(tmp_path, ids)
+    speaker = DelayedSpeaker()
+    pet = PetController(
+        fleet, {}, Conversation(fleet, Chat(), speaker, memory=memory),
+        memory, KeyScene(),
+    )
+    pet.multimodal = SimpleNamespace(hub=hub)
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 93
+    task = asyncio.create_task(pet._speak(
+        "robot-01", SceneChange("touch_tap", "My head was tapped", 1.0),
+        93, offered_at=now,
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        if replacement != "none":
+            hub.discard_video("robot-01" if replacement == "same" else "robot-02")
+        resume.set()
+        await asyncio.wait_for(task, timeout=3)
+        expected = 0 if visual_context and replacement == "same" else 1
+        assert state.spoken == len(speaker.spoken) == expected
+        assert memory.count("robot-01") == expected
+        if not expected:
+            assert pet._group_last_spoken == float("-inf")
+        else:
+            assert state.last_error is None
+    finally:
+        resume.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        state.enabled = False
         await pet.close()
 
 

@@ -3130,10 +3130,12 @@ class PetController:
                 "untrusted_text_not_instructions": True,
             })
         timeline = []
+        camera_context_generation = None
         # A physical touch can still trigger curiosity after visual opt
         # out; it must not reuse the old opt-in ASR/camera/tool timeline.
         if self.multimodal is not None:
             hub = self.multimodal.hub
+            hub_generation = getattr(hub, "_generation", {}).get(robot_id)
             now = time.monotonic()
             ordered = getattr(hub, "interaction_timeline", None)
             live_media_allowed = (
@@ -3191,6 +3193,13 @@ class PetController:
                     if (live_media_allowed
                         or item.get("source") == "wroom_sensed_event")
                 ]
+            # Fence visual evidence even when the initiating event is tactile.
+            if any(
+                item.get("channel") == "camera"
+                or (item.get("channel") == "tool" and item.get("kind") == "visual_look")
+                for item in timeline
+            ):
+                camera_context_generation = hub_generation
         # Mac activity remains a nonauthoritative live status, never a
         # separate speech trigger, past memory, or motor permission.
         timeline.extend(activity)
@@ -3214,7 +3223,7 @@ class PetController:
         )
         return (
             recent_memory, context, private_memory_allowed,
-            live_context_used, room_context_used,
+            live_context_used, room_context_used, camera_context_generation,
         )
 
     async def _speak_social(
@@ -3596,11 +3605,12 @@ class PetController:
             if gathered is None:
                 return
             (recent_memory, context, private_memory_allowed,
-             live_context_used, room_context_used) = gathered
+             live_context_used, room_context_used, camera_context_generation) = gathered
 
             def media_context_current() -> bool:
                 return (
                     camera_source_current()
+                    and self._camera_generation_current(robot_id, camera_context_generation)
                     and (not (live_context_used or camera_derived)
                      or self.settings.mode != "hardware"
                      or (self.settings.voice_vision_tools_enabled
@@ -3693,7 +3703,8 @@ class PetController:
             )
             if text is None:
                 return
-            if not camera_source_current():
+            if (not camera_source_current()
+                    or not self._camera_generation_current(robot_id, camera_context_generation)):
                 state.suppressed += 1
                 state.last_initiative_suppression = "camera_source_replaced"
                 return
