@@ -2845,3 +2845,85 @@ def test_procurement_bounds_derived_fleet_quantity():
     plan["parts"][0]["per_robot"] = 8
     report = mod.generate(plan)
     assert report["robots"][0]["fleet_total"] == 40
+
+
+@pytest.mark.parametrize("scope", ["first_robot", "fleet"])
+@pytest.mark.parametrize("mutation", [
+    "valid", "unresolved_motor", "remove_assembly", "remove_dock_contacts",
+    "remove_scd40", "remove_conditional_amg8833", "reduce_tof",
+])
+def test_full_checkout_cannot_price_away_required_scope(scope, mutation):
+    """A complete synthetic price ledger for a shortened BOM is still incomplete."""
+    import json
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    if mutation in {"remove_assembly", "remove_dock_contacts"}:
+        ident = mutation.removeprefix("remove_")
+        plan["parts"] = [row for row in plan["parts"] if row["id"] != ident]
+    elif mutation in {"remove_scd40", "remove_conditional_amg8833"}:
+        ident = "scd40" if mutation == "remove_scd40" else "amg8833"
+        room = plan["room_pod"]
+        room["modules"] = [row for row in room["modules"] if row["id"] != ident]
+    elif mutation == "reduce_tof":
+        next(row for row in plan["parts"]
+             if row["id"] == "cliff_obstacle")["per_robot"] = 7
+
+    report = mod.generate(plan)
+    if mutation != "unresolved_motor":
+        # Select a hypothetical costing variant only. No physical receipts
+        # are supplied and no purchase approval is asserted.
+        report["physical_motor_variant_in_cart"] = "stepper"
+    else:
+        assert report["physical_motor_variant_in_cart"] == "unresolved"
+    required, categories = mod.cost_requirements(report, scope)
+    required, _ = mod.power_cost_requirements(
+        required, categories, "separate_components",
+    )
+    # Supply exactly all roles the cost projection asks for. These synthetic
+    # stock records isolate scope coverage from price or seller failures.
+    inventory = [
+        {
+            "role_key": role, "usable_allocated": qty,
+            "acquisition_kind": "already_owned",
+            "inspection_receipt_url": "https://example.org/fixture/" + role,
+        }
+        for role, qty in required.items() if qty
+    ]
+    sense = next(row for row in inventory if row["role_key"] == "robot:xiao_sense")
+    sense["usable_allocated"] -= 1
+    if not sense["usable_allocated"]:
+        inventory.remove(sense)
+    inventory.append({
+        "role_key": "robot:xiao_sense", "usable_allocated": 1,
+        "acquisition_kind": "paid_order", "order_reference": "sense-fixture",
+        "inspection_receipt_url": "https://example.org/fixture/paid-sense",
+    })
+    evidence = {"costs": {
+        "scope": scope, "currency": "USD",
+        "power_package_mode": "separate_components",
+        "paid_orders_complete": True,
+        "paid_orders": [{
+            "order_reference": "sense-fixture", "total_paid_usd": "13.67",
+            "allocations": [{"role_key": "robot:xiao_sense", "quantity": 1}],
+        }],
+        "inventory": inventory, "lines": [], "seller_charges": [],
+    }}
+    cost = mod.cost_quote(report, evidence, scope)
+    assert cost["prior_paid_orders_cents"] == 1367
+    assert cost["unaccounted_roles"] == []
+    assert not report["order_released"]
+    if mutation == "valid":
+        assert cost["calculation_complete_not_physical_approval"] is True, cost["errors"]
+        assert cost["payable_now_cents"] == 0
+        assert cost["prototype_cumulative_cents"] == 1367
+        return
+    assert cost["calculation_complete_not_physical_approval"] is False
+    assert cost["payable_now_cents"] is None
+    assert cost["prototype_cumulative_cents"] is None
+    assert cost["remaining_under_cap_cents"] is None
+    assert cost["allocated_landed_subtotals_cents"] is None
+    assert cost["within_prototype_cap"] is (False if scope == "first_robot" else None)
+    message = ("unresolved drivetrain selection" if mutation == "unresolved_motor"
+               else "Incomplete full checkout scope")
+    assert any(message in error for error in cost["errors"])
+    assert "Payable now: unknown" in mod.cost_quote_markdown(cost)

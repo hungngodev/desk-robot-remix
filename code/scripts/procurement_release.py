@@ -2179,8 +2179,8 @@ def complete_power_kit_contents(contents: object) -> bool:
     return found == set(POWER_CHILDREN)
 
 
-def invalidate_incomplete_power_quote(cost: dict, message: str) -> dict:
-    """No monetary total or apparent budget headroom from an incomplete kit."""
+def invalidate_incomplete_quote(cost: dict, message: str) -> dict:
+    """No monetary total or apparent headroom from an incomplete checkout."""
     cost["errors"].append(message)
     cost["calculation_complete_not_physical_approval"] = False
     for field in (
@@ -2190,6 +2190,25 @@ def invalidate_incomplete_power_quote(cost: dict, message: str) -> dict:
         cost[field] = None
     cost["within_prototype_cap"] = (None if cost["scope"] == "fleet"
                                       else False)
+    return cost
+
+
+# Retain the existing helper name for callers of the power-specific validation.
+invalidate_incomplete_power_quote = invalidate_incomplete_quote
+
+
+def invalidate_incomplete_full_scope(cost: dict, report: dict) -> dict:
+    """A priced subset must never be labelled a complete robot or fleet."""
+    if report.get("physical_motor_variant_in_cart") not in {"stepper", "dc"}:
+        invalidate_incomplete_quote(cost, "Full checkout has unresolved drivetrain selection")
+    for gate in report.get("missing_system_evidence", []):
+        if gate.startswith((
+            "missing_or_reduced_full_feature_roles:",
+            "missing_or_reduced_conditional_room_roles:",
+            "unexpected_or_excess_full_feature_roles:",
+            "missing_or_reduced_linked_subassembly:",
+        )):
+            invalidate_incomplete_quote(cost, "Incomplete full checkout scope: " + gate)
     return cost
 
 
@@ -2498,8 +2517,9 @@ def cost_quote(report: dict, evidence: dict, scope: str) -> dict:
             cost["within_prototype_cap"] = False
     if scope == "evaluation":
         return cost
+    invalidate_incomplete_full_scope(cost, report)
     if type(mode) is not str or mode not in POWER_KIT_MODES:
-        return invalidate_incomplete_power_quote(
+        return invalidate_incomplete_quote(
             cost, "one complete power kit or all separately purchased "
                   "charger, boost, protected pack and connector must be selected",
         )
@@ -2507,7 +2527,7 @@ def cost_quote(report: dict, evidence: dict, scope: str) -> dict:
         lines = values.get("lines", [])
         inventory = values.get("inventory", [])
         if type(lines) is not list or type(inventory) is not list:
-            return invalidate_incomplete_power_quote(
+            return invalidate_incomplete_quote(
                 cost, "invalid complete power kit evidence",
             )
         included = [item for item in [*lines, *inventory]
@@ -2517,7 +2537,7 @@ def cost_quote(report: dict, evidence: dict, scope: str) -> dict:
             not complete_power_kit_contents(item.get("kit_components"))
             for item in included
         ):
-            return invalidate_incomplete_power_quote(
+            return invalidate_incomplete_quote(
                 cost, "complete power kit lacks exact charger, boost, "
                       "protected NTC pack and polarized connector identities",
             )
