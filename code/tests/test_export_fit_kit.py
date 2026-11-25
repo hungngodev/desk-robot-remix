@@ -415,6 +415,14 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     with pytest.raises(ValueError, match="SCAD source changed"):
         source.verify_fit_kit(tmp_path, output_dir=rendered)
     source_path.write_bytes(original_source)
+    alias_target = tmp_path / "same_bytes.scad"
+    alias_target.write_bytes(original_source)
+    source_path.unlink()
+    source_path.symlink_to(alias_target)
+    with pytest.raises(ValueError, match="Unsafe SCAD source path"):
+        source.verify_fit_kit(tmp_path, output_dir=rendered)
+    source_path.unlink()
+    source_path.write_bytes(original_source)
     mesh_path = rendered / "dock_stls/dock_rail_entry_coupon.stl"
     mesh_path.write_bytes(mesh_path.read_bytes() + b"stale")
     with pytest.raises(ValueError, match="STL changed"):
@@ -1513,7 +1521,10 @@ def test_exact_stl_volume_preserves_binary32_orientation(tmp_path, shift, size):
         module().closed_mesh_edges(path)
 
 
-def test_export_renders_pinned_source_and_aborts_on_concurrent_edit(tmp_path, monkeypatch):
+@pytest.mark.parametrize("change", ["edit", "replacement", "symlink"])
+def test_export_renders_pinned_source_and_aborts_on_concurrent_edit(
+    tmp_path, monkeypatch, change,
+):
     source = module()
     folder = tmp_path / "docs/cad/remixes"
     (folder / "dock").mkdir(parents=True)
@@ -1533,16 +1544,26 @@ def test_export_renders_pinned_source_and_aborts_on_concurrent_edit(tmp_path, mo
         assert staged != original
         assert staged.read_bytes() == original_bytes
         if not calls:
-            original.write_bytes(b"cube([9,9,9]);\n")
+            if change == "edit":
+                original.write_bytes(b"cube([9,9,9]);\n")
+            else:
+                replacement = tmp_path / "same_bytes.scad"
+                replacement.write_bytes(original_bytes)
+                if change == "symlink":
+                    original.unlink()
+                    original.symlink_to(replacement)
+                else:
+                    replacement.replace(original)
         calls.append(staged)
         Path(command[command.index("-o") + 1]).write_bytes(tetra_stl())
 
     monkeypatch.setattr(source.subprocess, "run", edit_during_render)
     output = tmp_path / "rendered"
-    with pytest.raises(ValueError, match="SCAD source changed during export"):
+    message = "Unsafe SCAD source path" if change == "symlink" else "SCAD source changed"
+    with pytest.raises(ValueError, match=message):
         source.export_kit(tmp_path, output_dir=output)
     assert len(calls) == 23
-    assert original.read_bytes() != original_bytes
+    assert (original.read_bytes() != original_bytes) is (change == "edit")
     assert not list(output.rglob("*.stl"))
     assert not (output / "fit_kit_manifest.json").exists()
 
@@ -1610,3 +1631,26 @@ def test_screen_print_bed_fit_uses_unrounded_stl_bounds_for_cli_decisions(
         assert entry["flat_height_exceeds_build_volume"] is exp_z_over, name
         assert entry["flat_yaw_impossible_by_plate_diagonal"] is exp_diag_over, name
         assert entry["other_orientation_or_support_fit_qualified"] is False
+
+
+@pytest.mark.parametrize("kind", ["leaf", "parent", "hardlink", "fifo"])
+def test_scad_source_reader_rejects_aliases_and_special_files(tmp_path, kind):
+    root = tmp_path / "checkout"
+    folder = root / "docs"
+    folder.mkdir(parents=True)
+    source = folder / "source.scad"
+    other = tmp_path / "other"
+    other.mkdir()
+    target = other / source.name
+    target.write_bytes(b"cube(1);")
+    if kind == "parent":
+        folder.rmdir()
+        folder.symlink_to(other, target_is_directory=True)
+    elif kind == "leaf":
+        source.symlink_to(target)
+    elif kind == "hardlink":
+        source.hardlink_to(target)
+    else:
+        os.mkfifo(source)
+    with pytest.raises(ValueError, match="SCAD source"):
+        module()._read_scad_source(root, source)

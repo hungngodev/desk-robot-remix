@@ -314,6 +314,45 @@ def _reject_fit_kit_output_aliases(output: Path) -> None:
                 raise ValueError(f"Undeclared fit kit STL: {entry}")
 
 
+def _read_scad_source(root: Path, source: Path) -> tuple[bytes, tuple[int, ...]]:
+    """Read one regular checkout source without following internal aliases."""
+    parts = source.relative_to(root).parts
+    directory = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in parts[:-1]:
+            child = os.open(
+                part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory,
+            )
+            os.close(directory)
+            directory = child
+        fd = os.open(
+            parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory,
+        )
+        try:
+            before = os.fstat(fd)
+            if not S_ISREG(before.st_mode) or before.st_nlink != 1:
+                raise ValueError(f"Nonregular or hardlinked SCAD source: {source}")
+            with os.fdopen(fd, "rb", closefd=False) as stream:
+                data = stream.read()
+            after = os.fstat(fd)
+        finally:
+            os.close(fd)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise ValueError(f"Unsafe SCAD source path: {source}") from exc
+    finally:
+        os.close(directory)
+
+    def identity(info: os.stat_result) -> tuple[int, ...]:
+        return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
+                info.st_ctime_ns, info.st_nlink)
+
+    if identity(before) != identity(after):
+        raise ValueError(f"SCAD source changed during read: {source}")
+    return data, identity(after)
+
+
 def export_kit(
     root: Path = ROOT, *, output_dir: Path | None = None,
     openscad: str = "openscad",
@@ -330,9 +369,6 @@ def export_kit(
         ("fit_stls", source_dir / "vl53l0x_gy530_fit_gauge.scad", RANGER_FITS),
         ("dock_stls", source_dir / "dock/dock_passive_fit.scad", DOCKS),
     )
-    for _, source, _ in sources:
-        if not source.is_file():
-            raise FileNotFoundError(f"Missing original parametric source: {source}")
     _reject_fit_kit_output_aliases(out)
     out.mkdir(parents=True, exist_ok=True)
     # Fail closed: a failed rebuild cannot retain an old success manifest.
@@ -343,9 +379,9 @@ def export_kit(
         stage = Path(folder)
         # Render only the bytes whose digest is recorded. The six current
         # SCAD sources are standalone (no external includes/imports).
-        snapshots = {source: source.read_bytes() for _, source, _ in sources}
+        snapshots = {source: _read_scad_source(root, source) for _, source, _ in sources}
         for kind, source, parts in sources:
-            source_bytes = snapshots[source]
+            source_bytes, _ = snapshots[source]
             staged_source = stage / "source_snapshot" / source.relative_to(source_dir)
             staged_source.parent.mkdir(parents=True, exist_ok=True)
             staged_source.write_bytes(source_bytes)
@@ -383,8 +419,8 @@ def export_kit(
                 })
         # A concurrent CAD edit invalidates this candidate, even though all
         # of its staged meshes remain tied to their original source bytes.
-        for source, source_bytes in snapshots.items():
-            if source.read_bytes() != source_bytes:
+        for source, snapshot in snapshots.items():
+            if _read_scad_source(root, source) != snapshot:
                 raise ValueError(f"SCAD source changed during export: {source.name}")
         for entry in rendered:
             relative = Path(entry["location"])
@@ -607,7 +643,7 @@ def verify_fit_kit(root: Path = ROOT, *, output_dir: Path | None = None) -> dict
             raise ValueError(f"Wrong source for {location}")
         source = root / expected[location]
         mesh = output / location
-        source_bytes = source.read_bytes()
+        source_bytes, _ = _read_scad_source(root, source)
         if sha256(source_bytes).hexdigest() != item.get("source_sha256"):
             raise ValueError(f"SCAD source changed: {location}")
         if not same_json_evidence(
