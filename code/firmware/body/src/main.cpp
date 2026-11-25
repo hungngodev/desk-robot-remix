@@ -70,7 +70,7 @@ desk_robot::BodyControl control(
 #if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
 desk_robot::MotorHeartbeat motor_heartbeat;
 #endif
-#if DESK_ROBOT_STEPPER
+#if DESK_ROBOT_STEPPER && DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED
 desk_robot::StepperDrive left_stepper;
 desk_robot::StepperDrive right_stepper;
 #endif
@@ -237,13 +237,15 @@ using ReplyQueue = desk_robot::ReplyTxQueue<2 * (desk_robot::kReplyCapacity + 2)
 ReplyQueue head_replies;
 ReplyQueue usb_replies;
 bool pwm_ready = false;
+#if DESK_ROBOT_FULL_SENSORS
 bool servo_attached = false;
-#if !DESK_ROBOT_STEPPER && (!DESK_ROBOT_FULL_SENSORS || DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED)
+int applied_lift = -1;
+int applied_grip = -1;
+#endif
+#if !DESK_ROBOT_STEPPER && DESK_ROBOT_FULL_SENSORS && DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED
 int applied_left = 0;
 int applied_right = 0;
 #endif
-int applied_lift = -1;
-int applied_grip = -1;
 
 void all_motor_inputs_low() {
   for (int pin : body_pins::kMotorPins) {
@@ -261,7 +263,7 @@ void zero_motor_pwm() {
 #endif
 }
 
-#if !DESK_ROBOT_STEPPER && (!DESK_ROBOT_FULL_SENSORS || DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED)
+#if !DESK_ROBOT_STEPPER && DESK_ROBOT_FULL_SENSORS && DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED
 void write_motor_pair(int forward_channel, int reverse_channel, int percent) {
   // Zero inactive side first; neither direction is driven during a reversal.
   const unsigned duty = static_cast<unsigned>(abs(percent) * 255 / 100);
@@ -283,11 +285,13 @@ void write_stepper(const int (&pins)[4], std::uint8_t mask) {
 }
 #endif
 
+#if DESK_ROBOT_FULL_SENSORS
 unsigned servo_duty(int degrees) {
   const unsigned pulse_us = body_pins::kServoMinUs +
       degrees * (body_pins::kServoMaxUs - body_pins::kServoMinUs) / 180;
   return pulse_us * 65535UL / 20000UL;
 }
+#endif
 
 #if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
 void enforce_motor_heartbeat(bool advance) {
@@ -327,8 +331,7 @@ void apply_outputs() {
   // A physical actuator can be enabled only through a qualified full guard.
   control.force_disarm();
   zero_motor_pwm();
-  return;
-#endif
+#else
   if (!pwm_ready) {
     control.force_disarm();
     zero_motor_pwm();
@@ -396,6 +399,7 @@ void apply_outputs() {
     ledcWrite(body_pins::kServoChannels[1], servo_duty(state.grip));
     applied_grip = state.grip;
   }
+#endif  // DESK_ROBOT_FULL_SENSORS
 }
 
 void process_input(HardwareSerial& stream, desk_robot::LineReceiver& receiver,

@@ -315,3 +315,40 @@ def test_drivetrain_compile_guard_matrix():
             assert result.returncode == 0, (flags, result.stderr)
         else:
             assert result.returncode != 0 and error in result.stderr, (flags, result.stderr)
+
+
+@pytest.mark.parametrize(("stepper", "full", "qualified"), [
+    (0, 0, 0), (0, 1, 0), (0, 1, 1), (1, 1, 0), (1, 1, 1),
+])
+def test_drivetrain_output_code_excluded_from_inert_profiles(stepper, full, qualified):
+    """Preprocess real firmware branches; this is not a target firmware build."""
+    compiler = shutil.which("c++")
+    if compiler is None:
+        pytest.skip("C++ compiler unavailable for firmware preprocessor test")
+    main = (BODY / "src/main.cpp").read_text(encoding="utf-8")
+    start = main.index("bool pwm_ready = false;")
+    end = main.index("void process_input(", start)
+    flags = {
+        "STEPPER": stepper,
+        "FULL_SENSORS": full,
+        "DC_HARDWARE_CUTOFF_QUALIFIED": qualified,
+        "STEPPER_HARDWARE_CUTOFF_QUALIFIED": qualified,
+    }
+    definitions = [f"-DDESK_ROBOT_{key}={value}" for key, value in flags.items()]
+    result = subprocess.run(
+        [compiler, "-E", "-P", "-x", "c++", *definitions, "-"],
+        input=main[start:end],
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=10,
+    )
+    output = result.stdout
+    assert ("void write_motor_pair(" in output) == bool(not stepper and full and qualified)
+    assert ("unsigned servo_duty(" in output) == bool(full)
+    assert ("ledcAttachPin(body_pins::kLiftServo" in output) == bool(full)
+    assert ("left_stepper.update(" in output) == bool(stepper and qualified)
+    assert ("void write_stepper(" in output) == bool(stepper)
+    if stepper and not qualified:
+        assert "write_stepper(body_pins::kLeftStepperPins, 0);" in output
+        assert "write_stepper(body_pins::kRightStepperPins, 0);" in output
