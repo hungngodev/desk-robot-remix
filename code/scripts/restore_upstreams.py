@@ -11,7 +11,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def git_env():
     # Never let an inherited GIT_DIR, GIT_WORK_TREE or config injection redirect Git.
-    return {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
 
 
 def run(args, cwd):
@@ -20,6 +22,17 @@ def run(args, cwd):
 
 def git(args, cwd, **kwargs):
     return subprocess.run(["git", *args], cwd=cwd, env=git_env(), **kwargs)
+
+
+def transfer(args, cwd, source):
+    try:
+        git(args, cwd, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise RuntimeError(
+            f"Cannot {args[0]} {source['path']} at {source['commit']}: "
+            "check network access to the pinned origin or restore a local checkout "
+            "containing the exact commit."
+        ) from exc
 
 
 def restore_path(source):
@@ -66,7 +79,7 @@ def main():
         path = restore_path(source)
         if not path.exists():
             path.parent.mkdir(exist_ok=True)
-            git(["clone", "--no-checkout", "--", source["url"], str(path)], ROOT, check=True)
+            transfer(["clone", "--no-checkout", "--", source["url"], str(path)], ROOT, source)
             path = restore_path(source)
             require_checkout(path)
         else:
@@ -82,7 +95,7 @@ def main():
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         ).returncode:
-            git(["fetch", "origin", source["commit"]], path, check=True)
+            transfer(["fetch", "origin", source["commit"]], path, source)
         git(["checkout", "--detach", "--no-overwrite-ignore", source["commit"]], path, check=True)
         if run(["git", "rev-parse", "HEAD"], path) != source["commit"]:
             raise RuntimeError(f"Upstream commit mismatch in {path}")
@@ -91,4 +104,7 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except RuntimeError as exc:
+        raise SystemExit(str(exc)) from None

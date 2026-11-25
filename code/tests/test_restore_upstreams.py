@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -153,3 +154,58 @@ def test_hidden_index_edits_preserved(tmp_path, monkeypatch, flag):
         restore.main()
     assert (path / "tracked").read_text() == "local edit"
     assert git(path, "symbolic-ref", "HEAD")
+
+
+@pytest.fixture
+def no_https(tmp_path, monkeypatch):
+    # Exercise real Git with HTTPS disabled instead of depending on DNS or mocks.
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(home / "config"))
+    git(tmp_path, "config", "--global", "protocol.https.allow", "never")
+
+
+def test_cached_pin_restores_without_network(tmp_path, monkeypatch, no_https):
+    path = tmp_path / "upstream/source"
+    pin = repository(path)
+    (path / "tracked").write_text("newer upstream version")
+    git(path, "commit", "-qam", "newer")
+    configure(tmp_path, monkeypatch, commit=pin)
+    restore.main()
+    assert git(path, "rev-parse", "HEAD") == pin
+    assert (path / "tracked").read_text() == "original"
+
+
+def test_unavailable_pin_preserves_checkout_and_reports_recovery(tmp_path, monkeypatch, no_https):
+    path = tmp_path / "upstream/source"
+    original = repository(path)
+    pin = "a" * 40
+    configure(tmp_path, monkeypatch, commit=pin)
+    with pytest.raises(RuntimeError, match="fetch.*source.*" + pin + ".*network"):
+        restore.main()
+    assert git(path, "rev-parse", "HEAD") == original
+    assert git(path, "symbolic-ref", "HEAD")
+    assert (path / "tracked").read_text() == "original"
+    assert not git(path, "status", "--porcelain")
+
+
+def test_missing_checkout_offline_cli_has_clear_error(tmp_path, monkeypatch, no_https):
+    configure(tmp_path, monkeypatch)
+    script = tmp_path / "scripts/restore_upstreams.py"
+    script.parent.mkdir()
+    script.write_text(Path(restore.__file__).read_text())
+    result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "clone" in result.stderr
+    assert "source" in result.stderr
+    assert "a" * 40 in result.stderr
+    assert "network" in result.stderr
+    assert "Traceback" not in result.stderr
+    assert "Verified" not in result.stdout
+    assert not (tmp_path / "upstream/source").exists()
+
+
+def test_git_authentication_prompt_disabled(monkeypatch):
+    monkeypatch.setenv("GIT_TERMINAL_PROMPT", "1")
+    assert restore.git_env()["GIT_TERMINAL_PROMPT"] == "0"
