@@ -2734,3 +2734,103 @@ int main() {
         check=True, capture_output=True, text=True, env=native_cpp_env(), timeout=60,
     )
     subprocess.run([str(binary)], check=True, timeout=10, env=native_cpp_env())
+
+def test_sense_network_task_startup_failure_and_retry(tmp_path):
+    """Exercise the production startup method with injected allocation failures."""
+    compiler = shutil.which("g++") or shutil.which("clang++")
+    if not compiler:
+        raise unittest.SkipTest("Native C++ compiler unavailable")
+    board = (HEAD / "sense/desk_robot_sense.cc").read_text()
+    startup = "    void StartNetwork() override {" + board.split(
+        "    void StartNetwork() override {", 1
+    )[1].split("\n    AudioCodec* GetAudioCodec()", 1)[0]
+    source = tmp_path / "sense_startup.cpp"
+    binary = tmp_path / "sense_startup"
+    source.write_text(r"""
+#include <cassert>
+#include <cstdint>
+#include <mutex>
+#include <string_view>
+#define CONFIG_DESK_ROBOT_ID "pet-1"
+static int errors = 0, starts = 0, attempts = 0;
+#define ESP_LOGE(tag, ...) (++errors)
+constexpr int pdPASS = 1;
+static bool fail_face = true, fail_poll = true;
+using TaskHandle_t = void*;
+int xTaskCreate(void (*)(void*), const char* name, int, void* context,
+                int, TaskHandle_t* out) {
+    ++attempts;
+    if (std::string_view(name) == "stackchan_idle_face" ? fail_face : fail_poll)
+        return -1;
+    *out = context;
+    return pdPASS;
+}
+struct WifiBoard { virtual void StartNetwork() {} };
+struct AudioCodec {};
+namespace desk_robot {
+struct Bridge {
+    Bridge(void*, AudioCodec*) {}
+    void Start() { ++starts; }
+};
+}
+struct Face {
+    int seeds = 0;
+    void seed(uint32_t) { ++seeds; }
+    void Seed(uint32_t) { ++seeds; }
+};
+struct Display {
+    int statuses = 0;
+    bool fault = false;
+    void SetBodyFault(bool value) { fault = value; }
+    void SetStatus(const char*) { ++statuses; }
+};
+struct BodyFaceStatus {};
+struct BodyFaceState {
+    int invalidations = 0;
+    void Publish(BodyFaceStatus) { ++invalidations; }
+};
+class DeskRobotSenseBoard : public WifiBoard {
+public:
+    void* camera_ = nullptr;
+    AudioCodec codec;
+    AudioCodec* GetAudioCodec() { return &codec; }
+    std::mutex network_tasks_mutex_;
+    desk_robot::Bridge* body_bridge_ = nullptr;
+    Face face_behavior_, eye_animator_;
+    TaskHandle_t face_task_ = nullptr, body_poll_task_ = nullptr;
+    Display screen;
+    Display* local_eye_display_ = &screen;
+    Display* display_ = &screen;
+    BodyFaceState body_face_state_;
+    static void FaceTask(void*) {}
+    static void BodyPollTask(void*) {}
+""" + startup + r"""
+};
+int main() {
+    DeskRobotSenseBoard board;
+    board.StartNetwork();
+    assert(attempts == 2 && errors == 2 && starts == 1);
+    assert(!board.face_task_ && !board.body_poll_task_);
+    assert(board.screen.fault && board.screen.statuses == 1);
+    assert(board.body_face_state_.invalidations == 1);
+    fail_face = false;
+    board.StartNetwork();
+    assert(board.face_task_ && !board.body_poll_task_);
+    assert(attempts == 4 && errors == 3 && starts == 1);
+    fail_poll = false;
+    board.StartNetwork();
+    assert(board.face_task_ && board.body_poll_task_);
+    assert(attempts == 5 && errors == 3 && starts == 1);
+    board.StartNetwork();
+    assert(attempts == 5 && errors == 3 && starts == 1);
+    assert(board.face_behavior_.seeds == 1 && board.eye_animator_.seeds == 1);
+}
+""")
+    pie_flags = [] if sys.platform == "darwin" else ["-fno-pie", "-no-pie"]
+    subprocess.run(
+        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-pthread",
+         "-fsanitize=address,undefined", *pie_flags, str(source), "-o", str(binary)],
+        check=True, capture_output=True, text=True, env=native_cpp_env(),
+    )
+    subprocess.run([str(binary)], check=True, timeout=30, env=native_cpp_env())
+

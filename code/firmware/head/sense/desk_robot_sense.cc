@@ -18,6 +18,7 @@
 #endif
 
 #include <esp_timer.h>
+#include <esp_log.h>
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
 #include <esp_event.h>
 #include <esp_wifi.h>
@@ -121,6 +122,7 @@ private:
     // A 350 ms UART timeout cannot block the OLED animation task.
     // Keep one actual bridge UART owner; only read-only polling moves tasks.
     BodyFaceState body_face_state_;
+    std::mutex network_tasks_mutex_;
     TaskHandle_t face_task_ = nullptr;
     TaskHandle_t body_poll_task_ = nullptr;
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
@@ -627,6 +629,7 @@ public:
 
     void StartNetwork() override {
         WifiBoard::StartNetwork();
+        std::lock_guard<std::mutex> lock(network_tasks_mutex_);
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
         // A real disconnect event catches WiFi flaps between FaceTask polls.
         // Failed event registration leaves the private recorder unavailable.
@@ -640,22 +643,30 @@ public:
 #endif
         static desk_robot::Bridge robot_bridge(camera_, GetAudioCodec());
         static std::once_flag bridge_once;
-        std::call_once(bridge_once, [] { robot_bridge.Start(); });
-        body_bridge_ = &robot_bridge;
-        // Each configured robot ID seeds Stackchan's EXISTING weighted idle
-        // picker independently. Five copies need not blink/smile in sync.
-        uint32_t pet_seed = 2166136261U;
-        for (const unsigned char c : std::string_view(CONFIG_DESK_ROBOT_ID))
-            pet_seed = (pet_seed ^ c) * 16777619U;
-        face_behavior_.seed(pet_seed);
-        eye_animator_.Seed(pet_seed);
+        std::call_once(bridge_once, [this] {
+            robot_bridge.Start();
+            body_bridge_ = &robot_bridge;
+            // Seed once, before the face task owns these mutable states.
+            uint32_t pet_seed = 2166136261U;
+            for (const unsigned char c : std::string_view(CONFIG_DESK_ROBOT_ID))
+                pet_seed = (pet_seed ^ c) * 16777619U;
+            face_behavior_.seed(pet_seed);
+            eye_animator_.Seed(pet_seed);
+        });
         // Face rendering must keep running if a physical UART reply stalls.
         // The separate poll remains read-only on the same bridge/UART owner.
-        if (!face_task_) {
-            xTaskCreate(FaceTask, "stackchan_idle_face", 4096, this, 1, &face_task_);
+        if (!face_task_ &&
+            xTaskCreate(FaceTask, "stackchan_idle_face", 4096, this, 1, &face_task_) != pdPASS) {
+            face_task_ = nullptr;
+            ESP_LOGE("SenseBoard", "Face task unavailable; automatic listening retry unavailable");
+            local_eye_display_->SetBodyFault(true);
+            display_->SetStatus("Face task unavailable");
         }
-        if (!body_poll_task_) {
-            xTaskCreate(BodyPollTask, "sense_body_poll", 4096, this, 1, &body_poll_task_);
+        if (!body_poll_task_ &&
+            xTaskCreate(BodyPollTask, "sense_body_poll", 4096, this, 1, &body_poll_task_) != pdPASS) {
+            body_poll_task_ = nullptr;
+            body_face_state_.Publish({});
+            ESP_LOGE("SenseBoard", "Body poll task unavailable; body status unknown");
         }
     }
 
