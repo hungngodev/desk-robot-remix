@@ -65,6 +65,29 @@ def test_required_nc_bumper_and_reed_are_real_but_pir_remains_lab_only():
     assert "(\"reed_count\", 2, \"magnet\"" in pet
 
 
+def test_nc_bumper_is_sampled_before_bus_commands_and_motor_outputs():
+    """The slow event classifier cannot own physical motor authorization."""
+    body = (ROOT / "code/firmware/body/src/main.cpp").read_text()
+    raw = body.split("bool sample_raw_bumper() {", 1)[1].split("void poll_optional", 1)[0]
+    assert "control.sample_bumper_input(digitalRead(body_pins::kBumperInput) == HIGH);" in raw
+    outputs = body.split("void apply_outputs() {", 1)[1].split("void process_input(", 1)[0]
+    assert outputs.index("sample_raw_bumper();") < outputs.index("control.tick(")
+    command = body.split("void process_input(", 1)[1].split("void setup()", 1)[0]
+    assert command.index("if (sample_raw_bumper()) apply_outputs();") < command.index(
+        "receiver.feed("
+    )
+    assert command.index("apply_outputs();  // apply accepted") < command.index(
+        '"ERR drive bumper_active"'
+    ) < command.index("replies.enqueue_line(reply)")
+    loop = body.split("void loop() {", 1)[1]
+    assert loop.index("if (sample_raw_bumper()) apply_outputs();") < loop.index("tof.poll(")
+    assert loop.index("if (control.state().bumper_raw) apply_outputs();") < loop.index(
+        "accessories.poll("
+    )
+    assert loop.rindex("sample_raw_bumper();") < loop.index("enforce_motor_heartbeat(true);")
+    assert loop.rindex("sample_raw_bumper();") > loop.index("accessories.poll(")
+
+
 def test_all_firmware_sensor_reactions_have_a_real_camera_priority_label():
     # Every event produced by physical input and eligible to initiate speech
     # must be representable as a separate authenticated camera context hint.

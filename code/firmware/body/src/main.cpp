@@ -78,20 +78,26 @@ std::uint32_t touch_last_sample_ms = 0;
 
 std::uint32_t last_extra_sample_ms = 0;
 desk_robot::McpContactEvidence contact_evidence;
-void poll_optional(std::uint32_t now_ms) {
+bool sample_raw_bumper() {
 #if defined(DESK_ROBOT_ENABLE_BUMPER) && DESK_ROBOT_ENABLE_BUMPER
-  // NC series to GND; open or unplugged -> HIGH trip
-  // Read the normally closed safety contact every loop. The 25 ms cadence
-  // below is only for debounced event counters, not motor inhibition.
+  // NC series to GND; open or unplugged -> HIGH trip. Direct GPIO
+  // acquisition does not wait for I2C, UART or the event debounce.
   control.sample_bumper_input(digitalRead(body_pins::kBumperInput) == HIGH);
+  return control.state().bumper_raw;
+#else
+  return false;
 #endif
+}
+
+void poll_optional(std::uint32_t now_ms) {
+  sample_raw_bumper();
   if (now_ms - last_extra_sample_ms < 25) return;
   last_extra_sample_ms = now_ms;
   std::uint8_t mask = 0;
   bool bumper = false, reed = false, pir = false;
 #if defined(DESK_ROBOT_ENABLE_BUMPER) && DESK_ROBOT_ENABLE_BUMPER
   mask |= 1U;
-  bumper = digitalRead(body_pins::kBumperInput) == HIGH; // NC series to GND; open or unplugged -> HIGH trip
+  bumper = control.state().bumper_raw; // same direct acquisition as the safety trip
 #endif
   // Slow magnetic/PIR inputs arrive from MCP23017 GPIOB on the existing
   // accessory mux. The required dock seat/PGOOD remains independent GPIOA.
@@ -295,6 +301,9 @@ void enforce_motor_heartbeat(bool advance) {
 void apply_outputs() {
   // All output paths, including commands received on either UART, recheck the
   // local interlock/timers immediately before writing the physical pins.
+#if DESK_ROBOT_FULL_SENSORS
+  sample_raw_bumper();
+#endif
   control.tick(millis());
 #if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
   enforce_motor_heartbeat(false);
@@ -386,6 +395,10 @@ void process_input(HardwareSerial& stream, desk_robot::LineReceiver& receiver,
     // clock. Non-pose commands ignore the timestamp; UART reads stay bounded.
     const std::uint64_t sample_us = received == '\n' ?
         static_cast<std::uint64_t>(esp_timer_get_time()) : 0ULL;
+#if DESK_ROBOT_FULL_SENSORS
+    // A pending UART ARM/rearm must see the current local NC contact.
+    if (sample_raw_bumper()) apply_outputs();
+#endif
 #if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
     // Latch a CPU pause before a pending command can reuse an old drive.
     enforce_motor_heartbeat(false);
@@ -420,6 +433,18 @@ void process_input(HardwareSerial& stream, desk_robot::LineReceiver& receiver,
     (void)local_usb;
 #endif
     apply_outputs();  // apply accepted command/expired timer before acknowledging
+#if DESK_ROBOT_FULL_SENSORS
+    // The contact can open between command validation and output application.
+    // Do not acknowledge a motion/recovery decision that this new sample vetoed.
+    if (completed && control.state().bumper_raw) {
+      if (strcmp(reply, "OK arm") == 0)
+        snprintf(reply, sizeof(reply), "ERR arm bumper_active");
+      else if (strncmp(reply, "OK drive ", 9) == 0)
+        snprintf(reply, sizeof(reply), "ERR drive bumper_active");
+      else if (strcmp(reply, "OK rearm") == 0)
+        snprintf(reply, sizeof(reply), "ERR rearm bumper_active");
+    }
+#endif
 #if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
     // A deadline can also expire while processing the command itself.
     if (completed && motor_heartbeat.missed_deadline()) {
@@ -679,6 +704,8 @@ void setup() {
 
 void loop() {
 #if DESK_ROBOT_FULL_SENSORS
+  // Apply an open NC contact before the first potentially blocking bus read.
+  if (sample_raw_bumper()) apply_outputs();
   // Sample raw touch before any potentially blocking shared bus transfer.
   // Poll again after IMU work below; the gesture clock is independent.
   poll_touch(millis());
@@ -718,6 +745,7 @@ void loop() {
   control.set_imu(berry_imu.reading());
   poll_touch(millis());
   poll_optional(millis());
+  if (control.state().bumper_raw) apply_outputs();
   // Safety sampling first, optional petting second. No motion authority.
   std::uint8_t cap_zones = 0;
   if (tof.bus_accessible() && cap1188.present() && cap1188.verified()) {
@@ -760,6 +788,8 @@ void loop() {
   terminal_ir.poll(millis());  // bounded, nonblocking, after cliff/dock reads
   control.set_terminal_ir(terminal_ir.evidence(millis()));
 #endif
+  // Never advance a CPU heartbeat using a pre-I2C bumper observation.
+  sample_raw_bumper();
 #endif
   control.tick(millis());
 #if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
