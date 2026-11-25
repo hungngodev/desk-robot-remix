@@ -79,6 +79,8 @@ class TwoWire {
   unsigned cap_failed_write_stops = 0;
   unsigned cap_register_requests = 0;
   bool optional_mux_installed = true;
+  bool optional_mux_write_nack = false;
+  bool optional_mux_read_nack = false;
   bool range_mux_write_nack = false;
   bool range_mux_read_nack = false;
   bool range_mux_bad_readback = false;
@@ -208,6 +210,7 @@ class TwoWire {
     } else if (current_address == 0x71) {
       if (outbound.empty()) return 0; // address-only TCA9548A probe
       if (outbound.size() != 1) return 4;
+      if (optional_mux_write_nack) return 4;
       if (!optional_mux_stuck) extras = outbound[0];
       if (extras && ranges) unsafe_parallel_mux = true;
     } else if (current_address == 0x29 && extras == 1 &&
@@ -269,6 +272,7 @@ class TwoWire {
       inbound = {range_mux_bad_readback
           ? static_cast<std::uint8_t>(0xff) : ranges};
     } else if (addr == 0x71) {
+      if (optional_mux_read_nack) return 0;
       inbound = {extras};
     } else if (addr == 0x29 && extras == 1 && cap_uses_0x29) {
       if (register_address == 0xFD) inbound = {0x50};

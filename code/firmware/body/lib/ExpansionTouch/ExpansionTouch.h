@@ -15,6 +15,7 @@ class ExpansionTouch {
  public:
   bool begin(TwoWire& wire);
   bool poll(std::uint32_t now_ms, std::uint8_t& zones);
+  // The 0x71 address ACK, independent of downstream chip configuration.
   bool present() const { return present_; }
   bool verified() const { return verified_; }
  private:

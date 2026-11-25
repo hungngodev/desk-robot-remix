@@ -495,6 +495,11 @@ void setup() {
   // Keep motors and servos de-energized through all five device inits.
   // No accepted calibration is embedded in this image. A local calibration
   // commit and a fresh manual USB rearm are required before any arm can pass.
+#if DESK_ROBOT_EXTRA_RANGERS
+  // The complete eight-ranger product includes the 0x71 accessory mux.
+  // A startup NACK is not proof of isolation on this required topology.
+  tof.note_optional_mux_present();
+#endif
   if (!tof.begin(body_pins::kSensorSda, body_pins::kSensorScl,
                  body_pins::kMuxReset)) {
     cliff_guard.bus_fault();
@@ -608,11 +613,10 @@ void setup() {
       "INFO required_max17048_found_unqualified_until_first_read" :
       "ERR required_max17048_missing_motor_locked");
 #endif
-  // These drivers probe the SAME 0x71 multiplexer after TofBus's own
-  // initial check. A transient 0x71 startup NACK must not let a later
-  // discovered CAP1188 at 0x29 coexist with an active VL53L0X lane.
-  // This only strengthens isolation; a failed quiescence forces local STOP.
-  if (petting_present || paw_present || accessory_mux)
+  // A mux ACK proves presence even if downstream configuration/readback
+  // fails. Do not use sensor begin() success as the isolation contract.
+  // This also protects the five-ranger bench if a later 0x71 probe succeeds.
+  if (cap1188.present() || paw_pulse.mux_present() || accessories.mux_present())
     tof.note_optional_mux_present();
   Serial.println(accessory_mux ? "INFO optional_accessory_bus_probed" :
                                  "INFO optional_accessory_bus_unavailable");

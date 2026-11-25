@@ -236,6 +236,48 @@ int main() {
       CHECK(Wire.extras == 0);
     }
     {
+      // Full product predeclares 0x71: absence at cold boot must not
+      // permit even one critical ranging initialization.
+      Wire = TwoWire{};
+      Wire.optional_mux_installed = false;
+      desk_robot::TofBus bus;
+      bus.note_optional_mux_present();
+      CHECK(!bus.begin(21, 22, -1));
+      CHECK(!bus.ready());
+      CHECK(Wire.ranges == 0 && Wire.tof_samples == 0);
+      Wire.optional_mux_installed = true;
+      CHECK(bus.begin(21, 22, -1));
+      CHECK(bus.ready() && Wire.extras == 0);
+    }
+    {
+      // NACK on the optional mux command, NACK on its control readback,
+      // or a rejected write buffer must all prevent any new 0x70 sample.
+      for (unsigned fault = 0; fault < 3; ++fault) {
+        Wire = TwoWire{};
+        desk_robot::TofBus bus;
+        desk_robot::CliffGuard guard;
+        ready(bus, guard);
+        bus.poll(guard, 60);
+        CHECK(bus.extra_diagnostic(0, 60).valid);
+        const auto before = Wire.tof_samples;
+        const auto selected = Wire.ranges;
+        Wire.optional_mux_write_nack = fault == 0;
+        Wire.optional_mux_read_nack = fault == 1;
+        Wire.fail_optional_mux_write = fault == 2;
+        bus.poll(guard, 61);
+        CHECK(Wire.tof_samples == before && Wire.ranges == selected);
+        CHECK(!bus.extra_diagnostic(0, 62).valid);
+        CHECK(!bus.optical_diagnostic(0, 62).valid);
+        faulted(guard);
+        Wire.optional_mux_write_nack = false;
+        Wire.optional_mux_read_nack = false;
+        Wire.fail_optional_mux_write = false;
+        for (std::uint32_t at = 62; at < 68; ++at) bus.poll(guard, at);
+        CHECK(!guard.evaluate(70)); // no automatic recovery
+        CHECK(guard.try_rearm(70));
+      }
+    }
+    {
       Wire = TwoWire{};
       Wire.optional_mux_installed = false; // five sensor bench profile
       desk_robot::TofBus bus;

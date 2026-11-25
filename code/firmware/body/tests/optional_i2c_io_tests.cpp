@@ -64,6 +64,7 @@ int main() {
       desk_robot::ExpansionTouch failed_config;
       CHECK(!failed_config.begin(failed_config_wire));
       CHECK(!failed_config.verified());
+      CHECK(failed_config.present()); // mux ACK survives failed CAP init
       CHECK(failed_config_wire.ranges == 0 && failed_config_wire.extras == 0);
       std::uint8_t untouched = 0x5A;
       CHECK(!failed_config.poll(100, untouched));
@@ -362,6 +363,7 @@ int main() {
     stuck_extra_pulse_wire.optional_mux_stuck = true;
     desk_robot::PulsePad stuck_extra_pulse;
     CHECK(!stuck_extra_pulse.begin(stuck_extra_pulse_wire));
+    CHECK(stuck_extra_pulse.mux_present()); // ACK is not chip readiness
     CHECK(stuck_extra_pulse_wire.extras == 0);
     TwoWire late_bad_mux_pulse_wire;
     desk_robot::PulsePad late_bad_mux_pulse;
@@ -775,6 +777,13 @@ int main() {
     CHECK(optional_accessories.readings().dock.valid);
     CHECK(optional_accessories.readings().dock.sample_seq > 0U);
     // A mux can ACK while leaving its old control register selected.
+    // A failed startup close cannot erase discovery of the shared mux.
+    TwoWire failed_close_wire;
+    failed_close_wire.extras = 1;
+    failed_close_wire.optional_mux_stuck = true;
+    desk_robot::AccessorySensors failed_close;
+    CHECK(!failed_close.begin(failed_close_wire));
+    CHECK(failed_close.mux_present());
     // A missing PN532 or jammed optional lane must never preserve a cached
     // MCP dock status as current valid physical evidence.
     TwoWire stuck_wire;
@@ -887,6 +896,7 @@ int main() {
     CHECK(!missing_paw.begin(missing_mux_wire));
     CHECK(!missing_touch.present() && !missing_touch.verified());
     CHECK(!missing_paw.sample().present && !missing_paw.sample().valid);
+    CHECK(!missing_paw.mux_present() && !missing_accessories.mux_present());
     const auto after_missing_probe = missing_mux_wire.transactions;
     std::uint8_t missing_zones = 0x5a;
     for (std::uint32_t ms = 0; ms < 1200; ms += 12) {

@@ -20,6 +20,8 @@ class AccessorySensors {
   bool begin(TwoWire& wire);
   void poll(std::uint32_t now_ms);
   const AccessoryReadings& readings() const { return data_; }
+  // Independent of successful downstream initialization and final close.
+  bool mux_present() const { return mux_present_; }
   // Local CAP1188 transition only. No speech/network motor commands.
   // Available solely in the isolated hardware one-shot lab build.
   bool request_haptic(std::uint32_t now_ms) {

@@ -15,11 +15,14 @@ class PulsePad {
   // No access to motor pins, arm, safety guard, or lift servo.
   bool poll(std::uint32_t now_ms);
   const OpticalRaw& sample() const { return sample_; }
+  // Acknowledged 0x71 even if selection/readback or optical init failed.
+  bool mux_present() const { return mux_present_; }
  private:
   TwoWire* wire_ = nullptr;
   OpticalRaw sample_{};
   std::uint32_t last_ms_ = 0;
   bool polled_ = false;
+  bool mux_present_ = false;
   // After ambiguous I2C FIFO consumption, discard old records before reuse.
   bool fifo_unsynced_ = false;
   bool select();

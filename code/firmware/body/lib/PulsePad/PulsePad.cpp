@@ -21,6 +21,7 @@ bool PulsePad::select_mux(std::uint8_t address, std::uint8_t mask) {
   // Always finish a partial transfer; an ACK alone does not prove the
   // 0x70/0x71 multiplexer selected the requested channel.
   const bool acknowledged = wire_->endTransmission(true) == 0;
+  if (address == kExtraMux && acknowledged) mux_present_ = true;
   if (!wrote || !acknowledged) return false;
   if (wire_->requestFrom(address, static_cast<std::size_t>(1), true) != 1 ||
       wire_->available() < 1) return false;

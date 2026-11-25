@@ -58,6 +58,7 @@ class TofBus {
   // independently recognized by a later touch or accessory driver. Once
   // observed, ALWAYS prove 0x71 is disabled before selecting a 0x70 lane:
   // both generic CAP1188 and VL53L0X carriers can answer at 0x29.
+  // Also predeclare 0x71 for a build whose hardware topology requires it.
   // Never clear the required quiescence rule on a later transient NACK.
   void note_optional_mux_present() { optional_mux_present_ = true; }
   std::uint8_t last_channel() const { return next_channel_; }
