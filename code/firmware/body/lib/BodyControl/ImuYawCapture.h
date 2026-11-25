@@ -58,8 +58,7 @@ class ImuYawCapture {
     const std::int64_t norm_max = calibration_.accel_norm_max_raw;
     if (r.model != BerryModel::Mpu6050 || !r.valid ||
         !r.low_g_status_valid || r.low_g_irq ||
-        r.gyro[calibration_.axis] == -32768 ||
-        r.gyro[calibration_.axis] == 32767 ||
+        gyro_saturated(r) ||
         corrected > calibration_.max_rate_raw ||
         corrected < -static_cast<std::int32_t>(calibration_.max_rate_raw) ||
         r.temperature_raw < calibration_.temp_min_raw ||
@@ -180,6 +179,13 @@ class ImuYawCapture {
   std::uint32_t segment() const { return segment_; }
 
  private:
+  static bool gyro_saturated(const BerryReading& r) {
+    // Clipping any axis loses evidence of planar motion.
+    for (const auto rate : r.gyro)
+      if (rate == -32768 || rate == 32767) return true;
+    return false;
+  }
+
   static bool same_sample(const BerryReading& a, const BerryReading& b) {
     if (a.model != b.model || a.valid != b.valid ||
         a.at_ms != b.at_ms || a.temperature_raw != b.temperature_raw ||

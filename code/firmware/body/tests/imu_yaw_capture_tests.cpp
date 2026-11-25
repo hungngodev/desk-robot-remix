@@ -172,7 +172,36 @@ static void extreme_axes_and_stationary_bias() {
     }
   }
 }
+// A clipped roll or pitch axis makes planar yaw evidence untrustworthy,
+// even when the configured yaw channel and acceleration norm look quiet.
+static void saturation_on_every_gyro_axis() {
+  for (std::uint8_t yaw_axis = 0; yaw_axis < 3; ++yaw_axis) {
+    for (std::uint8_t clipped_axis = 0; clipped_axis < 3; ++clipped_axis) {
+      for (const std::int16_t rail : {-32768, 32767}) {
+        ImuYawCapture cap;
+        auto c = calibration();
+        c.axis = yaw_axis;
+        check(cap.configure(c));
+        auto clipped = sample(0, 100);
+        clipped.gyro[clipped_axis] = rail;
+        check(cap.observe(clipped, 100) == Result::Invalid);
+        check(!cap.continuous() && cap.segment() == 0);
+        check(cap.observe(sample(0, 100), 100) == Result::Invalid);
+        check(cap.observe(sample(0, 150), 150) == Result::Baseline);
+        check(cap.observe(sample(0, 200), 200) == Result::Delta);
+        clipped.at_ms = 250;
+        check(cap.observe(clipped, 250) == Result::Invalid);
+        check(!cap.fresh(250) && cap.last_delta_urad() == 0);
+        check(cap.observe(sample(0, 250), 250) == Result::Invalid);
+        check(cap.observe(sample(0, 300), 300) == Result::Baseline);
+        check(cap.segment() == 2);
+      }
+    }
+  }
+}
+
 int main() {
+  saturation_on_every_gyro_axis();
   yaw_and_replay();
   handling_and_calibration_faults();
   rollover_and_drift_latch();
