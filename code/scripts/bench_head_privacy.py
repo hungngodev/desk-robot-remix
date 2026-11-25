@@ -144,6 +144,14 @@ async def measure(head, robot_id: str, *, seconds: float = 15,
                         previous["microphone_privacy_epoch"]):
                     errors.append("Mic read or BOOT counter rolled backward")
                     break
+                # A skipped epoch can hide an entire mute/unmute cycle between
+                # polls. Only one observed transition may advance the epoch.
+                expected_epoch = previous["microphone_privacy_epoch"] + int(
+                    sample["microphone_privacy_muted"] != previous["microphone_privacy_muted"]
+                )
+                if sample["microphone_privacy_epoch"] != expected_epoch:
+                    errors.append("Unobserved or inconsistent BOOT privacy transition")
+                    break
             now = clock()
             accepted += 1
             if first is None:

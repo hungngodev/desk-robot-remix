@@ -279,3 +279,25 @@ async def test_cli_ignores_ambient_proxy_for_authenticated_boot_privacy_bench(
     report = json.loads((tmp_path / "privacy.json").read_text())
     assert report["speaker_playback_verified"] is False
     assert report["physical_audio_privacy_qualified"] is False
+
+
+@pytest.mark.parametrize("broken", [
+    # Extra cycles before mute, during the muted interval, and after unmute.
+    CYCLE[:2] + [dict(row, microphone_privacy_epoch=row["microphone_privacy_epoch"] + 2)
+                 for row in CYCLE[2:]],
+    CYCLE[:4] + [dict(row, microphone_privacy_epoch=row["microphone_privacy_epoch"] + 2)
+                 for row in CYCLE[4:]],
+    CYCLE[:8] + [sample(False, 4, 170)],
+    [CYCLE[0]] + [dict(row, microphone_privacy_epoch=row["microphone_privacy_epoch"] + 2)
+                  for row in CYCLE[1:]],
+    # Epoch wrap during the trial cannot prove the exact two transitions.
+    [sample(False, 0xfffffffe, 100), sample(False, 0xfffffffe, 120),
+     sample(True, 0xffffffff, 130), sample(True, 0xffffffff, 132),
+     sample(True, 0xffffffff, 132), sample(True, 0xffffffff, 132),
+     sample(True, 0xffffffff, 132), sample(False, 0, 132), sample(False, 0, 170)],
+])
+async def test_boot_privacy_cycle_rejects_hidden_transitions_and_rollover(broken):
+    report, _ = await run(broken)
+    assert report["software_boot_privacy_cycle_observed"] is False
+    assert report["errors"]
+    assert report["physical_audio_privacy_qualified"] is False
