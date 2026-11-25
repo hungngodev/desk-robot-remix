@@ -128,7 +128,7 @@ if __name__ == "__main__":
     p.add_argument("--robot", default="robot-01")
     p.add_argument("--require-pass", action="store_true")
     args = p.parse_args()
-    with args.file.open(newline="") as stream:
+    with args.file.open(newline="", encoding="utf-8") as stream:
         reader = csv.DictReader(stream)
         headers = reader.fieldnames
         # DictReader silently overwrites earlier values for repeated names.

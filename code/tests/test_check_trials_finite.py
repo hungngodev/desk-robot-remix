@@ -2,6 +2,8 @@
 
 import csv
 import importlib.util
+import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -426,3 +428,23 @@ def test_a5_candy_start_orientation_is_not_a_key_only_requirement():
         if row["category"] == "candy":
             row["flat_start"] = ""
     assert check_trials.summarize(rows, "robot-01")["physical_acceptance_pass"]
+
+
+def test_a5_cli_reads_utf8_under_ascii_locale(tmp_path):
+    rows = trial_rows()
+    rows[0]["object_description"] = "chìa khóa"
+    path = tmp_path / "unicode-a5.csv"
+    with path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    result = subprocess.run(
+        [sys.executable, "-X", "utf8=0", str(SCRIPT), "--file", str(path), "--require-pass"],
+        env={**os.environ, "LC_ALL": "C"},
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert report["categories"]["key"]["successes"] == 8
+    assert report["physical_acceptance_pass"] is True
+    assert report["assembly_identity_physically_verified"] is False
