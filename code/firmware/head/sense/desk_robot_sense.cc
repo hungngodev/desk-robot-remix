@@ -252,6 +252,9 @@ private:
                 board->body_bridge_->TakeCosmeticMoodCue() :
                 desk_robot::CosmeticMood::kNone;
             if (body_unhealthy || !face_available) model_mood_active = false;
+            // Gate upstream virtual SetEmotion calls on the same LVGL lock.
+            if (board->local_eye_display_ != nullptr)
+                board->local_eye_display_->SetBodyFault(body_unhealthy);
             if (board->display_ != nullptr) {
                 // A new physical WROOM fault cannot leave yesterday's happy
                 // emotion visible until speech finishes. Neutralize it

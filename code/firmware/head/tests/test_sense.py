@@ -2132,3 +2132,138 @@ def test_camera_stream_never_spends_sequence_on_invalid_provenance_headers():
     send = stream.index("status = httpd_resp_send_chunk(", advance)
     assert reserve < format_headers < invalid < reject < valid < advance < send
     assert "++bridge->camera_sequence_" not in stream[:invalid]
+
+
+def test_local_eye_display_arbitrates_faults_subtitles_and_malformed_coordinates():
+    """Compile the actual renderer against a recursive-lock LVGL test double."""
+    source = (HEAD / "sense/desk_robot_sense.cc").read_text()
+    assert "board->local_eye_display_->SetBodyFault(body_unhealthy);" in source
+    compiler = shutil.which("g++") or shutil.which("c++")
+    if compiler is None:
+        raise unittest.SkipTest("Native C++ compiler unavailable")
+    fake = r"""
+#pragma once
+#include <algorithm>
+#include <cassert>
+#include <string>
+#include <vector>
+inline int lock_depth = 0;
+struct lv_obj_t {
+    bool hidden = false;
+    int x = 0, y = 0, w = 0, h = 0;
+    std::vector<lv_obj_t*> children;
+};
+inline lv_obj_t screen;
+inline lv_obj_t* lv_screen_active() { return &screen; }
+inline lv_obj_t* lv_obj_create(lv_obj_t* parent) {
+    assert(lock_depth > 0);
+    auto* node = new lv_obj_t;
+    parent->children.push_back(node);
+    return node;
+}
+inline void lv_obj_del(lv_obj_t* node) {
+    assert(lock_depth > 0);
+    for (auto* child : node->children) lv_obj_del(child);
+    if (node == screen.children[0]) screen.children.clear();
+    delete node;
+}
+inline void lv_obj_set_size(lv_obj_t* n, int w, int h) { n->w = w; n->h = h; }
+inline void lv_obj_set_pos(lv_obj_t* n, int x, int y) { n->x = x; n->y = y; }
+inline void lv_obj_align(lv_obj_t* n, int, int x, int y) { n->x = x; n->y = y; }
+inline void lv_obj_add_flag(lv_obj_t* n, int) { assert(lock_depth > 0); n->hidden = true; }
+inline void lv_obj_remove_flag(lv_obj_t* n, int) { assert(lock_depth > 0); n->hidden = false; }
+inline constexpr int LV_ALIGN_TOP_MID = 0, LV_RADIUS_CIRCLE = 1, LV_OPA_COVER = 2;
+inline constexpr int LV_SCROLLBAR_MODE_OFF = 3, LV_OBJ_FLAG_HIDDEN = 4;
+inline int lv_color_white() { return 1; }
+inline int lv_color_black() { return 0; }
+inline void lv_obj_set_style_radius(lv_obj_t*, int, int) {}
+inline void lv_obj_set_style_pad_all(lv_obj_t*, int, int) {}
+inline void lv_obj_set_style_border_width(lv_obj_t*, int, int) {}
+inline void lv_obj_set_style_bg_color(lv_obj_t*, int, int) {}
+inline void lv_obj_set_style_bg_opa(lv_obj_t*, int, int) {}
+inline void lv_obj_set_scrollbar_mode(lv_obj_t*, int) {}
+class OledDisplay;
+class DisplayLockGuard {
+public:
+    explicit DisplayLockGuard(OledDisplay*) { ++lock_depth; }
+    ~DisplayLockGuard() { --lock_depth; }
+    explicit operator bool() const { return true; }
+};
+class OledDisplay {
+public:
+    virtual ~OledDisplay() = default;
+    virtual void SetupUI() {}
+    int width() const { return 128; }
+    int height() const { return 64; }
+    virtual bool SetEmotion(const char* value) {
+        DisplayLockGuard lock(this);
+        emotion = value;
+        return true;
+    }
+    virtual void SetChatMessage(const char*, const char* value) {
+        DisplayLockGuard lock(this);
+        subtitle = value;
+        std::replace(subtitle.begin(), subtitle.end(), '\n', ' ');
+    }
+    virtual void RemoveChatMessage(const char*, const char* value) {
+        DisplayLockGuard lock(this);
+        std::string text = value;
+        std::replace(text.begin(), text.end(), '\n', ' ');
+        if (text == subtitle) subtitle.clear();
+    }
+    std::string emotion, subtitle;
+};
+"""
+    native = r"""
+#include "face_eye_display.hpp"
+#include <cassert>
+int main() {
+    desk_robot::LocalEyeDisplay display;
+    OledDisplay* upstream = &display;
+    display.SetupUI();
+    auto* layer = screen.children.at(0);
+    auto* pupil = layer->children.at(0)->children.at(0);
+    assert(layer->hidden);
+    display.ShowEyes({true, false, -127, 127});
+    assert(!layer->hidden && pupil->x == 1 && pupil->y == 8);
+    upstream->SetChatMessage("assistant", "first\nline");
+    assert(layer->hidden && display.subtitle == "first line");
+    display.ShowEyes({true, false, 3, 0});
+    assert(layer->hidden);
+    upstream->RemoveChatMessage("assistant", "old");
+    display.ShowEyes({true, false, 3, 0});
+    assert(layer->hidden);
+    upstream->RemoveChatMessage("assistant", "first\nline");
+    display.ShowEyes({true, false, 3, 0});
+    assert(!layer->hidden && pupil->x == 7);
+    assert(upstream->SetEmotion("happy"));
+    display.SetBodyFault(true);
+    assert(layer->hidden && display.emotion == "neutral");
+    assert(!upstream->SetEmotion("happy"));
+    assert(!upstream->SetEmotion(nullptr));
+    assert(display.emotion == "neutral");
+    display.ShowEyes({true, false, 3, 0});
+    assert(layer->hidden);
+    upstream->SetChatMessage("user", "new");
+    display.SetBodyFault(false);
+    display.ShowEyes({true, false, 3, 0});
+    assert(layer->hidden);
+    upstream->SetChatMessage("user", nullptr);
+    display.ShowEyes({true, true, 0, 0});
+    assert(!layer->hidden && pupil->hidden);
+    assert(upstream->SetEmotion("happy"));
+    assert(lock_depth == 0);
+}
+"""
+    with tempfile.TemporaryDirectory() as temp:
+        root = Path(temp)
+        (root / "display").mkdir()
+        (root / "display/oled_display.h").write_text(fake)
+        cpp = root / "face_display_test.cc"
+        binary = root / "face_display_test"
+        cpp.write_text(native)
+        subprocess.run([
+            compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+            "-I", str(root), "-I", str(HEAD / "overlay"), str(cpp), "-o", str(binary),
+        ], check=True, capture_output=True, text=True, env=native_cpp_env())
+        subprocess.run([str(binary)], check=True, capture_output=True, text=True)

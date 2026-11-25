@@ -1,5 +1,10 @@
 #pragma once
 
+#include <algorithm>
+#include <atomic>
+#include <cstring>
+#include <string>
+
 #include "display/oled_display.h"
 #include "face_eye_animator.hpp"
 
@@ -48,12 +53,74 @@ public:
         lv_obj_add_flag(eye_layer_, LV_OBJ_FLAG_HIDDEN);
     }
 
+    // The pinned esp_lvgl_port 2.9.x lock is recursive. Hold the existing
+    // lock across arbitration and base display calls so a concurrent voice
+    // emotion cannot slip through after a fault has been observed.
+    void SetBodyFault(bool active) {
+        if (body_fault_.load(std::memory_order_acquire) == active) return;
+        DisplayLockGuard lock(this);
+        if (!lock) return;  // FaceTask retries the transition on its next tick.
+        body_fault_.store(active, std::memory_order_release);
+        if (active) {
+            RenderEyesLocked({});
+            OledDisplay::SetEmotion("neutral");
+        }
+    }
+
+    bool SetEmotion(const char* emotion) override {
+        if (!emotion) return false;
+        DisplayLockGuard lock(this);
+        if (!lock || (body_fault_.load(std::memory_order_acquire) &&
+                      std::strcmp(emotion, "neutral") != 0)) return false;
+        return OledDisplay::SetEmotion(emotion);
+    }
+
+    // The pinned OLED puts the emotion cell on the left when subtitles are
+    // shown. A centered temporary overlay would cover the transcript instead.
+    // Hide it before publishing text; only a matching removal releases it.
+    void SetChatMessage(const char* role, const char* content) override {
+        DisplayLockGuard lock(this);
+        if (!lock) return;
+        subtitle_ = NormalizeSubtitle(content);
+        if (!subtitle_.empty()) RenderEyesLocked({});
+        OledDisplay::SetChatMessage(role, subtitle_.c_str());
+    }
+
+    void RemoveChatMessage(const char* role, const char* content) override {
+        if (!content) return;
+        DisplayLockGuard lock(this);
+        if (!lock) return;
+        OledDisplay::RemoveChatMessage(role, content);
+        if (NormalizeSubtitle(content) == subtitle_) subtitle_.clear();
+    }
+
     void ShowEyes(const EyeFrame& frame) {
+        DisplayLockGuard lock(this);
+        if (!lock) return;
+        RenderEyesLocked(body_fault_.load(std::memory_order_acquire) || !subtitle_.empty()
+                             ? EyeFrame{} : frame);
+    }
+
+    ~LocalEyeDisplay() override {
+        DisplayLockGuard lock(this);
+        if (lock && eye_layer_) lv_obj_del(eye_layer_);
+    }
+
+private:
+    static std::string NormalizeSubtitle(const char* content) {
+        std::string text = content ? content : "";
+        std::replace(text.begin(), text.end(), '\n', ' ');
+        return text;
+    }
+
+    void RenderEyesLocked(EyeFrame frame) {
+        if (!eye_layer_) return;
+        if (!frame.visible) frame = {};
+        frame.x = std::clamp<int>(frame.x, -3, 3);
+        frame.y = std::clamp<int>(frame.y, -3, 3);
         if (frame_known_ && frame.visible == last_.visible &&
             frame.closed == last_.closed && frame.x == last_.x &&
             frame.y == last_.y) return;
-        DisplayLockGuard lock(this);
-        if (!lock || !eye_layer_) return;
         if (!frame.visible) {
             lv_obj_add_flag(eye_layer_, LV_OBJ_FLAG_HIDDEN);
         } else {
@@ -73,16 +140,12 @@ public:
         frame_known_ = true;
     }
 
-    ~LocalEyeDisplay() override {
-        DisplayLockGuard lock(this);
-        if (lock && eye_layer_) lv_obj_del(eye_layer_);
-    }
-
-private:
     lv_obj_t* eye_layer_ = nullptr;
     lv_obj_t* eye_[2] = {nullptr, nullptr};
     lv_obj_t* pupil_[2] = {nullptr, nullptr};
     EyeFrame last_{};
     bool frame_known_ = false;
+    std::atomic<bool> body_fault_{false};
+    std::string subtitle_;
 };
 }  // namespace desk_robot
