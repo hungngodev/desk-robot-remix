@@ -154,7 +154,7 @@ store them outside the local protected trial directory.
    ```sh
    cd code
    uv run --no-sync python scripts/capture_sense_aec.py \
-     --head-url http://<actual_private_Sense_IP>:8081 \
+     --head-url "http://${SENSE_IP:?Set SENSE_IP to the head LAN IPv4}:8081" \
      --robot-id robot-01 --token-env DESK_ROBOT_HEAD_01_TOKEN \
      --output-dir data/private/aec_lab_trial \
      --i-consent-to-private-raw-audio
@@ -164,8 +164,10 @@ store them outside the local protected trial directory.
    before starting. The **flashed firmware**, not just the build command,
    must report integer `aec_delay_config_ms=0` and
    `microphone_privacy_muted=false`. Missing or nonzero configuration
-   stops the client before any START request. It also validates the same
-   robot identity, boot epoch and the particular capture generation in
+   stops the client before any START request. START also carries the boot and
+   microphone privacy epochs observed by this client; stale values must not
+   consume a newer physical grant. It validates the same robot identity,
+   boot epoch and particular capture generation in
    the authenticated START response, subsequent STATUS and raw PCM headers.
    This rejects an old completed recording from the same device after
    a new START. Firmware also discards a PDM callback whose samples began
