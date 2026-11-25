@@ -290,6 +290,7 @@ class PetController:
         self.on_low_battery_dock = on_low_battery_dock
         self.on_dock_inhibit_changed = on_dock_inhibit_changed
         self.states = {robot.id: PetState() for robot in settings.robots}
+        self._scheduled_quiet = quiet_hours_active(getattr(settings, "pet_quiet_hours", None))
         self._vision_lock = asyncio.Lock()
         self._vision_inflight: asyncio.Task | None = None
         # A queued background camera comparison does not yet have an
@@ -388,10 +389,19 @@ class PetController:
             )
 
     def _quiet_hours_active(self) -> bool:
-        return quiet_hours_active(getattr(self.settings, "pet_quiet_hours", None))
+        active = quiet_hours_active(getattr(self.settings, "pet_quiet_hours", None))
+        if active != self._scheduled_quiet:
+            # Wall-clock changes decide quiet; monotonic receipt time retires
+            # optional work across either observed edge without resetting cooldowns.
+            self._scheduled_quiet = active
+            changed_at = time.monotonic()
+            for state in self.states.values():
+                state.quiet_changed_at = changed_at
+        return active
 
     def is_quiet(self, robot_id: str) -> bool:
-        return self.states[robot_id].quiet or self._quiet_hours_active()
+        state = self.states[robot_id]
+        return self._quiet_hours_active() or state.quiet
 
     def status(self, robot_id: str) -> dict:
         state = self.states[robot_id]
@@ -2675,6 +2685,7 @@ class PetController:
             if camera_consent_generation is None else camera_consent_generation
         )
         state = self.states[robot_id]
+        scheduled_quiet = self._quiet_hours_active()
         now = time.monotonic()
         if (self._closed or not state.enabled or state.generation != generation
                 or (camera_derived and self.settings.mode == "hardware"
@@ -2774,7 +2785,7 @@ class PetController:
             else self.speech_cooldown
         )
         if (
-            self.is_quiet(robot_id)
+            state.quiet or scheduled_quiet
             or self._human_active_in_fleet(now)
             or now - previous < self.group_window
             or now - self._group_last_spoken < relevant_cooldown
@@ -3653,13 +3664,13 @@ class PetController:
             )
 
         try:
-            if offered_at < state.quiet_changed_at:
-                state.suppressed += 1
-                state.last_initiative_suppression = "quiet_transition_superseded_event"
-                return
             if self._quiet_hours_active():
                 state.suppressed += 1
                 state.last_initiative_suppression = "scheduled_quiet_hours"
+                return
+            if offered_at < state.quiet_changed_at:
+                state.suppressed += 1
+                state.last_initiative_suppression = "quiet_transition_superseded_event"
                 return
             if not camera_source_current():
                 state.suppressed += 1

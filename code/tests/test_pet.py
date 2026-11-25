@@ -8455,8 +8455,23 @@ async def test_tactile_reply_fences_admitted_camera_context(
 
 
 
-async def test_quiet_toggle_does_not_replay_touch_awaiting_memory(fleet, tmp_path, monkeypatch):
+@pytest.mark.parametrize(("window", "initial", "during", "resumed"), [
+    (None, None, None, None),
+    (["22:00", "07:00"], "06:59", None, "07:00"),
+    (["22:00", "07:00"], "21:59", "22:00", "07:00"),
+    (["01:30", "02:00"], "01:59", None, "01:00"),
+    (["01:30", "02:30"], "01:59", None, "03:00"),
+])
+async def test_quiet_toggle_does_not_replay_touch_awaiting_memory(
+    fleet, tmp_path, monkeypatch, window, initial, during, resumed,
+):
     """Only a fresh post-resumption touch may initiate optional speech."""
+    if window is not None:
+        payload = fleet.model_dump()
+        payload["pet_quiet_hours"] = window
+        fleet = type(fleet).model_validate(payload)
+        clock = [time.strptime(initial, "%H:%M")]
+        monkeypatch.setattr(time, "localtime", lambda *args: clock[0])
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
     speaker = SimulatedSpeaker()
     pet = PetController(
@@ -8474,13 +8489,22 @@ async def test_quiet_toggle_does_not_replay_touch_awaiting_memory(fleet, tmp_pat
         return await original(robot_id, change, **kwargs)
 
     monkeypatch.setattr(pet, "_store_observation", delayed_store)
-    await pet.set_quiet("robot-01", True)
+    if window is None:
+        await pet.set_quiet("robot-01", True)
     pending = asyncio.create_task(pet._remember_touch(
         "robot-01", 94, "touch_tap", "My head was tapped",
     ))
     try:
         await asyncio.wait_for(entered.wait(), timeout=2)
-        await pet.set_quiet("robot-01", False)
+        if window is None:
+            await pet.set_quiet("robot-01", False)
+        else:
+            if during is not None:
+                clock[0] = time.strptime(during, "%H:%M")
+                assert pet.status("robot-01")["quiet_hours_active"]
+            clock[0] = time.strptime(resumed, "%H:%M")
+            # Admission itself must notice the exit, even before the next
+            # activity-loop poll or status request.
         resume.set()
         await asyncio.wait_for(pending, timeout=3)
         assert pet._speech_task is None
