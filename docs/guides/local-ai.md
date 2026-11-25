@@ -5,7 +5,13 @@ M1 Max/64 GB Mac, but **no LLM, speech or vision weights were downloaded**, and
 the full AI server has not been launched. The steps below use existing projects
 and keep their larger dependencies isolated. No paid API is required.
 
-Run commands from the repository’s `code/` folder.
+Run commands from the repository’s `code/` folder. On a clean checkout, install
+`uv`, then restore the pinned source projects and install the coordinator:
+
+```sh
+uv sync --extra dev
+uv run python scripts/restore_upstreams.py
+```
 
 ## Conversation stack
 
@@ -41,7 +47,8 @@ configuration/tokenizer files are present; model weights are not.
 5. Copy `config/robots.example.toml` to `config/local.toml`. Enter the real head
    IP and its Xiaozhi `device-id` from its boot/server connection. Keep movement
    disabled until stand tests and measured calibration pass.
-6. Generate `config/local.env` once with `uv run desk-robot secrets`. Head token
+6. Generate `config/local.env` once with
+   `uv run desk-robot --config config/local.toml secrets`. Head token
    values must match each head's private firmware build. The operator and model
    tool tokens are distinct. Do not paste credentials into committed config.
 
@@ -116,7 +123,10 @@ Start the coordinator:
 uv run desk-robot --config config/local.toml serve
 ```
 
-Local API documentation is at localhost:8765/docs. Use the operator token for
+Local API documentation is at localhost:8765/docs. If you explicitly change
+`serve --port`, pass the matching `--url` before `doctor --live` or other CLI
+requests. The speech server and head must also use their configured endpoints.
+Use the operator token for
 manual enable/move, the separate tool token for the Xiaozhi pickup/stop/job
 functions. Tools cannot enable movement themselves. Ordinary head camera
 explanations remain upstream functionality; the separate detector supplies

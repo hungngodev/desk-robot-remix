@@ -1,7 +1,7 @@
 > Updated 2026-11-12. The esp32_full firmware targets eight VL53L0X
 > channels (five local safety plus three independent read-only directions) through TCA9548A 0x70, local fault latching, USB-only measured
 > calibration, touch interruption and read-only range diagnostics. This is
-> source files and target build profiles, not a verified compile at the current PR head, flashed, fitted or physically qualified assembly. GitHub Actions currently fails before job steps execute.
+> source files and target build profiles, not a verified compile at the current PR head, flashed, fitted or physically qualified assembly. Use the exact current PR head and its workflow results; older runner failures are historical.
 > `rearm` is local WROOM USB only, never the head, Mac or model; ordinary arm
 > cannot clear a fault. See firmware-foundation.md and the verification record.
 
@@ -107,7 +107,8 @@ in the CSV and summarized by `scripts/check_trials.py`, separately from the API.
 Operator `/enable` grants a 30-second one-use permit for one bounded job.
 For hardware mode, the coordinator first fetches the existing authenticated
 Sense `/api/status` response and refuses a permit unless the actual WROOM
-reports its expected stepper backend, correct robot identity, disarmed state,
+reports the per-robot configured guarded motor backend (`stepper_28byj48` or
+`dc_pwm_guarded`), correct robot identity, disarmed state,
 unpressed touch, clear local five-channel safety and five present, valid,
 recent readings. It checks **again immediately before the job arms**; a touch,
 disconnect, stale reading or fault between permit and execution therefore

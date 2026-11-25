@@ -21,6 +21,10 @@ Do not use historical Freenove/CoreS3 configurations for the selected Sense head
 
 ## Complete first robot route
 
+For the Mac coordinator, private configuration, pinned Xiaozhi overlay,
+provider dependencies and server startup, follow [Local AI setup](local-ai.md).
+The read-only CLI doctor is not physical qualification or a movement permit.
+
 Use this file as the single entry point for the first complete pet. The linked
 records remain canonical for measurements and generated wiring, so do not copy
 them into a second shopping list or hand-edit generated pin tables.

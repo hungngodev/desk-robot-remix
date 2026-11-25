@@ -1,4 +1,5 @@
 """Live Mac camera and vision preflight never issues motor, charger or pickup commands."""
+import sys
 from types import SimpleNamespace
 
 import httpx
@@ -119,9 +120,11 @@ async def test_live_doctor_owned_client_ignores_proxy_environment(monkeypatch):
     original_client = httpx.AsyncClient
     transport, calls = simulated_mac()
     options = []
+    urls = []
 
     def factory(*args, **kwargs):
         options.append(kwargs.get("trust_env"))
+        urls.append(kwargs.get("base_url"))
         return original_client(*args, transport=transport, **kwargs)
 
     monkeypatch.setenv("DESK_ROBOT_TOOL_TOKEN", "t" * 40)
@@ -133,9 +136,12 @@ async def test_live_doctor_owned_client_ignores_proxy_environment(monkeypatch):
 
     settings = configured()
     settings.tools_token_env = "DESK_ROBOT_TOOL_TOKEN"
-    result = await inspect_live_media(settings, "robot-01", look=True)
+    result = await inspect_live_media(
+        settings, "robot-01", look=True, base_url="http://127.0.0.1:9876",
+    )
     assert result["live_tool_tested"] is True
     assert options == [False]
+    assert urls == ["http://127.0.0.1:9876"]
     assert [method for method, _ in calls] == [
         "GET", "GET", "GET", "GET", "POST",
     ]
@@ -241,3 +247,39 @@ async def test_live_doctor_binds_selected_backend_without_motor_commands(
         action in path for _, path in calls
         for action in ("/enable", "/move", "/pickup")
     )
+
+
+def test_cli_missing_config_is_clean_error(monkeypatch, tmp_path, capsys):
+    import desk_robot.cli as cli
+
+    missing = tmp_path / "missing.toml"
+    monkeypatch.setattr(sys, "argv", ["desk-robot", "--config", str(missing), "doctor"])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 1
+    assert str(missing) in capsys.readouterr().err
+
+
+def test_cli_doctor_uses_custom_url(monkeypatch, tmp_path):
+    import desk_robot.cli as cli
+
+    settings = SimpleNamespace(
+        mode="hardware", coordinator_token_env="TEST_OPERATOR",
+        tools_token_env="TEST_TOOLS", robots=[SimpleNamespace(
+            id="robot-01", motion_enabled=False, calibration=None,
+        )],
+    )
+    monkeypatch.setattr(cli, "load_settings", lambda path: settings)
+    seen = []
+
+    async def inspect(settings, robot_id, *, look, base_url="http://127.0.0.1:8765"):
+        seen.append((robot_id, look, base_url))
+        return {}
+
+    monkeypatch.setattr(cli, "inspect_live_media", inspect)
+    monkeypatch.setattr(sys, "argv", [
+        "desk-robot", "--secrets", str(tmp_path / "none"),
+        "--url", "http://127.0.0.1:9876", "doctor", "--live",
+    ])
+    cli.main()
+    assert seen == [("robot-01", False, "http://127.0.0.1:9876")]

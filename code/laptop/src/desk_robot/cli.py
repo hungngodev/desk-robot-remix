@@ -65,7 +65,8 @@ def write_secrets(path: Path, settings, *, add_missing: bool = False) -> int:
 
 
 async def inspect_live_media(settings, robot_id: str, *, look: bool = False,
-                             client: httpx.AsyncClient | None = None) -> dict:
+                             client: httpx.AsyncClient | None = None,
+                             base_url: str = "http://127.0.0.1:8765") -> dict:
     """Read-only end-to-end Mac/head/vision preflight, with NO actuator permit."""
     if settings.mode != "hardware" or not settings.voice_vision_tools_enabled:
         raise ValueError("Real XIAO camera preflight requires hardware vision consent")
@@ -165,7 +166,7 @@ async def inspect_live_media(settings, robot_id: str, *, look: bool = False,
     if client is not None:
         return await inspect(client)
     async with httpx.AsyncClient(
-        base_url="http://127.0.0.1:8765",
+        base_url=base_url,
         headers={"Authorization": f"Bearer {secret(settings.tools_token_env)}"},
         # The authenticated local Mac endpoint must ignore ambient proxies.
         trust_env=False,
@@ -301,8 +302,8 @@ def main():
     chat.add_argument("--topic", default="Say hello to each other")
     chat.add_argument("--turns", type=int, default=None, choices=range(1, 11))
     args = p.parse_args()
-    settings = load_settings(args.config)
     try:
+        settings = load_settings(args.config)
         if args.action == "secrets":
             count = write_secrets(args.secrets, settings, add_missing=args.add_missing)
             print(f"Added {count} private credentials at {args.secrets}; values hidden")
@@ -338,7 +339,7 @@ def main():
             if args.live or args.look:
                 result["live_media"] = asyncio.run(inspect_live_media(
                     settings, args.robot or settings.robots[0].id,
-                    look=args.look,
+                    look=args.look, base_url=args.url,
                 ))
         elif args.action == "demo":
             result = asyncio.run(demo(settings))
