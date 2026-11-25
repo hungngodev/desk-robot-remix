@@ -399,7 +399,7 @@ def test_verification_report_never_overwrites_existing_evidence_or_source(
         assert report.is_symlink()
 
 
-def test_verification_report_refuses_a_concurrent_creator(monkeypatch, tmp_path):
+def test_verification_report_refuses_a_concurrent_creator(monkeypatch, tmp_path, capsys):
     report = tmp_path / "verification.json"
     stage = ("test-stage", ["true"], tmp_path, 1)
     monkeypatch.setattr(verify, "steps", lambda suite, build: [stage])
@@ -419,6 +419,38 @@ def test_verification_report_refuses_a_concurrent_creator(monkeypatch, tmp_path)
     monkeypatch.setattr(verify.sys, "argv", [
         "verify_system.py", "--suite", "body", "--report", str(report),
     ])
-    with pytest.raises(ValueError, match="already exists"):
+    with pytest.raises(SystemExit) as error:
         verify.main()
+    assert error.value.code == 2
+    assert "already exists" in capsys.readouterr().err
     assert report.read_text(encoding="utf-8") == "another writer's evidence\\n"
+
+
+def test_invalid_executable_is_failed_stage(tmp_path):
+    tool = tmp_path / "not-a-tool"
+    tool.write_text("not an executable format\n")
+    tool.chmod(0o700)
+    result = verify.run("body-compile", [str(tool)], tmp_path, 2)
+    assert result["pass"] is False
+    assert result["exit_code"] is None
+    assert result["error"].startswith("OSError:")
+
+
+def test_unusable_report_directory(monkeypatch, tmp_path, capsys):
+    parent = tmp_path / "not-a-directory"
+    parent.write_text("protected content\n")
+    monkeypatch.setattr(verify, "steps", lambda suite, build: [
+        ("stage", ["true"], tmp_path, 1),
+    ])
+    monkeypatch.setattr(verify, "source_snapshot", lambda: {
+        "sha": "a" * 40, "tracked_clean": True,
+        "root_tree_intact": True, "error": None,
+    })
+    monkeypatch.setattr(verify.sys, "argv", [
+        "verify_system.py", "--report", str(parent / "report.json"),
+    ])
+    with pytest.raises(SystemExit) as error:
+        verify.main()
+    assert error.value.code == 1
+    assert "Cannot create verification report directory" in capsys.readouterr().err
+    assert parent.read_text() == "protected content\n"

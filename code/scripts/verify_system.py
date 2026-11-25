@@ -167,7 +167,7 @@ def run(name: str, argv: list[str], cwd: Path, timeout: int) -> dict:
             stderr = stderr.decode("utf-8", errors="replace")
         result["output_tail"] = (stdout + "\n" + stderr)[-12000:]
         result["error"] = type(exc).__name__ + ": " + str(exc)[:300]
-    except (FileNotFoundError, PermissionError) as exc:
+    except OSError as exc:
         result["error"] = type(exc).__name__ + ": " + str(exc)[:300]
     result["elapsed_s"] = round(time.monotonic() - started, 2)
     return result
@@ -288,15 +288,18 @@ def main() -> int:
         "commercial_batch_release_ready": False,
         "assembly_ready": False,
     }
-    args.report.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        parser.exit(1, f"Cannot create verification report directory: {exc}\n")
     try:
         # Exclusive creation also closes the race after the initial check.
         with args.report.open("x", encoding="utf-8") as report_file:
             report_file.write(json.dumps(receipt, indent=2) + "\n")
-    except FileExistsError as exc:
-        raise ValueError(
-            "Verification report already exists; choose an unused path"
-        ) from exc
+    except FileExistsError:
+        parser.error("Verification report already exists; choose an unused path")
+    except OSError as exc:
+        parser.exit(1, f"Cannot write verification report: {exc}\n")
     print("Machine-readable verification: " + str(args.report))
     return 0 if receipt["source_suite_pass"] and clean_same_commit else 1
 
