@@ -30,7 +30,7 @@ class ExpansionTouch {
   bool verified_ = false;
   bool recovering_ = false;
   std::uint8_t recovery_step_ = 0;
-  static constexpr std::uint8_t kRecoverySteps = 6;
+  static constexpr std::uint8_t kRecoverySteps = 7;
   bool polled_ = false;
   std::uint32_t last_ms_ = 0;
   bool mux(std::uint8_t address, std::uint8_t mask);

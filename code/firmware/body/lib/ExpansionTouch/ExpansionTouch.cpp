@@ -72,6 +72,7 @@ bool ExpansionTouch::configure_step(std::uint8_t step) {
     case 3: return configure_bits(0x2F, 0x7F, 0x0A);  // baseline tracking
     case 4: return configure_bits(0x20, 0x38, 0x00);  // filters on, held recal off
     case 5: return configure_bits(0x44, 0x04, 0x00);  // RF noise filter on
+    case 6: return configure_bits(0x21, 0xFF, 0xFF);  // all eight inputs, DS00001620C §6.7
     default: return false;
   }
 }

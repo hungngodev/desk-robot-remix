@@ -31,12 +31,15 @@ int main() {
     CHECK(!desk_robot::ads1115_completed_for_channel(0xD383U, 0U)); // wrong mux
     CHECK(!desk_robot::ads1115_completed_for_channel(0xC383U, 2U)); // no lane 2
     CHECK(pulse.begin(Wire));
+    Wire.cap_input_enable = 0x01;
     CHECK(touch.begin(Wire));
+    CHECK(Wire.cap_input_enable == 0xFF);
     CHECK(Wire.ranges == 0 && Wire.extras == 0);
     // Common generic CAP1188 address 0x29 works on isolated 0x71 lane 0,
     // without requiring a special 0x28 resistor-strap carrier.
     TwoWire generic_touch_wire;
     generic_touch_wire.cap_uses_0x29 = true;
+    generic_touch_wire.cap_input_enable = 0x0F;
     generic_touch_wire.cap_config = 0xF8; // unrelated bits + disabled filters
     generic_touch_wire.cap_config2 = 0x45; // RF disabled; preserve unrelated bits
     generic_touch_wire.cap_recal_config = 0x7F;
@@ -44,6 +47,17 @@ int main() {
     desk_robot::ExpansionTouch generic_touch;
     CHECK(generic_touch.begin(generic_touch_wire));
     CHECK(generic_touch.verified());
+    CHECK(generic_touch_wire.cap_input_enable == 0xFF);
+    for (bool preferred : {false, true}) {
+      TwoWire disabled_input_wire;
+      disabled_input_wire.cap_uses_0x29 = preferred;
+      disabled_input_wire.cap_input_enable = 0x7F;
+      disabled_input_wire.ignore_cap_input_enable_write = true;
+      desk_robot::ExpansionTouch disabled_input_touch;
+      CHECK(!disabled_input_touch.begin(disabled_input_wire));
+      CHECK(!disabled_input_touch.verified());
+      CHECK(disabled_input_wire.extras == 0 && disabled_input_wire.ranges == 0);
+    }
     // Upstream multi-electrode init is now adopted on the isolated mux.
     CHECK(generic_touch_wire.cap_multi_touch_block == 0);
     CHECK(Wire.cap_config == 0x00); // strapped 0x28 also enables noise gate
@@ -177,9 +191,10 @@ int main() {
       recovery_wire.cap_recal_config = 0x7F;
       recovery_wire.cap_multi_touch_block = 0x80;
       recovery_wire.cap_noise_threshold = 3;
-      for (unsigned step = 0; step < 6; ++step) {
+      recovery_wire.cap_input_enable = 0x01;
+      for (unsigned step = 0; step < 7; ++step) {
         CHECK(!recovery_cap.poll(430 + step * 250, recovery_zones));
-        CHECK(recovery_cap.verified() == (step == 5));
+        CHECK(recovery_cap.verified() == (step == 6));
         CHECK(recovery_zones == 0xBC && recovery_wire.extras == 0 &&
               recovery_wire.ranges == 0);
       }
@@ -187,8 +202,9 @@ int main() {
       CHECK(recovery_wire.cap_recal_config == 0x0A &&
             recovery_wire.cap_multi_touch_block == 0);
       CHECK(recovery_wire.cap_noise_threshold == 1);
+      CHECK(recovery_wire.cap_input_enable == 0xFF);
       recovery_wire.cap_touch_bits = 0xA5;
-      CHECK(recovery_cap.poll(1760, recovery_zones));
+      CHECK(recovery_cap.poll(2010, recovery_zones));
       CHECK(recovery_zones == 0xA5 && recovery_wire.extras == 0 &&
             !recovery_wire.unsafe_parallel_mux);
     }

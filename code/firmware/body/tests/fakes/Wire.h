@@ -73,6 +73,8 @@ class TwoWire {
   std::uint8_t cap_main_control = 0x01;
   std::uint8_t cap_touch_bits = 0xA5; // CAP1188 sensor status mask, including release
   std::uint8_t cap_multi_touch_block = 0x80;
+  std::uint8_t cap_input_enable = 0xFF;
+  bool ignore_cap_input_enable_write = false;
   std::uint8_t cap_config2 = 0x40;
   bool ignore_cap_multi_touch_write = false;
   std::uint8_t cap_config = 0x20;
@@ -212,6 +214,8 @@ class TwoWire {
       if (outbound[0] == 0x2a && !ignore_cap_multi_touch_write)
         cap_multi_touch_block = outbound[1];
       if (outbound[0] == 0x44) cap_config2 = outbound[1];
+      if (outbound[0] == 0x21 && !ignore_cap_input_enable_write)
+        cap_input_enable = outbound[1];
       if (outbound[0] == 0x20) {
         if (fail_cap_config_write) return 4;
         if (!ignore_cap_config_write) cap_config = outbound[1];
@@ -322,7 +326,9 @@ class TwoWire {
     } else if (addr == 0x29 && extras == 1 && cap_uses_0x29) {
       if (register_address == 0xFD) inbound = {0x50};
       else if (register_address == 0xFE) inbound = {0x5D};
-      else if (register_address == 0x03) inbound = {cap_touch_bits};
+      else if (register_address == 0x03)
+        inbound = {static_cast<std::uint8_t>(cap_touch_bits & cap_input_enable)};
+      else if (register_address == 0x21) inbound = {cap_input_enable};
       else if (register_address == 0x00) inbound = {cap_main_control};
       else if (register_address == 0x20) inbound = {cap_config};
       else if (register_address == 0x2f) inbound = {cap_recal_config};
@@ -402,7 +408,9 @@ class TwoWire {
       pending_sht = false;
     } else if (addr == 0x28 && register_address == 0xFD) inbound = {0x50};
     else if (addr == 0x28 && register_address == 0xFE) inbound = {0x5D};
-    else if (addr == 0x28 && register_address == 0x03) inbound = {cap_touch_bits};
+    else if (addr == 0x28 && register_address == 0x03)
+      inbound = {static_cast<std::uint8_t>(cap_touch_bits & cap_input_enable)};
+    else if (addr == 0x28 && register_address == 0x21) inbound = {cap_input_enable};
     else if (addr == 0x28 && register_address == 0x00) inbound = {cap_main_control};
     else if (addr == 0x28 && register_address == 0x20) inbound = {cap_config};
     else if (addr == 0x28 && register_address == 0x2f) inbound = {cap_recal_config};
