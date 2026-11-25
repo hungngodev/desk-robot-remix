@@ -118,7 +118,7 @@ class SenseOverlayTests(unittest.TestCase):
         assert "const uint32_t failure_epoch = app.GetSenseAudioFailureEpoch();" in face
         assert "failure_epoch != board->last_audio_failure_epoch_seen_" in face
         assert "(!board->continuous_audio_started_ || failed_since_attempt) &&" in face
-        assert "now_ms - board->last_audio_listen_attempt_ms_ >= 5000U" in face
+        assert "AudioListenRetryDue(uptime_ms, board->last_audio_listen_attempt_ms_)" in face
         assert "board->last_audio_failure_epoch_seen_ = failure_epoch;" in face
         assert "!board->audio_operator_touched_.load()" in face
         assert "device_state == kDeviceStateIdle" in face
@@ -259,7 +259,7 @@ int main() {
         self.assertIn('WifiManager::GetInstance().IsConnected()', source)
         self.assertIn('if (!wifi_connected)', source)
         self.assertIn('board->continuous_audio_started_ = false;', source)
-        self.assertIn('&& wifi_connected && now_ms >= 10000', source)
+        self.assertIn('&& wifi_connected', source)
         self.assertLess(
             source.index('if ((!board->continuous_audio_started_'),
             source.index('app.ToggleChatState();  // existing Xiaozhi realtime listen'),
@@ -847,13 +847,13 @@ int main() {
         # Both initial/reconnect and failure paths must share the throttle.
         self.assertIn(
             "if ((!board->continuous_audio_started_ || failed_since_attempt) &&\n"
-            "                    now_ms - board->last_audio_listen_attempt_ms_ >= 5000U)",
+            "                    AudioListenRetryDue(uptime_ms, board->last_audio_listen_attempt_ms_))",
             face,
         )
         self.assertIn(
-            "now_ms - board->last_audio_listen_attempt_ms_ >= 5000U", face,
+            "AudioListenRetryDue(uptime_ms, board->last_audio_listen_attempt_ms_)", face,
         )
-        self.assertIn("board->last_audio_listen_attempt_ms_ = now_ms;", face)
+        self.assertIn("board->last_audio_listen_attempt_ms_ = uptime_ms;", face)
         self.assertIn("if (!wifi_connected)", face)
         self.assertIn("device_state == kDeviceStateIdle", face)
         self.assertIn("!board->audio_operator_touched_.load()", face)
@@ -2335,6 +2335,13 @@ int main() {
     assert(!state.Read().Fresh(boundary - 11));
     state.Publish({});
     assert(!state.Read().Fresh(boundary));
+    assert(!AudioListenRetryDue(9999, 0));
+    assert(AudioListenRetryDue(10000, 0));
+    assert(!AudioListenRetryDue(14999, 10000));
+    assert(AudioListenRetryDue(15000, 10000));
+    assert(!AudioListenRetryDue(boundary + 100, boundary - 4899));
+    assert(AudioListenRetryDue(boundary + 101, boundary - 4899));
+    assert(!AudioListenRetryDue(boundary - 1, boundary));
     std::atomic<bool> done{false};
     std::thread writer([&] {
         for (uint64_t i = 1; i <= 100000; ++i) {
@@ -2354,9 +2361,10 @@ int main() {
 }
 """
         )
+        pie_flags = [] if sys.platform == "darwin" else ["-fno-pie", "-no-pie"]
         subprocess.run(
             [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-pthread",
-             "-fsanitize=address,undefined", "-fno-pie", "-no-pie",
+             "-fsanitize=address,undefined", *pie_flags,
              str(source), "-o", str(binary)],
             check=True, capture_output=True, text=True, env=native_cpp_env(),
         )

@@ -95,6 +95,12 @@ private:
     BodyFaceStatus status_{};
 };
 
+// The startup delay is absolute uptime, not a wrapping 32-bit face clock.
+constexpr bool AudioListenRetryDue(uint64_t uptime_ms, uint64_t last_attempt_ms) {
+    return uptime_ms >= 10000U && uptime_ms >= last_attempt_ms &&
+           uptime_ms - last_attempt_ms >= 5000U;
+}
+
 class DeskRobotSenseBoard : public WifiBoard {
 private:
     i2c_master_bus_handle_t display_i2c_bus_ = nullptr;
@@ -121,7 +127,7 @@ private:
     std::atomic<bool> boot_press_muted_{false};
     BootPrivacyGesture boot_privacy_gesture_;
     bool continuous_audio_started_ = false;
-    uint32_t last_audio_listen_attempt_ms_ = 0;
+    uint64_t last_audio_listen_attempt_ms_ = 0;
     uint32_t last_audio_failure_epoch_seen_ = 0;
 #endif
 
@@ -191,9 +197,9 @@ private:
             const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
             // Copy under a short independent lock, never held across UART or OLED I/O.
             const auto body = board->body_face_state_.Read();
-            const uint64_t body_now_ms =
+            const uint64_t uptime_ms =
                 static_cast<uint64_t>(esp_timer_get_time() / 1000);
-            const bool body_fresh = body.Fresh(body_now_ms);
+            const bool body_fresh = body.Fresh(uptime_ms);
             // A stalled polling task cannot preserve an old healthy report.
             const bool body_unhealthy = !body_fresh || body.fault;
             // A dock-contact fault is still a mandatory local motor STOP.
@@ -232,14 +238,14 @@ private:
             const bool failed_since_attempt =
                 failure_epoch != board->last_audio_failure_epoch_seen_;
             if ((!board->continuous_audio_started_ || failed_since_attempt) &&
-                    now_ms - board->last_audio_listen_attempt_ms_ >= 5000U) {
+                    AudioListenRetryDue(uptime_ms, board->last_audio_listen_attempt_ms_)) {
                 if (!board->audio_operator_touched_.load()
-                        && wifi_connected && now_ms >= 10000
+                        && wifi_connected
                         && device_state == kDeviceStateIdle
                         && app.GetAecMode() == kAecOnDeviceSide) {
                     board->last_audio_failure_epoch_seen_ = failure_epoch;
                     board->continuous_audio_started_ = true;
-                    board->last_audio_listen_attempt_ms_ = now_ms;
+                    board->last_audio_listen_attempt_ms_ = uptime_ms;
                     app.ToggleChatState();  // existing Xiaozhi realtime listen
                 }
             }
