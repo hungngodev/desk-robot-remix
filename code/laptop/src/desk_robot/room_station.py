@@ -14,7 +14,7 @@ import secrets
 import threading
 import time
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 from .soil_calibration import SoilCalibration
@@ -51,6 +51,8 @@ class RoomObservation:
     # The USB frame station field is validated above; this is protocol
     # provenance, not cryptographic authentication of the attached Feather.
     station_id: str = STATION
+    sensor_ages_ms: dict[str, int] | None = field(default=None, repr=False, compare=False)
+    soil_calibration: SoilCalibration | None = field(default=None, repr=False, compare=False)
 
 
 def _pairs(items: list[tuple[str, object]]) -> dict:
@@ -197,6 +199,37 @@ def _summary(readings: dict, calibration: SoilCalibration | None = None) -> str:
     return "; ".join(bits)[:400] if bits else "No fresh room station measurements"
 
 
+def fresh_room_summary(observation: RoomObservation, *, now: float) -> str | None:
+    """Recompute shared station summary expiring each sensor per MAX_AGES_MS.
+
+    Returns None once every validated sensor has exceeded its physical age bound
+    (never letting a stale sensor piggyback on a newer packet's receive clock).
+    Legacy synthetic RoomObservation fixtures without sensor_ages_ms retain
+    their precomputed summary within the aggregate caller window.
+    """
+    if observation.sensor_ages_ms is None:
+        return observation.summary
+    elapsed_ms = round(1000 * (now - observation.received_at))
+    if elapsed_ms < 0:
+        return None
+    filtered: dict[str, dict] = {}
+    any_fresh = False
+    for sensor in SENSORS:
+        raw = observation.readings.get(sensor)
+        if not isinstance(raw, dict) or not raw.get("valid"):
+            filtered[sensor] = {"valid": False}
+            continue
+        age_at_receipt = observation.sensor_ages_ms.get(sensor)
+        if age_at_receipt is None or age_at_receipt + elapsed_ms > MAX_AGES_MS[sensor]:
+            filtered[sensor] = {"valid": False}
+        else:
+            filtered[sensor] = raw
+            any_fresh = True
+    if not any_fresh:
+        return None
+    return _summary(filtered, observation.soil_calibration)
+
+
 class RoomStationDecoder:
     def __init__(self, soil_calibration: SoilCalibration | None = None) -> None:
         if soil_calibration is not None and not isinstance(soil_calibration, SoilCalibration):
@@ -270,10 +303,12 @@ class RoomStationDecoder:
         # or an intervening invalid reading. Stage all updates atomically.
         sensor_elapsed_ms = self._last_sensor_elapsed_ms.copy()
         sensor_readings = self._last_sensor_readings.copy()
+        sensor_ages_ms: dict[str, int] = {}
         for sensor in SENSORS:
             reading = readings[sensor]
             if _valid_reading(sensor, reading, clock):
                 age = (clock - reading["sample_ms"]) & UINT32
+                sensor_ages_ms[sensor] = age
                 acquired = elapsed_ms - age
                 previous = sensor_elapsed_ms.get(sensor)
                 if previous is not None and acquired < previous:
@@ -296,9 +331,13 @@ class RoomStationDecoder:
         self._last_sensor_elapsed_ms = sensor_elapsed_ms
         self._last_sensor_readings = sensor_readings
         self._last_received_at = float(now)
-        return RoomObservation(seq, clock, float(now), readings,
-                               _summary(readings, self._soil_calibration),
-                               station_id=payload["station"])
+        return RoomObservation(
+            seq, clock, float(now), readings,
+            _summary(readings, self._soil_calibration),
+            station_id=payload["station"],
+            sensor_ages_ms=sensor_ages_ms,
+            soil_calibration=self._soil_calibration,
+        )
 
 
 class RoomSerialFeed:
@@ -317,12 +356,14 @@ class RoomSerialFeed:
     Alternate consumers must supply their own similarly bounded handoff.
     """
     def __init__(self, port: str, on_observation: Callable[[RoomObservation], None],
-                 soil_calibration: SoilCalibration | None = None):
+                 soil_calibration: SoilCalibration | None = None,
+                 on_disconnect: Callable[[], None] | None = None):
         if not isinstance(port, str) or not port.startswith("/dev/"):
             raise ValueError("Room station requires an explicit local serial device")
         self.port = port
         self.on_observation = on_observation
         self.soil_calibration = soil_calibration
+        self.on_disconnect = on_disconnect
         self.last_error: str | None = None
         self.received = 0
         self.rejected = 0  # Invalid USB frames only, not application failures
@@ -465,6 +506,11 @@ class RoomSerialFeed:
                 self.last_error = type(exc).__name__
             finally:
                 reader_stop.set()
+                if callable(self.on_disconnect):
+                    try:
+                        self.on_disconnect()
+                    except Exception:
+                        pass
             if not stop.is_set():
                 try:
                     await asyncio.wait_for(stop.wait(), timeout=1.0)

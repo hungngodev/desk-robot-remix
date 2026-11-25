@@ -55,6 +55,9 @@ class RobotConfig(BaseModel):
     calibration: Path | None = None
     dock_calibration: Path | None = None
     dock_motion_qualified: StrictBool = False
+    autonomous_low_battery_dock_enabled: StrictBool = False
+    spatial_navigation_qualified: StrictBool = False
+    object_detector_qualified: StrictBool = False
     # Actual AVR dock beacon is flashed per physical station. Never infer
     # an assigned dock from a pet name or from one matching IR observation.
     dock_beacon_id: int | None = Field(default=None, ge=1, le=5)

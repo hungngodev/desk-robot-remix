@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 import uuid
+from collections import deque
 from dataclasses import asdict, dataclass, field, replace
 from typing import Awaitable, Callable, TypeVar
 
@@ -106,6 +107,30 @@ class Job:
         return asdict(self)
 
 
+@dataclass
+class DeferredMotionRequest:
+    id: str
+    robot_id: str
+    kind: str
+    expires_at: float
+    queue_generation: int
+    submit_fn: Callable[[], Job] = field(repr=False)
+    consent_check: Callable[[], bool] | None = field(default=None, repr=False)
+    state: str = "queued"  # queued, dispatched, discarded, expired, failed
+    job_id: str | None = None
+    error: str | None = None
+
+    def data(self) -> dict:
+        return {
+            "id": self.id,
+            "robot_id": self.robot_id,
+            "kind": self.kind,
+            "state": self.state,
+            "job_id": self.job_id,
+            "error": self.error,
+        }
+
+
 class Coordinator:
     def __init__(self, settings: Settings, heads: dict[str, Head], vision: Vision):
         self.settings = settings
@@ -129,6 +154,15 @@ class Coordinator:
         self._pending_stops: dict[str, int] = {}
         self._stop_generation = {r.id: 0 for r in settings.robots}
         self._unconfirmed_stops: set[str] = set()
+        self._voice_active_robots: set[str] = set()
+        self._voice_monitor_enforced = False
+        self._voice_monitor_ready = True
+        self._voice_stop_unconfirmed = False
+        self._deferred_voice_queue: deque[DeferredMotionRequest] = deque()
+        self._deferred_requests: dict[str, DeferredMotionRequest] = {}
+        self._deferred_voice_generation = 0
+        self._deferred_dispatch_lock: asyncio.Lock | None = None
+        self._deferred_dispatch_task: asyncio.Task | None = None
 
     def robot(self, robot_id):
         try:
@@ -230,6 +264,9 @@ class Coordinator:
             raise OperationError("motion_enabled=false; no arm sent")
         if robot_id in self._pending_stops or robot_id in self._unconfirmed_stops:
             raise OperationError("WROOM STOP pending or unconfirmed; require acknowledged halt")
+        voice_reason = self.voice_blocks_motion()
+        if voice_reason is not None:
+            raise OperationError(voice_reason)
         if self.locks[robot_id].locked() or any(
             j.robot_id == robot_id and j.state in {"queued", "running"} for j in self.jobs.values()
         ):
@@ -280,6 +317,10 @@ class Coordinator:
                 del self._pending_stops[robot_id]
 
     async def _stop(self, robot_id: str):
+        self.discard_deferred_motion(
+            robot_id=robot_id,
+            reason="STOP requested; deferred motion discarded",
+        )
         self._permit_epoch[robot_id] += 1
         self.permits.pop(robot_id, None)
         running = [
@@ -395,6 +436,10 @@ class Coordinator:
     async def close(self):
         """Revoke permits and send bounded physical STOP before slow cleanup."""
         self.closed = True
+        self.discard_deferred_motion(reason="Coordinator closing")
+        dispatch_task = getattr(self, "_deferred_dispatch_task", None)
+        if dispatch_task is not None and not dispatch_task.done():
+            dispatch_task.cancel()
         self.shutdown_stop_failures.clear()  # Each close attempt owns fresh evidence.
         self.permits.clear()
         for robot_id in self._permit_epoch:
@@ -430,6 +475,231 @@ class Coordinator:
                         "Shutdown task ignored cancellation; WROOM watchdog required"
                     )
 
+    def _ensure_voice_gate(self) -> None:
+        if not hasattr(self, "_voice_active_robots"):
+            self._voice_active_robots = set()
+        if not hasattr(self, "_voice_monitor_enforced"):
+            self._voice_monitor_enforced = False
+        if not hasattr(self, "_voice_monitor_ready"):
+            self._voice_monitor_ready = True
+        if not hasattr(self, "_voice_stop_unconfirmed"):
+            self._voice_stop_unconfirmed = False
+        if not hasattr(self, "_deferred_voice_queue"):
+            self._deferred_voice_queue = deque()
+        if not hasattr(self, "_deferred_requests"):
+            self._deferred_requests = {}
+        if not hasattr(self, "_deferred_voice_generation"):
+            self._deferred_voice_generation = 0
+        if getattr(self, "_deferred_dispatch_lock", None) is None:
+            self._deferred_dispatch_lock = asyncio.Lock()
+
+    def voice_blocks_motion(self) -> str | None:
+        if getattr(self, "_voice_stop_unconfirmed", False):
+            return "Voice priority: speaker STOP unconfirmed"
+        if getattr(self, "_voice_monitor_enforced", False) and not getattr(
+            self, "_voice_monitor_ready", True
+        ):
+            return "Voice priority: voice monitor unavailable"
+        if getattr(self, "_voice_active_robots", ()):
+            return "Voice priority: human speech active"
+        return None
+
+    def set_voice_state(
+        self,
+        *,
+        active_robots: frozenset[str] | set[str] | None = None,
+        monitor_enforced: bool | None = None,
+        monitor_ready: bool | None = None,
+        voice_stop_unconfirmed: bool | None = None,
+    ) -> None:
+        self._ensure_voice_gate()
+        if active_robots is not None:
+            self._voice_active_robots = set(active_robots)
+        if monitor_enforced is not None:
+            self._voice_monitor_enforced = bool(monitor_enforced)
+        if monitor_ready is not None:
+            self._voice_monitor_ready = bool(monitor_ready)
+        if voice_stop_unconfirmed is not None:
+            self._voice_stop_unconfirmed = bool(voice_stop_unconfirmed)
+        if self._voice_stop_unconfirmed or (
+            self._voice_monitor_enforced and not self._voice_monitor_ready
+        ):
+            self.discard_deferred_motion(
+                reason="Voice monitor outage or unconfirmed STOP discarded deferred motion"
+            )
+
+    def discard_deferred_motion(
+        self, *, robot_id: str | None = None, reason: str = "Deferred motion discarded",
+    ) -> int:
+        self._ensure_voice_gate()
+        self._deferred_voice_generation += 1
+        kept: deque[DeferredMotionRequest] = deque()
+        discarded = 0
+        while self._deferred_voice_queue:
+            req = self._deferred_voice_queue.popleft()
+            if robot_id is None or req.robot_id == robot_id:
+                req.state = "discarded"
+                req.error = reason
+                self.permits.pop(req.robot_id, None)
+                if req.robot_id in self._permit_epoch:
+                    self._permit_epoch[req.robot_id] += 1
+                discarded += 1
+            else:
+                kept.append(req)
+        self._deferred_voice_queue = kept
+        pending_auto = getattr(self, "_deferred_autonomous_dock", None)
+        if isinstance(pending_auto, dict):
+            if robot_id is None:
+                discarded += len(pending_auto)
+                pending_auto.clear()
+            elif pending_auto.pop(robot_id, None) is not None:
+                discarded += 1
+        return discarded
+
+    def defer_motion(
+        self,
+        robot_id: str,
+        kind: str,
+        *,
+        submit_fn: Callable[[], Job],
+        consent_check: Callable[[], bool] | None = None,
+        max_wait_seconds: float = 30.0,
+    ) -> DeferredMotionRequest:
+        """Queue a voice-deferred request FIFO while expiring its old permit.
+
+        Original permits NEVER survive across speech_end or resume canceled
+        pre-speech exploration; dispatch requires fresh hardware preflight.
+        """
+        self._ensure_voice_gate()
+        robot = self.robot(robot_id)
+        if self.closed or robot_id in self._pending_stops or robot_id in self._unconfirmed_stops:
+            raise OperationError("Robot unavailable or STOP unconfirmed; cannot defer motion")
+        if not robot.motion_enabled:
+            raise OperationError("Deferred motion requires motion_enabled=true")
+        if self._voice_stop_unconfirmed or (
+            self._voice_monitor_enforced and not self._voice_monitor_ready
+        ):
+            raise OperationError("Voice monitor unavailable; cannot defer motion")
+        if self.permits.get(robot_id, 0) < time.monotonic():
+            self.permits.pop(robot_id, None)
+            raise OperationError("Operator permit missing or expired; enable one operation first")
+        # Consume and retire the pre-speech permit immediately so it cannot
+        # outlive the turn or bypass fresh preflight at speech_end dispatch.
+        self.permits.pop(robot_id, None)
+        self._permit_epoch[robot_id] += 1
+        if len(self._deferred_voice_queue) >= 16:
+            raise OperationError("Deferred voice motion queue is full")
+        if len(self._deferred_requests) >= 128:
+            for oldest_id in list(self._deferred_requests):
+                if self._deferred_requests[oldest_id].state != "queued":
+                    del self._deferred_requests[oldest_id]
+                    break
+        request = DeferredMotionRequest(
+            id=uuid.uuid4().hex,
+            robot_id=robot_id,
+            kind=kind,
+            expires_at=time.monotonic() + max_wait_seconds,
+            queue_generation=self._deferred_voice_generation,
+            submit_fn=submit_fn,
+            consent_check=consent_check,
+        )
+        self._deferred_voice_queue.append(request)
+        self._deferred_requests[request.id] = request
+        return request
+
+    async def dispatch_next_deferred(self) -> Job | None:
+        self._ensure_voice_gate()
+        assert self._deferred_dispatch_lock is not None
+        async with self._deferred_dispatch_lock:
+            while self._deferred_voice_queue:
+                if (
+                    self.closed
+                    or self._fleet_motion_owner is not None
+                    or self.voice_blocks_motion() is not None
+                ):
+                    return None
+                req = self._deferred_voice_queue[0]
+                if (
+                    req.robot_id in self._pending_stops
+                    or req.robot_id in self._unconfirmed_stops
+                ):
+                    return None
+                if time.monotonic() > req.expires_at:
+                    self._deferred_voice_queue.popleft()
+                    req.state = "expired"
+                    req.error = "Deferred motion permit wait window expired"
+                    continue
+                if (
+                    not self.robot(req.robot_id).motion_enabled
+                    or (self.dock_inhibited(req.robot_id) and req.kind in {"exploration", "pickup", "navigate"})
+                    or (req.consent_check is not None and not req.consent_check())
+                ):
+                    self._deferred_voice_queue.popleft()
+                    req.state = "discarded"
+                    req.error = "Motion permission, dock state, or consent revoked before dispatch"
+                    continue
+                self._deferred_voice_queue.popleft()
+                dispatch_epoch = self._permit_epoch[req.robot_id]
+                try:
+                    await self._hardware_preflight(req.robot_id)
+                except Exception as exc:
+                    req.state = "failed"
+                    req.error = str(exc) or type(exc).__name__
+                    return None
+                if (
+                    self.closed
+                    or req.queue_generation != self._deferred_voice_generation
+                    or self._permit_epoch[req.robot_id] != dispatch_epoch
+                    or req.robot_id in self._pending_stops
+                    or req.robot_id in self._unconfirmed_stops
+                    or not self.robot(req.robot_id).motion_enabled
+                    or (self.dock_inhibited(req.robot_id) and req.kind in {"exploration", "pickup", "navigate"})
+                    or (req.consent_check is not None and not req.consent_check())
+                    or self._fleet_motion_owner is not None
+                ):
+                    req.state = "discarded"
+                    req.error = "STOP, fault, or permission change superseded deferred dispatch"
+                    return None
+                if self.voice_blocks_motion() is not None:
+                    # Human spoke again during preflight: discard instead of replaying.
+                    req.state = "discarded"
+                    req.error = "New human voice or monitor loss interrupted deferred dispatch"
+                    return None
+                self.permits[req.robot_id] = time.monotonic() + 5.0
+                try:
+                    job = req.submit_fn()
+                except Exception as exc:
+                    self.permits.pop(req.robot_id, None)
+                    req.state = "failed"
+                    req.error = str(exc) or type(exc).__name__
+                    return None
+                req.state = "dispatched"
+                req.job_id = job.id
+                return job
+            pending_auto = getattr(self, "_deferred_autonomous_dock", None)
+            while pending_auto:
+                if (
+                    self.closed
+                    or self._fleet_motion_owner is not None
+                    or self.voice_blocks_motion() is not None
+                ):
+                    return None
+                robot_id = next(iter(pending_auto))
+                initial_low = pending_auto.pop(robot_id)
+                if (
+                    robot_id in self._pending_stops
+                    or robot_id in self._unconfirmed_stops
+                    or self.dock_inhibited(robot_id)
+                ):
+                    continue
+                job = await self.request_autonomous_low_battery_dock(
+                    robot_id, initial_low=initial_low,
+                )
+                if job is not None:
+                    return job
+            return None
+        return None
+
     def _submit(self, robot_id: str, kind: str, work: Callable[[Job], Awaitable[dict]]) -> Job:
         self.robot(robot_id)
         if self.permits.get(robot_id, 0) < time.monotonic():
@@ -450,6 +720,9 @@ class Coordinator:
             )
         if self._pending_stops or self._unconfirmed_stops:
             raise OperationError("Fleet motion blocked: WROOM STOP pending or unconfirmed")
+        voice_reason = self.voice_blocks_motion()
+        if voice_reason is not None:
+            raise OperationError(voice_reason)
         # Retain only bounded history; never accumulate infinite tasks/results in a long-running server.
         if len(self.jobs) >= 100:
             for jid in list(self.jobs):
@@ -581,6 +854,18 @@ class Coordinator:
                     if getattr(self, "_fleet_motion_owner", None) == job.id:
                         self._motion_children.pop(job.id, None)
                         self._fleet_motion_owner = None
+                        if (
+                            not self.closed
+                            and getattr(self, "_deferred_voice_queue", None)
+                            and self.voice_blocks_motion() is None
+                        ):
+                            existing = getattr(self, "_deferred_dispatch_task", None)
+                            if existing is None or existing.done():
+                                task = asyncio.create_task(self.dispatch_next_deferred())
+                                self._deferred_dispatch_task = task
+                                task.add_done_callback(
+                                    lambda done: None if done.cancelled() else done.exception()
+                                )
 
     def manual(self, robot_id: str, command: str) -> Job:
         robot = self.robot(robot_id)
@@ -664,6 +949,36 @@ class Coordinator:
         )
         return body
 
+    def dock_inhibited(self, robot_id: str) -> bool:
+        """True while dock seat/power/CHG telemetry inhibits away-from-dock motion."""
+        return bool(getattr(self, "_dock_charging_inhibited", {}).get(robot_id, False))
+
+    def set_dock_charge_inhibition(self, robot_id: str, inhibited: bool) -> None:
+        """Sync read-only dock seat/charge-pin status into motion admission."""
+        table = getattr(self, "_dock_charging_inhibited", None)
+        if table is None:
+            table = {}
+            self._dock_charging_inhibited = table
+        flag = bool(inhibited)
+        table[robot_id] = flag
+        if not flag:
+            return
+        discard = getattr(self, "discard_deferred_motion", None)
+        if callable(discard):
+            discard(robot_id=robot_id, reason="Robot seated or powered on dock")
+        active = self.jobs.get(self._fleet_motion_owner) if self._fleet_motion_owner else None
+        task = self.tasks.get(active.id) if active is not None else None
+        if (
+            active is not None
+            and active.robot_id == robot_id
+            and active.kind in {"exploration", "pickup", "navigate"}
+            and task is not None
+            and not task.done()
+            and not task.cancelling()
+        ):
+            active.error = "Stopped: robot seated or powered on dock"
+            task.cancel()
+
     def explore(self, robot_id: str) -> Job:
         """Start operator enabled, persistent but locally guarded exploration.
 
@@ -675,11 +990,72 @@ class Coordinator:
         robot = self.robot(robot_id)
         if not robot.motion_enabled:
             raise OperationError("Exploration requires motion_enabled=true")
+        if self.dock_inhibited(robot_id):
+            raise OperationError("Exploration refused: robot is seated or powered on dock")
         if self.settings.mode == "hardware" and not robot.exploration_qualified:
             raise OperationError(
                 "Hardware exploration needs measured swept-path qualification"
             )
         return self._submit(robot_id, "exploration", self._explore)
+
+    async def request_autonomous_low_battery_dock(
+        self, robot_id: str, *, initial_low: bool = False,
+    ) -> Job | None:
+        """Queue or start bounded dock approach on sustained low battery.
+
+        Fail-closed: requires autonomous_low_battery_dock_enabled, motion_enabled,
+        dock_motion_qualified, measured calibration, assigned beacon, valid
+        steering signs, active camera consent in hardware mode, no dock/charger
+        inhibition, no active fleet motion job, and fresh _hardware_preflight +
+        operator_arm + dock() checks. Never authorizes terminal charging.
+        """
+        robot = self.robot(robot_id)
+        if not robot.autonomous_low_battery_dock_enabled:
+            return None
+        if not robot.motion_enabled or not robot.dock_motion_qualified:
+            return None
+        if (
+            robot.dock_turn_sign not in (-1, 1)
+            or robot.dock_forward_sign not in (-1, 1)
+            or robot.dock_beacon_id is None
+            or robot.dock_calibration is None
+        ):
+            return None
+        if self.settings.mode == "hardware" and not self.settings.voice_vision_tools_enabled:
+            return None
+        if self.dock_inhibited(robot_id):
+            return None
+        try:
+            load_real_dock_calibration(robot.dock_calibration, robot_id=robot_id)
+        except Exception:
+            return None
+        if any(not task.done() for task in self.tasks.values()):
+            return None
+
+        if self.voice_blocks_motion() is not None:
+            pending_auto = getattr(self, "_deferred_autonomous_dock", None)
+            if pending_auto is None:
+                pending_auto = {}
+                self._deferred_autonomous_dock = pending_auto
+            pending_auto[robot_id] = initial_low
+            return None
+        try:
+            await self.operator_arm(robot_id)
+            if (
+                not robot.autonomous_low_battery_dock_enabled
+                or not robot.motion_enabled
+                or not robot.dock_motion_qualified
+                or self.dock_inhibited(robot_id)
+            ):
+                self.permits.pop(robot_id, None)
+                return None
+            if self.settings.mode == "hardware" and not self.settings.voice_vision_tools_enabled:
+                self.permits.pop(robot_id, None)
+                return None
+            return self.dock(robot_id)
+        except OperationError:
+            self.permits.pop(robot_id, None)
+            return None
 
     async def _explore(self, job: Job) -> dict:
         head = self.heads[job.robot_id]
@@ -1053,6 +1429,8 @@ class Coordinator:
             raise OperationError("Pickup target must be key or candy")
         if not robot.motion_enabled or robot.calibration is None:
             raise OperationError("Pickup requires motion_enabled=true and measured calibration")
+        if self.dock_inhibited(robot_id):
+            raise OperationError("Pickup refused: robot is seated or powered on dock")
         calibration = Calibration.load(robot.calibration)
         calibration.verify_ready()
         if calibration.simulation_only and self.settings.mode != "simulation":
@@ -1307,3 +1685,263 @@ class Coordinator:
             "target": target,
             "note": "Image evidence is experimental; no physical 10 mm lift or loaded object acceptance is claimed",
         }
+
+    def navigate(
+        self,
+        robot_id: str,
+        *,
+        label: str | None = None,
+        goal: tuple[int, int] | None = None,
+        goal_heading: int | None = None,
+        start: tuple[int, int] = (0, 0),
+        heading: int = 0,
+    ) -> Job:
+        """Execute a bounded, revalidated Guide 60 route proposal through Coordinator."""
+        robot = self.robot(robot_id)
+        if not robot.motion_enabled or not robot.spatial_navigation_qualified:
+            raise OperationError(
+                "Spatial navigation requires motion_enabled=true and spatial_navigation_qualified=true"
+            )
+        if self.dock_inhibited(robot_id):
+            raise OperationError("Navigation refused: robot is seated or powered on dock")
+        spatial = getattr(self, "spatial", None)
+        if spatial is None:
+            raise OperationError("Spatial runtime unavailable")
+        camera_grant = None
+        if self.settings.mode == "hardware" and label is not None:
+            camera_grant = self._camera_motion_grant()
+        route, _, _ = spatial.plan_navigation(
+            robot_id,
+            start=start,
+            heading=heading,
+            goal=goal,
+            label=label,
+            goal_heading=goal_heading,
+        )
+        if route.status != "planned" or route.may_execute is not False:
+            raise OperationError(f"Navigation refused: {route.reason}")
+        expected_epoch = spatial.state(robot_id).epoch
+        return self._submit(
+            robot_id,
+            "navigate",
+            lambda job: self._navigate(
+                job,
+                route=route,
+                initial_heading=heading,
+                expected_epoch=expected_epoch,
+                label=label,
+                camera_grant=camera_grant,
+            ),
+        )
+
+    async def _navigate(
+        self,
+        job: Job,
+        *,
+        route,
+        initial_heading: int,
+        expected_epoch: int,
+        label: str | None = None,
+        camera_grant: int | None = None,
+    ) -> dict:
+        from .object_detector import DetectorFrame
+
+        spatial = getattr(self, "spatial", None)
+        if spatial is None:
+            raise OperationError("Spatial runtime unavailable")
+        head = self.heads[job.robot_id]
+        robot = self.robot(job.robot_id)
+        turn_sign = robot.dock_turn_sign if robot.dock_turn_sign in (-1, 1) else 1
+        forward_sign = robot.dock_forward_sign if robot.dock_forward_sign in (-1, 1) else 1
+        step_vectors = {(1, 0): 0, (0, 1): 1, (-1, 0): 2, (0, -1): 3}
+        cur_heading = initial_heading
+
+        async def _verify_step_authority(cell: tuple[int, int] | None = None) -> None:
+            if camera_grant is not None:
+                self._require_camera_motion_grant(camera_grant)
+            if self.dock_inhibited(job.robot_id):
+                raise OperationError("Navigation halted: robot seated or powered on dock")
+            st = spatial.state(job.robot_id)
+            if st.epoch != expected_epoch or st.grid is None or not st.grid.anchored:
+                reason = st.invalidated_reason or "epoch_changed"
+                raise OperationError(f"Navigation halted: spatial map invalidated ({reason})")
+            if cell is not None:
+                cell_state = st.grid.state(cell[0], cell[1], now_us=spatial.now_us())
+                if cell_state != "safe":
+                    raise OperationError(
+                        f"Navigation halted: cell {cell} no longer safe ({cell_state})"
+                    )
+            pose_reader = getattr(head, "pose_status", None)
+            if callable(pose_reader):
+                req_start = time.monotonic()
+                pose_payload = await _bounded_head_reply(
+                    pose_reader(),
+                    seconds=1.0,
+                    timeout_message="Spatial navigation pose status timeout",
+                )
+                spatial.observe_pose(
+                    job.robot_id,
+                    pose_payload,
+                    received_at=time.monotonic(),
+                    request_started_at=req_start,
+                )
+
+        def _turn_once(target_heading: int) -> str:
+            delta = (target_heading - cur_heading) % 4
+            if delta == 1:
+                direction = turn_sign
+            elif delta == 3:
+                direction = -turn_sign
+            else:
+                raise OperationError("Navigation refused uncalibrated 180-degree spin")
+            return f"drive {20 * direction} {-20 * direction} 100"
+
+        try:
+            if len(route.cells) <= 1 and (
+                route.final_heading is None or route.final_heading == cur_heading
+            ):
+                await self._assert_armed_health(job.robot_id, require_front_clearance=False)
+                await _verify_step_authority(route.cells[0] if route.cells else None)
+            else:
+                prev_cell = route.cells[0]
+                for next_cell in route.cells[1:]:
+                    await self._assert_armed_health(job.robot_id, require_front_clearance=True)
+                    voice_block = self.voice_blocks_motion()
+                    if voice_block is not None:
+                        return {
+                            "status": "stopped_for_voice",
+                            "reason": voice_block,
+                            "arrived": False,
+                            "motor_authorized": False,
+                            "charging_authorized": False,
+                            "physical_acceptance_pass": False,
+                        }
+                    await _verify_step_authority(next_cell)
+                    dx = next_cell[0] - prev_cell[0]
+                    dy = next_cell[1] - prev_cell[1]
+                    desired_heading = step_vectors.get((dx, dy))
+                    if desired_heading is None:
+                        raise OperationError("Navigation halted: non-adjacent route cell")
+                    if desired_heading != cur_heading:
+                        cmd = _turn_once(desired_heading)
+                        await head.command(cmd)
+                        await asyncio.sleep(0.05)
+                        await _bounded_pulse_stop(head)
+                        cur_heading = desired_heading
+                        await self._assert_armed_health(
+                            job.robot_id, require_front_clearance=True
+                        )
+                        if self.voice_blocks_motion() is not None:
+                            return {
+                                "status": "stopped_for_voice",
+                                "reason": "voice_barge_in",
+                                "arrived": False,
+                                "motor_authorized": False,
+                                "charging_authorized": False,
+                                "physical_acceptance_pass": False,
+                            }
+                        await _verify_step_authority(next_cell)
+                    await head.command(f"drive {20 * forward_sign} {20 * forward_sign} 100")
+                    await asyncio.sleep(0.05)
+                    await _bounded_pulse_stop(head)
+                    job.events.append(f"nav step {next_cell} heading={cur_heading}")
+                    prev_cell = next_cell
+
+                if route.final_heading is not None and route.final_heading != cur_heading:
+                    await self._assert_armed_health(job.robot_id, require_front_clearance=True)
+                    await _verify_step_authority(prev_cell)
+                    await head.command(_turn_once(route.final_heading))
+                    await asyncio.sleep(0.05)
+                    await _bounded_pulse_stop(head)
+                    cur_heading = route.final_heading
+
+            if label is None:
+                return {
+                    "status": "waypoint_reached",
+                    "arrived": True,
+                    "final_cell": route.cells[-1],
+                    "final_heading": cur_heading,
+                    "motor_authorized": False,
+                    "charging_authorized": False,
+                    "physical_acceptance_pass": False,
+                }
+
+            if not robot.object_detector_qualified:
+                return {
+                    "status": "arrived_pending_detector_qualification",
+                    "arrived": False,
+                    "target_observed": False,
+                    "label": label,
+                    "final_cell": route.cells[-1],
+                    "motor_authorized": False,
+                    "charging_authorized": False,
+                    "physical_acceptance_pass": False,
+                }
+
+            snap_fn = getattr(head, "snapshot_for_dock", head.snapshot)
+            raw_obs = await _bounded_head_reply(
+                snap_fn(), seconds=2.0, timeout_message="Navigation verification snapshot timeout"
+            )
+            jpeg = raw_obs[0] if isinstance(raw_obs, tuple) else raw_obs
+            st = spatial.state(job.robot_id)
+            now_us = spatial.now_us()
+            frame = DetectorFrame(
+                robot_id=job.robot_id,
+                session_id=route.session_id,
+                turn_id=route.turn_id,
+                origin_id=st.origin_id,
+                epoch=st.epoch,
+                anchor_id=st.anchor_id,
+                calibration_id=st.calibration_id,
+                camera_boot=st.camera_boot,
+                host_boot_id=spatial.host_boot_id,
+                camera_grant=self.settings.camera_consent_generation,
+                frame_seq=len(st.observations) + 1,
+                captured_us=now_us,
+                received_us=now_us,
+                seen_at_wall_s=time.time(),
+                jpeg=jpeg,
+            )
+            receipt = await spatial.confirm_target_frame(
+                self.vision,
+                frame,
+                label=label,
+                session_id=route.session_id,
+                turn_id=route.turn_id,
+                model_qualified=True,
+                safety_clear=lambda: (
+                    spatial.state(job.robot_id).epoch == expected_epoch
+                    and not self.dock_inhibited(job.robot_id)
+                    and self.voice_blocks_motion() is None
+                ),
+                request_is_current=lambda: (
+                    not job.id or self.jobs.get(job.id, job).state == "running"
+                ),
+            )
+            if receipt.evidence is not None:
+                spatial.record_object_sighting(job.robot_id, receipt.evidence)
+            if receipt.status == "camera_seen":
+                return {
+                    "status": "arrived_target_confirmed",
+                    "arrived": True,
+                    "target_observed": True,
+                    "label": label,
+                    "final_cell": route.cells[-1],
+                    "motor_authorized": False,
+                    "charging_authorized": False,
+                    "physical_acceptance_pass": False,
+                }
+            return {
+                "status": "no_current_sighting",
+                "reason": receipt.reason,
+                "arrived": False,
+                "target_observed": False,
+                "label": label,
+                "final_cell": route.cells[-1],
+                "motor_authorized": False,
+                "charging_authorized": False,
+                "physical_acceptance_pass": False,
+            }
+        except asyncio.CancelledError:
+            spatial.invalidate_robot(job.robot_id, reason="navigation_cancelled")
+            raise

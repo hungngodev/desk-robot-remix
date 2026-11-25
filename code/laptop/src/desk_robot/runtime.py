@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import threading
 import time
@@ -24,6 +25,7 @@ from .simulator import (
     SimulationVision,
 )
 from .soil_calibration import SoilCalibration
+from .spatial_runtime import SpatialRuntime
 from .transport import HttpHead
 from .vision import OllamaScene, YoloWorldVision
 
@@ -73,7 +75,12 @@ class Runtime:
         self.pet = PetController(
             settings, heads, self.conversation, self.memory, scene,
             on_local_fault=self.coordinator.stop,
+            on_low_battery_dock=self._on_low_battery_dock,
+            on_dock_inhibit_changed=self._on_dock_inhibit_changed,
         )
+        self.spatial = SpatialRuntime(settings, self.memory)
+        self.coordinator.spatial = self.spatial
+        self.pet.spatial = self.spatial
         # Shared read-only activity context for the pet; the Coordinator
         # still exclusively owns the job, permits and physical commands.
         self.pet.coordinator_jobs = self.coordinator.jobs
@@ -109,8 +116,9 @@ class Runtime:
         # One coalesced, latest-only callback cannot crowd out live human VAD.
         self._room_dispatch_lock = threading.Lock()
         # Queue provenance belongs to the original sharing grant, not a later ON.
-        self._room_dispatch_pending: tuple[RoomObservation, int | None, bool] | None = None
+        self._room_dispatch_pending = None
         self._room_dispatch_enqueued = False
+        self._room_connection_epoch = 0
         self.room_context_failures = 0
         self._closed = False
         self._close_task: asyncio.Task | None = None
@@ -118,12 +126,39 @@ class Runtime:
         self._fatal_service_error: RuntimeError | None = None
         self._voice_stop_attempt = 0
         self._voice_stop_unconfirmed = False
+        self._voice_speech_active: set[str] = set()
 
     def _on_room_observation(self, observation: RoomObservation) -> None:
         """One Mac owner shares only opt-in, ephemeral environmental facts."""
         if (not self._closed and self.settings.room_station_context_enabled
                 and self.multimodal is not None):
-            self.multimodal.hub.remember_room(observation)
+            remember = self.multimodal.hub.remember_room
+            try:
+                params = inspect.signature(remember).parameters
+                accepts_epoch = "epoch" in params or any(
+                    p.kind is inspect.Parameter.VAR_KEYWORD
+                    for p in params.values()
+                )
+            except (TypeError, ValueError):
+                accepts_epoch = False
+            if accepts_epoch:
+                remember(
+                    observation,
+                    epoch=getattr(self, "_room_connection_epoch", 0),
+                )
+            else:
+                remember(observation)
+
+    def _on_room_disconnect(self) -> None:
+        """Invalidate pending and cached room state when USB disconnects."""
+        with self._room_dispatch_lock:
+            self._room_connection_epoch = getattr(self, "_room_connection_epoch", 0) + 1
+            epoch = self._room_connection_epoch
+            self._room_dispatch_pending = None
+        multimodal = getattr(self, "multimodal", None)
+        hub = getattr(multimodal, "hub", None)
+        if hub is not None and hasattr(hub, "invalidate_room"):
+            hub.invalidate_room(epoch=epoch)
 
     def _deliver_room_observation(self) -> None:
         """Consume the latest room measurement, not every intermediate sample.
@@ -135,10 +170,16 @@ class Runtime:
             queued = self._room_dispatch_pending
             self._room_dispatch_pending = None
             self._room_dispatch_enqueued = False
+            current_conn_epoch = getattr(self, "_room_connection_epoch", 0)
         if queued is not None:
-            observation, grant_generation, granted_at_queue = queued
+            if len(queued) == 4:
+                observation, grant_generation, granted_at_queue, conn_epoch = queued
+            else:
+                observation, grant_generation, granted_at_queue = queued
+                conn_epoch = current_conn_epoch
             if (
                 not granted_at_queue
+                or conn_epoch != current_conn_epoch
                 or not self.settings.room_station_context_enabled
                 or getattr(self.settings, "room_station_consent_generation", None)
                 != grant_generation
@@ -178,8 +219,10 @@ class Runtime:
             grant_after = getattr(
                 self.settings, "room_station_consent_generation", None
             )
+            conn_epoch = getattr(self, "_room_connection_epoch", 0)
             self._room_dispatch_pending = (
                 observation, grant_after, granted and grant_before == grant_after,
+                conn_epoch,
             )
             if self._room_dispatch_enqueued:
                 return
@@ -192,6 +235,24 @@ class Runtime:
                 self._room_dispatch_enqueued = False
             if not self._closed:
                 raise
+
+    def _on_dock_inhibit_changed(self, robot_id: str, inhibited: bool) -> None:
+        if getattr(self, "_closed", False):
+            return
+        setter = getattr(getattr(self, "coordinator", None), "set_dock_charge_inhibition", None)
+        if callable(setter):
+            setter(robot_id, inhibited)
+
+    async def _on_low_battery_dock(self, robot_id: str, initial_low: bool) -> None:
+        if getattr(self, "_closed", False):
+            return
+        requester = getattr(
+            getattr(self, "coordinator", None),
+            "request_autonomous_low_battery_dock",
+            None,
+        )
+        if callable(requester):
+            await requester(robot_id, initial_low=initial_low)
 
     async def start(self):
         """Bridge Xiaozhi's real voice interruption into Mac speech cancellation."""
@@ -223,6 +284,7 @@ class Runtime:
                     loop, observation
                 ),
                 soil_calibration=soil_calibration,
+                on_disconnect=self._on_room_disconnect,
             )
             self._room_task = asyncio.create_task(
                 self.room_feed.run(self._room_stop),
@@ -232,6 +294,9 @@ class Runtime:
             )
         if not any(robot.device_id for robot in self.settings.robots):
             return
+        sync_voice = getattr(getattr(self, "coordinator", None), "set_voice_state", None)
+        if callable(sync_voice):
+            sync_voice(monitor_enforced=True, monitor_ready=False, voice_stop_unconfirmed=False)
         self.voice_events = VoiceEventListener(
             self.client, url=self.settings.speech_bridge_url,
             token=secret(self.settings.speech_bridge_token_env),
@@ -249,6 +314,8 @@ class Runtime:
             lambda task: self._on_service_done("Native voice monitor", task)
         )
         if self.settings.pet_autostart_enabled:
+            self.pet.on_low_battery_dock = self._on_low_battery_dock
+            self.pet.on_dock_inhibit_changed = self._on_dock_inhibit_changed
             # Boot into autonomous observation only after explicit local
             # operator consent. Current voice monitor is NOT ready yet, so
             # any camera/sensor events remain silent until Xiaozhi's live
@@ -374,6 +441,12 @@ class Runtime:
             # A recovered VAD snapshot can be the FIRST evidence of a
             # speaking human. Both speech and roaming stop concurrently.
             stop_attempt = self._begin_voice_stop()
+            sync_voice = getattr(getattr(self, "coordinator", None), "set_voice_state", None)
+            if callable(sync_voice):
+                sync_voice(
+                    active_robots=set(active) | set(getattr(self, "_voice_speech_active", ())),
+                    voice_stop_unconfirmed=True,
+                )
             outcomes = await asyncio.gather(
                 self._preempt_audio_floor(),
                 self._stop_autonomous_roaming_for_voice(),
@@ -438,21 +511,48 @@ class Runtime:
                     else:
                         visual.voice_started(robot_id)
             recovering.clear()
+        self._voice_speech_active = set(active)
+        coord = getattr(self, "coordinator", None)
+        sync_voice = getattr(coord, "set_voice_state", None)
+        if callable(sync_voice):
+            sync_voice(
+                active_robots=self._voice_speech_active,
+                voice_stop_unconfirmed=getattr(self, "_voice_stop_unconfirmed", False),
+            )
         if preempt_error is not None:
             raise preempt_error
+        if (
+            not self._voice_speech_active
+            and not getattr(self, "_voice_stop_unconfirmed", False)
+            and callable(getattr(coord, "dispatch_next_deferred", None))
+        ):
+            await coord.dispatch_next_deferred()
 
     async def _on_voice_monitor_ready(self, ready: bool) -> None:
         if getattr(self, "_closed", False):
             return
         # Re-enable spontaneous voice only after a successful authenticated
         # event-stream bootstrap or ordered poll, never on a guessed timeout.
+        coord = getattr(self, "coordinator", None)
+        sync_voice = getattr(coord, "set_voice_state", None)
         if ready:
             if getattr(self, "_voice_stop_unconfirmed", False):
                 raise RuntimeError("Voice monitor recovery requires confirmed STOP")
             self.pet.set_voice_monitor_ready(True)
+            if callable(sync_voice):
+                sync_voice(
+                    monitor_enforced=True,
+                    monitor_ready=True,
+                    voice_stop_unconfirmed=False,
+                )
+            dispatch = getattr(coord, "dispatch_next_deferred", None)
+            if callable(dispatch) and not getattr(self, "_voice_speech_active", ()):
+                await dispatch()
             return
         # A dead VAD monitor cannot certify a current signed tool turn.
         self._voice_turn_generations = None
+        if callable(sync_voice):
+            sync_voice(monitor_enforced=True, monitor_ready=False)
         try:
             self.pet.set_voice_monitor_ready(False)
         finally:
@@ -466,6 +566,14 @@ class Runtime:
             raise ValueError("Unsupported global voice transport fault")
         self._voice_turn_generations = None
         stop_attempt = self._begin_voice_stop()
+        coord = getattr(self, "coordinator", None)
+        sync_voice = getattr(coord, "set_voice_state", None)
+        if callable(sync_voice):
+            sync_voice(
+                monitor_enforced=True,
+                monitor_ready=False,
+                voice_stop_unconfirmed=True,
+            )
         failures: list[BaseException] = []
         # Neither synchronous callback may skip the independent native
         # decoder, group audio, or roaming STOP owners.
@@ -516,9 +624,18 @@ class Runtime:
         # asynchronously recovering server snapshot before changing leases.
         self._voice_edge_generation = getattr(self, "_voice_edge_generation", 0) + 1
         attention = getattr(self, "attention", None)
+        speech_active = getattr(self, "_voice_speech_active", None)
+        if speech_active is None:
+            speech_active = set()
+            self._voice_speech_active = speech_active
+        coord = getattr(self, "coordinator", None)
+        sync_voice = getattr(coord, "set_voice_state", None)
         if attention is not None and kind in ("speech_start", "normal", "group"):
             attention.human_started(robot_id, time.monotonic())
         if kind == "speech_end":
+            speech_active.discard(robot_id)
+            if callable(sync_voice):
+                sync_voice(active_robots=speech_active)
             if attention is not None:
                 attention.human_ended(robot_id, time.monotonic())
             # A real VAD-negative transition only slows camera sampling.
@@ -527,7 +644,16 @@ class Runtime:
             visual = getattr(self, "multimodal", None)
             if visual is not None:
                 visual.voice_ended(robot_id)
+            dispatch = getattr(coord, "dispatch_next_deferred", None)
+            if (
+                callable(dispatch)
+                and not speech_active
+                and not getattr(self, "_voice_stop_unconfirmed", False)
+            ):
+                await dispatch()
             return
+        if kind == "speech_start":
+            speech_active.add(robot_id)
         visual = getattr(self, "multimodal", None)
         prepare = getattr(visual, "prepare_human_turn", None)
         # The VAD producer is authenticated already. Fence old camera/tool
@@ -550,6 +676,11 @@ class Runtime:
         # authenticated human camera must still start if audio STOP fails,
         # without treating the unresolved speaker lease as a success.
         stop_attempt = self._begin_voice_stop()
+        if callable(sync_voice):
+            sync_voice(
+                active_robots=speech_active,
+                voice_stop_unconfirmed=True,
+            )
         outcomes = await asyncio.gather(
             self._preempt_audio_floor(),
             self._stop_autonomous_roaming_for_voice(),
@@ -561,6 +692,10 @@ class Runtime:
         preempt_error = failures[0] if failures else None
         if preempt_error is None:
             self._confirm_voice_stop(stop_attempt)
+            if callable(sync_voice):
+                sync_voice(
+                    voice_stop_unconfirmed=getattr(self, "_voice_stop_unconfirmed", False),
+                )
         if getattr(self, "_closed", False):
             return  # A late STOP completion must not reopen camera workers.
         if visual is not None:
@@ -716,6 +851,10 @@ class Runtime:
             except Exception as exc:
                 errors.append(exc)
         await step("WROOM motion", self.coordinator.close, 4.0)
+        spatial = getattr(self, "spatial", None)
+        if spatial is not None:
+            for robot in self.settings.robots:
+                spatial.invalidate_robot(robot.id, reason="runtime_closed")
         unconfirmed = getattr(self.coordinator, "shutdown_stop_failures", {})
         if unconfirmed:
             # An idle robot can still have an uncertain prior motor pulse.

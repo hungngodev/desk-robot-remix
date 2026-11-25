@@ -1202,3 +1202,90 @@ def test_usb_trickle_cannot_extend_sync_deadline_to_frame_size(monkeypatch):
     # Whole-line read timeout plus one in-flight byte read, not 409.7s.
     assert room_module.USB_SYNC_TIMEOUT_S <= clock[0] <= room_module.USB_SYNC_TIMEOUT_S + 0.5
     assert feed.received == 0
+
+
+def test_room_station_per_sensor_expiry_drops_old_readings_before_12s_cap():
+    """Slow SCD40 CO2 survives up to 8.5s while 3s sensors expire independently."""
+    hub = CameraFrameHub(["robot-01"])
+    payload = frame(seq=1, clock=10_000)
+    payload["readings"]["bme688"]["sample_ms"] = 8_000  # 2000ms old at receipt
+    payload["readings"]["scd40"]["sample_ms"] = 9_500   # 500ms old at receipt
+    evidence = accept(payload, now=10.0)
+    hub.remember_room(evidence)
+
+    # At +0.5s all valid sensors remain within MAX_AGES_MS.
+    fresh = hub.interaction_timeline("robot-01", now=10.5)
+    assert len(fresh) == 1
+    assert "CO2 630 ppm" in fresh[0]["content"]
+    assert "Station air 24.0 C" in fresh[0]["content"]
+
+    # At +2.0s bme688 (2000+2000 > 3000ms) expired while amg8833 & scd40 stay valid.
+    mid = hub.interaction_timeline("robot-01", now=12.0)
+    assert len(mid) == 1
+    assert "CO2 630 ppm" in mid[0]["content"]
+    assert "Station air 24.0 C" not in mid[0]["content"]
+    assert "thermal raw" in mid[0]["content"]
+
+    # At +3.5s 3s sensors (amg8833, ld2410c, soil) also expired while scd40 stays.
+    late = hub.interaction_timeline("robot-01", now=13.5)
+    assert len(late) == 1
+    assert "CO2 630 ppm" in late[0]["content"]
+    assert "thermal raw" not in late[0]["content"]
+
+    # At +8.5s even SCD40 (500+8500 > 8500ms) expired; room entry omitted despite <12s.
+    assert hub.interaction_timeline("robot-01", now=18.5) == []
+
+
+async def test_room_disconnect_invalidates_shared_cache_and_rejects_old_epoch_replay():
+    """USB disconnect bumps connection epoch, clears cache, and blocks stale callbacks."""
+    from types import SimpleNamespace
+
+    from desk_robot.runtime import Runtime
+
+    hub = CameraFrameHub(["robot-01"])
+    runtime = Runtime.__new__(Runtime)
+    runtime._closed = False
+    runtime._room_dispatch_lock = threading.Lock()
+    runtime._room_dispatch_pending = None
+    runtime._room_dispatch_enqueued = False
+    runtime._room_connection_epoch = 0
+    runtime.room_context_failures = 0
+    runtime.settings = SimpleNamespace(
+        room_station_context_enabled=True,
+        room_station_consent_generation=1,
+    )
+    runtime.multimodal = SimpleNamespace(hub=hub)
+
+    old_evidence = accept(frame(seq=1, clock=1000), now=1.0)
+    runtime._queue_room_observation(asyncio.get_running_loop(), old_evidence)
+    runtime._deliver_room_observation()
+    assert hub.shared_room == old_evidence
+    assert len(hub.interaction_timeline("robot-01", now=1.2)) == 1
+
+    # Simulate USB error ending one session in RoomSerialFeed.run().
+    disconnected = False
+
+    def note_disconnect():
+        nonlocal disconnected
+        disconnected = True
+        runtime._on_room_disconnect()
+
+    stop = asyncio.Event()
+    feed = RoomSerialFeed("/dev/cu.test", lambda obs: None, on_disconnect=note_disconnect)
+
+    def failing_port(_running):
+        stop.set()
+        raise OSError("USB unplugged")
+
+    feed._read_port = failing_port
+    await feed.run(stop)
+    assert disconnected is True
+    assert hub.shared_room is None
+    assert hub.interaction_timeline("robot-01", now=1.3) == []
+
+    # A stale epoch observation cannot re-populate after disconnect.
+    hub.remember_room(old_evidence, epoch=0)
+    assert hub.shared_room is None
+    new_evidence = accept(frame(seq=1, clock=1000), now=1.5)
+    hub.remember_room(new_evidence, epoch=runtime._room_connection_epoch)
+    assert hub.shared_room == new_evidence

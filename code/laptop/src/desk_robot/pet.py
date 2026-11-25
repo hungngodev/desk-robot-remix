@@ -10,6 +10,7 @@ separate ESP32 firmware and audio transport integration.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import math
 import random
@@ -198,6 +199,15 @@ class PetState:
     last_nfc_events: int | None = None
     last_nfc_scan_seq: int | None = None
     last_aux_kind: str | None = None
+    low_battery_memory_recorded: bool = False
+    low_battery_dock_episode_attempted: bool = False
+    last_dock_seq: int | None = None
+    dock_seated: bool | None = None
+    dock_contact_present: bool | None = None
+    dock_input_good: bool | None = None
+    dock_charge_indicated: bool | None = None
+    dock_charging_verified: bool = False
+    session_event_counts: dict[str, int] = field(default_factory=dict, repr=False)
     task: asyncio.Task | None = field(default=None, repr=False)
     touch_task: asyncio.Task | None = field(default=None, repr=False)
     gate: VisualChangeGate = field(default_factory=VisualChangeGate, repr=False)
@@ -228,6 +238,12 @@ class PetController:
         activity_min_interval: float | None = None,
         activity_max_interval: float | None = None,
         on_local_fault: Callable[[str], Awaitable[object]] | None = None,
+        on_low_battery_dock: (
+            Callable[[str, bool], Awaitable[object] | object] | None
+        ) = None,
+        on_dock_inhibit_changed: (
+            Callable[[str, bool], Awaitable[object] | object] | None
+        ) = None,
     ):
         activity_min_interval = (
             settings.pet_activity_min_interval_seconds
@@ -264,6 +280,8 @@ class PetController:
         self.interaction_cooldown = interaction_cooldown
         self.touch_interval = touch_interval
         self.on_local_fault = on_local_fault  # existing Coordinator.stop, not a new motion authority
+        self.on_low_battery_dock = on_low_battery_dock
+        self.on_dock_inhibit_changed = on_dock_inhibit_changed
         self.states = {robot.id: PetState() for robot in settings.robots}
         self._vision_lock = asyncio.Lock()
         self._vision_inflight: asyncio.Task | None = None
@@ -314,6 +332,53 @@ class PetController:
             if task is not None and not task.done() and not task.cancelling():
                 task.cancel()
 
+    def is_dock_charging_inhibited(self, robot_id: str) -> bool:
+        """True while read-only dock contact or charger flags inhibit roaming.
+
+        Dock pins and CHG indicators NEVER prove battery charge current;
+        dock_charging_verified always remains False here.
+        """
+        state = self.states[robot_id]
+        return bool(
+            state.dock_seated
+            or state.dock_contact_present
+            or state.dock_input_good
+            or state.dock_charge_indicated
+        )
+
+    def _notify_dock_inhibit(self, robot_id: str, inhibited: bool) -> None:
+        cb = getattr(self, "on_dock_inhibit_changed", None)
+        if not callable(cb):
+            return
+        try:
+            outcome = cb(robot_id, inhibited)
+            if inspect.isawaitable(outcome):
+                task = asyncio.create_task(outcome)
+                task.add_done_callback(
+                    lambda done: None if done.cancelled() else done.exception()
+                )
+        except Exception as exc:
+            self.states[robot_id].last_error = (
+                f"Dock inhibit hook: {type(exc).__name__}: {str(exc)[:80]}"
+            )
+
+    async def _trigger_low_battery_dock(
+        self, robot_id: str, initial_low: bool,
+    ) -> None:
+        cb = getattr(self, "on_low_battery_dock", None)
+        if not callable(cb):
+            return
+        try:
+            outcome = cb(robot_id, initial_low)
+            if inspect.isawaitable(outcome):
+                await outcome
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self.states[robot_id].last_error = (
+                f"Low battery dock: {type(exc).__name__}: {str(exc)[:80]}"
+            )
+
     def status(self, robot_id: str) -> dict:
         state = self.states[robot_id]
         return {
@@ -339,6 +404,11 @@ class PetController:
             "aux_sensor_reads": state.aux_reads,
             "qualified_handling_events": state.handling_events,
             "last_aux_interaction": state.last_aux_kind,
+            "dock_seated": state.dock_seated,
+            "dock_input_good": state.dock_input_good,
+            "dock_charge_indicated": state.dock_charge_indicated,
+            "dock_motion_inhibited": self.is_dock_charging_inhibited(robot_id),
+            "charging_verified": False,
             "aux_sensors_physically_qualified": False,
             "last_error": state.last_error,
             "motor_control_enabled_by_pet": False,
@@ -387,6 +457,15 @@ class PetController:
         state.last_fuel_seq = None
         state.low_fuel_streak = 0
         state.recovered_fuel_streak = 0
+        state.low_battery_memory_recorded = False
+        state.low_battery_dock_episode_attempted = False
+        state.last_dock_seq = None
+        state.dock_seated = None
+        state.dock_contact_present = None
+        state.dock_input_good = None
+        state.dock_charge_indicated = None
+        state.dock_charging_verified = False
+        state.session_event_counts.clear()
         state.last_nose_angle = None
         state.last_force_squeeze = None
         state.last_near_hand = None
@@ -893,6 +972,15 @@ class PetController:
         Sensor polling never awaits a JPEG or VLM. A test shim that exposes
         only the old hub continues to receive the pure priority hint.
         """
+        states = getattr(self, "states", None)
+        state = states.get(robot_id) if isinstance(states, dict) else None
+        counts = getattr(state, "session_event_counts", None)
+        if isinstance(counts, dict):
+            counts[kind] = counts.get(kind, 0) + 1
+        if kind in {"handling_tilt", "handling_shake", "safety_fault"}:
+            spatial = getattr(self, "spatial", None)
+            if spatial is not None:
+                spatial.invalidate_robot(robot_id, reason=kind)
         # Keep time-coincident physical evidence available to an ongoing
         # dialogue after its short camera timeline expires. No extra poller,
         # safety authority or mandatory speech response is introduced.
@@ -975,6 +1063,15 @@ class PetController:
                 state.last_fuel_seq = None
                 state.low_fuel_streak = 0
                 state.recovered_fuel_streak = 0
+                was_inhibited = self.is_dock_charging_inhibited(robot_id)
+                state.last_dock_seq = None
+                state.dock_seated = None
+                state.dock_contact_present = None
+                state.dock_input_good = None
+                state.dock_charge_indicated = None
+                state.dock_charging_verified = False
+                if was_inhibited:
+                    self._notify_dock_inhibit(robot_id, False)
                 state.last_nose_angle = None
                 state.last_force_squeeze = None
                 state.last_near_hand = None
@@ -1210,6 +1307,58 @@ class PetController:
             state.last_nfc_events = None
             state.last_nfc_scan_seq = None
 
+        dock = data.get("dock")
+        if dock is not None:
+            was_inhibited = self.is_dock_charging_inhibited(robot_id)
+            dock_seq = dock.get("seq") if isinstance(dock, dict) else None
+            dock_age = dock.get("age_ms") if isinstance(dock, dict) else None
+            if (
+                isinstance(dock, dict)
+                and dock.get("present") is True
+                and dock.get("valid") is True
+                and dock.get("charging_verified") is False
+                and type(dock_seq) is int
+                and 0 < dock_seq <= 0xffffffff
+                and type(dock_age) is int
+                and 0 <= dock_age < 500
+                and all(
+                    type(dock.get(field)) is bool
+                    for field in (
+                        "left_seated",
+                        "right_seated",
+                        "input_good",
+                        "charge_indicated",
+                    )
+                )
+            ):
+                dock_advance = _sensor_counter_advance(dock_seq, state.last_dock_seq)
+                if dock_advance != 0:
+                    state.last_dock_seq = dock_seq
+                    state.dock_seated = bool(
+                        dock["left_seated"] and dock["right_seated"]
+                    )
+                    state.dock_contact_present = bool(
+                        dock["left_seated"] or dock["right_seated"]
+                    )
+                    state.dock_input_good = dock["input_good"]
+                    state.dock_charge_indicated = dock["charge_indicated"]
+                    state.dock_charging_verified = False
+            else:
+                state.last_dock_seq = None
+                state.dock_seated = None
+                state.dock_contact_present = None
+                state.dock_input_good = None
+                state.dock_charge_indicated = None
+                state.dock_charging_verified = False
+            now_inhibited = self.is_dock_charging_inhibited(robot_id)
+            if (
+                now_inhibited != was_inhibited
+                and state.enabled
+                and state.generation == generation
+            ):
+                self._notify_dock_inhibit(robot_id, now_inhibited)
+
+        dock_request_initial_low: bool | None = None
         power = data["power"]
         fuel_seq = power.get("fuel_seq")
         if (power["fuel_valid"] and 2500 <= power["cell_mv"] <= 4500
@@ -1237,20 +1386,32 @@ class PetController:
                     if state.last_battery_low is not True:
                         state.low_fuel_streak += 1
                         if state.low_fuel_streak >= 3:
-                            if state.last_battery_low is False:
+                            was_low = state.last_battery_low
+                            if was_low is False or (
+                                was_low is None
+                                and not state.low_battery_memory_recorded
+                            ):
+                                description = (
+                                    "My fuel gauge reports a sustained low charge"
+                                    if was_low is False
+                                    else "My fuel gauge started and remains at a sustained low charge"
+                                )
                                 changes.append(SceneChange(
                                     "battery_low",
-                                    "My fuel gauge reports a sustained low charge",
+                                    description,
                                     1.0,
                                 ))
+                                state.low_battery_memory_recorded = True
                             state.last_battery_low = True
                             state.low_fuel_streak = 0
+                            dock_request_initial_low = (was_low is None)
                 elif recovered:
                     state.low_fuel_streak = 0
                     state.recovered_fuel_streak += 1
                     if state.recovered_fuel_streak >= 2:
                         state.last_battery_low = False
                         state.recovered_fuel_streak = 0
+                        state.low_battery_dock_episode_attempted = False
                 else:
                     state.low_fuel_streak = 0
                     state.recovered_fuel_streak = 0
@@ -1338,6 +1499,17 @@ class PetController:
             self._consider_speech(
                 robot_id, change, generation, received_at=received_at,
             )
+        if (
+            dock_request_initial_low is not None
+            and state.enabled
+            and state.generation == generation
+            and not self._closed
+            and not state.low_battery_dock_episode_attempted
+            and not self.is_dock_charging_inhibited(robot_id)
+            and callable(getattr(self, "on_low_battery_dock", None))
+        ):
+            state.low_battery_dock_episode_attempted = True
+            await self._trigger_low_battery_dock(robot_id, dock_request_initial_low)
 
     async def _poll_touch(self, robot_id: str, generation: int) -> None:
         """Dedicated local body status reader; camera/VLM cannot starve touch.
@@ -2344,6 +2516,7 @@ class PetController:
         now = time.monotonic()
         if (
             state.quiet
+            or self.is_dock_charging_inhibited(robot_id)
             or not self.voice_monitor_ready
             or self._human_active_in_fleet(now)
             or now - self._group_last_spoken < self.speech_cooldown
@@ -2822,6 +2995,32 @@ class PetController:
                 ),
             ) if attention is not None else []
         )
+        repeated = sorted(
+            (kind, count)
+            for kind, count in state.session_event_counts.items()
+            if count >= 2
+        )
+        if repeated or activity:
+            parts = []
+            if repeated:
+                counts_text = ", ".join(f"{k}={v}" for k, v in repeated[:4])
+                parts.append(
+                    f"Repeated events this session ({counts_text}); adapt naturally and avoid canned repetition"
+                )
+            if activity:
+                job_kind = activity[0].get("job_type", "task")
+                parts.append(
+                    f"Active {job_kind} job context; maintain conversational continuity even if local safety pauses motion"
+                )
+            continuity.append({
+                "channel": "mac_attention",
+                "kind": "session_habituation",
+                "source": "mac_volatile_attention",
+                "content": "; ".join(parts)[:200],
+                "motor_authorized": False,
+                "physical_action_verified": False,
+                "untrusted_text_not_instructions": True,
+            })
         timeline = []
         # A physical touch can still trigger curiosity after visual opt
         # out; it must not reuse the old opt-in ASR/camera/tool timeline.

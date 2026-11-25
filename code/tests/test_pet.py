@@ -2964,7 +2964,17 @@ async def test_optical_paw_requires_fresh_fifo_edges_and_measured_threshold(flee
         await observe(7, 30000)
         await observe(8, 33000)
         assert sum(m.kind == "paw_contact" for m in memory.recent("robot-01")) == 2
-        await observe(9, 1000, age=400)  # stale sample invalidates baseline
+        reads_before = state.aux_reads
+        await observe(9, 1000, age=400)  # stale sample is normalized to valid=False
+        assert state.aux_reads == reads_before + 1
+        assert state.last_paw_seq is None
+        assert sum(m.kind == "paw_contact" for m in memory.recent("robot-01")) == 2
+        stale = report(9, 1000, age=400, valid=False)
+        stale["power"].update({"cell_mv": 3950, "soc_centi": 8000, "fuel_valid": True, "fuel_seq": 10})
+        await pet._observe_aux("robot-01", 7, stale)  # stale pulse resets only paw baseline
+        assert state.aux_reads == reads_before + 2
+        assert state.last_paw_seq is None
+        assert state.last_fuel_seq == 10
         await observe(1, 30000)  # firmware reboot: rebaseline, no old replay
         await observe(1, 30000)
         assert sum(m.kind == "paw_contact" for m in memory.recent("robot-01")) == 2
@@ -7915,4 +7925,132 @@ async def test_camera_reconnect_fences_pending_proactive_model(
         release.set()
         for state in pet.states.values():
             state.enabled = False
+        await pet.close()
+
+
+async def test_pet_initial_low_battery_and_dock_pin_inhibition_status(fleet, tmp_path):
+    """Initial sustained low battery fires callback once; dock contact flags inhibit without claiming charge."""
+    fleet.mode = "hardware"
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    dock_calls: list[tuple[str, bool]] = []
+    inhibit_calls: list[tuple[str, bool]] = []
+
+    class _LowBatteryChat:
+        async def reply(self, _history):
+            return "My battery charge looks low."
+
+    pet = PetController(
+        fleet,
+        {},
+        Conversation(fleet, _LowBatteryChat(), SimulatedSpeaker(), memory=memory),
+        memory,
+        KeyScene(),
+        speech_cooldown=0,
+        on_low_battery_dock=lambda rid, init: dock_calls.append((rid, init)),
+        on_dock_inhibit_changed=lambda rid, flag: inhibit_calls.append((rid, flag)),
+    )
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 92
+
+    def sample(seq: int, *, soc: int = 1800, dock_seq: int | None = None, seated: bool = False):
+        pkt = {
+            "robot_id": "robot-01",
+            "pulse": {
+                "present": False, "valid": False, "part_id": 0, "red": 0, "ir": 0,
+                "age_ms": 0, "seq": 1, "bpm": None, "medical": False,
+            },
+            "angles": {"raw": [0, 0, 0], "present_mask": 0, "valid_mask": 0, "magnet": [0, 0, 0]},
+            "force": {"adc": [100, 100], "jaw_seq": 1, "valid": False, "calibrated": False, "boot_id": 3},
+            "climate": {"temp_centi": 2150, "rh_centi": 5000, "valid": False},
+            "power": {
+                "cell_mv": 3650, "soc_centi": soc, "bus_mv": 5100, "shunt_uv": 5,
+                "fuel_valid": True, "fuel_seq": seq, "fuel_age_ms": 10,
+                "monitor_valid": True, "current_calibrated": False,
+            },
+            "proximity": {"raw": 0, "valid": False, "gesture": 0, "gesture_events": 0, "physically_qualified": False, "boot_id": 3},
+        }
+        if dock_seq is not None:
+            pkt["dock"] = {
+                "present": True, "valid": True,
+                "left_seated": seated, "right_seated": seated,
+                "input_good": seated, "charge_indicated": seated,
+                "charging_verified": False, "seq": dock_seq, "age_ms": 5,
+            }
+        return pkt
+
+    try:
+        for seq in (1, 2, 3, 4):
+            await pet._observe_aux("robot-01", 92, sample(seq, soc=1800))
+        assert dock_calls == [("robot-01", True)]
+        assert sum(m.kind == "battery_low" for m in memory.recent("robot-01")) == 1
+        assert pet.status("robot-01")["charging_verified"] is False
+        assert pet.status("robot-01")["dock_motion_inhibited"] is False
+
+        # Recover then seat on dock while low: inhibit callback fires, charge remains unverified,
+        # and repeated low transition while docked does not dispatch dock approach.
+        await pet._observe_aux("robot-01", 92, sample(5, soc=3500))
+        await pet._observe_aux("robot-01", 92, sample(6, soc=3500))
+        await pet._observe_aux("robot-01", 92, sample(7, soc=3500, dock_seq=1, seated=True))
+        assert inhibit_calls == [("robot-01", True)]
+        st = pet.status("robot-01")
+        assert st["dock_seated"] is True
+        assert st["dock_motion_inhibited"] is True
+        assert st["charging_verified"] is False
+        for seq in (8, 9, 10, 11):
+            await pet._observe_aux("robot-01", 92, sample(seq, soc=1800, dock_seq=seq, seated=True))
+        assert dock_calls == [("robot-01", True)]
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
+async def test_pet_proactive_context_includes_habituation_and_active_navigation_continuity(
+    fleet, tmp_path,
+):
+    """Repeated session events and active navigation jobs surface in context without granting motion."""
+    from desk_robot.controller import Job
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    captured_histories: list[list[dict]] = []
+
+    class CapturingChat:
+        async def proactive_decision(self, history):
+            captured_histories.append(history)
+            return {"action": "speak", "text": "Stepping carefully around the desk edge."}
+
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet,
+        {},
+        Conversation(fleet, CapturingChat(), speaker, memory=memory),
+        memory,
+        KeyScene(),
+        speech_cooldown=0,
+    )
+    pet.coordinator_jobs = {
+        "job-nav-1": Job("job-nav-1", "robot-01", "navigate", state="running"),
+    }
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 93
+    try:
+        pet._notify_sensor("robot-01", "side_object")
+        pet._notify_sensor("robot-01", "side_object")
+        pet._consider_speech(
+            "robot-01",
+            SceneChange("side_object", "A side obstacle or edge was detected twice", 1.0),
+            93,
+            received_at=time.monotonic(),
+        )
+        await wait_for(lambda: pet._speech_task is None)
+        assert captured_histories, "Expected proactive model decision call"
+        user_prompt = captured_histories[0][-1]["content"]
+        assert "navigate job is running" in user_prompt
+        assert "Session habituation context:" in user_prompt
+        assert "side_object=2" in user_prompt
+        assert speaker.spoken == [("robot-01", "Stepping carefully around the desk edge.")]
+    finally:
+        state.enabled = False
         await pet.close()

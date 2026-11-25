@@ -334,7 +334,14 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         current_tool_context=current_tool_context,
     )
 
-    register_spatial_pose_route(app, operator=operator, coordinator=coordinator)
+    register_spatial_pose_route(
+        app,
+        operator=operator,
+        coordinator=coordinator,
+        authorize=authorize,
+        settings=settings,
+        spatial=lambda: getattr(app.state.runtime, "spatial", None),
+    )
 
     @app.post("/v1/robots/{robot_id}/dock/approach",
               dependencies=[Depends(operator)], status_code=202)
@@ -419,20 +426,42 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         return await coordinator().operator_arm(robot_id)
 
     @app.post("/v1/robots/{robot_id}/move", dependencies=[Depends(operator)], status_code=202)
-    async def move(robot_id: str, request: CommandRequest):
-        return coordinator().manual(robot_id, request.command).data()
+    async def move(robot_id: str, request: CommandRequest, defer_on_voice: bool = False):
+        coord = coordinator()
+        if defer_on_voice and coord.voice_blocks_motion():
+            return coord.defer_motion(
+                robot_id, "manual",
+                submit_fn=lambda: coord.manual(robot_id, request.command),
+            ).data()
+        return coord.manual(robot_id, request.command).data()
 
     @app.post("/v1/robots/{robot_id}/explore", dependencies=[Depends(operator)], status_code=202)
-    async def explore(robot_id: str):
+    async def explore(robot_id: str, defer_on_voice: bool = False):
         if app.state.runtime.pet.states[robot_id].quiet:
             raise OperationError("Quiet mode blocks exploration")
-        return coordinator().explore(robot_id).data()
+        coord = coordinator()
+        if defer_on_voice and coord.voice_blocks_motion():
+            return coord.defer_motion(
+                robot_id, "exploration",
+                submit_fn=lambda: coord.explore(robot_id),
+                consent_check=lambda: (
+                    not app.state.runtime.pet.states[robot_id].quiet
+                    and coord.robot(robot_id).exploration_qualified
+                ),
+            ).data()
+        return coord.explore(robot_id).data()
 
     # A spoken key/candy request may consume ONE recent operator-granted
     # permit; the model cannot mint or extend that permit itself.
     @app.post("/v1/robots/{robot_id}/pickup", dependencies=[Depends(authorize)], status_code=202)
-    async def pickup(robot_id: str, request: PickupRequest):
-        return coordinator().pickup(robot_id, request.target).data()
+    async def pickup(robot_id: str, request: PickupRequest, defer_on_voice: bool = False):
+        coord = coordinator()
+        if defer_on_voice and coord.voice_blocks_motion():
+            return coord.defer_motion(
+                robot_id, "pickup",
+                submit_fn=lambda: coord.pickup(robot_id, request.target),
+            ).data()
+        return coord.pickup(robot_id, request.target).data()
 
     async def bounded_cleanup(coro, *, seconds: float, message: str):
         """A cancelled but uncooperative adapter must not block later STOPs."""
@@ -476,33 +505,37 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         )
 
     async def stop_pet_and_audio(robot_id: str, *, quiet: bool):
-        """Stop body first, then revoke pet initiative and native speaker.
+        """Stop body, pet initiative, and native speaker concurrently.
 
-        Cleanup must run despite previous failures. Crucially, a failed WROOM
-        STOP may never be hidden by a later pet or speaker cleanup failure.
+        Cleanup must run despite previous failures. Crucially, a slow or
+        blocked WROOM STOP must never delay urgent XIAO speaker interruption,
+        while a failed WROOM STOP stays the primary failure over secondary
+        pet or speaker cleanup failures.
         """
-        acknowledgement = None
-        pet_status = None
-        failures: list[tuple[str, BaseException]] = []
-        try:
-            acknowledgement = await coordinator().stop(robot_id)
-        except (Exception, asyncio.CancelledError) as exc:
-            failures.append(("WROOM STOP", exc))
-        try:
+        async def _stop_pet():
             operation = (
                 app.state.runtime.pet.set_quiet(robot_id, True)
                 if quiet else app.state.runtime.pet.pause(robot_id)
             )
-            pet_status = await bounded_cleanup(
+            return await bounded_cleanup(
                 operation, seconds=_PET_SHUTDOWN_TIMEOUT_S,
                 message="Pet pause timeout; speaker STOP still required",
             )
-        except (Exception, asyncio.CancelledError) as exc:
-            failures.append(("pet pause", exc))
-        try:
-            await stop_native_pet_speech(robot_id)
-        except (Exception, asyncio.CancelledError) as exc:
-            failures.append(("XIAO speech STOP", exc))
+
+        body_res, pet_res, audio_res = await asyncio.gather(
+            coordinator().stop(robot_id),
+            _stop_pet(),
+            stop_native_pet_speech(robot_id),
+            return_exceptions=True,
+        )
+        failures: list[tuple[str, BaseException]] = []
+        for stage, outcome in (
+            ("WROOM STOP", body_res),
+            ("pet pause", pet_res),
+            ("XIAO speech STOP", audio_res),
+        ):
+            if isinstance(outcome, BaseException):
+                failures.append((stage, outcome))
         if failures:
             primary = failures[0][1]
             for stage, secondary in failures[1:]:
@@ -510,7 +543,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                     f"Additional {stage} failure: {type(secondary).__name__}"
                 )
             raise primary
-        return acknowledgement, pet_status
+        return body_res, pet_res
 
     @app.post("/v1/robots/{robot_id}/stop", dependencies=[Depends(authorize)])
     async def stop(robot_id: str):

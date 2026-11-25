@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from .config import Settings
     from .transport import Head
     from .vision import OllamaScene
-from .room_station import RoomObservation
+from .room_station import RoomObservation, fresh_room_summary
 from .sensor_event_contract import TRIGGERS  # retained public import name
 
 # Keep source-ID deduplication longer than the 30s visible ASR context.
@@ -228,6 +228,8 @@ class CameraFrameHub:
         self.shared_room: RoomObservation | None = None
         self._room_settings = room_settings
         self._shared_room_grant: int | None = None
+        self._room_connection_epoch: int = 0
+        self._shared_room_epoch: int | None = None
 
     def _room_grant(self) -> tuple[bool, int | None]:
         """Keep production USB evidence within its original room opt-in."""
@@ -241,10 +243,25 @@ class CameraFrameHub:
         )
         return allowed, epoch if allowed else None
 
-    def remember_room(self, observation: RoomObservation) -> None:
+    def invalidate_room(self, *, epoch: int | None = None) -> int:
+        """Clear cached shared room state on USB disconnect or shutdown."""
+        self.shared_room = None
+        self._shared_room_grant = None
+        self._shared_room_epoch = None
+        self._room_connection_epoch = (
+            max(self._room_connection_epoch + 1, epoch)
+            if epoch is not None else self._room_connection_epoch + 1
+        )
+        return self._room_connection_epoch
+
+    def remember_room(
+        self, observation: RoomObservation, *, epoch: int | None = None,
+    ) -> None:
         if (not isinstance(observation, RoomObservation)
                 or not _admissible_mac_event_clock(observation.received_at)):
             raise ValueError("Room provenance must come from validated USB source")
+        if epoch is not None and epoch != getattr(self, "_room_connection_epoch", 0):
+            return  # Reject delayed callback from disconnected serial epoch.
         allowed, grant = self._room_grant()
         if not allowed:
             return  # Never admit a shared observation while access is revoked.
@@ -253,6 +270,7 @@ class CameraFrameHub:
             return  # An older asynchronous serial callback cannot regress state.
         self.shared_room = observation
         self._shared_room_grant = grant
+        self._shared_room_epoch = self._room_connection_epoch
 
     def _check(self, robot_id: str) -> None:
         if robot_id not in self.robots:
@@ -693,18 +711,23 @@ class CameraFrameHub:
         items = []
         room = self.shared_room
         allowed, grant = self._room_grant()
-        if (allowed and grant == self._shared_room_grant
+        epoch_ok = getattr(self, "_shared_room_epoch", None) == getattr(
+            self, "_room_connection_epoch", 0
+        )
+        if (allowed and grant == self._shared_room_grant and epoch_ok
                 and room is not None and 0 <= now - room.received_at <= 12):
-            items.append((room.received_at, {
-                "channel": "room_station",
-                "kind": "shared_room_raw_measurement",
-                "age_ms": round(1000 * (now - room.received_at)),
-                "source": room.source,
-                "content": room.summary,
-                "shared_not_robot_eyewitness": True,
-                "identity_verified": False,
-                "physical_action_verified": False,
-            }))
+            content = fresh_room_summary(room, now=now)
+            if content is not None:
+                items.append((room.received_at, {
+                    "channel": "room_station",
+                    "kind": "shared_room_raw_measurement",
+                    "age_ms": round(1000 * (now - room.received_at)),
+                    "source": room.source,
+                    "content": content,
+                    "shared_not_robot_eyewitness": True,
+                    "identity_verified": False,
+                    "physical_action_verified": False,
+                }))
         for kind, stamp in self.event_history[robot_id]:
             if 0 <= now - stamp <= 8:
                 items.append((stamp, {
@@ -962,8 +985,7 @@ class CameraFrameHub:
         self.quiet_until[robot_id] = -math.inf
 
     def close(self) -> None:
-        self.shared_room = None
-        self._shared_room_grant = None
+        self.invalidate_room()
         for robot_id in self.robots:
             self.clear(robot_id)
 

@@ -1149,3 +1149,270 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
             assert head.frames == 2 and head.ir_reads == 1
     finally:
         await coordinator.close()
+
+
+@pytest.mark.parametrize("initial_low", [False, True])
+async def test_autonomous_low_battery_dock_and_charge_inhibition_lifecycle(
+    settings, tmp_path, monkeypatch, initial_low,
+):
+    """Qualified low-battery auto-dock covers initial/crossing low, voice deferral, and dock inhibition."""
+    import asyncio
+
+    from desk_robot.dock_ir import dock_beacon_code
+    from desk_robot.dock_vision import DockPose
+    from desk_robot.runtime import Runtime
+
+    settings.memory_dir = tmp_path / "memory"
+    settings.trials_file = tmp_path / "trials.jsonl"
+    robot = settings.robots[0]
+    robot.device_id = "xiaozhi-01"
+    robot.motor_backend = "stepper_28byj48"
+    robot.motion_enabled = True
+    robot.exploration_qualified = True
+    robot.dock_motion_qualified = True
+    robot.dock_beacon_id = 1
+    robot.dock_turn_sign = 1
+    robot.dock_forward_sign = 1
+    robot.battery_low_percent = 20
+
+    calib = tmp_path / "dock_cal.json"
+    calib.write_text(json.dumps({
+        "measured": True,
+        "robot_id": robot.id,
+        "head_device_id": "xiaozhi-01",
+        "camera_sensor_pid": "OV5640",
+        "fx": 410,
+        "fy": 410,
+        "cx": 320,
+        "cy": 240,
+        "distortion_coeffs": [0.1, -0.05, 0.0, 0.0, 0.0],
+        "image_width_px": 640,
+        "image_height_px": 480,
+        "mount_lateral_offset_mm": 0.0,
+        "mount_yaw_deg": 0.0,
+        "tag_side_mm": 60,
+        "marker_id": 1,
+        "target_distance_mm": 200,
+    }))
+    robot.dock_calibration = calib
+
+    class LowBatteryDockHead(DockFrameFixture):
+        def __init__(self):
+            self.commands = []
+            self.armed = False
+            self.frames = 0
+            self.ir_reads = 0
+            self.sensor_pid = "OV5640"
+
+        async def status(self):
+            return {
+                "robot_id": robot.id,
+                "backend": "stepper_28byj48",
+                "armed": self.armed,
+                "watchdog_ms": 500,
+                "safety": {"required": True, "ready": True, "fault": "none"},
+                "ranges": {
+                    "present_mask": 31,
+                    "valid_mask": 31,
+                    "mm": [50, 50, 50, 50, 600],
+                    "age_ms": [5, 5, 5, 5, 5],
+                },
+                "imu": {
+                    "family": 1,
+                    "valid": True,
+                    "age_ms": 10,
+                    "acc": [0, 0, 16384],
+                    "gyro": [0, 0, 0],
+                },
+                "touch": {"active": False},
+                "side_ranges": {
+                    "present_mask": 7,
+                    "valid_mask": 7,
+                    "age_ms": [10, 10, 10],
+                    "mm": [600, 600, 600],
+                },
+                "power": {
+                    "cell_mv": 3650,
+                    "soc_centi": 1800,
+                    "fuel_valid": True,
+                    "fuel_seq": 50,
+                    "fuel_age_ms": 10,
+                },
+            }
+
+        async def snapshot(self):
+            raise AssertionError("Autonomous dock used stale snapshot")
+
+        async def snapshot_for_dock(self):
+            self.frames += 1
+            return (b"\xff\xd8" + b"\x00" * 20 + b"\xff\xd9", time.monotonic(), (1234, 1, 1), 1)
+
+        async def camera_identity(self, _obs=None):
+            return self.sensor_pid
+
+        async def ir_status(self):
+            self.ir_reads += 1
+            return {
+                "robot_id": robot.id,
+                "left_valid": True,
+                "right_valid": True,
+                "match": True,
+                "left_seq": self.ir_reads,
+                "right_seq": self.ir_reads,
+                "left_age_ms": 5,
+                "right_age_ms": 5,
+                "code": dock_beacon_code(1),
+                "motor_authorized": False,
+                "charging_authorized": False,
+                "physical_qualified": False,
+            }
+
+        async def command(self, cmd):
+            self.commands.append(cmd)
+            if cmd == "arm":
+                self.armed = True
+            elif cmd == "halt":
+                self.armed = False
+
+    def aux_packet(
+        soc: int,
+        fuel_seq: int,
+        *,
+        dock_seq: int | None = None,
+        seated: bool = False,
+    ) -> dict:
+        pkt = {
+            "robot_id": robot.id,
+            "pulse": {
+                "present": False,
+                "valid": False,
+                "part_id": 0,
+                "red": 0,
+                "ir": 0,
+                "age_ms": 0,
+                "seq": 1,
+                "bpm": None,
+                "medical": False,
+            },
+            "angles": {"raw": [0, 0, 0], "present_mask": 0, "valid_mask": 0, "magnet": [0, 0, 0]},
+            "force": {"adc": [100, 100], "jaw_seq": 1, "valid": False, "calibrated": False, "boot_id": 7},
+            "climate": {"temp_centi": 2200, "rh_centi": 5000, "valid": False},
+            "power": {
+                "cell_mv": 3650,
+                "soc_centi": soc,
+                "bus_mv": 5100,
+                "shunt_uv": 5,
+                "fuel_valid": True,
+                "fuel_seq": fuel_seq,
+                "fuel_age_ms": 10,
+                "monitor_valid": True,
+                "current_calibrated": False,
+            },
+            "proximity": {
+                "raw": 0,
+                "valid": False,
+                "gesture": 0,
+                "gesture_events": 0,
+                "physically_qualified": False,
+                "boot_id": 7,
+            },
+        }
+        if dock_seq is not None:
+            pkt["dock"] = {
+                "present": True,
+                "valid": True,
+                "left_seated": seated,
+                "right_seated": seated,
+                "input_good": seated,
+                "charge_indicated": seated,
+                "charging_verified": False,
+                "seq": dock_seq,
+                "age_ms": 5,
+            }
+        return pkt
+
+    poses = iter(((0, 450), (0, 150)))
+    monkeypatch.setattr(
+        "desk_robot.dock_runtime.detect_apriltag",
+        lambda _jpeg, _cal, *, captured_at: DockPose(0, 0, next(poses)[1], 0.5, captured_at),
+    )
+
+    head = LowBatteryDockHead()
+    rt = Runtime(settings)
+    rt.coordinator.heads[robot.id] = head
+    rt.pet.heads[robot.id] = head
+    rt.conversation.speaker.interrupt = lambda _robot: asyncio.sleep(0)
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    rt.pet.set_voice_monitor_ready(True)
+    rt.coordinator.set_voice_state(monitor_enforced=True, monitor_ready=True)
+    state = rt.pet.states[robot.id]
+    state.enabled = True
+    state.generation = 1
+    try:
+        # Fail-closed default: autonomous_low_battery_dock_enabled=False performs no motion.
+        assert robot.autonomous_low_battery_dock_enabled is False
+        baseline_samples = (1800, 1800, 1800, 1800) if initial_low else (5000, 1800, 1800, 1800)
+        for seq, soc in enumerate(baseline_samples, start=1):
+            await rt.pet._observe_aux(robot.id, 1, aux_packet(soc, seq))
+        assert rt.coordinator.jobs == {}
+        assert head.commands == []
+
+        # Enable qualified autonomous low-battery dock and reset to test fresh episode.
+        robot.autonomous_low_battery_dock_enabled = True
+        state.last_battery_low = None
+        state.last_fuel_seq = None
+        state.low_fuel_streak = 0
+        state.recovered_fuel_streak = 0
+        state.low_battery_memory_recorded = False
+        state.low_battery_dock_episode_attempted = False
+
+        # For crossing_low, defer behind live human voice first, then dispatch on speech_end.
+        if not initial_low:
+            rt.coordinator.set_voice_state(active_robots=frozenset({robot.id}), monitor_ready=True)
+        next_samples = (1800, 1800, 1800, 1800) if initial_low else (5000, 1800, 1800, 1800)
+        for seq, soc in enumerate(next_samples, start=10):
+            await rt.pet._observe_aux(robot.id, 1, aux_packet(soc, seq))
+
+        if not initial_low:
+            assert rt.coordinator.jobs == {}
+            assert head.commands == []
+            rt.coordinator.set_voice_state(active_robots=frozenset(), monitor_ready=True)
+            dispatched = await rt.coordinator.dispatch_next_deferred()
+            assert dispatched is not None and dispatched.kind == "dock_approach"
+
+        assert len(rt.coordinator.jobs) == 1
+        dock_job = next(iter(rt.coordinator.jobs.values()))
+        await asyncio.wait_for(rt.coordinator.tasks[dock_job.id], timeout=6)
+        assert dock_job.state == "succeeded"
+        assert dock_job.result["phase"] == "hold"
+        assert dock_job.result["charging_authorized"] is False
+        assert any(cmd.startswith("drive 20 20") for cmd in head.commands)
+        assert head.armed is False
+
+        # Additional sustained low samples within same episode must not re-dock.
+        await rt.pet._observe_aux(robot.id, 1, aux_packet(1800, 20))
+        await rt.pet._observe_aux(robot.id, 1, aux_packet(1800, 21))
+        assert len(rt.coordinator.jobs) == 1
+
+        # Seated/charger-indicated dock flags inhibit exploration/pickup without proving charge.
+        await rt.pet._observe_aux(robot.id, 1, aux_packet(1800, 22, dock_seq=1, seated=True))
+        pet_status = rt.pet.status(robot.id)
+        assert pet_status["dock_seated"] is True
+        assert pet_status["dock_input_good"] is True
+        assert pet_status["dock_charge_indicated"] is True
+        assert pet_status["dock_motion_inhibited"] is True
+        assert pet_status["charging_verified"] is False
+        assert rt.coordinator.dock_inhibited(robot.id) is True
+
+        with pytest.raises(OperationError, match="seated or powered on dock"):
+            rt.coordinator.explore(robot.id)
+
+        # Recovering and dropping low again while still seated on dock stays inhibited.
+        for seq, soc in ((23, 3500), (24, 3500), (25, 1800), (26, 1800), (27, 1800)):
+            await rt.pet._observe_aux(robot.id, 1, aux_packet(soc, seq, dock_seq=seq - 20, seated=True))
+        assert len(rt.coordinator.jobs) == 1
+    finally:
+        state.enabled = False
+        await rt.close()
+

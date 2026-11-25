@@ -1833,3 +1833,187 @@ async def test_runtime_shutdown_stops_native_voice_before_optional_worker_joins(
         release.set()
         runtime._room_stop.set()
         await asyncio.gather(shutdown, room_task, voice_task, return_exceptions=True)
+
+
+async def test_api_stop_dispatches_xiao_speaker_stop_while_wroom_stop_is_blocked(
+    settings, tokens, monkeypatch,
+):
+    """Blocked WROOM STOP must never delay urgent XIAO speaker interruption."""
+    from unittest.mock import AsyncMock
+
+    from desk_robot.api import create_app
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("DESK_ROBOT_SPEECH_TOKEN", "s" * 32)
+    stop_hold = asyncio.Event()
+
+    class StubVoiceListener:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def run(self):
+            await stop_hold.wait()
+
+    monkeypatch.setattr("desk_robot.runtime.VoiceEventListener", StubVoiceListener)
+    settings.mode = "hardware"
+    settings.robots[0].device_id = "xiao-01"
+    wroom_entered = asyncio.Event()
+    wroom_release = asyncio.Event()
+    speaker_stopped = asyncio.Event()
+
+    async def slow_wroom_stop(robot_id):
+        wroom_entered.set()
+        await wroom_release.wait()
+        return {"robot_id": robot_id, "halted": True}
+
+    async def fast_speaker_stop(robot):
+        speaker_stopped.set()
+
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        runtime.coordinator.stop = slow_wroom_stop
+        runtime.coordinator.close = AsyncMock()
+        runtime.conversation.speaker.operator_stop = fast_speaker_stop
+        runtime.conversation.speaker.monitor_lost = AsyncMock()
+        stop_endpoint = next(
+            route.endpoint for route in client.app.routes
+            if getattr(route, "path", None) == "/v1/robots/{robot_id}/stop"
+        )
+        task = asyncio.create_task(stop_endpoint("robot-01"))
+        try:
+            await asyncio.wait_for(wroom_entered.wait(), timeout=0.5)
+            await asyncio.wait_for(speaker_stopped.wait(), timeout=0.5)
+            assert not task.done()
+        finally:
+            wroom_release.set()
+            await asyncio.wait_for(task, timeout=1.0)
+    stop_hold.set()
+
+
+async def test_voice_blocks_motion_and_dispatches_deferred_fifo_after_speech_end(settings, tmp_path):
+    """Active human speech blocks immediate motion and drains deferred FIFO cleanly."""
+    from desk_robot.config import Settings
+
+    sim_settings = Settings(
+        robots=[settings.robots[0]],
+        mode="simulation",
+        memory_dir=tmp_path / "mem",
+        trials_file=tmp_path / "trials.jsonl",
+    )
+    sim_settings.robots[0].motion_enabled = True
+    sim_settings.robots[0].exploration_qualified = True
+
+    runtime = Runtime(sim_settings)
+    commands: list[str] = []
+    preflights = 0
+    original_command = runtime.coordinator.heads["robot-01"].command
+    original_preflight = runtime.coordinator._hardware_preflight
+
+    async def tracked_command(cmd):
+        commands.append(cmd)
+        return await original_command(cmd)
+
+    async def tracked_preflight(robot_id):
+        nonlocal preflights
+        preflights += 1
+        await original_preflight(robot_id)
+
+    runtime.coordinator.heads["robot-01"].command = tracked_command
+    runtime.coordinator._hardware_preflight = tracked_preflight
+
+    try:
+        await runtime.coordinator.operator_arm("robot-01")
+        roaming = runtime.coordinator.explore("robot-01")
+        await asyncio.sleep(0.05)
+
+        await runtime._on_voice_interrupt("robot-01", "speech_start")
+        assert roaming.state in {"cancelled", "failed"} or runtime.coordinator.tasks[roaming.id].done()
+        commands.clear()
+
+        # Grant a permit in idle gap then immediately activate human speech to prove
+        # a pre-existing permit is blocked during speech_start without starting ARM.
+        runtime.coordinator.set_voice_state(active_robots=set())
+        await runtime.coordinator.operator_arm("robot-01")
+        runtime.coordinator.set_voice_state(active_robots={"robot-01"})
+
+        with pytest.raises(Exception, match="Voice priority"):
+            runtime.coordinator.manual("robot-01", "drive 10 10 80")
+        with pytest.raises(Exception, match="Voice priority"):
+            await runtime.coordinator.operator_arm("robot-01")
+
+        # Defer first request using the pre-speech permit (immediately retired).
+        req1 = runtime.coordinator.defer_motion(
+            "robot-01", "manual",
+            submit_fn=lambda: runtime.coordinator.manual("robot-01", "drive 5 5 60"),
+        )
+        assert "robot-01" not in runtime.coordinator.permits
+
+        runtime.coordinator.set_voice_state(active_robots=set())
+        await runtime.coordinator.operator_arm("robot-01")
+        runtime.coordinator.set_voice_state(active_robots={"robot-01"})
+        req2 = runtime.coordinator.defer_motion(
+            "robot-01", "manual",
+            submit_fn=lambda: runtime.coordinator.manual("robot-01", "drive 8 8 60"),
+        )
+        preflights_before_end = preflights
+        await runtime._on_voice_interrupt("robot-01", "speech_end")
+
+        async with asyncio.timeout(2.0):
+            while req2.state == "queued":
+                await asyncio.sleep(0.02)
+            while req1.job_id and runtime.coordinator.jobs[req1.job_id].state in {"queued", "running"}:
+                await asyncio.sleep(0.02)
+            while req2.job_id and runtime.coordinator.jobs[req2.job_id].state in {"queued", "running"}:
+                await asyncio.sleep(0.02)
+
+        assert req1.state == "dispatched" and req2.state == "dispatched"
+        assert preflights >= preflights_before_end + 2
+        drive_cmds = [c for c in commands if c.startswith("drive ")]
+        assert drive_cmds == ["drive 5 5 60", "drive 8 8 60"]
+        # Canceled roaming before speech never restarted automatically.
+        assert not any(
+            j.kind == "exploration" and j.id != roaming.id
+            for j in runtime.coordinator.jobs.values()
+        )
+    finally:
+        await runtime.close()
+
+
+async def test_deferred_motion_discards_on_stop_or_monitor_outage(settings, tmp_path):
+    """Explicit STOP or voice monitor outage must discard deferred FIFO requests."""
+    from desk_robot.config import Settings
+
+    sim_settings = Settings(
+        robots=[settings.robots[0]],
+        mode="simulation",
+        memory_dir=tmp_path / "mem",
+        trials_file=tmp_path / "trials.jsonl",
+    )
+    sim_settings.robots[0].motion_enabled = True
+    runtime = Runtime(sim_settings)
+    try:
+        await runtime.coordinator.operator_arm("robot-01")
+        runtime.coordinator.set_voice_state(
+            active_robots={"robot-01"}, monitor_enforced=True, monitor_ready=True,
+        )
+        req1 = runtime.coordinator.defer_motion(
+            "robot-01", "manual",
+            submit_fn=lambda: runtime.coordinator.manual("robot-01", "drive 5 5 50"),
+        )
+        await runtime.coordinator.stop("robot-01")
+        assert req1.state == "discarded"
+
+        runtime.coordinator.set_voice_state(active_robots=set(), monitor_ready=True)
+        await runtime.coordinator.operator_arm("robot-01")
+        runtime.coordinator.set_voice_state(active_robots={"robot-01"}, monitor_ready=True)
+        req2 = runtime.coordinator.defer_motion(
+            "robot-01", "manual",
+            submit_fn=lambda: runtime.coordinator.manual("robot-01", "drive 6 6 50"),
+        )
+        await runtime._on_voice_monitor_ready(False)
+        assert req2.state == "discarded"
+        await runtime._on_voice_monitor_ready(True)
+        assert req2.state == "discarded"
+        assert req2.job_id is None
+    finally:
+        await runtime.close()

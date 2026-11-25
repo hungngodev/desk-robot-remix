@@ -262,3 +262,47 @@ def test_overlapping_robot_receipt_ids_recover_and_remain_private(tmp_path):
     )
     assert remaining is not None and remaining.evidence == second
     assert remaining.status == "pending_localization"
+
+
+def test_legacy_pre_spatial_sqlite_migrates_and_reads_back_original_records(tmp_path):
+    """Genuine pre-spatial private DB without relay_token or spatial tables upgrades cleanly."""
+    import sqlite3
+
+    root = tmp_path / "legacy_private"
+    root.mkdir(mode=0o700, parents=True)
+    db_path = root / "robot-01.sqlite3"
+    when = time.time() - 5.0
+    # Seed the legacy pre-spatial schema (no relay_token, no spatial/provenance tables).
+    with sqlite3.connect(db_path) as legacy:
+        legacy.execute(
+            """CREATE TABLE memories (
+                 event_id TEXT PRIMARY KEY,
+                 source_robot TEXT NOT NULL,
+                 witnessed INTEGER NOT NULL CHECK(witnessed IN (0,1)),
+                 kind TEXT NOT NULL,
+                 summary TEXT NOT NULL,
+                 observed_at REAL NOT NULL,
+                 confidence REAL NOT NULL CHECK(confidence >= 0 AND confidence <= 1)
+               )"""
+        )
+        legacy.execute(
+            """INSERT INTO memories
+               (event_id, source_robot, witnessed, kind, summary, observed_at, confidence)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            ("legacy-evt-1", "robot-01", 1, "vision", "Pre-upgrade desk key note", when, 0.9),
+        )
+        legacy.commit()
+
+    store = MemoryStore(root, ["robot-01"])
+    spatial = SpatialMemory(store)
+    rows = store.recent("robot-01", limit=10)
+    assert any(r.event_id == "legacy-evt-1" and r.summary == "Pre-upgrade desk key note" for r in rows)
+
+    # Reopen and attach spatial evidence to another newly observed episode cleanly.
+    reopened = MemoryStore(root, ["robot-01"])
+    spatial2 = SpatialMemory(reopened)
+    assert any(r.event_id == "legacy-evt-1" for r in reopened.recent("robot-01", limit=10))
+    now2 = time.time()
+    assert remember(reopened, "robot-01", "post-upgrade-1", now2)
+    assert spatial2.attach("robot-01", "post-upgrade-1", evidence(now2))
+    assert spatial.last_seen("robot-01", "flat_key", now=now2 + 0.1).event_id == "post-upgrade-1"

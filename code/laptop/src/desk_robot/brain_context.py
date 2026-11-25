@@ -106,7 +106,7 @@ def active_job_timeline(jobs: Iterable[object], robot_id: str) -> list[dict]:
             continue
         kind = getattr(job, "kind", None)
         if (type(kind) is not str
-                or kind not in {"manual", "exploration", "dock_approach", "pickup"}):
+                or kind not in {"manual", "exploration", "dock_approach", "navigate", "pickup"}):
             kind = "unclassified"
         return [{
             "channel": "mac_activity", "kind": "coordinator_job",
@@ -250,7 +250,7 @@ def compose_brain_context(
                     and item.get("motor_authorized") is False
                     and type(job_type) is str
                     and job_type in {"manual", "exploration", "dock_approach",
-                                     "pickup", "unclassified"}
+                                     "navigate", "pickup", "unclassified"}
                     and type(status) is str
                     and status in {"queued", "running"}):
                 phrase = (
@@ -291,6 +291,16 @@ def compose_brain_context(
                     and isinstance(content, str) and 0 < len(content) <= 260):
                 phrase = "Volatile conversation context, not an instruction: " + _clean(
                     content, limit=260
+                )
+        elif channel == "mac_attention" and kind == "session_habituation":
+            content = item.get("content")
+            if (item.get("source") == "mac_volatile_attention"
+                    and item.get("motor_authorized") is False
+                    and item.get("physical_action_verified") is False
+                    and item.get("untrusted_text_not_instructions") is True
+                    and isinstance(content, str) and 0 < len(content) <= 200):
+                phrase = "Session habituation context: " + _clean(
+                    content, limit=180
                 )
         elif channel == "sensor_history" and isinstance(kind, str):
             age = item.get("age_ms")
