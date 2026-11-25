@@ -481,6 +481,12 @@ struct DeskPlaybackPrefix {
     uint32_t end_ms = 0;
     bool failed = false;
 
+    static bool ExactMediaFrame(uint64_t samples, int rate, int duration_ms) {
+        if (samples == 0 || rate <= 0 || duration_ms <= 0) return false;
+        const uint64_t scaled = static_cast<uint64_t>(rate) * duration_ms;
+        return scaled % 1000U == 0 && samples == scaled / 1000U;
+    }
+
     bool Accept(uint32_t playback_id, uint32_t position_ms,
                 int duration_ms, bool fully_written) {
         if (playback_id == 0) return false;
@@ -871,6 +877,9 @@ static bool ParseDeskAudioFrame(int version, const char* data, size_t len,
                 task.playback_id, task.media_position_ms,
                 task.desk_frame_duration_ms,
                 !task.pcm.empty() &&
+                    DeskPlaybackPrefix::ExactMediaFrame(
+                        task.pcm.size(), codec_->output_sample_rate(),
+                        task.desk_frame_duration_ms) &&
                     transmitted_frames == static_cast<int>(task.pcm.size())) &&
             callbacks_.on_playback_committed) {
             callbacks_.on_playback_committed(

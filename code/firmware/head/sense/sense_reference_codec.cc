@@ -265,6 +265,7 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
     // I2S wait. Preserve its mutex, squared-volume PCM conversion and sole
     // speaker owner rather than maintaining a second codec implementation.
     const int accepted = NoAudioCodec::Write(data, samples);
+    bool stale_write = false;
     bool log_stale = false;
     uint32_t stale_discards = 0;
     bool log_short = false;
@@ -295,6 +296,7 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
         } else if (accepted > 0) {
             // The physical TX DMA may have accepted some old audio. It must
             // NOT be relabeled as current-generation echo reference.
+            stale_write = true;
             if (stale_publish_discards_ != UINT32_MAX) ++stale_publish_discards_;
             stale_discards = stale_publish_discards_;
             reference_integrity_failed_ = true;
@@ -309,7 +311,8 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
         ESP_LOGW("SenseAEC", "incomplete speaker I2S write: %d/%d frames; %u short writes; A2 integrity FAILED",
                  accepted, samples, static_cast<unsigned>(short_writes));
     }
-    return accepted;
+    // An obsolete write cannot extend the current media receipt prefix.
+    return stale_write ? 0 : accepted;
 }
 
 void SenseReferenceCodec::ClearReference() {

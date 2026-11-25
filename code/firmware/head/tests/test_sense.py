@@ -727,6 +727,8 @@ int main() {
         assert "task.desk_frame_duration_ms," in output
         assert "transmitted_frames == static_cast<int>(task.pcm.size())" in output
         assert "!task.pcm.empty()" in output
+        assert "DeskPlaybackPrefix::ExactMediaFrame(" in output
+        assert "task.pcm.size(), codec_->output_sample_rate()," in output
         guard = "struct DeskPlaybackPrefix {" + header.split(
             "struct DeskPlaybackPrefix {", 1
         )[1].split("struct DebugStatistics {", 1)[0]
@@ -738,6 +740,14 @@ int main() {
             "#include <cstdint>\n#include <cassert>\n" + guard + """
 int main() {
     DeskPlaybackPrefix prefix;
+    assert(prefix.ExactMediaFrame(1920, 32000, 60));
+    assert(!prefix.ExactMediaFrame(1919, 32000, 60));
+    assert(!prefix.ExactMediaFrame(1921, 32000, 60));
+    assert(!prefix.ExactMediaFrame(960, 32000, 60));
+    assert(!prefix.ExactMediaFrame(0, 32000, 60));
+    assert(!prefix.ExactMediaFrame(1920, 0, 60));
+    assert(!prefix.ExactMediaFrame(1920, 32000, -60));
+    assert(!prefix.ExactMediaFrame(1, 1, 1));
     assert(prefix.Accept(1, 60, 60, true));
     assert(!prefix.Accept(1, 180, 60, true));
     assert(!prefix.Accept(1, 240, 60, true));
@@ -951,6 +961,8 @@ int main() {
         self.assertIn("started_generation, accepted, accepted_at_us);", writer)
         self.assertIn("if (stale_publish_discards_ != UINT32_MAX) ++stale_publish_discards_;", writer)
         self.assertIn("stale_discards = stale_publish_discards_;", writer)
+        self.assertIn("stale_write = true;", writer)
+        self.assertIn("return stale_write ? 0 : accepted;", writer)
         self.assertIn("reference_integrity_failed_ = true;", writer)
         self.assertIn("PublishAcceptedLocked(data, accepted, volume", writer)
         clear = code.split("void SenseReferenceCodec::ClearReference()", 1)[1]
