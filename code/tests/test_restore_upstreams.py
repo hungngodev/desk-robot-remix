@@ -95,3 +95,47 @@ def test_dirty_checkout_preserved(tmp_path, monkeypatch):
     with pytest.raises(RuntimeError, match="local changes"):
         restore.main()
     assert (path / "tracked").read_text() == "local edit"
+
+
+@pytest.mark.parametrize("pin", ["HEAD", "-f", "a" * 39, "g" * 40])
+def test_non_commit_pin_rejected(tmp_path, monkeypatch, pin):
+    configure(tmp_path, monkeypatch, commit=pin)
+    with pytest.raises(RuntimeError, match="commit pin"):
+        restore.main()
+    assert not (tmp_path / "upstream").exists()
+
+
+@pytest.mark.parametrize("url", ["ext::command", "file:///tmp/source", "--upload-pack=command"])
+def test_non_public_url_rejected(tmp_path, monkeypatch, url):
+    configure(tmp_path, monkeypatch, url=url)
+    with pytest.raises(RuntimeError, match="repository URL"):
+        restore.main()
+    assert not (tmp_path / "upstream").exists()
+
+
+def test_git_metadata_symlink_rejected(tmp_path, monkeypatch):
+    victim = tmp_path / "victim"
+    original = repository(victim)
+    path = tmp_path / "upstream/source"
+    path.mkdir(parents=True)
+    (path / ".git").symlink_to(victim / ".git", target_is_directory=True)
+    configure(tmp_path, monkeypatch, commit=original)
+    with pytest.raises(RuntimeError, match="standalone"):
+        restore.main()
+    assert git(victim, "symbolic-ref", "HEAD")
+
+
+def test_ignored_file_not_overwritten_by_checkout(tmp_path, monkeypatch):
+    path = tmp_path / "upstream/source"
+    repository(path)
+    (path / "local-secret").write_text("upstream version")
+    git(path, "add", "local-secret")
+    git(path, "commit", "-qm", "add file")
+    pin = git(path, "rev-parse", "HEAD")
+    git(path, "checkout", "-q", "HEAD~1")
+    (path / ".git/info/exclude").write_text("local-secret\n")
+    (path / "local-secret").write_text("private local data")
+    configure(tmp_path, monkeypatch, commit=pin)
+    with pytest.raises(subprocess.CalledProcessError):
+        restore.main()
+    assert (path / "local-secret").read_text() == "private local data"
