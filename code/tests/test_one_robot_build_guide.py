@@ -3,6 +3,7 @@
 This verifies navigation and critical release language, not electrical fit.
 """
 import re
+import subprocess
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -109,7 +110,72 @@ def test_commissioning_and_paper_screen_fail_closed():
         "all_floor_mounts_possible_on_paper",
         "necessary_planar_coverage_on_paper",
         "necessary_stability_on_paper",
+        "source_only_layout_possible",
     ):
         assert gate in cad
+    assert "--template-for-dock 1" in cad
     assert "floor_mount_records[4]" in measurements
+    assert "8/10 successful unassisted physical grasp-and-place trials" in GUIDE.read_text()
     assert "check_trials.py --robot robot-01 --require-pass" in gripper
+
+
+def test_builder_usb_shell_blocks_fail_closed(tmp_path, monkeypatch):
+    """Execute the documented shell, never the real firmware tools."""
+    text = GUIDE.with_name("build.md").read_text(encoding="utf-8")
+    blocks = re.findall(r"^\x60{3}sh\n(.*?)^\x60{3}\s*$", text, re.M | re.S)
+    wroom = next(x for x in blocks if '--upload-port "$WROOM_PORT"' in x)
+    sense = next(x for x in blocks if 'idf.py -p "$SENSE_PORT"' in x)
+    inspect = next(x for x in blocks if "--inspect --samples 10" in x)
+    code = tmp_path / "code"
+    (code / "firmware/head/build/xiaozhi-sense").mkdir(parents=True)
+    tools = tmp_path / ".tools"
+    log = tmp_path / "calls"
+    monkeypatch.setenv("LOG", str(log))
+    monkeypatch.setenv("PATH", str(tools / "sdk-bootstrap/bin") + ":/usr/bin:/bin")
+    for name in ("WROOM_PORT", "SENSE_PORT", "FAIL_UPLOAD", "FAIL_SDK"):
+        monkeypatch.delenv(name, raising=False)
+    for rel in ("body-pio-venv/bin/pio", "sdk-bootstrap/bin/idf.py", "sdk-bootstrap/bin/uv"):
+        stub = tools / rel
+        stub.parent.mkdir(parents=True, exist_ok=True)
+        stub.write_text(
+            '#!/bin/bash\nprintf "%s\\n" "$*" >> "$LOG"\n'
+            'if [[ "$1" == run && "${FAIL_UPLOAD:-0}" == 1 ]]; then exit 13; fi\n'
+        )
+        stub.chmod(0o755)
+    sdk = tools / "esp-idf/export.sh"
+    sdk.parent.mkdir()
+    sdk.write_text('return "${FAIL_SDK:-0}"\n')
+
+    def run(script):
+        if log.exists():
+            log.unlink()
+        result = subprocess.run(
+            ["bash", "-c", script], cwd=code, capture_output=True, text=True, check=False
+        )
+        return result.returncode, log.read_text().splitlines() if log.exists() else []
+
+    for script in (wroom, sense, inspect):
+        assert run(script)[0] != 0
+        assert not log.exists()
+    monkeypatch.setenv("WROOM_PORT", "/dev/mock-body")
+    monkeypatch.setenv("FAIL_UPLOAD", "1")
+    status, calls = run(wroom)
+    assert status != 0 and len(calls) == 1
+    monkeypatch.delenv("FAIL_UPLOAD")
+    assert run(wroom) == (
+        0,
+        [
+            "run -d firmware/body -e esp32_full --target upload --upload-port /dev/mock-body",
+            "device monitor --port /dev/mock-body --baud 115200",
+        ],
+    )
+    monkeypatch.setenv("SENSE_PORT", "/dev/mock-head")
+    monkeypatch.setenv("FAIL_SDK", "7")
+    status, calls = run(sense)
+    assert status != 0 and not calls
+    monkeypatch.delenv("FAIL_SDK")
+    assert run(sense) == (0, ["-p /dev/mock-head flash monitor"])
+    assert run(inspect) == (
+        0,
+        ["run --no-sync python scripts/serial_bench.py --port /dev/mock-body --inspect --samples 10"],
+    )
