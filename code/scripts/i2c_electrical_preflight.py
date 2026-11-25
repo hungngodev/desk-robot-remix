@@ -46,46 +46,64 @@ def topology(plan: dict | None = None) -> list[dict]:
     bus = plan.get("bus")
     if not isinstance(bus, dict):
         raise ValueError("Missing WROOM bus map")
-    contract = plan.get("range_breakout_power_contract", {})
+    contract = plan.get("range_breakout_power_contract")
+    if not isinstance(contract, dict):
+        raise ValueError("Missing 3.3V sensor bus contract")
     for key in ("module_vin_v", "tca9548a_vcc_v",
                 "upstream_pullup_target_v", "downstream_pullup_target_v"):
         if contract.get(key) != VCC:
             raise ValueError(f"Incorrect 3.3V sensor bus contract: {key}")
     upstream = bus.get("upstream")
-    if not isinstance(upstream, list):
-        raise ValueError("Missing upstream I2C addresses")
-    addresses = [x.get("address") for x in upstream]
-    if any(type(x) is not int or not 0 < x < 128 for x in addresses):
-        raise ValueError("Invalid upstream I2C address")
-    if len(set(addresses)) != len(addresses) or set(addresses) != {0x68, 0x70, 0x71}:
-        raise ValueError("Duplicate or changed upstream mux or MPU address")
+    expected_upstream = {
+        "MPU6050": {0x68, 0x69},
+        "TCA9548A ranges": {0x70},
+        "TCA9548A interactions": {0x71},
+    }
+    if (not isinstance(upstream, list) or len(upstream) != len(expected_upstream)
+            or any(not isinstance(device, dict)
+                   or not isinstance(device.get("device"), str)
+                   or type(device.get("address")) is not int for device in upstream)
+            or {device["device"] for device in upstream} != expected_upstream.keys()
+            or any(device["address"] not in expected_upstream[device["device"]]
+                   for device in upstream)):
+        raise ValueError("Duplicate or changed upstream mux or MPU identity/address")
+    addresses = {device["address"] for device in upstream}
     if "wire_.begin(sda, scl, 400000)" not in TOF.read_text(encoding="utf-8"):
         raise ValueError("Live firmware clock changed: recalibrate I2C timing model")
 
     results = []
     for key, address in (("mux_ranges", 0x70), ("mux_extras", 0x71)):
         mux = bus.get(key)
-        if not isinstance(mux, dict) or mux.get("address") != address:
+        if (not isinstance(mux, dict) or type(mux.get("address")) is not int
+                or mux["address"] != address):
             raise ValueError(f"Incorrect mux address: {key}")
         lanes = mux.get("channels")
         if not isinstance(lanes, list) or len(lanes) != 8:
             raise ValueError(f"All eight lanes required: {key}")
         seen = set()
         for lane in lanes:
+            if not isinstance(lane, dict):
+                raise ValueError(f"Invalid mux lane: {key}")
             ch = lane.get("channel")
             if type(ch) is not int or not 0 <= ch <= 7 or ch in seen:
                 raise ValueError(f"Duplicate, invalid or missing mux lane: {key}")
             seen.add(ch)
             devices = lane.get("devices")
-            if not isinstance(devices, list) or not devices:
+            if (not isinstance(devices, list) or not devices
+                    or any(not isinstance(device, dict)
+                           or not isinstance(device.get("name"), str)
+                           or not device["name"].strip() for device in devices)):
                 raise ValueError("Each selected mux lane needs a real device")
             target_addresses = [d.get("address") for d in devices]
-            if any(type(x) is not int or not 0 < x < 128 for x in target_addresses):
+            if any(type(x) is not int or not 0x08 <= x <= 0x77 for x in target_addresses):
                 raise ValueError("Invalid downstream I2C address")
             if len(set(target_addresses)) != len(target_addresses):
                 raise ValueError("Address conflict WITHIN one live mux branch")
             if any(x in addresses for x in target_addresses):
                 raise ValueError("Downstream device conflicts with upstream I2C target")
+            if key == "mux_ranges" and (len(devices) != 1
+                    or devices[0]["name"] != "VL53L0X" or target_addresses != [0x29]):
+                raise ValueError("Range lane must contain one VL53L0X at 0x29")
             results.append({
                 "branch": f"0x{address:02X}:{ch}",
                 "devices": [{"name":d["name"], "address":d["address"]}
@@ -201,13 +219,16 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
 
 def audit(evidence: dict | None = None, plan: dict | None = None) -> dict:
     lanes = topology(plan)
-    evidence = evidence or {}
+    if evidence is None:
+        evidence = {}
     if not isinstance(evidence, dict):
         raise ValueError("Evidence must map physical circuits")
     fields = ("upstream", "branches")
     if evidence and any(f not in evidence for f in fields):
         raise ValueError("Both upstream and selected branch evidence required")
     upstream = evidence.get("upstream")
+    if evidence and not isinstance(upstream, dict):
+        raise ValueError("Upstream evidence must be a dictionary")
     segments = evidence.get("branches", {})
     if not isinstance(segments, dict):
         raise ValueError("Branch evidence must be a dictionary")
@@ -262,6 +283,8 @@ def main() -> None:
         object_pairs_hook=strict_electrical_evidence_object,
         parse_constant=reject_nonfinite_electrical_constant,
     ) if args.evidence else {})
+    if not isinstance(values, dict):
+        raise ValueError("Evidence must map physical circuits")
     print(json.dumps(audit(values), indent=2))
 
 

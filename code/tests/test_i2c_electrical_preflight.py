@@ -265,3 +265,53 @@ def test_selected_lane_requires_its_own_pullups(line):
 def test_valid_selected_and_unselected_bus():
     upstream, downstream = segment()
     assert tool.screen_selected_segment(upstream, downstream)["selected_branch_paper_pass"]
+
+
+def test_strapped_mpu_address_and_selected_branch_conflict():
+    plan = json.loads(tool.PLAN.read_text())
+    plan["bus"]["upstream"][0]["address"] = 0x69
+    assert len(tool.topology(plan)) == 16
+    plan["bus"]["mux_extras"]["channels"][2]["devices"][0]["address"] = 0x69
+    with pytest.raises(ValueError, match="conflicts with upstream"):
+        tool.topology(plan)
+
+
+@pytest.mark.parametrize("address", [0x01, 0x07, 0x78, 0x7F])
+def test_reserved_downstream_addresses_rejected(address):
+    plan = json.loads(tool.PLAN.read_text())
+    plan["bus"]["mux_extras"]["channels"][2]["devices"][0]["address"] = address
+    with pytest.raises(ValueError, match="Invalid downstream I2C address"):
+        tool.topology(plan)
+
+
+def test_topology_rejects_swapped_identity_and_noninteger_mux_address():
+    plan = json.loads(tool.PLAN.read_text())
+    bad = copy.deepcopy(plan)
+    bad["bus"]["upstream"][0]["device"] = "TCA9548A ranges"
+    with pytest.raises(ValueError, match="upstream"):
+        tool.topology(bad)
+    bad = copy.deepcopy(plan)
+    bad["bus"]["mux_extras"]["address"] = 113.0
+    with pytest.raises(ValueError, match="Incorrect mux address"):
+        tool.topology(bad)
+    bad = copy.deepcopy(plan)
+    bad["bus"]["mux_ranges"]["channels"][0]["devices"][0]["name"] = "VL53L4CD"
+    with pytest.raises(ValueError, match="Range lane must contain"):
+        tool.topology(bad)
+
+
+@pytest.mark.parametrize("evidence", [False, [], "", 0])
+def test_falsy_nonmapping_evidence_is_not_silently_absent(evidence):
+    with pytest.raises(ValueError, match="Evidence must map"):
+        tool.audit(evidence)
+
+
+def test_explicit_null_evidence_file_is_invalid(tmp_path):
+    evidence = tmp_path / "null-evidence.json"
+    evidence.write_text("null", encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(SRC), "--evidence", str(evidence)],
+        capture_output=True, text=True, check=False,
+    )
+    assert result.returncode != 0
+    assert "Evidence must map physical circuits" in result.stderr
