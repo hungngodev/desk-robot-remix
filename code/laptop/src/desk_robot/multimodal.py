@@ -404,14 +404,16 @@ class CameraFrameHub:
         Old captures after pause/reconnect or new capture commit are rejected.
         """
         self._check(robot_id)
-        if generation is not None and generation != self._generation[robot_id]:
+        if generation is not None and (
+            type(generation) is not int or generation != self._generation[robot_id]
+        ):
             raise RuntimeError("Old camera generation discarded")
-        if not _admissible_mac_event_clock(received_at) or source not in {
-            "proactive", "speech", "voice_question", "sensor"
-        }:
+        if (not _admissible_mac_event_clock(received_at)
+                or type(source) is not str
+                or source not in {"proactive", "speech", "voice_question", "sensor"}):
             raise ValueError("Unknown image source or invalid time")
         if trigger_kind is not None and (
-            source != "sensor" or trigger_kind not in TRIGGERS
+            source != "sensor" or type(trigger_kind) is not str or trigger_kind not in TRIGGERS
         ):
             raise ValueError("Only a real sensor burst can label its trigger")
         if received_at <= self.last_capture[robot_id]:
@@ -421,7 +423,7 @@ class CameraFrameHub:
             or any(type(value) is not int for value in source_identity)
             or not 0 <= source_identity[0] <= 0xffffffff
             or not 1 <= source_identity[1] <= 0xffffffff
-            or source_identity[2] <= 0
+            or not 1 <= source_identity[2] <= 0xffffffffffffffff
         ):
             raise ValueError("Invalid device camera completion identity")
         reduced, gray, _ = prepared

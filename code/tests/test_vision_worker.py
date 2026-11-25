@@ -327,3 +327,38 @@ async def test_cancelled_jpeg_validation_keeps_native_slot_without_blocking_voic
             await asyncio.sleep(0.01)
     else:
         pytest.fail("JPEG validation worker failed to release its slot")
+
+
+@pytest.mark.parametrize(("metadata", "error"), [
+    ({"source": []}, ValueError),
+    ({"source": {}}, ValueError),
+    ({"source": "sensor", "trigger_kind": []}, ValueError),
+    ({"source": "sensor", "trigger_kind": {}}, ValueError),
+    ({"generation": False}, RuntimeError),
+    ({"generation": 0.0}, RuntimeError),
+    ({"source_identity": (1, 1, 2**64)}, ValueError),
+])
+def test_corrupt_camera_metadata_cannot_mutate_fleet_frame_hub(metadata, error):
+    import time
+
+    from desk_robot.multimodal import CameraFrameHub
+
+    ids = [f"robot-{i:02d}" for i in range(1, 6)]
+    hub = CameraFrameHub(ids)
+    robot_id = ids[0]
+    prepared = (b"\xff\xd8", bytes(64 * 48), 0.0)
+    stamp = time.monotonic()
+    hub.urgent[robot_id] = True
+    kwargs = {"source": "proactive", **metadata}
+    with pytest.raises(error):
+        hub.offer_prepared(robot_id, prepared, stamp, **kwargs)
+    assert all(not hub.frames[rid] for rid in ids)
+    assert not hub.previous_gray
+    assert hub.urgent[robot_id] is True
+    assert hub.last_capture[robot_id] == float("-inf")
+    evidence = hub.offer_prepared(
+        robot_id, prepared, stamp, source="sensor", trigger_kind="touch_tap",
+        generation=0, source_identity=(1, 1, 2**64 - 1),
+    )
+    assert evidence.source_identity == (1, 1, 2**64 - 1)
+    assert all(not hub.frames[rid] for rid in ids[1:])
