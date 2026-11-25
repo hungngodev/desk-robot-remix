@@ -1251,3 +1251,52 @@ def test_explicit_goal_report_only_target_omits_eyewitness_timestamp(
         assert job["result"]["last_seen_at_wall_s"] is None
         assert job["result"]["arrived"] is False
         assert job["result"]["motor_authorized"] is False
+
+
+@pytest.mark.parametrize("late_error", [False, True])
+async def test_navigation_discards_pose_after_map_epoch_replacement(
+    settings, tmp_path, monkeypatch, late_error,
+):
+    """A retired pose request cannot update or invalidate a replacement map."""
+    from desk_robot.spatial_frames import PlanarTransform
+
+    head = _HardwarePoseHead("robot-01", x_mm=40, y_mm=40, yaw_mrad=0)
+    transform = PlanarTransform("map", "odom", 0.0, 0.0, 0.0)
+    rt = await _setup_hardware_pose_runtime(settings, tmp_path, head, transform)
+    original_pose = head.pose_status
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def delayed_pose():
+        receipt = await original_pose()
+        entered.set()
+        await release.wait()
+        if late_error:
+            raise OSError("Retired pose request failed")
+        return receipt
+
+    monkeypatch.setattr(head, "pose_status", delayed_pose)
+    try:
+        await rt.coordinator.operator_arm("robot-01")
+        job = rt.coordinator.navigate("robot-01", goal=(3, 2))
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        old_epoch = rt.spatial.state("robot-01").epoch
+        _seed_safe_grid(rt.spatial, "robot-01", head, map_to_odom=transform)
+        replacement = rt.spatial.state("robot-01")
+        replacement_epoch = replacement.epoch
+        replacement_grid = replacement.grid
+        assert replacement_epoch > old_epoch
+        release.set()
+        await asyncio.wait_for(rt.coordinator.tasks[job.id], timeout=5)
+        assert job.state == "failed"
+        assert "spatial map invalidated during pose read" in (job.error or "")
+        assert not any(cmd.startswith("drive ") for cmd in head.commands)
+        assert "halt" in head.commands
+        current = rt.spatial.state("robot-01")
+        assert current.epoch == replacement_epoch
+        assert current.grid is replacement_grid
+        assert current.grid.anchored
+        assert current.last_navigation_pose is None
+    finally:
+        release.set()
+        await rt.close()

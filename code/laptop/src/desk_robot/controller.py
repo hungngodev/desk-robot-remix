@@ -1962,9 +1962,18 @@ class Coordinator:
                         seconds=1.0,
                         timeout_message="Spatial navigation pose status timeout",
                     )
-                except Exception:
+                except Exception as exc:
+                    if spatial.state(job.robot_id).epoch != expected_epoch:
+                        raise OperationError(
+                            "Navigation halted: spatial map invalidated during pose read"
+                        ) from exc
                     spatial.invalidate_robot(job.robot_id, reason="pose_transport_lost")
                     raise
+                # A replaced map cannot inherit a pending pose request.
+                if spatial.state(job.robot_id).epoch != expected_epoch:
+                    raise OperationError(
+                        "Navigation halted: spatial map invalidated during pose read"
+                    )
                 return spatial.observe_pose(
                     job.robot_id,
                     pose_payload,
@@ -2021,7 +2030,8 @@ class Coordinator:
             )
             if route.status != "planned" or route.may_execute is not False or not route.cells:
                 raise OperationError(f"Navigation halted: {route.reason}")
-            expected_epoch = route.epoch
+            if route.epoch != expected_epoch:
+                raise OperationError("Navigation halted: spatial map invalidated during planning")
             cur_heading = observed_heading
 
         def _check_step_authority(start_cell: tuple[int, int], goal_cell: tuple[int, int]):
