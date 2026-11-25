@@ -39,7 +39,7 @@ from .sensor_event_contract import (
 )
 from .side_ranging import SideRangeEvents
 from .transport import Head, HeadError
-from .vision import SceneChange, VisualChangeGate
+from .vision import OllamaScene, SceneChange, VisualChangeGate
 
 _PET_SPEECH_ABORT_TIMEOUT_S = 2.5
 _PET_OBSERVER_CANCEL_TIMEOUT_S = 2.0
@@ -2241,9 +2241,32 @@ class PetController:
                         if remaining <= 0:
                             state.stale_camera_events += 1
                             continue
-                        inference = asyncio.create_task(
-                            self.scene.compare(previous, jpeg)
-                        )
+                        def admit_comparison(
+                            admitted_received=received,
+                            admitted_hub=hub_generation,
+                            admitted_preemption=preemption_epoch,
+                            grant_valid=current_camera_grant,
+                        ) -> bool:
+                            now = time.monotonic()
+                            return (
+                                state.enabled and state.generation == generation
+                                and not self._closed and grant_valid()
+                                and admitted_preemption == self._vision_preemption_epoch
+                                and not self._direct_vision_requests
+                                and (admitted_hub is None or
+                                     self.multimodal.hub._generation[robot_id]
+                                     == admitted_hub)
+                                and not self._human_active_in_fleet(now)
+                                and 0 <= now - admitted_received <= self.max_observation_age
+                            )
+
+                        if isinstance(self.scene, OllamaScene):
+                            request = self.scene.compare(
+                                previous, jpeg, admit=admit_comparison
+                            )
+                        else:
+                            request = self.scene.compare(previous, jpeg)
+                        inference = asyncio.create_task(request)
                         self._vision_inflight = inference
                         try:
                             # A model adapter can ignore asyncio cancellation.

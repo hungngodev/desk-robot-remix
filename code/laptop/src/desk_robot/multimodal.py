@@ -24,9 +24,9 @@ from PIL import Image, ImageOps, ImageStat
 if TYPE_CHECKING:
     from .config import Settings
     from .transport import Head
-    from .vision import OllamaScene
 from .room_station import RoomObservation, fresh_room_summary
 from .sensor_event_contract import TRIGGERS  # retained public import name
+from .vision import OllamaScene
 
 # Keep source-ID deduplication longer than the 30s visible ASR context.
 # A saturated identity fence refuses new context rather than evicting live IDs.
@@ -2036,10 +2036,27 @@ class MultimodalOrchestrator:
                     # the deadline. Its late response must not retain the
                     # common inference lock or become a new human answer.
                     from .controller import _bounded_head_reply
+                    def admit_answer() -> bool:
+                        now = time.monotonic()
+                        return (
+                            current_turn()
+                            and self._camera_grant_valid(robot_id, camera_consent_generation)
+                            and camera_generation == self.hub._generation[robot_id]
+                            and all(
+                                0 <= now - frame.received_at <= _VISUAL_FRAME_MAX_AGE_S
+                                for frame in chosen
+                            )
+                        )
+
+                    images = [frame.jpeg for frame in chosen]
+                    # The real adapter decodes off-thread. Recheck the exact
+                    # request grant at its final model submission boundary.
+                    if isinstance(self.scene, OllamaScene):
+                        request = self.scene.answer(question, images, admit=admit_answer)
+                    else:
+                        request = self.scene.answer(question, images)
                     answer = await _bounded_head_reply(
-                        self.scene.answer(
-                            question, [frame.jpeg for frame in chosen]
-                        ),
+                        request,
                         seconds=remaining,
                         timeout_message="Live visual analysis timed out",
                     )

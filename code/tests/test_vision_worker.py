@@ -362,3 +362,38 @@ def test_corrupt_camera_metadata_cannot_mutate_fleet_frame_hub(metadata, error):
     )
     assert evidence.source_identity == (1, 1, 2**64 - 1)
     assert all(not hub.frames[rid] for rid in ids[1:])
+
+
+@pytest.mark.parametrize("method", ["answer", "compare"])
+@pytest.mark.parametrize("revoked_before_decode", [False, True])
+async def test_scene_dispatch_rechecks_admission_after_jpeg_validation(
+    monkeypatch, method, revoked_before_decode,
+):
+    from io import BytesIO
+    from unittest.mock import AsyncMock
+
+    from desk_robot import vision as module
+    from PIL import Image
+
+    output = BytesIO()
+    Image.new("RGB", (32, 32)).save(output, "JPEG")
+    frame = output.getvalue()
+    active = not revoked_before_decode
+    validated = False
+
+    async def validate(frames, **kwargs):
+        nonlocal active, validated
+        validated = True
+        active = False
+        return tuple((32, 32) for _ in frames)
+
+    monkeypatch.setattr(module, "validated_camera_sizes", validate)
+    client = AsyncMock()
+    scene = module.OllamaScene(client, url="http://localhost:11434", model="local-vlm")
+    with pytest.raises(RuntimeError, match="invalidated before model submission"):
+        if method == "answer":
+            await scene.answer("What do you see?", [frame], admit=lambda: active)
+        else:
+            await scene.compare(frame, frame, admit=lambda: active)
+    assert validated is not revoked_before_decode
+    client.post.assert_not_awaited()

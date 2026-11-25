@@ -7,7 +7,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Protocol
+from typing import Callable, Protocol
 
 from PIL import Image
 
@@ -306,14 +306,18 @@ class OllamaScene:
         self.client = client
         self.url, self.model = url.rstrip("/"), model
 
-    async def compare(self, before: bytes, after: bytes) -> SceneChange | None:
+    async def compare(
+        self, before: bytes, after: bytes, *, admit: Callable[[], bool] | None = None,
+    ) -> SceneChange | None:
         import base64
         import json
 
         # Direct comparisons do not necessarily pass through CameraFrameHub.
         # A valid JPEG header is not a valid scan. Decode before allocating
         # the network payload, without blocking the realtime voice loop.
+        self._require_admission(admit)
         await validated_camera_sizes((before, after))
+        self._require_admission(admit)
 
         response = await self.client.post(
             self.url + "/api/chat",
@@ -362,7 +366,15 @@ class OllamaScene:
             return None
         return SceneChange(kind, summary.strip(), float(confidence))
 
-    async def answer(self, question: str, jpeg_frames: list[bytes]) -> str:
+    @staticmethod
+    def _require_admission(admit: Callable[[], bool] | None) -> None:
+        if admit is not None and admit() is not True:
+            raise RuntimeError("Camera evidence invalidated before model submission")
+
+    async def answer(
+        self, question: str, jpeg_frames: list[bytes], *,
+        admit: Callable[[], bool] | None = None,
+    ) -> str:
         """Answer one actual spoken visual question with current source JPEGs.
 
         Reuses the same local Ollama VLM and authenticated XIAO image stream
@@ -381,7 +393,9 @@ class OllamaScene:
                        for frame in jpeg_frames)):
             raise ValueError("Real bounded camera frames and vision model required")
         frames = tuple(jpeg_frames)
+        self._require_admission(admit)
         await validated_camera_sizes(frames)
+        self._require_admission(admit)
         temporal = len(frames) == 2
         prompt = (
             "You are this desk robot's local vision adapter. Answer the human's "
