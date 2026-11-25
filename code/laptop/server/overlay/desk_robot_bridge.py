@@ -261,7 +261,8 @@ def native_tts_config(conn):
     """
     config = conn.config
     device = getattr(conn, "device_id", None)
-    robot = robot_for_device(device)
+    devices = device_map()
+    robot = next((robot for robot, mapped in devices.items() if mapped == device), None)
     if robot is None:
         return config  # Preserve upstream behavior for other clients.
     if connections.get(device) is not conn:
@@ -273,10 +274,15 @@ def native_tts_config(conn):
         )
     except ValueError as exc:
         raise RuntimeError("Invalid trusted native fleet voice map") from exc
-    voice = assignments.get(robot)
-    if (not isinstance(voice, str)
-            or re.fullmatch(r"[a-z]{2}_[a-z][a-z0-9_]{0,31}", voice) is None):
-        raise RuntimeError("Native fleet pet has no validated assigned voice")
+    # Validate the entire provisioned fleet, not just the requesting pet.
+    # A duplicate, missing or malformed sibling voice makes this map unsafe.
+    if (assignments.keys() != devices.keys()
+            or not all(isinstance(voice, str)
+                       and re.fullmatch(r"[a-z]{2}_[a-z][a-z0-9_]{0,31}", voice)
+                       for voice in assignments.values())
+            or len(set(assignments.values())) != len(assignments)):
+        raise RuntimeError("Native fleet pet has no validated assigned voice map")
+    voice = assignments[robot]
     selected = config.get("selected_module", {}).get("TTS")
     if selected != "CustomTTS":
         # A Volcengine speaker ID is not a Kokoro voice; refuse silent voice

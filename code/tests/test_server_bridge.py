@@ -2645,7 +2645,10 @@ def test_native_voice_refuses_missing_or_malformed_operator_mapping(
 def test_native_kokoro_voice_fails_closed_for_unmapped_provider(bridge, monkeypatch):
     from types import SimpleNamespace
 
-    monkeypatch.setenv("DESK_ROBOT_NATIVE_VOICE_MAP", '{"robot-01": "af_heart"}')
+    monkeypatch.setenv(
+        "DESK_ROBOT_NATIVE_VOICE_MAP",
+        '{"robot-01": "af_heart", "robot-02": "am_adam"}',
+    )
     conn = SimpleNamespace(
         device_id="mac-01",
         config={"selected_module": {"TTS": "HuoshanDoubleStreamTTSV2"},
@@ -2654,6 +2657,49 @@ def test_native_kokoro_voice_fails_closed_for_unmapped_provider(bridge, monkeypa
     bridge.register(conn)
     with pytest.raises(RuntimeError, match="requires CustomTTS"):
         bridge.native_tts_config(conn)
+
+
+@pytest.mark.parametrize(
+    "fault", ["duplicate", "missing", "extra", "malformed", "unhashable", "valid"],
+)
+def test_native_voice_map_validates_every_provisioned_pet(bridge, monkeypatch, fault):
+    devices = {f"robot-{i}": f"mac-{i}" for i in range(5)}
+    voices = dict(zip(
+        devices, ["af_heart", "am_adam", "af_bella", "am_michael", "af_nicole"],
+        strict=True,
+    ))
+    if fault == "duplicate":
+        voices["robot-4"] = voices["robot-0"]
+    elif fault == "missing":
+        del voices["robot-4"]
+    elif fault == "extra":
+        voices["ghost"] = "af_ghost"
+    elif fault == "malformed":
+        voices["robot-4"] = True
+    elif fault == "unhashable":
+        voices["robot-4"] = []
+    monkeypatch.setenv("DESK_ROBOT_DEVICE_MAP", json.dumps(devices))
+    monkeypatch.setenv("DESK_ROBOT_NATIVE_VOICE_MAP", json.dumps(voices))
+    common = {
+        "selected_module": {"TTS": "CustomTTS"},
+        "TTS": {"CustomTTS": {"type": "custom", "params": {"voice": "af_heart"}}},
+    }
+    heads = [SimpleNamespace(device_id=device, config=common)
+             for device in devices.values()]
+    for head in heads:
+        bridge.register(head)
+    if fault == "valid":
+        configs = [bridge.native_tts_config(head) for head in heads]
+        params = [config["TTS"]["CustomTTS"]["params"] for config in configs]
+        assert [param["voice"] for param in params] == list(voices.values())
+        assert len({id(param) for param in params}) == 5
+        params[0]["voice"] = "changed"
+        assert params[1]["voice"] == "am_adam"
+    else:
+        for head in heads:
+            with pytest.raises(RuntimeError, match="validated assigned voice"):
+                bridge.native_tts_config(head)
+    assert common["TTS"]["CustomTTS"]["params"]["voice"] == "af_heart"
 
 
 def test_native_voice_mapping_export_matches_fleet_and_rejects_duplicates(tmp_path):
