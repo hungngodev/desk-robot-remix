@@ -5,7 +5,10 @@ struct FakeWire {
   bool fail_begin = false, short_write = false, hold_after_stop = false;
   unsigned starts = 0, stops = 0, reads = 0;
   int mux_readback = 1;
-  bool begin(int, int, unsigned) { return !fail_begin; }
+  bool begin(int sda, int scl, unsigned hz) {
+    assert(sda == 21 && scl == 22 && hz == 400000);
+    return !fail_begin;
+  }
   void setTimeOut(unsigned) {}
   void beginTransmission(uint8_t) { ++starts; }
   size_t write(uint8_t) { return short_write ? 0 : 1; }

@@ -5,19 +5,39 @@
 #include <Arduino.h>
 #include <Wire.h>
 #include <VL53L0X.h>
+#include "BodyPins.h"
+
+#if !DESK_ROBOT_STEPPER
+#error Ranging bench must neutralize the entire eight-phase actuator harness
+#endif
 
 namespace {
 constexpr uint8_t kMux = 0x70;
 constexpr uint8_t kSensorChannel = 0;
 constexpr uint32_t kReportEveryMs = 120;
-constexpr int kActuatorPins[] = {
-    13, 14, 25, 26, 27, 32, 33, 23, 18, 19};
+// The stepper harness is the superset of both drive alternatives. If the
+// DC mapping ever changes, refuse to compile an incomplete bench shutdown.
+constexpr bool covers_motor_pin(int pin, unsigned i = 0) {
+  return i < body_pins::count(body_pins::kMotorPins) &&
+      (body_pins::kMotorPins[i] == pin || covers_motor_pin(pin, i + 1));
+}
+static_assert(covers_motor_pin(body_pins::kLeftIn1) &&
+              covers_motor_pin(body_pins::kLeftIn2) &&
+              covers_motor_pin(body_pins::kRightIn1) &&
+              covers_motor_pin(body_pins::kRightIn2),
+              "Ranging bench must hold both motor harness alternatives low");
 VL53L0X sensor;
 bool ready = false;
 uint32_t last_report_ms = 0;
 
 bool bus_idle() {
-  return digitalRead(21) == HIGH && digitalRead(22) == HIGH;
+  return digitalRead(body_pins::kSensorSda) == HIGH &&
+      digitalRead(body_pins::kSensorScl) == HIGH;
+}
+
+void hold_low(int pin) {
+  digitalWrite(pin, LOW);
+  pinMode(pin, OUTPUT);
 }
 
 bool select_sensor() {
@@ -37,13 +57,11 @@ bool select_sensor() {
 void setup() {
   // No commands in this sketch can authorize or drive the body. On a shared
   // assembly, disconnect stepper/servo power BEFORE flashing this bench target.
-  for (int pin : kActuatorPins) {
-    digitalWrite(pin, LOW);
-    pinMode(pin, OUTPUT);
-  }
+  for (int pin : body_pins::kMotorPins) hold_low(pin);
+  for (int pin : body_pins::kServoPins) hold_low(pin);
   Serial.begin(115200);
   Serial.println("BENCH_ONLY VL53L0X; motors physically disconnected; no cliff permission");
-  if (!Wire.begin(21, 22, 400000)) {
+  if (!Wire.begin(body_pins::kSensorSda, body_pins::kSensorScl, 400000)) {
     Serial.println("FAIL i2c_begin");
     return;
   }

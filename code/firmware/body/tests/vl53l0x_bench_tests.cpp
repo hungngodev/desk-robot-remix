@@ -7,9 +7,23 @@ static void reset() {
   stuck_bus = false;
   clock_ms = 120;
   outputs_low = 0;
+  low_writes.fill(0);
+  output_modes.fill(0);
+  input_reads.fill(0);
   Wire = FakeWire{};
   sensor = VL53L0X{};
   Serial = FakeSerial{};
+}
+
+static void assert_safe_harness() {
+  // Independent fixed harness oracle; do not derive the expectation from
+  // the production array, which could contain the same erroneous pin.
+  const int expected[] = {13, 14, 18, 19, 23, 25, 26, 27, 32, 33};
+  for (int pin = 0; pin < 40; ++pin) {
+    unsigned writes = 0;
+    for (int safe : expected) if (pin == safe) ++writes;
+    assert(low_writes[pin] == writes && output_modes[pin] == writes);
+  }
 }
 
 int main() {
@@ -17,6 +31,7 @@ int main() {
   Wire.fail_begin = true;
   setup();
   assert(!ready && Wire.starts == 0 && outputs_low == 10);
+  assert_safe_harness();
   reset();
   Wire.short_write = true;
   setup();
@@ -36,6 +51,8 @@ int main() {
   reset();
   setup();
   assert(ready);
+  assert_safe_harness();
+  assert(input_reads[21] > 0 && input_reads[22] > 0);
   loop();
   assert(Serial.samples == 1 && Serial.valid == 1);
   clock_ms += 120;

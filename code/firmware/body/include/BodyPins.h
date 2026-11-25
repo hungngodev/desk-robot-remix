@@ -49,12 +49,13 @@ constexpr int kTerminalIrRightInput = 39;
 // They are not WROOM GPIOs and cannot capture 560us IR pulses.
 #endif
 
-#if !DESK_ROBOT_STEPPER
 // DRV8833: xIN1 positive PWM / xIN2 low, reversed for negative; both low = coast.
+// Keep the alternative harness names available to the motor-disconnected bench.
 constexpr int kLeftIn1 = 25;
 constexpr int kLeftIn2 = 26;
 constexpr int kRightIn1 = 27;
 constexpr int kRightIn2 = 32;
+#if !DESK_ROBOT_STEPPER
 constexpr int kMotorPins[] = {kLeftIn1, kLeftIn2, kRightIn1, kRightIn2};
 constexpr int kMotorChannels[] = {0, 1, 2, 3};
 constexpr int kMotorFrequency = 20000;
