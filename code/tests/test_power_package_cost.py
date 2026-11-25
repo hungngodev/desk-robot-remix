@@ -39,7 +39,9 @@ def kit_contents():
     ]
 
 
-def report_quote(monkeypatch, mode, lines, *, scope="first_robot", qty=1):
+def report_quote(
+    monkeypatch, mode, lines, *, scope="first_robot", qty=1, shipping="0.00",
+):
     monkeypatch.setattr(
         release, "cost_requirements",
         lambda _report, _scope: (
@@ -53,7 +55,7 @@ def report_quote(monkeypatch, mode, lines, *, scope="first_robot", qty=1):
         "lines": lines, "inventory": [],
         "paid_in_flight": [],
         "seller_charges": [{
-            "seller": "TestSupplier", "shipping_usd": "0.00",
+            "seller": "TestSupplier", "shipping_usd": shipping,
             "tax_usd": "0.00", "duties_usd": "0.00",
             "discount_usd": "0.00",
         }],
@@ -173,3 +175,30 @@ def test_fleet_power_parts_are_five_sets_without_first_unit_cap(monkeypatch):
     assert cost["payable_now_cents"] == 4000
     assert cost["prototype_cap_cents"] is None
     assert cost["within_prototype_cap"] is None
+
+
+@pytest.mark.parametrize("mode", ["complete_kit", "separate_components"])
+@pytest.mark.parametrize("over_cap", [False, True])
+def test_first_robot_power_delivered_cost_includes_paid_sense_at_cap(
+    monkeypatch, mode, over_cap,
+):
+    if mode == "complete_kit":
+        lines = [quote(release.POWER_PARENT_ROLE, "COMPLETE-PACK", kit=kit_contents())]
+        lines[0]["package_price_usd"] = "35.34" if over_cap else "35.33"
+    else:
+        lines = [
+            quote(release.POWER_PARENT_ROLE + ":" + part, part)
+            for part in release.POWER_CHILDREN
+        ]
+        # Three other carriers cost $2 each, plus $1 freight.
+        lines[0]["package_price_usd"] = "29.34" if over_cap else "29.33"
+
+    cost = report_quote(monkeypatch, mode, lines, shipping="1.00")
+
+    assert cost["errors"] == []
+    assert cost["calculation_complete_not_physical_approval"]
+    assert cost["prior_paid_orders_cents"] == 1367
+    assert cost["payable_now_cents"] == (3634 if over_cap else 3633)
+    assert cost["prototype_cumulative_cents"] == (5001 if over_cap else 5000)
+    assert cost["remaining_under_cap_cents"] == (-1 if over_cap else 0)
+    assert cost["within_prototype_cap"] is (not over_cap)
