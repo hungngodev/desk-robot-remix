@@ -13,7 +13,7 @@ clearances_mm = [0.15, 0.30, 0.45, 0.60];
 assert(case_length_mm > 0 && case_width_mm > 0, "Measure actual servo case first");
 assert(wall_mm >= 2 && floor_mm >= 1.5 && total_height_mm >= floor_mm + 3);
 assert(spacing_mm >= 2, "Servo fit coupons need printable separation");
-assert(len(clearances_mm) >= 1 && len(clearances_mm) <= 8,
+assert(is_list(clearances_mm) && len(clearances_mm) >= 1 && len(clearances_mm) <= 8,
        "Servo fit coupon count must be bounded");
 module fit_gauge(clearance_mm, tick_count) {
     // The pocket expands by half the requested clearance on each wall.
@@ -53,6 +53,11 @@ module fit_gauge(clearance_mm, tick_count) {
 // shared print verifier's closed, connected mesh policy. Historical
 // four-cup layout remains available for manually printing the set.
 if (part == "mg90s_four_cup_layout") {
+    // Tick counts identify strictly increasing, distinct fit clearances.
+    if (len(clearances_mm)>1)
+        for (i=[1:len(clearances_mm)-1])
+            assert(clearances_mm[i]>clearances_mm[i-1],
+                   "Servo layout clearances must be strictly increasing");
     for (i=[0:len(clearances_mm)-1]) {
         translate([i*(case_length_mm+2*wall_mm+spacing_mm),0,0])
             fit_gauge(clearances_mm[i], i+1);

@@ -1346,3 +1346,23 @@ def test_adapter_mounts_and_apertures_reject_invalid_geometry(tmp_path, part, ov
     ], capture_output=True, text=True, timeout=90)
     assert bad.returncode != 0
     assert message in bad.stdout + bad.stderr
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+@pytest.mark.parametrize(("filename", "override", "message"), [
+    ("mg90s_pocket_fit_gauges.scad", "clearances_mm=[0.15,0.15]", "strictly increasing"),
+    ("mg90s_pocket_fit_gauges.scad", "clearances_mm=[0.60,0.15]", "strictly increasing"),
+    ("mg90s_pocket_fit_gauges.scad", 'clearances_mm="0.15"', "count must be bounded"),
+    ("vl53l0x_gy530_fit_gauge.scad", "board_x=0", "footprint outside meaningful"),
+    ("vl53l0x_gy530_fit_gauge.scad", "board_y=0", "footprint outside meaningful"),
+    ("vl53l0x_gy530_fit_gauge.scad", "board_y=4", "removal notch breaches"),
+])
+def test_servo_labels_and_ranger_pocket_reject_invalid_geometry(tmp_path, filename,
+                                                               override, message):
+    source = ROOT / "docs/cad/remixes" / filename
+    bad = subprocess.run([
+        "openscad", "--export-format", "binstl", "-o", str(tmp_path / "bad.stl"),
+        "-D", override, str(source),
+    ], capture_output=True, text=True, timeout=90)
+    assert bad.returncode != 0
+    assert message in bad.stdout + bad.stderr

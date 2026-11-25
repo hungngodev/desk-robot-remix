@@ -13,7 +13,9 @@ pocket_depth = 2.8; // nonbinding sample ONLY; actual carrier PCB unknown
 module vl53l0x_gy530_fit_gauge() {
     x = board_x + 2*fit_each_side;
     y = board_y + 2*fit_each_side;
-    assert(x < 14 && y < 18);
+    assert(board_x>0 && board_y>0 && x<14 && y<18,
+           "GY530 board footprint outside meaningful sample bounds");
+    assert(y>=8, "GY530 removal notch breaches pocket corner web");
     assert(fit_each_side >= 0.2 && fit_each_side <= 0.8);
     // A source fit cup with a zero-thickness floor or paper-thin perimeter
     // cannot safely measure this nominal board's actual XY footprint.
