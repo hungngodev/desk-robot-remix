@@ -7200,8 +7200,9 @@ async def test_proactive_optional_tool_timeout_ignoring_cancel_does_not_block_sp
         await pet.close()
 
 
-async def test_expired_uncooperative_scene_releases_fleet_vision_lock(
-    fleet, tmp_path,
+@pytest.mark.parametrize("preemption", ["expiry", "human"])
+async def test_uncooperative_scene_releases_fleet_vision_lock(
+    fleet, tmp_path, preemption,
 ):
     """A stuck speculative VLM must not starve a human look on another pet."""
     entered = asyncio.Event()
@@ -7223,14 +7224,20 @@ async def test_expired_uncooperative_scene_releases_fleet_vision_lock(
     pet = PetController(
         fleet, {"robot-01": ChangingCamera()},
         Conversation(fleet, GroundedChat(), speaker, memory=memory),
-        memory, StubbornScene(), interval=.01, max_observation_age=.30,
+        memory, StubbornScene(), interval=.01,
+        max_observation_age=.30 if preemption == "expiry" else 5,
     )
     try:
         pet.start("robot-01")
         await asyncio.wait_for(entered.wait(), timeout=2)
+        if preemption == "human":
+            # The runtime calls interrupt for every pet on authenticated VAD.
+            # A peer's human turn must not wait for the five-second deadline.
+            await pet.interrupt("robot-02")
         await asyncio.wait_for(cancelled.wait(), timeout=2)
-        await wait_for(lambda:
-            pet.status("robot-01")["stale_camera_events_dropped"] >= 1)
+        if preemption == "expiry":
+            await wait_for(lambda:
+                pet.status("robot-01")["stale_camera_events_dropped"] >= 1)
         # This is the SAME vision lock used by an authenticated human look.
         await asyncio.wait_for(pet._vision_lock.acquire(), timeout=.3)
         pet._vision_lock.release()

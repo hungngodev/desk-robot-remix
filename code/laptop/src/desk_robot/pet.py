@@ -620,7 +620,7 @@ class PetController:
         """Invalidate active AND queued speculative VLM, not its observer."""
         self._vision_preemption_epoch += 1
         pending = self._vision_inflight
-        if pending is not None and not pending.done():
+        if pending is not None and not pending.done() and not pending.cancelling():
             pending.cancel()
 
     def begin_direct_vision(self) -> None:
@@ -2326,23 +2326,29 @@ class PetController:
                                 and 0 <= now - admitted_received <= self.max_observation_age
                             )
 
-                        if isinstance(self.scene, OllamaScene):
-                            request = self.scene.compare(
-                                previous, jpeg, admit=admit_comparison
-                            )
-                        else:
-                            request = self.scene.compare(previous, jpeg)
-                        inference = asyncio.create_task(request)
-                        self._vision_inflight = inference
-                        try:
-                            # A model adapter can ignore asyncio cancellation.
-                            # Do not hold the shared five-pet VLM lock until
-                            # that obsolete background request eventually exits.
+                        async def bounded_comparison():
+                            # Construct the request inside its cancellable owner:
+                            # preemption before the first scheduling step must
+                            # not leave an unawaited comparison coroutine.
                             from .controller import _bounded_head_reply
-                            change = await _bounded_head_reply(
-                                inference, seconds=remaining,
+                            if isinstance(self.scene, OllamaScene):
+                                request = self.scene.compare(
+                                    previous, jpeg, admit=admit_comparison
+                                )
+                            else:
+                                request = self.scene.compare(previous, jpeg)
+                            return await _bounded_head_reply(
+                                request, seconds=remaining,
                                 timeout_message="Proactive scene comparison expired",
                             )
+
+                        # Cancel the bounded waiter, not just the underlying
+                        # model task: an adapter suppressing cancellation must
+                        # not retain the fleet vision lock until its deadline.
+                        inference = asyncio.create_task(bounded_comparison())
+                        self._vision_inflight = inference
+                        try:
+                            change = await inference
                         except TimeoutError:
                             # Cancel the expensive speculative request at its
                             # provenance deadline. A timeout is NOT a new
