@@ -3776,8 +3776,9 @@ def test_native_tool_fact_pack_fails_closed_not_dropping_last_receipt(native):
             module.pack_grounded_facts(facts)
 
 
+@pytest.mark.parametrize("wav_fault", ["valid", "short_byte", "short_sample", "empty", "odd"])
 async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
-    native,
+    native, wav_fault,
 ):
     import io
     import wave
@@ -3797,8 +3798,12 @@ async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
         wav.setnchannels(1)
         wav.setsampwidth(2)
         wav.setframerate(24000)
-        wav.writeframes(b"\x00" * 48000)
-    encoded = base64.b64encode(audio.getvalue()).decode()
+        wav.writeframes(b"\x00" * (48001 if wav_fault == "odd" else 48000))
+    raw = audio.getvalue()
+    cuts = {"short_byte": 1, "short_sample": 2, "empty": 48000}
+    if wav_fault in cuts:
+        raw = raw[:-cuts[wav_fault]]
+    encoded = base64.b64encode(raw).decode()
     calls = []
 
     class Response:
@@ -3856,6 +3861,14 @@ async def test_native_tool_speech_reuses_same_model_chat_and_queued_xiao_audio(
         calls[0][1]["messages"][0]["content"]
     )
     assert "Perhaps a blue mug" in calls[0][1]["messages"][1]["content"]
+    if wav_fault != "valid":
+        assert session.native_tool_speech_errors == 1
+        assert session.native_tool_audio_queued == 0
+        assert session.outgoing.empty()
+        assert session._tool_speech_turn is None
+        assert session._tool_audio_response_id is None
+        assert not session._tool_reply_pending
+        return
     assert session.native_tool_audio_queued == 1
     chunks = [session.outgoing.get_nowait() for _ in range(6)]
     # Native queue always carries (response_id, PCM_or_None) tuples, so

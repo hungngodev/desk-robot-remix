@@ -1335,7 +1335,13 @@ class NativeOmniSession:
                         or wav.getframerate() != 24000
                         or not 0 < wav.getnframes() <= 24_000 * 20):
                     raise ValueError("Expected 24 kHz mono PCM16 model WAV")
-                pcm = wav.readframes(wav.getnframes())
+                frames = wav.getnframes()
+                # wave.readframes may return fewer bytes than the header
+                # promises, or a trailing incomplete sample. Do not treat
+                # either as completed speech or feed it to the Opus encoder.
+                pcm = wav.readframes(frames + 1)
+                if len(pcm) != frames * 2:
+                    raise ValueError("Truncated or misaligned model WAV PCM")
             if (self.closed or not self.connected
                     or self._tool_speech_turn != (epoch, request_turn)):
                 return
