@@ -628,8 +628,8 @@ async def test_navigation_consumes_real_typed_pose_receipt(settings, tmp_path):
 
 
 async def test_plan_callback_rejects_in_place_epoch_change(settings, tmp_path, monkeypatch):
-    from desk_robot.runtime import Runtime
     from desk_robot.route_planner import plan_route
+    from desk_robot.runtime import Runtime
 
     settings.memory_dir = tmp_path / "memory"
     settings.trials_file = tmp_path / "trials.jsonl"

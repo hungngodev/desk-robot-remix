@@ -2,7 +2,7 @@
 import asyncio
 
 import pytest
-from desk_robot.api_ingress import APIIngress, MAX_REQUEST_BYTES
+from desk_robot.api_ingress import MAX_REQUEST_BYTES, APIIngress
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 

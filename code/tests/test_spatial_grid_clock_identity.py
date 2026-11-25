@@ -1,7 +1,6 @@
 from dataclasses import replace
 
 import pytest
-
 from desk_robot.spatial_grid import GridEvidenceError, RangeCellBatch, SpatialGrid
 
 
