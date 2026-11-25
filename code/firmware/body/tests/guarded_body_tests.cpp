@@ -1684,6 +1684,59 @@ static void repeated_dock_loss_retires_last_trusted_gpioa_acquisition() {
   CHECK(body.state().left == 0 && body.state().right == 0);
 }
 
+// Keep cliff and drive deadlines healthy so only GPIOA reaches its limit.
+// The optional GPIOB interaction port must neither stop nor sustain wheels.
+static void dock_expiry_is_exact_and_reed_pir_cannot_gate_stepper() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 100U);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.require_dock_monitor(true);
+  desk_robot::AccessoryReadings readings{};
+  auto& dock = readings.dock;
+  auto& optional = readings.optional_inputs;
+  optional.present = optional.valid = true;
+  optional.sample_seq = 1U;
+  optional.at_ms = 100U;
+  optional.reed_closed = optional.pir_active = true;
+  dock.present = dock.valid = true;
+  dock.at_ms = 100U;
+  body.set_accessories(readings, 100U);
+  CHECK(send(body, "arm", 100U) != "OK arm"); // no GPIOA sequence
+  dock.sample_seq = 1U;
+  body.set_accessories(readings, 100U);
+  CHECK(send(body, "rearm", 100U, true) == "OK rearm");
+
+  for (std::uint32_t now = 180U; now < 599U; now += 80U) {
+    fresh(guard, now);
+    body.tick(now);
+  }
+  fresh(guard, 599U);
+  CHECK(send(body, "arm", 599U) == "OK arm");
+  CHECK(send(body, "drive 20 20 200", 599U).find("OK drive") == 0);
+  // An expired or unavailable GPIOB observation must not veto the
+  // stepper profile, nor may an asserted reed/PIR manufacture a bumper.
+  body.sample_optional_inputs(7U, false, true, true, true);
+  body.tick(599U);
+  CHECK(body.state().armed && body.state().left == 20 && body.state().right == 20);
+  optional.valid = false;
+  body.set_accessories(readings, 599U);
+  body.sample_optional_inputs(1U, false, false, false, true);
+  body.tick(599U);
+  CHECK(body.state().armed && body.state().left == 20 && body.state().right == 20);
+
+  // Fresh GPIOB at exactly 500 ms cannot refresh the independent dock clock.
+  fresh(guard, 600U);
+  optional.valid = true;
+  optional.sample_seq = 2U;
+  optional.at_ms = 600U;
+  body.set_accessories(readings, 600U);
+  body.tick(600U);
+  CHECK(!body.state().armed && body.state().left == 0 && body.state().right == 0);
+  CHECK(send(body, "arm", 600U) == "ERR arm dock_monitor_latched");
+  CHECK(send(body, "rearm", 600U, true) == "ERR rearm dock_gpio_missing_or_stale");
+}
+
 static void complete_robot_requires_boot_installed_and_fresh_dock_expander() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
   body.require_dock_monitor(true);  // only the full physical firmware boot sets this
@@ -3744,6 +3797,7 @@ int main() {
     installed_dock_i2c_loss_or_single_seat_stops_local_motors();
     guarded_dc_dock_loss_latches_until_fresh_local_usb_rearm();
     repeated_dock_loss_retires_last_trusted_gpioa_acquisition();
+    dock_expiry_is_exact_and_reed_pir_cannot_gate_stepper();
     complete_robot_requires_boot_installed_and_fresh_dock_expander();
     dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof();
     belly_adc_does_not_refresh_stale_jaw_sample();
