@@ -21,6 +21,10 @@ class HeadError(RuntimeError):
     """A failed request may already have actuated: never automatically retry it."""
 
 
+class PoseUnsupported(HeadError):
+    """The pose capability is absent or uses a different wire version."""
+
+
 class Head(Protocol):
     async def command(self, command: str) -> dict: ...
     async def status(self) -> dict: ...
@@ -339,10 +343,28 @@ class HttpHead:
         async with self.lock:
             try:
                 request_started_at = time.monotonic()
-                data = _response_object(await self._request("GET", "/api/pose"))
+                try:
+                    response = await self._request("GET", "/api/pose")
+                except HeadError as exc:
+                    cause = exc.__cause__
+                    if (isinstance(cause, httpx.HTTPStatusError)
+                            and cause.response.status_code in (404, 501)):
+                        raise PoseUnsupported("Pose unsupported by head/body firmware") from exc
+                    raise
+                data = _response_object(response)
+                version = data.get("v")
+                # Foreign identities and malformed version types are not
+                # legitimate capability negotiation.
+                if (data.get("robot_id") == self.config.id
+                        and type(version) is int and 0 <= version <= 0xffffffff
+                        and version != 1):
+                    raise PoseUnsupported("Pose unsupported wire version")
                 return self.pose_fence.observe(
                     data, time.monotonic(), request_started_at=request_started_at,
                 )
+            except PoseUnsupported:
+                self.pose_fence.invalidate("pose_unsupported")
+                raise
             except PoseError as exc:
                 raise HeadError(f"Rejected pose receipt: {exc}") from exc
             except BaseException:

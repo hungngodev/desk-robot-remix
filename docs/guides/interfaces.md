@@ -221,8 +221,14 @@ curl --fail-with-body \
 ```
 
 Legacy head/body firmware that responds with HTTP 404 or 501 is represented
-as HTTP 501 at this Mac route; invalid identities, replayed body sequences
-and failed head requests do not return a usable pose. A successful diagnostic
+as HTTP 501 at this Mac route. A head response with the correct robot identity
+and an explicit non-v1 unsigned 32-bit integer wire version also returns 501.
+Both outcomes invalidate cached pose continuity; the next supported readings
+must establish a new baseline. Missing, malformed or duplicate version fields,
+foreign identities, replayed body sequences and other failed head requests
+do not return a usable pose. Additional unknown fields in a v1 head response
+are ignored by the Mac's typed decoder; the body UART schema remains exact.
+No pose compatibility outcome grants movement or disables unrelated routes. A successful diagnostic
 response includes the version-one body values, head boot, quality and the
 `PoseFence` continuity result. Its `available: true` means that the
 head returned a typed packet, **not** calibrated displacement or localization.

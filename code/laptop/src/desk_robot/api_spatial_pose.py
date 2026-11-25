@@ -16,7 +16,7 @@ from fastapi import Depends, FastAPI, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
 from .spatial_pose import PoseFence, PoseReceipt
-from .transport import HeadError
+from .transport import HeadError, PoseUnsupported
 
 # SpatialGrid admits at most 64 cells per axis. Reject coercions before
 # submitting or deferring any job; the planner still checks the actual grid.
@@ -58,6 +58,8 @@ def register_spatial_pose_route(
 
         try:
             receipt = await reader()
+        except PoseUnsupported as exc:
+            raise HTTPException(501, "Pose unsupported by head/body firmware") from exc
         except HeadError as exc:
             # Old Sense/WROOM versions have no pose command. Preserve that
             # compatibility outcome instead of making up an origin.

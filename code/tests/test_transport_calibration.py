@@ -1,11 +1,18 @@
 import json
+import time
 from pathlib import Path
 from runpy import run_path
 
 import httpx
 import pytest
 from desk_robot.calibration import Calibration
-from desk_robot.transport import HeadError, HttpHead, expected_ack, validate_command
+from desk_robot.transport import (
+    HeadError,
+    HttpHead,
+    PoseUnsupported,
+    expected_ack,
+    validate_command,
+)
 
 # The USB bench tool is intentionally a standalone script, not a second
 # installable robot controller or a package in the firmware/runtime hierarchy.
@@ -1238,3 +1245,98 @@ def test_pickup_calibration_load_refuses_ambiguous_json_fields(
     )
     with pytest.raises(ValueError, match=f"Duplicate calibration JSON field: {field}"):
         Calibration.load(ambiguous)
+
+
+
+@pytest.mark.parametrize(
+    ("fault", "unsupported"),
+    [
+        ("http404", True), ("http501", True), ("v0", True), ("v2", True),
+        ("missing_version", False), ("bool_version", False), ("string_version", False),
+        ("float_version", False), ("negative_version", False), ("huge_version", False),
+        ("missing_seq", False), ("foreign", False), ("duplicate", False),
+        ("http403", False), ("http503", False),
+    ],
+)
+async def test_pose_version_skew_isolated_from_legacy_head_operations(
+    settings, tokens, fault, unsupported,
+):
+    robot = settings.robots[0]
+    calls = []
+    pose_reads = 0
+    jpeg = b"\xff\xd8\xff\xd9"
+
+    def handler(request):
+        nonlocal pose_reads
+        assert request.headers["Authorization"] == "Bearer " + tokens[robot.token_env]
+        path = request.url.path
+        calls.append(path)
+        if path == "/api/status":
+            return httpx.Response(200, json={"robot_id": robot.id, "armed": False})
+        if path == "/api/camera.jpg":
+            return httpx.Response(200, content=jpeg)
+        if path == "/api/face":
+            assert json.loads(request.content) == {"event": "mood:happy"}
+            return httpx.Response(200, json={
+                "robot_id": robot.id, "ok": True, "reply": "mood cue queued",
+            })
+        if path == "/api/command":
+            assert json.loads(request.content) == {"command": "stop"}
+            return httpx.Response(200, json={
+                "robot_id": robot.id, "ok": True, "reply": "OK stop",
+            })
+        assert path == "/api/pose" and request.method == "GET"
+        pose_reads += 1
+        packet = {
+            "robot_id": robot.id, "v": 1, "body_boot": 4, "origin": 1,
+            "seq": pose_reads, "sample_us": pose_reads * 100_000,
+            "x_mm": 10, "y_mm": -20, "yaw_mrad": 10, "quality": "valid", "head_boot": 8,
+        }
+        if pose_reads == 3:
+            if fault.startswith("http"):
+                return httpx.Response(int(fault[4:]))
+            if fault == "missing_version":
+                packet.pop("v")
+            elif fault == "missing_seq":
+                packet.pop("seq")
+            elif fault == "foreign":
+                packet.update(robot_id="foreign-robot", v=0)
+            elif fault == "duplicate":
+                return httpx.Response(200, content=b'{"v":0,"v":1}')
+            else:
+                packet["v"] = {
+                    "v0": 0, "v2": 2, "bool_version": True, "string_version": "1",
+                    "float_version": 1.0, "negative_version": -1, "huge_version": 2**32,
+                }[fault]
+        elif pose_reads >= 4:
+            # Additional head fields do not enter the typed pose or grant authority.
+            packet["future_extension"] = {"navigation_authorized": True}
+        return httpx.Response(200, json=packet)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(robot, client)
+        await head.pose_status()
+        continuous = await head.pose_status()
+        assert head.pose_fence.current(continuous.received_at) is continuous
+        with pytest.raises(HeadError) as rejected:
+            await head.pose_status()
+        assert isinstance(rejected.value, PoseUnsupported) is unsupported
+        if unsupported:
+            assert head.pose_fence.blocked_reason == "pose_unsupported"
+        assert head.pose_fence.current(time.monotonic()) is None
+        assert head.pose_fence.needs_reanchor
+        assert not head.pose_fence.owns_continuous_receipt(continuous)
+        assert (await head.status())["armed"] is False
+        await head.face_event("mood:happy")
+        assert await head.snapshot() == jpeg
+        assert (await head.command("stop"))["reply"] == "OK stop"
+        recovered = await head.pose_status()
+        assert head.pose_fence.current(recovered.received_at) is None
+        fresh = await head.pose_status()
+        assert head.pose_fence.current(fresh.received_at) is fresh
+        assert not hasattr(fresh, "future_extension")
+        assert head.pose_fence.needs_reanchor
+    assert calls == [
+        "/api/pose", "/api/pose", "/api/pose", "/api/status", "/api/face",
+        "/api/camera.jpg", "/api/command", "/api/pose", "/api/pose",
+    ]

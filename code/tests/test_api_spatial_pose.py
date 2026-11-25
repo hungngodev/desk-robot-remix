@@ -88,14 +88,30 @@ def test_readonly_pose_operator_route_preserves_source_and_never_arms(settings, 
     assert commands == []
 
 
-def test_readonly_pose_old_firmware_returns_501_without_breaking_status(settings, tokens):
+@pytest.mark.parametrize(
+    ("fault", "status_code"),
+    [
+        ("http404", 501), ("http501", 501), ("v0", 501), ("v2", 501),
+        ("missing_version", 503), ("bool_version", 503), ("foreign_version", 503),
+    ],
+)
+def test_readonly_pose_old_firmware_returns_501_without_breaking_status(
+    settings, tokens, fault, status_code,
+):
     robot = settings.robots[0]
     calls = []
 
     def handler(request):
         calls.append(request.url.path)
         if request.url.path == "/api/pose":
-            return httpx.Response(501)
+            if fault.startswith("http"):
+                return httpx.Response(int(fault[4:]))
+            packet = {"robot_id": robot.id}
+            if fault == "foreign_version":
+                packet.update(robot_id="foreign-robot", v=0)
+            elif fault != "missing_version":
+                packet["v"] = {"v0": 0, "v2": 2, "bool_version": True}[fault]
+            return httpx.Response(200, json=packet)
         assert request.url.path == "/api/status"
         return httpx.Response(200, json={"robot_id": robot.id, "armed": False})
 
@@ -103,8 +119,10 @@ def test_readonly_pose_old_firmware_returns_501_without_breaking_status(settings
     auth = {"Authorization": "Bearer " + tokens["DESK_ROBOT_API_TOKEN"]}
     with client:
         response = client.get(f"/v1/robots/{robot.id}/pose", headers=auth)
-        assert response.status_code == 501
-        assert "unsupported" in response.json()["detail"].lower()
+        assert response.status_code == status_code
+        if status_code == 501:
+            assert "unsupported" in response.json()["detail"].lower()
+            assert head.pose_fence.blocked_reason == "pose_unsupported"
         assert head.pose_fence.current(1) is None
         status = client.get(f"/v1/robots/{robot.id}/status", headers=auth)
         assert status.status_code == 200
