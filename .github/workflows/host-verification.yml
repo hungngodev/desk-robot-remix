@@ -108,6 +108,7 @@ jobs:
         run: |
           uv run --no-sync pytest -q -ra \
             tests/test_attention.py \
+            tests/test_handling_drive_boundary.py \
             tests/test_side_ranging.py \
             tests/test_live_turns.py \
             tests/test_runtime_voice_priority.py \
@@ -138,6 +139,7 @@ jobs:
             tests/test_stop_transport_failure.py::StopTransportFailureTests::test_cooperative_job_cancellation_preserves_failed_physical_stop \
             tests/test_stop_transport_failure.py::StopTransportFailureTests::test_terminal_stop_halts_body_but_short_pulse_preserves_arm \
             tests/test_stop_transport_failure.py::StopTransportFailureTests::test_urgent_halt_bypasses_stalled_status_request \
+            tests/test_stop_transport_failure.py::StopTransportFailureTests::test_uart_status_disconnect_fences_queued_control_until_halt \
             tests/test_vision_worker.py::test_scene_comparator_unhashable_model_kind_is_rejected_without_crash \
             tests/test_multimodal.py::test_unhashable_multimodal_cues_are_rejected_without_mutation \
             tests/test_multimodal_api.py::test_mac_semantic_planner_rejects_late_plan_after_new_human_vad \

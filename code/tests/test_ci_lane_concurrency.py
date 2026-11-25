@@ -197,6 +197,10 @@ def test_fast_lane_collects_private_memory_conversation_and_tool_fences():
     # Resolve the actual unquoted shell globs, not substrings in step comments.
     args = shlex.split(command.replace(chr(92) + "\n", ""))
     assert args[:4] == ["uv", "run", "--no-sync", "pytest"]
+    assert (
+        "tests/test_stop_transport_failure.py::StopTransportFailureTests::"
+        "test_uart_status_disconnect_fences_queued_control_until_halt"
+    ) in args
     selected = set()
     for arg in args[4:]:
         if arg.startswith("tests/") and "::" not in arg:
@@ -205,6 +209,7 @@ def test_fast_lane_collects_private_memory_conversation_and_tool_fences():
     required.update(code.glob("tests/test_conversation_*.py"))
     required.update(code / "tests" / name for name in (
         "test_api_motion_lifecycle.py",
+        "test_handling_drive_boundary.py",
         "test_episode_memory_mutation_race.py",
         "test_native_startup_memory_fence.py",
         "test_native_omni_consent_grant.py",
