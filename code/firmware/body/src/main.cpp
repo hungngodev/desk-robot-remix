@@ -23,11 +23,23 @@
 #ifndef DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED
 #define DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED 0
 #endif
+#if (DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED != 0 && \
+     DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED != 1) || \
+    (DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED != 0 && \
+     DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED != 1)
+#error Motor cutoff qualification flags must be 0 or 1
+#endif
 // A guarded DC image must not silently omit its CPU-stall motor cutoff.
 // The historical unguarded DC bench remains separate from full-sensor motion.
 #if !DESK_ROBOT_STEPPER && DESK_ROBOT_FULL_SENSORS && \
-    (!defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) || !DESK_ROBOT_ENABLE_DC_WATCHDOG)
+    (!defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) || DESK_ROBOT_ENABLE_DC_WATCHDOG != 1)
 #error Full-sensor DC motion requires the independent motor watchdog heartbeat
+#endif
+// nFAULT is a separate local interlock, not a substitute for the one-shot.
+// A custom full DC build must not silently compile it out.
+#if !DESK_ROBOT_STEPPER && DESK_ROBOT_FULL_SENSORS && \
+    (!defined(DESK_ROBOT_REQUIRE_DC_NFAULT) || DESK_ROBOT_REQUIRE_DC_NFAULT != 1)
+#error Full-sensor DC motion requires the driver nFAULT monitor
 #endif
 #if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
 #if DESK_ROBOT_STEPPER || !DESK_ROBOT_FULL_SENSORS
@@ -280,7 +292,8 @@ unsigned servo_duty(int degrees) {
 #if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
 void enforce_motor_heartbeat(bool advance) {
   const auto& drive = control.state();
-  const bool allow_heartbeat = pwm_ready && drive.armed &&
+  const bool allow_heartbeat = DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED &&
+      pwm_ready && drive.armed &&
       (drive.left != 0 || drive.right != 0);
   if (advance) {
     // Only the full sensor loop can generate CPU heartbeat edges.

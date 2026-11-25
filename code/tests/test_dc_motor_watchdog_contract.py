@@ -3,7 +3,13 @@
 Static source agreement and pure C++ do not qualify any 3.3V 74HC123 pulse,
 DRV8833 breakout nSLEEP pullup, stopping distance, charger or full robot.
 """
+import shlex
+import shutil
+import subprocess
+from configparser import ConfigParser
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 BODY = ROOT / "code/firmware/body"
@@ -181,6 +187,7 @@ def test_uart_and_output_paths_check_cpu_deadline_without_advancing_pulses():
     loop = main.split("void loop() {", 1)[1]
     assert main.count("motor_heartbeat.update(") == 1
     assert main.count("enforce_motor_heartbeat(true);") == 1
+    assert "const bool allow_heartbeat = DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED &&" in helper
     assert "if (advance)" in helper
     assert "motor_heartbeat.check_authority(millis(), allow_heartbeat)" in helper
     assert "control.motor_watchdog_trip();" in helper
@@ -232,3 +239,79 @@ def test_watchdog_halt_clears_both_dc_motor_pairs_and_retains_servo_hold():
         "write_motor_pair(body_pins::kMotorChannels[2], "
         "body_pins::kMotorChannels[3], state.right);"
     ) in outputs
+
+
+def test_shipped_profiles_never_opt_in_to_unmeasured_cutoff():
+    """Inspect every declared environment, including inherited lab overrides."""
+    ini = ConfigParser(interpolation=None)
+    ini.read_string((BODY / "platformio.ini").read_text(encoding="utf-8"))
+    keys = {
+        "DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED",
+        "DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED",
+    }
+    for section in ini.sections():
+        flags = shlex.split(ini[section].get("build_flags", ""))
+        for index, flag in enumerate(flags):
+            if not flag.startswith("-D"):
+                continue
+            definition = flags[index + 1] if flag == "-D" else flag[2:]
+            name, _, value = definition.partition("=")
+            if name in keys:
+                assert value == "0", (section, definition)
+
+    for name, key in (
+        ("esp32_full", "DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED"),
+        ("esp32_dc_full", "DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED"),
+    ):
+        assert f"-D{key}=0" in shlex.split(ini[f"env:{name}"]["build_flags"])
+    for name in ("esp32_dc_watchdog_lab", "esp32_dc_integrated_lab"):
+        lab = ini[f"env:{name}"]
+        assert lab["extends"] == "env:esp32_dc_full"
+        assert "${env:esp32_dc_full.build_flags}" in lab["build_flags"]
+
+
+def test_drivetrain_compile_guard_matrix():
+    """Exercise the actual firmware preprocessor guards, not a duplicate model."""
+    compiler = shutil.which("c++")
+    if compiler is None:
+        pytest.skip("C++ compiler unavailable for firmware guard syntax test")
+    main = (BODY / "src/main.cpp").read_text(encoding="utf-8")
+    start = main.index("#ifndef DESK_ROBOT_FULL_SENSORS")
+    end = main.index('#if DESK_ROBOT_FULL_SENSORS\n#include "CliffGuard.h"', start)
+    prelude = main[start:end].replace('#include "MotorHeartbeat.h"', "")
+    dc = {"STEPPER": 0, "FULL_SENSORS": 1}
+    stepper = {"STEPPER": 1, "FULL_SENSORS": 1}
+    legacy = {"STEPPER": 0, "FULL_SENSORS": 0}
+    guarded = {**dc, "ENABLE_DC_WATCHDOG": 1, "REQUIRE_DC_NFAULT": 1}
+    cases = (
+        (legacy, None),
+        (stepper, None),
+        (guarded, None),
+        ({**guarded, "DC_HARDWARE_CUTOFF_QUALIFIED": 1}, None),
+        (
+            {**dc, "ENABLE_DC_WATCHDOG": 1, "DC_HARDWARE_CUTOFF_QUALIFIED": 1},
+            "nFAULT monitor",
+        ),
+        ({**guarded, "REQUIRE_DC_NFAULT": 0}, "nFAULT monitor"),
+        ({**guarded, "REQUIRE_DC_NFAULT": 2}, "nFAULT monitor"),
+        (dc, "independent motor watchdog heartbeat"),
+        ({**guarded, "ENABLE_DC_WATCHDOG": 0}, "independent motor watchdog heartbeat"),
+        ({**guarded, "ENABLE_DC_WATCHDOG": 2}, "independent motor watchdog heartbeat"),
+        ({**stepper, "ENABLE_DC_WATCHDOG": 1}, "requires full sensors with DC drive pins"),
+        ({**stepper, "STEPPER_HARDWARE_CUTOFF_QUALIFIED": 2}, "must be 0 or 1"),
+        ({**guarded, "DC_HARDWARE_CUTOFF_QUALIFIED": -1}, "must be 0 or 1"),
+    )
+    for flags, error in cases:
+        definitions = [f"-DDESK_ROBOT_{key}={value}" for key, value in flags.items()]
+        result = subprocess.run(
+            [compiler, "-std=c++17", "-x", "c++", "-fsyntax-only", *definitions, "-"],
+            input=prelude,
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=10,
+        )
+        if error is None:
+            assert result.returncode == 0, (flags, result.stderr)
+        else:
+            assert result.returncode != 0 and error in result.stderr, (flags, result.stderr)
