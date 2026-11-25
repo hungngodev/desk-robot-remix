@@ -177,5 +177,8 @@ def test_builder_usb_shell_blocks_fail_closed(tmp_path, monkeypatch):
     assert run(sense) == (0, ["-p /dev/mock-head flash monitor"])
     assert run(inspect) == (
         0,
-        ["run --no-sync python scripts/serial_bench.py --port /dev/mock-body --inspect --samples 10"],
+        [
+            "run --no-sync python scripts/serial_bench.py "
+            "--port /dev/mock-body --inspect --samples 10"
+        ],
     )
