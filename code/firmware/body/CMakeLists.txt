@@ -137,7 +137,7 @@ target_include_directories(tof_mux_tests PRIVATE tests/fakes lib/TofBus
   lib/CliffGuard lib/BerryImu lib/AccessorySensors)
 target_compile_definitions(tof_mux_tests PRIVATE DESK_ROBOT_STEPPER=1
   DESK_ROBOT_EXTRA_RANGERS=1)
-target_link_libraries(tof_mux_tests PRIVATE cliff_guard berry_imu)
+target_link_libraries(tof_mux_tests PRIVATE body_control)
 target_compile_features(tof_mux_tests PRIVATE cxx_std_11)
 target_compile_options(tof_mux_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
 # Exercise the real Arduino-guarded LSM9DS0 register writes with a host Wire fake.

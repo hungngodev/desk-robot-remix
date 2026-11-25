@@ -299,6 +299,12 @@ void BodyControl::invalidate_range_optics() {
   for (auto& sample : state_.optical) sample.valid = false;
 }
 
+void BodyControl::invalidate_range_lane(std::uint8_t channel) {
+  if (channel >= 8) return;
+  state_.optical[channel].valid = false;
+  if (channel >= 5) state_.side_valid[channel - 5] = false;
+}
+
 void BodyControl::sample_side_range(std::uint8_t index, std::uint16_t mm,
                                     bool valid, std::uint32_t now_ms) {
   if (index >= 3) return;

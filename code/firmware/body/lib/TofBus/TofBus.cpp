@@ -84,6 +84,7 @@ void TofBus::failed(CliffGuard& guard) {
   // Revoke its acquisition notifications along with the stored validity.
   new_extra_channel_ = 255;
   new_optical_channel_ = 255;
+  rejected_channel_ = 255;
   // Every range lane shares this mux and I2C controller. A bus fault
   // invalidates optional side/rear evidence too, not only the five critical
   // floor/front samples. Retain presence and last measured millimeters for
@@ -187,6 +188,7 @@ bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   scan_.reset();
   new_extra_channel_ = 255;
   new_optical_channel_ = 255;
+  rejected_channel_ = 255;
   for (auto& sample : extra_) sample = ExtraSample{};
   for (auto& sample : optical_) sample = OpticalSample{};
   // Pinned Pololu VL53L0X setup uses an 80ms timeout per device.
@@ -374,6 +376,7 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
   }
   new_extra_channel_ = 255;
   new_optical_channel_ = 255;
+  rejected_channel_ = 255;
   if (!initialized_) {
     failed(guard);
     return;
@@ -421,6 +424,7 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
   // ST VL53L0X_GetInterruptMaskStatus: bits 3/4 indicate range
   // error independently of readiness. Never publish a stale result.
   if ((ready & 0x18U) != 0) {
+    rejected_channel_ = channel;
     optical_[channel].valid = false;
     if (channel < kFloorAndFrontCount) {
       // Zero is an invalid sentinel: no distance was acquired.

@@ -76,6 +76,8 @@ class TofBus {
   TofOpticalDiagnostic optical_diagnostic(std::uint8_t channel,
                                            std::uint32_t now_ms) const;
   std::uint8_t new_optical_channel() const { return new_optical_channel_; }
+  // Interrupt error revokes cached evidence, but is not a new conversion.
+  std::uint8_t rejected_channel() const { return rejected_channel_; }
   // One-time read-only probe on the existing upstream 3.3V I2C bus,
   // after Wire has initialized. Do not call from the motor polling loop.
   ImuIdentity probe_imu();
@@ -93,6 +95,7 @@ class TofBus {
   std::uint8_t next_channel_ = 0;
   std::uint8_t new_extra_channel_ = 255;
   std::uint8_t new_optical_channel_ = 255;
+  std::uint8_t rejected_channel_ = 255;
   struct OpticalSample {
     bool present = false;
     bool valid = false;

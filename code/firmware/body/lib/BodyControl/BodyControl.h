@@ -163,6 +163,8 @@ class BodyControl {
                            std::uint16_t signal_97, bool valid,
                            std::uint32_t now_ms);
   void invalidate_range_optics();
+  // Revoke one lane without fabricating a conversion or refreshing its age.
+  void invalidate_range_lane(std::uint8_t channel);
 
   // Left/right/rear read-only ToF samples never grant motor permission.
   void sample_side_range(std::uint8_t index, std::uint16_t mm,

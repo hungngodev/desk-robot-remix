@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include "Wire.h"
 #include "TofBus.h"
+#include "RangeTelemetry.h"
 #include "CliffGuard.h"
 
 TwoWire Wire; // host fake, never a real bus
@@ -1064,20 +1065,43 @@ int main() {
             desk_robot::TofBus bus;
             desk_robot::CliffGuard guard;
             ready(bus, guard);
-            for (std::uint32_t now = 60; now < 78; ++now)
+            desk_robot::BodyControl control;
+            const auto poll = [&](std::uint32_t now) {
+              const auto errors = bus.errors();
               bus.poll(guard, now);
+              desk_robot::publish_range_telemetry(
+                  bus, control, now, bus.errors() != errors);
+            };
+            for (std::uint32_t now = 60; now < 78; ++now)
+              poll(now);
             std::uint32_t now = 80;
             for (const auto lane : order) {
               if (lane == target) break;
-              bus.poll(guard, now++);
+              poll(now++);
             }
             const auto prior = bus.optical_diagnostic(target, now);
+            const auto previous = control.state();
+            for (const auto& raw : previous.optical) CHECK(raw.present && raw.valid);
+            for (const auto valid : previous.side_valid) CHECK(valid);
             CHECK(prior.present && prior.valid);
             const auto prior_samples = Wire.tof_samples;
             Wire.tof_ready = conversion_ready;
             Wire.tof_interrupt_error_bits = bits;
-            bus.poll(guard, now);
+            poll(now);
             CHECK(bus.last_channel() == target);
+            CHECK(bus.rejected_channel() == target);
+            for (std::uint8_t lane = 0; lane < 8; ++lane) {
+              const auto& published = control.state().optical[lane];
+              CHECK(published.present && published.valid == (lane != target));
+              CHECK(published.at_ms == previous.optical[lane].at_ms);
+              CHECK(published.ambient_97 == previous.optical[lane].ambient_97);
+              CHECK(published.signal_97 == previous.optical[lane].signal_97);
+            }
+            for (std::uint8_t index = 0; index < 3; ++index) {
+              CHECK(control.state().side_valid[index] == (target != index + 5));
+              CHECK(control.state().side_at_ms[index] == previous.side_at_ms[index]);
+              CHECK(control.state().side_mm[index] == previous.side_mm[index]);
+            }
             CHECK(Wire.tof_samples == prior_samples);
             CHECK(bus.new_optical_channel() == 255);
             CHECK(bus.new_extra_channel() == 255);
@@ -1098,9 +1122,13 @@ int main() {
             }
             Wire.tof_interrupt_error_bits = 0;
             Wire.tof_ready = true;
-            for (std::uint32_t step = 1; step <= 18; ++step)
-              bus.poll(guard, now + step);
+            for (std::uint32_t step = 1; step <= 18; ++step) {
+              poll(now + step);
+              CHECK(bus.rejected_channel() == 255);
+            }
             CHECK(bus.optical_diagnostic(target, now + 18).valid);
+            CHECK(control.state().optical[target].valid);
+            if (target >= 5) CHECK(control.state().side_valid[target - 5]);
             if (target < 5) {
               CHECK(!guard.evaluate(now + 18));
               CHECK(guard.try_rearm(now + 18));
