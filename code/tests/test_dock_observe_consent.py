@@ -35,7 +35,7 @@ def test_dock_observe_never_publishes_old_grant_pose(
     async def noop():
         pass
 
-    monkeypatch.setattr("desk_robot.api.observe_actual_dock", observe)
+    monkeypatch.setattr("desk_robot.api_dock_routes.observe_actual_dock", observe)
     coordinator = SimpleNamespace(
         robot=lambda robot: settings.robot(robot),
         heads={robot_id: object()},
