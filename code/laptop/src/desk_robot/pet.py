@@ -3249,7 +3249,6 @@ class PetController:
     ) -> None:
         """Reuse one fleet speech owner for a consent-fenced social event."""
         state = self.states[robot_id]
-        robot = self.settings.robot(robot_id)
         peer = self.states[social_peer_id]
         if (not state.enabled or self.is_quiet(robot_id)
                 or state.generation != generation or self._closed
