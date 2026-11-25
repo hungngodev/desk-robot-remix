@@ -13,6 +13,7 @@ public:
     void Reset() { baselined_ = false; }
 
     bool AcceptBoot(std::uint32_t boot_id) {
+        boot_accepted_ = false;
         // WROOM initializes its epoch as esp_random() | 1U. Zero is an
         // uninitialized or malformed report, never a new observed boot.
         // Invalidate the edge baseline but preserve the retired epoch fence.
@@ -24,9 +25,9 @@ public:
             boot_seen_ = true;
             active_boot_ = boot_id;
             Reset();
-            return true;
+            return boot_accepted_ = true;
         }
-        if (boot_id == active_boot_) return true;
+        if (boot_id == active_boot_) return boot_accepted_ = true;
         for (std::size_t i = 0; i < retired_count_; ++i)
             if (retired_boot_ids_[i] == boot_id) return false;
         // Bounded UART transport has no legitimate multi-boot replay source.
@@ -37,11 +38,11 @@ public:
         active_boot_ = boot_id;
         Reset();  // first post-reboot count may already be nonzero
         counter_seen_ = false;
-        return true;
+        return boot_accepted_ = true;
     }
 
     int Observe(std::uint32_t counter, std::uint32_t cap = 3) {
-        if (!boot_seen_) return 0;
+        if (!boot_accepted_) return 0;
         if (!counter_seen_) {
             last_ = counter;
             counter_seen_ = true;
@@ -65,6 +66,7 @@ private:
     bool counter_seen_ = false;
     std::uint32_t last_ = 0;
     bool boot_seen_ = false;
+    bool boot_accepted_ = false;
     std::uint32_t active_boot_ = 0;
     std::array<std::uint32_t, 8> retired_boot_ids_{};
     std::size_t retired_count_ = 0;

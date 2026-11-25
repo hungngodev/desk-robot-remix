@@ -151,6 +151,17 @@ int main() {
       replay.Observe(2) != 1) return 32;
   desk_robot::RealTouchEdges no_boot;
   if (no_boot.Observe(10) != 0 || no_boot.Observe(11) != 0) return 33;
+  // Rejected epochs must not emit or poison the active watermark, even
+  // if a future caller accidentally forwards their counters.
+  desk_robot::RealTouchEdges rejected;
+  if (!rejected.AcceptBoot(91) || rejected.Observe(100) != 0 ||
+      !rejected.AcceptBoot(92) || rejected.Observe(10) != 0) return 34;
+  if (rejected.AcceptBoot(91) || rejected.Observe(11) != 0) return 35;
+  if (!rejected.AcceptBoot(92) || rejected.Observe(11) != 1) return 36;
+  if (rejected.AcceptBoot(0) || rejected.Observe(500) != 0 ||
+      rejected.Observe(501) != 0) return 37;
+  if (!rejected.AcceptBoot(92) || rejected.Observe(12) != 0 ||
+      rejected.Observe(13) != 1) return 38;
   return 0;
 }
 """
