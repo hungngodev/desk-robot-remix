@@ -46,6 +46,33 @@ static void faulted(desk_robot::CliffGuard& guard) {
 int main() {
   try {
     {
+      // A later verified close must not erase a transient overlap,
+      // regardless of which mux was enabled last.
+      for (const std::uint8_t first : {0x70, 0x71}) {
+        TwoWire transport;
+        const std::uint8_t second = first == 0x70 ? 0x71 : 0x70;
+        const auto select_mask = [&transport](std::uint8_t address,
+                                               std::uint8_t mask) {
+          transport.beginTransmission(address);
+          CHECK(transport.write(mask) == 1);
+          CHECK(transport.endTransmission(true) == 0);
+        };
+        select_mask(first, 1);
+        CHECK(!transport.unsafe_parallel_mux);
+        select_mask(second, 1);
+        CHECK(transport.ranges == 1 && transport.extras == 1);
+        CHECK(transport.unsafe_parallel_mux);
+        select_mask(first, 0);
+        select_mask(second, 0);
+        CHECK(transport.unsafe_parallel_mux);
+        transport = TwoWire{};
+        select_mask(first, 1);
+        select_mask(first, 0);
+        select_mask(second, 1);
+        CHECK(!transport.unsafe_parallel_mux);
+      }
+    }
+    {
       // Verify the transport fake itself before trusting driver regressions.
       Wire = TwoWire{};
       CHECK(Wire.getTimeOut() == 50);

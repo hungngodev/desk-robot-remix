@@ -235,6 +235,9 @@ class TwoWire {
           hold_sda_on_range_mask = 0;
         }
       }
+      // Latch overlap in both selection directions, even if a later
+      // transaction repairs the masks before the driver publishes a sample.
+      if (ranges && extras) unsafe_parallel_mux = true;
     } else if (current_address == 0x71) {
       if (outbound.empty()) return 0; // address-only TCA9548A probe
       if (outbound.size() != 1) return 4;
