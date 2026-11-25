@@ -55,6 +55,43 @@ def test_default_drive_duration_matches_body_and_head_ack():
 
 
 @pytest.mark.parametrize(
+    ("command", "ack"),
+    [
+        ("drive -40 40 1", "OK drive left=-40 right=40 ms=1"),
+        ("drive 40 -40 250", "OK drive left=40 right=-40 ms=250"),
+        ("drive 40 40 250", "OK drive left=40 right=40 ms=250"),
+        ("drive -40 -40 1", "OK drive left=-40 right=-40 ms=1"),
+        ("lift 60", "OK lift angle=60"),
+        ("lift 120", "OK lift angle=120"),
+        ("grip 60", "OK grip angle=60"),
+        ("grip 120", "OK grip angle=120"),
+    ],
+)
+def test_motion_wire_envelope_includes_exact_boundaries(command, ack):
+    # Syntax and receipt only: guarded WROOM still rejects unqualified directions.
+    assert validate_command(command) == command.split()[0]
+    assert expected_ack(command) == ack
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "drive -41 0 1",
+        "drive 0 -41 1",
+        "drive 0 41 1",
+        "drive 0 0 -1",
+        "lift 121",
+        "grip 59",
+    ],
+)
+def test_motion_wire_envelope_rejects_each_outside_boundary(command):
+    with pytest.raises(ValueError):
+        validate_command(command)
+    with pytest.raises(ValueError):
+        expected_ack(command)
+
+
+@pytest.mark.parametrize(
     "reply,identity",
     [
         ("OK drive", "robot-01"),
