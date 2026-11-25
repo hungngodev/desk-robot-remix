@@ -5,8 +5,9 @@ becomes a physical or same-commit test receipt by changing a status string.
 """
 import importlib.util
 import json
-import math
 import re
+import subprocess
+import sys
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
@@ -29,29 +30,7 @@ MIXED_PROCEDURE_IDS = _POLICY.MIXED_PROCEDURE_IDS
 REQUIRED_PROCEDURE_COMMAND_TOKENS = _POLICY.REQUIRED_PROCEDURE_COMMAND_TOKENS
 
 
-def _parse_ledger(raw):
-    """Reject ambiguous evidence before any gate or receipt is inspected."""
-    def unique_fields(pairs):
-        result = {}
-        for key, value in pairs:
-            if key in result:
-                raise ValueError(f"Duplicate procedure ledger field: {key}")
-            result[key] = value
-        return result
-
-    def reject_constant(token):
-        raise ValueError(f"Nonfinite procedure ledger constant: {token}")
-
-    def finite_float(token):
-        value = float(token)
-        if not math.isfinite(value):
-            raise ValueError(f"Nonfinite procedure ledger number: {token}")
-        return value
-
-    return json.loads(
-        raw, object_pairs_hook=unique_fields,
-        parse_constant=reject_constant, parse_float=finite_float,
-    )
+_parse_ledger = _POLICY.parse_ledger
 
 
 def _load_ledger():
@@ -471,3 +450,52 @@ def test_procedure_ledger_accepts_unambiguous_finite_json():
     assert _parse_ledger('{"gate":"OPEN","value":1.25}') == {
         "gate": "OPEN", "value": 1.25,
     }
+
+
+@pytest.mark.parametrize("extra", [
+    '"schema_version": 2, ',
+    '"unused": NaN, ',
+    '"unused": Infinity, ',
+    '"unused": -Infinity, ',
+    '"unused": 1e999, ',
+    '"unused": 1e-999, ',
+    '"unused": 9223372036854775808, ',
+    '"unused": {"nested": 1, "nested": 2}, ',
+    '"unused": ',
+    "",
+])
+def test_standalone_ledger_cli_rejects_invalid_json_before_audit(tmp_path, extra):
+    ledger = _load_ledger()
+    for row in ledger["procedures"]:
+        row["gate"] = "OPEN"
+    raw = json.dumps(ledger)
+    if extra:
+        raw = "{" + extra + raw[1:]
+    else:
+        raw = raw.replace('"gate": "OPEN"', '"gate": "OPEN", "gate": "OPEN"', 1)
+    path = tmp_path / "ledger.json"
+    path.write_text(raw, encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "code/scripts/verify_playbook_receipts.py"),
+         "--ledger", str(path)],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert result.returncode == 1
+    assert "INCOMPLETE: invalid playbook ledger" in result.stderr
+    assert "No procedures promoted" not in result.stdout
+    assert "Verified GitHub metadata" not in result.stdout
+
+
+def test_standalone_ledger_cli_accepts_complete_open_ledger(tmp_path):
+    ledger = _load_ledger()
+    for row in ledger["procedures"]:
+        row["gate"] = "OPEN"
+    path = tmp_path / "ledger.json"
+    path.write_text(json.dumps(ledger), encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "code/scripts/verify_playbook_receipts.py"),
+         "--ledger", str(path)],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "No procedures promoted. No live evidence receipts checked" in result.stdout

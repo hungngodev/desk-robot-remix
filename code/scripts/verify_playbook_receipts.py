@@ -356,6 +356,17 @@ def bounded_receipt_int(value: str) -> int:
     return number
 
 
+def parse_ledger(raw: str) -> object:
+    """Decode evidence without duplicate fields or lossy numeric values."""
+    return json.loads(
+        raw,
+        object_pairs_hook=strict_receipt_object,
+        parse_constant=reject_nonfinite_receipt_value,
+        parse_float=finite_receipt_float,
+        parse_int=bounded_receipt_int,
+    )
+
+
 def physical_record_revision(receipt: object, tested_sha: str) -> str | None:
     """Resolve a record commit without confusing it with the tested source."""
     if (type(receipt) is not dict or type(tested_sha) is not str
@@ -668,7 +679,7 @@ def main() -> int:
     parser.add_argument("--ledger", type=Path, default=LEDGER)
     args = parser.parse_args()
     try:
-        ledger = json.loads(args.ledger.read_text(encoding="utf-8"))
+        ledger = parse_ledger(args.ledger.read_text(encoding="utf-8"))
         errors = audit(ledger)
     except (OSError, ValueError, TypeError, KeyError) as exc:
         print(f"INCOMPLETE: invalid playbook ledger: {exc}", file=sys.stderr)
