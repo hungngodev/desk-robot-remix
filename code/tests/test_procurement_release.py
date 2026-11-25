@@ -1256,6 +1256,20 @@ def test_supplemental_decisions_reject_unresolved_real_subparts():
     dc_report = mod.generate(plan, both_selected)
     assert dc_report["order_released"]  # synthetic receipt fixture only
     assert dc_report["physical_motor_variant_in_cart"] == "dc"
+    # Both physical drivetrain trials independently gate both architectures,
+    # even when all individual carrier and linked decision receipts pass.
+    for candidate in (evidence, both_selected):
+        for gate in ("loaded_drive_and_stopping",
+                     "hardware_motor_driver_fails_low_after_cpu_stall"):
+            for invalid_receipt in (None, True, {**receipt, "result": "fail"}):
+                unqualified = copy.deepcopy(candidate)
+                unqualified["system"][gate] = invalid_receipt
+                report = mod.generate(plan, unqualified)
+                assert report["physical_motor_variant_in_cart"] == "unresolved"
+                assert gate in report["missing_system_evidence"]
+                assert not report["order_released"]
+                assert not any(row["excluded_from_order_as_alternative"]
+                               for row in report["robots"])
     legacy = [row for row in dc_report["robots"]
               if row["id"] in ("stepper", "uln2003")]
     assert len(legacy) == 2

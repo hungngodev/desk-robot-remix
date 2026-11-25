@@ -679,7 +679,13 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
     # chosen physical drivetrain, even when the old 28BYJ48 rows remain in
     # the fixed 42-role accounting baseline. This is critical for the first
     # robot cart: do not recommend a second set of stepper motors by default.
-    if not motor_pair_reviewed or motor_is_dc != driver_is_dc:
+    # Individual carrier receipts do not prove the assembled drivetrain can
+    # stop under load or lose motor power independently of a stalled CPU.
+    motor_physical_pass = all(gate not in missing_system for gate in (
+        "loaded_drive_and_stopping",
+        "hardware_motor_driver_fails_low_after_cpu_stall",
+    ))
+    if not motor_pair_reviewed or motor_is_dc != driver_is_dc or not motor_physical_pass:
         physical_motor_variant = "unresolved"
     else:
         physical_motor_variant = "dc" if motor_is_dc else "stepper"
