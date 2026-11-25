@@ -383,10 +383,10 @@ The device must already be assembled, authorized and continuously listening.
 Only the optional bench image registers the authenticated
 `/api/audio.capture.start`, `/api/audio.capture.status` and
 `/api/audio.capture.raw` endpoints. The capture does not begin at boot.
-The operator should reproduce four seconds of actual speaking output with
-simultaneous microphone capture; an incomplete, discontinuous or reset
-reference invalidates the trial. The private capture must never be deployed
-as a production image.
+Start an audible broadband stimulus before START and sustain it throughout
+the four-second recording. An incomplete reference, known short PDM read,
+discontinuous source window or playback reset invalidates the trial. The
+private capture must never be deployed as a production image.
 
 For a real bench trial, first configure the private image with the robot's
 existing unique token and an accessible Mac LAN IPv4 address. Build and flash
@@ -410,8 +410,12 @@ Replace the sample IP, robot ID and token environment name with the actual
 local device identity. The capture tool refuses public or proxied addresses,
 requires an authenticated matching boot ID, declines partial PCM and writes
 private 0700 directory and 0600 files without overwriting existing captures.
-Those files contain **real microphone audio**, so do not commit, share or
-place them in a synchronized public folder. The device's sample times and
+Use both WAVs from the same capture directory; do not independently trim,
+pad, or substitute one channel. The estimator rejects unequal resampled
+sample counts, malformed PCM16 and a dominant negative lag. A positive
+candidate is still an offline diagnostic, not proof of shared acquisition
+or audible output. Those files contain **real microphone audio**, so do not
+commit, share or place them in a synchronized public folder. The device's sample times and
 software integrity counters are diagnostics, not proof of audible speaker
 output. Reflash the standard build with PCM capture off after calibration.
 Keep the true speaker latency, microphone intelligibility, acoustic

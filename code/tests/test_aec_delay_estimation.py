@@ -292,3 +292,38 @@ def test_odd_pcm_chunk_byte_cannot_be_silently_discarded(tmp_path, rate):
     file.write_bytes(raw)
     with pytest.raises(ValueError, match="incomplete PCM16"):
         source["read_wav"](file)
+
+
+
+@pytest.mark.parametrize("fault", ["negative_lead", "unequal_duration"])
+def test_misaligned_board_wavs_cannot_emit_delay_candidate(tmp_path, fault):
+    """A weak positive echo must not mask a stronger noncausal alignment."""
+    import subprocess
+    import sys
+    import wave
+
+    rng = np.random.default_rng(996)
+    speaker = rng.normal(0, 0.12, 64000)
+    positive_echo = np.concatenate((np.zeros(1120), speaker))[:64000]
+    if fault == "negative_lead":
+        microphone = np.concatenate((speaker[960:], np.zeros(960))) + 0.45 * positive_echo
+        message = "microphone leads speaker reference"
+    else:
+        microphone = positive_echo[:60000]
+        message = "equal sample counts"
+    with pytest.raises(ValueError, match=message):
+        estimate_delay(speaker, microphone)
+    for filename, samples in (("speaker.wav", speaker), ("mic.wav", microphone)):
+        with wave.open(str(tmp_path / filename), "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(16000)
+            wav.writeframes((samples * 32767).astype("<i2").tobytes())
+    script = Path(__file__).resolve().parents[1] / "scripts/estimate_aec_delay.py"
+    result = subprocess.run([
+        sys.executable, str(script), "--speaker", str(tmp_path / "speaker.wav"),
+        "--microphone", str(tmp_path / "mic.wav"),
+    ], capture_output=True, text=True)
+    assert result.returncode != 0
+    assert message in result.stderr
+    assert not result.stdout

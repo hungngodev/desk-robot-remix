@@ -77,6 +77,8 @@ def estimate_delay(
         raise ValueError(
             "Audio capture too short for requested delay search and 100 ms tail"
         )
+    if len(reference) != len(microphone):
+        raise ValueError("Aligned reference and microphone need equal sample counts")
     if not np.isfinite(reference).all() or not np.isfinite(microphone).all():
         raise ValueError("Nonfinite audio samples")
     ref = reference.astype(np.float64, copy=False)
@@ -96,8 +98,12 @@ def estimate_delay(
     # energy penalizes long delays and unrelated noise outside the overlap.
     # Prefix sums give the local Pearson coefficient without a per-lag scan.
     # The capture-length check above guarantees at least 100 ms per candidate.
-    lags = np.arange(requested_lag + 1)
-    counts = np.minimum(len(ref), len(mic) - lags)
+    # Include negative lags so a misaligned reference cannot hide a
+    # dominant microphone lead behind a weaker positive correlation peak.
+    lags = np.arange(-requested_lag, requested_lag + 1)
+    ref_starts = np.maximum(-lags, 0)
+    mic_starts = np.maximum(lags, 0)
+    counts = np.minimum(len(ref) - ref_starts, len(mic) - mic_starts)
 
     def overlap_stats(values, starts, ends):
         sums = np.concatenate(([0.0], np.cumsum(values)))
@@ -108,17 +114,18 @@ def estimate_delay(
         )
         return total, energy
 
-    ref_sum, ref_variance = overlap_stats(ref, 0, counts)
-    mic_sum, mic_variance = overlap_stats(mic, lags, lags + counts)
-    covariance = corr[:requested_lag + 1] - ref_sum * mic_sum / counts
+    ref_sum, ref_variance = overlap_stats(ref, ref_starts, ref_starts + counts)
+    mic_sum, mic_variance = overlap_stats(mic, mic_starts, mic_starts + counts)
+    covariance = corr[lags % nfft] - ref_sum * mic_sum / counts
     denominator = np.sqrt(ref_variance * mic_variance)
     strength = np.divide(
         np.abs(covariance), denominator, out=np.zeros_like(denominator),
         where=(ref_variance >= 1e-8) & (mic_variance >= 1e-8),
     )
     strength = np.clip(strength, 0.0, 1.0)
-    lag = int(np.argmax(strength))
-    peak = float(strength[lag])
+    peak_index = int(np.argmax(strength))
+    lag = int(lags[peak_index])
+    peak = float(strength[peak_index])
     confidence = peak
     if not math.isfinite(confidence) or confidence < 0.15:
         raise ValueError("Playback and microphone capture insufficiently correlated")
@@ -129,9 +136,11 @@ def estimate_delay(
     # AEC setup must use a broadband stimulus with a unique correlation peak.
     alternate = strength.copy()
     guard = sample_rate // 1000
-    alternate[max(0, lag - guard):min(len(alternate), lag + guard + 1)] = 0
+    alternate[max(0, peak_index - guard):peak_index + guard + 1] = 0
     if float(alternate.max()) >= 0.90 * peak:
         raise ValueError("Ambiguous acoustic delay: periodic tone or competing echo")
+    if lag < 0:
+        raise ValueError("Misaligned capture: microphone leads speaker reference")
     samples_per_ms = sample_rate // 1000
     setting_applicable = lag <= 250 * samples_per_ms
     # Kconfig accepts integer milliseconds; round half up from exact samples.
@@ -230,7 +239,7 @@ def main() -> None:
         ))
     except ValueError as exc:
         # No drift number is better than a fabricated estimate from silence,
-        # unequal clips, abrupt latency jumps or insufficient evidence.
+        # abrupt latency jumps or insufficient evidence.
         report.update({
             "clock_drift_ppm_estimate": None,
             "clock_drift_status": "unavailable",
