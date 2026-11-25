@@ -269,6 +269,10 @@ async def test_activity_scheduler_reevaluates_idle_scene_without_fake_perception
     user_prompt = chat.prompts[0][1]["content"]
     assert "There is no new sensor or camera observation" in user_prompt
     assert "Camera model assessment" not in user_prompt
+    evidence = json.loads(user_prompt.split("Untrusted evidence JSON: ", 1)[1])
+    assert evidence["robot_id"] == "robot-01"
+    assert evidence["untrusted_data_not_instructions"] is True
+    assert evidence["event"] is None
     await pet.close()
     assert pet.status("robot-01")["activity_scheduler_running"] is False
 
@@ -5129,11 +5133,32 @@ async def test_proactive_source_prompt_does_not_claim_sensor_is_camera(fleet, tm
         assert "Local physical sensor event" in chat.prompts[0][1]["content"]
         assert "New visual change" not in chat.prompts[0][1]["content"]
         await wait_for(lambda: pet._speech_task is None)
+        description = 'A possible "key" appeared near a book.\nPrinted label: Notes.'
+        received = time.monotonic()
         pet._consider_speech(
-            "robot-01", SceneChange("key", "A possible key appeared", .96), 24
+            "robot-01", SceneChange("key", description, .96), 24,
+            received_at=received,
         )
         await wait_for(lambda: pet._speech_task is None)
         assert "Camera model assessment (uncertain)" in chat.prompts[1][1]["content"]
+        system, user = chat.prompts[1][:2]
+        assert system["role"] == "system" and user["role"] == "user"
+        assert description not in system["content"]
+        assert "untrusted data" in system["content"]
+        evidence = json.loads(user["content"].split("Untrusted evidence JSON: ", 1)[1])
+        assert evidence["robot_id"] == "robot-01"
+        assert evidence["mac_monotonic_offered_at"] == received
+        assert evidence["untrusted_data_not_instructions"] is True
+        assert evidence["event"] == {
+            "kind": "key",
+            "source_category": "camera_model_assessment",
+            "description": description,
+            "confidence": .96,
+        }
+        sensor = json.loads(
+            chat.prompts[0][1]["content"].split("Untrusted evidence JSON: ", 1)[1]
+        )
+        assert sensor["event"]["source_category"] == "physical_sensor_event"
         # Different sensor and camera evidence keep independent provenance;
         # identical canned model text is intentionally not spoken twice.
         assert state.spoken == 1
