@@ -563,6 +563,15 @@ class OverlayTests(unittest.TestCase):
         )
         kconfig = (self.root / "main/Kconfig.projbuild").read_text()
         self.assertIn("config BOARD_TYPE_DESK_ROBOT_SENSE_S3", kconfig)
+        p3_path = "scripts/p3_tools/p3_gui_player.py"
+        original_p3 = self.original[p3_path]
+        installed_p3 = (self.root / p3_path).read_bytes()
+        self.assertNotEqual(installed_p3, original_p3)
+        self.assertEqual(
+            installed_p3, overlay.instrument_p3_player(original_p3.decode()).encode(),
+        )
+        compile(installed_p3, p3_path, "exec")
+        self.assertEqual((UPSTREAM / p3_path).read_bytes(), original_p3)
         overlay.remove(self.root)
         self.assertFalse(board.exists())
         self.assertEqual(

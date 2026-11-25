@@ -214,3 +214,34 @@ def test_repeated_pause_does_not_contaminate_active_reports(source, tmp_path):
     assert metrics["underflow_reports_first_write"] == 1
     assert metrics["underflow_reports_after_pause"] == 2
     assert metrics["underflow_reports_active"] == 2
+
+
+@pytest.mark.parametrize("payload", [b"", b"\x00"])
+def test_gui_worker_stops_on_unplayable_file_even_in_repeat_mode(source, tmp_path, payload):
+    path = tmp_path / "bad.p3"
+    path.write_bytes(payload)
+    instrumented = overlay.instrument_p3_player(source)
+    player, calls = make_player(instrumented, [], [], [0])
+    app_class = next(
+        node for node in ast.parse(instrumented).body
+        if isinstance(node, ast.ClassDef) and node.name == "P3PlayerApp"
+    )
+    worker = next(node for node in app_class.body if getattr(node, "name", "") == "play_audio")
+    ns = {"play_p3_file": player, "tk": SimpleNamespace(END="end"), "os": os}
+    exec(compile(ast.Module(body=[worker], type_ignores=[]), "p3_gui_player.py", "exec"), ns)
+    statuses = []
+    event = SimpleNamespace(is_set=lambda: False)
+    app = SimpleNamespace(
+        stop_event=event, pause_event=event, playlist=[str(path)], current_index=0,
+        loop_playback=SimpleNamespace(get=lambda: True), is_playing=True, is_paused=False,
+        playlist_listbox=SimpleNamespace(
+            selection_clear=lambda *_: None, selection_set=lambda *_: None,
+            activate=lambda *_: None,
+        ),
+        update_status=lambda message, color: statuses.append((message, color)),
+    )
+    ns["play_audio"](app)
+    assert not app.is_playing and not app.is_paused
+    assert statuses[-1][0].startswith("P3 playback failed:")
+    assert statuses[-1][1] == "red"
+    assert calls == ["start", "stop", "close"]

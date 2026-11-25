@@ -171,7 +171,9 @@ def instrument_p3_player(source: str) -> str:
         source,
         "            play_p3_file(file, self.stop_event, self.pause_event)\n",
         '''            try:
-                play_p3_file(file, self.stop_event, self.pause_event)
+                result = play_p3_file(file, self.stop_event, self.pause_event)
+                if result["termination"] == "empty":
+                    raise ValueError("Empty P3 audio file")
             except Exception as exc:
                 print(f"P3 playback failed: {exc}")
                 self.is_playing = False
