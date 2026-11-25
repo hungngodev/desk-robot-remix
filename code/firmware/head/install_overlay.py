@@ -1272,16 +1272,27 @@ def checked_overlay_path(target: Path, name: str) -> Path:
     return path
 
 
+def unique_journal_object(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Invalid head overlay journal: duplicate key")
+        result[key] = value
+    return result
+
+
 def read_overlay_journal(target: Path, marker: Path) -> dict:
     """Reject malformed or escaping recovery journals before any file IO."""
     if not marker.is_file() or marker.is_symlink() or marker.stat().st_size > 16_000_000:
         raise ValueError("Invalid head overlay journal")
-    state = json.loads(marker.read_text())
+    state = json.loads(marker.read_text(), object_pairs_hook=unique_journal_object)
     if not isinstance(state, dict) or not state:
         raise ValueError("Invalid head overlay journal")
     root = target.resolve()
     for name, info in state.items():
-        if (not isinstance(name, str) or not name.startswith(("main/", "scripts/"))
+        if (not isinstance(name, str) or not (name.startswith("main/")
+                    or name == "scripts/p3_tools/p3_gui_player.py")
+                or any(ord(ch) < 32 or ord(ch) == 127 for ch in name)
                 or "\\" in name or any(part in ("", ".", "..") for part in name.split("/"))
                 or not isinstance(info, dict)
                 or set(info) not in ({"sha256", "original"},
@@ -1297,6 +1308,9 @@ def read_overlay_journal(target: Path, marker: Path) -> dict:
             if (type(recipe) is not str or len(recipe) != 64
                     or any(ch not in "0123456789abcdef" for ch in recipe)):
                 raise ValueError("Invalid head overlay journal recipe digest")
+        parts = name.split("/")
+        if any("/".join(parts[:i]) in state for i in range(1, len(parts))):
+            raise ValueError("Invalid head overlay journal: overlapping paths")
         path = checked_overlay_path(target, name)
         if not path.parent.resolve().is_relative_to(root):
             raise ValueError("Overlay journal path escapes pinned checkout")
@@ -1305,6 +1319,8 @@ def read_overlay_journal(target: Path, marker: Path) -> dict:
                 base64.b64decode(info["original"], validate=True)
             except (ValueError, base64.binascii.Error) as exc:
                 raise ValueError("Invalid original bytes in overlay journal") from exc
+    if len({info.get("recipe_sha256") for info in state.values()}) != 1:
+        raise ValueError("Invalid head overlay journal: mixed recipe digests")
     return state
 
 

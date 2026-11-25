@@ -293,6 +293,40 @@ class OverlayPathTests(unittest.TestCase):
         self.assertTrue(marker.is_file())
         self.assertEqual((self.board / "config.json").read_bytes(), b"{}")
 
+    def test_malformed_journal_cannot_mutate_installed_files(self):
+        overlay.apply(self.root)
+        marker = self.root / overlay.MARKER
+        original_marker = marker.read_text()
+        state = json.loads(original_marker)
+        name, entry = next(iter(state.items()))
+        encoded = json.dumps(entry)
+        duplicate_path = "{" + json.dumps(name) + ":" + encoded + ","
+        duplicate_path += json.dumps(name) + ":" + encoded + "}"
+        duplicate_field = original_marker.replace('"original": null',
+                                                  '"original": null, "original": "eA=="')
+        cases = {
+            "duplicate path": duplicate_path,
+            "duplicate field": duplicate_field,
+            "overlapping paths": json.dumps({**state, name + "/child": entry}),
+            "NUL path": json.dumps({**state, "main/a\u0000b": entry}),
+            "unrelated script": json.dumps({**state, "scripts/unrelated.py": entry}),
+            "mixed recipe": json.dumps({
+                **state, "main/other": {**entry, "recipe_sha256": "0" * 64},
+            }),
+        }
+        for label, malformed in cases.items():
+            with self.subTest(label=label):
+                marker.write_text(malformed)
+                with self.assertRaisesRegex(ValueError, "Invalid head overlay journal"):
+                    overlay.remove(self.root)
+                with self.assertRaisesRegex(ValueError, "Invalid head overlay journal"):
+                    overlay.apply(self.root)
+                self.assertEqual(marker.read_text(), malformed)
+                self.assertEqual((self.board / "config.json").read_bytes(), b"{}")
+        marker.write_text(original_marker)
+        overlay.remove(self.root)
+        self.assertFalse(marker.exists())
+
     def test_journal_allows_p3_player_host_script_and_rejects_arbitrary_path(self):
         script_path = self.root / "scripts/p3_tools/p3_gui_player.py"
         script_path.parent.mkdir(parents=True, exist_ok=True)
