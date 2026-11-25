@@ -1114,3 +1114,78 @@ def test_spatial_navigation_accepts_integer_cell_and_heading_boundaries():
     assert request.heading == 3
     assert request.goal_heading == 0
 
+
+def test_readonly_planner_never_uses_asr_from_revoked_live_grant(settings):
+    import time
+
+    from desk_robot.api_readonly_planner import register_readonly_planner_routes
+    from desk_robot.multimodal import CameraFrameHub
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    hub = CameraFrameHub(["robot-01"])
+    assert hub.remember_heard("robot-01", "old_grant", "OLD PRIVATE ASR", time.monotonic())
+    settings.voice_vision_tools_enabled = False
+
+    class Planner:
+        def __init__(self):
+            self.calls = []
+            self.revoke = False
+
+        async def reply(self, history):
+            self.calls.append(history)
+            if self.revoke:
+                settings.voice_vision_tools_enabled = False
+                settings.voice_vision_tools_enabled = True
+            return '{"tools":[]}'
+
+    planner = Planner()
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        multimodal=SimpleNamespace(hub=hub), conversation=SimpleNamespace(chat=planner),
+    )
+    register_readonly_planner_routes(app, settings, authorize=lambda: None)
+    with TestClient(app) as client:
+        def read():
+            return client.post(
+                "/v1/pet/robot-01/plan-readonly", json={"transcript": "Check safety status"},
+            )
+
+        assert read().status_code == 200
+        assert "OLD PRIVATE ASR" not in str(planner.calls[-1])
+        settings.voice_vision_tools_enabled = True
+        assert read().status_code == 200
+        assert "OLD PRIVATE ASR" not in str(planner.calls[-1])
+        assert hub.remember_heard("robot-01", "new_grant", "NEW GRANT ASR", time.monotonic())
+        assert read().status_code == 200
+        assert "NEW GRANT ASR" in str(planner.calls[-1])
+        planner.revoke = True
+        assert read().status_code == 409
+
+
+def test_readonly_planner_rejects_marked_unsigned_voice_request(settings):
+    from fastapi.testclient import TestClient
+
+    settings.mode = "hardware"
+
+    class Planner:
+        async def reply(self, history):
+            pytest.fail("Unauthenticated voice receipt reached the language model")
+
+    runtime = SimpleNamespace(conversation=SimpleNamespace(chat=Planner()))
+    app = create_app(settings, runtime=runtime)
+    app.state.runtime = runtime
+    app.state.operator_token = "operator-test-token"
+    app.state.tool_token = "tool-test-token"
+    response = TestClient(app).post(
+        "/v1/pet/robot-01/plan-readonly",
+        headers={
+            "Authorization": "Bearer tool-test-token",
+            "x-desk-robot-tool-receipt": "1",
+        },
+        json={"transcript": "Check safety status"},
+    )
+    assert response.status_code == 409
+

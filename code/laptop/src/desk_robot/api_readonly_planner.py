@@ -11,10 +11,14 @@ import json
 import re
 import time
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from .brain_context import compose_brain_context, is_camera_derived_timeline_item
+from .brain_context import (
+    compose_brain_context,
+    is_camera_derived_timeline_item,
+    live_asr_in_current_grant,
+)
 from .config import Settings
 from .controller import OperationError
 
@@ -27,10 +31,13 @@ class ReadonlyPlanRequest(BaseModel):
 
 def register_readonly_planner_routes(
     app: FastAPI, settings: Settings, *, authorize,
+    requested_tool_context=None, current_tool_context=None,
 ) -> None:
     @app.post("/v1/pet/{robot_id}/plan-readonly",
               dependencies=[Depends(authorize)])
-    async def plan_native_readonly(robot_id: str, request: ReadonlyPlanRequest):
+    async def plan_native_readonly(
+        robot_id: str, request: ReadonlyPlanRequest, http_request: Request,
+    ):
         """Reuse the Mac's existing Ollama to interpret ambiguous voice tools.
 
         Nothing from this response is executable. The pinned Xiaozhi adapter
@@ -47,6 +54,15 @@ def register_readonly_planner_routes(
         transcript = " ".join(request.transcript.split())
         if not transcript or "\x00" in transcript:
             raise HTTPException(400, "Invalid completed model ASR")
+        receipt_owner = None
+        marked_receipt = http_request.headers.get("x-desk-robot-tool-receipt") == "1"
+        if marked_receipt:
+            if not callable(requested_tool_context) or not callable(current_tool_context):
+                raise HTTPException(409, "Voice planner receipt owner unavailable")
+            receipt_owner = requested_tool_context(http_request, robot_id)
+            current_tool_context(
+                receipt_owner, robot_id, "Voice planner receipt missing or superseded",
+            )
         conversation = getattr(app.state.runtime, "conversation", None)
         model = getattr(conversation, "chat", None)
         reply = getattr(model, "readonly_tool_plan", None)
@@ -66,9 +82,15 @@ def register_readonly_planner_routes(
         )
         timeline = []
         if visual is not None:
-            timeline = visual.hub.interaction_timeline(
-                robot_id, time.monotonic(), limit=10
-            )
+            now = time.monotonic()
+            timeline = visual.hub.interaction_timeline(robot_id, now, limit=10)
+            timeline = [
+                entry for entry in timeline
+                if live_asr_in_current_grant(
+                    entry, now=now, enabled=settings.voice_vision_tools_enabled,
+                    consent_started_at=settings.camera_consent_started_at,
+                )
+            ]
             if not settings.voice_vision_tools_enabled:
                 timeline = [
                     entry for entry in timeline
@@ -84,7 +106,9 @@ def register_readonly_planner_routes(
                     if entry.get("channel") != "room_station"
                 ]
         camera_context_used = any(
-            is_camera_derived_timeline_item(item) for item in timeline
+            is_camera_derived_timeline_item(item)
+            or item.get("channel") == "human_transcript"
+            for item in timeline
         )
         camera_consent_generation = settings.camera_consent_generation
         camera_granted_at_request = settings.voice_vision_tools_enabled
@@ -128,6 +152,10 @@ def register_readonly_planner_routes(
             # An unavailable or malformed optional Ollama plan must never
             # become a guessed physical action or stall live microphone I/O.
             parsed = {}
+        if marked_receipt:
+            current_tool_context(
+                receipt_owner, robot_id, "Voice planner receipt superseded during read",
+            )
         if (type(turn_at_request) is int
                 and (getattr(app.state.runtime, "multimodal", None) is not visual
                      or not isinstance(getattr(visual, "_turn_epoch", None), dict)

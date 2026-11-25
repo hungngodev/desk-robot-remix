@@ -643,7 +643,11 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         native_pet_speech_policy=native_pet_speech_policy,
     )
 
-    register_readonly_planner_routes(app, settings, authorize=authorize)
+    register_readonly_planner_routes(
+        app, settings, authorize=authorize,
+        requested_tool_context=requested_tool_context,
+        current_tool_context=current_tool_context,
+    )
 
     register_voice_context_route(
         app, settings, authorize=authorize,
