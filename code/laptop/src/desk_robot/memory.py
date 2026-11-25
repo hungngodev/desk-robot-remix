@@ -435,7 +435,12 @@ class MemoryStore:
                 continue
             if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
                 raise ValueError("Refusing linked or nonregular memory sidecar")
-        db = sqlite3.connect(path, timeout=3)
+        # Only initialization may create a database. A runtime read or write
+        # must not leave an empty replacement if the private file vanished.
+        # SQLite URI mode=rw enforces this at open, without an exists/open race.
+        # Path.as_uri escapes literal '?' and '#' in the configured root.
+        mode = "rwc" if initializing else "rw"
+        db = sqlite3.connect(path.as_uri() + f"?mode={mode}", timeout=3, uri=True)
         try:
             # A private root is necessary but insufficient if an older
             # database file was created with group/world read bits. Restrict

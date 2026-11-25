@@ -332,3 +332,27 @@ def test_empty_existing_identity_table_cannot_be_silently_rebound(tmp_path):
     with sqlite3.connect(database) as db:
         assert db.execute("SELECT robot_id FROM memory_identity").fetchall() == []
         assert db.execute("SELECT value FROM core_facts").fetchone() == ("Private game",)
+
+@pytest.mark.parametrize("directory", ["private", "private ?#%"])
+def test_runtime_memory_open_does_not_recreate_missing_database(tmp_path, directory):
+    import sqlite3
+
+    root = tmp_path / directory
+    store = MemoryStore(root, ["pet_a", "pet_b"])
+    assert store.set_core_fact("pet_a", "favorite_game", "Original private game")
+    path = root / "pet_a.sqlite3"
+    saved = root / "pet_a.backup"
+    path.rename(saved)
+
+    with pytest.raises(sqlite3.OperationalError):
+        store.recent("pet_a")
+    assert not path.exists()
+    with pytest.raises(sqlite3.OperationalError):
+        store.forget_episode("pet_a", "missing")
+    assert not path.exists()
+    assert store.count("pet_b") == 0
+
+    saved.rename(path)
+    assert store.core_facts("pet_a")[0].value == "Original private game"
+    assert store.set_core_fact("pet_a", "favorite_game", "New private game")
+    assert store.core_facts("pet_a")[0].value == "New private game"
