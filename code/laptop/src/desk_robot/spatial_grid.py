@@ -107,6 +107,7 @@ class SpatialGrid:
         """
         if (type(now_us) is not int or now_us < 0
                 or not isinstance(batch, RangeCellBatch)
+                or type(batch.body_boot) is not int or type(batch.epoch) is not int
                 or batch.robot_id != self.robot_id or batch.body_boot != self.body_boot
                 or batch.origin_id != self.origin_id or batch.epoch != self.epoch
                 or batch.calibration_id != self.calibration_id
@@ -144,6 +145,15 @@ class SpatialGrid:
         relative_lag_us = 0 if reference is None else (
             (batch.received_us - reference[1]) - (batch.sample_us - reference[0])
         )
+        # All eight lanes share the WROOM clock, including a lane's first packet.
+        offset = batch.received_us - batch.sample_us
+        best_offset = min((r - s for s, r in self._clock_reference.values()), default=offset)
+        if (offset - best_offset > _MAX_SOURCE_RECEIPT_LAG_US
+                or best_offset - offset > _MAX_SOURCE_FORWARD_LEAP_US):
+            self._cells.clear()
+            self._last_update_us = 0
+            self.anchored = False
+            raise GridEvidenceError("ToF source clock diverged from Mac receipt")
         if previous is not None:
             # WROOM and Mac have unrelated clock epochs, but their elapsed
             # durations must agree within transport lag tolerance. A newly
@@ -194,6 +204,8 @@ class SpatialGrid:
                 if (target.obstacle_calibration != batch.calibration_id
                         or target.obstacle_epoch != batch.epoch
                         or target.obstacle_received_us == 0
+                        or target.obstacle_received_us - target.obstacle_sample_us
+                        - min(best_offset, offset) > _MAX_SOURCE_RECEIPT_LAG_US
                         or not 0 <= batch.received_us - target.obstacle_received_us <= self.ttl_us):
                     # An expired prior hit or clearance cannot bias fresh evidence.
                     # Clock rollback also discards the prior belief, never revives it.
@@ -242,6 +254,13 @@ class SpatialGrid:
             return "unknown"
         if (not 0 <= now_us - cell.floor_received_us <= self.ttl_us
                 or not 0 <= now_us - cell.obstacle_received_us <= self.ttl_us):
+            return "stale"
+        # A later lane can reveal that a previously received conversion was old.
+        best_offset = min(r - s for s, r in self._clock_reference.values())
+        if (cell.floor_received_us - cell.floor_sample_us - best_offset
+                > _MAX_SOURCE_RECEIPT_LAG_US
+                or cell.obstacle_received_us - cell.obstacle_sample_us - best_offset
+                > _MAX_SOURCE_RECEIPT_LAG_US):
             return "stale"
         if cell.obstacle_log_odds >= 0.5:
             return "occupied"

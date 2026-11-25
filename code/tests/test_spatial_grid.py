@@ -44,13 +44,13 @@ def test_occupied_free_unknown_and_log_odds_clamp():
     g.record(evidence("obstacle_clear", 4), now_us=1_000_010)
     assert g.log_odds(1, 1) == pytest.approx(-0.8)
     for seq in range(2, 12):
-        g.record(evidence("obstacle_hit", 4, seq, received_us=1_000_000 + seq * 10),
-                 now_us=1_000_000 + seq * 10)
+        g.record(replace(evidence("obstacle_hit", 4, seq, received_us=1_000_000 + seq * 10),
+                         sample_us=100_000 + seq * 10), now_us=1_000_000 + seq * 10)
     assert g.log_odds(1, 1) == pytest.approx(4.0)
     assert g.state(1, 1, now_us=1_000_110) == "occupied"
     for seq in range(12, 30):
-        g.record(evidence("obstacle_clear", 4, seq, received_us=1_000_000 + seq * 10),
-                 now_us=1_000_000 + seq * 10)
+        g.record(replace(evidence("obstacle_clear", 4, seq, received_us=1_000_000 + seq * 10),
+                         sample_us=100_000 + seq * 10), now_us=1_000_000 + seq * 10)
     assert g.log_odds(1, 1) == pytest.approx(-4.0)
     assert g.state(1, 1, now_us=1_000_300) == "safe"
 
@@ -134,7 +134,8 @@ def test_recalibration_cannot_reuse_old_clearance_or_blockage():
     g.record(evidence("floor_supported", 0), now_us=1_000_010)
     for seq in range(1, 7):
         at = 1_000_000 + seq * 10
-        g.record(evidence("obstacle_clear", 4, seq, received_us=at), now_us=at)
+        g.record(replace(evidence("obstacle_clear", 4, seq, received_us=at),
+                         sample_us=100_000 + seq * 10), now_us=at)
     assert g.log_odds(1, 1) == pytest.approx(-4.0)
     assert g.state(1, 1, now_us=1_000_060) == "safe"
 
@@ -245,16 +246,18 @@ def test_expired_obstacle_confidence_never_biases_new_measurement(
     # Several mutually consistent old measurements saturate the log odds.
     for seq in range(1, 6):
         receipt = 1_000_000 + seq * 10
-        g.record(evidence(old_kind, 4, seq, received_us=receipt), now_us=receipt)
+        g.record(replace(evidence(old_kind, 4, seq, received_us=receipt),
+                         sample_us=100_000 + seq * 10), now_us=receipt)
     assert g.log_odds(1, 1) == pytest.approx(old_confidence)
 
     # The new floor support is fresh, but the obstacle belief has expired.
     now = 2_000_100
-    g.record(evidence("floor_supported", 0, received_us=now), now_us=now)
+    g.record(replace(evidence("floor_supported", 0, received_us=now),
+                     sample_us=1_100_100), now_us=now)
     assert g.state(1, 1, now_us=now) == "stale"
     new_sample = replace(
         evidence(fresh_kind, 4, seq=6, received_us=now),
-        sample_us=1_500_050,
+        sample_us=1_100_100,
     )
     g.record(new_sample, now_us=now)
     assert g.log_odds(1, 1) == pytest.approx(fresh_confidence)
@@ -289,10 +292,10 @@ def test_snapshot_expiry_never_renews_old_safe_cell_evidence(
     g.record(evidence("floor_supported", 0), now_us=1_000_000)
     g.record(evidence("obstacle_clear", 4, received_us=1_100_000,
                       cells=((2, 1),)), now_us=1_100_000)
-    g.record(evidence("obstacle_clear", 4, seq=2, received_us=1_400_000),
-             now_us=1_400_000)
-    g.record(evidence("floor_supported", 1, received_us=1_500_000,
-                      cells=((2, 1),)), now_us=1_500_000)
+    g.record(replace(evidence("obstacle_clear", 4, seq=2, received_us=1_400_000),
+                     sample_us=400_000), now_us=1_400_000)
+    g.record(replace(evidence("floor_supported", 1, received_us=1_500_000,
+                              cells=((2, 1),)), sample_us=500_000), now_us=1_500_000)
     snapshot = g.snapshot(now_us=now_us)
     assert snapshot.support[5:7] == (first_state, second_state)
     assert snapshot.support[0] == "unknown"
