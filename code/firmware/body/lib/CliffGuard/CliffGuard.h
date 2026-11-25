@@ -38,7 +38,7 @@ struct CliffConfig {
 // A native v1 NVS blob contains a bool. Inspect its object representation
 // before any typed read (including checksum calculation): malformed bool bytes
 // have undefined behavior. Only an explicitly calibrated record may load.
-inline bool valid_stored_calibrated_flag(const CliffConfig& config) {
+inline bool valid_stored_calibrated_flag(const CliffConfig& config) noexcept {
   const bool expected = true;
   return std::memcmp(&config.calibrated, &expected, sizeof(expected)) == 0;
 }
@@ -61,18 +61,18 @@ enum class CliffFault : std::uint8_t {
 // never clears a fault. Only an explicit, authorized try_rearm may clear it.
 class CliffGuard {
  public:
-  bool configure(const CliffConfig& config);
+  bool configure(const CliffConfig& config) noexcept;
   void sample(std::uint8_t channel, std::uint16_t distance_mm, bool valid,
-              std::uint32_t now_ms);
-  void bus_fault();
-  bool evaluate(std::uint32_t now_ms);
-  bool try_rearm(std::uint32_t now_ms);
-  bool configured() const { return configured_; }
-  const CliffConfig& configuration() const { return config_; }
-  CliffFault fault() const { return fault_; }
-  std::uint8_t fault_sensor() const { return fault_sensor_; }
-  RangeDiagnostic diagnostic(std::uint8_t channel, std::uint32_t now_ms) const;
-  static const char* fault_name(CliffFault fault);
+              std::uint32_t now_ms) noexcept;
+  void bus_fault() noexcept;
+  bool evaluate(std::uint32_t now_ms) noexcept;
+  bool try_rearm(std::uint32_t now_ms) noexcept;
+  bool configured() const noexcept { return configured_; }
+  const CliffConfig& configuration() const noexcept { return config_; }
+  CliffFault fault() const noexcept { return fault_; }
+  std::uint8_t fault_sensor() const noexcept { return fault_sensor_; }
+  RangeDiagnostic diagnostic(std::uint8_t channel, std::uint32_t now_ms) const noexcept;
+  static const char* fault_name(CliffFault fault) noexcept;
 
  private:
   struct Sample {
@@ -93,13 +93,13 @@ class CliffGuard {
   CliffFault fault_ = CliffFault::Unconfigured;
   std::uint8_t fault_sensor_ = kNoFaultSensor;
 
-  static bool valid_config(const CliffConfig& config);
-  CliffFault sample_fault(std::uint8_t channel) const;
+  static bool valid_config(const CliffConfig& config) noexcept;
+  CliffFault sample_fault(std::uint8_t channel) const noexcept;
   bool current_health(std::uint32_t now_ms, CliffFault& reason,
-                      std::uint8_t& sensor);
-  void latch(CliffFault reason, std::uint8_t sensor = kNoFaultSensor);
+                      std::uint8_t& sensor) noexcept;
+  void latch(CliffFault reason, std::uint8_t sensor = kNoFaultSensor) noexcept;
   void classify_complete_initial_sweep(CliffFault reason,
-                                       std::uint8_t sensor);
+                                       std::uint8_t sensor) noexcept;
 };
 
 }  // namespace desk_robot

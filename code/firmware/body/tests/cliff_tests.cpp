@@ -13,6 +13,26 @@ using desk_robot::CliffConfig;
 using desk_robot::CliffFault;
 using desk_robot::CliffGuard;
 
+static_assert(noexcept(desk_robot::valid_stored_calibrated_flag(
+                  std::declval<const CliffConfig&>())), "stored flag inspection must not throw");
+static_assert(noexcept(std::declval<CliffGuard&>().configure(
+                  std::declval<const CliffConfig&>())), "cliff configuration must not throw");
+static_assert(noexcept(std::declval<CliffGuard&>().sample(0U, 0U, false, 0U)),
+              "cliff sampling must not throw");
+static_assert(noexcept(std::declval<CliffGuard&>().bus_fault()), "bus fault must not throw");
+static_assert(noexcept(std::declval<CliffGuard&>().evaluate(0U)), "evaluation must not throw");
+static_assert(noexcept(std::declval<CliffGuard&>().try_rearm(0U)), "rearm must not throw");
+static_assert(noexcept(std::declval<const CliffGuard&>().configured()),
+              "configuration query must not throw");
+static_assert(noexcept(std::declval<const CliffGuard&>().configuration()),
+              "calibration query must not throw");
+static_assert(noexcept(std::declval<const CliffGuard&>().fault()), "fault query must not throw");
+static_assert(noexcept(std::declval<const CliffGuard&>().fault_sensor()),
+              "fault sensor query must not throw");
+static_assert(noexcept(std::declval<const CliffGuard&>().diagnostic(0U, 0U)),
+              "range diagnostic must not throw");
+static_assert(noexcept(CliffGuard::fault_name(CliffFault::None)), "fault name must not throw");
+
 namespace {
 #define CHECK(expression)                                                        \
   do {                                                                          \
