@@ -64,7 +64,29 @@ static void stress_capture_clock(std::uint32_t source_rate, int stall_us) {
   assert(!capture.occupied());
 }
 
+// Several JPEG scheduling stalls can accumulate a large phase excursion,
+// then fast callbacks can hide it by the end of the four-second window.
+static void jpeg_burst_phase_recovery() {
+  static std::array<std::int16_t, SensePcmWindow::kFrames * 2> storage{};
+  std::array<std::int16_t, 320> mic{}, ref{};
+  mic.fill(1234);
+  ref.fill(-5678);
+  SensePcmWindow capture;
+  constexpr std::int64_t start = 1000000;
+  assert(capture.begin(storage.data(), start));
+  for (int i = 1; i <= 200; ++i) {
+    const auto phase = i <= 6 ? (i - 1) * 20000 :
+        std::max(0, 100000 - (i - 6) * 1000);
+    capture.offer(mic.data(), ref.data(), 320, start + i * 20000 + phase, true);
+    if (i == 5) assert(!capture.failed() && capture.frames_received() == 1600);
+    if (i >= 6) assert(capture.failed() && capture.frames_received() == 1600);
+  }
+  assert(!capture.ready() && capture.take().interleaved == nullptr);
+  assert(capture.discard() == storage.data());
+}
+
 int main() {
+  jpeg_burst_phase_recovery();
   static std::array<std::int16_t, SensePcmWindow::kFrames * 2> data{};
   assert(SensePcmWindow::kBytes == 256000);
   SensePcmWindow capture;
@@ -173,7 +195,7 @@ int main() {
   for (int i = 1; i <= 200; ++i)
     drifted.offer(mic.data(), ref.data(), 320,
                   1000000 + i * 20500, true);
-  assert(drifted.frames_received() == SensePcmWindow::kFrames);
+  assert(drifted.frames_received() == 161 * 320);
   assert(drifted.failed() && !drifted.ready());
   assert(drifted.take().interleaved == nullptr);
   assert(drifted.discard() == data.data());

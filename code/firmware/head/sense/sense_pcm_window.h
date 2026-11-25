@@ -114,6 +114,15 @@ class SensePcmWindow {
       failed_ = true;
       return;
     }
+    // Check phase throughout the window: a burst of delayed callbacks can
+    // recover before the last read and conceal a discontinuity in the WAV.
+    const auto elapsed = accepted_end_us - first_sample_us_;
+    const auto expected = std::int64_t{received_ + accepted} * 1'000'000 / kSampleRate;
+    if (elapsed < expected - kMaxWindowDriftUs ||
+        elapsed > expected + kMaxWindowDriftUs) {
+      failed_ = true;
+      return;
+    }
     for (std::uint32_t i = 0; i < accepted; ++i) {
       storage_[2 * (received_ + i)] = mic[i];
       storage_[2 * (received_ + i) + 1] = reference[i];
@@ -130,14 +139,7 @@ class SensePcmWindow {
     received_ += accepted;
     last_sample_us_ = accepted_end_us;
     if (received_ == kFrames) {
-      // A full byte count does not prove an uninterrupted four seconds.
-      // Short missing intervals can each fit the per-read jitter budget,
-      // while collectively making the source capture unreliable.
-      const auto elapsed = last_sample_us_ - first_sample_us_;
-      const auto expected = std::int64_t{kFrames} * 1'000'000 / kSampleRate;
-      if (elapsed < expected - kMaxWindowDriftUs ||
-          elapsed > expected + kMaxWindowDriftUs ||
-          !reference_nonzero_seen_ || !microphone_nonzero_seen_) {
+      if (!reference_nonzero_seen_ || !microphone_nonzero_seen_) {
         failed_ = true;
       } else {
         ready_ = true;
