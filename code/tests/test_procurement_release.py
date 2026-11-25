@@ -1247,7 +1247,34 @@ def test_supplemental_decisions_reject_unresolved_real_subparts():
         assert csv_rows[ident]["per_robot"] == "0"
         assert csv_rows[ident]["fleet_total"] == "0"
         assert csv_rows[ident]["remaining_if_all_reported_stock_works"] == "0"
-    assert mod.generate(plan, evidence)["physical_motor_variant_in_cart"] == "stepper"
+    for scope, motors, drivers in (("first_robot", 2, 1), ("fleet", 10, 5)):
+        required, categories = mod.cost_requirements(dc_report, scope)
+        assert required["robot:stepper"] == required["robot:uln2003"] == 0
+        assert required["robot:n20_motor_candidate"] == motors
+        assert required["robot:drv8833_driver_candidate"] == drivers
+        cost = mod.account_landed_cost({}, required, categories, expected_scope=scope)
+        assert not cost["calculation_complete_not_physical_approval"]
+        assert {"robot:n20_motor_candidate", "robot:drv8833_driver_candidate"} <= set(
+            cost["unaccounted_roles"]
+        )
+    assert csv_rows["n20_motor_candidate"]["fleet_total"] == "10"
+    assert csv_rows["drv8833_driver_candidate"]["fleet_total"] == "5"
+    first, _ = mod.cost_requirements(dc_report, "first_robot")
+    attached = mod.attach_verified_checkout_evidence(
+        dc_report,
+        {"scope": "first_robot", "calculation_complete_not_physical_approval": True,
+         "quoted_units_applied_to_roles": first},
+        {"lines": [], "seller_charges": [], "power_package_mode": "complete_kit"},
+    )
+    linked = {item["id"]: item for item in mod.first_robot_projection(attached)[
+        "linked_decisions"
+    ]}
+    assert linked["n20_motor_candidate"]["verified_checkout_order_units"] == 2
+    assert linked["drv8833_driver_candidate"]["verified_checkout_order_units"] == 1
+    assert "linked drivetrain substitution" in mod.render_first_robot_markdown(attached)
+    step = mod.generate(plan, evidence)
+    assert step["physical_motor_variant_in_cart"] == "stepper"
+    assert not set(mod.DC_COST_ROLES) & set(mod.cost_requirements(step, "fleet")[0])
 
     invalid = copy.deepcopy(evidence)
     invalid["supplemental_decisions"]["ghost_charger"] = {}

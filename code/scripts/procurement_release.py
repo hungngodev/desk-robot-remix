@@ -980,6 +980,12 @@ def first_robot_projection(report: dict) -> dict:
             "parent_present_in_plan": parent in pet_ids | station_ids,
             "reviewed": item["reviewed"], "disposition": item["disposition"],
             "additive_purchase_authorized": False,
+            "selected_drivetrain_substitute": (
+                motor == "dc" and "robot:" + item["id"] in DC_COST_ROLES
+            ),
+            "verified_checkout_order_units": item.get("verified_checkout_order_units"),
+            "verified_inspected_first_unit": item.get("verified_inspected_first_unit", 0),
+            "verified_checkout_quotes": copy.deepcopy(item.get("verified_checkout_quotes", [])),
         })
     documented = _documented_prior_spend_baseline()
     return {
@@ -1737,6 +1743,12 @@ def render_first_robot_markdown(report: dict) -> str:
                 f"{row['fleet_ordered_unreceived_not_verified']} | "
                 f"{first_allocated} |"
             )
+    for item in projection["linked_decisions"]:
+        if item["selected_drivetrain_substitute"] and item["verified_inspected_first_unit"]:
+            lines.append(
+                f"| {cell(item['name'])} | {item['verified_inspected_first_unit']} | "
+                "0 | 0 | 0 | 0 |"
+            )
     for item in projection["verified_linked_power_stock"]:
         lines.append(
             f"| {cell(item['name'])} | {item['usable_allocated']} | "
@@ -1797,6 +1809,19 @@ def render_first_robot_markdown(report: dict) -> str:
             f"{cell(_power_reference_summary(row))} | {cell(quote)} |"
         )
     for item in projection["linked_decisions"]:
+        if item["selected_drivetrain_substitute"]:
+            units = item["verified_checkout_order_units"]
+            net = str(units) if type(units) is int else "NOT AUDITED"
+            quote = _verified_checkout_quote(item) or "UNQUOTED: delivered total unknown"
+            lines.append(
+                f"| linked drivetrain substitution | {cell(item['name'])} | "
+                f"{item['conditional_one_robot_quantity']} | "
+                f"not independently counted | {net} | {item['disposition']} | "
+                f"replaces {cell(item['parent_role'])} | "
+                "Do not buy excluded STEP hardware | "
+                f"{cell(item.get('implementation_source'))} | | {cell(quote)} |"
+            )
+            continue
         lines.append(
             f"| linked detail, never additive | {cell(item['name'])} | "
             f"{item['conditional_one_robot_quantity']} if selected | "
@@ -1834,7 +1859,7 @@ def _purchase_rows(report: dict):
 
 
 def render_csv(report: dict) -> str:
-    """Authoritative machine-readable 49-role view of the physical gated plan."""
+    """Canonical parent roles, plus explicit selected DC replacements when applicable."""
     output = io.StringIO(newline="")
     writer = csv.writer(output, lineterminator="\n")
     writer.writerow((
@@ -1859,6 +1884,19 @@ def render_csv(report: dict) -> str:
             ref.get("vendor", ""), ref.get("sku", ""), ref.get("url", ""),
             part["shopping_decision"], part["notes"],
         ))
+    if report.get("physical_motor_variant_in_cart") == "dc":
+        for detail in report["supplemental_decisions"]:
+            role = "robot:" + detail["id"]
+            if role not in DC_COST_ROLES:
+                continue
+            count = DC_COST_ROLES[role]
+            writer.writerow((
+                "linked drivetrain substitution", detail["id"], detail["name"],
+                count // 5, count, 0, 0, 0, count,
+                "yes" if report["order_released"] and detail["reviewed"] else "NO",
+                "", "", "", "replaces_excluded_legacy_drivetrain",
+                "Replaces " + detail["parent_role"] + "; do not buy both",
+            ))
     return output.getvalue()
 
 
@@ -1952,6 +1990,15 @@ def render_markdown(report: dict) -> str:
             if detail["reviewed"] and detail["disposition"] != "deferred_optional"
             else "HOLD SUBASSEMBLY DECISION"
         )
+        if (report.get("physical_motor_variant_in_cart") == "dc"
+                and "robot:" + detail["id"] in DC_COST_ROLES):
+            output.append(
+                f"| linked drivetrain substitution | {cell(name)} | "
+                f"{detail['fleet_quantity']} | see audited quote | {status} | "
+                f"Replaces {detail['parent_role']}; do not buy both | | "
+                f"{cell(_verified_checkout_quote(detail))} |"
+            )
+            continue
         output.append(
             f"| linked detail (not additive) | {cell(name)} | "
             f"{detail['fleet_quantity']} if selected | not independently counted | "
@@ -2055,6 +2102,12 @@ def invalidate_incomplete_power_quote(cost: dict, message: str) -> dict:
     return cost
 
 
+DC_COST_ROLES = {
+    "robot:" + ident: SUPPLEMENTAL_DECISIONS[ident][1]
+    for ident in ("n20_motor_candidate", "drv8833_driver_candidate")
+}
+
+
 def cost_requirements(report: dict, scope: str) -> tuple[dict, dict]:
     """Derive payable part counts from the same canonical quantity owner."""
     if scope == "evaluation":
@@ -2081,6 +2134,11 @@ def cost_requirements(report: dict, scope: str) -> tuple[dict, dict]:
         key = category + ":" + ident
         needed[key] = _count(quantity, key)
         categories[key] = category
+    # A qualified DC substitution replaces, rather than supplements, STEP.
+    if report.get("physical_motor_variant_in_cart") == "dc":
+        for role, fleet_quantity in DC_COST_ROLES.items():
+            needed[role] = fleet_quantity // 5 if scope == "first_robot" else fleet_quantity
+            categories[role] = "robot"
     return needed, categories
 
 
@@ -2153,6 +2211,15 @@ def stock_carrier_failures(evidence: dict) -> list[str]:
                             or selected.get("disposition") != "selected"):
                         errors.append(f"{label}: unselected power component")
                         continue
+            elif role in DC_COST_ROLES:
+                selected = supplemental.get(ident, {})
+                permitted = ("selected", "reuse_existing") if group_name == "inventory" else (
+                    "selected",
+                )
+                if (not isinstance(selected, dict)
+                        or selected.get("disposition") not in permitted):
+                    errors.append(f"{label}: unselected DC substitute")
+                    continue
             else:
                 selected = (station if prefix == "station" else parts).get(ident, {})
             if type(selected) is not dict:
@@ -2243,6 +2310,11 @@ def attach_verified_checkout_evidence(
         rows[prefix + ":" + part["id"]] = part
     for part in output["room_pod"]:
         rows["station:" + part["id"]] = part
+    if output.get("physical_motor_variant_in_cart") == "dc":
+        for detail in output["supplemental_decisions"]:
+            role = "robot:" + detail["id"]
+            if role in DC_COST_ROLES:
+                rows[role] = detail
     # Only the landed-cost accountant knows how verified inventory, paid
     # allocations and minimum packs cover each role. Never subtract signed
     # stock a second time from the old unverified inventory projection.
@@ -2680,6 +2752,11 @@ def main() -> int:
                               file=sys.stderr)
                         return 2
                     selected = decision
+            elif role in DC_COST_ROLES:
+                selected = supplemental.get(ident, {})
+                if selected.get("disposition") != "selected":
+                    print("HOLD: DC substitute not selected: " + ident, file=sys.stderr)
+                    return 2
             else:
                 selected = by_role[0 if kind == "station" else 1].get(ident, {})
             # A supplier can be a distributor (for example DigiKey) rather
