@@ -12,7 +12,7 @@ template <std::size_t Capacity>
 class ReplyTxQueue {
  public:
   static_assert(Capacity >= 4, "Reply TX queue needs a complete line");
-  bool enqueue_line(const char* line) {
+  bool enqueue_line(const char* line) noexcept {
     if (line == nullptr) return false;
     std::size_t length = 0;
     if (!bounded_line_length(line, Capacity - 2, length) ||
@@ -30,7 +30,7 @@ class ReplyTxQueue {
   // Called ONLY for a completed local STOP/HALT response, after the actuator
   // has already been stopped. The independent lane is not an emergency stop
   // implementation. Never truncate a prior partially transmitted JSON line.
-  bool enqueue_priority_line(const char* line) {
+  bool enqueue_priority_line(const char* line) noexcept {
     if (line == nullptr) return false;
     std::size_t length = 0;
     if (!bounded_line_length(line, kPriorityLineCapacity - 2, length) ||
@@ -98,13 +98,13 @@ class ReplyTxQueue {
     return accepted;
   }
 
-  std::size_t pending() const {
+  std::size_t pending() const noexcept {
     std::size_t result = count_;
     for (std::size_t i = 0; i < priority_count_; ++i)
       result += priority_lengths_[(priority_start_ + i) % kPrioritySlots];
     return result - priority_offset_;
   }
-  std::size_t dropped() const { return dropped_; }
+  std::size_t dropped() const noexcept { return dropped_; }
 
  private:
   static constexpr std::size_t kPrioritySlots = 2;
@@ -113,7 +113,7 @@ class ReplyTxQueue {
   // stops at the queue's capacity even when a caller supplies oversized text,
   // so malformed replies cannot add unbounded work to the motor service loop.
   static bool bounded_line_length(const char* line, std::size_t maximum,
-                                  std::size_t& length) {
+                                  std::size_t& length) noexcept {
     for (length = 0; length <= maximum; ++length) {
       const char value = line[length];
       if (value == '\0') return true;
@@ -122,7 +122,7 @@ class ReplyTxQueue {
     return false;
   }
 
-  void push(char value) {
+  void push(char value) noexcept {
     bytes_[(front_ + count_) % Capacity] = value;
     ++count_;
   }

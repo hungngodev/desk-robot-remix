@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <iostream>
 #include <string>
+#include <utility>
 
 struct FakeSerial {
   int free = 0;
@@ -17,6 +18,14 @@ struct FakeSerial {
     return accepted;
   }
 };
+
+using Queue = desk_robot::ReplyTxQueue<128>;
+static_assert(noexcept(std::declval<Queue&>().enqueue_line(nullptr)));
+static_assert(noexcept(std::declval<Queue&>().enqueue_priority_line(nullptr)));
+static_assert(noexcept(std::declval<const Queue&>().pending()));
+static_assert(noexcept(std::declval<const Queue&>().dropped()));
+// The generic serial backend can allocate or throw; do not promise otherwise.
+static_assert(!noexcept(std::declval<Queue&>().drain(std::declval<FakeSerial&>())));
 
 int main() {
   desk_robot::ReplyTxQueue<128> head, usb;
