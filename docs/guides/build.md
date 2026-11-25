@@ -173,12 +173,15 @@ stop before upload. Identify the exact board/port; port listing is read-only:
 ../.tools/body-pio-venv/bin/pio device list
 ```
 
-After confirming the port belongs to the WROOM, set `PORT` to its exact USB
+After confirming the port belongs to the WROOM, set `WROOM_PORT` to its exact USB
 device and upload the same explicit full profile (from `code/`):
 
 ```sh
-../.tools/body-pio-venv/bin/pio run -d firmware/body -e esp32_full --target upload --upload-port "${PORT:?Set PORT to the verified WROOM USB device}"
-../.tools/body-pio-venv/bin/pio device monitor --port "$PORT" --baud 115200
+(
+  : "${WROOM_PORT:?Set WROOM_PORT to the verified WROOM USB device}"
+  ../.tools/body-pio-venv/bin/pio run -d firmware/body -e esp32_full --target upload --upload-port "$WROOM_PORT" || exit 1
+  ../.tools/body-pio-venv/bin/pio device monitor --port "$WROOM_PORT" --baud 115200
+)
 ```
 
 Expect a disarmed body and local rearm required. Missing calibration or sensor
@@ -230,10 +233,19 @@ reuse another robot's readings.
 
 After those measurements, switch back to the guarded full firmware and
 follow the jaw calibration, ToF/IMU, electrical cutoff and explicit USB
-rearm procedures. `scripts/serial_bench.py` is for an **already qualified
-guarded body**, not initial servo centering. It refuses implicit rearm,
-sends one bounded command and then STOP; a command ACK remains different
-from physical motion or successful grasp evidence.
+rearm procedures. With actuator power disconnected, inspect the guarded body
+from `code/` using the read-only USB bench mode:
+
+```sh
+uv run --no-sync python scripts/serial_bench.py --port "${WROOM_PORT:?Set WROOM_PORT to the verified WROOM USB device}" --inspect --samples 10
+```
+
+Stop if status is missing, stale or invalid; inspection does not rearm or
+qualify hardware. The helper's motion mode is only for an **already qualified
+guarded body**, not initial servo centering. It requires explicit local rearm,
+sends one bounded command and issues HALT in cleanup, disarming while retaining
+servo PWM. A command ACK remains different from physical motion or successful
+grasp evidence.
 
 Host tests:
 
@@ -307,12 +319,13 @@ Keep the WROOM UART and all actuator and charging power disconnected. From
 
 ```sh
 (
+  : "${SENSE_PORT:?Set SENSE_PORT to the verified Sense USB device}"
   tools_root="$(cd ../.tools && pwd)" || exit 1
   export IDF_TOOLS_PATH="$tools_root/idf-tools"
   export PATH="$tools_root/sdk-bootstrap/bin:$PATH"
   source "$tools_root/esp-idf/export.sh" || exit 1
   cd firmware/head/build/xiaozhi-sense || exit 1
-  idf.py -p "${PORT:?Set PORT to the verified Sense USB device}" flash monitor
+  idf.py -p "$SENSE_PORT" flash monitor
 )
 ```
 
