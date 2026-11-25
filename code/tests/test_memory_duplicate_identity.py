@@ -293,3 +293,42 @@ def test_legacy_firsthand_provenance_cannot_be_adopted_by_wrong_pet(tmp_path):
         assert db.execute(
             "SELECT name FROM sqlite_master WHERE name='memory_identity'"
         ).fetchone() is None
+
+
+def test_relative_memory_root_is_anchored_to_original_working_directory(
+    tmp_path, monkeypatch,
+):
+    from pathlib import Path
+
+    first, second = tmp_path / "first", tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    ids = [f"pet_{i}" for i in range(1, 6)]
+    monkeypatch.chdir(first)
+    original = MemoryStore(Path("private"), ids)
+    assert original.set_core_fact("pet_3", "favorite_game", "Original private game")
+    monkeypatch.chdir(second)
+    different = MemoryStore(Path("private"), ids)
+    assert different.set_core_fact("pet_3", "favorite_game", "Other private game")
+
+    assert original.core_facts("pet_3")[0].value == "Original private game"
+    assert different.core_facts("pet_3")[0].value == "Other private game"
+    assert original.forget_core_fact("pet_3", "favorite_game")
+    assert different.core_facts("pet_3")[0].value == "Other private game"
+
+
+def test_empty_existing_identity_table_cannot_be_silently_rebound(tmp_path):
+    import sqlite3
+
+    store = MemoryStore(tmp_path, ["pet_3"])
+    assert store.set_core_fact("pet_3", "favorite_game", "Private game")
+    database = tmp_path / "pet_3.sqlite3"
+    with sqlite3.connect(database) as db:
+        db.execute("DELETE FROM memory_identity")
+    with pytest.raises(ValueError, match="database identity mismatch"):
+        store.core_facts("pet_3")
+    with pytest.raises(ValueError, match="database identity unavailable"):
+        MemoryStore(tmp_path, ["pet_3"])
+    with sqlite3.connect(database) as db:
+        assert db.execute("SELECT robot_id FROM memory_identity").fetchall() == []
+        assert db.execute("SELECT value FROM core_facts").fetchone() == ("Private game",)

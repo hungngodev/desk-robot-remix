@@ -125,7 +125,9 @@ class MemoryStore:
     """One local SQLite database per robot; explicit observed vs told provenance."""
 
     def __init__(self, root: Path, robot_ids: list[str] | tuple[str, ...]):
-        self.root = Path(root)
+        # Anchor relative paths to this store's original working directory.
+        # absolute() preserves lexical symlinks and ".." for the checks below.
+        self.root = Path(root).absolute()
         if (not isinstance(robot_ids, (list, tuple)) or not robot_ids
                 or not all(type(i) is str and _ROBOT_ID.fullmatch(i)
                            for i in robot_ids)):
@@ -346,6 +348,9 @@ class MemoryStore:
     @staticmethod
     def _bind_database_identity(db: sqlite3.Connection, robot_id: str) -> None:
         """Bind the database to its pet inside the existing schema transaction."""
+        already_bound = db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_identity'"
+        ).fetchone() is not None
         db.execute(
             """CREATE TABLE IF NOT EXISTS memory_identity (
                  singleton INTEGER PRIMARY KEY CHECK(singleton=1),
@@ -356,6 +361,8 @@ class MemoryStore:
             "SELECT robot_id FROM memory_identity WHERE singleton=1"
         ).fetchone()
         if identity is None:
+            if already_bound:
+                raise ValueError("Private memory database identity unavailable")
             # Legacy filenames are the only identity for core-only stores.
             # At least reject a legacy episode whose provenance contradicts
             # that filename before adopting the existing database.
