@@ -172,7 +172,12 @@ def detect_apriltag(
     except ImportError as exc:
         raise RuntimeError("Install the existing vision extra for OpenCV AprilTag") from exc
     try:
-        frame = cv2.imdecode(np.frombuffer(jpeg, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+        # Intrinsics describe the encoded sensor coordinates, not EXIF display
+        # orientation. A 180-degree rotation even preserves image dimensions.
+        frame = cv2.imdecode(
+            np.frombuffer(jpeg, dtype=np.uint8),
+            cv2.IMREAD_GRAYSCALE | cv2.IMREAD_IGNORE_ORIENTATION,
+        )
     except cv2.error:
         return None  # A native decoder failure is not a trusted dock observation
     if (frame is None or not isinstance(frame, np.ndarray)

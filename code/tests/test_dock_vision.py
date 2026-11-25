@@ -789,3 +789,34 @@ def test_accurate_back_facing_or_overtilted_pose_does_not_retry(monkeypatch, ang
     assert ok
     assert detect_apriltag(jpeg.tobytes(), camera, captured_at=5) is None
     assert methods == [cv2.SOLVEPNP_IPPE_SQUARE]
+
+
+@pytest.mark.parametrize("orientation", range(1, 9))
+def test_apriltag_pose_uses_encoded_sensor_coordinates(orientation):
+    """EXIF display rotation must not change metric tag position or image mode."""
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    cv2 = pytest.importorskip("cv2")
+    dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
+    canvas = np.full((480, 640), 255, dtype=np.uint8)
+    canvas[160:320, 100:260] = cv2.aruco.generateImageMarker(dictionary, 12, 160)
+    camera = DockCameraCalibration(
+        410, 410, 320, 240, 60, 12, image_width_px=640, image_height_px=480,
+    )
+    image = Image.fromarray(canvas)
+    exif = image.getexif()
+    exif[274] = orientation
+    output = io.BytesIO()
+    image.save(output, format="JPEG", exif=exif)
+    pose = detect_apriltag(output.getvalue(), camera, captured_at=1.0)
+    assert pose is not None
+    assert pose.x_mm == pytest.approx(-53.02, abs=1.0)
+    assert pose.z_mm == pytest.approx(154.72, abs=2.0)
+    assert pose.reprojection_error_px < 0.5
+    assessment = assess_dock(pose, now=1.05, target_distance_mm=120)
+    assert assessment.phase == "align"
+    assert not assessment.motor_authorized
+    assert not assessment.charging_authorized
