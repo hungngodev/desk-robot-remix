@@ -19,16 +19,16 @@ class MotorHeartbeat {
 
   // Startup or explicit successful local USB recovery ONLY. A routine stop
   // must not clear a missed heartbeat; the external one-shot can have expired.
-  void reset() {
+  void reset() noexcept {
     idle();
     missed_deadline_ = false;
   }
 
-  bool missed_deadline() const { return missed_deadline_; }
+  bool missed_deadline() const noexcept { return missed_deadline_; }
 
   // Check every command/output path without generating a heartbeat edge.
   // Only the full sensor loop may advance the pulse using update().
-  bool check_authority(std::uint32_t now_ms, bool local_motion_authorized) {
+  bool check_authority(std::uint32_t now_ms, bool local_motion_authorized) noexcept {
     // A CPU pause may let the external retriggerable one-shot expire.
     // Check the previous active interval before clearing it on STOP or lease
     // expiry: current permission may already be false when the CPU returns.
@@ -43,7 +43,7 @@ class MotorHeartbeat {
 
   // Caller must already have run local floor, dock and body guards.
   // Return LOW if disarmed, stopped, unavailable or any guard is false.
-  bool update(std::uint32_t now_ms, bool local_motion_authorized) {
+  bool update(std::uint32_t now_ms, bool local_motion_authorized) noexcept {
     if (!check_authority(now_ms, local_motion_authorized)) return false;
     if (!active_) {
       active_ = true;
@@ -59,7 +59,7 @@ class MotorHeartbeat {
   }
 
  private:
-  void idle() {
+  void idle() noexcept {
     active_ = false;
     high_ = false;
     last_toggle_ms_ = 0;

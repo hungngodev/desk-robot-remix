@@ -3,8 +3,14 @@
 #define CHECK(expr) do { if (!(expr)) throw std::runtime_error(#expr); } while (false)
 #include <cstdint>
 #include <iostream>
+#include <utility>
 
 using desk_robot::MotorHeartbeat;
+
+static_assert(noexcept(std::declval<MotorHeartbeat&>().reset()));
+static_assert(noexcept(std::declval<const MotorHeartbeat&>().missed_deadline()));
+static_assert(noexcept(std::declval<MotorHeartbeat&>().check_authority(0U, false)));
+static_assert(noexcept(std::declval<MotorHeartbeat&>().update(0U, false)));
 
 // Model only the caller's authority input; BodyControl owns the actual leases.
 // A long-running pulse train must neither hide a late CPU transition nor
