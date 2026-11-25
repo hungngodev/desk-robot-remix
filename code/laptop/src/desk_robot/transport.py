@@ -15,6 +15,8 @@ from .tof_optics import validate_optics
 
 # Sense emits signed int64 esp_timer_get_time() microseconds in both camera routes.
 _MAX_CAMERA_COMPLETE_US = (1 << 63) - 1
+# Bound time without a complete JPEG, not merely time without network bytes.
+_MJPEG_FRAME_TIMEOUT_SECONDS = 3.0
 
 
 class HeadError(RuntimeError):
@@ -555,7 +557,21 @@ class HttpHead:
                         raise HeadError("Superseded XIAO camera stream")
                     self._stream_connected = True
                     self._stream_condition.notify_all()
-                async for chunk in response.aiter_bytes():
+                chunks = response.aiter_bytes()
+                loop = asyncio.get_running_loop()
+                deadline = loop.time() + _MJPEG_FRAME_TIMEOUT_SECONDS
+                while True:
+                    # HTTPX read timeouts restart for each received chunk.
+                    # Partial headers or JPEG bytes must not renew this lease.
+                    try:
+                        if loop.time() >= deadline:
+                            raise TimeoutError
+                        async with asyncio.timeout_at(deadline):
+                            chunk = await anext(chunks)
+                    except StopAsyncIteration:
+                        break
+                    except TimeoutError as exc:
+                        raise HeadError("No complete MJPEG frame before deadline") from exc
                     # Record receipt at the network boundary, not later as a
                     # slow consumer iterates several older frames in a batch.
                     received = time.monotonic()
@@ -598,6 +614,9 @@ class HttpHead:
                             self._stream_condition.notify_all()
                     if latest is not None:
                         yield latest, received
+                        # Do not charge the caller's frame processing time to
+                        # network acquisition; only a complete frame renews it.
+                        deadline = loop.time() + _MJPEG_FRAME_TIMEOUT_SECONDS
                 if reader.buffer:
                     raise HeadError("Truncated MJPEG part at end of stream")
         except (httpx.HTTPError, ValueError) as exc:

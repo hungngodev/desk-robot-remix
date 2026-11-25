@@ -1,5 +1,6 @@
 """Sense MJPEG parser memory bounds for batched and fragmented network reads."""
 
+import asyncio
 from types import SimpleNamespace
 
 import httpx
@@ -408,3 +409,56 @@ async def test_sense_bearer_requests_refuse_redirect_even_if_shared_client_follo
         "http://head.example/api/audio.reference",
         "http://head.example/api/camera.mjpg",
     ]
+
+
+@pytest.mark.asyncio
+async def test_slow_drip_mjpeg_releases_real_socket(monkeypatch):
+    """A real TCP peer can keep read inactivity alive without completing a JPEG."""
+    monkeypatch.setenv("SENSE_TEST_TOKEN", "x" * 32)
+    monkeypatch.setattr("desk_robot.transport._MJPEG_FRAME_TIMEOUT_SECONDS", 0.2)
+    closed = asyncio.Event()
+    jpeg = b"\xff\xd8" + b"x" * 4096 + b"\xff\xd9"
+    partial = _part(1, jpeg)[:-4096]
+
+    async def serve(reader, writer):
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(
+                b"HTTP/1.1 200 OK\r\n"
+                b"Content-Type: multipart/x-mixed-replace; boundary=deskrobotframe\r\n"
+                b"Connection: close\r\n\r\n" + partial
+            )
+            await writer.drain()
+            while not reader.at_eof():
+                writer.write(b"x")
+                await writer.drain()
+                await asyncio.sleep(0.01)
+        except (ConnectionError, asyncio.IncompleteReadError):
+            pass
+        finally:
+            writer.close()
+            try:
+                await writer.wait_closed()
+            except ConnectionError:
+                pass
+            closed.set()
+
+    server = await asyncio.start_server(serve, "127.0.0.1", 0)
+    port = server.sockets[0].getsockname()[1]
+    async with server, httpx.AsyncClient(
+        trust_env=False, limits=httpx.Limits(max_connections=1),
+    ) as client:
+        head = HttpHead(RobotConfig(
+            id="robot-01", name="Camera pet", token_env="SENSE_TEST_TOKEN",
+            head_url=f"http://127.0.0.1:{port}",
+        ), client)
+        # An outer watchdog only prevents a broken regression from hanging CI.
+        # The production deadline, not that watchdog, must raise HeadError.
+        with pytest.raises(HeadError, match="No complete MJPEG frame"):
+            async with asyncio.timeout(2):
+                async for _ in head.stream_frames():
+                    pytest.fail("Incomplete JPEG was published")
+        await asyncio.wait_for(closed.wait(), timeout=2)
+        assert head._stream_connected is False
+        assert head._stream_latest is None
+        assert head._last_camera is None
