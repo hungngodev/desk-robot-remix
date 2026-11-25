@@ -46,7 +46,7 @@ def _validate_measured_board_geometry(
         or type(marker_id) is not int
         or not 0 <= marker_id < 587
         or any(
-            type(x) not in (int, float) or not math.isfinite(x)
+            type(x) not in (int, float)
             for x in (square_mm, tag_side_mm, target_distance_mm)
         )
         or not 2 <= square_mm <= 100
@@ -140,7 +140,7 @@ def fit_corners(
     # length or lens distortion. OpenCV estimates their uncertainty using
     # the same detected corners; reject an underconstrained candidate.
     sigma = intrinsic_std.reshape(-1)
-    if (len(sigma) < 9 or not np.isfinite(sigma).all()
+    if (len(sigma) < 9 or not np.isfinite(sigma).all() or (sigma < 0).any()
             or sigma[0] > .03 * camera[0, 0]
             or sigma[1] > .03 * camera[1, 1]
             or sigma[2] > .04 * width or sigma[3] > .04 * height
@@ -150,11 +150,11 @@ def fit_corners(
     fx, fy = float(camera[0, 0]), float(camera[1, 1])
     cx, cy = float(camera[0, 2]), float(camera[1, 2])
     distortion = tuple(float(v) for v in dist.reshape(-1))
-    if (not math.isfinite(rms) or rms > 1.5
+    if (not math.isfinite(rms) or not 0 <= rms <= 1.5
             or not all(math.isfinite(x) for x in (fx, fy, cx, cy, *distortion))
             or not width * .1 <= fx <= width * 10
             or not height * .1 <= fy <= height * 10
-            or not 0 <= cx <= width or not 0 <= cy <= height
+            or not 0 <= cx < width or not 0 <= cy < height
             or len(distortion) not in (4, 5, 8, 12, 14)):
         raise ValueError("Untrustworthy camera intrinsics or excessive reprojection error")
     return {

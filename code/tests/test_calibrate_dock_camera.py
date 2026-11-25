@@ -640,3 +640,37 @@ def test_calibrate_images_renders_distorted_jpegs_and_recovers_undistort(tmp_pat
             head_device_id="xiaozhi-01",
         )
 
+
+@pytest.mark.parametrize("field", ["rms", "sigma", "cx", "cy"])
+def test_invalid_native_calibration_statistics(monkeypatch, field):
+    """Impossible native fit outputs cannot become a calibration candidate."""
+    cv2 = pytest.importorskip("cv2")
+    original = cv2.calibrateCameraExtended
+
+    def invalid(*args, **kwargs):
+        data = list(original(*args, **kwargs))
+        if field == "rms":
+            data[0] = -0.1
+        elif field == "sigma":
+            data[5] = data[5].copy()
+            data[5][0, 0] = -0.1
+        elif field == "cx":
+            data[1] = data[1].copy()
+            data[1][0, 2] = 640
+        else:
+            data[1] = data[1].copy()
+            data[1][1, 2] = 480
+        return tuple(data)
+
+    monkeypatch.setattr(cv2, "calibrateCameraExtended", invalid)
+    with pytest.raises(ValueError):
+        fit(projected_views(cv2))
+
+
+def test_huge_board_geometry_fails_closed():
+    cv2 = pytest.importorskip("cv2")
+    with pytest.raises(ValueError, match="measured board/dock geometry"):
+        fitter().fit_corners(
+            projected_views(cv2), (640, 480), columns=9, rows=6,
+            square_mm=10**1000, tag_side_mm=60, marker_id=2, target_distance_mm=200,
+        )
