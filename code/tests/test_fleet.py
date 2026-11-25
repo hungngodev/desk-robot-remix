@@ -258,30 +258,63 @@ async def test_five_cancellation_and_repeated_stop_finish_session_cleanup(fleet)
     assert len(await conversation.run(IDS, "again", 1)) == 1
 
 
-async def test_lost_fleet_head_cleans_session_and_leaves_future_chat_usable(fleet):
+@pytest.mark.parametrize("lost_id", IDS)
+async def test_lost_fleet_head_cleans_session_and_leaves_future_chat_usable(fleet, lost_id):
     class LostSpeaker(SimulatedSpeaker):
-        exited = False
+        def __init__(self):
+            super().__init__()
+            self.offline = {lost_id}
+            self.owner = None
+            self.releases = 0
 
         @asynccontextmanager
         async def session(self, robots):
+            assert self.owner is None
+            self.owner = [robot.id for robot in robots]
             try:
                 yield
             finally:
-                self.exited = True
+                self.owner = None
+                self.releases += 1
 
         async def say(self, robot, text, *, permission_check=None):
-            if robot.id == "robot-03":
+            assert self.owner is not None and robot.id in self.owner
+            if robot.id in self.offline:
                 raise RuntimeError("head disconnected")
             await super().say(robot, text, permission_check=permission_check)
 
     speaker = LostSpeaker()
     conversation = Conversation(fleet, SimulatedChat(), speaker)
+    survivors = [robot_id for robot_id in IDS if robot_id != lost_id]
     with pytest.raises(RuntimeError, match="disconnected"):
-        await conversation.run(IDS, "hello")
-    assert speaker.exited and conversation.active is None
-    assert [r for r, _ in speaker.spoken] == IDS[:2]
-    conversation.speaker = SimulatedSpeaker()
-    assert len(await conversation.run(IDS, "again", 1)) == 1
+        await conversation.run(IDS, "Play a word game")
+    assert speaker.owner is None and speaker.releases == 1
+    assert conversation.active is None and not conversation.session_lock.locked()
+    assert [r for r, _ in speaker.spoken] == IDS[:IDS.index(lost_id)]
+    for robot_id in IDS:
+        activity = conversation.group_activity_timeline(robot_id)[0]
+        assert activity["status"] == "failed"
+        assert activity["playback_verified"] is False
+
+    # Keep the original speaker and conversation, including their actual
+    # ownership state. A fresh adapter would hide a leaked session.
+    lost_history = list(conversation.histories[lost_id])
+    transcript = await conversation.run(survivors, "Continue the game")
+    assert [line["robot_id"] for line in transcript] == survivors * 2
+    assert speaker.owner is None and speaker.releases == 2
+    assert conversation.active is None
+    assert conversation.histories[lost_id] == lost_history
+    assert conversation.group_activity_timeline(lost_id)[0]["status"] == "failed"
+    for robot_id in survivors:
+        assert conversation.group_activity_timeline(robot_id)[0]["status"] == "completed"
+
+    # The disconnected identity is admitted again only after simulated recovery.
+    speaker.offline.remove(lost_id)
+    transcript = await conversation.run(IDS, "A new game")
+    assert [line["robot_id"] for line in transcript] == IDS * 2
+    assert speaker.owner is None and speaker.releases == 3
+    assert conversation.active is None and not conversation.session_lock.locked()
+    assert len({id(history) for history in conversation.histories.values()}) == 5
 
 
 async def test_cancelled_stop_caller_cannot_interrupt_session_cleanup(fleet):
