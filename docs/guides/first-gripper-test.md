@@ -9,8 +9,10 @@ drivers but cannot attach either servo until the actual lift and jaw travel
 calibrations are qualified. Follow the isolated one-shot centering fixture
 in [the build guide](build.md#center-the-two-hornless-mg90s-before-measuring-installed-lift-travel).
 
-Test your actual **flat key and candy** before buying the complete rover/head.
-The existing mechanism's floor clearance and gripping ability are unproven.
+Start with the actual **flat key and candy** and reversible mechanical fit
+pieces before releasing the remaining complete first-unit purchases. The
+already reported paid Sense is not a new purchase. The existing mechanism's
+floor clearance and gripping ability are unproven.
 
 1. The original `servo_case_arm.stl`, `arm_rack.stl` and `pinion_gear.stl` are
    [saved locally](../cad/originals/gripper/README.md) from
@@ -34,9 +36,15 @@ The existing mechanism's floor clearance and gripping ability are unproven.
    actual safe lift travel and jaw geometry on a collision-free fixture
    before supplying any qualified firmware limits.
 
-The serial bench helper described in `build.md` runs one bounded servo job and
-maintains its control lease. Do not disable the 500 ms watchdog for manual tests.
-An ACK means a commanded angle was accepted; it is not a grip/force measurement.
+The serial bench helper described in `build.md` is for an already qualified
+guarded body; it runs one bounded job and maintains its control lease. Do not
+disable the 500 ms watchdog for manual tests. Before any loaded grasp, require
+measured lift/jaw endpoints, [force calibration](force-feedback-gripper.md),
+qualified servo supply, and the per-pose stability and clearance checks in
+[the Fusion assembly](../cad/FUSION_ONE_ROBOT_ASSEMBLY.md). Begin on a supported
+fixture with drive power disconnected. Stop on binding, unexpected motion,
+invalid force evidence, instability or loss of the control lease. An ACK means
+a commanded angle was accepted; it is not a grip/force measurement.
 
 Weigh and photograph/describe each actual object. The key must start flat on the
 intended surface. Do not prop it up to make a trial pass. Use wrapped candy and
