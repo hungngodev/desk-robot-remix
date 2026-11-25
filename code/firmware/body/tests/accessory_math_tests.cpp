@@ -118,9 +118,64 @@ static void check_gesture_session_recovery() {
   }
 }
 
+static void check_bmp280_boundaries() {
+  desk_robot::Bmp280Trim d{};
+  d.t1 = 16384;
+  d.t2 = 16384;
+  d.p1 = 6250;
+  int t = 0;
+  unsigned p = 0;
+  // With all other coefficients zero, T=(raw_t-262144)/5120,
+  // and P=1048576-raw_p. These exact fixtures isolate each output gate.
+  CHECK(desk_robot::bmp280_compensate(d, 57344, 1018576, t, p));
+  CHECK(t == -4000 && p == 30000);
+  CHECK(desk_robot::bmp280_compensate(d, 697344, 928576, t, p));
+  CHECK(t == 8500 && p == 120000);
+  const auto reject = [&t, &p](const desk_robot::Bmp280Trim& trim,
+                              std::uint32_t rt, std::uint32_t rp) {
+    t = 1234; p = 56789;
+    CHECK(!desk_robot::bmp280_compensate(trim, rt, rp, t, p));
+    CHECK(t == 1234 && p == 56789);
+  };
+  reject(d, 57343, 1018576);
+  reject(d, 697345, 928576);
+  reject(d, 262144, 1018577);
+  reject(d, 262144, 928575);
+  d.t2 = 0;
+  d.p1 = 32768;
+  // Each invalid raw code would otherwise yield an in-range result.
+  reject(d, 0x80000U, 500000);
+  reject(d, 0x100000U, 500000);
+  reject(d, 0xffffffffU, 500000);
+  reject(d, 262144, 0x80000U);
+  d.p1 = 6250;
+  d.p4 = -2500;
+  reject(d, 262144, 0x100000U);
+  // Extreme representable coefficients exercise all arithmetic before
+  // conversion; either reject atomically or publish only bounded values.
+  for (const auto signed_rail : {-32768, 32767}) {
+    for (const auto unsigned_rail : {1U, 65535U}) {
+      d.t1 = d.p1 = static_cast<std::uint16_t>(unsigned_rail);
+      d.t2 = d.t3 = d.p2 = d.p3 = d.p4 = d.p5 = d.p6 =
+          d.p7 = d.p8 = d.p9 = static_cast<std::int16_t>(signed_rail);
+      for (const auto rt : {0U, 0x7ffffU, 0x80001U, 0xfffffU}) {
+        for (const auto rp : {0U, 0x7ffffU, 0x80001U, 0xfffffU}) {
+          t = 1234; p = 56789;
+          if (desk_robot::bmp280_compensate(d, rt, rp, t, p)) {
+            CHECK(t >= -4000 && t <= 8500 && p >= 30000 && p <= 120000);
+          } else {
+            CHECK(t == 1234 && p == 56789);
+          }
+        }
+      }
+    }
+  }
+}
+
 int main() {
   try {
     check_register_precision();
+    check_bmp280_boundaries();
     check_gesture_boundaries();
     check_gesture_session_recovery();
     const std::uint8_t known[2] = {0xBE, 0xEF};
