@@ -1,5 +1,6 @@
 """Fast Mac CI must not be queued behind a long physical firmware build."""
 
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -40,7 +41,8 @@ def test_host_verification_uses_independent_bounded_job_lanes():
             assert "tests/test_control.py::test_fleet_motion_owner_latches_failed_stop_until_explicit_recovery" in tests
             assert "tests/test_stop_transport_failure.py::StopTransportFailureTests::test_cooperative_job_cancellation_preserves_failed_physical_stop" in tests
             assert "tests/test_stop_transport_failure.py::StopTransportFailureTests::test_terminal_stop_halts_body_but_short_pulse_preserves_arm" in tests
-            assert "tests/test_memory_duplicate_identity.py" in tests
+            assert "tests/test_memory_*.py" in tests
+            assert "tests/test_conversation_*.py" in tests
             assert "tests/test_core_memory_mutation_race.py" in tests
             assert "tests/test_vision_worker.py::test_scene_comparator_unhashable_model_kind_is_rejected_without_crash" in tests
             assert "tests/test_multimodal.py::test_unhashable_multimodal_cues_are_rejected_without_mutation" in tests
@@ -166,3 +168,34 @@ def test_tree_guard_rejects_missing_worktree_and_partial_index(tmp_path):
     partial = verify()
     assert partial.returncode != 0
     assert "code/firmware/head has only 1 tracked files" in partial.stdout
+
+
+def test_fast_lane_collects_private_memory_conversation_and_tool_fences():
+    code = Path(__file__).resolve().parents[1]
+    workflow = yaml.safe_load(
+        (code.parent / ".github/workflows/host-verification.yml").read_text()
+    )
+    steps = workflow["jobs"]["mac-fast"]["steps"]
+    command = next(
+        step["run"] for step in steps
+        if step.get("name") == "Verify bounded Mac voice, memory and fleet ownership"
+    )
+    # Resolve the actual unquoted shell globs, not substrings in step comments.
+    args = shlex.split(command.replace(chr(92) + "\n", ""))
+    assert args[:4] == ["uv", "run", "--no-sync", "pytest"]
+    selected = set()
+    for arg in args[4:]:
+        if arg.startswith("tests/") and "::" not in arg:
+            selected.update(code.glob(arg))
+    required = set(code.glob("tests/test_memory_*.py"))
+    required.update(code.glob("tests/test_conversation_*.py"))
+    required.update(code / "tests" / name for name in (
+        "test_episode_memory_mutation_race.py",
+        "test_native_startup_memory_fence.py",
+        "test_native_omni_consent_grant.py",
+        "test_native_spoken_grant.py",
+        "test_native_transcript_consent_grant.py",
+        "test_tool_receipt_bridge_signature.py",
+        "test_tool_receipt_operator_scope.py",
+    ))
+    assert required <= selected, sorted(str(p.relative_to(code)) for p in required - selected)

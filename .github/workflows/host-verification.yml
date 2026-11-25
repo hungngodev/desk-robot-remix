@@ -112,7 +112,15 @@ jobs:
             tests/test_brain_core_memory.py \
             tests/test_core_memory_mutation_race.py \
             tests/test_brain_memory_retrieval.py \
-            tests/test_memory_duplicate_identity.py \
+            tests/test_memory_*.py \
+            tests/test_conversation_*.py \
+            tests/test_episode_memory_mutation_race.py \
+            tests/test_native_startup_memory_fence.py \
+            tests/test_native_omni_consent_grant.py \
+            tests/test_native_spoken_grant.py \
+            tests/test_native_transcript_consent_grant.py \
+            tests/test_tool_receipt_bridge_signature.py \
+            tests/test_tool_receipt_operator_scope.py \
             tests/test_api_conversation.py \
             tests/test_api_readonly_context_split.py \
             tests/test_realtime_omni_protocol.py \
