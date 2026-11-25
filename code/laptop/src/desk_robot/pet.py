@@ -3322,18 +3322,18 @@ class PetController:
                 # describe a live event after queued model/TTS work.
                 and time.monotonic() - offered_at <= self.max_observation_age
             )
-        # Count the first successfully transmitted segment, not the second
-        # reply or unverified physical playback. An interrupted first line
-        # still uses the spontaneous fleet speech budget.
+        # Count each speaker on its first successful transmission, but
+        # refresh the fleet cooldown on every segment. Transmission does
+        # not prove physical playback, and interruption cannot refund it.
         sent_speakers: set[str] = set()
 
         def count_sent_segment(sent_robot_id: str) -> None:
-            if (sent_robot_id not in {robot_id, social_peer_id}
-                    or sent_robot_id in sent_speakers):
+            if sent_robot_id not in {robot_id, social_peer_id}:
                 return
-            sent_speakers.add(sent_robot_id)
-            self.states[sent_robot_id].spoken += 1
             self._group_last_spoken = time.monotonic()
+            if sent_robot_id not in sent_speakers:
+                sent_speakers.add(sent_robot_id)
+                self.states[sent_robot_id].spoken += 1
 
         turns = await asyncio.wait_for(
             self.conversation.run(

@@ -5429,6 +5429,76 @@ async def test_partial_social_speech_consumes_budget_before_peer_reply(
         await pet.close()
 
 
+@pytest.mark.parametrize("interrupt_after", [1, 2])
+async def test_social_stream_segment_refreshes_cooldown(
+    fleet, tmp_path, interrupt_after,
+):
+    """Account before a complete reply, without counting segments as turns."""
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_social_autonomy_enabled = True
+    first_sent, second_sent, continue_stream = (
+        asyncio.Event(), asyncio.Event(), asyncio.Event()
+    )
+
+    class PausedStream:
+        async def stream_reply(self, history):
+            yield "First phrase."
+            first_sent.set()
+            await continue_stream.wait()
+            yield "Second phrase."
+            second_sent.set()
+            await asyncio.Event().wait()
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, PausedStream(), speaker, memory=memory)
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(), speech_cooldown=60,
+    )
+    for robot_id in ("robot-01", "robot-02", "robot-03"):
+        pet.states[robot_id].enabled = True
+        pet.states[robot_id].generation = 13
+    try:
+        pet._consider_speech(
+            "robot-01", SceneChange("nfc_tag", "First tag arrived", 1.0), 13,
+        )
+        await asyncio.wait_for(first_sent.wait(), timeout=2)
+        assert speaker.spoken == [("robot-01", "First phrase.")]
+        assert pet.states["robot-01"].spoken == 1
+        assert pet.states["robot-02"].spoken == 0
+        assert 0 <= time.monotonic() - pet._group_last_spoken < 2
+
+        if interrupt_after == 2:
+            # Model a long inter-segment delay without wall-clock sleeps
+            # or modifying the event loop's monotonic clock.
+            pet._group_last_spoken = time.monotonic() - 61
+            continue_stream.set()
+            await asyncio.wait_for(second_sent.wait(), timeout=2)
+            assert speaker.spoken[-1] == ("robot-01", "Second phrase.")
+            assert pet.states["robot-01"].spoken == 1
+            assert 0 <= time.monotonic() - pet._group_last_spoken < 2
+
+        await asyncio.wait_for(pet.interrupt("robot-01"), timeout=3)
+        assert conversation.active is None
+        assert pet._speech_task is None
+        assert pet.states["robot-01"].spoken == 1
+        assert pet.states["robot-02"].spoken == 0
+        assert len(speaker.spoken) == interrupt_after
+        pet._social_last_started = float("-inf")
+        pet._consider_speech(
+            "robot-03", SceneChange("nfc_tag", "Another tag arrived", 1.0), 13,
+        )
+        assert pet.states["robot-03"].last_initiative_suppression == (
+            "quiet_voice_or_group_budget"
+        )
+        assert len(speaker.spoken) == interrupt_after
+    finally:
+        continue_stream.set()
+        for state in pet.states.values():
+            state.enabled = False
+        await pet.close()
+
+
 async def test_social_event_expires_while_first_robot_waits_to_speak(
     fleet, tmp_path, monkeypatch,
 ):
