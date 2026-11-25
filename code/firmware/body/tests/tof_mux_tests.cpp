@@ -68,6 +68,33 @@ int main() {
       CHECK(!bus.optical_diagnostic(8, 61).present);
     }
     {
+      // An accessory can hold a shared line AFTER a successful ToF poll.
+      // Revoking cached evidence must also revoke its new-sample markers,
+      // otherwise a later consumer could count an invalidated acquisition.
+      Wire = TwoWire{};
+      fake_i2c_lines() = FakeI2cLines{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      bus.poll(guard, 60);  // side lane 5
+      CHECK(bus.new_extra_channel() == 0 && bus.new_optical_channel() == 5);
+      CHECK(bus.extra_diagnostic(0, 60).valid);
+      CHECK(bus.optical_diagnostic(5, 60).valid);
+      const auto before = Wire.transactions;
+      const auto errors = bus.errors();
+      fake_i2c_lines().sda_stuck = true;
+      bus.observe_shared_bus_fault(guard);
+      CHECK(bus.new_extra_channel() == 255 && bus.new_optical_channel() == 255);
+      CHECK(!bus.extra_diagnostic(0, 60).valid);
+      CHECK(!bus.optical_diagnostic(5, 60).valid);
+      CHECK(!bus.optical_diagnostic(0, 60).valid);
+      CHECK(Wire.transactions == before && bus.errors() == errors + 1);
+      faulted(guard);
+      bus.observe_shared_bus_fault(guard);
+      CHECK(bus.errors() == errors + 1);
+      fake_i2c_lines() = FakeI2cLines{};
+    }
+    {
       Wire = TwoWire{};
       desk_robot::TofBus bus;
       desk_robot::CliffGuard guard;

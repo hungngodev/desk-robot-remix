@@ -70,6 +70,10 @@ bool TofBus::write_byte(std::uint8_t reg, std::uint8_t value) {
 void TofBus::failed(CliffGuard& guard) {
   ++bus_errors_;
   recovery_pending_ = true;
+  // A sibling transaction can fault after poll() published a conversion.
+  // Revoke its acquisition notifications along with the stored validity.
+  new_extra_channel_ = 255;
+  new_optical_channel_ = 255;
   // Every range lane shares this mux and I2C controller. A bus fault
   // invalidates optional side/rear evidence too, not only the five critical
   // floor/front samples. Retain presence and last measured millimeters for
