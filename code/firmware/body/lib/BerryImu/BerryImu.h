@@ -44,7 +44,11 @@ class BerryImu {
   // Big-endian MPU sample: accel 0..5, temperature 6..7, gyro 8..13.
   static void decode_mpu6050(const std::uint8_t (&bytes)[14], BerryReading& sample);
   const BerryReading& reading() const { return reading_; }
-  void invalidate_bus() { reading_.valid = false; reading_.low_g_status_valid = false; }
+  void invalidate_bus() {
+    reading_.valid = false;
+    reading_.low_g_status_valid = false;
+    reading_.low_g_irq = false;
+  }
   bool configured() const { return configured_; }
   bool fresh(std::uint32_t now_ms) const {
     return configured_ && reading_.valid &&

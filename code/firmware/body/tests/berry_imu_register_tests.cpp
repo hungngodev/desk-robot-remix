@@ -9,6 +9,52 @@ int main() {
   try {
     using desk_robot::BerryImu;
     using desk_robot::BerryModel;
+    // External bus loss must invalidate current IRQ evidence, but preserve
+    // the historical counter and edge fence across uint32_t rollover.
+    {
+      TwoWire wire;
+      BerryImu imu;
+      CHECK(imu.begin(wire, BerryModel::Mpu6050, 0x69, 0));
+      wire.registers[0x3a] = 0x80;
+      imu.poll(0xffffffd0U);
+      CHECK(imu.fresh(0xffffffd0U));
+      CHECK(imu.reading().low_g_irq && imu.reading().low_g_event_seq == 1U);
+      imu.invalidate_bus();
+      CHECK(!imu.fresh(0xffffffd1U));
+      CHECK(!imu.reading().low_g_status_valid && !imu.reading().low_g_irq);
+      CHECK(imu.reading().low_g_event_seq == 1U);
+      CHECK(imu.reading().at_ms == 0xffffffd0U);
+      wire.registers[0x3a] = 0x80;
+      imu.poll(2U); // 50 ms across rollover
+      CHECK(imu.fresh(2U) && imu.reading().low_g_irq);
+      CHECK(imu.reading().low_g_event_seq == 1U);
+      imu.poll(52U);
+      CHECK(!imu.reading().low_g_irq);
+      wire.registers[0x3a] = 0x80;
+      imu.poll(102U);
+      CHECK(imu.reading().low_g_event_seq == 2U);
+    }
+
+    // An ACK without verified scale, rate or power configuration must
+    // not permit calibrated MPU6050 data or any fresh sample.
+    for (int reg : {0x6b, 0x6c, 0x19, 0x1a, 0x1b, 0x1c}) {
+      TwoWire unreadable;
+      unreadable.reject_read_reg = reg;
+      BerryImu candidate;
+      CHECK(!candidate.begin(unreadable, BerryModel::Mpu6050, 0x68, 0));
+      CHECK(!candidate.configured());
+      candidate.poll(100);
+      CHECK(!candidate.fresh(100));
+
+      TwoWire ignored;
+      ignored.ignore_write_reg = reg;
+      ignored.registers[reg] = 0xff;
+      CHECK(!candidate.begin(ignored, BerryModel::Mpu6050, 0x68, 0));
+      CHECK(!candidate.configured());
+      candidate.poll(150);
+      CHECK(!candidate.fresh(150));
+    }
+
     TwoWire wire;
     BerryImu imu;
     CHECK(imu.begin(wire, BerryModel::V1Lsm9ds0, 0x6b, 0x1d));

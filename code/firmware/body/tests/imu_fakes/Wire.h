@@ -18,6 +18,7 @@ class TwoWire {
   std::array<std::uint8_t, 256> registers{};
   bool reject_writes = false;
   int reject_read_reg = -1;
+  int ignore_write_reg = -1;
   int partial_read_reg = -1;
   std::uint8_t next_stop_status = 0;
 
@@ -45,7 +46,8 @@ class TwoWire {
     }
     if (!stop || bytes_.size() != 2) return 4;
     writes.push_back({address_, bytes_[0], bytes_[1]});
-    registers[bytes_[0]] = bytes_[1];
+    if (static_cast<int>(bytes_[0]) != ignore_write_reg)
+      registers[bytes_[0]] = bytes_[1];
     return 0;
   }
   std::size_t requestFrom(std::uint8_t address, std::size_t count,

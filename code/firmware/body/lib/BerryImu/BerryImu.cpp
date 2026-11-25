@@ -99,15 +99,17 @@ bool BerryImu::begin(TwoWire& wire, BerryModel model,
          // event. This board uses no MPU auxiliary I2C bypass or INT wire.
          write_byte(gyro_address_, 0x37, 0x00) &&
          write_byte(gyro_address_, 0x38, 0x80);
-    // An I2C write ACK is not proof that a clone honored FF registers.
-    // An unverified configuration cannot claim actual low-g interrupts.
-    std::uint8_t threshold = 0, duration = 0, pin_cfg = 0xff, int_enable = 0;
-    ok = ok && read_bytes(gyro_address_, 0x1d, &threshold, 1) &&
-         read_bytes(gyro_address_, 0x1e, &duration, 1) &&
-         read_bytes(gyro_address_, 0x37, &pin_cfg, 1) &&
-         read_bytes(gyro_address_, 0x38, &int_enable, 1) &&
-         threshold == 150 && duration == 40 &&
-         pin_cfg == 0 && int_enable == 0x80;
+    // ACK alone cannot establish the scale, cadence or native low-g setup.
+    // Verify every setting before publishing samples under MPU6050 units.
+    const auto matches = [this](std::uint8_t reg, std::uint8_t expected) {
+      std::uint8_t actual = 0;
+      return read_bytes(gyro_address_, reg, &actual, 1) && actual == expected;
+    };
+    ok = ok && matches(0x6b, 0x01) && matches(0x6c, 0x00) &&
+         matches(0x1a, 0x03) && matches(0x19, 0x09) &&
+         matches(0x1b, 0x00) && matches(0x1c, 0x00) &&
+         matches(0x1d, 150) && matches(0x1e, 40) &&
+         matches(0x37, 0x00) && matches(0x38, 0x80);
   } else if (reading_.model == BerryModel::V1Lsm9ds0) {
     // LSM9DS0 CTRL_REG1_XM bit 3 (DocID024763 table 70)
     // and CTRL_REG4_G bit 7 enable
@@ -143,9 +145,7 @@ void BerryImu::poll(std::uint32_t now_ms) {
       // An unreadable conversion cannot carry a previous IRQ/status forward
       // as evidence for this failed sample. Keep the historical event count
       // and edge state, so an interrupted read cannot duplicate an old IRQ.
-      reading_.valid = false;
-      reading_.low_g_status_valid = false;
-      reading_.low_g_irq = false;
+      invalidate_bus();
       return;
     }
     decode_mpu6050(frame, reading_);
