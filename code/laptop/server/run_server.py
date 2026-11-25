@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT / "laptop/src"))
 from desk_robot.private_files import read_private_env, read_private_text  # noqa: E402
 
 
-def fleet_device_and_voice_maps(robots: list[dict]) -> tuple[dict, dict]:
+def fleet_device_and_voice_maps(robots: list[dict]) -> tuple[dict[str, str], dict[str, str]]:
     """Bind each native voice to a trusted configured Xiaozhi device."""
     devices = {}
     voices = {}
@@ -76,12 +76,15 @@ def verified_xiaozhi_auth_config(path: Path) -> None:
         raise ValueError("Set a private non-placeholder Xiaozhi auth_key")
 
 
-def main():
+def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--config", type=Path, default=ROOT / "config/local.toml")
     args = p.parse_args()
-    with args.config.open("rb") as source:
-        config = tomllib.load(source)
+    try:
+        with args.config.open("rb") as source:
+            config = tomllib.load(source)
+    except (OSError, UnicodeError, tomllib.TOMLDecodeError):
+        p.error("Cannot read fleet configuration; check the path and UTF-8 TOML syntax")
     try:
         credentials = read_private_env(ROOT / "config/local.env")
         mapping, voices = fleet_device_and_voice_maps(config["robots"])
