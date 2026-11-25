@@ -260,3 +260,25 @@ def test_private_config_invalid_fleet_rejected(tmp_path, monkeypatch, capsys, fl
     assert error.value.code == 2
     assert not (board / "config.private.json").exists()
     assert SYNTHETIC_TOKEN not in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("raw", [
+    '{"builds":[],"builds":[{"sdkconfig_append":[]}]}',
+    '{"builds":[{"sdkconfig_append":[],"sdkconfig_append":["CONFIG_UNRELATED=y"]}]}',
+])
+def test_private_config_rejects_duplicate_template_fields(tmp_path, monkeypatch, capsys, raw):
+    configure(tmp_path, monkeypatch)
+    board = tmp_path / BOARD
+    source = template(board)
+    private.main()
+    target = board / "config.private.json"
+    original = target.read_bytes()
+    source.write_text(raw)
+    with pytest.raises(SystemExit) as error:
+        private.main()
+    assert error.value.code == 2
+    assert target.read_bytes() == original
+    assert not list(board.glob(".config.private.*.tmp"))
+    output = capsys.readouterr()
+    assert SYNTHETIC_TOKEN not in output.out + output.err
+    assert "template is missing or invalid" in output.err

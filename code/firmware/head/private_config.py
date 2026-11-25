@@ -62,6 +62,15 @@ def require_same_directory(root, relative, directory, parser):
         os.close(current)
 
 
+def unique_template_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Duplicate private build template field")
+        result[key] = value
+    return result
+
+
 def read_template(directory, parser):
     try:
         descriptor = os.open("config.json", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
@@ -70,7 +79,7 @@ def read_template(directory, parser):
             if not stat.S_ISREG(os.fstat(descriptor).st_mode):
                 raise ValueError("Not a regular template")
             with os.fdopen(descriptor, encoding="utf-8", closefd=False) as stream:
-                config = json.load(stream)
+                config = json.load(stream, object_pairs_hook=unique_template_object)
             builds = config.get("builds") if isinstance(config, dict) else None
             if (not isinstance(builds, list) or len(builds) != 1
                     or not isinstance(builds[0], dict)):
