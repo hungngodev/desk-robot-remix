@@ -16,11 +16,14 @@ def test_uart_receive_failure_and_frame_boundaries(tmp_path):
 
     source = tmp_path / "uart_transaction.cc"
     source.write_text(r'''
+#include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include "robot_protocol.h"
 using namespace desk_robot;
 constexpr int ESP_OK = 0, kUart = 1, kTimeoutMs = 350;
@@ -28,20 +31,44 @@ constexpr std::size_t kMaxReply = 1920;
 #define pdMS_TO_TICKS(x) (x)
 
 int flush_result = 0, read_error = 0, writes = 0, reads = 0;
-std::int64_t tick = 0;
+std::atomic<std::int64_t> tick{0};
 std::string rx, tx;
 std::size_t pos = 0;
-std::int64_t esp_timer_get_time() { return tick += 10; }
+bool interrupt_poll = false;
+std::atomic<bool> poll_entered{false}, release_poll{false};
+
+// Synchronize the fake UART read with urgent admission, not wall-clock sleeps.
+// A broken gate must fail rather than hang the native test binary.
+template <typename Predicate>
+void wait_until(Predicate ready) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!ready()) {
+        assert(std::chrono::steady_clock::now() < deadline);
+        std::this_thread::yield();
+    }
+}
+
+std::int64_t esp_timer_get_time() { return tick.fetch_add(10) + 10; }
 int uart_flush_input(int) { return flush_result; }
 int uart_write_bytes(int, const char* s, std::size_t n) {
     ++writes;
     tx.assign(s, n);
+    if (interrupt_poll && (tx == "stop\r\n" || tx == "halt\r\n")) {
+        rx = "OK " + tx;
+        pos = 0;
+    }
     return static_cast<int>(n);
 }
 int uart_wait_tx_done(int, int) { return ESP_OK; }
 int uart_read_bytes(int, std::uint8_t* c, int, int) {
     ++reads;
     if (read_error) return -1;
+    if (interrupt_poll && tx != "stop\r\n" && tx != "halt\r\n") {
+        poll_entered.store(true, std::memory_order_release);
+        wait_until([] { return release_poll.load(std::memory_order_acquire); });
+        tick.fetch_add(10000);
+        return 0;
+    }
     if (pos == rx.size()) {
         tick += 10000;
         return 0;
@@ -74,7 +101,31 @@ void reset() {
     pos = 0;
     rx.clear();
     tx.clear();
+    interrupt_poll = false;
+    poll_entered = false;
+    release_poll = false;
 }
+
+void check_urgent_poll_preemption(const std::string& poll, const std::string& verb) {
+    reset();
+    Bridge b;
+    interrupt_poll = true;
+    Reply reading{}, stopped{};
+    std::thread reader([&] { reading = b.Transact(poll, false); });
+    wait_until([] { return poll_entered.load(std::memory_order_acquire); });
+    std::thread stopper([&] { stopped = b.Transact(verb, true); });
+    wait_until([&] { return b.urgent_stop_gate_.preempts(false); });
+    release_poll.store(true, std::memory_order_release);
+    reader.join();
+    stopper.join();
+    assert(reading.status == 503 && !reading.ok);
+    assert(reading.text == "body response superseded by urgent stop");
+    assert(stopped.ok && stopped.text == "OK " + verb);
+    assert(writes == 2 && tx == verb + "\r\n");
+    // The first empty read may finish, but no second polling read is allowed.
+    assert(reads == 1 + static_cast<int>(stopped.text.size()) + 2);
+}
+
 int main() {
     Bridge b;
     reset();
@@ -117,6 +168,11 @@ int main() {
     rx = "OK ping";
     a = b.Transact("ping", true);
     assert(a.status == 504 && !a.ok);
+    for (const std::string poll : {"status", "aux", "optics", "ir", "pose"}) {
+        for (const std::string verb : {"stop", "halt"}) {
+            check_urgent_poll_preemption(poll, verb);
+        }
+    }
 }
 ''')
     compiler = shutil.which("c++")
@@ -124,7 +180,7 @@ int main() {
     binary = tmp_path / "uart_transaction"
     pie_flags = [] if sys.platform == "darwin" else ["-fno-pie", "-no-pie"]
     subprocess.run(
-        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-pthread",
          "-fsanitize=address,undefined", *pie_flags, "-I", str(overlay),
          str(source), "-o", str(binary)],
         check=True, timeout=60,
