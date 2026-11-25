@@ -527,17 +527,19 @@ void thermal_observation(uint32_t now) {
 // Wait phases are split across passes. The pinned Wire core still has
 // synchronous hardware event waits without an I2C transaction timeout.
 bool begin_bme() {
-  if (!bme.begin(kBmePrimary) && !bme.begin(kBmeAlternate))
-    return false;
-  bme.setTemperatureOversampling(BME680_OS_8X);
-  bme.setHumidityOversampling(BME680_OS_2X);
-  bme.setPressureOversampling(BME680_OS_4X);
-  bme.setIIRFilterSize(BME680_FILTER_SIZE_3);
-  bme.setGasHeater(320, 150);
+  // Retire the previous generation even if probing/configuration fails.
   bme_pending = false;
   bme_last_start_ms = 0;
   bme_completed.invalidate();
-  return true;
+  if (!bme.begin(kBmePrimary) && !bme.begin(kBmeAlternate))
+    return false;
+  // The pinned driver's setters return I2C configuration status. A
+  // responding chip is not evidence that the requested profile was applied.
+  return bme.setTemperatureOversampling(BME680_OS_8X) &&
+      bme.setHumidityOversampling(BME680_OS_2X) &&
+      bme.setPressureOversampling(BME680_OS_4X) &&
+      bme.setIIRFilterSize(BME680_FILTER_SIZE_3) &&
+      bme.setODR(BME68X_ODR_NONE) && bme.setGasHeater(320, 150);
 }
 void recover_sensors(uint32_t now) {
   // Sensirion requires 500 ms after stopPeriodicMeasurement before start.

@@ -855,3 +855,73 @@ int main() {
     )
     subprocess.run([str(executable)], check=True, capture_output=True,
                    text=True, timeout=15)
+
+
+def test_bme_recovery_requires_every_configuration_write(tmp_path):
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    begin = "bool begin_bme() {" + src.split("bool begin_bme() {", 1)[1].split(
+        "void recover_sensors(", 1
+    )[0]
+    recovery = src.split("void recover_sensors(", 1)[1].split("void report(", 1)[0]
+    assert "bme_started = begin_bme();" in recovery
+    harness = r"""
+#include <cassert>
+#include <cstdint>
+constexpr uint8_t kBmePrimary = 0x77, kBmeAlternate = 0x76;
+constexpr uint8_t BME680_OS_8X = 4, BME680_OS_2X = 2, BME680_OS_4X = 3;
+constexpr uint8_t BME680_FILTER_SIZE_3 = 2, BME68X_ODR_NONE = 8;
+bool bme_pending;
+uint32_t bme_last_start_ms;
+struct Completed {
+  bool valid = true;
+  void invalidate() { valid = false; }
+} bme_completed;
+struct FakeBme {
+  int fail = 0, calls = 0, probes = 0;
+  bool primary = true, alternate = true;
+  bool begin(uint8_t address) {
+    ++probes;
+    return address == kBmePrimary ? primary : alternate;
+  }
+  bool setting() { return ++calls != fail; }
+  bool setTemperatureOversampling(uint8_t n) { assert(n == BME680_OS_8X); return setting(); }
+  bool setHumidityOversampling(uint8_t n) { assert(n == BME680_OS_2X); return setting(); }
+  bool setPressureOversampling(uint8_t n) { assert(n == BME680_OS_4X); return setting(); }
+  bool setIIRFilterSize(uint8_t n) { assert(n == BME680_FILTER_SIZE_3); return setting(); }
+  bool setODR(uint8_t n) { assert(n == BME68X_ODR_NONE); return setting(); }
+  bool setGasHeater(int t, int ms) { assert(t == 320 && ms == 150); return setting(); }
+} bme;
+""" + begin + r"""
+void reset() {
+  bme = FakeBme{};
+  bme_pending = bme_completed.valid = true;
+  bme_last_start_ms = 123;
+}
+int main() {
+  for (int failure = 1; failure <= 6; ++failure) {
+    reset(); bme.fail = failure;
+    assert(!begin_bme());
+    assert(bme.calls == failure && bme.probes == 1);
+    assert(!bme_pending && !bme_completed.valid && bme_last_start_ms == 0);
+  }
+  reset(); bme.primary = bme.alternate = false;
+  assert(!begin_bme() && bme.probes == 2 && bme.calls == 0);
+  assert(!bme_completed.valid && !bme_pending);
+  reset(); bme.primary = false;
+  assert(begin_bme() && bme.probes == 2 && bme.calls == 6);
+  assert(!bme_completed.valid && !bme_pending);
+  reset(); assert(begin_bme() && bme.probes == 1 && bme.calls == 6);
+}
+"""
+    compiler = shutil.which("c++")
+    assert compiler is not None
+    source = tmp_path / "bme_recovery.cpp"
+    source.write_text(harness)
+    executable = tmp_path / "bme_recovery"
+    subprocess.run(
+        [compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
+         str(source), "-o", str(executable)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    subprocess.run([str(executable)], check=True, capture_output=True,
+                   text=True, timeout=15)
