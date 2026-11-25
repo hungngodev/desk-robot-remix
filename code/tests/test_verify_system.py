@@ -163,8 +163,13 @@ def test_python_suite_accepts_exact_pinned_upstream_commits(
         (tmp_path / "upstream" / name / ".git").mkdir(parents=True)
     monkeypatch.setattr(verify, "CODE", tmp_path)
     calls = []
+    monkeypatch.setenv("GIT_OPTIONAL_LOCKS", "0")
+    monkeypatch.setenv("DRX311_ENV_SENTINEL", "preserved")
 
     def pinned_git(args, **kwargs):
+        env = kwargs["env"]
+        assert not any(key.startswith("GIT_") for key in env)
+        assert env["DRX311_ENV_SENTINEL"] == "preserved"
         if args == ["git", "rev-parse", "--show-toplevel"]:
             return str(kwargs["cwd"])
         if args == ["git", "rev-parse", "--git-common-dir"]:

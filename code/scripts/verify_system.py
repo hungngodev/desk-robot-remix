@@ -166,7 +166,7 @@ def required_upstream_fixture_errors() -> list[str]:
             modifications = subprocess.check_output(
                 ["git", "status", "--porcelain", "--untracked-files=no"],
                 cwd=directory, text=True, stderr=subprocess.DEVNULL,
-                timeout=10,
+                timeout=10, env=git_env,
             )
         except (OSError, subprocess.CalledProcessError,
                 subprocess.TimeoutExpired):
