@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import secrets
 import time
 from contextlib import asynccontextmanager
@@ -125,15 +126,26 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         app.state.operator_token, app.state.tool_token = api_credentials(settings)
         app.state.runtime = runtime or Runtime(settings)
         app.state.runtime_started = False
+        cancelled = False
         try:
             start = getattr(app.state.runtime, "start", None)
             if callable(start):
                 await start()
             app.state.runtime_started = True
             yield
+        except asyncio.CancelledError:
+            cancelled = True
+            raise
         finally:
             app.state.runtime_started = False
-            await app.state.runtime.close()
+            try:
+                await app.state.runtime.close()
+            except Exception as error:
+                if not cancelled:
+                    raise
+                logging.getLogger(__name__).error(
+                    "Runtime shutdown failed after lifespan cancellation", exc_info=error,
+                )
 
     app = FastAPI(title="Desk robot controls", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
