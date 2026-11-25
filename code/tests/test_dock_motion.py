@@ -1416,3 +1416,48 @@ async def test_autonomous_low_battery_dock_and_charge_inhibition_lifecycle(
         state.enabled = False
         await rt.close()
 
+
+async def test_seated_robot_cannot_start_dock_approach_or_consume_permit(settings):
+    from desk_robot.controller import Job
+
+    controller, head = make(settings)
+    controller.permits["robot-01"] = time.monotonic() + 10
+    controller.set_dock_charge_inhibition("robot-01", True)
+    try:
+        with pytest.raises(OperationError, match="seated or powered"):
+            controller.dock("robot-01")
+        with pytest.raises(OperationError, match="seated or powered"):
+            await controller._dock_approach(
+                Job("seated", "robot-01", "dock_approach"), None, 200, 1, 1,
+            )
+        assert controller.permits["robot-01"] > time.monotonic()
+        assert not controller.jobs
+        assert head.commands == []
+    finally:
+        await controller.close()
+
+
+async def test_contact_inhibition_cancels_only_own_active_dock_approach(settings):
+    import asyncio
+
+    from desk_robot.controller import Job
+
+    controller, _head = make(settings)
+    job = Job("approach", "robot-01", "dock_approach")
+    task = asyncio.create_task(asyncio.Event().wait())
+    controller.jobs[job.id] = job
+    controller.tasks[job.id] = task
+    controller._fleet_motion_owner = job.id
+    try:
+        controller.set_dock_charge_inhibition("robot-02", True)
+        assert not task.cancelling()
+        controller.set_dock_charge_inhibition("robot-01", True)
+        assert task.cancelling()
+        assert job.error == "Stopped: robot seated or powered on dock"
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        controller.jobs.pop(job.id)
+        controller.tasks.pop(job.id)
+        controller._fleet_motion_owner = None
+        await controller.close()

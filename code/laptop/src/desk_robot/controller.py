@@ -971,7 +971,7 @@ class Coordinator:
         if (
             active is not None
             and active.robot_id == robot_id
-            and active.kind in {"exploration", "pickup", "navigate"}
+            and active.kind in {"exploration", "pickup", "navigate", "dock_approach"}
             and task is not None
             and not task.done()
             and not task.cancelling()
@@ -1198,6 +1198,8 @@ class Coordinator:
     def dock(self, robot_id: str) -> Job:
         """Permit-gated camera approach ending BEFORE unqualified charge contacts."""
         robot = self.robot(robot_id)
+        if self.dock_inhibited(robot_id):
+            raise OperationError("Dock approach refused: robot is seated or powered on dock")
         if not robot.motion_enabled or not robot.dock_motion_qualified:
             raise OperationError("Dock motion requires measured physical qualification")
         if self.settings.mode != "hardware":
@@ -1253,6 +1255,8 @@ class Coordinator:
         expected_dock = self.robot(job.robot_id).dock_beacon_id
         previous_ir: tuple[int, int] | None = None
         for attempt in range(16):
+            if self.dock_inhibited(job.robot_id):
+                raise OperationError("Dock approach refused: robot is seated or powered on dock")
             # Check before vision and AGAIN afterwards: camera and PnP may
             # pause for seconds while the hardware floor/front state changes.
             await self._assert_armed_health(
@@ -1437,6 +1441,9 @@ class Coordinator:
                         "charging_authorized": False,
                         "physical_acceptance_pass": False,
                     }
+            # Seat or charger evidence may arrive during any preceding await.
+            if self.dock_inhibited(job.robot_id):
+                raise OperationError("Dock approach refused: robot is seated or powered on dock")
             await head.command(command)
             await asyncio.sleep(0.12)
             await _bounded_pulse_stop(head)
