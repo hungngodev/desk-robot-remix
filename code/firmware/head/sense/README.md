@@ -168,7 +168,9 @@ add autofocus controls or establish optical/pickup performance.
 
 Native USB19/20, debug UART43/44, strapping GPIO3 and flash/PSRAM pins are not
 assigned to external peripherals. Amplifier7/8 reuse SD signals, so never insert
-an SD card or initialize SD. No touch pad is allocated. Floor/obstacle sensors**Required real-board mod for the chosen audio+RGB pins:** The microSD slot shares S3 GPIO7, GPIO8 and GPIO9 via the Sense expansion's **J3 solder bridge, shipped enabled by default**. Merely disabling SD software does **not** electrically remove the slot. Before connecting speaker amp on GPIO7/8 or optional RGB on GPIO9, use Seeed's [official J3 instructions](https://wiki.seeedstudio.com/xiao_esp32s3_sense_filesystem/) on the actual shipped expansion revision: remove camera to protect the lens, open J3 for SPI header use, then electrically inspect and confirm no microSD routing is active. **No SD card**, no SD.begin(). The current firmware compile does not verify physical J3.
+an SD card or initialize SD.
+
+**Required real-board mod for the chosen audio+RGB pins:** The microSD slot shares S3 GPIO7, GPIO8 and GPIO9 via the Sense expansion's **J3 solder bridge, shipped enabled by default**. Merely disabling SD software does **not** electrically remove the slot. Before connecting speaker amp on GPIO7/8 or optional RGB on GPIO9, use Seeed's [official J3 instructions](https://wiki.seeedstudio.com/xiao_esp32s3_sense_filesystem/) on the actual shipped expansion revision: remove camera to protect the lens, open J3 for SPI header use, then electrically inspect and confirm no microSD routing is active. **No SD card**, no SD.begin(). The current firmware compile does not verify physical J3.
 
 No touch pad is allocated. Floor/obstacle sensors
 belong to the WROOM bus, not this head's display bus.
@@ -182,14 +184,16 @@ rated actuator wiring. Do not join independent USB5V sources blindly.
 
 When the private firmware setting `CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED`
 is enabled, the Sense board uses the original Xiaozhi `ToggleChatState`
-and its one Opus microphone/speaker session. The same guarded boot attempt
-may happen once again after a real WiFi disconnect followed by reconnection
-and return to idle. This does not start another microphone owner, open
-a new custom audio WebSocket, or retry a model response. An operator
-pressing BOOT disables unattended audio restart until the board reboots.
-Arbitrary server-side session closure while WiFi stays connected does
-not automatically reopen the microphone; verify recovery and consent
-in the real network loss and manual mute trials before qualification.
+and its one Opus microphone/speaker session. The initial attempt waits until
+at least ten seconds after boot, connected WiFi, idle device state and device
+AEC. A WiFi loss resets the initial-attempt latch. A changed Xiaozhi audio
+failure epoch also permits a retry after a channel closure or open failure
+even if WiFi remains associated. All attempts share a minimum five-second
+interval; an ordinary healthy transition to idle alone does not trigger a
+restart. No new microphone owner, custom audio WebSocket or model-response
+retry is created. An operator pressing BOOT disables unattended audio restart
+until the board reboots. Verify recovery and consent in the physical network
+loss, server-channel closure and manual mute trials before qualification.
 
 ## Physical BOOT microphone privacy verification
 
@@ -293,15 +297,16 @@ passes the five-minute Mac-offline face and zero-motion observation and the
 remaining expressions are demonstrated.
 
 Camera SCCB must be I²C0 and OLED I²C1; compile guards reject the known conflicting
-camera setting. The8MB partition table is `partitions/v2/8m.csv`: two0x2f0000
-OTA slots and2MB assets at0x600000. Actual app/assets size and a successful build
+camera setting. The 8 MB partition table is `partitions/v2/8m.csv`: two 0x2f0000
+OTA slots and 2 MB assets at 0x600000. Actual app/assets size and a successful build
 are required; never truncate the old16MB merged image.
 
 ## Build only
 
-From the project root:
+From the repository root:
 
 ```sh
+cd code
 python3 firmware/head/install_overlay.py --board sense --upstream upstream/xiaozhi-esp32 --output firmware/head/build/xiaozhi-sense
 bash scripts/build_head.sh --board sense
 ```
