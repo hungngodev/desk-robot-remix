@@ -40,7 +40,8 @@ class DockContactInhibit:
                 or dock.get("present") is not True or dock.get("valid") is not True
                 or dock.get("charging_verified") is not False
                 or type(dock.get("seq")) is not int or not 1 <= dock["seq"] <= 0xffffffff
-                or type(dock.get("age_ms")) is not int or dock["age_ms"] < 0
+                or type(dock.get("age_ms")) is not int
+                or not 0 <= dock["age_ms"] < _DOCK_SAMPLE_MAX_AGE_MS
                 or type(elapsed_ms) not in (int, float) or not 0 <= elapsed_ms < 500
                 or dock["age_ms"] + elapsed_ms >= _DOCK_SAMPLE_MAX_AGE_MS
                 or any(type(dock.get(pin)) is not bool for pin in pins)):

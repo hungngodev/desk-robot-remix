@@ -517,6 +517,7 @@ async def test_dock_observation_expires_after_scheduling_pause_and_retry_is_fres
     assert not retry["motor_authorized"]
     assert head.commands == []
 
+
 def dock_pin_sample(seq, *, asserted=False, age=5):
     return dict(
         present=True, valid=True, charging_verified=False, seq=seq, age_ms=age,
@@ -573,3 +574,10 @@ def test_dock_inhibit_rollover_and_replay_break_confirmation():
         assert guard.inhibited
     assert guard.observe(dock_pin_sample(4), 17)
     assert not guard.inhibited
+
+
+def test_dock_inhibit_huge_age_cannot_raise_or_release():
+    guard = DockContactInhibit()
+    assert guard.observe(dock_pin_sample(1, asserted=True), 17)
+    assert not guard.observe(dock_pin_sample(2, age=10**1000), 17, 0.5)
+    assert guard.inhibited

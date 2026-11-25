@@ -1397,6 +1397,16 @@ async def test_autonomous_low_battery_dock_and_charge_inhibition_lifecycle(
         assert any(cmd.startswith("drive 20 20") for cmd in head.commands)
         assert head.armed is False
 
+        # A fresh pet session (including a Mac restart) loses the volatile flags.
+        # The already consumed autonomous attempt must nevertheless remain denied.
+        state.last_battery_low = None
+        state.last_fuel_seq = None
+        state.low_fuel_streak = state.recovered_fuel_streak = 0
+        state.low_battery_dock_episode_attempted = False
+        for seq in range(14, 18):
+            await rt.pet._observe_aux(robot.id, 1, aux_packet(1800, seq))
+        assert len(rt.coordinator.jobs) == 1
+
         # Additional sustained low samples within same episode must not re-dock.
         await rt.pet._observe_aux(robot.id, 1, aux_packet(1800, 20))
         await rt.pet._observe_aux(robot.id, 1, aux_packet(1800, 21))
@@ -1481,3 +1491,59 @@ async def test_contact_inhibition_cancels_only_own_active_dock_approach(settings
         controller.tasks.pop(job.id)
         controller._fleet_motion_owner = None
         await controller.close()
+
+
+def test_autonomous_dock_retry_budget_survives_reopen_and_boot_change(tmp_path):
+    from desk_robot.memory import MemoryStore
+
+    def reopen():
+        return MemoryStore(tmp_path, ["robot-01", "robot-02"])
+
+    first = reopen()
+    assert first.dock_retry_transition("robot-01", 17, 100, recovered=False)
+    assert first.dock_retry_transition("robot-02", 17, 100, recovered=False)
+    second = reopen()
+    assert not second.dock_retry_transition("robot-01", 17, 101, recovered=False)
+    assert not second.dock_retry_transition("robot-01", 18, 1, recovered=False)
+    assert not second.dock_retry_transition(
+        "robot-01", 17, 103, recovered=True, previous_fuel_seq=102,
+    )
+    assert not second.dock_retry_transition(
+        "robot-01", 18, 2, recovered=True, previous_fuel_seq=1,
+    )
+    assert second.dock_retry_transition(
+        "robot-01", 18, 3, recovered=True, previous_fuel_seq=2,
+    )
+    third = reopen()
+    assert not third.dock_retry_transition("robot-01", 18, 3, recovered=False)
+    assert third.dock_retry_transition("robot-01", 18, 4, recovered=False)
+    assert not third.dock_retry_transition("robot-02", 17, 101, recovered=False)
+
+
+def test_autonomous_dock_retry_budget_reserves_only_once_concurrently(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from desk_robot.memory import MemoryStore
+
+    store = MemoryStore(tmp_path, ["robot-01"])
+
+    def reserve(seq):
+        return store.dock_retry_transition("robot-01", 1, seq, recovered=False)
+
+    with ThreadPoolExecutor(max_workers=5) as pool:
+        assert sum(pool.map(reserve, range(1, 6))) == 1
+
+
+@pytest.mark.parametrize("boot,seq,previous", [
+    (True, 2, 1), (1, 2, 2), (1, 2, 3), (1, 2, None), (1, 2, True),
+])
+def test_autonomous_dock_retry_rejects_malformed_recovery(tmp_path, boot, seq, previous):
+    from desk_robot.memory import MemoryStore
+
+    store = MemoryStore(tmp_path, ["robot-01"])
+    assert store.dock_retry_transition("robot-01", 1, 1, recovered=False)
+    with pytest.raises(ValueError):
+        store.dock_retry_transition(
+            "robot-01", boot, seq, recovered=True, previous_fuel_seq=previous,
+        )
+    assert not store.dock_retry_transition("robot-01", 1, 2, recovered=False)

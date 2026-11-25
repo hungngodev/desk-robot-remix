@@ -154,6 +154,20 @@ class MemoryStore:
                 # Serialize schema inspection, DDL, triggers and FTS rebuild.
                 # Otherwise competing initializers can both attempt ALTER TABLE.
                 db.execute("BEGIN IMMEDIATE")
+                # A deny-only safety budget, separate from recallable memories.
+                db.execute(
+                    """CREATE TABLE IF NOT EXISTS dock_retry_budget (
+                         singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                         attempted INTEGER NOT NULL CHECK(attempted IN (0,1)),
+                         boot_id INTEGER NOT NULL,
+                         fuel_seq INTEGER NOT NULL
+                       )"""
+                )
+                db.execute(
+                    """CREATE TABLE IF NOT EXISTS dock_retry_retired_boots (
+                         boot_id INTEGER PRIMARY KEY
+                       )"""
+                )
                 db.execute(
                     """CREATE TABLE IF NOT EXISTS memories (
                          event_id TEXT PRIMARY KEY,
@@ -379,6 +393,59 @@ class MemoryStore:
             raise
         finally:
             db.close()
+
+    def dock_retry_transition(
+        self, robot_id: str, boot_id: int, fuel_seq: int, *, recovered: bool,
+        previous_fuel_seq: int | None = None,
+    ) -> bool:
+        """Atomically reserve one autonomous attempt or record confirmed recovery.
+
+        Callers must establish fresh, same-boot fuel evidence before invoking.
+        The persisted flag is a denial fence, never a motor permit.
+        """
+        if (type(boot_id) is not int or not 1 <= boot_id <= 0xffffffff
+                or type(fuel_seq) is not int or not 1 <= fuel_seq <= 0xffffffff
+                or type(recovered) is not bool
+                or (recovered and (
+                    type(previous_fuel_seq) is not int
+                    or not 1 <= previous_fuel_seq <= 0xffffffff
+                    or not 0 < ((fuel_seq - previous_fuel_seq) & 0xffffffff) < 0x80000000
+                ))):
+            raise ValueError("Invalid dock retry evidence")
+        with self._connect(robot_id) as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT attempted, boot_id, fuel_seq FROM dock_retry_budget WHERE singleton=1"
+            ).fetchone()
+            attempted = bool(row[0]) if row else False
+            if row:
+                if boot_id == row[1]:
+                    first_seq = previous_fuel_seq if recovered else fuel_seq
+                    if not 0 < ((first_seq - row[2]) & 0xffffffff) < 0x80000000:
+                        return False
+                    if not 0 < ((fuel_seq - row[2]) & 0xffffffff) < 0x80000000:
+                        return False
+                else:
+                    if db.execute(
+                        "SELECT 1 FROM dock_retry_retired_boots WHERE boot_id=?", (boot_id,),
+                    ).fetchone():
+                        return False
+                    retired_count = db.execute(
+                        "SELECT count(*) FROM dock_retry_retired_boots"
+                    ).fetchone()[0]
+                    if retired_count >= 256:
+                        return False
+                    db.execute(
+                        "INSERT INTO dock_retry_retired_boots VALUES (?)", (row[1],),
+                    )
+            db.execute(
+                """INSERT INTO dock_retry_budget VALUES (1, ?, ?, ?)
+                   ON CONFLICT(singleton) DO UPDATE SET
+                   attempted=excluded.attempted, boot_id=excluded.boot_id,
+                   fuel_seq=excluded.fuel_seq""",
+                (int(not recovered), boot_id, fuel_seq),
+            )
+            return recovered or not attempted
 
     def remember(
         self,

@@ -1115,6 +1115,8 @@ class PetController:
         boot_id = data["force"].get("boot_id") or data["proximity"].get("boot_id")
         if boot_id is not None:
             if boot_id in state.retired_aux_boot_ids:
+                state.dock_guard.invalidate()
+                state.low_fuel_streak = state.recovered_fuel_streak = 0
                 return
             if boot_id != state.last_aux_boot_id:
                 if state.last_aux_boot_id is not None:
@@ -1140,6 +1142,8 @@ class PetController:
         elif state.last_aux_boot_id is not None:
             # Once authenticated epoch evidence exists, never downgrade to
             # legacy epochless packets that could replay the older boot.
+            state.dock_guard.invalidate()
+            state.low_fuel_streak = state.recovered_fuel_streak = 0
             return
         state.aux_reads += 1
         robot = self.settings.robot(robot_id)
@@ -1334,13 +1338,26 @@ class PetController:
             self._notify_dock_inhibit(robot_id, now_inhibited)
 
         dock_request_initial_low: bool | None = None
+        dock_recovered = False
         power = data["power"]
         fuel_seq = power.get("fuel_seq")
+        previous_fuel_seq = state.last_fuel_seq
+        fuel_boot = _aux_boot_epoch(data)
+        fuel_age = power.get("fuel_age_ms")
+        auto_dock = robot.autonomous_low_battery_dock_enabled
+        fresh_fuel = (
+            fuel_boot is not None and type(fuel_age) is int and 0 <= fuel_age < 500
+            and type(request_elapsed_ms) in (int, float) and 0 <= request_elapsed_ms < 500
+            and fuel_age + request_elapsed_ms < 500
+        )
         if (power["fuel_valid"] and 2500 <= power["cell_mv"] <= 4500
-                and type(fuel_seq) is int and 0 < fuel_seq <= 0xffffffff):
+                and type(fuel_seq) is int and 0 < fuel_seq <= 0xffffffff
+                and (not auto_dock or fresh_fuel)):
             advance = _sensor_counter_advance(fuel_seq, state.last_fuel_seq)
             if advance == 0:
-                pass  # Cached or backwards sample cannot change battery state.
+                # Replayed evidence cannot complete an autonomous confirmation streak.
+                if auto_dock:
+                    state.low_fuel_streak = state.recovered_fuel_streak = 0
             elif advance is None or advance > 1000:
                 state.last_fuel_seq = fuel_seq
                 state.low_fuel_streak = 0
@@ -1387,6 +1404,7 @@ class PetController:
                         state.last_battery_low = False
                         state.recovered_fuel_streak = 0
                         state.low_battery_dock_episode_attempted = False
+                        dock_recovered = auto_dock and fresh_fuel
                 else:
                     state.low_fuel_streak = 0
                     state.recovered_fuel_streak = 0
@@ -1463,6 +1481,15 @@ class PetController:
                 "hand_wave", f"My hand gesture sensor observed a {direction} wave", 1.0
             ))
 
+        if dock_recovered:
+            try:
+                await asyncio.to_thread(
+                    self.memory.dock_retry_transition, robot_id, fuel_boot, fuel_seq,
+                    recovered=True, previous_fuel_seq=previous_fuel_seq,
+                )
+            except (OSError, ValueError, sqlite3.Error) as exc:
+                state.last_error = f"Dock retry recovery: {type(exc).__name__}"
+
         for change in changes:
             if not state.enabled or state.generation != generation:
                 return
@@ -1484,6 +1511,23 @@ class PetController:
             and callable(getattr(self, "on_low_battery_dock", None))
         ):
             state.low_battery_dock_episode_attempted = True
+            if robot.autonomous_low_battery_dock_enabled:
+                if not auto_dock or not fresh_fuel:
+                    return
+                try:
+                    reserved = await asyncio.to_thread(
+                        self.memory.dock_retry_transition, robot_id, fuel_boot, fuel_seq,
+                        recovered=False,
+                    )
+                except (OSError, ValueError, sqlite3.Error) as exc:
+                    state.last_error = f"Dock retry reservation: {type(exc).__name__}"
+                    return
+                if (not reserved or not state.enabled or state.generation != generation
+                        or self._closed or self.is_dock_charging_inhibited(robot_id)
+                        or not robot.autonomous_low_battery_dock_enabled
+                        or fuel_age + request_elapsed_ms
+                        + (time.monotonic() - received_at) * 1000 >= 500):
+                    return
             await self._trigger_low_battery_dock(robot_id, dock_request_initial_low)
 
     async def _poll_touch(self, robot_id: str, generation: int) -> None:
