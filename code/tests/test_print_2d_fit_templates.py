@@ -36,7 +36,8 @@ def setup_sources(tmp_path):
             "guide_wall_mm=5;\nwall_outside_margin_mm=8;\n"
             "entry_flare_each_mm=7;\nentry_flare_run_mm=37;\nguide_height_mm=12;\n"
             "backstop_brace_depth_mm=8;\nbackstop_brace_height_mm=10;\n"
-            "backstop_height_mm=90;\n",
+            "backstop_height_mm=90;\n"
+            "tag_recess_depth_mm=0.8;\ntag_bottom_z_mm=16;\n",
         "docs/cad/remixes/remaining_fit_gauges.scad":
             "candidate_pack_body_l_mm = 86;\npower_l = 86;\n"
             "power_w = 35;\npower_h = 14;\nfit_xy = 0.4;\nwall = 2.4;\n"
@@ -153,6 +154,8 @@ def test_larger_dock_pocket_must_not_overprint_a4_captions(tmp_path):
                                 "tag_black_side_mm = 75;")
     modified = modified.replace("tag_white_margin_each_mm=5;",
                                 "tag_white_margin_each_mm=10;")
+    # Keep the CAD backstop tall enough to isolate the A4 layout failure.
+    modified = modified.replace("backstop_height_mm=90;", "backstop_height_mm=120;")
     scad.write_text(modified, encoding="utf-8")
     # Pocket 96.2 mm ends at y=172.2, crossing the first caption at 171.
     output = tmp_path / "paper"
@@ -690,3 +693,42 @@ def test_dock_paper_tracks_changed_scad_flare_transition(tmp_path, render_mesh):
         ordered = sorted(ys)
         assert len(ordered) == 3
         assert paper_transitions() == [ordered[1] - ordered[0]] * 2
+
+
+@pytest.mark.parametrize(("old", "new", "message"), [
+    ("tag_recess_depth_mm=0.8;", "tag_recess_depth_mm=0.39;", "backing thickness"),
+    ("tag_recess_depth_mm=0.8;", "tag_recess_depth_mm=3;", "backing thickness"),
+    ("tag_bottom_z_mm=16;", "tag_bottom_z_mm=14.9;", "vertical clearance"),
+    ("tag_bottom_z_mm=16;", "tag_bottom_z_mm=19;", "vertical clearance"),
+])
+def test_a4_dock_rejects_invalid_tag_recess_before_export(tmp_path, old, new, message):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / source.SOURCES["dock"]
+    original = scad.read_text(encoding="utf-8")
+    assert original.count(old) == 1
+    scad.write_text(original.replace(old, new), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match=message):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(("old", "new"), [
+    ("tag_recess_depth_mm=0.8;", "tag_recess_depth_mm=0.4;"),
+    ("tag_recess_depth_mm=0.8;", "tag_recess_depth_mm=2.99;"),
+    ("tag_bottom_z_mm=16;", "tag_bottom_z_mm=15;"),
+    ("tag_bottom_z_mm=16;", "tag_bottom_z_mm=18.8;"),
+])
+def test_a4_dock_accepts_valid_tag_recess_boundaries(tmp_path, old, new):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / source.SOURCES["dock"]
+    original = scad.read_text(encoding="utf-8")
+    assert original.count(old) == 1
+    scad.write_text(original.replace(old, new), encoding="utf-8")
+    output = tmp_path / "paper"
+    manifest = source.export(tmp_path, output)
+    assert manifest["source_dimensions_mm"]["dock"] == [60, 70, 71.2]
+    assert manifest["actual_fit_verified"] is False
+    assert source.verify(tmp_path, output) == manifest

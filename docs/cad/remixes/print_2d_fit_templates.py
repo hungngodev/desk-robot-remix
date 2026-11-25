@@ -136,6 +136,15 @@ def values(root: Path, *, source_bytes: dict[str, bytes] | None = None) -> dict:
     if (base_l - backstop_thickness - brace_depth <= guide_run
             or brace_height > backstop_height):
         raise ValueError("Invalid dock brace or guide geometry")
+    # Match the SCAD recess's backing and vertical web constraints, not
+    # merely its XY silhouette. Reject before producing any paper pages.
+    recess_depth = scad_mm(dock, "tag_recess_depth_mm")
+    tag_bottom = scad_mm(dock, "tag_bottom_z_mm")
+    if not 0.4 <= recess_depth < backstop_thickness - 2:
+        raise ValueError("Invalid dock tag recess backing thickness")
+    if (tag_bottom < base_thickness + brace_height + 2
+            or tag_bottom + pocket + 3 > base_thickness + backstop_height):
+        raise ValueError("Invalid dock tag recess vertical clearance")
     return {
         "ranger": (scad_mm(data["ranger"], "board_x"),
                    scad_mm(data["ranger"], "board_y")),
