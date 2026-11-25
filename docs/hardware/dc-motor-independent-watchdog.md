@@ -46,7 +46,24 @@ software timeout or Mac-side heartbeat does not prove that motor drive ceases.
 | DRV8833 | nSLEEP must become LOW on heartbeat timeout or brownout | Inspect and, if needed, modify the exact carrier onboard nSLEEP pullup; never connect a 3.3 V CMOS output to an unknown VM-referenced pullup |
 
 The logic timing above makes 30 ms nominal positive-edge intervals while
-the application is running. The actual timer must be tuned so the **shortest**
+the application is running.
+The 45 ms software deadline is per transition, not per positive edge:
+two individually accepted 44 ms gaps can give an 88 ms interval between
+rising-edge timestamps. Qualification must account for that interval and
+additional measured GPIO timing uncertainty, not just the nominal 30 ms.
+If that cannot fit the loaded cliff stopping budget, the heartbeat timing
+contract must be tightened before enabling motion.
+
+TI DRV8833 Rev E, section 7.3.2, Table 1 distinguishes LOW/LOW (coast,
+high impedance) from HIGH/HIGH (active brake). All four motor PWM duties
+must be zero on STOP; neither coast nor nSLEEP LOW proves zero wheel speed.
+No active-brake substitution is qualified. Measure loaded coast distance.
+
+TI CD74HC123 Rev F, page 2, also permits a trigger when reset rises while
+A is LOW and B is HIGH. Require verified reset/power sequencing with B LOW
+before reset release, including timer-only brownout while the MCU is powered.
+A fixed reset pullup alone is not evidence of glitch-free startup.
+ The actual timer must be tuned so the **shortest**
 qualified hardware pulse exceeds the maximum rising edge interval plus loop
 jitter, and the **longest** pulse and stopping distance both stay inside the
 measured distance to the desk edge. A 200 ms default watchdog from an unrelated

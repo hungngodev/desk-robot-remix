@@ -12,7 +12,9 @@ class MotorHeartbeat {
  public:
   static constexpr std::uint32_t kToggleIntervalMs = 15;
   // Conservative CPU scheduling deadline, NOT the measured CD74HC123 RC
-  // cutoff. A missed deadline latches LOW even if the old drive lease lives.
+  // cutoff. This is per transition, not per rising edge: two accepted
+  // 44 ms gaps can give 88 ms between positive-edge timestamps.
+  // A missed deadline latches LOW even if the old drive lease lives.
   static constexpr std::uint32_t kMissedDeadlineMs = 45;
 
   // Startup or explicit successful local USB recovery ONLY. A routine stop

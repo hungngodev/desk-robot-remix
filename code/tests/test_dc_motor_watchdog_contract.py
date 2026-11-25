@@ -363,3 +363,61 @@ def test_drivetrain_output_code_excluded_from_inert_profiles(stepper, full, qual
     if stepper and not qualified:
         assert "write_stepper(body_pins::kLeftStepperPins, 0);" in output
         assert "write_stepper(body_pins::kRightStepperPins, 0);" in output
+
+
+def test_dc_motor_writes_coast_and_clear_inactive_channel_first(tmp_path):
+    """Execute actual PWM function bodies with a recording LEDC boundary."""
+    compiler = shutil.which("c++")
+    if compiler is None:
+        pytest.skip("C++ compiler unavailable for motor output test")
+    main = (BODY / "src/main.cpp").read_text(encoding="utf-8")
+    pins = (BODY / "include/BodyPins.h").read_text(encoding="utf-8")
+    channels = pins.split("constexpr int kMotorChannels[]", 1)[1].split(";", 1)[0]
+    functions = []
+    for signature in ("void zero_motor_pwm()", "void write_motor_pair("):
+        functions.append(signature + main.split(signature, 1)[1].split("\n}", 1)[0] + "\n}")
+    source = r'''
+#include <array>
+#include <cstdlib>
+#include <stdexcept>
+#define CHECK(expr) do { if (!(expr)) throw std::runtime_error(#expr); } while (false)
+#define DESK_ROBOT_STEPPER 0
+namespace body_pins { constexpr int kMotorChannels[] CHANNELS; }
+std::array<unsigned, 6> duties{};
+void ledcWrite(int channel, unsigned duty) {
+    CHECK(channel >= 0 && channel < 4);
+    CHECK(duty <= 255);
+    duties.at(channel) = duty;
+    CHECK(!(duties[0] && duties[1]));
+    CHECK(!(duties[2] && duties[3]));
+}
+'''.replace("CHANNELS", channels) + "\n".join(functions) + r'''
+int main() {
+    for (int pair : {0, 2}) {
+        for (int previous : {-100, 0, 100}) {
+            for (int next = -100; next <= 100; ++next) {
+                duties = {0, 0, 0, 0, 123, 234};
+                duties[pair] = previous > 0 ? 255 : 0;
+                duties[pair + 1] = previous < 0 ? 255 : 0;
+                duties[2 - pair] = 77;
+                write_motor_pair(pair, pair + 1, next);
+                const unsigned expected = static_cast<unsigned>(std::abs(next) * 255 / 100);
+                CHECK(duties[pair] == (next > 0 ? expected : 0));
+                CHECK(duties[pair + 1] == (next < 0 ? expected : 0));
+                CHECK(duties[2 - pair] == 77 && duties[3 - pair] == 0);
+                zero_motor_pwm();
+                CHECK((duties == std::array<unsigned, 6>{0, 0, 0, 0, 123, 234}));
+            }
+        }
+    }
+}
+'''
+    binary = tmp_path / "dc_motor_outputs"
+    result = subprocess.run(
+        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-x", "c++", "-",
+         "-o", str(binary)],
+        input=source, text=True, capture_output=True, timeout=15, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=5, check=False)
+    assert result.returncode == 0, result.stderr
