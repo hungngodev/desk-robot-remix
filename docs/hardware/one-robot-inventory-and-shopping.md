@@ -31,6 +31,23 @@ original photographs and ownership evidence remain in the dedicated
 [photo inventory](photo-inventory-2026-11-04.md).
 
 
+## First range and audio evaluation
+
+For a bounded sample evaluation, generate the pilot view from the same checkout.
+
+```bash
+cd code
+uv run --no-sync python scripts/procurement_release.py --format pilot-samples-markdown
+```
+
+The [shopping checklist's first order](../plans/first-unit-shopping-agent-checklist.md#first-order-and-when-to-test)
+identifies the range carrier and audio pair for the initial checks. Count usable
+stock first, then verify the exact seller option, sample quantity, and delivered
+price against the prototype budget before checkout. Keep the remaining ranging
+modules and other unresolved roles on the full-build list until their own
+evidence is available. The pilot view does not approve a full robot order.
+
+
 ## Strict first-unit prior spending reconciliation
 
 The nonstrict two-list preview stays available without private receipts. Before
