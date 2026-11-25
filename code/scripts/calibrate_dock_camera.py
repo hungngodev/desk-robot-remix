@@ -125,9 +125,11 @@ def fit_corners(
                     "Checkerboard views include repeated or near-duplicate placements"
                 )
 
-    rms, camera, dist, _, _, intrinsic_std, _, per_view_errors = cv2.calibrateCameraExtended(
-        [object_grid] * len(image_points), image_points, (width, height),
-        None, None,
+    rms, camera, dist, rvecs, tvecs, intrinsic_std, _, per_view_errors = (
+        cv2.calibrateCameraExtended(
+            [object_grid] * len(image_points), image_points, (width, height),
+            None, None,
+        )
     )
     # OpenCV also reports RMS for each view. A badly fitted placement can
     # hide inside a small pooled RMS when many other views fit well.
@@ -157,6 +159,19 @@ def fit_corners(
             or not 0 <= cx < width or not 0 <= cy < height
             or len(distortion) not in (4, 5, 8, 12, 14)):
         raise ValueError("Untrustworthy camera intrinsics or excessive reprojection error")
+    # Per-view RMS still dilutes an individual bad checkerboard corner.
+    # Reproject every accepted observation with the fitted extrinsics and
+    # enforce the same 3 px absolute corner ceiling used for live AprilTags.
+    if len(rvecs) != len(image_points) or len(tvecs) != len(image_points):
+        raise ValueError("Incomplete checkerboard extrinsics")
+    for observed, rvec, tvec in zip(image_points, rvecs, tvecs, strict=True):
+        projected, _ = cv2.projectPoints(object_grid, rvec, tvec, camera, dist)
+        if projected.shape != observed.shape or not np.isfinite(projected).all():
+            raise ValueError("Invalid checkerboard corner reprojection")
+        residual = projected.astype(np.float64) - observed
+        errors = np.hypot(residual[..., 0], residual[..., 1])
+        if not np.isfinite(errors).all() or np.any(errors > 3.0):
+            raise ValueError("Excessive checkerboard corner reprojection error")
     return {
         "measured": False,  # Operator must inspect actual mounting and images.
         "fx": fx, "fy": fy, "cx": cx, "cy": cy,

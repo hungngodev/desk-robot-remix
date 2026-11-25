@@ -674,3 +674,14 @@ def test_huge_board_geometry_fails_closed():
             projected_views(cv2), (640, 480), columns=9, rows=6,
             square_mm=10**1000, tag_side_mm=60, marker_id=2, target_distance_mm=200,
         )
+
+def test_rejects_one_bad_corner_hidden_by_low_view_rms():
+    """Actual OpenCV fit cannot average one corrupted corner into 54 points."""
+    cv2 = pytest.importorskip("cv2")
+    views = projected_views(cv2)
+    good = fit(views)
+    assert good["reprojection_rms_px"] < .02
+    assert not good["physical_acceptance_pass"]
+    views[-1][26, 0, 0] += 5.0
+    with pytest.raises(ValueError, match="corner reprojection error"):
+        fit(views)
