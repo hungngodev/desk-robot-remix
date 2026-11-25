@@ -85,7 +85,11 @@ A native low-g event, mixed metadata, reboot or acquisition replay invalidates
 the trial rather than becoming a qualified handling threshold.
 
 The JSONL records a host monotonic **receipt time**, not a synchronized IMU
-conversion clock. Only actual `imu.sample_ms` and `imu.boot_id` establish
+conversion clock. New captures record `request_elapsed_ms` separately; capture
+and analysis reject samples when that duration plus firmware `age_ms` exceeds
+200 ms. Legacy logs without this field remain operator-supplied, unattested
+candidates without measured transport freshness. Only actual `imu.sample_ms`
+and `imu.boot_id` establish
 conversion sequence and physical boot provenance. Preserve the separate
 hardware stopwatch/thermal notes rather than inventing timestamps.
 

@@ -41,6 +41,23 @@ def trials():
     return samples
 
 
+@pytest.mark.parametrize("elapsed", [181, -1, True, None, float("nan"), float("inf")])
+def test_calibration_rejects_invalid_or_stale_recorded_transport_age(elapsed):
+    rows = trials()
+    rows[8]["request_elapsed_ms"] = elapsed
+    with pytest.raises(ValueError, match="fresh stationary WROOM"):
+        analyze(rows)
+
+
+def test_calibration_accepts_total_age_at_runtime_boundary():
+    rows = trials()
+    for row in rows:
+        row["request_elapsed_ms"] = 180
+    report = analyze(rows)
+    assert report["sample_counts"] == {"upright": 8, "tilted": 4, "shaking": 4}
+    assert report["thresholds_physically_qualified"] is False
+
+
 def test_stationary_biased_gyro_and_separated_handling_events():
     report = analyze(trials())
     assert report["gyro_bias_dps"] == [1.0, 0.0, 0.0]

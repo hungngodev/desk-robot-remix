@@ -136,19 +136,21 @@ async def capture_phase(
     previous_low_g_seq = trial_low_g_counter(previous_imu) if previous_imu is not None else None
     low_g_seen = previous_imu is not None
     for _ in range(count * 10):
+        started = time.monotonic()
         response = await client.get(
             endpoint,
             headers={"Authorization": f"Bearer {token}"}, timeout=3.0,
         )
         response.raise_for_status()
         observed = time.monotonic()
+        request_elapsed_ms = (observed - started) * 1000.0
         body = response.json(
             object_pairs_hook=_unique_status_fields,
             parse_constant=_reject_nonfinite_status_json,
         )
         if not isinstance(body, dict) or body.get("robot_id") != robot:
             raise RuntimeError("Authenticated WROOM status has wrong robot identity")
-        if raw_mpu6050(body) is None:
+        if raw_mpu6050(body, request_elapsed_ms=request_elapsed_ms) is None:
             raise RuntimeError("Robot is moving or MPU6050 evidence is invalid")
         current = body["imu"]["sample_ms"]
         current_boot = body["imu"]["boot_id"]
@@ -173,6 +175,7 @@ async def capture_phase(
                 # This is a HOST RECEIPT timestamp, not a claimed I2C
                 # acquisition clock or synchronized head audio timestamp.
                 "time_monotonic_s": observed,
+                "request_elapsed_ms": request_elapsed_ms,
                 "firmware_commit": firmware_commit,
                 "mount_id": mount_id,
                 "body": body,

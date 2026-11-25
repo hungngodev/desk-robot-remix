@@ -75,7 +75,11 @@ def analyze(records: list[dict]) -> dict:
         if not _finite(observed) or observed < 0:
             raise ValueError("Require monotonic physical acquisition time")
         body = record.get("body")
-        decoded = raw_mpu6050(body)
+        # Legacy operator logs may omit transport timing; newer captures
+        # preserve it so offline analysis enforces the live freshness budget.
+        decoded = raw_mpu6050(
+            body, request_elapsed_ms=record.get("request_elapsed_ms", 0.0),
+        )
         if decoded is None:
             raise ValueError("Each frame needs fresh stationary WROOM MPU6050 evidence")
         observed_robot = body.get("robot_id")

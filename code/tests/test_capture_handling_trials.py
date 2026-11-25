@@ -19,6 +19,24 @@ _operator_status_client = _capture_module["_operator_status_client"]
 save_private_trial_rows = _capture_module["save_private_trial_rows"]
 
 
+@pytest.mark.parametrize("delay_s", [0.179, 0.181])
+async def test_capture_counts_http_duration_against_imu_age(monkeypatch, delay_s):
+    from types import SimpleNamespace
+
+    ticks = iter((100.0, 100.0 + delay_s))
+    monkeypatch.setitem(
+        capture_phase.__globals__, "time",
+        SimpleNamespace(monotonic=lambda: next(ticks)),
+    )
+    if delay_s > 0.180:
+        with pytest.raises(RuntimeError, match="invalid"):
+            await read(FakeClient(), count=1)
+    else:
+        rows = await read(FakeClient(), count=1)
+        assert rows[0]["request_elapsed_ms"] == pytest.approx(delay_s * 1000)
+        assert rows[0]["body"]["imu"]["age_ms"] == 20
+
+
 class FakeResponse:
     def __init__(self, data):
         self.data = data
