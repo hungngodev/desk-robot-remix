@@ -50,7 +50,7 @@ def _require_boolean_assignment(model: BaseModel, name: str, value: object) -> N
 
 
 class RobotConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False, hide_input_in_errors=True)
     id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,40}$")
     name: str
     persona: str = "You are a friendly desk companion. Keep replies to one short sentence."
@@ -106,21 +106,25 @@ class RobotConfig(BaseModel):
             raise ValueError("Robot name cannot be blank")
         if self.dock_turn_sign == 0 or self.dock_forward_sign == 0:
             raise ValueError("Dock movement polarity cannot be zero")
-        u = urlparse(self.head_url)
+        try:
+            u = urlparse(self.head_url)
+            port = u.port
+        except ValueError:
+            # urllib may include malformed address or port text in its exception.
+            raise ValueError("head_url must have a valid hostname and port") from None
         if (
             u.scheme not in ("http", "https") or not u.hostname
             or u.username is not None or u.password is not None
             or u.query or u.fragment or any(char.isspace() for char in self.head_url)
         ):
             raise ValueError("head_url must be an http(s) URL without embedded credentials")
-        # Accessing port also rejects malformed and out-of-range port strings.
-        if u.port == 0:
+        if port == 0:
             raise ValueError("head_url port must be nonzero")
         return self
 
 
 class Settings(BaseModel):
-    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False, hide_input_in_errors=True)
     # Global live camera grant covers every configured pet. Private Pydantic
     # storage never becomes a serializable configuration or model instruction.
     _camera_consent_generation: int = PrivateAttr(default=0)

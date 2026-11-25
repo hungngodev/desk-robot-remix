@@ -313,3 +313,34 @@ def test_device_id_case_aliases_are_rejected():
     robots[1]["device_id"] = "aa:bb:cc:dd:ee:ff"
     with pytest.raises(ValueError, match="device_id must uniquely"):
         Settings(robots=robots)
+
+@pytest.mark.parametrize("field", ["voice_vision_tools_enabled", "unknown_setting"])
+def test_configuration_error_does_not_echo_rejected_values(tmp_path, field):
+    marker = "synthetic-private-value-1234"
+    with pytest.raises(ValueError, match=field) as error:
+        load_settings(_file(tmp_path), overrides={field: marker})
+    assert marker not in str(error.value)
+
+
+@pytest.mark.parametrize("value", [
+    "http://head.local:synthetic-private-value-1234",
+    "http://[synthetic-private-value-1234]:8081",
+    "http://synthetic-private-value-1234@head.local:8081",
+])
+def test_malformed_head_address_does_not_echo_rejected_values(value):
+    for validate in (
+        lambda: RobotConfig(**_robot(), head_url=value),
+        lambda: Settings(robots=[{**_robot(), "head_url": value}]),
+    ):
+        with pytest.raises(ValueError, match="head_url") as error:
+            validate()
+        assert "synthetic-private-value-1234" not in str(error.value)
+
+
+def test_nested_configuration_type_error_does_not_echo_rejected_values(tmp_path):
+    marker = "synthetic-private-value-1234"
+    path = _file(tmp_path)
+    path.write_text(path.read_text() + f'\nmotion_enabled = "{marker}"\n')
+    with pytest.raises(ValueError, match=r"robots\.0\.motion_enabled") as error:
+        load_settings(path)
+    assert marker not in str(error.value)
