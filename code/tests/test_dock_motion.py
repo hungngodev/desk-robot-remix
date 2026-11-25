@@ -947,13 +947,15 @@ async def test_second_pet_cannot_use_first_pet_dock_intrinsics_to_move(
 
 @pytest.mark.parametrize(
     "outcome", ["standoff", "contact", "beacon_loss", "timeout",
-                "marker_loss", "pulse_budget", "receipt_denial"],
+                "marker_loss", "pulse_budget", "receipt_denial",
+                "queued_camera_expired"],
 )
 async def test_public_dock_replay_stops_without_unqualified_recovery(
     settings, tmp_path, monkeypatch, outcome,
 ):
     """Host replay: qualified approach is distinct from contact and charge proof."""
     import asyncio
+    from types import SimpleNamespace
 
     from desk_robot.dock_evidence import observe_dock_evidence
     from desk_robot.dock_ir import dock_beacon_code
@@ -979,7 +981,18 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
         "mount_lateral_offset_mm": 0.0, "mount_yaw_deg": 0.0,
     }))
 
+    clock = time
+    clock_now = [time.monotonic()]
+    if outcome == "queued_camera_expired":
+        # Advance only the dock consumers' clock, not asyncio's deadlines.
+        # Camera age will be 210 ms while IR age is only 110 ms.
+        clock = SimpleNamespace(monotonic=lambda: clock_now[0], time=time.time)
+        monkeypatch.setattr("desk_robot.controller.time", clock)
+        monkeypatch.setattr("desk_robot.dock_runtime.time", clock)
+
     class ReplayHead:
+        supports_dispatch_check = outcome == "queued_camera_expired"
+
         def __init__(self):
             self.armed = False
             self.contacted = False
@@ -1012,10 +1025,12 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
                     await asyncio.Event().wait()
                 finally:
                     self.snapshot_cancelled.set()
-            return b"synthetic marker", time.monotonic(), (1234, self.frames, 1), 1
+            return b"synthetic marker", clock.monotonic(), (1234, self.frames, 1), 1
 
         async def camera_identity(self, receipt):
             await self.dock_receipt_current(receipt)
+            if outcome == "queued_camera_expired":
+                clock_now[0] += 0.10
             return "OV5640"
 
         async def dock_receipt_current(self, receipt):
@@ -1037,7 +1052,11 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
                 "physical_qualified": False,
             }
 
-        async def command(self, command):
+        async def command(self, command, *, dispatch_check=None):
+            if dispatch_check is not None:
+                # Model the time spent waiting for HttpHead's command locks.
+                clock_now[0] += 0.11
+                dispatch_check()
             self.commands.append(command)
             if command == "arm":
                 self.armed = True
@@ -1106,7 +1125,7 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
         await asyncio.wait_for(coordinator.tasks[job.id], timeout=10)
         commands = [c for c in head.commands if c != "keepalive"]
         expected = ["arm", "drive 20 20 100", "stop"]
-        if outcome == "receipt_denial":
+        if outcome in {"receipt_denial", "queued_camera_expired"}:
             expected = ["arm"]
             assert head.frames == head.ir_reads == 1
         elif outcome == "pulse_budget":
@@ -1120,7 +1139,10 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
             assert head.ir_reads == 2
         assert commands == expected + ["halt"]
         assert not head.armed
-        if outcome in {"standoff", "beacon_loss", "marker_loss", "pulse_budget"}:
+        if outcome in {
+            "standoff", "beacon_loss", "marker_loss", "pulse_budget",
+            "queued_camera_expired",
+        }:
             assert job.state == "succeeded"
             assert job.result["phase"] == "hold"
             assert not job.result["charging_authorized"]
@@ -1130,6 +1152,7 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
                 "beacon_loss": "not jointly visible",
                 "marker_loss": "No identified, calibrated target",
                 "pulse_budget": "Maximum guarded approach pulses reached",
+                "queued_camera_expired": "Dock camera receipt expired before guarded drive",
             }[outcome]
             assert reason in job.result["reason"]
         else:

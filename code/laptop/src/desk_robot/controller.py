@@ -1391,6 +1391,8 @@ class Coordinator:
             # This does not grant any movement or charging authorization:
             # the five local WROOM ranging and dock-contact interlocks still
             # own the physical STOP verdict.
+            reading = None
+            ir_request_at = 0.0
             if expected_dock is not None:
                 getter = getattr(head, "ir_status", None)
                 if not callable(getter):
@@ -1479,15 +1481,23 @@ class Coordinator:
                         "physical_acceptance_pass": False,
                     }
             # Seat or charger evidence may arrive during any preceding await,
-            # AND assigned IR/consent/seat freshness may expire while queued
+            # AND camera/IR/consent/seat freshness may expire while queued
             # behind HttpHead.lock or HttpHead.command_lock.
             class _DockIrQueueExpired(Exception):
                 pass
 
+            class _DockCameraQueueExpired(Exception):
+                pass
+
             def _verify_before_post(
                 reading=reading, ir_request_at=ir_request_at,
+                observation=observation,
             ) -> None:
                 self._require_camera_motion_grant(camera_grant)
+                try:
+                    unpack_dock_frame(observation)
+                except ValueError as exc:
+                    raise _DockCameraQueueExpired(str(exc)) from exc
                 if expected_dock is not None:
                     try:
                         validate_ir(
@@ -1501,12 +1511,19 @@ class Coordinator:
                         "Dock approach refused: robot is seated or powered on dock"
                     )
 
-            _verify_before_post()
             try:
+                _verify_before_post()
                 if getattr(head, "supports_dispatch_check", False):
                     await head.command(command, dispatch_check=_verify_before_post)
                 else:
                     await head.command(command)
+            except _DockCameraQueueExpired:
+                return {
+                    "phase": "hold",
+                    "reason": "Dock camera receipt expired before guarded drive",
+                    "charging_authorized": False,
+                    "physical_acceptance_pass": False,
+                }
             except _DockIrQueueExpired:
                 return {
                     "phase": "hold",
