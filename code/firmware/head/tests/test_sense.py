@@ -1924,7 +1924,7 @@ def test_private_pcm_transfer_revoked_by_boot_mute_and_reference_reset():
     assert "ReleaseBenchPcmCapture(pcm.interleaved)" in worker
     # New raw buffers cannot overlap an outstanding moved HTTP transfer,
     # nor be opened after a physical BOOT privacy mute.
-    starter = codec.split("bool SenseReferenceCodec::BeginBenchPcmCapture()", 1)[1]
+    starter = codec.split("bool SenseReferenceCodec::BeginBenchPcmCapture(", 1)[1]
     starter = starter.split("SenseReferenceCodec::BenchCaptureProgress", 1)[0]
     assert "bench_transfer_active_" in starter
     assert "microphone_privacy_muted_.load(" in starter

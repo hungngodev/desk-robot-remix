@@ -394,10 +394,13 @@ void SenseReferenceCodec::GrantBenchPcmConsent() {
         bench_consent_.Grant(esp_timer_get_time());
 }
 
-bool SenseReferenceCodec::BeginBenchPcmCapture() {
+bool SenseReferenceCodec::BeginBenchPcmCapture(uint32_t expected_privacy_epoch) {
     std::lock_guard<std::mutex> lock(bench_mutex_);
-    if (bench_window_.occupied() || bench_transfer_active_ ||
-        microphone_privacy_muted_.load(std::memory_order_acquire)) return false;
+    const auto privacy_changed = [&] {
+        return microphone_privacy_muted_.load(std::memory_order_acquire) ||
+            microphone_privacy_epoch_.load(std::memory_order_acquire) != expected_privacy_epoch;
+    };
+    if (bench_window_.occupied() || bench_transfer_active_ || privacy_changed()) return false;
     // Consume before allocation or timer setup: failed START must not
     // authorize a second network request without another physical gesture.
     if (!bench_consent_.Take(esp_timer_get_time())) return false;
@@ -413,6 +416,10 @@ bool SenseReferenceCodec::BeginBenchPcmCapture() {
     auto* data = static_cast<int16_t*>(heap_caps_malloc(
         desk_robot::SensePcmWindow::kBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
     if (!data) return false;
+    if (privacy_changed()) {
+        ReleaseBenchPcmCapture(data);
+        return false;
+    }
     // No stale heap data may be delivered if a partial callback occurs.
     std::fill_n(data, desk_robot::SensePcmWindow::kFrames * 2, 0);
     const int64_t now = esp_timer_get_time();
@@ -432,6 +439,12 @@ bool SenseReferenceCodec::BeginBenchPcmCapture() {
         // asynchronous HTTP read of lifetime counters.
         std::lock_guard<std::mutex> reference_lock(reference_mutex_);
         bench_speaker_at_start_ = speaker_activity_.BeginWindow();
+    }
+    if (privacy_changed()) {
+        (void)esp_timer_stop(bench_expiry_timer_);
+        bench_started_us_ = 0;
+        ReleaseBenchPcmCapture(bench_window_.discard());
+        return false;
     }
     bench_speaker_activity_in_window_ = false;
     bench_capture_generation_.fetch_add(1, std::memory_order_acq_rel);

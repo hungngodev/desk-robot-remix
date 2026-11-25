@@ -81,7 +81,7 @@ public:
     };
     // Only the physical BOOT calibration gesture may issue this one-use grant.
     void GrantBenchPcmConsent();
-    bool BeginBenchPcmCapture();
+    bool BeginBenchPcmCapture(uint32_t expected_privacy_epoch);
     // A physical BOOT mute or playback cancellation invalidates any
     // asynchronous raw PCM transfer, even after its buffer was taken.
     uint64_t BenchPcmGeneration() const noexcept {

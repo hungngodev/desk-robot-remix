@@ -77,10 +77,15 @@ def _number(value, low: int, high: int, name: str) -> int:
     return value
 
 
-def _json_response(opener, url: str, token: str, *, method: str = "GET") -> dict:
+def _json_response(opener, url: str, token: str, *, method: str = "GET",
+                   boot: int | None = None, privacy_epoch: int | None = None) -> dict:
+    headers = {"Authorization": "Bearer " + token, "Accept": "application/json"}
+    if boot is not None:
+        headers["X-Desk-Audio-Boot"] = str(boot)
+    if privacy_epoch is not None:
+        headers["X-Desk-Audio-Privacy-Epoch"] = str(privacy_epoch)
     request = urllib.request.Request(
-        url, method=method, data=b"" if method == "POST" else None,
-        headers={"Authorization": "Bearer " + token, "Accept": "application/json"},
+        url, method=method, data=b"" if method == "POST" else None, headers=headers,
     )
     with opener.open(request, timeout=2.0) as response:
         if response.status not in (200, 202):
@@ -134,6 +139,7 @@ def capture_head(opener, head_url: str, robot_id: str, token: str, *,
         raise ValueError("Sense calibration requires verified firmware AEC delay 0 ms")
     started = _json_response(
         opener, base + "/api/audio.capture.start", token, method="POST",
+        boot=boot, privacy_epoch=privacy_epoch,
     )
     if (started.get("ok") is not True or started.get("robot_id") != robot_id
             or started.get("boot") != boot):

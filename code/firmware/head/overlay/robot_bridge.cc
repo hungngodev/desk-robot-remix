@@ -869,9 +869,22 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
             return Json(req, 400, Envelope(false, "Bench capture request must be empty"));
         if (!audio_codec_) return Json(req, 503, Envelope(false, "Sense codec unavailable"));
         auto* codec = static_cast<SenseReferenceCodec*>(audio_codec_);
+        // A delayed START must not spend consent from another boot or
+        // from a later physical mute/unmute cycle. Fence before allocation.
+        const uint32_t privacy_epoch =
+            codec->GetReferenceDiagnostics().microphone_privacy_epoch;
+        char expected_privacy[24] = {};
+        char supplied_privacy[24] = {};
+        snprintf(expected_privacy, sizeof(expected_privacy), "%u",
+                 static_cast<unsigned>(privacy_epoch));
+        if (!matches_capture_boot() ||
+            httpd_req_get_hdr_value_str(req, "X-Desk-Audio-Privacy-Epoch",
+                supplied_privacy, sizeof(supplied_privacy)) != ESP_OK ||
+            strcmp(expected_privacy, supplied_privacy) != 0)
+            return Json(req, 409, Envelope(false, "Bench START privacy or boot mismatch"));
         JsonPtr started(cJSON_CreateObject(), cJSON_Delete);
         if (!started) return Json(req, 503, Envelope(false, "Bench start reply unavailable"));
-        if (!codec->BeginBenchPcmCapture())
+        if (!codec->BeginBenchPcmCapture(privacy_epoch))
             return Json(req, 409, Envelope(false, "Bench PCM unavailable or already active"));
         char generation[24];
         snprintf(generation, sizeof(generation), "%llu",

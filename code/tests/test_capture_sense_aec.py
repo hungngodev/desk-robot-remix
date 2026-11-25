@@ -170,6 +170,9 @@ def test_authenticated_head_pcm_delivers_one_bounded_private_wav_pair(tmp_path):
     original = http.open
 
     def open_request(request, timeout):
+        if request.full_url.endswith("/api/audio.capture.start"):
+            assert request.get_header("X-desk-audio-boot") == "7"
+            assert request.get_header("X-desk-audio-privacy-epoch") == "3"
         if request.full_url.endswith("/api/audio.capture.raw"):
             assert request.get_header("X-desk-audio-boot") == "7"
             assert request.get_header("X-desk-audio-generation") == "1"
@@ -753,6 +756,12 @@ def test_stale_pcm_raw_request_is_rejected_before_buffer_transfer():
     """Both request identities fence the real firmware ownership transition."""
     head = SOURCE.parents[1] / "firmware/head"
     bridge = (head / "overlay/robot_bridge.cc").read_text()
+    start = bridge.split('if (strcmp(req->uri, "/api/audio.capture.start") == 0)', 1)[1]
+    start = start.split('if (strcmp(req->uri, "/api/audio.capture.abort") == 0)', 1)[0]
+    begin = start.index("codec->BeginBenchPcmCapture(privacy_epoch)")
+    assert start.index("!matches_capture_boot()") < begin
+    assert start.index('"X-Desk-Audio-Privacy-Epoch"') < begin
+    assert start.index("strcmp(expected_privacy, supplied_privacy) != 0") < begin
     raw = bridge.split('if (strcmp(req->uri, "/api/audio.capture.raw") == 0)', 1)[1]
     take = raw.index("codec->TakeBenchPcmCapture(generation)")
     assert raw.index("!matches_capture_boot()") < take
