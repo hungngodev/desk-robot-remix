@@ -2942,10 +2942,14 @@ class PetController:
         ):
             state.suppressed += 1
             state.last_initiative_suppression = "deferred_floor_busy"
-            state.deferred_speech_candidate = (
-                change, generation, camera_derived, offered_at,
-                admitted_camera_grant, camera_generation,
-            )
+            # Independent observation producers can finish persistence out
+            # of order. Coalesce by receipt time, not coroutine completion.
+            pending = state.deferred_speech_candidate
+            if pending is None or offered_at >= pending[3]:
+                state.deferred_speech_candidate = (
+                    change, generation, camera_derived, offered_at,
+                    admitted_camera_grant, camera_generation,
+                )
             if state.deferred_speech_task is None or state.deferred_speech_task.done():
                 state.deferred_speech_task = asyncio.create_task(
                     self._await_deferred_speech_floor(robot_id, generation)

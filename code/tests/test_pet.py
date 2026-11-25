@@ -9513,6 +9513,15 @@ async def test_deferred_touch_coalesces_busy_floor_and_enforces_expiry_vetoes(
             "robot-01", 1, "touch_tap", "Coalesced second tap", received_at=time.monotonic(),
         )
         assert state.deferred_speech_candidate[0].description == "Coalesced second tap"
+        pending = state.deferred_speech_candidate
+        # An older receipt can finish persistence after the newer touch.
+        # It remains fresh enough for admission but must not replace it.
+        pet._consider_speech(
+            "robot-01", SceneChange("touch_tap", "Late older tap", 1.0), 1,
+            received_at=pending[3] - 0.001,
+        )
+        assert state.last_initiative_suppression == "deferred_floor_busy"
+        assert state.deferred_speech_candidate is pending
         floor_task.cancel()
         await asyncio.gather(floor_task, return_exceptions=True)
         conversation.active = None
