@@ -29,7 +29,7 @@ def test_queued_pdm_read_rechecks_consent_after_acquiring_reader_mutex():
 
 def test_partial_pdm_read_erases_private_scratch_before_return():
     read = _read()
-    failed = read.split("if (mic_read != frames) {", 1)[1].split("}", 1)[0]
+    failed = read.split("if (mic_read != frames) {", 1)[1].split("\n    }\n", 1)[0]
     assert failed.index("std::fill_n(microphone_frame_.begin(), frames, 0);") < failed.index(
         "return 0;"
     )

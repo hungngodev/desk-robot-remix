@@ -537,7 +537,18 @@ def test_actual_wroom_stepper_wiring_has_unique_boot_safe_pins():
         return int(found.group(1))
 
     wheels = values("kLeftStepperPins", stepper) + values("kRightStepperPins", stepper)
-    phases = values("kMotorPins", stepper)
+    left = values("kLeftStepperPins", stepper)
+    right = values("kRightStepperPins", stepper)
+    motor_tokens = re.search(r"constexpr int kMotorPins\[\] = \{([^}]+)\};", stepper)
+    assert motor_tokens, "Missing kMotorPins pin array"
+    pin_refs = {
+        **{f"kLeftStepperPins[{i}]": p for i, p in enumerate(left)},
+        **{f"kRightStepperPins[{i}]": p for i, p in enumerate(right)},
+    }
+    phases = [
+        pin_refs[tok.strip()] if tok.strip() in pin_refs else int(tok.strip())
+        for tok in motor_tokens.group(1).split(",")
+    ]
     assert len(wheels) == len(phases) == 8
     assert wheels == phases
     assert one("kMuxReset", stepper) == -1  # passive 3.3 V pullup, no GPIO4

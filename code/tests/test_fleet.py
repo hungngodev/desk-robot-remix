@@ -994,10 +994,20 @@ async def test_five_pet_sharing_revoked_during_peer_write_keeps_one_own_receipt(
         return inserted
 
     monkeypatch.setattr(memory, "remember", revoke_on_first_peer)
-    speaker = SimulatedSpeaker()
+
+    class InterruptibleSpeaker(SimulatedSpeaker):
+        def __init__(self):
+            super().__init__()
+            self.interrupted = []
+
+        async def interrupt(self, robot):
+            self.interrupted.append(robot.id)
+
+    speaker = InterruptibleSpeaker()
     conversation = Conversation(fleet, SimulatedChat(), speaker, memory=memory)
     with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
         await conversation.run(IDS, "Play a word game")
+    assert speaker.interrupted == [IDS[0]]
     assert peer_attempts == [IDS[1]]
     assert len(speaker.spoken) == 1
     own = memory.recent(IDS[0])

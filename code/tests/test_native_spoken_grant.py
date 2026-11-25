@@ -85,6 +85,9 @@ def test_boot_enabled_settings_starts_native_receipt_fence(settings):
     data = settings.model_dump()
     data["mode"] = "hardware"
     data["voice_vision_tools_enabled"] = True
+    for index, robot in enumerate(data["robots"], start=1):
+        robot["head_url"] = f"http://192.168.1.{50 + index}:8001"
+        robot["voice"] = f"voice-{index}"
     boot_settings = Settings.model_validate(data)
     assert boot_settings.camera_consent_started_at > 0
     assert boot_settings.camera_consent_started_at <= time.monotonic()

@@ -1242,7 +1242,6 @@ async def test_room_disconnect_invalidates_shared_cache_and_rejects_old_epoch_re
 
     from desk_robot.runtime import Runtime
 
-    hub = CameraFrameHub(["robot-01"])
     runtime = Runtime.__new__(Runtime)
     runtime._closed = False
     runtime._room_dispatch_lock = threading.Lock()
@@ -1251,9 +1250,11 @@ async def test_room_disconnect_invalidates_shared_cache_and_rejects_old_epoch_re
     runtime._room_connection_epoch = 0
     runtime.room_context_failures = 0
     runtime.settings = SimpleNamespace(
+        mode="hardware",
         room_station_context_enabled=True,
         room_station_consent_generation=1,
     )
+    hub = CameraFrameHub(["robot-01"], room_settings=runtime.settings)
     runtime.multimodal = SimpleNamespace(hub=hub)
 
     old_evidence = accept(frame(seq=1, clock=1000), now=1.0)

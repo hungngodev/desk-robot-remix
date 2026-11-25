@@ -123,7 +123,7 @@ def test_later_evidence_commit_attests_exact_real_git_source_and_blob(tmp_path):
     assert source != later
     assert playbook.source_unchanged_since_test(source, later, lookup)
     assert procurement.verified_scoped_record(receipt, later, lookup)
-    assert playbook.verified_procedure_record(procedure, later, lookup)
+    assert playbook.verified_procedure_record(procedure, source, lookup)
     assert git(tmp_path, "rev-parse", f"{later}:docs/records/release.json")
 
 
@@ -136,7 +136,7 @@ def test_wrong_artifact_digest_or_untrusted_revision_cannot_release(tmp_path):
         {**procedure, "physical_measurement_receipt": {
             **procedure["physical_measurement_receipt"],
             "artifact_sha256": "0" * 64,
-        }}, later, lookup,
+        }}, source, lookup,
     )
     assert not procurement.verified_scoped_record(
         {**receipt, "evidence_url": receipt["evidence_url"].replace(
@@ -154,4 +154,4 @@ def test_real_intervening_source_edit_invalidates_physical_evidence(tmp_path):
     assert source != later
     assert not playbook.source_unchanged_since_test(source, later, lookup)
     assert not procurement.verified_scoped_record(receipt, later, lookup)
-    assert not playbook.verified_procedure_record(procedure, later, lookup)
+    assert not playbook.verified_procedure_record(procedure, source, lookup)

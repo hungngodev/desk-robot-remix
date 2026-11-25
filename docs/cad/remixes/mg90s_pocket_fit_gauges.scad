@@ -53,6 +53,9 @@ module fit_gauge(clearance_mm, tick_count) {
 // shared print verifier's closed, connected mesh policy. Historical
 // four-cup layout remains available for manually printing the set.
 if (part == "mg90s_four_cup_layout") {
+    for (c = clearances_mm)
+        assert(is_num(c) && c >= 0.1 && c <= 1.5,
+               "Servo pocket clearance must be measured and positive");
     // Tick counts identify strictly increasing, distinct fit clearances.
     if (len(clearances_mm)>1)
         for (i=[1:len(clearances_mm)-1])

@@ -1,6 +1,16 @@
+import importlib.util
 import shutil
 import subprocess
 from pathlib import Path
+
+
+def _native_cpp_env():
+    spec = importlib.util.spec_from_file_location(
+        "test_overlay_env", Path(__file__).with_name("test_overlay.py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.native_cpp_env()
 
 
 def test_body_read_metadata_and_encoding_fail_closed(tmp_path):
@@ -21,9 +31,15 @@ def test_body_read_metadata_and_encoding_fail_closed(tmp_path):
 #define CONFIG_DESK_ROBOT_ID "pet1"
 struct cJSON {
     bool fail_id = false, fail_boot = false, fail_encode = false;
+    bool has_id = false, has_boot = false;
     bool id_added = false, boot_added = false, encoded = false;
     uint32_t boot = 0;
 };
+cJSON* cJSON_GetObjectItemCaseSensitive(cJSON* body, const char* key) {
+    if (std::string(key) == "robot_id") return body->has_id ? body : nullptr;
+    if (std::string(key) == "head_boot") return body->has_boot ? body : nullptr;
+    return nullptr;
+}
 cJSON* cJSON_AddStringToObject(cJSON* body, const char* key, const char* id) {
     assert(std::string(key) == "robot_id" && std::string(id) == "pet1");
     if (body->fail_id) return nullptr;
@@ -49,6 +65,14 @@ int main() {
     cJSON status;
     assert(!EncodeBodyRead(&status, false, 123).empty());
     assert(status.id_added && !status.boot_added && status.encoded);
+    cJSON dup_id;
+    dup_id.has_id = true;
+    assert(EncodeBodyRead(&dup_id, true, 123).empty());
+    assert(!dup_id.id_added && !dup_id.encoded);
+    cJSON dup_boot;
+    dup_boot.has_boot = true;
+    assert(EncodeBodyRead(&dup_boot, true, 123).empty());
+    assert(!dup_boot.id_added && !dup_boot.encoded);
     cJSON no_id;
     no_id.fail_id = true;
     assert(EncodeBodyRead(&no_id, true, 123).empty());
@@ -66,6 +90,6 @@ int main() {
     binary = tmp_path / "body_read_identity"
     subprocess.run(
         [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", str(source), "-o", str(binary)],
-        check=True,
+        env=_native_cpp_env(), check=True,
     )
     subprocess.run([str(binary)], check=True)

@@ -68,7 +68,7 @@ def test_manual_raw_camera_requires_operator_token(settings, tokens):
     operator = {"Authorization": "Bearer " + tokens["DESK_ROBOT_API_TOKEN"]}
     with TestClient(create_app(settings, runtime=runtime)) as client:
         assert client.get(route, headers=tool).status_code == 403
-        assert client.get(route).status_code == 403
+        assert client.get(route).status_code == 401
         assert calls == []
         response = client.get(route, headers=operator)
         assert response.status_code == 200
@@ -2110,6 +2110,7 @@ def test_native_memory_tool_receipt_respects_consent_turn_and_pet_isolation(
     settings.mode = "hardware"
     settings.voice_vision_tools_enabled = True
     settings.voice_memory_tools_enabled = True
+    settings.fleet_text_sharing_enabled = True
     ids = [robot.id for robot in settings.robots]
     memory = MemoryStore(tmp_path / "private", ids)
     memory.remember(
@@ -2204,6 +2205,7 @@ def test_native_personality_uses_shared_brain_provenance_and_private_core(
     settings.mode = "hardware"
     settings.voice_vision_tools_enabled = True
     settings.voice_memory_tools_enabled = True
+    settings.fleet_text_sharing_enabled = True
 
     class StubRuntime:
         coordinator = SimpleNamespace(robot=settings.robot)

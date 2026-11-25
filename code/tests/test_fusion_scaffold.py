@@ -236,8 +236,9 @@ def test_cozmars_packaging_precedes_sparky_fallback_without_copying_unlicensed_c
         encoding="utf-8"
     )
     cozmars = guide.index("## Cozmars packaging comparison before Sparky fallback")
-    sparky = guide.index("selected **Sparky v0.1** shell")
-    assert cozmars < sparky
+    sparky = " ".join(guide.split()).index("insert the **Sparky v0.1** shell")
+    assert cozmars < guide.index("**Sparky v0.1**")
+    assert sparky > 0
     assert "515f980d4ee91f6a279406085f591b882254aad8" in guide
     assert "4ea3952fdc452081dfc711839e8b500e033a20ee" in guide
     assert "aabc2da472af675a90ad51e425bd576ba1d31383" in guide

@@ -158,8 +158,16 @@ def test_foreign_physical_dock_rejected_even_when_both_receivers_agree():
 
 
 def test_two_robots_cannot_claim_one_physical_dock():
-    a = RobotConfig(id="robot-01", name="Pip", token_env="T1", dock_beacon_id=1)
-    b = RobotConfig(id="robot-02", name="Dot", token_env="T2", dock_beacon_id=1)
+    a = RobotConfig(
+        id="robot-01", name="Pip", token_env="T1",
+        head_url="http://192.168.1.51:8001", voice="voice-a",
+        dock_beacon_id=1,
+    )
+    b = RobotConfig(
+        id="robot-02", name="Dot", token_env="T2",
+        head_url="http://192.168.1.52:8001", voice="voice-b",
+        dock_beacon_id=1,
+    )
     with pytest.raises(ValueError, match="only one robot"):
         Settings(robots=[a, b], mode="hardware")
 

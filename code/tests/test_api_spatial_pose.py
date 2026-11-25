@@ -66,7 +66,7 @@ def test_readonly_pose_operator_route_preserves_source_and_never_arms(settings, 
     operator = {"Authorization": "Bearer " + tokens["DESK_ROBOT_API_TOKEN"]}
     tool = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
     with client:
-        assert client.get(route).status_code == 403
+        assert client.get(route).status_code == 401
         assert client.get(route, headers=tool).status_code == 403
         baseline = client.get(route, headers=operator)
         assert baseline.status_code == 200

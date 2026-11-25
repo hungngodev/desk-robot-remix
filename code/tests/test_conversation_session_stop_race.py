@@ -170,6 +170,7 @@ async def test_proactive_grant_rechecks_unconfirmed_stop(kind, latch):
     conversation = conversation_with(speaker)
     conversation.settings = SimpleNamespace(
         mode="simulation" if kind == "legacy" else "hardware",
+        pet_quiet_hours=None,
     )
     conversation.active = None
     conversation.session_lock = asyncio.Lock()

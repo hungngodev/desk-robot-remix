@@ -47,6 +47,7 @@ def test_private_settings_write_only_selected_fifth_identity(tmp_path, monkeypat
     (config / "local.env").write_text(
         f"DESK_ROBOT_HEAD_01_TOKEN={first}\nDESK_ROBOT_HEAD_05_TOKEN={fifth}\n"
     )
+    (config / "local.env").chmod(0o600)
     board = (tmp_path / "firmware/head/build/xiaozhi-modular/main/boards/desk-robot"
              / "desk-robot-modular-s3")
     board.mkdir(parents=True)

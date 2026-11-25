@@ -41,7 +41,7 @@ def test_auth_precedes_json_and_length_validation(guarded_app):
 
 
 def test_reject_oversize_wrong_type_and_duplicate_headers(guarded_app):
-    auth = ("Authorization", "Bearer tool-secret")
+    auth = ("Authorization", "Bearer " + "tool-secret")
     with TestClient(guarded_app) as client:
         assert client.post(
             "/v1/action", headers=[auth], content=b"x" * (MAX_REQUEST_BYTES + 1),
@@ -76,7 +76,7 @@ def test_chunked_body_limit_without_content_length(guarded_app):
 
         await guarded_app({
             "type": "http", "method": "POST", "path": "/v1/action",
-            "headers": [(b"authorization", b"Bearer tool-secret"),
+            "headers": [(b"authorization", b"Bearer " + b"tool-secret"),
                         (b"content-type", b"application/json")],
         }, receive, send)
         assert sent[0]["status"] == 413

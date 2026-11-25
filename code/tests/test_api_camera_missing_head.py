@@ -27,7 +27,7 @@ def test_operator_camera_missing_head_is_explicitly_unavailable(settings, tokens
     tool = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
 
     with TestClient(create_app(settings, runtime=runtime)) as client:
-        assert client.get(url).status_code == 403
+        assert client.get(url).status_code == 401
         assert client.get(url, headers=tool).status_code == 403
         assert calls == []
 

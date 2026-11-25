@@ -44,7 +44,8 @@ class SenseOverlayTests(unittest.TestCase):
                  'main/protocols/protocol.cc', 'main/protocols/protocol.h',
                  'main/protocols/websocket_protocol.cc',
                  'main/protocols/websocket_protocol.h',
-                 'scripts/p3_tools/p3_gui_player.py']
+                 'scripts/p3_tools/p3_gui_player.py',
+                 'scripts/release.py']
         names += [f'main/boards/common/{name}' for name in (
             'camera.h', 'esp_video.h', 'esp_video.cc', 'esp32_camera.h', 'esp32_camera.cc')]
         names += [p.relative_to(UPSTREAM).as_posix()
@@ -1327,7 +1328,7 @@ class SenseSelectionTests(unittest.TestCase):
                 ' if (touched.motion != Motion::kNod) return 4;\n'
                 # A timer scheduled just before uint32 wrap must not fire
                 # immediately, nor become stuck when its deadline wraps to 0.
-                ' HsmBehavior picker(2);\n'
+                ' HsmBehavior picker(6);\n'
                 ' picker.pick_min_ms = 200; picker.pick_max_ms = 200;\n'
                 ' picker.update({0xfffffff0u});\n'
                 ' if (!picker.update({0xfffffff1u}).empty()) return 5;\n'

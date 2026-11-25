@@ -2204,7 +2204,7 @@ async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(settin
 
     async def status():
         body = await original_status()
-        head._watchdog()
+        head._watchdog(time.monotonic())
         return {**body, "armed": head.armed, "imu": {**body["imu"], "boot_id": 1}}
 
     async def aux_status():

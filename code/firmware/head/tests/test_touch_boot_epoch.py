@@ -227,9 +227,14 @@ struct Control {
   struct State { bool armed=true; bool touch_raw_active=false; } s;
   unsigned edges=0;
   State const& state() const { return s; }
-  void sample_touch_input(bool a) { s.touch_raw_active=a; if(a) s.armed=false; }
+  void sample_touch_input(bool a, std::uint32_t = 0) { s.touch_raw_active=a; if(a) s.armed=false; }
   void set_touch(bool a, std::uint32_t) { if(a) ++edges; }
 } control;
+bool sample_raw_touch(std::uint32_t now_ms) {
+  const bool active = digitalRead(body_pins::kTouchOutput) == HIGH;
+  control.sample_touch_input(active, now_ms);
+  return active;
+}
 unsigned output_calls=0;
 void apply_outputs() { assert(!control.state().armed); ++output_calls; }
 bool touch_stable=false, touch_candidate=false;

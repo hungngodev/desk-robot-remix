@@ -168,7 +168,8 @@ def test_stale_radar_isolated_without_dropping_fresh_room_sensors():
                    "movingTargetDetected", "stationaryTargetDistance", "movingTargetDistance"):
         assert f"radar.{getter}()" not in report
     assert "radar_sample_clock.fresh(now, kRadarStaleMs)" in report
-    assert "return has_sample_ && now_ms - sample_ms_ <= max_age_ms;" in clock
+    assert "if (has_sample_ && now_ms - sample_ms_ > max_age_ms) has_sample_ = false;" in clock
+    assert "return has_sample_;" in clock
     assert "jsbool(connected)" in report
     assert "telemetry.print(radar_sample_clock.sample_ms());" in report
 
@@ -303,7 +304,8 @@ def test_bme_pending_conversion_reports_only_last_completed_tuple():
     assert "bme.gas_resistance, millis());" in scan
     assert "bme_completed.invalidate();" in scan
     assert "bme_completed.fresh(now, kBmeStaleMs)" in report
-    assert "now_ms - sample_ms <= max_age_ms" in helper
+    assert "if (valid && now_ms - sample_ms > max_age_ms) invalidate();" in helper
+    assert "return valid;" in helper
     for raw in ("bme.temperature", "bme.humidity", "bme.pressure", "bme.gas_resistance"):
         assert raw not in report
     for field in ("temperature_c", "humidity_pct", "pressure_pa", "gas_ohms", "sample_ms"):
@@ -337,8 +339,11 @@ def test_bme_completed_native_conversion_cache_with_sanitizers(tmp_path):
 
 def test_room_transaction_clocks_follow_completed_io():
     src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    helper = (ROOT / "code/firmware/room_station/src/sensor_recovery.h").read_text()
     recovery = src.split("void recover_sensors(", 1)[1].split("void report(", 1)[0]
-    stop = recovery.split("if (Wire.endTransmission() == 0) {", 1)[1]
+    stop = recovery.split("if (desk_robot_room::scd_request_stop(Wire, SCD41_I2C_ADDR_62)) {", 1)[1]
+    assert "const int result = wire.endTransmission();" in helper
+    assert "return high_ok && low_ok && result == 0;" in helper
     assert "scd_stop_ms = millis();" in stop
     assert "scd_started_ms = millis();" in recovery
     loop = src.split("void loop() {", 1)[1]

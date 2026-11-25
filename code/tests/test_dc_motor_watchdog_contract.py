@@ -116,7 +116,7 @@ def test_raw_contact_inhibition_precedes_optional_event_debounce():
     for function, raw, delayed in (
         (
             "poll_touch",
-            "control.sample_touch_input(active);",
+            "const bool active = sample_raw_touch(now_ms);",
             "if (now_ms - touch_last_sample_ms < 25) return;",
         ),
         (
@@ -130,6 +130,8 @@ def test_raw_contact_inhibition_precedes_optional_event_debounce():
         section = main.split(signature, 1)[1].split("\n}", 1)[0]
         assert section.index(raw) < section.index(delayed)
 
+    raw_touch = main.split("bool sample_raw_touch(std::uint32_t now_ms) {", 1)[1].split("\n}\n", 1)[0]
+    assert "control.sample_touch_input(active, now_ms);" in raw_touch
     raw_bumper = main.split("bool sample_raw_bumper() {", 1)[1].split("\n}\n", 1)[0]
     assert "control.sample_bumper_input(digitalRead(body_pins::kBumperInput) == HIGH);" in raw_bumper
     assert "return control.state().bumper_raw;" in raw_bumper
