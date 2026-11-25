@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from io import BytesIO
 
 import pytest
 from desk_robot.api import create_app
@@ -16,6 +17,13 @@ from desk_robot.spatial_grid import RangeCellBatch
 from desk_robot.spatial_memory import SpatialEvidence
 from desk_robot.vision import Detection
 from fastapi.testclient import TestClient
+from PIL import Image
+
+
+def _valid_jpeg() -> bytes:
+    output = BytesIO()
+    Image.new("RGB", (640, 480)).save(output, format="JPEG")
+    return output.getvalue()
 
 
 class SpatialHead:
@@ -84,7 +92,7 @@ class SpatialHead:
 
     async def snapshot(self):
         self.frame_seq += 1
-        return b"\xff\xd8" + b"\x00" * 32 + b"\xff\xd9"
+        return _valid_jpeg()
 
     async def command(self, cmd: str):
         self.commands.append(cmd)
@@ -213,7 +221,7 @@ def test_spatial_endpoints_and_navigation_fail_closed_by_default(settings, token
         )
 
 
-@pytest.mark.parametrize("observation", ["seen", "missing", "camera_failed"])
+@pytest.mark.parametrize("observation", ["seen", "missing", "camera_failed", "expired"])
 def test_api_spatial_search_navigate_and_target_confirmation(
     settings, tokens, tmp_path, monkeypatch, observation,
 ):
@@ -221,7 +229,6 @@ def test_api_spatial_search_navigate_and_target_confirmation(
     settings.memory_dir = tmp_path / "memory"
     settings.trials_file = tmp_path / "trials.jsonl"
     monkeypatch.setattr("desk_robot.controller.image_size", lambda _jpeg: (640, 480))
-    monkeypatch.setattr("desk_robot.object_detector.image_size", lambda _jpeg: (640, 480))
 
     app = create_app(settings)
     op = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
@@ -246,8 +253,16 @@ def test_api_spatial_search_navigate_and_target_confirmation(
         head = SpatialHead("robot-01")
         rt.coordinator.heads["robot-01"] = head
         rt.pet.heads["robot-01"] = head
-        rt.coordinator.vision = FakeKeyVision(observation == "seen")
+        rt.coordinator.vision = FakeKeyVision(observation in {"seen", "expired"})
         original_snapshot = head.snapshot
+        original_confirm = rt.spatial.confirm_target_frame
+        if observation == "expired":
+            async def delayed_confirm(*args, **kwargs):
+                receipt = await original_confirm(*args, **kwargs)
+                await asyncio.sleep(0.27)
+                return receipt
+
+            monkeypatch.setattr(rt.spatial, "confirm_target_frame", delayed_confirm)
         if observation == "camera_failed":
             async def unavailable_snapshot():
                 raise TimeoutError("Injected camera interruption")
@@ -367,6 +382,7 @@ def test_api_spatial_search_navigate_and_target_confirmation(
             "seen": "target_seen_unverified_location",
             "missing": "not_found_after_search",
             "camera_failed": "no_current_sighting",
+            "expired": "no_current_sighting",
         }[observation]
         assert job["result"]["status"] == expected
         assert job["result"]["arrived"] is False
@@ -376,6 +392,10 @@ def test_api_spatial_search_navigate_and_target_confirmation(
         assert job["result"]["final_cell_verified"] is False
         if observation == "camera_failed":
             assert job["result"]["reason"] == "camera_unavailable"
+        if observation == "expired":
+            assert job["result"]["reason"] == "frame_expired"
+            assert len(st.observations) == 1
+            monkeypatch.setattr(rt.spatial, "confirm_target_frame", original_confirm)
         head.snapshot = original_snapshot
         assert job["result"]["motor_authorized"] is False
         assert job["result"]["physical_acceptance_pass"] is False
@@ -505,7 +525,6 @@ async def test_spatial_navigate_barrier_cancellation_and_pre_pickup_rejection(
     robot.object_detector_qualified = True
     robot.motion_enabled = True
     monkeypatch.setattr("desk_robot.controller.image_size", lambda _jpeg: (640, 480))
-    monkeypatch.setattr("desk_robot.object_detector.image_size", lambda _jpeg: (640, 480))
 
     class FixedVision:
         async def detect(self, _jpeg: bytes, target: str):
@@ -561,7 +580,7 @@ async def test_spatial_navigate_barrier_cancellation_and_pre_pickup_rejection(
             captured_us=max(1, now_us - 50),
             received_us=now_us,
             seen_at_wall_s=time.time(),
-            jpeg=b"\xff\xd8" + b"\x00" * 32 + b"\xff\xd9",
+            jpeg=_valid_jpeg(),
         )
         receipt = await rt.spatial.confirm_target_frame(
             FixedVision(),

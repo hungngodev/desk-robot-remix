@@ -1837,7 +1837,7 @@ class Coordinator:
         target: ObjectTarget | None = None,
         search: ObjectSearchResult | None = None,
     ) -> dict:
-        from .object_detector import DetectorFrame
+        from .object_detector import DEFAULT_FRAME_FRESH_US, DetectorFrame
         from .route_planner import revalidate_route_step
 
         spatial = getattr(self, "spatial", None)
@@ -2083,6 +2083,10 @@ class Coordinator:
             _check_step_authority(route.cells[-1], route.cells[-1])
             if self.voice_blocks_motion() is not None:
                 return target_result("rejected", "voice_barge_in")
+            current_us = spatial.now_us()
+            if (type(current_us) is not int
+                    or not 0 <= current_us - frame.captured_us <= DEFAULT_FRAME_FRESH_US):
+                return target_result("rejected", "frame_expired")
             if receipt.evidence is not None:
                 spatial.record_object_sighting(job.robot_id, receipt.evidence)
             return target_result(receipt.status, receipt.reason)

@@ -14,6 +14,8 @@ from typing import Callable
 from .object_targets import ObjectEvidence, ObjectOwner, ObjectQuery
 from .vision import Detection, Vision, validated_camera_sizes
 
+DEFAULT_FRAME_FRESH_US = 250_000
+
 
 @dataclass(frozen=True)
 class DetectorFrame:
@@ -132,7 +134,7 @@ async def detect_object_frame(
     clock_us: Callable[[], int],
     request_is_current: Callable[[], bool],
     safety_clear: Callable[[], bool],
-    fresh_us: int = 250_000,
+    fresh_us: int = DEFAULT_FRAME_FRESH_US,
     timeout_s: float = 2.0,
     min_confidence: float = 0.85,
 ) -> DetectorReceipt:
