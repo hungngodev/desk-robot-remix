@@ -2771,3 +2771,39 @@ def test_drx131_canonical_prior_ledger_ignores_archived_bom(
     )
     assert mod.main() == 2
     assert "confirmed Sense payment is absent" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("group", ["lines", "inventory"])
+@pytest.mark.parametrize("mutation", ["valid", "selected", "wrong_parent", "connector_revision"])
+def test_complete_power_kit_binding_includes_inspected_inventory(group, mutation):
+    carrier = {"vendor": "generic", "sku": "plug", "pcb_revision": "A"}
+    parent = {"connector_selected_carrier": dict(carrier)}
+    decisions = {
+        ident: {"disposition": "included_in_parent", "replacement_sku": "kit"}
+        for ident in mod.POWER_CHILDREN[:3]
+    }
+    row = {
+        "role_key": mod.POWER_PARENT_ROLE, "sku": "kit",
+        "kit_components": [
+            {"id": ident, "quantity_per_kit": 1, **carrier}
+            for ident in mod.POWER_CHILDREN
+        ],
+    }
+    if mutation == "selected":
+        decisions[mod.POWER_CHILDREN[0]]["disposition"] = "selected"
+    elif mutation == "wrong_parent":
+        decisions[mod.POWER_CHILDREN[0]]["replacement_sku"] = "other-kit"
+    elif mutation == "connector_revision":
+        parent["connector_selected_carrier"]["pcb_revision"] = "B"
+    evidence = {
+        "parts": {"cap_power": parent},
+        "supplemental_decisions": decisions,
+        "costs": {"power_package_mode": "complete_kit", group: [row]},
+    }
+    errors = mod.linked_parent_checkout_failures({}, evidence)
+    if mutation == "valid":
+        assert errors == []
+    elif mutation == "connector_revision":
+        assert "power kit connector not independently selected" in errors
+    else:
+        assert any("power kit lacks signed linked inclusion" in error for error in errors)

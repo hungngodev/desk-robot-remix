@@ -2354,6 +2354,31 @@ def stock_carrier_failures(evidence: dict) -> list[str]:
 
 
 
+def complete_power_kit_binding_failures(
+    row: dict, parent: dict, decisions: dict,
+) -> list[str]:
+    """Bind every credited power kit to signed component decisions."""
+    if not complete_power_kit_contents(row.get("kit_components")):
+        return ["complete power kit lacks exact component identities"]
+    errors = []
+    for component in POWER_CHILDREN[:3]:
+        decision = decisions.get(component, {})
+        if (not isinstance(decision, dict)
+                or decision.get("disposition") != "included_in_parent"
+                or decision.get("replacement_sku") != row.get("sku")):
+            errors.append("power kit lacks signed linked inclusion: " + component)
+    connector = parent.get("connector_selected_carrier", {})
+    claimed = next(piece for piece in row["kit_components"]
+                   if piece["id"] == "polarized_battery_connector")
+    if not isinstance(connector, dict) or not all(
+        claimed.get(k) == connector.get(k)
+        and isinstance(claimed.get(k), str) and claimed[k].strip()
+        for k in ("sku", "pcb_revision", "vendor")
+    ):
+        errors.append("power kit connector not independently selected")
+    return errors
+
+
 def linked_parent_checkout_failures(report: dict, evidence: dict) -> list[str]:
     """Bind station aliases and included/separate dock parts to actual checkout items."""
     errors = []
@@ -2367,6 +2392,15 @@ def linked_parent_checkout_failures(report: dict, evidence: dict) -> list[str]:
     inventory = costs.get("inventory", [])
     if not isinstance(lines, list) or not isinstance(inventory, list):
         return ["malformed linked parent checkout rows"]
+    if costs.get("power_package_mode") == "complete_kit":
+        power_parent = parts.get("cap_power", {})
+        if not isinstance(power_parent, dict):
+            return ["malformed signed power parent"]
+        for row in [*lines, *inventory]:
+            if isinstance(row, dict) and row.get("role_key") == POWER_PARENT_ROLE:
+                errors.extend(complete_power_kit_binding_failures(
+                    row, power_parent, decisions,
+                ))
     for detail in report.get("supplemental_decisions", []):
         ident, parent = detail["id"], detail["parent_role"]
         disposition = detail.get("disposition")
@@ -2992,28 +3026,6 @@ def main() -> int:
             if role == POWER_PARENT_ROLE:
                 if power_mode != "complete_kit":
                     print("HOLD: parent-plus-child power charges", file=sys.stderr)
-                    return 2
-                # The three linked selected decisions must explicitly name
-                # this same complete parent SKU as their qualified inclusion.
-                for component in POWER_CHILDREN[:3]:
-                    decision = supplemental.get(component, {})
-                    if (decision.get("disposition") != "included_in_parent"
-                            or decision.get("replacement_sku") != line["sku"]):
-                        print("HOLD: power kit lacks signed linked inclusion: "
-                              + component, file=sys.stderr)
-                        return 2
-                # The fourth physical item is the connector; it cannot be
-                # inferred from a generic battery chip/module description.
-                connector = parent_power.get("connector_selected_carrier", {})
-                claimed = next((piece for piece in line["kit_components"]
-                                if piece["id"] == "polarized_battery_connector"),
-                               {})
-                if not all(claimed.get(k) == connector.get(k)
-                           and isinstance(claimed.get(k), str)
-                           and claimed[k].strip()
-                           for k in ("sku", "pcb_revision", "vendor")):
-                    print("HOLD: power kit connector not independently selected",
-                          file=sys.stderr)
                     return 2
         report = attach_verified_checkout_evidence(
             report, cost, evidence["costs"]
