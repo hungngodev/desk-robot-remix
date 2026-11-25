@@ -75,6 +75,23 @@ module oval_slot(l=7,d=2.5,h=5){
   }
 }
 module head_bridge(){
+  // Keep the M3 slot capsule separate from the plate perimeter, its
+  // neighboring slots, and the rectangular cable opening.
+  r=m3_clearance_d/2;
+  half_span=2.5;
+  assert(m3_clearance_d>=3 && head_wire_clearance>0,
+         "Head bridge requires M3 bores and a positive cable opening");
+  assert(head_mount_x-2*(half_span+r)>=2 && head_mount_y-2*r>=2,
+         "Head bridge mounting slots overlap or thin their shared web");
+  assert((head_bridge_x-head_mount_x)/2-half_span-r>=2 &&
+         (head_bridge_y-head_mount_y)/2-r>=2,
+         "Head bridge slot breaches outer printable web");
+  wire_gap_x=max(0,head_mount_x/2-half_span-head_wire_clearance/2);
+  wire_gap_y=max(0,head_mount_y/2-head_wire_clearance/2);
+  assert(norm([wire_gap_x,wire_gap_y])-r>=2,
+         "Head bridge slot breaches cable opening web");
+  assert((min(head_bridge_x,head_bridge_y)-head_wire_clearance)/2>=2,
+         "Head bridge cable opening breaches exterior printable web");
   difference(){
     translate([0,0,1.5]) cube([head_bridge_x,head_bridge_y,3],center=true);
     translate([0,0,2]) cube([head_wire_clearance,head_wire_clearance,6],center=true);
@@ -98,6 +115,15 @@ module tof_adjustable(){
          "ToF base slot breaches side printable web");
   assert(slot_y+slot_extent<gusset_front_y,
          "ToF base slot intersects support gusset envelope");
+  // Screen the source aperture envelope only. The real lens center, beam
+  // footprint and standoff must still be measured on the selected carrier.
+  aperture_r=(tof_lens_d+2)/2;
+  assert(tof_lens_d>0 && m2_clearance_d>=2,
+         "ToF reference requires a positive lens and M2 mounting bores");
+  assert(face_z/2-1-aperture_r>=2 && base_x/2-aperture_r>=2,
+         "ToF aperture breaches face printable web");
+  assert(base_x/2-5.5-aperture_r>=1,
+         "ToF aperture intersects or thins support gusset clearance");
   difference(){
     union(){
       translate([0,0,1.5]) cube([base_x,base_y,3],center=true);
@@ -182,6 +208,7 @@ module fsr_jaw_pocket(){
   assert(fsr_d>=18.3 && fsr_tail_w_mm>=7.62 && fit_xy>=0.35,
          "FSR402 reference body or tail clearance undersized");
   assert(fsr_min_ring_web_mm>=2 && fsr_min_plate_web_mm>=2);
+  assert(fsr_bore_d_mm>=2, "FSR M2 bore is undersized");
   assert((ring_od-fsr_d-fit_xy)/2>=fsr_min_ring_web_mm,
          "FSR retaining ring below printable radial web");
   assert(fsr_ring_base_overlap_mm>=0.4 &&

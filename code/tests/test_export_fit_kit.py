@@ -1325,3 +1325,24 @@ def test_battery_tray_requires_printable_mounts_and_strap_openings(tmp_path, ove
     ], capture_output=True, text=True, timeout=90)
     assert bad.returncode != 0
     assert message in bad.stdout + bad.stderr
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+@pytest.mark.parametrize(("part", "override", "message"), [
+    ("head_bridge", "head_bridge_x=45", "outer printable web"),
+    ("head_bridge", "head_wire_clearance=36", "cable opening web"),
+    ("head_bridge", "m3_clearance_d=0", "requires M3 bores"),
+    ("head_bridge", "head_mount_x=2", "slots overlap"),
+    ("tof_adjustable", "tof_lens_d=12", "support gusset clearance"),
+    ("tof_adjustable", "tof_lens_d=20", "face printable web"),
+    ("tof_adjustable", "tof_lens_d=0", "positive lens"),
+    ("fsr_jaw_pocket", "fsr_bore_d_mm=0", "M2 bore is undersized"),
+])
+def test_adapter_mounts_and_apertures_reject_invalid_geometry(tmp_path, part, override, message):
+    source = ROOT / "docs/cad/remixes/one_robot_adapter_kit.scad"
+    bad = subprocess.run([
+        "openscad", "--export-format", "binstl", "-o", str(tmp_path / "bad.stl"),
+        "-D", f'part="{part}"', "-D", override, str(source),
+    ], capture_output=True, text=True, timeout=90)
+    assert bad.returncode != 0
+    assert message in bad.stdout + bad.stderr
