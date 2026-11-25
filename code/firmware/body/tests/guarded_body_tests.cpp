@@ -494,6 +494,98 @@ static void single_invalid_or_stale_lane_cancels_drive() {
   }
 }
 
+// Four independent states per lane: healthy, invalid conversion, abrupt
+// distance step, and silent dropout. Enumerate the full 4^8 product on
+// both guarded motor policies; the three optional lanes never grant clearance.
+static void mixed_eight_lane_failures_cancel_active_drive() {
+  using desk_robot::BodyProfile;
+  using desk_robot::CliffFault;
+  for (const auto profile : {BodyProfile::StepperGuarded, BodyProfile::DcGuarded}) {
+    for (unsigned combination = 0; combination < 65536U; ++combination) {
+      const auto mode = [combination](unsigned lane) {
+        return (combination >> (2U * lane)) & 3U;
+      };
+      desk_robot::CliffGuard guard;
+      CHECK(guard.configure(config()));
+      fresh(guard, 100);
+      desk_robot::BodyControl body(profile, &guard);
+      for (std::uint8_t lane = 5; lane < 8; ++lane)
+        body.sample_side_range(lane - 5, 200, true, 100);
+      CHECK(send(body, "rearm", 100, true) == "OK rearm");
+      CHECK(send(body, "arm", 100) == "OK arm");
+      CHECK(send(body, "drive 40 40 250", 100) ==
+            "OK drive left=40 right=40 ms=250");
+      CHECK(body.state().armed && body.drive_remaining(100) == 250);
+
+      CliffFault expected = CliffFault::None;
+      std::uint8_t first = desk_robot::kNoFaultSensor;
+      for (std::uint8_t lane = 0; lane < 8; ++lane) {
+        const unsigned state = mode(lane);
+        if (state == 3) continue; // No conversion, not an invented zero.
+        const bool valid = state != 1;
+        if (lane < 5) {
+          const std::uint16_t mm = state == 2 ?
+              (lane < 4 ? 1300 : 30) : (lane < 4 ? 50 : 200);
+          guard.sample(lane, mm, valid, 199);
+          if (expected == CliffFault::None && state != 0) {
+            first = lane;
+            expected = state == 1 ? CliffFault::InvalidSample :
+                (lane < 4 ? CliffFault::FloorOutOfRange : CliffFault::FrontObstacle);
+          }
+        } else {
+          body.sample_side_range(lane - 5, state == 2 ? 30 : 200, valid, 199);
+        }
+      }
+      body.tick(199);
+      CHECK(guard.fault() == expected && guard.fault_sensor() == first);
+      CHECK(body.state().armed == (expected == CliffFault::None));
+      CHECK(body.state().left == (expected == CliffFault::None ? 40 : 0));
+      CHECK(body.state().right == (expected == CliffFault::None ? 40 : 0));
+      if (expected == CliffFault::None) {
+        for (std::uint8_t lane = 0; lane < 5; ++lane) {
+          if (mode(lane) == 3) {
+            expected = CliffFault::StaleSample;
+            first = lane;
+            break;
+          }
+        }
+      }
+      // A silent critical lane expires at exactly the configured boundary.
+      body.tick(200);
+      CHECK(guard.fault() == expected && guard.fault_sensor() == first);
+      CHECK(body.state().armed == (expected == CliffFault::None));
+      CHECK(body.state().left == (expected == CliffFault::None ? 40 : 0));
+      CHECK(body.state().right == (expected == CliffFault::None ? 40 : 0));
+      CHECK(body.drive_remaining(200) == (expected == CliffFault::None ? 150U : 0U));
+      for (std::uint8_t lane = 5; lane < 8; ++lane) {
+        CHECK(body.state().side_valid[lane - 5] == (mode(lane) != 1));
+        CHECK(body.state().side_at_ms[lane - 5] ==
+              (mode(lane) == 3 ? 100U : 199U));
+      }
+      if (expected == CliffFault::None) continue;
+
+      CHECK(send(body, "rearm", 200, true) == "ERR rearm safety_interlock");
+      CHECK(body.state().servos_attached);
+      // Restore one lane at a time. No partial recovery may restart motors.
+      for (std::uint8_t lane = 0; lane < 5; ++lane) {
+        guard.sample(lane, lane < 4 ? 50 : 200, true, 201U + lane);
+        body.tick(201U + lane);
+        CHECK(!body.state().armed && body.drive_remaining(201U + lane) == 0);
+        CHECK(body.state().left == 0 && body.state().right == 0);
+        CHECK(guard.fault() == expected && guard.fault_sensor() == first);
+      }
+      CHECK(send(body, "arm", 206) == "ERR arm safety_interlock");
+      CHECK(send(body, "drive 40 40 250", 206) == "ERR drive disarmed");
+      CHECK(send(body, "rearm", 206) == "ERR rearm local_only");
+      CHECK(send(body, "rearm", 206, true) == "OK rearm");
+      CHECK(!body.state().armed && body.drive_remaining(206) == 0);
+      CHECK(send(body, "arm", 206) == "OK arm");
+      CHECK(body.state().left == 0 && body.state().right == 0);
+      CHECK(body.drive_remaining(206) == 0);
+    }
+  }
+}
+
 static void fault_holds_payload_and_requires_rearm() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -3867,6 +3959,7 @@ int main() {
     std::cout << "PASS guarded reverse and turns need calibrated swept space\n";
     local_trip_blocks_forward_and_reverse_replay();
     single_invalid_or_stale_lane_cancels_drive();
+    mixed_eight_lane_failures_cancel_active_drive();
     fault_holds_payload_and_requires_rearm();
     std::cout << "PASS fault holds payload and requires explicit rearm\n";
     stale_read_stops_before_watchdog();
