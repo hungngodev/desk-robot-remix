@@ -442,7 +442,10 @@ async def test_native_barge_invalidates_backend_audio_and_never_forges_ack(nativ
 
 
 @pytest.mark.asyncio
-async def test_authenticated_i2s_progress_never_forges_playback_ack(native):
+@pytest.mark.parametrize("invalidate", [
+    "barge", "turn", "response", "session", "socket", "close", "generation",
+])
+async def test_authenticated_i2s_progress_never_forges_playback_ack(native, invalidate):
     module, bridge = native
     conn, sent = connection()
     bridge.connections[conn.device_id] = conn
@@ -500,16 +503,36 @@ async def test_authenticated_i2s_progress_never_forges_playback_ack(native):
     assert module.device_i2s_progress(conn, {**common, "committed_ms": 120})
     assert session.wire.played_ms == 0
 
-    await session.barge()
-    assert not module.status(conn.device_id)["head_audio_i2s_progress_observed"]
+    if invalidate == "barge":
+        await session.barge()
+    elif invalidate == "turn":
+        session._readonly_turn += 1
+    elif invalidate == "response":
+        session.wire.handle_event({
+            "type": "response.created", "response_id": "r2",
+            "response": {"id": "r2", "metadata": {"duplex_event": {"epoch": 0}}},
+        })
+        assert session.wire.response_id == "r2"
+    elif invalidate == "session":
+        conn.session_id = "replacement-session"
+    elif invalidate == "socket":
+        replacement, _ = connection()
+        bridge.connections[conn.device_id] = replacement
+    elif invalidate == "close":
+        session.closed = True
+    else:
+        session._generation += 1
+    status = module.status(conn.device_id)
+    assert not status["head_audio_i2s_progress_observed"]
+    assert status["head_audio_i2s_committed_ms"] == 0
     assert not module.device_i2s_progress(
-        conn, {**common, "committed_ms": 120}
+        conn, {**common, "session_id": conn.session_id, "committed_ms": 120}
     )
     assert session.wire.played_ms == 0
     module._sessions.pop(conn.device_id, None)
 
 
-@pytest.mark.parametrize("outcome", ["success", "failure", "cancel"])
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancel", "turn"])
 async def test_i2s_receipt_cannot_advance_before_pending_send_finishes(native, outcome):
     module, bridge = native
     conn, _ = connection()
@@ -557,6 +580,8 @@ async def test_i2s_receipt_cannot_advance_before_pending_send_finishes(native, o
         with pytest.raises(asyncio.CancelledError):
             await send
     else:
+        if outcome == "turn":
+            session._readonly_turn += 1
         release.set()
         if outcome == "failure":
             with pytest.raises(RuntimeError, match="send failed"):

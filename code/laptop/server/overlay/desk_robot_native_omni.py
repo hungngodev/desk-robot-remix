@@ -152,12 +152,16 @@ def status(device: str) -> dict:
                 "audio_video_latency_physically_measured": False,
                 "native_tool_calls_supported": False,
                 "live_transcript_context_enabled": False}
+    committed_ms = (
+        s._head_i2s_prefix.committed_ms
+        if s._head_playback_current(s._generation) else 0
+    )
     return {
         "native_omni_enabled": True,
         "native_backend_connected": s.connected and not s.closed,
         "head_audio_playback_acknowledged": False,
-        "head_audio_i2s_progress_observed": s._head_i2s_prefix.committed_ms > 0,
-        "head_audio_i2s_committed_ms": s._head_i2s_prefix.committed_ms,
+        "head_audio_i2s_progress_observed": committed_ms > 0,
+        "head_audio_i2s_committed_ms": committed_ms,
         "audio_video_latency_physically_measured": False,
         "native_tool_calls_supported": False,
         "live_transcript_context_enabled": s._live_transcript_enabled,
@@ -291,6 +295,7 @@ class NativeOmniSession:
         self._head_playback_counter = uuid.uuid4().int & 0x7ffffffe
         self._head_playback_id = 0
         self._head_playback_response_id: str | None = None
+        self._head_playback_session_id: str | None = None
         self._head_playback_generation = -1
         self._head_playback_turn = -1
         self._head_i2s_prefix = I2sTransmissionPrefix()
@@ -2198,7 +2203,10 @@ class NativeOmniSession:
 
     def _begin_head_playback(self, response_id: str, generation: int) -> int:
         """Bind one opaque device token to the current model response."""
+        session_id = self.conn.session_id
         if (self.closed or generation != self._generation
+                or not isinstance(response_id, str) or not response_id
+                or not isinstance(session_id, str) or not session_id
                 or self.wire.response_id != response_id):
             return 0
         self._head_playback_counter = (
@@ -2206,15 +2214,19 @@ class NativeOmniSession:
         ) + 1
         self._head_playback_id = self._head_playback_counter
         self._head_playback_response_id = response_id
+        self._head_playback_session_id = session_id
         self._head_playback_generation = generation
         self._head_playback_turn = self._readonly_turn
         self._head_i2s_prefix = I2sTransmissionPrefix()
         return self._head_playback_id
 
     def _head_playback_current(self, generation: int) -> bool:
+        import desk_robot_bridge as bridge
         return (
             not self.closed
+            and bridge.connections.get(self.device) is self.conn
             and self._head_playback_id != 0
+            and self._head_playback_session_id == self.conn.session_id
             and generation == self._generation == self._head_playback_generation
             and self._head_playback_turn == self._readonly_turn
             and self._head_playback_response_id == self.wire.response_id
@@ -2354,6 +2366,7 @@ class NativeOmniSession:
                     if self._head_playback_response_id == response_id:
                         self._head_playback_id = 0
                         self._head_playback_response_id = None
+                        self._head_playback_session_id = None
                         self._head_playback_generation = -1
                         self._head_playback_turn = -1
                         self._head_i2s_prefix = I2sTransmissionPrefix()
@@ -2584,6 +2597,7 @@ class NativeOmniSession:
         self._generation += 1
         self._head_playback_id = 0
         self._head_playback_response_id = None
+        self._head_playback_session_id = None
         self._head_playback_generation = -1
         self._head_playback_turn = -1
         self._head_i2s_prefix = I2sTransmissionPrefix()
