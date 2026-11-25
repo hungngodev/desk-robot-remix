@@ -54,3 +54,13 @@ def test_pack_exact_budget_preserves_order_and_typed_values(pack, limit):
 def test_pack_rejects_invalid_budget_type_or_range(pack, limit):
     with pytest.raises(ValueError):
         pack([{"source": "status"}], limit=limit)
+
+
+def test_pack_exact_depth_boundary(pack):
+    # Root list is depth zero, its first dictionary is depth one.
+    node = {"value": 1}
+    for _ in range(30):
+        node = {"nested": node}
+    assert json.loads(pack([node])) == [node]
+    with pytest.raises(ValueError, match="Tool facts must be JSON values"):
+        pack([{"nested": node}])
