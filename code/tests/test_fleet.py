@@ -298,12 +298,12 @@ async def test_lost_fleet_head_cleans_session_and_leaves_future_chat_usable(flee
 
     # Keep the original speaker and conversation, including their actual
     # ownership state. A fresh adapter would hide a leaked session.
-    lost_history = list(conversation.histories[lost_id])
     transcript = await conversation.run(survivors, "Continue the game")
     assert [line["robot_id"] for line in transcript] == survivors * 2
     assert speaker.owner is None and speaker.releases == 2
     assert conversation.active is None
-    assert conversation.histories[lost_id] == lost_history
+    # Volatile prompts are scoped to the current participant set.
+    assert set(conversation.histories) == set(survivors)
     assert conversation.group_activity_timeline(lost_id)[0]["status"] == "failed"
     for robot_id in survivors:
         assert conversation.group_activity_timeline(robot_id)[0]["status"] == "completed"
