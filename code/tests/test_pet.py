@@ -8140,7 +8140,7 @@ async def test_tactile_reply_fences_admitted_camera_context(
                 await resume.wait()
             return "That sounds interesting."
 
-    class DelayedSpeaker(SimulatedSpeaker):
+    class DelayedSpeaker(PassiveBudgetSimulatedSpeaker):
         async def say(self, robot, text, *, permission_check=None):
             if stage == "tts":
                 entered.set()
