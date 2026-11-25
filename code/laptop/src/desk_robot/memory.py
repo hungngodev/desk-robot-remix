@@ -121,6 +121,20 @@ class CoreFact:
     updated_at: float
 
 
+_INVALID_MEMORY_CHARACTER = re.compile(r"[\x00\ud800-\udfff]")
+
+
+def _validate_memory_text(
+    value: object, limit: int, message: str, *,
+    invalid_character_message: str | None = None,
+) -> None:
+    """Reject text SQLite cannot bind before reserving a mutation generation."""
+    if not isinstance(value, str) or not 1 <= len(value.strip()) <= limit:
+        raise ValueError(message)
+    if _INVALID_MEMORY_CHARACTER.search(value):
+        raise ValueError(invalid_character_message or message)
+
+
 class MemoryStore:
     """One local SQLite database per robot; explicit observed vs told provenance."""
 
@@ -537,10 +551,10 @@ class MemoryStore:
             or _RELAY_TOKEN.fullmatch(relay_token) is None
         ):
             raise ValueError("Only a secondhand copy can carry a relay receipt")
-        if not isinstance(summary, str) or not 1 <= len(summary.strip()) <= 300:
-            raise ValueError("Bounded nonempty description required")
-        if "\x00" in summary:
-            raise ValueError("Invalid description")
+        _validate_memory_text(
+            summary, 300, "Bounded nonempty description required",
+            invalid_character_message="Invalid description",
+        )
         when = time.time() if observed_at is None else observed_at
         if not isinstance(when, (int, float)) or isinstance(when, bool) or not 0 <= when < 1e12:
             raise ValueError("Invalid observation clock")
@@ -812,11 +826,8 @@ class MemoryStore:
             raise ValueError("Unknown robot memory identity")
         if type(slot) is not str or not _CORE_SLOT.fullmatch(slot):
             raise ValueError("Invalid core memory slot")
-        if value is not None and (
-            not isinstance(value, str) or not 1 <= len(value.strip()) <= 200
-            or "\x00" in value
-        ):
-            raise ValueError("Invalid bounded core memory value")
+        if value is not None:
+            _validate_memory_text(value, 200, "Invalid bounded core memory value")
         with self._connect(robot_id) as db:
             db.execute("BEGIN IMMEDIATE")
             return self._advance_core_mutation(db, slot)
@@ -866,9 +877,7 @@ class MemoryStore:
             raise ValueError("Unknown robot memory identity")
         if type(slot) is not str or not _CORE_SLOT.fullmatch(slot):
             raise ValueError("Invalid core memory slot")
-        if (not isinstance(value, str) or not 1 <= len(value.strip()) <= 200
-                or "\x00" in value):
-            raise ValueError("Invalid bounded core memory value")
+        _validate_memory_text(value, 200, "Invalid bounded core memory value")
         clean = " ".join(value.split())
         with self._connect(robot_id) as db:
             db.execute("BEGIN IMMEDIATE")
@@ -923,11 +932,8 @@ class MemoryStore:
             raise ValueError("Unknown robot memory identity")
         if type(event_id) is not str or not _EVENT_ID.fullmatch(event_id):
             raise ValueError("Invalid memory event ID")
-        if summary is not None and (
-            not isinstance(summary, str) or not 1 <= len(summary.strip()) <= 300
-            or "\x00" in summary
-        ):
-            raise ValueError("Bounded nonempty description required")
+        if summary is not None:
+            _validate_memory_text(summary, 300, "Bounded nonempty description required")
         with self._connect(robot_id) as db:
             db.execute("BEGIN IMMEDIATE")
             return self._advance_episode_mutation(db, event_id)
@@ -975,9 +981,7 @@ class MemoryStore:
         """Correct local episode text without rewriting its evidence provenance."""
         if type(event_id) is not str or not _EVENT_ID.fullmatch(event_id):
             raise ValueError("Invalid memory event ID")
-        if (not isinstance(summary, str) or not 1 <= len(summary.strip()) <= 300
-                or "\x00" in summary):
-            raise ValueError("Bounded nonempty description required")
+        _validate_memory_text(summary, 300, "Bounded nonempty description required")
         clean = summary.strip()
         with self._connect(robot_id) as db:
             db.execute("BEGIN IMMEDIATE")
