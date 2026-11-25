@@ -1338,3 +1338,60 @@ async def test_authenticated_shared_xiaozhi_plan_accepts_three_distinct_readonly
         assert result == {
             "error": "Invalid read-only Mac intent plan", "retried": False,
         }
+
+
+@pytest.mark.parametrize("delay", [0, 0.01, 0.25])
+async def test_obsolete_http_teardown_failure_is_observed(
+    bridge_tools, monkeypatch, delay,
+):
+    """Observe failures within and beyond the bounded cancellation cleanup."""
+    import asyncio
+    import gc
+
+    started, signal, finished = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    bridge_tools.bridge.tool_turn_cancel_event = lambda device: signal
+    unhandled = []
+    loop = asyncio.get_running_loop()
+    previous = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, context: unhandled.append(context))
+
+    class FailingTeardown:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+        async def get(self, *args, **kwargs):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await asyncio.sleep(delay)
+                finished.set()
+                raise RuntimeError("obsolete HTTP teardown failed") from None
+
+    monkeypatch.setattr(
+        bridge_tools.httpx, "AsyncClient", lambda **kwargs: FailingTeardown()
+    )
+    task = asyncio.create_task(
+        bridge_tools.call(bridge_tools.registered_head, "status")
+    )
+    try:
+        await asyncio.wait_for(started.wait(), 1)
+        signal.set()
+        result = await asyncio.wait_for(task, 1)
+        assert result == {
+            "error": "Robot tool result superseded by new speech or reconnect",
+            "retried": False,
+        }
+        assert bridge_tools.voice_turn_response(result).action == 1
+        await asyncio.wait_for(finished.wait(), 1)
+        await asyncio.sleep(0)
+        gc.collect()
+        await asyncio.sleep(0)
+        assert unhandled == []
+    finally:
+        signal.set()
+        await asyncio.gather(task, return_exceptions=True)
+        loop.set_exception_handler(previous)

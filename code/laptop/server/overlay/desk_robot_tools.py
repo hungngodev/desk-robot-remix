@@ -182,6 +182,13 @@ async def call(conn, route, payload=None):
                 }
             request_task = asyncio.create_task(request_mac())
             turn_task = asyncio.create_task(signal.wait())
+            # Observe both child outcomes from creation, including a failure
+            # during bounded cancellation cleanup or a second cancellation.
+            for task in (request_task, turn_task):
+                task.add_done_callback(
+                    lambda completed: None if completed.cancelled()
+                    else completed.exception()
+                )
             try:
                 done, _ = await asyncio.wait(
                     {request_task, turn_task},
@@ -203,22 +210,12 @@ async def call(conn, route, payload=None):
                 # Task cancellation must be requested before returning to
                 # the active human turn. Never hold the speaker on a hung
                 # optional VLM task that suppresses cancellation.
-                # Cancellation can win the wait in the same loop turn as
-                # an HTTP failure. Retrieve that completed exception even
-                # when the obsolete result is deliberately discarded.
-                if request_task.done() and not request_task.cancelled():
-                    request_task.exception()
                 pending = [task for task in (request_task, turn_task)
                            if not task.done()]
                 if pending:
-                    done, pending = await asyncio.wait(
+                    await asyncio.wait(
                         pending, timeout=0.2, return_when=asyncio.ALL_COMPLETED
                     )
-                    for task in pending:
-                        task.add_done_callback(
-                            lambda completed: None if completed.cancelled()
-                            else completed.exception()
-                        )
         else:
             response = await request_mac()
     except (httpx.TransportError, httpx.TimeoutException):
