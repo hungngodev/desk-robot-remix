@@ -21,6 +21,14 @@ Do not use historical Freenove/CoreS3 configurations for the selected Sense head
 
 ## Complete first robot route
 
+On a clean Mac, first install the Xcode Command Line Tools (`xcode-select --install` if needed), `uv`, CMake and OpenSCAD. OpenSCAD must be callable as `openscad` for the fit-kit exporter; if installed as an application, pass its verified executable path with `--openscad`. Check the tools before proceeding, and use the exact intended repository checkout. From the repository root, prepare the locked Python environment **before** the shopping step's `uv run --no-sync` command:
+
+```sh
+(cd code && uv sync --extra dev --python 3.11 --locked)
+```
+
+If dependency installation fails, stop this setup stage rather than proceeding with stale generated artifacts. The CAD export and paper template commands below run from the repository root; coordinator and firmware commands run from `code/` unless otherwise stated.
+
 For the Mac coordinator, private configuration, pinned Xiaozhi overlay,
 provider dependencies and server startup, follow [Local AI setup](local-ai.md).
 The read-only CLI doctor is not physical qualification or a movement permit.
@@ -271,6 +279,36 @@ it under `../.tools/esp-idf` and tools under `../.tools/idf-tools`. On another m
 restore the exact SDK commit recorded in `toolchain-lock.json`, initialize its
 submodules, and run its `install.sh esp32s3` with `IDF_TOOLS_PATH` set as below.
 Do not substitute IDF5.
+
+For a fresh installation only, from `code/`, create the SDK bootstrap and
+clone the SDK at the exact commit in the checked-out toolchain lock. The
+following subshell stops on the first failure and refuses an existing SDK
+checkout or bootstrap environment. For an existing installation, inspect its
+origin, revision, submodules and Python environment instead of deleting it.
+
+```sh
+(
+  set -eu
+  mkdir -p ../.tools
+  test ! -e ../.tools/sdk-bootstrap && test ! -L ../.tools/sdk-bootstrap
+  test ! -e ../.tools/esp-idf && test ! -L ../.tools/esp-idf
+  uv venv ../.tools/sdk-bootstrap --python 3.12
+  idf_commit="$(python3 -c 'import json; print(json.load(open("toolchain-lock.json"))["esp_idf"]["commit"])')"
+  git clone --no-checkout https://github.com/espressif/esp-idf.git ../.tools/esp-idf
+  git -C ../.tools/esp-idf fetch origin "$idf_commit"
+  git -C ../.tools/esp-idf checkout --detach "$idf_commit"
+  git -C ../.tools/esp-idf submodule update --init --recursive
+  test "$(git -C ../.tools/esp-idf rev-parse HEAD)" = "$idf_commit"
+  tools_root="$(cd ../.tools && pwd)"
+  export IDF_TOOLS_PATH="$tools_root/idf-tools"
+  export PATH="$tools_root/sdk-bootstrap/bin:$PATH"
+  "$tools_root/esp-idf/install.sh" esp32s3
+)
+```
+
+A successful install is not a flash or physical qualification. If an existing
+SDK or bootstrap is present, do not rerun the fresh-install block until its
+identity and preservation have been reviewed.
 
 The build helper seeds and verifies `firmware/head/dependencies.lock` in each
 build copy. It rejects a changed dependency lock. Keep the two board copies
