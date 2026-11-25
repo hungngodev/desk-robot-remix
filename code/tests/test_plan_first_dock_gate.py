@@ -1,23 +1,56 @@
 """Docking is a first robot release gate, not an optional fleet expansion."""
+import re
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 PLAN = ROOT / "docs/PLAN.md"
 
 
 def _stages(markdown):
-    lines = markdown.splitlines()
-    table = [line for line in lines if line.startswith("| ") and " | " in line]
-    return {
-        int(line.split("|")[1].strip().split(".")[0]): line.casefold()
-        for line in table
-        if line.split("|")[1].strip().split(".")[0].isdigit()
-    }
+    heading = "## Complete linear build and permanent verification stages"
+    _, section = markdown.split(heading + "\n", 1)
+    section = section.split("\n## ", 1)[0]
+    stages = {}
+    for line in section.splitlines():
+        match = re.match(r"^\| (\d+)\. ", line)
+        if match is None:
+            continue
+        number = int(match.group(1))
+        assert number not in stages, f"duplicate canonical stage {number}"
+        stages[number] = line.casefold()
+    assert list(stages) == list(range(13)), "canonical stages must be ordered 0 through 12"
+    return stages
+
+
+def test_canonical_stage_cannot_be_masked_by_later_table():
+    plan = PLAN.read_text(encoding="utf-8")
+    original = next(line for line in plan.splitlines() if line.startswith("| 9. "))
+    contradictory = "| 9. First robot qualification | Dock optional | Defer dock |"
+    mutated = plan.replace(original, contradictory, 1)
+    mutated += "\n## Noncanonical summary\n\n" + original + "\n"
+    assert _stages(mutated)[9] == contradictory.casefold()
+
+
+def test_duplicate_canonical_stage_is_rejected():
+    plan = PLAN.read_text(encoding="utf-8")
+    original = next(line for line in plan.splitlines() if line.startswith("| 9. "))
+    contradictory = "| 9. First robot qualification | Dock optional | Defer dock |"
+    mutated = plan.replace(original, contradictory + "\n" + original, 1)
+    with pytest.raises(AssertionError, match="duplicate canonical stage 9"):
+        _stages(mutated)
+
+
+def test_missing_canonical_stage_is_rejected():
+    plan = PLAN.read_text(encoding="utf-8")
+    original = next(line for line in plan.splitlines() if line.startswith("| 9. "))
+    with pytest.raises(AssertionError, match="canonical stages must be ordered"):
+        _stages(plan.replace(original + "\n", "", 1))
 
 
 def test_first_robot_plan_requires_dock_before_qualification():
     stages = _stages(PLAN.read_text())
-    assert len(stages) >= 13
     assert "first dock" in stages[2]
     assert "protected 1s charging" in stages[2]
     assert "eight-sensor vl53l0x" in stages[3]
