@@ -215,6 +215,8 @@ def test_overlay_targets_pinned_server_and_compiles():
     # Both extracted pure modules must ship with the pinned native adapter.
     # Compilation alone does not resolve their imports.
     assert len(changes) == 13
+    assert "desk_robot_omni_audio.py" in changes
+    assert "PcmOpusFramer" in changes["desk_robot_omni_audio.py"]
     assert "desk_robot_omni_http_protocol.py" in changes
     assert "decode_tool_completion" in changes["desk_robot_omni_http_protocol.py"]
     assert "desk_robot_voice_intents.py" in changes

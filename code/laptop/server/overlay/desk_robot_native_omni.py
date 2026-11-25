@@ -24,6 +24,12 @@ from collections import deque
 from dataclasses import dataclass
 
 import aiohttp
+from desk_robot_omni_audio import (
+    FRAME_SAMPLES,
+    HEAD_SAMPLE_RATE,
+    PcmOpusFramer,
+    remaining_packet_delay,
+)
 from desk_robot_omni_http_protocol import (
     approved_backend_url,
     chat_completion_endpoint,
@@ -2251,10 +2257,9 @@ class NativeOmniSession:
         """
         import opuslib_next  # available in pinned Xiaozhi, not needed for host-only tests
         encoder = opuslib_next.Encoder(
-            16000, 1, opuslib_next.APPLICATION_AUDIO
+            HEAD_SAMPLE_RATE, 1, opuslib_next.APPLICATION_AUDIO
         )
-        pending = bytearray()
-        resample_state = None
+        framer = PcmOpusFramer(audioop.ratecv)
         current_response: str | None = None
         generation = -1
         dropped_response_id: str | None = None
@@ -2276,10 +2281,10 @@ class NativeOmniSession:
                 if response_id != current_response:
                     continue
                 if current_response is not None and generation == self._generation:
-                    if pending:
-                        tail = bytes(pending).ljust(1920, b"\0")
+                    tail = framer.padded_tail()
+                    if tail:
                         delivered = await self._send_device_opus(
-                            encoder.encode(tail, 960), generation
+                            encoder.encode(tail, FRAME_SAMPLES), generation
                         )
                         sent_audio = delivered or sent_audio
                         fully_sent = fully_sent and delivered
@@ -2301,8 +2306,7 @@ class NativeOmniSession:
                         # of whether audio actually reached the head.
                         if current_response == self._tool_audio_response_id:
                             self._tool_speech_turn = None
-                pending.clear()
-                resample_state = None
+                framer.reset()
                 current_response = None
                 sent_audio = False
                 fully_sent = True
@@ -2337,13 +2341,11 @@ class NativeOmniSession:
                                     and self._tool_audio_response_id != response_id)):
                             dropped_response_id = response_id
                             current_response = None
-                            pending.clear()
-                            resample_state = None
+                            framer.reset()
                             sent_audio = False
                             fully_sent = True
                             continue
-                pending.clear()
-                resample_state = None
+                framer.reset()
                 sent_audio = False
                 fully_sent = True
                 current_response = response_id
@@ -2356,20 +2358,15 @@ class NativeOmniSession:
                         self._clear_head_playback()
                     dropped_response_id = response_id
                     current_response = None
-                    pending.clear()
-                    resample_state = None
+                    framer.reset()
                     sent_audio = False
                     fully_sent = True
                     continue
-            pcm16k, resample_state = audioop.ratecv(
-                chunk24k, 2, 1, 24000, 16000, resample_state
-            )
-            pending.extend(pcm16k)
-            while len(pending) >= 1920 and generation == self._generation:
-                frame = bytes(pending[:1920])
-                del pending[:1920]
+            framer.append(chunk24k)
+            while framer.has_frame() and generation == self._generation:
+                frame = framer.pop_frame()
                 delivered = await self._send_device_opus(
-                    encoder.encode(frame, 960), generation
+                    encoder.encode(frame, FRAME_SAMPLES), generation
                 )
                 sent_audio = sent_audio or delivered
                 fully_sent = fully_sent and delivered
@@ -2387,8 +2384,7 @@ class NativeOmniSession:
                     self._tool_reply_pending.pop(response_id, None)
                     self._native_output_words.pop(response_id, None)
                     dropped_response_id = response_id
-                    pending.clear()
-                    resample_state = None
+                    framer.reset()
                     current_response = None
                     sent_audio = False
                     fully_sent = True
@@ -2578,7 +2574,7 @@ class NativeOmniSession:
         # Include elapsed transport time in this 60 ms packet interval.
         # Do not accumulate a second full frame delay after every send.
         # This is pacing, not acoustic playback confirmation.
-        await asyncio.sleep(max(0.0, 0.060 - (time.monotonic() - packet_started)))
+        await asyncio.sleep(remaining_packet_delay(packet_started, time.monotonic()))
         return True
 
     async def _invalidate_head_first(self) -> tuple[dict, ...]:
