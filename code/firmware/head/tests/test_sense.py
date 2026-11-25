@@ -1712,6 +1712,70 @@ def test_body_status_is_async_and_urgent_stop_preempts_uart_telemetry():
     assert "Request(const Request&) = delete;" in protocol
 
 
+def test_reference_silence_gap_retires_filter_history(tmp_path):
+    """Exercise the actual publishing methods with the production reference clock."""
+    codec = (HEAD / "sense/sense_reference_codec.cc").read_text()
+    methods = "void SenseReferenceCodec::PushLocked(" + codec.split(
+        "void SenseReferenceCodec::PushLocked(", 1
+    )[1].split("bool SenseReferenceCodec::ReadReferenceLocked(", 1)[0]
+    harness = r"""
+#include "reference_timeline.h"
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <cmath>
+#include <cstdint>
+
+struct SenseReferenceCodec {
+    static constexpr uint32_t kRingSize = 16384, kMaxGapSamples = kRingSize;
+    static constexpr uint32_t kSpeakerRate = 32000, kMicRate = 16000;
+    std::array<int16_t, kRingSize> reference_{};
+    uint64_t write_index_ = 0;
+    desk_robot::PlaybackReferenceClock reference_clock_{};
+    int16_t filter_last1_ = 0, filter_last2_ = 0, last_filtered_ = 0;
+    float phase_ = 0.0f;
+    void PushLocked(int16_t sample);
+    void FillSilenceLocked(int64_t now_us);
+    void PublishAcceptedLocked(const int32_t* source, int samples, int64_t now_us);
+};
+""" + methods + r"""
+int main() {
+    std::array<int32_t, 1920> loud{}, quiet{};
+    loud.fill(16000 * 65536);
+    SenseReferenceCodec gap;
+    gap.PublishAcceptedLocked(loud.data(), loud.size(), 1000000);
+    assert(gap.write_index_ == 960);
+    assert(gap.reference_[959] == 16000);
+    // A PDM read fills the 40 ms gap before a subsequent write arrives.
+    gap.FillSilenceLocked(1100000);
+    gap.PublishAcceptedLocked(quiet.data(), quiet.size(), 1100000);
+    assert(gap.write_index_ == 2560);
+    assert(std::all_of(gap.reference_.begin() + 960,
+                       gap.reference_.begin() + 2560,
+                       [](int16_t sample) { return sample == 0; }));
+    // No gap: chunk boundaries, even odd-sized writes, must preserve phase
+    // and filter history. Compare against one uninterrupted accepted chunk.
+    SenseReferenceCodec whole, split;
+    whole.PublishAcceptedLocked(loud.data(), loud.size(), 1000000);
+    split.PublishAcceptedLocked(loud.data(), 1, 1000000);
+    split.PublishAcceptedLocked(loud.data() + 1, loud.size() - 1, 1000000);
+    assert(whole.write_index_ == split.write_index_);
+    assert(whole.reference_ == split.reference_);
+}
+"""
+    source = tmp_path / "reference_gap.cc"
+    source.write_text(harness)
+    compiler = shutil.which("c++")
+    assert compiler is not None, "A native C++17 compiler is required"
+    executable = tmp_path / "reference_gap"
+    subprocess.run(
+        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+         "-I", str(HEAD / "sense"), str(source), "-o", str(executable)],
+        check=True, env=native_cpp_env(),
+    )
+    subprocess.run([str(executable)], check=True)
+
+
 def test_reference_ring_lap_is_checked_even_on_unavailable_reads(tmp_path):
     """Execute the production ring read method with deterministic clock and ring state."""
     codec = (HEAD / "sense/sense_reference_codec.cc").read_text()

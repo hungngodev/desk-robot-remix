@@ -33,6 +33,14 @@ void SenseReferenceCodec::FillSilenceLocked(int64_t now_us) {
     // tests. Reads may not replay wall time already represented by PCM.
     const uint64_t sample_gap =
         reference_clock_.silence_frames(now_us, kMaxGapSamples);
+    // Silence represents a break in the accepted PCM stream. Do not replay
+    // pre-gap filter history when the next chunk arrives. Keep the 2:1
+    // phase: inserting whole reference frames does not change its parity.
+    if (sample_gap != 0) {
+        filter_last1_ = 0;
+        filter_last2_ = 0;
+        last_filtered_ = 0;
+    }
     for (uint64_t n = 0; n < sample_gap; ++n) {
         PushLocked(0);
     }
