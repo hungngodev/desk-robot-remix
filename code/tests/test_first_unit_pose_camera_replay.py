@@ -4,14 +4,19 @@ Synthetic authenticated transport and already selected MJPEG frame metadata
 exercise the real Mac consumer. This is not physical map or motor acceptance.
 """
 
+import json
 import time
 from types import SimpleNamespace
 
 import httpx
 import pytest
 from desk_robot import transport
+from desk_robot.api import create_app
+from desk_robot.config import RobotConfig, Settings
+from desk_robot.runtime import Runtime
 from desk_robot.spatial_bracket import BracketError, validate_stationary_bracket
 from desk_robot.transport import HeadError, HttpHead
+from fastapi.testclient import TestClient
 
 JPEG = bytes.fromhex("ffd8696d616765ffd9")
 
@@ -226,3 +231,71 @@ async def test_stationary_camera_pose_bracket_recovers_with_new_receipts(
         with pytest.raises(BracketError, match="current"):
             bracket(previous, selected, before, after)
     assert calls == ["/api/pose"] * (6 if fault == "stream_reconnect" else 7)
+
+
+def test_legacy_pose_normal_runtime_startup_and_restart(tmp_path, tokens, monkeypatch):
+    """Exercise the real lifespan with only head HTTP replaced, not Runtime.start."""
+    robot = RobotConfig(id="robot-01", name="Legacy", token_env="DESK_ROBOT_HEAD_01_TOKEN")
+    settings = Settings(mode="hardware", robots=[robot], memory_dir=tmp_path / "memory")
+    auth = {"Authorization": "Bearer " + tokens["DESK_ROBOT_API_TOKEN"]}
+    base = f"/v1/robots/{robot.id}"
+    calls = []
+    offline = False
+
+    def handler(request):
+        assert request.headers["Authorization"] == "Bearer " + tokens[robot.token_env]
+        calls.append((request.method, request.url.path))
+        if request.url.path == "/api/pose":
+            if offline:
+                raise httpx.ConnectError("Legacy head disconnected", request=request)
+            return httpx.Response(501)
+        if request.url.path == "/api/status":
+            return httpx.Response(200, json={"robot_id": robot.id, "armed": False})
+        assert request.url.path == "/api/command" and request.method == "POST"
+        assert json.loads(request.content) == {"command": "halt"}
+        return httpx.Response(200, json={
+            "robot_id": robot.id, "ok": True, "reply": "OK halt",
+        })
+
+    original_client = httpx.AsyncClient
+
+    def mock_client(**kwargs):
+        return original_client(transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(httpx, "AsyncClient", mock_client)
+    runtimes = []
+    # Start with empty private storage, then reconstruct all runtime owners.
+    for _ in range(2):
+        offline = False
+        app = create_app(settings)
+        with TestClient(app) as client:
+            runtime = app.state.runtime
+            assert isinstance(runtime, Runtime)
+            runtimes.append(runtime)
+            head = runtime.coordinator.heads[robot.id]
+            assert isinstance(head, HttpHead)
+            assert client.get(base + "/pose", headers=auth).status_code == 501
+            assert head.pose_fence.current(time.monotonic()) is None
+            assert head.pose_fence.needs_reanchor
+            status = client.get(base + "/status", headers=auth)
+            assert status.status_code == 200
+            assert status.json()["armed"] is False
+            grid = client.get(base + "/spatial/grid", headers=auth)
+            assert grid.status_code == 200
+            for field in ("anchored", "navigation_authorized", "motor_authorized",
+                          "charging_authorized", "physical_acceptance_pass"):
+                assert grid.json()[field] is False
+            assert client.post(
+                base + "/navigate", headers=auth, json={"goal": [1, 1]},
+            ).status_code == 409
+            offline = True
+            assert client.get(base + "/pose", headers=auth).status_code == 503
+            assert head.pose_fence.current(time.monotonic()) is None
+            offline = False
+            assert client.get(base + "/status", headers=auth).status_code == 200
+        assert runtime.client.is_closed
+    assert runtimes[0] is not runtimes[1]
+    assert calls == [
+        ("GET", "/api/pose"), ("GET", "/api/status"), ("GET", "/api/pose"),
+        ("GET", "/api/status"), ("POST", "/api/command"),
+    ] * 2
