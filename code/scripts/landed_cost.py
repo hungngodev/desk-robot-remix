@@ -13,7 +13,6 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 
-
 MAX_ACCOUNTING_USD = Decimal("1000000000000")
 
 

@@ -1,7 +1,6 @@
 """Motor activity must fence cached IMU conversions before handling calibration."""
 
 import pytest
-
 from desk_robot.handling import HandlingGate, raw_mpu6050
 
 

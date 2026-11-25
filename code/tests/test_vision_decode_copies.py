@@ -4,10 +4,9 @@ from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-from PIL import Image
-
 from desk_robot.multimodal import _prepare
 from desk_robot.vision import YoloWorldVision, image_size
+from PIL import Image
 
 
 def _jpeg(mode: str) -> bytes:

@@ -6,7 +6,6 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-
 from desk_robot.config import load_settings
 from desk_robot.conversation import Conversation
 from desk_robot.memory import MemoryStore

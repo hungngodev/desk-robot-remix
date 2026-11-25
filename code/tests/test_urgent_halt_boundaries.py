@@ -5,7 +5,6 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 import httpx
-
 from desk_robot.transport import HeadError, HttpHead
 
 
