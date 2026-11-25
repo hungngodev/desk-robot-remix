@@ -151,6 +151,9 @@ class MemoryStore:
             raise PermissionError("Robot memory root is accessible to other users")
         for robot in sorted(self.robot_ids):
             with self._connect(robot) as db:
+                # Serialize schema inspection, DDL, triggers and FTS rebuild.
+                # Otherwise competing initializers can both attempt ALTER TABLE.
+                db.execute("BEGIN IMMEDIATE")
                 db.execute(
                     """CREATE TABLE IF NOT EXISTS memories (
                          event_id TEXT PRIMARY KEY,
@@ -275,31 +278,43 @@ class MemoryStore:
                                   content_rowid='rowid',
                                   tokenize='porter unicode61')"""
                 )
-                db.executescript(
+                # executescript implicitly commits pending transactions.
+                # Execute each complete trigger within the same migration lease.
+                db.execute(
                     """CREATE TRIGGER IF NOT EXISTS spatial_observations_delete
                        AFTER DELETE ON memories BEGIN
                           DELETE FROM spatial_observations WHERE event_id=old.event_id;
-                       END;
-                       CREATE TRIGGER IF NOT EXISTS spatial_observations_correction
+                       END;"""
+                )
+                db.execute(
+                    """CREATE TRIGGER IF NOT EXISTS spatial_observations_correction
                        AFTER UPDATE OF summary ON memories
                        WHEN new.summary <> old.summary BEGIN
                           DELETE FROM spatial_observations WHERE event_id=old.event_id;
-                       END;
-                       CREATE TRIGGER IF NOT EXISTS camera_provenance_delete
+                       END;"""
+                )
+                db.execute(
+                    """CREATE TRIGGER IF NOT EXISTS camera_provenance_delete
                        AFTER DELETE ON memories BEGIN
                          DELETE FROM camera_provenance WHERE event_id=old.event_id;
-                       END;
-                       CREATE TRIGGER IF NOT EXISTS memories_fts_insert
+                       END;"""
+                )
+                db.execute(
+                    """CREATE TRIGGER IF NOT EXISTS memories_fts_insert
                        AFTER INSERT ON memories BEGIN
                          INSERT INTO memories_fts(rowid,summary,kind)
                          VALUES (new.rowid,new.summary,new.kind);
-                       END;
-                       CREATE TRIGGER IF NOT EXISTS memories_fts_delete
+                       END;"""
+                )
+                db.execute(
+                    """CREATE TRIGGER IF NOT EXISTS memories_fts_delete
                        AFTER DELETE ON memories BEGIN
                          INSERT INTO memories_fts(memories_fts,rowid,summary,kind)
                          VALUES ('delete',old.rowid,old.summary,old.kind);
-                       END;
-                       CREATE TRIGGER IF NOT EXISTS memories_fts_update
+                       END;"""
+                )
+                db.execute(
+                    """CREATE TRIGGER IF NOT EXISTS memories_fts_update
                        AFTER UPDATE ON memories BEGIN
                          INSERT INTO memories_fts(memories_fts,rowid,summary,kind)
                          VALUES ('delete',old.rowid,old.summary,old.kind);

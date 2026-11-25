@@ -147,3 +147,52 @@ def test_case_aliased_database_introduced_after_start_is_rejected(tmp_path):
 
     with pytest.raises(ValueError, match="Case-aliased robot memory database"):
         store.recent("pet_a")
+
+
+def test_failed_fts_rebuild_rolls_back_entire_schema_migration(tmp_path, monkeypatch):
+    import sqlite3
+
+    database = tmp_path / "robot-1.sqlite3"
+    connect = sqlite3.connect
+    with connect(database) as raw:
+        raw.execute(
+            """CREATE TABLE memories (
+               event_id TEXT PRIMARY KEY, source_robot TEXT NOT NULL,
+               witnessed INTEGER NOT NULL, kind TEXT NOT NULL,
+               summary TEXT NOT NULL, observed_at REAL NOT NULL,
+               confidence REAL NOT NULL)"""
+        )
+        raw.execute(
+            "INSERT INTO memories VALUES (?,?,?,?,?,?,?)",
+            ("old", "robot-1", 1, "touch", "Legacy private note", 1, 1),
+        )
+
+    class FailingConnection(sqlite3.Connection):
+        def execute(self, sql, parameters=()):
+            if sql == "INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')":
+                raise sqlite3.OperationalError("injected FTS rebuild failure")
+            return super().execute(sql, parameters)
+
+    def fail_rebuild(*args, **kwargs):
+        return connect(*args, **kwargs, factory=FailingConnection)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(sqlite3, "connect", fail_rebuild)
+        with pytest.raises(sqlite3.OperationalError, match="injected FTS rebuild failure"):
+            MemoryStore(tmp_path, ["robot-1"])
+
+    with connect(database) as raw:
+        assert "relay_token" not in {
+            row[1] for row in raw.execute("PRAGMA table_info(memories)")
+        }
+        assert raw.execute(
+            "SELECT name FROM sqlite_master WHERE name NOT LIKE 'sqlite_%'"
+        ).fetchall() == [("memories",)]
+        assert raw.execute("SELECT summary FROM memories").fetchone() == (
+            "Legacy private note",
+        )
+        assert raw.execute("PRAGMA integrity_check").fetchone() == ("ok",)
+
+    reopened = MemoryStore(tmp_path, ["robot-1", "robot-10"])
+    assert reopened.search("robot-1", "legacy")[0].event_id == "old"
+    assert reopened.search("robot-10", "legacy") == []
