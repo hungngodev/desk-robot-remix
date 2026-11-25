@@ -322,7 +322,7 @@ Local measured calibration commands are accepted only on the WROOM programming U
 
 Limits range 1..1300 mm; freshness is 30..200ms. All four floor, front and freshness settings must be staged before the atomic commit; calabort clears the stage. The body saves a versioned checksummed calibration in NVS, leaves motors disarmed, and requires five fresh measurements plus a NEW direct USB rearm before motion. Reboot and recovering I2C never resume old motion. Any stale/invalid/out-of-range sensor or bus fault latches stop, with no blind reversal. Measure real lead and stopping margin before putting tracks on a desk.
 
-Pinned Pololu VL53L0X v1.3.1 handles sensor startup. Its readRangeContinuousMillimeters() waits for data-ready, so local critical sampling instead checks VL53L0X register 0x13 readiness once, reads result at 0x14, validates status and distance, then clears 0x0B. Real timeout, surface reflectance and loaded desk-edge stop measurements are still mandatory; this software code is NOT physical safety signoff.
+Pinned Pololu VL53L0X v1.3.1 handles sensor startup. Its readRangeContinuousMillimeters() waits for data-ready, so local critical sampling instead checks VL53L0X register 0x13 readiness once, reads result at 0x14, validates status and distance, then clears 0x0B. Wire is configured for a 10 ms timeout per I2C transaction, not per complete sensor poll or control-loop iteration; the separate Pololu startup timeout remains 80 ms. Real timeout, surface reflectance and loaded desk-edge stop measurements are still mandatory; this software code is NOT physical safety signoff.
 
 ## Five read-only range diagnostics
 

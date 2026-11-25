@@ -23,7 +23,7 @@ static void ready(desk_robot::TofBus& bus, desk_robot::CliffGuard& guard) {
   CHECK(guard.configure(calibration()));
   CHECK(bus.begin(21, 22, -1));
   CHECK(bus.ready());
-  CHECK(Wire.getTimeOut() == 15);
+  CHECK(Wire.getTimeOut() == 10);
   CHECK(Wire.tof_init_timeouts.size() == (DESK_ROBOT_EXTRA_RANGERS ? 8U : 5U));
   for (auto timeout : Wire.tof_init_timeouts) CHECK(timeout == 80);
   CHECK(Wire.ranges == 0 && Wire.extras == 0);
@@ -342,7 +342,13 @@ int main() {
           Wire.next_short_read_request = 12;
           Wire.next_short_read_count = 11;
         }
-        bus.poll(guard, 60);
+        fake_arduino_millis() = 60;
+        const auto before = millis();
+        bus.poll(guard, before);
+        // Timeout paths consume the configured budget; NACK and partial
+        // reads are modeled as immediate errors by the transport fake.
+        CHECK(millis() - before == (failure < 2 ? 10U : 0U));
+        CHECK(!Wire.repeated_start_pending);
         CHECK(bus.new_optical_channel() == 255);
         CHECK(bus.new_extra_channel() == 255);
         faulted(guard);
@@ -370,7 +376,9 @@ int main() {
         // Register pointer writes use repeated START, so this one-shot
         // STOP timeout targets the 0x0B acknowledgement after the read.
         Wire.next_stop_timeout_address = 0x29;
+        fake_arduino_millis() = now;
         bus.poll(guard, now);
+        CHECK(millis() - now == 10U);
         CHECK(Wire.next_stop_timeout_address == -1);
         CHECK(Wire.tof_samples == samples + 1);
         CHECK(Wire.tof_register_stop_transmissions == stops + 1);
@@ -386,10 +394,13 @@ int main() {
         CHECK(guard.fault() == desk_robot::CliffFault::BusFailure);
         CHECK(!guard.evaluate(now));
         CHECK(!guard.try_rearm(now));
-        for (std::uint32_t at = now + 1; at <= now + 7; ++at)
+        const auto recovered_at = millis();
+        for (std::uint32_t at = recovered_at + 1; at <= recovered_at + 7; ++at) {
+          fake_arduino_millis() = at;
           bus.poll(guard, at);
-        CHECK(!guard.evaluate(now + 7)); // no automatic rearm
-        CHECK(guard.try_rearm(now + 7)); // new critical sweep + operator
+        }
+        CHECK(!guard.evaluate(recovered_at + 7)); // no automatic rearm
+        CHECK(guard.try_rearm(recovered_at + 7)); // new critical sweep + operator
       }
     }
     {

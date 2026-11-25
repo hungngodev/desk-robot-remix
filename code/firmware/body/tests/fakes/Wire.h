@@ -244,6 +244,7 @@ class TwoWire {
     repeated_start_pending = false;
     if (current_address == next_stop_timeout_address) {
       next_stop_timeout_address = -1;
+      fake_arduino_millis() += timeout_ms;
       return 5; // Arduino-ESP32 endTransmission timeout
     }
     return applyTransmission();
@@ -362,6 +363,7 @@ class TwoWire {
       ++cap_register_requests;
     if (addr == next_read_timeout_address) {
       next_read_timeout_address = -1;
+      fake_arduino_millis() += timeout_ms;
       return 0;
     }
     if (deferred) {

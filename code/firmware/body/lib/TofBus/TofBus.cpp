@@ -193,10 +193,10 @@ bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   for (auto& sample : optical_) sample = OpticalSample{};
   // Pinned Pololu VL53L0X setup uses an 80ms timeout per device.
   // The critical polling path uses nonblocking status checks and the Wire
-  // controller's independent 15ms I2C timeout.
+  // controller's independent 10ms I2C transaction timeout.
   wire_started_ = wire_.begin(sda, scl, 400000);
   if (!wire_started_) return false;
-  wire_.setTimeOut(15);
+  wire_.setTimeOut(10);
   if (!bus_accessible()) return false;
   // Optional second mux: 0x71 (A0 high, A1/A2 low). No second board is
   // required for the existing five sensor firmware, and an absent board NACK
