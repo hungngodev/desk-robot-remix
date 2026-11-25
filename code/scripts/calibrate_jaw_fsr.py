@@ -16,6 +16,7 @@ import os
 import re
 import stat
 import statistics
+import sys
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -148,8 +149,8 @@ def write_jaw_candidate(target: Path, payload: dict) -> None:
     """Publish an unapproved trial exclusively as private regular evidence.
 
     Walk directories by descriptors so a user-controlled alias cannot
-    redirect a safety calibration into another location. Allow macOS /var
-    root-owned aliases only when their root-owned parent is not writable.
+    redirect a safety calibration into another location. Allow only macOS
+    top-level /tmp and /var aliases when their root-owned parent is not writable.
     """
     if (".." in target.parts or not isinstance(payload, dict)
             or payload.get("measured") is not False):
@@ -158,11 +159,13 @@ def write_jaw_candidate(target: Path, payload: dict) -> None:
     absolute = target.absolute()
     directory_fd = os.open(absolute.anchor, os.O_RDONLY | os.O_DIRECTORY)
     try:
-        for segment in absolute.parts[1:-1]:
+        for depth, segment in enumerate(absolute.parts[1:-1]):
             entry = os.stat(segment, dir_fd=directory_fd, follow_symlinks=False)
             if stat.S_ISLNK(entry.st_mode):
                 directory = os.fstat(directory_fd)
-                if (entry.st_uid != 0 or directory.st_uid != 0
+                if (sys.platform != "darwin" or depth != 0
+                        or segment not in {"tmp", "var"}
+                        or entry.st_uid != 0 or directory.st_uid != 0
                         or stat.S_IMODE(directory.st_mode) & 0o022):
                     raise ValueError("Unsafe jaw candidate parent alias")
             elif not stat.S_ISDIR(entry.st_mode):

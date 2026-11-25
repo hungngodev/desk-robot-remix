@@ -302,3 +302,38 @@ async def test_jaw_capture_rejects_invalid_count_before_http(count):
                 client, base_url="http://127.0.0.1:8008",
                 robot="robot-01", token="t" * 24, count=count,
             )
+
+
+def test_jaw_candidate_rejects_nested_root_owned_alias_on_macos(tmp_path, monkeypatch):
+    """The system alias exception must not apply to arbitrary nested paths."""
+    import os
+    from types import SimpleNamespace
+
+    parent = tmp_path.resolve()
+    actual = parent / "real"
+    actual.mkdir(mode=0o700)
+    alias = parent / "alias"
+    alias.symlink_to(actual, target_is_directory=True)
+    parent_stat = parent.stat()
+
+    class RootAliasOS:
+        def __getattr__(self, name):
+            return getattr(os, name)
+
+        def stat(self, path, **kwargs):
+            info = os.stat(path, **kwargs)
+            if path == alias.name:
+                return SimpleNamespace(st_mode=info.st_mode, st_uid=0)
+            return info
+
+        def fstat(self, fd):
+            info = os.fstat(fd)
+            if (info.st_dev, info.st_ino) == (parent_stat.st_dev, parent_stat.st_ino):
+                return SimpleNamespace(st_mode=info.st_mode, st_uid=0)
+            return info
+
+    monkeypatch.setattr(jaw, "os", RootAliasOS())
+    monkeypatch.setattr(jaw, "sys", SimpleNamespace(platform="darwin"), raising=False)
+    with pytest.raises(ValueError, match="alias"):
+        jaw.write_jaw_candidate(alias / "trial.jaw_candidate.json", {"measured": False})
+    assert not (actual / "trial.jaw_candidate.json").exists()
