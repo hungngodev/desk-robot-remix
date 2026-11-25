@@ -2559,3 +2559,22 @@ def test_explicit_invalid_first_observer_cannot_fall_back_to_fleet(invalid_first
     system[mod.FIRST_ROBOT_ROOM_GATE] = invalid_first
     blocked = mod.generate(plan, {"system": system})
     assert mod.FIRST_ROBOT_ROOM_GATE in blocked["missing_first_robot_system_evidence"]
+
+
+@pytest.mark.parametrize("parent,linked", [
+    ("amg8833", "room_amg8833"),
+    ("nfc_game_props", "room_nfc_game_tokens"),
+])
+def test_deferred_station_with_explicit_incomplete_room_receipts_is_held(parent, linked):
+    import json
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    default = mod.generate(plan)
+    blocker = "invalid_deferred_room_receipts:" + parent
+    assert blocker not in default["missing_system_evidence"]
+    report = mod.generate(plan, {"room_pod": {parent: {}}})
+    assert blocker in report["missing_system_evidence"]
+    assert blocker in report["missing_first_robot_system_evidence"]
+    decisions = {row["id"]: row for row in report["supplemental_decisions"]}
+    assert decisions[linked]["disposition"] == "deferred_optional"
+    assert mod.conditional_station_decision_ids({parent, "room_controller"}) == {linked}

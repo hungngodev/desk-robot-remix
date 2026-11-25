@@ -14,6 +14,7 @@ import io
 import json
 import math
 import sys
+from collections.abc import Iterable
 from datetime import date
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -187,6 +188,15 @@ SUPPLEMENTAL_DECISIONS = {
     "room_nfc_game_tokens": ("nfc_game_props", 10),
 }
 
+
+
+def conditional_station_decision_ids(parent_ids: Iterable[str]) -> frozenset[str]:
+    """Resolve only canonical conditional station parents to linked decision IDs."""
+    parents = set(parent_ids).intersection(CONDITIONAL_ROOM_PER_STATION)
+    return frozenset(
+        ident for ident, (parent, _) in SUPPLEMENTAL_DECISIONS.items()
+        if parent in parents
+    )
 
 
 def _count(v: object, name: str) -> int:
@@ -397,6 +407,10 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
             and status == "conditional_optional"
         )
         missing = [name for name in PART_GATES if not _receipt(ev.get(name))]
+        # Deferral requires no new receipts, but an explicitly supplied
+        # historical claim still enters the immutable receipt verifier.
+        if optional_not_selected and ident in room_evidence and missing:
+            missing_system.append("invalid_deferred_room_receipts:" + ident)
         selected_carrier = _selected_carrier(ev)
         if selected_carrier is None:
             missing.insert(0, "exact_vendor_sku_and_pcb_revision")
@@ -610,13 +624,12 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
         raise ValueError("Unknown supplemental purchasing decisions: " +
                          ", ".join(sorted(unknown_decisions)))
     approved_decisions = []
-    optional_deferred_parents = {
-        row["id"] for row in room
-        if row.get("excluded_from_order_as_optional")
-    }
+    optional_deferred_ids = conditional_station_decision_ids(
+        row["id"] for row in room if row.get("excluded_from_order_as_optional")
+    )
     for ident, (parent, units) in SUPPLEMENTAL_DECISIONS.items():
         plan_detail = linked_plan.get(ident, {})
-        if parent in optional_deferred_parents:
+        if ident in optional_deferred_ids:
             current = plan_detail.get("disposition")
             conflict = ident in decisions
             valid = current == "deferred_optional" and not conflict
@@ -2824,11 +2837,13 @@ def main() -> int:
             # The same generator decision map owns optional station inclusion.
             # Deferred, reviewed shared-room options require no fabricated
             # purchase receipts; selected options still require every gate.
-            deferred_optional_ids = frozenset(
+            deferred_optional_ids = conditional_station_decision_ids(
+                row["id"] for row in report["room_pod"]
+                if row.get("excluded_from_order_as_optional")
+            ) & frozenset(
                 decision["id"] for decision in report["supplemental_decisions"]
                 if decision["reviewed"]
                 and decision["disposition"] == "deferred_optional"
-                and decision["parent_role"] in CONDITIONAL_ROOM_PER_STATION
             )
             failures = audit_release(
                 evidence, checked_sha, first_robot=args.require_first_robot,

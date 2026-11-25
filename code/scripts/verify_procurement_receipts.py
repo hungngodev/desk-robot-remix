@@ -31,6 +31,7 @@ from procurement_release import (
     PART_GATES,
     SUPPLEMENTAL_DECISIONS,
     SYSTEM_GATES,
+    conditional_station_decision_ids,
     first_robot_room_receipt_gate,
 )
 from verify_playbook_receipts import (
@@ -711,10 +712,7 @@ def audit_release(evidence: dict, sha: str, lookup=None, *,
                     and any(not isinstance(r, dict)
                             for r in records.values()))):
             return [f"malformed {section} release evidence"]
-    allowed_deferred = {
-        ident for ident, (parent, _) in SUPPLEMENTAL_DECISIONS.items()
-        if parent in CONDITIONAL_ROOM_PER_STATION
-    }
+    allowed_deferred = conditional_station_decision_ids(CONDITIONAL_ROOM_PER_STATION)
     if (not isinstance(deferred_optional_ids, frozenset)
             or not deferred_optional_ids <= allowed_deferred):
         return ["invalid deferred optional receipt scope"]

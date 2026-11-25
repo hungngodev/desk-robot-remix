@@ -1558,3 +1558,24 @@ def test_explicit_invalid_first_observer_keeps_original_receipt_scope(invalid_fi
     assert claims[first_gate] is invalid_first
     errors = release.audit_release({"system": system}, SHA, lookup, first_robot=True)
     assert any(first_gate in error for error in errors)
+
+
+@pytest.mark.parametrize("parent,linked", [
+    ("amg8833", "room_amg8833"),
+    ("nfc_game_props", "room_nfc_game_tokens"),
+])
+def test_optional_parent_deferral_does_not_waive_explicit_room_receipts(parent, linked):
+    deferred = release.conditional_station_decision_ids({parent, "room_controller"})
+    assert deferred == {linked}
+    claims = list(release.required_receipts(
+        {"room_pod": {parent: {}}}, deferred_optional_ids=deferred,
+    ))
+    assert not any(scope == "supplemental:" + linked for scope, _, _ in claims)
+    assert {gate for scope, gate, _ in claims if scope == "room:" + parent} == set(
+        release.PART_GATES
+    )
+    errors = release.audit_release(
+        {"room_pod": {parent: {}}}, SHA, lookup, deferred_optional_ids=deferred,
+    )
+    assert any("room:" + parent in error and "missing receipt" in error
+               for error in errors)
