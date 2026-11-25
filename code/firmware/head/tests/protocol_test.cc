@@ -273,6 +273,58 @@ int main() {
     assert(!ParseCommand("rearm", true, c));
     assert(!ParseCommand("rearm", false, c));
     assert(!ParseCommand(std::string(96, 'x'), true, c));
+    // Mutation corpus for the real command parser. Exercise accepted near-misses
+    // as well as invalid bytes; uniformly random data rarely reaches a verb.
+    const std::string seeds[] = {"drive 100 -100 250", "drive -100 100",
+        "drive 0 0 1", "lift 60", "grip 120", "arm", "disarm", "keepalive",
+        "stop", "halt", "status", "aux", "ir", "optics", "pose", "ping",
+        "rearm", "calcommit", "drive 2147483648 0", "drive -2147483649 0",
+        "drive 0 0 0", "drive 0 0 251", "drive +1 0", "grip 59", "lift 121"};
+    const auto check_mutation = [](const std::string& input) {
+        for (bool op : {false, true}) {
+            Command parsed{"poison", {999}, "stale"};
+            if (!ParseCommand(input, op, parsed)) {
+                assert(parsed.verb.empty() && parsed.args.empty() && parsed.wire.empty());
+                continue;
+            }
+            assert(parsed.wire == input && input.size() <= 95);
+            for (unsigned char ch : input) assert(ch >= 32 && ch <= 126);
+            const auto& verb = parsed.verb;
+            const auto& args = parsed.args;
+            assert(verb != "rearm" && verb != "calcommit");
+            if (!op) assert(verb != "arm" && verb != "disarm" && verb != "keepalive");
+            if (verb == "drive") {
+                assert(args.size() == 2 || args.size() == 3);
+                assert(args[0] >= -100 && args[0] <= 100);
+                assert(args[1] >= -100 && args[1] <= 100);
+                if (args.size() == 3) assert(args[2] >= 1 && args[2] <= 250);
+            } else if (verb == "lift" || verb == "grip") {
+                assert(args.size() == 1 && args[0] >= 60 && args[0] <= 120);
+            } else {
+                assert(args.empty());
+                assert(verb == "arm" || verb == "disarm" || verb == "keepalive" ||
+                       verb == "stop" || verb == "halt" || verb == "status" ||
+                       verb == "aux" || verb == "ir" || verb == "optics" ||
+                       verb == "pose" || verb == "ping");
+            }
+            assert(ExpectedAck(parsed).rfind("OK " + verb, 0) == 0);
+        }
+    };
+    for (const auto& seed : seeds) {
+        check_mutation(seed);
+        for (std::size_t i = 0; i <= seed.size(); ++i) {
+            for (int byte = 0; byte < 256; ++byte) {
+                auto mutated = seed;
+                mutated.insert(i, 1, static_cast<char>(byte));
+                check_mutation(mutated);
+                if (i < seed.size()) {
+                    mutated = seed;
+                    mutated[i] = static_cast<char>(byte);
+                    check_mutation(mutated);
+                }
+            }
+        }
+    }
     for (int value = 0; value < 256; ++value) {
         if (value >= 32 && value <= 126) continue;
         assert(!ParseCommand(std::string("stop") + static_cast<char>(value), true, c));
