@@ -250,3 +250,66 @@ def test_secret_rejects_non_bearer_characters_without_leaking_values(monkeypatch
     with pytest.raises(ValueError, match="bearer token") as error:
         secret("HEAD_TOKEN")
     assert value not in str(error.value)
+
+
+@pytest.mark.parametrize("field,value", [
+    ("max_job_seconds", True), ("max_job_seconds", 121),
+    ("max_job_seconds", float("nan")), ("max_job_seconds", float("inf")),
+    ("pet_activity_min_interval_seconds", "30"),
+    ("fleet_social_min_interval_seconds", 29),
+])
+def test_settings_numeric_limits_do_not_coerce_invalid_values(field, value):
+    with pytest.raises(ValueError, match=field):
+        Settings(robots=[_robot()], **{field: value})
+
+
+@pytest.mark.parametrize("field,value", [
+    ("dock_beacon_id", True), ("dock_beacon_id", 6),
+    ("dock_forward_sign", True), ("dock_turn_sign", 0),
+    ("battery_low_percent", "20"), ("handling_tilt_threshold_deg", 76),
+    ("side_near_threshold_mm", 1001),
+])
+def test_robot_numeric_limits_do_not_coerce_invalid_values(field, value):
+    with pytest.raises(ValueError):
+        RobotConfig(**_robot(), **{field: value})
+
+
+@pytest.mark.parametrize("field,value", [
+    ("watchdog_ms", 1000), ("drive_permit_ms", 500), ("max_speed", 100),
+    ("pins", {"motor": 21, "i2c": 21}),
+])
+def test_mac_config_cannot_override_body_safety_or_pin_assignments(field, value):
+    with pytest.raises(ValueError, match=field):
+        Settings(robots=[_robot()], **{field: value})
+    with pytest.raises(ValueError, match=field):
+        RobotConfig(**_robot(), **{field: value})
+
+
+@pytest.mark.parametrize("backend", ["stepper", "guarded_dc", "unknown"])
+def test_robot_rejects_unrecognized_motor_profiles(backend):
+    with pytest.raises(ValueError, match="motor_backend"):
+        RobotConfig(**_robot(), motor_backend=backend)
+
+
+@pytest.mark.parametrize("backend", ["stepper_28byj48", "dc_pwm_guarded"])
+def test_valid_motor_profile_does_not_arm_by_itself(backend):
+    robot = RobotConfig(**_robot(), motor_backend=backend)
+    assert robot.motor_backend == backend
+    assert robot.motion_enabled is False
+
+
+@pytest.mark.parametrize("url", [
+    "http://@head.local:8081", "http://head.local:8081?route=x",
+    "http://head.local:8081#fragment", " http://head.local:8081",
+])
+def test_head_url_rejects_ambiguous_route_suffixes_and_credentials(url):
+    with pytest.raises(ValueError, match="head_url"):
+        RobotConfig(**_robot(), head_url=url)
+
+
+def test_device_id_case_aliases_are_rejected():
+    robots = _hardware_pair()
+    robots[0]["device_id"] = "AA:BB:CC:DD:EE:FF"
+    robots[1]["device_id"] = "aa:bb:cc:dd:ee:ff"
+    with pytest.raises(ValueError, match="device_id must uniquely"):
+        Settings(robots=robots)

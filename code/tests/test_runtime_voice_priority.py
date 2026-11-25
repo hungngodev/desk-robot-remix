@@ -563,6 +563,10 @@ def test_hardware_pet_autostart_needs_real_local_vision_and_camera_consent(setti
 
     fields = settings.model_dump()
     fields["mode"] = "hardware"
+    # Simulation can share mock endpoints and voices; hardware cannot.
+    for index, robot in enumerate(fields["robots"], start=1):
+        robot["head_url"] = f"http://192.168.1.{100 + index}:8081"
+        robot["voice"] = f"test_voice_{index}"
     fields["pet_autostart_enabled"] = True
     with pytest.raises(ValueError, match="Proactive camera autostart"):
         Settings.model_validate(fields)

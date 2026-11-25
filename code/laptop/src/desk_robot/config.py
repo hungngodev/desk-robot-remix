@@ -33,7 +33,7 @@ def _require_boolean_assignment(model: BaseModel, name: str, value: object) -> N
 
 
 class RobotConfig(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,40}$")
     name: str
     persona: str = "You are a friendly desk companion. Keep replies to one short sentence."
@@ -45,26 +45,26 @@ class RobotConfig(BaseModel):
     motor_backend: Literal["stepper_28byj48", "dc_pwm_guarded"] | None = None
     exploration_qualified: StrictBool = False  # Explicit real swept-path trial gate; not a simulation claim.
     # Optional physical sensor-triggered interactions. None means NOT calibrated.
-    nose_twist_threshold_counts: int | None = Field(default=None, ge=80, le=1800)
-    squeeze_raw_threshold: int | None = Field(default=None, ge=100, le=30000)
-    proximity_near_raw_threshold: int | None = Field(default=None, ge=25, le=245)
-    battery_low_percent: int = Field(default=20, ge=5, le=40)
+    nose_twist_threshold_counts: int | None = Field(default=None, strict=True, ge=80, le=1800)
+    squeeze_raw_threshold: int | None = Field(default=None, strict=True, ge=100, le=30000)
+    proximity_near_raw_threshold: int | None = Field(default=None, strict=True, ge=25, le=245)
+    battery_low_percent: int = Field(default=20, strict=True, ge=5, le=40)
     # An actual measured optical contact threshold, NOT a heart-rate model.
-    paw_contact_ir_raw_threshold: int | None = Field(default=None, ge=1000, le=250000)
+    paw_contact_ir_raw_threshold: int | None = Field(default=None, strict=True, ge=1000, le=250000)
     paw_contact_interactions_qualified: StrictBool = False
     # Ambient change thresholds use actual SHT41 readings, never guessed room conditions.
     ambient_interactions_qualified: StrictBool = False
     nfc_interactions_qualified: StrictBool = False  # toy tags only, never access control
-    ambient_temp_change_centi: int | None = Field(default=None, ge=100, le=2000)
-    ambient_humidity_change_centi: int | None = Field(default=None, ge=500, le=3000)
+    ambient_temp_change_centi: int | None = Field(default=None, strict=True, ge=100, le=2000)
+    ambient_humidity_change_centi: int | None = Field(default=None, strict=True, ge=500, le=3000)
     # Only opt-in after observing repeatable BMP280 readings in the actual shell.
     bmp280_interactions_qualified: StrictBool = False
-    bmp280_pressure_change_pa: int | None = Field(default=None, ge=100, le=5000)
+    bmp280_pressure_change_pa: int | None = Field(default=None, strict=True, ge=100, le=5000)
     gesture_interactions_qualified: StrictBool = False  # measured hardware gate
     handling_interactions_qualified: StrictBool = False  # measured MPU6050 mount and stationary baseline
-    handling_tilt_threshold_deg: int = Field(default=38, ge=25, le=75)
-    handling_shake_delta_mg: int = Field(default=550, ge=300, le=1400)
-    side_near_threshold_mm: int | None = Field(default=None, ge=35, le=1000)
+    handling_tilt_threshold_deg: int = Field(default=38, strict=True, ge=25, le=75)
+    handling_shake_delta_mg: int = Field(default=550, strict=True, ge=300, le=1400)
+    side_near_threshold_mm: int | None = Field(default=None, strict=True, ge=35, le=1000)
     side_interactions_qualified: StrictBool = False  # measured 3-direction geometry, no motor permit
     calibration: Path | None = None
     dock_calibration: Path | None = None
@@ -74,9 +74,9 @@ class RobotConfig(BaseModel):
     object_detector_qualified: StrictBool = False
     # Actual AVR dock beacon is flashed per physical station. Never infer
     # an assigned dock from a pet name or from one matching IR observation.
-    dock_beacon_id: int | None = Field(default=None, ge=1, le=5)
-    dock_turn_sign: int | None = Field(default=None, ge=-1, le=1)
-    dock_forward_sign: int | None = Field(default=None, ge=-1, le=1)
+    dock_beacon_id: int | None = Field(default=None, strict=True, ge=1, le=5)
+    dock_turn_sign: int | None = Field(default=None, strict=True, ge=-1, le=1)
+    dock_forward_sign: int | None = Field(default=None, strict=True, ge=-1, le=1)
     voice: str = "af_heart"
 
     def __setattr__(self, name: str, value: object) -> None:
@@ -90,7 +90,11 @@ class RobotConfig(BaseModel):
         if self.dock_turn_sign == 0 or self.dock_forward_sign == 0:
             raise ValueError("Dock movement polarity cannot be zero")
         u = urlparse(self.head_url)
-        if u.scheme not in ("http", "https") or not u.hostname or u.username or u.password:
+        if (
+            u.scheme not in ("http", "https") or not u.hostname
+            or u.username is not None or u.password is not None
+            or u.query or u.fragment or any(char.isspace() for char in self.head_url)
+        ):
             raise ValueError("head_url must be an http(s) URL without embedded credentials")
         # Accessing port also rejects malformed and out-of-range port strings.
         if u.port == 0:
@@ -99,7 +103,7 @@ class RobotConfig(BaseModel):
 
 
 class Settings(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     # Global live camera grant covers every configured pet. Private Pydantic
     # storage never becomes a serializable configuration or model instruction.
     _camera_consent_generation: int = PrivateAttr(default=0)
@@ -126,11 +130,11 @@ class Settings(BaseModel):
     voice_transcript_memory_enabled: StrictBool = False  # Separate consent to retain model-estimated spoken words as text.
     voice_vision_tools_enabled: StrictBool = False  # Explicit opt-in for Xiaozhi camera questions/voice frame selection.
     pet_autostart_enabled: StrictBool = False  # Explicit hardware opt-in for idle camera and sensor observation.
-    pet_activity_min_interval_seconds: float = Field(default=30.0, ge=5.0, le=600.0)
-    pet_activity_max_interval_seconds: float = Field(default=90.0, ge=5.0, le=600.0)
+    pet_activity_min_interval_seconds: float = Field(default=30.0, strict=True, ge=5.0, le=600.0)
+    pet_activity_max_interval_seconds: float = Field(default=90.0, strict=True, ge=5.0, le=600.0)
     fleet_text_sharing_enabled: StrictBool = False  # Opt-in local, provenance-tagged text only.
     fleet_social_autonomy_enabled: StrictBool = False  # Bounded pet-to-pet talk, explicit opt-in.
-    fleet_social_min_interval_seconds: int = Field(default=300, ge=30, le=3600)
+    fleet_social_min_interval_seconds: int = Field(default=300, strict=True, ge=30, le=3600)
     room_station_enabled: StrictBool = False  # One explicit USB source, never an extra robot
     room_station_port: str | None = None  # Actual local /dev/tty.* device
     room_station_context_enabled: StrictBool = False  # Consent for all pets to read room facts
@@ -138,7 +142,7 @@ class Settings(BaseModel):
     room_station_soil_dry_adc: int | None = Field(default=None, strict=True, ge=1, le=4094)
     room_station_soil_wet_adc: int | None = Field(default=None, strict=True, ge=1, le=4094)
     fleet_text_auto_fanout_enabled: StrictBool = True  # Keep existing broadcast behavior unless selective-only chosen.
-    max_job_seconds: float = Field(default=45, ge=1, le=120)
+    max_job_seconds: float = Field(default=45, strict=True, ge=1, le=120)
     trials_file: Path = Path("data/physical-trials.jsonl")
     memory_dir: Path = Path("../data/private/memory")
 
@@ -210,7 +214,7 @@ class Settings(BaseModel):
             voices = [r.voice.strip().casefold() for r in self.robots]
             if not all(voices) or len(set(voices)) != len(voices):
                 raise ValueError("Hardware fleet requires nonblank unique voices")
-        device_ids = [r.device_id for r in self.robots if r.device_id]
+        device_ids = [r.device_id.strip().casefold() for r in self.robots if r.device_id]
         if len(set(device_ids)) != len(device_ids):
             raise ValueError("device_id must uniquely identify a robot")
         docks = [r.dock_beacon_id for r in self.robots if r.dock_beacon_id is not None]
