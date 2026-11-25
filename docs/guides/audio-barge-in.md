@@ -46,7 +46,10 @@ These thresholds make the requirement reviewable; no physical trial exists yet.
 coverage instead of treating an arbitrary set of twenty identical
 interruptions as acceptance evidence. The input is JSON Lines containing
 twenty `kind: human` records at 50 cm and another twenty at 100 cm,
-plus one `kind: robot_only` record and one `kind: quiet` record.
+plus one `kind: robot_only` record and one `kind: quiet` record (42 total).
+From the repository root, run `python code/scripts/check_barge_in_trials.py
+PATH_TO_PRIVATE_TRIALS.jsonl`. Inspect the JSON `meets_proposed_gate` field;
+a zero process exit status alone does not mean the gate passed.
 One complete twenty-trial distance set alone can be inspected but **never
 passes A2 overall**. Both controls must be observed for at least
 600 seconds on the same actual robot, firmware, audio setup and head geometry.
@@ -339,7 +342,7 @@ evaluate changes across measured trials, not a zero counter alone.
 This telemetry helps diagnose A2 reference integrity. The optional,
 authenticated four-second PCM capture path is now implemented and described
 below, but a real assembled-head recording, measured acoustic latency,
-verified device playback progress, and twenty human interruption trials
+verified device playback progress, and both twenty-trial human interruption sets plus both controls
 are still absent. Source integration never satisfies those physical gates.
 
 ## Per-robot playback reference alignment in the pinned Sense build
@@ -353,7 +356,7 @@ is source history, not a safe MAX98357A board clock. The earlier fixed 90 ms
 reference alignment is now a Kconfig setting named
 `CONFIG_DESK_ROBOT_AEC_DELAY_MS` (0 to 250 ms). That **does not** make the
 robot acoustically calibrated. Each actual assembled robot must measure the
-reference-to-microphone lag and run the 20 interruption trials at different
+reference-to-microphone lag and run the two twenty-trial interruption sets at different
 speaker volumes, distances and motor load. The offline
 `code/scripts/estimate_aec_delay.py` now accepts a synchronized mono PCM16
 speaker recording at the actual 32 kHz I2S rate and a simultaneous 16 kHz
@@ -376,7 +379,8 @@ These checks cannot detect every brief timing excursion; retain the physical
 AEC and interruption trial requirements.
 
 For a private physical Sense build, pass `--board sense --aec-delay-ms 115`
-to the existing `firmware/head/private_config.py` command after measuring a
+to the existing `firmware/head/private_config.py` command (without
+`--bench-aec-capture`) after measuring a
 115 ms reference lag. Use its other required robot ID, config, secrets and LAN
 server options as before. The field is written only to the private firmware
 configuration, without changing the upstream ESP-SR implementation. A 90 ms
@@ -395,8 +399,14 @@ image needs all of `--board sense --continuous-audio --aec-delay-ms 0
 --bench-aec-capture` passed to `code/firmware/head/private_config.py`.
 The device must already be assembled, authorized and continuously listening.
 Only the optional bench image registers the authenticated
-`/api/audio.capture.start`, `/api/audio.capture.status` and
-`/api/audio.capture.raw` endpoints. The capture does not begin at boot.
+`/api/audio.capture.start`, `/api/audio.capture.abort`,
+`/api/audio.capture.status` and `/api/audio.capture.raw` endpoints. The
+capture does not begin at boot. For each recording, follow the mandatory
+[physical BOOT consent gesture](sense-aec-port.md#authenticated-one-shot-sense-microphonereference-capture):
+mute with BOOT, hold BOOT while already muted until the long-press event,
+release, then tap within 30 seconds to unmute while connected and idle.
+This authorizes one START within the next 30 seconds. Ordinary unmute,
+a private image and an authenticated bearer are not recording consent.
 Start an audible broadband stimulus before START and sustain it throughout
 the four-second recording. An incomplete reference, known short PDM read,
 discontinuous source window or playback reset invalidates the trial. The
@@ -439,8 +449,9 @@ commit, share or place them in a synchronized public folder. The device's sample
 software integrity counters are diagnostics, not proof of audible speaker
 output. Reflash the standard build with PCM capture off after calibration.
 Keep the true speaker latency, microphone intelligibility, acoustic
-isolation, barge-in stop measurements and the twenty human plus ten-minute
-echo-only procedure open until recorded on the assembled head.
+isolation and the forty human interruption trials (twenty at each distance),
+ten-minute echo-only control and separate ten-minute quiet-mode control open
+until recorded on the assembled head.
 
 ## Xiaozhi natural realtime VAD and actual acoustic acceptance
 
@@ -455,7 +466,7 @@ The authenticated Mac speech bridge now exposes `GET http://127.0.0.1:8766/voice
 
 Official upstream [78/xiaozhi-esp32](https://github.com/78/xiaozhi-esp32) supports **both** a streaming ASR + LLM + TTS server and a realtime end-to-end speech model. Its full-duplex capability also requires AEC-capable actual hardware. The project's current `code/config/xiaozhi.local.example.yaml` selects **SileroVAD, FunASR, OllamaLLM and CustomTTS/Kokoro**, which is the separate three-stage local pipeline, not automatically a Gemini Live / ChatGPT Live equivalent. The `CONFIG_USE_DEVICE_AEC=y` Sense flag and the new `/voice-readiness` endpoint establish a software path; neither proves an end-to-end realtime provider is in use or acoustic echo cancellation on the assembled head.
 
-For genuine open conversation, keep the pinned Xiaozhi firmware, device AFE reference code and server interruption hook. Then connect a supported realtime voice service using its documented provisioning/transport interface, preserving the existing authenticated WROOM motion guard and device identities. Do **not** rename `OllamaLLM` to an unverified realtime module or hardcode a cloud credential. Physical mic/speaker delay, double talk and audible cancel still need the measured 20 trial procedure. The control endpoint reports `natural_barge_in_certified=false` until those results are real. See also [Xiaozhi feature guide](https://xiaozhi.dev/en/docs/usage/feature-guide/) and the pinned server bridge config.
+For genuine open conversation, keep the pinned Xiaozhi firmware, device AFE reference code and server interruption hook. Then connect a supported realtime voice service using its documented provisioning/transport interface, preserving the existing authenticated WROOM motion guard and device identities. Do **not** rename `OllamaLLM` to an unverified realtime module or hardcode a cloud credential. Physical mic/speaker delay, double talk and audible cancel still need the measured two-distance forty-trial procedure and both controls. The control endpoint reports `natural_barge_in_certified=false` until those results are real. See also [Xiaozhi feature guide](https://xiaozhi.dev/en/docs/usage/feature-guide/) and the pinned server bridge config.
 
 
 ## Bounded pinned Xiaozhi TX under urgent flush
