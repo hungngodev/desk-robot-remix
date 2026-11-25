@@ -140,6 +140,50 @@ void each_floor_sensor_latches() {
   CHECK(guard.evaluate(10));
 }
 
+void asymmetric_corner_transient_fault_is_immediately_sticky() {
+  auto calibration = config();
+  for (std::uint8_t lane = 0; lane < desk_robot::kFloorSensorCount; ++lane) {
+    calibration.floor[lane].min_mm = 40 + 10 * lane;
+    calibration.floor[lane].max_mm = 50 + 10 * lane;
+  }
+  const auto refresh = [](CliffGuard& guard, std::uint32_t now) {
+    for (std::uint8_t lane = 0; lane < desk_robot::kFloorSensorCount; ++lane)
+      guard.sample(lane, 45 + 10 * lane, true, now);
+    guard.sample(4, 300, true, now);
+  };
+  for (std::uint8_t target = 0; target < desk_robot::kFloorSensorCount; ++target) {
+    for (unsigned kind = 0; kind < 3; ++kind) {
+      CliffGuard guard;
+      CHECK(guard.configure(calibration));
+      refresh(guard, 100);
+      CHECK(guard.try_rearm(100));
+      for (std::uint32_t now = 101; now <= 110; ++now) {
+        refresh(guard, now);
+        CHECK(guard.evaluate(now));
+      }
+      const bool valid = kind != 2;
+      const auto& interval = calibration.floor[target];
+      const std::uint16_t raw = kind == 0 ? interval.min_mm - 1
+          : kind == 1 ? interval.max_mm + 1 : interval.min_mm + 5;
+      const auto expected = valid ? CliffFault::FloorOutOfRange
+                                  : CliffFault::InvalidSample;
+      guard.sample(target, raw, valid, 111);
+      // No evaluate(), second conversion or other lane is needed to latch.
+      CHECK(guard.fault() == expected);
+      CHECK(guard.fault_sensor() == target);
+      CHECK(!guard.diagnostic(target, 111).valid);
+      // Even a complete healthy sweep BEFORE the next safety checkpoint
+      // cannot erase the original bad conversion or restore permission.
+      refresh(guard, 112);
+      CHECK(!guard.evaluate(112));
+      CHECK(guard.fault() == expected);
+      CHECK(guard.fault_sensor() == target);
+      CHECK(guard.try_rearm(112));
+      CHECK(guard.evaluate(112));
+    }
+  }
+}
+
 void invalid_then_good_is_sticky() {
   CliffGuard guard;
   ready(guard, 0);
@@ -638,6 +682,8 @@ int main(int argc, char** argv) {
       {"boot_and_configuration", boot_and_configuration},
       {"invalid_configuration", invalid_configuration},
       {"each_floor_sensor_latches", each_floor_sensor_latches},
+      {"asymmetric_corner_transient_fault_is_immediately_sticky",
+       asymmetric_corner_transient_fault_is_immediately_sticky},
       {"stored_calibration_flag_rejects_noncanonical_bytes",
        stored_calibration_flag_rejects_noncanonical_bytes},
       {"invalid_then_good_is_sticky", invalid_then_good_is_sticky},
