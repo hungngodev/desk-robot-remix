@@ -89,6 +89,7 @@ async def capture_checkerboards(
     parent_fd, capture_fd = _open_new_private_folder(folder)
     saved: list[str] = []
     size = None
+    camera_pid = None
     seen_pixels = set()
     success = False
     try:
@@ -99,6 +100,14 @@ async def capture_checkerboards(
                 raise RuntimeError("Disarm the physical WROOM before positioning checkerboard")
             # HttpHead(strict_capture=True) rejects reused camera sequence IDs.
             jpeg = await asyncio.wait_for(head.snapshot(), timeout=4)
+            # The standalone HttpHead verifies this PID against the accepted
+            # JPEG boot. Never mix camera optics, even at identical resolution.
+            observed_pid = await asyncio.wait_for(head.camera_identity(), timeout=3)
+            if type(observed_pid) is not str or observed_pid not in ("OV3660", "OV5640"):
+                raise ValueError("Unsupported checkerboard camera sensor PID")
+            if camera_pid is not None and observed_pid != camera_pid:
+                raise ValueError("Checkerboard camera sensor PID changed during calibration")
+            camera_pid = observed_pid
             # JPEG IO may take four seconds. Reject a calibration sample if
             # the independent WROOM armed or its status disappeared mid-read.
             after_capture = await asyncio.wait_for(head.status(), timeout=3)
@@ -147,6 +156,7 @@ async def capture_checkerboards(
         return {
             "images": len(saved), "image_width_px": size[0],
             "image_height_px": size[1], "private_directory": str(folder),
+            "camera_sensor_pid": camera_pid,
             "checkerboard_poses_verified": False,
             "calibration_approved": False, "motor_authorized": False,
             "charging_authorized": False,

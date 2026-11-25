@@ -25,11 +25,16 @@ def jpeg(width=640, height=480, color=(100, 110, 120)):
     return buf.getvalue()
 
 
+class StableCameraIdentity:
+    async def camera_identity(self):
+        return "OV5640"
+
+
 @pytest.mark.asyncio
 async def test_capture_private_original_jpeg_bytes_while_disarmed(tmp_path):
     originals = [jpeg(color=(60 + i * 12, 110, 120)) for i in range(12)]
 
-    class Head:
+    class Head(StableCameraIdentity):
         n = 0
 
         async def status(self):
@@ -76,7 +81,7 @@ async def test_capture_rejects_bad_jpeg_header_before_rgb_decode(
     encoded = io.BytesIO()
     image.save(encoded, format="JPEG", exif=exif)
 
-    class Head:
+    class Head(StableCameraIdentity):
         async def status(self):
             return {"armed": False}
 
@@ -111,7 +116,7 @@ async def test_repeated_checkerboard_pixels_abort_and_remove_private_media(
     if metadata_changed:
         assert replay != original
 
-    class Head:
+    class Head(StableCameraIdentity):
         n = 0
 
         async def status(self):
@@ -135,7 +140,7 @@ async def test_repeated_checkerboard_pixels_abort_and_remove_private_media(
 async def test_capture_aborts_and_removes_partial_private_media(tmp_path, failure):
     data = jpeg()
 
-    class Head:
+    class Head(StableCameraIdentity):
         n = 0
 
         async def status(self):
@@ -164,7 +169,7 @@ async def test_arming_during_snapshot_discards_all_private_calibration_frames(
 ):
     """Source disarm must still hold after a slow camera snapshot."""
 
-    class Head:
+    class Head(StableCameraIdentity):
         captured = 0
         checks = 0
 
@@ -230,7 +235,7 @@ async def test_disk_write_failure_cleans_partial_private_image(tmp_path, monkeyp
         module.os, "fdopen", lambda fd, *_args, **_kwargs: FailedWrite(fd)
     )
 
-    class Head:
+    class Head(StableCameraIdentity):
         async def status(self):
             return {"armed": False}
 
@@ -313,7 +318,7 @@ async def test_parent_swap_during_prompt_cannot_redirect_private_jpegs(tmp_path)
     folder = trusted_parent / "capture"
     originals = [jpeg(color=(50 + i * 10, 90, 130)) for i in range(12)]
 
-    class Head:
+    class Head(StableCameraIdentity):
         next_image = 0
 
         async def status(self):
@@ -402,3 +407,56 @@ async def test_operator_cli_disables_ambient_proxy_for_device_bearer(
     assert calls[0][1] == tmp_path / "private-frames"
     assert calls[0][2:] == (16, True)
     assert '"calibration_approved": false' in capsys.readouterr().out
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("pids", [("OV2640",), ("OV5640", "OV3660")])
+async def test_capture_rejects_unsupported_or_changed_camera_pid(tmp_path, pids):
+    class Head:
+        n = 0
+
+        async def status(self):
+            return {"armed": False}
+
+        async def snapshot(self):
+            self.n += 1
+            return jpeg(color=(50 + self.n * 10, 100, 120))
+
+        async def camera_identity(self):
+            return pids[min(self.n - 1, len(pids) - 1)]
+
+    async def confirm(_index):
+        pass
+
+    folder = tmp_path / "private"
+    with pytest.raises(ValueError, match="camera sensor PID"):
+        await capture_checkerboards(Head(), folder, count=12, prompt=confirm)
+    assert not folder.exists()
+
+
+@pytest.mark.asyncio
+async def test_capture_reports_verified_session_pid(tmp_path):
+    class Head:
+        n = 0
+        identity_checks = 0
+
+        async def status(self):
+            return {"armed": False}
+
+        async def snapshot(self):
+            self.n += 1
+            return jpeg(color=(50 + self.n * 10, 100, 120))
+
+        async def camera_identity(self):
+            self.identity_checks += 1
+            assert self.identity_checks == self.n
+            return "OV5640"
+
+    async def confirm(_index):
+        pass
+
+    head = Head()
+    result = await capture_checkerboards(head, tmp_path / "private", count=12, prompt=confirm)
+    assert head.identity_checks == 12
+    assert result["camera_sensor_pid"] == "OV5640"
+    assert result["calibration_approved"] is False
