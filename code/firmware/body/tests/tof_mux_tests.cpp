@@ -22,6 +22,9 @@ static void ready(desk_robot::TofBus& bus, desk_robot::CliffGuard& guard) {
   CHECK(guard.configure(calibration()));
   CHECK(bus.begin(21, 22, -1));
   CHECK(bus.ready());
+  CHECK(Wire.getTimeOut() == 15);
+  CHECK(Wire.tof_init_timeouts.size() == (DESK_ROBOT_EXTRA_RANGERS ? 8U : 5U));
+  for (auto timeout : Wire.tof_init_timeouts) CHECK(timeout == 80);
   CHECK(Wire.extras == 0);
   for (std::uint32_t i = 0; i < 5; ++i)
     bus.poll(guard, 10U * i);
@@ -42,6 +45,76 @@ static void faulted(desk_robot::CliffGuard& guard) {
 
 int main() {
   try {
+    {
+      // Verify the transport fake itself before trusting driver regressions.
+      Wire = TwoWire{};
+      CHECK(Wire.getTimeOut() == 50);
+      Wire.setTimeOut(15);
+      CHECK(Wire.getTimeOut() == 15);
+      Wire.ranges = 1;
+      Wire.next_stop_timeout_address = 0x70;
+      Wire.beginTransmission(0x70);
+      CHECK(Wire.write(2) == 1);
+      CHECK(Wire.endTransmission() == 5);
+      CHECK(Wire.ranges == 1);
+      Wire.next_read_timeout_address = 0x70;
+      CHECK(Wire.requestFrom(0x70, 1) == 0);
+      CHECK(Wire.available() == 0 && Wire.read() == -1);
+      CHECK(Wire.requestFrom(0x70, 1) == 1);
+      CHECK(Wire.read() == 1);
+      CHECK(Wire.requestFrom(0x70, 2) == 0);
+      CHECK(Wire.available() == 0 && Wire.read() == -1);
+      Wire.beginTransmission(0x29);
+      CHECK(Wire.write(0x14) == 1);
+      CHECK(Wire.endTransmission(false) == 0);
+      Wire.next_short_read_address = 0x29;
+      Wire.next_short_read_request = 12;
+      Wire.next_short_read_count = 11;
+      CHECK(Wire.requestFrom(0x29, 12) == 11);
+      CHECK(Wire.available() == 11);
+      for (int i = 0; i < 11; ++i) CHECK(Wire.read() >= 0);
+      CHECK(Wire.read() == -1);
+      CHECK(Wire.requestFrom(0x29, 12) == 12);
+
+      TwoWire other;
+      VL53L0X sensor;
+      CHECK(sensor.getBus() == &Wire && sensor.getTimeout() == 0);
+      sensor.setBus(&other);
+      sensor.setTimeout(80);
+      CHECK(sensor.getBus() == &other && sensor.getTimeout() == 80);
+      CHECK(!sensor.init());
+      other.ranges = 1;
+      CHECK(sensor.init() && other.tof_init_timeouts.size() == 1);
+      CHECK(other.tof_init_timeouts[0] == 80);
+      VL53L0X::fail_timeout() = true;
+      CHECK(sensor.timeoutOccurred() && !sensor.timeoutOccurred());
+      fake_arduino_millis() = 0xfffffffeU;
+      const auto before = millis();
+      fake_arduino_millis() = 1U;
+      CHECK(millis() - before == 3U);
+      fake_arduino_millis() = 0;
+    }
+    {
+      // A timeout or partial read cannot authorize a new optical sample.
+      for (int failure = 0; failure < 3; ++failure) {
+        Wire = TwoWire{};
+        fake_i2c_lines() = FakeI2cLines{};
+        desk_robot::TofBus bus;
+        desk_robot::CliffGuard guard;
+        ready(bus, guard);
+        if (failure == 0) Wire.next_stop_timeout_address = 0x70;
+        if (failure == 1) Wire.next_read_timeout_address = 0x29;
+        if (failure == 2) {
+          Wire.next_short_read_address = 0x29;
+          Wire.next_short_read_request = 12;
+          Wire.next_short_read_count = 11;
+        }
+        bus.poll(guard, 60);
+        CHECK(bus.new_optical_channel() == 255);
+        CHECK(bus.new_extra_channel() == 255);
+        faulted(guard);
+      }
+    }
     {
       // A full millis revolution must not make expired diagnostics fresh.
       Wire = TwoWire{};

@@ -105,7 +105,17 @@ class TwoWire {
 
   bool fail_begin = false;
   bool begin(int, int, int) { return !fail_begin; }
-  void setTimeOut(unsigned) {}
+  std::uint16_t timeout_ms = 50;
+  void setTimeOut(std::uint16_t ms) { timeout_ms = ms; }
+  std::uint16_t getTimeOut() { return timeout_ms; }
+  // Explicit one-shot transport faults. ESP32 HAL normally reports zero
+  // bytes on error; a short nonzero count is an additional adversarial case.
+  int next_stop_timeout_address = -1;
+  int next_read_timeout_address = -1;
+  int next_short_read_address = -1;
+  std::size_t next_short_read_request = 0;
+  std::size_t next_short_read_count = 0;
+  std::vector<std::uint16_t> tof_init_timeouts;
 
   void beginTransmission(std::uint8_t addr) {
     if (addr == 0x68 || addr == 0x69 || addr == 0x6a || addr == 0x6b ||
@@ -178,6 +188,10 @@ class TwoWire {
         current_address == 0x6a || current_address == 0x6b ||
         current_address == 0x1c || current_address == 0x1d ||
         current_address == 0x1e) ++imu_terminated_transmissions;
+    if (stop && current_address == next_stop_timeout_address) {
+      next_stop_timeout_address = -1;
+      return 5; // Arduino-ESP32 endTransmission timeout
+    }
     if (!connected(current_address)) return 4;
     // Fail only the ADS1115 single-shot config WRITE, not its mux or reads.
     if (fail_ads_config_write && current_address == 0x48 &&
@@ -265,6 +279,10 @@ class TwoWire {
     pos = 0;
     if (addr == 0x28 || (addr == 0x29 && extras == 1 && cap_uses_0x29))
       ++cap_register_requests;
+    if (addr == next_read_timeout_address) {
+      next_read_timeout_address = -1;
+      return 0;
+    }
     if (!connected(addr)) return 0;
     if (addr == 0x48 && extras == 4 &&
         register_address == fail_ads_read_register) {
@@ -429,7 +447,16 @@ class TwoWire {
       if (ads_config_high == 0xC3) inbound = {0x04, 0x00};
       else inbound = {0xFE, 0xDC};
     }
-    return inbound.size() == count ? count : 0;
+    if (inbound.size() != count) {
+      inbound.clear();
+      return 0;
+    }
+    if (addr == next_short_read_address && count == next_short_read_request) {
+      next_short_read_address = -1;
+      if (next_short_read_count < inbound.size())
+        inbound.resize(next_short_read_count);
+    }
+    return inbound.size();
   }
   int available() const { return static_cast<int>(inbound.size() - pos); }
   int read() {

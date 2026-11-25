@@ -72,4 +72,5 @@ inline std::uint32_t& fake_arduino_millis() {
   static std::uint32_t now = 0;
   return now;
 }
-inline unsigned long millis() { return fake_arduino_millis(); }
+// ESP32 unsigned long is 32-bit; Linux LP64 unsigned long is not.
+inline std::uint32_t millis() { return fake_arduino_millis(); }
