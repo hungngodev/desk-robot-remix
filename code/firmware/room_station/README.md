@@ -89,6 +89,22 @@ pixels stay invalid until new successful conversions. This is a software
 recovery contract and **not** a physical hot-unplug or supply integrity pass.
 Bench test all fitted carrier revisions, bus pullups and actual reconnect time.
 
+
+The pinned nRF52 Wire implementation can still wait indefinitely for a
+hardware event: staged sensor scheduling is not a transaction timeout.
+Both station profiles therefore start the nRF52840 hardware watchdog before
+initializing Wire and feed its sole reload channel only after a complete
+main-loop pass. The nominal timeout is four seconds, including CPU sleep
+and debugger halt. An incompatible inherited watchdog configuration leaves
+the station silent instead of silently operating unguarded. Startup no
+longer waits for a USB host. A persistent bus fault may cause repeated
+resets; this does not guarantee healthy sensor service while the bus is
+stuck. Verify the actual reset reason, USB reconnect/nonce freshness, and
+recovery with the exact Feather bootloader and a controlled bus-stall trial.
+This is a station availability watchdog, not the WROOM motor watchdog,
+a charge grant or physical safety qualification.
+Reference: [Nordic nRF52840 WDT product specification](https://docs.nordicsemi.com/r/bundle/ps_nrf52840/page/wdt.html).
+
 ## Nonblocking shared radar and BME688 sampling
 
 The pinned Adafruit BME680 2.0.5 source uses `beginReading()` and

@@ -6,6 +6,7 @@
 // Hardware, serial electrical levels, I2C fit, gas warmup and thermal
 // calibration still need a physical one-unit trial.
 #include <Arduino.h>
+#include <nrf.h>
 #include <Wire.h>
 #include <SensirionI2cScd4x.h>
 #include <Adafruit_BME680.h>
@@ -27,6 +28,38 @@
 #endif
 
 namespace {
+// nRF52840 WDT: run during sleep and debugger halt; timeout is
+// (CRV + 1) / 32768 seconds. Feed only after the main loop returns
+// from all synchronous bus operations. No timer/ISR can mask a hang.
+class RoomLoopWatchdog {
+ public:
+  template <typename Registers>
+  bool begin(Registers& regs) {
+    if (!regs.RUNSTATUS) {
+      regs.CONFIG = kRunDuringSleepAndHalt;
+      regs.CRV = kReloadTicks;
+      regs.RREN = 1U;
+      regs.TASKS_START = 1U;
+    }
+    // A soft reset can preserve the watchdog. Do not overwrite locked
+    // registers or feed another configuration's reload channels.
+    ready_ = regs.CONFIG == kRunDuringSleepAndHalt &&
+        regs.CRV == kReloadTicks && regs.RREN == 1U;
+    return ready_;
+  }
+  template <typename Registers>
+  void completed_pass(Registers& regs) const {
+    if (ready_) regs.RR[0] = 0x6E524635U;
+  }
+
+ private:
+  static constexpr uint32_t kRunDuringSleepAndHalt = 0x09U;
+  static constexpr uint32_t kReloadTicks = 4U * 32768U - 1U;
+  bool ready_ = false;
+};
+RoomLoopWatchdog room_watchdog;
+bool room_watchdog_ready = false;
+
 // Keep report formatting off the USB endpoint. The pinned TinyUSB CDC
 // write() spins while DTR remains asserted and its TX FIFO is full.
 constexpr size_t kMaxUsbLineBytes = 1536;
@@ -118,7 +151,6 @@ constexpr uint32_t kBmeStaleMs = 3000;
 constexpr uint32_t kRadarStaleMs = 3000;
 constexpr uint32_t kThermalStaleMs = 3000;
 constexpr uint32_t kThermalScanMaxMs = 250;
-constexpr uint32_t kBootWaitMs = 1200;
 constexpr uint32_t kScdNoSampleMs = 15000;
 constexpr uint8_t kBmePrimary = 0x77;
 constexpr uint8_t kBmeAlternate = 0x76;
@@ -570,9 +602,9 @@ void report(uint32_t now) {
 }  // namespace
 
 void setup() {
+  room_watchdog_ready = room_watchdog.begin(*NRF_WDT);
+  if (!room_watchdog_ready) return;
   Serial.begin(115200);
-  const uint32_t start = millis();
-  while (!Serial && millis() - start < kBootWaitMs) delay(5);
   Wire.begin();
   Wire.setClock(100000);
   // Probes now run through recover_sensors() so a missing module at boot
@@ -587,6 +619,7 @@ void setup() {
 #endif
 }
 void loop() {
+  if (!room_watchdog_ready) return;
   // Bounded read-only causal handshake, never a command to actuate.
   // Queue the response ahead of any subsequently generated JSON report.
   // Read at most 32 bytes each pass so live radar UART remains serviced.
@@ -623,4 +656,5 @@ void loop() {
     report(now);
   }
   usb_tx.step(Serial); // one FIFO-space-limited chunk; never wait for a reader
+  room_watchdog.completed_pass(*NRF_WDT);
 }

@@ -788,3 +788,70 @@ int main() { run(100); run(UINT32_MAX - 5); }
     )
     subprocess.run([str(executable)], check=True, capture_output=True,
                    text=True, timeout=15)
+
+
+def test_room_loop_watchdog_feeds_only_after_completed_pass(tmp_path):
+    src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
+    setup = src.split("void setup() {", 1)[1].split("void loop() {", 1)[0]
+    loop = src.split("void loop() {", 1)[1]
+    assert setup.index("room_watchdog.begin(*NRF_WDT)") < setup.index("Wire.begin()")
+    assert "if (!room_watchdog_ready) return;" in setup
+    assert loop.lstrip().startswith("if (!room_watchdog_ready) return;")
+    assert "delay(" not in setup
+    assert src.count("room_watchdog.completed_pass(*NRF_WDT);") == 1
+    assert loop.index("usb_tx.step(Serial)") < loop.index("room_watchdog.completed_pass")
+    assert loop.rstrip().endswith("room_watchdog.completed_pass(*NRF_WDT);\n}")
+    watchdog = "class RoomLoopWatchdog {" + src.split(
+        "class RoomLoopWatchdog {", 1
+    )[1].split("RoomLoopWatchdog room_watchdog;", 1)[0]
+    harness = r"""
+#include <cassert>
+#include <cstdint>
+""" + watchdog + r"""
+struct Registers {
+  uint32_t RUNSTATUS = 0, CONFIG = 0, CRV = 0, RREN = 0;
+  uint32_t TASKS_START = 0, RR[8] = {};
+};
+int main() {
+  Registers regs;
+  RoomLoopWatchdog watchdog;
+  watchdog.completed_pass(regs);
+  assert(regs.RR[0] == 0);
+  assert(watchdog.begin(regs));
+  assert(regs.TASKS_START == 1 && regs.RREN == 1);
+  assert(regs.CONFIG == 9 && regs.CRV == 131071);
+  assert(regs.RR[0] == 0);
+  watchdog.completed_pass(regs);
+  assert(regs.RR[0] == 0x6E524635U && regs.RR[1] == 0);
+  regs.RUNSTATUS = 1;
+  regs.TASKS_START = regs.RR[0] = 0;
+  RoomLoopWatchdog after_soft_reset;
+  assert(after_soft_reset.begin(regs));
+  assert(regs.TASKS_START == 0 && regs.RR[0] == 0);
+  after_soft_reset.completed_pass(regs);
+  assert(regs.RR[0] == 0x6E524635U);
+  for (unsigned fault = 0; fault < 3; ++fault) {
+    Registers incompatible = regs;
+    incompatible.RR[0] = 0;
+    if (fault == 0) incompatible.CONFIG = 1;
+    if (fault == 1) incompatible.CRV = 20;
+    if (fault == 2) incompatible.RREN = 3;
+    RoomLoopWatchdog foreign;
+    assert(!foreign.begin(incompatible));
+    foreign.completed_pass(incompatible);
+    assert(incompatible.TASKS_START == 0 && incompatible.RR[0] == 0);
+  }
+}
+"""
+    compiler = shutil.which("c++")
+    assert compiler is not None
+    source = tmp_path / "room_watchdog.cpp"
+    source.write_text(harness)
+    executable = tmp_path / "room_watchdog"
+    subprocess.run(
+        [compiler, "-std=c++11", "-Wall", "-Wextra", "-Werror",
+         str(source), "-o", str(executable)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    subprocess.run([str(executable)], check=True, capture_output=True,
+                   text=True, timeout=15)
