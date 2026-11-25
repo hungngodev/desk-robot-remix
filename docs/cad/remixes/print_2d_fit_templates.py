@@ -26,14 +26,25 @@ SOURCES = {
 
 
 def scad_mm(source: str, variable: str) -> float:
-    """Read one literal millimetre dimension; never evaluate SCAD expressions."""
-    matches = re.findall(
-        rf"(?m)^\s*{re.escape(variable)}\s*=\s*(\d+(?:\.\d+)?)\s*;",
+    """Read one unambiguous global literal, never evaluate SCAD expressions."""
+    # Remove comments and strings before identifying assignments. Preserve
+    # newlines so a comment cannot create a fake line-start declaration.
+    code = re.sub(
+        r'//[^\n]*|/\*[\s\S]*?\*/|"(?:\\.|[^"\\])*"',
+        lambda match: re.sub(r"[^\n]", " ", match.group()),
         source,
     )
-    if len(matches) != 1:
+    assignments = list(re.finditer(
+        rf"(?<![\w$]){re.escape(variable)}\s*=(?!=)", code,
+    ))
+    matches = list(re.finditer(
+        rf"(?m)^[ \t]*{re.escape(variable)}\s*=\s*(\d+(?:\.\d+)?)\s*;",
+        code,
+    ))
+    if (len(assignments) != 1 or len(matches) != 1
+            or code[:matches[0].start()].count("{") != code[:matches[0].start()].count("}")):
         raise ValueError(f"Missing or ambiguous source dimension: {variable}")
-    value = float(matches[0])
+    value = float(matches[0].group(1))
     if not 0 < value < A4_HEIGHT_MM:
         raise ValueError(f"Out-of-range source dimension: {variable}")
     return value

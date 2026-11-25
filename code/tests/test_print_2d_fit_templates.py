@@ -511,3 +511,29 @@ def test_a4_refuses_nonregular_or_hardlinked_artifacts(tmp_path, filename, kind)
         source.verify(tmp_path, output)
     assert outside.read_bytes() == b"unchanged"
     assert not (output / "speaker_reference_A4.svg").exists()
+
+
+@pytest.mark.parametrize("contents", [
+    "/*\nboard_x=10.5;\n*/\nboard_x=20+1;",
+    "board_x=10.5;\nboard_x=20+1;",
+    "board_x=10.5; board_x=21;",
+    "module example() {\nboard_x=10.5;\n}",
+    "board_x=10.5;\nmodule example() {\nboard_x=20+1;\n}",
+])
+def test_a4_rejects_commented_or_ambiguous_dimension(tmp_path, contents):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/vl53l0x_gy530_fit_gauge.scad"
+    scad.write_text(contents + "\nboard_y=13.3;\n", encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="Missing or ambiguous source dimension: board_x"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+
+def test_a4_ignores_commented_and_quoted_assignment_text():
+    contents = (
+        "/*\nboard_x=8;\n*/\n// board_x=9;\n"
+        'board_x=10.5; // mm\necho("board_x=12;");'
+    )
+    assert load().scad_mm(contents, "board_x") == 10.5
