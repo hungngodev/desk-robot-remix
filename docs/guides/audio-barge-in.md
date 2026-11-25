@@ -358,7 +358,10 @@ speaker volumes, distances and motor load. The offline
 `code/scripts/estimate_aec_delay.py` now accepts a synchronized mono PCM16
 speaker recording at the actual 32 kHz I2S rate and a simultaneous 16 kHz
 mono microphone recording, with an explicit ten-second limit. Its causal
-three-tap 2:1 reference conversion models the selected Sense codec phase.
+three-tap 2:1 reference conversion reproduces the selected Sense codec's
+reset phase and signed PCM16 division truncated toward zero. Use actual
+post-volume PCM16 output, not arbitrary floating-point or pre-volume TTS data.
+This does not replace the zero-delay native capture or prove audible output.
 Use `python code/scripts/estimate_aec_delay.py --speaker
 sense_playback_32k.wav --microphone sense_microphone_16k.wav` with
 private real recordings from the SAME assembly and clock alignment.

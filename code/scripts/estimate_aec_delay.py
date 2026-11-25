@@ -88,9 +88,17 @@ def resample_reference(source: np.ndarray, original_rate: int) -> np.ndarray:
         values = np.asarray(source, dtype=np.float64)
         if values.ndim != 1 or len(values) < 2:
             raise ValueError("Need mono speaker PCM")
-        padded = np.pad(values, (2, 0))
-        filtered = (padded[:-2] + 2 * padded[1:-1] + padded[2:]) / 4.0
-        return np.concatenate((np.zeros(1), filtered[1:-1:2]))
+        if not np.isfinite(values).all() or np.any(
+            (values < -1.0) | (values > 32767 / 32768)
+        ):
+            raise ValueError("Speaker reference must contain finite normalized PCM16")
+        # SenseReferenceCodec filters signed PCM16 with integer division,
+        # truncating toward zero before decimation. Preserve its reset phase.
+        pcm = np.rint(values * 32768).astype(np.int32)
+        padded = np.pad(pcm, (2, 0))
+        numerator = padded[:-2] + 2 * padded[1:-1] + padded[2:]
+        filtered = np.trunc(numerator / 4).astype(np.int32)
+        return np.concatenate((np.zeros(1), filtered[1:-1:2])) / 32768
     if original_rate != 24000:
         raise ValueError("Unsupported speaker sample rate")
     # Historical RIO captures at 24 kHz remain supported.

@@ -171,7 +171,8 @@ def test_sense_32khz_speaker_wav_matches_reference_phase(tmp_path):
     assert rate == 32000
     assert len(reference) == 32000
     assert reference[0] == 0
-    assert reference[1] == pytest.approx((2 * recorded[0] + recorded[1]) / 4)
+    expected_pcm = int((2 * recorded[0] + recorded[1]) * 32768 / 4)
+    assert reference[1] == expected_pcm / 32768
     microphone = np.concatenate((np.zeros(1120), reference))[:len(reference)]
     report = estimate_delay(reference, microphone)
     assert report["reference_delay_ms"] == 70.0
@@ -367,3 +368,27 @@ def test_capture_receipt_binds_same_length_wavs(tmp_path):
     receipt.write_text('{"frames": 64000, "frames": 64000}')
     with pytest.raises(ValueError, match="Duplicate"):
         validate(receipt, ref, rate, received, mic_rate)
+
+
+@pytest.mark.parametrize("samples", [
+    [1, -3, -4, 0, 1, 1, 0],
+    [32767, -32768, -32768, 32767, 32767, -32768],
+    [1, 1, 1, -1, -1, -1, 0, 0],
+])
+def test_sense_exact_integer_filter(samples):
+    # Mirror the codec's reset phase and signed C++ integer division.
+    expected = []
+    previous2 = previous1 = previous_filtered = 0
+    for index, sample in enumerate(samples):
+        if index % 2 == 0:
+            expected.append(previous_filtered)
+        previous_filtered = int((previous2 + 2 * previous1 + sample) / 4)
+        previous2, previous1 = previous1, sample
+    actual = resample_reference(np.asarray(samples, dtype=np.float64) / 32768, 32000)
+    np.testing.assert_array_equal(actual * 32768, expected)
+
+
+@pytest.mark.parametrize("value", [np.nan, np.inf, -1.0001, 1.0])
+def test_sense_reference_rejects_impossible_pcm(value):
+    with pytest.raises(ValueError, match="PCM16"):
+        resample_reference(np.array([0.0, value]), 32000)
