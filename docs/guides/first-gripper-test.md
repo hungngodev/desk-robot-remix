@@ -60,7 +60,15 @@ with letters, numbers, underscores, periods or hyphens. A rebuild requires a new
 assembly ID and a fresh set of both ten-trial categories; never combine trials
 from different physical assemblies even when firmware and jaw calibration match.
 `check_trials.py` verifies the recorded identifier is consistent but cannot
-physically authenticate it. Goal: at least 8/10 per category.
+physically authenticate it. Goal: at least 8/10 per category. From the
+repository root, after recording all real trials, run:
+
+```sh
+python3 code/scripts/check_trials.py --robot robot-01 --require-pass
+```
+
+For a separate private record, supply `--file` with its actual CSV path.
+A nonzero result is a hold; do not replace measured rows with simulated trials.
 
 Allowed remedies are small jaw tips, clearances, spacers and brackets. Fusion MCP
 must be available before CAD editing; inspect the active design and preserve
