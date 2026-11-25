@@ -210,6 +210,15 @@ class PoseFence:
         """True only for an actual accepted receipt in the current continuity."""
         return self._continuous and any(item is receipt for item in self._receipts)
 
+    def continuous_receipts_between(
+        self, before: PoseReceipt, after: PoseReceipt,
+    ) -> tuple[PoseReceipt, ...]:
+        """Return retained observations between two owned endpoints, or none."""
+        if (not self.owns_continuous_receipt(before)
+                or not self.owns_continuous_receipt(after) or before.seq >= after.seq):
+            return ()
+        return tuple(item for item in self._receipts if before.seq <= item.seq <= after.seq)
+
     def current(self, now: float, *, max_age_s: float = 0.25) -> PoseReceipt | None:
         if (not _valid_local_clock(now)
                 or type(max_age_s) not in (int, float) or not 0 < max_age_s <= 1):

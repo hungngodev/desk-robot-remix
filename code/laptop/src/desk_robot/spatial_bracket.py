@@ -129,12 +129,15 @@ def validate_stationary_bracket(
             or now - camera_received_at > 0.20
             or after.received_at - before.received_at + max_body_lag_s > 0.5):
         raise BracketError("Pose receipts do not bound the possible image time")
+    receipts = fence.continuous_receipts_between(before, after)
+    if not receipts:
+        raise BracketError("Bracket poses lack current authenticated continuity")
     try:
-        first = odom_base_transform(before)
         last = odom_base_transform(after)
+        stationary = all(odom_base_transform(item) == last for item in receipts)
     except FrameError as exc:
         raise BracketError("Invalid bracket transform") from exc
-    if first != last:
+    if not stationary:
         raise BracketError("Stationary bracket contains changed odometry")
     return StationaryBracket(
         robot_id=after.robot_id, body_boot=after.body_boot, origin=after.origin,
