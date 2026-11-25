@@ -443,7 +443,9 @@ class CameraFrameHub:
             type(generation) is not int or generation != self._generation[robot_id]
         ):
             raise RuntimeError("Old camera generation discarded")
-        if (not _admissible_mac_event_clock(received_at)
+        # Camera receipts are stamped on this Mac, not on a remote clock.
+        # Even a subsecond future receipt can poison the ordering cursor.
+        if (not _finite(received_at) or received_at > time.monotonic()
                 or type(source) is not str
                 or source not in {"proactive", "speech", "voice_question", "sensor"}):
             raise ValueError("Unknown image source or invalid time")

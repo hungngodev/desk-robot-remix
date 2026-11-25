@@ -3388,6 +3388,28 @@ def test_room_cache_does_not_cross_revoke_and_regrant():
     )
 
 
+def test_subsecond_future_camera_receipt_cannot_poison_frame_order(monkeypatch):
+    now = time.monotonic()
+    monkeypatch.setattr(
+        "desk_robot.multimodal.time", SimpleNamespace(monotonic=lambda: now),
+    )
+    hub = CameraFrameHub(["robot-01"])
+    prepared = _prepare(image())
+    first = hub.offer_prepared(
+        "robot-01", prepared, now - 0.25, source="proactive",
+    )
+    with pytest.raises(ValueError, match="invalid time"):
+        hub.offer_prepared(
+            "robot-01", prepared, now + 0.5, source="proactive",
+        )
+    assert list(hub.frames["robot-01"]) == [first]
+    assert hub.last_capture["robot-01"] == first.received_at
+    current = hub.offer_prepared(
+        "robot-01", prepared, now, source="proactive",
+    )
+    assert hub.selected("robot-01", "What do you see?", now) == [current]
+
+
 def test_future_camera_and_shared_room_receipts_cannot_block_real_observations():
     from desk_robot.room_station import RoomObservation
 
