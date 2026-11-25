@@ -48,10 +48,46 @@ bool ExpansionTouch::write(std::uint8_t reg, std::uint8_t value) {
   const bool acknowledged = wire_->endTransmission(true) == 0;
   return wrote && acknowledged;
 }
+// Retain the upstream CAP1188 simultaneous-electrode configuration and
+// Microchip DS00001620C sections 5.5.2, 6.6, 6.17 and 6.19 noise settings.
+// Never force recalibration on a held touch; preserve unrelated bits.
+bool ExpansionTouch::configure_bits(std::uint8_t reg, std::uint8_t mask,
+                                    std::uint8_t value) {
+  std::uint8_t old_value = 0, actual = 0;
+  if (!read(reg, old_value)) return false;
+  const auto desired = static_cast<std::uint8_t>(
+      (old_value & ~mask) | (value & mask));
+  return (desired == old_value || write(reg, desired)) &&
+         read(reg, actual) && (actual & mask) == (desired & mask);
+}
+bool ExpansionTouch::configure_step(std::uint8_t step) {
+  switch (step) {
+    case 0: {
+      std::uint8_t product = 0, manufacturer = 0;
+      return read(0xFD, product) && read(0xFE, manufacturer) &&
+             product == 0x50 && manufacturer == 0x5D;
+    }
+    case 1: return configure_bits(0x2A, 0x80, 0x00);  // simultaneous touch
+    case 2: return configure_bits(0x38, 0x03, 0x01);  // 37.5% noise threshold
+    case 3: return configure_bits(0x2F, 0x7F, 0x0A);  // baseline tracking
+    case 4: return configure_bits(0x20, 0x38, 0x00);  // filters on, held recal off
+    case 5: return configure_bits(0x44, 0x04, 0x00);  // RF noise filter on
+    default: return false;
+  }
+}
+void ExpansionTouch::invalidate_bus() {
+  // Never start probing hardware that was not verified at startup.
+  if (!verified_ && !recovering_) return;
+  verified_ = false;
+  recovering_ = true;
+  recovery_step_ = 0;
+}
 bool ExpansionTouch::begin(TwoWire& wire) {
   wire_ = &wire;  // existing 400kHz/15ms bounded bus, never begin twice
   present_ = false;
   verified_ = false;
+  recovering_ = false;
+  recovery_step_ = 0;
   polled_ = false;
   wire_->beginTransmission(kExpansionMux);
   present_ = wire_->endTransmission(true) == 0;
@@ -64,45 +100,36 @@ bool ExpansionTouch::begin(TwoWire& wire) {
   const std::uint8_t candidates[] = {kPreferredAddress, kAlternativeAddress};
   for (const std::uint8_t candidate : candidates) {
     address_ = candidate;
-    std::uint8_t product = 0, manufacturer = 0;
-    if (read(0xFD, product) && read(0xFE, manufacturer) &&
-        product == 0x50 && manufacturer == 0x5D) {
+    if (configure_step(0)) {
       recognized = true;
       break;
     }
   }
-  // Upstream CAP1188 init clears MTBLK (0x2A) for simultaneous electrodes.
-  // Apply only after exact chip identity and while the optional mux is
-  // isolated; unlike the upstream adapter, a failed write is explicit.
-  // Microchip DS00001620C sections 5.5.2, 6.6, 6.17 and 6.19.
-  // Use the chip's baseline tracking, not host-side threshold guesses.
-  // Exclude sub-touch noise from the baseline, retain analog filtering,
-  // and never force recalibration just because a real touch is held.
-  // Preserve unrelated configuration bits and verify actual readback.
-  const auto configure_bits = [this](std::uint8_t reg, std::uint8_t mask,
-                                      std::uint8_t value) {
-    std::uint8_t old_value = 0, actual = 0;
-    if (!read(reg, old_value)) return false;
-    const auto desired = static_cast<std::uint8_t>(
-        (old_value & ~mask) | (value & mask));
-    return (desired == old_value || write(reg, desired)) &&
-           read(reg, actual) && (actual & mask) == (desired & mask);
-  };
-  const bool configured = recognized &&
-      configure_bits(0x2A, 0x80, 0x00) &&  // simultaneous touch enabled
-      configure_bits(0x38, 0x03, 0x01) &&  // 37.5% noise threshold
-      configure_bits(0x2F, 0x7F, 0x0A) &&  // 64 samples, 16 negative deltas
-      configure_bits(0x20, 0x38, 0x00) &&  // filters on, held recal off
-      configure_bits(0x44, 0x04, 0x00);    // RF noise filter on
+  bool configured = recognized;
+  for (std::uint8_t step = 1; configured && step < kRecoverySteps; ++step)
+    configured = configure_step(step);
   const bool closed = close();
   verified_ = configured && closed;
   return verified_;
 }
 bool ExpansionTouch::poll(std::uint32_t now_ms, std::uint8_t& zones) {
-  if (!verified_ || (polled_ && now_ms - last_ms_ < 80U)) return false;
+  if ((!verified_ && !recovering_) ||
+      (polled_ && now_ms - last_ms_ < (recovering_ ? 250U : 80U))) return false;
   polled_ = true;
   last_ms_ = now_ms;
-  if (!select()) { close(); verified_ = false; return false; }
+  if (!select()) { close(); invalidate_bus(); return false; }
+  if (recovering_) {
+    // At most one identity or configuration step per poll, never a full
+    // startup sequence in the safety loop. Close even on a failed step.
+    const bool configured = configure_step(recovery_step_);
+    const bool closed = close();
+    if (!configured || !closed) { invalidate_bus(); return false; }
+    if (++recovery_step_ == kRecoverySteps) {
+      recovering_ = false;
+      verified_ = true;
+    }
+    return false;  // Only a subsequent successful status read publishes touch.
+  }
   std::uint8_t bits = 0;
   const bool sample_ok = read(0x03, bits);
   // CAP1188 can assert MAIN.INT on RELEASE when the contact mask is zero.
@@ -116,7 +143,7 @@ bool ExpansionTouch::poll(std::uint32_t now_ms, std::uint8_t& zones) {
               write(0x00, static_cast<std::uint8_t>(main_control & ~0x01U));
   }
   const bool closed = close();
-  if (!sample_ok || !cleared || !closed) { verified_ = false; return false; }
+  if (!sample_ok || !cleared || !closed) { invalidate_bus(); return false; }
   zones = bits;
   return true;
 }

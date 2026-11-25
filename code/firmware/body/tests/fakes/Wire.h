@@ -76,6 +76,7 @@ class TwoWire {
   bool ignore_cap_config_write = false;
   bool fail_cap_config_write = false;
   unsigned cap_interrupt_clears = 0;
+  bool cap_connected = true;
   bool cap_uses_0x29 = false; // common generic breakout address
   unsigned cap_register_end_calls = 0;
   unsigned cap_failed_write_stops = 0;
@@ -149,10 +150,10 @@ class TwoWire {
     if (addr == 0x71) return optional_mux_installed;
     if (addr == 0x29)
       return (ranges != 0 && extras == 0 && (ranges & (ranges - 1U)) == 0) ||
-             (ranges == 0 && extras == 1 && cap_uses_0x29);
+             (ranges == 0 && extras == 1 && cap_uses_0x29 && cap_connected);
     if (ranges != 0 || extras == 0) return false;
     switch (extras) {
-      case 1: return (addr == 0x28 && !cap_uses_0x29) || addr == 0x57;
+      case 1: return (addr == 0x28 && !cap_uses_0x29 && cap_connected) || addr == 0x57;
       case 2: return addr == 0x39 || addr == 0x36;
       case 4: return addr == 0x48;
       case 8: return addr == 0x44;

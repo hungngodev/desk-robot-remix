@@ -129,7 +129,9 @@ def test_cliff_fault_reaches_motor_outputs_before_other_i2c_work():
     assert loop.index("tof.poll(") < loop.index(stop) < loop.index("berry_imu.poll(")
     for client in ("berry_imu", "paw_pulse", "accessories"):
         assert f"if(tof.bus_accessible()){client}.poll(" in loop
-    assert "if(tof.bus_accessible()&&cap1188.present()&&cap1188.verified())" in loop
+    assert "if(tof.bus_accessible()&&cap1188.present())" in loop
+    assert "elseif(!cap1188.verified())control.set_cap(false,0);" in loop
+    assert loop.count("cap1188.invalidate_bus();") == 2
     assert "tof.observe_shared_bus_fault(cliff_guard);" in loop
 
 

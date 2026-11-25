@@ -763,10 +763,11 @@ void loop() {
   if (control.state().bumper_raw) apply_outputs();
   // Safety sampling first, optional petting second. No motion authority.
   std::uint8_t cap_zones = 0;
-  if (tof.bus_accessible() && cap1188.present() && cap1188.verified()) {
+  if (tof.bus_accessible() && cap1188.present()) {
     if (cap1188.poll(millis(), cap_zones)) control.set_cap(true, cap_zones);
     else if (!cap1188.verified()) control.set_cap(false, 0);
   } else {
+    cap1188.invalidate_bus();
     control.set_cap(false, 0);
   }
   if (tof.bus_accessible()) paw_pulse.poll(millis());
@@ -793,6 +794,7 @@ void loop() {
     control.invalidate_range_optics();
     berry_imu.invalidate_bus();
     control.set_imu(berry_imu.reading());
+    cap1188.invalidate_bus();
     control.set_cap(false, 0);
     paw_pulse.invalidate_bus();
     control.set_paw_pulse(paw_pulse.sample());

@@ -154,6 +154,44 @@ int main() {
     CHECK(cap_failed_write_wire.ranges == 0);
     CHECK(cap_failed_write_wire.extras == 0);
     CHECK(!cap_failed_write_wire.unsafe_parallel_mux);
+
+  // A formerly verified CAP1188 must recover from a real address NACK,
+  // without publishing old zones or monopolizing the shared safety bus.
+  for (bool preferred : {false, true}) {
+    TwoWire recovery_wire;
+    recovery_wire.cap_uses_0x29 = preferred;
+    desk_robot::ExpansionTouch recovery_cap;
+    std::uint8_t recovery_zones = 0;
+    CHECK(recovery_cap.begin(recovery_wire));
+    CHECK(recovery_cap.poll(100, recovery_zones));
+    recovery_wire.cap_connected = false;
+    recovery_zones = 0xBC;
+    CHECK(!recovery_cap.poll(180, recovery_zones));
+    CHECK(!recovery_cap.verified() && recovery_zones == 0xBC);
+    const auto transfers = recovery_wire.transactions;
+    CHECK(!recovery_cap.poll(200, recovery_zones));
+    CHECK(recovery_wire.transactions == transfers);
+    recovery_wire.cap_connected = true;
+    recovery_wire.cap_config = 0xF8;
+    recovery_wire.cap_config2 = 0x45;
+    recovery_wire.cap_recal_config = 0x7F;
+    recovery_wire.cap_multi_touch_block = 0x80;
+    recovery_wire.cap_noise_threshold = 3;
+    for (unsigned step = 0; step < 6; ++step) {
+      CHECK(!recovery_cap.poll(430 + step * 250, recovery_zones));
+      CHECK(recovery_cap.verified() == (step == 5));
+      CHECK(recovery_zones == 0xBC && recovery_wire.extras == 0 &&
+            recovery_wire.ranges == 0);
+    }
+    CHECK(recovery_wire.cap_config == 0xC0 && recovery_wire.cap_config2 == 0x41);
+    CHECK(recovery_wire.cap_recal_config == 0x0A &&
+          recovery_wire.cap_multi_touch_block == 0);
+    CHECK(recovery_wire.cap_noise_threshold == 1);
+    recovery_wire.cap_touch_bits = 0xA5;
+    CHECK(recovery_cap.poll(1760, recovery_zones));
+    CHECK(recovery_zones == 0xA5 && recovery_wire.extras == 0 &&
+          !recovery_wire.unsafe_parallel_mux);
+  }
     // Corrupted high bits in a FIFO pointer must not be silently masked
     // into a plausible fresh touch sample. The 0x71 lane closes on error.
     for (const int reg : {0, 1, 2}) {

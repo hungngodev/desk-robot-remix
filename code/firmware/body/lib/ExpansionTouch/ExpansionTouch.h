@@ -15,6 +15,7 @@ class ExpansionTouch {
  public:
   bool begin(TwoWire& wire);
   bool poll(std::uint32_t now_ms, std::uint8_t& zones);
+  void invalidate_bus();
   // The 0x71 address ACK, independent of downstream chip configuration.
   bool present() const { return present_; }
   bool verified() const { return verified_; }
@@ -27,9 +28,14 @@ class ExpansionTouch {
   TwoWire* wire_ = nullptr;
   bool present_ = false;
   bool verified_ = false;
+  bool recovering_ = false;
+  std::uint8_t recovery_step_ = 0;
+  static constexpr std::uint8_t kRecoverySteps = 6;
   bool polled_ = false;
   std::uint32_t last_ms_ = 0;
   bool mux(std::uint8_t address, std::uint8_t mask);
+  bool configure_step(std::uint8_t step);
+  bool configure_bits(std::uint8_t reg, std::uint8_t mask, std::uint8_t value);
   bool select();
   bool close();
   bool read(std::uint8_t reg, std::uint8_t& value);
