@@ -369,6 +369,11 @@ A 24 kHz decoded TTS file alone is not the actual post-resampler speaker
 output and cannot certify echo delay. The command only estimates lag and
 drift; it does not capture audio, prove acoustic isolation, or qualify
 barge-in without the separate physical trial evidence.
+For recordings of four seconds or longer, failed drift validation suppresses
+the copyable fixed-delay setting even if global correlation finds a peak.
+Long recordings also probe gaps between the four primary drift windows.
+These checks cannot detect every brief timing excursion; retain the physical
+AEC and interruption trial requirements.
 
 For a private physical Sense build, pass `--board sense --aec-delay-ms 115`
 to the existing `firmware/head/private_config.py` command after measuring a

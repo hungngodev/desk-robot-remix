@@ -392,3 +392,49 @@ def test_sense_exact_integer_filter(samples):
 def test_sense_reference_rejects_impossible_pcm(value):
     with pytest.raises(ValueError, match="PCM16"):
         resample_reference(np.array([0.0, value]), 32000)
+
+
+@pytest.mark.parametrize("lo,hi", [(1.6, 2.7), (4.5, 5.5), (7.3, 8.4)])
+def test_transient_latency_in_drift_window_gaps_is_rejected(lo, hi):
+    rng = np.random.default_rng(8901)
+    ref = rng.normal(0, 0.12, 160000)
+    pos = np.arange(ref.size)
+    delay = np.where((pos >= lo * 16000) & (pos < hi * 16000), 1240, 1120)
+    mic = np.interp(pos - delay, pos, ref, left=0, right=0)
+    # Global correlation still looks like a 70 ms echo despite the excursion.
+    assert estimate_delay(ref, mic)["sample_lag"] == 1120
+    with pytest.raises(ValueError, match="not a stable clock drift"):
+        estimate_clock_drift(ref, mic)
+
+
+@pytest.mark.parametrize("unstable", [True, False])
+def test_cli_long_capture_requires_stable_drift_for_fixed_setting(tmp_path, unstable):
+    import json
+    import subprocess
+    import sys
+    import wave
+
+    rng = np.random.default_rng(8901)
+    ref = rng.integers(-6000, 6000, size=160000, dtype=np.int16)
+    pos = np.arange(len(ref))
+    delay = np.where((pos >= 25600) & (pos < 43200), 1240, 1120) if unstable else 1120
+    mic = np.zeros_like(ref)
+    idx = pos - delay
+    mic[idx >= 0] = ref[idx[idx >= 0]]
+    for name, samples in (("speaker.wav", ref), ("mic.wav", mic)):
+        with wave.open(str(tmp_path / name), "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(16000)
+            wav.writeframes(samples.astype("<i2").tobytes())
+    script = Path(__file__).resolve().parents[1] / "scripts/estimate_aec_delay.py"
+    result = subprocess.run([
+        sys.executable, str(script), "--speaker", str(tmp_path / "speaker.wav"),
+        "--microphone", str(tmp_path / "mic.wav"),
+    ], capture_output=True, text=True, check=True)
+    report = json.loads(result.stdout)
+    assert report["sample_lag"] == 1120
+    assert report["esp_idf_delay_setting_applicable"] is not unstable
+    assert report["esp_idf_delay_setting_ms"] == (None if unstable else 70)
+    assert not report["aec_physically_verified"]
+    assert not report["natural_barge_in_verified"]

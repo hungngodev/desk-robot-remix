@@ -256,6 +256,25 @@ def estimate_clock_drift(
     residual = float(np.max(np.abs(predicted - y)))
     if not math.isfinite(slope) or residual > 3.0:
         raise ValueError("Changing acoustic delay is not a stable clock drift")
+    # Long recordings leave blind intervals between the primary windows.
+    # Probe the midpoint of each gap with the same correlation estimator;
+    # reject an ambiguous or inconsistent local delay before reporting drift.
+    for left, right in zip(starts[:-1], starts[1:], strict=True):
+        if right - left <= window:
+            continue
+        start = (left + right) // 2
+        try:
+            result = estimate_delay(
+                reference[start:start + window], microphone[start:start + window],
+                sample_rate=sample_rate, max_delay_ms=max_delay_ms,
+            )
+        except ValueError as exc:
+            raise ValueError("Changing acoustic delay is not a stable clock drift") from exc
+        expected = y.mean() + slope * (start - t.mean())
+        residual = max(residual, abs(result["sample_lag"] - expected))
+        correlations.append(result["normalized_correlation"])
+        if residual > 3.0:
+            raise ValueError("Changing acoustic delay is not a stable clock drift")
     ppm = slope * 1_000_000.0
     return {
         "clock_drift_ppm_estimate": round(ppm, 1),
@@ -300,6 +319,12 @@ def main() -> None:
             "aec_physically_verified": False,
             "natural_barge_in_verified": False,
         })
+        # Preserve short-clip diagnostic compatibility, but a complete
+        # four-second or longer trial with failed drift validation must not
+        # advertise a copyable fixed delay setting.
+        if len(reference) >= 4 * 16000:
+            report["esp_idf_delay_setting_applicable"] = False
+            report["esp_idf_delay_setting_ms"] = None
     report["capture_report_pcm_matched"] = args.capture_report is not None
     print(json.dumps(report, indent=2))
 
