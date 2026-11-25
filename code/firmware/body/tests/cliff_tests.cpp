@@ -560,6 +560,35 @@ void invalid_return_never_grants_clearance() {
   }
 }
 
+void no_return_transient_latches_before_next_sweep() {
+  for (std::uint8_t lane = 0; lane < desk_robot::kCliffSensorCount; ++lane) {
+    for (const bool valid : {false, true}) {
+      CliffGuard guard;
+      ready(guard, 100);
+      healthy_samples(guard, 101);
+      CHECK(guard.evaluate(101));
+      // An impossible range must veto clearance even if the upstream validity
+      // bit is wrong. A later healthy sweep must not erase the first fault.
+      guard.sample(lane, 8190, valid, 102);
+      const auto expected = !valid ? CliffFault::InvalidSample
+          : (lane < desk_robot::kFloorSensorCount ? CliffFault::FloorOutOfRange
+                                                 : CliffFault::FrontOutOfRange);
+      CHECK(guard.fault() == expected);
+      CHECK(guard.fault_sensor() == lane);
+      const auto bad = guard.diagnostic(lane, 102);
+      CHECK(bad.present && !bad.valid && bad.distance_mm == 8190);
+      // Do not evaluate the unsafe sample before overwriting it: sample()
+      // itself must latch, independently of the next control checkpoint.
+      healthy_samples(guard, 103);
+      CHECK(!guard.evaluate(103));
+      CHECK(guard.fault() == expected);
+      CHECK(guard.fault_sensor() == lane);
+      CHECK(guard.try_rearm(103));
+      CHECK(guard.evaluate(103));
+    }
+  }
+}
+
 void exact_threshold_jitter_never_clears_latch() {
   for (std::uint8_t lane = 0; lane < desk_robot::kCliffSensorCount; ++lane) {
     for (const bool upper : {false, true}) {
@@ -707,6 +736,8 @@ int main(int argc, char** argv) {
        silent_critical_lane_expires_despite_fresh_peers},
       {"invalid_return_never_grants_clearance",
        invalid_return_never_grants_clearance},
+      {"no_return_transient_latches_before_next_sweep",
+       no_return_transient_latches_before_next_sweep},
       {"exact_threshold_jitter_never_clears_latch",
        exact_threshold_jitter_never_clears_latch},
       {"recovery_requires_every_critical_lane_safe",
