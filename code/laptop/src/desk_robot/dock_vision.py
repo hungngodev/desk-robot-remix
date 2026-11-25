@@ -280,11 +280,14 @@ def detect_apriltag(
             translation = np.asarray(tvec, dtype=np.float64).reshape(3)
         except (cv2.error, ValueError, TypeError, IndexError, OverflowError):
             return None  # Native pose failure cannot authorize contact approach
-        error = float(np.sqrt(np.mean(np.sum(
-            (projected - image_points) ** 2, axis=1,
-        ))))
-        if not _finite_number(error) or error > max_reprojection_error_px:
+        # A pooled RMS can hide one bad corner (5 px / sqrt(4) = 2.5 px).
+        # Every corner must satisfy the budget; retain RMS in the pose receipt.
+        residual = projected - image_points
+        corner_errors = np.hypot(residual[:, 0], residual[:, 1])
+        if (not np.isfinite(corner_errors).all()
+                or np.any(corner_errors > max_reprojection_error_px)):
             continue
+        error = float(np.sqrt(np.mean(corner_errors ** 2)))
         # The physical printed face must point toward the camera. A good
         # reprojection is not permission to relax the existing angle gate.
         if (normal.shape != (3,) or not np.isfinite(normal).all()

@@ -820,3 +820,44 @@ def test_apriltag_pose_uses_encoded_sensor_coordinates(orientation):
     assert assessment.phase == "align"
     assert not assessment.motor_authorized
     assert not assessment.charging_authorized
+
+
+@pytest.mark.parametrize("corner_error_px", [0.0, 3.0, 5.0])
+def test_apriltag_reprojection_limits_each_corner(monkeypatch, corner_error_px):
+    """A small pooled RMS cannot hide one badly reprojected marker corner."""
+    import numpy as np
+
+    cv2 = pytest.importorskip("cv2")
+    square = np.array([
+        [-30, 30, 0], [30, 30, 0], [30, -30, 0], [-30, -30, 0],
+    ], dtype=np.float64)
+    k = np.array([[410, 0, 320], [0, 410, 240], [0, 0, 1]], dtype=np.float64)
+    rotation = np.array([[math.pi], [0.0], [0.0]])
+    translation = np.array([[0.0], [0.0], [400.0]])
+    points, _ = cv2.projectPoints(square, rotation, translation, k, np.zeros(5))
+    observed = points.astype(np.float32).reshape(1, 4, 2)
+
+    class Detector:
+        def __init__(self, dictionary):
+            pass
+
+        def detectMarkers(self, frame):
+            return [observed], np.array([[12]], dtype=np.int32), []
+
+    # Isolate the acceptance gate from platform-dependent PnP convergence.
+    # The other three corners are exact, so RMS for 5 px is only 2.5 px.
+    projected = observed.astype(np.float64).reshape(4, 1, 2).copy()
+    projected[0, 0, 0] += corner_error_px
+    monkeypatch.setattr(cv2.aruco, "ArucoDetector", Detector)
+    monkeypatch.setattr(cv2, "solvePnP", lambda *a, **kw: (True, rotation, translation))
+    monkeypatch.setattr(cv2, "projectPoints", lambda *a: (projected, None))
+    ok, jpeg = cv2.imencode(".jpg", np.zeros((480, 640), dtype=np.uint8))
+    assert ok
+    camera = DockCameraCalibration(410, 410, 320, 240, 60, 12)
+    pose = detect_apriltag(jpeg.tobytes(), camera, captured_at=1.0)
+    if corner_error_px > 3:
+        assert pose is None
+        assert assess_dock(pose, now=1.05, target_distance_mm=120).phase == "hold"
+    else:
+        assert pose is not None
+        assert pose.reprojection_error_px == pytest.approx(corner_error_px / 2)
