@@ -543,6 +543,8 @@ class MemoryStore:
             raise ValueError("witnessed must be a boolean")
         if witnessed != (source_robot == robot_id):
             raise ValueError("Only this robot's own sensor observations are witnessed")
+        if witnessed and kind in ("peer_claim", "peer_report", "peer_utterance"):
+            raise ValueError("Peer reports cannot be witnessed memories")
         if relay_token is not None and (
             witnessed or type(relay_token) is not str
             or _RELAY_TOKEN.fullmatch(relay_token) is None

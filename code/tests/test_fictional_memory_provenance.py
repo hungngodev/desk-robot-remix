@@ -121,3 +121,36 @@ def test_voice_and_operator_memory_json_do_not_claim_dream_witness(settings, tok
             "/v1/pet/robot-02/voice-context", headers=tool, params={"query": "brass key"},
         )
         assert peer.status_code == 200 and peer.json()["memories"] == []
+
+
+@pytest.mark.parametrize("kind", ["peer_claim", "peer_report", "peer_utterance"])
+def test_peer_report_cannot_be_promoted_to_firsthand(tmp_path, kind):
+    source, listener = "robot-01", "robot-02"
+    store = MemoryStore(tmp_path, [source, listener])
+    event_id = "peer001"
+    summary = "A key moved to the blue box"
+    with pytest.raises(ValueError, match="Peer reports cannot be witnessed"):
+        store.remember(
+            listener, event_id, summary, kind=kind,
+            source_robot=listener, witnessed=True,
+        )
+    assert store.count(listener) == 0
+    assert store.remember(
+        listener, event_id, summary, kind=kind,
+        source_robot=source, witnessed=False,
+    )
+    with pytest.raises(ValueError, match="Peer reports cannot be witnessed"):
+        store.remember(
+            listener, event_id, summary, kind=kind,
+            source_robot=listener, witnessed=True,
+        )
+    reopened = MemoryStore(tmp_path, [source, listener])
+    recalled, = reopened.search(listener, "blue box")
+    assert recalled.source_robot == source
+    assert recalled.kind == kind and recalled.witnessed is False
+    assert reopened.recent(listener, own_only=True) == []
+    assert reopened.search(listener, "blue box", own_only=True) == []
+    assert reopened.witnessed_episode_revision(listener, event_id) is None
+    assert reopened.search(source, "blue box") == []
+    assert "I observed" not in memory_provenance_label(recalled)
+    assert source in memory_provenance_label(recalled)
