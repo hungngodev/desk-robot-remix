@@ -624,6 +624,7 @@ async def interrupt_for_normal_voice(conn, have_voice: bool) -> bool:
         # must not manufacture a newer human intent or flush its first words.
         if record_human_voice(conn, "normal"):
             _normal_barge_recorded.add(device)
+    stop_generation = interrupt_generation.get(device, 0)
     try:
         native = _native_adapter()
     except ModuleNotFoundError:
@@ -644,18 +645,20 @@ async def interrupt_for_normal_voice(conn, have_voice: bool) -> bool:
             )
         stop_sent = True
     finally:
-        if stop_sent:
-            conn.clearSpeakStatus()
-        # Failure or cancellation must not pretend the decoder stopped.
-        # Native generation invalidation still happens on real user VAD,
-        # even when the first urgent STOP failed.
-        voice_frames.pop(device, None)
-        voice_last_frame_at.pop(device, None)
-        if native is not None:
-            try:
-                await asyncio.wait_for(native.on_barge(conn), timeout=0.5)
-            except (Exception, asyncio.CancelledError):
-                pass
+        # STOP may finish after this socket or turn has been replaced.
+        # Never clear the replacement head's VAD or speaker state.
+        if (connections.get(device) is conn
+                and interrupt_generation.get(device, 0) == stop_generation):
+            if stop_sent:
+                conn.clearSpeakStatus()
+            # Failure or cancellation must not pretend the decoder stopped.
+            voice_frames.pop(device, None)
+            voice_last_frame_at.pop(device, None)
+            if native is not None:
+                try:
+                    await asyncio.wait_for(native.on_barge(conn), timeout=0.5)
+                except Exception:
+                    pass  # Optional model failure is not task cancellation.
     return True
 
 

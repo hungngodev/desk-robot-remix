@@ -3170,3 +3170,87 @@ def test_bridge_wav_audio_and_encode_opus_preserve_short_and_partial_tails(
     with pytest.raises(ValueError, match="16-bit mono/stereo PCM WAV"):
         bridge.wav_audio(base64.b64encode(bad_rate_wav).decode("ascii"))
 
+
+@pytest.mark.parametrize("replace_socket", [True, False])
+async def test_inflight_normal_stop_cannot_clear_newer_vad(bridge, monkeypatch, replace_socket):
+    old = conn("mac-01")
+    old.client_listen_mode = "realtime"
+    old.client_is_speaking = True
+    old.session_id = "old-stop"
+    old.clear_queues = lambda: None
+    cleared, native_cancels = [], []
+    old.clearSpeakStatus = lambda: cleared.append(True)
+    bridge.register(old)
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    async def urgent(_owner):
+        entered.set()
+        await release.wait()
+
+    async def cancel_native(owner):
+        native_cancels.append(owner)
+
+    async def preempt_peers(_device):
+        return None
+
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: SimpleNamespace(
+        send_external_urgent_stop=urgent, on_barge=cancel_native,
+        preempt_others_for_human=preempt_peers, unregister=lambda _owner: None,
+    ))
+    assert not await bridge.interrupt_for_normal_voice(old, True)
+    task = asyncio.create_task(bridge.interrupt_for_normal_voice(old, True))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        if replace_socket:
+            bridge.unregister(old)
+            bridge.register(conn("mac-01"))
+        else:
+            bridge.interrupt_generation["mac-01"] += 1
+        now = time.monotonic()
+        bridge.voice_frames["mac-01"] = 1
+        bridge.voice_last_frame_at["mac-01"] = now
+        release.set()
+        await asyncio.wait_for(task, timeout=1)
+        assert bridge.voice_frames["mac-01"] == 1
+        assert bridge.voice_last_frame_at["mac-01"] == now
+        assert not cleared
+        assert not native_cancels
+    finally:
+        release.set()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_normal_barge_propagates_cancellation_during_native_cleanup(bridge, monkeypatch):
+    head = conn("mac-01")
+    head.client_listen_mode = "realtime"
+    head.client_is_speaking = True
+    head.session_id = "cancelled-stop"
+    head.clear_queues = lambda: None
+    head.clearSpeakStatus = lambda: None
+    bridge.register(head)
+    entered = asyncio.Event()
+
+    async def urgent(_owner):
+        return None
+
+    async def cancel_native(_owner):
+        entered.set()
+        await asyncio.Event().wait()
+
+    async def preempt_peers(_device):
+        return None
+
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: SimpleNamespace(
+        send_external_urgent_stop=urgent, on_barge=cancel_native,
+        preempt_others_for_human=preempt_peers,
+    ))
+    assert not await bridge.interrupt_for_normal_voice(head, True)
+    task = asyncio.create_task(bridge.interrupt_for_normal_voice(head, True))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
