@@ -2,7 +2,7 @@
 
 ## Assignment
 
-Work on [Desk Robot Remix PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17). Produce a complete order list for **one robot, its own dock, and one shared room station within $50 USD delivered including prior spending**. Keep all accepted features. Preserve the first-unit scope and the separate later fleet decision.
+Produce one complete order list for **one robot, its dock, and one shared room station**. Include the cables, connectors, mounting hardware, and printed parts needed to assemble it. Price every required part and compare the cumulative delivered cost with the **$50 USD prototype cap**, including prior spending. If the compatible build exceeds $50, show the full cart and the exact overage for the owner to decide. Keep all accepted features and leave fleet quantities out of this order. [Desk Robot Remix PR #17](https://github.com/hungngodev/desk-robot-remix/pull/17)
 
 For each feature, prefer the component family people routinely use for that same job in comparable builds. Use open-source projects with working code and wiring or schematics as evidence. Choose a low-cost board with the same chip, voltage, pinout, interface, and fit. Reuse suitable hardware. Buy no new Adafruit hardware. Account for the cables, headers, adapters, and minimum package sizes required to make each option work.
 
@@ -10,7 +10,15 @@ Keep the local Mac and Xiaozhi behavior, Sense camera and mic, WROOM local safet
 
 Fetch the live PR head and read its repository instructions and related review threads. Check existing code, purchasing decisions, and work in progress before starting a duplicate. Keep authorized code and documentation changes on the canonical PR #17 branch `impl/mac-hardware-safety-preflight-2026-11-10`. Refresh its live head and current file blobs before writing; do not create competing branches or overwrite concurrent changes. If another worker fixes a task, verify it and choose an open task. Keep working on independent items when a quote or measurement is pending.
 
-The November 23 projection at `7978bc6` contained **33 remaining purchase roles and 49 required slots** after conditional reuse. Refresh the quantities and source owners at the live head. [Accepted product definition](https://github.com/hungngodev/desk-robot-remix/blob/7978bc6b5e2c94dd5bac08d75276ac8aa75af64a/docs/product-definition.md) · [Hardware plan](https://github.com/hungngodev/desk-robot-remix/blob/7978bc6b5e2c94dd5bac08d75276ac8aa75af64a/docs/hardware/full-feature-plan.json) · [Role-to-source map](https://github.com/hungngodev/desk-robot-remix/blob/7978bc6b5e2c94dd5bac08d75276ac8aa75af64a/docs/hardware/full-63-role-source-ownership.json)
+Generate the first-unit projection at the live head before allocating parts. Account for every parent role and linked decision. Expand kits into their actual contents and count each purchase once. Use the product definition for scope, the hardware plan for quantities, and the ownership map to locate the normal firmware or assembly path. [Product definition](../product-definition.md) · [Hardware plan](../hardware/full-feature-plan.json) · [Role-to-source map](../hardware/full-63-role-source-ownership.json)
+
+## Work in this order
+
+1. **Reconcile owned stock and earlier payments.** Match the photos, board markings, and order records to role IDs. Allocate received, usable stock to the first unit. If identity or condition is uncertain, name the exact marking, photo, or inspection needed. Record orders awaiting delivery separately so the owner can avoid a duplicate purchase without counting those parts as usable stock. Review private invoices and refunds through the existing spending reconciliation procedure. [Photo inventory](../hardware/photo-inventory-2026-11-04.md) · [Prior spending reconciliation](../hardware/one-robot-inventory-and-shopping.md#strict-first-unit-prior-spending-reconciliation)
+2. **Select the drivetrain before sizing power.** Resolve motor and driver choice against the track and encoder fit, load, speed, and independent cutoff requirements. Use the chosen motor and simultaneous load limits to finish the battery, charger, regulated rails, dock contacts, and adapter as a matched system. If a published rating cannot settle the decision, identify the exact load or clearance measurement needed. [Power selection and qualification](../hardware/one-robot-power-gate.md)
+3. **Close independent choices while power work is open.** Resolve the exact range carriers and muxes, head audio, interaction boards, station modules, and passive hardware using the tables below. Quote the complete quantities. Use datasheets, board drawings, existing fit gauges, and exact seller listings to close decisions before requesting a sample. When the exact delivered carrier or fit still needs a sample, record which decision the result will settle. [Mechanical measurements](../cad/FUSION_MEASUREMENT_SHEET.md)
+4. **Trace the selected parts to the build.** Check the normal firmware profile, wiring, or CAD location for each item. Fix any missing required feature path with the existing subsystem owner and verify it through the normal entry point. Generate the cart and cost summary from the same selections and stock allocation.
+5. **Review the complete order and the commissioning steps.** Apply the line and full-cart checks below. Record calibration and powered tests in the build guide or verification ledger. Keep motion disarmed and charging disconnected until the applicable measured checks pass. [Assembly and commissioning guide](../guides/one-complete-robot.md)
 
 ## How widely is each part used for its feature?
 
@@ -29,18 +37,18 @@ For all other order roles, carry out the same feature-level comparison. Prefer t
 
 ## First order and when to test
 
-Quote one **SEN-19-006 GY-530**, one **DFR0954 MAX98357A amplifier**, and one **Challenge CS20-02P110-04-1X speaker**. The first range check can use the owned WROOM and Pololu’s direct single-sensor example. Buy documented compatible parts after checking exact identity, quantity, availability, and delivered cost. Test and calibrate ordinary add-ons after delivery. Validate safe stopping, independent motor cutoff, and protected charging before using those functions.
+If a sample is needed, quote one **SEN-19-006 GY-530**, one **DFR0954 MAX98357A amplifier**, and one **Challenge CS20-02P110-04-1X speaker** as applicable. Use the owned WROOM and Pololu’s direct single-sensor example for the range check. Keep the full quantities and the remaining order lines visible while evaluating samples. Confirm identity, quantity, availability, and delivered cost for compatible parts before ordering. Schedule ordinary add-on calibration after delivery. Validate safe stopping, independent motor cutoff, and protected charging before using those functions.
 
 ## Confirm reuse and choose the drive
 
 - [ ] **Confirm the base inventory.** Allocate one paid XIAO ESP32S3 Sense, one WROOM, one 0.96-inch SSD1306, two positional MG90S for lift and grip, one MPU6050, one AT42QT1010, one MAX30102, one reed module, one PIR, one BMP280, one FIT0774 motor, and one suitable Feather nRF52840. Check board and accessory condition before counting an item as usable. Record the $13.67 Sense payment once and reconcile the remaining prior payments and refunds. Add a replacement order line only for a confirmed shortfall.
-- [ ] **Choose one track drive.** Compare two owned 28BYJ-48 motors with two owned ULN2003 drivers against two suitable DC gearmotors and the owned DRV8833. Check the existing CAD, load and speed requirements, and published motor and driver ratings. Publish the selected motor and driver, rated power leads, exact independent cutoff parts, wiring, mounts, and normal WROOM build profile. Verify the power design against that choice and leave the unused path outside the cart.
+- [ ] **Choose one track drive.** Compare two owned 28BYJ-48 motors with two owned ULN2003 drivers against two suitable DC gearmotors and the owned DRV8833. Check the existing CAD, load and speed requirements, and published motor and driver ratings. Select the lowest delivered-cost option that satisfies fit, load, speed, and independent cutoff requirements. Publish the selected motor and driver, rated leads, exact cutoff parts, wiring, mounts, encoders, and normal WROOM build profile. Use only that option to size the power system and count purchase quantities.
 
 ## Robot electronics and interaction
 
 | Role and qty | Check off when the agent finishes this |
 | --- | --- |
-| `cliff_obstacle` ×8 | Start with one ElectroPeak **SEN-19-006** and quote the matching seven separately. Record the exact board revision, headers, lens dimensions, and documented 3.3 V connections. Use the existing Pololu example for the one-sensor check and the normal eight-lane firmware for integration. [Part or design reference](https://electropeak.com/gy-530-vl53l0x-laser-range-finder) · [Pololu single-sensor example](https://github.com/pololu/vl53l0x-arduino/blob/master/examples/Single/Single.ino) |
+| `cliff_obstacle` ×8 | Quote all eight matching ElectroPeak **SEN-19-006** carriers. Record the exact board revision, headers, lens dimensions, and documented 3.3 V connections. If the carrier needs an evaluation, use one sample with the existing Pololu example. Use the normal eight-lane firmware for integration. [Part or design reference](https://electropeak.com/gy-530-vl53l0x-laser-range-finder) · [Pololu single-sensor example](https://github.com/pololu/vl53l0x-arduino/blob/master/examples/Single/Single.ino) |
 | `i2c_mux` ×2 | Quote two documented TCA9548A boards with usable address settings for `0x70` and `0x71`. Start with **BOB-16784** and include required Qwiic-to-header leads and channel wiring. Compare equivalent documented boards and confirm any cheaper listing's exact silicon and pinout. [Part or design reference](https://www.sparkfun.com/sparkfun-qwiic-mux-breakout-8-channel-tca9548a.html) |
 | `amp` ×1 | Quote **DFRobot DFR0954**, MAX98357A I²S mono. Include its power and speaker connection hardware and use the existing Sense audio path. Compare the delivered pair with the speaker from the same distributor. [Part or design reference](https://www.digikey.com/en/products/detail/dfrobot/DFR0954/18069273) |
 | `speaker` ×1 | Quote **Challenge CS20-02P110-04-1X**, 8 Ω, 2 W, 20 × 16 × 4.7 mm. Include lead and enclosure details needed for fit. [Part or design reference](https://www.digikey.com/en/products/detail/challenge-electronics/CS20-02P110-04-1X/30407069) |
@@ -88,23 +96,44 @@ Treat the protected cell, recommended charger and regulator, DC alternative, doc
 
 ## Implement and release the order list
 
-- [ ] **Make every feature usable through its existing owner.** Map all selected electronics to firmware, setting, and relevant integration test. Map passive parts to wiring or CAD. Close missing haptic, station, or other required feature paths through the normal firmware or agent configuration. Keep voice interruption, camera-triggered initiative, lift and grip, local movement stops, and dock interlocks in the acceptance checklist. Use documented open-source examples and fix related review findings already identified on the current PR.
-- [ ] **Generate the two actual shopping lists.** Reconcile owned and paid parts against the quantities. Fill every buy line with exact order quantity, package contents, dated seller availability, current price, and delivered charges. Compare documented alternatives where they save material cost or fix availability. Recalculate the $50 delivered total from real prior payments and all seller charges. Document the smallest verified gap if the cheapest complete compatible cart exceeds the cap. Finish the independent work while waiting for a missing quote or needed measurement.
-- [ ] **Prove the two stages through the normal entry points.** Print the exact first order for compatible modules that can be bought and calibrated afterward. Keep safe movement, charging and complete assembly acceptance tied to their own evidence. Use the normal software builds, shopping commands, and receipt check. Deliver the exact cart and link each supporting record once, or name the unresolved line and the specific evidence needed to close it.
+### Make every selected part usable
+
+Map each electronic part to its normal firmware build, configuration, and integration test. Map each passive part to the exact connection or CAD location. Follow the existing WROOM, Sense, dock, station, and Mac paths. Fix missing or disabled required features through those paths. Verify ordinary-speech interruption, camera-triggered initiative, lift and grip, independent stops, and dock interlocks in the applicable tests. Check related review feedback and record its resolution with the change or evidence.
+
+### Generate one cart from the existing register
+
+Use the [procurement generator](../../code/scripts/procurement_release.py) with the existing hardware register and the first-unit evidence. Keep one source for quantities. Extend the existing first-unit Markdown and JSON output if the current projection is missing fields needed for checkout. Keep the fleet projection and the strict release commands intact.
+
+For each role, include its assembly and feature, exact manufacturer and seller SKU, required units, confirmed usable stock, pending deliveries, and quantity to order. Include the package contents, required accessories, seller link, quote date, availability at the required quantity, and price. Link the compatibility evidence for voltage, signal levels, current, and fit as applicable. Link its implementation, wiring, or CAD evidence.
+
+Give each line a disposition that the buyer can act on:
+
+- **Reuse** when the identified, usable stock covers the required quantity.
+- **Order** for the verified shortfall when the exact variant, compatibility, availability, and current delivered quote are documented. List any post-delivery calibration with the corresponding commissioning step.
+- **Hold** when a part selection, inspection, quote, or essential compatibility check is still open. Name the missing fact, who can provide it, and the smallest check that settles it. Continue work on independent lines.
+- **Deferred** for a documented optional role with zero order quantity. Record the decision and its scope.
+
+### Calculate delivered cost and resolve the budget
+
+Use the existing [landed-cost calculator](../../code/scripts/landed_cost.py) with `costs.scope` set to `first_robot`. Verify price and stock for the actual quantity at each seller. Check bundle contents, minimum quantities, and combined shipments before totaling item prices, shipping, tax, duties, and discounts. Count bundled items and paid orders once. Keep original invoices and payment statements private and use the existing evidence references for review.
+
+Show **amount due now**, **cumulative cost including prior spending**, and **headroom or overage against $50**. Mark missing charges explicitly and identify any subtotal as partial. If the least expensive verified compatible cart exceeds $50, include the complete cart and exact overage for the owner to decide. Record any accepted budget change before applying it to the strict release check. Keep the accepted features in the calculation.
 
 ## Verify the result and hand off
 
-For each role, record which requirement it serves, exact SKU, quantity, included accessories, pinout, voltage, current, mounting dimensions, open-source example, and code or wiring owner. Verify that required features run through the normal firmware configuration. Run builds and targeted integration tests. Record calibration and powered-assembly evidence separately from supplier and software evidence.
-
-Get real seller totals including shipping, tax, duties, discounts, and every known prior payment. Compare reusable stock and cheaper documented equivalents where they affect cost or availability. Keep the exact choices and the two shopping lists in the existing project records. If the cheapest verified complete cart exceeds $50, give the exact shortfall and the main costs. If any quote or measurement is still missing, specify the exact line, the evidence that closes it, and who can provide it.
-
-Run the existing commands from the live PR checkout. Use real evidence for the strict assembly-ready release check. The preview and sample cart are not checkout authorization. If strict release exits with a nonzero status, retain HOLD; never substitute a preview or historical quote for released evidence.
+Run the full list and cost views from the live PR checkout. Run the sample view when a sample affects a selection. In the evidence commands, set `evidence` to the actual private operator JSON path.
 
 ```sh
 python3 -B code/scripts/procurement_release.py --format first-robot-markdown
 python3 -B code/scripts/procurement_release.py --format pilot-cart-markdown
-python3 -B code/scripts/procurement_release.py --format pilot-landed-cost-markdown
-python3 -B code/scripts/procurement_release.py --format first-robot-markdown --evidence PATH_TO_REAL_EVIDENCE --require-first-robot
+evidence='/absolute/path/to/private-checkout-evidence.json'
+python3 -B code/scripts/procurement_release.py --evidence "$evidence" --format first-robot-markdown
+python3 -B code/scripts/procurement_release.py --evidence "$evidence" --format landed-cost-markdown
+python3 -B code/scripts/procurement_release.py --evidence "$evidence" --format first-robot-markdown --require-first-robot
 ```
 
-Finish with the two builder lists, delivered-cost calculation, and evidence for how each selected part is used. Record the verified revision and related review outcomes. Purchasing, external messages, and publishing require the applicable authorization.
+1. **Reconcile every role.** Check the generated cart against every parent role and linked decision. Verify that it covers one robot, one dock, and one station. Review quantities and delivered totals against the seller evidence. Confirm that only the selected drivetrain is charged and that paid stock and kit contents are counted once.
+2. **Exercise the shopping rules.** If the generator changes, test a complete cart, a wrong seller variant, a stale quote, an inventory shortfall, duplicate kit contents, unknown shipping, and a complete cart above $50. Check that a pending calibration leaves an independently compatible line orderable and that missing essential compatibility evidence holds the affected line.
+3. **Recheck the source.** For implementation changes, run the affected tests through the normal entry points. Verify the Mac, Python and head host, body C++ sanitizer, WROOM, and Sense jobs at the exact revision used for strict release. Diagnose failed jobs before claiming a pass and record the revision and run links. [Verification ledger](../records/verification.md)
+4. **Record commissioning separately.** Include fitted calibration, current and thermal checks, independent motor cutoff, measured edge stopping, and protected charging and docking in the build handoff. Keep the strict release on HOLD if the command fails. Record which assembly and revision each physical receipt covers. [Assembly and commissioning guide](../guides/one-complete-robot.md)
+5. **Give the owner one checkout decision.** Hand off the complete generated reuse and order lists, the verified delivered total, and any exact budget overage. If the whole order is held, give the owner the affected lines and the evidence needed to clear each one. Mark the whole cart ready to order only after every required role is covered and the owner has resolved the budget. The current preview and sample commands provide planning evidence. Use the strict command and real receipts to report strict release approval.
