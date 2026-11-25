@@ -171,16 +171,16 @@ bool OpticsValid(cJSON* json) {
 }
 
 
-bool PoseWireByteValid(bool& pending_cr, uint8_t byte) {
+bool BodyWireByteValid(bool& pending_cr, uint8_t byte) {
     // CR is allowed only immediately before LF, not inside JSON or error text.
     if (pending_cr && byte != '\n') return false;
     pending_cr = byte == '\r';
     return true;
 }
 
-bool PoseWireValid(const std::string& line) {
+bool BodyWireValid(const std::string& line) {
     // cJSON C strings truncate escaped NUL in both keys and values.
-    // Pose v1 has no free-text fields, so this spelling is never needed.
+    // The body wire protocol never needs embedded NUL in a reply.
     return line.find("\\u0000") == std::string::npos;
 }
 
@@ -452,16 +452,18 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
         uart_wait_tx_done(kUart, pdMS_TO_TICKS(30)) != ESP_OK) return {503, false, "body UART write failed"};
     const auto deadline = esp_timer_get_time() + kTimeoutMs * 1000;
     std::string line;
-    bool pose_cr_pending = false;
+    bool body_cr_pending = false;
     while (esp_timer_get_time() < deadline) {
         if (urgent_stop_gate_.preempts(urgent))
             return {503, false, "body response superseded by urgent stop"};
         uint8_t c = 0;
         if (uart_read_bytes(kUart, &c, 1, pdMS_TO_TICKS(10)) != 1) continue;
-        if (command.verb == "pose" && !PoseWireByteValid(pose_cr_pending, c))
+        if (!BodyWireByteValid(body_cr_pending, c))
             return {503, false, "malformed body response"};
         if (c == '\r') continue;
         if (c == '\n') {
+            if (!BodyWireValid(line))
+                return {503, false, "malformed body response"};
             // Old WROOM builds reject this new read-only verb explicitly.
             if (command.verb == "pose" && line == "ERR input unknown_command")
                 return {501, false, "pose unsupported by body firmware"};
@@ -470,8 +472,6 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
             if (command.verb == "status" || command.verb == "aux" ||
                 command.verb == "ir" || command.verb == "optics" ||
                 command.verb == "pose") {
-                if (command.verb == "pose" && !PoseWireValid(line))
-                    return {503, false, "malformed or unsupported pose response"};
                 auto json = Parse(line);
                 if (json && (command.verb == "status" ?
                              StatusValid(json.get()) : command.verb == "aux" ?
