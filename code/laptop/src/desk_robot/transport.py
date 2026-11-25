@@ -13,6 +13,9 @@ from .dock_ir import validate_ir
 from .spatial_pose import PoseError, PoseFence, PoseReceipt
 from .tof_optics import validate_optics
 
+# HTTPX timeouts are per I/O phase, not a whole finite response deadline.
+_REQUEST_DEADLINE_SECONDS = 3.0
+
 # Sense emits signed int64 esp_timer_get_time() microseconds in both camera routes.
 _MAX_CAMERA_COMPLETE_US = (1 << 63) - 1
 # Bound time without a complete JPEG, not merely time without network bytes.
@@ -237,19 +240,20 @@ class HttpHead:
 
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         try:
-            response = await self.client.request(
-                method,
-                self.config.head_url.rstrip("/") + path,
-                headers={"Authorization": f"Bearer {secret(self.config.token_env)}"},
-                timeout=httpx.Timeout(3, connect=1),
-                # Never inherit shared-client redirect behavior for a
-                # device bearer or a physical command recipient.
-                follow_redirects=False,
-                **kwargs,
-            )
+            async with asyncio.timeout(_REQUEST_DEADLINE_SECONDS):
+                response = await self.client.request(
+                    method,
+                    self.config.head_url.rstrip("/") + path,
+                    headers={"Authorization": f"Bearer {secret(self.config.token_env)}"},
+                    timeout=httpx.Timeout(3, connect=1),
+                    # Never inherit shared-client redirect behavior for a
+                    # device bearer or a physical command recipient.
+                    follow_redirects=False,
+                    **kwargs,
+                )
             response.raise_for_status()
             return response
-        except (httpx.HTTPError, ValueError) as exc:
+        except (httpx.HTTPError, ValueError, TimeoutError) as exc:
             raise HeadError(f"{self.config.id}: head request failed; no retry: {exc}") from exc
 
     async def _ordered_command(
