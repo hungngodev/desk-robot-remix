@@ -111,7 +111,9 @@ async def test_scene_comparator_unhashable_model_kind_is_rejected_without_crash(
     from PIL import Image
 
     image = BytesIO()
-    Image.new("RGB", (16, 16), (100, 100, 100)).save(image, "JPEG")
+    source = Image.new("RGB", (16, 16), (100, 100, 100))
+    source.paste((220, 220, 220), (8, 0, 16, 16))
+    source.save(image, "JPEG")
     frame = image.getvalue()
 
     class Response:
@@ -127,8 +129,10 @@ async def test_scene_comparator_unhashable_model_kind_is_rejected_without_crash(
 
     class Client:
         kind = invalid_kind
+        calls = 0
 
         async def post(self, *args, **kwargs):
+            self.calls += 1
             return Response()
 
     client = Client()
@@ -136,8 +140,10 @@ async def test_scene_comparator_unhashable_model_kind_is_rejected_without_crash(
     # Model JSON data may contain a non-string kind; no observer task should
     # terminate because Python cannot hash an array or object.
     assert await scene.compare(frame, frame) is None
+    assert client.calls == 1  # Must reach parser, not fail image quality first.
     client.kind = "person"
     change = await scene.compare(frame, frame)
+    assert client.calls == 2
     assert change is not None
     assert change.kind == "person"
     assert change.confidence == 0.95
