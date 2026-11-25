@@ -36,6 +36,7 @@ from .dock_evidence import DockContactInhibit
 from .expression_policy import model_mood_event, reserve_face_cue
 from .habituation import HabituationWindow
 from .handling import HandlingGate
+from .initiative_policy import cooldown_pending, event_cooldown, quiet_voice_veto, receipt_veto
 from .memory import CameraProvenance, MemoryStore
 from .operations import _bounded_head_reply
 from .sensor_event_contract import (
@@ -2841,7 +2842,9 @@ class PetController:
         if (
             not self.voice_monitor_ready
             or self._human_active_in_fleet(now)
-            or now - self._group_last_spoken < self.speech_cooldown
+            or cooldown_pending(
+                now=now, last=self._group_last_spoken, interval=self.speech_cooldown,
+            )
             or self.conversation.active is not None
             or (self._speech_task is not None and not self._speech_task.done())
         ):
@@ -2906,19 +2909,14 @@ class PetController:
         # Physical events, like camera receipts, may wait for SQLite or
         # peer fanout. Never let persistence renew the initiative lifetime.
         offered_at = received_at if received_at is not None else now
-        if (type(offered_at) not in (int, float)
-                or not 0 <= now - offered_at <= self.max_observation_age):
+        veto = receipt_veto(
+            now=now, offered_at=offered_at, max_age=self.max_observation_age,
+            quiet_changed_at=state.quiet_changed_at,
+            latest_human_turn=getattr(self.multimodal, "latest_fleet_human_turn_at", None),
+        )
+        if veto is not None:
             state.suppressed += 1
-            state.last_initiative_suppression = "event_expired_before_admission"
-            return
-        if offered_at < state.quiet_changed_at:
-            state.suppressed += 1
-            state.last_initiative_suppression = "quiet_transition_superseded_event"
-            return
-        latest = getattr(self.multimodal, "latest_fleet_human_turn_at", None)
-        if callable(latest) and latest() > offered_at:
-            state.suppressed += 1
-            state.last_initiative_suppression = "human_turn_superseded_event"
+            state.last_initiative_suppression = veto
             return
         if not _initiative_evidence(change):
             state.suppressed += 1
@@ -2976,18 +2974,22 @@ class PetController:
                 state.suppressed += 1
                 state.last_initiative_suppression = "repeated_camera_scene"
                 return
-        relevant_cooldown = (
-            min(self.speech_cooldown, self.interaction_cooldown)
-            if not camera_derived and change.kind in _DIRECT_INTERACTION_KINDS
-            else self.speech_cooldown
+        relevant_cooldown = event_cooldown(
+            camera_derived=camera_derived,
+            direct_interaction=change.kind in _DIRECT_INTERACTION_KINDS,
+            speech_interval=self.speech_cooldown,
+            interaction_interval=self.interaction_cooldown,
+        )
+        quiet_veto = quiet_voice_veto(
+            local_quiet=state.quiet, scheduled_quiet=scheduled_quiet,
+            human_active=lambda: self._human_active_in_fleet(now),
         )
         if (
-            state.quiet or scheduled_quiet
-            or self._human_active_in_fleet(now)
-            or now - previous < self.group_window
-            or now - self._group_last_spoken < relevant_cooldown
+            quiet_veto
+            or cooldown_pending(now=now, last=previous, interval=self.group_window)
+            or cooldown_pending(now=now, last=self._group_last_spoken, interval=relevant_cooldown)
         ):
-            if state.quiet or scheduled_quiet or self._human_active_in_fleet(now):
+            if quiet_veto:
                 self._clear_deferred_speech(state)
             state.suppressed += 1
             state.last_initiative_suppression = "quiet_voice_or_group_budget"
