@@ -339,8 +339,14 @@ def export_kit(
     # No incomplete candidate part gets published if any SCAD render fails.
     with tempfile.TemporaryDirectory(prefix="desk-fit-", dir=out) as folder:
         stage = Path(folder)
+        # Render only the bytes whose digest is recorded. The six current
+        # SCAD sources are standalone (no external includes/imports).
+        snapshots = {source: source.read_bytes() for _, source, _ in sources}
         for kind, source, parts in sources:
-            source_bytes = source.read_bytes()
+            source_bytes = snapshots[source]
+            staged_source = stage / "source_snapshot" / source.relative_to(source_dir)
+            staged_source.parent.mkdir(parents=True, exist_ok=True)
+            staged_source.write_bytes(source_bytes)
             scad_digest = sha256(source_bytes).hexdigest()
             license_evidence = source_license_evidence(source_bytes)
             for name in parts:
@@ -349,7 +355,7 @@ def export_kit(
                 subprocess.run(
                     [
                         openscad, "--hardwarnings", "--export-format", "binstl", "-o",
-                        str(target), "-D", f'part="{name}"', str(source),
+                        str(target), "-D", f'part="{name}"', str(staged_source),
                     ],
                     check=True, capture_output=True, text=True, timeout=180,
                 )
@@ -373,6 +379,11 @@ def export_kit(
                         *DOCKS,
                     ),
                 })
+        # A concurrent CAD edit invalidates this candidate, even though all
+        # of its staged meshes remain tied to their original source bytes.
+        for source, source_bytes in snapshots.items():
+            if source.read_bytes() != source_bytes:
+                raise ValueError(f"SCAD source changed during export: {source.name}")
         for entry in rendered:
             relative = Path(entry["location"])
             destination = out / relative

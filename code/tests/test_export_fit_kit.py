@@ -1498,3 +1498,37 @@ def test_exact_stl_volume_preserves_binary32_orientation(tmp_path, shift, size):
     path.write_bytes(_tetra_with_vertices(vertices, inverted=True))
     with pytest.raises(ValueError, match="Inverted or zero-volume"):
         module().closed_mesh_edges(path)
+
+
+def test_export_renders_pinned_source_and_aborts_on_concurrent_edit(tmp_path, monkeypatch):
+    source = module()
+    folder = tmp_path / "docs/cad/remixes"
+    (folder / "dock").mkdir(parents=True)
+    for name in (
+        "one_robot_adapter_kit.scad", "remaining_fit_gauges.scad",
+        "speaker_rect_fit_gauge.scad", "vl53l0x_gy530_fit_gauge.scad",
+        "mg90s_pocket_fit_gauges.scad", "dock/dock_passive_fit.scad",
+    ):
+        (folder / name).write_bytes(b"cube([1,1,1]);\n")
+    original = folder / "one_robot_adapter_kit.scad"
+    original_bytes = original.read_bytes()
+    monkeypatch.setattr(source.shutil, "which", lambda _: "/usr/bin/openscad")
+    calls = []
+
+    def edit_during_render(command, **_kwargs):
+        staged = Path(command[-1])
+        assert staged != original
+        assert staged.read_bytes() == original_bytes
+        if not calls:
+            original.write_bytes(b"cube([9,9,9]);\n")
+        calls.append(staged)
+        Path(command[command.index("-o") + 1]).write_bytes(tetra_stl())
+
+    monkeypatch.setattr(source.subprocess, "run", edit_during_render)
+    output = tmp_path / "rendered"
+    with pytest.raises(ValueError, match="SCAD source changed during export"):
+        source.export_kit(tmp_path, output_dir=output)
+    assert len(calls) == 23
+    assert original.read_bytes() != original_bytes
+    assert not list(output.rglob("*.stl"))
+    assert not (output / "fit_kit_manifest.json").exists()
