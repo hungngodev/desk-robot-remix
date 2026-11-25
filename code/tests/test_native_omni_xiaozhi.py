@@ -9731,7 +9731,7 @@ async def test_native_five_buffered_camera_streams_yield_to_mic(native):
 
     workers = [
         asyncio.create_task(session._camera_stream(Mac(session, done)))
-        for session, done in zip(sessions, drained)
+        for session, done in zip(sessions, drained, strict=True)
     ]
 
     async def mic_producer():
