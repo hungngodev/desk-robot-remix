@@ -11,7 +11,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from .dock_vision import DockCameraCalibration
+from .dock_vision import DockCameraCalibration, _finite_number
 
 
 class ProjectionError(ValueError):
@@ -56,7 +56,7 @@ class FloorProjectionCalibration:
             ("min_downward_ray", 0.1, 0.95),
         ):
             value = getattr(self, name)
-            if (type(value) not in (float, int) or not math.isfinite(value)
+            if (not _finite_number(value)
                     or not lo <= value <= hi):
                 raise ProjectionError(f"Invalid measured camera {name}")
         if (type(self.valid_pixel_roi) is not tuple or len(self.valid_pixel_roi) != 4
@@ -74,7 +74,7 @@ class FloorProjectionCalibration:
             raise ProjectionError("Visible floor crop exceeds measured resolution")
         for bounds in (self.valid_forward_mm, self.valid_lateral_mm):
             if (type(bounds) is not tuple or len(bounds) != 2
-                    or any(type(v) not in (float, int) or not math.isfinite(v)
+                    or any(not _finite_number(v)
                            for v in bounds) or bounds[0] >= bounds[1]
                     or any(abs(v) > 5000 for v in bounds)):
                 raise ProjectionError("Invalid bounded calibrated floor region")
@@ -95,10 +95,10 @@ class FloorProjectionCalibration:
         if (type(image_width) is not int or type(image_height) is not int
                 or (image_width, image_height) !=
                 (self.lens.image_width_px, self.lens.image_height_px)
+                or type(camera_sensor_pid) is not str
                 or camera_sensor_pid != self.lens.camera_sensor_pid):
             raise ProjectionError("Live camera PID or resolution mismatches intrinsics")
-        if (type(u) not in (float, int) or type(v) not in (float, int)
-                or not math.isfinite(u) or not math.isfinite(v)
+        if (not _finite_number(u) or not _finite_number(v)
                 or not (self.valid_pixel_roi[0] <= u < self.valid_pixel_roi[2])
                 or not (self.valid_pixel_roi[1] <= v < self.valid_pixel_roi[3])):
             raise ProjectionError("Pixel outside calibrated visible floor crop")
@@ -113,12 +113,31 @@ class FloorProjectionCalibration:
                 [0, self.lens.fy, self.lens.cy],
                 [0, 0, 1],
             ], dtype=np.float64)
-            points = cv2.undistortPoints(
-                np.array([[[u, v]]], dtype=np.float64), mat,
-                np.array(self.lens.distortion_coeffs, dtype=np.float64),
-            )
-            right = float(points[0, 0, 0])
-            down = float(points[0, 0, 1])
+            distortion = np.array(self.lens.distortion_coeffs, dtype=np.float64)
+            try:
+                points = cv2.undistortPoints(
+                    np.array([[[u, v]]], dtype=np.float64), mat, distortion,
+                )
+                if (not isinstance(points, np.ndarray) or points.shape != (1, 1, 2)
+                        or points.dtype.kind != "f" or not np.isfinite(points).all()):
+                    raise ProjectionError("Invalid native lens undistortion result")
+                right, down = (float(x) for x in points[0, 0])
+                # OpenCV's default inverse is iterative and may return a
+                # finite but inaccurate result. Reproject the ray with the
+                # SAME lens before using it as a metric floor observation.
+                projected, _ = cv2.projectPoints(
+                    np.array([[right, down, 1.0]], dtype=np.float64),
+                    np.zeros(3), np.zeros(3), mat, distortion,
+                )
+            except ProjectionError:
+                raise
+            except (cv2.error, TypeError, ValueError, OverflowError) as exc:
+                raise ProjectionError("Native lens undistortion failed") from exc
+            if (not isinstance(projected, np.ndarray) or projected.shape != (1, 1, 2)
+                    or projected.dtype.kind != "f" or not np.isfinite(projected).all()
+                    or math.hypot(float(projected[0, 0, 0]) - u,
+                                  float(projected[0, 0, 1]) - v) > 0.5):
+                raise ProjectionError("Lens undistortion round trip exceeds 0.5 pixels")
         else:
             right = (u - self.lens.cx) / self.lens.fx
             down = (v - self.lens.cy) / self.lens.fy
