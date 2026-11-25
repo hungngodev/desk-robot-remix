@@ -121,7 +121,7 @@ def test_raw_contact_inhibition_precedes_optional_event_debounce():
         ),
         (
             "poll_optional",
-            "control.sample_bumper_input(digitalRead(body_pins::kBumperInput) == HIGH);",
+            "sample_raw_bumper();",
             "if (now_ms - last_extra_sample_ms < 25) return;",
         ),
     ):
@@ -130,6 +130,9 @@ def test_raw_contact_inhibition_precedes_optional_event_debounce():
         section = main.split(signature, 1)[1].split("\n}", 1)[0]
         assert section.index(raw) < section.index(delayed)
 
+    raw_bumper = main.split("bool sample_raw_bumper() {", 1)[1].split("\n}\n", 1)[0]
+    assert "control.sample_bumper_input(digitalRead(body_pins::kBumperInput) == HIGH);" in raw_bumper
+    assert "return control.state().bumper_raw;" in raw_bumper
     assert "sample_bumper_input((enabled_mask & 1U) != 0U && bumper);" in control
     # Raw HIGH remains an interlock even before the first debounce mask.
     assert "const bool bumper_hit = state_.bumper_raw ||" in control
@@ -191,17 +194,23 @@ def test_uart_and_output_paths_check_cpu_deadline_without_advancing_pulses():
     assert "if (advance)" in helper
     assert "motor_heartbeat.check_authority(millis(), allow_heartbeat)" in helper
     assert "control.motor_watchdog_trip();" in helper
-    assert loop.index("control.tick(millis());") < loop.index(
-        "enforce_motor_heartbeat(true);"
-    ) < loop.index("apply_outputs();")
+    heartbeat = loop.index("enforce_motor_heartbeat(true);")
+    assert loop.index("control.tick(millis());") < heartbeat
+    assert heartbeat < loop.index("apply_outputs();", heartbeat)
     assert outputs.index("control.tick(millis());") < outputs.index(
         "enforce_motor_heartbeat(false);"
     ) < outputs.index("write_motor_pair(")
     assert uart.index("enforce_motor_heartbeat(false);") < uart.index("receiver.feed(")
-    assert uart.index("apply_outputs();") < uart.index(
-        'ERR drive motor_watchdog_latched'
-    ) < uart.index("replies.enqueue_line(reply)")
-    assert 'ERR arm motor_watchdog_latched' in uart
+    veto = uart.index("desk_robot::MotionAckVeto::MotorWatchdogLatched")
+    assert uart.index("apply_outputs();  // apply accepted") < uart.index(
+        "if (completed && motor_heartbeat.missed_deadline())"
+    ) < veto < uart.index("replies.enqueue_line(reply)")
+    control = (BODY / "lib/BodyControl/BodyControl.cpp").read_text(encoding="utf-8")
+    formatter = control.split("void veto_motion_ack(", 1)[1].split("\n}\n", 1)[0]
+    assert '"motor_watchdog_latched"' in formatter
+    assert '"ERR %s %s", command, reason' in formatter
+    for command in ("arm", "drive"):
+        assert f'command = "{command}";' in formatter
     assert 'completed && local_usb && strcmp(reply, "OK rearm") == 0' in uart
 
 
