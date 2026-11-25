@@ -1281,7 +1281,7 @@ def read_overlay_journal(target: Path, marker: Path) -> dict:
         raise ValueError("Invalid head overlay journal")
     root = target.resolve()
     for name, info in state.items():
-        if (not isinstance(name, str) or not name.startswith("main/")
+        if (not isinstance(name, str) or not name.startswith(("main/", "scripts/"))
                 or "\\" in name or any(part in ("", ".", "..") for part in name.split("/"))
                 or not isinstance(info, dict)
                 or set(info) not in ({"sha256", "original"},
