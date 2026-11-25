@@ -240,6 +240,7 @@ class RoomStationDecoder:
         self._station_elapsed_ms = 0
         self._last_sensor_elapsed_ms: dict[str, int] = {}
         self._last_sensor_readings: dict[str, dict] = {}
+        self._last_sensor_receipts: dict[str, tuple[float, int]] = {}
         self._first_received_at: float | None = None
         self._last_received_at: float | None = None
 
@@ -303,12 +304,12 @@ class RoomStationDecoder:
         # or an intervening invalid reading. Stage all updates atomically.
         sensor_elapsed_ms = self._last_sensor_elapsed_ms.copy()
         sensor_readings = self._last_sensor_readings.copy()
+        sensor_receipts = self._last_sensor_receipts.copy()
         sensor_ages_ms: dict[str, int] = {}
         for sensor in SENSORS:
             reading = readings[sensor]
             if _valid_reading(sensor, reading, clock):
                 age = (clock - reading["sample_ms"]) & UINT32
-                sensor_ages_ms[sensor] = age
                 acquired = elapsed_ms - age
                 previous = sensor_elapsed_ms.get(sensor)
                 if previous is not None and acquired < previous:
@@ -316,11 +317,21 @@ class RoomStationDecoder:
                 if previous is not None and acquired == previous:
                     if reading != sensor_readings[sensor]:
                         raise ValueError(f"Contradictory {sensor} acquisition values")
+                    # A cached conversion cannot become younger merely because
+                    # the station clock lags the Mac receipt clock.
+                    first_at, first_age = sensor_receipts[sensor]
+                    elapsed = min((float(now) - first_at) * 1000, MAX_AGES_MS[sensor] + 1)
+                    age = max(age, first_age + round(elapsed))
                 else:
                     # Returned observations contain mutable dictionaries/lists.
                     # Keep a detached witness even if a consumer edits them.
                     sensor_readings[sensor] = deepcopy(reading)
+                    sensor_receipts[sensor] = (float(now), age)
                 sensor_elapsed_ms[sensor] = acquired
+                if age > MAX_AGES_MS[sensor]:
+                    readings[sensor] = {"valid": False}
+                else:
+                    sensor_ages_ms[sensor] = age
         # Invalid frames never mutate counter fences. A USB reconnect must
         # create a NEW decoder instance only after actual port reopening.
         if self._first_received_at is None:
@@ -330,6 +341,7 @@ class RoomStationDecoder:
         self._station_elapsed_ms = elapsed_ms
         self._last_sensor_elapsed_ms = sensor_elapsed_ms
         self._last_sensor_readings = sensor_readings
+        self._last_sensor_receipts = sensor_receipts
         self._last_received_at = float(now)
         return RoomObservation(
             seq, clock, float(now), readings,

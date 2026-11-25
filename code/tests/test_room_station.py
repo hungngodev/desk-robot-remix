@@ -1289,3 +1289,39 @@ async def test_room_disconnect_invalidates_shared_cache_and_rejects_old_epoch_re
     new_evidence = accept(frame(seq=1, clock=1000), now=1.5)
     hub.remember_room(new_evidence, epoch=runtime._room_connection_epoch)
     assert hub.shared_room == new_evidence
+
+
+@pytest.mark.parametrize("sensor,first_age,limit", [
+    ("scd40", 500, 8500), ("bme688", 500, 3000), ("ld2410c", 0, 3000),
+    ("amg8833", 1000, 3000), ("soil", 500, 3000),
+])
+def test_cached_room_sample_cannot_renew_host_age(sensor, first_age, limit):
+    decoder = RoomStationDecoder()
+    first = frame(1, 5000)
+    first["readings"]["soil"] = {"valid": True, "sample_ms": 5000, "raw_adc": 2048}
+    first["readings"][sensor]["sample_ms"] -= first_age
+    accept(first, decoder=decoder, now=10.0)
+
+    repeated = frame(2, 5001)
+    repeated["readings"][sensor] = first["readings"][sensor]
+    boundary = 10.0 + (limit - first_age) / 1000
+    observation = accept(repeated, decoder=decoder, now=boundary)
+    assert observation.sensor_ages_ms[sensor] == limit
+
+    missing = frame(3, 5002)
+    missing["readings"][sensor] = {"valid": False}
+    accept(missing, decoder=decoder, now=boundary + 0.001)
+    replay = frame(4, 5003)
+    replay["readings"][sensor] = first["readings"][sensor]
+    expired = accept(replay, decoder=decoder, now=boundary + 0.002)
+    assert expired.readings[sensor] == {"valid": False}
+    assert sensor not in expired.sensor_ages_ms
+    other = "bme688" if sensor == "scd40" else "scd40"
+    assert expired.readings[other]["valid"] is True
+    assert expired.sensor_ages_ms[other] == 0
+
+    current = frame(5, 5004)
+    current["readings"]["soil"] = {"valid": True, "sample_ms": 5004, "raw_adc": 2048}
+    recovered = accept(current, decoder=decoder, now=boundary + 0.003)
+    assert recovered.readings[sensor]["valid"] is True
+    assert recovered.sensor_ages_ms[sensor] == 0
