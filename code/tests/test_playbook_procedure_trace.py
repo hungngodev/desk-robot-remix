@@ -61,6 +61,25 @@ def _valid_manual_review(record, sha):
     )
 
 
+def _valid_ci_receipt_url(url):
+    if not isinstance(url, str) or any(ord(ch) <= 32 or ord(ch) == 127 for ch in url):
+        return False
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and parsed.netloc == "github.com"
+        and not parsed.query
+        and not parsed.fragment
+        and re.fullmatch(
+            r"/hungngodev/desk-robot-remix/actions/runs/[1-9][0-9]{0,19}",
+            parsed.path,
+        ) is not None
+    )
+
+
 def _valid_release_evidence(record):
     if record.get("evidence_class") not in EVIDENCE_CLASSES:
         return False
@@ -86,9 +105,7 @@ def _valid_release_evidence(record):
             or test["exit_code"] != 0
             or not isinstance(test.get("command"), str)
             or test["command"] != record["verification_command"]
-            or not isinstance(test.get("url"), str)
-            or not test["url"].startswith(
-                "https://github.com/hungngodev/desk-robot-remix/")):
+            or not _valid_ci_receipt_url(test.get("url"))):
         return False
     if record["gate"] in {"MEASURED", "QUALIFIED"}:
         measured = record["physical_measurement_receipt"]
@@ -297,3 +314,25 @@ def test_later_physical_record_requires_explicit_source_and_digest():
     assert _valid_release_evidence(row)
     measured["source_sha"] = "b" * 40
     assert not _valid_release_evidence(row)
+
+@pytest.mark.parametrize("url", [
+    "https://github.com/hungngodev/desk-robot-remix/",
+    "https://github.com/hungngodev/desk-robot-remix/pull/17",
+    "https://github.com/hungngodev/desk-robot-remix/actions/runs/0",
+    "https://github.com/hungngodev/desk-robot-remix/actions/runs/01",
+    "https://github.com/hungngodev/desk-robot-remix/actions/runs/1?attempt=2",
+    "https://github.com/hungngodev/desk-robot-remix/actions/runs/1#jobs",
+    "https://github.com/hungngodev/desk-robot-remix/actions/runs/123456789012345678901",
+    "https://github.com/hungngodev/desk-robot-remix/actions/runs/1\n",
+    "https://[broken",
+    None,
+])
+def test_invalid_ci_receipt_url_cannot_promote_ledger(url):
+    row = _physical_receipt_fixture()
+    row["executed_test_receipt"]["url"] = url
+    assert not _valid_release_evidence(row)
+
+
+def test_valid_ci_receipt_url_is_structural_only():
+    assert _valid_ci_receipt_url("https://github.com/hungngodev/desk-robot-remix/actions/runs/1")
+
