@@ -84,6 +84,37 @@ a latched SDA-low bus may require power reset rather than software
 recovery. Failing closed stops wheels, but does not make a hung mux
 self-recovering.
 
+### RESET, address straps and brownout acceptance
+
+Both selected muxes have active-low RESET passively pulled up to their
+3.3 V supply; `BodyPins.h` sets `kMuxReset = -1`. GPIO4 is reserved by
+project policy, not a silicon strapping pin. RANGE 0x70 uses A2/A1/A0
+LOW; ACCESSORY 0x71 uses A2/A1 LOW and A0 HIGH. Verify the actual
+breakout straps, RESET pullups and addresses with actuator power isolated.
+
+TI SCPS207H sections 7.4.1–7.4.2 and 8.3.1 explain RESET and supply
+sequencing. A valid mux reset clears its channel mask; it does not reset
+the attached sensors. A WROOM-only restart need not reset either mux, and
+a brief supply dip need not produce a valid mux power-on reset. The
+firmware checks mux control masks and latches observed bus faults. Its
+bounded clock-clear cannot isolate a permanently held downstream line
+through a mux that cannot accept a write. With no driven RESET, persistent
+faults require a local, motor-inhibited recovery and a verified power cycle
+of the affected circuitry. A failed startup is not repaired by the normal
+range polling loop. Do not treat restored SDA/SCL or a mux ACK as proof
+that a sensor retained configuration or that movement can resume.
+
+With actuator power disconnected, capture both mux VCC/RESET and upstream
+SDA/SCL across cold start, WROOM-only reset, separate mux supply interruption,
+and representative load-induced droop. Verify the actual supply fall,
+low interval and rise against TI Figure 8-5/Table 8-1; check for unintended
+back-power through signal connections. Exercise each mux with a selected
+lane and with no lane selected, including a persistent SDA/SCL hold.
+Record mask readbacks, sensor reacquisition, guard latch and the deliberate
+local rearm after a fresh complete critical sweep. A successful host fake
+or recovered bus is not proof of these electrical conditions. Keep the
+physical release HOLD until the captures exist.
+
 This script deliberately returns physically qualified FALSE even when
 an illustrative RC calculation passes. The central purchasing source
 requires the independent fleet receipt

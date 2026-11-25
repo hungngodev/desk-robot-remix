@@ -794,6 +794,42 @@ int main() {
       }
     }
     {
+      // A WROOM-only restart need not clear the mux control registers.
+      // Start with either retained lane, not the fake's default zero masks.
+      for (const bool accessory_retained : {false, true}) {
+        Wire = TwoWire{};
+        fake_i2c_lines() = FakeI2cLines{};
+        if (accessory_retained) Wire.extras = 1;
+        else Wire.ranges = 16;
+        desk_robot::TofBus bus;
+        CHECK(bus.begin(21, 22, -1));
+        CHECK(Wire.ranges == 0 && Wire.extras == 0);
+        CHECK(!Wire.unsafe_parallel_mux);
+      }
+    }
+    {
+      // Model an observed mux supply fault followed by power-on reset.
+      // A cleared control mask is not a fresh safety measurement.
+      Wire = TwoWire{};
+      fake_i2c_lines() = FakeI2cLines{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      Wire.ranges = 0;
+      Wire.extras = 0;
+      Wire.range_mux_write_nack = true;
+      const auto samples = Wire.tof_samples;
+      bus.poll(guard, 60);
+      CHECK(Wire.tof_samples == samples);
+      faulted(guard);
+      Wire.range_mux_write_nack = false;
+      CHECK(!guard.try_rearm(61));
+      for (std::uint32_t at = 61; at < 73; ++at) bus.poll(guard, at);
+      CHECK(!guard.evaluate(73));
+      CHECK(!Wire.unsafe_parallel_mux);
+      CHECK(guard.try_rearm(73));
+    }
+    {
       // A held SDA is not an ordinary NACK. Latch and invalidate BEFORE
       // touching GPIO; only a later poll clears the bus.
       Wire = TwoWire{};

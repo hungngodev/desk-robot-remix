@@ -158,7 +158,7 @@ def verify(plan: dict, body: str, head: str) -> None:
     if bus["body_gpio"]["head_uart_tx"] != 17 or bus["sense_gpio"]["head_uart_rx"] != 1:
         raise ValueError("Unexpected WROOM to XIAO UART link")
     if "constexpr int kMuxReset = -1;" not in body:
-        raise ValueError("Mux RESET must not use ESP32 strapping GPIO")
+        raise ValueError("Mux RESET must remain passive; no WROOM GPIO is allocated")
     if ("#define AUDIO_PDM_MIC_GPIO_SCK GPIO_NUM_42" not in head
             or "#define AUDIO_PDM_MIC_GPIO_DIN GPIO_NUM_41" not in head):
         raise ValueError("Stock XIAO PDM pins changed")
