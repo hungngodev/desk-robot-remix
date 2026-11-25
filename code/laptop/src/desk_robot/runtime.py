@@ -260,10 +260,16 @@ class Runtime:
             raise RuntimeError("Closed runtime cannot restart voice listeners")
         if self.settings.mode != "hardware" or self._voice_task is not None:
             return
-        if any(robot.dock_calibration is not None for robot in self.settings.robots):
+        if any(getattr(robot, "dock_calibration", None) is not None
+               for robot in self.settings.robots):
             from .dock_runtime import prewarm_detector_pool
 
             await prewarm_detector_pool()
+            # Prewarming yields: close or another start may have won ownership.
+            if self._closed:
+                raise RuntimeError("Closed runtime cannot restart voice listeners")
+            if self._voice_task is not None:
+                return
         # Visual consent enables a persistent feed independently of voice
         # activity or pet autostart. One Mac stream consumer per real head.
         # The pet still needs its separate opt-in to speak proactively.

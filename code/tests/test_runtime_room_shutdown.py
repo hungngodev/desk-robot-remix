@@ -441,3 +441,88 @@ def test_spatial_invalidation_failure_does_not_skip_fleet_shutdown(monkeypatch):
             await reader
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("close_during_warmup", [True, False])
+def test_runtime_start_rechecks_ownership_after_detector_warmup(
+    monkeypatch, close_during_warmup,
+):
+    """An awaited prewarm cannot reopen closed IO or orphan a second monitor."""
+    async def scenario():
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        voice_stop = asyncio.Event()
+        calls = []
+
+        async def warm():
+            calls.append("warm")
+            if len(calls) == (1 if close_during_warmup else 2):
+                entered.set()
+            await release.wait()
+
+        class Listener:
+            def __init__(self, *args, **kwargs):
+                calls.append("listener")
+
+            async def run(self):
+                await voice_stop.wait()
+
+        monkeypatch.setattr("desk_robot.dock_runtime.prewarm_detector_pool", warm)
+        monkeypatch.setattr("desk_robot.dock_runtime.close_detector_pool", AsyncMock())
+        monkeypatch.setattr("desk_robot.runtime.VoiceEventListener", Listener)
+        monkeypatch.setattr("desk_robot.runtime.secret", lambda name: "s" * 32)
+
+        runtime = Runtime.__new__(Runtime)
+        runtime.settings = SimpleNamespace(
+            mode="hardware", room_station_enabled=False,
+            robots=[SimpleNamespace(
+                id="robot-01", device_id="head01", dock_calibration="test",
+            )],
+            speech_bridge_url="http://127.0.0.1:8766",
+            speech_bridge_token_env="SPEECH_TOKEN", pet_autostart_enabled=False,
+        )
+        runtime._closed = False
+        runtime._voice_task = None
+        runtime._room_task = None
+        runtime._room_stop = asyncio.Event()
+        runtime._room_dispatch_lock = threading.Lock()
+        runtime._room_dispatch_pending = None
+        runtime.coordinator = SimpleNamespace(
+            close=AsyncMock(), shutdown_stop_failures={}
+        )
+        runtime.pet = SimpleNamespace(
+            close=AsyncMock(), set_voice_monitor_ready=lambda ready: None,
+        )
+        runtime.conversation = SimpleNamespace(
+            stop=AsyncMock(), speaker=SimpleNamespace(monitor_lost=AsyncMock()),
+        )
+        runtime.client = SimpleNamespace(aclose=AsyncMock())
+        runtime.multimodal = None
+
+        starts = [asyncio.create_task(runtime.start())]
+        if not close_during_warmup:
+            starts.append(asyncio.create_task(runtime.start()))
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            if close_during_warmup:
+                await runtime.close()
+            release.set()
+            results = await asyncio.wait_for(
+                asyncio.gather(*starts, return_exceptions=True), timeout=1,
+            )
+            if close_during_warmup:
+                assert isinstance(results[0], RuntimeError)
+                assert calls.count("listener") == 0
+                assert runtime._voice_task is None
+            else:
+                assert results == [None, None]
+                assert calls.count("listener") == 1
+                assert runtime._voice_task is not None
+        finally:
+            release.set()
+            voice_stop.set()
+            await asyncio.gather(*starts, return_exceptions=True)
+            if not runtime._closed:
+                await runtime.close()
+
+    asyncio.run(scenario())
