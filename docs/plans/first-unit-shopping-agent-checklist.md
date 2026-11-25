@@ -8,7 +8,7 @@ For each feature, prefer the component family people routinely use for that same
 
 Keep the local Mac and Xiaozhi behavior, Sense camera and mic, WROOM local safety, 0.96-inch monochrome SSD1306, fixed rounded head, tracked chassis, and two positional MG90S servos for lift and grip. Preserve ordinary-speech interruption, camera-triggered initiative, handling and touch responses, and safe pickup and placement. Keep all eight range positions, two muxes, the independent stopping inputs, and the MAX98357A and exact 8 Ω Challenge speaker. Keep each accepted add-on, the dedicated dock, and the read-only shared station.
 
-Fetch the live PR head and read its repository instructions and related review threads. Check existing code, purchasing decisions, and work in progress before starting a duplicate. Keep authorized code changes on an isolated branch. If another worker fixes a task, verify it and choose an open task. Keep working on independent items when a quote or measurement is pending.
+Fetch the live PR head and read its repository instructions and related review threads. Check existing code, purchasing decisions, and work in progress before starting a duplicate. Keep authorized code and documentation changes on the canonical PR #17 branch `impl/mac-hardware-safety-preflight-2026-11-10`. Refresh its live head and current file blobs before writing; do not create competing branches or overwrite concurrent changes. If another worker fixes a task, verify it and choose an open task. Keep working on independent items when a quote or measurement is pending.
 
 The November 23 projection at `7978bc6` contained **33 remaining purchase roles and 49 required slots** after conditional reuse. Refresh the quantities and source owners at the live head. [Accepted product definition](https://github.com/hungngodev/desk-robot-remix/blob/7978bc6b5e2c94dd5bac08d75276ac8aa75af64a/docs/product-definition.md) · [Hardware plan](https://github.com/hungngodev/desk-robot-remix/blob/7978bc6b5e2c94dd5bac08d75276ac8aa75af64a/docs/hardware/full-feature-plan.json) · [Role-to-source map](https://github.com/hungngodev/desk-robot-remix/blob/7978bc6b5e2c94dd5bac08d75276ac8aa75af64a/docs/hardware/full-63-role-source-ownership.json)
 
@@ -98,7 +98,7 @@ For each role, record which requirement it serves, exact SKU, quantity, included
 
 Get real seller totals including shipping, tax, duties, discounts, and every known prior payment. Compare reusable stock and cheaper documented equivalents where they affect cost or availability. Keep the exact choices and the two shopping lists in the existing project records. If the cheapest verified complete cart exceeds $50, give the exact shortfall and the main costs. If any quote or measurement is still missing, specify the exact line, the evidence that closes it, and who can provide it.
 
-Run the existing commands from the live PR checkout. Use real evidence for the strict assembly-ready release check.
+Run the existing commands from the live PR checkout. Use real evidence for the strict assembly-ready release check. The preview and sample cart are not checkout authorization. If strict release exits with a nonzero status, retain HOLD; never substitute a preview or historical quote for released evidence.
 
 ```sh
 python3 -B code/scripts/procurement_release.py --format first-robot-markdown
