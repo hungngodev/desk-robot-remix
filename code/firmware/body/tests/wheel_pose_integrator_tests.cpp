@@ -176,7 +176,30 @@ static void refuse_rotation_and_expired_imu_origin() {
     check(pose.state().origin == 0);
   }
 }
+static void refuse_future_wheel_acquisition() {
+  // The older wheel and IMU can be fresh while the other wheel is
+  // future-dated. Neither wheel ordering may create a stationary witness.
+  for (std::uint32_t base : {0U, 0xffffff90U}) {
+    for (bool reverse : {false, true}) {
+      WheelPoseIntegrator pose;
+      check(pose.configure(calibration()));
+      auto e = observed(1, base + 100);
+      if (reverse) {
+        e.wheel.left_ms = base + 110;
+        e.wheel.right_ms = base + 100;
+      }
+      check(!pose.observe(e, base + 105));
+      check(!pose.stationary_origin_ready());
+      // A rejected acquisition remains fenced even after time catches up.
+      check(!pose.observe(e, base + 110));
+      auto next = observed(2, base + 200);
+      check(pose.observe(next, base + 210));
+    }
+  }
+}
+
 int main() {
+  refuse_future_wheel_acquisition();
   refuse_rotation_and_expired_imu_origin();
   refuse_unqualified_and_reanchor();
   refuse_skew_stale_and_replay();

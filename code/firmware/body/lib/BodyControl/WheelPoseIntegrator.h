@@ -99,6 +99,7 @@ class WheelPoseIntegrator {
         w.skew_ms > limits_.max_pair_skew_ms ||
         skew(later, e.imu_at_ms) > limits_.max_imu_skew_ms ||
         now_ms - earlier > limits_.max_age_ms ||
+        now_ms - later > limits_.max_age_ms ||
         now_ms - e.imu_at_ms > limits_.max_age_ms ||
         static_cast<std::uint64_t>(e.imu_error_urad) +
                 limits_.imu_alignment_error_urad >
