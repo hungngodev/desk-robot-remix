@@ -7,6 +7,7 @@ safety defaults. Never grants motor or charging rights directly.
 
 from __future__ import annotations
 
+import math
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -23,6 +24,7 @@ from .object_targets import (
     resolve_object_target,
 )
 from .route_planner import GridSnapshot, RouteRequest, RouteResult, SafetyEnvelope, plan_route
+from .spatial_frames import FrameError, PlanarTransform, odom_base_transform
 from .spatial_grid import CELL_MM, GridEvidenceError, RangeCellBatch, SpatialGrid
 from .spatial_memory import SpatialEvidence, SpatialMemory, SpatialSighting
 from .spatial_pose import PoseError, PoseFence, PoseReceipt
@@ -35,6 +37,7 @@ class RobotSpatialState:
     pose_fence: PoseFence
     grid: SpatialGrid | None = None
     last_navigation_pose: PoseReceipt | None = None
+    map_to_odom: PlanarTransform | None = None
     epoch: int = 1
     body_boot: int = 0
     origin_id: str = "unanchored"
@@ -76,6 +79,7 @@ class SpatialRuntime:
         state.invalidated_reason = reason
         state.pose_fence.invalidate(reason)
         state.last_navigation_pose = None
+        state.map_to_odom = None
         if state.grid is not None:
             state.grid.invalidate_origin(state.body_boot, f"reset-{state.epoch}")
             state.grid.epoch = state.epoch
@@ -98,12 +102,18 @@ class SpatialRuntime:
         envelope: SafetyEnvelope,
         ttl_us: int = 2_000_000,
         anchored: bool = False,
+        map_to_odom: PlanarTransform | None = None,
     ) -> SpatialGrid:
         """Bind a bounded per-robot occupancy grid for an identified origin and calibration."""
         state = self.states[robot_id]
         if (type(anchored) is not bool or type(camera_boot) is not int
                 or not 0 <= camera_boot <= 0xffffffff):
             raise ValueError("Invalid spatial anchor identity")
+        if map_to_odom is not None and (
+            type(map_to_odom) is not PlanarTransform
+            or (map_to_odom.parent, map_to_odom.child) != ("map", "odom")
+        ):
+            raise ValueError("Invalid map-to-odom localization transform")
         next_epoch = state.epoch + 1
         grid = SpatialGrid(
             robot_id,
@@ -123,6 +133,8 @@ class SpatialRuntime:
         state.calibration_id = calibration_id
         state.camera_boot = camera_boot
         state.envelope = envelope
+        state.map_to_odom = map_to_odom
+        state.last_navigation_pose = None
         state.invalidated_reason = None if anchored else "unanchored"
         grid.anchored = anchored
         state.grid = grid
@@ -179,6 +191,61 @@ class SpatialRuntime:
             raise PoseError("Pose origin, head boot or quality differs from anchored map")
         state.last_navigation_pose = receipt
         return receipt
+
+    def localized_pose_cell_heading(
+        self,
+        robot_id: str,
+        receipt: PoseReceipt,
+        *,
+        yaw_tolerance_rad: float = math.pi / 6,
+    ) -> tuple[tuple[int, int], int]:
+        """Project a validated PoseReceipt through map_to_odom into grid (cell, heading)."""
+        state = self.states[robot_id]
+        if (state.grid is None or not state.grid.anchored
+                or state.map_to_odom is None
+                or type(receipt) is not PoseReceipt
+                or receipt.robot_id != robot_id
+                or receipt.quality != "valid"
+                or (state.body_boot > 0 and receipt.body_boot != state.body_boot)
+                or str(receipt.origin) != state.origin_id
+                or receipt.head_boot != state.camera_boot):
+            raise PoseError("Map-localized pose unavailable")
+        try:
+            map_base = state.map_to_odom.compose(odom_base_transform(receipt))
+        except FrameError as exc:
+            raise PoseError("Invalid map-to-base pose transform") from exc
+        cell_x = math.floor(map_base.x_mm / CELL_MM)
+        cell_y = math.floor(map_base.y_mm / CELL_MM)
+        if not (0 <= cell_x < state.grid.width and 0 <= cell_y < state.grid.height):
+            raise PoseError("Localized pose outside anchored spatial grid")
+        heading = round(map_base.yaw_rad / (math.pi / 2)) % 4
+        if abs(math.remainder(map_base.yaw_rad - heading * (math.pi / 2), math.tau)) > yaw_tolerance_rad:
+            raise PoseError("Localized heading diverges from lattice orientation")
+        return (cell_x, cell_y), heading
+
+    def verify_pose_matches_route_state(
+        self,
+        robot_id: str,
+        receipt: PoseReceipt,
+        *,
+        expected_cell: tuple[int, int],
+        expected_heading: int,
+        yaw_tolerance_rad: float = math.pi / 6,
+    ) -> tuple[tuple[int, int], int]:
+        """Fail closed and invalidate map if observed localized pose diverges from route state."""
+        try:
+            actual = self.localized_pose_cell_heading(
+                robot_id, receipt, yaw_tolerance_rad=yaw_tolerance_rad,
+            )
+        except PoseError:
+            self.invalidate_robot(robot_id, reason="pose_odometry_divergence")
+            raise
+        if actual != (expected_cell, expected_heading):
+            self.invalidate_robot(robot_id, reason="pose_odometry_divergence")
+            raise PoseError(
+                f"Observed pose {actual} diverges from route state {(expected_cell, expected_heading)}"
+            )
+        return actual
 
     def record_range_batch(
         self, robot_id: str, batch: RangeCellBatch, *, now_us: int | None = None,

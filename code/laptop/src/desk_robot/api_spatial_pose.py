@@ -29,8 +29,8 @@ class NavigateRequest(BaseModel):
     label: str | None = Field(default=None, min_length=1, max_length=64)
     goal: tuple[GridCoordinate, GridCoordinate] | None = None
     goal_heading: GridHeading | None = None
-    start: tuple[GridCoordinate, GridCoordinate] = (0, 0)
-    heading: GridHeading = 0
+    start: tuple[GridCoordinate, GridCoordinate] | None = None
+    heading: GridHeading | None = None
 
 
 def register_spatial_pose_route(

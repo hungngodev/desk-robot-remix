@@ -1812,8 +1812,8 @@ class Coordinator:
         label: str | None = None,
         goal: tuple[int, int] | None = None,
         goal_heading: int | None = None,
-        start: tuple[int, int] = (0, 0),
-        heading: int = 0,
+        start: tuple[int, int] | None = None,
+        heading: int | None = None,
     ) -> Job:
         """Execute a bounded, revalidated Guide 60 route proposal through Coordinator."""
         robot = self.robot(robot_id)
@@ -1832,10 +1832,43 @@ class Coordinator:
             if not self.settings.voice_memory_tools_enabled:
                 raise OperationError("Object navigation requires private memory consent")
             memory_grant = self.settings.voice_memory_consent_generation
+        st = spatial.state(robot_id)
+        if self.settings.mode == "hardware" and st.map_to_odom is None:
+            raise OperationError("Navigation refused: map-to-odom localization unqualified")
+        if label is None and goal is None:
+            raise OperationError("Navigation refused: missing_goal_or_target")
+
+        require_localized_pose = self.settings.mode == "hardware" or st.map_to_odom is not None
+        if require_localized_pose and (start is None or heading is None):
+            if st.grid is None or not st.grid.anchored or st.envelope is None:
+                raise OperationError("Navigation refused: unanchored_or_stale_map")
+            expected_epoch = st.epoch
+            return self._submit(
+                robot_id,
+                "navigate",
+                lambda job: self._navigate(
+                    job,
+                    route=None,
+                    initial_heading=0 if heading is None else heading,
+                    expected_epoch=expected_epoch,
+                    label=label,
+                    goal=goal,
+                    goal_heading=goal_heading,
+                    requested_start=start,
+                    requested_heading=heading,
+                    camera_grant=camera_grant,
+                    memory_grant=memory_grant,
+                    target=None,
+                    search=None,
+                ),
+            )
+
+        chosen_start = (0, 0) if start is None else start
+        chosen_heading = 0 if heading is None else heading
         route, target, search = spatial.plan_navigation(
             robot_id,
-            start=start,
-            heading=heading,
+            start=chosen_start,
+            heading=chosen_heading,
             goal=goal,
             label=label,
             goal_heading=goal_heading,
@@ -1851,7 +1884,7 @@ class Coordinator:
             lambda job: self._navigate(
                 job,
                 route=route,
-                initial_heading=heading,
+                initial_heading=chosen_heading,
                 expected_epoch=expected_epoch,
                 label=label,
                 camera_grant=camera_grant,
@@ -1869,6 +1902,10 @@ class Coordinator:
         initial_heading: int,
         expected_epoch: int,
         label: str | None = None,
+        goal: tuple[int, int] | None = None,
+        goal_heading: int | None = None,
+        requested_start: tuple[int, int] | None = None,
+        requested_heading: int | None = None,
         camera_grant: int | None = None,
         memory_grant: int | None = None,
         target: ObjectTarget | None = None,
@@ -1876,6 +1913,7 @@ class Coordinator:
     ) -> dict:
         from .object_detector import DEFAULT_FRAME_FRESH_US, DetectorFrame
         from .route_planner import revalidate_route_step
+        from .spatial_pose import PoseError
 
         spatial = getattr(self, "spatial", None)
         if spatial is None:
@@ -1886,6 +1924,78 @@ class Coordinator:
         forward_sign = robot.dock_forward_sign if robot.dock_forward_sign in (-1, 1) else 1
         step_vectors = {(1, 0): 0, (0, 1): 1, (-1, 0): 2, (0, -1): 3}
         cur_heading = initial_heading
+
+        async def _observe_live_pose():
+            pose_reader = getattr(head, "pose_status", None)
+            if callable(pose_reader):
+                req_start = time.monotonic()
+                try:
+                    pose_payload = await _bounded_head_reply(
+                        pose_reader(),
+                        seconds=1.0,
+                        timeout_message="Spatial navigation pose status timeout",
+                    )
+                except Exception:
+                    spatial.invalidate_robot(job.robot_id, reason="pose_transport_lost")
+                    raise
+                return spatial.observe_pose(
+                    job.robot_id,
+                    pose_payload,
+                    received_at=time.monotonic(),
+                    request_started_at=req_start,
+                    source_fence=getattr(head, "pose_fence", None),
+                )
+            if self.settings.mode == "hardware":
+                spatial.invalidate_robot(job.robot_id, reason="pose_transport_lost")
+                raise OperationError("Navigation halted: live pose unavailable")
+            return None
+
+        if route is None:
+            try:
+                self._require_camera_motion_grant(camera_grant)
+            except OperationError:
+                spatial.invalidate_robot(job.robot_id, reason="camera_consent_revoked")
+                raise
+            if label is not None and self.settings.mode == "hardware" and (
+                memory_grant is None or not self.settings.voice_memory_tools_enabled
+                or self.settings.voice_memory_consent_generation != memory_grant
+            ):
+                raise OperationError("Navigation halted: memory consent changed")
+            if self.dock_inhibited(job.robot_id):
+                raise OperationError("Navigation halted: robot seated or powered on dock")
+            st_init = spatial.state(job.robot_id)
+            if (st_init.epoch != expected_epoch or st_init.grid is None
+                    or not st_init.grid.anchored or st_init.envelope is None
+                    or st_init.map_to_odom is None):
+                raise OperationError("Navigation halted: spatial map invalidated")
+            receipt = await _observe_live_pose()
+            if receipt is None:
+                spatial.invalidate_robot(job.robot_id, reason="pose_transport_lost")
+                raise OperationError("Navigation halted: live pose unavailable")
+            try:
+                observed_cell, observed_heading = spatial.localized_pose_cell_heading(
+                    job.robot_id, receipt,
+                )
+            except PoseError as exc:
+                spatial.invalidate_robot(job.robot_id, reason="pose_odometry_divergence")
+                raise OperationError(f"Navigation halted: {exc}") from exc
+            if (requested_start is not None and observed_cell != requested_start) or (
+                requested_heading is not None and observed_heading != requested_heading
+            ):
+                spatial.invalidate_robot(job.robot_id, reason="pose_odometry_divergence")
+                raise OperationError("Navigation halted: requested start diverges from localized pose")
+            route, target, search = spatial.plan_navigation(
+                job.robot_id,
+                start=observed_cell,
+                heading=observed_heading,
+                goal=goal,
+                label=label,
+                goal_heading=goal_heading,
+            )
+            if route.status != "planned" or route.may_execute is not False or not route.cells:
+                raise OperationError(f"Navigation halted: {route.reason}")
+            expected_epoch = route.epoch
+            cur_heading = observed_heading
 
         def _check_step_authority(start_cell: tuple[int, int], goal_cell: tuple[int, int]):
             try:
@@ -1931,28 +2041,21 @@ class Coordinator:
         async def _verify_step_authority(start_cell: tuple[int, int],
                                          goal_cell: tuple[int, int]) -> None:
             _check_step_authority(start_cell, goal_cell)
-            pose_reader = getattr(head, "pose_status", None)
-            if callable(pose_reader):
-                req_start = time.monotonic()
-                try:
-                    pose_payload = await _bounded_head_reply(
-                        pose_reader(),
-                        seconds=1.0,
-                        timeout_message="Spatial navigation pose status timeout",
-                    )
-                except Exception:
+            receipt = await _observe_live_pose()
+            st_pose = spatial.state(job.robot_id)
+            if self.settings.mode == "hardware" or st_pose.map_to_odom is not None:
+                if receipt is None:
                     spatial.invalidate_robot(job.robot_id, reason="pose_transport_lost")
-                    raise
-                spatial.observe_pose(
-                    job.robot_id,
-                    pose_payload,
-                    received_at=time.monotonic(),
-                    request_started_at=req_start,
-                    source_fence=getattr(head, "pose_fence", None),
-                )
-            elif self.settings.mode == "hardware":
-                spatial.invalidate_robot(job.robot_id, reason="pose_transport_lost")
-                raise OperationError("Navigation halted: live pose unavailable")
+                    raise OperationError("Navigation halted: live pose unavailable")
+                try:
+                    spatial.verify_pose_matches_route_state(
+                        job.robot_id,
+                        receipt,
+                        expected_cell=start_cell,
+                        expected_heading=cur_heading,
+                    )
+                except PoseError as exc:
+                    raise OperationError(f"Navigation halted: {exc}") from exc
             # Pose IO can yield to sensor updates, STOP and consent revocation.
             # Refresh local health and then recheck the full inflated edge
             # synchronously immediately before the caller dispatches a pulse.
@@ -2027,6 +2130,11 @@ class Coordinator:
                 if route.final_heading is not None and route.final_heading != cur_heading:
                     raise OperationError("Navigation halted: unplanned final turn")
 
+            if len(route.cells) > 1 and (
+                self.settings.mode == "hardware"
+                or spatial.state(job.robot_id).map_to_odom is not None
+            ):
+                await _verify_step_authority(route.cells[-1], route.cells[-1])
             _check_step_authority(route.cells[-1], route.cells[-1])
             if label is None:
                 return {

@@ -104,7 +104,15 @@ class SpatialHead:
             self.x_mm += 20
 
 
-def _seed_safe_grid(spatial, robot_id: str, head: SpatialHead, *, width: int = 8, height: int = 8):
+def _seed_safe_grid(
+    spatial,
+    robot_id: str,
+    head: SpatialHead,
+    *,
+    width: int = 8,
+    height: int = 8,
+    map_to_odom=None,
+):
     env = SafetyEnvelope(
         footprint_radius_mm=3,
         localization_error_mm=2,
@@ -124,6 +132,7 @@ def _seed_safe_grid(spatial, robot_id: str, head: SpatialHead, *, width: int = 8
         envelope=env,
         ttl_us=5_000_000,
         anchored=True,
+        map_to_odom=map_to_odom,
     )
     cells = tuple((x, y) for y in range(height) for x in range(width))
     now_us = spatial.now_us()
@@ -688,5 +697,192 @@ async def test_plan_callback_rejects_in_place_epoch_change(settings, tmp_path, m
         assert route.status == "rejected"
         assert not route.may_execute
         assert not rt.spatial.state("robot-01").grid.anchored
+    finally:
+        await rt.close()
+
+
+class _HardwarePoseHead(SpatialHead):
+    """Hardware-contract test head emitting typed PoseReceipts through a PoseFence."""
+
+    def __init__(
+        self,
+        robot_id: str,
+        *,
+        x_mm: int = 0,
+        y_mm: int = 0,
+        yaw_mrad: int = 0,
+        ignore_turn: bool = False,
+        freeze_forward_after: int | None = None,
+    ):
+        from desk_robot.spatial_pose import PoseFence
+
+        super().__init__(robot_id)
+        self.x_mm = x_mm
+        self.y_mm = y_mm
+        self.yaw_mrad = yaw_mrad
+        self.pose_fence = PoseFence(robot_id)
+        self.ignore_turn = ignore_turn
+        self.freeze_forward_after = freeze_forward_after
+        self._forward_count = 0
+
+    async def pose_status(self):
+        payload = await super().pose_status()
+        return self.pose_fence.observe(payload, time.monotonic())
+
+    async def command(self, cmd: str):
+        import math
+
+        self.commands.append(cmd)
+        if cmd == "arm":
+            self.armed = True
+        elif cmd == "halt":
+            self.armed = False
+        elif cmd == "drive 20 20 100":
+            self._forward_count += 1
+            if self.freeze_forward_after is None or self._forward_count <= self.freeze_forward_after:
+                theta = self.yaw_mrad / 1000.0
+                self.x_mm += round(20 * math.cos(theta))
+                self.y_mm += round(20 * math.sin(theta))
+        elif cmd == "drive 20 -20 100" and not self.ignore_turn:
+            self.yaw_mrad = round(math.remainder(self.yaw_mrad / 1000.0 + math.pi / 2, math.tau) * 1000.0)
+        elif cmd == "drive -20 20 100" and not self.ignore_turn:
+            self.yaw_mrad = round(math.remainder(self.yaw_mrad / 1000.0 - math.pi / 2, math.tau) * 1000.0)
+
+
+async def _setup_hardware_pose_runtime(settings, tmp_path, head: _HardwarePoseHead, map_to_odom):
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraEvidence
+    from desk_robot.runtime import Runtime
+
+    settings.memory_dir = tmp_path / "memory"
+    settings.trials_file = tmp_path / "trials.jsonl"
+    robot = settings.robots[0]
+    robot.head_url = "http://192.168.1.51:8001"
+    robot.voice = "voice-1"
+    robot.motor_backend = "stepper_28byj48"
+    robot.motion_enabled = True
+    robot.spatial_navigation_qualified = True
+    robot.dock_turn_sign = 1
+    robot.dock_forward_sign = 1
+    settings.robots = [robot]
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+
+    rt = Runtime(settings)
+
+    async def _noop_interrupt(_robot):
+        return True
+
+    rt.conversation.speaker = SimpleNamespace(interrupt=_noop_interrupt)
+    rt.coordinator.heads["robot-01"] = head
+    rt.pet.heads["robot-01"] = head
+    _seed_safe_grid(rt.spatial, "robot-01", head, map_to_odom=map_to_odom)
+    rt.coordinator.multimodal = SimpleNamespace(
+        stream_owns_camera=lambda _id: True,
+        status=lambda _id: {"camera_stream_connected": True},
+        hub=SimpleNamespace(
+            frames={
+                "robot-01": [
+                    CameraEvidence(
+                        jpeg=_valid_jpeg(),
+                        received_at=time.monotonic(),
+                        motion_fraction=0.0,
+                        source="proactive",
+                        source_identity=(head.head_boot, 1, 1),
+                    )
+                ]
+            }
+        ),
+    )
+    # Prime continuous PoseFence baseline so subsequent pose_status() is current.
+    await head.pose_status()
+    return rt
+
+
+async def test_hardware_navigate_derives_shifted_start_and_heading_from_localized_pose(settings, tmp_path):
+    """Hardware navigation derives initial cell and heading from map_to_odom + live PoseReceipt."""
+    import math
+
+    from desk_robot.spatial_frames import PlanarTransform
+
+    # map<-odom rotated +90 deg and shifted: odom (20, -20, 0) -> map (60, 40, +pi/2) -> cell (3, 2), heading 1 (+Y).
+    head = _HardwarePoseHead("robot-01", x_mm=20, y_mm=-20, yaw_mrad=0)
+    map_to_odom = PlanarTransform("map", "odom", 40.0, 20.0, math.pi / 2)
+    rt = await _setup_hardware_pose_runtime(settings, tmp_path, head, map_to_odom)
+    try:
+        await rt.coordinator.operator_arm("robot-01")
+        job = rt.coordinator.navigate("robot-01", goal=(3, 3))
+        await asyncio.wait_for(rt.coordinator.tasks[job.id], timeout=5)
+        assert job.state == "succeeded", job.error
+        assert job.result["status"] == "waypoint_reached"
+        assert job.result["final_cell"] == (3, 3)
+        assert job.result["final_heading"] == 1
+        assert [c for c in head.commands if c.startswith("drive ")] == ["drive 20 20 100"]
+    finally:
+        await rt.close()
+
+
+async def test_hardware_navigate_rejects_shifted_start_or_heading_before_any_drive(settings, tmp_path):
+    """Caller start=(0,0), heading=0 must fail closed with zero pulses when live pose is elsewhere."""
+    from desk_robot.spatial_frames import PlanarTransform
+
+    head = _HardwarePoseHead("robot-01", x_mm=40, y_mm=20, yaw_mrad=1571)
+    map_to_odom = PlanarTransform("map", "odom", 0.0, 0.0, 0.0)
+    rt = await _setup_hardware_pose_runtime(settings, tmp_path, head, map_to_odom)
+    try:
+        await rt.coordinator.operator_arm("robot-01")
+        job = rt.coordinator.navigate("robot-01", goal=(1, 0), start=(0, 0), heading=0)
+        await asyncio.wait_for(rt.coordinator.tasks[job.id], timeout=5)
+        assert job.state == "failed"
+        assert "diverges from route state" in (job.error or "")
+        assert not any(c.startswith("drive ") for c in head.commands)
+        assert rt.spatial.state("robot-01").grid.anchored is False
+        assert rt.spatial.state("robot-01").map_to_odom is None
+    finally:
+        await rt.close()
+
+
+@pytest.mark.parametrize("failure_mode", ["failed_turn", "failed_forward"])
+async def test_hardware_navigate_halts_on_mid_route_odometry_divergence(
+    settings, tmp_path, failure_mode,
+):
+    """Missing turn or unachieved step halts before next pulse and invalidates spatial anchor."""
+    from desk_robot.spatial_frames import PlanarTransform
+
+    if failure_mode == "failed_turn":
+        head = _HardwarePoseHead("robot-01", x_mm=40, y_mm=40, yaw_mrad=0, ignore_turn=True)
+        goal = (2, 3)  # Requires turn at (2, 2) to heading 1 before stepping to (2, 3).
+    else:
+        head = _HardwarePoseHead("robot-01", x_mm=40, y_mm=40, yaw_mrad=0, freeze_forward_after=1)
+        goal = (5, 2)  # Pulse 1 reaches (3,2), pulse 2 stalls at (3,2), pre-pulse 3 halts on (3,2) != (4,2).
+    map_to_odom = PlanarTransform("map", "odom", 0.0, 0.0, 0.0)
+    rt = await _setup_hardware_pose_runtime(settings, tmp_path, head, map_to_odom)
+    try:
+        await rt.coordinator.operator_arm("robot-01")
+        job = rt.coordinator.navigate("robot-01", goal=goal)
+        await asyncio.wait_for(rt.coordinator.tasks[job.id], timeout=5)
+        assert job.state == "failed"
+        assert "diverges from route state" in (job.error or "")
+        if failure_mode == "failed_turn":
+            assert [c for c in head.commands if c.startswith("drive ")] == ["drive 20 -20 100"]
+        else:
+            assert [c for c in head.commands if c.startswith("drive ")] == ["drive 20 20 100", "drive 20 20 100"]
+        assert "halt" in head.commands
+        assert rt.spatial.state("robot-01").grid.anchored is False
+        assert rt.spatial.state("robot-01").map_to_odom is None
+    finally:
+        await rt.close()
+
+
+async def test_hardware_navigate_refuses_missing_map_to_odom(settings, tmp_path):
+    """Hardware navigation refuses to start when map_to_odom is unbound."""
+    head = _HardwarePoseHead("robot-01", x_mm=40, y_mm=40, yaw_mrad=0)
+    rt = await _setup_hardware_pose_runtime(settings, tmp_path, head, map_to_odom=None)
+    try:
+        await rt.coordinator.operator_arm("robot-01")
+        with pytest.raises(OperationError, match="map-to-odom localization unqualified"):
+            rt.coordinator.navigate("robot-01", goal=(3, 2))
+        assert head.commands == []
     finally:
         await rt.close()
