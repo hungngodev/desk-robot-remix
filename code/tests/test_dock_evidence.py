@@ -741,3 +741,43 @@ def test_invalid_shunt_diagnostic_does_not_invalidate_other_sensors(shunt):
     result = validate_aux(frame, "robot-01")
     assert result["power"]["monitor_valid"] is False
     assert result["dock"]["valid"] is True
+
+
+@pytest.mark.parametrize(("readings", "expected"), [
+    (((-81917, -16383),) * 3, "out_of_pack_unqualified"),
+    (((81915, 16383),) * 3, "into_pack_unqualified"),
+    (((-105, -21), (0, 0), (105, 21)), "indeterminate"),
+    (((-5, -1), (-2, 0), (2, 0)), "indeterminate"),
+    (((-105, -21), (-100, -20), (-105, -21)), "indeterminate"),
+    (((105, 21), (100, 20), (105, 21)), "indeterminate"),
+    (((-105, -21), (105, 21), (105, 21)), "indeterminate"),
+])
+async def test_ina226_signed_boundaries_and_mixed_dock_direction(
+    monkeypatch, readings, expected,
+):
+    """Signed nonrail readings survive JSON without inventing net charging."""
+    import json
+
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for index, (sample, (uv, ma)) in enumerate(zip(samples, readings, strict=True)):
+        sample["power"].update(
+            shunt_uv=uv, pack_ma=ma, pack_valid=True, monitor_valid=True,
+            pack_seq=index + 1, pack_age_ms=35,
+        )
+    head = FakeHead(json.loads(json.dumps(samples)))
+    result = await observe_dock_evidence(head, "robot-01")
+    assert result["stable_three_samples"]
+    assert result["raw_pack_samples_fresh"]
+    assert result["raw_pack_ma"] == [ma for _, ma in readings]
+    assert result["raw_pack_direction"] == expected
+    assert result["charger_indicator_net_discharge_conflict"] is (
+        expected == "out_of_pack_unqualified"
+    )
+    assert not result["battery_current_measured"]
+    assert not result["charging_verified"] and not result["charging_authorized"]
+    assert not result["motor_authorized"]
+    assert head.commands == []
