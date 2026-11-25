@@ -43,3 +43,13 @@ Before applying USB or battery power to Step 6 of [the build guide](../guides/bu
 ## Fixed rectangular 2 W speaker and 5 V amplifier power allocation
 
 The current canonical purchase register retains MAX98357A but has already selected the **Challenge CS20-02P110-04-1X, 8 ohm 2 W, 20 x 16 x 4.7 mm** speaker candidate for the five pets. The earlier round 1 W part was rejected, and its 3.3 V mitigation must not silently override the newer fixed selection. MAX98357A VDD is allocated to a qualified, protected **5 V audio rail**; I2S input logic remains 3.3 V. Analog Devices Rev 16 lists about 1.8 W into an 8 ohm load at 5 V under specified test conditions. Neither speaker terminal connects to ground, and audio power must not bypass the XIAO USB/VBUS isolation design. This allocation does **not** prove the carrier's gain setting, actual speaker impedance, long speech thermal behavior, enclosure acoustics, microphone double talk, or supply transient margin. The printed rectangular speaker coupon is a fit reference, not a qualified sealed 1 cc acoustic chamber. Hold purchasing until exact board and physical evidence are accepted. Manufacturer sources: [MAX98357A datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/max98357a-max98357b.pdf) and [Challenge speaker datasheet](https://www.challengeelectronics.com/speakers/pdf/CS20-02P110-04-1X.pdf).
+
+### Local fuel cutoff and recovery
+
+The WROOM guarded profiles stop wheel commands and latch on a reported MAX17048
+cell voltage below 3300 mV or estimated SoC below 3%. A fresh independently
+acquired reading at or above 3350 mV **and** 5% SoC is necessary to clear that
+latch via explicit local USB rearm; remote ARM cannot clear it. Rearm leaves
+wheels stopped and disarmed. Mac retains its independent motion-admission and
+hardware-preflight checks. These are software thresholds, not a measured
+loaded-rail limit, pack protection circuit, or charger qualification.

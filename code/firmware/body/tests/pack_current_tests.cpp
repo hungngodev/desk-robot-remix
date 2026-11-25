@@ -1,4 +1,5 @@
 #include "AccessoryReadings.h"
+#include "../lib/BodyControl/BatterySafety.h"
 #include <cstdlib>
 #include <cstdint>
 #include <iostream>
@@ -19,6 +20,14 @@ using desk_robot::next_nonzero_sensor_sequence;
 } while (false)
 
 int main() {
+  using desk_robot::fuel_below_motor_floor;
+  using desk_robot::fuel_above_recovery_floor;
+  CHECK(fuel_below_motor_floor(3299, 5000));
+  CHECK(fuel_below_motor_floor(3800, 299));
+  CHECK(!fuel_below_motor_floor(3300, 300));
+  CHECK(!fuel_above_recovery_floor(3349, 500));
+  CHECK(!fuel_above_recovery_floor(3350, 499));
+  CHECK(fuel_above_recovery_floor(3350, 500));
   int ma = 999;
   CHECK(ina226_shunt_uv(static_cast<std::int16_t>(0)) == 0);
   CHECK(ina226_shunt_uv(static_cast<std::int16_t>(16)) == 40);

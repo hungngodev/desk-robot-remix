@@ -1,4 +1,5 @@
 #include "BodyControl.h"
+#include "BatterySafety.h"
 #include "BodyCommandParser.h"
 #include "CliffGuard.h"
 
@@ -847,7 +848,7 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
     state_.armed = false;
   }
   if (readings.gauge.fuel_valid &&
-      readings.gauge.cell_mv < 3200U) {
+      fuel_below_motor_floor(fuel.cell_mv, fuel.soc_centi)) {
     if (guarded_motion_profile()) {
       // Even a suspicious low reading must stop wheels. But its raw
       // identity must not move the recovery threshold backwards or ahead
@@ -1081,7 +1082,8 @@ void BodyControl::tick(std::uint32_t now_ms) {
     return;
   }
   if (state_.armed && state_.accessories.gauge.fuel_valid &&
-      state_.accessories.gauge.cell_mv < 3200U) {
+      fuel_below_motor_floor(state_.accessories.gauge.cell_mv,
+                             state_.accessories.gauge.soc_centi)) {
     stop_motion();
     state_.armed = false;
     return;
@@ -1626,11 +1628,10 @@ void BodyControl::execute(const char* line, std::size_t length,
     const bool bumper_hit = state_.bumper_raw ||
         ((state_.extra_mask & 1U) != 0U && state_.bumper_active);
     const bool touch_hit = state_.touch_active || state_.touch_raw_active;
-    // Movement already in progress uses the 3200 mV emergency stop, but
-    // a NEW arm requires 3300 mV. Do not tell Mac the robot is ready at
-    // 3250 mV when the very next arm command will be rejected.
+    // Match the active cutoff and Mac motion-admission floors.
     const bool battery_below_arm_min = state_.accessories.gauge.fuel_valid &&
-        state_.accessories.gauge.cell_mv < 3300U;
+        fuel_below_motor_floor(state_.accessories.gauge.cell_mv,
+                             state_.accessories.gauge.soc_centi);
     const bool local_motion_ready = cliff_ready && !driver_unhealthy &&
         !motor_cutoff_unqualified_ &&
         // Guarded ARM attaches BOTH MG90S channels. One unmeasured lifting
@@ -1850,18 +1851,19 @@ void BodyControl::execute(const char* line, std::size_t length,
       // The low-cell latch requires trustworthy source provenance even
       // in guarded profiles where the gauge is otherwise optional.
       if (!fuel_monitor_fresh(now_ms) ||
-          fuel.cell_mv < 3300U || seq_delta == 0U ||
+          !fuel_above_recovery_floor(fuel.cell_mv, fuel.soc_centi) ||
+          seq_delta == 0U ||
           seq_delta >= 0x80000000U || time_delta == 0U ||
           time_delta >= 0x80000000U) {
         std::snprintf(reply, capacity, "ERR rearm battery_unsafe_or_stale");
         return;
       }
     }
-    // Recovery is not a future arm preapproval. Even above the 3200 mV
-    // emergency trip, a known cell below the 3300 mV arm floor must not
+    // Recovery is not a future arm preapproval. A depleted pack cannot
     // clear an unrelated cliff/bumper/watchdog latch for later remote ARM.
     if (state_.accessories.gauge.fuel_valid &&
-        state_.accessories.gauge.cell_mv < 3300U) {
+        fuel_below_motor_floor(state_.accessories.gauge.cell_mv,
+                             state_.accessories.gauge.soc_centi)) {
       std::snprintf(reply, capacity, "ERR rearm battery_unsafe_or_stale");
       return;
     }
@@ -1971,7 +1973,8 @@ void BodyControl::execute(const char* line, std::size_t length,
       return;
     }
     if (state_.accessories.gauge.fuel_valid &&
-        state_.accessories.gauge.cell_mv < 3300U) {
+        fuel_below_motor_floor(state_.accessories.gauge.cell_mv,
+                             state_.accessories.gauge.soc_centi)) {
       std::snprintf(reply, capacity, "ERR arm battery_low");
       return;
     }

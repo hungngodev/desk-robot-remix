@@ -54,7 +54,7 @@ static void cold_boot_complete_unsafe_sweep_reports_real_fault() {
   fresh(guard, 101);
   CHECK(!guard.evaluate(101));
   CHECK(guard.fault() == desk_robot::CliffFault::FloorOutOfRange);
-  CHECK(send(body, "arm", 101) == "ERR arm safety_interlock");
+  CHECK(send(body, "arm", 101) == "ERR arm battery_low_latched");
   CHECK(send(body, "rearm", 101) == "ERR rearm local_only");
   CHECK(send(body, "rearm", 101, true) == "OK rearm");
   CHECK(!body.state().armed);
@@ -2787,6 +2787,7 @@ static void low_voltage_cannot_clear_unrelated_recovery_latches() {
       fuel.fuel_sample_seq = 1;
       fuel.fuel_at_ms = 100;
       fuel.cell_mv = 3350;
+      fuel.soc_centi = 5000;
       body.set_accessories(readings, 100);
       CHECK(send(body, "rearm", 100, true) == "OK rearm");
       CHECK(send(body, "arm", 100) == "OK arm");
@@ -2831,12 +2832,13 @@ static void battery_readiness_matches_stricter_arm_voltage() {
   readings.gauge.fuel_sample_seq = 1;
   readings.gauge.fuel_at_ms = 100;
   readings.gauge.cell_mv = 3250;
+  readings.gauge.soc_centi = 5000;
   body.set_accessories(readings, 100);
   CHECK(send(body, "rearm", 100, true) == "ERR rearm battery_unsafe_or_stale");
   CHECK(!guard.evaluate(100));
   CHECK(!body.state().armed);
   // Raising voltage does not retroactively authorize recovery.
-  CHECK(send(body, "arm", 100) == "ERR arm safety_interlock");
+  CHECK(send(body, "arm", 100) == "ERR arm battery_low_latched");
   CHECK(send(body, "status", 100).find("\"ready\":false") !=
         std::string::npos);
   CHECK(send(body, "status", 100).find("\"fault\":\"missing_sample\"") !=
@@ -2852,16 +2854,73 @@ static void battery_readiness_matches_stricter_arm_voltage() {
   CHECK(send(body, "status", 101).find("\"ready\":true") !=
         std::string::npos);
   CHECK(send(body, "arm", 101) == "OK arm");
-  // Once boot recovery is authorized, the stricter ARM threshold still
-  // applies independently of the lower emergency trip voltage.
+  // Once boot recovery is authorized, a fresh low sample latches again.
   readings.gauge.fuel_sample_seq = 3;
   readings.gauge.fuel_at_ms = 102;
   readings.gauge.cell_mv = 3250;
   body.set_accessories(readings, 102);
   CHECK(send(body, "status", 102).find("\"ready\":false") != std::string::npos);
-  CHECK(send(body, "status", 102).find("\"fault\":\"battery_low\"") !=
+  CHECK(send(body, "status", 102).find("\"fault\":\"battery_low_latched\"") !=
         std::string::npos);
-  CHECK(send(body, "arm", 102) == "ERR arm battery_low");
+  CHECK(send(body, "arm", 102) == "ERR arm battery_low_latched");
+}
+
+static void battery_cutoff_and_recovery_boundaries() {
+  using desk_robot::BodyProfile;
+  for (const auto profile : {BodyProfile::StepperGuarded, BodyProfile::DcGuarded}) {
+    for (bool voltage_trip : {false, true}) {
+      desk_robot::CliffGuard guard;
+      CHECK(guard.configure(config()));
+      fresh(guard, 100);
+      desk_robot::BodyControl body(profile, &guard);
+      body.require_fuel_monitor(true);
+      desk_robot::AccessoryReadings readings{};
+      auto& fuel = readings.gauge;
+      fuel.fuel_present = fuel.fuel_valid = true;
+      fuel.fuel_sample_seq = 1;
+      fuel.fuel_at_ms = 100;
+      fuel.cell_mv = 3300;
+      fuel.soc_centi = 300;
+      body.set_accessories(readings, 100);
+      CHECK(send(body, "rearm", 100, true) == "OK rearm");
+      CHECK(send(body, "arm", 100) == "OK arm");
+      CHECK(send(body, "drive 30 30 150", 100).find("OK drive") == 0);
+
+      fuel.cell_mv = voltage_trip ? 3299U : 3800U;
+      fuel.soc_centi = voltage_trip ? 5000U : 299U;
+      ++fuel.fuel_sample_seq;
+      fuel.fuel_at_ms = 101;
+      body.set_accessories(readings, 101);
+      CHECK(!body.state().armed && body.state().left == 0 &&
+            body.state().right == 0);
+      CHECK(body.drive_remaining(101) == 0);
+      CHECK(send(body, "arm", 101) == "ERR arm battery_low_latched");
+
+      fuel.cell_mv = 3349;
+      fuel.soc_centi = 500;
+      ++fuel.fuel_sample_seq;
+      fuel.fuel_at_ms = 102;
+      body.set_accessories(readings, 102);
+      CHECK(send(body, "rearm", 102, true) == "ERR rearm battery_unsafe_or_stale");
+      fuel.cell_mv = 3350;
+      fuel.soc_centi = 499;
+      ++fuel.fuel_sample_seq;
+      fuel.fuel_at_ms = 103;
+      body.set_accessories(readings, 103);
+      CHECK(send(body, "rearm", 103, true) == "ERR rearm battery_unsafe_or_stale");
+      fuel.soc_centi = 500;
+      ++fuel.fuel_sample_seq;
+      fuel.fuel_at_ms = 104;
+      body.set_accessories(readings, 104);
+      CHECK(send(body, "arm", 104) == "ERR arm battery_low_latched");
+      CHECK(send(body, "rearm", 104) == "ERR rearm local_only");
+      CHECK(send(body, "rearm", 104, true) == "OK rearm");
+      CHECK(!body.state().armed && body.state().left == 0 &&
+            body.state().right == 0);
+      CHECK(send(body, "arm", 104) == "OK arm");
+      CHECK(body.drive_remaining(104) == 0);
+    }
+  }
 }
 
 static void battery_undervoltage_rejects_arm_and_stops_motion() {
@@ -2878,6 +2937,7 @@ static void battery_undervoltage_rejects_arm_and_stops_motion() {
   readings.gauge.fuel_sample_seq = 1;
   readings.gauge.fuel_at_ms = 1;
   readings.gauge.cell_mv = 0; // Collapsed 0 mV reading must fail closed
+  readings.gauge.soc_centi = 5000;
   body.set_accessories(readings, 1);
   CHECK(!body.state().armed);
   CHECK(send(body, "arm", 1) == "ERR arm battery_low_latched");
@@ -2990,7 +3050,7 @@ static void fuel_voltage_replay_cannot_rearm_or_restore_drive() {
   readings.gauge.soc_centi = 5000;
   body.set_accessories(readings, 100);
   CHECK(send(body, "rearm", 100, true) == "ERR rearm battery_unsafe_or_stale");
-  CHECK(send(body, "arm", 100) == "ERR arm safety_interlock");
+  CHECK(send(body, "arm", 100) == "ERR arm battery_low_latched");
   CHECK(!guard.evaluate(100) && !body.state().armed);
 
   // A second caller must not relabel the same conversion as 3.8 V.
@@ -3126,6 +3186,7 @@ static void required_fuel_gauge_loss_stops_and_requires_local_rearm() {
         std::string::npos);
   readings.gauge.fuel_present = readings.gauge.fuel_valid = true;
   readings.gauge.cell_mv = 3700;
+  readings.gauge.soc_centi = 5000;
   readings.gauge.fuel_sample_seq = 1;
   readings.gauge.fuel_at_ms = 102;
   body.set_accessories(readings, 102);
@@ -3912,6 +3973,7 @@ int main() {
     battery_readiness_matches_stricter_arm_voltage();
     low_voltage_cannot_clear_unrelated_recovery_latches();
     battery_undervoltage_rejects_arm_and_stops_motion();
+    battery_cutoff_and_recovery_boundaries();
     optional_gauge_low_latch_requires_trusted_recovery();
     invalid_fuel_identity_cannot_rearm_from_cached_conversion();
     required_fuel_gauge_loss_stops_and_requires_local_rearm();
