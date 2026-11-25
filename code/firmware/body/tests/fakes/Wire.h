@@ -144,6 +144,10 @@ class TwoWire {
   std::uint16_t getTimeOut() { return timeout_ms; }
   // Explicit one-shot transport faults. ESP32 HAL normally reports zero
   // bytes on error; a short nonzero count is an additional adversarial case.
+  // Arduino-ESP32 maps ESP_FAIL (address or data NACK) to status 2.
+  // Inject before device side effects; real peripherals may accept a prefix.
+  int next_transfer_nack_address = -1;
+  bool repeated_start_pending = false;
   int next_stop_timeout_address = -1;
   int next_read_timeout_address = -1;
   int next_short_read_address = -1;
@@ -157,6 +161,8 @@ class TwoWire {
       ++imu_probe_attempts;
     current_address = addr;
     outbound.clear();
+    // Arduino-ESP32 clears an abandoned same-task repeated START here.
+    repeated_start_pending = false;
   }
   std::size_t write(std::uint8_t v) {
     if (fail_tof_register_write && current_address == 0x29 &&
@@ -223,9 +229,25 @@ class TwoWire {
         current_address == 0x6a || current_address == 0x6b ||
         current_address == 0x1c || current_address == 0x1d ||
         current_address == 0x1e) ++imu_terminated_transmissions;
-    if (stop && current_address == next_stop_timeout_address) {
+    // Pinned Arduino-ESP32 2.0.17 does not call the HAL for non-STOP
+    // writes until a matching requestFrom(). No mux or register state
+    // may change yet, even if endTransmission(false) returns success.
+    if (!stop) {
+      repeated_start_pending = true;
+      return 0;
+    }
+    repeated_start_pending = false;
+    if (current_address == next_stop_timeout_address) {
       next_stop_timeout_address = -1;
       return 5; // Arduino-ESP32 endTransmission timeout
+    }
+    return applyTransmission();
+  }
+
+  std::uint8_t applyTransmission() {
+    if (current_address == next_transfer_nack_address) {
+      next_transfer_nack_address = -1;
+      return 2;
     }
     if (!connected(current_address)) return 4;
     if (fail_sht_command && current_address == 0x44 &&
@@ -317,13 +339,27 @@ class TwoWire {
   std::size_t requestFrom(std::uint8_t addr, std::size_t count, bool stop = true) {
     (void)stop;
     ++transactions;
+    // Mismatched address is rejected before clearing RX or pending TX.
+    if (repeated_start_pending && addr != current_address) return 0;
+    const bool deferred = repeated_start_pending;
+    repeated_start_pending = false;
     inbound.clear();
     pos = 0;
+    // A zero-length read performs no bus transfer or read-to-clear action.
+    if (count == 0) return 0;
     if (addr == 0x28 || (addr == 0x29 && extras == 1 && cap_uses_0x29))
       ++cap_register_requests;
     if (addr == next_read_timeout_address) {
       next_read_timeout_address = -1;
       return 0;
+    }
+    if (deferred) {
+      // The supported combined transaction is a one-byte sensor register
+      // pointer followed by a read. Mux selection requires an explicit
+      // STOP before readback (TCA9548A SCPS207H, section 7.5.4).
+      // Do not simulate unsupported combined writes as successful.
+      if (addr == 0x70 || addr == 0x71 || outbound.size() != 1 ||
+          applyTransmission() != 0) return 0;
     }
     if (!connected(addr)) return 0;
     if (addr == 0x48 && extras == 4 &&

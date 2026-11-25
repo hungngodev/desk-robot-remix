@@ -122,13 +122,81 @@ int main() {
       fake_arduino_millis() = 0;
     }
     {
-      // A timeout or partial read cannot authorize a new optical sample.
-      for (int failure = 0; failure < 3; ++failure) {
+      // Pinned Wire defers the repeated START until requestFrom().
+      TwoWire transfer;
+      transfer.ranges = 1;
+      transfer.tof_register = 0x13;
+      transfer.beginTransmission(0x29);
+      CHECK(transfer.write(0x14) == 1);
+      CHECK(transfer.endTransmission(false) == 0);
+      CHECK(transfer.tof_register == 0x13);
+      CHECK(transfer.requestFrom(0x70, 1) == 0);
+      CHECK(transfer.tof_register == 0x13);
+      transfer.next_transfer_nack_address = 0x29;
+      CHECK(transfer.requestFrom(0x29, 12) == 0);
+      CHECK(transfer.available() == 0 && transfer.read() == -1);
+      CHECK(transfer.tof_register == 0x13 && transfer.tof_samples == 0);
+      CHECK(transfer.next_transfer_nack_address == -1);
+      transfer.beginTransmission(0x29);
+      CHECK(transfer.write(0x14) == 1);
+      CHECK(transfer.endTransmission(false) == 0);
+      CHECK(transfer.requestFrom(0x29, 12) == 12);
+      CHECK(transfer.tof_register == 0x14 && transfer.tof_samples == 1);
+    }
+    {
+      // Both TCA9548A masks remain unchanged without the explicit STOP.
+      for (const std::uint8_t mux : {0x70, 0x71}) {
+        TwoWire transfer;
+        transfer.beginTransmission(mux);
+        CHECK(transfer.write(2) == 1);
+        CHECK(transfer.endTransmission(false) == 0);
+        CHECK(transfer.ranges == 0 && transfer.extras == 0);
+        CHECK(transfer.requestFrom(mux, 1) == 0);
+        CHECK(transfer.ranges == 0 && transfer.extras == 0);
+        transfer.beginTransmission(mux);
+        CHECK(transfer.write(2) == 1);
+        CHECK(transfer.endTransmission(true) == 0);
+        CHECK(transfer.requestFrom(mux, 1) == 1);
+        CHECK(transfer.read() == 2);
+      }
+    }
+    {
+      // Zero-length requests cannot consume a MAX30102 read-to-clear
+      // register; a multi-byte NACK must be visible after buffering.
+      TwoWire transfer;
+      transfer.extras = 1;
+      transfer.pulse_interrupt_status = 0x80;
+      const auto status_pointer = [&transfer]() {
+        transfer.beginTransmission(0x57);
+        CHECK(transfer.write(0x00) == 1);
+        CHECK(transfer.endTransmission(false) == 0);
+      };
+      status_pointer();
+      CHECK(transfer.requestFrom(0x57, 0) == 0);
+      CHECK(transfer.pulse_interrupt_status == 0x80);
+      status_pointer();
+      CHECK(transfer.requestFrom(0x57, 1) == 1);
+      CHECK(transfer.read() == 0x80 && transfer.pulse_interrupt_status == 0);
+      transfer.extras = 4;
+      const auto config = [&transfer]() {
+        transfer.beginTransmission(0x48);
+        CHECK(transfer.write(0x01) == 1 && transfer.write(0xd3) == 1 &&
+              transfer.write(0x83) == 1);
+        return transfer.endTransmission(true);
+      };
+      transfer.next_transfer_nack_address = 0x48;
+      CHECK(config() == 2 && transfer.ads_config_high == 0xc3);
+      CHECK(config() == 0 && transfer.ads_config_high == 0xd3);
+    }
+    {
+      // A timeout, NACK or partial read cannot authorize a new optical sample.
+      for (int failure = 0; failure < 4; ++failure) {
         Wire = TwoWire{};
         fake_i2c_lines() = FakeI2cLines{};
         desk_robot::TofBus bus;
         desk_robot::CliffGuard guard;
         ready(bus, guard);
+        if (failure == 3) Wire.next_transfer_nack_address = 0x29;
         if (failure == 0) Wire.next_stop_timeout_address = 0x70;
         if (failure == 1) Wire.next_read_timeout_address = 0x29;
         if (failure == 2) {
