@@ -81,3 +81,24 @@ def test_bad_frames_cycles_and_bounds_rejected():
         PlanarTransform("map", "map", 1, 0, 0)
     with pytest.raises(FrameError):
         a.point(1_000_000, 0)
+
+
+@pytest.mark.parametrize("odom_yaw,map_yaw,expected_yaw,origin_xy,forward_xy", [
+    (math.pi / 2, math.pi, math.pi / 2, (170, 60), (90, 100)),
+    (-math.pi / 2, -math.pi, -math.pi / 2, (30, 140), (90, 100)),
+    (3 * math.pi / 4, -3 * math.pi / 4, math.pi / 2, (170, 60),
+     (100 - 10 / math.sqrt(2), 100 - 10 / math.sqrt(2))),
+])
+def test_reanchor_with_turned_odometry(odom_yaw, map_yaw, expected_yaw, origin_xy, forward_xy):
+    odom = PlanarTransform("odom", "base_link", 40, 70, odom_yaw)
+    measured = PlanarTransform("map", "base_link", 100, 100, map_yaw)
+    correction = map_odom_transform(measured, odom)
+    assert (correction.x_mm, correction.y_mm) == pytest.approx(origin_xy)
+    assert correction.yaw_rad == pytest.approx(expected_yaw)
+    assert correction.point(40, 70) == pytest.approx((100, 100))
+    # An actual +10 mm forward step in the already turned odom frame.
+    next_odom = PlanarTransform("odom", "base_link",
+                                40 + 10 * math.cos(odom_yaw),
+                                70 + 10 * math.sin(odom_yaw), odom_yaw)
+    next_map = correction.compose(next_odom)
+    assert (next_map.x_mm, next_map.y_mm) == pytest.approx(forward_xy)
