@@ -50,8 +50,12 @@ def register_spatial_pose_route(
     authorize=None,
     settings=None,
     spatial=None,
+    motion_ready=None,
 ) -> None:
     read_dep = authorize if authorize is not None else operator
+    motion_dependencies = [Depends(operator)]
+    if motion_ready is not None:
+        motion_dependencies.append(Depends(motion_ready))
 
     @app.get("/v1/robots/{robot_id}/pose", dependencies=[Depends(operator)])
     async def read_body_pose(robot_id: str):
@@ -184,7 +188,7 @@ def register_spatial_pose_route(
         return result
 
     @app.post("/v1/robots/{robot_id}/navigate",
-              dependencies=[Depends(operator)], status_code=202)
+              dependencies=motion_dependencies, status_code=202)
     async def navigate_robot(
         robot_id: str,
         request: NavigateRequest,

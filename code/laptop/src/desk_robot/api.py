@@ -16,6 +16,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .api_ingress import APIIngress, authorized_token, token_matches
+from .api_lifecycle import require_runtime_ready, runtime_ready
 from .api_memory_routes import (
     CoreMemoryRequest as CoreMemoryRequest,
 )
@@ -157,11 +158,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     async def health() -> JSONResponse:
         """Report Mac lifecycle, not physical connectivity or movement authority."""
         owner = app.state.runtime
-        ready = (
-            app.state.runtime_started is True
-            and not getattr(owner, "_closed", False)
-            and getattr(owner, "_fatal_service_error", None) is None
-        )
+        ready = runtime_ready(app.state)
         warnings = []
         if settings.mode == "simulation":
             warnings.append({"code": "simulation_mode"})
@@ -396,10 +393,11 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         authorize=authorize,
         settings=settings,
         spatial=lambda: getattr(app.state.runtime, "spatial", None),
+        motion_ready=require_runtime_ready,
     )
 
     @app.post("/v1/robots/{robot_id}/dock/approach",
-              dependencies=[Depends(operator)], status_code=202)
+              dependencies=[Depends(operator), Depends(require_runtime_ready)], status_code=202)
     async def dock_approach(robot_id: str):
         return coordinator().dock(robot_id).data()
 
@@ -476,11 +474,13 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             headers={"Cache-Control": "no-store"},
         )
 
-    @app.post("/v1/robots/{robot_id}/enable", dependencies=[Depends(operator)])
+    @app.post("/v1/robots/{robot_id}/enable",
+              dependencies=[Depends(operator), Depends(require_runtime_ready)])
     async def enable(robot_id: str):
         return await coordinator().operator_arm(robot_id)
 
-    @app.post("/v1/robots/{robot_id}/move", dependencies=[Depends(operator)], status_code=202)
+    @app.post("/v1/robots/{robot_id}/move",
+              dependencies=[Depends(operator), Depends(require_runtime_ready)], status_code=202)
     async def move(robot_id: str, request: CommandRequest, defer_on_voice: bool = False):
         coord = coordinator()
         if defer_on_voice and coord.voice_blocks_motion():
@@ -490,7 +490,8 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             ).data()
         return coord.manual(robot_id, request.command).data()
 
-    @app.post("/v1/robots/{robot_id}/explore", dependencies=[Depends(operator)], status_code=202)
+    @app.post("/v1/robots/{robot_id}/explore",
+              dependencies=[Depends(operator), Depends(require_runtime_ready)], status_code=202)
     async def explore(robot_id: str, defer_on_voice: bool = False):
         if app.state.runtime.pet.states[robot_id].quiet:
             raise OperationError("Quiet mode blocks exploration")
@@ -508,7 +509,8 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
 
     # A spoken key/candy request may consume ONE recent operator-granted
     # permit; the model cannot mint or extend that permit itself.
-    @app.post("/v1/robots/{robot_id}/pickup", dependencies=[Depends(authorize)], status_code=202)
+    @app.post("/v1/robots/{robot_id}/pickup",
+              dependencies=[Depends(authorize), Depends(require_runtime_ready)], status_code=202)
     async def pickup(robot_id: str, request: PickupRequest, defer_on_voice: bool = False):
         coord = coordinator()
         if defer_on_voice and coord.voice_blocks_motion():
@@ -611,7 +613,8 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         coordinator().robot(robot_id)
         return app.state.runtime.pet.status(robot_id)
 
-    @app.post("/v1/pet/{robot_id}/start", dependencies=[Depends(operator)])
+    @app.post("/v1/pet/{robot_id}/start",
+              dependencies=[Depends(operator), Depends(require_runtime_ready)])
     async def pet_start(robot_id: str):
         coordinator().robot(robot_id)
         return app.state.runtime.pet.start(robot_id)
