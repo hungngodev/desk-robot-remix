@@ -222,6 +222,40 @@ the original README files, including noncommercial and share alike restrictions.
     parameter values. Export a final print plate only after you verify
     no missing gear, track, insert, connector or electrical clearance.
 
+## Removable cosmetic qualification (G018 / G024)
+
+These are reserved cosmetic interfaces, not fitted hat/ear/antenna geometry
+or a qualified personality input. Follow the [product definition](../product-definition.md)
+and [measurement sheet](FUSION_MEASUREMENT_SHEET.md). Do not release a
+costume solely because the bare head or a watertight accessory mesh fits.
+
+For each distinct accessory and allowed combination, model its installed
+geometry, installation/removal path, worst measured mounting offset,
+retention play, print tolerance and flexible antenna deflection. Compare
+the complete swept envelope against the actual assembly, including the
+full lift/jaw travel and dock seating path. Check the following against
+the undecorated baseline:
+
+| Interface | Required comparison with cosmetic installed |
+| --- | --- |
+| OV2640 camera | Measured lens center and horizontal/vertical field of view remain clear across the full image; verify edge/corner targets and absence of new reflections or shadows. Do not assume the supplied camera revision has a particular field angle. |
+| Eight VL53L0X lanes (0x70) | All four down, front, left, right and rear optical envelopes remain clear, including reflected IR from costume surfaces; repeat each lane's installed range/validity and controlled edge/obstacle trials under the existing safety procedure. The three read-only lanes gain no motion authority. |
+| PDM microphone | Keep the physical sound inlet open and isolated from vibration; GPIO42 clock and GPIO41 data are electrical connections, not extra acoustic ports. Compare capture level, noise, echo and double talk with the existing [Sense AEC procedure](../guides/sense-aec-port.md). |
+| Speaker | Preserve the full grille open area, rear cavity, gasket and lead seal; compare audible output, clipping, rattling and barge-in with the same speaker/gain configuration. |
+| BOOT (GPIO0), USB and switch | Retain deliberate finger/tool and connector insertion/removal access; the attachment must not press BOOT or obstruct emergency power-off. Check with power disconnected first. |
+| Cooling and RF | Keep Sense, WROOM and amplifier cooling paths and their actual Wi-Fi antenna keepouts clear. Compare temperatures and connectivity under the same sustained workload and ambient conditions; a vent visible in CAD is not thermal acceptance. |
+| Retention and sensors | Capture magnets mechanically, insulate conductive decorations, and check accidental reed activation, touch, encoder magnets, mechanical snag and loose-part risk. A flexible cosmetic antenna is passive, not a mains probe or a second radio. |
+
+Record accessory ID/revision, robot/assembly ID, exact CAD and firmware
+revisions, measured offsets and minimum clearances by interface and pose,
+baseline and installed measurements, trial conditions, results and evidence.
+Keep missing or failed comparisons unqualified; remove the attachment
+before powered use rather than relaxing a safety threshold or reusing
+bare-head optical/acoustic acceptance. Do not add motion permission or
+automatic personality changes from a reed closure. G018 identity and G024
+optional input remain independently unqualified until the existing sensor
+and interaction evidence supports them.
+
 ## Read the automatic battery packaging warning
 
 After exporting provisional OpenSCAD fit coupons, the Fusion scaffold
