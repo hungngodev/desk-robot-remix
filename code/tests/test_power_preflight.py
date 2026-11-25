@@ -1316,3 +1316,21 @@ def test_partial_pack_ratings_still_reject_known_contradictions(ratings):
             pack_thickness_mm=10, tray_length_mm=68, tray_width_mm=35,
             tray_height_mm=14, **ratings,
         )
+
+
+@pytest.mark.parametrize("variant, sys_v", [("BQ24074", 4.4), ("BQ24075", 5.5)])
+@pytest.mark.parametrize("peak, expected", [(1.765, True), (1.766, False), (2.0, False)])
+def test_integrated_stack_respects_charger_bat_and_out_operating_limit(
+    variant, sys_v, peak, expected
+):
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg.update(charger_variant=variant, docked_sys_v=sys_v, active_peak_5v_a=peak)
+    result = one_stack(**cfg)
+    assert result["charger_battery_discharge_recommended_max_a"] == 4.5
+    # All other gates pass: neither a stronger pack nor converter bypasses BAT/OUT.
+    assert all(value for key, value in result["checks"].items()
+               if key != "charger_battery_discharge_path_covers_peak")
+    assert result["checks"]["charger_battery_discharge_path_covers_peak"] is expected
+    assert result["all_power_stages_compatible_on_paper"] is expected
+    assert result["all_power_stages_physically_verified"] is False
+    assert result["qualified_1s_dock_safe_to_buy"] is False

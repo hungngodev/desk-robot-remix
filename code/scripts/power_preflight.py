@@ -437,7 +437,13 @@ def screen_one_cell_power_stack(
         protected_pack_max_charge_a=pack_charge_max_a,
         motors_confirmed_disarmed=dock_motors_disarmed,
         charger_variant=charger_variant)
+    # TI BQ2407x SLUS810N sections 8.1/8.3: BAT discharge and OUT
+    # recommended maximum are 4.5 A; 5 A is an absolute stress limit.
+    # The entire undocked converter input flows through this charger path.
+    charger_path_max_a = 4.5
     gates = {
+        "charger_battery_discharge_path_covers_peak": (
+            undocked["minimum_rated_cell_and_boost_input_a"] <= charger_path_max_a),
         "charger_out_to_regulated_5v_covers_3v_cell_and_dock": (
             vpath["regulator_covers_charger_output_on_paper"]),
         "regulator_current_and_pack_low_cell_budget": (
@@ -454,6 +460,7 @@ def screen_one_cell_power_stack(
     return {
         "source_of_equations": "existing power_preflight.py",
         "charger_variant": charger_variant,
+        "charger_battery_discharge_recommended_max_a": charger_path_max_a,
         "minimum_5v_peak_a_including_margin": (
             undocked["minimum_rated_5v_output_a"]),
         "minimum_1s_peak_a_including_margin": (

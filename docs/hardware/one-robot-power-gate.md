@@ -8,6 +8,10 @@ New code/scripts/power_preflight.py accepts actual observed **peak and continuou
 
 For example, an entirely hypothetical 3A peak at 5V, a 3.0V low cell and 85 percent efficiency requires >7.6A of protected cell and boost input rating after the 30 percent margin. Therefore Pololu's U3V50F5 **5A maximum input rating** is insufficient for that *example*, even though it is marketed as a 5V power regulator. It may be adequate for a lower verified load; its actual thermal output must be checked. Vendor https://www.pololu.com/product/2565/specs .
 
+For the selected BQ24075 (also BQ24074), TI [SLUS810N Rev N](https://www.ti.com/lit/ds/symlink/bq24075.pdf), sections 8.1 and 8.3, limits recommended BAT discharge and OUT current to 4.5 A; 5 A is an absolute maximum, not an operating rating. The integrated `screen_one_cell_power_stack` must reject a reserve-adjusted depleted-cell demand above 4.5 A even if the pack, boost and harness are rated higher. The standalone supply-sizing CLI does not select a charger. This ceiling is not proof of a carrier's thermal capacity, BAT-to-OUT voltage drop or pulse behavior.
+
+F008/F009 remain separate physical gates: the pack-side harness requires source-proximate DC overcurrent protection, not only a fuse after the 5 V converter. Protect the dock input independently. Identify the main switch's exact disconnect scope (battery and dock are independent sources), DC voltage/current and inrush rating; it is not the independent motor cutoff. Verify each logic, actuator and audio branch against its own wiring, connector, regulator and protection ratings. Record manufacturer-required local capacitors, actual bulk capacitance, voltage rating, ESR, ripple and startup inrush; neither bulk capacitance nor aggregate load arithmetic proves rail isolation. Hold motor enable and charge authorization until the applicable measured rail, fault and recovery gates pass. No fixed capacitance or fuse SKU is selected by this arithmetic.
+
 After actual measurement, example command:
 
     cd code
