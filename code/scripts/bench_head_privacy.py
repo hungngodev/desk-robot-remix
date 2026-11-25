@@ -123,7 +123,7 @@ async def measure(head, robot_id: str, *, seconds: float = 15,
     phase = "initial_unmuted"
     muted_at = quiet_base = unmute_base = None
     quiet_samples = 0
-    late_reads = resumed = False
+    late_reads = resumed = hold_observed = False
     errors: list[str] = []
     accepted = 0
     while clock() < deadline and phase != "complete":
@@ -182,12 +182,13 @@ async def measure(head, robot_id: str, *, seconds: float = 15,
                         elif sample["microphone_frames_read"] != quiet_base:
                             late_reads = True
                         quiet_samples += 1
-                    if (now - muted_at >= hold_min_s and quiet_samples >= 2
-                            and on_ready is not None):
-                        on_ready("Press physical BOOT again to unmute.")
-                        on_ready = None
+                    if now - muted_at >= hold_min_s and quiet_samples >= 2:
+                        hold_observed = True
+                        if on_ready is not None:
+                            on_ready("Press physical BOOT again to unmute.")
+                            on_ready = None
                 else:
-                    if now - muted_at < hold_min_s or quiet_samples < 2:
+                    if not hold_observed:
                         errors.append("Muted interval was too short")
                         break
                     if sample["microphone_privacy_epoch"] < first["microphone_privacy_epoch"] + 2:

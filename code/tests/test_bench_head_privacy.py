@@ -301,3 +301,11 @@ async def test_boot_privacy_cycle_rejects_hidden_transitions_and_rollover(broken
     assert report["software_boot_privacy_cycle_observed"] is False
     assert report["errors"]
     assert report["physical_audio_privacy_qualified"] is False
+
+
+async def test_privacy_cycle_requires_observed_full_muted_interval():
+    # The unmuted receipt cannot prove the preceding unobserved time was muted.
+    report, notices = await run(CYCLE[:6] + CYCLE[7:])
+    assert not report["software_boot_privacy_cycle_observed"]
+    assert report["errors"] == ["Muted interval was too short"]
+    assert len(notices) == 1
