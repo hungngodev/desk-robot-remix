@@ -47,6 +47,7 @@ from .controller import OperationError
 from .conversation import conversation_turns
 from .dock_evidence import observe_dock_evidence
 from .dock_runtime import observe_actual_dock
+from .operations import _bounded_head_reply
 from .runtime import Runtime
 from .transport import HeadError
 
@@ -108,6 +109,11 @@ class ChatRequest(BaseModel):
     def bounded_group(self):
         self.utterances = conversation_turns(self.robot_ids, self.utterances)
         return self
+
+
+async def _bounded_cleanup(coro, *, seconds: float, message: str):
+    """A cancelled but uncooperative adapter must not block later STOPs."""
+    return await _bounded_head_reply(coro, seconds=seconds, timeout_message=message)
 
 
 def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
@@ -527,21 +533,6 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             ).data()
         return coord.pickup(robot_id, request.target).data()
 
-    async def bounded_cleanup(coro, *, seconds: float, message: str):
-        """A cancelled but uncooperative adapter must not block later STOPs."""
-        task = asyncio.create_task(coro)
-        try:
-            done, _ = await asyncio.wait({task}, timeout=seconds)
-            if not done:
-                raise TimeoutError(message)
-            return await task
-        finally:
-            if not task.done():
-                task.cancel()
-                task.add_done_callback(
-                    lambda done: None if done.cancelled() else done.exception()
-                )
-
     async def stop_native_pet_speech(robot_id: str):
         """Interrupt the one existing Xiaozhi speaker, never a second TTS."""
         if settings.mode != "hardware":
@@ -563,7 +554,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             raise HeadError("XIAO speech STOP unconfirmed: no device identity")
         if not callable(interrupt):
             raise HeadError("XIAO speech STOP unconfirmed: no speaker adapter")
-        await bounded_cleanup(
+        await _bounded_cleanup(
             interrupt(robot), seconds=2.5,
             message="XIAO speech interruption unconfirmed",
         )
@@ -581,7 +572,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                 app.state.runtime.pet.set_quiet(robot_id, True)
                 if quiet else app.state.runtime.pet.pause(robot_id)
             )
-            return await bounded_cleanup(
+            return await _bounded_cleanup(
                 operation, seconds=_PET_SHUTDOWN_TIMEOUT_S,
                 message="Pet pause timeout; speaker STOP still required",
             )

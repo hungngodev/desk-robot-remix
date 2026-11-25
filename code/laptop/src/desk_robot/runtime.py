@@ -15,6 +15,7 @@ from .conversation import Conversation, KokoroHeadSpeaker, OllamaChat
 from .live_voice_events import VoiceEventListener
 from .memory import MemoryStore
 from .multimodal import MultimodalOrchestrator
+from .operations import _bounded_head_reply
 from .pet import PetController
 from .room_station import RoomObservation, RoomSerialFeed
 from .simulator import (
@@ -36,18 +37,10 @@ _RUNTIME_PET_STOP_TIMEOUT_S = 5.0
 
 async def _bounded_monitor_stop(coro) -> None:
     """One stalled decoder cannot block the five-head monitor outage abort."""
-    task = asyncio.create_task(coro)
-    try:
-        done, _ = await asyncio.wait({task}, timeout=_MONITOR_STOP_TIMEOUT_S)
-        if not done:
-            raise TimeoutError("Physical XIAO STOP unconfirmed on monitor loss")
-        await task
-    finally:
-        if not task.done():
-            task.cancel()
-            task.add_done_callback(
-                lambda done: None if done.cancelled() else done.exception()
-            )
+    await _bounded_head_reply(
+        coro, seconds=_MONITOR_STOP_TIMEOUT_S,
+        timeout_message="Physical XIAO STOP unconfirmed on monitor loss",
+    )
 
 
 class Runtime:
