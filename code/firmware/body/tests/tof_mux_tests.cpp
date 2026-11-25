@@ -551,6 +551,21 @@ int main() {
       CHECK(!guard.try_rearm(61));
     }
     {
+      Wire = TwoWire{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      const auto clears = Wire.tof_register_stop_transmissions;
+      const auto samples = Wire.tof_samples;
+      Wire.hold_sda_after_tof_result = true;
+      bus.poll(guard, 60);
+      CHECK(Wire.tof_samples == samples + 1);
+      CHECK(Wire.tof_register_stop_transmissions == clears);
+      CHECK(bus.new_extra_channel() == 255 && bus.new_optical_channel() == 255);
+      faulted(guard);
+      fake_i2c_lines() = FakeI2cLines{};
+    }
+    {
       // A newly connected downstream lane can hang the bus at the mux
       // STOP. Skip the readback transaction, latch, then clear next poll.
       Wire = TwoWire{};

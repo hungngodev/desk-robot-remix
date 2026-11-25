@@ -89,6 +89,7 @@ class TwoWire {
   std::uint16_t tof_register = 0;
   unsigned tof_samples = 0;
   bool tof_ready = true;
+  bool hold_sda_after_tof_result = false;
   bool fail_tof_register_write = false;
   unsigned rejected_tof_register_writes = 0;
   unsigned tof_register_stop_transmissions = 0;
@@ -305,6 +306,10 @@ class TwoWire {
         inbound[10] = static_cast<std::uint8_t>(mm >> 8);
         inbound[11] = static_cast<std::uint8_t>(mm);
         ++tof_samples;
+        if (hold_sda_after_tof_result) {
+          fake_i2c_lines().sda_stuck = true;
+          hold_sda_after_tof_result = false;
+        }
       }
     } else if (addr == 0x24 && nfc_connected) {
       if (nfc_phase == 1 && count == 7) {

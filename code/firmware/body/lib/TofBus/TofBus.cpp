@@ -231,7 +231,10 @@ ImuIdentity TofBus::probe_imu() {
     wire_.beginTransmission(address);
     const bool wrote = wire_.write(static_cast<std::uint8_t>(0x0f)) == 1;
     const bool acknowledged = wire_.endTransmission(!wrote) == 0;
-    if (!wrote || !acknowledged || !bus_idle()) return false;
+    // Arduino ESP32 2.0.17 retains Wire's lock after endTransmission(false).
+    // Complete requestFrom before testing line state; never abandon a
+    // pending repeated START (upstream libraries/Wire/src/Wire.cpp).
+    if (!wrote || !acknowledged) return false;
     if (wire_.requestFrom(address, static_cast<size_t>(1), true) != 1 ||
         wire_.available() < 1) return false;
     const int byte = wire_.read();
@@ -248,7 +251,8 @@ ImuIdentity TofBus::probe_imu() {
     wire_.beginTransmission(addr);
     const bool wrote = wire_.write(static_cast<std::uint8_t>(0x75)) == 1;
     const bool acknowledged = wire_.endTransmission(!wrote) == 0;
-    if (wrote && acknowledged && bus_idle() &&
+    // Complete the combined transaction to release the Wire lock.
+    if (wrote && acknowledged &&
         wire_.requestFrom(addr, static_cast<size_t>(1), true) == 1 &&
         wire_.available() >= 1) {
       const int value = wire_.read();
@@ -386,7 +390,7 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
     return;
   }
   std::uint8_t result[kMaxSampleBytes]{};
-  if (!read_register(0x14, result, kMaxSampleBytes) ||
+  if (!read_register(0x14, result, kMaxSampleBytes) || !bus_idle() ||
       !write_byte(0x0B, 0x01) || !bus_idle()) {
     failed(guard);
     return;
