@@ -123,6 +123,7 @@ def test_verified_run_and_pinned_physical_record_paths():
 @pytest.mark.parametrize("defect", [
     "missing", "skipped", "cancelled", "failure", "wrong_attempt", "wrong_sha",
     "duplicate", "wrong_run", "truncated", "malformed_name",
+    "queued", "unexpected_success", "unexpected_skipped",
 ])
 def test_green_headline_cannot_promote_without_exact_required_jobs(defect):
     row = promoted("TESTED")["procedures"][0]
@@ -136,6 +137,11 @@ def test_green_headline_cannot_promote_without_exact_required_jobs(defect):
             jobs.pop()
         elif defect in ("skipped", "cancelled", "failure"):
             jobs[0]["conclusion"] = defect
+        elif defect == "queued":
+            jobs[0]["status"] = "queued"
+        elif defect in ("unexpected_success", "unexpected_skipped"):
+            jobs.append({**jobs[0], "name": "Unexpected lane",
+                         "conclusion": defect.removeprefix("unexpected_")})
         elif defect == "malformed_name":
             jobs[0]["name"] = []
         elif defect == "wrong_attempt":
@@ -153,6 +159,25 @@ def test_green_headline_cannot_promote_without_exact_required_jobs(defect):
     assert verify.audit(full_ledger_with(row), lookup) == []
     assert any("CI run not verified" in error
                for error in verify.audit(full_ledger_with(row), altered))
+
+
+@pytest.mark.parametrize(("status", "conclusion"), [
+    ("queued", None), ("completed", "success"), ("completed", "failure"),
+])
+def test_required_jobs_reject_run_superseded_during_lookup(status, conclusion):
+    jobs_read = False
+
+    def superseded(url):
+        nonlocal jobs_read
+        response = lookup(url)
+        if "jobs" in response:
+            jobs_read = True
+        elif jobs_read and url.endswith("/actions/runs/42"):
+            response.update(run_attempt=3, status=status, conclusion=conclusion)
+        return response
+
+    assert verify.verified_required_ci_jobs(RUN, SHA, lookup)
+    assert not verify.verified_required_ci_jobs(RUN, SHA, superseded)
 
 
 def test_required_job_lookup_failure_stays_distinct_from_failed_ci():

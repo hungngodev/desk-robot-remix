@@ -92,7 +92,7 @@ REQUIRED_PURCHASE_CI_JOBS = frozenset({
 def verified_required_ci_jobs(
     run_url: object, sha: str, lookup=None, *, propagate_lookup_errors: bool = False,
 ) -> bool:
-    """Reject green workflow headlines with missing or skipped required lanes.
+    """Reject green workflow headlines without exactly the current required lanes.
 
     Every named job must belong to the exact successful workflow run, source
     SHA and attempt. Callers may retain their own network-failure diagnostics.
@@ -131,7 +131,7 @@ def verified_required_ci_jobs(
             if type(name) is not str:
                 return False
             if name not in REQUIRED_PURCHASE_CI_JOBS:
-                continue
+                return False
             if (name in passed or type(job.get("run_id")) is not int
                     or job["run_id"] != run_id
                     or type(job.get("run_attempt")) is not int
@@ -141,7 +141,11 @@ def verified_required_ci_jobs(
                     or job.get("conclusion") != "success"):
                 return False
             passed.add(name)
-        return passed == REQUIRED_PURCHASE_CI_JOBS
+        if passed != REQUIRED_PURCHASE_CI_JOBS:
+            return False
+        # Reject a rerun that superseded the job list during this lookup.
+        return (verified_actions_run(run_url, sha, fetch_run)
+                and captured["run"]["run_attempt"] == attempt)
     except (HTTPError, URLError, OSError, TimeoutError):
         if propagate_lookup_errors:
             raise
