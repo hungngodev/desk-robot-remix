@@ -14,6 +14,37 @@ Power path proposal for review, **not verified electronics**: a protected compat
 
 The actual battery, boost, charger board, NTC wiring, input charge contact current limit, thermal load, chassis geometry, shore power, and exposed contact safety remain unselected and cannot be called verified until built and measured. Do not energize exposed metal contacts from this file.
 
+## Independent cold-contact acceptance boundary
+
+The two normally closed GPA0/GPA1 switches are **robot-side read-only
+evidence**, not the dock-side charge enable interlock. In the following
+matrix, seated means the normalized logical observation (HIGH on GPA0 or
+GPA1), not a physically closed electrical switch. An open wire can
+produce the same observation as a pressed switch. Even both HIGH cannot
+prove correct mating, polarity, or electrical independence.
+
+| Physical test condition | Required dock contact power state |
+| --- | --- |
+| Empty dock, including startup/reset or loss of controller power | Off |
+| Partial bump, left switch alone, or right switch alone | Off |
+| One switch stuck, open wire, shorted wire, or contradictory seat evidence | Off unless an independently reviewed circuit can positively prove safe mating without that failed channel; no such circuit is qualified today |
+| Both switches apparently seated, but polarity, contact coverage or protection not established | Off |
+| Full correctly polarized seating and independently validated hardware interlock | Eligible for separate current-limited electrical acceptance only; still off in the current unqualified build |
+| Removal, intermittent seating, or dock supply loss/recovery | Off; no software-only reenable |
+
+The independent dock supply and switching schematic must establish its
+default-off state and fault behavior without Mac, WROOM, Nano beacon,
+I2C, or any software permission. Before approval, record measured contact
+voltage in the above conditions, removal cutoff and residual stored
+energy, connector polarity, reverse/backfeed isolation (including robot
+battery and USB sources), and current-limit/short protection. Begin with
+unpowered continuity and mechanical tests; any powered fault test requires
+a separately reviewed current-limited bench fixture without a live pack.
+Use the existing protected power design and DRR-145 acceptance boundary;
+no new component or charge-enable implementation is selected here.
+PGOOD, CHG, an AprilTag, NEC reception, and even signed pack current are
+not substitutes for independently safe contact energization.
+
 ## November 11 replay safe physical sample path
 
 The original three HTTP responses were **not proof of three independent physical reads**. The same cached WROOM auxiliary UART line could have been returned repeatedly and labelled `stable_three_samples=true`. The corrected source requires genuine hardware acquisition identity.
