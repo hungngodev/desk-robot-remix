@@ -574,6 +574,16 @@ def test_hardware_pet_autostart_needs_real_local_vision_and_camera_consent(setti
     with pytest.raises(ValueError, match="Proactive camera autostart"):
         Settings.model_validate(fields)
     fields["vision_model"] = "local-vision-model"
+    with pytest.raises(ValueError, match="mapped Xiaozhi device_id"):
+        Settings.model_validate(fields)
+    fields["robots"][0]["device_id"] = " "
+    with pytest.raises(ValueError, match="mapped Xiaozhi device_id"):
+        Settings.model_validate(fields)
+    fields["robots"][0]["device_id"] = "live-01"
+    fields["vision_model"] = " "
+    with pytest.raises(ValueError, match="local VLM"):
+        Settings.model_validate(fields)
+    fields["vision_model"] = "local-vision-model"
     accepted = Settings.model_validate(fields)
     assert accepted.pet_autostart_enabled is True
     assert accepted.mode == "hardware"

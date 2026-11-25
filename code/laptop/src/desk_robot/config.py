@@ -194,10 +194,12 @@ class Settings(BaseModel):
         if self.pet_autostart_enabled and (
             self.mode != "hardware"
             or not self.voice_vision_tools_enabled
-            or not self.vision_model
+            or not self.vision_model.strip()
+            or not any(robot.device_id.strip() for robot in self.robots)
         ):
             raise ValueError(
-                "Proactive camera autostart requires hardware, explicit camera consent and a local VLM"
+                "Proactive camera autostart requires hardware, explicit camera consent, "
+                "a local VLM and at least one mapped Xiaozhi device_id"
             )
         if self.fleet_social_autonomy_enabled and not self.fleet_text_sharing_enabled:
             raise ValueError("Automatic peer dialogue requires explicit local text sharing consent")
