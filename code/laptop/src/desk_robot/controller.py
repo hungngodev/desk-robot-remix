@@ -1623,6 +1623,12 @@ class Coordinator:
             last_live_frame_at = result[1]
             return result
 
+        def fence_observation() -> None:
+            # A newer cached JPEG may still predate movement or the hold.
+            # Fence Mac receipt time at completion of each supervised phase.
+            nonlocal last_live_frame_at
+            last_live_frame_at = max(last_live_frame_at, time.monotonic())
+
         await self._assert_armed_health(job.robot_id)
         self._require_camera_motion_grant(camera_grant)
         await head.command(f"grip {c.grip_open}")
@@ -1630,6 +1636,7 @@ class Coordinator:
         self._require_camera_motion_grant(camera_grant)
         await head.command(f"lift {c.lift_down}")
         await asyncio.sleep(c.servo_settle_seconds)
+        fence_observation()
         initial = None
         for attempt in range(24):
             await self._assert_armed_health(job.robot_id)
@@ -1658,6 +1665,7 @@ class Coordinator:
             await head.command(command)  # exactly once: an uncertain ACK is a failure
             await asyncio.sleep(0.12)
             await _bounded_pulse_stop(head)
+            fence_observation()
             await self._assert_armed_health(job.robot_id)
         if initial is None:
             raise OperationError("Alignment attempt limit reached")
@@ -1687,11 +1695,13 @@ class Coordinator:
         # Image evidence: same category moves upward into measured raised-jaw region and remains
         # there in two fresh frames while wheels are stopped. A servo ACK alone never passes.
         await _bounded_pulse_stop(head)
+        fence_observation()
         a, b, x, y = c.lifted_roi_px
         observed = []
         for sample in range(2):
             if sample:
                 await asyncio.sleep(c.hold_seconds)
+                fence_observation()
             await self._assert_armed_health(job.robot_id)
             detection, _ = await observe()
             px, py = detection.center
@@ -1719,6 +1729,7 @@ class Coordinator:
         self._require_camera_motion_grant(camera_grant)
         await head.command(f"lift {c.lift_down}")
         await asyncio.sleep(c.servo_settle_seconds)
+        fence_observation()
         lowered, _ = await observe()
         lowered_ground = c.ground(lowered.center)
         if (
@@ -1738,10 +1749,12 @@ class Coordinator:
         self._require_camera_motion_grant(camera_grant)
         await head.command(f"lift {c.lift_up}")
         await asyncio.sleep(c.servo_settle_seconds)
+        fence_observation()
         placed_positions = []
         for sample in range(2):
             if sample:
                 await asyncio.sleep(0.15)
+                fence_observation()
             await self._assert_armed_health(job.robot_id)
             placed, _ = await observe()
             ground = c.ground(placed.center)

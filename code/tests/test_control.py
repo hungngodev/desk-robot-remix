@@ -2294,3 +2294,52 @@ async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(settin
         allow_contact.set()
         allow_halt.set()
         await c.close()
+
+
+async def test_pickup_camera_receipts_follow_motion_and_hold_boundaries(settings):
+    """A cached frame newer than the last observation may still predate actuation."""
+    c, head = make(settings)
+    original_command = head.command
+    original_observe = c._observe
+    latest_motion_at = float("-inf")
+    first_held_at = None
+    checked = []
+
+    async def command(value):
+        nonlocal latest_motion_at
+        result = await original_command(value)
+        if value.startswith(("grip ", "lift ", "drive ")) or value == "stop":
+            latest_motion_at = time.monotonic()
+        return result
+
+    async def observe(robot_id, target, calibration, *, after, camera_grant):
+        nonlocal first_held_at
+        # This is the actual cutoff passed to the live MJPEG selector, even
+        # though the simulator itself always takes a fresh synthetic image.
+        assert after >= latest_motion_at
+        result = await original_observe(
+            robot_id, target, calibration, after=after, camera_grant=camera_grant,
+        )
+        checked.append(after)
+        if (
+            head.commands.count(f"lift {calibration.lift_up}") == 1
+            and head.commands.count(f"grip {calibration.grip_open}") == 1
+        ):
+            if first_held_at is None:
+                first_held_at = result[1]
+            else:
+                assert after >= first_held_at + calibration.hold_seconds
+        return result
+
+    head.command = command
+    c._observe = observe
+    try:
+        await c.operator_arm("robot-01")
+        job = c.pickup("robot-01", "key")
+        await c.tasks[job.id]
+        assert job.state == "succeeded", job.error
+        assert len(checked) >= 6
+        assert first_held_at is not None
+        assert job.result["physical_acceptance_pass"] is False
+    finally:
+        await c.close()
