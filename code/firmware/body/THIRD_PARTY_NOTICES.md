@@ -28,6 +28,8 @@ The upstream library's synchronous ACK, response and card wait loops were
 NOT linked into the local WROOM cliff safety loop. The new bounded frame
 adapter under `lib/AccessorySensors/Pn532Frames.h` retains explicit source
 attribution and parses only ISO14443A UID game tokens. It cannot authenticate
-a person or operate the charger or motors. Check the retained upstream
-license at https://github.com/Seeed-Studio/PN532/blob/e61296876c1c3e66ef67156562c71324b389f5fa/LICENSE.md .
+a person or operate the charger or motors. The full pinned [BSD-3-Clause notice](../../../docs/licenses/Seeed-PN532-BSD-3-Clause.txt)
+retains both original copyright holders (Adafruit Industries and Seeed Technology Inc.).
+Include it in applicable source and binary distributions. The [upstream license](https://github.com/Seeed-Studio/PN532/blob/e61296876c1c3e66ef67156562c71324b389f5fa/LICENSE.md)
+is retained as the revision-specific reference.
 No real PN532 module, antenna, voltage or timing trial has passed.
