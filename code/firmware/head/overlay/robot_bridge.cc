@@ -1181,6 +1181,10 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
     if (!json || !cJSON_IsObject(json.get()) || cJSON_GetArraySize(json.get()) != 1)
         return Json(req, 400, Envelope(false, "expected one event or command field"));
     if (strcmp(req->uri, "/api/face") == 0) {
+#if !defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3)
+        // Only Sense has a local task consuming these queued cues.
+        return Json(req, 503, Envelope(false, "face cue consumer unavailable on this board"));
+#else
         // The authenticated Mac can offer a bounded *visual* cue only. A
         // language model, OCR frame or tool response cannot send motor text
         // through this route. Latest event wins; no unbounded HTTP queue.
@@ -1200,6 +1204,7 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         person_cue_.offer(
             static_cast<std::uint32_t>(esp_timer_get_time() / 1000));
         return Json(req, 200, Envelope(true, "person cue queued"));
+#endif
     }
     auto item = cJSON_GetObjectItemCaseSensitive(json.get(), "command");
     if (!cJSON_IsString(item) || !item->valuestring)

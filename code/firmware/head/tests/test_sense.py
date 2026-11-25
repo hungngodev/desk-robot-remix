@@ -1522,6 +1522,71 @@ def test_authenticated_mac_person_face_cue_is_cosmetic_only():
     assert 'Transact(event' not in bridge  # never send cue to WROOM
 
 
+def test_face_dispatch_requires_live_sense_consumer():
+    """Compile and exercise the actual route branch for each head profile."""
+    bridge = (HEAD / "overlay/robot_bridge.cc").read_text()
+    start = bridge.index('    if (strcmp(req->uri, "/api/face") == 0) {')
+    end = bridge.index('    auto item = cJSON_GetObjectItemCaseSensitive(json.get(), "command");', start)
+    route = bridge[start:end]
+    harness = r'''
+#include <cassert>
+#include <cstdint>
+#include <cstring>
+struct Request { const char* uri = "/api/face"; };
+struct Event { const char* valuestring; };
+struct Document { Event event; Event* get() { return &event; } };
+Event* cJSON_GetObjectItemCaseSensitive(Event* event, const char*) { return event; }
+bool cJSON_IsString(Event* event) { return event != nullptr; }
+enum class CosmeticMood { kNone, kHappy };
+CosmeticMood ParseCosmeticMood(const char* event) {
+    return std::strcmp(event, "mood:happy") == 0 ? CosmeticMood::kHappy : CosmeticMood::kNone;
+}
+std::int64_t esp_timer_get_time() { return 1000; }
+bool Envelope(bool ok, const char*) { return ok; }
+int Json(Request*, int status, bool ok) { assert(ok == (status == 200)); return status; }
+struct Cue {
+    int count = 0;
+    template <typename... Args> void offer(Args...) { ++count; }
+};
+struct Harness {
+    Cue person_cue_, cosmetic_mood_;
+    int dispatch(const char* value) {
+        Request request;
+        auto* req = &request;
+        [[maybe_unused]] Document json{{value}};
+''' + route + r'''
+        return 500;
+    }
+};
+int main() {
+    Harness bridge;
+#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+    assert(bridge.dispatch("person_detected") == 200);
+    assert(bridge.dispatch("mood:happy") == 200);
+    assert(bridge.dispatch("not_a_cue") == 400);
+    assert(bridge.person_cue_.count == 1 && bridge.cosmetic_mood_.count == 1);
+#else
+    assert(bridge.dispatch("person_detected") == 503);
+    assert(bridge.dispatch("mood:happy") == 503);
+    assert(bridge.person_cue_.count == 0 && bridge.cosmetic_mood_.count == 0);
+#endif
+}
+'''
+    compiler = shutil.which("c++")
+    assert compiler is not None, "A native C++ compiler is required"
+    with tempfile.TemporaryDirectory() as temp:
+        source = Path(temp) / "face_profile.cc"
+        exe = Path(temp) / "face_profile"
+        source.write_text(harness)
+        for profile in ("SENSE_S3", "MODULAR_S3", "WAVESHARE_S3_CAM", "CORE_S3"):
+            subprocess.run(
+                [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+                 f"-DCONFIG_BOARD_TYPE_DESK_ROBOT_{profile}=1", str(source), "-o", str(exe)],
+                check=True, env=native_cpp_env(),
+            )
+            subprocess.run([str(exe)], check=True)
+
+
 def test_sense_fault_face_overrides_idle_moods_and_recovers_once():
     """The local OLED cannot smile through a current WROOM safety fault."""
     board = (HEAD / "sense/desk_robot_sense.cc").read_text()
