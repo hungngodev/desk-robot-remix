@@ -45,6 +45,8 @@ class ObjectSearchResult:
     considered: int = 0
     may_execute: bool = False
     arrived: bool = False
+    # Candidate poses still unobserved after observing the proposed viewpoint.
+    # A rejected route is not an observation, even if it consumed planning budget.
     remaining_viewpoints: int | None = None
 
 
@@ -284,7 +286,7 @@ def propose_object_search(
                 return refuse("invalid_route_receipt", considered)
             return ObjectSearchResult(
                 "viewpoint_proposal", "must_reobserve_target", view.viewpoint_id,
-                proposal, considered, remaining_viewpoints=len(candidates) - considered,
+                proposal, considered, remaining_viewpoints=len(candidates) - 1,
             )
         if proposal.reason not in {"no_safe_route", "unsafe_goal"}:
             return refuse(proposal.reason, considered)

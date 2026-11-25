@@ -381,3 +381,28 @@ def test_viewpoint_aliases_do_not_repeat_same_pose(inspected, heading, expected,
     assert result.status == expected
     assert result.remaining_viewpoints == remaining
     assert not result.may_execute and not result.arrived
+
+
+@pytest.mark.parametrize("first_inspected, remaining", [(False, 1), (True, 0)])
+def test_unsafe_viewpoint_is_not_counted_as_observed(first_inspected, remaining):
+    grid, _, _, query, _, target, view = fixtures()
+    blocked = list(grid.support)
+    blocked[7 * grid.width + 9] = "unsafe"
+    first = replace(view, inspected_in_request=first_inspected)
+    second = replace(view, viewpoint_id="view-2", cell=(8, 7), priority=1)
+    proposal = search(grid=replace(grid, support=tuple(blocked)),
+                      candidates=(first, second))
+    assert proposal.status == "viewpoint_proposal"
+    assert proposal.viewpoint_id == second.viewpoint_id
+    assert proposal.considered == (1 if first_inspected else 2)
+    assert proposal.remaining_viewpoints == remaining
+    result = summarize_search_observation(
+        label=query.label, final_cell=second.cell, target=target, search=proposal,
+        observation_status="camera_not_seen", reason="detector_outcome",
+    )
+    assert result["status"] == (
+        "not_found_after_search" if first_inspected else "no_current_sighting"
+    )
+    assert result["search_exhausted"] is first_inspected
+    assert result["remaining_viewpoints"] == remaining
+    assert not result["arrived"] and not result["motor_authorized"]
