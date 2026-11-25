@@ -327,3 +327,43 @@ def test_misaligned_board_wavs_cannot_emit_delay_candidate(tmp_path, fault):
     assert result.returncode != 0
     assert message in result.stderr
     assert not result.stdout
+
+
+def test_capture_receipt_binds_same_length_wavs(tmp_path):
+    import json
+
+    capture = runpy.run_path(str(
+        Path(__file__).resolve().parents[1] / "scripts/capture_sense_aec.py"
+    ))
+    rng = np.random.default_rng(71)
+    speaker = rng.integers(-16000, 16000, 64000, dtype=np.int16)
+    mic = np.concatenate((np.zeros(1120, dtype=np.int16), speaker[:-1120]))
+    raw = np.column_stack((mic, speaker)).astype("<i2").tobytes()
+    metadata = {
+        "capture_source": "authenticated_sense_codec_private_pcm_window",
+        "head_bearer_response_checked": True,
+        "frames": 64000, "sample_rate_hz": 16000,
+        "first_sample_us": 1, "last_sample_us": 4000001,
+    }
+    directory = tmp_path / "capture"
+    capture["save_wavs"](directory, raw, metadata)
+    read = source["read_wav"]
+    validate = source["validate_capture_report"]
+    ref, rate = read(directory / "speaker_reference.wav")
+    received, mic_rate = read(directory / "microphone.wav")
+    receipt = directory / "capture.json"
+    validate(receipt, ref, rate, received, mic_rate)
+    assert estimate_delay(ref, received)["sample_lag"] == 1120
+    with pytest.raises(ValueError, match="digest mismatch"):
+        validate(receipt, np.roll(ref, 1), rate, received, mic_rate)
+    with pytest.raises(ValueError, match="digest mismatch"):
+        validate(receipt, received, rate, ref, mic_rate)
+    saved = json.loads(receipt.read_text())
+    for key, value in (("last_sample_us", 9000001), ("frames", True),
+                       ("microphone_pcm_sha256", None)):
+        receipt.write_text(json.dumps({**saved, key: value}))
+        with pytest.raises(ValueError, match="Sense capture report"):
+            validate(receipt, ref, rate, received, mic_rate)
+    receipt.write_text('{"frames": 64000, "frames": 64000}')
+    with pytest.raises(ValueError, match="Duplicate"):
+        validate(receipt, ref, rate, received, mic_rate)

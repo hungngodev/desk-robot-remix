@@ -403,8 +403,14 @@ python code/scripts/capture_sense_aec.py \
   --i-consent-to-private-raw-audio
 python code/scripts/estimate_aec_delay.py \
   --speaker ./data/private/sense-aec-trial-01/speaker_reference.wav \
-  --microphone ./data/private/sense-aec-trial-01/microphone.wav
+  --microphone ./data/private/sense-aec-trial-01/microphone.wav \
+  --capture-report ./data/private/sense-aec-trial-01/capture.json
 ```
+
+The capture receipt includes SHA-256 digests of both PCM channels. Keep all
+three files together: the estimator rejects mismatched or older receipts
+without digests when `--capture-report` is supplied. A matching local receipt
+is not cryptographic device attestation or physical AEC qualification.
 
 Replace the sample IP, robot ID and token environment name with the actual
 local device identity. The capture tool refuses public or proxied addresses,

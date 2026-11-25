@@ -8,6 +8,7 @@ see docs/guides/audio-barge-in.md for acquisition and physical acceptance.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 import wave
@@ -35,6 +36,47 @@ def read_wav(path: Path) -> tuple[np.ndarray, int]:
             raise ValueError("WAV contains incomplete PCM16 sample")
         samples = np.frombuffer(pcm, dtype="<i2").astype(np.float64)
     return samples / 32768, rate
+
+
+def validate_capture_report(
+    path: Path, speaker: np.ndarray, speaker_rate: int,
+    microphone: np.ndarray, mic_rate: int,
+) -> None:
+    """Match exported PCM to its local receipt, not a physical attestation."""
+    with path.open("rb") as file:
+        raw = file.read(8193)
+    if len(raw) > 8192:
+        raise ValueError("Sense capture report too large")
+
+    def unique_keys(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("Duplicate Sense capture report field")
+            result[key] = value
+        return result
+
+    receipt = json.loads(raw, object_pairs_hook=unique_keys)
+    if not isinstance(receipt, dict):
+        raise ValueError("Invalid Sense capture report")
+    first, last = receipt.get("first_sample_us"), receipt.get("last_sample_us")
+    if (receipt.get("capture_source") != "authenticated_sense_codec_private_pcm_window"
+            or receipt.get("head_bearer_response_checked") is not True
+            or type(receipt.get("frames")) is not int
+            or receipt["frames"] != 64000
+            or type(receipt.get("sample_rate_hz")) is not int
+            or receipt["sample_rate_hz"] != 16000
+            or speaker_rate != 16000 or mic_rate != 16000
+            or len(speaker) != 64000 or len(microphone) != 64000
+            or type(first) is not int or type(last) is not int
+            or not 1 <= first < last <= 2**63 - 1
+            or not 3_920_000 <= last - first <= 4_080_000):
+        raise ValueError("Invalid Sense capture report format or timing")
+    for key, samples in (("microphone_pcm_sha256", microphone),
+                         ("speaker_reference_pcm_sha256", speaker)):
+        digest = hashlib.sha256((samples * 32768).astype("<i2").tobytes()).hexdigest()
+        if receipt.get(key) != digest:
+            raise ValueError("Sense capture report PCM digest mismatch")
 
 
 def resample_reference(source: np.ndarray, original_rate: int) -> np.ndarray:
@@ -223,12 +265,15 @@ def main() -> None:
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--speaker", required=True, type=Path)
     cli.add_argument("--microphone", required=True, type=Path)
+    cli.add_argument("--capture-report", type=Path)
     cli.add_argument("--max-delay-ms", type=float, default=250.0)
     args = cli.parse_args()
     speaker, speaker_rate = read_wav(args.speaker)
     microphone, mic_rate = read_wav(args.microphone)
     if mic_rate != 16000:
         raise ValueError("Microphone recording must be 16 kHz")
+    if args.capture_report is not None:
+        validate_capture_report(args.capture_report, speaker, speaker_rate, microphone, mic_rate)
     reference = resample_reference(speaker, speaker_rate)
     report = estimate_delay(
         reference, microphone, max_delay_ms=args.max_delay_ms,
@@ -247,6 +292,7 @@ def main() -> None:
             "aec_physically_verified": False,
             "natural_barge_in_verified": False,
         })
+    report["capture_report_pcm_matched"] = args.capture_report is not None
     print(json.dumps(report, indent=2))
 
 

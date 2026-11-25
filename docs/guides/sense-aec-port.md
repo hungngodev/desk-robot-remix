@@ -26,7 +26,7 @@ Known source paths below refer to those revisions. [Source record](../hardware/r
 ## Smallest substantive port
 
 Add a Sense-only codec adapter and bounded playback-reference helper, keeping the
-current baseline available for comparison. The writer owns one stateful 24-to-16
+current baseline available for comparison. The writer owns one stateful 32-to-16
 kHz converter. Publish the effective post-volume/clamped output samples with
 frame indices, timing and a playback generation; do not reconstruct reference
 gain independently from an unsynchronized volume variable.
@@ -198,8 +198,14 @@ store them outside the local protected trial directory.
    cd code
    uv run --no-sync python scripts/estimate_aec_delay.py \
      --microphone data/private/aec_lab_trial/microphone.wav \
-     --speaker data/private/aec_lab_trial/speaker_reference.wav
+     --speaker data/private/aec_lab_trial/speaker_reference.wav \
+     --capture-report data/private/aec_lab_trial/capture.json
    ```
+
+   Keep the two WAVs and their receipt together. SHA-256 PCM digests detect
+   accidental pairing across captures or edited channels; they do not prove
+   hardware identity or acoustic playback. Older receipts lacking digests
+   must be recaptured for this receipt-checked workflow.
 
 5. Repeat speaker-active broadband bench captures during double talk,
    VAD interruption, WiFi/camera/servo load and head reboot. Also run

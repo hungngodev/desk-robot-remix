@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import array
+import hashlib
 import ipaddress
 import json
 import os
@@ -414,6 +415,12 @@ def save_wavs(directory: Path, raw: bytes, report: dict, *,
     if expected_directory_identity is not None and identity != expected_directory_identity:
         raise ValueError("AEC capture directory changed during write")
     mic, ref = split_pcm(raw)
+    # Bind the receipt to the exported channels, not merely their lengths.
+    report = {
+        **report,
+        "microphone_pcm_sha256": hashlib.sha256(mic).hexdigest(),
+        "speaker_reference_pcm_sha256": hashlib.sha256(ref).hexdigest(),
+    }
     paths = [directory / "microphone.wav", directory / "speaker_reference.wav",
              directory / "capture.json"]
     # O_NOFOLLOW on individual WAV paths alone is insufficient: a local
