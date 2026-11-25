@@ -1,5 +1,6 @@
 #include <cstdio>
 #include "BodyControl.h"
+#include "TouchDebounce.h"
 #include "CliffGuard.h"
 #include "ReplyTxQueue.h"
 #include "StepperDrive.h"
@@ -816,6 +817,30 @@ static void cap_petting_zones_are_optional_and_never_arm() {
   body.set_cap(false, 0);
   CHECK(!body.state().cap_valid && body.state().cap_mask == 0);
   CHECK(send(body, "status", 2).find("\"cap_ok\":false") != std::string::npos);
+}
+
+static void raw_touch_observations_restart_gesture_debounce() {
+  desk_robot::TouchDebounce touch;
+  CHECK(!touch.poll(true, 100));
+  CHECK(!touch.poll(true, 125));
+  touch.observe(false, 130);  // UART/output safety read between gesture polls
+  CHECK(!touch.poll(true, 150));
+  CHECK(!touch.stable());
+  CHECK(!touch.poll(true, 175));
+  CHECK(touch.poll(true, 200));
+  CHECK(touch.stable());
+  CHECK(!touch.poll(false, 225));
+  CHECK(!touch.poll(false, 250));
+  touch.observe(true, 255);  // interrupt a candidate release
+  CHECK(!touch.poll(false, 275));
+  CHECK(touch.stable());
+  CHECK(!touch.poll(false, 300));
+  CHECK(touch.poll(false, 325));
+  CHECK(!touch.stable());
+  desk_robot::TouchDebounce wrap;
+  CHECK(!wrap.poll(true, 0xfffffff0U));
+  CHECK(!wrap.poll(true, 9U));
+  CHECK(wrap.poll(true, 34U));
 }
 
 static void touch_telemetry_never_grants_motion() {
@@ -3552,6 +3577,7 @@ int main() {
     side_range_validity_clears_on_shared_bus_fault_without_fake_samples();
     optional_range_replay_preserves_newest_raw_evidence();
     cap_petting_zones_are_optional_and_never_arm();
+    raw_touch_observations_restart_gesture_debounce();
     touch_telemetry_never_grants_motion();
     raw_touch_trip_preempts_debounce_without_forging_a_tap();
     touch_is_local_human_stop_and_requires_fresh_arm();

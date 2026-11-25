@@ -53,6 +53,7 @@
 #include "StepperDrive.h"
 #include "TofBus.h"
 #include "ExpansionTouch.h"
+#include "TouchDebounce.h"
 #include "PulsePad.h"
 #include "AccessorySensors.h"
 #include "McpContactEvidence.h"
@@ -83,10 +84,7 @@ desk_robot::BerryImu berry_imu;  // One six-axis adapter, MPU6050 or BerryIMU; s
 // AT42QT1010 owns the input threshold. Sample without internal pullups
 // (GPIO34 is input-only), debounce three equal 25ms samples, and retain
 // an edge counter so the Mac can detect short taps between status polls.
-bool touch_stable = false;
-bool touch_candidate = false;
-std::uint8_t touch_candidate_samples = 0;
-std::uint32_t touch_last_sample_ms = 0;
+desk_robot::TouchDebounce touch_debounce;
 
 std::uint32_t last_extra_sample_ms = 0;
 desk_robot::McpContactEvidence contact_evidence;
@@ -141,6 +139,7 @@ void apply_outputs();
 bool sample_raw_touch(std::uint32_t now_ms) {
   const bool active = digitalRead(body_pins::kTouchOutput) == HIGH;
   control.sample_touch_input(active, now_ms);
+  touch_debounce.observe(active, now_ms);
   return active;
 }
 
@@ -148,21 +147,14 @@ void poll_touch(std::uint32_t now_ms) {
   // Independent wheel inhibition must not wait for the 25 ms gesture timer.
   const bool was_armed = control.state().armed;
   const bool active = sample_raw_touch(now_ms);
-  if (active && was_armed) apply_outputs();
-  // Every observed raw transition restarts the gesture debounce. Otherwise
-  // short pulses coinciding with three sample instants can forge a touch.
-  if (active != touch_candidate) {
-    touch_candidate = active;
-    touch_candidate_samples = 1;
-    touch_last_sample_ms = now_ms;
+  if (active && was_armed) {
+    apply_outputs();
+    // apply_outputs resamples GPIO; do not feed its predecessor back into
+    // the gesture classifier with an older timestamp.
     return;
   }
-  if (now_ms - touch_last_sample_ms < 25) return;
-  touch_last_sample_ms = now_ms;
-  if (touch_candidate_samples < 3) ++touch_candidate_samples;
-  if (touch_candidate_samples >= 3 && touch_candidate != touch_stable) {
-    touch_stable = touch_candidate;
-    control.set_touch(touch_stable, now_ms);
+  if (touch_debounce.poll(active, now_ms)) {
+    control.set_touch(touch_debounce.stable(), now_ms);
   }
 }
 
