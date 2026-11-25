@@ -74,6 +74,13 @@ class DockCameraCalibration:
             self.cx >= self.image_width_px or self.cy >= self.image_height_px
         ):
             raise ValueError("Dock optical center lies outside measured image")
+        # Match calibrate_dock_camera.fit_corners: loaded measured intrinsics
+        # must not bypass the fitter's resolution-relative focal envelope.
+        if self.image_width_px is not None and (
+            not self.image_width_px * .1 <= self.fx <= self.image_width_px * 10
+            or not self.image_height_px * .1 <= self.fy <= self.image_height_px * 10
+        ):
+            raise ValueError("Dock camera focal lengths outside measured resolution envelope")
         if self.camera_sensor_pid is not None and self.camera_sensor_pid not in (
             "OV3660", "OV5640"
         ):
