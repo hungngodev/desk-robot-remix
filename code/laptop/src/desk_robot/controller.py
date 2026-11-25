@@ -1275,21 +1275,30 @@ class Coordinator:
                     raise OperationError(
                         "Dock camera live sensor identity unavailable"
                     )
+                remaining = 0.20 - (time.monotonic() - received_at)
+                if remaining <= 0:
+                    raise OperationError("Stale dock camera receipt before PID lookup")
                 observed_pid = await _bounded_head_reply(
                     (read_identity(observation) if isinstance(observation, tuple)
-                     and len(observation) == 4 else read_identity()), seconds=2.0,
+                     and len(observation) == 4 else read_identity()), seconds=remaining,
                     timeout_message="Dock camera live sensor identity timeout",
                 )
                 if observed_pid != camera.camera_sensor_pid:
                     raise OperationError(
                         "Dock camera sensor PID differs from measured calibration"
                     )
-            # The shared bounded native detector also owns all read-only
-            # AprilTag observations. A cancelled/expired C detector cannot
-            # escape the single-worker budget or overlap another robot.
-            pose = await detect_bounded(
-                jpeg, camera, captured_at=received_at
-            )
+            # The isolated detector is shared with read-only diagnostics.
+            # Expired or revoked evidence must never enter a native process.
+            self._require_camera_motion_grant(camera_grant)
+            try:
+                pose = await detect_bounded(
+                    jpeg, camera, captured_at=received_at
+                )
+            except TimeoutError:
+                return {
+                    "phase": "hold", "reason": "Stale AprilTag camera receipt",
+                    "charging_authorized": False, "physical_acceptance_pass": False,
+                }
             # A centered AprilTag in the camera frame is not necessarily
             # centered on the wheel chassis. Apply measured camera yaw and
             # lateral lens offset before choosing a left/right/forward pulse.

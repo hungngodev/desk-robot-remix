@@ -260,6 +260,10 @@ class Runtime:
             raise RuntimeError("Closed runtime cannot restart voice listeners")
         if self.settings.mode != "hardware" or self._voice_task is not None:
             return
+        if any(robot.dock_calibration is not None for robot in self.settings.robots):
+            from .dock_runtime import prewarm_detector_pool
+
+            await prewarm_detector_pool()
         # Visual consent enables a persistent feed independently of voice
         # activity or pet autostart. One Mac stream consumer per real head.
         # The pet still needs its separate opt-in to speak proactively.
@@ -922,9 +926,8 @@ class Runtime:
         )
         if callable(vision_close):
             await step("YOLO native inference", vision_close, 2.0)
-        # The process-global AprilTag C worker also outlives canceled
-        # asyncio requests. Do not silently leave a hung detector reusable
-        # by another Runtime instance or any of the five robots.
+        # Kill/reap the shared AprilTag processes only after physical STOP.
+        # An unconfirmed reap keeps the old owner closed to every robot.
         if self.settings.mode == "hardware":
             from .dock_runtime import close_detector_pool
             await step("AprilTag native detector", close_detector_pool, 2.0)

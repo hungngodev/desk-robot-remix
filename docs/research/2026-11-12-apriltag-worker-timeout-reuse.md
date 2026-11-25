@@ -18,3 +18,32 @@ First write an asynchronous test with a real `threading.Event` blocking a fake d
 
 ## Safety and coordination
 Never allow a timed-out detector to publish a late pose, enable movement, or enable charging. Keep this as a narrow runtime boundary change on PR #17; do not introduce another AprilTag implementation. Existing QA finding on PR #17 already covers timeout risk. This note supplies the upstream code evidence and test acceptance plan for the implementation and QA loops. No firmware, wiring, CAD or charging safety is validated by this research.
+
+## EXP-069 implementation follow-up (November 24)
+
+The thread pool approach above was intentionally fail-closed but could not
+recover from an indefinitely frozen C call. The replacement uses Python 3.11
+standard-library asyncio subprocess pipes (PSF license), not fork of the
+running Mac application or a second vision framework:
+https://docs.python.org/3.11/library/asyncio-subprocess.html
+
+The runtime warms two isolated children before dock capture when calibration
+is configured. Only one child receives a JPEG at a time; the spare holds no
+queued frame. Each request has a bounded JSON envelope and a sequence and
+original receipt clock; the parent reconstructs the validated DockPose.
+The existing 200 ms receipt lifetime includes serialization and IPC. On
+timeout, crash, malformed IPC or cancellation, SIGKILL and bounded pipe
+draining/reaping precede releasing the single-flight owner. The next caller
+must acquire a new JPEG; it may use an already warm spare while replenishment
+starts. Unconfirmed reaping closes the owner to all five pets. Shutdown
+kills both children after physical STOP and replaces the pool only on
+confirmed retirement. A process boundary is not a security sandbox.
+
+Sandbox: the old shielded executor retained its slot after a real 200 ms
+timeout. The new isolated process module and fault tests passed 13 cases on
+Linux with Python 3.13 and OpenCV 4.13, including real generated AprilTag JPEG,
+SIGSTOP/SIGKILL, hang, crash, malformed/oversized/duplicate IPC, timestamp and
+sequence mismatch, NaN, cancellation and concurrent close. Each fault case
+required a fresh frame on the prewarmed spare in under 500 ms. This is host
+evidence, not macOS loaded timing, camera mount calibration, body STOP
+acknowledgment or charging qualification.

@@ -1,24 +1,16 @@
 """Real camera docking observation without a motor or charger permission."""
 from __future__ import annotations
 
-import asyncio
 import json
 import math
-import threading
 import time
-from concurrent.futures import ThreadPoolExecutor
 from typing import Callable
 
-from .dock_vision import DockCameraCalibration, DockPose, assess_dock, detect_apriltag
+from .dock_process import DetectorPool, DockDetectorBusy
+from .dock_vision import DockCameraCalibration, DockPose, assess_dock
 
-# Keep the native future itself as the worker lifetime owner. An asyncio wrapper
-# can be cancelled during shutdown while the C detector is still running.
-_DETECTOR_SLOT = threading.BoundedSemaphore(1)
-_DETECTOR_POOL = ThreadPoolExecutor(max_workers=1, thread_name_prefix="desk-apriltag")
-_DETECTOR_SHUTTING_DOWN = False
-_DETECTOR_RESTART_REQUIRED = False
-
-
+# Shared by all five robots and both read-only and guarded dock paths.
+_DETECTOR_POOL = DetectorPool()
 
 
 def _unique_calibration_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -95,87 +87,24 @@ def _hold(robot_id: str, *, reason: str, source: str) -> dict:
     }
 
 
-class DockDetectorBusy(RuntimeError):
-    """The shared native AprilTag worker is busy or cannot be restarted safely."""
+async def prewarm_detector_pool() -> None:
+    """Warm native dependencies before acquiring a camera receipt."""
+    await _DETECTOR_POOL.prewarm()
 
 
 async def close_detector_pool() -> None:
-    """Retire the shared native detector only after proving it is idle.
-
-    Python cannot kill an active native C decoder. When Runtime shutdown
-    sees one still running, latch an explicit process-restart requirement.
-    Never replace that worker with a parallel detector in the same process.
-    A genuinely idle worker can be joined and a fresh executor used by a
-    subsequent Mac Runtime instance.
-    """
-    global _DETECTOR_SHUTTING_DOWN, _DETECTOR_RESTART_REQUIRED, _DETECTOR_POOL
-    if _DETECTOR_RESTART_REQUIRED:
-        raise RuntimeError("AprilTag worker shutdown unconfirmed; restart Mac process")
-    if not _DETECTOR_SLOT.acquire(blocking=False):
-        # An overlapping close holds the same slot while joining an already
-        # idle executor. Do not mistake that owner for a running detector.
-        if _DETECTOR_SHUTTING_DOWN:
-            raise RuntimeError("AprilTag worker shutdown already in progress")
-        _DETECTOR_SHUTTING_DOWN = True
-        _DETECTOR_RESTART_REQUIRED = True
-        raise RuntimeError("Native AprilTag still running; restart Mac process")
-    _DETECTOR_SHUTTING_DOWN = True
-    try:
-        previous = _DETECTOR_POOL
-        previous.shutdown(wait=False, cancel_futures=False)
-        # Join actual thread, not the cancellable asyncio wrapper. If this
-        # step is cancelled, keep detection closed until cleanup is retried.
-        await asyncio.to_thread(previous.shutdown, wait=True)
-        _DETECTOR_POOL = ThreadPoolExecutor(
-            max_workers=1, thread_name_prefix="desk-apriltag"
-        )
-        _DETECTOR_SHUTTING_DOWN = False
-    finally:
-        _DETECTOR_SLOT.release()
+    """Replace the owner only after every subprocess is confirmed reaped."""
+    global _DETECTOR_POOL
+    previous = _DETECTOR_POOL
+    await previous.close()
+    if _DETECTOR_POOL is previous:
+        _DETECTOR_POOL = DetectorPool()
 
 
 async def detect_bounded(jpeg: bytes, calibration: DockCameraCalibration, *,
-                         captured_at: float):
-    """The sole AprilTag worker for read-only vision AND permitted approach.
-
-    Cancellation of an asyncio awaiter cannot stop an active native C call.
-    Its concurrent future, not a coroutine, retains the single global slot.
-    No camera observation itself ever authorizes motors or charging.
-    """
-    if _DETECTOR_RESTART_REQUIRED:
-        raise DockDetectorBusy(
-            "Native AprilTag shutdown unconfirmed; restart Mac process"
-        )
-    if _DETECTOR_SHUTTING_DOWN:
-        raise DockDetectorBusy("Native AprilTag worker is closing")
-    if not _DETECTOR_SLOT.acquire(blocking=False):
-        raise DockDetectorBusy("Dock marker detector still busy")
-    try:
-        work = _DETECTOR_POOL.submit(
-            detect_apriltag, jpeg, calibration, captured_at=captured_at
-        )
-    except Exception:
-        # Executor submission may fail before a Future owns the slot.
-        _DETECTOR_SLOT.release()
-        raise
-
-    def finish_detection(done) -> None:
-        try:
-            if not done.cancelled():
-                done.exception()  # Retrieve late native detector failures.
-        finally:
-            _DETECTOR_SLOT.release()
-
-    work.add_done_callback(finish_detection)
-    # Shield only the asyncio awaiter. On timeout the native detector is
-    # allowed to finish, and holds the slot until its real completion.
-    wrapped = asyncio.wrap_future(work)
-    # The shield may be cancelled before the native future fails. Consuming
-    # the concurrent future's exception does not consume its asyncio copy.
-    wrapped.add_done_callback(
-        lambda done: None if done.cancelled() else done.exception()
-    )
-    return await asyncio.wait_for(asyncio.shield(wrapped), timeout=2.0)
+                         captured_at: float) -> DockPose | None:
+    """One isolated detector for diagnostics and permitted approach."""
+    return await _DETECTOR_POOL.detect(jpeg, calibration, captured_at=captured_at)
 
 
 def unpack_dock_frame(observation) -> tuple[bytes, float]:
@@ -350,9 +279,13 @@ async def observe_actual_dock(
             robot.id, reason=str(exc),
             source="apriltag_detector_busy",
         )
+    except TimeoutError:
+        return _hold(
+            robot.id, reason="Stale dock camera receipt: AprilTag deadline expired",
+            source="apriltag_detection_failed",
+        )
     except Exception as exc:
-        # Native OpenCV raises cv2.error (not RuntimeError) on malformed
-        # calibration/decoder state. An observation failure never grants rights.
+        # Malformed IPC and native decoder failures never grant rights.
         # Do not catch BaseException: cancellation must still propagate.
         return _hold(
             robot.id,

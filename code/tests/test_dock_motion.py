@@ -5,6 +5,7 @@ import time
 import pytest
 from desk_robot.controller import Coordinator, OperationError
 from desk_robot.simulator import SimulatedHead, SimulationVision
+from dock_detector_fixture import mock_dock_detector
 
 
 class DockFrameFixture:
@@ -116,8 +117,8 @@ async def test_dock_approach_rejects_turn_without_three_fresh_clear_ranges(
         tag_side_mm=60, marker_id=1,
         mount_lateral_offset_mm=0, mount_yaw_deg=0,
     )
-    monkeypatch.setattr(
-        "desk_robot.dock_runtime.detect_apriltag",
+    mock_dock_detector(
+        monkeypatch,
         lambda jpeg, cal, *, captured_at: DockPose(
             80, 0, 500, 0.5, captured_at,
         ),
@@ -176,8 +177,8 @@ async def test_dock_approach_moves_once_then_holds_before_contacts(
         mount_lateral_offset_mm=0, mount_yaw_deg=0,
     )
     distances = iter((500, 150))
-    monkeypatch.setattr(
-        "desk_robot.dock_runtime.detect_apriltag",
+    mock_dock_detector(
+        monkeypatch,
         lambda jpeg, cal, *, captured_at: DockPose(
             0, 0, next(distances), 0.5, captured_at,
         ),
@@ -343,8 +344,8 @@ async def test_dock_turns_by_chassis_not_lens_axis(
         mount_lateral_offset_mm=lateral, mount_yaw_deg=yaw,
     )
     z_values = iter((500, 150))
-    monkeypatch.setattr(
-        "desk_robot.dock_runtime.detect_apriltag",
+    mock_dock_detector(
+        monkeypatch,
         lambda jpeg, calib, *, captured_at: DockPose(
             0, 0, next(z_values), 0.2, captured_at,
         ),
@@ -444,8 +445,8 @@ async def test_dock_refuses_stale_pre_camera_safety_after_sensor_fault(
         410, 410, 320, 240, 60, 1,
         mount_lateral_offset_mm=0, mount_yaw_deg=0,
     )
-    monkeypatch.setattr(
-        "desk_robot.dock_runtime.detect_apriltag",
+    mock_dock_detector(
+        monkeypatch,
         lambda jpeg, cal, *, captured_at: DockPose(
             0, 0, 500, 0.5, captured_at,
         ),
@@ -506,8 +507,8 @@ async def test_dock_refuses_new_side_obstacle_after_camera_frame(
         410, 410, 320, 240, 60, 1,
         mount_lateral_offset_mm=0, mount_yaw_deg=0,
     )
-    monkeypatch.setattr(
-        "desk_robot.dock_runtime.detect_apriltag",
+    mock_dock_detector(
+        monkeypatch,
         lambda jpeg, cal, *, captured_at: DockPose(
             80, 0, 500, 0.5, captured_at,
         ),
@@ -565,7 +566,7 @@ async def test_dock_slow_marker_inference_never_drives_from_expired_image(
         time.sleep(0.26)
         return DockPose(0, 0, 500, 0.5, captured_at)
 
-    monkeypatch.setattr("desk_robot.dock_runtime.detect_apriltag", slow_detector)
+    mock_dock_detector(monkeypatch, slow_detector)
     head = CameraHead()
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
     camera = DockCameraCalibration(
@@ -635,8 +636,8 @@ async def test_dock_marker_expires_while_waiting_for_second_body_status(
         410, 410, 320, 240, 60, 1,
         mount_lateral_offset_mm=0, mount_yaw_deg=0,
     )
-    monkeypatch.setattr(
-        "desk_robot.dock_runtime.detect_apriltag",
+    mock_dock_detector(
+        monkeypatch,
         lambda image, camera, *, captured_at: DockPose(
             0, 0, 500, 0.5, captured_at
         ),
@@ -655,7 +656,7 @@ async def test_dock_marker_expires_while_waiting_for_second_body_status(
         await controller.close()
 
 
-async def test_dock_approach_refuses_parallel_native_detector_ownership(settings):
+async def test_dock_approach_refuses_parallel_native_detector_ownership(settings, monkeypatch):
     """A diagnostic AprilTag worker and physical dock motion share one slot."""
     from desk_robot import dock_runtime
     from desk_robot.controller import Job
@@ -693,7 +694,7 @@ async def test_dock_approach_refuses_parallel_native_detector_ownership(settings
         410, 410, 320, 240, 60, 1,
         mount_lateral_offset_mm=0, mount_yaw_deg=0,
     )
-    assert dock_runtime._DETECTOR_SLOT.acquire(blocking=False)
+    monkeypatch.setattr(dock_runtime._DETECTOR_POOL, "_active", object())
     try:
         with pytest.raises(dock_runtime.DockDetectorBusy):
             await controller._dock_approach(
@@ -703,7 +704,6 @@ async def test_dock_approach_refuses_parallel_native_detector_ownership(settings
         assert head.captures == 1
         assert head.commands == []  # no speculative movement or charge
     finally:
-        dock_runtime._DETECTOR_SLOT.release()
         await controller.close()
 
 
@@ -754,8 +754,8 @@ async def test_dock_rejects_foreign_body_identity_after_camera_before_turn(
         tag_side_mm=60, marker_id=1,
         mount_lateral_offset_mm=0, mount_yaw_deg=0,
     )
-    monkeypatch.setattr(
-        "desk_robot.dock_runtime.detect_apriltag",
+    mock_dock_detector(
+        monkeypatch,
         lambda jpeg, calibration, *, captured_at: DockPose(
             80, 0, 500, 0.5, captured_at,
         ),
@@ -870,7 +870,7 @@ async def test_dock_approach_rejects_expired_stream_receipt_before_detector_or_d
     def forbidden(*args, **kwargs):
         raise AssertionError("Stale dock frame entered native detector")
 
-    monkeypatch.setattr("desk_robot.dock_runtime.detect_apriltag", forbidden)
+    mock_dock_detector(monkeypatch, forbidden)
     head = StaleHead()
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
     camera = DockCameraCalibration(
@@ -1077,7 +1077,7 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
         x, z = (80, 500) if outcome == "pulse_budget" else next(poses)
         return DockPose(x, 0, z, 0.5, captured_at)
 
-    monkeypatch.setattr("desk_robot.dock_runtime.detect_apriltag", detect)
+    mock_dock_detector(monkeypatch, detect)
     coordinator = Coordinator(settings, {robot.id: head}, SimulationVision())
     try:
         await coordinator.operator_arm(robot.id)
@@ -1332,8 +1332,8 @@ async def test_autonomous_low_battery_dock_and_charge_inhibition_lifecycle(
         return pkt
 
     poses = iter(((0, 450), (0, 150)))
-    monkeypatch.setattr(
-        "desk_robot.dock_runtime.detect_apriltag",
+    mock_dock_detector(
+        monkeypatch,
         lambda _jpeg, _cal, *, captured_at: DockPose(0, 0, next(poses)[1], 0.5, captured_at),
     )
 

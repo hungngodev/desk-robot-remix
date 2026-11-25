@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 from desk_robot import dock_runtime
 from desk_robot.dock_vision import DockPose
+from dock_detector_fixture import mock_dock_detector
 
 
 class Head:
@@ -134,7 +135,7 @@ async def test_measured_marker_pose_does_not_energize_contact_or_drive(tmp_path,
         assert image.startswith(b"\xff\xd8") and calibration.marker_id == 12
         return DockPose(0, 0, 450, 0.5, captured_at)
 
-    monkeypatch.setattr(dock_runtime, "detect_apriltag", detector)
+    mock_dock_detector(monkeypatch, detector)
     result = await dock_runtime.observe_actual_dock(
         head, SimpleNamespace(id="robot-01", dock_calibration=path)
     )
@@ -174,8 +175,8 @@ async def test_dock_diagnostic_rejects_same_resolution_wrong_sensor(
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
     }))
     head = Head()  # Actual OV5640 despite equal JPEG dimensions.
-    monkeypatch.setattr(
-        dock_runtime, "detect_apriltag",
+    mock_dock_detector(
+        monkeypatch,
         lambda *_args, **_kw: pytest.fail("Wrong sensor entered PnP"),
     )
     result = await dock_runtime.observe_actual_dock(
@@ -263,7 +264,7 @@ async def test_slow_apriltag_diagnostic_holds_stale_pose_without_any_motion(
         time.sleep(0.25)
         return DockPose(0, 0, 450, 0.5, captured_at)
 
-    monkeypatch.setattr(dock_runtime, "detect_apriltag", slow_detector)
+    mock_dock_detector(monkeypatch, slow_detector)
     result = await dock_runtime.observe_actual_dock(
         head, SimpleNamespace(id="robot-01", dock_calibration=calibration)
     )
@@ -317,7 +318,7 @@ async def test_detector_failure_holds_without_motion(tmp_path, monkeypatch, fail
     def failed_detector(*args, **kwargs):
         raise failure
 
-    monkeypatch.setattr(dock_runtime, "detect_apriltag", failed_detector)
+    mock_dock_detector(monkeypatch, failed_detector)
     result = await dock_runtime.observe_actual_dock(
         head, SimpleNamespace(id="robot-01", dock_calibration=path)
     )
@@ -345,8 +346,8 @@ async def test_corrupt_native_pose_result_fails_closed(tmp_path, monkeypatch, ma
         "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
     }))
     head = Head()
-    monkeypatch.setattr(
-        dock_runtime, "detect_apriltag",
+    mock_dock_detector(
+        monkeypatch,
         lambda *args, **kwargs: malformed_pose,
     )
     result = await dock_runtime.observe_actual_dock(
@@ -359,272 +360,6 @@ async def test_corrupt_native_pose_result_fails_closed(tmp_path, monkeypatch, ma
     assert result["charging_authorized"] is False
     assert result["physical_acceptance_pass"] is False
     assert head.captures == 1 and head.commands == []
-
-async def test_detector_timeout_does_not_queue_another_native_worker(tmp_path, monkeypatch):
-    import asyncio
-    import threading
-
-    path = tmp_path / "dock.json"
-    path.write_text(json.dumps({
-        "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
-        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
-    }))
-    robot = SimpleNamespace(id="robot-01", dock_calibration=path)
-    started = threading.Event()
-    release = threading.Event()
-    calls = []
-
-    def blocked_detector(image, calibration, *, captured_at):
-        calls.append(captured_at)
-        started.set()
-        release.wait(timeout=10)
-        return DockPose(0, 0, 450, 0.5, captured_at)
-
-    monkeypatch.setattr(dock_runtime, "detect_apriltag", blocked_detector)
-    try:
-        first = asyncio.create_task(dock_runtime.observe_actual_dock(Head(), robot))
-        await asyncio.wait_for(asyncio.to_thread(started.wait), timeout=1)
-        second = await dock_runtime.observe_actual_dock(Head(), robot)
-        assert second["phase"] == "hold"
-        assert second["source"] == "apriltag_detector_busy"
-        assert second["motor_authorized"] is False
-        assert second["charging_authorized"] is False
-        assert len(calls) == 1
-
-        timed_out = await asyncio.wait_for(first, timeout=4)
-        assert timed_out["source"] == "apriltag_detection_failed"
-        still_busy = await dock_runtime.observe_actual_dock(Head(), robot)
-        assert still_busy["source"] == "apriltag_detector_busy"
-        assert len(calls) == 1
-    finally:
-        release.set()
-
-    # The worker releases the slot after it really exits, not at timeout.
-    for _ in range(100):
-        if dock_runtime._DETECTOR_SLOT.acquire(blocking=False):
-            dock_runtime._DETECTOR_SLOT.release()
-            break
-        await asyncio.sleep(0.01)
-    else:
-        pytest.fail("Detector worker did not release its slot")
-    recovered = await dock_runtime.observe_actual_dock(Head(), robot)
-    assert recovered["motor_authorized"] is False
-    assert recovered["charging_authorized"] is False
-    assert len(calls) == 2
-
-
-async def test_cancel_before_detector_dispatch_releases_slot(tmp_path, monkeypatch):
-    """A queued native future must release its slot if dispatch is cancelled."""
-    import asyncio
-    from concurrent.futures import Future
-
-    path = tmp_path / "dock.json"
-    path.write_text(json.dumps({
-        "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
-        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
-    }))
-    robot = SimpleNamespace(id="robot-01", dock_calibration=path)
-    queued = Future()
-    submitted = asyncio.Event()
-    real_submit = dock_runtime._DETECTOR_POOL.submit
-
-    def not_dispatched_yet(*args, **kwargs):
-        submitted.set()
-        return queued
-
-    monkeypatch.setattr(dock_runtime._DETECTOR_POOL, "submit", not_dispatched_yet)
-    observer = asyncio.create_task(dock_runtime.observe_actual_dock(Head(), robot))
-    try:
-        await asyncio.wait_for(submitted.wait(), timeout=1)
-        observer.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await observer
-        busy = await dock_runtime.observe_actual_dock(Head(), robot)
-        assert busy["source"] == "apriltag_detector_busy"
-        assert not busy["motor_authorized"] and not busy["charging_authorized"]
-    finally:
-        # Model executor cancellation *before* a worker has started.
-        assert queued.cancel()
-        monkeypatch.setattr(dock_runtime._DETECTOR_POOL, "submit", real_submit)
-
-    for _ in range(100):
-        if dock_runtime._DETECTOR_SLOT.acquire(blocking=False):
-            dock_runtime._DETECTOR_SLOT.release()
-            break
-        await asyncio.sleep(0.01)
-    else:
-        pytest.fail("Cancelled native future leaked the detector slot")
-
-    def detector(image, calibration, *, captured_at):
-        return DockPose(0, 0, 450, 0.5, captured_at)
-
-    monkeypatch.setattr(dock_runtime, "detect_apriltag", detector)
-    recovered = await dock_runtime.observe_actual_dock(Head(), robot)
-    assert recovered["source"] == "head_jpeg_observed_on_mac_receipt"
-    assert not recovered["motor_authorized"] and not recovered["charging_authorized"]
-
-
-async def test_cancel_after_native_detector_starts_keeps_slot(tmp_path, monkeypatch):
-    """Cancellation of the observer must not release a running native worker."""
-    import asyncio
-    import threading
-
-    path = tmp_path / "dock.json"
-    path.write_text(json.dumps({
-        "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
-        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
-    }))
-    robot = SimpleNamespace(id="robot-01", dock_calibration=path)
-    started = threading.Event()
-    release = threading.Event()
-    calls = []
-
-    def blocked_detector(image, calibration, *, captured_at):
-        calls.append(captured_at)
-        started.set()
-        if not release.wait(timeout=5):
-            raise TimeoutError("Test worker release never arrived")
-        return DockPose(0, 0, 450, 0.5, captured_at)
-
-    monkeypatch.setattr(dock_runtime, "detect_apriltag", blocked_detector)
-    observer = asyncio.create_task(dock_runtime.observe_actual_dock(Head(), robot))
-    try:
-        assert await asyncio.wait_for(asyncio.to_thread(started.wait, 1), timeout=2)
-        observer.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await observer
-
-        busy = await dock_runtime.observe_actual_dock(Head(), robot)
-        assert busy["source"] == "apriltag_detector_busy"
-        assert busy["phase"] == "hold"
-        assert not busy["motor_authorized"] and not busy["charging_authorized"]
-        assert not busy["physical_acceptance_pass"]
-        assert len(calls) == 1
-    finally:
-        release.set()
-        if not observer.done():
-            observer.cancel()
-            await asyncio.gather(observer, return_exceptions=True)
-
-    for _ in range(100):
-        if dock_runtime._DETECTOR_SLOT.acquire(blocking=False):
-            dock_runtime._DETECTOR_SLOT.release()
-            break
-        await asyncio.sleep(0.01)
-    else:
-        pytest.fail("Native detector did not release slot after worker completion")
-
-    recovered = await dock_runtime.observe_actual_dock(Head(), robot)
-    assert recovered["source"] == "head_jpeg_observed_on_mac_receipt"
-    assert not recovered["motor_authorized"] and not recovered["charging_authorized"]
-    assert not recovered["physical_acceptance_pass"]
-    assert len(calls) == 2
-
-
-
-async def test_cancel_asyncio_future_while_native_detector_runs_still_holds_slot(
-    tmp_path, monkeypatch,
-):
-    """Cancelling the asyncio wrapper cannot make active C work seem finished."""
-    import asyncio
-    import threading
-
-    path = tmp_path / "dock.json"
-    path.write_text(json.dumps({
-        "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
-        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
-    }))
-    robot = SimpleNamespace(id="robot-01", dock_calibration=path)
-    started, release = threading.Event(), threading.Event()
-    wrappers = []
-    calls = []
-    original_wrap = asyncio.wrap_future
-
-    def tracked_wrap(native_future, *args, **kwargs):
-        wrapper = original_wrap(native_future, *args, **kwargs)
-        wrappers.append(wrapper)
-        return wrapper
-
-    def blocked_detector(image, calibration, *, captured_at):
-        calls.append(captured_at)
-        started.set()
-        if not release.wait(timeout=5):
-            raise TimeoutError("Detector test release was not signalled")
-        return DockPose(0, 0, 450, 0.5, captured_at)
-
-    monkeypatch.setattr(dock_runtime.asyncio, "wrap_future", tracked_wrap)
-    monkeypatch.setattr(dock_runtime, "detect_apriltag", blocked_detector)
-    observer = asyncio.create_task(dock_runtime.observe_actual_dock(Head(), robot))
-    try:
-        assert await asyncio.wait_for(asyncio.to_thread(started.wait, 1), timeout=2)
-        assert wrappers
-        # Simulate the event loop cancelling its adapter task at shutdown.
-        wrappers[0].cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await observer
-        busy = await dock_runtime.observe_actual_dock(Head(), robot)
-        assert busy["source"] == "apriltag_detector_busy"
-        assert busy["phase"] == "hold"
-        assert not busy["motor_authorized"] and not busy["charging_authorized"]
-        assert len(calls) == 1
-    finally:
-        release.set()
-        if not observer.done():
-            observer.cancel()
-            await asyncio.gather(observer, return_exceptions=True)
-
-    for _ in range(100):
-        if dock_runtime._DETECTOR_SLOT.acquire(blocking=False):
-            dock_runtime._DETECTOR_SLOT.release()
-            break
-        await asyncio.sleep(0.01)
-    else:
-        pytest.fail("Completed native detector never released its slot")
-    recovered = await dock_runtime.observe_actual_dock(Head(), robot)
-    assert recovered["source"] == "head_jpeg_observed_on_mac_receipt"
-    assert len(calls) == 2
-    assert not recovered["motor_authorized"] and not recovered["charging_authorized"]
-
-
-@pytest.mark.parametrize("failure", [RuntimeError("Executor unavailable"), ValueError("Bad executor submission")])
-async def test_detector_executor_submission_failure_releases_slot(tmp_path, monkeypatch, failure):
-    """A rejected native job must not permanently block subsequent observations."""
-    import asyncio
-
-    path = tmp_path / "dock.json"
-    path.write_text(json.dumps({
-        "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01", "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
-        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
-    }))
-    robot = SimpleNamespace(id="robot-01", dock_calibration=path)
-    original_submit = dock_runtime._DETECTOR_POOL.submit
-
-    def rejected_submit(*args, **kwargs):
-        raise failure
-
-    monkeypatch.setattr(dock_runtime._DETECTOR_POOL, "submit", rejected_submit)
-    first_head = Head()
-    failed = await dock_runtime.observe_actual_dock(first_head, robot)
-    assert failed["phase"] == "hold"
-    assert failed["source"] == "apriltag_detection_failed"
-    assert failed["pose"] is None
-    assert not failed["motor_authorized"] and not failed["charging_authorized"]
-    assert failed["physical_acceptance_pass"] is False
-    assert first_head.commands == []
-
-    monkeypatch.setattr(dock_runtime._DETECTOR_POOL, "submit", original_submit)
-    monkeypatch.setattr(
-        dock_runtime, "detect_apriltag",
-        lambda image, calibration, *, captured_at:
-            DockPose(0, 0, 450, 0.5, captured_at),
-    )
-    recovered = await asyncio.wait_for(
-        dock_runtime.observe_actual_dock(Head(), robot), timeout=3
-    )
-    assert recovered["source"] == "head_jpeg_observed_on_mac_receipt"
-    assert not recovered["motor_authorized"] and not recovered["charging_authorized"]
-    assert recovered["physical_acceptance_pass"] is False
-
 
 async def test_real_snapshot_deadline_cancels_stalled_capture_without_motion(tmp_path):
     """A real deadline, not an injected TimeoutError, must fail closed."""
@@ -684,7 +419,7 @@ async def test_invalid_dock_snapshot_never_starts_native_detector(tmp_path, monk
         pytest.fail("Malformed camera data reached native AprilTag detector")
 
     monkeypatch.setattr(head, "snapshot", snapshot)
-    monkeypatch.setattr(dock_runtime, "detect_apriltag", detector)
+    mock_dock_detector(monkeypatch, detector)
     result = await dock_runtime.observe_actual_dock(
         head, SimpleNamespace(id="robot-01", dock_calibration=path)
     )
@@ -760,8 +495,8 @@ async def test_dock_diagnostic_uses_measured_chassis_offset_not_centered_lens(
         "mount_lateral_offset_mm": 40.0,
         "mount_yaw_deg": 0.0,
     }))
-    monkeypatch.setattr(
-        dock_runtime, "detect_apriltag",
+    mock_dock_detector(
+        monkeypatch,
         lambda jpeg, camera, *, captured_at: DockPose(
             0, 0, 450, 0.5, captured_at,
         ),
@@ -788,8 +523,8 @@ async def test_dock_diagnostic_keeps_raw_camera_only_when_mount_unmeasured(
         "cx": 320, "cy": 240, "tag_side_mm": 60,
         "marker_id": 12, "target_distance_mm": 120,
     }))
-    monkeypatch.setattr(
-        dock_runtime, "detect_apriltag",
+    mock_dock_detector(
+        monkeypatch,
         lambda jpeg, camera, *, captured_at: DockPose(
             0, 0, 450, 0.5, captured_at,
         ),
@@ -820,8 +555,8 @@ async def test_dock_diagnostic_uses_strict_live_frame_receipt_if_available(
             self.captures += 1
             return b"\xff\xd8\xff\xd9", time.monotonic()
 
-    monkeypatch.setattr(
-        dock_runtime, "detect_apriltag",
+    mock_dock_detector(
+        monkeypatch,
         lambda jpeg, camera, *, captured_at: DockPose(
             0, 0, 450, 0.5, captured_at,
         ),
@@ -853,7 +588,7 @@ async def test_stale_mac_receipt_does_not_enter_dock_detector(tmp_path, monkeypa
     def detector(*args, **kwargs):
         raise AssertionError("Stale observation entered native detector")
 
-    monkeypatch.setattr(dock_runtime, "detect_apriltag", detector)
+    mock_dock_detector(monkeypatch, detector)
     result = await dock_runtime.observe_actual_dock(
         StaleHead(), SimpleNamespace(id="robot-01", dock_calibration=calibration)
     )
@@ -904,8 +639,8 @@ async def test_unrepresentable_dock_receipt_holds_before_identity_or_detector(
             return b"\xff\xd8\xff\xd9", timestamp
 
     head = ExtremeReceiptHead()
-    monkeypatch.setattr(
-        dock_runtime, "detect_apriltag",
+    mock_dock_detector(
+        monkeypatch,
         lambda *_args, **_kwargs: pytest.fail("Bad receipt entered native detector"),
     )
     result = await dock_runtime.observe_actual_dock(
@@ -959,7 +694,7 @@ async def test_dock_detector_delay_expires_original_receipt_without_motion(
         time.sleep(0.08)
         return DockPose(0, 0, 450, 0.5, captured_at)
 
-    monkeypatch.setattr(dock_runtime, "detect_apriltag", slow_detector)
+    mock_dock_detector(monkeypatch, slow_detector)
     head = DelayedFrame()
     result = await dock_runtime.observe_actual_dock(
         head, SimpleNamespace(id="robot-01", dock_calibration=calibration)
@@ -969,72 +704,6 @@ async def test_dock_detector_delay_expires_original_receipt_without_motion(
     assert not result["motor_authorized"] and not result["charging_authorized"]
     assert head.commands == []
 
-
-
-async def test_close_native_detector_retires_idle_pool_before_new_runtime(
-    monkeypatch,
-):
-    """A normal Runtime restart gets a new single native worker, not a leak."""
-    from types import SimpleNamespace
-
-    old = dock_runtime._DETECTOR_POOL
-    monkeypatch.setattr(
-        dock_runtime, "detect_apriltag",
-        lambda jpeg, calibration, *, captured_at: DockPose(
-            0, 0, 400, 0.5, captured_at,
-        ),
-    )
-    await dock_runtime.close_detector_pool()
-    assert dock_runtime._DETECTOR_POOL is not old
-    with pytest.raises(RuntimeError):
-        old.submit(lambda: None)
-    result = await dock_runtime.detect_bounded(
-        b"fake-frame", SimpleNamespace(), captured_at=1.0,
-    )
-    assert result.z_mm == 400
-    await dock_runtime.close_detector_pool()
-
-
-async def test_close_native_detector_refuses_restart_until_process_reset(
-    monkeypatch,
-):
-    """One hung native C worker cannot be replaced by a second unsafe pool."""
-    import asyncio
-    import threading
-    from types import SimpleNamespace
-
-    entered, release = threading.Event(), threading.Event()
-
-    def blocked(jpeg, calibration, *, captured_at):
-        entered.set()
-        release.wait(timeout=5)
-        return DockPose(0, 0, 450, 0.5, captured_at)
-
-    monkeypatch.setattr(dock_runtime, "detect_apriltag", blocked)
-    # Restore the global latched fault after this test; production never
-    # clears it except via restart of the Mac process.
-    monkeypatch.setattr(dock_runtime, "_DETECTOR_RESTART_REQUIRED", False)
-    monkeypatch.setattr(dock_runtime, "_DETECTOR_SHUTTING_DOWN", False)
-    current_pool = dock_runtime._DETECTOR_POOL
-    pending = asyncio.create_task(dock_runtime.detect_bounded(
-        b"frame", SimpleNamespace(), captured_at=1.0,
-    ))
-    try:
-        assert await asyncio.to_thread(entered.wait, 1.0)
-        with pytest.raises(RuntimeError, match="restart Mac process"):
-            await dock_runtime.close_detector_pool()
-        assert dock_runtime._DETECTOR_RESTART_REQUIRED is True
-        assert dock_runtime._DETECTOR_POOL is current_pool
-        with pytest.raises(dock_runtime.DockDetectorBusy, match="restart Mac process"):
-            await dock_runtime.detect_bounded(
-                b"new frame", SimpleNamespace(), captured_at=2.0,
-            )
-    finally:
-        release.set()
-        await asyncio.wait_for(pending, timeout=2.0)
-    assert dock_runtime._DETECTOR_RESTART_REQUIRED is True
-    with pytest.raises(RuntimeError, match="restart Mac process"):
-        await dock_runtime.close_detector_pool()
 
 
 @pytest.mark.parametrize(
@@ -1228,116 +897,6 @@ async def test_selected_dock_frame_verification_is_bounded_even_if_cancel_ignore
         if entered.is_set():
             await asyncio.wait_for(finished.wait(), timeout=1.0)
 
-async def test_cancelled_detector_observer_retrieves_late_native_failure(monkeypatch):
-    """The asyncio wrapper must consume a late exception without freeing C work."""
-    import asyncio
-    import gc
-    import threading
-
-    entered, release = threading.Event(), threading.Event()
-    reports = []
-    loop = asyncio.get_running_loop()
-    previous_handler = loop.get_exception_handler()
-
-    def exception_handler(event_loop, context):
-        if (isinstance(context.get("exception"), RuntimeError)
-                and str(context["exception"]) == "late native AprilTag failure"):
-            reports.append(context["message"])
-        elif previous_handler is not None:
-            previous_handler(event_loop, context)
-        else:
-            event_loop.default_exception_handler(context)
-
-    def blocked_detector(*args, **kwargs):
-        entered.set()
-        if not release.wait(timeout=5):
-            raise TimeoutError("Detector test release was not signalled")
-        raise RuntimeError("late native AprilTag failure")
-
-    monkeypatch.setattr(dock_runtime, "detect_apriltag", blocked_detector)
-    loop.set_exception_handler(exception_handler)
-    observer = asyncio.create_task(dock_runtime.detect_bounded(
-        b"frame", SimpleNamespace(), captured_at=1.0,
-    ))
-    try:
-        assert await asyncio.to_thread(entered.wait, 1.0)
-        observer.cancel()
-        with pytest.raises(asyncio.CancelledError):
-            await observer
-        with pytest.raises(dock_runtime.DockDetectorBusy):
-            await dock_runtime.detect_bounded(
-                b"other frame", SimpleNamespace(), captured_at=2.0,
-            )
-    finally:
-        release.set()
-        if not observer.done():
-            observer.cancel()
-            await asyncio.gather(observer, return_exceptions=True)
-        try:
-            # Drain native work and its completion callback before checking
-            # the event loop's unobserved-exception reports.
-            barrier = dock_runtime._DETECTOR_POOL.submit(lambda: None)
-            await asyncio.to_thread(barrier.result, 2.0)
-            for _ in range(3):
-                await asyncio.sleep(0)
-                gc.collect()
-        finally:
-            loop.set_exception_handler(previous_handler)
-
-    assert not reports
-    assert dock_runtime._DETECTOR_SLOT.acquire(blocking=False)
-    dock_runtime._DETECTOR_SLOT.release()
-
-
-async def test_overlapping_detector_shutdown_does_not_latch_native_fault(monkeypatch):
-    """A second closer must not misidentify the first as active C detection."""
-    import asyncio
-    import threading
-
-    monkeypatch.setattr(dock_runtime, "_DETECTOR_RESTART_REQUIRED", False)
-    monkeypatch.setattr(dock_runtime, "_DETECTOR_SHUTTING_DOWN", False)
-    old = dock_runtime._DETECTOR_POOL
-    original_shutdown = old.shutdown
-    entered, release = threading.Event(), threading.Event()
-
-    def delayed_join(wait=True, *, cancel_futures=False):
-        if wait:
-            entered.set()
-            if not release.wait(timeout=5):
-                raise TimeoutError("Shutdown test release was not signalled")
-        return original_shutdown(wait=wait, cancel_futures=cancel_futures)
-
-    monkeypatch.setattr(old, "shutdown", delayed_join)
-    first = asyncio.create_task(dock_runtime.close_detector_pool())
-    try:
-        assert await asyncio.to_thread(entered.wait, 1.0)
-        with pytest.raises(RuntimeError, match="shutdown already in progress"):
-            await dock_runtime.close_detector_pool()
-        assert not dock_runtime._DETECTOR_RESTART_REQUIRED
-        with pytest.raises(dock_runtime.DockDetectorBusy, match="closing"):
-            await dock_runtime.detect_bounded(
-                b"frame", SimpleNamespace(), captured_at=1.0,
-            )
-    finally:
-        release.set()
-        await asyncio.wait_for(first, timeout=2.0)
-
-    assert not dock_runtime._DETECTOR_RESTART_REQUIRED
-    assert not dock_runtime._DETECTOR_SHUTTING_DOWN
-    assert dock_runtime._DETECTOR_POOL is not old
-    monkeypatch.setattr(
-        dock_runtime, "detect_apriltag",
-        lambda jpeg, calibration, *, captured_at: DockPose(
-            0, 0, 400, 0.5, captured_at,
-        ),
-    )
-    recovered = await dock_runtime.detect_bounded(
-        b"frame", SimpleNamespace(), captured_at=2.0,
-    )
-    assert recovered.z_mm == 400
-    await dock_runtime.close_detector_pool()
-
-
 @pytest.mark.parametrize("strict_receipt", [False, True])
 async def test_dock_identity_lookup_expires_with_original_frame(
     tmp_path, monkeypatch, strict_receipt,
@@ -1378,8 +937,8 @@ async def test_dock_identity_lookup_expires_with_original_frame(
     if strict_receipt:
         monkeypatch.setattr(head, "snapshot_for_dock", strict_snapshot, raising=False)
     monkeypatch.setattr(head, "camera_identity", stuck_identity)
-    monkeypatch.setattr(
-        dock_runtime, "detect_apriltag",
+    mock_dock_detector(
+        monkeypatch,
         lambda *args, **kwargs: pytest.fail("Expired receipt reached native detector"),
     )
     try:
@@ -1398,3 +957,57 @@ async def test_dock_identity_lookup_expires_with_original_frame(
         release.set()
         if entered.is_set():
             await asyncio.wait_for(finished.wait(), timeout=1.0)
+
+
+async def test_frozen_observer_reaps_worker_and_recovers_without_replaying_jpeg(
+    tmp_path, monkeypatch,
+):
+    import os
+    import signal
+    import sys
+    import time
+
+    from desk_robot.dock_process import DetectorPool
+
+    worker = """
+import json, sys
+print("ready", flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    pose = dict(x_mm=0, y_mm=0, z_mm=450, reprojection_error_px=0.5,
+                captured_at=request["captured_at"])
+    print(json.dumps(dict(id=request["id"], pose=pose)), flush=True)
+"""
+    pool = DetectorPool((sys.executable, "-u", "-c", worker))
+    monkeypatch.setattr(dock_runtime, "_DETECTOR_POOL", pool)
+    calibration = tmp_path / "dock.json"
+    calibration.write_text(json.dumps({
+        "measured": True, "robot_id": "robot-01", "head_device_id": "xiaozhi-01",
+        "camera_sensor_pid": "OV5640", "fx": 410, "fy": 410, "cx": 320, "cy": 240,
+        "tag_side_mm": 60, "marker_id": 12, "target_distance_mm": 120,
+    }))
+    robot = SimpleNamespace(id="robot-01", dock_calibration=calibration)
+    head = Head()
+    try:
+        await dock_runtime.prewarm_detector_pool()
+        assert len(pool._ready) == 2
+        frozen, spare = pool._ready
+        os.kill(frozen.pid, signal.SIGSTOP)
+        started = time.monotonic()
+        first = await dock_runtime.observe_actual_dock(head, robot)
+        assert first["phase"] == "hold" and first["pose"] is None
+        assert first["source"] == "apriltag_detection_failed"
+        assert frozen.returncode == -signal.SIGKILL
+        second = await dock_runtime.observe_actual_dock(head, robot)
+        assert second["phase"] == "approach"
+        assert second["pose"]["z_mm"] == 450
+        assert pool._ready[0] is spare and head.captures == 2
+        assert time.monotonic() - started < 0.5
+        for result in (first, second):
+            assert not result["motor_authorized"] and not result["charging_authorized"]
+            assert not result["physical_acceptance_pass"]
+        assert not head.commands
+    finally:
+        await dock_runtime.close_detector_pool()
+    assert not pool._owned
+    assert dock_runtime._DETECTOR_POOL is not pool

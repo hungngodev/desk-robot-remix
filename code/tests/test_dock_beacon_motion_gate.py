@@ -9,6 +9,7 @@ import pytest
 from desk_robot.controller import Coordinator, Job, OperationError
 from desk_robot.dock_vision import DockCameraCalibration, DockPose
 from desk_robot.simulator import SimulationVision
+from dock_detector_fixture import mock_dock_detector
 
 
 class SensorHead:
@@ -74,8 +75,8 @@ def camera():
 
 def install_scene(monkeypatch, depths):
     measured = iter(depths)
-    monkeypatch.setattr(
-        "desk_robot.dock_runtime.detect_apriltag",
+    mock_dock_detector(
+        monkeypatch,
         lambda frame, calibration, *, captured_at: DockPose(
             0, 0, next(measured), 0.5, captured_at,
         ),
@@ -186,7 +187,7 @@ async def test_hardware_dock_rejects_legacy_camera_before_inference_or_motor(
     def forbidden(*args, **kwargs):
         raise AssertionError("Unauthenticated JPEG reached native AprilTag")
 
-    monkeypatch.setattr("desk_robot.dock_runtime.detect_apriltag", forbidden)
+    mock_dock_detector(monkeypatch, forbidden)
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
     try:
         with pytest.raises(

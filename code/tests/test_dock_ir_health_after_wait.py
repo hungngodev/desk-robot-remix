@@ -9,6 +9,7 @@ from desk_robot.controller import Coordinator, Job, OperationError
 from desk_robot.dock_ir import dock_beacon_code
 from desk_robot.dock_vision import DockCameraCalibration, DockPose
 from desk_robot.simulator import SimulationVision
+from dock_detector_fixture import mock_dock_detector
 
 
 @pytest.mark.parametrize("changed,pose_x", [
@@ -92,8 +93,8 @@ async def test_dock_rechecks_real_body_safety_after_waiting_for_ir(
         mount_lateral_offset_mm=0, mount_yaw_deg=0,
     )
     observations = iter((500, 150))
-    monkeypatch.setattr(
-        "desk_robot.dock_runtime.detect_apriltag",
+    mock_dock_detector(
+        monkeypatch,
         lambda jpeg, cal, *, captured_at:
             DockPose(pose_x, 0, next(observations), 0.5, captured_at),
     )
