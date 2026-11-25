@@ -9673,10 +9673,11 @@ async def test_deferred_touch_coalesces_busy_floor_and_enforces_expiry_vetoes(
         await pet.close()
 
 
+@pytest.mark.parametrize("elapsed", [30.0, 119.0, 120.0, 121.0])
 async def test_privacy_mode_optional_transmission_dedup_across_cooldown_with_identical_cliff_faults(
-    fleet, tmp_path, monkeypatch,
+    fleet, tmp_path, monkeypatch, elapsed,
 ):
-    """DRX-112: repeating optional line >120s deduped without SQLite, blocking STOP, or user replies."""
+    """Separate repeated cliff cancellation from optional speech at the cooldown boundary."""
     import desk_robot.multimodal as multimodal_module
     import desk_robot.pet as pet_module
     from desk_robot.multimodal import CameraEvidence, CameraFrameHub
@@ -9753,20 +9754,28 @@ async def test_privacy_mode_optional_transmission_dedup_across_cooldown_with_ide
         await wait_for(lambda: state.spoken == 1)
         assert speaker.spoken == [("robot-01", "Whoa, another cliff edge near me!")]
 
-        # Explicit clear then advance past 120s cooldown to t=1121, identical cliff 2 -> model repeats line
+        # Simulate explicit local rearm, not an automatic Mac safety clear.
         await pet._observe_body_safety("robot-01", 31, clear_body)
-        fake_now[0] = 1121.0
+        fake_now[0] += elapsed
+        await pet._observe_body_safety("robot-01", 31, fault_body)
+        # Repeated polling of the same latched episode is not another arrival.
         await pet._observe_body_safety("robot-01", 31, fault_body)
         assert stopped == ["robot-01", "robot-01"]
         assert state.safety_fault_events == 2
+        assert state.last_safety_fault == "floor_out_of_range"
         hub.frames["robot-01"].append(CameraEvidence(b"jpeg2", fake_now[0], 0.0, "safety_fault"))
         pet._consider_speech(
             "robot-01", SceneChange("key", "A bright silver edge item appeared", 0.99),
             31, camera_derived=True, received_at=fake_now[0],
         )
-        await wait_for(
-            lambda: state.last_initiative_suppression == "repetitive_spontaneous_reply"
-        )
+        if elapsed < 120.0:
+            assert state.last_initiative_suppression == "quiet_voice_or_group_budget"
+            assert state.deferred_speech_candidate is None
+        else:
+            await wait_for(
+                lambda: state.last_initiative_suppression == "repetitive_spontaneous_reply"
+            )
+        assert state.spoken == 1
         assert speaker.spoken == [("robot-01", "Whoa, another cliff edge near me!")]
 
         # Unrelated user conversation reply remains unaffected
