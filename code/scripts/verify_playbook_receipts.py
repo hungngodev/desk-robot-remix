@@ -234,6 +234,45 @@ def source_unchanged_since_test(
         return False
 
 
+def verified_regular_record_path(url: str, sha: str, lookup) -> bool:
+    """Reject symlinks and submodules hidden behind a Contents API file response."""
+    if type(url) is not str or type(sha) is not str or not SHA.fullmatch(sha):
+        return False
+    try:
+        parsed = urlsplit(url)
+        base = f"/{REPO}/blob/{sha}/docs/records/"
+        if (parsed.scheme != "https" or parsed.netloc != "github.com"
+                or parsed.query or parsed.fragment or not parsed.path.startswith(base)):
+            return False
+        suffix = parsed.path[len(base):]
+        if not suffix or any(part in ("", ".", "..") for part in suffix.split("/")):
+            return False
+        path = "docs/records/" + suffix
+        commit = lookup(f"https://api.github.com/repos/{REPO}/git/commits/{sha}")
+        if type(commit) is not dict or commit.get("sha") != sha:
+            return False
+        root = commit.get("tree")
+        tree_sha = root.get("sha") if type(root) is dict else None
+        if type(tree_sha) is not str or not SHA.fullmatch(tree_sha):
+            return False
+        tree = lookup(f"https://api.github.com/repos/{REPO}/git/trees/{tree_sha}?recursive=1")
+        if (type(tree) is not dict or tree.get("sha") != tree_sha
+                or tree.get("truncated") is not False or type(tree.get("tree")) is not list):
+            return False
+        entries = tree["tree"]
+        if any(type(entry) is not dict for entry in entries):
+            return False
+        matches = [entry for entry in entries if entry.get("path") == path]
+        if len(matches) != 1:
+            return False
+        entry = matches[0]
+        blob_sha = entry.get("sha")
+        return (entry.get("type") == "blob" and entry.get("mode") == "100644"
+                and type(blob_sha) is str and SHA.fullmatch(blob_sha) is not None)
+    except (ValueError, TypeError, AttributeError, KeyError):
+        return False
+
+
 def evidence_digest_matches(raw: bytes, digest: object) -> bool:
     return (type(digest) is str and EVIDENCE_DIGEST.fullmatch(digest) is not None
             and hashlib.sha256(raw).hexdigest() == digest)
@@ -555,7 +594,11 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
                 errors.append(f"procedure {identifier}: incomplete physical signoff")
                 continue
             try:
-                if not verified_procedure_record(row, sha, lookup):
+                signoff = row.get("physical_measurement_receipt")
+                evidence_sha = physical_record_revision(signoff, sha)
+                if (not verified_procedure_record(row, sha, lookup)
+                        or not verified_regular_record_path(
+                            signoff["raw_data_url"], evidence_sha, lookup)):
                     errors.append(f"procedure {identifier}: immutable physical record not matched")
             except (HTTPError, URLError, ValueError, TimeoutError, OSError) as exc:
                 errors.append(

@@ -124,6 +124,15 @@ def receipt(scope, gate):
 
 
 def lookup(url, records=None):
+    if "/git/commits/" in url:
+        revision = url.rsplit("/", 1)[1]
+        return {"sha": revision, "tree": {"sha": "d" * 40}}
+    if url.endswith("/git/trees/" + "d" * 40 + "?recursive=1"):
+        return {
+            "sha": "d" * 40, "truncated": False,
+            "tree": [{"path": "docs/records/release-evidence.json", "mode": "100644",
+                      "type": "blob", "sha": "e" * 40}],
+        }
     if records is None:
         records = [receipt("part:imu", gate) for gate in release.PART_GATES]
         records += [receipt("system", gate) for gate in release.SYSTEM_GATES]
@@ -1493,3 +1502,18 @@ def test_online_release_rejects_matching_record_without_authorized_review():
 
     errors = release.audit_release({"system": {gate: row}}, SHA, outsider)
     assert any(gate in error and "authorized reviewer approval" in error for error in errors)
+
+
+def test_purchase_audit_rejects_symlink_even_with_matching_contents_and_review():
+    gate = release.PART_GATES[0]
+    row = receipt("part:imu", gate)
+
+    def altered(url):
+        result = lookup(url)
+        if "/git/trees/" in url:
+            result["tree"][0]["mode"] = "120000"
+        return result
+
+    errors = release.audit_release({"parts": {"imu": {gate: row}}}, SHA, altered)
+    assert any("immutable scoped record absent or mismatched" in error
+               and f"part:imu.{gate}" in error for error in errors)

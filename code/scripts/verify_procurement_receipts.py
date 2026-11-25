@@ -41,6 +41,7 @@ from verify_playbook_receipts import (
     source_unchanged_since_test,
     strict_receipt_object,
     verified_raw_record,
+    verified_regular_record_path,
 )
 from verify_system import source_snapshot
 
@@ -762,7 +763,9 @@ def audit_release(evidence: dict, sha: str, lookup=None, *,
             errors.append(f"{scope}.{gate}: unpinned or generic signoff")
             continue
         try:
-            if not verified_scoped_record(receipt, sha, cached_lookup):
+            if (not verified_scoped_record(receipt, sha, cached_lookup)
+                    or not verified_regular_record_path(
+                        receipt["evidence_url"], sha, cached_lookup)):
                 errors.append(f"{scope}.{gate}: immutable scoped record absent or mismatched")
             elif not verified_procurement_review(receipt, cached_lookup):
                 errors.append(f"{scope}.{gate}: authorized reviewer approval missing or mismatched")

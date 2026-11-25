@@ -3,8 +3,10 @@ import base64
 import hashlib
 import importlib.util
 import json
+import subprocess
 from pathlib import Path
 from urllib.error import URLError
+from urllib.parse import urlsplit
 
 import pytest
 
@@ -24,6 +26,15 @@ REVIEW_URL = ("https://github.com/hungngodev/desk-robot-remix/pull/17"
 
 
 def lookup(url):
+    if "/git/commits/" in url:
+        revision = url.rsplit("/", 1)[1]
+        return {"sha": revision, "tree": {"sha": "d" * 40}}
+    if url.endswith("/git/trees/" + "d" * 40 + "?recursive=1"):
+        return {
+            "sha": "d" * 40, "truncated": False,
+            "tree": [{"path": "docs/records/bench.csv", "mode": "100644",
+                      "type": "blob", "sha": "e" * 40}],
+        }
     if url.endswith("/issues/comments/5678"):
         return {"html_url": REVIEW_URL,
                 "body": f"ACCEPTED procedure 9 at {SHA}",
@@ -840,3 +851,110 @@ def test_malformed_review_comment_never_raises_or_approves():
             return value if "/issues/comments/" in url else lookup(url)
         assert any("manual review not verified" in error
                    for error in verify.audit(full_ledger_with(row), malformed))
+
+
+def test_actual_git_objects_separate_source_and_evidence(tmp_path):
+    def git(*args):
+        return subprocess.check_output(
+            ["git", "-C", str(tmp_path), *args], stderr=subprocess.PIPE,
+        ).decode().strip()
+
+    git("init", "-q")
+    git("config", "user.email", "fixture@example.test")
+    git("config", "user.name", "Receipt Fixture")
+    (tmp_path / "code").mkdir()
+    (tmp_path / "code/robot.py").write_text("SAFE = True\n")
+    git("add", ".")
+    git("commit", "-qm", "tested source")
+    source = git("rev-parse", "HEAD")
+    (tmp_path / "docs/records").mkdir(parents=True)
+    raw = (
+        "procedure_id,source_sha,gate,result,operator,device_revision,"
+        "tested_on,measurement\n"
+        f"9,{source},MEASURED,pass,fixture_operator_001,"
+        "fixture_carrier_rev_A,2026-11-20,10 mm lift\n"
+    ).encode()
+    path = "docs/records/bench.csv"
+    (tmp_path / path).write_bytes(raw)
+    git("add", ".")
+    git("commit", "-qm", "record physical evidence")
+    evidence = git("rev-parse", "HEAD")
+    assert source != evidence
+    signoff = {
+        "raw_data_url": f"https://github.com/{verify.REPO}/blob/{evidence}/{path}",
+        "source_sha": source, "artifact_sha256": hashlib.sha256(raw).hexdigest(),
+        "operator": "fixture_operator_001", "device_revision": "fixture_carrier_rev_A",
+        "tested_on": "2026-11-20", "result": "pass",
+    }
+    row = {"id": 9, "gate": "MEASURED", "physical_measurement_receipt": signoff}
+
+    def git_lookup(url):
+        parsed = urlsplit(url)
+        if "/git/commits/" in parsed.path:
+            revision = parsed.path.rsplit("/", 1)[1]
+            return {"sha": revision, "tree": {"sha": git("rev-parse", revision + "^{tree}")}}
+        if "/git/trees/" in parsed.path:
+            tree_sha = parsed.path.rsplit("/", 1)[1]
+            entries = []
+            for line in git("ls-tree", "-r", tree_sha).splitlines():
+                meta, name = line.split("\t")
+                mode, kind, blob_sha = meta.split()
+                entries.append({"path": name, "mode": mode, "type": kind, "sha": blob_sha})
+            return {"sha": tree_sha, "truncated": False, "tree": entries}
+        if "/contents/" in parsed.path:
+            revision = parsed.query.removeprefix("ref=")
+            data = subprocess.check_output(
+                ["git", "-C", str(tmp_path), "show", f"{revision}:{path}"],
+            )
+            return {"type": "file", "size": len(data), "encoding": "base64",
+                    "content": base64.b64encode(data).decode()}
+        if "/compare/" in parsed.path:
+            left, right = parsed.path.rsplit("/", 1)[1].split("...")
+            commits = git("rev-list", "--reverse", f"{left}..{right}").splitlines()
+            files = [
+                {"status": {"A": "added", "M": "modified"}.get(status, status),
+                 "filename": name}
+                for status, name in (line.split("\t") for line in
+                                     git("diff", "--name-status", left, right).splitlines())
+            ]
+            base = git("merge-base", left, right)
+            return {"status": "ahead" if base == left else "diverged",
+                    "ahead_by": len(commits), "total_commits": len(commits),
+                    "commits": [{"sha": sha} for sha in commits],
+                    "merge_base_commit": {"sha": base}, "files": files}
+        raise AssertionError(url)
+
+    assert verify.verified_procedure_record(row, source, git_lookup)
+    assert verify.verified_regular_record_path(signoff["raw_data_url"], evidence, git_lookup)
+    signoff["artifact_sha256"] = "0" * 64
+    assert not verify.verified_procedure_record(row, source, git_lookup)
+    signoff["artifact_sha256"] = hashlib.sha256(raw).hexdigest()
+    (tmp_path / "code/robot.py").write_text("SAFE = False\n")
+    git("add", ".")
+    git("commit", "-qm", "change tested code")
+    changed = git("rev-parse", "HEAD")
+    signoff["raw_data_url"] = signoff["raw_data_url"].replace(evidence, changed)
+    assert not verify.verified_procedure_record(row, source, git_lookup)
+
+    (tmp_path / path).unlink()
+    (tmp_path / "docs/records/other.csv").write_bytes(raw)
+    (tmp_path / path).symlink_to("other.csv")
+    git("add", ".")
+    git("commit", "-qm", "substitute a symbolic link")
+    linked = git("rev-parse", "HEAD")
+    url = f"https://github.com/{verify.REPO}/blob/{linked}/{path}"
+    assert not verify.verified_regular_record_path(url, linked, git_lookup)
+
+
+@pytest.mark.parametrize("mode", ["120000", "160000", "100755", None])
+def test_online_audit_rejects_nonregular_receipt_tree_entry(mode):
+    row = promoted("MEASURED")["procedures"][0]
+
+    def altered(url):
+        result = lookup(url)
+        if "/git/trees/" in url:
+            result["tree"][0]["mode"] = mode
+        return result
+
+    assert any("immutable physical record not matched" in error
+               for error in verify.audit(full_ledger_with(row), altered))
