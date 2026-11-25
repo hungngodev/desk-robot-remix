@@ -2,6 +2,7 @@
 import importlib.util
 import shutil
 import subprocess
+from math import fsum
 from pathlib import Path
 from struct import unpack_from
 
@@ -96,12 +97,29 @@ def test_named_mg90s_coupons_have_integral_clearance_ticks(
     )
     assert marked_edges == expected
     pocket_offset = 2.5 - clearance_mm / 2
-    assert any(
-        abs(x - pocket_offset) < 0.002 and
-        abs(y - pocket_offset) < 0.002 and
-        abs(z - 2.0) < 0.002
-        for x, y, z in vertices
+    for x_expected in (pocket_offset, 28.0 - pocket_offset):
+        for y_expected in (pocket_offset, 17.2 - pocket_offset):
+            assert any(
+                abs(x - x_expected) < 0.002
+                and abs(y - y_expected) < 0.002
+                and abs(z - 2.0) < 0.002
+                for x, y, z in vertices
+            )
+    # Bounding boxes and a pocket corner can miss a fused obstruction.
+    # Integrate the oriented surface; the closed shell must enclose only
+    # the outer block minus the open pocket plus the exposed tick material.
+    six_volume = fsum(
+        a[0] * (b[1] * c[2] - b[2] * c[1])
+        + a[1] * (b[2] * c[0] - b[0] * c[2])
+        + a[2] * (b[0] * c[1] - b[1] * c[0])
+        for a, b, c in zip(vertices[::3], vertices[1::3], vertices[2::3], strict=True)
     )
+    expected_volume = (
+        28.0 * 17.2 * 8.0
+        - (23.0 + clearance_mm) * (12.2 + clearance_mm) * 6.0
+        + mark_count * 1.5 * 0.6 * 2.5
+    )
+    assert six_volume / 6 == pytest.approx(expected_volume, abs=0.01)
     # The protrusions must fuse to the cup rather than creating loose
     # separate islands which the printer could silently omit.
     verifier = ROOT / "code/scripts/export_fit_kit.py"
