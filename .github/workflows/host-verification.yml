@@ -166,7 +166,8 @@ jobs:
             fi
           done < <(git ls-files -z)
       - name: Compile head test Python before expensive toolchain setup
-        run: python3 -m compileall -q code/firmware/head/tests
+        working-directory: code
+        run: python3 -m compileall -q laptop/src laptop/server/overlay laptop/server/*.py tests scripts firmware/head/*.py firmware/head/tests
       - name: Install Python and locked dependencies
         working-directory: code
         run: |
@@ -174,7 +175,7 @@ jobs:
           uv sync --extra dev --python 3.11 --locked
       - name: Python lint
         working-directory: code
-        run: uv run --no-sync ruff check laptop/src laptop/server/overlay laptop/server/*.py tests scripts firmware/head/*.py
+        run: uv run --no-sync ruff check laptop/src laptop/server/overlay laptop/server/*.py tests scripts firmware/head/*.py firmware/head/tests
 
       - name: Install pinned headless OpenCV for dock geometry tests
         working-directory: code

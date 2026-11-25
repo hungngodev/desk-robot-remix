@@ -94,9 +94,15 @@ def test_sense_python_test_syntax_checked_before_expensive_setup():
         if step.get("name") == "Install Python and locked dependencies"
     )
     assert compiled < dependencies
-    assert steps[compiled]["run"] == (
-        "python3 -m compileall -q code/firmware/head/tests"
-    )
+    expected = [
+        "laptop/src", "laptop/server/overlay", "laptop/server/*.py", "tests",
+        "scripts", "firmware/head/*.py", "firmware/head/tests",
+    ]
+    assert steps[compiled]["working-directory"] == "code"
+    assert steps[compiled]["run"].split() == ["python3", "-m", "compileall", "-q", *expected]
+    lint = next(step for step in steps if step.get("name") == "Python lint")
+    assert lint["working-directory"] == "code"
+    assert lint["run"].split() == ["uv", "run", "--no-sync", "ruff", "check", *expected]
 
 
 def test_tree_guard_rejects_missing_worktree_and_partial_index(tmp_path):

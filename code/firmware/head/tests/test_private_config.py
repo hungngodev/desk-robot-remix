@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-
 SPEC = importlib.util.spec_from_file_location(
     "private_config_exp037", Path(__file__).resolve().parents[1] / "private_config.py"
 )
@@ -71,3 +70,49 @@ def test_private_config_normal_build_keeps_token_private(tmp_path, monkeypatch, 
     settings = json.loads(target.read_text())["builds"][0]["sdkconfig_append"]
     assert f'CONFIG_DESK_ROBOT_TOKEN="{SYNTHETIC_TOKEN}"' in settings
     assert not list(board.glob(".config.private.*.tmp"))
+
+
+@pytest.mark.parametrize("exists", [True, False])
+def test_private_config_refuses_target_symlink(tmp_path, monkeypatch, capsys, exists):
+    configure(tmp_path, monkeypatch)
+    board = tmp_path / BOARD
+    template(board)
+    victim = tmp_path / "tracked.json"
+    if exists:
+        victim.write_bytes(b"tracked source")
+    target = board / "config.private.json"
+    target.symlink_to(victim)
+    with pytest.raises(SystemExit) as error:
+        private.main()
+    assert error.value.code == 2
+    output = capsys.readouterr()
+    assert SYNTHETIC_TOKEN not in output.out + output.err
+    assert target.is_symlink()
+    if exists:
+        assert victim.read_bytes() == b"tracked source"
+    else:
+        assert not victim.exists()
+    assert not list(board.glob(".config.private.*.tmp"))
+
+
+def test_private_config_failed_replace_preserves_previous_settings(tmp_path, monkeypatch, capsys):
+    configure(tmp_path, monkeypatch)
+    board = tmp_path / BOARD
+    template(board)
+    private.main()
+    target = board / "config.private.json"
+    original = target.read_bytes()
+    monkeypatch.setenv("EXP037_TEST_TOKEN", "y" * 40)
+
+    def replace_failed(*args):
+        raise OSError("injected replace failure")
+
+    monkeypatch.setattr(private.os, "replace", replace_failed)
+    with pytest.raises(OSError, match="injected replace failure"):
+        private.main()
+    assert target.read_bytes() == original
+    assert target.stat().st_mode & 0o777 == 0o600
+    assert not list(board.glob(".config.private.*.tmp"))
+    output = capsys.readouterr()
+    assert SYNTHETIC_TOKEN not in output.out + output.err
+    assert "y" * 40 not in output.out + output.err
