@@ -64,14 +64,15 @@ static void gaps_and_magnets() {
   auto absent = angle(2, 46, 240);
   absent.magnet_status = 0x00;
   check(wheel.observe(absent, 240) == Result::Invalid);
-  check(wheel.observe(angle(2, 46, 240), 240) == Result::Baseline);
+  check(wheel.observe(angle(2, 46, 240), 240) == Result::Invalid);
+  check(wheel.observe(angle(2, 47, 250), 250) == Result::Baseline);
   // Failure invalidates continuity; the following sample cannot recover
   // prior distance, even though its acquisition is newer.
   check(wheel.angular_counts() == 0);
-  check(wheel.observe(angle(100, 47, 600), 600) == Result::Invalid);
-  check(wheel.observe(angle(101, 48, 620), 620) == Result::Baseline);
-  check(wheel.observe(angle(105, 49, 630), 800) == Result::Invalid);
-  check(wheel.observe(angle(106, 50, 700), 700) == Result::Baseline);
+  check(wheel.observe(angle(100, 48, 600), 600) == Result::Invalid);
+  check(wheel.observe(angle(101, 49, 620), 620) == Result::Baseline);
+  check(wheel.observe(angle(105, 50, 630), 800) == Result::Invalid);
+  check(wheel.observe(angle(106, 51, 700), 700) == Result::Baseline);
   check(wheel.segment() >= 3);
 }
 
@@ -102,7 +103,35 @@ static void source_rollover_and_reset() {
   check(wheel.observe(angle(1, 1, 1), 1) == Result::Unqualified);
 }
 
+static void rejected_conversion_replay_and_register_width() {
+  WheelAngleCapture wheel;
+  check(wheel.configure(4000, 150, 100));
+  check(wheel.observe(angle(4095, 0xfffffffeU, 0xfffffff0U), 0xfffffff0U) ==
+        Result::Baseline);
+  auto bad = angle(65535, 0xffffffffU, 0U);
+  check(wheel.observe(bad, 0U) == Result::Invalid);
+  check(wheel.observe(angle(0, 0xffffffffU, 0U), 1U) == Result::Invalid);
+  check(wheel.observe(angle(4095, 1, 10), 10) == Result::Baseline);
+  check(wheel.observe(angle(0, 2, 20), 20) == Result::Delta);
+  check(wheel.last_delta() == 1);
+  check(wheel.observe(angle(4095, 3, 30), 30) == Result::Delta);
+  check(wheel.last_delta() == -1 && wheel.angular_counts() == 0);
+  // A future-dated invalid record cannot poison the real sequence fence.
+  check(wheel.observe(angle(65535, 100, 1000), 31) == Result::Invalid);
+  check(wheel.observe(angle(0, 4, 40), 40) == Result::Baseline);
+  // Every out-of-range 16-bit register word is invalid, not masked or wrapped.
+  for (std::uint32_t raw = 4096; raw <= 65535; ++raw) {
+    WheelAngleCapture capture;
+    check(capture.configure(4000, 150, 100));
+    check(capture.observe(angle(static_cast<std::uint16_t>(raw), 1, 100), 100) ==
+          Result::Invalid);
+    check(capture.observe(angle(0, 1, 100), 100) == Result::Invalid);
+    check(capture.observe(angle(0, 2, 101), 101) == Result::Baseline);
+  }
+}
+
 int main() {
+  rejected_conversion_replay_and_register_width();
   replay_and_reverse();
   gaps_and_magnets();
   source_rollover_and_reset();

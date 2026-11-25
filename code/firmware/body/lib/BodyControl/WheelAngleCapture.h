@@ -37,6 +37,19 @@ class WheelAngleCapture {
     if (!reading.present || !reading.valid || reading.magnet_status != 0x20 ||
         reading.angle > 4095 || reading.sample_seq == 0 ||
         now_ms - reading.at_ms > max_age_) {
+      // A fresh rejected conversion still fences its acquisition identity.
+      // Failed bus reads keep the previous successful sequence; stale,
+      // future or replayed records must not advance that source fence.
+      const std::uint32_t seq_delta = reading.sample_seq - last_seq_;
+      const std::uint32_t time_delta = reading.at_ms - last_ms_;
+      if (reading.sample_seq != 0 && now_ms - reading.at_ms <= max_age_ &&
+          (!seen_ || (seq_delta != 0 && seq_delta < 0x80000000U &&
+                      time_delta != 0 && time_delta < 0x80000000U))) {
+        seen_ = true;
+        last_seq_ = reading.sample_seq;
+        last_ms_ = reading.at_ms;
+        last_angle_ = reading.angle;
+      }
       lose_continuity();
       return Result::Invalid;
     }
