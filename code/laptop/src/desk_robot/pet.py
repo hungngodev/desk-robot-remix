@@ -1684,8 +1684,10 @@ class PetController:
         # motion stop. Revoke Mac motion authority, but do not fabricate a
         # second autobiographical "latched fault" for an ordinary petting
         # interaction; the genuine touch counter has its own event path.
-        if fault == "touch_active":
-            if (previous is not None and previous != fault
+        # The first unsafe sample is a memory baseline, not a motion grant.
+        # An independently authorized Mac job may predate observer startup.
+        if fault == "touch_active" or previous is None:
+            if (previous != fault and fault not in ("none", "not_required")
                     and safety["ready"] is False and state.enabled
                     and state.generation == generation
                     and self.on_local_fault is not None):
@@ -1693,11 +1695,11 @@ class PetController:
                     await self.on_local_fault(robot_id)
                 except Exception as exc:
                     state.last_error = (
-                        f"Local touch stop: {type(exc).__name__}: {str(exc)[:80]}"
+                        f"Local safety baseline/touch stop: {type(exc).__name__}: {str(exc)[:80]}"
                     )
             return
         if (
-            previous is None or previous == fault or
+            previous == fault or
             fault in ("none", "not_required") or
             safety["ready"] is True or not state.enabled or
             state.generation != generation
