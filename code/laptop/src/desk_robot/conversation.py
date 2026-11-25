@@ -20,6 +20,7 @@ from .streamed_ollama import ollama_speech_segments
 
 _SPEAKER_ABORT_TIMEOUT_S = 2.0
 _CONVERSATION_STOP_TIMEOUT_S = 2.5
+_GROUP_ACTIVITY_TIMEOUT_S = 300.0
 
 
 async def _bounded_speaker_abort(interrupt, robot: RobotConfig) -> None:
@@ -760,6 +761,12 @@ class Conversation:
         if type(origin) is not str or origin not in {"operator", "autonomous_social"}:
             raise ValueError("Unsupported group conversation origin")
         turns = conversation_turns(robot_ids, utterances)
+        if type(topic) is not str or not topic.strip() or len(topic) > 500:
+            raise ValueError("Group topic must contain 1..500 characters")
+        # One monotonic budget includes private context preparation, lease
+        # acquisition and all turns. Never renew it after slow SQLite reads.
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _GROUP_ACTIVITY_TIMEOUT_S
         if self.speaker_stop_unconfirmed:
             raise RuntimeError("Xiaozhi speaker STOP unconfirmed; recovery required")
         if self.active is not None and not self.active.done():
@@ -804,7 +811,8 @@ class Conversation:
 
         def consent_still_valid() -> bool:
             return (
-                (not sharing_at_start
+                loop.time() < deadline
+                and (not sharing_at_start
                  or (self.settings.fleet_text_sharing_enabled
                      and self.settings.fleet_sharing_consent_generation
                         == sharing_consent_generation))
@@ -905,7 +913,7 @@ class Conversation:
                         asyncio.to_thread(self._persona_with_memory, robot)
                         for robot in robots
                     )),
-                    timeout=5.0,
+                    timeout=min(5.0, max(0.0, deadline - loop.time())),
                 )
             # Topic-specific memory is separate from the last six memories.
             # If the group starts talking about a key after many unrelated
@@ -920,7 +928,7 @@ class Conversation:
                         )
                         for robot in robots
                     )),
-                    timeout=5.0,
+                    timeout=min(5.0, max(0.0, deadline - loop.time())),
                 )
 
             def live_cues(robot_id: str) -> str:
@@ -1065,9 +1073,11 @@ class Conversation:
                     robots, personas, topical, strict=True
                 )
             }
+            if loop.time() >= deadline:
+                raise TimeoutError("Group activity deadline exceeded")
             if not consent_still_valid():
                 raise RuntimeError("Group conversation consent revoked")
-            async with asyncio.timeout(300):
+            async with asyncio.timeout_at(deadline):
                 async with self.session_lock, self._confirmed_speaker_session(robots):
                     try:
                         # Track only segments whose speaker.say actually

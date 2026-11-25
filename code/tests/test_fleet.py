@@ -129,6 +129,65 @@ def test_group_turn_limits(count, limit):
         conversation_turns(IDS[:count], limit + 1)
 
 
+@pytest.mark.parametrize("topic", [None, [], "", "  ", "x" * 501])
+async def test_invalid_group_topic_does_not_claim_active_owner(fleet, topic):
+    conversation = Conversation(fleet, SimulatedChat(), SimulatedSpeaker())
+    with pytest.raises(ValueError, match="Group topic"):
+        await conversation.run(IDS, topic)
+    assert conversation.active is None
+    assert len(await conversation.run(IDS, "Play again", 1)) == 1
+
+
+async def test_group_budget_includes_context_preparation(fleet, monkeypatch):
+    from desk_robot import conversation as conversation_module
+
+    monkeypatch.setattr(conversation_module, "_GROUP_ACTIVITY_TIMEOUT_S", 0.05)
+
+    async def blocked_read(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(asyncio, "to_thread", blocked_read)
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, SimulatedChat(), speaker)
+    with pytest.raises(TimeoutError):
+        await asyncio.wait_for(conversation.run(IDS, "Tell a story"), timeout=1)
+    assert conversation.active is None
+    assert not speaker.spoken
+    assert all(conversation.group_activity_timeline(i)[0]["status"] == "failed"
+               for i in IDS)
+
+
+async def test_group_budget_is_not_renewed_after_context_setup(fleet, monkeypatch):
+    from desk_robot import conversation as conversation_module
+
+    budget = 0.15
+    monkeypatch.setattr(conversation_module, "_GROUP_ACTIVITY_TIMEOUT_S", budget)
+    loop = asyncio.get_running_loop()
+    original_timeout_at = asyncio.timeout_at
+    deadlines = []
+
+    def capture_timeout_at(deadline):
+        deadlines.append(deadline)
+        return original_timeout_at(deadline)
+
+    async def delayed_read(func, robot):
+        await asyncio.sleep(0.03)
+        return func(robot)
+
+    monkeypatch.setattr(asyncio, "timeout_at", capture_timeout_at)
+    monkeypatch.setattr(asyncio, "to_thread", delayed_read)
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, SimulatedChat(), speaker)
+    async with conversation.session_lock:
+        started = loop.time()
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(conversation.run(IDS, "Play peekaboo"), timeout=1)
+    assert len(deadlines) == 1
+    assert started + budget <= deadlines[0] < started + budget + 0.03
+    assert conversation.active is None
+    assert not speaker.spoken
+
+
 async def test_five_cancellation_and_repeated_stop_finish_session_cleanup(fleet):
     entered, cleanup_started, release_cleanup = asyncio.Event(), asyncio.Event(), asyncio.Event()
 
