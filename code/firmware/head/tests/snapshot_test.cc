@@ -17,6 +17,12 @@ struct Frame {
     uint16_t height;
     int format;
 };
+using camera_fb_t = Frame;
+int returned_frames = 0;
+void esp_camera_fb_return(camera_fb_t* frame) {
+    assert(frame != nullptr);
+    ++returned_frames;
+}
 bool encoder_ok = true;
 bool encoder_framing_ok = true;
 bool image_to_jpeg(uint8_t* src, size_t size, uint16_t width, uint16_t height,
@@ -34,16 +40,20 @@ class Esp32Camera {
 public:
     int capture_calls = 0;
     bool capture_ok = true;
+    bool frame_available = true;
     bool native_jpeg_ok = true;
     uint8_t pixels[8] = {};
     Frame frame{pixels, 8, 2, 2, PIXFORMAT_RGB565};
-    Frame* current_fb_ = &frame;
+    Frame* current_fb_ = nullptr;
     uint8_t* encode_buf_ = pixels;
     std::recursive_mutex mutex;
     std::recursive_mutex& AccessMutex() { return mutex; }
     bool Capture() {
         std::lock_guard<std::recursive_mutex> lock(AccessMutex());
         ++capture_calls;
+        if (current_fb_) esp_camera_fb_return(current_fb_);
+        current_fb_ = frame_available ? &frame : nullptr;
+        if (!current_fb_) return false;
         if (frame.format == PIXFORMAT_JPEG) {
             // A native camera frame must actually begin with SOI and end
             // with EOI. The prior synthetic JPEG was four arbitrary RGB
@@ -63,32 +73,40 @@ public:
 
 int main() {
     Esp32Camera camera;
-    auto first = camera.SnapshotJpeg();
-    auto second = camera.SnapshotJpeg();
+    const auto capture = [&camera]() {
+        const int before = returned_frames;
+        const bool available = camera.frame_available;
+        auto result = camera.SnapshotJpeg();
+        assert(camera.current_fb_ == nullptr);
+        assert(returned_frames == before + (available ? 1 : 0));
+        return result;
+    };
+    auto first = capture();
+    auto second = capture();
     assert(first && second && camera.capture_calls == 2);
     assert((*first)[2] == 1 && (*second)[2] == 2);
     camera.capture_ok = false;
-    auto failed = camera.SnapshotJpeg();
+    auto failed = capture();
     assert(!failed && failed.error() == "Fresh camera capture failed");
     camera.capture_ok = true;
     encoder_ok = false;
-    assert(!camera.SnapshotJpeg());
+    assert(!capture());
     encoder_ok = true;
     encoder_framing_ok = false;
-    assert(!camera.SnapshotJpeg());
+    assert(!capture());
     encoder_framing_ok = true;
-    assert(camera.SnapshotJpeg());
+    assert(capture());
     camera.frame.format = PIXFORMAT_OTHER;
-    assert(!camera.SnapshotJpeg());
+    assert(!capture());
     camera.frame.format = PIXFORMAT_JPEG;
     camera.frame.len = 3;
-    assert(!camera.SnapshotJpeg());
+    assert(!capture());
     camera.frame.len = 512 * 1024 + 1;
-    assert(!camera.SnapshotJpeg());
+    assert(!capture());
     camera.frame.len = 4;
-    assert(camera.SnapshotJpeg()->size() == 4);
+    assert(capture()->size() == 4);
     camera.native_jpeg_ok = false;
-    assert(!camera.SnapshotJpeg());
-    camera.current_fb_ = nullptr;
-    assert(!camera.SnapshotJpeg());
+    assert(!capture());
+    camera.frame_available = false;
+    assert(!capture());
 }

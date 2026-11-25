@@ -1,5 +1,16 @@
 std::expected<std::vector<uint8_t>, std::string> Esp32Camera::SnapshotJpeg() {
     std::lock_guard<std::recursive_mutex> camera_lock(AccessMutex());
+    // HTTP owns only the copied JPEG, not a framebuffer for future Explain.
+    // Return the driver buffer on every exit while the camera lock is held.
+    struct FrameRelease {
+        camera_fb_t*& frame;
+        ~FrameRelease() {
+            if (frame) {
+                esp_camera_fb_return(frame);
+                frame = nullptr;
+            }
+        }
+    } release{current_fb_};
     // Capture joins any previous encoder and discards queued frames before
     // obtaining a new frame. Never serve the last Explain frame as a snapshot.
     if (!Capture() || !current_fb_ || !current_fb_->buf || !current_fb_->len)
