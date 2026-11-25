@@ -303,6 +303,8 @@ def native_tts_config(conn):
     params = provider.get("params") if isinstance(provider, dict) else None
     if not isinstance(params, dict) or provider.get("type") != "custom":
         raise RuntimeError("Expected pinned CustomTTS params for pet voice")
+    if params.get("model") != "kokoro":
+        raise RuntimeError("Per-pet native voice requires explicit Kokoro model")
     isolated = copy.deepcopy(config)
     isolated["TTS"]["CustomTTS"]["params"]["voice"] = voice
     return isolated

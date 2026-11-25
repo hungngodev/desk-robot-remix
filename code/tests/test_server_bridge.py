@@ -2588,7 +2588,7 @@ def test_trusted_fleet_maps_reject_ambiguous_json(bridge, monkeypatch):
     common = {
         "selected_module": {"TTS": "CustomTTS"},
         "TTS": {"CustomTTS": {
-            "type": "custom", "params": {"voice": "af_heart"},
+            "type": "custom", "params": {"voice": "af_heart", "model": "kokoro"},
         }},
     }
     owner = SimpleNamespace(device_id="mac-01", config=common)
@@ -2652,11 +2652,42 @@ def test_native_voice_refuses_missing_or_malformed_operator_mapping(
 
     monkeypatch.setenv("DESK_ROBOT_NATIVE_VOICE_MAP", json.dumps({"robot-01": voice}))
     config = {"selected_module": {"TTS": "CustomTTS"},
-              "TTS": {"CustomTTS": {"type": "custom", "params": {"voice": "af_heart"}}}}
+              "TTS": {"CustomTTS": {"type": "custom", "params": {"voice": "af_heart", "model": "kokoro"}}}}
     owner = SimpleNamespace(device_id="mac-01", config=config)
     bridge.register(owner)
     with pytest.raises(RuntimeError, match="validated assigned voice"):
         bridge.native_tts_config(owner)
+
+
+@pytest.mark.parametrize("model", [None, "", "other", True, {"name": "kokoro"}])
+def test_native_kokoro_voice_rejects_invalid_model_after_config_change(
+    bridge, monkeypatch, model,
+):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv(
+        "DESK_ROBOT_NATIVE_VOICE_MAP",
+        '{"robot-01":"af_heart","robot-02":"am_adam"}',
+    )
+    common = {
+        "selected_module": {"TTS": "CustomTTS"},
+        "TTS": {"CustomTTS": {
+            "type": "custom", "params": {"voice": "af_heart", "model": "kokoro"},
+        }},
+    }
+    owner = SimpleNamespace(device_id="mac-02", config=common)
+    bridge.register(owner)
+    assert bridge.native_tts_config(owner)["TTS"]["CustomTTS"]["params"]["voice"] == "am_adam"
+    params = common["TTS"]["CustomTTS"]["params"]
+    if model is None:
+        del params["model"]
+    else:
+        params["model"] = model
+    with pytest.raises(RuntimeError, match="explicit Kokoro model"):
+        bridge.native_tts_config(owner)
+    assert params["voice"] == "af_heart"
+    params["model"] = "kokoro"
+    assert bridge.native_tts_config(owner)["TTS"]["CustomTTS"]["params"]["voice"] == "am_adam"
 
 
 def test_native_kokoro_voice_fails_closed_for_unmapped_provider(bridge, monkeypatch):
@@ -2699,7 +2730,7 @@ def test_native_voice_map_validates_every_provisioned_pet(bridge, monkeypatch, f
     monkeypatch.setenv("DESK_ROBOT_NATIVE_VOICE_MAP", json.dumps(voices))
     common = {
         "selected_module": {"TTS": "CustomTTS"},
-        "TTS": {"CustomTTS": {"type": "custom", "params": {"voice": "af_heart"}}},
+        "TTS": {"CustomTTS": {"type": "custom", "params": {"voice": "af_heart", "model": "kokoro"}}},
     }
     heads = [SimpleNamespace(device_id=device, config=common)
              for device in devices.values()]
