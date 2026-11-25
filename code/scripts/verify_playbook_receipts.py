@@ -67,6 +67,37 @@ REQUIRED_PROCEDURE_COMMAND_TOKENS = {
 }
 
 
+_SPECIAL_PROCEDURE_COMMANDS = {
+    1: "cd code && git rev-parse HEAD",
+    3: "cd code && git diff --name-only origin/codex/initial-remix...HEAD",
+    4: "cd code && gh api repos/hungngodev/desk-robot-remix/pulls/17/comments --paginate",
+    2: "cd code && python scripts/verify_system.py --suite python",
+    8: "cd code && python scripts/verify_system.py --suite all",
+    26: "cd code && python scripts/verify_system.py --suite body",
+    **{i: "cd code && python scripts/verify_system.py --suite body" for i in range(33, 41)},
+    **{i: "cd code && python scripts/verify_system.py --suite sense" for i in range(41, 49)},
+    **{i: "cd code && python scripts/verify_system.py --suite all" for i in range(81, 97)},
+}
+
+
+def valid_procedure_command(identifier: int, command: object) -> bool:
+    """Admit canonical procedure commands; admission alone is not execution evidence."""
+    if (type(identifier) is not int or not 1 <= identifier <= 96
+            or not isinstance(command, str) or not command.startswith("cd code && ")
+            or re.search(
+                r"--(?:help|version|collect-only)\b|&& true\b|\bpython(?:3(?:\.\d+)?)?\s+-c\b",
+                command,
+            )
+            or any(tok not in command for tok in REQUIRED_PROCEDURE_COMMAND_TOKENS.get(
+                identifier, (),
+            ))):
+        return False
+    return (
+        command == _SPECIAL_PROCEDURE_COMMANDS.get(identifier)
+        or re.search(r"tests/[A-Za-z0-9_./-]+\.py|\bctest\b|\bcmake\b", command) is not None
+    )
+
+
 def github_json(url: str, token: str | None = None) -> dict:
     """Read metadata; do not mutate the repository or download arbitrary URLs."""
     token = token or os.environ.get("GITHUB_TOKEN")
@@ -606,17 +637,7 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
             continue
         command = row.get("verification_command")
         receipt = row.get("executed_test_receipt")
-        if (not isinstance(command, str)
-                or not command.startswith("cd code && ")
-                or re.search(
-                    r"--(?:help|version|collect-only)\b|&& true\b|\bpython(?:3(?:\.\d+)?)?\s+-c\b",
-                    command,
-                )
-                or not re.search(r"tests/[A-Za-z0-9_./-]+\.py|\bctest\b|\bcmake\b", command)
-                or any(
-                    tok not in command
-                    for tok in REQUIRED_PROCEDURE_COMMAND_TOKENS.get(identifier, ())
-                )
+        if (not valid_procedure_command(identifier, command)
                 or not isinstance(receipt, dict)
                 or receipt.get("command") != command):
             errors.append(f"procedure {identifier}: executable command receipt mismatch")

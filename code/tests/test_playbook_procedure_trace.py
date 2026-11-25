@@ -127,12 +127,7 @@ def _valid_release_evidence(record):
             and record.get("verification_method") != "manual_review"):
         return False
     command = record.get("verification_command", "")
-    if (not isinstance(command, str)
-            or re.search(r"\bpython(?:3(?:\.\d+)?)?\s+-c\b", command)
-            or any(
-                tok not in command
-                for tok in REQUIRED_PROCEDURE_COMMAND_TOKENS.get(identifier, ())
-            )):
+    if not _POLICY.valid_procedure_command(identifier, command):
         return False
     if record["gate"] == "TESTED" and record["evidence_class"] == "physical":
         return False
