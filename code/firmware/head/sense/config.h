@@ -81,6 +81,15 @@ static_assert([] {
     }
     return true;
 }(), "Sense peripheral GPIO collision or reserved GPIO");
+static_assert(AUDIO_OUTPUT_SAMPLE_RATE == 32000 && AUDIO_INPUT_SAMPLE_RATE == 16000,
+              "Sense MAX98357A LRCLK and PDM/AEC rates must remain 32/16 kHz");
+static_assert(AUDIO_I2S_SPK_GPIO_BCLK == GPIO_NUM_4 &&
+              AUDIO_I2S_SPK_GPIO_LRCK == GPIO_NUM_7 &&
+              AUDIO_I2S_SPK_GPIO_DOUT == GPIO_NUM_8,
+              "Sense MAX98357A I2S wiring must remain GPIO4/7/8");
+static_assert(AUDIO_PDM_MIC_GPIO_SCK == GPIO_NUM_42 &&
+              AUDIO_PDM_MIC_GPIO_DIN == GPIO_NUM_41,
+              "Sense onboard PDM wiring must remain GPIO42/41");
 static_assert(CAMERA_PIN_PWDN == GPIO_NUM_NC && CAMERA_PIN_RESET == GPIO_NUM_NC,
               "Unused head pins must remain disconnected");
 static_assert(ROBOT_UART_TX == GPIO_NUM_2 && ROBOT_UART_RX == GPIO_NUM_1,
