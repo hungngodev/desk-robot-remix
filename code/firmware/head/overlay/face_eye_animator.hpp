@@ -24,7 +24,9 @@ public:
     EyeFrame Step(uint32_t now_ms, stackchan::behavior::Motion motion, bool allowed) {
         using stackchan::behavior::Motion;
         if (!allowed) {
-            started_ = false;
+            // A transient voice/reconnect or fault gate cancels the current
+            // gesture, but must not restart the idle blink clock indefinitely.
+            // The next allowed frame may start a new blink, never replay one.
             gaze_ = Motion::kNone;
             blink_active_ = false;
             return {};

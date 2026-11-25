@@ -2011,6 +2011,32 @@ int main() {
             assert(!offline.Step(300102U, Motion::kNone, true).visible);
         }
     }
+    // The 5s voice reconnect throttle must not starve a longer blink timer.
+    using namespace stackchan::behavior;
+    HsmBehavior pet(1000);
+    pet.pick_min_ms = 6000;
+    pet.pick_max_ms = 15000;
+    FaceEyeAnimator reconnecting;
+    reconnecting.Seed(1000);
+    unsigned blink_ticks = 0, gaze_ticks = 0;
+    for (uint32_t elapsed = 0; elapsed <= 300000U; elapsed += 100U) {
+        const uint32_t now = 0xfffff000U + elapsed;
+        const auto action = pet.update({now});
+        const bool allowed = elapsed % 5000U < 4500U;
+        const auto frame = reconnecting.Step(now, action.motion, allowed);
+        assert(!action.set_speech && action.speech[0] == '\0');
+        assert(allowed || !frame.visible);
+        assert(frame.x >= -3 && frame.x <= 3 && frame.y >= -3 && frame.y <= 3);
+        blink_ticks += frame.closed;
+        gaze_ticks += frame.visible && (frame.x || frame.y);
+    }
+    assert(blink_ticks > 20 && gaze_ticks > 0);
+    assert(pet.state() == State::kIdle);
+    pet.update({0xfffff000U + 300100U});
+    assert(pet.state() == State::kSleeping);
+    pet.pushEvent(Event(EventType::kPersonDetected));
+    const auto awake = pet.update({0xfffff000U + 300200U});
+    assert(pet.state() == State::kAttentive && !awake.set_speech);
 }
 """
     with tempfile.TemporaryDirectory() as temp:
