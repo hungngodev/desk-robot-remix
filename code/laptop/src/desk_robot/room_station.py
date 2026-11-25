@@ -125,6 +125,8 @@ def _valid_reading(sensor: str, data: dict, clock: int) -> bool:
     if set(data) != {"valid", "sample_ms"} | fields:
         raise ValueError(f"Unknown or missing {sensor} measurement field")
     if sensor == "scd40":
+        if type(data["co2_ppm"]) is not int:
+            raise ValueError("CO2 ppm must be an integer")
         _value(data, "co2_ppm", 1, 50000)
         _value(data, "temp_c", -40, 125)
         _value(data, "humidity_pct", 0, 100)
@@ -133,12 +135,19 @@ def _valid_reading(sensor: str, data: dict, clock: int) -> bool:
         _value(data, "humidity_pct", 0, 100)
         _value(data, "pressure_pa", 30000, 125000)
         # Pinned BME680 2.0.5 uses zero as the unstable heater sentinel.
+        if type(data["gas_ohms"]) is not int:
+            raise ValueError("Gas resistance must be an integer")
         _value(data, "gas_ohms", 1, 1e9)
     elif sensor == "ld2410c":
         for key in ("presence", "stationary", "moving"):
             _boolean(data, key)
         for key in ("stationary_cm", "moving_cm"):
+            if type(data[key]) is not int:
+                raise ValueError("Radar distance must be an integer")
             _value(data, key, 0, 65535)
+        if ((data["stationary"] and data["stationary_cm"] == 0)
+                or (data["moving"] and data["moving_cm"] == 0)):
+            raise ValueError("Active radar target requires a positive distance")
         if (data["stationary"] or data["moving"]) and not data["presence"]:
             raise ValueError("Radar target contradicts absent presence")
     elif sensor == "soil":
