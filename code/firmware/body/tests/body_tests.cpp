@@ -644,6 +644,7 @@ int main(int argc, char** argv) {
       {"independent_receivers", independent_receivers}, {"status_honesty", status_honesty},
       {"guarded_head_timeout_cannot_rearm_from_reconnected_uart",
        guarded_head_timeout_cannot_rearm_from_reconnected_uart},
+      {"guarded_transition_sequences", guarded_transition_sequences},
       {"deterministic_stream_stress", deterministic_stream_stress}};
   int ran = 0;
   for (const auto& test : tests) {

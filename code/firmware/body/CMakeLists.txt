@@ -231,6 +231,9 @@ foreach(scenario
     stop_freezes_servos explicit_disarm_detaches watchdog_holds_servos
     rollover_timers strict_integer_parser malformed_atomicity
     overlong_frame_recovery framing serial_idle_frame_timeout independent_receivers status_honesty
+    rejected_grip_does_not_renew_watchdog
+    guarded_head_timeout_cannot_rearm_from_reconnected_uart
+    guarded_transition_sequences
     deterministic_stream_stress)
   body_add_test(${scenario} body_tests ${scenario})
 endforeach()
