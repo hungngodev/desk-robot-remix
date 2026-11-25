@@ -2,6 +2,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <limits>
 using desk_robot::SensePcmWindow;
 int main() {
   static std::array<std::int16_t, SensePcmWindow::kFrames * 2> data{};
@@ -170,5 +171,21 @@ int main() {
   short_read.invalidate_read(11020000);
   assert(short_read.ready() && !short_read.failed());
   assert(short_read.take().frames == SensePcmWindow::kFrames);
+  // Reject invalid clock values before subtracting callback duration.
+  SensePcmWindow edge;
+  for (auto end_us : {std::numeric_limits<std::int64_t>::min(), std::int64_t{0}}) {
+    assert(edge.begin(data.data(), 1000000));
+    edge.offer(mic.data(), ref.data(), 320, end_us, true);
+    assert(edge.failed() && edge.frames_received() == 0 && !edge.ready());
+    assert(edge.discard() == data.data());
+  }
+  // A valid short callback near the clock's upper limit must not overflow
+  // while applying the allowed scheduling-overlap tolerance.
+  const auto clock_max = std::numeric_limits<std::int64_t>::max();
+  assert(edge.begin(data.data(), clock_max - 5000));
+  edge.offer(mic.data(), ref.data(), 16, clock_max - 1000, true);
+  edge.offer(mic.data(), ref.data(), 16, clock_max, true);
+  assert(!edge.failed() && edge.frames_received() == 32);
+  assert(edge.discard() == data.data());
   return 0;
 }

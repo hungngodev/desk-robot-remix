@@ -65,6 +65,11 @@ class SensePcmWindow {
              std::uint32_t frames, std::int64_t end_us,
              bool reference_valid) noexcept {
     if (storage_ == nullptr || ready_ || failed_) return;
+    // Reject an invalid clock before subtracting a callback interval.
+    if (end_us <= 0) {
+      failed_ = true;
+      return;
+    }
     // A PDM Read may have started before the authenticated bench START.
     // Never save pre-consent microphone samples merely because that blocking
     // callback finished after START. Drop the whole overlapping callback;
@@ -85,7 +90,9 @@ class SensePcmWindow {
          (end_us <= last_sample_us_ ||
           end_us - last_sample_us_ >
               callback_us + kMaxCallbackJitterUs ||
-          end_us - callback_us + 2'000 < last_sample_us_)) ||
+          // The preceding bounds make this relative difference safe even
+          // when end_us is close to INT64_MAX.
+          end_us - last_sample_us_ + 2'000 < callback_us)) ||
         (last_sample_us_ == 0 && end_us - requested_us_ > 500'000)) {
       failed_ = true;
       return;
