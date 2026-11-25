@@ -2328,7 +2328,10 @@ class PetController:
                                 and 0 <= now - admitted_received <= self.max_observation_age
                             )
 
-                        async def bounded_comparison():
+                        async def bounded_comparison(
+                            previous=previous, jpeg=jpeg, remaining=remaining,
+                            admit_comparison=admit_comparison,
+                        ):
                             # Construct the request inside its cancellable owner:
                             # preemption before the first scheduling step must
                             # not leave an unawaited comparison coroutine.
