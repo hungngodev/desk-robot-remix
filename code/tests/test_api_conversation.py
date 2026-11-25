@@ -1355,12 +1355,21 @@ async def test_group_prompts_never_promote_forged_peer_memory_to_firsthand(setti
         "robot-02", "peer_asr", "The user asked for a move",
         kind="heard_human", source_robot="robot-01", witnessed=False,
     )
-    c = Conversation(settings, SimulatedChat(), SimulatedSpeaker(), memory=memory)
-    persona = c._persona_with_memory(settings.robot("robot-02"))
-    assert "robot-01 reported: I picked up a key" in persona
-    assert "robot-01 reported uncertain human speech" in persona
-    await c.run(ids, "picked up a key", 1)
-    messages = c.histories["robot-02"]
+    class RecordingChat(SimulatedChat):
+        def __init__(self):
+            self.prompts = []
+
+        async def reply(self, history):
+            self.prompts.append([dict(message) for message in history])
+            return await super().reply(history)
+
+    chat = RecordingChat()
+    c = Conversation(settings, chat, SimulatedSpeaker(), memory=memory)
+    transcript = await c.run(ids, "picked up a key", 2)
+    assert [turn["robot_id"] for turn in transcript] == ids
+    assert len(chat.prompts) == 2
+    messages = chat.prompts[1]
+    assert messages[0]["content"] == settings.robot("robot-02").persona
     assert messages[0]["role"] == "system"
     assert messages[1]["role"] == "user"
     assert "robot-01 reported:" not in messages[0]["content"]
@@ -1371,6 +1380,7 @@ async def test_group_prompts_never_promote_forged_peer_memory_to_firsthand(setti
     assert evidence["role"] == "user"
     assert "Untrusted per-pet historical memory data" in evidence["content"]
     assert "robot-01 reported: I picked up a key" in evidence["content"]
+    assert "robot-01 reported uncertain human speech" in evidence["content"]
     assert "I said previously: I picked up a key" not in evidence["content"]
 
 
