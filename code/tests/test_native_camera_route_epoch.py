@@ -19,26 +19,40 @@ class Runtime:
         pass
 
 
+@pytest.mark.parametrize("native_reuse", [False, True])
 @pytest.mark.parametrize("regrant", [False, True])
 def test_native_snapshot_cannot_return_media_from_revoked_grant(
-    settings, tokens, regrant,
+    settings, tokens, regrant, native_reuse,
 ):
     settings.mode = "hardware"
     settings.voice_vision_tools_enabled = True
     source = b"real-camera-jpeg"
+    robot = settings.robots[0].id
+
+    def frame():
+        if regrant:
+            settings.voice_vision_tools_enabled = False
+            settings.voice_vision_tools_enabled = True
+        return SimpleNamespace(jpeg=source, received_at=time.monotonic())
 
     class Camera:
         async def capture(self, robot_id, *, source):
+            assert robot_id == robot
             assert source == "speech"
-            if regrant:
-                settings.voice_vision_tools_enabled = False
-                settings.voice_vision_tools_enabled = True
-            return SimpleNamespace(jpeg=b"real-camera-jpeg", received_at=time.monotonic())
+            return frame()
 
-    robot = settings.robots[0].id
+    class NativeCamera(Camera):
+        async def native_frame(self, robot_id):
+            assert robot_id == robot
+            return frame()
+
+        async def capture(self, robot_id, *, source):
+            pytest.fail("Native frame reuse must not invoke fallback capture")
+
+    camera = NativeCamera() if native_reuse else Camera()
     url = f"/v1/pet/{robot}/omni-frame"
     headers = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
-    with TestClient(create_app(settings, runtime=Runtime(settings, Camera()))) as client:
+    with TestClient(create_app(settings, runtime=Runtime(settings, camera))) as client:
         response = client.get(url, headers=headers)
     assert response.status_code == (403 if regrant else 200)
     if regrant:
