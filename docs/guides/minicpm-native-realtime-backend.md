@@ -45,7 +45,7 @@ The model's `playback.ack` contract must be based on **actual I2S played samples
 
 The host loopback tests in `code/tests/test_native_omni_xiaozhi.py` exercise a real WebSocket handshake, actual PCM-shaped input, native model event responses, Opus-shaped head output, explicit model selection, identity, TLS rules, fleet speaker priority and the fact that no playback ACK is invented. They replace neither the real MiniCPM 9B model nor the ESP32 board. The `test_multimodal_api.py` tests verify the Mac source-authenticated JPEG route requires explicit hardware privacy consent.
 
-The original GitHub Actions jobs currently fail with **zero visible job steps** and unavailable log blobs. This is unresolved verification infrastructure; do not report tests passing or promote the PR to ready. Physical docking, charging electronics, fully dimensioned final 3D CAD and calibrated grasp also remain separate unqualified gates.
+The original November 11 GitHub Actions runs failed with **zero visible job steps** and unavailable log blobs. Later runs executed host and firmware jobs; check the exact current commit's five lanes instead of extrapolating either historical failures or successes. Do not promote the PR to ready on software CI alone. Physical docking, charging electronics, fully dimensioned final 3D CAD and calibrated grasp also remain separate unqualified gates.
 
 ---
 
@@ -103,26 +103,26 @@ uv run --no-sync python scripts/omni_duplex_smoke.py \
 
 The probe rejects cleartext nonloopback URLs so audio is not accidentally sent across the LAN. Use `wss://` with a correctly configured private TLS endpoint for remote servers. This is a service compatibility probe, not the final robot setup. Do not use the generated WAV to claim actual robot playback.
 
-## Exact full cutover architecture still to integrate
+## Exclusive audio route in source and remaining playback qualification
 
 ```text
 XIAO Sense PDM mic + hardware AEC (existing)
   -> ESP32 Opus / pinned Xiaozhi WebSocket (existing)
   -> pinned server decoder: actual mono 16k PCM (existing)
-  -> exclusive audio route (NOT YET PATCHED)
+  -> exclusive audio route (implemented, per-robot opt-in)
        -> MiniCPM omni backend realtime WebSocket
           + camera snapshot from Mac's authenticated per-robot hub
           + one frame on the matching 1s PCM unit
        <- generated PCM16 at 24k and transcript
   -> single XIAO output owner, resample to 16k, Opus 60ms
   -> XIAO I2S speaker DMA
-  <- actual sample played feedback (NOT YET IMPLEMENTED)
-  -> backend playback.ack with measured cumulative played milliseconds
+  <- generation-scoped digital I2S committed-prefix telemetry (source implemented)
+  -> backend playback.ack (not emitted; acoustic playback remains unverified)
 ```
 
 A correct switch has to be exclusive per physical robot and its audio lease: the old Xiaozhi ASR/LLM/Kokoro must not speak concurrently with the model's native full-duplex stream. The native backend must not bypass device AEC, the XIAO speaker decoder, fleet voice priority, or Mac motor permissions. The model-side MiniCPM omni realtime lane is not documented as supporting arbitrary tools; keep private memory, selected sensors and motion decision logic in the Mac, do not claim native model motor tools.
 
-Most important blocker: **playback truth**. The vLLM-Omni protocol requires `playback.ack` to represent actual sound heard. A Mac HTTP response, Opus transmission completion, and an estimated 240ms tail are **not** measurements. We need head firmware tracking decoder-to-I2S played sample count and an authenticated response with sample/turn generation. Only then may the new backend keep a truthful conversational playback ledger. Likewise, barge in needs 19/20 physical trials with audible stop within 500ms, not an API acknowledgement.
+Most important blocker: **playback truth**. The vLLM-Omni protocol requires `playback.ack` to represent actual sound heard. A Mac HTTP response, Opus transmission completion, and an estimated 240ms tail are **not** measurements. The current adapter accepts a bounded digital I2S committed prefix only from the registered head socket, matching session, playback token, response, generation and turn. It exposes `head_audio_i2s_progress_observed` and `head_audio_i2s_committed_ms`; neither proves that the amplifier or speaker produced sound. `head_audio_playback_acknowledged`, `tool_audio_playback_acknowledged`, `native_context_model_application_verified` and `tool_results_ingested_by_native_duplex_kv` remain false. The completed Mac read-only tool speech route is not evidence that native model KV consumed a tool result. Likewise, barge in needs 19/20 physical trials with audible stop within 500ms, not an API acknowledgement.
 
 The Mac XIAO camera currently gives JPEG capture completion metadata and a freshness check, not true synchronized exposure timestamps. The overlay must preserve headset/mic and camera identity, time alignment, model session replacement and loss/reconnect behavior before swapping the audio path. All five pets require independent backend session identity and one shared unsolicited-speech floor.
 
@@ -130,7 +130,7 @@ The Mac XIAO camera currently gives JPEG capture completion metadata and a fresh
 
 * Native model protocol tests: software integration, not hardware validated.
 * Offline realtime server probe: executable if a compatible model server exists, but not yet run against a real server here.
-* Xiaozhi speaker cutover and 24kHz-to-16kHz resampling: IMPLEMENTED in opt-in source but NOT hardware or model verified. Genuine DMA/I2S playback acknowledgement: NOT IMPLEMENTED and **must not** be invented from Opus send counters.
+* Xiaozhi speaker cutover and 24kHz-to-16kHz resampling: IMPLEMENTED in opt-in source but NOT hardware or model verified. Generation-scoped digital I2S progress exists in source; audible playback acknowledgement remains unverified and **must not** be invented from either Opus send counters or digital I2S commitment.
 * End-to-end physical voice interruption, human speech latency, proactive audiovisual correctness and the complete assembled robot: NOT VERIFIED.
 * Autonomous docking, protected 1S charger and gripper contact force still require physical measurements, independent of the AI backend.
 
