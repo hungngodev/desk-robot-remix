@@ -266,9 +266,11 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
             + _text(15, 37, "PROVISIONAL / UNPOWERED / NOT FOR DRILLING")
             + features
             + _text(20, 218, "Print at 100% or actual size. Disable fit-to-page scaling.")
-            + _text(20, 225, "Measure BOTH lengths between stroke centers, not outer edges.")
+            + _text(20, 225, "Measure all three lengths between stroke centers, not outer edges.")
             + _rect(20, 239, 100, 8)
             + _text(20, 236, "100 mm horizontal print scale")
+            + _rect(20, 258, 50, 8)
+            + _text(20, 255, "50 mm horizontal print scale")
             + _rect(173, 229, 8, 25)
             + _text(146, 262, "25 mm vertical")
             + _text(15, 280, "BACK / BOTTOM of paper. Never mirror a mounting pattern blindly.")

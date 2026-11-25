@@ -70,7 +70,7 @@ them into a second shopping list or hand-edit generated pin tables.
    `dock_reference_A4.svg` (AprilTag paper pocket),
    `dock_guide_reference_A4.svg` (front entry and back stop rails), and
    `power_reference_A4.svg` (provisional protected 1S pack and tray footprint).
-   Never fit-to-page. Measure their independent 100 mm and 25 mm scales with a
+   Never fit-to-page. Measure their independent 100 mm, 50 mm and 25 mm scales with a
    ruler, then compare carrier size and holes against the delivered parts. A
    clipped, scaled or mismatched paper reference is a **STOP** before drilling,
    purchasing final mounts or printing permanent solids. These are unpowered

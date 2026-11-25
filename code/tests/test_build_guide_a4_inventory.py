@@ -31,7 +31,7 @@ def test_builder_instructions_cover_all_provisional_a4_paper_pages():
         assert f"`{page}_reference_A4.svg`" in instructions
     _validate_a4_scaling_prohibition(instructions)
     assert "**100% / actual size**" in instructions
-    assert "100 mm and 25 mm scales" in instructions
+    assert "100 mm, 50 mm and 25 mm scales" in instructions
     assert "provisional protected 1S pack" in instructions
     assert "not approved mounting holes or a qualified dock" in instructions
 

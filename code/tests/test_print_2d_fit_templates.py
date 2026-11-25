@@ -3,6 +3,7 @@ import importlib.util
 import os
 import shutil
 import subprocess
+from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
 from struct import unpack_from
@@ -107,6 +108,7 @@ def test_a4_real_scale_and_source_dimensions(tmp_path):
         assert root.attrib["height"] == "297mm"
         assert root.attrib["viewBox"] == "0 0 210 297"
         assert 'width="100" height="8"' in data
+        assert 'width="50" height="8"' in data
         assert 'width="8" height="25"' in data
         assert "FRONT / TOP" in data and "BACK / BOTTOM" in data
         assert "NOT FOR DRILLING" in data
@@ -600,15 +602,19 @@ def test_a4_calibration_centerlines_and_no_drill_marks(tmp_path):
             "width": "210mm", "height": "297mm", "viewBox": "0 0 210 297",
         }
         rects = root.findall(f"{ns}rect")
-        horizontal = [r for r in rects if r.get("x") == "20" and r.get("y") == "239"]
-        vertical = [r for r in rects if r.get("x") == "173" and r.get("y") == "229"]
-        assert len(horizontal) == len(vertical) == 1
-        for mark, width, height in ((horizontal[0], 100, 8), (vertical[0], 8, 25)):
-            assert float(mark.attrib["width"]) == width
-            assert float(mark.attrib["height"]) == height
-            assert float(mark.attrib["stroke-width"]) == pytest.approx(0.3)
+        for x, y, width, height in ((20, 239, 100, 8), (20, 258, 50, 8), (173, 229, 8, 25)):
+            marks = [r for r in rects if r.get("x") == str(x) and r.get("y") == str(y)]
+            assert len(marks) == 1
+            mark = marks[0]
+            assert Decimal(mark.attrib["width"]) == width
+            assert Decimal(mark.attrib["height"]) == height
+            assert Decimal(mark.attrib["stroke-width"]) == Decimal("0.3")
+            stroke = Decimal(mark.attrib["stroke-width"]) / 2
+            assert x - stroke >= 15 and x + width + stroke <= 195
+            assert y - stroke >= 15 and y + height + stroke <= 282
         labels = [element.text for element in root.findall(f"{ns}text")]
-        assert "Measure BOTH lengths between stroke centers, not outer edges." in labels
+        assert "Measure all three lengths between stroke centers, not outer edges." in labels
+        assert "50 mm horizontal print scale" in labels
         assert any("FRONT / TOP" in label for label in labels)
         assert any("BACK / BOTTOM" in label for label in labels)
         assert any("NOT FOR DRILLING" in label for label in labels)

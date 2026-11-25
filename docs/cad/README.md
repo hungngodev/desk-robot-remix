@@ -133,7 +133,7 @@ python3 docs/cad/remixes/print_2d_fit_templates.py --output /tmp/robot-paper-fit
 ```
 
 Print each SVG at **100% / actual size**, never "fit to page", and independently
-measure both the horizontal **100 mm** and vertical **25 mm** reference
+measure the horizontal **100 mm** and **50 mm** and vertical **25 mm** reference
 features on the resulting paper. The pages label front/top and back/bottom,
 carry pinned source dimensions and a digest manifest, and deliberately
 contain **zero approved drilling holes**. The dock outline is not a usable
