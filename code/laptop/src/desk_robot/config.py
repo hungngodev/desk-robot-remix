@@ -15,6 +15,18 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, mode
 from .private_files import read_private_env as read_private_env
 
 CredentialEnvName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
+LocalClockTime = Annotated[str, Field(strict=True, pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")]
+
+
+def quiet_hours_active(schedule: tuple[str, str] | None) -> bool:
+    """Use the Mac's real local wall clock, including midnight and DST."""
+    if schedule is None:
+        return False
+    start, end = schedule
+    now = time.strftime("%H:%M", time.localtime())
+    if start < end:
+        return start <= now < end
+    return now >= start or now < end
 
 
 def _head_host(url: str) -> str:
@@ -133,6 +145,10 @@ class Settings(BaseModel):
     pet_autostart_enabled: StrictBool = False  # Explicit hardware opt-in for idle camera and sensor observation.
     pet_activity_min_interval_seconds: float = Field(default=30.0, strict=True, ge=5.0, le=600.0)
     pet_activity_max_interval_seconds: float = Field(default=90.0, strict=True, ge=5.0, le=600.0)
+    # Optional daily local-time window; fixed for the lifetime of this config.
+    pet_quiet_hours: tuple[LocalClockTime, LocalClockTime] | None = Field(
+        default=None, frozen=True,
+    )
     fleet_text_sharing_enabled: StrictBool = False  # Opt-in local, provenance-tagged text only.
     fleet_social_autonomy_enabled: StrictBool = False  # Bounded pet-to-pet talk, explicit opt-in.
     fleet_social_min_interval_seconds: int = Field(default=300, strict=True, ge=30, le=3600)
@@ -158,6 +174,9 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def unique_ids(self):
+        if (self.pet_quiet_hours is not None
+                and self.pet_quiet_hours[0] == self.pet_quiet_hours[1]):
+            raise ValueError("Quiet hours need distinct start and end times")
         if self.pet_activity_min_interval_seconds > self.pet_activity_max_interval_seconds:
             raise ValueError(
                 "Pet activity minimum interval cannot exceed maximum"

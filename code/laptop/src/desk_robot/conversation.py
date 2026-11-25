@@ -14,7 +14,7 @@ from typing import Callable, Protocol
 import httpx
 
 from .brain_context import _memory_label, active_job_timeline, compose_brain_context
-from .config import RobotConfig, Settings, secret
+from .config import RobotConfig, Settings, quiet_hours_active, secret
 from .memory import MemoryStore, MemoryWriteSealed
 from .streamed_ollama import ollama_speech_segments
 
@@ -761,6 +761,9 @@ class Conversation:
         if type(origin) is not str or origin not in {"operator", "autonomous_social"}:
             raise ValueError("Unsupported group conversation origin")
         turns = conversation_turns(robot_ids, utterances)
+        if (origin == "autonomous_social"
+                and quiet_hours_active(self.settings.pet_quiet_hours)):
+            raise RuntimeError("Scheduled quiet hours block autonomous group conversation")
         if type(topic) is not str or not topic.strip() or len(topic) > 500:
             raise ValueError("Group topic must contain 1..500 characters")
         # One monotonic budget includes private context preparation, lease
@@ -812,6 +815,8 @@ class Conversation:
         def consent_still_valid() -> bool:
             return (
                 loop.time() < deadline
+                and (origin != "autonomous_social"
+                     or not quiet_hours_active(self.settings.pet_quiet_hours))
                 and (not sharing_at_start
                  or (self.settings.fleet_text_sharing_enabled
                      and self.settings.fleet_sharing_consent_generation
@@ -1326,6 +1331,17 @@ class Conversation:
         """
         if type(deliberate) is not bool:
             raise ValueError("Deliberate interaction flag must be boolean")
+        caller_permission = permission_check
+
+        def permitted() -> bool:
+            return (
+                not quiet_hours_active(self.settings.pet_quiet_hours)
+                and (caller_permission is None or caller_permission())
+            )
+
+        permission_check = permitted
+        if not permitted():
+            return False
         if self.active is not None and not self.active.done():
             return False
         async with self.session_lock:

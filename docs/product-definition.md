@@ -134,7 +134,7 @@ These are requirements, **not a list of finished features**.
 | Exploration permitted | Stay enabled until the user pauses/stops, without recurring two-minute renewal. Stop/look, make a bounded short movement, then observe again. Fault/disconnect/shutdown cancels the session. Blocked path means stop/wait/report; reverse/turn only in qualified clear swept space. No blind retreat. |
 | Asked to pick something up | Observe → approach → align → lower → grip → lift → visually verify → hold → place. Stop/report rather than claim success if the object is absent, slips or cannot be confirmed. Use calibrated sequences, not arbitrary LLM joint angles. |
 | Peers interact | Give each robot a unique ID/name, mood and local history. Exchange digital peer events through the Mac, serialize spoken turns, and react with expressions. Begin with five stationary peers and only one moving robot. |
-| Quiet mode | No unsolicited speech or movement. Local quiet face animation may continue. User-requested interaction remains available. |
+| Quiet mode | No unsolicited speech or movement. An optional daily fleet quiet-hours window follows the Mac local wall clock; independent manual quiet remains in effect after it ends. Local quiet face animation may continue. User-requested interaction remains available. |
 | Mac/Wi-Fi/sensor failure | Cancel activity, stop drive, preserve the current gripper target where powered, show fault/offline state. No automatic motor restart after reconnect or fault recovery. |
 
 Proposed tuning defaults: blink every 3–7seconds, occasional gaze shifts every 6–15

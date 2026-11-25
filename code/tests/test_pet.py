@@ -123,6 +123,111 @@ def test_activity_policy_defaults_and_rejects_reversed_range(fleet):
         type(fleet).model_validate(payload)
 
 
+@pytest.mark.parametrize("window", [
+    ["24:00", "07:00"], ["2:00", "07:00"], ["22:60", "07:00"],
+    ["22:00", "22:00"], ["22:00"], [22, 7], ["22:00", "07:00", "10:00"],
+])
+def test_quiet_hours_reject_invalid_local_clock_config(fleet, window):
+    payload = fleet.model_dump()
+    payload["pet_quiet_hours"] = window
+    with pytest.raises(ValueError):
+        type(fleet).model_validate(payload)
+
+
+@pytest.mark.parametrize(("window", "clock", "expected"), [
+    (None, "23:00", False),
+    (["22:00", "07:00"], "21:59", False),
+    (["22:00", "07:00"], "22:00", True),
+    (["22:00", "07:00"], "00:00", True),
+    (["22:00", "07:00"], "06:59", True),
+    (["22:00", "07:00"], "07:00", False),
+    (["12:00", "13:00"], "11:59", False),
+    (["12:00", "13:00"], "12:00", True),
+    (["12:00", "13:00"], "13:00", False),
+])
+def test_quiet_hours_use_local_wall_clock(fleet, monkeypatch, window, clock, expected):
+    from desk_robot.config import quiet_hours_active
+
+    payload = fleet.model_dump()
+    payload["pet_quiet_hours"] = window
+    settings = type(fleet).model_validate(payload)
+    local = time.strptime(clock, "%H:%M")
+    monkeypatch.setattr(time, "localtime", lambda *args: local)
+    assert quiet_hours_active(settings.pet_quiet_hours) is expected
+
+
+async def test_scheduled_quiet_hours_gate_all_five_but_allow_requested_speech(
+    fleet, tmp_path, monkeypatch,
+):
+    payload = fleet.model_dump()
+    payload["pet_quiet_hours"] = ["22:00", "07:00"]
+    fleet = type(fleet).model_validate(payload)
+    clock = [time.strptime("23:30", "%H:%M")]
+    monkeypatch.setattr(time, "localtime", lambda *args: clock[0])
+    ids = [robot.id for robot in fleet.robots]
+    memory = MemoryStore(tmp_path, ids)
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, GroundedChat(), speaker, memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    for robot_id in ids:
+        pet.states[robot_id].enabled = True
+    await pet.set_quiet(ids[0], True)
+    try:
+        pet._reconsider_activity()
+        assert pet._speech_task is None
+        assert all(pet.status(i)["quiet_hours_active"] for i in ids)
+        assert all(pet.status(i)["quiet"] for i in ids)
+        assert not await conversation.say_proactive(fleet.robots[1], "Unsolicited")
+        with pytest.raises(RuntimeError, match="Scheduled quiet"):
+            await conversation.run(ids[:2], "Play a game", origin="autonomous_social")
+        assert not speaker.spoken
+        assert len(await conversation.run(ids, "User requested a story", 1)) == 1
+        clock[0] = time.strptime("07:00", "%H:%M")
+        assert pet.status(ids[0])["manual_quiet"] and pet.status(ids[0])["quiet"]
+        assert not any(pet.status(i)["quiet"] for i in ids[1:])
+        assert await conversation.say_proactive(fleet.robots[1], "Morning")
+        assert [i for i, _ in speaker.spoken] == ids[:2]
+    finally:
+        await pet.close()
+
+
+async def test_scheduled_quiet_cancels_pending_optional_model_at_boundary(
+    fleet, tmp_path, monkeypatch,
+):
+    payload = fleet.model_dump()
+    payload["pet_quiet_hours"] = ["22:00", "07:00"]
+    fleet = type(fleet).model_validate(payload)
+    clock = [time.strptime("21:59", "%H:%M")]
+    monkeypatch.setattr(time, "localtime", lambda *args: clock[0])
+    entered = asyncio.Event()
+
+    class SlowChat:
+        async def reply(self, history):
+            entered.set()
+            await asyncio.Event().wait()
+
+    ids = [robot.id for robot in fleet.robots]
+    memory = MemoryStore(tmp_path, ids)
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, SlowChat(), speaker, memory=memory)
+    pet = PetController(
+        fleet, {ids[0]: StaticCamera()}, conversation, memory, KeyScene(),
+        activity_min_interval=30, activity_max_interval=30,
+    )
+    pet.start(ids[0])
+    try:
+        pet._reconsider_activity()
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        clock[0] = time.strptime("22:00", "%H:%M")
+        await wait_for(lambda: pet._speech_task is None or pet._speech_task.done())
+        assert not speaker.spoken
+        assert pet.status(ids[0])["quiet_hours_active"]
+        assert pet.status(ids[0])["enabled"]
+        assert pet._activity_task is not None and not pet._activity_task.done()
+    finally:
+        await pet.close()
+
+
 async def test_activity_scheduler_reevaluates_idle_scene_without_fake_perception(
     fleet, tmp_path,
 ):

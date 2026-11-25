@@ -41,7 +41,7 @@ from .api_readonly_planner import (
 )
 from .api_robot_status import register_robot_status_routes
 from .api_spatial_pose import register_spatial_pose_route
-from .config import Settings, secret
+from .config import Settings, quiet_hours_active, secret
 from .controller import OperationError
 from .conversation import conversation_turns
 from .dock_evidence import observe_dock_evidence
@@ -350,7 +350,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             # output; pause/quiet remain separate operator-owned settings.
             "voice_monitor_ready": ready,
             "pet_autonomy_enabled": state.enabled is True and ready,
-            "pet_quiet": state.quiet is True,
+            "pet_quiet": state.quiet is True or quiet_hours_active(settings.pet_quiet_hours),
         }
 
     register_robot_status_routes(

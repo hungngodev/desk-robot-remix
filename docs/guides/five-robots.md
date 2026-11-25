@@ -114,6 +114,20 @@ not pretend it saw that scene. A separate cooldown suppresses repetitive
 invitations. Default consent stays false; see
 [the authoritative multimedia and social contract](multimodal-voice-video-orchestration.md).
 
+### Optional daily quiet hours
+
+In private `config/local.toml`, set `pet_quiet_hours = ["22:00", "07:00"]`
+to silence unsolicited fleet speech using the Mac's actual local clock. This is
+an example, not a default. The start is inclusive and the end is exclusive;
+overnight windows and local daylight-saving changes follow the system clock.
+An omitted window disables scheduling. Invalid or equal endpoints are rejected.
+The manual per-pet quiet flag is independent and remains set after the window
+ends. Explicitly requested conversation remains available; safety monitoring and
+operator-owned motion permissions are unchanged. Optional speech is rechecked
+before synthesis and transmission, and the existing activity task requests
+cancellation of active optional speech on the next one-second policy check.
+This is a host policy, not measured acoustic STOP latency.
+
 A word game such as “Take turns naming an animal without repetition” is still
 only a prompted language activity, **not** a deterministic scored game referee.
 The software does not currently prove autonomous collision-safe chasing,

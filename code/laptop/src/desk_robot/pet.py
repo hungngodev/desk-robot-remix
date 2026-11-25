@@ -28,7 +28,7 @@ from .brain_context import (
     live_asr_in_current_grant,
     repeated_spontaneous_line,
 )
-from .config import Settings
+from .config import Settings, quiet_hours_active
 from .conversation import Conversation
 from .dock_evidence import DockContactInhibit
 from .handling import HandlingGate
@@ -381,12 +381,21 @@ class PetController:
                 f"Low battery dock: {type(exc).__name__}: {str(exc)[:80]}"
             )
 
+    def _quiet_hours_active(self) -> bool:
+        return quiet_hours_active(getattr(self.settings, "pet_quiet_hours", None))
+
+    def is_quiet(self, robot_id: str) -> bool:
+        return self.states[robot_id].quiet or self._quiet_hours_active()
+
     def status(self, robot_id: str) -> dict:
         state = self.states[robot_id]
+        scheduled_quiet = self._quiet_hours_active()
         return {
             "robot_id": robot_id,
             "enabled": state.enabled,
-            "quiet": state.quiet,
+            "quiet": state.quiet or scheduled_quiet,
+            "manual_quiet": state.quiet,
+            "quiet_hours_active": scheduled_quiet,
             "camera_change_events": state.events,
             "spontaneous_speech_turns": state.spoken,
             "suppressed_speech_candidates": state.suppressed,
@@ -2525,7 +2534,8 @@ class PetController:
         No second TTS broker, planner, camera owner or physical actuator.
         Pair rotation prevents one peer monopolizing the conversation.
         """
-        if (not self.settings.fleet_social_autonomy_enabled
+        if (self._quiet_hours_active()
+                or not self.settings.fleet_social_autonomy_enabled
                 or not self.settings.fleet_text_sharing_enabled
                 or kind not in _SOCIAL_EVENT_KINDS
                 or now - self._social_last_started
@@ -2546,7 +2556,28 @@ class PetController:
             delay = random.uniform(
                 self.activity_min_interval, self.activity_max_interval
             )
-            await asyncio.sleep(delay)
+            if getattr(self.settings, "pet_quiet_hours", None) is None:
+                await asyncio.sleep(delay)
+            else:
+                # Reuse this existing fleet policy task to interrupt optional
+                # speech at a wall-clock boundary, without resetting the
+                # monotonic activity/cooldown schedule or stopping user turns.
+                loop = asyncio.get_running_loop()
+                deadline = loop.time() + delay
+                while not self._closed:
+                    if self._quiet_hours_active():
+                        speech = self._speech_task
+                        participants = self._speech_participants
+                        if speech is not None and not speech.done() and participants:
+                            try:
+                                await self._cancel_speech(next(iter(participants)))
+                            except (RuntimeError, TimeoutError) as exc:
+                                for robot_id in participants:
+                                    self.states[robot_id].last_error = str(exc)[:160]
+                    remaining = deadline - loop.time()
+                    if remaining <= 0:
+                        break
+                    await asyncio.sleep(min(1.0, remaining))
             if self._closed:
                 return
             self._reconsider_activity()
@@ -2565,7 +2596,7 @@ class PetController:
             if not state.enabled:
                 continue
             state.activity_reevaluations += 1
-            if state.quiet or self.is_dock_charging_inhibited(robot_id):
+            if self.is_quiet(robot_id) or self.is_dock_charging_inhibited(robot_id):
                 state.last_activity_decision = "defer"
                 continue
             break
@@ -2698,7 +2729,7 @@ class PetController:
             else self.speech_cooldown
         )
         if (
-            state.quiet
+            self.is_quiet(robot_id)
             or self._human_active_in_fleet(now)
             or now - previous < self.group_window
             or now - self._group_last_spoken < relevant_cooldown
@@ -3195,9 +3226,9 @@ class PetController:
         state = self.states[robot_id]
         robot = self.settings.robot(robot_id)
         peer = self.states[social_peer_id]
-        if (not state.enabled or state.quiet
+        if (not state.enabled or self.is_quiet(robot_id)
                 or state.generation != generation or self._closed
-                or not peer.enabled or peer.quiet
+                or not peer.enabled or self.is_quiet(social_peer_id)
                 or peer.generation != social_peer_generation
                 or (camera_derived and not self._camera_generation_current(
                     robot_id, camera_generation))
@@ -3234,9 +3265,9 @@ class PetController:
                 not self._closed and self.voice_monitor_ready
                 and self.settings.fleet_social_autonomy_enabled
                 and self.settings.fleet_text_sharing_enabled
-                and state.enabled and not state.quiet
+                and state.enabled and not self.is_quiet(robot_id)
                 and state.generation == generation
-                and peer.enabled and not peer.quiet
+                and peer.enabled and not self.is_quiet(social_peer_id)
                 and peer.generation == social_peer_generation
                 and (not camera_derived or self._camera_generation_current(
                     robot_id, camera_generation))
@@ -3550,6 +3581,10 @@ class PetController:
             )
 
         try:
+            if self._quiet_hours_active():
+                state.suppressed += 1
+                state.last_initiative_suppression = "scheduled_quiet_hours"
+                return
             if not camera_source_current():
                 state.suppressed += 1
                 state.last_initiative_suppression = "camera_source_replaced"
@@ -3634,7 +3669,7 @@ class PetController:
                 now = time.monotonic()
                 return (
                     not self._closed and self.voice_monitor_ready
-                    and state.enabled and not state.quiet
+                    and state.enabled and not self.is_quiet(robot_id)
                     and state.generation == generation
                     and private_memory_current()
                     and (not private_memory_allowed
@@ -3705,7 +3740,7 @@ class PetController:
                 state.suppressed += 1
                 state.last_initiative_suppression = "voice_monitor_unavailable"
                 return
-            if (not state.enabled or state.quiet
+            if (not state.enabled or self.is_quiet(robot_id)
                     or state.generation != generation
                     or (camera_derived and self.settings.mode == "hardware"
                         and not self.settings.voice_vision_tools_enabled)
@@ -3743,7 +3778,7 @@ class PetController:
                 # A lost listener cannot certify that a human has not barged.
                 return (
                     not self._closed and self.voice_monitor_ready
-                    and state.enabled and not state.quiet
+                    and state.enabled and not self.is_quiet(robot_id)
                     and state.generation == generation
                     and private_memory_current()
                     and (not private_memory_allowed
