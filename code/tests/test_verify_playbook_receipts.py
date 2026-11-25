@@ -958,3 +958,11 @@ def test_online_audit_rejects_nonregular_receipt_tree_entry(mode):
 
     assert any("immutable physical record not matched" in error
                for error in verify.audit(full_ledger_with(row), altered))
+
+@pytest.mark.parametrize("url", [
+    RUN + "\n", RUN + "\r", RUN + "\t", RUN + "?", RUN + "#",
+    " " + RUN, RUN.replace("/42", "/4\t2"),
+])
+def test_noncanonical_run_urls_rejected_without_lookup(url):
+    assert not verify.verified_actions_run(url, SHA, lambda _: pytest.fail("Unexpected lookup"))
+

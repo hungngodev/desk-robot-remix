@@ -73,6 +73,7 @@ def _valid_ci_receipt_url(url):
         and parsed.netloc == "github.com"
         and not parsed.query
         and not parsed.fragment
+        and url == f"https://github.com{parsed.path}"
         and re.fullmatch(
             r"/hungngodev/desk-robot-remix/actions/runs/[1-9][0-9]{0,19}",
             parsed.path,
@@ -322,6 +323,8 @@ def test_later_physical_record_requires_explicit_source_and_digest():
     "https://github.com/hungngodev/desk-robot-remix/actions/runs/01",
     "https://github.com/hungngodev/desk-robot-remix/actions/runs/1?attempt=2",
     "https://github.com/hungngodev/desk-robot-remix/actions/runs/1#jobs",
+    "https://github.com/hungngodev/desk-robot-remix/actions/runs/1?",
+    "https://github.com/hungngodev/desk-robot-remix/actions/runs/1#",
     "https://github.com/hungngodev/desk-robot-remix/actions/runs/123456789012345678901",
     "https://github.com/hungngodev/desk-robot-remix/actions/runs/1\n",
     "https://[broken",

@@ -59,6 +59,7 @@ def verified_actions_run(url: str, sha: str, lookup=github_json) -> bool:
     match = RUN_PATH.fullmatch(parsed.path)
     if (parsed.scheme != "https" or parsed.netloc != "github.com"
             or parsed.query or parsed.fragment or match is None
+            or url != f"https://github.com{parsed.path}"
             or len(match[1]) > 20 or match[1].startswith("0")):
         return False
     run = lookup(f"https://api.github.com/repos/{REPO}/actions/runs/{match[1]}")
