@@ -565,8 +565,8 @@ class HttpHead:
         # Source completion and Mac arrival run on different monotonic
         # clocks. Only compare DELTAS within this one connected stream;
         # never interpret an absolute ESP32 timestamp as Mac wall time.
-        last_source_identity = None
-        last_received = None
+        clock_reference_identity = None
+        clock_reference_received = None
         try:
             async with self.client.stream(
                 "GET", url, headers=headers,
@@ -620,26 +620,28 @@ class HttpHead:
                             latest = jpeg
                             latest_identity = identity
                         if latest is not None:
-                            if (last_source_identity is not None
-                                    and last_source_identity[0] == latest_identity[0]
-                                    and last_received is not None):
-                                network_elapsed = received - last_received
+                            if (clock_reference_identity is None
+                                    or clock_reference_identity[0] != latest_identity[0]
+                                    or clock_reference_received is None):
+                                clock_reference_identity = latest_identity
+                                clock_reference_received = received
+                            else:
+                                network_elapsed = received - clock_reference_received
                                 source_elapsed = (
-                                    latest_identity[2] - last_source_identity[2]
+                                    latest_identity[2] - clock_reference_identity[2]
                                 ) / 1_000_000
-                                # A delayed chunk whose camera timestamp
-                                # barely moved cannot become a fresh scene
-                                # just because the consumer resumed later.
-                                # Two ordinary 250ms frame periods are the
-                                # permitted unaccounted backlog. This only
-                                # compares relative clocks within one boot;
-                                # it is not a synchronized exposure timestamp.
-                                if network_elapsed - source_elapsed > 0.5:
+                                lag = network_elapsed - source_elapsed
+                                # Keep the best relative offset for this boot
+                                # and connection, not the previous frame.
+                                # Otherwise small delays accumulate unnoticed.
+                                # This is not a synchronized exposure clock.
+                                if lag > 0.5:
                                     raise HeadError(
                                         "Buffered stale camera frame after stream backlog"
                                     )
-                            last_source_identity = latest_identity
-                            last_received = received
+                                if lag < 0:
+                                    clock_reference_identity = latest_identity
+                                    clock_reference_received = received
                             self._stream_latest = latest
                             self._stream_received_at = received
                             self._stream_version += 1

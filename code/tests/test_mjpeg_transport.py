@@ -378,6 +378,56 @@ async def test_subsecond_camera_network_backlog_is_not_fresh(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("receipts", "stale"),
+    [
+        ((100.0, 100.45, 100.90, 101.35), True),
+        ((100.0, 100.45, 100.50, 100.95), False),
+        ((100.0, 100.1, 100.55, 101.0, 101.45), True),
+    ],
+)
+async def test_camera_backlog_accumulates_from_best_relative_offset(
+    monkeypatch, receipts, stale,
+):
+    """Small consecutive delays must not launder cumulative camera age."""
+    monkeypatch.setenv("SENSE_TEST_TOKEN", "x" * 32)
+    jpeg = b"\xff\xd8scene\xff\xd9"
+    parts = tuple(_part(i + 1, jpeg) for i in range(len(receipts)))
+
+    def respond(_request):
+        return httpx.Response(
+            200,
+            stream=TwoPartCameraStream(parts),
+            headers={"content-type":
+                     "multipart/x-mixed-replace; boundary=deskrobotframe"},
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        head = HttpHead(
+            RobotConfig(
+                id="robot-01", name="Camera pet", token_env="SENSE_TEST_TOKEN",
+                head_url="http://head.example",
+            ), client,
+        )
+        ticks = iter(receipts)
+        monkeypatch.setattr(
+            "desk_robot.transport.time",
+            SimpleNamespace(monotonic=lambda: next(ticks)),
+        )
+        observed = []
+        if stale:
+            with pytest.raises(HeadError, match="Buffered stale camera frame"):
+                async for _, when in head.stream_frames():
+                    observed.append(when)
+            assert observed == list(receipts[:-1])
+            assert head._stream_latest is None
+            assert not head._stream_connected
+        else:
+            observed = [when async for _, when in head.stream_frames()]
+            assert observed == list(receipts)
+
+
+@pytest.mark.asyncio
 async def test_sense_bearer_requests_refuse_redirect_even_if_shared_client_follows(
     monkeypatch,
 ):
