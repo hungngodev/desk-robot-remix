@@ -236,7 +236,8 @@ CRITICAL_TRIAL_GATES = {
     "sixteen_mux_channel_400khz_pullups_rise_and_sink_trials": {
         # Physical Fast-mode timing must hold on all 16 selected TCA9548A
         # branches, not merely on a convenient short upstream harness.
-        # NXP UM10204 and TI TCA9548A: <=300 ns rise, <=400 pF bus load.
+        # NXP UM10204 and TI TCA9548A: <=300 ns rise, <=400 pF bus load,
+        # <=3 mA combined low sink and <=0.4 V LOW on each line.
         "minimum_samples": 16,
         "quantities": (
             ("distinct_mux_lanes_tested", "lanes", 16, 16, True),
@@ -244,6 +245,10 @@ CRITICAL_TRIAL_GATES = {
             ("maximum_scl_rise_time_ns", "ns", 1, 300, False),
             ("maximum_sda_rise_time_ns", "ns", 1, 300, False),
             ("maximum_branch_bus_capacitance_pf", "pF", 1, 400, False),
+            ("maximum_scl_sink_current_ma", "mA", 0, 3, False),
+            ("maximum_sda_sink_current_ma", "mA", 0, 3, False),
+            ("maximum_scl_low_voltage_v", "V", 0, 0.4, False),
+            ("maximum_sda_low_voltage_v", "V", 0, 0.4, False),
             ("continuous_poll_cycles", "cycles", 10000, None, True),
             ("i2c_bus_recovery_events", "events", 0, 0, True),
         ),
@@ -386,8 +391,13 @@ def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
             "mic_speaker_placement_id", "trial_capture_id",
         ))
     if gate == "sixteen_mux_channel_400khz_pullups_rise_and_sink_trials":
-        keys.extend(("bus_topology_revision", "pullup_network_revision"))
-        if conditions.get("instrument_type") != "oscilloscope":
+        keys.extend((
+            "bus_topology_revision", "pullup_network_revision",
+            "bench_fixture_id", "rise_capture_id", "sink_capture_id",
+        ))
+        if conditions.get("instrument_type") not in (
+            "oscilloscope_and_ammeter", "oscilloscope_and_calibrated_shunt",
+        ):
             return False
     if gate == "signed_pack_current_three_new_samples_and_chg_mismatch_trial":
         keys.extend((

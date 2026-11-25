@@ -53,9 +53,12 @@ def measurement_for_gate(scope, gate):
                     "trial_capture_id": "aligned_a2_capture_01",
                 } if gate == "sense_speaker_mic_double_talk" else {}),
                 **({
-                    "instrument_type": "oscilloscope",
+                    "instrument_type": "oscilloscope_and_ammeter",
                     "bus_topology_revision": "two_tca9548a_0x70_0x71",
                     "pullup_network_revision": "measured_3v3_network_01",
+                    "bench_fixture_id": "sixteen_lane_fixture_01",
+                    "rise_capture_id": "sda_scl_rise_capture_01",
+                    "sink_capture_id": "sda_scl_sink_capture_01",
                 } if gate == (
                     "sixteen_mux_channel_400khz_pullups_rise_and_sink_trials"
                 ) else {}),
@@ -1196,6 +1199,10 @@ def test_independent_cutoff_evidence_requires_real_scope_and_fault(field, invali
     ("maximum_scl_rise_time_ns", 301),
     ("maximum_sda_rise_time_ns", 301),
     ("maximum_branch_bus_capacitance_pf", 401),
+    ("maximum_scl_sink_current_ma", 3.01),
+    ("maximum_sda_sink_current_ma", 3.01),
+    ("maximum_scl_low_voltage_v", 0.401),
+    ("maximum_sda_low_voltage_v", 0.401),
     ("continuous_poll_cycles", 9999),
     ("i2c_bus_recovery_events", 1),
 ])
@@ -1208,6 +1215,9 @@ def test_mux_fastmode_receipt_rejects_partial_lanes_or_out_of_spec(metric, inval
     by_name["maximum_scl_rise_time_ns"]["value"] = 300
     by_name["maximum_sda_rise_time_ns"]["value"] = 300
     by_name["maximum_branch_bus_capacitance_pf"]["value"] = 400
+    for line in ("scl", "sda"):
+        by_name[f"maximum_{line}_sink_current_ma"]["value"] = 3
+        by_name[f"maximum_{line}_low_voltage_v"]["value"] = 0.4
     assert release.verified_scoped_record(
         good, SHA, lambda url: lookup(url, records=[good]),
     )
@@ -1228,11 +1238,51 @@ def test_mux_fastmode_receipt_rejects_partial_lanes_or_out_of_spec(metric, inval
     ("instrument_type", None),
     ("bus_topology_revision", "tbd"),
     ("pullup_network_revision", ""),
+    ("instrument_type", "oscilloscope"),
+    ("bench_fixture_id", None),
+    ("bench_fixture_id", "tbd"),
+    ("rise_capture_id", ""),
+    ("sink_capture_id", "unknown"),
 ])
 def test_mux_fastmode_receipt_requires_installed_bus_and_scope(field, invalid):
     gate = "sixteen_mux_channel_400khz_pullups_rise_and_sink_trials"
     item = receipt("system", gate)
     item["measurement"]["conditions"][field] = invalid
+    assert not release.verified_scoped_record(
+        item, SHA, lambda url: lookup(url, records=[item]),
+    )
+
+
+@pytest.mark.parametrize("metric", [
+    "maximum_scl_sink_current_ma", "maximum_sda_sink_current_ma",
+    "maximum_scl_low_voltage_v", "maximum_sda_low_voltage_v",
+])
+@pytest.mark.parametrize("defect", [
+    "missing", "wrong_unit", "negative", "nan", "infinity", "bool", "huge",
+])
+def test_mux_sink_and_low_voltage_require_finite_scoped_measurements(metric, defect):
+    gate = "sixteen_mux_channel_400khz_pullups_rise_and_sink_trials"
+    item = receipt("system", gate)
+    measurement = item["measurement"]
+    assert release._qualified_gate_measurement(gate, measurement)
+    quantities = measurement["quantities"]
+    row = next(q for q in quantities if q["name"] == metric)
+    if defect == "missing":
+        quantities.remove(row)
+    elif defect == "wrong_unit":
+        row["unit"] = "unrelated"
+    else:
+        row["value"] = {
+            "negative": -1, "nan": float("nan"), "infinity": float("inf"),
+            "bool": True, "huge": 10**1000,
+        }[defect]
+    assert not release._qualified_gate_measurement(gate, measurement)
+
+
+def test_mux_shipping_record_does_not_replace_electrical_trial():
+    gate = "sixteen_mux_channel_400khz_pullups_rise_and_sink_trials"
+    item = receipt("system", gate)
+    item["measurement"] = {"tracking": "delivered", "supplier": "seller"}
     assert not release.verified_scoped_record(
         item, SHA, lambda url: lookup(url, records=[item]),
     )

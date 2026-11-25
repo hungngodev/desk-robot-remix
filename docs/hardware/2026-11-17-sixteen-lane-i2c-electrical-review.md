@@ -72,6 +72,13 @@ These are NOT vendor facts and cannot be copied as product qualification.
 The physical board must be inspected for supply voltage, pullups and PCB
 revision, then actual SDA/SCL rise, low level, timeout behavior and
 electrical recovery must be tested with motor and speaker transients.
+The purchasing receipt must include the worst measured SDA and SCL sink
+currents (mA, each at most 3) and LOW voltages (V, each at most 0.4)
+across the installed sixteen lanes, together with the bench fixture,
+rise capture and sink capture identifiers. Use an oscilloscope with an
+ammeter or calibrated shunt; a supplier shipment or an RC calculation
+is not an electrical measurement. Human review must inspect the underlying
+captures and their association with the actual installed boards.
 Current WROOM GPIO allocation has no dedicated assured TCA RESET output:
 a latched SDA-low bus may require power reset rather than software
 recovery. Failing closed stops wheels, but does not make a hung mux
