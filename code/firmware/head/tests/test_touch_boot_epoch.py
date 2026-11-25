@@ -212,8 +212,9 @@ def test_wroom_touch_poll_rejects_inter_sample_bounce_and_stops_before_bus(tmp_p
     if not compiler:
         pytest.skip("native C++ compiler unavailable")
     body = (HEAD.parent / "body/src/main.cpp").read_text()
-    start = body.index("void poll_touch(std::uint32_t now_ms) {")
-    end = body.index("\n}\n", start) + 3
+    start = body.index("bool sample_raw_touch(std::uint32_t now_ms) {")
+    poll_start = body.index("void poll_touch(std::uint32_t now_ms) {", start)
+    end = body.index("\n}\n", poll_start) + 3
     loop = body.split("void loop() {", 1)[1]
     assert loop.index("poll_touch(millis());") < loop.index("tof.poll(")
     cpp = tmp_path / "raw_touch.cc"
@@ -226,7 +227,7 @@ def test_wroom_touch_poll_rejects_inter_sample_bounce_and_stops_before_bus(tmp_p
 namespace body_pins { constexpr int kTouchOutput=34; }
 constexpr int HIGH=1;
 bool raw=false;
-int digitalRead(int) { return raw; }
+int digitalRead(int pin) { assert(pin == body_pins::kTouchOutput); return raw; }
 struct Control {
   struct State { bool armed=true; bool touch_raw_active=false; } s;
   unsigned edges=0;
@@ -235,16 +236,23 @@ struct Control {
   void set_touch(bool a, std::uint32_t) { if(a) ++edges; }
 } control;
 desk_robot::TouchDebounce touch_debounce;
-bool sample_raw_touch(std::uint32_t now_ms) {
-  const bool active = digitalRead(body_pins::kTouchOutput) == HIGH;
-  control.sample_touch_input(active, now_ms);
-  touch_debounce.observe(active, now_ms);
-  return active;
-}
 unsigned output_calls=0;
-void apply_outputs() { assert(!control.state().armed); ++output_calls; }
+std::uint32_t sample_ms=0;
+bool release_during_output=false;
+void apply_outputs();
 """ + body[start:end] + """
-void sample(std::uint32_t t,bool a){raw=a;poll_touch(t);}
+void apply_outputs() {
+  assert(!control.state().armed);
+  ++output_calls;
+  // Fake the output boundary, including its real second GPIO sample.
+  if (release_during_output) {
+    raw=false;
+    sample_raw_touch(sample_ms+1);
+  } else {
+    sample_raw_touch(sample_ms);
+  }
+}
+void sample(std::uint32_t t,bool a){sample_ms=t;raw=a;poll_touch(t);}
 int main(){
   // Three 1ms pulses coincident with nominal 25ms sample instants.
   for(std::uint32_t t=0;t<=100;++t) sample(t,t==25||t==50||t==75);
@@ -260,6 +268,19 @@ int main(){
   sample(8u,true); assert(!touch_debounce.stable());
   sample(32u,true); assert(!touch_debounce.stable());
   sample(33u,true); assert(touch_debounce.stable() && control.edges==2);
+  // Release during output resampling must invalidate the first raw pulse.
+  // A stale predecessor must not count as the first gesture sample.
+  control=Control{};
+  touch_debounce=desk_robot::TouchDebounce{};
+  release_during_output=true;
+  sample(100000,true);
+  assert(!control.state().armed && !control.state().touch_raw_active);
+  assert(output_calls==2 && control.edges==0);
+  sample(100025,true);
+  sample(100050,true);
+  assert(!touch_debounce.stable() && control.edges==0);
+  sample(100075,true);
+  assert(touch_debounce.stable() && control.edges==1);
 }
 """,
         encoding="utf-8",
