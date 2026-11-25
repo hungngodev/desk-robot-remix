@@ -621,6 +621,12 @@ class Conversation:
             self._private_memory_generation.get(robot_id, 0) + 1
         )
         active = self.active
+        if active is None or active.done():
+            # A completed group may contain both the original private prompt
+            # and derived peer replies. Retire all volatile copies together;
+            # the next group rebuilds its context from current SQLite data.
+            self.histories.clear()
+            return
         if (robot_id in self._active_private_memory_ids
                 and active is not None and not active.done()
                 and not active.cancelling()):

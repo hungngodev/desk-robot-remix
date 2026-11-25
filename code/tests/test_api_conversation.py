@@ -1061,6 +1061,34 @@ async def test_hardware_group_memory_respects_fleet_sharing_consent(
     assert "private_preference" in agent.histories["robot-01"][2]["content"]
 
 
+async def test_idle_private_memory_invalidation_retires_completed_group_histories(
+    settings, tmp_path,
+):
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_memory_tools_enabled = True
+    ids = ["robot-01", "robot-02"]
+    store = MemoryStore(tmp_path, ids)
+    store.set_core_fact(ids[0], "private_preference", "Old private preference")
+    store.set_core_fact(ids[1], "other_preference", "Independent preference")
+    agent = Conversation(settings, SimulatedChat(), SimulatedSpeaker(), memory=store)
+
+    await agent.run(ids, "Discuss our preferences", 2)
+    assert agent.active is None
+    assert "Old private preference" in str(agent.histories[ids[0]])
+
+    store.set_core_fact(ids[0], "private_preference", "Updated private preference")
+    agent.invalidate_private_memory(ids[0])
+    # Peer replies may derive from the old private prompt, so clear the
+    # completed group's entire volatile copy, not its durable memories.
+    assert agent.histories == {}
+
+    await agent.run(ids, "Discuss our preferences", 2)
+    assert "Old private preference" not in str(agent.histories)
+    assert "Updated private preference" in str(agent.histories[ids[0]])
+    assert "Independent preference" in str(agent.histories[ids[1]])
+
+
 async def test_group_chat_never_exposes_live_asr_without_fleet_text_consent(settings):
     import time
     from types import SimpleNamespace
