@@ -438,6 +438,62 @@ static void local_trip_blocks_forward_and_reverse_replay() {
   }
 }
 
+// Exercise the same first-fault contract on the live drive state, not
+// just the pure guard. Each case has exactly one faulty critical lane.
+static void single_invalid_or_stale_lane_cancels_drive() {
+  using desk_robot::BodyProfile;
+  using desk_robot::CliffFault;
+  for (const auto profile : {BodyProfile::StepperGuarded, BodyProfile::DcGuarded}) {
+    for (std::uint8_t lane = 0; lane < desk_robot::kCliffSensorCount; ++lane) {
+      for (const bool stale : {false, true}) {
+        desk_robot::CliffGuard guard;
+        CHECK(guard.configure(config()));
+        fresh(guard, 100);
+        desk_robot::BodyControl body(profile, &guard);
+        CHECK(send(body, "rearm", 100, true) == "OK rearm");
+        CHECK(send(body, "arm", 100) == "OK arm");
+        CHECK(send(body, "drive 40 40 250", 100) ==
+              "OK drive left=40 right=40 ms=250");
+        const std::uint32_t trip = stale ? 200 : 101;
+        if (stale) {
+          // Only the chosen lane misses its freshness deadline. The
+          // active drive lease and every peer lane are still healthy.
+          for (std::uint8_t peer = 0; peer < desk_robot::kCliffSensorCount; ++peer)
+            if (peer != lane) guard.sample(peer, peer < 4 ? 50 : 200, true, 199);
+          body.tick(199);
+          CHECK(body.state().armed && body.state().left == 40 &&
+                body.state().right == 40 && body.drive_remaining(199) > 0);
+        } else {
+          // Plausible millimeters must not mask one invalid chip result.
+          guard.sample(lane, lane < 4 ? 50 : 200, false, trip);
+          CHECK(guard.fault() == CliffFault::InvalidSample);
+        }
+        body.tick(trip);
+        CHECK(guard.fault() == (stale ? CliffFault::StaleSample :
+                                      CliffFault::InvalidSample));
+        CHECK(guard.fault_sensor() == lane);
+        CHECK(!body.state().armed && body.state().left == 0 &&
+              body.state().right == 0 && body.drive_remaining(trip) == 0);
+        CHECK(body.state().servos_attached);
+        CHECK(send(body, "rearm", trip, true) == "ERR rearm safety_interlock");
+        // One actual replacement restores sensor health, not motion authority.
+        const auto recovered = trip + 1;
+        guard.sample(lane, lane < 4 ? 50 : 200, true, recovered);
+        CHECK(guard.diagnostic(lane, recovered).valid);
+        CHECK(send(body, "arm", recovered) == "ERR arm safety_interlock");
+        CHECK(send(body, "keepalive", recovered) == "ERR keepalive disarmed");
+        CHECK(send(body, "drive 40 40 250", recovered) == "ERR drive disarmed");
+        CHECK(send(body, "rearm", recovered) == "ERR rearm local_only");
+        CHECK(send(body, "rearm", recovered, true) == "OK rearm");
+        CHECK(!body.state().armed && body.drive_remaining(recovered) == 0);
+        CHECK(send(body, "arm", recovered) == "OK arm");
+        CHECK(body.state().left == 0 && body.state().right == 0 &&
+              body.drive_remaining(recovered) == 0);
+      }
+    }
+  }
+}
+
 static void fault_holds_payload_and_requires_rearm() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -3740,6 +3796,7 @@ int main() {
     guarded_directional_drive_rejects_unqualified_sweep();
     std::cout << "PASS guarded reverse and turns need calibrated swept space\n";
     local_trip_blocks_forward_and_reverse_replay();
+    single_invalid_or_stale_lane_cancels_drive();
     fault_holds_payload_and_requires_rearm();
     std::cout << "PASS fault holds payload and requires explicit rearm\n";
     stale_read_stops_before_watchdog();
