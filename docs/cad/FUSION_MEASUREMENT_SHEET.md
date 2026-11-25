@@ -95,4 +95,24 @@ the physical revision before releasing printed parts.
 
 **The 68 mm battery gauge was undersized and is now corrected as a body-only fit coupon.** The LPHD7430085 protected 1S candidate is listed as 86 mm long plus leads. `docs/cad/remixes/remaining_fit_gauges.scad` now uses `power_l = 86` mm and refuses shorter overrides. This does **not** establish clearance for the leads, protection board, NTC connector, charger, boost or strain relief; the complete power assembly is still unqualified. Do not treat that gauge as an acceptable enclosure for the candidate pack. A selected cell, NTC connector, protection board, DC boost and strain relief must be measured and fitted together before changing final printed geometry. The 1 W speaker was rejected as the final model; an 8 ohm 2 W Challenge CS20-02P110-04-1X is now the exact fixed candidate. The source-proved 20 x 16 x 4.7 mm rectangular fit coupon (docs/cad/remixes/speaker_rect_fit_gauge.scad) renders watertight, but does NOT establish speaker seating, the stated 1cc sealed acoustic enclosure, real amplifier thermals or speech double talk.
 
+## Provisional coupon tolerances and optical acceptance
+
+The FSR402 retaining ring defaults produce a 34.3 x 34.3 x 3.5 mm
+source envelope. The actual sensor body, adhesive stack and compressed
+silicone height must still be measured. Record both retaining fit and the
+rigid rim clearance before allowing jaw force. Source geometry checks use
+2 mm minimum structural webs where specified; the speaker pocket floor
+minimum is 1.5 mm. These are screening floors, not material strength or
+printer qualification. Measure the printed coupon and actual screw shank,
+head, washer and insertion depth before approving a mounting interface.
+
+For each GY530 lane and the XIAO camera, record the exact optical center,
+recess depth, clear aperture in both axes, supplier field of view and
+worst-case assembly offset and aim. Inspect the complete ray envelope
+against the enclosure, bracket, fasteners and moving gripper in all
+permitted poses. A nominal circular opening and watertight STL cannot
+establish optical clearance. Verify floor returns and cliff detection
+at the calibrated installed heights on the actual desk surfaces before
+permitting movement.
+
 Do not fabricate any blank measurement to claim print-ready geometry.

@@ -178,6 +178,7 @@ def test_render_all_candidates_with_one_source_and_unqualified_output(monkeypatc
     def fake_render(command, **kwargs):
         commands.append(command)
         assert kwargs["check"] and kwargs["timeout"] <= 180
+        assert "--hardwarnings" in command
         assert "--export-format" in command and "binstl" in command
         out = Path(command[command.index("-o") + 1])
         out.write_bytes(tetra_stl())
@@ -1366,3 +1367,55 @@ def test_servo_labels_and_ranger_pocket_reject_invalid_geometry(tmp_path, filena
     ], capture_output=True, text=True, timeout=90)
     assert bad.returncode != 0
     assert message in bad.stdout + bad.stderr
+
+
+def test_pinched_vertex_in_edge_connected_mesh(tmp_path):
+    def cube_stl(*, pinch=False):
+        vertices = [(0, 0, 0), (1, 0, 0), (1, 1, 0), (0, 1, 0),
+                    (0, 0, 1), (1, 0, 1), (1, 1, 1), (0, 1, 1)]
+        quads = [(0, 3, 2, 1), (4, 5, 6, 7), (0, 1, 5, 4),
+                 (3, 7, 6, 2), (0, 4, 7, 3), (1, 2, 6, 5)]
+        triangles = []
+        for a, b, c, d in quads:
+            if a in (0, 6) or c in (0, 6):
+                triangles.extend(((a, b, d), (b, c, d)))
+            else:
+                triangles.extend(((a, b, c), (a, c, d)))
+        if pinch:
+            vertices[0] = vertices[6] = (0.5, 0.5, 0.5)
+        data = bytearray(bytes(80) + len(triangles).to_bytes(4, "little"))
+        for face in triangles:
+            xyz = [v for i in face for v in vertices[i]]
+            data.extend(pack("<12fH", 0, 0, 0, *xyz, 0))
+        return bytes(data)
+
+    path = tmp_path / "cube.stl"
+    path.write_bytes(cube_stl())
+    assert module().closed_mesh_edges(path) == 18
+    path.write_bytes(cube_stl(pinch=True))
+    with pytest.raises(ValueError, match="Nonmanifold STL vertex"):
+        module().closed_mesh_edges(path)
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+def test_render_warning_invalidates_old_manifest_without_publishing(tmp_path):
+    folder = tmp_path / "docs/cad/remixes"
+    folder.mkdir(parents=True)
+    for name in ("one_robot_adapter_kit.scad", "remaining_fit_gauges.scad",
+                 "speaker_rect_fit_gauge.scad", "vl53l0x_gy530_fit_gauge.scad",
+                 "mg90s_pocket_fit_gauges.scad"):
+        (folder / name).write_text("cube([1,1,1]);\n")
+    (folder / "dock").mkdir()
+    (folder / "dock/dock_passive_fit.scad").write_text("cube([1,1,1]);\n")
+    (folder / "one_robot_adapter_kit.scad").write_text(
+        "cube([1,1,1]);\necho(unbound_fit_dimension);\n",
+    )
+    output = tmp_path / "rendered"
+    output.mkdir()
+    manifest = output / "fit_kit_manifest.json"
+    manifest.write_text("{}")
+    with pytest.raises(subprocess.CalledProcessError) as exc:
+        module().export_kit(tmp_path, output_dir=output)
+    assert "unknown variable" in exc.value.stderr
+    assert not list(output.rglob("*.stl"))
+    assert not manifest.exists()

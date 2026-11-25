@@ -127,6 +127,7 @@ def closed_mesh_edges(path: Path) -> int:
     triangles = binary_stl_triangles(path)
     incidence: Counter = Counter()
     winding: Counter = Counter()
+    vertex_links: dict = {}
     # Closed shells that only touch at one vertex are still separate print
     # islands. Require triangle connectivity THROUGH SHARED EDGES, not merely
     # a common vertex coordinate.
@@ -166,7 +167,11 @@ def closed_mesh_edges(path: Path) -> int:
         # normal contributes six times signed enclosed volume.
         signed_six_volume += sum(a[k] * normal[k] for k in range(3))
         for corner in range(3):
-            a, b = points[corner], points[(corner + 1) % 3]
+            a, b, c = (points[corner], points[(corner + 1) % 3],
+                       points[(corner + 2) % 3])
+            link = vertex_links.setdefault(a, {})
+            link.setdefault(b, set()).add(c)
+            link.setdefault(c, set()).add(b)
             edge = (a, b) if a < b else (b, a)
             other_face = first_face_for_edge.setdefault(edge, index)
             parents[root(index)] = root(other_face)
@@ -178,6 +183,21 @@ def closed_mesh_edges(path: Path) -> int:
         raise ValueError(f"Open or inconsistent STL mesh: {path.name}")
     if len({root(index) for index in range(triangles)}) != 1:
         raise ValueError(f"Disconnected STL mesh: {path.name}")
+    # Edge pairing and whole-mesh connectivity do not rule out a vertex
+    # where two disjoint triangle fans touch. A manifold vertex link is
+    # one connected cycle (the incident triangles form one local surface).
+    for link in vertex_links.values():
+        if any(len(neighbors) != 2 for neighbors in link.values()):
+            raise ValueError(f"Nonmanifold STL vertex: {path.name}")
+        seen = set()
+        pending = [next(iter(link))]
+        while pending:
+            neighbor = pending.pop()
+            if neighbor not in seen:
+                seen.add(neighbor)
+                pending.extend(link[neighbor] - seen)
+        if len(seen) != len(link):
+            raise ValueError(f"Nonmanifold STL vertex: {path.name}")
     if not isfinite(signed_six_volume) or signed_six_volume <= 0:
         raise ValueError(f"Inverted or zero-volume STL mesh: {path.name}")
     return len(incidence)
@@ -304,7 +324,7 @@ def export_kit(
                 target.parent.mkdir(parents=True, exist_ok=True)
                 subprocess.run(
                     [
-                        openscad, "--export-format", "binstl", "-o",
+                        openscad, "--hardwarnings", "--export-format", "binstl", "-o",
                         str(target), "-D", f'part="{name}"', str(source),
                     ],
                     check=True, capture_output=True, text=True, timeout=180,
