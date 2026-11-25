@@ -4,6 +4,66 @@
 #include <cstdint>
 #include <limits>
 using desk_robot::SensePcmWindow;
+
+// Exercise the real capture window with mixed callback sizes, simulated
+// source clocks and Nyquist-frequency PCM. This is not an acoustic AEC test.
+static void stress_capture_clock(std::uint32_t source_rate, int stall_us) {
+  constexpr std::size_t guard = 8;
+  constexpr std::int16_t sentinel = 12345;
+  static std::array<std::int16_t, SensePcmWindow::kFrames * 2 + guard * 2> storage;
+  std::array<std::int16_t, 2048> mic{}, ref{};
+  storage.fill(sentinel);
+  auto* data = storage.data() + guard;
+  SensePcmWindow capture;
+  constexpr std::int64_t start = 1000000;
+  assert(capture.begin(data, start));
+  std::uint32_t total = 0;
+  const bool valid = source_rate == SensePcmWindow::kSampleRate && stall_us == 0;
+  for (int i = 0; i < 200; ++i) {
+    const std::uint32_t frames = 480 * (1 + (i * 7) % 4);
+    for (std::uint32_t n = 0; n < frames; ++n) {
+      mic[n] = ((total + n) % 2) ? INT16_MIN : INT16_MAX;
+      ref[n] = ((total + n) % 4 < 2) ? -23456 : 23456;
+    }
+    total += frames;
+    const auto jitter = i == 0 ? 0 : ((i % 3) - 1) * 1000;
+    const auto end = start + std::int64_t{total} * 1000000 / source_rate
+        + jitter + (i >= 5 ? stall_us : 0);
+    const auto before = capture.frames_received();
+    const bool terminal = capture.failed() || capture.ready();
+    capture.offer(mic.data(), ref.data(), frames, end, true);
+    assert(capture.frames_received() <= SensePcmWindow::kFrames);
+    assert(capture.frames_received() >= before);
+    if (terminal) assert(capture.frames_received() == before);
+    for (std::size_t n = 0; n < guard; ++n) {
+      assert(storage[n] == sentinel);
+      assert(storage[storage.size() - 1 - n] == sentinel);
+    }
+  }
+  if (valid) {
+    assert(capture.ready() && !capture.failed());
+    const auto result = capture.take();
+    assert(result.interleaved == data && result.frames == SensePcmWindow::kFrames);
+    assert(result.first_sample_us == start);
+    assert(result.last_sample_us >= start + 3999000);
+    assert(result.last_sample_us <= start + 4001000);
+    for (std::uint32_t n = 0; n < result.frames; ++n) {
+      assert(data[2 * n] == (n % 2 ? INT16_MIN : INT16_MAX));
+      assert(data[2 * n + 1] == (n % 4 < 2 ? -23456 : 23456));
+    }
+  } else {
+    assert(capture.failed() && !capture.ready());
+    assert(capture.take().interleaved == nullptr);
+    // Unaccepted space stays untouched even after repeated callbacks.
+    for (std::uint32_t n = capture.frames_received() * 2;
+         n < SensePcmWindow::kFrames * 2; ++n) {
+      assert(data[n] == sentinel);
+    }
+    assert(capture.discard() == data);
+  }
+  assert(!capture.occupied());
+}
+
 int main() {
   static std::array<std::int16_t, SensePcmWindow::kFrames * 2> data{};
   assert(SensePcmWindow::kBytes == 256000);
@@ -187,5 +247,10 @@ int main() {
   edge.offer(mic.data(), ref.data(), 16, clock_max, true);
   assert(!edge.failed() && edge.frames_received() == 32);
   assert(edge.discard() == data.data());
+  for (auto rate : {8000U, 12000U, 16000U, 24000U, 32000U, 44100U, 48000U}) {
+    stress_capture_clock(rate, 0);
+  }
+  stress_capture_clock(16000, 180000);
+  stress_capture_clock(16000, -10000);
   return 0;
 }
