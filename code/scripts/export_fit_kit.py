@@ -15,7 +15,7 @@ import subprocess
 import tempfile
 from collections import Counter
 from hashlib import sha256
-from math import hypot, isfinite
+from math import hypot, isfinite, ldexp
 from pathlib import Path
 from stat import S_ISDIR, S_ISREG
 from struct import unpack_from
@@ -134,7 +134,7 @@ def closed_mesh_edges(path: Path) -> int:
     # a common vertex coordinate.
     parents = list(range(triangles))
     first_face_for_edge = {}
-    signed_six_volume = 0.0
+    signed_six_volume = 0
 
     def root(face):
         while parents[face] != face:
@@ -154,7 +154,14 @@ def closed_mesh_edges(path: Path) -> int:
             raise ValueError(f"Degenerate or nonfinite STL triangle: {path.name}")
         # Three different coordinates can still lie on one line. Such a
         # triangle has zero printable surface and is never a valid facet.
-        a, b, c = points
+        # Every finite binary32 coordinate is an exact multiple of 2**-149.
+        # Scaling by that power of two fits in binary64 without rounding,
+        # then integer cross products and volume sums avoid cancellation.
+        # Keep the original float tuples for exact shared-edge identities.
+        a, b, c = (
+            tuple(int(ldexp(value, 149)) for value in point)
+            for point in points
+        )
         ab = tuple(b[k] - a[k] for k in range(3))
         ac = tuple(c[k] - a[k] for k in range(3))
         normal = (
@@ -162,10 +169,11 @@ def closed_mesh_edges(path: Path) -> int:
             ab[2] * ac[0] - ab[0] * ac[2],
             ab[0] * ac[1] - ab[1] * ac[0],
         )
-        if not all(isfinite(v) for v in normal) or not any(normal):
+        if not any(normal):
             raise ValueError(f"Degenerate or nonfinite STL triangle: {path.name}")
         # The dot of an oriented triangle's first vertex with its area
-        # normal contributes six times signed enclosed volume.
+        # normal contributes six times signed enclosed volume in the
+        # scaled integer lattice. Its sign is unchanged by the scaling.
         signed_six_volume += sum(a[k] * normal[k] for k in range(3))
         for corner in range(3):
             a, b, c = (points[corner], points[(corner + 1) % 3],
@@ -199,7 +207,7 @@ def closed_mesh_edges(path: Path) -> int:
                 pending.extend(link[neighbor] - seen)
         if len(seen) != len(link):
             raise ValueError(f"Nonmanifold STL vertex: {path.name}")
-    if not isfinite(signed_six_volume) or signed_six_volume <= 0:
+    if signed_six_volume <= 0:
         raise ValueError(f"Inverted or zero-volume STL mesh: {path.name}")
     return len(incidence)
 

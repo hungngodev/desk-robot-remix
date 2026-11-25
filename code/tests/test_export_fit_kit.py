@@ -1454,3 +1454,47 @@ def test_fit_kit_refuses_nondirectory_part_group(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="Non-directory fit kit output"):
         source.verify_fit_kit(ROOT, output_dir=tmp_path)
     assert (tmp_path / "fit_stls").read_bytes() == b"unchanged"
+
+
+def _tetra_with_vertices(vertices, *, inverted=False):
+    faces = [(0, 2, 1), (0, 1, 3), (0, 3, 2), (1, 2, 3)]
+    data = bytearray(bytes(80) + len(faces).to_bytes(4, "little"))
+    for face in faces:
+        if inverted:
+            face = face[::-1]
+        xyz = [value for index in face for value in vertices[index]]
+        data.extend(pack("<12fH", 0, 0, 0, *xyz, 0))
+    return bytes(data)
+
+
+def test_exact_stl_volume_rejects_coplanar_closed_triangle_topology(tmp_path):
+    # All coordinates are representable binary32 integers. The fourth
+    # point is a + 2*(b-a) + 3*(c-a), so the true volume is exactly zero.
+    # The old floating signed sum rounded to +512 and accepted six edges.
+    a = (882647, 89582, -444314)
+    b = (2875749, -629703, -646806)
+    c = (1378740, 1587739, -1294931)
+    d = tuple(a[k] + 2 * (b[k] - a[k]) + 3 * (c[k] - a[k]) for k in range(3))
+    path = tmp_path / "coplanar.stl"
+    for inverted in (False, True):
+        path.write_bytes(_tetra_with_vertices((a, b, c, d), inverted=inverted))
+        with pytest.raises(ValueError, match="Inverted or zero-volume"):
+            module().closed_mesh_edges(path)
+
+
+@pytest.mark.parametrize(("shift", "size"), [
+    (0.0, 1.0), (2.0**23, 1.0), (0.0, 2.0**-149), (0.0, 2.0**127),
+])
+def test_exact_stl_volume_preserves_binary32_orientation(tmp_path, shift, size):
+    vertices = [
+        (shift, shift, shift),
+        (shift + size, shift, shift),
+        (shift, shift + size, shift),
+        (shift, shift, shift + size),
+    ]
+    path = tmp_path / "tetra.stl"
+    path.write_bytes(_tetra_with_vertices(vertices))
+    assert module().closed_mesh_edges(path) == 6
+    path.write_bytes(_tetra_with_vertices(vertices, inverted=True))
+    with pytest.raises(ValueError, match="Inverted or zero-volume"):
+        module().closed_mesh_edges(path)
