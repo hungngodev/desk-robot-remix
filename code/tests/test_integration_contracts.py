@@ -133,6 +133,22 @@ def test_cliff_fault_reaches_motor_outputs_before_other_i2c_work():
     assert "tof.observe_shared_bus_fault(cliff_guard);" in loop
 
 
+def test_imu_fault_reaches_motor_outputs_before_optional_i2c_work():
+    body = (ROOT / "code/firmware/body/src/main.cpp").read_text()
+    loop = body.split("void loop()", 1)[1]
+    loop = re.sub(r"//[^\n]*|/\*.*?\*/", "", loop, flags=re.S)
+    loop = re.sub(r"\s+", "", loop)
+    armed = "constboolwas_armed_before_imu=control.state().armed;"
+    sample = "control.set_imu(berry_imu.reading());"
+    stop = (
+        "if(was_armed_before_imu&&"
+        "(!control.state().armed||!control.imu_fresh(millis()))){apply_outputs();}"
+    )
+    assert loop.index(armed) < loop.index(sample) < loop.index(stop)
+    for client in ("poll_touch(", "cap1188.poll(", "paw_pulse.poll(", "accessories.poll("):
+        assert loop.index(stop) < loop.index(client, loop.index(sample))
+
+
 def test_real_robot_pin_allocations_do_not_double_book_same_gpio():
     bus = PLAN["bus"]
     for key in ("body_gpio", "sense_gpio"):

@@ -755,7 +755,14 @@ void loop() {
     berry_imu.invalidate_bus();
     accessories.invalidate_bus();
   }
+  const bool was_armed_before_imu = control.state().armed;
   control.set_imu(berry_imu.reading());
+  // Apply a newly detected IMU veto before optional I2C can delay STOP.
+  // A stale/invalid frame is handled by tick inside apply_outputs().
+  if (was_armed_before_imu &&
+      (!control.state().armed || !control.imu_fresh(millis()))) {
+    apply_outputs();
+  }
   poll_touch(millis());
   poll_optional(millis());
   if (control.state().bumper_raw) apply_outputs();
