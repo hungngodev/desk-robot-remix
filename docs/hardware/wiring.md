@@ -99,11 +99,11 @@ or gripper-distance feedback. Use [sensor requirements](../research/2026-11-03-c
 The current WROOM source includes MPU6050 and revision-aware optional
 BerryIMU raw six-axis drivers, immediate AT42QT1010 touch disarming,
 CAP1188 petting and optional sensor telemetry. **None** has passed
-physical breakout, mounting or timing tests. MPU6050 is the preferred
-first build; do not power a second IMU on the shared bus until its exact
-revision and chip IDs are confirmed. BMP280 is assigned to a separate
-0x71 multiplexer lane from the optional BerryIMU and requires a real
-chip-ID and breakout-address check. [Photo identification and checks](photo-inventory-2026-11-04.md).
+physical breakout, mounting or timing tests. MPU6050 is the preferred first build; do not power a second IMU on the
+shared bus until its exact revision and chip IDs are confirmed. BMP280 is wired
+to accessory mux `0x71` lane 3 while any single selected IMU (MPU6050 default,
+or optional historical BerryIMU alternate) sits upstream on GPIO21/22; never
+infer `0x71` for BerryIMU, and verify the real chip ID and breakout address. [Photo identification and checks](photo-inventory-2026-11-04.md).
 Keep body I2C reads bounded and serialized so floor sensing retains priority.
 [Interaction wiring and acceptance](interaction-sensors.md) also covers optional
 SenseGPIO9 RGB data with a level buffer; bodyGPIO4 is not spare.
@@ -365,13 +365,16 @@ disarmed state are required. This is additional software refusal, **never**
 proof that the physical stop margin, IMU attitude safety or supply is qualified.
 
 
-## Bounded BerryIMU six-axis bringup
+## Optional historical BerryIMU six-axis alternate bringup
 
-Use the already owned BerryIMU with its verified **3.3V compatible** supply,
+MPU6050 / GY-521 on upstream GPIO21/GPIO22 is the selected default single IMU;
+use this section only if explicitly evaluating an already owned BerryIMU as an
+unpowered or bench-isolated **optional historical alternate** (never mount or
+power both IMUs together). Connect its verified **3.3V compatible** supply,
 SDA and SCL on body GPIO21 and GPIO22 upstream of the TCA9548A. Do not infer
 VCC pin ordering from another revision, assume 5V tolerance or attach it to
-a downstream mux port. The firmware reuses the existing boot-time WHO_AM_I
-probe and only initializes the matching V1/V2/V3 gyro and accelerometer.
+a downstream mux port (`0x70`/`0x71`). The firmware reuses the existing boot-time
+WHO_AM_I probe and only initializes the selected single IMU's matching registers.
 The same status and USB inspection path reports raw acceleration, raw gyro and
 age with an explicit validity bit, not interpreted tilt or an optical cliff
 clearance. Keep actuators unloaded during board identification and measure the
@@ -379,9 +382,10 @@ real axis orientation before considering tilt or held interlock thresholds.
 A valid raw IMU sample never substitutes for any missing VL53L0X corner.
 
 
-The physical WROOM profile also refuses a motion `arm` without fresh
-BerryIMU six-axis samples. It stops/disarms if those samples become stale
-or invalid during a drive, without releasing a held payload intentionally.
+The physical WROOM profile also refuses a motion `arm` without fresh supported
+IMU six-axis samples (MPU6050 default, or the selected optional alternate). It
+stops/disarms if those samples become stale or invalid during a drive, without
+releasing a held payload intentionally.
 The Mac's authenticated permit preflight checks the same data. Neither this
 heartbeat nor the existing five optical channels replaces the pending,
 measured tilt/held acceptance trials. The read-only USB inspection may show

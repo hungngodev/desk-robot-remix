@@ -732,6 +732,66 @@ def test_round2_safety_driver_preserves_all_eight_muxed_ready_checked_ranges():
         ROOT / "code/firmware/head/sense/config.h"
     ).read_text().split("#define CAMERA_PIN_D2")[0]
 
+EXPECTED_SENSE_CAMERA_PINS = {
+    "CAMERA_PIN_D0": 15,
+    "CAMERA_PIN_D1": 17,
+    "CAMERA_PIN_D2": 18,
+    "CAMERA_PIN_D3": 16,
+    "CAMERA_PIN_D4": 14,
+    "CAMERA_PIN_D5": 12,
+    "CAMERA_PIN_D6": 11,
+    "CAMERA_PIN_D7": 48,
+    "CAMERA_PIN_XCLK": 10,
+    "CAMERA_PIN_PCLK": 13,
+    "CAMERA_PIN_VSYNC": 38,
+    "CAMERA_PIN_HREF": 47,
+    "CAMERA_PIN_SIOD": 40,
+    "CAMERA_PIN_SIOC": 39,
+}
+
+
+def _validate_sense_gpio_config(header_text: str) -> dict[str, int]:
+    """Validate all active Sense GPIO_NUM_* macros are unique and match board map."""
+    stripped = re.sub(r"//[^\n]*|/\*.*?\*/", "", header_text, flags=re.S)
+    defines = re.findall(
+        r"(?m)^\s*#define\s+([A-Z0-9_]+)\s+GPIO_NUM_([0-9]+|NC)\b",
+        stripped,
+    )
+    assert defines, "No GPIO_NUM_* defines found in Sense config.h"
+    gpio_map: dict[str, int] = {}
+    used_pins: dict[int, str] = {}
+    for macro, pin_str in defines:
+        if pin_str == "NC":
+            continue
+        pin = int(pin_str)
+        assert pin not in used_pins, (
+            f"Duplicate Sense GPIO_NUM_{pin}: {used_pins[pin]} vs {macro}"
+        )
+        used_pins[pin] = macro
+        gpio_map[macro] = pin
+    for cam_macro, expected_pin in EXPECTED_SENSE_CAMERA_PINS.items():
+        assert gpio_map.get(cam_macro) == expected_pin, (
+            f"{cam_macro} expected GPIO_NUM_{expected_pin}, got {gpio_map.get(cam_macro)}"
+        )
+    return gpio_map
+
+
+def test_sense_config_gpio_macros_are_unique_and_match_board_reference():
+    sense_pins = (ROOT / "code/firmware/head/sense/config.h").read_text()
+    gpio_map = _validate_sense_gpio_config(sense_pins)
+    assert gpio_map["AUDIO_PDM_MIC_GPIO_DIN"] == 41
+
+    # DRX-081 mutation tests: colliding CAMERA_PIN_D7 with D2 (18) or PDM (41) fails.
+    for collision_pin in ("GPIO_NUM_18", "GPIO_NUM_41"):
+        mutated = sense_pins.replace(
+            "#define CAMERA_PIN_D7 GPIO_NUM_48",
+            f"#define CAMERA_PIN_D7 {collision_pin}",
+        )
+        assert mutated != sense_pins
+        with pytest.raises(AssertionError):
+            _validate_sense_gpio_config(mutated)
+
+
 def test_round2_xiaozhi_jpeg_and_bounded_uart_reuse_existing_owners():
     """Prove the audit's alternate S3CAM UART/Explain loop is not installed.
 

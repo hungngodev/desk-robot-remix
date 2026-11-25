@@ -1070,3 +1070,130 @@ def test_procedure_16_requires_authorized_manual_review_approval():
     valid_16 = {**no_method, "verification_method": "manual_review"}
     assert verify.audit(full_ledger_with(valid_16), lookup_16) == []
 
+
+def test_complete_physical_procedures_reject_downgraded_class_under_green_ci():
+    """All 29 canonical physical rows resist class downgrade to mixed/source."""
+    procedures = json.loads(
+        (ROOT / "docs/reviews/100_page_procedure_trace.json").read_text(encoding="utf-8")
+    )["procedures"]
+    physical_ids = {
+        row["id"] for row in procedures if row["evidence_class"] == "physical"
+    }
+    assert physical_ids == verify.PHYSICAL_PROCEDURE_IDS
+    for proc_id in sorted(physical_ids):
+        row = procedures[proc_id - 1].copy()
+        row["gate"] = "TESTED"
+        row["last_verified_sha"] = SHA
+        row["executed_test_receipt"] = {
+            "sha": SHA,
+            "exit_code": 0,
+            "command": row["verification_command"],
+            "url": RUN,
+        }
+        assert any(
+            f"procedure {proc_id}: " in err
+            for err in verify.audit(full_ledger_with(row), lookup)
+        ), proc_id
+        for fake_class in ("mixed", "source"):
+            downgraded = {**row, "evidence_class": fake_class}
+            assert any(
+                f"procedure {proc_id}: physical evidence class is compulsory" in err
+                for err in verify.audit(full_ledger_with(downgraded), lookup)
+            ), (proc_id, fake_class)
+
+
+def test_procedure_specific_commands_reject_noop_or_missing_behavioral_targets():
+    """Playbook rows 20/21/23/24 bind exact targets and reject python -c no-ops."""
+    procedures = json.loads(
+        (ROOT / "docs/reviews/100_page_procedure_trace.json").read_text(encoding="utf-8")
+    )["procedures"]
+    assert "cliff_fault_policy" in procedures[19]["verification_command"]
+    assert "guarded_body_integration" in procedures[19]["verification_command"]
+    assert "cliff_fault_policy" in procedures[20]["verification_command"]
+    assert "tests/test_integrated_1s_power_stack_contract.py" in procedures[22]["verification_command"]
+    assert "tests/test_aec_delay_estimation.py" in procedures[23]["verification_command"]
+
+    noop_row = {
+        **promoted("TESTED")["procedures"][0],
+        "verification_command": 'cd code && python -c "pass"',
+        "executed_test_receipt": {
+            "sha": SHA,
+            "exit_code": 0,
+            "command": 'cd code && python -c "pass"',
+            "url": RUN,
+        },
+    }
+    assert any(
+        "executable command receipt mismatch" in err
+        for err in verify.audit(full_ledger_with(noop_row), lookup)
+    )
+
+    bad_20 = {
+        **procedures[19],
+        "gate": "TESTED",
+        "last_verified_sha": SHA,
+        "verification_command": "cd code && python -m pytest -q tests/test_power_preflight.py",
+        "executed_test_receipt": {
+            "sha": SHA,
+            "exit_code": 0,
+            "command": "cd code && python -m pytest -q tests/test_power_preflight.py",
+            "url": RUN,
+        },
+    }
+    assert any(
+        "executable command receipt mismatch" in err
+        for err in verify.audit(full_ledger_with(bad_20), lookup)
+    )
+
+
+def test_procedure_59_requires_manual_review_approval_and_remains_open():
+    """Optional Gemini evaluation row 59 cannot promote via legacy tests alone."""
+    row = json.loads(
+        (ROOT / "docs/reviews/100_page_procedure_trace.json").read_text(encoding="utf-8")
+    )["procedures"][58]
+    assert row["id"] == 59
+    assert row["gate"] == "OPEN"
+    assert row["verification_method"] == "manual_review"
+    assert row["manual_review_receipt"] is None
+
+    promoted_59 = {
+        **row,
+        "gate": "TESTED",
+        "last_verified_sha": SHA,
+        "executed_test_receipt": {
+            "sha": SHA,
+            "exit_code": 0,
+            "command": row["verification_command"],
+            "url": RUN,
+        },
+    }
+
+    def lookup_59(url):
+        if "/issues/comments/" in url:
+            return {
+                "html_url": REVIEW_URL,
+                "body": f"ACCEPTED procedure 59 at {SHA}",
+                "author_association": "OWNER",
+                "user": {"login": "arch_reviewer", "type": "User"},
+            }
+        return lookup(url)
+
+    assert any(
+        "procedure 59: manual review not verified" in err
+        for err in verify.audit(full_ledger_with(promoted_59), lookup_59)
+    )
+    no_method = {
+        **promoted_59,
+        "verification_method": None,
+        "manual_review_receipt": {
+            "sha": SHA,
+            "reviewer": "arch_reviewer",
+            "review_url": REVIEW_URL,
+        },
+    }
+    assert any(
+        "procedure 59: manual review evidence is compulsory" in err
+        for err in verify.audit(full_ledger_with(no_method), lookup_59)
+    )
+    assert verify.audit(full_ledger_with({**no_method, "verification_method": "manual_review"}), lookup_59) == []
+

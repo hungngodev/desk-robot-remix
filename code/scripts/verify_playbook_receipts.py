@@ -31,7 +31,24 @@ ROOT = Path(__file__).resolve().parents[2]
 LEDGER = ROOT / "docs/reviews/100_page_procedure_trace.json"
 RUN_PATH = re.compile(r"^/hungngodev/desk-robot-remix/actions/runs/([0-9]+)$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
-MANUAL_REVIEW_PROCEDURE_IDS = frozenset(range(1, 9)) | {16}
+MANUAL_REVIEW_PROCEDURE_IDS = frozenset(range(1, 9)) | {16, 59}
+PHYSICAL_PROCEDURE_IDS = frozenset({
+    19, 22, 23, 24, 27, 28, 29, 30, 43, 44, 45, 65, 67, 68, 69, 70, 71, 72,
+    77, 78, 79, 80, 87, 88, 89, 90, 91, 92, 94,
+})
+MIXED_PROCEDURE_IDS = frozenset({
+    10, 11, 13, 14, 17, 18, 25, 26, 31, 32, 35, 36, 37, 38, 42, 46, 47,
+    61, 64, 66, 73, 75, 76, 93, 95,
+})
+REQUIRED_PROCEDURE_COMMAND_TOKENS = {
+    18: ("guarded_body_integration",),
+    19: ("guarded_body_integration",),
+    20: ("cliff_fault_policy", "guarded_body_integration"),
+    21: ("cliff_fault_policy", "guarded_body_integration"),
+    23: ("tests/test_integrated_1s_power_stack_contract.py",),
+    24: ("tests/test_aec_delay_estimation.py", "tests/test_power_preflight.py"),
+    59: ("tests/test_xiaozhi_tool_resilience.py", "tests/test_voice_memory_reuse.py"),
+}
 
 
 def github_json(url: str, token: str | None = None) -> dict:
@@ -551,6 +568,12 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
         }:
             errors.append(f"procedure {identifier}: missing evidence class")
             continue
+        if identifier in PHYSICAL_PROCEDURE_IDS and evidence_class != "physical":
+            errors.append(f"procedure {identifier}: physical evidence class is compulsory")
+            continue
+        if identifier in MIXED_PROCEDURE_IDS and evidence_class == "source":
+            errors.append(f"procedure {identifier}: mixed evidence class cannot be downgraded")
+            continue
         if evidence_class == "physical" and row.get("gate") == "TESTED":
             errors.append(f"procedure {identifier}: physical task cannot be source-only TESTED")
             continue
@@ -558,7 +581,15 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
         receipt = row.get("executed_test_receipt")
         if (not isinstance(command, str)
                 or not command.startswith("cd code && ")
-                or re.search(r"--(?:help|version|collect-only)\b|&& true\b", command)
+                or re.search(
+                    r"--(?:help|version|collect-only)\b|&& true\b|\bpython(?:3(?:\.\d+)?)?\s+-c\b",
+                    command,
+                )
+                or not re.search(r"tests/[A-Za-z0-9_./-]+\.py|\bctest\b|\bcmake\b", command)
+                or any(
+                    tok not in command
+                    for tok in REQUIRED_PROCEDURE_COMMAND_TOKENS.get(identifier, ())
+                )
                 or not isinstance(receipt, dict)
                 or receipt.get("command") != command):
             errors.append(f"procedure {identifier}: executable command receipt mismatch")

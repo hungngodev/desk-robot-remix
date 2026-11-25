@@ -3,6 +3,7 @@
 The canonical PR owns execution. A source, URL or proposed command never
 becomes a physical or same-commit test receipt by changing a status string.
 """
+import importlib.util
 import json
 import math
 import re
@@ -15,7 +16,17 @@ ROOT = Path(__file__).resolve().parents[2]
 LEDGER = ROOT / "docs/reviews/100_page_procedure_trace.json"
 STATES = {"OPEN", "TESTED", "MEASURED", "QUALIFIED"}
 EVIDENCE_CLASSES = {"source", "mixed", "physical"}
-MANUAL_REVIEW_PROCEDURE_IDS = frozenset(range(1, 9)) | {16}
+
+_VERIFY_SPEC = importlib.util.spec_from_file_location(
+    "playbook_receipt_policy",
+    ROOT / "code/scripts/verify_playbook_receipts.py",
+)
+_POLICY = importlib.util.module_from_spec(_VERIFY_SPEC)
+_VERIFY_SPEC.loader.exec_module(_POLICY)
+MANUAL_REVIEW_PROCEDURE_IDS = _POLICY.MANUAL_REVIEW_PROCEDURE_IDS
+PHYSICAL_PROCEDURE_IDS = _POLICY.PHYSICAL_PROCEDURE_IDS
+MIXED_PROCEDURE_IDS = _POLICY.MIXED_PROCEDURE_IDS
+REQUIRED_PROCEDURE_COMMAND_TOKENS = _POLICY.REQUIRED_PROCEDURE_COMMAND_TOKENS
 
 
 def _parse_ledger(raw):
@@ -127,6 +138,22 @@ def _valid_ci_receipt_url(url):
 
 def _valid_release_evidence(record):
     if record.get("evidence_class") not in EVIDENCE_CLASSES:
+        return False
+    identifier = record.get("id")
+    if identifier in PHYSICAL_PROCEDURE_IDS and record.get("evidence_class") != "physical":
+        return False
+    if identifier in MIXED_PROCEDURE_IDS and record.get("evidence_class") == "source":
+        return False
+    if (identifier in MANUAL_REVIEW_PROCEDURE_IDS
+            and record.get("verification_method") != "manual_review"):
+        return False
+    command = record.get("verification_command", "")
+    if (not isinstance(command, str)
+            or re.search(r"\bpython(?:3(?:\.\d+)?)?\s+-c\b", command)
+            or any(
+                tok not in command
+                for tok in REQUIRED_PROCEDURE_COMMAND_TOKENS.get(identifier, ())
+            )):
         return False
     if record["gate"] == "TESTED" and record["evidence_class"] == "physical":
         return False
@@ -242,11 +269,10 @@ def test_procurement_and_physical_procedures_remain_open_without_bench_receipts(
 
 def test_physical_procedures_cannot_be_promoted_by_source_only_receipts():
     rows = _load_ledger()["procedures"]
-    required = {19, 24, 27, 28, 44, 65, 67, 70, 72, 77, 78, 80,
-                87, 88, 89, 90, 91, 92, 94}
-    assert all(rows[index - 1]["evidence_class"] == "physical"
-               for index in required)
-    for index in required:
+    assert {row["id"] for row in rows if row["evidence_class"] == "physical"} == (
+        PHYSICAL_PROCEDURE_IDS
+    )
+    for index in sorted(PHYSICAL_PROCEDURE_IDS):
         row = rows[index - 1].copy()
         row["gate"] = "TESTED"
         row["last_verified_sha"] = "a" * 40
@@ -255,10 +281,12 @@ def test_physical_procedures_cannot_be_promoted_by_source_only_receipts():
             "command": row["verification_command"],
             "url": "https://github.com/hungngodev/desk-robot-remix/actions/runs/1",
         }
-        # A source-only receipt is otherwise structurally valid. Isolate
-        # the physical classification as the reason for rejection.
+        # Physical procedures cannot promote as TESTED or downgrade to mixed/source.
         assert not _valid_release_evidence(row), index
-        assert _valid_release_evidence({**row, "evidence_class": "source"}), index
+        for downgraded_class in ("mixed", "source"):
+            assert not _valid_release_evidence({
+                **row, "evidence_class": downgraded_class,
+            }), (index, downgraded_class)
 
 
 def _physical_receipt_fixture():
