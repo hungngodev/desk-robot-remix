@@ -71,8 +71,8 @@ void veto_motion_ack(char* reply, std::size_t capacity, MotionAckVeto fault) {
   else if (std::strncmp(reply, "OK lift ", 8) == 0) command = "lift";
   else if (std::strncmp(reply, "OK grip ", 8) == 0) command = "grip";
   if (command == nullptr) return;
-  const char* reason = fault == MotionAckVeto::BumperActive ?
-      "bumper_active" : "motor_watchdog_latched";
+  const char* reason = fault == MotionAckVeto::BumperActive ? "bumper_active" :
+      fault == MotionAckVeto::TouchActive ? "touch_active" : "motor_watchdog_latched";
   std::snprintf(reply, capacity, "ERR %s %s", command, reason);
 }
 

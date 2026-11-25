@@ -88,6 +88,27 @@ def test_nc_bumper_is_sampled_before_bus_commands_and_motor_outputs():
     assert loop.rindex("sample_raw_bumper();") > loop.index("accessories.poll(")
 
 
+def test_raw_touch_is_resampled_before_commands_outputs_and_heartbeat():
+    body = (ROOT / "code/firmware/body/src/main.cpp").read_text()
+    raw = body.split("bool sample_raw_touch(", 1)[1].split("\n}", 1)[0]
+    assert "digitalRead(body_pins::kTouchOutput) == HIGH" in raw
+    assert "control.sample_touch_input(active, now_ms);" in raw
+    assert "apply_outputs(" not in raw
+    outputs = body.split("void apply_outputs() {", 1)[1].split("void process_input(", 1)[0]
+    assert outputs.index("sample_raw_touch(millis());") < outputs.index("control.tick(")
+    command = body.split("void process_input(", 1)[1].split("void setup()", 1)[0]
+    assert command.index("if (sample_raw_touch(millis())) apply_outputs();") < command.index(
+        "receiver.feed("
+    )
+    assert command.index("apply_outputs();  // apply accepted") < command.index(
+        "desk_robot::MotionAckVeto::TouchActive"
+    ) < command.index("replies.enqueue_line(reply)")
+    loop = body.split("void loop() {", 1)[1]
+    assert loop.rindex("sample_raw_touch(millis());") < loop.index(
+        "enforce_motor_heartbeat(true);"
+    )
+
+
 def test_all_firmware_sensor_reactions_have_a_real_camera_priority_label():
     # Every event produced by physical input and eligible to initiate speech
     # must be representable as a separate authenticated camera context hint.

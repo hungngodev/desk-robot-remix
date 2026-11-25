@@ -138,11 +138,16 @@ void poll_optional(std::uint32_t now_ms) {
 
 void apply_outputs();
 
+bool sample_raw_touch(std::uint32_t now_ms) {
+  const bool active = digitalRead(body_pins::kTouchOutput) == HIGH;
+  control.sample_touch_input(active, now_ms);
+  return active;
+}
+
 void poll_touch(std::uint32_t now_ms) {
   // Independent wheel inhibition must not wait for the 25 ms gesture timer.
-  const bool active = digitalRead(body_pins::kTouchOutput) == HIGH;
   const bool was_armed = control.state().armed;
-  control.sample_touch_input(active, now_ms);
+  const bool active = sample_raw_touch(now_ms);
   if (active && was_armed) apply_outputs();
   // Every observed raw transition restarts the gesture debounce. Otherwise
   // short pulses coinciding with three sample instants can forge a touch.
@@ -320,6 +325,7 @@ void apply_outputs() {
   // local interlock/timers immediately before writing the physical pins.
 #if DESK_ROBOT_FULL_SENSORS
   sample_raw_bumper();
+  sample_raw_touch(millis());
 #endif
   control.tick(millis());
 #if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
@@ -413,8 +419,9 @@ void process_input(HardwareSerial& stream, desk_robot::LineReceiver& receiver,
     const std::uint64_t sample_us = received == '\n' ?
         static_cast<std::uint64_t>(esp_timer_get_time()) : 0ULL;
 #if DESK_ROBOT_FULL_SENSORS
-    // A pending UART ARM/rearm must see the current local NC contact.
+    // A pending UART command must see both current local interlocks.
     if (sample_raw_bumper()) apply_outputs();
+    if (sample_raw_touch(millis())) apply_outputs();
 #endif
 #if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
     // Latch a CPU pause before a pending command can reuse an old drive.
@@ -455,6 +462,8 @@ void process_input(HardwareSerial& stream, desk_robot::LineReceiver& receiver,
     // Do not acknowledge a motion/recovery decision that this new sample vetoed.
     if (completed && control.state().bumper_raw)
       desk_robot::veto_motion_ack(reply, sizeof(reply), desk_robot::MotionAckVeto::BumperActive);
+    if (completed && control.state().touch_raw_active)
+      desk_robot::veto_motion_ack(reply, sizeof(reply), desk_robot::MotionAckVeto::TouchActive);
 #endif
 #if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
     // A deadline can also expire while processing the command itself.
@@ -840,8 +849,9 @@ void loop() {
       accessories.request_haptic(millis());
   }
 #endif
-  // Never advance a CPU heartbeat using a pre-I2C bumper observation.
+  // Never advance a CPU heartbeat using pre-I2C contact observations.
   sample_raw_bumper();
+  sample_raw_touch(millis());
 #endif
   control.tick(millis());
 #if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG

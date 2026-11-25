@@ -2233,9 +2233,10 @@ void output_fault_vetoes_all_motion_acknowledgments() {
   const char* acks[] = {"OK arm", "OK rearm", "OK keepalive",
                        "OK drive 20 20 100", "OK lift 90", "OK grip 90"};
   const char* commands[] = {"arm", "rearm", "keepalive", "drive", "lift", "grip"};
-  for (auto fault : {MotionAckVeto::BumperActive, MotionAckVeto::MotorWatchdogLatched}) {
-    const std::string reason = fault == MotionAckVeto::BumperActive ?
-        "bumper_active" : "motor_watchdog_latched";
+  for (auto fault : {MotionAckVeto::BumperActive, MotionAckVeto::MotorWatchdogLatched,
+                     MotionAckVeto::TouchActive}) {
+    const std::string reason = fault == MotionAckVeto::BumperActive ? "bumper_active" :
+        fault == MotionAckVeto::TouchActive ? "touch_active" : "motor_watchdog_latched";
     for (std::size_t i = 0; i < 6; ++i) {
       char reply[128]{};
       std::snprintf(reply, sizeof(reply), "%s", acks[i]);
