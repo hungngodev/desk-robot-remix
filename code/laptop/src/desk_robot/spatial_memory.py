@@ -48,6 +48,8 @@ class SpatialSighting:
     event_id: str
     evidence: SpatialEvidence
     status: str  # pending_localization, historical, live, stale, invalid_origin
+    episode_confidence: float | None = None  # Original episode, not metric accuracy.
+    age_s: float | None = None  # Unknown if the read clock precedes observation.
 
 
 def _integer(value: object, low: int, high: int) -> bool:
@@ -192,7 +194,7 @@ class SpatialMemory:
                           s.origin_id,s.pose_seq,s.pose_sample_us,s.camera_boot,
                           s.camera_seq,s.camera_complete_us,s.calibration_id,
                           s.x_mm,s.y_mm,s.yaw_mrad,s.uncertainty_mm,
-                          s.frame,s.anchor_id
+                          s.frame,s.anchor_id,m.confidence
                    FROM spatial_observations AS s JOIN memories AS m
                    ON s.event_id=m.event_id
                    JOIN camera_provenance AS p ON p.event_id=m.event_id
@@ -212,10 +214,11 @@ class SpatialMemory:
             return None
         (event_id, obj, observed, boot, origin, pose_seq, pose_time,
          camera_boot, camera_seq, complete, calibration, x, y, yaw, uncertainty,
-         frame, anchor) = row
+         frame, anchor, confidence) = row
         # SQLite affinities are not strict types. Never decode malformed
         # durable receipt IDs or expose invalid coordinates from a legacy row.
-        if (type(event_id) is not str or not _TOKEN.fullmatch(event_id)
+        if (type(confidence) not in (float, int) or not 0 <= confidence <= 1
+                or type(event_id) is not str or not _TOKEN.fullmatch(event_id)
                 or type(complete) is not str or not 1 <= len(complete) <= 19
                 or not complete.isascii() or not complete.isdigit()
                 or complete.startswith("0")):
@@ -245,4 +248,7 @@ class SpatialMemory:
             status = "live"
         else:
             status = "historical"
-        return SpatialSighting(event_id, evidence, status)
+        return SpatialSighting(
+            event_id, evidence, status, episode_confidence=float(confidence),
+            age_s=elapsed if elapsed >= 0 else None,
+        )

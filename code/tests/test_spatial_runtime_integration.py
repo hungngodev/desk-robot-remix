@@ -295,6 +295,7 @@ def test_api_spatial_search_navigate_and_target_confirmation(
             source_robot="robot-01",
             witnessed=True,
             observed_at=now_wall,
+            confidence=0.63,
             camera_provenance=CameraProvenance(
                 received_at=now_wall,
                 interpreted_at=now_wall,
@@ -367,7 +368,14 @@ def test_api_spatial_search_navigate_and_target_confirmation(
             headers=tool,
         ).json()
         assert mem["status"] == "pending_localization"
+        assert mem["observed_at"] == now_wall
+        assert mem["age_s"] >= 0
+        assert mem["episode_confidence"] == 0.63
+        assert mem["body_boot"] == head.body_boot
+        assert mem["origin_id"] == st.origin_id
         assert mem["navigation_authorized"] is False
+        assert mem["motor_authorized"] is False
+        assert mem["arrived"] is False
 
         grid = client.get("/v1/robots/robot-01/spatial/grid", headers=tool).json()
         assert grid["initialized"] is True

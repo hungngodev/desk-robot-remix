@@ -417,3 +417,33 @@ def test_corrupt_persisted_spatial_row_is_not_reported(tmp_path, column, value):
     assert spatial.last_seen("robot-01", "flat_key", now=when + 2) is None
     peer = spatial.last_seen("robot-02", "flat_key", now=when + 2)
     assert peer is not None and peer.evidence == evidence(when)
+
+
+def test_recall_preserves_episode_confidence_age_and_origin_per_pet(tmp_path):
+    root = tmp_path / "private"
+    robots = ["robot-01", "robot-02"]
+    store = MemoryStore(root, robots)
+    when = time.time() - 2
+    original = evidence(when)
+    for robot, confidence in zip(robots, (0.37, 0.82), strict=True):
+        assert store.remember(
+            robot, "same", "A key was seen", kind="vision",
+            source_robot=robot, witnessed=True, observed_at=when,
+            confidence=confidence,
+            camera_provenance=CameraProvenance(when, when, (11, 4, 900_000)),
+        )
+        assert SpatialMemory(store).attach(robot, "same", original)
+    spatial = SpatialMemory(MemoryStore(root, robots))
+    for robot, confidence in zip(robots, (0.37, 0.82), strict=True):
+        for now, origin, status, age in (
+            (when + 2, (7, "odom-1"), "pending_localization", 2),
+            (when + 86_401, (7, "odom-1"), "stale", 86_401),
+            (when - 1, (7, "odom-1"), "stale", None),
+            (when + 2, (8, "reset-2"), "invalid_origin", 2),
+        ):
+            result = spatial.last_seen(robot, "flat_key", now=now, current_origin=origin)
+            assert result is not None
+            assert result.status == status
+            assert result.age_s == age
+            assert result.episode_confidence == confidence
+            assert result.evidence == original
