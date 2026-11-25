@@ -16,8 +16,15 @@ from desk_robot.object_targets import (
     ObjectQuery,
     resolve_object_target,
 )
-from desk_robot.route_planner import GridSnapshot, RouteRequest, SafetyEnvelope
+from desk_robot.route_planner import (
+    GridSnapshot,
+    RouteRequest,
+    SafetyEnvelope,
+    plan_route,
+    revalidate_route_step,
+)
 from desk_robot.simulator import SimulatedHead, SimulationVision
+from desk_robot.spatial_grid import RangeCellBatch, SpatialGrid
 
 
 @pytest.fixture
@@ -271,3 +278,59 @@ def test_unanchoring_grid_after_valid_sighting_revokes_viewpoint_route(
     assert after.status == "rejected"
     assert after.reason == "unanchored_or_stale_map"
     assert after.route is None
+
+
+@pytest.mark.parametrize("kind,lane,expected", [
+    ("floor_unsafe", 0, "unsafe"),
+    ("obstacle_hit", 4, "occupied"),
+])
+def test_live_range_corner_revokes_previously_safe_route_edge(kind, lane, expected):
+    """A new corner hazard invalidates a turn, even when both centers stay safe."""
+    grid = SpatialGrid("robot-01", 1, "origin-3", "tag-4", "cal-5", 15, 15, epoch=8)
+    grid.anchored = True  # Synthetic qualified map, not a hardware attestation.
+    cells = tuple((x, y) for y in range(15) for x in range(15))
+
+    def record(kind, lane, sequence, now, cells):
+        grid.record(RangeCellBatch(
+            "robot-01", 1, "origin-3", 8, "cal-5", lane, sequence,
+            now - 900_000, now, kind, cells, True,
+        ), now_us=now)
+
+    record("floor_supported", 0, 1, 1_000_000, cells)
+    # Saturated free evidence must not mask a single fresh obstacle hit.
+    for sequence in range(1, 6):
+        record("obstacle_clear", 4, sequence, 1_000_000 + sequence, cells)
+    request = RouteRequest(
+        "robot-01", "origin-3", 8, "tag-4", "session-2", "turn-7",
+        (3, 7), 0, (9, 9), 2_500_000,
+    )
+    envelope = SafetyEnvelope(3, 2, 2, 32, True)
+    before = grid.to_route_snapshot(now_us=1_000_010)
+    route = plan_route(before, request, envelope, now_us=1_000_010)
+    assert route.status == "planned" and route.may_execute is False
+    assert route.cells[-3:] == ((9, 7), (9, 8), (9, 9))
+    assert revalidate_route_step(
+        before, route, envelope, start=(8, 7), heading=0, goal=(9, 7),
+        now_us=1_000_010,
+    )
+    assert revalidate_route_step(
+        before, route, envelope, start=(9, 7), heading=0, goal=(9, 8),
+        now_us=1_000_010,
+    )
+
+    now = 1_100_000
+    hazard = (10, 8)  # Outside translation clearance, inside swept turn clearance.
+    record(kind, lane, 6, now, (hazard,))
+    live = grid.to_route_snapshot(now_us=now)
+    assert live.anchored and now < route.valid_until_us
+    assert grid.state(*hazard, now_us=now) == expected
+    assert grid.state(9, 7, now_us=now) == grid.state(9, 8, now_us=now) == "safe"
+    assert not revalidate_route_step(
+        live, route, envelope, start=(9, 7), heading=0, goal=(9, 8), now_us=now,
+    )
+    # At the old route's exact expiry, even the previously clear edge is invalid.
+    expired = grid.to_route_snapshot(now_us=route.valid_until_us)
+    assert not revalidate_route_step(
+        expired, route, envelope, start=(8, 7), heading=0, goal=(9, 7),
+        now_us=route.valid_until_us,
+    )
