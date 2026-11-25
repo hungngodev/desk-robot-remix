@@ -163,6 +163,20 @@ class HsmBehavior {
 
   /// Queue an event. It is handled in the next update(). Events are dropped if the queue is full.
   void pushEvent(const Event& e) {
+    // Unknown IDs are not activity and must not consume a bounded queue slot.
+    switch (e.type) {
+      case EventType::kTouched:
+      case EventType::kPersonDetected:
+      case EventType::kPersonLost:
+      case EventType::kLoudSound:
+      case EventType::kBatteryLow:
+      case EventType::kCharging:
+      case EventType::kSpeakRequest:
+      case EventType::kSpeechFinished:
+        break;
+      default:
+        return;
+    }
     if (queue_len_ < kQueueSize) {
       queue_[(queue_head_ + queue_len_) % kQueueSize] = e;
       queue_len_++;
