@@ -1397,6 +1397,9 @@ async def test_native_cooldown_rejects_before_peer_stop(
     second.device_id = "mac-02"
     second.session_id = "second-robot"
     bridge.connections.update({"mac-01": first, "mac-02": second})
+    bridge.robot_for_device = lambda dev: {
+        "mac-01": "robot-01", "mac-02": "robot-02",
+    }.get(dev)
     previous = module.NativeOmniSession(
         first, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
         model="openbmb/MiniCPM-o-4_5", token="p" * 32,
