@@ -61,7 +61,19 @@ std::string EncodeBodyRead(cJSON* body, bool pose, uint32_t head_boot) {
         cJSON_GetObjectItemCaseSensitive(body, "head_boot")) return {};
     if (!cJSON_AddStringToObject(body, "robot_id", CONFIG_DESK_ROBOT_ID)) return {};
     // Preserve body fields and bind the transport boot only for pose.
-    if (pose && !cJSON_AddNumberToObject(body, "head_boot", head_boot)) return {};
+    if (pose) {
+        // cJSON prints large doubles with %g, which may round the source
+        // timestamp or emit an exponent that Python decodes as a float.
+        const auto* sample = cJSON_GetObjectItemCaseSensitive(body, "sample_us");
+        if (!cJSON_IsNumber(sample) || !std::isfinite(sample->valuedouble) ||
+            std::floor(sample->valuedouble) != sample->valuedouble ||
+            sample->valuedouble < 1 || sample->valuedouble > 9007199254740991.0)
+            return {};
+        const auto decimal = std::to_string(static_cast<std::uint64_t>(sample->valuedouble));
+        cJSON_DeleteItemFromObjectCaseSensitive(body, "sample_us");
+        if (!cJSON_AddRawToObject(body, "sample_us", decimal.c_str()) ||
+            !cJSON_AddNumberToObject(body, "head_boot", head_boot)) return {};
+    }
     auto payload = Encode(body);
     return payload == "{}" ? std::string{} : payload;
 }

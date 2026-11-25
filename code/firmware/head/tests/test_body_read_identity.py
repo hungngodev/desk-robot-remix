@@ -26,7 +26,9 @@ def test_body_read_metadata_and_encoding_fail_closed(tmp_path):
     source = tmp_path / "body_read_identity.cc"
     source.write_text(r'''
 #include <cassert>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <string>
 #define CONFIG_DESK_ROBOT_ID "pet1"
 struct cJSON {
@@ -34,11 +36,27 @@ struct cJSON {
     bool has_id = false, has_boot = false;
     bool id_added = false, boot_added = false, encoded = false;
     uint32_t boot = 0;
+    double valuedouble = 1234;
+    bool has_sample = true, numeric_sample = true, fail_raw = false;
+    std::string raw_sample;
 };
 cJSON* cJSON_GetObjectItemCaseSensitive(cJSON* body, const char* key) {
     if (std::string(key) == "robot_id") return body->has_id ? body : nullptr;
     if (std::string(key) == "head_boot") return body->has_boot ? body : nullptr;
+    if (std::string(key) == "sample_us") return body->has_sample ? body : nullptr;
     return nullptr;
+}
+bool cJSON_IsNumber(const cJSON* item) { return item && item->numeric_sample; }
+void cJSON_DeleteItemFromObjectCaseSensitive(cJSON* body, const char* key) {
+    assert(std::string(key) == "sample_us" && body->has_sample);
+    body->has_sample = false;
+}
+cJSON* cJSON_AddRawToObject(cJSON* body, const char* key, const char* raw) {
+    assert(std::string(key) == "sample_us" && !body->has_sample);
+    if (body->fail_raw) return nullptr;
+    body->has_sample = true;
+    body->raw_sample = raw;
+    return body;
 }
 cJSON* cJSON_AddStringToObject(cJSON* body, const char* key, const char* id) {
     assert(std::string(key) == "robot_id" && std::string(id) == "pet1");
@@ -62,9 +80,36 @@ int main() {
     cJSON normal;
     assert(!EncodeBodyRead(&normal, true, 123).empty());
     assert(normal.id_added && normal.boot_added && normal.boot == 123 && normal.encoded);
+    assert(normal.raw_sample == "1234");
+    for (const auto n : {999999999999999ULL, 1000000000000000ULL,
+                         9007199254740990ULL, 9007199254740991ULL}) {
+        cJSON boundary;
+        boundary.valuedouble = static_cast<double>(n);
+        assert(!EncodeBodyRead(&boundary, true, 123).empty());
+        assert(boundary.raw_sample == std::to_string(n));
+    }
+    for (const double bad : {0.0, -1.0, 1.5, 9007199254740992.0,
+                             std::numeric_limits<double>::infinity(),
+                             std::numeric_limits<double>::quiet_NaN()}) {
+        cJSON invalid;
+        invalid.valuedouble = bad;
+        assert(EncodeBodyRead(&invalid, true, 123).empty());
+        assert(!invalid.boot_added && !invalid.encoded);
+    }
+    cJSON missing;
+    missing.has_sample = false;
+    assert(EncodeBodyRead(&missing, true, 123).empty());
+    cJSON not_number;
+    not_number.numeric_sample = false;
+    assert(EncodeBodyRead(&not_number, true, 123).empty());
+    cJSON no_raw;
+    no_raw.fail_raw = true;
+    assert(EncodeBodyRead(&no_raw, true, 123).empty());
+    assert(!no_raw.boot_added && !no_raw.encoded);
     cJSON status;
     assert(!EncodeBodyRead(&status, false, 123).empty());
     assert(status.id_added && !status.boot_added && status.encoded);
+    assert(status.raw_sample.empty());
     cJSON dup_id;
     dup_id.has_id = true;
     assert(EncodeBodyRead(&dup_id, true, 123).empty());
