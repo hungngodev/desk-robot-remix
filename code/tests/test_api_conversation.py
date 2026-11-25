@@ -2231,9 +2231,10 @@ def test_operator_group_api_requires_peer_sharing_before_interrupting(
 
 
 def test_operator_group_api_allows_explicit_request_while_pet_stays_quiet(
-    settings, tokens, monkeypatch,
+    settings, tokens, tmp_path,
 ):
     """Quiet suppresses unsolicited activity, not authenticated human requests."""
+    settings.memory_dir = tmp_path
     app = create_app(settings)
     headers = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
     body = {
@@ -2241,33 +2242,115 @@ def test_operator_group_api_allows_explicit_request_while_pet_stays_quiet(
         "topic": "Compare notes", "utterances": 2,
     }
     with TestClient(app) as client:
+        runtime = app.state.runtime
+        # Enter quiet through the real operator route while using simulated I/O.
+        quiet = client.post("/v1/pet/robot-02/quiet", json={"quiet": True}, headers=headers)
+        assert quiet.status_code == 200
+        assert quiet.json()["quiet"] is True
         settings.mode = "hardware"
         settings.fleet_text_sharing_enabled = True
-        app.state.runtime.pet.states["robot-02"].quiet = True
-        interrupts = []
-        runs = []
-
-        async def interrupt(robot_id):
-            interrupts.append(robot_id)
-
-        async def run(*args):
-            runs.append(args)
-            return [
-                {"robot_id": "robot-01", "text": "one"},
-                {"robot_id": "robot-02", "text": "two"},
-            ]
-
-        monkeypatch.setattr(app.state.runtime.pet, "interrupt", interrupt)
-        monkeypatch.setattr(app.state.runtime.conversation, "run", run)
+        epoch = runtime.pet._vision_preemption_epoch
 
         allowed = client.post("/v1/conversation", json=body, headers=headers)
         assert allowed.status_code == 200
-        assert interrupts == [robot.id for robot in settings.robots]
-        assert len(runs) == 1
-        assert app.state.runtime.pet.states["robot-02"].quiet is True
-        assert [turn["robot_id"] for turn in allowed.json()["transcript"]] == (
-            body["robot_ids"]
-        )
+        transcript = allowed.json()["transcript"]
+        assert [turn["robot_id"] for turn in transcript] == body["robot_ids"]
+        assert runtime.conversation.speaker.spoken == [
+            (turn["robot_id"], turn["text"]) for turn in transcript
+        ]
+        assert all(turn["text"].strip() for turn in transcript)
+        assert runtime.pet._vision_preemption_epoch == epoch + len(settings.robots)
+        assert runtime.pet.states["robot-02"].quiet is True
+        assert allowed.json()["physical_playback_verified"] is False
+        assert runtime.conversation.active is None
+        assert not runtime.conversation.session_lock.locked()
+        assert not runtime.conversation.speaker_lock.locked()
+        for robot_id in body["robot_ids"]:
+            receipt, = runtime.conversation.group_activity_timeline(robot_id)
+            assert receipt["status"] == "completed"
+            assert receipt["sent_segments"] == 1
+            assert receipt["playback_verified"] is False
+
+
+def test_group_api_partial_stream_failure_releases_real_runtime_and_retries(
+    settings, tokens, tmp_path,
+):
+    """A failed second segment must not become peer speech or strand the session."""
+    settings.memory_dir = tmp_path
+    app = create_app(settings)
+    headers = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
+    body = {
+        "robot_ids": ["robot-01", "robot-02"],
+        "topic": "Compare notes", "utterances": 2,
+    }
+
+    class PartialChat:
+        calls = 0
+
+        async def stream_reply(self, history):
+            self.calls += 1
+            if self.calls == 1:
+                yield "One transmitted fragment."
+                raise RuntimeError("Model stream disconnected")
+            yield f"Recovered reply {self.calls}."
+
+    class RecordingSpeaker(SimulatedSpeaker):
+        def __init__(self):
+            super().__init__()
+            self.interruptions = []
+
+        async def interrupt(self, robot):
+            self.interruptions.append(robot.id)
+
+    with TestClient(app) as client:
+        runtime = app.state.runtime
+        settings.mode = "hardware"
+        settings.fleet_text_sharing_enabled = True
+        chat, speaker = PartialChat(), RecordingSpeaker()
+        conversation = runtime.conversation
+        conversation.chat = chat
+        conversation.speaker = speaker
+
+        failed = client.post("/v1/conversation", json=body, headers=headers)
+        assert failed.status_code == 409
+        assert "Model stream disconnected" in failed.json()["detail"]
+        assert chat.calls == 1
+        assert speaker.spoken == [("robot-01", "One transmitted fragment.")]
+        assert speaker.interruptions == ["robot-01"]
+        assert conversation.active is None
+        assert not conversation.session_lock.locked()
+        assert not conversation.speaker_lock.locked()
+        assert not conversation.speaker_stop_unconfirmed
+        assert "One transmitted fragment." not in str(conversation.histories)
+        # SQLite work may legitimately finish after the response.
+        deadline = time.monotonic() + 3
+        while (conversation.group_activity_timeline("robot-01")[0]["memory_write_pending"]
+               and time.monotonic() < deadline):
+            time.sleep(0.01)
+        assert conversation.group_activity_timeline("robot-01")[0]["memory_write_pending"] == 0
+        own = runtime.memory.recent("robot-01")
+        assert len(own) == 1
+        assert own[0].kind == "own_utterance"
+        assert "playback unverified" in own[0].summary
+        assert "One transmitted fragment." in own[0].summary
+        assert runtime.memory.recent("robot-02") == []
+
+        recovered = client.post("/v1/conversation", json=body, headers=headers)
+        assert recovered.status_code == 200
+        assert recovered.json()["transcript"] == [
+            {"robot_id": "robot-01", "text": "Recovered reply 2."},
+            {"robot_id": "robot-02", "text": "Recovered reply 3."},
+        ]
+        assert speaker.spoken == [
+            ("robot-01", "One transmitted fragment."),
+            ("robot-01", "Recovered reply 2."),
+            ("robot-02", "Recovered reply 3."),
+        ]
+        assert speaker.interruptions == ["robot-01"]
+        assert recovered.json()["physical_playback_verified"] is False
+        assert conversation.active is None
+        assert not conversation.session_lock.locked()
+        assert not conversation.speaker_lock.locked()
 
 
 def test_operator_group_api_refuses_revoke_regrant_during_preemption(
