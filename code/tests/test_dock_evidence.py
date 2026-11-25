@@ -581,3 +581,46 @@ def test_dock_inhibit_huge_age_cannot_raise_or_release():
     assert guard.observe(dock_pin_sample(1, asserted=True), 17)
     assert not guard.observe(dock_pin_sample(2, age=10**1000), 17, 0.5)
     assert guard.inhibited
+
+
+@pytest.mark.parametrize("shunt", [-81920, -81916, 81916, 81917, 81919, 81920])
+@pytest.mark.parametrize("include_pack", [False, True])
+def test_saturated_shunt_cannot_be_valid_telemetry(shunt, include_pack):
+    from desk_robot.aux import validate_aux
+
+    frame = payload()
+    frame["power"].update(shunt_uv=shunt, monitor_valid=True)
+    if include_pack:
+        frame["power"].update(
+            pack_ma=int(shunt / 5), pack_valid=True, pack_seq=1, pack_age_ms=35,
+        )
+    with pytest.raises(ValueError, match="INA226 saturated shunt"):
+        validate_aux(frame, "robot-01")
+
+
+@pytest.mark.parametrize("shunt", [-81915, 0, 81915])
+@pytest.mark.parametrize("include_pack", [False, True])
+def test_unsaturated_shunt_wire_boundaries_remain_valid(shunt, include_pack):
+    from desk_robot.aux import validate_aux
+
+    frame = payload()
+    frame["power"].update(shunt_uv=shunt, monitor_valid=True)
+    if include_pack:
+        frame["power"].update(
+            pack_ma=int(shunt / 5), pack_valid=True, pack_seq=1, pack_age_ms=35,
+        )
+    assert validate_aux(frame, "robot-01")["power"]["monitor_valid"]
+
+
+@pytest.mark.parametrize("shunt", [-81920, 81917])
+def test_invalid_shunt_diagnostic_does_not_invalidate_other_sensors(shunt):
+    from desk_robot.aux import validate_aux
+
+    frame = payload()
+    frame["power"].update(
+        shunt_uv=shunt, monitor_valid=False, pack_valid=False,
+        pack_ma=0, pack_seq=1, pack_age_ms=35,
+    )
+    result = validate_aux(frame, "robot-01")
+    assert result["power"]["monitor_valid"] is False
+    assert result["dock"]["valid"] is True
