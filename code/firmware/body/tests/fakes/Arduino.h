@@ -20,6 +20,9 @@ struct FakeI2cLines {
   int sda_mode = OUTPUT_OPEN_DRAIN;
   int scl_mode = OUTPUT_OPEN_DRAIN;
   unsigned release_after_pulses = 0;
+  // Hold the next clock release after this many completed data-clear clocks.
+  unsigned hold_scl_after_pulses = 0;
+  unsigned clear_attempts = 0;
   unsigned clear_pulses = 0;
   unsigned stops = 0;
   unsigned restore_calls = 0;
@@ -56,8 +59,12 @@ inline void digitalWrite(int pin, int value) {
   } else {
     const bool was_low = lines.scl_driven_low;
     lines.scl_driven_low = value == LOW;
-    if (was_low && value == HIGH && !lines.scl_stuck &&
-        !lines.sda_driven_low) {
+    if (was_low && value == HIGH && !lines.sda_driven_low) {
+      ++lines.clear_attempts;
+      if (lines.hold_scl_after_pulses &&
+          lines.clear_pulses >= lines.hold_scl_after_pulses)
+        lines.scl_stuck = true;
+      if (lines.scl_stuck) return;
       ++lines.clear_pulses;
       if (lines.release_after_pulses &&
           lines.clear_pulses >= lines.release_after_pulses)

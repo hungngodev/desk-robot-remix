@@ -1069,6 +1069,41 @@ int main() {
       fake_i2c_lines() = FakeI2cLines{};
     }
     {
+      // A slave may stretch SCL after any successful data-clear clock.
+      // Distinguish attempted releases from real edges to catch continuing
+      // to pulse a physically held clock after the bounded stretch wait.
+      for (unsigned held = 1; held < 9; ++held) {
+        Wire = TwoWire{};
+        fake_i2c_lines() = FakeI2cLines{};
+        desk_robot::TofBus bus;
+        desk_robot::CliffGuard guard;
+        ready(bus, guard);
+        auto& lines = fake_i2c_lines();
+        lines.sda_stuck = true;
+        lines.release_after_pulses = 9;
+        lines.hold_scl_after_pulses = held;
+        const auto transactions = Wire.transactions;
+        const auto samples = Wire.tof_samples;
+        bus.poll(guard, 60);
+        faulted(guard);
+        bus.poll(guard, 61);
+        CHECK(lines.clear_attempts == held + 1 && lines.clear_pulses == held);
+        CHECK(lines.stops == 0 && lines.restore_calls == 1 && !lines.unsafe_high);
+        CHECK(!bus.bus_accessible() && Wire.transactions == transactions);
+        lines.scl_stuck = false;
+        lines.hold_scl_after_pulses = 0;
+        bus.poll(guard, 160);
+        CHECK(lines.clear_attempts == held + 1 && !bus.bus_accessible());
+        bus.poll(guard, 161);
+        CHECK(lines.clear_attempts == 10 && lines.clear_pulses == 9);
+        CHECK(lines.stops == 1 && lines.restore_calls == 2 && !lines.unsafe_high);
+        CHECK(Wire.transactions == transactions + 4 && Wire.tof_samples == samples);
+        CHECK(Wire.ranges == 0 && Wire.extras == 0 && bus.bus_accessible());
+        CHECK(!guard.try_rearm(161));
+      }
+      fake_i2c_lines() = FakeI2cLines{};
+    }
+    {
       // A pin matrix restore failure must not let idle GPIOs qualify
       // samples. Shared Wire buffers are never torn down during recovery.
       Wire = TwoWire{};
