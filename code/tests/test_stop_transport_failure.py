@@ -46,6 +46,33 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
             await head.command("drive 20 20 100")
 
 
+    async def test_new_stop_preserves_historical_cancellation_reason(self):
+        from desk_robot.simulator import SimulatedHead
+
+        coordinator = _coordinator(SimulatedHead("robot-01"))
+        historical = asyncio.create_task(asyncio.sleep(10))
+        historical.cancel()
+        await asyncio.gather(historical, return_exceptions=True)
+        old_job = Job(
+            "old", "robot-01", "pickup", state="cancelled",
+            error="Operator cancelled",
+        )
+        current = asyncio.create_task(asyncio.sleep(10))
+        new_job = Job("new", "robot-01", "pickup")
+        coordinator.jobs = {"old": old_job, "new": new_job}
+        coordinator.tasks = {"old": historical, "new": current}
+        try:
+            receipt = await coordinator.stop("robot-01")
+            self.assertEqual(receipt["reply"], "OK halt")
+            self.assertEqual(old_job.state, "cancelled")
+            self.assertEqual(old_job.error, "Operator cancelled")
+            self.assertTrue(current.cancelled())
+            self.assertEqual(new_job.state, "cancelled")
+            self.assertEqual(new_job.error, "Operator cancelled before job started")
+        finally:
+            current.cancel()
+            await asyncio.gather(current, return_exceptions=True)
+
     async def test_failed_stop_receipt_survives_cancelled_job_timeout(self):
         release = asyncio.Event()
         started = asyncio.Event()

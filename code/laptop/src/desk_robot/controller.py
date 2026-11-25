@@ -402,11 +402,11 @@ class Coordinator:
                             self.jobs[jid].state = "failed"
                             if stop_acknowledged:
                                 self.jobs[jid].error = "Cancelled job ignored timeout; WROOM stop dispatched"
-        for jid, task in self.tasks.items():
-            if (self.jobs[jid].robot_id == robot_id and task.cancelled()
-                    and self.jobs[jid].state != "failed"):
-                # A task cancelled before its first instruction must not
-                # overwrite an unconfirmed physical STOP receipt.
+        for jid in active_job_ids:
+            task = self.tasks[jid]
+            if task.cancelled() and self.jobs[jid].state != "failed":
+                # Only this STOP's jobs may change. A task cancelled before
+                # its first instruction must not erase a failed STOP receipt.
                 self.jobs[jid].state = "cancelled"
                 self.jobs[jid].error = "Operator cancelled before job started"
         owner_id = getattr(self, "_fleet_motion_owner", None)
