@@ -42,6 +42,27 @@ def test_bad_pose_fields_fail_closed(updates):
         decode_pose(pose(**updates), "robot-01", 100.0)
 
 
+@pytest.mark.parametrize("updates", [
+    {"unexpected": 1}, {"seq\x00": 2}, {"quality\x00": "valid"},
+    {"unexpected": float("nan")},
+])
+def test_unknown_v1_fields_invalidate_current_pose(updates):
+    with pytest.raises(PoseError, match="Unexpected pose field"):
+        decode_pose(pose(**updates), "robot-01", 100.0)
+
+    gate = PoseFence("robot-01")
+    gate.observe(pose(), 100.0)
+    accepted = gate.observe(pose(seq=2, sample_us=1_100_000), 100.1)
+    assert gate.current(100.1) is accepted
+
+    with pytest.raises(PoseError, match="Unexpected pose field"):
+        gate.observe(pose(seq=3, sample_us=1_200_000, **updates), 100.2)
+    assert gate.current(100.2) is None
+    assert gate.needs_reanchor
+    assert gate.blocked_reason == "invalid_pose"
+    assert not gate.owns_continuous_receipt(accepted)
+
+
 def test_no_mutation_of_input_and_optional_head_boot():
     raw = pose()
     saved = copy.deepcopy(raw)

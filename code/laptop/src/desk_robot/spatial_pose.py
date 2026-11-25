@@ -15,6 +15,10 @@ _MAX_LOCAL_CLOCK_S = _MAX_SAMPLE_US / 1_000_000
 _MAX_COORD_MM = 1_000_000
 _MAX_RECEIPT_LAG_S = 0.25
 _MAX_CONTINUITY_RECEIPTS = 64
+_POSE_V1_FIELDS = frozenset({
+    "robot_id", "v", "body_boot", "origin", "seq", "sample_us",
+    "x_mm", "y_mm", "yaw_mrad", "quality", "head_boot",
+})
 
 
 class PoseError(ValueError):
@@ -62,6 +66,10 @@ def decode_pose(data: dict, robot_id: str, received_at: float) -> PoseReceipt:
         raise PoseError("Invalid local pose receipt time")
     if _bounded_int(data, "v", 1, 1) != 1:
         raise PoseError("Unsupported pose version")
+    # Sense validates the exact body schema before adding transport identity.
+    # Reject unknown fields here too; legacy head_boot remains optional.
+    if not data.keys() <= _POSE_V1_FIELDS:
+        raise PoseError("Unexpected pose field")
     quality = data.get("quality")
     if type(quality) is not str or quality not in ("valid", "degraded", "unavailable"):
         raise PoseError("Invalid pose quality")
