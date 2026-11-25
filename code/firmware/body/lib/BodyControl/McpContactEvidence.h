@@ -38,10 +38,12 @@ class McpContactEvidence {
       reset();
       return false;
     }
-    if (time_step > 250U) {
-      // No continuously observed event survives a missing acquisition gap.
+    const auto expected_seq = last_seq_ == 0xffffffffU ? 1U : last_seq_ + 1U;
+    if (time_step > 250U || sample.sample_seq != expected_seq) {
+      // A gap breaks continuity. Mark this poll unavailable so BodyControl
+      // rebaselines the recovered level instead of counting a false edge.
       baseline(sample);
-      return true;
+      return false;
     }
     last_seq_ = sample.sample_seq;
     last_at_ms_ = sample.at_ms;

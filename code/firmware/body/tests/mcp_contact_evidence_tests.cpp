@@ -102,6 +102,31 @@ void stale_replay_and_conflicting_cache_rebaseline() {
   CHECK(body.state().reed_events == 0U);
 }
 
+void acquisition_gaps_cannot_fabricate_edges() {
+  for (const auto gap : {251U, 84U}) {
+    BodyControl body;
+    McpContactEvidence evidence;
+    poll(body, evidence, reading(10, 0, false, false), 0);
+    // A time gap or an unobserved conversion invalidates continuity even
+    // when this poll receives a fresh high sample and no intervening poll.
+    const auto seq = gap == 251U ? 11U : 12U;
+    poll(body, evidence, reading(seq, gap, true, true), gap);
+    CHECK(body.state().extra_mask == 1U);
+    CHECK(body.state().reed_events == 0U && body.state().pir_events == 0U);
+    poll(body, evidence, reading(seq, gap, true, true), gap + 25U);
+    CHECK(body.state().extra_mask == 7U);
+    CHECK(body.state().reed_active && body.state().pir_active);
+    CHECK(body.state().reed_events == 0U && body.state().pir_events == 0U);
+    for (std::uint32_t i = 1; i <= 3; ++i)
+      poll(body, evidence, reading(seq + i, gap + i * 84U, false, false),
+           gap + i * 84U);
+    for (std::uint32_t i = 4; i <= 6; ++i)
+      poll(body, evidence, reading(seq + i, gap + i * 84U, true, true),
+           gap + i * 84U);
+    CHECK(body.state().reed_events == 1U && body.state().pir_events == 1U);
+  }
+}
+
 void genuine_uint32_wrap_and_bumper_are_preserved() {
   BodyControl body;
   McpContactEvidence evidence;
@@ -126,8 +151,9 @@ int main() {
     duplicate_cached_gpio_never_fabricates_rising_event();
     three_independent_gpio_conversions_emit_exactly_one_event();
     stale_replay_and_conflicting_cache_rebaseline();
+    acquisition_gaps_cannot_fabricate_edges();
     genuine_uint32_wrap_and_bumper_are_preserved();
-    std::cout << "four MCP GPIOB acquisition provenance tests passed\n";
+    std::cout << "five MCP GPIOB acquisition provenance tests passed\n";
     return 0;
   } catch (const std::exception& exc) {
     std::cerr << "FAIL " << exc.what() << '\n';
