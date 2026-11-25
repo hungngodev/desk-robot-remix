@@ -1075,8 +1075,8 @@ def test_native_activity_context_skips_unhashable_job_metadata(kind, state):
     '{"heading":true}',
     '{"heading":4}',
     '{"goal_heading":true}',
-    '{"label":"\ud800"}',
-    '{"\ud800":1}',
+    r'{"label":"\ud800"}',
+    r'{"\ud800":1}',
 ])
 def test_spatial_navigation_invalid_json_values_never_submit(settings, body):
     from fastapi.testclient import TestClient
