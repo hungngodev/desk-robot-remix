@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Iterable, Sequence
 
-from .memory import FICTIONAL_MEMORY_KINDS, CoreFact, Memory
+from .memory import FICTIONAL_MEMORY_KINDS, PEER_MEMORY_KINDS, CoreFact, Memory
 from .sensor_event_contract import DIRECT_INTERACTION_KINDS
 
 
@@ -86,6 +86,8 @@ def memory_provenance_label(entry: Memory) -> str:
         # Current persistence records successful speech transmission, NOT
         # speaker DMA progress or acoustically confirmed words heard by a user.
         return "I sent for speech (playback unverified)"
+    if entry.kind in PEER_MEMORY_KINDS and entry.source_robot == entry.robot_id:
+        return "Unattributed peer report (not my observation)"
     if entry.kind == "peer_utterance":
         # Peer conversation is relayed digitally by the Mac. Even an
         # inconsistent witnessed flag cannot convert it into direct hearing,

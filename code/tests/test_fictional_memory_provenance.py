@@ -154,3 +154,30 @@ def test_peer_report_cannot_be_promoted_to_firsthand(tmp_path, kind):
     assert reopened.search(source, "blue box") == []
     assert "I observed" not in memory_provenance_label(recalled)
     assert source in memory_provenance_label(recalled)
+
+
+@pytest.mark.parametrize("kind", ["peer_claim", "peer_report", "peer_utterance"])
+def test_legacy_peer_row_cannot_be_recalled_or_relayed_as_firsthand(tmp_path, kind):
+    robot = "robot-02"
+    store = MemoryStore(tmp_path, [robot])
+    assert store.remember(
+        robot, "legacy", "A blue box moved", kind="scene",
+        source_robot=robot, witnessed=True,
+    )
+    # Emulate a row persisted before the peer-kind write guard.
+    with store._connect(robot) as db:
+        db.execute("UPDATE memories SET kind=? WHERE event_id='legacy'", (kind,))
+    reopened = MemoryStore(tmp_path, [robot])
+    episode = reopened.get_episode(robot, "legacy")
+    assert episode is not None
+    assert episode.witnessed is False
+    assert reopened.recent(robot) == [episode]
+    assert reopened.search(robot, "blue box") == [episode]
+    assert reopened.recent(robot, own_only=True) == []
+    assert reopened.search(robot, "blue box", own_only=True) == []
+    assert reopened.witnessed_episode_revision(robot, "legacy") is None
+    assert "Unattributed peer report" in memory_provenance_label(episode)
+    assert "Unattributed peer report" in memory_provenance_label(
+        replace(episode, witnessed=True)
+    )
+    assert reopened.count(robot) == 1

@@ -19,6 +19,7 @@ from .brain_context import (
 from .config import Settings
 from .memory import (
     FICTIONAL_MEMORY_KINDS,
+    PEER_MEMORY_KINDS,
     CoreMemoryMutationSuperseded,
     EpisodeMemoryMutationSuperseded,
     Memory,
@@ -36,8 +37,10 @@ class EpisodeMemoryCorrectionRequest(BaseModel):
 
 
 
-def _fictional_episode_metadata(entry: Memory) -> dict[str, object]:
-    """Expose authored fiction without the legacy local-origin witness bit."""
+def _episode_provenance_metadata(entry: Memory) -> dict[str, object]:
+    """Expose fiction and digital peer reports without a firsthand witness claim."""
+    if entry.kind in PEER_MEMORY_KINDS:
+        return {"witnessed": False, "provenance": memory_provenance_label(entry)}
     if entry.kind not in FICTIONAL_MEMORY_KINDS:
         return {}
     return {
@@ -155,7 +158,7 @@ def register_memory_routes(
                     "summary": entry.summary,
                     "observed_at": entry.observed_at,
                     "confidence": entry.confidence,
-                    **_fictional_episode_metadata(entry),
+                    **_episode_provenance_metadata(entry),
                 }
                 for entry in records
             ],
@@ -511,7 +514,7 @@ def register_voice_context_route(
                     "event_id": getattr(entry, "event_id", None),
                     "observed_at": getattr(entry, "observed_at", None),
                     "confidence": getattr(entry, "confidence", None),
-                    **_fictional_episode_metadata(entry),
+                    **_episode_provenance_metadata(entry),
                 } for entry in records
             ],
         }

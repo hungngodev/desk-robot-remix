@@ -30,6 +30,7 @@ _RELAY_TOKEN = re.compile(r"[0-9a-f]{32}\Z")
 # G005 producers must use fictional_dream; retain dream as a legacy alias.
 # The event kind, not a generated story's wording, owns this boundary.
 FICTIONAL_MEMORY_KINDS = ("dream", "fictional_dream")
+PEER_MEMORY_KINDS = ("peer_claim", "peer_report", "peer_utterance")
 
 # Every retained operator edit ID is an exact cross-restart replay prohibition.
 # Unlike bounded episode rows, tombstones CANNOT be silently evicted.
@@ -543,7 +544,7 @@ class MemoryStore:
             raise ValueError("witnessed must be a boolean")
         if witnessed != (source_robot == robot_id):
             raise ValueError("Only this robot's own sensor observations are witnessed")
-        if witnessed and kind in ("peer_claim", "peer_report", "peer_utterance"):
+        if witnessed and kind in PEER_MEMORY_KINDS:
             raise ValueError("Peer reports cannot be witnessed memories")
         if relay_token is not None and (
             witnessed or type(relay_token) is not str
@@ -699,7 +700,7 @@ class MemoryStore:
         if row is None:
             return None
         event, source, witnessed, kind, summary, at, score = row
-        return Memory(robot_id, event, source, bool(witnessed),
+        return Memory(robot_id, event, source, bool(witnessed) and kind not in PEER_MEMORY_KINDS,
                       kind, summary, at, score)
 
     def witnessed_episode_revision(
@@ -719,8 +720,8 @@ class MemoryStore:
                    FROM memories AS m
                    LEFT JOIN episode_mutations AS e ON e.event_id=m.event_id
                    WHERE m.event_id=? AND m.source_robot=? AND m.witnessed=1
-                   AND m.kind NOT IN (?,?)""",
-                (event_id, robot_id, *FICTIONAL_MEMORY_KINDS),
+                   AND m.kind NOT IN (?,?,?,?,?)""",
+                (event_id, robot_id, *FICTIONAL_MEMORY_KINDS, *PEER_MEMORY_KINDS),
             ).fetchone()
         return (str(row[0]), int(row[1])) if row is not None else None
 
@@ -775,8 +776,9 @@ class MemoryStore:
                 rows = db.execute(
                     """SELECT event_id,source_robot,witnessed,kind,summary,observed_at,confidence
                        FROM memories WHERE witnessed=1 AND source_robot=?
+                       AND kind NOT IN (?,?,?)
                        ORDER BY observed_at DESC,event_id DESC LIMIT ?""",
-                    (robot_id, limit),
+                    (robot_id, *PEER_MEMORY_KINDS, limit),
                 ).fetchall()
             else:
                 rows = db.execute(
@@ -785,7 +787,8 @@ class MemoryStore:
                     (limit,),
                 ).fetchall()
         return [
-            Memory(robot_id, event_id, source, bool(witnessed), kind, summary, at, score)
+            Memory(robot_id, event_id, source, bool(witnessed) and kind not in PEER_MEMORY_KINDS,
+                   kind, summary, at, score)
             for event_id, source, witnessed, kind, summary, at, score in rows
         ]
 
@@ -817,8 +820,9 @@ class MemoryStore:
                        FROM memories_fts
                        JOIN memories AS m ON m.rowid = memories_fts.rowid
                        WHERE memories_fts MATCH ? AND m.witnessed=1 AND m.source_robot=?
+                       AND m.kind NOT IN (?,?,?)
                        LIMIT 250""",
-                    (expression, robot_id),
+                    (expression, robot_id, *PEER_MEMORY_KINDS),
                 ).fetchall()
             else:
                 rows = db.execute(
@@ -832,6 +836,7 @@ class MemoryStore:
         now = time.time()
         ranked = []
         for event_id, source, witnessed, kind, summary, at, confidence, relevance in rows:
+            witnessed = bool(witnessed) and kind not in PEER_MEMORY_KINDS
             age_days = max(0.0, now - at) / 86400
             # BM25 scores are lower for better matches. Quantize tiny
             # floating noise so confidence, firsthand source and recency
