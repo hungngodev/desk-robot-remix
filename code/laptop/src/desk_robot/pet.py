@@ -2445,30 +2445,33 @@ class PetController:
                                 camera_consent_generation=camera_consent_generation,
                                 camera_generation=hub_generation,
                             )
+                # The camera stream owns the observation clock. Keep its
+                # wait in the same error boundary as frame processing.
+                wake = getattr(
+                    self.multimodal, "wait_for_proactive_frame", None
+                ) if self.multimodal is not None else None
+                owns_stream = getattr(
+                    self.multimodal, "stream_owns_camera", None
+                ) if self.multimodal is not None else None
+                if (callable(wake) and callable(owns_stream)
+                        and owns_stream(robot_id)):
+                    await wake(
+                        robot_id, state.last_scene_frame_at,
+                        timeout_s=self.interval,
+                    )
+                else:
+                    await asyncio.sleep(self.interval)
             except asyncio.CancelledError:
                 raise
+            except HeadError as exc:
+                state.last_error = f"{type(exc).__name__}: {str(exc)[:120]}"
+                # A failed authenticated device requires explicit re-enable.
+                state.enabled = False
+                break
             except Exception as exc:
                 state.last_error = f"{type(exc).__name__}: {str(exc)[:120]}"
-                if "head" in type(exc).__name__.lower():
-                    # A failed authenticated device requires explicit re-enable.
-                    state.enabled = False
-                    break
-            # The camera stream owns the observation clock. On a scene that
-            # arrived during VLM work, immediately process its newest frame;
-            # do not impose an extra blind sleep before checking the hub.
-            wake = getattr(
-                self.multimodal, "wait_for_proactive_frame", None
-            ) if self.multimodal is not None else None
-            owns_stream = getattr(
-                self.multimodal, "stream_owns_camera", None
-            ) if self.multimodal is not None else None
-            if (callable(wake) and callable(owns_stream)
-                    and owns_stream(robot_id)):
-                await wake(
-                    robot_id, state.last_scene_frame_at,
-                    timeout_s=self.interval,
-                )
-            else:
+                # A broken wait or processing step must not kill the observer
+                # or cause a tight retry loop.
                 await asyncio.sleep(self.interval)
 
     async def _cue_person_face(

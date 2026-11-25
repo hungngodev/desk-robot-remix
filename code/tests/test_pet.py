@@ -9131,3 +9131,68 @@ async def test_activity_silence_requires_current_context(fleet, tmp_path, monkey
         resume.set()
         state.enabled = False
         await pet.close()
+
+
+@pytest.mark.parametrize("head_failure", [False, True])
+async def test_stream_wait_failure_reports_error_and_preserves_typed_policy(
+    fleet, tmp_path, head_failure,
+):
+    from desk_robot.transport import HeadError
+
+    class HeadLogicError(RuntimeError):
+        pass
+
+    class Unavailable(HeadError):
+        pass
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {"robot-01": StaticCamera()},
+        Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(), interval=0.01,
+    )
+    robot_id = "robot-01"
+    hub = CameraFrameHub([r.id for r in fleet.robots])
+    retry = asyncio.Event()
+    calls = 0
+    error = Unavailable("stream wait failed") if head_failure else HeadLogicError(
+        "stream wait failed"
+    )
+
+    async def wake(rid, after, *, timeout_s):
+        nonlocal calls
+        assert rid == robot_id
+        assert after is not None  # first wait follows processing a real frame
+        calls += 1
+        if calls == 1:
+            raise error
+        retry.set()
+        await asyncio.Event().wait()
+
+    pet.multimodal = SimpleNamespace(
+        hub=hub, stream_owns_camera=lambda rid: rid == robot_id,
+        wait_for_proactive_frame=wake,
+    )
+    state = pet.states[robot_id]
+    state.enabled, state.generation, state.quiet = True, 17, True
+    hub.offer(robot_id, WHITE, time.monotonic(), source="proactive")
+    observer = asyncio.create_task(pet._observe(robot_id, 17))
+    try:
+        if head_failure:
+            await asyncio.wait_for(asyncio.shield(observer), timeout=2)
+            assert calls == 1
+            assert not pet.status(robot_id)["enabled"]
+        else:
+            await asyncio.wait_for(retry.wait(), timeout=2)
+            assert not observer.done()
+            assert pet.status(robot_id)["enabled"]
+        assert pet.status(robot_id)["last_error"] == (
+            f"{type(error).__name__}: stream wait failed"
+        )
+        assert state.events == 0
+        assert state.spoken == 0
+    finally:
+        state.enabled = False
+        observer.cancel()
+        await asyncio.gather(observer, return_exceptions=True)
+        await pet.close()
