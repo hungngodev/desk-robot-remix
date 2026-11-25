@@ -1138,27 +1138,45 @@ async def test_five_pet_memory_context_does_not_block_live_voice_loop(settings, 
     speaker = SimulatedSpeaker()
     memory = MemoryStore(tmp_path, [robot.id for robot in settings.robots])
     c = Conversation(settings, SimulatedChat(), speaker, memory=memory)
-    entered = threading.Event()
+    loop = asyncio.get_running_loop()
+    loop_thread = threading.get_ident()
+    entered = asyncio.Event()
+    finished = asyncio.Event()
     release = threading.Event()
     original = c._persona_with_memory
 
     def slow_sqlite_context(robot):
-        entered.set()
-        release.wait(timeout=1.0)
-        return original(robot)
+        if robot.id != "robot-01":
+            return robot.persona
+        loop.call_soon_threadsafe(entered.set)
+        try:
+            assert threading.get_ident() != loop_thread, "SQLite ran on the voice loop"
+            assert release.wait(timeout=15), "Test failed to release SQLite worker"
+            return original(robot)
+        finally:
+            loop.call_soon_threadsafe(finished.set)
 
     c._persona_with_memory = slow_sqlite_context
     task = asyncio.create_task(c.run(["robot-01", "robot-02"], "hello", 2))
     try:
-        assert await asyncio.wait_for(asyncio.to_thread(entered.wait, 0.5), 0.7)
-        # A blocking SQLite read would stall this direct real time callback.
-        await asyncio.wait_for(asyncio.sleep(0.005), timeout=0.07)
-        await asyncio.wait_for(c.stop(), timeout=0.3)
+        await asyncio.wait_for(entered.wait(), timeout=5)
+        assert not finished.is_set()
+        # STOP must complete while the worker is still blocked, not merely
+        # within a short wall-clock interval on an unloaded runner.
+        await asyncio.wait_for(c.stop(), timeout=5)
+        assert not finished.is_set()
         assert task.cancelled()
         assert c.active is None
         assert speaker.spoken == []
     finally:
         release.set()
+        if not task.done():
+            task.cancel()
+        done, _ = await asyncio.wait({task}, timeout=5)
+        assert task in done, "Conversation task survived test cleanup"
+        await asyncio.gather(task, return_exceptions=True)
+        if entered.is_set():
+            await asyncio.wait_for(finished.wait(), timeout=5)
 
 
 async def test_memory_context_error_releases_fleet_owner(settings, tmp_path):
