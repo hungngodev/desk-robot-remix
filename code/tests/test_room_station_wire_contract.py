@@ -56,3 +56,11 @@ def test_inactive_radar_ranges_remain_compatible_with_firmware():
     assert result.readings["ld2410c"]["valid"]
     assert "Station radar detected an echo" in result.summary
     assert "65535 cm" not in result.summary
+
+
+@pytest.mark.parametrize("gas", [0, -1, 0.5])
+def test_existing_gas_range_rejection_keeps_its_error_contract(gas):
+    payload = _frame(1, 1000)
+    payload["readings"]["bme688"]["gas_ohms"] = gas
+    with pytest.raises(ValueError, match="Room sensor reading out of range"):
+        RoomStationDecoder().accept(json.dumps(payload), now=1.0)
