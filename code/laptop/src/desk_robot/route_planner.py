@@ -319,7 +319,7 @@ def revalidate_route_step(
     expected = (start,) if start == goal else (start, goal)
     if (start == goal and start not in route.cells
             or start != goal and not any(
-                (a, b) == expected for a, b in zip(route.cells, route.cells[1:])
+                (a, b) == expected for a, b in zip(route.cells, route.cells[1:], strict=False)
             )):
         return False
     check = plan_route(
