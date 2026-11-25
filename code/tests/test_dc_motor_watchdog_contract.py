@@ -479,3 +479,47 @@ def test_servo_gpio_preloads_before_output_enable_and_pwm_detach():
             "digitalWrite(pin, LOW);"
         )
         assert "pinMode(pin, OUTPUT);" in detach[1]
+
+
+def test_all_dc_environments_require_watchdog_at_compile_time():
+    """Compile the real guard with inherited shipping flags, then remove the watchdog."""
+    ini = ConfigParser(interpolation=None)
+    ini.read_string((BODY / "platformio.ini").read_text(encoding="utf-8"))
+
+    def effective_flags(section):
+        flags = []
+        for token in shlex.split(ini[section]["build_flags"]):
+            if token.startswith("${") and token.endswith(".build_flags}"):
+                flags.extend(effective_flags(token[2:-len(".build_flags}")]))
+            else:
+                flags.append(token)
+        return flags
+
+    compiler = shutil.which("c++")
+    if compiler is None:
+        pytest.skip("C++ compiler unavailable for firmware guard syntax test")
+    main = (BODY / "src/main.cpp").read_text(encoding="utf-8")
+    start = main.index("#ifndef DESK_ROBOT_FULL_SENSORS")
+    end = main.index('#if DESK_ROBOT_FULL_SENSORS\n#include "CliffGuard.h"', start)
+    prelude = main[start:end]
+    watchdog = "-DDESK_ROBOT_ENABLE_DC_WATCHDOG"
+    environments = [name for name in ini.sections() if name.startswith("env:esp32_dc_")]
+    assert "env:esp32_dc_full" in environments
+    for name in environments:
+        flags = effective_flags(name)
+        assert "-DDESK_ROBOT_STEPPER=0" in flags, name
+        assert "-DDESK_ROBOT_FULL_SENSORS=1" in flags, name
+        assert "-DDESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED=0" in flags, name
+        assert watchdog + "=1" in flags, name
+        without_watchdog = [flag for flag in flags if flag.split("=", 1)[0] != watchdog]
+        for definitions, rejected in ((flags, False), (without_watchdog, True)):
+            result = subprocess.run(
+                [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-fsyntax-only",
+                 "-I", str(BODY / "lib/BodyControl"), *definitions, "-x", "c++", "-"],
+                input=prelude, text=True, capture_output=True, check=False, timeout=10,
+            )
+            if rejected:
+                assert result.returncode != 0, name
+                assert "independent motor watchdog heartbeat" in result.stderr, name
+            else:
+                assert result.returncode == 0, (name, result.stderr)
