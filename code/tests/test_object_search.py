@@ -297,3 +297,18 @@ def test_missing_or_invalid_viewpoint_heading_is_rejected(heading):
     result = search(candidates=(replace(view, heading=heading),))
     assert result.reason == "invalid_viewpoint" and result.route is None
     assert not result.arrived and not result.may_execute
+
+
+@pytest.mark.parametrize(
+    ("last_read", "expected"),
+    [(1_025_000, "rejected"), (1_100_000, "viewpoint_proposal")],
+)
+def test_nested_route_clock_cannot_rewind_outer_search(last_read, expected):
+    _, request, _, _, _, _, view = fixtures()
+    view = replace(view, cell=request.start, heading=request.heading)
+    ticks = iter((1_000_000, 1_000_000, 1_050_000, 1_100_000, last_read))
+    result = search(candidates=(view,), clock_us=lambda: next(ticks))
+    assert result.status == expected
+    if expected == "rejected":
+        assert result.reason == "invalid_clock" and result.route is None
+    assert not result.may_execute and not result.arrived

@@ -138,17 +138,25 @@ def propose_object_search(
 
     last_clock_us = now_us
 
-    def live() -> str | None:
+    def read_clock() -> int:
+        # The outer search and every nested route must share one high-water mark.
         nonlocal last_clock_us
+        current = clock_us()
+        if type(current) is not int or current < last_clock_us:
+            raise ValueError("Invalid search clock")
+        last_clock_us = current
+        return current
+
+    def live() -> str | None:
         try:
             if request_is_current() is not True:
                 return "request_invalidated"
-            current = clock_us()
         except Exception:
             return "request_invalidated"
-        if type(current) is not int or current < last_clock_us:
+        try:
+            current = read_clock()
+        except Exception:
             return "invalid_clock"
-        last_clock_us = current
         if current >= object_query.deadline_us or current >= route_request.deadline_us:
             return "deadline_expired"
         if current >= grid.expires_at_us:
@@ -219,7 +227,7 @@ def propose_object_search(
                 goal_heading=view.heading,
             ), envelope, now_us=last_clock_us,
             max_expansions=max_expansions_per_view,
-            clock_us=clock_us, request_is_current=request_is_current,
+            clock_us=read_clock, request_is_current=request_is_current,
         )
         invalid = live()
         if invalid is not None:
