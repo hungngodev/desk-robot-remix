@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "code/scripts/procurement_release.py"
 
@@ -141,3 +143,40 @@ def test_partial_supplier_total_is_explicitly_not_full_cart(tmp_path):
     assert "Partial supplier quote ElectroPeak:" in result.stdout
     assert "Supplier ElectroPeak:" not in result.stdout
     assert "Allocated landed category costs: unknown (incomplete quote)" in result.stdout
+
+
+@pytest.mark.parametrize("bad_scope", [[], {}, ["first_robot"], {"scope": "fleet"}])
+def test_unhashable_quote_scope_is_rejected_without_traceback(tmp_path, bad_scope):
+    path = tmp_path / "invalid-scope.json"
+    path.write_text(json.dumps({"costs": {"scope": bad_scope}}), encoding="utf-8")
+    result = run_cost("--evidence", str(path), "--format", "landed-cost-json")
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "Unknown cost quote scope" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize("bad_mode", [[], {}, ["complete_kit"], {"mode": "complete_kit"}])
+def test_unhashable_power_mode_preserves_unknown_cost(tmp_path, bad_mode):
+    path = tmp_path / "invalid-power-mode.json"
+    path.write_text(json.dumps({"costs": {
+        "scope": "first_robot", "power_package_mode": bad_mode,
+    }}), encoding="utf-8")
+    result = run_cost("--evidence", str(path), "--format", "landed-cost-json")
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert not data["calculation_complete_not_physical_approval"]
+    assert data["payable_now_cents"] is None
+    assert not data["within_prototype_cap"]
+    assert any("one complete power kit" in error for error in data["errors"])
+
+
+@pytest.mark.parametrize("evidence", [[], None, True, "not an object"])
+def test_nonobject_evidence_is_rejected_without_traceback(tmp_path, evidence):
+    path = tmp_path / "invalid-evidence.json"
+    path.write_text(json.dumps(evidence), encoding="utf-8")
+    result = run_cost("--evidence", str(path), "--format", "landed-cost-json")
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "Evidence must be a JSON object" in result.stderr
+    assert "Traceback" not in result.stderr

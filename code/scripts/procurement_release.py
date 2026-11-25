@@ -2359,7 +2359,7 @@ def cost_quote(report: dict, evidence: dict, scope: str) -> dict:
     )
     if scope == "evaluation":
         return cost
-    if mode not in POWER_KIT_MODES:
+    if type(mode) is not str or mode not in POWER_KIT_MODES:
         return invalidate_incomplete_power_quote(
             cost, "one complete power kit or all separately purchased "
                   "charger, boost, protected pack and connector must be selected",
@@ -2730,6 +2730,8 @@ def main() -> int:
                     if args.evidence else {})
     except ValueError as exc:
         parser.error(str(exc))
+    if not isinstance(evidence, dict):
+        parser.error("Evidence must be a JSON object")
     report = generate(plan, evidence)
     provided_costs = evidence.get("costs")
     requested_scope = (provided_costs.get("scope", "first_robot")
@@ -2740,7 +2742,8 @@ def main() -> int:
         pricing_scope = "first_robot"
     else:
         pricing_scope = requested_scope
-    if pricing_scope not in {"first_robot", "fleet", "evaluation"}:
+    if (type(pricing_scope) is not str
+            or pricing_scope not in {"first_robot", "fleet", "evaluation"}):
         parser.error("Unknown cost quote scope")
     cost = cost_quote(report, evidence, pricing_scope)
     if args.require_first_robot and args.format not in (
