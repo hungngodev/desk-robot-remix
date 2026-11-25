@@ -256,21 +256,24 @@ class CameraFrameHub:
 
     def remember_room(
         self, observation: RoomObservation, *, epoch: int | None = None,
+        grant_generation: int | None = None,
     ) -> None:
         if (not isinstance(observation, RoomObservation)
                 or not _admissible_mac_event_clock(observation.received_at)):
             raise ValueError("Room provenance must come from validated USB source")
-        if epoch is not None and epoch != getattr(self, "_room_connection_epoch", 0):
+        if epoch is None:
+            epoch = getattr(self, "_room_connection_epoch", 0)
+        if epoch != getattr(self, "_room_connection_epoch", 0):
             return  # Reject delayed callback from disconnected serial epoch.
         allowed, grant = self._room_grant()
-        if not allowed:
-            return  # Never admit a shared observation while access is revoked.
+        if not allowed or (grant_generation is not None and grant_generation != grant):
+            return  # Never admit a shared observation under a different grant.
         previous = self.shared_room
         if previous is not None and observation.received_at <= previous.received_at:
             return  # An older asynchronous serial callback cannot regress state.
         self.shared_room = observation
         self._shared_room_grant = grant
-        self._shared_room_epoch = self._room_connection_epoch
+        self._shared_room_epoch = epoch
 
     def _check(self, robot_id: str) -> None:
         if robot_id not in self.robots:

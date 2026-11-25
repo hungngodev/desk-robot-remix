@@ -5,6 +5,7 @@ import threading
 from types import SimpleNamespace
 
 import pytest
+from desk_robot.multimodal import CameraFrameHub
 from desk_robot.room_station import RoomObservation
 from desk_robot.runtime import Runtime
 
@@ -169,3 +170,40 @@ def test_room_grant_changes_mid_usb_queue_snapshot_are_rejected():
     runtime._queue_room_observation(loop, room(2))
     loop.callbacks.pop()()
     assert [observation.seq for observation in delivered] == [2]
+
+
+@pytest.mark.parametrize("boundary", ["runtime", "hub"])
+@pytest.mark.parametrize("change", ["consent", "disconnect"])
+def test_room_delivery_preserves_original_epochs(monkeypatch, boundary, change):
+    runtime, _ = make_runtime()
+    runtime.settings = SimpleNamespace(
+        mode="hardware", room_station_context_enabled=True,
+        room_station_consent_generation=0,
+    )
+    hub = CameraFrameHub(["robot-01", "robot-02"], room_settings=runtime.settings)
+    runtime.multimodal = SimpleNamespace(hub=hub)
+    loop = QueuedLoop()
+
+    runtime._queue_room_observation(loop, room(1))
+    target, name = (
+        (runtime, "_on_room_observation") if boundary == "runtime"
+        else (hub, "remember_room")
+    )
+    original = getattr(target, name)
+
+    def interrupt_delivery(observation, **kwargs):
+        if change == "consent":
+            runtime.settings.room_station_context_enabled = False
+            runtime.settings.room_station_consent_generation += 1
+            runtime.settings.room_station_context_enabled = True
+        else:
+            runtime._on_room_disconnect()
+        original(observation, **kwargs)
+
+    monkeypatch.setattr(target, name, interrupt_delivery)
+    loop.callbacks.pop()()
+    assert hub.shared_room is None
+    monkeypatch.setattr(target, name, original)
+    runtime._queue_room_observation(loop, room(2))
+    loop.callbacks.pop()()
+    assert hub.shared_room.seq == 2

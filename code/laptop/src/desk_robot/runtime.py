@@ -128,26 +128,35 @@ class Runtime:
         self._voice_stop_unconfirmed = False
         self._voice_speech_active: set[str] = set()
 
-    def _on_room_observation(self, observation: RoomObservation) -> None:
+    def _on_room_observation(
+        self, observation: RoomObservation, *, epoch: int | None = None,
+        grant_generation: int | None = None,
+    ) -> None:
         """One Mac owner shares only opt-in, ephemeral environmental facts."""
         if (not self._closed and self.settings.room_station_context_enabled
                 and self.multimodal is not None):
+            if epoch is None:
+                epoch = getattr(self, "_room_connection_epoch", 0)
+            if epoch != getattr(self, "_room_connection_epoch", 0):
+                return
+            if (grant_generation is not None and grant_generation !=
+                    getattr(self.settings, "room_station_consent_generation", None)):
+                return
             remember = self.multimodal.hub.remember_room
             try:
                 params = inspect.signature(remember).parameters
-                accepts_epoch = "epoch" in params or any(
-                    p.kind is inspect.Parameter.VAR_KEYWORD
-                    for p in params.values()
+                accepts_kwargs = any(
+                    p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
                 )
             except (TypeError, ValueError):
-                accepts_epoch = False
-            if accepts_epoch:
-                remember(
-                    observation,
-                    epoch=getattr(self, "_room_connection_epoch", 0),
-                )
-            else:
-                remember(observation)
+                params = {}
+                accepts_kwargs = False
+            kwargs = {}
+            if "epoch" in params or accepts_kwargs:
+                kwargs["epoch"] = epoch
+            if "grant_generation" in params or accepts_kwargs:
+                kwargs["grant_generation"] = grant_generation
+            remember(observation, **kwargs)
 
     def _on_room_disconnect(self) -> None:
         """Invalidate pending and cached room state when USB disconnects."""
@@ -186,7 +195,9 @@ class Runtime:
             ):
                 return
             try:
-                self._on_room_observation(observation)
+                self._on_room_observation(
+                    observation, epoch=conn_epoch, grant_generation=grant_generation,
+                )
             except Exception:
                 # An optional context consumer must never fault the event-loop
                 # callback or prevent the next fresh USB observation arriving.
