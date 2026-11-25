@@ -1225,6 +1225,75 @@ int main() {
         CHECK(bus.probe_imu().family == 0);
       }
     }
+    {
+      // All prior accessory lanes crossed with every next optical lane.
+      // Simultaneous faults on both muxes must not permit any range result.
+      // Digital transaction faults only; this is not electrical qualification.
+      const std::uint8_t order[] = {5, 0, 1, 2, 3, 4,
+                                    6, 0, 1, 2, 3, 4, 7};
+      for (std::uint8_t retained = 0; retained < 8; ++retained) {
+        for (std::uint8_t target = 0; target < 8; ++target) {
+          for (unsigned accessory_fault = 0; accessory_fault < 5; ++accessory_fault) {
+            for (unsigned range_fault = 0; range_fault < 5; ++range_fault) {
+              Wire = TwoWire{};
+              fake_i2c_lines() = FakeI2cLines{};
+              desk_robot::TofBus bus;
+              desk_robot::CliffGuard guard;
+              ready(bus, guard);
+              std::uint32_t now = 60;
+              for (const auto lane : order) {
+                if (lane == target) break;
+                bus.poll(guard, now++);
+              }
+              CHECK(guard.evaluate(now));
+              Wire.ranges = 0;
+              Wire.extras = static_cast<std::uint8_t>(1U << retained);
+              Wire.optional_mux_stuck = accessory_fault == 1;
+              Wire.optional_mux_write_nack = accessory_fault == 2;
+              Wire.optional_mux_read_nack = accessory_fault == 3;
+              Wire.optional_mux_installed = accessory_fault != 4;
+              Wire.range_mux_stuck = range_fault == 1;
+              Wire.range_mux_write_nack = range_fault == 2;
+              Wire.range_mux_bad_readback = range_fault == 3;
+              if (range_fault == 4)
+                Wire.hold_sda_on_range_mask = static_cast<std::uint8_t>(1U << target);
+              const auto samples = Wire.tof_samples;
+              bus.poll(guard, now);
+              CHECK(bus.last_channel() == target);
+              CHECK(!Wire.unsafe_parallel_mux);
+              if (accessory_fault == 0 && range_fault == 0) {
+                CHECK(Wire.extras == 0 && Wire.ranges == (1U << target));
+                CHECK(Wire.tof_samples == samples + 1);
+                CHECK(bus.new_optical_channel() == target);
+                CHECK(guard.evaluate(now));
+                continue;
+              }
+              CHECK(Wire.tof_samples == samples);
+              CHECK(bus.new_optical_channel() == 255 && bus.new_extra_channel() == 255);
+              CHECK(guard.fault() == desk_robot::CliffFault::BusFailure);
+              CHECK(!guard.evaluate(now) && !guard.try_rearm(now));
+              for (std::uint8_t lane = 0; lane < 8; ++lane)
+                CHECK(!bus.optical_diagnostic(lane, now).valid);
+              for (std::uint8_t lane = 0; lane < 5; ++lane)
+                CHECK(!guard.diagnostic(lane, now).present);
+              // A failure in the first mux must prevent a write to the second.
+              if (accessory_fault != 0) CHECK(Wire.ranges == 0);
+              Wire.optional_mux_stuck = Wire.optional_mux_write_nack =
+                Wire.optional_mux_read_nack = false;
+              Wire.optional_mux_installed = true;
+              Wire.range_mux_stuck = Wire.range_mux_write_nack =
+                Wire.range_mux_bad_readback = false;
+              Wire.hold_sda_on_range_mask = 0;
+              fake_i2c_lines() = FakeI2cLines{}; // simulated removal of held line
+              for (unsigned i = 0; i < 12; ++i) bus.poll(guard, ++now);
+              CHECK(!guard.evaluate(now));
+              CHECK(guard.try_rearm(now));
+              CHECK(!Wire.unsafe_parallel_mux);
+            }
+          }
+        }
+      }
+    }
     std::cout << "PASS cheap VL53L0X TCA9548A selected-channel readback and fail-closed cliff paths\n";
     return 0;
   } catch (const std::exception& ex) {
