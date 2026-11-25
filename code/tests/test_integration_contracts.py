@@ -131,8 +131,9 @@ def test_cliff_fault_reaches_motor_outputs_before_other_i2c_work():
         assert f"if(tof.bus_accessible()){client}.poll(" in loop
     assert "if(tof.bus_accessible()&&cap1188.present())" in loop
     assert "elseif(!cap1188.verified())control.set_cap(false,0);" in loop
-    assert loop.count("cap1188.invalidate_bus();") == 2
-    assert "tof.observe_shared_bus_fault(cliff_guard);" in loop
+    assert body.count("cap1188.invalidate_bus();") == 2
+    assert "tof.observe_shared_bus_fault(cliff_guard);" in body
+    assert "invalidate_shared_bus_if_faulted();" in loop
 
 
 def test_imu_fault_reaches_motor_outputs_before_optional_i2c_work():
@@ -149,6 +150,42 @@ def test_imu_fault_reaches_motor_outputs_before_optional_i2c_work():
     assert loop.index(armed) < loop.index(sample) < loop.index(stop)
     for client in ("poll_touch(", "cap1188.poll(", "paw_pulse.poll(", "accessories.poll("):
         assert loop.index(stop) < loop.index(client, loop.index(sample))
+
+
+def test_critical_pass_and_uart_precede_optional_context_work():
+    """Runtime checkpoints enforce deadlines without granting fresh motion."""
+    body = (ROOT / "code/firmware/body/src/main.cpp").read_text()
+    checkpoint = body.split("void service_safety_checkpoint() {", 1)[1].split("\n}", 1)[0]
+    assert checkpoint.index("invalidate_shared_bus_if_faulted();") < checkpoint.index(
+        "poll_touch(millis());"
+    ) < checkpoint.index("apply_outputs();")
+    assert "enforce_motor_heartbeat(true)" not in checkpoint
+    loop = body.split("void loop() {", 1)[1]
+    critical = (
+        "tof.poll(",
+        "berry_imu.poll(",
+        "accessories.poll(",
+        "control.set_accessories(",
+        "process_input(head_uart",
+        "process_input(Serial",
+        "head_replies.drain(",
+        "usb_replies.drain(",
+    )
+    positions = [loop.index(token) for token in critical]
+    assert positions == sorted(positions)
+    for before, after in zip(positions[:3], positions[1:4], strict=True):
+        if after == positions[3]:
+            continue  # Accessory evidence must be published before the next checkpoint.
+        assert "service_safety_checkpoint();" in loop[before:after]
+    assert "service_safety_checkpoint();" in loop[positions[3]:positions[4]]
+    cap = loop.index("cap1188.poll(")
+    paw = loop.index("paw_pulse.poll(")
+    heartbeat = loop.index("enforce_motor_heartbeat(true);")
+    assert positions[-1] < cap < paw < heartbeat
+    assert "static bool cap_next = true;" in loop
+    assert "cap_next = !cap_next;" in loop
+    assert "service_safety_checkpoint();" in loop[paw:heartbeat]
+    assert loop.index("control.tick(millis());") < heartbeat < loop.rindex("apply_outputs();")
 
 
 def test_real_robot_pin_allocations_do_not_double_book_same_gpio():

@@ -710,6 +710,33 @@ void setup() {
       "ERR boot pwm_unavailable");
 }
 
+#if DESK_ROBOT_FULL_SENSORS
+void invalidate_shared_bus_if_faulted() {
+  if (tof.bus_accessible()) return;
+  // A client after the range scan can hold SDA/SCL. No more I2C work,
+  // no cached evidence and no wait for the next scan before stopping.
+  tof.observe_shared_bus_fault(cliff_guard);
+  control.invalidate_side_ranges();
+  control.invalidate_range_optics();
+  berry_imu.invalidate_bus();
+  control.set_imu(berry_imu.reading());
+  cap1188.invalidate_bus();
+  control.set_cap(false, 0);
+  paw_pulse.invalidate_bus();
+  control.set_paw_pulse(paw_pulse.sample());
+  accessories.invalidate_bus();
+  control.set_accessories(accessories.readings(), millis());
+}
+
+void service_safety_checkpoint() {
+  // No new motor permission or heartbeat edge: enforce existing authority
+  // and deadlines before the next synchronous client gets the shared bus.
+  invalidate_shared_bus_if_faulted();
+  poll_touch(millis());
+  apply_outputs();
+}
+#endif
+
 void loop() {
 #if DESK_ROBOT_FULL_SENSORS
   // Apply an open NC contact before the first potentially blocking bus read.
@@ -717,8 +744,9 @@ void loop() {
   // Sample raw touch before any potentially blocking shared bus transfer.
   // Poll again after IMU work below; the gesture clock is independent.
   poll_touch(millis());
-  // Real I2C sampling precedes every physical motor update. The pure
-  // CliffGuard remains the only local motion/safety authority.
+  // Expire an old drive before starting another synchronous sensor call.
+  // New UART commands still wait for the complete critical sensor pass.
+  service_safety_checkpoint();
   if (tof.ready()) {
     const auto scan_ms = millis();
     const auto errors_before = tof.errors();
@@ -745,6 +773,7 @@ void loop() {
   // A fault must reach the physical outputs before another shared I2C
   // transaction can block. Preserve holding PWM through apply_outputs().
   if (!cliff_guard.evaluate(millis())) apply_outputs();
+  service_safety_checkpoint();
   if (tof.bus_accessible()) berry_imu.poll(millis());
   if (!tof.bus_accessible()) {
     berry_imu.invalidate_bus();
@@ -761,18 +790,44 @@ void loop() {
   poll_touch(millis());
   poll_optional(millis());
   if (control.state().bumper_raw) apply_outputs();
-  // Safety sampling first, optional petting second. No motion authority.
-  std::uint8_t cap_zones = 0;
-  if (tof.bus_accessible() && cap1188.present()) {
-    if (cap1188.poll(millis(), cap_zones)) control.set_cap(true, cap_zones);
-    else if (!cap1188.verified()) control.set_cap(false, 0);
+  service_safety_checkpoint();
+  if (tof.bus_accessible()) accessories.poll(millis());
+  invalidate_shared_bus_if_faulted();
+  control.set_accessories(accessories.readings(), millis());
+  service_safety_checkpoint();
+#if defined(DESK_ROBOT_ENABLE_TERMINAL_IR) && DESK_ROBOT_ENABLE_TERMINAL_IR
+  terminal_ir.poll(millis());  // bounded, nonblocking, after cliff/dock reads
+  control.set_terminal_ir(terminal_ir.evidence(millis()));
+#endif
+  service_safety_checkpoint();
+#endif
+  apply_outputs();
+  process_input(head_uart, head_receiver, head_replies, false);
+  process_input(Serial, usb_receiver, usb_replies, true);
+  // Never wait for the complete JSON/status wire time. Each port transfers
+  // at most 32 already-bufferable bytes after safety and input handling.
+  head_replies.drain(head_uart);
+  usb_replies.drain(Serial);
+#if DESK_ROBOT_FULL_SENSORS
+  // One non-authoritative context client per loop, after both UART RX slices.
+  // This bounds the optional work ahead of the next safety/STOP service.
+  static bool cap_next = true;
+  if (cap_next) {
+    std::uint8_t cap_zones = 0;
+    if (tof.bus_accessible() && cap1188.present()) {
+      if (cap1188.poll(millis(), cap_zones)) control.set_cap(true, cap_zones);
+      else if (!cap1188.verified()) control.set_cap(false, 0);
+    } else {
+      cap1188.invalidate_bus();
+      control.set_cap(false, 0);
+    }
   } else {
-    cap1188.invalidate_bus();
-    control.set_cap(false, 0);
+    if (tof.bus_accessible()) paw_pulse.poll(millis());
+    if (!tof.bus_accessible()) paw_pulse.invalidate_bus();
+    control.set_paw_pulse(paw_pulse.sample());
   }
-  if (tof.bus_accessible()) paw_pulse.poll(millis());
-  if (!tof.bus_accessible()) paw_pulse.invalidate_bus();
-  control.set_paw_pulse(paw_pulse.sample());
+  cap_next = !cap_next;
+  service_safety_checkpoint();
 #if DESK_ROBOT_ENABLE_HAPTIC
   // React only to a genuine fresh CAP1188 rising touch zone, not a boot
   // baseline, microphone/LLM request, or arbitrary remote motor command.
@@ -785,26 +840,6 @@ void loop() {
       accessories.request_haptic(millis());
   }
 #endif
-  if (tof.bus_accessible()) accessories.poll(millis());
-  if (!tof.bus_accessible()) {
-    // A client after the range scan can hold SDA/SCL. No more I2C work,
-    // no cached evidence and no wait for the next scan before stopping.
-    tof.observe_shared_bus_fault(cliff_guard);
-    control.invalidate_side_ranges();
-    control.invalidate_range_optics();
-    berry_imu.invalidate_bus();
-    control.set_imu(berry_imu.reading());
-    cap1188.invalidate_bus();
-    control.set_cap(false, 0);
-    paw_pulse.invalidate_bus();
-    control.set_paw_pulse(paw_pulse.sample());
-    accessories.invalidate_bus();
-  }
-  control.set_accessories(accessories.readings(), millis());
-#if defined(DESK_ROBOT_ENABLE_TERMINAL_IR) && DESK_ROBOT_ENABLE_TERMINAL_IR
-  terminal_ir.poll(millis());  // bounded, nonblocking, after cliff/dock reads
-  control.set_terminal_ir(terminal_ir.evidence(millis()));
-#endif
   // Never advance a CPU heartbeat using a pre-I2C bumper observation.
   sample_raw_bumper();
 #endif
@@ -813,11 +848,5 @@ void loop() {
   enforce_motor_heartbeat(true);
 #endif
   apply_outputs();
-  process_input(head_uart, head_receiver, head_replies, false);
-  process_input(Serial, usb_receiver, usb_replies, true);
-  // Never wait for the complete JSON/status wire time. Each port transfers
-  // at most 32 already-bufferable bytes after safety and input handling.
-  head_replies.drain(head_uart);
-  usb_replies.drain(Serial);
   delay(1);
 }
