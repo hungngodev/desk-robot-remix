@@ -13,7 +13,7 @@ import pytest
 from desk_robot.api import create_app
 from desk_robot.config import load_settings
 from desk_robot.conversation import Conversation, KokoroHeadSpeaker
-from desk_robot.memory import MemoryStore
+from desk_robot.memory import CameraProvenance, MemoryStore
 from desk_robot.multimodal import CameraFrameHub
 from desk_robot.pet import PetController, _initiative_evidence
 from desk_robot.simulator import SimulatedSpeaker
@@ -8232,4 +8232,53 @@ async def test_pet_proactive_context_includes_habituation_and_active_navigation_
         assert speaker.spoken == [("robot-01", "Stepping carefully around the desk edge.")]
     finally:
         state.enabled = False
+        await pet.close()
+
+@pytest.mark.parametrize("peer_identity", [
+    None, (7, 19, 201), (8, 19, 200), (7, 20, 200),
+])
+async def test_operator_peer_share_rejects_conflicting_camera_receipt(
+    fleet, tmp_path, peer_identity,
+):
+    fleet.fleet_text_sharing_enabled = True
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    when = time.time() - 2
+    event = "same-camera-event"
+    original = CameraProvenance(when, when + 1, (7, 19, 200))
+    conflicting = (
+        CameraProvenance(when, when + 1, peer_identity)
+        if peer_identity is not None else None
+    )
+    for robot, witnessed, receipt in (
+        ("robot-01", True, original),
+        ("robot-02", False, conflicting),
+    ):
+        assert memory.remember(
+            robot, event, "A key appeared", kind="key", source_robot="robot-01",
+            witnessed=witnessed, observed_at=when, confidence=0.95,
+            camera_provenance=receipt,
+        )
+    pet = PetController(
+        fleet, {}, Conversation(
+            fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+        ), memory, KeyScene(),
+    )
+    try:
+        # Text, observation time and source match, but camera identity does not.
+        with pytest.raises(ValueError, match="conflicting memory event ID"):
+            await pet.share_with_peer("robot-01", "robot-02", event)
+        assert memory.get_camera_provenance("robot-02", event) == conflicting
+        assert memory.count("robot-02") == 1
+        assert memory.get_camera_provenance("robot-01", event) == original
+        # The same source can still be shared to an unoccupied private store,
+        # and a repeat with identical provenance remains an idempotent no-op.
+        first = await pet.share_with_peer("robot-01", "robot-03", event)
+        second = await pet.share_with_peer("robot-01", "robot-03", event)
+        assert first["stored"] is True and second["stored"] is False
+        assert first["event_id"] == second["event_id"] == event
+        assert first["source_robot"] == second["source_robot"] == "robot-01"
+        assert first["witnessed"] is second["witnessed"] is False
+        assert memory.get_camera_provenance("robot-03", event) == original
+        assert memory.count("robot-03") == 1
+    finally:
         await pet.close()

@@ -926,6 +926,9 @@ class PetController:
                     and prior.summary == source.summary
                     and prior.observed_at == source.observed_at
                     and prior.confidence == source.confidence
+                    and self.memory.get_camera_provenance(
+                        to_robot, source.event_id,
+                    ) == original_camera
                 ):
                     raise ValueError(
                         "Receiving pet has a conflicting memory event ID"
