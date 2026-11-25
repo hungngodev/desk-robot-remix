@@ -946,7 +946,7 @@ async def test_second_pet_cannot_use_first_pet_dock_intrinsics_to_move(
 
 
 @pytest.mark.parametrize(
-    "outcome", ["standoff", "contact", "beacon_loss", "timeout",
+    "outcome", ["standoff", "contact", "beacon_loss", "ir_replay", "timeout",
                 "marker_loss", "pulse_budget", "receipt_denial",
                 "queued_camera_expired", "queued_stream_replaced"],
 )
@@ -1047,10 +1047,11 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
         async def ir_status(self):
             self.ir_reads += 1
             matching = not (outcome == "beacon_loss" and self.ir_reads == 2)
+            seq = 1 if outcome == "ir_replay" and self.ir_reads == 2 else self.ir_reads
             return {
                 "robot_id": robot.id, "left_valid": matching,
                 "right_valid": matching, "match": matching,
-                "left_seq": self.ir_reads, "right_seq": self.ir_reads,
+                "left_seq": seq, "right_seq": seq,
                 "left_age_ms": 5, "right_age_ms": 5,
                 "code": dock_beacon_code(1) if matching else 0,
                 "motor_authorized": False, "charging_authorized": False,
@@ -1142,13 +1143,13 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
         elif outcome == "marker_loss":
             assert head.frames == 2 and head.ir_reads == 1
         else:
-            if outcome != "beacon_loss":
+            if outcome not in {"beacon_loss", "ir_replay"}:
                 expected += ["drive 20 20 100", "stop"]
             assert head.ir_reads == 2
         assert commands == expected + ["halt"]
         assert not head.armed
         if outcome in {
-            "standoff", "beacon_loss", "marker_loss", "pulse_budget",
+            "standoff", "beacon_loss", "ir_replay", "marker_loss", "pulse_budget",
             "queued_camera_expired",
         }:
             assert job.state == "succeeded"
@@ -1158,6 +1159,7 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
             reason = {
                 "standoff": "contacts unverified",
                 "beacon_loss": "not jointly visible",
+                "ir_replay": "Assigned dock IR replay or stale conversion",
                 "marker_loss": "No identified, calibrated target",
                 "pulse_budget": "Maximum guarded approach pulses reached",
                 "queued_camera_expired": "Dock camera receipt expired before guarded drive",

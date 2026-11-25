@@ -931,3 +931,27 @@ def test_dock_native_raster_must_match_encoded_dimensions(monkeypatch):
     monkeypatch.setattr(cv2.aruco, "getPredefinedDictionary", forbidden_detector)
     with pytest.raises(ValueError, match="resolution differs from encoded image"):
         detect_apriltag(jpeg, calibration(), captured_at=5)
+
+
+@pytest.mark.parametrize("detected_id", [13, 14, 15, 16])
+def test_detect_apriltag_rejects_wrong_valid_integer_marker_id(monkeypatch, detected_id):
+    import numpy as np
+
+    cv2 = pytest.importorskip("cv2")
+    corners = [np.array([[[280.0, 200.0], [360.0, 200.0], [360.0, 280.0], [280.0, 280.0]]], dtype=np.float32)]
+
+    class WrongIdDetector:
+        def __init__(self, *_a):
+            pass
+
+        def detectMarkers(self, _gray):
+            return corners, np.array([[detected_id]], dtype=np.int32), []
+
+    monkeypatch.setattr(cv2.aruco, "ArucoDetector", WrongIdDetector)
+    monkeypatch.setattr(cv2, "solvePnP", lambda *a, **kw: pytest.fail("Wrong marker reached solvePnP"))
+    pose = detect_apriltag(_encoded_frame(), calibration(), captured_at=2.0)
+    assert pose is None
+    decision = assess_dock(pose, now=2.05, target_distance_mm=120)
+    assert decision.phase == "hold"
+    assert not decision.motor_authorized
+    assert not decision.charging_authorized
