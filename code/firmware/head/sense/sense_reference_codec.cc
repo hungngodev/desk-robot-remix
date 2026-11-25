@@ -173,6 +173,13 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
             bench_window_.invalidate_read(failed_read_us);
         }
 #endif
+        // Count actual driver failures in every build, not just private AEC
+        // captures. A short read is not proof of a hardware DMA queue overflow.
+        {
+            std::lock_guard<std::mutex> diagnostics_lock(reference_mutex_);
+            if (short_input_reads_ != UINT32_MAX) ++short_input_reads_;
+            reference_integrity_failed_ = true;
+        }
         // An error or short PDM read can still have written raw microphone PCM.
         std::fill_n(microphone_frame_.begin(), frames, 0);
         return 0; // AudioCodec::InputData is boolean; reject partial frames.
@@ -372,7 +379,7 @@ SenseReferenceCodec::GetReferenceDiagnostics() {
     std::lock_guard<std::mutex> lock(reference_mutex_);
     return ReferenceDiagnostics{
         missing_reference_reads_, reference_overwrite_reads_,
-        stale_publish_discards_, short_output_writes_,
+        stale_publish_discards_, short_output_writes_, short_input_reads_,
         microphone_frames_read_, speaker_frames_accepted_,
         microphone_privacy_muted_.load(std::memory_order_acquire),
         microphone_privacy_epoch_.load(std::memory_order_acquire),

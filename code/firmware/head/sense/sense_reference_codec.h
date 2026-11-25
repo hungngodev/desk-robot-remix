@@ -59,6 +59,7 @@ public:
         uint32_t overwrite_reads;
         uint32_t discarded_stale_writes;
         uint32_t short_output_writes;
+        uint32_t short_input_reads;
         uint32_t microphone_frames_read;
         uint32_t speaker_frames_accepted;
         // BOOT privacy is measured at the real PDM owner, not a GUI guess.
@@ -162,6 +163,8 @@ private:
     uint32_t stale_publish_discards_ = 0;
     // I2S timeout/short output cannot be counted as fully delivered speech.
     uint32_t short_output_writes_ = 0;
+    // Actual PDM driver errors/short reads, distinct from reference overwrites.
+    uint32_t short_input_reads_ = 0;
     // Driver read/write progress, not proof of microphone acoustic quality
     // or speaker playback. Persist across cancellation for a live bench.
     uint32_t microphone_frames_read_ = 0;
