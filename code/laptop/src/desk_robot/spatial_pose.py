@@ -154,6 +154,12 @@ class PoseFence:
                             and (reading.seq <= old.seq or reading.sample_us <= old.sample_us))):
                     self.invalidate("replayed_or_reset_pose_clock")
                     raise PoseError("Pose sequence, sample clock, or receipt clock reset")
+                if reading.body_boot == old.body_boot:
+                    host_delta = reading.received_at - old.received_at
+                    body_delta = (reading.sample_us - old.sample_us) / 1_000_000
+                    if body_delta - host_delta > 5:
+                        self.invalidate("implausible_pose_clock")
+                        raise PoseError("Pose sample clock advanced implausibly")
                 # Retire each changed identity independently: a different head
                 # boot must never resurrect a previously invalidated body origin.
                 if reading.body_boot != old.body_boot:
@@ -164,7 +170,10 @@ class PoseFence:
                     self._retired_head_boots.add(old.head_boot)
                 # Origin zero is a repeatable unavailable diagnostic, not a frame.
                 self.last = reading
-                self._clock_reference = reading
+                # The best source clock offset belongs to the body boot, not
+                # the head or origin. A new frame cannot launder source lag.
+                if reading.body_boot != old.body_boot or self._relative_lag_s(reading) < 0:
+                    self._clock_reference = reading
                 self.invalidate("origin_changed")
                 raise PoseError("Pose body origin or head boot changed; re-anchor required")
             if (reading.seq <= old.seq or reading.sample_us <= old.sample_us
@@ -184,7 +193,7 @@ class PoseFence:
                 self._failed.add(identity)
                 self.invalidate("implausible_pose_clock")
                 raise PoseError("Pose sample clock advanced implausibly")
-        # Keep the best observed relative offset for this identity. Sliding the
+        # Keep the best observed relative offset for this body boot. Sliding the
         # baseline on every packet would hide a slowly growing source backlog.
         # This is a conservative relative bound, not a synchronized clock or
         # proof that the first sample was fresh. No unmeasured drift allowance.
