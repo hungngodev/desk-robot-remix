@@ -184,6 +184,45 @@ static void timestamp_and_cap_extremes_do_not_overflow() {
   CHECK(clock.silence_frames(hi, 16384) == 16384);
 }
 
+static void fractional_output_end_survives_projection_and_idle_reanchor() {
+  PlaybackReferenceClock clock;
+  CHECK(clock.silence_frames(1000000, 16384) == 0);
+  clock.accepted_output_frames(1);  // 31.25 us, not 31 us.
+  CHECK(clock.future_reference_frames(1000031, 16384) == 1);
+  CHECK(clock.future_reference_frames(1000032, 16384) == 0);
+  CHECK(clock.silence_frames(1000156, 16384) == 1); // 124.75 us, not 125.
+  CHECK(clock.silence_frames(1000157, 16384) == 1);
+  clock.accepted_output_frames(1);
+  CHECK(clock.represented_end_us() == 1000188);
+  CHECK(clock.future_reference_frames(1000188, 16384) == 1);
+  CHECK(clock.silence_frames(1000189, 16384) == 0);
+  // Independent exact quarter-microsecond oracle, including idle gaps,
+  // non-integral chunk duration, queued writes and arbitrary PDM cadence.
+  clock.reset();
+  std::int64_t now = 1000000;
+  std::int64_t end_quarters = now * 4;
+  std::uint64_t gap_remainder = 0;
+  CHECK(clock.silence_frames(now, 16384) == 0);
+  for (int i = 1; i <= 10000; ++i) {
+    now += 1 + (i * 71) % 3000;
+    const auto at = now * 4;
+    std::uint64_t silence = 0;
+    if (at > end_quarters) {
+      const auto gap = static_cast<std::uint64_t>(at - end_quarters) + gap_remainder;
+      silence = gap / 250;
+      gap_remainder = gap % 250;
+      end_quarters = at;
+    }
+    CHECK(clock.silence_frames(now, 16384) == silence);
+    const int accepted = 1 + (i * 13) % 97;
+    clock.accepted_output_frames(accepted);
+    end_quarters += static_cast<std::int64_t>(accepted) * 125;
+    CHECK(clock.represented_end_us() == end_quarters / 4);
+    CHECK(clock.future_reference_frames(now, 16384) ==
+          static_cast<std::uint64_t>((end_quarters - at + 249) / 250));
+  }
+}
+
 int main() {
   try {
     for (int cadence_ms : {10, 20, 30, 60}) {
@@ -199,6 +238,7 @@ int main() {
     irregular_idle_cadence_retains_fractional_reference_samples();
     short_i2s_writes_preserve_submicrosecond_playback_time();
     reset_retires_fractional_timing_residue();
+    fractional_output_end_survives_projection_and_idle_reanchor();
     std::cout << "PASS actual Sense playback reference time accounting\n";
   } catch (const std::exception& exc) {
     std::cerr << "FAIL " << exc.what() << "\n";

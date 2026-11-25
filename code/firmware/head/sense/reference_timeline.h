@@ -25,12 +25,21 @@ class PlaybackReferenceClock {
     if (now_us <= end_us_) return 0;
     // Ordered signed timestamps can span the full uint64_t range. Subtract
     // in unsigned space, then split whole seconds before multiplying.
-    const auto elapsed_us = static_cast<std::uint64_t>(now_us) -
+    auto elapsed_us = static_cast<std::uint64_t>(now_us) -
         static_cast<std::uint64_t>(end_us_);
     // Keep the fractional sample phase between irregular PDM reads without
     // overflowing either the elapsed-time product or a caller-supplied cap.
+    // The queued output end can contain a fractional microsecond. Subtract
+    // that fraction before re-anchoring to the integer microphone clock.
+    // Borrow a whole microsecond before splitting to avoid unsigned underflow.
+    std::uint64_t fractional_gap = 0;
+    if (output_remainder_ != 0) {
+      --elapsed_us;
+      fractional_gap = (kOutputRate - output_remainder_) / 2U;
+    }
     const auto numerator = (elapsed_us % 1000000U) * kReferenceRate +
-        silence_remainder_;
+        silence_remainder_ + fractional_gap;
+    output_remainder_ = 0;
     const auto frames = (elapsed_us / 1000000U) * kReferenceRate +
         numerator / 1000000U;
     end_us_ = now_us;
@@ -56,7 +65,8 @@ class PlaybackReferenceClock {
         return;
       }
       end_us_ += duration;
-      output_remainder_ = numerator % kOutputRate;
+      output_remainder_ = end_us_ == std::numeric_limits<std::int64_t>::max()
+          ? 0 : numerator % kOutputRate;
     }
   }
 
@@ -66,13 +76,15 @@ class PlaybackReferenceClock {
   // This is a bounded software timing estimate, not physical DAC playback.
   std::uint64_t future_reference_frames(std::int64_t now_us,
                                         std::uint64_t cap) const {
-    if (end_us_ <= now_us) return 0;
+    if (!initialized_ || end_us_ < now_us) return 0;
+    if (end_us_ == now_us && output_remainder_ == 0) return 0;
     if (now_us < 0) return cap;
     const auto ahead_us = static_cast<std::uint64_t>(end_us_ - now_us);
     // Round up: never expose a queued PCM sample as already played. Split
     // the duration so even INT64_MAX and UINT64_MAX caps are safe.
     return std::min(cap, (ahead_us / 1000000U) * kReferenceRate +
-        ((ahead_us % 1000000U) * kReferenceRate + 999999U) / 1000000U);
+        ((ahead_us % 1000000U) * kReferenceRate +
+         output_remainder_ / 2U + 999999U) / 1000000U);
   }
 
   void reset() {
