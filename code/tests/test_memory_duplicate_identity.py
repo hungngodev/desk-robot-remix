@@ -196,3 +196,34 @@ def test_failed_fts_rebuild_rolls_back_entire_schema_migration(tmp_path, monkeyp
     reopened = MemoryStore(tmp_path, ["robot-1", "robot-10"])
     assert reopened.search("robot-1", "legacy")[0].event_id == "old"
     assert reopened.search("robot-10", "legacy") == []
+
+
+@pytest.mark.parametrize("suffix", ["-journal", "-wal", "-shm"])
+@pytest.mark.parametrize("link", ["hard", "symbolic"])
+def test_memory_rejects_linked_sqlite_sidecars(tmp_path, suffix, link):
+    import os
+
+    store = MemoryStore(tmp_path, ["pet_a", "pet_b"])
+    assert store.remember(
+        "pet_b", "private_note", "Pet B private observation",
+        kind="scene", source_robot="pet_b", witnessed=True,
+    )
+    peer = tmp_path / "pet_b.sqlite3"
+    expected = peer.read_bytes()
+    alias = tmp_path / ("pet_a.sqlite3" + suffix)
+    if link == "hard":
+        os.link(peer, alias)
+    else:
+        alias.symlink_to(peer)
+    try:
+        with pytest.raises(ValueError, match="memory sidecar"):
+            store.remember(
+                "pet_a", "new_note", "Pet A private observation",
+                kind="scene", source_robot="pet_a", witnessed=True,
+            )
+        assert peer.read_bytes() == expected
+    finally:
+        alias.unlink()
+    assert store.recent("pet_a") == []
+    assert store.recent("pet_b")[0].summary == "Pet B private observation"
+    assert MemoryStore(tmp_path, ["pet_a", "pet_b"]).count("pet_b") == 1

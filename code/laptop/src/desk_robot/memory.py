@@ -13,6 +13,7 @@ import math
 import os
 import re
 import sqlite3
+import stat
 import time
 import unicodedata
 from contextlib import contextmanager
@@ -365,6 +366,17 @@ class MemoryStore:
         # aliases introduced after MemoryStore was initialized.
         if path.exists() and path.stat().st_nlink > 1:
             raise ValueError("Refusing hard-linked memory database")
+        # SQLite can open existing WAL/SHM/journal files itself. In particular,
+        # a hard-linked WAL or SHM can overwrite an unrelated private file.
+        # Reject preexisting aliases before handing any filename to SQLite.
+        for suffix in ("-journal", "-wal", "-shm"):
+            sidecar = path.with_name(path.name + suffix)
+            try:
+                info = sidecar.lstat()
+            except FileNotFoundError:
+                continue
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                raise ValueError("Refusing linked or nonregular memory sidecar")
         db = sqlite3.connect(path, timeout=3)
         try:
             # A private root is necessary but insufficient if an older
