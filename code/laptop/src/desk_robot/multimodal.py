@@ -63,17 +63,22 @@ def _prepare(jpeg: bytes, max_side: int = 768) -> tuple[bytes, bytes, float]:
     """Encode bounded JPEG for the VLM and a tiny grayscale motion fingerprint."""
     if not isinstance(jpeg, bytes) or not 12 <= len(jpeg) <= 4_000_000:
         raise ValueError("Camera JPEG size invalid")
-    with Image.open(BytesIO(jpeg)) as im:
-        if im.format != "JPEG":
-            raise ValueError("Authenticated camera source must return JPEG")
-        # JPEG headers expose the declared dimensions without decoding the
-        # image. Reject oversized frames BEFORE allocating the RGB raster.
-        # With five active heads an untrusted decompression bomb must never
-        # consume the live audio/camera worker's memory budget.
-        if not 1 <= im.width <= 4096 or not 1 <= im.height <= 4096:
-            raise ValueError("Camera dimensions invalid")
-        im.load()
-        rgb = ImageOps.exif_transpose(im).convert("RGB")
+    try:
+        with Image.open(BytesIO(jpeg)) as im:
+            if im.format != "JPEG":
+                raise ValueError("Authenticated camera source must return JPEG")
+            # JPEG headers expose the declared dimensions without decoding the
+            # image. Reject oversized frames BEFORE allocating the RGB raster.
+            # With five active heads an untrusted decompression bomb must never
+            # consume the live audio/camera worker's memory budget.
+            if not 1 <= im.width <= 4096 or not 1 <= im.height <= 4096:
+                raise ValueError("Camera dimensions invalid")
+            im.load()
+            rgb = ImageOps.exif_transpose(im).convert("RGB")
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
+        # Pillow can reject a malicious raster before our size guard runs.
+        # Classify it as a bad frame, not a broken continuous connection.
+        raise ValueError("Camera dimensions invalid") from exc
     rgb.thumbnail((max_side, max_side), Image.Resampling.BILINEAR)
     gray = ImageOps.grayscale(rgb).resize((64, 48))
     fingerprint = gray.tobytes()

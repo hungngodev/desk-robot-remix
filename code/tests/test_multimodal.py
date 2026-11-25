@@ -65,12 +65,13 @@ def test_legacy_camera_source_has_no_invented_device_timestamp():
     assert camera["exposure_timestamp_verified"] is False
 
 
-def test_oversized_jpeg_header_rejected_before_pixel_decompression():
+@pytest.mark.parametrize("size", [5000, 65535])
+def test_oversized_jpeg_header_rejected_before_pixel_decompression(size):
     """A JPEG may advertise huge dimensions in a tiny source byte stream."""
     frame = bytearray(image())
     sof = frame.find(b"\xff\xc0")
     assert sof > 0  # PIL's default generated RGB JPEG is baseline SOF0.
-    frame[sof + 5:sof + 9] = (5000).to_bytes(2, "big") * 2
+    frame[sof + 5:sof + 9] = size.to_bytes(2, "big") * 2
     with pytest.raises(ValueError, match="Camera dimensions invalid"):
         _prepare(bytes(frame))
 
@@ -261,15 +262,15 @@ async def test_stream_frame_aging_out_during_jpeg_decode_is_not_published():
         await visual.close()
 
 
-@pytest.mark.parametrize("malformed", [True, False])
-async def test_corrupt_live_jpeg_drops_frame_without_restarting_camera_stream(malformed):
+@pytest.mark.parametrize("size", [None, 5000, 65535])
+async def test_corrupt_live_jpeg_drops_frame_without_restarting_camera_stream(size):
     """Malformed bytes and deceptive JPEG dimensions must not break video."""
     bad_frame = b"not a JPEG"
-    if not malformed:
+    if size is not None:
         oversized = bytearray(image())
         sof = oversized.find(b"\xff\xc0")
         assert sof > 0
-        oversized[sof + 5:sof + 9] = (5000).to_bytes(2, "big") * 2
+        oversized[sof + 5:sof + 9] = size.to_bytes(2, "big") * 2
         bad_frame = bytes(oversized)
 
     class CorruptThenHealthy(Head):
