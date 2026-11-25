@@ -99,6 +99,7 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
     first_audio_at = None
     input_appends_after_first_audio = 0
     model_decision = None
+    decision_at = None
     started_at = time.monotonic()
     # This is a prerecorded operator-supplied test JPEG, NOT a live
     # XIAO exposure timestamp. Use its one local receipt identity for the
@@ -121,6 +122,7 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
             greeting = await socket.receive_json(timeout=10)
             verify_native_server(greeting, wire.model)
             wire.handle_event(greeting)
+            session_ready_at = time.monotonic()
             if barrier is not None:
                 # Hold every authenticated backend session open BEFORE
                 # sending a single audio unit. Serial one-at-a-time probes
@@ -129,8 +131,11 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                     barrier.wait(), timeout=min(10.0, deadline),
                 )
 
+            input_started_at = time.monotonic()
+
             async def reader():
                 nonlocal first_audio_at, model_decision, input_appends_after_first_audio
+                nonlocal decision_at
                 async for msg in socket:
                     if msg.type != aiohttp.WSMsgType.TEXT:
                         raise RuntimeError("Non-JSON response from native backend")
@@ -158,6 +163,7 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                         # model listen decision without response.created/done.
                         # It is not generated audio, a playback ACK, or a fail.
                         model_decision = "listen"
+                        decision_at = time.monotonic()
                         return
                     if packet is not None:
                         if first_audio_at is None:
@@ -184,6 +190,7 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                                 "Native duplex completed without generated speech"
                             )
                         model_decision = "speak"
+                        decision_at = time.monotonic()
                         return
                 raise RuntimeError("Native duplex socket ended before response.done")
 
@@ -244,6 +251,19 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
         "generated_audio_ms": len(output) * 1000 // (24000 * 2),
         "input_appends_after_first_audio": input_appends_after_first_audio,
         "input_output_overlap_observed": input_appends_after_first_audio > 0,
+        # Keep protocol negotiation and fleet admission separate from the
+        # paced input and terminal response. These are client-side clocks,
+        # not model compute time or acoustic latency.
+        "session_negotiation_ms": round((session_ready_at - started_at) * 1000),
+        "fleet_admission_wait_ms": round((input_started_at - session_ready_at) * 1000),
+        "first_audio_ms_since_input_start": (
+            round((first_audio_at - input_started_at) * 1000)
+            if first_audio_at is not None else None
+        ),
+        "terminal_decision_ms_since_input_start": (
+            round((decision_at - input_started_at) * 1000)
+            if decision_at is not None else None
+        ),
         "first_audio_ms_since_connect": (
             round((first_audio_at - started_at) * 1000)
             if first_audio_at is not None else None

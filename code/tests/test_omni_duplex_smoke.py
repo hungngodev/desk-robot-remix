@@ -346,8 +346,9 @@ async def test_native_av_smoke_propagates_backend_error_during_input_pacing():
 
 
 @pytest.mark.asyncio
-async def test_real_five_concurrent_websocket_av_sessions_use_independent_receipts():
-    """Five actual protocol sockets, not five mocked Python probe calls."""
+@pytest.mark.parametrize("count", [1, 2, 5])
+async def test_real_concurrent_websocket_av_sessions_use_independent_receipts(count):
+    """Actual protocol sockets at each fleet size, not mocked probe calls."""
     import asyncio
     import base64
     import json
@@ -388,9 +389,9 @@ async def test_real_five_concurrent_websocket_av_sessions_use_independent_receip
                     },
                 })
             elif event["type"] == "input_audio_buffer.append":
-                # The shared preflight barrier must open all five authenticated
+                # The shared preflight barrier must open all requested authenticated
                 # sessions before ANY model receives its first audio chunk.
-                assert len(sessions) == 5
+                assert len(sessions) == count
                 appends.append((session_id, event))
             elif event["type"] == "input_audio_buffer.commit":
                 response_id = f"resp_{session_id}"
@@ -423,11 +424,11 @@ async def test_real_five_concurrent_websocket_av_sessions_use_independent_receip
         )
         result = await asyncio.wait_for(smoke.probe_fleet(
             url, "openbmb/MiniCPM-o-4_5", bytes(32000), jpeg,
-            deadline=5, count=5,
+            deadline=5, count=count,
         ), timeout=8)
-    assert len(result) == 5
-    assert len(sessions) == 5
-    assert len(appends) == 50
+    assert len(result) == count
+    assert len(sessions) == count
+    assert len(appends) == 10 * count
     for session_id in sessions:
         events = [item for owner, item in appends if owner == session_id]
         assert len(events) == 10
@@ -435,6 +436,16 @@ async def test_real_five_concurrent_websocket_av_sessions_use_independent_receip
         assert base64.b64decode(events[-1]["video_frames"][0]) == jpeg
     assert all(len(audio) == 4800 for audio, _ in result)
     assert all(stats["video_frames_sent"] == 1 for _, stats in result)
+    for _, stats in result:
+        assert stats["session_negotiation_ms"] >= 0
+        assert stats["fleet_admission_wait_ms"] >= 0
+        first_audio = stats["first_audio_ms_since_input_start"]
+        assert 0 <= first_audio <= stats["terminal_decision_ms_since_input_start"]
+        elapsed = (
+            stats["session_negotiation_ms"] + stats["fleet_admission_wait_ms"]
+            + first_audio
+        )
+        assert abs(elapsed - stats["first_audio_ms_since_connect"]) <= 2
     assert all(
         stats["head_speaker_connected"] is False
         and stats["actual_playback_acknowledged"] is False
@@ -537,6 +548,9 @@ async def test_quiet_mic_video_unit_accepts_intentional_listen_or_real_speech(
     assert stats["input_duration_ms"] == 1000
     assert stats["video_frames_sent"] == 1
     assert stats["model_decision"] == decision
+    assert stats["terminal_decision_ms_since_input_start"] >= 0
+    if decision == "listen":
+        assert stats["first_audio_ms_since_input_start"] is None
     assert stats["input_output_overlap_observed"] is False
     assert stats["input_appends_after_first_audio"] == 0
     assert len(audio) == (0 if decision == "listen" else 4800)
