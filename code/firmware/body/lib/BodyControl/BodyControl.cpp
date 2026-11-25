@@ -590,8 +590,7 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
     // newer completed channel-0 conversion restores read-only validity.
     belly_provenance_bad_ = true;
   }
-  const bool jaw_valid = (force.valid_mask & 2U) != 0U ||
-      (force.valid_mask == 0U && force.valid);
+  const bool jaw_valid = (force.valid_mask & 2U) != 0U;
   const bool jaw_current = force.present && jaw_valid &&
       force.jaw_sample_seq != 0U && now_ms - force.jaw_at_ms < 500U &&
       force.adc[1] != -32768 && force.adc[1] != 32767;
@@ -1380,14 +1379,8 @@ void BodyControl::execute(const char* line, std::size_t length,
                              belly_unclipped &&
                              a.force.belly_sample_seq != 0U &&
                              now_ms - a.force.belly_at_ms < 500U;
-    const bool jaw_unclipped = a.force.adc[1] != -32768 &&
-                               a.force.adc[1] != 32767;
-    const bool jaw_fresh = !jaw_provenance_bad_ &&
-                           ((a.force.valid_mask & 2U) != 0U ||
-                            (a.force.valid_mask == 0U && a.force.valid)) &&
-                           jaw_unclipped &&
-                           a.force.jaw_sample_seq != 0U &&
-                           now_ms - a.force.jaw_at_ms < 500U;
+    // Publish the same independent jaw verdict used by local servo motion.
+    const bool jaw_fresh = grip_feedback_fresh(now_ms);
     const bool force_fresh = belly_fresh && jaw_fresh;
     const bool climate_fresh = a.climate.valid &&
                                now_ms - a.climate.at_ms < 1000U;

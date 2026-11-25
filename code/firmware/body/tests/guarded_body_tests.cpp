@@ -1737,6 +1737,43 @@ static void belly_adc_does_not_refresh_stale_jaw_sample() {
   CHECK(!body.state().armed);
 }
 
+static void jaw_aux_and_motion_require_present_independent_channel() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
+  desk_robot::AccessoryReadings readings{};
+  auto& f = readings.force;
+  f.valid = true;
+  f.valid_mask = 2U;
+  f.adc[1] = 555;
+  f.jaw_sample_seq = 1U;
+  f.jaw_at_ms = 100U;
+  const auto check = [&](std::uint32_t now, bool expected) {
+    body.set_accessories(readings, now);
+    CHECK(body.grip_feedback_fresh(now) == expected);
+    const auto aux = send(body, "aux", now);
+    CHECK(aux.find(expected ? "\"jaw_valid\":true" : "\"jaw_valid\":false") !=
+          std::string::npos);
+  };
+  check(101U, false);  // Absent ADC, contradictory cached fields.
+  f.present = true;
+  f.valid_mask = 0U;
+  check(102U, false);  // Composite validity is not channel evidence.
+  f.valid_mask = 1U;
+  check(103U, false);  // Belly alone cannot authorize a jaw.
+  f.valid = false;
+  f.valid_mask = 2U;
+  ++f.jaw_sample_seq;
+  f.jaw_at_ms = 104U;
+  check(104U, true);   // Independent jaw remains usable without belly.
+  f.valid = true;
+  f.valid_mask = 0U;
+  check(105U, false);
+  f.valid_mask = 2U;
+  check(106U, false);  // Cached conversion cannot restore lost validity.
+  ++f.jaw_sample_seq;
+  f.jaw_at_ms = 107U;
+  check(107U, true);
+}
+
 static void belly_acquisition_identity_cannot_forge_contact() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::DcPwm);
   body.set_boot_epoch(123U);
@@ -3173,6 +3210,7 @@ int main() {
     complete_robot_requires_boot_installed_and_fresh_dock_expander();
     dock_gpio_aux_sample_sequence_is_bounded_and_not_charging_proof();
     belly_adc_does_not_refresh_stale_jaw_sample();
+    jaw_aux_and_motion_require_present_independent_channel();
     belly_acquisition_identity_cannot_forge_contact();
     physical_gripper_stops_ramping_when_adc_is_not_trustworthy();
     gripper_jaw_consumes_at_most_four_degrees_per_adc_conversion();

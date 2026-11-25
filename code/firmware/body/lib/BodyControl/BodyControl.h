@@ -254,7 +254,8 @@ class BodyControl {
   }
   bool grip_feedback_fresh(std::uint32_t now_ms) const {
     const auto& f = state_.accessories.force;
-    const bool jaw_valid = (f.valid_mask & 2U) != 0U || (f.valid_mask == 0U && f.valid);
+    // Composite validity cannot substitute for an acquired jaw channel.
+    const bool jaw_valid = (f.valid_mask & 2U) != 0U;
     return !jaw_provenance_bad_ && f.present && jaw_valid &&
            f.jaw_sample_seq != 0U && now_ms - f.jaw_at_ms < 500U &&
            f.adc[1] != -32768 && f.adc[1] != 32767;
