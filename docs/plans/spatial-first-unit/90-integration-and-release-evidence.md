@@ -18,3 +18,20 @@ Own shared Mac startup and API registration, `controller.py` cross-feature integ
 
 - Run `uv run --no-sync pytest -q -ra tests firmware/head/tests` from `code/`, the tracked lint command and receipt verifiers. Run sanitizer, WROOM, Sense, dock and Feather jobs from [host CI](../../../.github/workflows/host-verification.yml). Check the exact result revision, review comments and required check outcomes. Record any host, workflow or toolchain limits with reproduction paths, exact failed commands and affected claims.
 - Verify the source-to-physical trace for robot/dock/station using guides [10](10-requirements-and-shopping.md), [40](40-voice-and-proactive-behavior.md), [60](60-object-recall-and-navigation.md) and [70](70-fit-power-manipulation-and-dock.md). Each acceptance row needs source revision, fixture or real assembly ID, operator evidence and status. Treat historical CI and physical evidence from different assemblies as separate records. Keep the PR in its required draft state until the active release policy allows promotion. [Current build guide](../../guides/build.md), [Verification ledger](../../records/verification.md)
+
+
+### Independent procurement reviewer approval
+
+For each real procurement receipt, keep the measured record immutable and set
+`source_sha` to the tested revision. Use `artifact_sha256` when the record
+was added at a later evidence revision. A reviewer must inspect the actual
+measurements, equipment, carrier and procedure before signing. Generate the
+exact acceptance line with
+`verify_procurement_receipts.procurement_review_statement(receipt)`.
+The claimed GitHub reviewer must personally post that line as a PR #17
+conversation comment (one or more exact acceptance lines, with no other
+text) and attach its `review_url` to the release receipt. The verifier binds
+the comment author and digest to the exact scope, gate, source, artifact,
+device revision, test date and measurement; a name in a file alone cannot
+release purchasing. A synthetic fixture or an unrelated green workflow is
+not physical approval.

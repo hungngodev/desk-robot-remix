@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import hashlib
 import json
 import math
 import re
@@ -32,6 +33,7 @@ from procurement_release import (
     SYSTEM_GATES,
 )
 from verify_playbook_receipts import (
+    REPO,
     bounded_receipt_int,
     evidence_digest_matches,
     finite_receipt_float,
@@ -380,6 +382,9 @@ def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
     conditions = measurement["conditions"]
     keys = ["installed_hardware", "procedure_revision"]
     if gate == "sense_speaker_mic_double_talk":
+        firmware_commit = conditions.get("firmware_commit")
+        if type(firmware_commit) is not str or not SHA.fullmatch(firmware_commit):
+            return False
         keys.extend((
             "robot_id", "firmware_commit", "audio_config_id",
             "mic_speaker_placement_id", "trial_capture_id",
@@ -423,11 +428,6 @@ def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
             return False
     observations = measurement["quantities"]
     if len(observations) < len(specification["quantities"]):
-        return False
-    names = [item.get("name") for item in observations if type(item) is dict]
-    if (len(names) != len(observations)
-            or any(type(name) is not str for name in names)
-            or len(set(names)) != len(names)):
         return False
     for name, unit, lower, upper, integer_only in specification["quantities"]:
         matches = [item for item in observations if item.get("name") == name]
@@ -509,6 +509,11 @@ def _qualified_gate_measurement(gate: object, measurement: object) -> bool:
             or type(observations) is not list
             or not 1 <= len(observations) <= 100):
         return False
+    names = [item.get("name") for item in observations if type(item) is dict]
+    if (len(names) != len(observations)
+            or any(type(name) is not str or not name.strip() for name in names)
+            or len(set(names)) != len(names)):
+        return False
     matched = [
         item for item in observations
         if type(item) is dict
@@ -538,12 +543,12 @@ def _qualified_gate_measurement(gate: object, measurement: object) -> bool:
         # observed within 100 ms of a deliberately stalled CPU, not within
         # an arbitrary reviewer-supplied maximum of e.g. 200 ms.
         if (item["value"] > 100
-                or conditions.get("instrument_type") not in {
+                or conditions.get("instrument_type") not in (
                     "logic_analyzer", "oscilloscope",
-                }
-                or conditions.get("fault_injection") not in {
+                )
+                or conditions.get("fault_injection") not in (
                     "cpu_stall", "intentional_cpu_halt",
-                }):
+                )):
             return False
     return bounds[1] <= bounds[0] <= bounds[2]
 
@@ -556,9 +561,12 @@ def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
     Mere existence of an unrelated nonempty file never releases purchasing.
     """
     url = receipt.get("evidence_url")
-    if (not _completed_trial_date(receipt.get("tested_on"))
-            or not isinstance(url, str)
-            or not urlsplit(url).path.endswith(".json")):
+    if not _completed_trial_date(receipt.get("tested_on")) or type(url) is not str:
+        return False
+    try:
+        if not urlsplit(url).path.endswith(".json"):
+            return False
+    except ValueError:
         return False
     response = {}
 
@@ -594,7 +602,7 @@ def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
             parse_float=finite_receipt_float,
             parse_int=bounded_receipt_int,
         )
-    except (ValueError, TypeError, UnicodeError, binascii.Error):
+    except (ValueError, TypeError, UnicodeError, binascii.Error, RecursionError):
         return False
     rows = document.get("receipts") if type(document) is dict else None
     if not isinstance(rows, list) or not 0 < len(rows) <= 2000:
@@ -622,6 +630,62 @@ def verified_scoped_record(receipt: dict, sha: str, lookup) -> bool:
             and isinstance(measurement, dict) and bool(measurement)
             and _qualified_gate_measurement(record.get("gate"), measurement)
             and _same_json_measurement(measurement, receipt.get("measurement")))
+
+
+PROCUREMENT_REVIEW_LINE = re.compile(
+    r"ACCEPTED procurement [A-Za-z0-9_.:-]+ [A-Za-z0-9_.:-]+ "
+    r"at [0-9a-f]{40} digest [0-9a-f]{64}"
+)
+
+
+def procurement_review_statement(receipt: dict) -> str | None:
+    """Canonical review text binds scope, source, artifact and measured values."""
+    fields = (
+        "record_id", "source_sha", "scope", "gate", "result", "reviewer",
+        "tested_on", "device_revision", "measurement", "evidence_url", "artifact_sha256",
+    )
+    try:
+        payload = json.dumps(
+            {key: receipt.get(key) for key in fields},
+            sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False,
+        ).encode("ascii")
+        digest = hashlib.sha256(payload).hexdigest()
+        statement = (
+            f"ACCEPTED procurement {receipt['scope']} {receipt['gate']} "
+            f"at {receipt['source_sha']} digest {digest}"
+        )
+    except (AttributeError, KeyError, TypeError, ValueError, RecursionError):
+        return None
+    return statement if PROCUREMENT_REVIEW_LINE.fullmatch(statement) else None
+
+
+def verified_procurement_review(receipt: dict, lookup) -> bool:
+    """Require a deliberate PR #17 comment from the actual claimed reviewer."""
+    if type(receipt) is not dict:
+        return False
+    url = receipt.get("review_url")
+    reviewer = receipt.get("reviewer")
+    if type(url) is not str or type(reviewer) is not str:
+        return False
+    match = re.fullmatch(
+        rf"https://github\.com/{REPO}/pull/17#issuecomment-([0-9]+)", url,
+    )
+    expected = procurement_review_statement(receipt)
+    if match is None or expected is None:
+        return False
+    comment = lookup(f"https://api.github.com/repos/{REPO}/issues/comments/{match[1]}")
+    if type(comment) is not dict:
+        return False
+    actor = comment.get("user")
+    body = comment.get("body")
+    if (comment.get("html_url") != url or type(actor) is not dict
+            or actor.get("type") != "User" or actor.get("login") != reviewer
+            or comment.get("author_association") not in ("OWNER", "MEMBER", "COLLABORATOR")
+            or type(body) is not str or not 0 < len(body) <= 65536):
+        return False
+    lines = body.strip().splitlines()
+    return (expected in lines and len(lines) == len(set(lines))
+            and all(PROCUREMENT_REVIEW_LINE.fullmatch(line) for line in lines))
 
 
 def audit_release(evidence: dict, sha: str, lookup=None, *,
@@ -700,7 +764,9 @@ def audit_release(evidence: dict, sha: str, lookup=None, *,
         try:
             if not verified_scoped_record(receipt, sha, cached_lookup):
                 errors.append(f"{scope}.{gate}: immutable scoped record absent or mismatched")
-        except (HTTPError, URLError, ValueError, TimeoutError, OSError):
+            elif not verified_procurement_review(receipt, cached_lookup):
+                errors.append(f"{scope}.{gate}: authorized reviewer approval missing or mismatched")
+        except (HTTPError, URLError, ValueError, TimeoutError, OSError, RecursionError):
             errors.append(f"{scope}.{gate}: record lookup unavailable")
     if seen == 0:
         errors.append("no release receipts recorded")

@@ -110,8 +110,8 @@ def test_verified_run_and_pinned_physical_record_paths():
 
 
 @pytest.mark.parametrize("defect", [
-    "missing", "skipped", "wrong_attempt", "wrong_sha", "duplicate", "wrong_run",
-    "truncated",
+    "missing", "skipped", "cancelled", "failure", "wrong_attempt", "wrong_sha",
+    "duplicate", "wrong_run", "truncated", "malformed_name",
 ])
 def test_green_headline_cannot_promote_without_exact_required_jobs(defect):
     row = promoted("TESTED")["procedures"][0]
@@ -123,8 +123,10 @@ def test_green_headline_cannot_promote_without_exact_required_jobs(defect):
         jobs = response["jobs"]
         if defect == "missing":
             jobs.pop()
-        elif defect == "skipped":
-            jobs[0]["conclusion"] = "skipped"
+        elif defect in ("skipped", "cancelled", "failure"):
+            jobs[0]["conclusion"] = defect
+        elif defect == "malformed_name":
+            jobs[0]["name"] = []
         elif defect == "wrong_attempt":
             jobs[0]["run_attempt"] = 1
         elif defect == "wrong_sha":
@@ -797,3 +799,44 @@ def test_later_evidence_revision_is_bound_to_tested_source(defect):
         assert errors == []
     else:
         assert any("immutable physical record not matched" in error for error in errors)
+
+
+@pytest.mark.parametrize("response", [None, [], 42, "bad"])
+def test_malformed_actions_run_response_cannot_approve(response):
+    assert not verify.verified_actions_run(RUN, SHA, lambda _: response)
+    assert not verify.verified_required_ci_jobs(RUN, SHA, lambda _: response)
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("id", 43), ("id", 42.0), ("id", True), ("run_attempt", 0),
+    ("run_attempt", 2.0), ("path", ".github/workflows/other.yml"),
+    ("head_sha", "b" * 40), ("conclusion", "cancelled"),
+    ("conclusion", "skipped"), ("status", "queued"), ("head_repository", []),
+])
+def test_workflow_headline_must_identify_requested_run(field, value):
+    assert verify.verified_actions_run(RUN, SHA, lookup)
+    run = {**lookup("https://api.github.com/repos/" + verify.REPO + "/actions/runs/42"),
+           field: value}
+    assert not verify.verified_actions_run(RUN, SHA, lambda _: run)
+
+
+@pytest.mark.parametrize("url", ["https://[broken", RUN + "0" * 25, RUN.replace("42", "0")])
+def test_invalid_actions_run_url_rejected_without_lookup(url):
+    assert not verify.verified_actions_run(url, SHA, lambda _: 1 / 0)
+
+
+@pytest.mark.parametrize("value", [[], {}, None])
+def test_malformed_evidence_class_fails_closed(value):
+    row = promoted("TESTED")["procedures"][0]
+    row["evidence_class"] = value
+    assert any("missing evidence class" in error
+               for error in verify.audit(full_ledger_with(row), lambda _: 1 / 0))
+
+
+def test_malformed_review_comment_never_raises_or_approves():
+    row = promoted("MEASURED")["procedures"][0]
+    for bad in (None, [], {"author_association": ["OWNER"]}):
+        def malformed(url, value=bad):
+            return value if "/issues/comments/" in url else lookup(url)
+        assert any("manual review not verified" in error
+                   for error in verify.audit(full_ledger_with(row), malformed))

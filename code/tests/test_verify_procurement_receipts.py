@@ -1,5 +1,6 @@
 """Real purchasing approval cannot use fake or unscoped trial receipts."""
 import base64
+import hashlib
 import importlib.util
 import json
 import sys
@@ -19,6 +20,7 @@ spec.loader.exec_module(release)
 SHA = "a" * 40
 URL = ("https://github.com/hungngodev/desk-robot-remix/blob/"
        + SHA + "/docs/records/release-evidence.json")
+REVIEW_URL = "https://github.com/hungngodev/desk-robot-remix/pull/17#issuecomment-42"
 
 
 def measurement_for_gate(scope, gate):
@@ -117,13 +119,11 @@ def receipt(scope, gate):
         "reviewer": "real_review_account", "tested_on": "2026-11-18",
         "device_revision": "inspected_rev_A",
         "measurement": measurement_for_gate(scope, gate),
-        "evidence_url": URL,
+        "evidence_url": URL, "review_url": REVIEW_URL,
     }
 
 
 def lookup(url, records=None):
-    assert url.endswith("/contents/docs/records/"
-                        "release-evidence.json?ref=" + SHA)
     if records is None:
         records = [receipt("part:imu", gate) for gate in release.PART_GATES]
         records += [receipt("system", gate) for gate in release.SYSTEM_GATES]
@@ -134,6 +134,15 @@ def lookup(url, records=None):
                 receipt(scope, "decision_receipt"),
                 receipt(scope, "alternative_or_parent_receipt"),
             ]
+    if url.endswith("/issues/comments/42"):
+        return {
+            "html_url": REVIEW_URL,
+            "user": {"login": "real_review_account", "type": "User"},
+            "author_association": "OWNER",
+            "body": "\n".join(release.procurement_review_statement(row) for row in records),
+        }
+    assert url.endswith("/contents/docs/records/"
+                        "release-evidence.json?ref=" + SHA)
     raw = json.dumps({"receipts": records}).encode("utf-8")
     return {
         "type": "file", "size": len(raw), "encoding": "base64",
@@ -1154,8 +1163,12 @@ def test_independent_motor_cutoff_receipt_enforces_100ms_real_cpu_stall():
 @pytest.mark.parametrize(("field", "invalid"), [
     ("instrument_type", "voltmeter"),
     ("instrument_type", None),
+    ("instrument_type", []),
+    ("instrument_type", {}),
     ("fault_injection", "normal_runtime"),
     ("fault_injection", None),
+    ("fault_injection", []),
+    ("fault_injection", {}),
 ])
 def test_independent_cutoff_evidence_requires_real_scope_and_fault(field, invalid):
     import copy
@@ -1394,3 +1407,89 @@ def test_xiao_trial_rejects_matching_immutable_but_text_only_measurement():
     assert not release.verified_scoped_record(
         narrative, SHA, lambda url: lookup(url, records=[narrative])
     )
+
+
+@pytest.mark.parametrize("bad", ["unknown-commit", "a" * 39, "g" * 40, 42, []])
+def test_a2_requires_exact_firmware_commit_identity(bad):
+    row = receipt("system", "sense_speaker_mic_double_talk")
+    row["measurement"]["conditions"]["firmware_commit"] = bad
+    assert not release.verified_scoped_record(
+        row, SHA, lambda url: lookup(url, records=[row]),
+    )
+
+
+@pytest.mark.parametrize("gate", sorted(release.PHYSICAL_GATE_METRICS))
+def test_same_metric_with_conflicting_unit_is_not_unambiguous_evidence(gate):
+    row = receipt("system", gate)
+    quantities = row["measurement"]["quantities"]
+    quantities.append({**quantities[0], "unit": "unrelated_unit"})
+    assert not release.verified_scoped_record(
+        row, SHA, lambda url: lookup(url, records=[row]),
+    )
+
+
+@pytest.mark.parametrize("defect", [
+    None, "actor", "bot", "outsider", "body", "quote", "scope", "measurement",
+    "source", "artifact", "missing", "association_list", "wrong_url", "duplicate",
+])
+def test_procurement_requires_deliberate_authorized_review(defect):
+    gate = "hardware_motor_driver_fails_low_after_cpu_stall"
+    row = receipt("system", gate)
+    body = release.procurement_review_statement(row)
+    fields = (
+        "record_id", "source_sha", "scope", "gate", "result", "reviewer", "tested_on",
+        "device_revision", "measurement", "evidence_url", "artifact_sha256",
+    )
+    digest = hashlib.sha256(json.dumps(
+        {key: row.get(key) for key in fields}, sort_keys=True,
+        separators=(",", ":"), ensure_ascii=True, allow_nan=False,
+    ).encode("ascii")).hexdigest()
+    assert body == f"ACCEPTED procurement system {gate} at {SHA} digest {digest}"
+    comment = {
+        "html_url": REVIEW_URL, "user": {"login": row["reviewer"], "type": "User"},
+        "author_association": "OWNER", "body": body,
+    }
+    if defect == "actor":
+        comment["user"]["login"] = "other"
+    elif defect == "bot":
+        comment["user"]["type"] = "Bot"
+    elif defect == "outsider":
+        comment["author_association"] = "NONE"
+    elif defect == "association_list":
+        comment["author_association"] = ["OWNER"]
+    elif defect == "body":
+        comment["body"] = "NOT " + body
+    elif defect == "quote":
+        comment["body"] = "> " + body
+    elif defect == "scope":
+        row["scope"] = "part:other"
+    elif defect == "measurement":
+        row["measurement"]["quantities"][0]["value"] = 7
+    elif defect == "source":
+        row["source_sha"] = "b" * 40
+    elif defect == "artifact":
+        row["artifact_sha256"] = "f" * 64
+    elif defect == "missing":
+        row.pop("review_url")
+    elif defect == "wrong_url":
+        comment["html_url"] = REVIEW_URL.replace("42", "43")
+    elif defect == "duplicate":
+        comment["body"] += "\n" + body
+    assert release.verified_procurement_review(row, lambda _: comment) is (defect is None)
+
+
+def test_online_release_rejects_matching_record_without_authorized_review():
+    gate = "hardware_motor_driver_fails_low_after_cpu_stall"
+    row = receipt("system", gate)
+    assert release.verified_scoped_record(
+        row, SHA, lambda url: lookup(url, records=[row]),
+    )
+
+    def outsider(url):
+        answer = lookup(url, records=[row])
+        if "/issues/comments/" in url:
+            answer["author_association"] = "NONE"
+        return answer
+
+    errors = release.audit_release({"system": {gate: row}}, SHA, outsider)
+    assert any(gate in error and "authorized reviewer approval" in error for error in errors)

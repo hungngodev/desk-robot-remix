@@ -50,16 +50,26 @@ def github_json(url: str, token: str | None = None) -> dict:
 
 
 def verified_actions_run(url: str, sha: str, lookup=github_json) -> bool:
-    if not isinstance(url, str):
+    if (type(url) is not str or type(sha) is not str or not SHA.fullmatch(sha)):
         return False
-    parsed = urlsplit(url)
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
     match = RUN_PATH.fullmatch(parsed.path)
     if (parsed.scheme != "https" or parsed.netloc != "github.com"
-            or parsed.query or parsed.fragment or match is None):
+            or parsed.query or parsed.fragment or match is None
+            or len(match[1]) > 20 or match[1].startswith("0")):
         return False
     run = lookup(f"https://api.github.com/repos/{REPO}/actions/runs/{match[1]}")
+    if type(run) is not dict:
+        return False
     head_repo = run.get("head_repository")
-    return (run.get("head_sha") == sha
+    attempt = run.get("run_attempt")
+    return (type(run.get("id")) is int and run["id"] == int(match[1])
+            and type(attempt) is int and attempt >= 1
+            and run.get("path") == ".github/workflows/host-verification.yml"
+            and run.get("head_sha") == sha
             and run.get("name") == "Host verification"
             and run.get("event") == "pull_request"
             and run.get("head_branch") == "impl/mac-hardware-safety-preflight-2026-11-10"
@@ -100,15 +110,9 @@ def verified_required_ci_jobs(
     try:
         if not verified_actions_run(run_url, sha, fetch_run):
             return False
-        match = RUN_PATH.fullmatch(urlsplit(run_url).path)
         run = captured["run"]
-        if match is None or type(run.get("id")) is not int:
-            return False
-        run_id = int(match[1])
-        attempt = run.get("run_attempt")
-        if (run["id"] != run_id or type(attempt) is not int or attempt < 1
-                or run.get("path") != ".github/workflows/host-verification.yml"):
-            return False
+        run_id = run["id"]
+        attempt = run["run_attempt"]
         response = lookup(
             f"https://api.github.com/repos/{REPO}/actions/runs/"
             f"{run_id}/jobs?per_page=100"
@@ -123,6 +127,8 @@ def verified_required_ci_jobs(
             if not isinstance(job, dict):
                 return False
             name = job.get("name")
+            if type(name) is not str:
+                return False
             if name not in REQUIRED_PURCHASE_CI_JOBS:
                 continue
             if (name in passed or type(job.get("run_id")) is not int
@@ -144,9 +150,12 @@ def verified_required_ci_jobs(
 
 
 def verified_raw_record(url: str, sha: str, lookup=github_json) -> bool:
-    if not isinstance(url, str):
+    if (type(url) is not str or type(sha) is not str or not SHA.fullmatch(sha)):
         return False
-    parsed = urlsplit(url)
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
     base = f"/{REPO}/blob/{sha}/docs/records/"
     if (parsed.scheme != "https" or parsed.netloc != "github.com"
             or parsed.query or parsed.fragment
@@ -368,7 +377,7 @@ def verified_procedure_record(row: dict, sha: str, lookup=github_json) -> bool:
             records = document.get("receipts") if isinstance(document, dict) else None
         else:
             return False
-    except (ValueError, TypeError, UnicodeError, binascii.Error, csv.Error):
+    except (ValueError, TypeError, UnicodeError, binascii.Error, csv.Error, RecursionError):
         return False
     if not isinstance(records, list) or not 0 < len(records) <= 2000:
         return False
@@ -423,6 +432,8 @@ def verified_manual_review(row: dict, sha: str, lookup=github_json) -> bool:
     if match is None:
         return False
     comment = lookup(f"https://api.github.com/repos/{REPO}/issues/comments/{match[1]}")
+    if type(comment) is not dict:
+        return False
     actor = comment.get("user")
     body = comment.get("body")
     identifier = row.get("id")
@@ -431,7 +442,7 @@ def verified_manual_review(row: dict, sha: str, lookup=github_json) -> bool:
         and isinstance(actor, dict)
         and actor.get("type") == "User"
         and actor.get("login") == reviewer
-        and comment.get("author_association") in {"OWNER", "MEMBER", "COLLABORATOR"}
+        and comment.get("author_association") in ("OWNER", "MEMBER", "COLLABORATOR")
         and isinstance(body, str)
         and isinstance(identifier, int)
         # A mere mention can be a rejection ("NOT ACCEPTED"), a quote or
@@ -487,7 +498,9 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
         if gate == "OPEN":
             continue
         evidence_class = row.get("evidence_class")
-        if evidence_class not in {"source", "mixed", "physical"}:
+        if type(evidence_class) is not str or evidence_class not in {
+            "source", "mixed", "physical",
+        }:
             errors.append(f"procedure {identifier}: missing evidence class")
             continue
         if evidence_class == "physical" and row.get("gate") == "TESTED":
