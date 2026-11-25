@@ -213,3 +213,37 @@ async def test_kill_failure_latches_and_retains_native_owner(pool, monkeypatch):
         monkeypatch.setattr(pool, "_kill", real_kill)
         await pool.close()
     assert not pool._owned
+
+
+async def test_real_opencv_frozen_child_recovers_with_different_jpeg():
+    cv2 = pytest.importorskip("cv2")
+    np = pytest.importorskip("numpy")
+    if not hasattr(cv2, "aruco"):
+        pytest.skip("OpenCV vision extra does not provide AprilTag")
+    dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
+    images = []
+    for size in (160, 170):
+        frame = np.full((480, 640), 255, np.uint8)
+        frame[240-size//2:240+size//2, 320-size//2:320+size//2] = (
+            cv2.aruco.generateImageMarker(dictionary, 12, size)
+        )
+        ok, jpeg = cv2.imencode(".jpg", frame)
+        assert ok
+        images.append(jpeg.tobytes())
+    pool = DetectorPool()
+    try:
+        await pool.prewarm()
+        failed, spare = pool._ready
+        os.kill(failed.pid, signal.SIGSTOP)
+        start = time.monotonic()
+        with pytest.raises(TimeoutError):
+            await pool.detect(images[0], CAMERA, captured_at=start)
+        assert failed.returncode == -signal.SIGKILL
+        fresh = time.monotonic()
+        pose = await pool.detect(images[1], CAMERA, captured_at=fresh)
+        assert pose is not None and 140 < pose.z_mm < 150
+        assert pose.captured_at == fresh and pool._ready[0] is spare
+        assert time.monotonic() - start < 0.5
+    finally:
+        await pool.close()
+    assert not pool._owned

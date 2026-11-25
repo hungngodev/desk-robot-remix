@@ -47,3 +47,23 @@ sequence mismatch, NaN, cancellation and concurrent close. Each fault case
 required a fresh frame on the prewarmed spare in under 500 ms. This is host
 evidence, not macOS loaded timing, camera mount calibration, body STOP
 acknowledgment or charging qualification.
+
+### Adversarial follow-up and actual OpenCV recovery measurements
+
+The second implementation commit ffc0e512 adds kill/reap failure fencing,
+pose envelope validation, and cancellation during a full-size JPEG pipe
+write. The isolated detector suite passed 17 tests in 26.29 seconds.
+The additional real OpenCV SIGSTOP regression passed independently.
+
+A Linux Python 3.13.5/OpenCV 4.13.0 host trial ran five cycles: prewarm
+both children, SIGSTOP the active child, submit a 160-pixel AprilTag JPEG,
+reject it on its original 200 ms deadline, confirm SIGKILL/reap, then
+submit a different 170-pixel AprilTag JPEG to the warm spare. The resulting
+pose was 145.56 mm on every cycle; elapsed recovery including the original
+deadline was 218.96, 232.57, 216.13, 233.85 and 226.77 ms (mean 225.65 ms,
+maximum 233.85 ms). No owned subprocesses remained after close.
+The 500 ms result is conditional on an available warm spare and normal
+OS kill/reap scheduling; simultaneous failures and unconfirmed reap
+remain non-authorizing. This is not a macOS or physical docking timing
+qualification. Exact-commit Host verification workflows for the first
+two commits were cancelled; full integration CI is not established.
