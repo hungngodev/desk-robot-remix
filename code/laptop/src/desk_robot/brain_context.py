@@ -14,6 +14,7 @@ from difflib import SequenceMatcher
 from typing import Iterable, Sequence
 
 from .memory import CoreFact, Memory
+from .sensor_event_contract import DIRECT_INTERACTION_KINDS
 
 
 @dataclass(frozen=True)
@@ -402,7 +403,9 @@ def compose_brain_context(
             priority = (
                 -1 if channel == "sensor" and kind == "safety_fault"
                 else 0.75 if channel == "mac_activity"
-                and kind == "group_conversation" else priorities[channel]
+                and kind == "group_conversation"
+                else 1.75 if channel == "sensor" and isinstance(kind, str)
+                and kind in DIRECT_INTERACTION_KINDS else priorities[channel]
             )
             if channel == "human_transcript":
                 priority = 0 if heard_count == 0 else 5

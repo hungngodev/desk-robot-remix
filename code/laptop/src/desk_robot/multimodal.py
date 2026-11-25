@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from .config import Settings
     from .transport import Head
 from .room_station import RoomObservation, fresh_room_summary
-from .sensor_event_contract import TRIGGERS  # retained public import name
+from .sensor_event_contract import DIRECT_INTERACTION_KINDS, TRIGGERS  # public names
 from .vision import OllamaScene
 
 # Keep source-ID deduplication longer than the 30s visible ASR context.
@@ -218,6 +218,11 @@ class CameraFrameHub:
         # edges within its eight-second context lifetime. This is a cached
         # observation timestamp, never an independent motion authority.
         self.latest_safety_fault = {robot: -math.inf for robot in robot_ids}
+        # One direct-contact cue survives routine sensor chatter for the same
+        # original eight-second TTL. It does not grant speech or motion.
+        self.latest_direct_interaction: dict[str, tuple[str, float] | None] = {
+            robot: None for robot in robot_ids
+        }
         # Ephemeral successful tool interpretations accompany sensor cues,
         # not raw JPEG/PCM or persistent user memories. One existing owner.
         self.tool_history = {
@@ -317,6 +322,10 @@ class CameraFrameHub:
             raise ValueError("Unknown physical event or invalid time")
         self.urgent[robot_id] = True
         self.event_history[robot_id].append((kind, now))
+        if kind in DIRECT_INTERACTION_KINDS:
+            previous = self.latest_direct_interaction[robot_id]
+            if previous is None or now >= previous[1]:
+                self.latest_direct_interaction[robot_id] = (kind, now)
         # Only situational cues survive a long utterance. Routine contact
         # and the separately owned WROOM safety-fault event retain their
         # original short TTL; neither may be resurrected as a new warning.
@@ -531,6 +540,9 @@ class CameraFrameHub:
                 and not any(k == "human_voice" and t == voice_at
                             for k, t in events)):
             events.append(("human_voice", voice_at))
+        direct = self.latest_direct_interaction[robot_id]
+        if direct is not None and 0 <= now - direct[1] <= 8 and direct not in events:
+            events.append(direct)
         events.sort(key=lambda event: event[1])
         required: set[int] = set()
         for required_kind in ("safety_fault", "human_voice"):
@@ -538,6 +550,8 @@ class CameraFrameHub:
                 if events[index][0] == required_kind:
                     required.add(index)
                     break
+        if direct is not None and direct in events:
+            required.add(events.index(direct))
         for index in range(len(events) - 1, -1, -1):
             if len(required) >= 6:
                 break
@@ -803,6 +817,18 @@ class CameraFrameHub:
                 "source": "wroom_event", "content": None,
                 "physical_action_verified": False,
             }))
+        # A fresh direct interaction must not be displaced by background
+        # sensors before the model's modality budget even sees it.
+        direct = self.latest_direct_interaction[robot_id]
+        if (direct is not None and 0 <= now - direct[1] <= 8
+                and direct not in self.event_history[robot_id]):
+            kind, stamp = direct
+            items.append((stamp, {
+                "channel": "sensor", "kind": kind,
+                "age_ms": round(1000 * (now - stamp)),
+                "source": "wroom_event", "content": None,
+                "physical_action_verified": False,
+            }))
         # Keep the authenticated voice-start edge for its original short TTL
         # even if routine sensor traffic filled the shared deque. This is
         # audio event provenance, not a new ASR guess or a speech permit.
@@ -941,6 +967,15 @@ class CameraFrameHub:
                         and items[index][0] >= current_voice_at):
                     required.add(index)
                     break
+        # Keep one deliberate interaction after current human/tool evidence
+        # but before routine sensor or shared room telemetry.
+        if len(required) < limit:
+            for index in range(len(items) - 1, -1, -1):
+                entry = items[index][1]
+                if (entry["channel"] == "sensor"
+                        and entry["kind"] in DIRECT_INTERACTION_KINDS):
+                    required.add(index)
+                    break
         # Preserve the last event from other modalities when room remains.
         # An older tool from before this VAD gets normal historical priority.
         for channel in modalities[2:]:
@@ -1019,6 +1054,7 @@ class CameraFrameHub:
         self.event_history[robot_id].clear()
         self.situation_edges[robot_id].clear()
         self.latest_safety_fault[robot_id] = -math.inf
+        self.latest_direct_interaction[robot_id] = None
         self.voice_started_at[robot_id] = -math.inf
         self.voice_until[robot_id] = -math.inf
         self.quiet_until[robot_id] = -math.inf

@@ -1942,3 +1942,41 @@ async def test_proactive_privacy_filter_preserves_reserved_safety_fault(settings
         assert len(prompt) <= 400
     finally:
         await pet.close()
+
+
+
+def test_direct_touch_survives_routine_sensor_flood_at_both_context_boundaries():
+    now = time.monotonic()
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    robot = "robot-01"
+    hub.notify(robot, "safety_fault", now - 3)
+    hub.notify(robot, "human_voice", now - 2.9)
+    hub.remember_heard(robot, "question", "Check your battery", now - 2.8)
+    hub.remember_tool(robot, "robot_status", "Battery 42 percent", now - 2.7)
+    hub.notify(robot, "touch_double", now - 2.6)
+    for index in range(20):
+        hub.notify(robot, "side_object", now - 2 + index * .05)
+    for index in range(3):
+        hub.frames[robot].append(
+            CameraEvidence(b"jpeg", now - .5 + index * .1, 0.0, "speech")
+        )
+
+    assert all(kind != "touch_double" for kind, _ in hub.event_history[robot])
+    assert any(item["kind"] == "touch_double"
+               for item in hub.recent_events(robot, now))
+    timeline = hub.interaction_timeline(robot, now, limit=5)
+    assert {item["kind"] for item in timeline} == {
+        "safety_fault", "human_voice", "model_asr_completed",
+        "robot_status", "touch_double",
+    }
+    prompt = compose_brain_context([], [], timeline).interaction
+    assert "latched safety fault" in prompt
+    assert "Check your battery" in prompt
+    assert "Battery 42 percent" in prompt
+    assert "Physical sensor edge: touch_double" in prompt
+    assert len(prompt) <= 400
+    assert hub.interaction_timeline("robot-02", now) == []
+    assert not any(item["kind"] == "touch_double"
+                   for item in hub.interaction_timeline(robot, now + 9))
+    hub.clear(robot)
+    assert hub.interaction_timeline(robot, now) == []
