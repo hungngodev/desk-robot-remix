@@ -2693,8 +2693,11 @@ static void fuel_voltage_replay_cannot_rearm_or_restore_drive() {
   readings.gauge.cell_mv = 3800;
   body.set_accessories(readings, 101);
   CHECK(!body.fuel_monitor_fresh(101));
+  // The original optical boot latch remains the primary status fault.
+  // The independent fuel latch must still reject ARM and local rearm.
   CHECK(send(body, "status", 101).find(
-      "\"fault\":\"fuel_monitor_latched\"") != std::string::npos);
+      "\"fault\":\"missing_sample\"") != std::string::npos);
+  CHECK(send(body, "status", 101).find("\"ready\":false") != std::string::npos);
   CHECK(send(body, "arm", 101) == "ERR arm fuel_monitor_latched");
   CHECK(send(body, "rearm", 101, true) ==
         "ERR rearm fuel_monitor_missing_or_stale");
