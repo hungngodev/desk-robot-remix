@@ -55,6 +55,54 @@ int main() {
       CHECK(!candidate.fresh(150));
     }
 
+    // All retained ST variants must verify configuration before publishing
+    // raw diagnostic axes. Their counts must not acquire MPU low-g metadata.
+    for (const auto model : {BerryModel::V1Lsm9ds0, BerryModel::V2Lsm9ds1,
+                             BerryModel::V3Lsm6dsl}) {
+      const bool v1 = model == BerryModel::V1Lsm9ds0;
+      const bool v3 = model == BerryModel::V3Lsm6dsl;
+      const std::uint8_t gyro_reg = v1 ? 0xa8 : (v3 ? 0x22 : 0x98);
+      const std::uint8_t accel_reg = v3 ? 0x28 : 0xa8;
+      const int config_reg = v1 ? 0x23 : (v3 ? 0x12 : 0x22);
+      TwoWire ignored;
+      ignored.ignore_write_reg = config_reg;
+      BerryImu candidate;
+      CHECK(!candidate.begin(ignored, model, 0x6b, 0x1d));
+      CHECK(!candidate.configured());
+      candidate.poll(100);
+      CHECK(!candidate.fresh(100));
+      TwoWire unreadable;
+      unreadable.reject_read_reg = config_reg;
+      CHECK(!candidate.begin(unreadable, model, 0x6b, 0x1d));
+      CHECK(!candidate.configured());
+
+      TwoWire sample_wire;
+      CHECK(candidate.begin(sample_wire, model, 0x6b, 0x1d));
+      auto& accel_bank = v1 ? sample_wire.extra_registers : sample_wire.registers;
+      // Distinct signed rails and asymmetric words expose swaps and sign errors.
+      const std::uint8_t gyro_bytes[6] = {0x00, 0x80, 0xff, 0x7f, 0x34, 0x12};
+      const std::uint8_t accel_bytes[6] = {0xff, 0xff, 0x01, 0x00, 0x00, 0xc0};
+      for (unsigned i = 0; i < 6; ++i) {
+        sample_wire.registers[gyro_reg + i] = gyro_bytes[i];
+        accel_bank[accel_reg + i] = accel_bytes[i];
+      }
+      candidate.poll(100);
+      CHECK(candidate.fresh(100));
+      const auto& r = candidate.reading();
+      CHECK(r.model == model);
+      CHECK(r.gyro[0] == -32768 && r.gyro[1] == 32767 && r.gyro[2] == 4660);
+      CHECK(r.accel[0] == -1 && r.accel[1] == 1 && r.accel[2] == -16384);
+      CHECK(!r.low_g_status_valid && !r.low_g_irq && r.low_g_event_seq == 0U);
+      CHECK(r.temperature_raw == 0);
+      sample_wire.partial_read_reg = accel_reg;
+      candidate.poll(150);
+      CHECK(!candidate.fresh(150) && r.at_ms == 100U);
+      CHECK(r.gyro[0] == -32768 && r.accel[2] == -16384);
+      sample_wire.partial_read_reg = -1;
+      candidate.poll(200);
+      CHECK(candidate.fresh(200) && r.at_ms == 200U);
+    }
+
     TwoWire wire;
     BerryImu imu;
     CHECK(imu.begin(wire, BerryModel::V1Lsm9ds0, 0x6b, 0x1d));

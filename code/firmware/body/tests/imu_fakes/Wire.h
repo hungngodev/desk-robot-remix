@@ -16,6 +16,7 @@ class TwoWire {
   };
   std::vector<Write> writes;
   std::array<std::uint8_t, 256> registers{};
+  std::array<std::uint8_t, 256> extra_registers{};
   bool reject_writes = false;
   int reject_read_reg = -1;
   int ignore_write_reg = -1;
@@ -47,7 +48,7 @@ class TwoWire {
     if (!stop || bytes_.size() != 2) return 4;
     writes.push_back({address_, bytes_[0], bytes_[1]});
     if (static_cast<int>(bytes_[0]) != ignore_write_reg)
-      registers[bytes_[0]] = bytes_[1];
+      bank(address_)[bytes_[0]] = bytes_[1];
     return 0;
   }
   std::size_t requestFrom(std::uint8_t address, std::size_t count,
@@ -69,8 +70,9 @@ class TwoWire {
     if (!remaining_) return -1;
     --remaining_;
     const auto reg = read_register_++;
-    const auto value = registers[reg];
-    if (reg == 0x3a) registers[reg] = 0; // MPU FF_INT clears on status read
+    auto& values = bank(read_address_);
+    const auto value = values[reg];
+    if (reg == 0x3a) values[reg] = 0; // MPU FF_INT clears on status read
     return value;
   }
   bool wrote(std::uint8_t address, std::uint8_t reg,
@@ -82,6 +84,9 @@ class TwoWire {
   }
 
  private:
+  std::array<std::uint8_t, 256>& bank(std::uint8_t address) {
+    return address < 0x20 ? extra_registers : registers;
+  }
   std::uint8_t address_ = 0;
   std::uint8_t read_address_ = 0;
   std::uint8_t read_register_ = 0;

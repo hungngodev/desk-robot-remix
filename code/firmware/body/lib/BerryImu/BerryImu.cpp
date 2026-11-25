@@ -2,6 +2,13 @@
 
 namespace desk_robot {
 
+// Convert the sensor's two's-complement word without relying on C++17
+// implementation-defined unsigned-to-signed narrowing at the negative rail.
+static std::int16_t signed_word(std::uint16_t raw) {
+  const auto value = static_cast<std::int32_t>(raw);
+  return static_cast<std::int16_t>(value < 32768 ? value : value - 65536);
+}
+
 BerryModel BerryImu::identify(std::uint8_t gyro, std::uint8_t other) {
   if (gyro == 0xd4 && other == 0x49) return BerryModel::V1Lsm9ds0;
   if (gyro == 0x68 && other == 0x3d) return BerryModel::V2Lsm9ds1;
@@ -17,12 +24,12 @@ void BerryImu::decode_mpu6050(const std::uint8_t (&bytes)[14], BerryReading& sam
   // this does not apply an unmeasured temperature compensation curve.
   const auto temperature = static_cast<std::uint16_t>(
       (static_cast<unsigned>(bytes[6]) << 8) | bytes[7]);
-  sample.temperature_raw = static_cast<std::int16_t>(temperature);
+  sample.temperature_raw = signed_word(temperature);
   for (int i = 0; i < 3; ++i) {
     const auto accel = static_cast<std::uint16_t>((static_cast<unsigned>(bytes[2*i]) << 8) | bytes[2*i + 1]);
     const auto gyro = static_cast<std::uint16_t>((static_cast<unsigned>(bytes[8 + 2*i]) << 8) | bytes[9 + 2*i]);
-    sample.accel[i] = static_cast<std::int16_t>(accel);
-    sample.gyro[i] = static_cast<std::int16_t>(gyro);
+    sample.accel[i] = signed_word(accel);
+    sample.gyro[i] = signed_word(gyro);
   }
 }
 
@@ -77,6 +84,16 @@ bool BerryImu::begin(TwoWire& wire, BerryModel model,
   // Limited data rates, raw telemetry only, and no magnetometer/pressure
   // configuration. Register meanings follow OzzMaker's original Arduino
   // BerryIMU variant definitions. Physical axes are NOT yet calibrated.
+  const auto matches = [this](std::uint8_t address, std::uint8_t reg,
+                              std::uint8_t expected) {
+    std::uint8_t actual = 0;
+    return read_bytes(address, reg, &actual, 1) && actual == expected;
+  };
+  const auto write_verified = [this, &matches](std::uint8_t address,
+                                                std::uint8_t reg,
+                                                std::uint8_t value) {
+    return write_byte(address, reg, value) && matches(address, reg, value);
+  };
   bool ok = false;
   if (reading_.model == BerryModel::Mpu6050) {
     // Official InvenSense RM-MPU-6000A register map, not BerryIMU registers.
@@ -101,35 +118,36 @@ bool BerryImu::begin(TwoWire& wire, BerryModel model,
          write_byte(gyro_address_, 0x38, 0x80);
     // ACK alone cannot establish the scale, cadence or native low-g setup.
     // Verify every setting before publishing samples under MPU6050 units.
-    const auto matches = [this](std::uint8_t reg, std::uint8_t expected) {
-      std::uint8_t actual = 0;
-      return read_bytes(gyro_address_, reg, &actual, 1) && actual == expected;
-    };
-    ok = ok && matches(0x6b, 0x01) && matches(0x6c, 0x00) &&
-         matches(0x1a, 0x03) && matches(0x19, 0x09) &&
-         matches(0x1b, 0x00) && matches(0x1c, 0x00) &&
-         matches(0x1d, 150) && matches(0x1e, 40) &&
-         matches(0x37, 0x00) && matches(0x38, 0x80);
+    ok = ok && matches(gyro_address_, 0x6b, 0x01) &&
+         matches(gyro_address_, 0x6c, 0x00) &&
+         matches(gyro_address_, 0x1a, 0x03) &&
+         matches(gyro_address_, 0x19, 0x09) &&
+         matches(gyro_address_, 0x1b, 0x00) &&
+         matches(gyro_address_, 0x1c, 0x00) &&
+         matches(gyro_address_, 0x1d, 150) &&
+         matches(gyro_address_, 0x1e, 40) &&
+         matches(gyro_address_, 0x37, 0x00) &&
+         matches(gyro_address_, 0x38, 0x80);
   } else if (reading_.model == BerryModel::V1Lsm9ds0) {
     // LSM9DS0 CTRL_REG1_XM bit 3 (DocID024763 table 70)
     // and CTRL_REG4_G bit 7 enable
     // block-data-update on both six-byte reads. Without gyro BDU,
     // the sensor may update an MSB between the LSB/MSB I2C transfers.
     // The 245 dps full-scale setting remains unchanged (FS=00).
-    ok = write_byte(extra_address_, 0x20, 0x6f) &&  // 100Hz XYZ + XM BDU
-         write_byte(extra_address_, 0x21, 0x00) &&  // +/-2g
-         write_byte(gyro_address_, 0x20, 0x0f) &&   // 95Hz XYZ gyro
-         write_byte(gyro_address_, 0x23, 0x80);    // gyro BDU + 245dps
+    ok = write_verified(extra_address_, 0x20, 0x6f) &&  // 100Hz XYZ + XM BDU
+         write_verified(extra_address_, 0x21, 0x00) &&  // +/-2g
+         write_verified(gyro_address_, 0x20, 0x0f) &&   // 95Hz XYZ gyro
+         write_verified(gyro_address_, 0x23, 0x80);    // gyro BDU + 245dps
   } else if (reading_.model == BerryModel::V2Lsm9ds1) {
-    ok = write_byte(gyro_address_, 0x22, 0x44) &&  // BDU + auto increment
-         write_byte(gyro_address_, 0x1e, 0x38) &&  // XYZ gyro
-         write_byte(gyro_address_, 0x1f, 0x38) &&  // XYZ accelerometer
-         write_byte(gyro_address_, 0x10, 0x60) &&  // 119Hz gyro, 245dps
-         write_byte(gyro_address_, 0x20, 0x60);    // 119Hz accel, +/-2g
+    ok = write_verified(gyro_address_, 0x22, 0x44) &&  // BDU + auto increment
+         write_verified(gyro_address_, 0x1e, 0x38) &&  // XYZ gyro
+         write_verified(gyro_address_, 0x1f, 0x38) &&  // XYZ accelerometer
+         write_verified(gyro_address_, 0x10, 0x60) &&  // 119Hz gyro, 245dps
+         write_verified(gyro_address_, 0x20, 0x60);    // 119Hz accel, +/-2g
   } else if (reading_.model == BerryModel::V3Lsm6dsl) {
-    ok = write_byte(gyro_address_, 0x12, 0x44) &&  // BDU + auto increment
-         write_byte(gyro_address_, 0x10, 0x40) &&  // 104Hz accel, +/-2g
-         write_byte(gyro_address_, 0x11, 0x40);    // 104Hz gyro, 250dps
+    ok = write_verified(gyro_address_, 0x12, 0x44) &&  // BDU + auto increment
+         write_verified(gyro_address_, 0x10, 0x40) &&  // 104Hz accel, +/-2g
+         write_verified(gyro_address_, 0x11, 0x40);    // 104Hz gyro, 250dps
   }
   configured_ = ok;
   return ok;
@@ -186,8 +204,8 @@ void BerryImu::poll(std::uint32_t now_ms) {
                    (static_cast<std::uint16_t>(gyro[i * 2 + 1]) << 8);
     const auto a = static_cast<std::uint16_t>(accel[i * 2]) |
                    (static_cast<std::uint16_t>(accel[i * 2 + 1]) << 8);
-    reading_.gyro[i] = static_cast<std::int16_t>(g);
-    reading_.accel[i] = static_cast<std::int16_t>(a);
+    reading_.gyro[i] = signed_word(static_cast<std::uint16_t>(g));
+    reading_.accel[i] = signed_word(static_cast<std::uint16_t>(a));
   }
   reading_.at_ms = now_ms;
   reading_.valid = true;
