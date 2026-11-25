@@ -4,6 +4,7 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <deque>
 #include <string>
 
@@ -56,10 +57,30 @@ extern FakeServoSerial Serial;
 inline std::uint32_t millis() { return servo_bench_fake::clock_ms; }
 inline void pinMode(int, int) {}
 inline void digitalWrite(int, int value) { assert(value == LOW); }
-inline double ledcSetup(int, int, int) { return 50; }
-inline void ledcWrite(int, unsigned) { ++servo_bench_fake::writes; }
-inline void ledcAttachPin(int pin, int) {
-  assert(servo_bench_fake::attached_pin == -1);
+// Independent fixture contract: 50 Hz, 16-bit, 1500 us center command.
+// Do not derive expected duty or channel mapping from the production helper.
+inline int& programmed_servo_channel() {
+  static int channel = -1;
+  return channel;
+}
+inline double ledcSetup(int channel, int frequency, int resolution) {
+  if ((channel != 4 && channel != 5) || frequency != 50 || resolution != 16)
+    std::abort();
+  return 50;
+}
+inline void ledcWrite(int channel, unsigned duty) {
+  if ((channel != 4 && channel != 5) || duty != 4915U ||
+      servo_bench_fake::attached_pin != -1 || programmed_servo_channel() != -1)
+    std::abort();
+  programmed_servo_channel() = channel;
+  ++servo_bench_fake::writes;
+}
+inline void ledcAttachPin(int pin, int channel) {
+  if (servo_bench_fake::attached_pin != -1 ||
+      programmed_servo_channel() != channel ||
+      !((pin == 18 && channel == 4) || (pin == 19 && channel == 5)))
+    std::abort();
+  programmed_servo_channel() = -1;
   servo_bench_fake::attached_pin = pin;
   servo_bench_fake::attached_at = millis();
 }
