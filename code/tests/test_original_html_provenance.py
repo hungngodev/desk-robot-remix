@@ -159,3 +159,79 @@ def test_original_known_hardware_corrections_are_not_lost():
         {"name": "CAP1188", "address": 0x29},
         {"name": "MAX30102 paw pad", "address": 0x57},
     ]
+
+
+EXPECTED_VIDEO_IDS = [
+    "5MZ6O6yT73M", "aLbg-b4UZb0", "R1E3AkfSaIM", "umeCiPdUtFo",
+    "2JRqNyq6Epk", "vf1qYoM40aQ", "aDaSp6zaqWM", "i05wihSkuD8",
+    "zrvFgxxDrIU", "IT1uBUsOmUY", "MQBUOHRvMuc", "ktWnwJ-e-_w",
+]
+_PLACEHOLDER_CELLS = {"", "erased", "tbd", "todo", "placeholder", "...", "-"}
+
+
+def _extract_source_map_video_ids(text: str) -> list[str]:
+    section = text.split("## All twelve supplied videos", 1)[1].split("\n## ", 1)[0]
+    ids = re.findall(r"(?m)^\| \[[^\]]+\]\(https://www\.youtube\.com/watch\?v=([A-Za-z0-9_-]{11})\)", section)
+    if ids != EXPECTED_VIDEO_IDS:
+        raise ValueError("Source-map twelve-video table order or membership changed")
+    return ids
+
+
+def _extract_video_audit_ids(text: str) -> list[str]:
+    rows = re.findall(r"(?m)^\| (\d+) \| \[.+?\]\(https://www\.youtube\.com/watch\?v=([A-Za-z0-9_-]{11})\)", text)
+    if [int(n) for n, _ in rows] != list(range(1, 13)):
+        raise ValueError("Video audit table numbering changed")
+    ids = [vid for _, vid in rows]
+    if ids != EXPECTED_VIDEO_IDS:
+        raise ValueError("Video audit twelve-video table order or membership changed")
+    return ids
+
+
+def _validate_feature_payloads(text: str) -> int:
+    rows = re.findall(
+        r"(?m)^\| `([FBSGH]\d{3})` \|([^|]*)\|([^|]*)\|([^|]*)\|$",
+        text,
+    )
+    if len(rows) != 200:
+        raise ValueError(f"Expected 200 feature payload rows, got {len(rows)}")
+    for fid, idea, status, constraint in rows:
+        for label, cell in (("idea", idea), ("status", status), ("constraint", constraint)):
+            cleaned = cell.strip()
+            if cleaned.lower() in _PLACEHOLDER_CELLS:
+                raise ValueError(f"Feature {fid} has blank or placeholder {label} cell")
+    return len(rows)
+
+
+def test_twelve_videos_and_200_feature_payloads_stay_intact():
+    source_map = SOURCE_MAP.read_text(encoding="utf-8")
+    audit = (
+        SOURCE_MAP.parent / "research/2026-11-03-video-audit.md"
+    ).read_text(encoding="utf-8")
+    assert _extract_source_map_video_ids(source_map) == EXPECTED_VIDEO_IDS
+    assert _extract_video_audit_ids(audit) == EXPECTED_VIDEO_IDS
+    assert _validate_feature_payloads(source_map) == 200
+
+
+def test_video_and_feature_payload_guards_reject_corruption():
+    source_map = SOURCE_MAP.read_text(encoding="utf-8")
+
+    missing_video = source_map.replace("watch?v=ktWnwJ-e-_w", "removed", 1)
+    with pytest.raises(ValueError, match="twelve-video"):
+        _extract_source_map_video_ids(missing_video)
+
+    swapped_videos = (
+        source_map
+        .replace("watch?v=5MZ6O6yT73M", "watch?v=TEMP_SWAP_ID")
+        .replace("watch?v=aLbg-b4UZb0", "watch?v=5MZ6O6yT73M")
+        .replace("watch?v=TEMP_SWAP_ID", "watch?v=aLbg-b4UZb0")
+    )
+    with pytest.raises(ValueError, match="twelve-video"):
+        _extract_source_map_video_ids(swapped_videos)
+
+    blanked_payload = re.sub(
+        r"(?m)^\| `F001` \|.*$",
+        "| `F001` | erased | REQUIRED | erased |",
+        source_map,
+    )
+    with pytest.raises(ValueError, match="blank or placeholder"):
+        _validate_feature_payloads(blanked_payload)

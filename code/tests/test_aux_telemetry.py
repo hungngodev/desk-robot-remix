@@ -450,3 +450,46 @@ async def test_authenticated_head_isolates_clipped_pulse(settings, tokens):
         head = HttpHead(settings.robots[0], client)
         result = await head.aux_status()
     assert result == {**data, "pulse": {**data["pulse"], "valid": False}}
+
+
+@pytest.mark.parametrize("age,accepted", [
+    (0, True),
+    (499, True),
+    (500, False),
+    (0xffffffff, False),
+    (True, False),
+    (-1, False),
+    (None, False),
+])
+@pytest.mark.parametrize("field", ["fuel_age_ms", "pack_age_ms"])
+def test_power_acquisition_age_boundaries_reject_stale_or_invalid_metadata(
+    field, age, accepted,
+):
+    data = sample()
+    data["power"].update({
+        "shunt_uv": 25, "pack_ma": 5, "pack_valid": True, "pack_seq": 42,
+        field: age,
+    })
+    if accepted:
+        assert validate_aux(data, "robot-01")["power"][field] == age
+    else:
+        with pytest.raises(ValueError, match="MAX17048|INA226"):
+            validate_aux(data, "robot-01")
+
+
+@pytest.mark.parametrize("shunt_uv,accepted", [
+    (-81918, False),
+    (-81917, True),
+    (81915, True),
+    (81916, False),
+])
+def test_ina226_nonrail_shunt_bounds_match_signed_asymmetric_limits(
+    shunt_uv, accepted,
+):
+    data = sample()
+    data["power"]["shunt_uv"] = shunt_uv
+    if accepted:
+        assert validate_aux(data, "robot-01")["power"]["shunt_uv"] == shunt_uv
+    else:
+        with pytest.raises(ValueError, match="INA226"):
+            validate_aux(data, "robot-01")

@@ -27,8 +27,15 @@ def test_modular_head_guide_reconciles_paid_sense_and_pending_physical_gate():
     assert "Cozmars" in intro and "unprinted fallback" in intro
 
     # A compiled microphone/reference pathway does not imply physical AEC.
+    aec_clause = (
+        "That is software\n"
+        "integration, **not** evidence of fitted-speaker AEC alignment, audible stopping,\n"
+        "or preservation of a human's first words."
+    )
     assert "\u0060SenseReferenceCodec\u0060" in guide
     assert "software\nintegration" in guide
+    assert aec_clause in guide
+    assert "conclusive** evidence of fitted-speaker AEC" not in guide
     assert "not a drop-in ESP-IDF binary" in guide
     assert "[physical audio acceptance](audio-barge-in.md)" in guide
     assert "The compiled\nSense baseline has no playback reference/AEC" not in guide
@@ -38,4 +45,14 @@ def test_modular_head_guide_reconciles_paid_sense_and_pending_physical_gate():
     assert "0x2f0000-byte OTA slot check" in guide
     assert "not a compile report for the current PR head" in guide
     assert "Recheck the exact current ESP-IDF" in guide
+
+
+def test_modular_head_guide_rejects_conclusive_aec_overclaim():
+    guide = (ROOT / "docs/guides/modular-head.md").read_text(encoding="utf-8")
+    mutated = guide.replace(
+        "integration, **not** evidence",
+        "integration, **conclusive** evidence",
+    )
+    assert "integration, **not** evidence of fitted-speaker AEC alignment" in guide
+    assert "integration, **not** evidence of fitted-speaker AEC alignment" not in mutated
 
