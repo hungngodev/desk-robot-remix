@@ -28,6 +28,9 @@ class TwoWire {
   int fail_ina_read_register = -1;
   bool fail_sht_command = false;
   std::uint16_t ina226_shunt_raw = 0x0010U;
+  // Normal fake cadence has a new conversion each poll; fault injection
+  // holds CVRF low while the previous data registers remain readable.
+  bool ina226_conversion_ready = true;
   bool fail_optional_gpio = false;
   bool fail_mcp_register_write = false;
   bool fail_pulse_register_write = false;
@@ -442,6 +445,8 @@ class TwoWire {
       inbound = {0x32, 0x00};
     else if (addr == 0x40 && register_address == 0xFE)
       inbound = {0x54, 0x49};
+    else if (addr == 0x40 && register_address == 0x06)
+      inbound = {0x00, static_cast<std::uint8_t>(ina226_conversion_ready ? 0x08U : 0U)};
     else if (addr == 0x40 && register_address == 0x02)
       inbound = {0x10, 0x00};
     else if (addr == 0x40 && register_address == 0x01)

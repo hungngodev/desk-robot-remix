@@ -1105,9 +1105,31 @@ int main() {
       shunt_accessories.poll(ms);
     CHECK(sat_gauge.monitor_valid && sat_gauge.monitor_sample_seq > good_mon_seq);
     CHECK(sat_gauge.monitor_at_ms > good_mon_at);
-    // A failure of either INA226 register invalidates current only.
+    // Cached register contents without CVRF must not gain new provenance.
+    const auto ready_seq = sat_gauge.monitor_sample_seq;
+    const auto ready_at = sat_gauge.monitor_at_ms;
+    const auto fuel_seq = sat_gauge.fuel_sample_seq;
+    shunt_sat_wire.ina226_conversion_ready = false;
+    for (std::uint32_t ms = 1908; ms < 2200; ms += 12)
+      shunt_accessories.poll(ms);
+    CHECK(!sat_gauge.monitor_valid && !sat_gauge.pack_current_valid);
+    CHECK(sat_gauge.monitor_sample_seq == ready_seq);
+    CHECK(sat_gauge.monitor_at_ms == ready_at);
+    CHECK(sat_gauge.fuel_valid && sat_gauge.fuel_sample_seq > fuel_seq);
+    shunt_sat_wire.ina226_conversion_ready = true;
+    shunt_sat_wire.ina226_shunt_raw = 0xffc4U; // -60 counts = -150uV
+    for (std::uint32_t ms = 2208; ms < 2500; ms += 12)
+      shunt_accessories.poll(ms);
+    CHECK(sat_gauge.monitor_valid && sat_gauge.monitor_sample_seq > ready_seq);
+    CHECK(sat_gauge.shunt_uv == -150);
+#if defined(DESK_ROBOT_PACK_SHUNT_MOHM) && DESK_ROBOT_PACK_SHUNT_MOHM == 5
+    CHECK(sat_gauge.pack_current_valid && sat_gauge.pack_current_ma == -30);
+#else
+    CHECK(!sat_gauge.pack_current_valid);
+#endif
+    // A failure of any INA226 register invalidates current only.
     // Independent MAX17048 conversions must continue to advance.
-    for (const int reg : {0x01, 0x02}) {
+    for (const int reg : {0x01, 0x02, 0x06}) {
       TwoWire ina_wire;
       desk_robot::AccessorySensors ina_accessories;
       CHECK(ina_accessories.begin(ina_wire));

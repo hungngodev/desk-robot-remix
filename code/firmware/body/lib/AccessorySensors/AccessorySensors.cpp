@@ -433,8 +433,13 @@ void AccessorySensors::power(std::uint32_t now_ms) {
     }
   }
   if (g.monitor_present) {
-    std::uint16_t bus = 0, shunt = 0;
-    g.monitor_valid = read16(0x40, 0x02, bus) &&
+    std::uint16_t status = 0, bus = 0, shunt = 0;
+    // TI INA226 SBOS547B: CVRF (Mask/Enable 0x06 bit 3) is
+    // cleared on register read. Data registers remain readable between
+    // conversions; require a new conversion before renewing provenance.
+    g.monitor_valid = read16(0x40, 0x06, status) &&
+                      (status & 0x0008U) != 0U &&
+                      read16(0x40, 0x02, bus) &&
                       read16(0x40, 0x01, shunt);
     if (g.monitor_valid) {
       // Saturated signed raw ADC codes are not measurable current.
