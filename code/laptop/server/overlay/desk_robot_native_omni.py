@@ -1862,6 +1862,11 @@ class NativeOmniSession:
                         if len(buffer) > 1_600_000:
                             raise ValueError("Oversized Mac video event")
                         while b"\n" in buffer:
+                            # Buffered aiohttp reads need not suspend. Give live audio
+                            # and cancellation a turn before each bounded video event.
+                            await asyncio.sleep(0)
+                            if self.closed:
+                                return
                             line, _, remainder = buffer.partition(b"\n")
                             buffer = bytearray(remainder)
                             if not 0 < len(line) <= 1_500_000:

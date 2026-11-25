@@ -9663,3 +9663,94 @@ async def test_native_repeat_failure_does_not_cancel_decoder_cleanup(native, mon
     finally:
         release.set()
         await asyncio.gather(task, session.started, return_exceptions=True)
+
+
+async def test_native_five_buffered_camera_streams_yield_to_mic(native):
+    """Ready camera reads must not monopolize the shared voice event loop."""
+    module, bridge = native
+    sessions = []
+    bridge.robot_for_device = lambda dev: dev.replace("mac-", "robot-")
+    for index in range(1, 6):
+        conn, _ = connection()
+        conn.device_id = f"mac-{index:02}"
+        bridge.connections[conn.device_id] = conn
+        sessions.append(module.NativeOmniSession(
+            conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+            model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+        ))
+
+    # JPEG-shaped packets exercise the native NDJSON/base64 transport,
+    # not Pillow decoding or physical image quality.
+    encoded = base64.b64encode(b"\xff\xd8" + b"x" * 96000 + b"\xff\xd9").decode("ascii")
+    count = 8
+    receipt = module.time.monotonic_ns() // 1000 - count
+    drained = [asyncio.Event() for _ in sessions]
+
+    class Chunks:
+        def __init__(self, robot, done):
+            self.payload = b"".join(
+                (json.dumps({
+                    "robot_id": robot, "source": "proactive",
+                    "camera_age_ms": 0, "camera_receipt_us": receipt + offset,
+                    "motion_ppm": 20000, "jpeg_base64": encoded,
+                    "motor_authorized": False, "charging_authorized": False,
+                }) + "\n").encode("ascii")
+                for offset in range(count)
+            )
+            self.done = done
+
+        async def iter_chunked(self, size):
+            # Already buffered aiohttp chunks can return without suspension.
+            for start in range(0, len(self.payload), size):
+                yield self.payload[start:start + size]
+            self.done.set()
+            await asyncio.Event().wait()
+
+    class Response:
+        status = 200
+
+        def __init__(self, session, done):
+            self.headers = {
+                "X-Desk-Robot-Id": session.robot,
+                "Content-Type": "application/x-ndjson",
+            }
+            self.content = Chunks(session.robot, done)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            return False
+
+    class Mac:
+        def __init__(self, session, done):
+            self.response = Response(session, done)
+
+        def get(self, *_args, **_kwargs):
+            return self.response
+
+    workers = [
+        asyncio.create_task(session._camera_stream(Mac(session, done)))
+        for session, done in zip(sessions, drained)
+    ]
+
+    async def mic_producer():
+        selected_before_mic = sum(s.video_frames_selected for s in sessions)
+        for session in sessions:
+            session.queue_mic(b"\x00" * 3200, True)
+        return selected_before_mic
+
+    mic = asyncio.create_task(mic_producer())
+    try:
+        async with asyncio.timeout(3):
+            selected_before_mic = await mic
+            await asyncio.gather(*(done.wait() for done in drained))
+        assert selected_before_mic < count * len(sessions)
+        assert all(s.incoming.qsize() == 1 for s in sessions)
+        assert all(s.video_frames_selected == count for s in sessions)
+    finally:
+        for session in sessions:
+            session.closed = True
+        for worker in workers:
+            worker.cancel()
+        await asyncio.gather(*workers, mic, return_exceptions=True)
