@@ -518,8 +518,11 @@ def test_fixture_path_and_lock_faults(monkeypatch, tmp_path, fault):
     (code / "upstream-lock.json").write_text(lock)
 
     executed = []
+    real_run = subprocess.run
 
     def should_not_run(*args, **kwargs):
+        if args and args[0][0] == "git":
+            return real_run(*args, **kwargs)
         executed.append(args)
         raise AssertionError("Never launch pytest for ambiguous fixture provenance")
 
