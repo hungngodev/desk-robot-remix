@@ -4,7 +4,39 @@
 #include "robot_protocol.h"
 #include "real_touch_edges.h"
 using namespace desk_robot;
+
+// Minimal decoded cJSON-shaped nodes; the same templated validator is
+// called by the bridge after actual cJSON parsing.
+struct JsonNode {
+    const char* string = nullptr;
+    JsonNode* child = nullptr;
+    JsonNode* next = nullptr;
+    bool object = false;
+};
+
 int main() {
+    const auto is_object = [](const JsonNode* node) { return node->object; };
+    JsonNode second{"ready"};
+    JsonNode first{"ready", nullptr, &second};
+    JsonNode safety{"safety", &first, nullptr, true};
+    JsonNode root{nullptr, &safety, nullptr, true};
+    assert(!JsonKeysUnique(&root, is_object));
+    second.string = "fault";
+    assert(JsonKeysUnique(&root, is_object));
+    second.string = nullptr;
+    assert(!JsonKeysUnique(&root, is_object));
+    second.string = "ready";
+    JsonNode array{nullptr, &safety};
+    assert(!JsonKeysUnique(&array, is_object));
+    second.string = "READY";
+    assert(JsonKeysUnique(&array, is_object));
+    JsonNode distinct{"other", &second, nullptr, true};
+    safety.next = &distinct;
+    first.next = nullptr;
+    second.string = "ready";
+    assert(JsonKeysUnique(&root, is_object)); // same name in different objects
+    assert(!JsonKeysUnique(static_cast<const JsonNode*>(nullptr), is_object));
+
     assert(ContentLengthMatches("0", 0));
     assert(ContentLengthMatches("0160", 160));
     assert(ContentLengthMatches("160", 160));

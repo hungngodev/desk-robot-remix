@@ -42,7 +42,10 @@ struct BenchPcmTransfer {
 #endif
 JsonPtr Parse(const std::string& value) {
     if (!JsonWireBounded(value)) return JsonPtr(nullptr, cJSON_Delete);
-    return JsonPtr(cJSON_ParseWithLengthOpts(value.c_str(), value.size() + 1, nullptr, true), cJSON_Delete);
+    JsonPtr json(cJSON_ParseWithLengthOpts(value.c_str(), value.size() + 1, nullptr, true),
+                 cJSON_Delete);
+    if (!JsonKeysUnique(json.get(), cJSON_IsObject)) return JsonPtr(nullptr, cJSON_Delete);
+    return json;
 }
 std::string Encode(cJSON* value) {
     char* text = cJSON_PrintUnformatted(value);
@@ -52,6 +55,10 @@ std::string Encode(cJSON* value) {
     return result;
 }
 std::string EncodeBodyRead(cJSON* body, bool pose, uint32_t head_boot) {
+    // The body cannot supply the head's authenticated transport identity.
+    // Appending duplicate names would let different consumers disagree.
+    if (cJSON_GetObjectItemCaseSensitive(body, "robot_id") ||
+        cJSON_GetObjectItemCaseSensitive(body, "head_boot")) return {};
     if (!cJSON_AddStringToObject(body, "robot_id", CONFIG_DESK_ROBOT_ID)) return {};
     // Preserve body fields and bind the transport boot only for pose.
     if (pose && !cJSON_AddNumberToObject(body, "head_boot", head_boot)) return {};

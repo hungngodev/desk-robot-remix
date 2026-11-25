@@ -49,6 +49,25 @@ inline bool JsonWireBounded(std::string_view value) {
     return !quoted && depth == 0 && value.find("\\u0000") == std::string_view::npos;
 }
 
+// cJSON accepts duplicate names, while consumers may choose first or last.
+// Check decoded object keys at every depth before using any field.
+template <typename Node, typename IsObject>
+bool JsonKeysUnique(const Node* node, IsObject is_object, unsigned depth = 0) {
+    if (!node || depth > 12) return false;
+    const bool object = is_object(node);
+    for (const auto* item = node->child; item; item = item->next) {
+        if (object) {
+            if (!item->string) return false;
+            for (const auto* other = item->next; other; other = other->next) {
+                if (!other->string || std::string_view(item->string) == other->string)
+                    return false;
+            }
+        }
+        if (!JsonKeysUnique(item, is_object, depth + 1)) return false;
+    }
+    return true;
+}
+
 // Validate bytes BEFORE publishing a source identity or JPEG success receipt.
 // These are the same bounded native JPEG framing requirements on both routes.
 inline bool CompleteJpeg(const std::uint8_t* data, std::size_t size) {
