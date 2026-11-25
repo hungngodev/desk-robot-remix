@@ -529,7 +529,9 @@ class PetController:
                         state.aux_read_task) if t is not None
         ]
         for task in tasks:
-            if not task.done():
+            # Concurrent pause/close callers share the first cancellation.
+            # A second cancel could interrupt the observer's async cleanup.
+            if not task.done() and not task.cancelling():
                 task.cancel()
         try:
             if tasks:

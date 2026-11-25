@@ -6852,6 +6852,44 @@ async def test_pet_pause_keeps_unresponsive_observer_reference_until_real_exit(
         await pet.close()
 
 
+async def test_concurrent_pet_pause_preserves_observer_cleanup(fleet, tmp_path):
+    """A second pause must join cancellation, not interrupt async cleanup."""
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    entered, cleaning, release, cleaned = (asyncio.Event() for _ in range(4))
+
+    async def observer():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cleaning.set()
+            await release.wait()
+            cleaned.set()
+
+    state = pet.states["robot-01"]
+    state.enabled = True
+    task = state.task = asyncio.create_task(observer())
+    generation = state.generation
+    pauses = []
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        pauses.append(asyncio.create_task(pet.pause("robot-01")))
+        await asyncio.wait_for(cleaning.wait(), timeout=1)
+        pauses.append(asyncio.create_task(pet.pause("robot-01")))
+        await wait_for(lambda: state.generation == generation + 2)
+        release.set()
+        await asyncio.gather(*pauses)
+        assert cleaned.is_set()
+        assert task.cancelled()
+        assert not state.enabled and state.task is None
+    finally:
+        release.set()
+        await asyncio.gather(*pauses, task, return_exceptions=True)
+        await pet.close()
+
+
 async def test_pet_fleet_close_pauses_other_peers_despite_stuck_observer(
     fleet, tmp_path, monkeypatch,
 ):
