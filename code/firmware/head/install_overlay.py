@@ -1172,6 +1172,9 @@ void Application::HandleStartListeningEvent() {""",
         # Host-only diagnostics for the pinned P3 player, not firmware latency.
         path = "scripts/p3_tools/p3_gui_player.py"
         files[path] = instrument_p3_player((target / path).read_text()).encode()
+        # Replace the pinned unauthenticated, unbounded UDP bench receiver.
+        path = "scripts/audio_debug_server.py"
+        files[path] = (HERE / "audio_debug_server.py").read_bytes()
         return files
     files = cores3_files(target)
     if board == "cores3":
@@ -1261,6 +1264,8 @@ def atomic_replace_bytes(path: Path, contents: bytes) -> None:
 def overlay_recipe_digest(board: str) -> str:
     """Fingerprint the installer and local source inputs for this board."""
     inputs = {HERE / "install_overlay.py", HERE / "BOARD_README.md"}
+    if board == "sense":
+        inputs.add(HERE / "audio_debug_server.py")
     folders = [HERE / "overlay"]
     if board != "cores3":
         inputs.add(HERE / "modular_snapshot.inc")
@@ -1316,7 +1321,8 @@ def read_overlay_journal(target: Path, marker: Path) -> dict:
     root = target.resolve()
     for name, info in state.items():
         if (not isinstance(name, str) or not (name.startswith("main/")
-                    or name == "scripts/p3_tools/p3_gui_player.py")
+                    or name in ("scripts/p3_tools/p3_gui_player.py",
+                                "scripts/audio_debug_server.py"))
                 or any(ord(ch) < 32 or ord(ch) == 127 for ch in name)
                 or "\\" in name or any(part in ("", ".", "..") for part in name.split("/"))
                 or not isinstance(info, dict)
