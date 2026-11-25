@@ -5,7 +5,6 @@ import re
 import stat
 from pathlib import Path
 
-
 _ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
 _RESERVED_ROBOT_ID = re.compile(r"(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])\Z", re.I)
 
