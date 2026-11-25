@@ -707,10 +707,11 @@ void Bridge::CameraStreamTask(void* context) {
         {
             auto jpeg = bridge->camera_->SnapshotJpeg();
             const auto completed = esp_timer_get_time();
-            if (!jpeg || !CompleteJpeg(jpeg->data(), jpeg->size()) ||
-                bridge->camera_sequence_ == std::numeric_limits<std::uint32_t>::max() ||
-                completed <= bridge->camera_completed_us_) {
+            if (!jpeg || !CompleteJpeg(jpeg->data(), jpeg->size())) {
                 status = ESP_FAIL; // Never stream a partial camera frame.
+            } else if (bridge->camera_sequence_ == std::numeric_limits<std::uint32_t>::max() ||
+                       completed <= bridge->camera_completed_us_) {
+                status = ESP_FAIL; // Never wrap or publish a regressed source identity.
             } else {
                 // Per-part provenance is the same trusted monotonic camera
                 // completion metadata as the established snapshot endpoint.
