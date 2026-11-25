@@ -1998,6 +1998,111 @@ async def test_manual_command_rejection_precedes_permit_consumption_and_dispatch
         await c.close()
 
 
+async def test_voice_during_operator_preflight_never_grants_permit(settings):
+    c, head = make(settings)
+    started, resume = asyncio.Event(), asyncio.Event()
+    original = c._hardware_preflight
+
+    async def gated_preflight(robot_id):
+        await original(robot_id)
+        started.set()
+        await resume.wait()
+
+    c._hardware_preflight = gated_preflight
+    task = asyncio.create_task(c.operator_arm("robot-01"))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=2)
+        c.set_voice_state(active_robots={"robot-02"})
+        resume.set()
+        with pytest.raises(OperationError, match="Voice priority"):
+            await asyncio.wait_for(task, timeout=2)
+        assert "robot-01" not in c.permits
+        assert head.commands == []
+    finally:
+        resume.set()
+        await asyncio.gather(task, return_exceptions=True)
+        await c.close()
+
+
+@pytest.mark.parametrize("stage", ["queued", "preflight", "arm_receipt"])
+async def test_voice_before_actuation_fences_new_motion_job(settings, stage):
+    c, head = make(settings)
+    started, resume = asyncio.Event(), asyncio.Event()
+    original_preflight = c._hardware_preflight
+    original_command = head.command
+
+    async def gated_preflight(robot_id):
+        await original_preflight(robot_id)
+        started.set()
+        await resume.wait()
+
+    async def gated_command(command):
+        result = await original_command(command)
+        if command == "arm":
+            started.set()
+            await resume.wait()
+        return result
+
+    try:
+        await c.operator_arm("robot-01")
+        if stage == "preflight":
+            c._hardware_preflight = gated_preflight
+        elif stage == "arm_receipt":
+            head.command = gated_command
+        job = c.manual("robot-01", "drive 10 10 100")
+        if stage != "queued":
+            await asyncio.wait_for(started.wait(), timeout=2)
+        c.set_voice_state(active_robots={"robot-02"})
+        resume.set()
+        await asyncio.wait_for(c.tasks[job.id], timeout=2)
+        assert job.state == "failed"
+        assert "Voice priority" in job.error
+        assert head.commands == (
+            ["arm", "halt"] if stage == "arm_receipt" else ["halt"]
+        )
+        assert c._fleet_motion_owner is None
+    finally:
+        resume.set()
+        await c.close()
+
+
+async def test_deferred_motion_expiry_rechecked_after_preflight(settings):
+    c, head = make(settings)
+    started, resume = asyncio.Event(), asyncio.Event()
+    original = c._hardware_preflight
+    task = None
+
+    async def gated_preflight(robot_id):
+        await original(robot_id)
+        started.set()
+        await resume.wait()
+
+    try:
+        await c.operator_arm("robot-01")
+        c.set_voice_state(active_robots={"robot-02"})
+        request = c.defer_motion(
+            "robot-01", "manual",
+            submit_fn=lambda: c.manual("robot-01", "drive 10 10 100"),
+        )
+        c.set_voice_state(active_robots=set())
+        c._hardware_preflight = gated_preflight
+        task = asyncio.create_task(c.dispatch_next_deferred())
+        await asyncio.wait_for(started.wait(), timeout=2)
+        # Move the deadline behind the current clock at the exact IO barrier.
+        request.expires_at = time.monotonic() - 1
+        resume.set()
+        assert await asyncio.wait_for(task, timeout=2) is None
+        assert request.state == "expired"
+        assert not c.permits
+        assert not c.jobs
+        assert head.commands == []
+    finally:
+        resume.set()
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
+        await c.close()
+
+
 async def test_motion_disabled_during_operator_preflight_never_creates_permit(settings):
     settings.mode = "hardware"
     started, resume = asyncio.Event(), asyncio.Event()

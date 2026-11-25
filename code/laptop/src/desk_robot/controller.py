@@ -278,6 +278,9 @@ class Coordinator:
         await self._hardware_preflight(robot_id)
         if not self.robot(robot_id).motion_enabled:
             raise OperationError("motion_enabled=false; no permit granted")
+        voice_reason = self.voice_blocks_motion()
+        if voice_reason is not None:
+            raise OperationError(voice_reason)
         if (self.closed or self._permit_epoch[robot_id] != owner_epoch
                 or self.locks[robot_id].locked()
                 or any(j.robot_id == robot_id and j.state in {"queued", "running"}
@@ -665,6 +668,10 @@ class Coordinator:
                     req.state = "discarded"
                     req.error = "New human voice or monitor loss interrupted deferred dispatch"
                     return None
+                if time.monotonic() > req.expires_at:
+                    req.state = "expired"
+                    req.error = "Deferred motion permit wait window expired"
+                    continue
                 self.permits[req.robot_id] = time.monotonic() + 5.0
                 try:
                     job = req.submit_fn()
@@ -773,6 +780,9 @@ class Coordinator:
                 await self._hardware_preflight(job.robot_id)
                 if not self.robot(job.robot_id).motion_enabled:
                     raise OperationError("motion_enabled=false; no arm sent")
+                voice_reason = self.voice_blocks_motion()
+                if voice_reason is not None:
+                    raise OperationError(voice_reason)
                 await self.heads[job.robot_id].command(
                     "arm"
                 )  # only after consuming operator permit
@@ -780,6 +790,9 @@ class Coordinator:
                 # authorize subsequent actuator commands. HALT in finally.
                 if not self.robot(job.robot_id).motion_enabled:
                     raise OperationError("motion_enabled=false; no movement sent")
+                voice_reason = self.voice_blocks_motion()
+                if voice_reason is not None:
+                    raise OperationError(voice_reason)
                 acknowledged = asyncio.Event()
                 keeper = asyncio.create_task(self._keepalive(job.robot_id, acknowledged))
                 watchdog = asyncio.create_task(self._watch_keepalive(acknowledged))
