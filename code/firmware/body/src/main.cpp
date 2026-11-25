@@ -799,7 +799,8 @@ void loop() {
   service_safety_checkpoint();
 #if defined(DESK_ROBOT_ENABLE_TERMINAL_IR) && DESK_ROBOT_ENABLE_TERMINAL_IR
   terminal_ir.poll(millis());  // bounded, nonblocking, after cliff/dock reads
-  control.set_terminal_ir(terminal_ir.evidence(millis()));
+  const auto ir_assessed_at_ms = millis();
+  control.set_terminal_ir(terminal_ir.evidence(ir_assessed_at_ms), ir_assessed_at_ms);
 #endif
   service_safety_checkpoint();
 #endif

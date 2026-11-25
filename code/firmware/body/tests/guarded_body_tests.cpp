@@ -1799,7 +1799,7 @@ static void dual_ir_evidence_never_authorizes_body_motion_or_charging() {
   sample.left_age_ms = 15;
   sample.right_age_ms = 21;
   sample.code = sample.left_code = sample.right_code = 0xcb34ed12U;
-  body.set_terminal_ir(sample);
+  body.set_terminal_ir(sample, 100);
   const std::string data = send(body, "ir", 100);
   CHECK(data.find("\"match\":true") != std::string::npos);
   CHECK(data.find("\"left_seq\":9") != std::string::npos);
@@ -1813,9 +1813,25 @@ static void dual_ir_evidence_never_authorizes_body_motion_or_charging() {
   CHECK(send(body, "ir 1", 101) == "ERR ir bad_arguments");
   // Even a matched NEC code is never a local calibration or arm permit.
   CHECK(send(body, "drive 20 20 100", 102) != "OK drive left=20 right=20 ms=100");
+  // The UART serializer may run after a stalled sensor/command pass.
+  // A cached assessment must not relabel old IR receipts as fresh.
+  const auto boundary = send(body, "ir", 279);
+  CHECK(boundary.find("\"match\":true") != std::string::npos);
+  CHECK(boundary.find("\"right_age_ms\":200") != std::string::npos);
+  const auto expired = send(body, "ir", 280);
+  CHECK(expired.find("\"match\":false") != std::string::npos);
+  CHECK(expired.find("\"left_valid\":true,\"right_valid\":false") != std::string::npos);
+  CHECK(expired.find("\"right_age_ms\":201,\"code\":0") != std::string::npos);
+  CHECK(expired.find("\"right_code\":0") != std::string::npos);
+  CHECK(expired.find("\"right_seq\":12") != std::string::npos);
+  // The same cached snapshot, assessed before the 32-bit clock wraps.
+  body.set_terminal_ir(sample, 0xffffff00U);
+  const auto wrapped = send(body, "ir", 0x10U);
+  CHECK(wrapped.find("\"left_valid\":false,\"right_valid\":false,\"match\":false") != std::string::npos);
+  CHECK(wrapped.find("\"left_age_ms\":287,\"right_age_ms\":293") != std::string::npos);
   sample.left_fresh = sample.same_code = false;
   sample.code = sample.left_code = 0;
-  body.set_terminal_ir(sample);
+  body.set_terminal_ir(sample, 103);
   const auto single = send(body, "ir", 103);
   CHECK(single.find("\"match\":false") != std::string::npos);
   CHECK(single.find("\"left_code\":0") != std::string::npos);

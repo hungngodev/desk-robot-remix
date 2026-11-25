@@ -138,8 +138,9 @@ class BodyControl {
   // Fresh physical dock switch + charger PGOOD is an independent local
   // DISARM interlock. It never enables charging, nor grants movement.
   void set_accessories(const AccessoryReadings& readings, std::uint32_t now_ms);
-  void set_terminal_ir(const IrPairEvidence& evidence) {
+  void set_terminal_ir(const IrPairEvidence& evidence, std::uint32_t assessed_at_ms) {
     state_.terminal_ir = evidence; // entirely read-only; no arm or charge
+    terminal_ir_assessed_at_ms_ = assessed_at_ms;
   }
   // Full-feature build requires the dock input even if it failed at boot.
   // Cannot be activated or relaxed by UART, AI, or a peer message.
@@ -303,6 +304,7 @@ class BodyControl {
   BodyProfile profile_;
   CliffGuard* guard_;
   State state_{};
+  std::uint32_t terminal_ir_assessed_at_ms_ = 0;
   BerryReading imu_{};
   std::uint32_t boot_epoch_ = 0;
   // Read-only unavailable pose replies carry a source clock, not odometry.

@@ -66,6 +66,23 @@ struct IrPairEvidence {
   std::uint32_t left_code = 0, right_code = 0;
 };
 
+// Advance a cached assessment to the time a reply is assembled. Never
+// refresh a receiver or re-establish agreement from a cached observation.
+inline IrPairEvidence age_ir_snapshot(IrPairEvidence out, std::uint32_t elapsed_ms) {
+  const auto age = [elapsed_ms](std::uint32_t previous) {
+    return elapsed_ms > 0xffffffffU - previous ? 0xffffffffU : previous + elapsed_ms;
+  };
+  out.left_age_ms = age(out.left_age_ms);
+  out.right_age_ms = age(out.right_age_ms);
+  out.left_fresh = out.left_fresh && out.left_age_ms <= 200U;
+  out.right_fresh = out.right_fresh && out.right_age_ms <= 200U;
+  if (!out.left_fresh) out.left_code = 0;
+  if (!out.right_fresh) out.right_code = 0;
+  out.same_code = out.same_code && out.left_fresh && out.right_fresh;
+  if (!out.same_code) out.code = 0;
+  return out;
+}
+
 // IDF 4.4 RMT ringbuffers have no source-time timestamp. An observation
 // may be marked fresh only if the previous poll drained the queue completely,
 // this poll was on time, and this poll did not encounter an excessive backlog.

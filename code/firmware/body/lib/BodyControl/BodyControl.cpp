@@ -1360,7 +1360,7 @@ void BodyControl::execute(const char* line, std::size_t length,
   if (ping) {
     std::snprintf(reply, capacity, "OK ping");
   } else if (ir) {
-    const auto& e = state_.terminal_ir;
+    const auto e = age_ir_snapshot(state_.terminal_ir, now_ms - terminal_ir_assessed_at_ms_);
     // RMT observation is read-only. A matching IR code is not an estimate
     // of mechanical bearing or proof of a powered/accepted charging dock.
     const int written = std::snprintf(
