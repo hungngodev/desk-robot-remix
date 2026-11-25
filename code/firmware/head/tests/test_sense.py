@@ -2338,6 +2338,7 @@ inline int lock_depth = 0;
 struct lv_obj_t {
     bool hidden = false;
     int x = 0, y = 0, w = 0, h = 0;
+    lv_obj_t* parent = nullptr;
     std::vector<lv_obj_t*> children;
 };
 inline lv_obj_t screen;
@@ -2345,18 +2346,29 @@ inline lv_obj_t* lv_screen_active() { return &screen; }
 inline lv_obj_t* lv_obj_create(lv_obj_t* parent) {
     assert(lock_depth > 0);
     auto* node = new lv_obj_t;
+    node->parent = parent;
     parent->children.push_back(node);
     return node;
 }
 inline void lv_obj_del(lv_obj_t* node) {
     assert(lock_depth > 0);
-    for (auto* child : node->children) lv_obj_del(child);
-    if (node == screen.children[0]) screen.children.clear();
+    while (!node->children.empty()) lv_obj_del(node->children.back());
+    auto& siblings = node->parent->children;
+    siblings.erase(std::find(siblings.begin(), siblings.end(), node));
     delete node;
+}
+inline void lv_obj_move_foreground(lv_obj_t* node) {
+    assert(lock_depth > 0);
+    auto& siblings = node->parent->children;
+    siblings.erase(std::find(siblings.begin(), siblings.end(), node));
+    siblings.push_back(node);
 }
 inline void lv_obj_set_size(lv_obj_t* n, int w, int h) { n->w = w; n->h = h; }
 inline void lv_obj_set_pos(lv_obj_t* n, int x, int y) { n->x = x; n->y = y; }
-inline void lv_obj_align(lv_obj_t* n, int, int x, int y) { n->x = x; n->y = y; }
+inline void lv_obj_align(lv_obj_t* n, int, int x, int y) {
+    n->x = (128 - n->w) / 2 + x;
+    n->y = y;
+}
 inline void lv_obj_add_flag(lv_obj_t* n, int) { assert(lock_depth > 0); n->hidden = true; }
 inline void lv_obj_remove_flag(lv_obj_t* n, int) { assert(lock_depth > 0); n->hidden = false; }
 inline constexpr int LV_ALIGN_TOP_MID = 0, LV_RADIUS_CIRCLE = 1, LV_OPA_COVER = 2;
@@ -2378,8 +2390,18 @@ public:
 };
 class OledDisplay {
 public:
-    virtual ~OledDisplay() = default;
-    virtual void SetupUI() {}
+    virtual ~OledDisplay() {
+        DisplayLockGuard lock(this);
+        if (low_battery_popup_) lv_obj_del(low_battery_popup_);
+    }
+    virtual void SetupUI() {
+        DisplayLockGuard lock(this);
+        if (!low_battery_popup_) {
+            low_battery_popup_ = lv_obj_create(&screen);
+            lv_obj_set_size(low_battery_popup_, 115, 24);
+            lv_obj_add_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN);
+        }
+    }
     int width() const { return 128; }
     int height() const { return 64; }
     virtual bool SetEmotion(const char* value) {
@@ -2398,7 +2420,10 @@ public:
         std::replace(text.begin(), text.end(), '\n', ' ');
         if (text == subtitle) subtitle.clear();
     }
+    lv_obj_t* BatteryPopup() const { return low_battery_popup_; }
     std::string emotion, subtitle;
+protected:
+    lv_obj_t* low_battery_popup_ = nullptr;
 };
 """
     native = r"""
@@ -2408,7 +2433,9 @@ int main() {
     desk_robot::LocalEyeDisplay display;
     OledDisplay* upstream = &display;
     display.SetupUI();
-    auto* layer = screen.children.at(0);
+    auto* popup = display.BatteryPopup();
+    auto* layer = screen.children.at(screen.children[0] == popup ? 1 : 0);
+    assert(layer->x == 48 && layer->y == 16 && layer->w == 32 && layer->h == 48);
     auto* pupil = layer->children.at(0)->children.at(0);
     assert(layer->hidden);
     display.ShowEyes({true, false, -127, 127});
@@ -2439,6 +2466,28 @@ int main() {
     display.ShowEyes({true, true, 0, 0});
     assert(!layer->hidden && pupil->hidden);
     assert(upstream->SetEmotion("happy"));
+    // The upstream status bar unhides its existing popup; it does not reorder it.
+    { DisplayLockGuard lock(&display); lv_obj_remove_flag(popup, LV_OBJ_FLAG_HIDDEN); }
+    assert(!layer->hidden && !popup->hidden);
+    assert(screen.children.back() == popup);
+    for (int x = -128; x <= 127; ++x) {
+        for (int y = -128; y <= 127; ++y) {
+            for (bool closed : {false, true}) {
+                display.ShowEyes({true, closed, static_cast<int8_t>(x), static_cast<int8_t>(y)});
+                assert(screen.children.back() == popup);
+                for (auto* eye : layer->children) {
+                    assert(eye->x >= 0 && eye->x + eye->w <= layer->w);
+                    assert(eye->y >= 0 && eye->y + eye->h <= layer->h);
+                    auto* dot = eye->children.at(0);
+                    assert(dot->hidden == closed);
+                    if (!closed) {
+                        assert(dot->x >= 0 && dot->x + dot->w <= eye->w);
+                        assert(dot->y >= 0 && dot->y + dot->h <= eye->h);
+                    }
+                }
+            }
+        }
+    }
     assert(lock_depth == 0);
 }
 """

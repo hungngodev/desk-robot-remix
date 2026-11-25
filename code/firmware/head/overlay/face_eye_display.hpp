@@ -51,6 +51,8 @@ public:
             lv_obj_set_style_bg_opa(pupil_[i], LV_OPA_COVER, 0);
         }
         lv_obj_add_flag(eye_layer_, LV_OBJ_FLAG_HIDDEN);
+        // Keep Xiaozhi's independent low-battery warning above cosmetic eyes.
+        if (low_battery_popup_) lv_obj_move_foreground(low_battery_popup_);
     }
 
     // The pinned esp_lvgl_port 2.9.x lock is recursive. Hold the existing
