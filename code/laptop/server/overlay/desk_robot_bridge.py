@@ -11,6 +11,7 @@ import asyncio
 import base64
 import copy
 import json
+import logging
 import os
 import re
 import secrets
@@ -420,10 +421,10 @@ def register(conn):
 
 def unregister(conn):
     if connections.get(conn.device_id) is conn:
-        native = _native_adapter()
-        if native is not None:
-            native.unregister(conn)
+        # Revoke source authority before attempting optional model teardown.
         connections.pop(conn.device_id, None)
+        voice_frames.pop(conn.device_id, None)
+        voice_last_frame_at.pop(conn.device_id, None)
         idle_voice_count.pop(conn.device_id, None)
         idle_voice_last_at.pop(conn.device_id, None)
         idle_voice_emitted.discard(conn.device_id)
@@ -443,6 +444,15 @@ def unregister(conn):
         pending_tool = _tool_turn_cancel.pop(conn.device_id, None)
         if pending_tool is not None:
             pending_tool.set()
+        try:
+            native = _native_adapter()
+            if native is not None:
+                native.unregister(conn)
+        except Exception as exc:
+            # A broken optional backend cannot retain a retired head identity.
+            logging.getLogger(__name__).warning(
+                "Native audio unregister failed: %s", type(exc).__name__,
+            )
 
 
 def muted(device_id):

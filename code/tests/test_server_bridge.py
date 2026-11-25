@@ -3312,3 +3312,63 @@ def test_overlay_refresh_rejects_unsafe_paths(tmp_path, monkeypatch, alias):
             module.install(upstream, output)
         assert (root / "first.py").read_text() == "old"
     assert victim.read_text() == "old"
+
+
+async def test_reconnected_head_requires_its_own_two_vad_frames(bridge, monkeypatch):
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: None)
+
+    class Socket:
+        async def send(self, _frame):
+            return None
+
+    def speaking_head():
+        head = conn("mac-01")
+        head.client_listen_mode = "realtime"
+        head.client_is_speaking = True
+        head.session_id = "speaking"
+        head.clear_queues = lambda: None
+        head.clearSpeakStatus = lambda: None
+        head.websocket = Socket()
+        return head
+
+    old = speaking_head()
+    bridge.register(old)
+    assert not await bridge.interrupt_for_normal_voice(old, True)
+    bridge.unregister(old)
+    replacement = speaking_head()
+    bridge.register(replacement)
+    assert not await bridge.interrupt_for_normal_voice(replacement, True)
+    assert not replacement.client_abort
+    assert bridge.voice_frames[replacement.device_id] == 1
+    assert bridge.voice_event_cursor == 0
+    assert await bridge.interrupt_for_normal_voice(replacement, True)
+    assert bridge.voice_event_cursor == 1
+
+
+@pytest.mark.parametrize("failure", ["load", "teardown"])
+def test_optional_native_failure_cannot_retain_head_authority(
+    bridge, monkeypatch, caplog, failure,
+):
+    old = conn("mac-01")
+    bridge.register(old)
+    pending = bridge.tool_turn_cancel_event(old.device_id)
+
+    def unavailable(*_args):
+        raise RuntimeError("optional adapter unavailable")
+
+    if failure == "load":
+        monkeypatch.setattr(bridge, "_native_adapter", unavailable)
+    else:
+        monkeypatch.setattr(bridge, "_native_adapter", lambda: SimpleNamespace(
+            unregister=unavailable,
+        ))
+    bridge.unregister(old)
+    assert old.device_id not in bridge.connections
+    assert pending.is_set()
+    assert bridge.interrupt_generation[old.device_id] == 1
+    assert bridge.voice_turn_generation[old.device_id] == 1
+    assert "Native audio unregister failed: RuntimeError" in caplog.text
+    replacement = conn("mac-01")
+    bridge.register(replacement)
+    assert bridge.connections[old.device_id] is replacement
+    assert not bridge.tool_turn_cancel_event(old.device_id).is_set()
