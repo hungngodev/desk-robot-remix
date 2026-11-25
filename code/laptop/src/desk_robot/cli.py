@@ -12,7 +12,7 @@ from pathlib import Path
 
 import httpx
 
-from .config import load_settings, secret
+from .config import load_settings, read_private_env, secret
 from .conversation import conversation_turns
 from .runtime import Runtime
 
@@ -21,11 +21,8 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def load_env(path: Path):
     """Read generated KEY=value secrets without executing shell content."""
-    if path.is_file():
-        for line in path.read_text().splitlines():
-            if line and not line.startswith("#"):
-                key, value = line.split("=", 1)
-                os.environ.setdefault(key, value)
+    for key, value in read_private_env(path).items():
+        os.environ.setdefault(key, value)
 
 
 def write_secrets(path: Path, settings, *, add_missing: bool = False) -> int:

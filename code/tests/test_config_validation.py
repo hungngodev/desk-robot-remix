@@ -1,7 +1,8 @@
+import os
 from pathlib import Path
 
 import pytest
-from desk_robot.config import RobotConfig, Settings, load_settings, secret
+from desk_robot.config import RobotConfig, Settings, load_settings, read_private_env, secret
 
 
 def _robot():
@@ -194,3 +195,58 @@ def test_hardware_omitted_defaults_remain_disarmed():
     assert all(not r.dock_motion_qualified for r in settings.robots)
     assert not settings.voice_vision_tools_enabled
     assert not settings.fleet_text_sharing_enabled
+
+
+def test_missing_private_env_allows_environment_only_startup(tmp_path):
+    assert read_private_env(tmp_path / "missing.env") == {}
+
+
+def test_private_env_requires_owner_only_permissions(tmp_path):
+    path = tmp_path / "private.env"
+    path.write_text("HEAD_TOKEN=" + "x" * 40 + "\n")
+    path.chmod(0o644)
+    with pytest.raises(ValueError, match="owner-only"):
+        read_private_env(path)
+    path.chmod(0o600)
+    assert read_private_env(path) == {"HEAD_TOKEN": "x" * 40}
+
+
+def test_private_env_rejects_symlinks_and_nonregular_files(tmp_path):
+    path = tmp_path / "private.env"
+    path.write_text("HEAD_TOKEN=" + "x" * 40 + "\n")
+    path.chmod(0o600)
+    link = tmp_path / "alias.env"
+    link.symlink_to(path)
+    with pytest.raises(OSError):
+        read_private_env(link)
+    fifo = tmp_path / "fifo.env"
+    os.mkfifo(fifo, 0o600)
+    with pytest.raises(ValueError, match="regular file"):
+        read_private_env(fifo)
+
+
+@pytest.mark.parametrize("suffix", ["BROKEN", "HEAD_TOKEN=duplicate", "BAD NAME=x", "NUL=\x00"])
+def test_private_env_rejects_whole_malformed_file_without_leaking_values(tmp_path, suffix):
+    path = tmp_path / "private.env"
+    private = "super-private-credential-value" * 2
+    path.write_text(f"HEAD_TOKEN={private}\n{suffix}\n")
+    path.chmod(0o600)
+    with pytest.raises(ValueError, match="malformed or duplicate") as error:
+        read_private_env(path)
+    assert private not in str(error.value)
+
+
+def test_private_env_bounds_read_size(tmp_path):
+    path = tmp_path / "private.env"
+    path.write_text("HEAD_TOKEN=" + "x" * 65536)
+    path.chmod(0o600)
+    with pytest.raises(ValueError, match="too large"):
+        read_private_env(path)
+
+
+@pytest.mark.parametrize("value", ["é" * 40, "x" * 32 + "\nother", "x" * 32 + " other"])
+def test_secret_rejects_non_bearer_characters_without_leaking_values(monkeypatch, value):
+    monkeypatch.setenv("HEAD_TOKEN", value)
+    with pytest.raises(ValueError, match="bearer token") as error:
+        secret("HEAD_TOKEN")
+    assert value not in str(error.value)
