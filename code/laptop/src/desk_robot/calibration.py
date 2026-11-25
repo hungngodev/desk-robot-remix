@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import json
 import math
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Self
 
 import numpy as np
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
@@ -54,7 +55,7 @@ class Calibration(BaseModel):
     forward_sign: int = Field(default=1)
 
     @model_validator(mode="after")
-    def geometry(self):
+    def geometry(self) -> Self:
         if len(self.pixel_points) != len(self.ground_points_mm):
             raise ValueError("Calibration point pairs must have equal length")
         for x, y in self.pixel_points:
@@ -91,7 +92,10 @@ class Calibration(BaseModel):
             raise ValueError("Calibration points are collinear")
         rows = []
         for (x, y), (u, v) in zip(source, target, strict=True):
-            rows.extend(([x, y, 1, 0, 0, 0, -u * x, -u * y], [0, 0, 0, x, y, 1, -v * x, -v * y]))
+            rows.extend((
+                [x, y, 1, 0, 0, 0, -u * x, -u * y],
+                [0, 0, 0, x, y, 1, -v * x, -v * y],
+            ))
         design = np.array(rows)
         if np.linalg.matrix_rank(design) < 8:
             raise ValueError("Degenerate homography point pairs")
@@ -119,17 +123,17 @@ class Calibration(BaseModel):
         x0, y0, x1, y1 = self.work_area_mm
         return x0 <= point[0] <= x1 and y0 <= point[1] <= y1
 
-    def verify_ready(self):
+    def verify_ready(self) -> None:
         if not self.measured:
             raise ValueError(
                 "Calibration is an unmeasured example; measure this robot before pickup"
             )
 
-        if self.expires_at is not None and datetime.now(timezone.utc) >= self.expires_at:
+        if self.expires_at is not None and datetime.now(UTC) >= self.expires_at:
             raise ValueError("Calibration expired; re-calibrate this robot before pickup")
 
     @classmethod
-    def load(cls, path: Path) -> "Calibration":
+    def load(cls, path: Path) -> Self:
         contents = path.read_text()
         # Pydantic accepts repeated JSON keys with the final value winning.
         # Refuse ambiguous measured permission and point geometry first, then
@@ -137,5 +141,5 @@ class Calibration(BaseModel):
         json.loads(contents, object_pairs_hook=_unique_calibration_json_fields)
         return cls.model_validate_json(contents)
 
-    def save(self, path: Path):
+    def save(self, path: Path) -> None:
         path.write_text(json.dumps(self.model_dump(mode="json"), indent=2) + "\n")
