@@ -143,6 +143,50 @@ int main() {
       }
     }
     {
+      // A complete, plausible result is not publishable until the
+      // interrupt-clear STOP succeeds. A read timeout test alone cannot
+      // distinguish dropping the write_byte() failure check from correct
+      // behavior. Cover both the optional and safety-critical lane.
+      for (const bool critical : {false, true}) {
+        Wire = TwoWire{};
+        fake_i2c_lines() = FakeI2cLines{};
+        desk_robot::TofBus bus;
+        desk_robot::CliffGuard guard;
+        ready(bus, guard);
+        if (critical) {
+          bus.poll(guard, 60); // establish valid side-lane evidence
+          CHECK(bus.extra_diagnostic(0, 60).valid);
+        }
+        const std::uint32_t now = critical ? 61U : 60U;
+        const auto samples = Wire.tof_samples;
+        const auto stops = Wire.tof_register_stop_transmissions;
+        const auto errors = bus.errors();
+        // Register pointer writes use repeated START, so this one-shot
+        // STOP timeout targets the 0x0B acknowledgement after the read.
+        Wire.next_stop_timeout_address = 0x29;
+        bus.poll(guard, now);
+        CHECK(Wire.next_stop_timeout_address == -1);
+        CHECK(Wire.tof_samples == samples + 1);
+        CHECK(Wire.tof_register_stop_transmissions == stops + 1);
+        CHECK(bus.errors() == errors + 1);
+        CHECK(bus.new_optical_channel() == 255);
+        CHECK(bus.new_extra_channel() == 255);
+        CHECK(!bus.extra_diagnostic(0, now).valid);
+        CHECK(!bus.optical_diagnostic(5, now).valid);
+        for (std::uint8_t lane = 0; lane < 5; ++lane) {
+          CHECK(!bus.optical_diagnostic(lane, now).valid);
+          CHECK(!guard.diagnostic(lane, now).present);
+        }
+        CHECK(guard.fault() == desk_robot::CliffFault::BusFailure);
+        CHECK(!guard.evaluate(now));
+        CHECK(!guard.try_rearm(now));
+        for (std::uint32_t at = now + 1; at <= now + 7; ++at)
+          bus.poll(guard, at);
+        CHECK(!guard.evaluate(now + 7)); // no automatic rearm
+        CHECK(guard.try_rearm(now + 7)); // new critical sweep + operator
+      }
+    }
+    {
       // A full millis revolution must not make expired diagnostics fresh.
       Wire = TwoWire{};
       fake_i2c_lines() = FakeI2cLines{};
