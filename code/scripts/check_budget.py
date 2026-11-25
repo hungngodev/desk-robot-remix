@@ -77,11 +77,16 @@ def budget(data, shipping=None, tax=None):
         if row.get("currency", "USD") != "USD":
             raise ValueError(f"{name}: budget currency must be USD")
         price = row.get("unit_usd")
-        if price is None:
+        unit_cents = None if price is None else _money(price, label=f"{name} unit price")
+        # Only explicitly owned stock can use a zero historical price.
+        # A zero placeholder for a new purchase is an unknown quote.
+        if unit_cents == 0 and status != "owned":
+            unit_cents = None
+        if unit_cents is None:
             unknown_prices.append(name)
         else:
-            known_subtotal += _money(price, label=f"{name} unit price") * quantity
-        if status not in {"verified", "owned"} or price is None:
+            known_subtotal += unit_cents * quantity
+        if status not in {"verified", "owned"} or unit_cents is None:
             unresolved.append(name)
     # Bound aggregate costs too, so JSON floats retain cent resolution.
     if known_subtotal > MAX_BUDGET_CENTS:

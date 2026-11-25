@@ -716,3 +716,42 @@ def test_legacy_complete_bom_cannot_approve_purchase_cli(tmp_path):
     assert output["historical_math_ready"] is True
     assert output["purchase_ready"] is False
     assert "legacy BOM cannot approve" in completed.stderr
+
+
+@pytest.mark.parametrize("freight,total,ready", [
+    ("4.00", 49.99, True), ("4.01", 50.00, True), ("4.02", 50.01, False),
+])
+def test_historical_sense_payment_and_landed_cap(freight, total, ready):
+    data = {
+        "cap_usd": 50,
+        "fit_confirmed": True,
+        "items": [
+            {"item": "Sense", "quantity": 1, "unit_usd": "13.67",
+             "price_status": "verified"},
+            {"item": "other parts", "quantity": 1, "unit_usd": "32.00",
+             "price_status": "verified"},
+            {"item": "owned board", "quantity": 1, "unit_usd": 0,
+             "price_status": "owned"},
+        ],
+    }
+    budget = module("check_budget").budget
+    result = budget(data, freight, "0.32")
+    assert result["quoted_total_usd"] == total
+    assert result["purchase_ready"] is ready
+    partial = budget(data, None, "0.32")
+    assert partial["quoted_total_usd"] is None
+    assert partial["remaining_under_cap_usd"] is None
+    assert partial["purchase_ready"] is False
+
+
+@pytest.mark.parametrize("price", [0, "0.00", None])
+def test_historical_zero_price_placeholder_is_unknown(price):
+    data = historical_quoted_budget()
+    row = data["items"][0]
+    row["unit_usd"] = price
+    out = module("check_budget").budget(data, 0, 0)
+    assert row["item"] in out["unknown_price_items"]
+    assert row["item"] in out["unquoted_items"]
+    assert out["quoted_total_usd"] is None
+    assert out["remaining_under_cap_usd"] is None
+    assert not out["purchase_ready"]

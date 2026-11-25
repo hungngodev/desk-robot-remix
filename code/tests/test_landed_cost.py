@@ -448,6 +448,7 @@ def test_free_items_split_shipping_by_units_without_dividing_by_zero():
     ev = sample()
     for line in ev["lines"]:
         line["package_price_usd"] = "0.00"
+        line["free_package_evidence_url"] = "https://example.org/explicit-free-quote"
     ev["seller_charges"][0]["tax_usd"] = "0.00"
     categories = {
         "robot:cliff_obstacle": "robot",
@@ -890,3 +891,52 @@ def test_two_seller_duties_discounts_and_independent_freight_exact_cents():
     )
     assert excess["payable_now_cents"] is None
     assert any("discount exceeds seller total" in err for err in excess["errors"])
+
+
+@pytest.mark.parametrize("scope", ["evaluation", "first_robot"])
+@pytest.mark.parametrize("freight,total,within", [
+    ("4.00", 4999, True), ("4.01", 5000, True), ("4.02", 5001, False),
+])
+def test_sense_payment_exact_prototype_cap_with_tax_and_freight(scope, freight, total, within):
+    ev = sample()
+    ev["scope"] = scope
+    ev["paid_orders"][0]["total_paid_usd"] = "13.67"
+    ev["lines"][0]["package_price_usd"] = "31.53"
+    for line in ev["lines"]:
+        line["quoted_at"] = date.today().isoformat()
+        line["stock_checked_at"] = date.today().isoformat()
+    ev["seller_charges"][0].update(shipping_usd=freight, tax_usd="0.32")
+    out = mod.account_landed_cost(ev, REQUIRED, CATEGORIES, expected_scope=scope)
+    assert out["errors"] == []
+    assert out["prior_paid_orders_cents"] == 1367
+    assert out["prototype_cumulative_cents"] == total
+    assert out["remaining_under_cap_cents"] == 5000 - total
+    assert out["within_prototype_cap"] is within
+    assert not out["landed_price_is_a_verified_supplier_checkout"]
+
+
+@pytest.mark.parametrize("scope", ["evaluation", "first_robot", "fleet"])
+@pytest.mark.parametrize("bad_price", [None, "0.00", 0])
+def test_unpriced_purchase_line_cannot_use_zero_fallback(scope, bad_price):
+    ev = sample()
+    ev["scope"] = scope
+    for line in ev["lines"]:
+        line["quoted_at"] = date.today().isoformat()
+        line["stock_checked_at"] = date.today().isoformat()
+    ev["lines"][0]["package_price_usd"] = bad_price
+    out = mod.account_landed_cost(ev, REQUIRED, CATEGORIES, expected_scope=scope)
+    assert not out["calculation_complete_not_physical_approval"]
+    assert out["payable_now_cents"] is None
+    assert out["prototype_cumulative_cents"] is None
+    assert "robot:cliff_obstacle" in out["unaccounted_roles"]
+    assert out["within_prototype_cap"] is (None if scope == "fleet" else False)
+
+
+def test_missing_freight_cannot_turn_sense_payment_into_under_cap_quote():
+    ev = sample()
+    ev["paid_orders"][0]["total_paid_usd"] = "13.67"
+    del ev["seller_charges"][0]["shipping_usd"]
+    out = calculate(ev)
+    assert out["prior_paid_orders_cents"] == 1367
+    assert out["prototype_cumulative_cents"] is None
+    assert out["within_prototype_cap"] is False

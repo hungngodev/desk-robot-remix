@@ -182,7 +182,9 @@ def account_landed_cost(
     Evidence keys: scope, lines, seller_charges, inventory, paid_in_flight,
     paid_orders. Every quote has role_key, seller, sku, quantity_packages,
     units_per_package, package_price_usd, quote_reference, quoted_at,
-    stock_evidence_url. A seller charge has explicit shipping_usd, tax_usd,
+    stock_evidence_url. A zero package price additionally requires a separate
+    free_package_evidence_url proving the seller actually quotes a free item.
+    A seller charge has explicit shipping_usd, tax_usd,
     duties_usd, discount_usd. Inspected inventory must identify acquisition_kind
     as already_owned or paid_order and include an inspection_receipt_url.
     Paid-order inventory also needs its order_reference. The same paid order's
@@ -243,7 +245,10 @@ def account_landed_cost(
             category = role_categories[role]
             if category not in buckets:
                 raise ValueError("unknown robot, dock or station cost category")
-            total = packages * cents(line.get("package_price_usd"), "package price")
+            price = cents(line.get("package_price_usd"), "package price")
+            if price == 0 and not _url(line.get("free_package_evidence_url")):
+                raise ValueError("zero package price requires explicit free-item evidence")
+            total = packages * price
             claim = (role, seller, sku, quote_ref)
             if claim in quote_claims:
                 raise ValueError("duplicate quoted SKU under same role and quote reference")
