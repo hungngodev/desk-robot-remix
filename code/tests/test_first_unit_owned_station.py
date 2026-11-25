@@ -81,7 +81,10 @@ def test_historical_builder_table_uses_current_eight_ranges_and_two_muxes():
     assert roles["cliff_obstacle"]["per_robot"] == 8
     assert roles["i2c_mux"]["per_robot"] == 2
     parts = (ROOT / "docs/hardware/parts.md").read_text(encoding="utf-8")
-    rows = [row for row in parts.splitlines() if row.startswith("| ")]
+    missing_core = parts.split("## Missing for one complete core", 1)[1].split(
+        "\n## ", 1
+    )[0]
+    rows = [row for row in missing_core.splitlines() if row.startswith("| ")]
     range_rows = [
         row for row in rows if "VL53L0X" in row and re.search(r"\bcarriers?\b", row)
     ]

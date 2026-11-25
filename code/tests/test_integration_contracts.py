@@ -88,7 +88,7 @@ def test_late_optional_mux_detection_reaches_active_tof_safety_owner():
     assert "if (petting_present || paw_present || accessory_mux)" in body
     assert "tof.note_optional_mux_present();" in body
     assert "if (!optional_mux_present_) return true;" in tof
-    assert "return wire_.read() == 0;" in tof
+    assert "return wire_.read() == 0 && bus_idle();" in tof
     assert "return mux(kRangeMux, 0) && mux(kExpansionMux, 1);" in touch
     assert "kPreferredAddress" in touch  # generic 0x29 CAP1188 alternative
 

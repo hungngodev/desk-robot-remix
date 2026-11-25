@@ -309,6 +309,10 @@ jobs:
         run: |
           c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/usb_epoch_sync_tests.cpp -o /tmp/desk-room-usb-sync-test
           /tmp/desk-room-usb-sync-test
+      - name: Verify room BME688 completed-conversion publication with sanitizers
+        run: |
+          c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/bme_completed_sample_tests.cpp -o /tmp/desk-room-bme-test
+          /tmp/desk-room-bme-test
 
   sense-idf:
     concurrency:

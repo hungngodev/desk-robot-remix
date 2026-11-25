@@ -461,3 +461,182 @@ def test_private_dock_candidate_never_publishes_approved_or_nonfinite_fields(
     with pytest.raises(ValueError):
         fitter().write_private_dock_candidate(target, candidate)
     assert not target.exists()
+
+
+@pytest.mark.parametrize(
+    "bad_geometry",
+    [
+        {"columns": 3},
+        {"rows": 21},
+        {"square_mm": 0.5},
+        {"tag_side_mm": 9.0},
+        {"marker_id": 587},
+        {"target_distance_mm": 40.0},
+        {"square_mm": float("nan")},
+    ],
+)
+def test_calibrate_images_rejects_invalid_geometry_before_files_or_cv2(
+    tmp_path, monkeypatch, bad_geometry,
+):
+    """Measured board/tag geometry errors must fail before disk/CV2 work, after PID checks."""
+    monkeypatch.setitem(sys.modules, "cv2", None)
+    params = {
+        "columns": 9,
+        "rows": 6,
+        "square_mm": 10.0,
+        "tag_side_mm": 60.0,
+        "marker_id": 2,
+        "target_distance_mm": 200.0,
+        **bad_geometry,
+    }
+    missing = tmp_path / "does_not_exist"
+    with pytest.raises(ValueError, match="measured board/dock geometry"):
+        fitter().calibrate_images(
+            missing,
+            camera_sensor_pid="OV5640",
+            robot_id="robot-01",
+            head_device_id="xiaozhi-01",
+            **params,
+        )
+    # Invalid sensor PID still takes precedence over bad board geometry.
+    with pytest.raises(ValueError, match="actual XIAO camera sensor PID"):
+        fitter().calibrate_images(
+            missing,
+            camera_sensor_pid="OV2640",
+            robot_id="robot-01",
+            head_device_id="xiaozhi-01",
+            **params,
+        )
+
+
+def test_calibrate_images_renders_distorted_jpegs_and_recovers_undistort(tmp_path):
+    """End-to-end rendered JPEG chessboard calibration recovers intrinsics without approval."""
+    cv2 = pytest.importorskip("cv2")
+    width, height = 640, 480
+    columns, rows, square_mm = 9, 6, 10.0
+    truth_k = np.array(
+        [[510.0, 0.0, 320.0], [0.0, 512.0, 240.0], [0.0, 0.0, 1.0]],
+        dtype=np.float64,
+    )
+    truth_dist = np.array([-0.22, 0.08, 0.001, -0.001, 0.0], dtype=np.float64)
+
+    # Render warped planar checkerboards onto distinct synthetic views.
+    obj_squares = []
+    white_flags = []
+    for r in range(rows + 1):
+        for c in range(columns + 1):
+            x0, y0 = (c - 1) * square_mm, (r - 1) * square_mm
+            obj_squares.append(
+                np.array(
+                    [
+                        [x0, y0, 0.0],
+                        [x0 + square_mm, y0, 0.0],
+                        [x0 + square_mm, y0 + square_mm, 0.0],
+                        [x0, y0 + square_mm, 0.0],
+                    ],
+                    dtype=np.float32,
+                )
+            )
+            white_flags.append((r + c) % 2 == 0)
+
+    inner_obj = np.zeros((rows * columns, 3), dtype=np.float32)
+    inner_obj[:, :2] = np.mgrid[0:columns, 0:rows].T.reshape(-1, 2) * square_mm
+
+    captures = tmp_path / "captures"
+    captures.mkdir()
+    rendered_count = 0
+    for idx in range(24):
+        tx = -45.0 + (idx % 4) * 30.0
+        ty = -30.0 + ((idx // 4) % 3) * 30.0
+        tz = 180.0 + (idx % 5) * 45.0
+        rvec = np.array(
+            [
+                -0.25 + 0.1 * ((idx % 3) - 1),
+                0.22 - 0.12 * ((idx // 3) % 3),
+                0.08 * ((idx % 4) - 1.5),
+            ],
+            dtype=np.float64,
+        )
+        tvec = np.array([tx - 35.0, ty - 25.0, tz], dtype=np.float64)
+        canvas = np.full((height, width), 220, dtype=np.uint8)
+        for quad, is_white in zip(obj_squares, white_flags, strict=True):
+            projected, _ = cv2.projectPoints(quad, rvec, tvec, truth_k, truth_dist)
+            pts = np.round(projected.reshape(-1, 2)).astype(np.int32)
+            cv2.fillPoly(canvas, [pts], 235 if is_white else 20)
+        ok, buf = cv2.imencode(".jpg", canvas, [int(cv2.IMWRITE_JPEG_QUALITY), 95])
+        assert ok
+        (captures / f"view_{idx:02d}.jpg").write_bytes(buf.tobytes())
+        rendered_count += 1
+    assert rendered_count == 24
+
+    candidate = fitter().calibrate_images(
+        captures,
+        columns=columns,
+        rows=rows,
+        square_mm=square_mm,
+        tag_side_mm=60.0,
+        marker_id=2,
+        target_distance_mm=200.0,
+        camera_sensor_pid="OV5640",
+        robot_id="robot-01",
+        head_device_id="xiaozhi-01",
+    )
+    assert candidate["measured"] is False
+    assert candidate["physical_acceptance_pass"] is False
+    assert candidate["motor_authorized"] is False
+    assert candidate["charging_authorized"] is False
+    assert candidate["camera_pid_runtime_verified"] is False
+    assert candidate["input_jpegs"] == 24
+    assert candidate["checkerboard_views"] >= 18
+    assert candidate["reprojection_rms_px"] < 1.5
+    assert candidate["worst_view_reprojection_rms_px"] < 1.5
+    assert abs(candidate["fx"] - 510.0) < 15.0
+    assert abs(candidate["fy"] - 512.0) < 15.0
+
+    # Verify recovered intrinsics + distortion genuinely undistort image coordinates.
+    fitted_k = np.array(
+        [
+            [candidate["fx"], 0.0, candidate["cx"]],
+            [0.0, candidate["fy"], candidate["cy"]],
+            [0.0, 0.0, 1.0],
+        ],
+        dtype=np.float64,
+    )
+    fitted_dist = np.array(candidate["distortion_coeffs"], dtype=np.float64)
+    sample_rvec = np.array([0.1, -0.1, 0.05], dtype=np.float64)
+    sample_tvec = np.array([-30.0, -20.0, 210.0], dtype=np.float64)
+    distorted_pts, _ = cv2.projectPoints(
+        inner_obj, sample_rvec, sample_tvec, truth_k, truth_dist
+    )
+    ideal_pts, _ = cv2.projectPoints(
+        inner_obj, sample_rvec, sample_tvec, truth_k, np.zeros(5, dtype=np.float64)
+    )
+    undistorted = cv2.undistortPoints(
+        distorted_pts, fitted_k, fitted_dist, P=fitted_k
+    )
+    raw_err = float(np.max(np.linalg.norm(distorted_pts - ideal_pts, axis=2)))
+    corrected_err = float(np.max(np.linalg.norm(undistorted - ideal_pts, axis=2)))
+    assert raw_err > 1.5
+    assert corrected_err < 1.0
+
+    # Blank JPEGs with no detected checkerboards must fail cleanly.
+    blank_dir = tmp_path / "blank_jpegs"
+    blank_dir.mkdir()
+    ok, blank_buf = cv2.imencode(".jpg", np.full((height, width), 128, dtype=np.uint8))
+    assert ok
+    for idx in range(12):
+        (blank_dir / f"blank_{idx:02d}.jpg").write_bytes(blank_buf.tobytes())
+    with pytest.raises(ValueError, match="12\\+ independent real views"):
+        fitter().calibrate_images(
+            blank_dir,
+            columns=columns,
+            rows=rows,
+            square_mm=square_mm,
+            tag_side_mm=60.0,
+            marker_id=2,
+            target_distance_mm=200.0,
+            camera_sensor_pid="OV5640",
+            robot_id="robot-01",
+            head_device_id="xiaozhi-01",
+        )
+

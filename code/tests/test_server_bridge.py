@@ -3063,3 +3063,110 @@ async def test_retired_head_callbacks_cannot_touch_replacement_voice_state(bridg
     assert bridge.voice_event_cursor == 0
     assert not bridge.human_interrupted_devices
     assert not bridge.lease_stopping
+
+
+def _pcm_wav_bytes(samples: list[int], *, sample_rate: int = 16000, channels: int = 1) -> bytes:
+    import io
+    import struct
+    import wave
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav:
+        wav.setnchannels(channels)
+        wav.setsampwidth(2)
+        wav.setframerate(sample_rate)
+        wav.writeframes(struct.pack(f"<{len(samples)}h", *samples))
+    return buf.getvalue()
+
+
+def test_bridge_wav_audio_and_encode_opus_preserve_short_and_partial_tails(
+    bridge, monkeypatch,
+):
+    """Real WAV decoding and Opus tail zero-padding keep 60ms 960-sample alignment."""
+    import base64
+
+    util_path = (
+        ROOT
+        / "upstream/xiaozhi-esp32-server/main/xiaozhi-server/core/utils/util.py"
+    )
+    if not util_path.exists():
+        pytest.skip("Pinned upstream xiaozhi-esp32-server unavailable")
+
+    short_wav = _pcm_wav_bytes([300] * 400, sample_rate=16000)
+    encoded_short = base64.b64encode(short_wav).decode("ascii")
+    raw_short = bridge.wav_audio(encoded_short)
+    assert raw_short == short_wav
+
+    padded_chunks: list[bytes] = []
+
+    class FakeEncoder:
+        def encode(self, pcm_bytes: bytes, frame_size: int) -> bytes:
+            assert frame_size == 960
+            assert len(pcm_bytes) == 1920
+            padded_chunks.append(pcm_bytes)
+            return b"opus-" + str(len(padded_chunks)).encode("ascii")
+
+    core_pkg = types.ModuleType("core")
+    utils_pkg = types.ModuleType("core.utils")
+    util_mod = types.ModuleType("core.utils.util")
+    opus_mod = types.ModuleType("opuslib_next")
+    opus_mod.APPLICATION_AUDIO = 2049
+    opus_mod.Encoder = lambda *_args, **_kwargs: FakeEncoder()
+
+    import ast
+    import io
+    import wave as std_wave
+
+    util_src = util_path.read_text(encoding="utf-8")
+    pcm_fn_node = next(
+        node
+        for node in ast.parse(util_src).body
+        if isinstance(node, ast.FunctionDef) and node.name == "pcm_to_data_stream"
+    )
+    pcm_ns = {
+        "Callable": __import__("typing").Callable,
+        "Any": __import__("typing").Any,
+        "opuslib_next": opus_mod,
+        "np": __import__("numpy"),
+    }
+    exec(
+        compile(ast.Module(body=[pcm_fn_node], type_ignores=[]), str(util_path), "exec"),
+        pcm_ns,
+    )
+
+    def pinned_wav_to_data_stream(
+        audio_bytes, _file_type, is_opus, callback, sample_rate=16000,
+    ):
+        with std_wave.open(io.BytesIO(audio_bytes), "rb") as wav:
+            assert wav.getframerate() == sample_rate
+            pcm = wav.readframes(wav.getnframes())
+        return pcm_ns["pcm_to_data_stream"](
+            pcm, is_opus=is_opus, callback=callback, sample_rate=sample_rate
+        )
+
+    util_mod.audio_bytes_to_data_stream = pinned_wav_to_data_stream
+    monkeypatch.setitem(sys.modules, "core", core_pkg)
+    monkeypatch.setitem(sys.modules, "core.utils", utils_pkg)
+    monkeypatch.setitem(sys.modules, "core.utils.util", util_mod)
+    monkeypatch.setitem(sys.modules, "opuslib_next", opus_mod)
+
+    frames = bridge.encode_opus(short_wav)
+    assert frames == [b"opus-1"]
+    assert len(padded_chunks) == 1
+    # First 400 samples non-zero, remaining 560 samples zero-padded to exact 960 samples.
+    assert padded_chunks[0][:800] != b"\x00" * 800
+    assert padded_chunks[0][800:] == b"\x00" * 1120
+
+    # Exact 1.5-frame (1440-sample) WAV yields 2 frames without dropping partial tail.
+    padded_chunks.clear()
+    tail_wav = _pcm_wav_bytes([250] * 1440, sample_rate=16000)
+    frames_tail = bridge.encode_opus(tail_wav)
+    assert frames_tail == [b"opus-1", b"opus-2"]
+    assert len(padded_chunks) == 2
+    assert padded_chunks[1][960:] == b"\x00" * 960
+
+    # Invalid WAV parameters fail closed.
+    bad_rate_wav = _pcm_wav_bytes([100] * 100, sample_rate=4000)
+    with pytest.raises(ValueError, match="16-bit mono/stereo PCM WAV"):
+        bridge.wav_audio(base64.b64encode(bad_rate_wav).decode("ascii"))
+

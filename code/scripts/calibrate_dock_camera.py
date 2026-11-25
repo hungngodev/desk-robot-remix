@@ -28,6 +28,34 @@ def _require_cv2() -> ModuleType:
     return cv2
 
 
+def _validate_measured_board_geometry(
+    *,
+    columns: int,
+    rows: int,
+    square_mm: float,
+    tag_side_mm: float,
+    marker_id: int,
+    target_distance_mm: float,
+) -> None:
+    """Validate checkerboard pattern and dock target geometry before CV work."""
+    if (
+        type(columns) is not int
+        or type(rows) is not int
+        or not 4 <= columns <= 20
+        or not 4 <= rows <= 20
+        or type(marker_id) is not int
+        or not 0 <= marker_id < 587
+        or any(
+            type(x) not in (int, float) or not math.isfinite(x)
+            for x in (square_mm, tag_side_mm, target_distance_mm)
+        )
+        or not 2 <= square_mm <= 100
+        or not 10 <= tag_side_mm <= 250
+        or not 50 <= target_distance_mm <= 500
+    ):
+        raise ValueError("Need 12+ independent real views and measured board/dock geometry")
+
+
 def fit_corners(
     views: list, image_size: tuple[int, int], *,
     columns: int, rows: int, square_mm: float,
@@ -37,16 +65,13 @@ def fit_corners(
     width, height = image_size
     if (type(width) is not int or type(height) is not int
             or not 80 <= width <= 2048 or not 80 <= height <= 1536
-            or type(columns) is not int or type(rows) is not int
-            or not 4 <= columns <= 20 or not 4 <= rows <= 20
-            or type(marker_id) is not int or not 0 <= marker_id < 587
-            or any(type(x) not in (int, float) or not math.isfinite(x)
-                   for x in (square_mm, tag_side_mm, target_distance_mm))
-            or not 2 <= square_mm <= 100
-            or not 10 <= tag_side_mm <= 250
-            or not 50 <= target_distance_mm <= 500
             or len(views) < 12):
         raise ValueError("Need 12+ independent real views and measured board/dock geometry")
+    _validate_measured_board_geometry(
+        columns=columns, rows=rows, square_mm=square_mm,
+        tag_side_mm=tag_side_mm, marker_id=marker_id,
+        target_distance_mm=target_distance_mm,
+    )
     import numpy as np
 
     cv2 = _require_cv2()
@@ -220,6 +245,11 @@ def calibrate_images(folder: Path, *, columns: int, rows: int,
             or value.strip() != value or len(value) > 160
         ):
             raise ValueError(f"Record actual {field_name} for dock calibration")
+    _validate_measured_board_geometry(
+        columns=columns, rows=rows, square_mm=square_mm,
+        tag_side_mm=tag_side_mm, marker_id=marker_id,
+        target_distance_mm=target_distance_mm,
+    )
     # An original on-head capture must be a regular file below the chosen
     # capture folder. Path.is_file() and read_bytes() otherwise follow a
     # symlink and can silently import an unrelated JPEG as measured evidence.

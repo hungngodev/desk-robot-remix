@@ -293,6 +293,24 @@ class OverlayPathTests(unittest.TestCase):
         self.assertTrue(marker.is_file())
         self.assertEqual((self.board / "config.json").read_bytes(), b"{}")
 
+    def test_journal_allows_p3_player_host_script_and_rejects_arbitrary_path(self):
+        script_path = self.root / "scripts/p3_tools/p3_gui_player.py"
+        script_path.parent.mkdir(parents=True, exist_ok=True)
+        script_path.write_bytes(b"original p3 player")
+        self.plan["scripts/p3_tools/p3_gui_player.py"] = b"instrumented p3 player"
+        overlay.apply(self.root)
+        self.assertEqual(script_path.read_bytes(), b"instrumented p3 player")
+        marker = self.root / overlay.MARKER
+        state = json.loads(marker.read_text())
+        state["unrelated/arbitrary.py"] = dict(state["scripts/p3_tools/p3_gui_player.py"])
+        marker.write_text(json.dumps(state))
+        with self.assertRaisesRegex(ValueError, "Invalid head overlay journal entry"):
+            overlay.remove(self.root)
+        del state["unrelated/arbitrary.py"]
+        marker.write_text(json.dumps(state))
+        overlay.remove(self.root)
+        self.assertEqual(script_path.read_bytes(), b"original p3 player")
+
 
 @unittest.skipUnless((UPSTREAM / "main/boards/common/esp_video.cc").is_file(), "Pinned upstream fixture unavailable")
 class OverlayTests(unittest.TestCase):
