@@ -1073,6 +1073,17 @@ class Coordinator:
                          or self.settings.camera_consent_generation != camera_grant)):
                 raise OperationError("Hardware exploration camera consent revoked")
 
+        def require_motion_authority() -> None:
+            if job.id in self.jobs and job.state != "running":
+                raise OperationError("Exploration halted: job no longer owns motion")
+            voice_reason = self.voice_blocks_motion()
+            if voice_reason is not None:
+                raise OperationError(voice_reason)
+            if not self.robot(job.robot_id).motion_enabled:
+                raise OperationError("Exploration halted: motion_enabled=false")
+            if self.dock_inhibited(job.robot_id):
+                raise OperationError("Exploration halted: robot seated or powered on dock")
+
         async def observe_camera() -> None:
             nonlocal last_live_frame_at
             require_camera_grant()
@@ -1144,6 +1155,7 @@ class Coordinator:
         # This loop persists until a stop, quiet mode, failure, or disconnect.
         # There is no unbounded drive: every track movement expires after 100ms.
         while True:
+            require_motion_authority()
             require_camera_grant()
             await self._assert_armed_health(job.robot_id, require_front_clearance=True)
             # The reused Sense camera source must be alive before and after
@@ -1152,6 +1164,9 @@ class Coordinator:
             # A camera request can hang while a local cliff, touch or IMU
             # fault disarms WROOM. Never drive from a pre-camera verdict.
             await self._assert_armed_health(job.robot_id, require_front_clearance=True)
+            # A voice edge or operator revocation may arrive while health IO
+            # is suspended, before the separate asynchronous STOP task runs.
+            require_motion_authority()
             require_camera_grant()
             await head.command("drive 20 20 100")
             await asyncio.sleep(0.12)

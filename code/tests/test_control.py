@@ -545,6 +545,64 @@ async def test_authenticated_human_preempts_running_exploration_without_rearming
         await c.close()
 
 
+@pytest.mark.parametrize("pulse", [0, 1])
+@pytest.mark.parametrize(
+    ("fence", "message"),
+    [
+        ("voice", "Voice priority"),
+        ("disabled", "motion_enabled=false"),
+        ("dock", "seated or powered on dock"),
+        ("job", "job no longer owns motion"),
+    ],
+)
+async def test_exploration_rechecks_motion_authority_after_health_io(
+    settings, pulse, fence, message,
+):
+    c, head = make(settings)
+    started, resume = asyncio.Event(), asyncio.Event()
+    original_health = c._assert_armed_health
+    health_reads = 0
+
+    async def gated_health(robot_id, *, require_front_clearance=False):
+        nonlocal health_reads
+        health_reads += 1
+        result = await original_health(
+            robot_id, require_front_clearance=require_front_clearance,
+        )
+        if health_reads == 2 * (pulse + 1):
+            started.set()
+            await resume.wait()
+        return result
+
+    c._assert_armed_health = gated_health
+    try:
+        await c.operator_arm("robot-01")
+        job = c.explore("robot-01")
+        await asyncio.wait_for(started.wait(), timeout=3)
+        assert head.commands.count("drive 20 20 100") == pulse
+        # Exercise the synchronous authority fence before any separately
+        # scheduled STOP/cancellation can reach this suspended operation.
+        if fence == "voice":
+            c.set_voice_state(active_robots={"robot-02"})
+        elif fence == "disabled":
+            settings.robots[0].motion_enabled = False
+        elif fence == "dock":
+            c._dock_charging_inhibited = {"robot-01": True}
+        else:
+            job.state = "cancelled"
+        resume.set()
+        await asyncio.wait_for(c.tasks[job.id], timeout=3)
+        assert job.state == "failed"
+        assert message in job.error
+        assert head.commands.count("drive 20 20 100") == pulse
+        assert head.commands.count("arm") == 1
+        assert head.commands[-1] == "halt"
+        assert c._fleet_motion_owner is None
+    finally:
+        resume.set()
+        await c.close()
+
+
 async def test_human_voice_roaming_stop_does_not_cancel_manual_gripper(settings):
     c, head = make(settings)
     try:
