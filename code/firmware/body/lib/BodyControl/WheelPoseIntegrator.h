@@ -176,8 +176,11 @@ class WheelPoseIntegrator {
           (avg_abs_nm * limits_.wheel_error_ppm + 999999ULL) / 1000000ULL;
       const std::uint64_t heading_error_nm =
           (abs64(traveled_nm) * heading_error_urad + 999999ULL) / 1000000ULL;
+      // Zero translation has no midpoint rounding error. Keep measured
+      // wheel and heading uncertainty, including gyro drift, independent.
       const std::uint64_t error_increment_nm =
-          wheel_error_nm + heading_error_nm + 1000ULL;
+          wheel_error_nm + heading_error_nm +
+          (traveled_nm != 0 ? 1000ULL : 0ULL);
       const std::uint64_t max_xy_error_nm =
           static_cast<std::uint64_t>(limits_.max_xy_error_mm) * 1000000ULL;
       if (xy_error_nm_ > max_xy_error_nm ||

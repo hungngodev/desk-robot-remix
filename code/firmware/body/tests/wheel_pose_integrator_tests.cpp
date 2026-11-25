@@ -198,7 +198,40 @@ static void refuse_future_wheel_acquisition() {
   }
 }
 
+static void stationary_pairs_do_not_accumulate_translation_error() {
+  WheelPoseIntegrator pose;
+  auto c = calibration();
+  c.max_xy_error_mm = 1;
+  check(pose.configure(c));
+  for (std::uint32_t i = 1; i <= 3; ++i)
+    check(pose.observe(observed(i, i * 100), i * 100 + 10));
+  check(pose.start_origin(310));
+  for (std::uint32_t i = 4; i <= 1100; ++i) {
+    auto e = observed(i, i * 100);
+    // Increasing measured gyro uncertainty is not erased by zero travel.
+    e.imu_error_urad = i * 10;
+    check(pose.observe(e, i * 100 + 10));
+    check(pose.state().origin == 1);
+    check(pose.state().x_mm == 0 && pose.state().y_mm == 0);
+    check(pose.state().xy_error_mm == 0);
+  }
+  check(pose.state().yaw_error_mrad == 12);
+  // Actual translation must still consume the position error budget.
+  check(pose.observe(observed(1101, 110100, 10, -10), 110110));
+  check(pose.state().x_mm == 1 && pose.state().xy_error_mm > 0);
+  // Opposite wheel travel still has wheel uncertainty without translation.
+  WheelPoseIntegrator rotation;
+  check(rotation.configure(c));
+  for (std::uint32_t i = 1; i <= 3; ++i)
+    check(rotation.observe(observed(i, i * 100), i * 100 + 10));
+  check(rotation.start_origin(310));
+  check(rotation.observe(observed(4, 400, -10, -10, 20000), 410));
+  check(rotation.state().x_mm == 0 && rotation.state().y_mm == 0);
+  check(rotation.state().yaw_mrad == 20 && rotation.state().xy_error_mm > 0);
+}
+
 int main() {
+  stationary_pairs_do_not_accumulate_translation_error();
   refuse_future_wheel_acquisition();
   refuse_rotation_and_expired_imu_origin();
   refuse_unqualified_and_reanchor();
