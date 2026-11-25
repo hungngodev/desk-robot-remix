@@ -222,9 +222,8 @@ def test_manifest_rejects_cross_profile_and_fixed_head_gpio_collisions():
     corrupt["bus"]["body_gpio"]["lift_servo"] = 25
     changed_body = body.replace("{13, 14, 25, 26}", "{13, 14, 18, 26}")
     changed_body = changed_body.replace(
-        "{13, 14, 25, 26, 27, 32, 33, 23}",
-        "{13, 14, 18, 26, 27, 32, 33, 23}",
-    ).replace("constexpr int kLiftServo = 18;", "constexpr int kLiftServo = 25;")
+        "constexpr int kLiftServo = 18;", "constexpr int kLiftServo = 25;"
+    )
     with pytest.raises(ValueError, match="DC profile GPIO collides"):
         generator.verify(corrupt, changed_body, head)
 
@@ -331,8 +330,9 @@ def test_manifest_rejects_divergent_motor_and_servo_initialization_arrays():
     head = (ROOT / generator.HEAD_PINS).read_text()
     generator.verify(plan, body, head)
     for before, after, message in (
-        ("kMotorPins[] = {13, 14, 25, 26, 27, 32, 33, 23}",
-         "kMotorPins[] = {13, 14, 25, 26, 27, 32, 33, 21}", "Motor initialization"),
+        ("kRightStepperPins[3]};", "kRightStepperPins[2]};", "Motor initialization"),
+        ("kRightStepperPins[3]};", "kLiftServo};", "Motor initialization"),
+        ("kRightStepperPins[3]};", "kRightStepperPins[4]};", "Motor initialization"),
         ("kMotorPins[] = {kLeftIn1, kLeftIn2, kRightIn1, kRightIn2}",
          "kMotorPins[] = {kLeftIn1, kLeftIn2, kRightIn1, kLiftServo}", "Motor initialization"),
         ("kMotorPins[] = {kLeftIn1, kLeftIn2, kRightIn1, kRightIn2}",

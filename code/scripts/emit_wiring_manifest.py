@@ -137,10 +137,11 @@ def verify(plan: dict, body: str, head: str) -> None:
         raise ValueError("Unknown or incomplete body GPIO roles")
     # These arrays drive actual GPIO initialization, clearing and PWM attachment.
     # Checking only the individual declarations misses a divergent aggregate.
-    motor_arrays = re.findall(r"(?m)^[ \t]*constexpr int kMotorPins\[\] = \{([^{}\n]+)\};", body)
+    motor_arrays = re.findall(r"(?m)^[ \t]*constexpr int kMotorPins\[\] = \{([^{}]+)\};", body)
     motor_pins = [[pin.strip() for pin in array.split(",")] for array in motor_arrays]
-    expected_stepper = [str(pin) for role in ("left_stepper", "right_stepper")
-                        for pin in body_pins[role]]
+    expected_stepper = [f"{symbol}[{index}]"
+                        for symbol in ("kLeftStepperPins", "kRightStepperPins")
+                        for index in range(4)]
     expected_dc = ["kLeftIn1", "kLeftIn2", "kRightIn1", "kRightIn2"]
     if motor_pins != [expected_stepper, expected_dc]:
         raise ValueError("Motor initialization pin array drift")
