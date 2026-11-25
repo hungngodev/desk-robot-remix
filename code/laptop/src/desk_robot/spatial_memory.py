@@ -8,7 +8,6 @@ MemoryStore schema trigger. Producer authentication remains with Mac transport.
 
 from __future__ import annotations
 
-import math
 import re
 import time
 from dataclasses import dataclass
@@ -54,9 +53,12 @@ def _integer(value: object, low: int, high: int) -> bool:
 
 
 def _validate(e: SpatialEvidence) -> None:
-    if type(e) is not SpatialEvidence or not _OBJECT_KEY.fullmatch(e.object_key):
+    if (type(e) is not SpatialEvidence or type(e.object_key) is not str
+            or not _OBJECT_KEY.fullmatch(e.object_key)):
         raise ValueError("Invalid spatial object identity")
-    if (type(e.observed_at) not in (float, int) or not math.isfinite(e.observed_at)
+    # Compare bounded numeric values before any conversion to SQLite REAL.
+    # Chained bounds also reject NaN and infinities without integer overflow.
+    if (type(e.observed_at) not in (float, int)
             or not 0 <= e.observed_at <= time.time() + 60):
         raise ValueError("Invalid spatial observation wall clock")
     if (not _integer(e.body_boot, 0, 0xffffffff)
@@ -74,7 +76,7 @@ def _validate(e: SpatialEvidence) -> None:
             or not _integer(e.yaw_mrad, -3142, 3142)
             or not _integer(e.uncertainty_mm, 1, 1_000_000)):
         raise ValueError("Invalid spatial coordinate or uncertainty")
-    if (e.frame != "odom" or e.anchor_id is not None):
+    if type(e.frame) is not str or e.frame != "odom" or e.anchor_id is not None:
         # A caller cannot self-assert a map anchor without Guide 50's future
         # stationary JPEG/pose bracket and validated measured-tag receipt.
         raise ValueError("Unverified map anchoring not accepted")
@@ -163,10 +165,9 @@ class SpatialMemory:
         """
         if type(object_key) is not str or not _OBJECT_KEY.fullmatch(object_key):
             raise ValueError("Invalid object key")
-        if (type(now) not in (float, int) or not math.isfinite(now)
+        if (type(now) not in (float, int) or not 0 <= now < 1e12
                 or type(live_age_s) not in (float, int)
                 or type(history_age_s) not in (float, int)
-                or not math.isfinite(live_age_s) or not math.isfinite(history_age_s)
                 or not 0 < live_age_s <= 1 or not live_age_s <= history_age_s <= 31_536_000):
             raise ValueError("Invalid spatial read clock or age budget")
         if current_origin is not None and (

@@ -123,3 +123,61 @@ def test_maximum_sqlite_mutation_generation_is_valid_but_cannot_advance(tmp_path
         store.reserve_episode_mutation("pet1", "original")
     assert store.core_facts("pet1")[0].value == "changed"
     assert store.get_episode("pet1", "original").summary == "Changed touch"
+
+
+@pytest.mark.parametrize("field", ["now", "live_age_s", "history_age_s"])
+@pytest.mark.parametrize(
+    "bad", [10**1000, -(10**1000), float("inf"), float("-inf"), float("nan"), True],
+    ids=["huge", "negative_huge", "inf", "negative_inf", "nan", "bool"],
+)
+def test_spatial_read_rejects_hostile_numeric_values(tmp_path, field, bad):
+    import time
+
+    from desk_robot.spatial_memory import SpatialMemory
+
+    spatial = SpatialMemory(MemoryStore(tmp_path, ["robot-1", "robot-10"]))
+    clocks = dict(now=time.time(), live_age_s=0.25, history_age_s=86400)
+    clocks[field] = bad
+    with pytest.raises(ValueError, match="Invalid spatial read clock or age budget"):
+        spatial.last_seen("robot-1", "key", **clocks)
+    assert spatial.last_seen("robot-10", "key", now=time.time()) is None
+
+
+@pytest.mark.parametrize(
+    "field,bad",
+    [
+        ("object_key", None), ("object_key", []), ("object_key", {}),
+        ("object_key", 123), ("object_key", True),
+        ("observed_at", 10**1000), ("observed_at", -(10**1000)),
+        ("observed_at", float("nan")), ("observed_at", float("inf")),
+        ("observed_at", True),
+    ],
+)
+def test_spatial_attach_rejects_hostile_identity_or_clock(tmp_path, field, bad):
+    import time
+    from dataclasses import replace
+
+    from desk_robot.memory import CameraProvenance
+    from desk_robot.spatial_memory import SpatialEvidence, SpatialMemory
+
+    now = time.time()
+    store = MemoryStore(tmp_path, ["robot-1", "robot-10"])
+    assert store.remember(
+        "robot-1", "key", "Saw a key", kind="key",
+        source_robot="robot-1", witnessed=True, observed_at=now,
+        camera_provenance=CameraProvenance(now, now, (1, 1, 1)),
+    )
+    spatial = SpatialMemory(store)
+    evidence = SpatialEvidence(
+        object_key="key", observed_at=now, body_boot=1, origin_id="origin",
+        pose_seq=1, pose_sample_us=1, camera_boot=1, camera_seq=1,
+        camera_complete_us=1, calibration_id="calibration",
+        x_mm=10, y_mm=20, yaw_mrad=0, uncertainty_mm=1,
+    )
+    with pytest.raises(ValueError, match="Invalid spatial"):
+        spatial.attach("robot-1", "key", replace(evidence, **{field: bad}))
+    assert spatial.last_seen("robot-1", "key", now=now) is None
+    assert spatial.attach("robot-1", "key", evidence)
+    result = spatial.last_seen("robot-1", "key", now=now)
+    assert result is not None and result.status == "pending_localization"
+    assert spatial.last_seen("robot-10", "key", now=now) is None
