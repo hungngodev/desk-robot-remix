@@ -13,7 +13,7 @@ import re
 import threading
 import time
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import aclosing
 from dataclasses import dataclass
 from io import BytesIO
@@ -1145,6 +1145,7 @@ class MultimodalOrchestrator:
         # Allow at most one optional background decode: reserve capacity for
         # a genuine authenticated human speech or direct visual question.
         self._optional_preprocess_slot = threading.BoundedSemaphore(1)
+        self._preprocess_futures: set[Future[tuple[bytes, bytes, float]]] = set()
         self._preprocess_pool = ThreadPoolExecutor(
             max_workers=2, thread_name_prefix="desk-jpeg"
         )
@@ -1829,6 +1830,8 @@ class MultimodalOrchestrator:
         Under overload, drop optional camera work instead of starting extra
         native workers and interfering with live human audio.
         """
+        if self._closed:
+            raise RuntimeError("Camera orchestration is closed")
         optional = not priority
         if optional and not self._optional_preprocess_slot.acquire(blocking=False):
             raise RuntimeError("Background JPEG preprocessing busy")
@@ -1843,6 +1846,13 @@ class MultimodalOrchestrator:
             if optional:
                 self._optional_preprocess_slot.release()
             raise
+
+        # Keep native futures independent of cancelled asyncio awaiters.
+        # Only the event-loop owner mutates this bounded registry.
+        self._preprocess_futures = {
+            worker for worker in self._preprocess_futures if not worker.done()
+        }
+        self._preprocess_futures.add(future)
 
         def finished(done) -> None:
             try:
@@ -2253,45 +2263,54 @@ class MultimodalOrchestrator:
 
     async def close(self) -> None:
         self._closed = True
-        tasks = (list(self._capture_tasks.values())
-                 + list(self._sensor_tasks.values())
-                 + list(self._look_tasks.values())
-                 + list(self._stream_tasks.values())
-                 + list(self._stream_supervisors.values()))
-        for task in set(tasks + list(self._proactive_snapshots.values())
-                        + list(self._head_snapshot_tasks.values())):
-            task.cancel()
-        # Wait once for all worker types. Sequential 0.5-second waits for
-        # streams and physical snapshots could double the shutdown deadline.
-        # Cancellation-resistant tasks retain their registry owners below.
-        pending = set(tasks + list(self._proactive_snapshots.values())
-                      + list(self._head_snapshot_tasks.values()))
-        if pending:
-            await asyncio.wait(pending, timeout=0.5)
-        for robot_id, snapshot in tuple(self._head_snapshot_tasks.items()):
-            if snapshot.done():
-                self._head_snapshot_tasks.pop(robot_id, None)
-            else:
-                snapshot.add_done_callback(
-                    lambda done, rid=robot_id: (
-                        self._head_snapshot_tasks.pop(rid, None)
-                        if self._head_snapshot_tasks.get(rid) is done else None
-                    )
-                )
-        # Keep unfinished owners visible until their actual completion.
-        # An old completion must never retire a newer task for the same pet.
-        for registry in (self._capture_tasks, self._stream_tasks,
-                         self._stream_supervisors, self._sensor_tasks, self._look_tasks,
-                         self._proactive_snapshots):
+        registries = (
+            self._capture_tasks, self._stream_tasks, self._stream_supervisors,
+            self._sensor_tasks, self._look_tasks, self._proactive_snapshots,
+            self._head_snapshot_tasks,
+        )
+        tasks = {task for registry in registries for task in registry.values()}
+        for task in tasks:
+            if not task.done() and not task.cancelling():
+                task.cancel()
+
+        # Shut admission before awaiting any worker. Cancelling an asyncio
+        # wrapper does not terminate a running native Pillow decode.
+        self._preprocess_pool.shutdown(wait=False, cancel_futures=True)
+        native_waiters = [
+            asyncio.wrap_future(worker)
+            for worker in self._preprocess_futures if not worker.done()
+        ]
+        for waiter in native_waiters:
+            waiter.add_done_callback(
+                lambda done: None if done.cancelled() else done.exception()
+            )
+        # One deadline for all asyncio and native workers, not one per pet.
+        waiters = tasks.union(native_waiters)
+        if waiters:
+            await asyncio.wait(waiters, timeout=0.5)
+
+        def retire(owner, robot_id, task):
+            if not task.cancelled():
+                task.exception()
+            if owner.get(robot_id) is task:
+                owner.pop(robot_id, None)
+
+        # Preserve unfinished owners and observe their terminal exceptions.
+        for registry in registries:
             for robot_id, task in tuple(registry.items()):
                 if task.done():
-                    registry.pop(robot_id, None)
+                    retire(registry, robot_id, task)
                 else:
                     task.add_done_callback(
-                        lambda done, rid=robot_id, owner=registry: (
-                            owner.pop(rid, None)
-                            if owner.get(rid) is done else None
-                        )
+                        lambda done, rid=robot_id, owner=registry: retire(owner, rid, done)
                     )
         self.hub.close()
-        self._preprocess_pool.shutdown(wait=False, cancel_futures=True)
+        self._preprocess_futures = {
+            worker for worker in self._preprocess_futures if not worker.done()
+        }
+        unfinished = sum(not task.done() for task in tasks)
+        if unfinished or self._preprocess_futures:
+            raise TimeoutError(
+                f"Camera shutdown unconfirmed: {unfinished} async workers and "
+                f"{len(self._preprocess_futures)} native JPEG workers still active"
+            )

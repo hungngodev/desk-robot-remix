@@ -2327,6 +2327,40 @@ async def test_cancelled_preprocess_retains_native_worker_slot_until_it_exits(mo
         await visual.close()
 
 
+async def test_close_reports_native_jpeg_worker_after_awaiter_cancelled(monkeypatch):
+    import threading
+
+    import desk_robot.multimodal as media
+
+    started = threading.Event()
+    release = threading.Event()
+
+    def stalled_decode(jpeg):
+        started.set()
+        if not release.wait(5):
+            raise RuntimeError("native decoder fixture timed out")
+        return jpeg, b"", 0.0
+
+    monkeypatch.setattr(media, "_prepare", stalled_decode)
+    visual = MultimodalOrchestrator(config(), {}, Vision(), asyncio.Lock())
+    caller = asyncio.create_task(visual._prepare_bounded(image()))
+    try:
+        assert await asyncio.to_thread(started.wait, 1)
+        caller.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await caller
+        with pytest.raises(TimeoutError, match="1 native JPEG workers still active"):
+            await asyncio.wait_for(visual.close(), 2)
+        with pytest.raises(RuntimeError, match="Camera orchestration is closed"):
+            await visual._prepare_bounded(image())
+        release.set()
+        await asyncio.wait_for(visual.close(), 2)
+    finally:
+        release.set()
+        await asyncio.gather(caller, return_exceptions=True)
+        await visual.close()
+
+
 async def test_preprocess_submission_failure_releases_native_budget(monkeypatch):
     """A stopped executor cannot consume all future image capacity."""
     import threading
@@ -3158,7 +3192,8 @@ async def test_close_preserves_cancellation_resistant_physical_snapshot_ownershi
     try:
         await asyncio.wait_for(started.wait(), 1)
         physical = visual._head_snapshot_tasks["robot-01"]
-        await asyncio.wait_for(visual.close(), 2)
+        with pytest.raises(TimeoutError, match="Camera shutdown unconfirmed"):
+            await asyncio.wait_for(visual.close(), 2)
         assert not physical.done()
         assert visual._head_snapshot_tasks["robot-01"] is physical
         release.set()
@@ -3196,7 +3231,8 @@ async def test_close_uses_one_deadline_for_stream_and_physical_snapshot():
     try:
         await asyncio.gather(*(event.wait() for event in entered))
         start = asyncio.get_running_loop().time()
-        await asyncio.wait_for(visual.close(), 1.5)
+        with pytest.raises(TimeoutError, match="Camera shutdown unconfirmed"):
+            await asyncio.wait_for(visual.close(), 1.5)
         elapsed = asyncio.get_running_loop().time() - start
         assert elapsed < 0.85, f"shutdown waited twice: {elapsed:.3f}s"
         assert visual._stream_tasks["robot-01"] is stream
@@ -3230,9 +3266,14 @@ async def test_close_bounds_cancellation_resistant_stream_worker():
     visual._stream_tasks["robot-01"] = worker
     try:
         await asyncio.wait_for(entered.wait(), 1)
-        await asyncio.wait_for(visual.close(), 2)
+        with pytest.raises(TimeoutError, match="Camera shutdown unconfirmed"):
+            await asyncio.wait_for(visual.close(), 2)
         assert not worker.done()
         assert visual._stream_tasks["robot-01"] is worker
+        # A retry must not deliver a second cancellation to ongoing cleanup.
+        with pytest.raises(TimeoutError, match="Camera shutdown unconfirmed"):
+            await asyncio.wait_for(visual.close(), 2)
+        assert not worker.done()
         release.set()
         await asyncio.wait_for(worker, 1)
         await asyncio.sleep(0)
