@@ -1,5 +1,6 @@
 #include "ImuYawCapture.h"
 #include <cstdint>
+#include <initializer_list>
 #include <stdexcept>
 
 using desk_robot::BerryModel;
@@ -111,8 +112,70 @@ static void rollover_and_drift_latch() {
   check(!drift.drift_latched());
   check(drift.observe(sample(131, 1), 1) == Result::Unqualified);
 }
+static void invalid_acquisition_fences_replay() {
+  ImuYawCapture cap;
+  check(cap.configure(calibration()));
+  check(cap.observe(sample(131, 100), 100) == Result::Baseline);
+  auto fault = sample(131, 200);
+  fault.low_g_irq = true;
+  check(cap.observe(fault, 200) == Result::Invalid);
+  // A valid-looking delayed frame predating the fault cannot establish
+  // a new segment; neither can a rewritten acquisition at the fault time.
+  check(cap.observe(sample(131, 150), 200) == Result::Invalid);
+  check(cap.observe(sample(131, 200), 200) == Result::Invalid);
+  check(!cap.continuous() && cap.segment() == 1);
+  check(cap.observe(sample(131, 201), 201) == Result::Baseline);
+  check(cap.segment() == 2);
+
+  ImuYawCapture wrap;
+  check(wrap.configure(calibration()));
+  check(wrap.observe(sample(131, 0xfffffff0U), 0xfffffff0U) ==
+        Result::Baseline);
+  fault = sample(131, 0x10U);
+  fault.low_g_status_valid = false;
+  check(wrap.observe(fault, 0x10U) == Result::Invalid);
+  check(wrap.observe(sample(131, 0U), 0x10U) == Result::Invalid);
+  check(wrap.observe(sample(131, 0x10U), 0x10U) == Result::Invalid);
+  check(wrap.observe(sample(131, 0x11U), 0x11U) == Result::Baseline);
+  // A future-dated frame is invalid but cannot advance the replay fence.
+  check(wrap.observe(sample(131, 0x100U), 0x12U) == Result::Invalid);
+  check(wrap.observe(sample(131, 0x13U), 0x13U) == Result::Baseline);
+}
+
+static void extreme_axes_and_stationary_bias() {
+  const std::int16_t extremes[] = {-32768, -32767, 0, 32766, 32767};
+  for (const auto x : extremes) {
+    for (const auto y : extremes) {
+      for (const auto z : extremes) {
+        ImuYawCapture cap;
+        check(cap.configure(calibration()));
+        auto r = sample(0, 100);
+        r.accel[0] = x; r.accel[1] = y; r.accel[2] = z;
+        check(cap.observe(r, 100) == Result::Invalid);
+      }
+    }
+  }
+  for (const int sign : {-1, 1}) {
+    ImuYawCapture cap;
+    auto c = calibration(sign, 5000);
+    c.bias_raw = 4096;
+    check(cap.configure(c));
+    check(cap.observe(sample(4096, 100), 100) == Result::Baseline);
+    std::uint32_t previous_error = 0;
+    for (std::uint32_t t = 150; t <= 1000; t += 50) {
+      check(cap.observe(sample(4096, t), t) == Result::Delta);
+      check(cap.yaw_urad() == 0 && cap.last_delta_urad() == 0);
+      check(cap.error_bound_urad() > previous_error);
+      previous_error = cap.error_bound_urad();
+      check(cap.observe(sample(4096, t), t) == Result::Duplicate);
+      check(cap.error_bound_urad() == previous_error);
+    }
+  }
+}
 int main() {
   yaw_and_replay();
   handling_and_calibration_faults();
   rollover_and_drift_latch();
+  invalid_acquisition_fences_replay();
+  extreme_axes_and_stationary_bias();
 }

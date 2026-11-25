@@ -66,6 +66,14 @@ class ImuYawCapture {
         r.temperature_raw > calibration_.temp_max_raw ||
         norm2 < norm_min * norm_min || norm2 > norm_max * norm_max ||
         now_ms - r.at_ms > calibration_.max_age_ms) {
+      // A fresh rejected acquisition still fences older or rewritten
+      // samples. Do not advance the fence on stale or future timestamps.
+      const std::uint32_t advance = r.at_ms - last_.at_ms;
+      if (now_ms - r.at_ms <= calibration_.max_age_ms &&
+          (!seen_ || (advance != 0U && advance < 0x80000000U))) {
+        last_ = r;
+        seen_ = true;
+      }
       invalidate();
       return Result::Invalid;
     }
