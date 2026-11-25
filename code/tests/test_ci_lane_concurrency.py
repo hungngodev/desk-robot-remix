@@ -124,14 +124,16 @@ def test_tree_guard_rejects_missing_worktree_and_partial_index(tmp_path):
         if step.get("name") == "Prevent partial repository trees"
     )
     counts = {
-        "code/laptop/src": 49, "code/laptop/server": 7,
-        "code/tests": 195, "code/scripts": 36,
-        "code/firmware/head": 47, "code/firmware/body": 70,
-        "docs": 213, "agents": 245,
+        "code/laptop/src": 53, "code/laptop/server": 7,
+        "code/tests": 223, "code/scripts": 36,
+        "code/firmware/head": 67, "code/firmware/body": 82,
+        "code/firmware/room_station": 19, "code/firmware/dock": 2,
+        "docs": 215, "agents": 245,
     }
     sentinels = (
         ".agent3d/fixture", ".github/fixture", ".gitignore", "AGENTS.md",
-        "LICENSE", "README.md", "code/firmware/body/include/BodyPins.h",
+        "LICENSE", "README.md", "THIRD_PARTY_NOTICES.md",
+        "code/firmware/body/include/BodyPins.h",
         "code/firmware/head/sense/config.h", "docs/hardware/full-feature-plan.json",
         "docs/records/verification.md", "code/laptop/src/desk_robot/handling.py",
     )
@@ -158,6 +160,18 @@ def test_tree_guard_rejects_missing_worktree_and_partial_index(tmp_path):
     git("init", "-q")
     git("add", ".")
     assert verify().returncode == 0
+    for scope in ("code/firmware/room_station", "code/firmware/dock"):
+        git("rm", "-r", "--cached", "-f", scope)
+        partial = verify()
+        assert partial.returncode != 0
+        assert f"{scope} has only 0 tracked files" in partial.stdout
+        git("add", scope)
+    notice = tmp_path / "THIRD_PARTY_NOTICES.md"
+    notice.unlink()
+    git("rm", "--cached", "-f", "THIRD_PARTY_NOTICES.md")
+    assert verify().returncode != 0
+    notice.touch()
+    git("add", "THIRD_PARTY_NOTICES.md")
     unusual.unlink()
     missing = verify()
     assert missing.returncode != 0

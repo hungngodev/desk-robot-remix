@@ -46,7 +46,7 @@ jobs:
               exit 1
             fi
           done
-          for file in .gitignore AGENTS.md LICENSE README.md; do
+          for file in .gitignore AGENTS.md LICENSE README.md THIRD_PARTY_NOTICES.md; do
             if [ ! -f "$file" ] || [ -L "$file" ]; then
               echo "::error::Missing expected repository root file: $file"
               exit 1
@@ -57,7 +57,7 @@ jobs:
           test -f docs/hardware/full-feature-plan.json
           test -f docs/records/verification.md
           test -f code/laptop/src/desk_robot/handling.py
-          # November 24 baseline: 902 tracked blobs. Count NUL delimiters,
+          # November 25 baseline: 971 tracked blobs. Count NUL delimiters,
           # not rendered paths. Conservative per-owner floors catch partial
           # commits even if the overall tree and root sentinels survive.
           check_tree_count() {
@@ -68,15 +68,18 @@ jobs:
               exit 1
             fi
           }
-          check_tree_count . 800
-          check_tree_count code/laptop/src 40
-          check_tree_count code/laptop/server 5
-          check_tree_count code/tests 150
-          check_tree_count code/scripts 25
-          check_tree_count code/firmware/head 35
-          check_tree_count code/firmware/body 55
-          check_tree_count docs 160
-          check_tree_count agents 180
+          check_tree_count code/laptop/src 50
+          check_tree_count code/laptop/server 6
+          check_tree_count code/tests 200
+          check_tree_count code/scripts 30
+          check_tree_count code/firmware/head 60
+          check_tree_count code/firmware/body 75
+          check_tree_count code/firmware/room_station 18
+          check_tree_count code/firmware/dock 2
+          check_tree_count code 470
+          check_tree_count docs 200
+          check_tree_count agents 230
+          check_tree_count . 900
           # git ls-files counts sparse-checkout entries even when an entire
           # non-sentinel subtree is absent from the actual worktree. A green
           # source test requires every tracked path to exist on disk.
