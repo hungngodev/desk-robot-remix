@@ -68,6 +68,17 @@ int main() {
     assert(!activity.AdvancedSince(before_last_mic_frame, 60000));
     assert(activity.AdvancedSince(before_last_mic_frame, 60001));
 
+    // A write can return before the first retained microphone sample but
+    // wait for reference_mutex_ until after that sample. Use the return
+    // timestamp rather than the later publication timestamp.
+    activity.Reset();
+    const auto delayed = activity.BeginWindow();
+    activity.FenceWindowStart(delayed, 20000);
+    activity.RecordAccepted(activity.generation(), 160, 19999);
+    assert(!activity.AdvancedSince(delayed, 4020000));
+    activity.RecordAccepted(activity.generation(), 160, 20002);
+    assert(activity.AdvancedSince(delayed, 4020000));
+
     // Later digital acceptance must not mask earlier valid activity.
     activity.Reset();
     const auto valid_window = activity.BeginWindow();
@@ -147,7 +158,15 @@ def test_selected_codec_requires_current_generation_activity_for_bench_capture()
     header = (SENSE / "sense_reference_codec.h").read_text()
     assert "speaker_activity_.RecordAccepted(" in source
     assert "started_generation, accepted, accepted_at_us);" in source
-    assert "const int64_t accepted_at_us = esp_timer_get_time();" in source
+    # Source seam: the executable helper regression above distinguishes
+    # an I2S return timestamp from a delayed mutex acquisition timestamp.
+    write = source[source.index("int SenseReferenceCodec::Write("):]
+    returned = write.index("const int accepted = NoAudioCodec::Write(data, samples);")
+    timestamp = write.index("const int64_t accepted_at_us = esp_timer_get_time();")
+    publish_lock = write.index(
+        "std::lock_guard<std::mutex> lock(reference_mutex_);", returned
+    )
+    assert returned < timestamp < publish_lock
     assert "speaker_activity_.Reset();" in source
     assert "speaker_activity_.BeginWindow();" in source
     assert "if (!had_frames && bench_window_.frames_received() != 0)" in source

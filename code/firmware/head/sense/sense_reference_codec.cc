@@ -309,6 +309,9 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
     // I2S wait. Preserve its mutex, squared-volume PCM conversion and sole
     // speaker owner rather than maintaining a second codec implementation.
     const int accepted = NoAudioCodec::Write(data, samples);
+    // Timestamp the I2S return before waiting for reference publication.
+    // Lock contention must not move an old digital accept into a new MIC window.
+    const int64_t accepted_at_us = esp_timer_get_time();
     bool stale_write = false;
     bool log_stale = false;
     uint32_t stale_discards = 0;
@@ -332,7 +335,6 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
             reference_integrity_failed_ = true;
             log_short = short_writes == 1 || (short_writes % 32U) == 0U;
         }
-        const int64_t accepted_at_us = esp_timer_get_time();
         speaker_activity_.RecordAccepted(
             started_generation, accepted, accepted_at_us);
         if (accepted > 0 && started_generation == speaker_activity_.generation()) {
