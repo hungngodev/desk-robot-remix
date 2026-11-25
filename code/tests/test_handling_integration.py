@@ -1,4 +1,5 @@
 """One real WROOM MPU6050 frame path through Mac pet and private memory."""
+import asyncio
 from itertools import count
 from pathlib import Path
 from types import SimpleNamespace
@@ -112,3 +113,61 @@ async def test_unqualified_imu_never_creates_physical_fact_or_camera_trigger(tmp
         assert pet.status("robot-01")["motor_control_enabled_by_pet"] is False
     finally:
         await pet.close()
+
+async def test_body_poll_counts_transport_age_before_handling_memory(tmp_path):
+    settings = load_settings(
+        Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml"
+    )
+    settings.mode = "hardware"
+    settings.robots[0].handling_interactions_qualified = True
+    memory = MemoryStore(tmp_path, [robot.id for robot in settings.robots])
+    conversation = Conversation(settings, NoneChat(), SimulatedSpeaker(), memory=memory)
+    frame = status()
+    delay = 0.0
+
+    async def read_body():
+        if delay:
+            await asyncio.sleep(delay)
+        return frame
+
+    pet = PetController(
+        settings, {"robot-01": SimpleNamespace(status=read_body)},
+        conversation, memory, NoneVision(),
+    )
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 9
+    state.quiet = True
+
+    def body(acc=(0, 0, 16384)):
+        data = status(acc=acc)
+        data["robot_id"] = "robot-01"
+        data["motor"] = {"m0": data.pop("left"), "m1": data.pop("right")}
+        return data
+
+    try:
+        for _ in range(8):
+            frame = body()
+            await pet._touch_from_body("robot-01", 9)
+        assert state.handling_gate.reference is not None
+        frame = body(acc=(12551, 0, 10531))
+        await pet._touch_from_body("robot-01", 9)
+        frame = body(acc=(12551, 0, 10531))
+        delay = 0.22  # 30ms firmware age + 220ms delivery exceeds 200ms.
+        await pet._touch_from_body("robot-01", 9)
+        assert state.handling_gate.reference is None
+        assert state.handling_events == 0
+        assert memory.count("robot-01") == 0
+        # Fresh transport must still support the real poll path.
+        delay = 0.0
+        for _ in range(8):
+            frame = body()
+            await pet._touch_from_body("robot-01", 9)
+        for _ in range(2):
+            frame = body(acc=(12551, 0, 10531))
+            await pet._touch_from_body("robot-01", 9)
+        assert [r.kind for r in memory.recent("robot-01")] == ["handling_tilt"]
+        assert state.handling_events == 1
+    finally:
+        await pet.close()
+

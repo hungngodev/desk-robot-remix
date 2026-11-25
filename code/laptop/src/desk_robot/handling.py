@@ -44,9 +44,13 @@ def _stationary_body(body: object) -> bool:
             type(body.get("right")) is int and body["right"] == 0)
 
 
-def raw_mpu6050(body: dict) -> tuple[tuple[float, ...], float] | None:
+def raw_mpu6050(
+    body: dict, *, request_elapsed_ms: float = 0.0,
+) -> tuple[tuple[float, ...], float] | None:
     """Validate the WROOM 6-axis and source metadata before deriving context."""
-    if not isinstance(body, dict):
+    if (not isinstance(body, dict)
+            or type(request_elapsed_ms) not in (int, float)
+            or not 0 <= request_elapsed_ms <= 200):
         return None
     imu = body.get("imu")
     if not isinstance(imu, dict):
@@ -56,6 +60,7 @@ def raw_mpu6050(body: dict) -> tuple[tuple[float, ...], float] | None:
             or imu.get("valid") is not True
             or type(imu.get("age_ms")) is not int
             or not 0 <= imu["age_ms"] <= 200
+            or imu["age_ms"] + request_elapsed_ms > 200
             or type(imu.get("sample_ms")) is not int
             or not 0 <= imu["sample_ms"] <= 0xffffffff
             or type(imu.get("boot_id")) is not int
@@ -156,6 +161,7 @@ class HandlingGate:
         self, body: dict, now: float, *, qualified: bool,
         tilt_threshold_deg: float = 38.0,
         shake_delta_mg: int = 550,
+        request_elapsed_ms: float = 0.0,
     ) -> tuple[str, ...]:
         if (type(qualified) is not bool
                 or type(now) not in (int, float)
@@ -226,7 +232,7 @@ class HandlingGate:
                 and imu.get("boot_id") == self.last_boot_id
                 and type(imu.get("sample_ms")) is int
                 and self.last_sample_ms is not None
-                and raw_mpu6050(body) is not None):
+                and raw_mpu6050(body, request_elapsed_ms=request_elapsed_ms) is not None):
             stamp = imu["sample_ms"]
             if stamp == self.last_sample_ms:
                 if self.last_at is not None and now - self.last_at > 1.0:
@@ -250,7 +256,7 @@ class HandlingGate:
             self.reset(preserve_shake_cooldown=True)
             self.last_boot_id, self.last_sample_ms = previous
             # A transport gap invalidates pose, not the gesture cooldown.
-        sample = raw_mpu6050(body)
+        sample = raw_mpu6050(body, request_elapsed_ms=request_elapsed_ms)
         if sample is None:
             # Bad telemetry invalidates pose, not the last trusted acquisition.
             # Otherwise replaying that conversion after a malformed status

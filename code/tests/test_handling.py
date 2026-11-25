@@ -1236,3 +1236,25 @@ def test_pre_wrap_motor_active_still_revokes_pose():
     assert qualified(gate, sample(sample_ms=0xfffffffe, left=1), 103,
                      new_sample=False) == ()
     assert gate.reference is None
+
+@pytest.mark.parametrize(("elapsed_ms", "accepted"), [
+    (0, True), (20, True), (20.01, False), (200, False),
+    (-1, False), (True, False), (float("nan"), False),
+    (float("inf"), False), ("20", False),
+    pytest.param(10**400, False, id="huge-int"),
+])
+def test_source_age_plus_transport_age(elapsed_ms, accepted):
+    frame = canonical_wroom_sample(age=180, sample_ms=1000, gyro=(0, 131, 0))
+    assert (raw_mpu6050(frame, request_elapsed_ms=elapsed_ms) is not None) is accepted
+    assert frame["imu"]["age_ms"] == 180
+
+
+def test_stale_delivered_imu_cannot_confirm_handling_tilt():
+    gate = HandlingGate()
+    calibrated(gate)
+    first = canonical_wroom_sample(acc=(12551, 0, 10531), sample_ms=101200)
+    assert gate.observe(first, 101.2, qualified=True, request_elapsed_ms=10) == ()
+    late = canonical_wroom_sample(acc=(12551, 0, 10531), sample_ms=101400, age=180)
+    assert gate.observe(late, 101.4, qualified=True, request_elapsed_ms=30) == ()
+    assert gate.reference is None
+

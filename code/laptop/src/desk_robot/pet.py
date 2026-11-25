@@ -1558,6 +1558,7 @@ class PetController:
     async def _observe_imu(
         self, robot_id: str, generation: int, body: dict, *,
         received_at: float | None = None,
+        request_elapsed_ms: float = 0.0,
     ) -> None:
         """Connect genuine WROOM six-axis telemetry to contextual pet events.
 
@@ -1578,6 +1579,7 @@ class PetController:
             ),
             tilt_threshold_deg=robot.handling_tilt_threshold_deg,
             shake_delta_mg=robot.handling_shake_delta_mg,
+            request_elapsed_ms=request_elapsed_ms,
         )
         for kind in events:
             if not state.enabled or state.generation != generation:
@@ -1908,14 +1910,20 @@ class PetController:
         received_at = time.monotonic()
         if isinstance(body, dict):
             await self._observe_body_safety(robot_id, generation, body)
+            # WROOM's sample age stops at serialization. Include transport
+            # and any awaited fault processing before classifying handling.
             await self._observe_imu(
                 robot_id, generation, body, received_at=received_at,
+                request_elapsed_ms=(
+                    (time.monotonic() - request_started_at) * 1000.0
+                    if self.settings.mode == "hardware" else 0.0
+                ),
             )
             await self._observe_optional(
                 robot_id, generation, body, received_at=received_at,
             )
-            # Only the read-only side arrival gets a conservative age budget;
-            # WROOM safety continues to use its independent local watchdog.
+            # Side arrivals also count the elapsed request and processing
+            # time. WROOM safety still uses its independent local watchdog.
             await self._observe_side_ranges(
                 robot_id, generation, body,
                 request_elapsed_ms=max(
