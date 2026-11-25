@@ -768,9 +768,13 @@ def test_front_facing_planar_pose_at_expected_distances(monkeypatch, distance_mm
     assert pose.reprojection_error_px <= 3.0
 
 
-@pytest.mark.parametrize("angle_deg", [0, 110])
-def test_accurate_back_facing_or_overtilted_pose_does_not_retry(monkeypatch, angle_deg):
-    """A valid fit outside the existing normal gate cannot be rescued."""
+@pytest.mark.parametrize(("angle_deg", "native_corruption"), [
+    (0, False), (110, False), (0, True),
+])
+def test_accurate_back_facing_or_overtilted_pose_does_not_retry(
+    monkeypatch, angle_deg, native_corruption,
+):
+    """Reject reversed corner winding and independently reject a bad pose normal."""
     cv2 = pytest.importorskip("cv2", reason="dock vision tests require the optional vision extra")
     import numpy as np
 
@@ -780,7 +784,11 @@ def test_accurate_back_facing_or_overtilted_pose_does_not_retry(monkeypatch, ang
     intrinsics = np.array([[410., 0, 320], [0, 410., 240], [0, 0, 1]])
     rvec = np.array([[math.radians(angle_deg)], [0.], [0.]])
     tvec = np.array([[0.], [0.], [400.]])
-    corners, _ = cv2.projectPoints(square, rvec, tvec, intrinsics, np.zeros(5))
+    # A real back-facing plane has reversed corner winding and must not
+    # reach PnP. To exercise the normal gate independently, inject a
+    # corrupt native result with physically valid clockwise observations.
+    observed_rotation = np.array([[math.pi], [0.], [0.]]) if native_corruption else rvec
+    corners, _ = cv2.projectPoints(square, observed_rotation, tvec, intrinsics, np.zeros(5))
 
     class Detector:
         def __init__(self, dictionary):
@@ -797,10 +805,15 @@ def test_accurate_back_facing_or_overtilted_pose_does_not_retry(monkeypatch, ang
 
     monkeypatch.setattr(cv2.aruco, "ArucoDetector", Detector)
     monkeypatch.setattr(cv2, "solvePnP", solve)
+    if native_corruption:
+        monkeypatch.setattr(cv2, "projectPoints", lambda *args: (corners, None))
     ok, jpeg = cv2.imencode(".jpg", np.zeros((480, 640), dtype=np.uint8))
     assert ok
     assert detect_apriltag(jpeg.tobytes(), camera, captured_at=5) is None
-    assert methods == [cv2.SOLVEPNP_IPPE_SQUARE]
+    expected_methods = [] if angle_deg == 0 and not native_corruption else [
+        cv2.SOLVEPNP_IPPE_SQUARE,
+    ]
+    assert methods == expected_methods
 
 
 @pytest.mark.parametrize("orientation", range(1, 9))
