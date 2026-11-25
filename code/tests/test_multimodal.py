@@ -754,6 +754,17 @@ def test_brightness_shift_not_mistaken_for_localized_motion():
     assert change_fraction(a, bytes(c)) > 0.01
 
 
+@pytest.mark.parametrize("threshold", [16, 18])
+@pytest.mark.parametrize("delta", [-100, 100])
+def test_localized_change_does_not_bias_global_exposure_offset(threshold, delta):
+    baseline = bytes([120] * (64 * 48))
+    changed = bytearray(baseline)
+    changed[:614] = bytes([120 + delta] * 614)
+    assert change_fraction(baseline, bytes(changed), threshold=threshold) == pytest.approx(
+        614 / len(baseline)
+    )
+
+
 def test_multiplicative_light_shift_preserves_real_camera_occlusion():
     fingerprint = bytes(
         40 if (i // 64 + i % 64) % 2 else 110

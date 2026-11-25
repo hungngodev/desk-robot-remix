@@ -17,6 +17,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import aclosing
 from dataclasses import dataclass
 from io import BytesIO
+from statistics import median
 from typing import TYPE_CHECKING
 
 from PIL import Image, ImageOps, ImageStat
@@ -110,6 +111,11 @@ def _lighting_transform(a: bytes, b: bytes) -> tuple[float, float, bool]:
         if 0.55 <= candidate_gain <= 2.5:
             gain = candidate_gain
             fitted = True
+    if not fitted:
+        # A local occlusion must not shift the inferred brightness of every
+        # unchanged pixel. The median additive residual is robust to a
+        # minority of changed pixels when an affine fit is unreliable.
+        return gain, median(y - x for x, y in zip(a, b, strict=True)), fitted
     return gain, (sum_b - gain * sum_a) / count, fitted
 
 
