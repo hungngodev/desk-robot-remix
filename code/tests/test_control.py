@@ -520,6 +520,45 @@ async def test_exploration_persists_under_one_permit_until_explicit_stop(setting
         await c.close()
 
 
+async def test_exploration_session_survives_301_seconds(settings, monkeypatch):
+    """B015: the one-use admission grant is not a running session deadline."""
+    c, head = make(settings)
+    settings.max_job_seconds = 1
+    started = asyncio.Event()
+
+    async def hold_exploration(_job):
+        started.set()
+        await asyncio.Future()
+
+    async def hold_transport(*_args):
+        await asyncio.Future()
+
+    # Isolate the outer job deadline from the independent keepalive and
+    # camera IO deadlines, exercised by the other exploration regressions.
+    monkeypatch.setattr(c, "_explore", hold_exploration)
+    monkeypatch.setattr(c, "_keepalive", hold_transport)
+    monkeypatch.setattr(c, "_watch_keepalive", hold_transport)
+    try:
+        await c.operator_arm("robot-01")
+        job = c.explore("robot-01")
+        await asyncio.wait_for(started.wait(), timeout=2)
+        loop = asyncio.get_running_loop()
+        real_time = loop.time
+        with monkeypatch.context() as clock:
+            clock.setattr(loop, "time", lambda: real_time() + 301)
+            # Let due event-loop timers and cancellation callbacks run.
+            await asyncio.sleep(0.01)
+            assert job.state == "running"
+            assert not c.tasks[job.id].done()
+            assert head.commands.count("arm") == 1
+            assert "robot-01" not in c.permits
+            await c.stop("robot-01")
+            assert job.state == "cancelled"
+            assert head.commands[-1] == "halt"
+    finally:
+        await c.close()
+
+
 async def test_authenticated_human_preempts_running_exploration_without_rearming(settings):
     c, head = make(settings)
     try:
