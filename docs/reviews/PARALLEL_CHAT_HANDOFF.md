@@ -1251,6 +1251,8 @@ These are historical *topic* summaries. A closed PR is not proof all its commits
 
 ## Current hardware and state ownership
 
+> **Historical checkpoint (2026-11-11 / 2026-11-12, superseded):** The table and paragraph below are preserved from the November 11/12 handoff snapshot, before later source changes selected **eight VL53L0X (GY-530)** sensors and added bounded `PN532` acquisition/consumption (`code/firmware/body/platformio.ini` pinning `pololu/vl53l0x-arduino#1.3.1`, `code/firmware/body/lib/TofBus/TofBus.cpp`, `code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp`, `code/laptop/src/desk_robot/pet.py`, and `docs/hardware/full-feature-plan.json`). Treat `docs/PLAN.md` and `docs/source-map.md` as authoritative for current scope and parts; nothing in this historical snapshot claims physical qualification.
+
 | Function / physical source | True owner | Current implementation anchors | Known reality |
 | --- | --- | --- | --- |
 | Four downward cliffs, front obstacle, three lateral/rear read-only ranges | WROOM + TCA9548A 0x70 and **eight VL53L4CD** | `code/firmware/body/lib/TofBus/`, `CliffGuard/`, `code/laptop/src/desk_robot/side_ranging.py` | Code for 8 in `esp32_full`; physical distance, placement and stopping trials outstanding |
