@@ -7,6 +7,10 @@
 Unique `desk-robot-modular-s3` board for Freenove FNK0085B / N16R8 (16 MB flash,
 8 MB octal PSRAM), a 1.3-inch SH1106 I2C OLED, INMP441, MAX98357A and speaker.
 It reuses Xiaozhi's Esp32Camera, OledDisplay and NoAudioCodecSimplex drivers.
+This historical source profile still requests 24 kHz speaker output; the
+selected MAX98357A does not support 24 kHz LRCLK. Do not power that combination
+or infer amplifier compatibility from compilation. The active Sense profile
+uses 32 kHz output and 16 kHz PDM/AEC reference instead.
 The seller's exact camera sensor/lens and case fit still need confirmation.
 An N8R8 board is not covered by this 16 MB partition configuration.
 
@@ -40,9 +44,10 @@ default empty token disables the robot bridge and all movement tools. Snapshots
 capture a fresh frame and share a recursive lock with upstream capture/explain.
 They run outside the HTTP control task. No background movement keepalive exists.
 
-Prepare an independent build copy; nothing is flashed:
+Prepare an independent build copy from the repository root; nothing is flashed:
 
 ```sh
+cd code
 python3 firmware/head/install_overlay.py --board modular --upstream upstream/xiaozhi-esp32 --output firmware/head/build/xiaozhi-modular
 bash scripts/build_head.sh --board modular
 ```
@@ -50,7 +55,9 @@ bash scripts/build_head.sh --board modular
 For private local-server firmware, after generating local credentials:
 
 ```sh
-python3 firmware/head/private_config.py --board modular --robot robot-01 --server-ip MAC_LAN_IP
+python3 firmware/head/private_config.py --board modular \
+  --config config/local.toml --robot robot-01 \
+  --server-ip "${MAC_LAN_IP:?Set MAC_LAN_IP to the Mac LAN IPv4}"
 bash scripts/build_head.sh --board modular --private
 ```
 
