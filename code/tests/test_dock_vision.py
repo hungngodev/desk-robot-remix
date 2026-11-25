@@ -11,6 +11,16 @@ from desk_robot.dock_vision import (
 )
 
 
+def _encoded_frame(format_name="JPEG", size=(640, 480)):
+    from io import BytesIO
+
+    from PIL import Image
+
+    output = BytesIO()
+    Image.new("L", size, 255).save(output, format=format_name)
+    return output.getvalue()
+
+
 def calibration():
     return DockCameraCalibration(
         fx=410, fy=410, cx=320, cy=240,
@@ -544,11 +554,11 @@ def test_dock_jpeg_decode_failure_cannot_authorize_motion(monkeypatch, decode_fa
     monkeypatch.setattr(cv2, "imdecode", corrupt_decode)
     monkeypatch.setattr(cv2.aruco, "getPredefinedDictionary", forbidden_dictionary)
     if decode_failure == "native_error":
-        pose = detect_apriltag(b"corrupt JPEG", calibration(), captured_at=5)
+        pose = detect_apriltag(_encoded_frame(), calibration(), captured_at=5)
         assert pose is None
     else:
         with pytest.raises(ValueError, match="Invalid JPEG frame"):
-            detect_apriltag(b"corrupt JPEG", calibration(), captured_at=5)
+            detect_apriltag(_encoded_frame(), calibration(), captured_at=5)
         pose = None
     assessment = assess_dock(pose, now=5.1, target_distance_mm=120)
     assert assessment.phase == "hold"
@@ -649,7 +659,7 @@ def test_native_decoder_malformed_frame_shape_fails_closed(monkeypatch, bad_fram
     monkeypatch.setattr(cv2, "imdecode", lambda *args, **kwargs: bad_frame)
     monkeypatch.setattr(cv2.aruco, "getPredefinedDictionary", forbidden_dictionary)
     with pytest.raises(ValueError, match="Invalid JPEG frame"):
-        detect_apriltag(b"malformed frame", calibration(), captured_at=5)
+        detect_apriltag(_encoded_frame(), calibration(), captured_at=5)
     decision = assess_dock(None, now=5.1, target_distance_mm=120)
     assert decision.phase == "hold"
     assert not decision.motor_authorized and not decision.charging_authorized
@@ -670,7 +680,7 @@ def test_native_jpeg_decoder_non_uint8_frame_cannot_reach_detector(monkeypatch, 
     monkeypatch.setattr(cv2, "imdecode", corrupt_decode)
     monkeypatch.setattr(cv2.aruco, "getPredefinedDictionary", forbidden_detector)
     with pytest.raises(ValueError, match="Invalid JPEG frame"):
-        detect_apriltag(b"synthetic JPEG", calibration(), captured_at=5)
+        detect_apriltag(_encoded_frame(), calibration(), captured_at=5)
     decision = assess_dock(None, now=5.1, target_distance_mm=120)
     assert decision.phase == "hold"
     assert not decision.motor_authorized and not decision.charging_authorized
@@ -863,3 +873,48 @@ def test_apriltag_reprojection_limits_each_corner(monkeypatch, corner_error_px):
     else:
         assert pose is not None
         assert pose.reprojection_error_px == pytest.approx(corner_error_px / 2)
+
+
+@pytest.mark.parametrize(("format_name", "size", "measured", "error"), [
+    ("PNG", (640, 480), True, "Invalid JPEG frame"),
+    ("JPEG", (320, 240), True, "resolution differs"),
+    ("JPEG", (4097, 80), False, "Invalid JPEG frame"),
+])
+def test_dock_header_preflight_rejects_before_native_decode(
+    monkeypatch, format_name, size, measured, error,
+):
+    """Wrong codec or raster must not allocate a native image or enter PnP."""
+    from dataclasses import replace
+
+    cv2 = pytest.importorskip("cv2")
+    jpeg = _encoded_frame(format_name, size)
+    camera = calibration()
+    if measured:
+        camera = replace(camera, image_width_px=640, image_height_px=480)
+
+    def forbidden_decode(*args, **kwargs):
+        pytest.fail("Invalid camera header reached OpenCV imdecode")
+
+    monkeypatch.setattr(cv2, "imdecode", forbidden_decode)
+    with pytest.raises(ValueError, match=error):
+        detect_apriltag(jpeg, camera, captured_at=5)
+    decision = assess_dock(None, now=5.1, target_distance_mm=120)
+    assert decision.phase == "hold"
+    assert not decision.motor_authorized
+    assert not decision.charging_authorized
+
+
+def test_dock_native_raster_must_match_encoded_dimensions(monkeypatch):
+    """Even a legacy unmeasured frame cannot silently change raster dimensions."""
+    import numpy as np
+
+    cv2 = pytest.importorskip("cv2")
+    jpeg = _encoded_frame()
+    monkeypatch.setattr(cv2, "imdecode", lambda *args: np.zeros((240, 320), np.uint8))
+
+    def forbidden_detector(*args):
+        pytest.fail("Mismatched decoded raster reached AprilTag")
+
+    monkeypatch.setattr(cv2.aruco, "getPredefinedDictionary", forbidden_detector)
+    with pytest.raises(ValueError, match="resolution differs from encoded image"):
+        detect_apriltag(jpeg, calibration(), captured_at=5)

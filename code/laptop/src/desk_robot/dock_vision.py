@@ -13,6 +13,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from .vision import _check_camera_jpeg
+
 
 def _finite_number(value: object) -> bool:
     """Reject huge integers without leaking float conversion OverflowError."""
@@ -173,6 +175,15 @@ def detect_apriltag(
                    for v in (captured_at, max_reprojection_error_px))
             or not 0 < max_reprojection_error_px <= 10):
         raise ValueError("Invalid bounded camera frame or timing")
+    # imdecode accepts other image formats and allocates the decoded raster.
+    # Reuse the camera header gate before invoking the native decoder.
+    try:
+        encoded_size = _check_camera_jpeg(jpeg, max_bytes=512000)
+    except (OSError, ValueError) as exc:
+        raise ValueError("Invalid JPEG frame") from exc
+    if (calibration.image_width_px is not None
+            and encoded_size != (calibration.image_width_px, calibration.image_height_px)):
+        raise ValueError("Dock JPEG resolution differs from measured intrinsics")
     try:
         import cv2
         import numpy as np
@@ -193,10 +204,8 @@ def detect_apriltag(
         raise ValueError("Invalid JPEG frame")
     # OpenCV intrinsics and distortion belong to one exact capture mode.
     # Camera mode changes invalidate pose geometry, not just image quality.
-    if (calibration.image_width_px is not None
-            and (frame.shape[1], frame.shape[0]) !=
-                (calibration.image_width_px, calibration.image_height_px)):
-        raise ValueError("Dock JPEG resolution differs from measured intrinsics")
+    if (frame.shape[1], frame.shape[0]) != encoded_size:
+        raise ValueError("Dock JPEG resolution differs from encoded image")
     try:
         dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_APRILTAG_36h11)
         detector = cv2.aruco.ArucoDetector(dictionary)
