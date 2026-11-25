@@ -3372,3 +3372,67 @@ def test_optional_native_failure_cannot_retain_head_authority(
     bridge.register(replacement)
     assert bridge.connections[old.device_id] is replacement
     assert not bridge.tool_turn_cancel_event(old.device_id).is_set()
+
+
+@pytest.mark.parametrize(
+    "scenario", ["hardlink", "marker-hardlink", "missing", "new-edit", "upgrade"],
+)
+def test_overlay_refresh_preserves_unmanaged_files(tmp_path, monkeypatch, scenario):
+    import os
+    import subprocess
+
+    spec = importlib.util.spec_from_file_location(
+        "server_overlay_manifest", ROOT / "laptop/server/install_overlay.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    upstream = tmp_path / "upstream"
+    root = upstream / "main/xiaozhi-server"
+    root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=upstream, check=True)
+    (root / "tracked.py").write_text("original")
+    subprocess.run(["git", "add", "."], cwd=upstream, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+         "commit", "-qm", "fixture"], cwd=upstream, check=True,
+    )
+    pin = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=upstream, text=True).strip()
+    monkeypatch.setattr(module, "PIN", pin)
+    changes = {"first.py": "old", "managed.py": "old"}
+    monkeypatch.setattr(module, "files", lambda _root: changes)
+    output = tmp_path / "build"
+    module.install(upstream, output)
+    built = output / "main/xiaozhi-server"
+    marker = output / ".desk-robot-server-overlay.json"
+    victim = tmp_path / "external"
+    changes = {"first.py": "new", "managed.py": "new", "tracked.py": "patched"}
+    if scenario == "hardlink":
+        victim.write_text("old")
+        (built / "managed.py").unlink()
+        os.link(victim, built / "managed.py")
+    elif scenario == "marker-hardlink":
+        victim.write_bytes(marker.read_bytes())
+        marker.unlink()
+        os.link(victim, marker)
+    elif scenario == "missing":
+        manifest = json.loads(marker.read_text())
+        manifest.pop("managed.py")
+        marker.write_text(json.dumps(manifest))
+        (built / "managed.py").write_text("user change")
+    elif scenario == "new-edit":
+        (built / "tracked.py").write_text("user change")
+    before = victim.read_bytes() if victim.exists() else None
+    if scenario == "upgrade":
+        module.install(upstream, output)
+        module.install(upstream, output)
+        assert (built / "tracked.py").read_text() == "patched"
+    else:
+        with pytest.raises(ValueError, match="Hard link|Preserve unmanaged overlay file"):
+            module.install(upstream, output)
+        assert (built / "first.py").read_text() == "old"
+        if victim.exists():
+            assert victim.read_bytes() == before
+        if scenario == "missing":
+            assert (built / "managed.py").read_text() == "user change"
+        elif scenario == "new-edit":
+            assert (built / "tracked.py").read_text() == "user change"

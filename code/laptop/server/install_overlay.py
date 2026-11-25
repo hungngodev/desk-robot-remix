@@ -362,6 +362,8 @@ def checked_path(root: Path, name: str) -> Path:
         path = path / part
         if path.is_symlink():
             raise ValueError(f"Symbolic link in managed overlay path: {path}")
+    if path.is_file() and path.stat().st_nlink != 1:
+        raise ValueError(f"Hard link in managed overlay path: {path}")
     return path
 
 
@@ -369,13 +371,18 @@ def install(upstream: Path, output: Path):
     pin = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=upstream, text=True).strip()
     if pin != PIN:
         raise ValueError("Use the pinned server source from upstream-lock.json")
-    if subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=upstream, text=True).strip():
+    if subprocess.check_output(
+        ["git", "status", "--porcelain", "--untracked-files=no"], cwd=upstream, text=True,
+    ).strip():
         raise ValueError("Preserve upstream source changes before installing")
     changes = files(upstream / "main/xiaozhi-server")
     marker = checked_path(output, ".desk-robot-server-overlay.json")
     root = checked_path(output, "main/xiaozhi-server")
+    manifest = {}
     if output.exists():
-        current = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=output, text=True).strip()
+        current = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=output, text=True,
+        ).strip()
         if current != PIN or not marker.is_file():
             raise ValueError("Existing output is not this pinned managed build")
         manifest = json.loads(marker.read_text())
@@ -396,6 +403,20 @@ def install(upstream: Path, output: Path):
     # new paths absent from an older manifest.
     root = checked_path(output, "main/xiaozhi-server")
     destinations = {name: checked_path(root, name) for name in changes}
+    for name, path in destinations.items():
+        if name in manifest or not path.exists():
+            continue
+        # A newly managed path can replace only pristine pinned upstream data.
+        # Missing manifest entries must not authorize overwriting local edits.
+        try:
+            original = subprocess.check_output(
+                ["git", "show", f"HEAD:main/xiaozhi-server/{name}"],
+                cwd=upstream, stderr=subprocess.DEVNULL,
+            )
+        except subprocess.CalledProcessError as exc:
+            raise ValueError(f"Preserve unmanaged overlay file before refresh: {name}") from exc
+        if not path.is_file() or path.read_bytes() != original:
+            raise ValueError(f"Preserve unmanaged overlay file before refresh: {name}")
     for name, source in changes.items():
         path = destinations[name]
         path.parent.mkdir(parents=True, exist_ok=True)
