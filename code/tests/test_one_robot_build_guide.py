@@ -65,3 +65,22 @@ def test_both_authoritative_exits_require_physical_spatial_acceptance():
             "Missing or failed spatial trials prohibit duplication",
         ):
             assert phrase in section
+
+
+def test_selected_builder_route_uses_explicit_full_and_private_sense_targets():
+    text = GUIDE.with_name("build.md").read_text(encoding="utf-8")
+    profiles = (ROOT / "code/firmware/body/platformio.ini").read_text(encoding="utf-8")
+    assert "default_envs = esp32_full" in profiles
+    assert "run -d firmware/body -e esp32_full --target upload" in text
+    assert "logic-only upload is a prerequisite for sensor calibration" in text
+    assert "motor, servo, battery and dock/charger power" in text
+    assert "unexpectedly armed" in text
+    selected = text.split("## Selected XIAO ESP32S3 Sense head", 1)[1].split(
+        "## Modular S3 head", 1
+    )[0]
+    assert "private_config.py --board sense --config config/local.toml" in selected
+    assert "build_head.sh --board sense --private" in selected
+    assert "cd firmware/head/build/xiaozhi-sense" in selected
+    assert "J3 microSD isolation" in selected
+    assert "explicit operator consent" in selected
+    assert "all actuator and charging power disconnected" in selected.replace("\n", " ")
