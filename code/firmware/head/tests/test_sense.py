@@ -294,7 +294,7 @@ int main() {
         self.assertIn('board->display_->SetStatus("Body safety stop");', source)
         self.assertNotIn('body_unhealthy ? "sad" :', source)
         self.assertIn('Event(EventType::kPersonDetected)', source)
-        self.assertIn('last_was_idle = idle;', source)
+        self.assertIn('last_device_state = device_state;', source)
         self.assertIn('board->display_->SetStatus("Body safety stop");', source)
         self.assertNotIn('body_unhealthy ? "sad" :', source)
         self.assertIn('Event(EventType::kPersonDetected)', source)
@@ -1536,9 +1536,14 @@ def test_sense_fault_face_overrides_idle_moods_and_recovers_once():
         '} else if (requested_mood', 1
     )[0]
     # Motor safety is factual; a fault must not force scripted sadness.
-    assert 'SetEmotion("neutral")' in fault
     assert 'SetEmotion("sad")' not in fault
-    assert 'last_idle_face_fault && !last_face_available' in fault
+    refresh = face.split("if (body_unhealthy &&\n", 1)[1].split(
+        "} else if (last_rendered_fault", 1
+    )[0]
+    assert "device_state != last_device_state" in refresh
+    assert "now_ms - last_fault_status_refresh_ms >= 750U" in refresh
+    assert 'if (last_idle_face_fault)\n                        ' in refresh
+    assert 'board->display_->SetEmotion("neutral");' in refresh
     assert 'model_mood_active = false;' in fault
     # Recovery must force a neutral/local HSM face refresh even if its
     # idle picker emitted no new mood. No 100 ms continuous OLED spam.
@@ -1936,6 +1941,7 @@ def test_sense_hsm_gaze_and_blink_reach_local_locked_oled_without_motor_motion()
     native = r"""
 #include "face_eye_animator.hpp"
 #include <cassert>
+#include <initializer_list>
 using namespace desk_robot;
 using stackchan::behavior::Motion;
 int main() {
@@ -1964,6 +1970,29 @@ int main() {
     FaceEyeAnimator rollover;
     assert(rollover.Step(0xfffffff0U, Motion::kLookLeft, true).visible);
     assert(rollover.Step(0x40U, Motion::kNone, true).visible);
+    // Five offline minutes, including uint32 rollover, at the real task cadence.
+    for (uint32_t seed = 0; seed < 1000; ++seed) {
+        FaceEyeAnimator offline;
+        offline.Seed(seed);
+        unsigned blinks = 0;
+        bool was_closed = false;
+        for (uint32_t elapsed = 0; elapsed <= 300000U; elapsed += 100U) {
+            auto frame = offline.Step(0xfffff000U + elapsed, Motion::kNone, true);
+            assert(frame.x == 0 && frame.y == 0);
+            if (frame.closed && !was_closed) ++blinks;
+            assert(!frame.closed || frame.visible);
+            was_closed = frame.closed;
+        }
+        assert(blinks >= 44 && blinks <= 70);
+        for (auto motion : {Motion::kLookLeft, Motion::kLookRight, Motion::kLookUp,
+                            Motion::kLookDown, Motion::kNod, Motion::kShake}) {
+            auto frame = offline.Step(300100U, motion, true);
+            assert(frame.visible && frame.x >= -3 && frame.x <= 3);
+            assert(frame.y >= -3 && frame.y <= 3);
+            assert(!offline.Step(300101U, motion, false).visible);
+            assert(!offline.Step(300102U, Motion::kNone, true).visible);
+        }
+    }
 }
 """
     with tempfile.TemporaryDirectory() as temp:

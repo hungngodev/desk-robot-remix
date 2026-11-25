@@ -124,7 +124,7 @@ private:
         bool last_mic_privacy_overlay = false;
         uint32_t last_mic_privacy_refresh_ms = 0;
 #endif
-        bool last_was_idle = false;
+        auto last_device_state = kDeviceStateIdle;
         bool last_face_available = false;
         bool last_idle_face_fault = false;
         bool model_mood_active = false;
@@ -216,22 +216,24 @@ private:
             if (body_unhealthy || !face_available) model_mood_active = false;
             if (board->display_ != nullptr) {
                 // A new physical WROOM fault cannot leave yesterday's happy
-                // emotion visible until speech finishes. Only alter the
-                // separate LVGL emotion label once on the fault transition;
-                // Xiaozhi keeps ownership of speaker and listening status.
+                // emotion visible until speech finishes. Neutralize it
+                // immediately; the bounded refresh below also repairs
+                // subsequent upstream emotion writes.
                 if (body_unhealthy && !last_idle_face_fault)
                     board->display_->SetEmotion("neutral");
                 // WROOM faults are factual local OLED status even while
                 // Xiaozhi is speaking. Never wait for the speech floor to
                 // become idle to show a newly observed safety fault.
-                // Xiaozhi also rewrites status on live speaking/listening
-                // transitions. Restore the safety overlay at most every
-                // 750 ms while faulted, including continuous listening.
+                // Xiaozhi can rewrite both status and emotion during speech.
+                // Restore both on state changes and every 750 ms while
+                // faulted, without a 100 ms redraw loop.
                 // No mandatory warning speech or motor authority follows.
                 if (body_unhealthy &&
-                    (!last_rendered_fault || (idle && !last_was_idle) ||
+                    (!last_rendered_fault || device_state != last_device_state ||
                      dock_lockout != last_rendered_dock_lockout ||
                      now_ms - last_fault_status_refresh_ms >= 750U)) {
+                    if (last_idle_face_fault)
+                        board->display_->SetEmotion("neutral");
                     if (dock_lockout)
                         board->display_->SetStatus("Dock lock: motors off");
                     else
@@ -289,8 +291,6 @@ private:
                     // prescribing sadness for every independent WROOM fault.
                     // The factual STOP status above remains visible, and
                     // optional HSM/LLM moods cannot override the safety cue.
-                    if (last_idle_face_fault && !last_face_available)
-                        board->display_->SetEmotion("neutral");
                     model_mood_active = false;
                 } else if (requested_mood != desk_robot::CosmeticMood::kNone) {
                     board->display_->SetEmotion(CosmeticMoodName(requested_mood));
@@ -317,7 +317,7 @@ private:
             // Update fault history even while the voice floor owns the OLED.
             // Otherwise speaking can trigger a 100 ms neutral redraw flood.
             last_idle_face_fault = body_unhealthy;
-            last_was_idle = idle;
+            last_device_state = device_state;
             last_face_available = face_available;
             vTaskDelay(pdMS_TO_TICKS(100));
         }
