@@ -53,8 +53,12 @@ class YoloWorldVision:
         self._worker.shutdown(wait=False, cancel_futures=False)
         pending = self._inflight
         if pending is not None:
+            wrapped = asyncio.wrap_future(pending)
+            wrapped.add_done_callback(
+                lambda d: None if d.cancelled() else d.exception()
+            )
             try:
-                await asyncio.shield(asyncio.wrap_future(pending))
+                await asyncio.shield(wrapped)
             except Exception:
                 # The detector callback drains late inference exceptions.
                 pass

@@ -403,3 +403,50 @@ async def test_scene_dispatch_rechecks_admission_after_jpeg_validation(
             await scene.compare(frame, frame, admit=lambda: active)
     assert validated is not revoked_before_decode
     client.post.assert_not_awaited()
+
+
+@pytest.mark.parametrize("raise_failure", [False, True])
+async def test_cancelled_yolo_close_drains_late_wrapper_exception(raise_failure):
+    import gc
+
+    vision = YoloWorldVision(None)
+    entered, release = threading.Event(), threading.Event()
+
+    def blocked(jpeg, label):
+        entered.set()
+        release.wait(timeout=5)
+        if raise_failure:
+            raise ValueError("late model failure")
+        return [Detection(label, 1.0, (0, 0, 10, 10))]
+
+    vision._detect = blocked
+    loop = asyncio.get_running_loop()
+    exceptions = []
+    previous_handler = loop.get_exception_handler()
+    loop.set_exception_handler(lambda _loop, ctx: exceptions.append(ctx))
+    try:
+        started = asyncio.create_task(vision.detect(b"frame", "key"))
+        try:
+            assert await asyncio.to_thread(entered.wait, 1.0)
+            started.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await started
+            del started
+            closing = asyncio.create_task(vision.close())
+            await asyncio.sleep(0)
+            assert not closing.done()
+            closing.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await closing
+            del closing
+        finally:
+            release.set()
+        await asyncio.wait_for(vision.close(), timeout=2)
+        with pytest.raises(RuntimeError, match="YOLO detector is closed"):
+            await vision.detect(b"late frame", "candy")
+        for _ in range(3):
+            gc.collect()
+            await asyncio.sleep(0)
+        assert exceptions == []
+    finally:
+        loop.set_exception_handler(previous_handler)
