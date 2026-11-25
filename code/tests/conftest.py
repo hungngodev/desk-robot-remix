@@ -1,14 +1,21 @@
 from pathlib import Path
 
 import pytest
-from desk_robot.config import load_settings
+from desk_robot.config import Settings, load_settings
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 @pytest.fixture
-def settings():
-    return load_settings(ROOT / "config/simulation.toml")
+def settings(tmp_path: Path) -> Settings:
+    # A fresh model alone does not isolate the SQLite and trial file paths.
+    return load_settings(
+        ROOT / "config/simulation.toml",
+        overrides={
+            "memory_dir": tmp_path / "memory",
+            "trials_file": tmp_path / "physical-trials.jsonl",
+        },
+    )
 
 
 @pytest.fixture
