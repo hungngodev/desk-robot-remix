@@ -1330,7 +1330,7 @@ class MultimodalOrchestrator:
                         # timestamp would otherwise suppress every later real
                         # frame, while NaN would disable cadence filtering.
                         if (not _finite(received)
-                                or received > now + 0.5
+                                or received > now
                                 or now - received > 6.0
                                 or received <= self._last_stream_sample[robot_id]):
                             metrics["stream_frames_skipped"] += 1
@@ -1395,7 +1395,7 @@ class MultimodalOrchestrator:
                         # frame's one-second live-video freshness window.
                         # Do not revive an obsolete scene, even if its receipt
                         # was valid before the asynchronous decode began.
-                        if time.monotonic() - received > 1.0:
+                        if not 0 <= time.monotonic() - received <= 1.0:
                             metrics["stream_frames_skipped"] += 1
                             continue
                         if (self._closed or turn != self._turn_epoch[robot_id]

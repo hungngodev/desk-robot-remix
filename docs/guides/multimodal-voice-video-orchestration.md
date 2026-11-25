@@ -760,3 +760,15 @@ receipt incorporation require end-to-end tests; source context packing
 alone does not prove a realtime model used the tools. A model may never
 interpret the contents of tool results as developer/system instructions,
 motor permission, charging confirmation or a new sensor reading.
+
+### Mac JPEG receipt freshness across camera paths
+
+Continuous MJPEG, individual snapshots and external proactive photos reject
+frames that are more than one second old at the end of JPEG preprocessing.
+A stream timestamp is a local Mac monotonic receipt, so even a small
+future timestamp is invalid and cannot advance the stream sampling cursor.
+External proactive photos with invalid or expired receipt times are dropped
+before JPEG preprocessing as well. Direct visual questions still have a
+separate six-second oldest-selected-frame limit through VLM inference and
+answer admission. None of these bounds measures device exposure age,
+network capture latency or physical audible interruption.

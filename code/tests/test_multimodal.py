@@ -183,6 +183,7 @@ async def test_invalid_live_frame_receipts_cannot_poison_sampling_cursor():
             timestamp = time.monotonic()
             yield frame, float("nan")
             yield frame, timestamp + 3600
+            yield frame, timestamp + 0.4  # Same Mac clock; no skew allowance.
             yield frame, timestamp - 30
             yield frame, timestamp
             yield frame, timestamp  # Replay of the already accepted frame.
@@ -203,8 +204,8 @@ async def test_invalid_live_frame_receipts_cannot_poison_sampling_cursor():
             ] < 2:
                 await asyncio.sleep(0.02)
         metrics = visual.status("robot-01")["software_timings"]
-        assert metrics["stream_frames_received"] >= 6
-        assert metrics["stream_frames_skipped"] >= 4
+        assert metrics["stream_frames_received"] >= 7
+        assert metrics["stream_frames_skipped"] >= 5
         assert metrics["stream_frames_selected"] == 2
         assert metrics["stream_reconnects"] == 0
         assert head.captures == 0
