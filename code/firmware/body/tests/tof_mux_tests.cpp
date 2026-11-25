@@ -43,6 +43,35 @@ static void faulted(desk_robot::CliffGuard& guard) {
 int main() {
   try {
     {
+      // A full millis revolution must not make expired diagnostics fresh.
+      Wire = TwoWire{};
+      fake_i2c_lines() = FakeI2cLines{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      bus.poll(guard, 60);
+      CHECK(bus.extra_diagnostic(0, 60).valid);
+      CHECK(bus.optical_diagnostic(5, 60).valid);
+      Wire.tof_ready = false;
+      bus.poll(guard, 411);
+      CHECK(!bus.extra_diagnostic(0, 411).valid);
+      CHECK(!bus.optical_diagnostic(5, 411).valid);
+      CHECK(!guard.evaluate(411));
+      bus.poll(guard, 0x7fffffffU);
+      bus.poll(guard, 0xfffffff0U);
+      bus.poll(guard, 61);
+      CHECK(!bus.extra_diagnostic(0, 61).valid);
+      CHECK(!bus.optical_diagnostic(5, 61).valid);
+      CHECK(!bus.optical_diagnostic(0, 61).valid);
+      CHECK(bus.optical_diagnostic(5, 61).ambient_97 == 0x0123);
+      CHECK(!guard.evaluate(61));
+      Wire.tof_ready = true;
+      for (std::uint32_t i = 62; i < 86; ++i) bus.poll(guard, i);
+      CHECK(bus.extra_diagnostic(0, 86).valid);
+      CHECK(bus.optical_diagnostic(5, 86).valid);
+      CHECK(!guard.evaluate(86));
+    }
+    {
       // Optical quality is decoded from the SAME accepted 12-byte result,
       // not a new blocking I2C read or a separate motion authorization.
       Wire = TwoWire{};

@@ -351,6 +351,17 @@ TofOpticalDiagnostic TofBus::optical_diagnostic(
 }
 
 void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
+  // Retire expired evidence while polling, so a full millis revolution
+  // cannot make a cached conversion fresh again. Only acquisition renews it.
+  for (auto& sample : extra_) {
+    if (sample.present && now_ms - sample.at_ms > 350U) sample.valid = false;
+  }
+  for (std::uint8_t lane = 0; lane < kRangeCount; ++lane) {
+    auto& sample = optical_[lane];
+    const auto age = now_ms - sample.at_ms;
+    if (sample.present && (lane < kFloorAndFrontCount ? age >= 200U : age > 350U))
+      sample.valid = false;
+  }
   new_extra_channel_ = 255;
   new_optical_channel_ = 255;
   if (!initialized_) {

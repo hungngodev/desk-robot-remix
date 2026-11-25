@@ -929,6 +929,18 @@ std::uint32_t BodyControl::drive_remaining(std::uint32_t now_ms) const {
 }
 
 void BodyControl::tick(std::uint32_t now_ms) {
+  // Keep expired diagnostic validity cleared even after millis wraps.
+  // The raw words and timestamps remain available for inspection.
+  for (std::uint8_t lane = 0; lane < 8; ++lane) {
+    auto& sample = state_.optical[lane];
+    const auto age = now_ms - sample.at_ms;
+    if (sample.present && (lane < 5 ? age >= 200U : age > 350U))
+      sample.valid = false;
+  }
+  for (std::uint8_t lane = 0; lane < 3; ++lane) {
+    if (state_.side_present[lane] && now_ms - state_.side_at_ms[lane] > 350U)
+      state_.side_valid[lane] = false;
+  }
   if (wheel_pose_configured_) wheel_pose_.expire(now_ms);
   // Local gesture classification survives slow Mac camera polling.
   // Unsigned subtraction also handles millis rollover.

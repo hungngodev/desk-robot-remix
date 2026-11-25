@@ -2898,6 +2898,34 @@ static void status_readiness_matches_local_arm_interlocks() {
   CHECK(send(dock_body, "arm", 3) == "ERR arm dock_power_connected");
 }
 
+static void range_diagnostics_do_not_revive_after_full_millis_wrap() {
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
+  body.sample_range_optics(0, 291, 17767, true, 60);
+  body.sample_range_optics(5, 32, 1024, true, 60);
+  body.sample_side_range(0, 125, true, 60);
+  body.tick(259);
+  CHECK(body.state().optical[0].valid);
+  body.tick(260);
+  CHECK(!body.state().optical[0].valid);
+  body.tick(410);
+  CHECK(body.state().optical[5].valid && body.state().side_valid[0]);
+  body.tick(411);
+  CHECK(!body.state().optical[5].valid && !body.state().side_valid[0]);
+  body.tick(0x7fffffffU);
+  body.tick(0xfffffff0U);
+  body.tick(61);
+  CHECK(send(body, "optics", 61).find(
+      "\"present_mask\":33,\"valid_mask\":0") != std::string::npos);
+  CHECK(send(body, "status", 61).find(
+      "\"present_mask\":1,\"valid_mask\":0,\"motion_certified\":false") != std::string::npos);
+  CHECK(body.state().optical[5].ambient_97 == 32);
+  CHECK(body.state().side_mm[0] == 125);
+  body.sample_range_optics(5, 33, 1025, true, 62);
+  body.sample_side_range(0, 126, true, 62);
+  CHECK(body.state().optical[5].valid && body.state().side_valid[0]);
+  CHECK(!body.state().armed);
+}
+
 static void eight_lane_optical_words_are_read_only_and_expire() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
   CHECK(send(body, "optics", 0).find(
@@ -3263,6 +3291,7 @@ int main() {
     optional_max30102_raw_never_authorizes_motion_or_diagnosis();
     extra_three_ranging_channels_are_diagnostics_only();
     eight_lane_optical_words_are_read_only_and_expire();
+    range_diagnostics_do_not_revive_after_full_millis_wrap();
     side_range_validity_clears_on_shared_bus_fault_without_fake_samples();
     optional_range_replay_preserves_newest_raw_evidence();
     cap_petting_zones_are_optional_and_never_arm();
