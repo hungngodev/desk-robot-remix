@@ -16,19 +16,35 @@ int main() {
     assert(!CompleteJpeg(jpeg, sizeof(jpeg)));
 
     RealTouchEdges head;
+    assert(head.Observe(10) == 0); // no boot identity, no edges
+    assert(head.Observe(11) == 0);
+    assert(!head.AcceptBoot(0));
+    assert(head.AcceptBoot(101));
     assert(head.Observe(10) == 0); // first read is baseline
     assert(head.Observe(11) == 1);
     assert(head.Observe(11) == 0);
     assert(head.Observe(12) == 1);
-    assert(head.Observe(0) == 0); // unplug, reset or reboot
-    assert(head.Observe(1) == 1);
+    assert(head.Observe(0) == 0); // stale counter, not a reboot
+    assert(head.Observe(1) == 0);
+    assert(head.Observe(13) == 1);
     assert(head.Observe(99) == 0); // huge jump cannot forge touch
     head.Reset();
-    assert(head.Observe(8) == 0);
+    assert(head.Observe(8) == 0); // stale data cannot reset watermark
+    assert(head.AcceptBoot(101));
+    assert(head.Observe(100) == 0); // reconnect rebaselines
+    assert(head.Observe(101) == 1);
+    assert(head.AcceptBoot(103));
+    assert(head.Observe(8) == 0); // first sample of new boot
+    assert(!head.AcceptBoot(101)); // old generation cannot replay
+    assert(head.AcceptBoot(103));
+    assert(head.Observe(9) == 1);
     RealTouchEdges cap;
+    assert(cap.AcceptBoot(201));
     assert(cap.Observe(4294967295U) == 0);
-    assert(cap.Observe(0) == 0); // wrap never fabricates a contact
+    assert(cap.Observe(0) == 1); // real one-step counter rollover
     assert(cap.Observe(3) == 3);
+    assert(cap.Observe(0x80000003U) == 0); // ambiguous half-range
+    assert(cap.Observe(4) == 1);
 
     // OLED expressions require a genuinely active and ready local WROOM
     // guard. A legacy "not_required" profile or an unready calibration may
@@ -141,6 +157,7 @@ int main() {
     assert(!MatchingError("ERR gripper disarmed", c));
     for (const std::string bad : {"", "drive", "drive 1 1 0", "drive 1 1 251", "drive 101 1 1", "drive 1 -101", "drive 1 1 1 junk", "drive 1.0 1", "drive nan 1", "drive +1 1", "drive 1  1", " drive 1 1", "drive 1 1 ", "grip 59", "lift 121", "stop junk", "status\r", "ping\n", "drive 9999999999999999 0", "arm now", "forward 100"}) {
         assert(!ParseCommand(bad, true, c));
+        assert(c.verb.empty() && c.args.empty() && c.wire.empty());
     }
     for (const auto verb : {"arm", "disarm", "keepalive"}) {
         assert(!ParseCommand(verb, false, c));

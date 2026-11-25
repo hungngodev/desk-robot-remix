@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 namespace desk_robot {
@@ -156,14 +157,15 @@ inline bool ParseCommand(std::string_view line, bool operator_control, Command& 
         parts.push_back(line.substr(pos, end - pos));
         pos = end + 1;
     }
-    result.verb = std::string(parts[0]);
+    Command parsed;
+    parsed.verb = std::string(parts[0]);
     for (size_t i = 1; i < parts.size(); ++i) {
         int n = 0;
         if (!Integer(parts[i], n)) return false;
-        result.args.push_back(n);
+        parsed.args.push_back(n);
     }
-    const auto& v = result.verb;
-    const auto& a = result.args;
+    const auto& v = parsed.verb;
+    const auto& a = parsed.args;
     if (v == "drive") {
         if (a.size() != 2 && a.size() != 3) return false;
         if (a[0] < -100 || a[0] > 100 || a[1] < -100 || a[1] > 100) return false;
@@ -175,7 +177,8 @@ inline bool ParseCommand(std::string_view line, bool operator_control, Command& 
     } else if (v == "stop" || v == "halt" || v == "status" || v == "aux" || v == "ir" || v == "optics" || v == "pose" || v == "ping") {
         if (!a.empty()) return false;
     } else return false;
-    result.wire = std::string(line);
+    parsed.wire = std::string(line);
+    result = std::move(parsed);
     return true;
 }
 
@@ -194,7 +197,7 @@ inline std::string ExpectedAck(const Command& command) {
 
 inline bool MatchingError(std::string_view reply, const Command& command) {
     const std::string prefix = "ERR " + command.verb + " ";
-    return reply.starts_with(prefix) || reply == "ERR input line_too_long" ||
+    return reply.substr(0, prefix.size()) == prefix || reply == "ERR input line_too_long" ||
            reply == "ERR input invalid_ascii";
 }
 }  // namespace desk_robot
