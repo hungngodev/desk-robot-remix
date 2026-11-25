@@ -59,20 +59,60 @@ def _receipt_headers(
     }
 
 
+def _valid_tool_text(value, minimum, maximum):
+    if (not isinstance(value, str) or len(value) > maximum
+            or len(value.strip()) < minimum or "\x00" in value):
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _valid_tool_payload(route, payload):
+    """Validate all callers before constructing an authenticated HTTP request."""
+    if payload is None:
+        payload = {}
+    if not isinstance(payload, dict):
+        return False
+    if route == "pickup":
+        return (payload.keys() == {"target"}
+                and isinstance(payload["target"], str)
+                and payload["target"] in {"key", "candy"})
+    if route in {"look", "plan-readonly"}:
+        key = "question" if route == "look" else "transcript"
+        return (payload.keys() == {key}
+                and _valid_tool_text(payload[key], 3, 280))
+    if route == "voice-context":
+        return (not payload or (payload.keys() == {"question"}
+                and _valid_tool_text(payload["question"], 0, 240)))
+    return not payload
+
+
+def _valid_local_credential(token):
+    # HTTP bearer headers and compare_digest(str, str) require ASCII.
+    # Reject whitespace/control characters before a client can log an error.
+    return len(token) >= 24 and all(33 <= ord(char) <= 126 for char in token)
+
+
 async def call(conn, route, payload=None):
     # Only the pinned registered tools may reach the Mac. Never forward
     # arbitrary model-supplied paths, even to a separately protected API.
-    if route not in {
+    if not isinstance(route, str) or route not in {
         "status", "power-status", "aux-status", "latest-pickup",
         "interaction-context", "voice-context",
         "look", "pickup", "stop", "plan-readonly",
     }:
         return {"error": "Unsupported robot tool route", "retried": False}
+    if not _valid_tool_payload(route, payload):
+        return {"error": "Invalid robot tool arguments", "retried": False}
     robot = robot_for_device(conn.device_id)
     token = os.environ.get("DESK_ROBOT_TOOL_TOKEN", "")
     receipt_token = os.environ.get("DESK_ROBOT_SPEECH_TOKEN", "")
     if (robot is None or connections.get(conn.device_id) is not conn
-            or len(token) < 24 or len(receipt_token) < 24
+            or not _valid_local_credential(token)
+            or not _valid_local_credential(receipt_token)
             or secrets.compare_digest(token, receipt_token)):
         # A detached old WebSocket must not issue a Mac action after a
         # replacement head reconnects under the same configured device ID.
@@ -300,6 +340,7 @@ async def call(conn, route, payload=None):
                 "latest-pickup", "interaction-context", "voice-context",
             }
             or not isinstance(tool.get("payload"), dict)
+            or not _valid_tool_payload(tool["route"], tool["payload"])
             for tool in result["tools"]
         )
         # Even an otherwise allowlisted plan must not execute a duplicate
@@ -349,6 +390,7 @@ def description(name, text, properties=None, required=None):
                 "type": "object",
                 "properties": properties or {},
                 "required": required or [],
+                "additionalProperties": False,
             },
         },
     }

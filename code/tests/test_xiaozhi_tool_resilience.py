@@ -1485,3 +1485,97 @@ async def test_readonly_timeout_during_waiter_cleanup_cannot_request_stale_speec
     assert response.action == bridge_tools.Action.NONE
     assert response.result is None
     assert response.response is None
+
+
+
+@pytest.mark.parametrize("route", [None, [], {}, 3, True])
+async def test_shared_tool_rejects_nonstring_route_before_http(
+    bridge_tools, monkeypatch, route,
+):
+    def forbidden(*args, **kwargs):
+        pytest.fail("Malformed route reached authenticated HTTP")
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", forbidden)
+    assert await bridge_tools.call(bridge_tools.registered_head, route) == {
+        "error": "Unsupported robot tool route", "retried": False,
+    }
+
+
+@pytest.mark.parametrize("route,payload", [
+    ("stop", {"target": "key"}),
+    ("stop", []),
+    ("stop", False),
+    ("pickup", {}),
+    ("pickup", {"target": []}),
+    ("pickup", {"target": "key", "permit": True}),
+    ("pickup", {"target": "coin"}),
+    ("status", {"robot_id": "robot-02"}),
+    ("look", {"question": "  "}),
+    ("look", {"question": "x" * 281}),
+    ("look", {"question": "abc\x00"}),
+    ("look", {"question": "abc\ud800"}),
+    ("look", {"question": "What moved?", "extra": True}),
+    ("voice-context", {"question": 2}),
+    ("voice-context", {"question": "x" * 241}),
+    ("voice-context", ["What happened?"]),
+    ("plan-readonly", {"transcript": []}),
+    ("plan-readonly", {"transcript": "x" * 281}),
+])
+async def test_shared_tool_rejects_malformed_payload_before_http(
+    bridge_tools, monkeypatch, route, payload,
+):
+    def forbidden(*args, **kwargs):
+        pytest.fail("Malformed payload reached authenticated HTTP")
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", forbidden)
+    assert await bridge_tools.call(bridge_tools.registered_head, route, payload) == {
+        "error": "Invalid robot tool arguments", "retried": False,
+    }
+
+
+@pytest.mark.parametrize("variable", [
+    "DESK_ROBOT_TOOL_TOKEN", "DESK_ROBOT_SPEECH_TOKEN",
+])
+@pytest.mark.parametrize("suffix", ["\n", "\r", " ", "\t", "\x7f", "\u00e9"])
+async def test_shared_tool_rejects_unusable_credential_without_leak(
+    bridge_tools, monkeypatch, variable, suffix,
+):
+    def forbidden(*args, **kwargs):
+        pytest.fail("Invalid credential reached authenticated HTTP")
+
+    monkeypatch.setenv(variable, "private" * 6 + suffix)
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", forbidden)
+    result = await bridge_tools.call(bridge_tools.registered_head, "status")
+    assert result == {
+        "error": "Current registered head or local tool credential missing",
+    }
+    assert "private" not in str(result)
+
+
+async def test_shared_tool_rejects_whole_plan_with_malformed_payload(
+    bridge_tools, monkeypatch,
+):
+    original = httpx.AsyncClient
+
+    def handler(request):
+        return httpx.Response(200, json={
+            "robot_id": "robot-01",
+            "source": "existing_mac_ollama_readonly_route_selection",
+            "untrusted_model_selection": True,
+            "model_can_arm_motors": False,
+            "tools": [
+                {"route": "status", "payload": {}},
+                {"route": "look", "payload": {"question": ["invalid"]}},
+            ],
+        })
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    result = await bridge_tools.call(
+        bridge_tools.registered_head, "plan-readonly", {"transcript": "Check the desk"},
+    )
+    assert result == {
+        "error": "Invalid read-only Mac intent plan", "retried": False,
+    }
