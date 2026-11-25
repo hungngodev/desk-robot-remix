@@ -3882,3 +3882,52 @@ async def test_visual_answer_bound_to_selected_robot_camera_generation(
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         await service.close()
+
+
+@pytest.mark.parametrize(
+    ("temporal", "elapsed", "accepted"),
+    [(False, 0.25, True), (False, 6.0, False),
+     (True, 0.25, True), (True, 0.75, False)],
+)
+async def test_completed_visual_question_rechecks_every_selected_frame(
+    monkeypatch, temporal, elapsed, accepted,
+):
+    """Slow inference cannot refresh the JPEG's original evidence timestamp."""
+    robot_id = "robot-01"
+    now = time.monotonic()
+    clock = [now]
+    monkeypatch.setattr(
+        "desk_robot.multimodal.time",
+        SimpleNamespace(monotonic=lambda: clock[0]),
+    )
+
+    class AdvancingModel(Vision):
+        async def answer(self, question, frames):
+            result = await super().answer(question, frames)
+            clock[0] += elapsed
+            return result
+
+    scene = AdvancingModel()
+    service = MultimodalOrchestrator(
+        config(), {robot_id: Head(), "robot-02": Head()}, scene, asyncio.Lock(),
+    )
+    try:
+        if temporal:
+            service.hub.offer(robot_id, image(), now - 5.5, source="speech")
+        service.hub.offer(robot_id, image(square=True), now - 0.1, source="speech")
+        question = "What changed on the desk?" if temporal else "What is on the desk?"
+        if accepted:
+            result = await service.look(robot_id, question)
+            assert result["frames_used"] == (2 if temporal else 1)
+            assert service.hub.tool_history[robot_id]
+        else:
+            with pytest.raises(RuntimeError, match="Camera observation expired during"):
+                await service.look(robot_id, question)
+            assert not service.hub.tool_history[robot_id]
+        assert len(scene.calls) == 1
+        assert len(scene.calls[0][1]) == (2 if temporal else 1)
+        assert service._metrics[robot_id]["visual_answers"] == int(accepted)
+        assert not service.inference_lock.locked()
+        assert not service._look_tasks
+    finally:
+        await service.close()

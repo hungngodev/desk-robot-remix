@@ -2020,6 +2020,15 @@ class MultimodalOrchestrator:
                     for frame in chosen
                 ):
                     raise RuntimeError("Camera observation expired while queued")
+                # The oldest selected image limits the whole inference budget.
+                # A provider timeout is not permission to describe expired JPEGs.
+                remaining = min(
+                    self._vision_timeout_s,
+                    min(frame.received_at + _VISUAL_FRAME_MAX_AGE_S for frame in chosen)
+                    - model_started,
+                )
+                if remaining <= 0:
+                    raise RuntimeError("Camera observation expired while queued")
                 try:
                     # An alternate VLM client may swallow cancellation after
                     # the deadline. Its late response must not retain the
@@ -2029,7 +2038,7 @@ class MultimodalOrchestrator:
                         self.scene.answer(
                             question, [frame.jpeg for frame in chosen]
                         ),
-                        seconds=self._vision_timeout_s,
+                        seconds=remaining,
                         timeout_message="Live visual analysis timed out",
                     )
                     metrics["model_latency_last_ms"] = round(
@@ -2051,21 +2060,25 @@ class MultimodalOrchestrator:
                 raise RuntimeError("Camera consent revoked during visual analysis")
             if camera_generation != self.hub._generation[robot_id]:
                 raise RuntimeError("Camera evidence invalidated during visual analysis")
-            if time.monotonic() - chosen[-1].received_at > 16:
+            completed_at = time.monotonic()
+            if not all(
+                0 <= completed_at - frame.received_at <= _VISUAL_FRAME_MAX_AGE_S
+                for frame in chosen
+            ):
                 raise RuntimeError("Camera observation expired during visual analysis")
             metrics["visual_answers"] += 1
             # The read-only answer is bound to the exact accepted question
             # epoch and real Mac JPEG. It is a short-lived interpretation,
             # never a second camera/VLM agent or evidence of motion success.
             self.hub.remember_tool(
-                robot_id, "visual_look", answer, time.monotonic()
+                robot_id, "visual_look", answer, completed_at
             )
             return {
                 "robot_id": robot_id,
                 "answer": answer,
                 "frames_used": len(chosen),
                 "latest_frame_age_ms": round(
-                    1000 * (time.monotonic() - chosen[-1].received_at)
+                    1000 * (completed_at - chosen[-1].received_at)
                 ),
                 "model": self.settings.vision_model,
                 "source": "authenticated_xiao_camera_and_local_vlm",
