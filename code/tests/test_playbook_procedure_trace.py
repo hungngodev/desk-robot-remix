@@ -6,7 +6,7 @@ becomes a physical or same-commit test receipt by changing a status string.
 import json
 import re
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 import pytest
 
@@ -20,6 +20,8 @@ def _physical_record_url_is_traceable(url, sha, receipt):
     """Check immutable record syntax; the online audit verifies ancestry."""
     if not isinstance(url, str) or receipt.get("source_sha", sha) != sha:
         return False
+    if any(ord(ch) <= 32 or ord(ch) == 127 for ch in url):
+        return False
     try:
         parsed = urlsplit(url)
     except ValueError:
@@ -30,8 +32,19 @@ def _physical_record_url_is_traceable(url, sha, receipt):
     )
     if (parsed.scheme != "https" or parsed.netloc != "github.com"
             or parsed.query or parsed.fragment or match is None
-            or any(part in {"", ".", ".."} for part in match[2].split("/"))):
+            or url != f"https://github.com{parsed.path}"):
         return False
+    for part in match[2].split("/"):
+        if re.search(r"%(?![0-9a-fA-F]{2})", part):
+            return False
+        try:
+            decoded = unquote(part, errors="strict")
+        except UnicodeError:
+            return False
+        if (decoded in {"", ".", ".."}
+                or any(ch in decoded for ch in "/\\%")
+                or any(ord(ch) < 32 or ord(ch) == 127 for ch in decoded)):
+            return False
     if match[1] == sha:
         return True
     digest = receipt.get("artifact_sha256")
@@ -57,7 +70,7 @@ def _valid_manual_review(record, sha):
             "https://github.com/hungngodev/desk-robot-remix/pull/17"
             "#issuecomment-"
         )
-        and url.partition("#issuecomment-")[2].isdecimal()
+        and re.fullmatch(r"[1-9][0-9]{0,19}", url.partition("#issuecomment-")[2]) is not None
     )
 
 
@@ -338,4 +351,47 @@ def test_invalid_ci_receipt_url_cannot_promote_ledger(url):
 
 def test_valid_ci_receipt_url_is_structural_only():
     assert _valid_ci_receipt_url("https://github.com/hungngodev/desk-robot-remix/actions/runs/1")
+
+
+@pytest.mark.parametrize("suffix", [
+    "bench.csv\n", "bench.csv?", "bench.csv#",
+    "%2e%2e/bench.csv", "%252e%252e/bench.csv",
+    "x%2fy.csv", "x%5cy.csv", "x%00.csv", "x%ZZ.csv", "x%FF.csv",
+])
+def test_physical_record_rejects_ambiguous_encoded_paths(suffix):
+    row = _physical_receipt_fixture()
+    receipt = row["physical_measurement_receipt"]
+    receipt["raw_data_url"] = receipt["raw_data_url"].removesuffix("bench.csv") + suffix
+    assert not _valid_release_evidence(row)
+
+
+def test_physical_record_rejects_leading_whitespace():
+    row = _physical_receipt_fixture()
+    receipt = row["physical_measurement_receipt"]
+    receipt["raw_data_url"] = " " + receipt["raw_data_url"]
+    assert not _valid_release_evidence(row)
+
+
+@pytest.mark.parametrize("suffix", ["2026/bench.csv", "bench%20trial.csv"])
+def test_physical_record_accepts_unambiguous_nested_or_encoded_names(suffix):
+    row = _physical_receipt_fixture()
+    receipt = row["physical_measurement_receipt"]
+    receipt["raw_data_url"] = receipt["raw_data_url"].removesuffix("bench.csv") + suffix
+    assert _valid_release_evidence(row)
+
+
+@pytest.mark.parametrize("suffix", ["0", "01", "１２３", "123456789012345678901"])
+def test_manual_review_rejects_noncanonical_comment_ids(suffix):
+    sha = "a" * 40
+    record = {
+        "manual_review_receipt": {
+            "reviewer": "fixture_operator_001",
+            "sha": sha,
+            "review_url": (
+                "https://github.com/hungngodev/desk-robot-remix/pull/17#issuecomment-"
+                + suffix
+            ),
+        },
+    }
+    assert not _valid_manual_review(record, sha)
 
