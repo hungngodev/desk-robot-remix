@@ -260,3 +260,24 @@ def test_unknown_connector_does_not_hide_known_undersized_lead():
     assert report["harness_ampacity_enough_on_paper"] is False
     assert "exact_connector_or_lead_ampacity_missing" in report["blocking_reasons"]
     assert "exact_connector_or_lead_ampacity_insufficient" in report["blocking_reasons"]
+
+
+@pytest.mark.parametrize(("tray", "expected"), [
+    ((86, 35, 14), False),
+    ((66, 39, 21), False),
+    ((67, 39, 21), None),
+    ((39, 67, 21), None),
+    ((115, 55, 30), None),
+])
+def test_thor_bare_envelope_can_disprove_but_never_prove_complete_fit(tray, expected):
+    screen = module("screen_vendor_battery_harness")
+    demand = module("power_preflight").size_5v_supply(1.0, 0.6)
+    report = screen.evaluate("THOR-18650-1S2P-5200", demand, tray_mm=tray)
+    assert report["pack_fits_current_tray_on_paper"] is expected
+    assert report["assembled_pack_mm"] is None
+    assert report["bare_pack_mm"] == (65.0, 37.0, 18.4)
+    assert "full_protected_pack_dimensions_unknown" in report["blocking_reasons"]
+    assert (
+        "protected_pack_does_not_fit_existing_cavity" in report["blocking_reasons"]
+    ) == (expected is False)
+    assert report["complete_power_path_safe_to_buy"] is False

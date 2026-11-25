@@ -166,10 +166,17 @@ def evaluate(model: str, demand: dict, *, tray_mm=None,
              b + 2 * clearance_mm <= wt) or
             (b + wire_relief_mm + 2 * clearance_mm <= lt and
              a + 2 * clearance_mm <= wt)))
-    # THOR includes a configurable PCM and optional NTC, but publishes only
-    # bare-pack dimensions. The final protector, wiring and connector add volume.
-    if model == "THOR-18650-1S2P-5200":
-        fit = None
+    # THOR publishes only bare-pack dimensions. A larger complete pack
+    # cannot fit where even the bare envelope fails. Otherwise, the
+    # protector, wiring and connector still prevent a positive fit claim.
+    bare_only = model == "THOR-18650-1S2P-5200"
+    if bare_only:
+        bare_fits = (h + 2 * clearance_mm <= ht and
+                     ((a + 2 * clearance_mm <= lt and
+                       b + 2 * clearance_mm <= wt) or
+                      (b + 2 * clearance_mm <= lt and
+                       a + 2 * clearance_mm <= wt)))
+        fit = None if bare_fits else False
     peak = demand["minimum_rated_cell_and_boost_input_a"]
     cont = demand["minimum_continuous_cell_input_a"]
     # "Maximum discharge current" is not a published continuous rating.
@@ -196,9 +203,9 @@ def evaluate(model: str, demand: dict, *, tray_mm=None,
     harness_ok = (conn is not None and lead is not None and
                   conn >= peak and lead >= peak)
     reasons = []
-    if fit is None:
+    if bare_only:
         reasons.append("full_protected_pack_dimensions_unknown")
-    elif not fit:
+    if fit is False:
         reasons.append("protected_pack_does_not_fit_existing_cavity")
     if pack_max is None:
         reasons.append("manufacturer_assembled_pack_peak_discharge_rating_missing")
@@ -232,8 +239,8 @@ def evaluate(model: str, demand: dict, *, tray_mm=None,
         "connector_variant": src["connector"],
         "published_terminal_roles": dict(terminal_roles) if terminal_roles else None,
         "physical_harness_wiring_verified": False,
-        "assembled_pack_mm": None if fit is None else src["size_mm"],
-        "bare_pack_mm": src["size_mm"] if fit is None else None,
+        "assembled_pack_mm": None if bare_only else src["size_mm"],
+        "bare_pack_mm": src["size_mm"] if bare_only else None,
         "cell_level_max_discharge_a": cell_ceiling,
         "pack_fits_current_tray_on_paper": fit,
         "pack_peak_within_published_max_on_paper": peak_ok,
