@@ -104,7 +104,7 @@ struct State {
 enum class BodyProfile { DcPwm, StepperGuarded, DcGuarded };
 
 // Rewrite only accepted actuator/recovery replies vetoed during output application.
-enum class MotionAckVeto { BumperActive, MotorWatchdogLatched, TouchActive };
+enum class MotionAckVeto { BumperActive, MotorWatchdogLatched, TouchActive, SafetyInterlock };
 void veto_motion_ack(char* reply, std::size_t capacity, MotionAckVeto fault);
 
 class BodyControl {
@@ -113,6 +113,8 @@ class BodyControl {
                        CliffGuard* guard = nullptr) : profile_(profile), guard_(guard) {}
   const State& state() const { return state_; }
   void tick(std::uint32_t now_ms);
+  // Called after output application, before publishing an accepted reply.
+  void veto_unapplied_motion_ack(char* reply, std::size_t capacity) const;
   // Only the local USB receiver grants recovery authority. Network/head jobs
   // may arm an already-clear guard, but cannot clear a latched safety fault.
   void execute(const char* line, std::size_t length, std::uint32_t now_ms,

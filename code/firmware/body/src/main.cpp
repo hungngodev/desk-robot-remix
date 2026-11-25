@@ -472,6 +472,7 @@ void process_input(HardwareSerial& stream, desk_robot::LineReceiver& receiver,
                                  desk_robot::MotionAckVeto::MotorWatchdogLatched);
 #endif
     if (completed) {
+      control.veto_unapplied_motion_ack(reply, sizeof(reply));
       // STOP/HALT already took effect before acknowledgement. Keep the
       // small final reply out of the normal status backlog without splicing
       // it into any JSON line that has begun transmitting.

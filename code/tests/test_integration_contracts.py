@@ -102,7 +102,9 @@ def test_raw_touch_is_resampled_before_commands_outputs_and_heartbeat():
     )
     assert command.index("apply_outputs();  // apply accepted") < command.index(
         "desk_robot::MotionAckVeto::TouchActive"
-    ) < command.index("replies.enqueue_line(reply)")
+    ) < command.index("control.veto_unapplied_motion_ack(") < command.index(
+        "replies.enqueue_line(reply)"
+    )
     loop = body.split("void loop() {", 1)[1]
     assert loop.rindex("sample_raw_touch(millis());") < loop.index(
         "enforce_motor_heartbeat(true);"

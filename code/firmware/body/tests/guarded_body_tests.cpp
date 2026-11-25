@@ -1,6 +1,7 @@
 #include <cstdio>
 #include "BodyControl.h"
 #include "CliffGuard.h"
+#include "ReplyTxQueue.h"
 #include "StepperDrive.h"
 #include <cstring>
 #include <iostream>
@@ -2228,15 +2229,86 @@ static void optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract() {
 }
 
 
+static void stale_range_veto_survives_saturated_uart() {
+  struct Serial {
+    int free = 0;
+    std::string sent;
+    int availableForWrite() const { return free; }
+    std::size_t write(const std::uint8_t* data, std::size_t count) {
+      CHECK(count <= static_cast<std::size_t>(free));
+      sent.append(reinterpret_cast<const char*>(data), count);
+      free -= static_cast<int>(count);
+      return count;
+    }
+  };
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 100);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  CHECK(send(body, "rearm", 100, true) == "OK rearm");
+  CHECK(send(body, "arm", 100) == "OK arm");
+  char reply[desk_robot::kReplyCapacity]{};
+  const char drive[] = "drive 40 40 250";
+  body.execute(drive, sizeof(drive) - 1, 199, reply, sizeof(reply));
+  CHECK(std::string(reply) == "OK drive left=40 right=40 ms=250");
+  CHECK(body.state().armed && body.state().left == 40);
+  const auto status = send(body, "status", 199);
+  desk_robot::ReplyTxQueue<2 * (desk_robot::kReplyCapacity + 2)> head, usb;
+  Serial head_serial, usb_serial;
+  for (int i = 0; i < 16; ++i) {
+    head.enqueue_line(status.c_str());
+    usb.enqueue_line(status.c_str());
+  }
+  CHECK(head.dropped() > 0 && usb.dropped() > 0);
+  head_serial.free = 7;
+  CHECK(head.drain(head_serial) == 7);
+  CHECK(head.drain(head_serial) == 0 && usb.drain(usb_serial) == 0);
+
+  // The final output checkpoint must stop independently of both UARTs.
+  body.tick(200);
+  body.veto_unapplied_motion_ack(reply, sizeof(reply));
+  CHECK(std::string(reply) == "ERR drive safety_interlock");
+  CHECK(!body.state().armed && body.state().left == 0 && body.state().right == 0);
+  CHECK(body.state().servos_attached);
+  CHECK(guard.fault() == desk_robot::CliffFault::StaleSample);
+  body.sample_bumper_input(true);
+  guard.bus_fault();
+  CHECK(guard.fault() == desk_robot::CliffFault::StaleSample);
+  CHECK(head.enqueue_priority_line(send(body, "stop", 200).c_str()));
+  CHECK(usb.enqueue_priority_line(send(body, "halt", 200).c_str()));
+  CHECK(head.drain(head_serial) == 0 && usb.drain(usb_serial) == 0);
+  for (int i = 0; i < 256 && (head.pending() || usb.pending()); ++i) {
+    head_serial.free = usb_serial.free = 32;
+    CHECK(head.drain(head_serial) <= 32 && usb.drain(usb_serial) <= 32);
+  }
+  CHECK(head.pending() == 0 && usb.pending() == 0);
+  const auto prefix = status + "\r\nOK stop\r\n";
+  CHECK(head_serial.sent.compare(0, prefix.size(), prefix) == 0);
+  CHECK(usb_serial.sent.compare(0, 9, "OK halt\r\n") == 0);
+  body.sample_bumper_input(false);
+  fresh(guard, 201);
+  CHECK(send(body, "rearm", 201) == "ERR rearm local_only");
+  const auto recovered = send(body, "rearm", 201, true);
+  CHECK(recovered == "OK rearm");
+  std::snprintf(reply, sizeof(reply), "%s", recovered.c_str());
+  body.veto_unapplied_motion_ack(reply, sizeof(reply));
+  CHECK(std::string(reply) == "OK rearm" && !body.state().armed);
+  body.tick(301);
+  body.veto_unapplied_motion_ack(reply, sizeof(reply));
+  CHECK(std::string(reply) == "ERR rearm safety_interlock");
+}
+
 void output_fault_vetoes_all_motion_acknowledgments() {
   using desk_robot::MotionAckVeto;
   const char* acks[] = {"OK arm", "OK rearm", "OK keepalive",
                        "OK drive 20 20 100", "OK lift 90", "OK grip 90"};
   const char* commands[] = {"arm", "rearm", "keepalive", "drive", "lift", "grip"};
   for (auto fault : {MotionAckVeto::BumperActive, MotionAckVeto::MotorWatchdogLatched,
-                     MotionAckVeto::TouchActive}) {
+                     MotionAckVeto::TouchActive, MotionAckVeto::SafetyInterlock}) {
     const std::string reason = fault == MotionAckVeto::BumperActive ? "bumper_active" :
-        fault == MotionAckVeto::TouchActive ? "touch_active" : "motor_watchdog_latched";
+        fault == MotionAckVeto::TouchActive ? "touch_active" :
+        fault == MotionAckVeto::MotorWatchdogLatched ? "motor_watchdog_latched" :
+        "safety_interlock";
     for (std::size_t i = 0; i < 6; ++i) {
       char reply[128]{};
       std::snprintf(reply, sizeof(reply), "%s", acks[i]);
@@ -3409,6 +3481,7 @@ int main() {
     optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract();
     dual_ir_evidence_never_authorizes_body_motion_or_charging();
     output_fault_vetoes_all_motion_acknowledgments();
+    stale_range_veto_survives_saturated_uart();
     raw_bumper_trip_preempts_debounce_and_preserves_payload();
     raw_bumper_bounce_resets_both_edge_classifiers();
     accessory_reconnect_does_not_invent_petting_events();

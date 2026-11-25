@@ -72,8 +72,23 @@ void veto_motion_ack(char* reply, std::size_t capacity, MotionAckVeto fault) {
   else if (std::strncmp(reply, "OK grip ", 8) == 0) command = "grip";
   if (command == nullptr) return;
   const char* reason = fault == MotionAckVeto::BumperActive ? "bumper_active" :
-      fault == MotionAckVeto::TouchActive ? "touch_active" : "motor_watchdog_latched";
+      fault == MotionAckVeto::TouchActive ? "touch_active" :
+      fault == MotionAckVeto::MotorWatchdogLatched ? "motor_watchdog_latched" :
+      "safety_interlock";
   std::snprintf(reply, capacity, "ERR %s %s", command, reason);
+}
+
+void BodyControl::veto_unapplied_motion_ack(char* reply, std::size_t capacity) const {
+  if (!guarded_motion_profile() || reply == nullptr || capacity == 0 ||
+      std::memchr(reply, '\0', capacity) == nullptr) return;
+  // apply_outputs has already ticked the controller. A critical conversion
+  // may expire between command acceptance and that final safety evaluation.
+  // Successful local rearm deliberately leaves the motor disarmed.
+  if (guard_ == nullptr || guard_->fault() != CliffFault::None ||
+      (!state_.armed && std::strcmp(reply, "OK rearm") != 0) ||
+      (drive_duration_ms_ == 0 && std::strncmp(reply, "OK drive ", 9) == 0)) {
+    veto_motion_ack(reply, capacity, MotionAckVeto::SafetyInterlock);
+  }
 }
 
 bool BodyControl::configure_lift_travel_limits(const LiftTravelLimits& limits) {
