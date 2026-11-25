@@ -79,7 +79,7 @@ struct Event {
 
   Event(EventType t = EventType::kTouched) : type(t) {}
   Event(EventType t, const char* s) : type(t) {
-    strncpy(text, s, kMaxTextLength);
+    if (s) strncpy(text, s, kMaxTextLength);
     text[kMaxTextLength] = '\0';
   }
 };
@@ -218,11 +218,11 @@ class HsmBehavior {
   uint32_t last_picked_ms_[kNumCandidates] = {0, 0, 0, 0};
   bool picked_before_[kNumCandidates] = {false, false, false, false};
 
-  uint32_t random(uint32_t n) {  // xorshift32, 0..n-1
+  uint32_t random(uint32_t n) {  // xorshift32, 0..n-1; zero spans all uint32_t
     rng_ ^= rng_ << 13;
     rng_ ^= rng_ >> 17;
     rng_ ^= rng_ << 5;
-    return n == 0 ? 0 : rng_ % n;
+    return n == 0 ? rng_ : rng_ % n;
   }
 
   void setMood(Mood m) {
@@ -244,11 +244,15 @@ class HsmBehavior {
 
   void scheduleNextPick() {
     next_pick_started_ms_ = now_;
-    next_pick_delay_ms_ = pick_min_ms + random(pick_max_ms - pick_min_ms + 1);
+    next_pick_delay_ms_ = pick_max_ms <= pick_min_ms
+        ? pick_min_ms : pick_min_ms + random(pick_max_ms - pick_min_ms + 1U);
   }
 
   void transition(State to, const char* cause) {
     State from = state_;
+    // Cancel a prior gesture, including one emitted earlier in this same update.
+    // kNone would leave the animator's existing gaze alive.
+    action_.motion = Motion::kLookFront;
     // onExit
     if (from == State::kTalking) {
       setSpeech("");
@@ -423,6 +427,7 @@ class HsmBehavior {
   }
 
   void pickIdleBehavior() {
+    if (transient_active_) return;
     if (static_cast<uint32_t>(now_ - next_pick_started_ms_) < next_pick_delay_ms_) {
       return;
     }
