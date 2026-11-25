@@ -57,3 +57,25 @@ def test_deleted_unretained_event_stays_unwritable_after_restart(tmp_path):
     assert reopened.get_episode("pet_a", "late") is None
     assert reopened.count("pet_a") == 250
     assert record(reopened, "pet_b", "late", now - 1000) is True
+
+
+def test_corrected_episode_cannot_return_after_retention_and_restart(tmp_path):
+    root = tmp_path / "private"
+    store = MemoryStore(root, ["pet_a", "pet_b"])
+    now = time.time()
+    assert store.set_core_fact("pet_a", "favorite_game", "chess")
+    assert record(store, "pet_a", "original", now - 1000, "Silver key")
+    assert store.correct_episode("pet_a", "original", "Brass key")
+    assert store.get_episode("pet_a", "original").summary == "Brass key"
+    for index in range(250):
+        assert record(store, "pet_a", f"new_{index:03}", now - 500 + index)
+    assert store.get_episode("pet_a", "original") is None
+
+    # Free a slot so that an exact, backdated replay would survive retention.
+    assert store.forget_episode("pet_a", "new_249")
+    reopened = MemoryStore(root, ["pet_a", "pet_b"])
+    assert not record(reopened, "pet_a", "original", now - 1000, "Silver key")
+    assert reopened.get_episode("pet_a", "original") is None
+    assert reopened.count("pet_a") == 249
+    assert reopened.core_facts("pet_a")[0].value == "chess"
+    assert record(reopened, "pet_b", "original", now - 1000, "Silver key")

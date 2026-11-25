@@ -158,3 +158,27 @@ def test_sealed_absent_edits_do_not_grow_episode_mutation_ledger(tmp_path, monke
         remember(store, pet, "absent-0-0")
     assert generations("robot-02") == {}
     assert store.get_episode("robot-02", "peer") is not None
+
+
+def test_correction_replay_fences_share_bounded_per_pet_budget(tmp_path, monkeypatch):
+    monkeypatch.setattr(memory_module, "_MAX_DELETED_EPISODE_IDS", 2)
+    root = tmp_path / "private"
+    store = MemoryStore(root, ["robot-01", "robot-02"])
+    pet = "robot-01"
+    assert remember(store, pet, "first")
+    assert remember(store, pet, "second")
+    assert store.correct_episode(pet, "first", "Corrected first")
+    assert store.correct_episode(pet, "first", "Corrected again")
+    assert read_fence(root, pet) == (1, 0)
+    assert not store.correct_episode(pet, "missing", "Nothing to correct")
+    assert read_fence(root, pet) == (1, 0)
+    assert store.correct_episode(pet, "second", "Corrected second")
+    assert read_fence(root, pet) == (2, 1)
+    reopened = MemoryStore(root, ["robot-01", "robot-02"])
+    assert reopened.get_episode(pet, "second").summary == "Corrected second"
+    assert reopened.correct_episode(pet, "second", "Still editable")
+    assert reopened.forget_episode(pet, "first")
+    assert read_fence(root, pet) == (2, 1)
+    with pytest.raises(MemoryWriteSealed):
+        remember(reopened, pet, "first")
+    assert remember(reopened, "robot-02", "first")

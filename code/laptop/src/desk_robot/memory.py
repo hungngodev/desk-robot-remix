@@ -29,10 +29,10 @@ _RELAY_TOKEN = re.compile(r"[0-9a-f]{32}\Z")
 # The event kind, not a generated story's wording, owns this boundary.
 FICTIONAL_MEMORY_KINDS = ("dream", "fictional_dream")
 
-# Every retained deletion ID is an exact cross-restart replay prohibition.
+# Every retained operator edit ID is an exact cross-restart replay prohibition.
 # Unlike bounded episode rows, tombstones CANNOT be silently evicted.
-# At this generous per-pet budget (~274 unique deletions/day for a year),
-# seal only NEW memory writes durably. Explicit forget remains available.
+# At this generous per-pet budget, seal NEW episode writes durably.
+# Explicit correction and forget remain available.
 _MAX_DELETED_EPISODE_IDS = 100_000
 
 # SQLite INTEGER is a signed 64-bit value. Mutation receipts use its positive range.
@@ -246,10 +246,9 @@ class MemoryStore:
                     """CREATE INDEX IF NOT EXISTS spatial_object_latest
                        ON spatial_observations(object_key,observed_at DESC,event_id DESC)"""
                 )
-                # A deletion tombstone contains only the random event ID,
-                # never private episode text. Retain it across reconnects so
-                # an old delayed audio/vision callback cannot resurrect a
-                # fact after an operator forget or consent revocation.
+                # The legacy-named replay fence contains only the event ID,
+                # never private episode text. Corrections also fence replay
+                # after ordinary retention eventually removes the edited row.
                 db.execute(
                     """CREATE TABLE IF NOT EXISTS deleted_episode_ids (
                          event_id TEXT PRIMARY KEY
@@ -1062,6 +1061,9 @@ class MemoryStore:
             ).fetchone()
             if current is None:
                 return False
+            # The corrected row may later be evicted by ordinary retention.
+            # Persist its replay prohibition in the same writer transaction.
+            self._fence_episode_replay(db, event_id)
             if current[0] == clean:
                 # Human reaffirmation is no longer owned by a stale relay.
                 db.execute(
@@ -1077,6 +1079,26 @@ class MemoryStore:
                 (clean, event_id),
             ).rowcount == 1
 
+    @staticmethod
+    def _fence_episode_replay(db: sqlite3.Connection, event_id: str) -> None:
+        """Record an operator edit under the caller's BEGIN IMMEDIATE lease."""
+        if db.execute(
+            "SELECT writes_sealed FROM deletion_fence_guard WHERE singleton=1"
+        ).fetchone() != (0,):
+            return
+        db.execute(
+            "INSERT OR IGNORE INTO deleted_episode_ids(event_id) VALUES (?)",
+            (event_id,),
+        )
+        if db.execute(
+            "SELECT COUNT(*) FROM deleted_episode_ids"
+        ).fetchone()[0] >= _MAX_DELETED_EPISODE_IDS:
+            # Never evict a replay fence. After saturation even an unrecorded
+            # edit is safe because all new episode inserts are prohibited.
+            db.execute(
+                "UPDATE deletion_fence_guard SET writes_sealed=1 WHERE singleton=1"
+            )
+
     def forget_episode(
         self, robot_id: str, event_id: str, *,
         mutation_generation: int | None = None,
@@ -1087,27 +1109,8 @@ class MemoryStore:
         with self._connect(robot_id) as db:
             db.execute("BEGIN IMMEDIATE")
             self._require_episode_mutation(db, event_id, mutation_generation)
-            # Even a deletion arriving before a slow SQLite writer creates a
-            # durable fence. Never copy a peer's deletion to this pet's DB.
-            sealed = db.execute(
-                "SELECT writes_sealed FROM deletion_fence_guard WHERE singleton=1"
-            ).fetchone() != (0,)
-            if not sealed:
-                db.execute(
-                    "INSERT OR IGNORE INTO deleted_episode_ids(event_id) VALUES (?)",
-                    (event_id,),
-                )
-                if db.execute(
-                    "SELECT COUNT(*) FROM deleted_episode_ids"
-                ).fetchone()[0] >= _MAX_DELETED_EPISODE_IDS:
-                    # Permanently bound this robot's deletion registry.
-                    # No later remember() may insert anything, including
-                    # an ID deleted after saturation. Both operations hold
-                    # the same BEGIN IMMEDIATE writer lease.
-                    db.execute(
-                        "UPDATE deletion_fence_guard SET writes_sealed=1 "
-                        "WHERE singleton=1"
-                    )
+            # A forget arriving before a slow writer still fences that ID.
+            self._fence_episode_replay(db, event_id)
             return db.execute(
                 "DELETE FROM memories WHERE event_id=?", (event_id,)
             ).rowcount == 1
