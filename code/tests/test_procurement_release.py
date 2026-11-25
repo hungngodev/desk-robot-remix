@@ -2817,3 +2817,31 @@ def test_complete_power_kit_binding_includes_inspected_inventory(group, mutation
         assert "power kit connector not independently selected" in errors
     else:
         assert any("power kit lacks signed linked inclusion" in error for error in errors)
+
+@pytest.mark.parametrize("quantity", [10_001, 10**1000])
+def test_procurement_rejects_oversized_design_and_stock_counts(quantity):
+    plan = fixture()
+    plan["parts"][0]["per_robot"] = quantity
+    with pytest.raises(ValueError, match="unit bound"):
+        mod.generate(plan)
+
+    plan = fixture()
+    plan["room_pod"]["modules"][0]["quantity_per_room"] = quantity
+    with pytest.raises(ValueError, match="unit bound"):
+        mod.generate(plan)
+
+    plan = fixture()
+    plan["parts"][0]["reported_owned_total"] = quantity
+    with pytest.raises(ValueError, match="unit bound"):
+        mod.generate(plan)
+
+
+def test_procurement_bounds_derived_fleet_quantity():
+    plan = fixture()
+    plan["parts"][0]["per_robot"] = 2_001
+    with pytest.raises(ValueError, match="fleet_total.*unit bound"):
+        mod.generate(plan)
+
+    plan["parts"][0]["per_robot"] = 8
+    report = mod.generate(plan)
+    assert report["robots"][0]["fleet_total"] == 40

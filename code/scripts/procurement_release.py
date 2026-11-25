@@ -20,7 +20,7 @@ from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from landed_cost import account_landed_cost, cents, evidence_https_url
+from landed_cost import MAX_ACCOUNTING_UNITS, account_landed_cost, cents, evidence_https_url
 
 ROOT = Path(__file__).resolve().parents[2]
 PLAN = ROOT / "docs/hardware/full-feature-plan.json"
@@ -203,6 +203,8 @@ def conditional_station_decision_ids(parent_ids: Iterable[str]) -> frozenset[str
 def _count(v: object, name: str) -> int:
     if type(v) is not int or v < 0:
         raise ValueError(f"{name} must be a nonnegative integer")
+    if v > MAX_ACCOUNTING_UNITS:
+        raise ValueError(f"{name} exceeds {MAX_ACCOUNTING_UNITS} unit bound")
     return v
 
 
@@ -296,7 +298,7 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
         owned = _count(part.get("reported_owned_total"), f"{ident}.reported_owned_total")
         estimated = _count(part.get("estimated_owned_total", 0), f"{ident}.estimated_owned_total")
         ordered = _count(part.get("ordered_unreceived_total", 0), f"{ident}.ordered_unreceived_total")
-        needed = fleet * per
+        needed = _count(fleet * per, f"{ident}.fleet_total")
         # Reported ownership is not physical stock verification. An ordered
         # head is explicitly NOT counted as a delivered/accepted board.
         if owned + estimated + ordered > needed:
