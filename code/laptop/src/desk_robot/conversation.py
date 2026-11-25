@@ -430,6 +430,8 @@ class Conversation:
         self.speaker_lock = asyncio.Lock()
         self.session_lock = asyncio.Lock()  # One owned device-audio session across group and pet.
         self.active: asyncio.Task | None = None
+        # A STOP also invalidates API admission awaiting pet preemption.
+        self.stop_generation = 0
         # A cancelled Python task is not evidence of a stopped Xiaozhi decoder.
         # Never grant another speech session after an unacknowledged STOP.
         self.speaker_stop_unconfirmed = False
@@ -1387,6 +1389,7 @@ class Conversation:
             return True
 
     async def stop(self):
+        self.stop_generation += 1
         task = self.active
         if task and task is not asyncio.current_task():
             # Do not double-cancel a session's ongoing decoder cleanup.

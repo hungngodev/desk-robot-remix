@@ -132,6 +132,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         APIIngress, tokens=lambda: (app.state.operator_token, app.state.tool_token),
     )
     consumed_tool_receipts: dict[str, float] = {}
+    group_request_active = False
 
     async def authorize(credentials: HTTPAuthorizationCredentials | None = Depends(security)):
         if (
@@ -688,6 +689,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
 
     @app.post("/v1/conversation", dependencies=[Depends(operator)])
     async def conversation(request: ChatRequest):
+        nonlocal group_request_active
+        if group_request_active:
+            raise HTTPException(409, "A conversation request is already active")
+        group_request_active = True
         try:
             # Validate first. Human conversation preempts any robot's spontaneous
             # speech, including a robot not in the requested peer subset.
@@ -699,8 +704,15 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             sharing_generation = settings.fleet_sharing_consent_generation
             if settings.mode == "hardware" and not settings.fleet_text_sharing_enabled:
                 raise HTTPException(409, "Enable fleet peer text sharing consent before group dialogue")
+            owner = app.state.runtime.conversation
+            if owner.active is not None and not owner.active.done():
+                raise HTTPException(409, "A conversation is already active")
+            stop_generation = owner.stop_generation
             for robot in settings.robots:
                 await app.state.runtime.pet.interrupt(robot.id)
+                if (app.state.runtime.conversation is not owner
+                        or owner.stop_generation != stop_generation):
+                    raise HTTPException(409, "Conversation startup superseded by STOP")
             # Preemption awaits can allow revocation and immediate regrant.
             # An older request must not inherit a newer consent epoch.
             if settings.mode == "hardware" and (
@@ -708,13 +720,15 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
                 or settings.fleet_sharing_consent_generation != sharing_generation
             ):
                 raise HTTPException(409, "Fleet peer text sharing consent changed during startup")
-            transcript = await app.state.runtime.conversation.run(
+            transcript = await owner.run(
                 request.robot_ids, request.topic, request.utterances
             )
         except KeyError as exc:
             raise HTTPException(404, "Robot not found") from exc
         except RuntimeError as exc:
             raise HTTPException(409, str(exc)) from exc
+        finally:
+            group_request_active = False
         return {
             "mode": settings.mode,
             "transcript": transcript,

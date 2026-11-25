@@ -1,6 +1,8 @@
 import asyncio
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -2527,3 +2529,49 @@ async def test_sensor_memory_brain_conversation_replay_expires_live_cue(
     assert memory.get_episode(ids[0], event.event_id) == event
     assert not hub.interaction_timeline(ids[0], clock[0])
     await pet.close()
+
+
+@pytest.mark.parametrize("stop_path", ["api", "internal"])
+def test_group_startup_cannot_outlive_stop(settings, tokens, monkeypatch, stop_path):
+    """A pending operator request must not start after an acknowledged STOP."""
+    app = create_app(settings)
+    headers = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
+    body = {
+        "robot_ids": ["robot-01", "robot-02"],
+        "topic": "Compare notes", "utterances": 2,
+    }
+    started, release = Event(), Event()
+    runs = []
+
+    async def interrupt(robot_id):
+        if not started.is_set():
+            started.set()
+            assert await asyncio.to_thread(release.wait, 5)
+
+    async def run(*args):
+        runs.append(args)
+        return []
+
+    with TestClient(app) as client, ThreadPoolExecutor(max_workers=1) as pool:
+        owner = app.state.runtime.conversation
+        monkeypatch.setattr(app.state.runtime.pet, "interrupt", interrupt)
+        monkeypatch.setattr(owner, "run", run)
+        pending = pool.submit(client.post, "/v1/conversation", json=body, headers=headers)
+        try:
+            assert started.wait(5)
+            # A second start may not interrupt the first startup or race its lease.
+            assert client.post("/v1/conversation", json=body, headers=headers).status_code == 409
+            if stop_path == "api":
+                assert client.post("/v1/conversation/stop", headers=headers).status_code == 200
+            else:
+                # Runtime VAD uses the same Conversation.stop() method.
+                client.portal.call(owner.stop)
+        finally:
+            release.set()
+        result = pending.result(timeout=5)
+        assert result.status_code == 409
+        assert "superseded by STOP" in result.json()["detail"]
+        assert runs == []
+        # Fresh operator authorization after STOP is not permanently disabled.
+        assert client.post("/v1/conversation", json=body, headers=headers).status_code == 200
+        assert len(runs) == 1
