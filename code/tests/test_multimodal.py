@@ -4027,9 +4027,10 @@ async def test_overlapping_aec_edge_replaces_live_fallback_speech_sampler():
         await visual.close()
 
 @pytest.mark.parametrize("stage", ["queued", "running"])
+@pytest.mark.parametrize("invalidation", ["discard", "boot"])
 @pytest.mark.parametrize("invalidated", [None, "robot-01", "robot-02"])
 async def test_visual_answer_bound_to_selected_robot_camera_generation(
-    monkeypatch, stage, invalidated,
+    monkeypatch, stage, invalidated, invalidation,
 ):
     selected, entered, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
     calls = []
@@ -4055,6 +4056,10 @@ async def test_visual_answer_bound_to_selected_robot_camera_generation(
         return result
 
     monkeypatch.setattr(service.hub, "selected", select)
+    if invalidation == "boot":
+        for peer, head in service.heads.items():
+            head._last_camera = (19, 1, 100)
+            service._sync_camera_boot(peer)
     service.hub.offer(robot, image(), time.monotonic(), source="proactive")
     if stage == "queued":
         await lock.acquire()
@@ -4064,7 +4069,10 @@ async def test_visual_answer_bound_to_selected_robot_camera_generation(
         if stage == "running":
             await asyncio.wait_for(entered.wait(), timeout=1)
         if invalidated:
-            service.hub.discard_video(invalidated)
+            if invalidation == "boot":
+                service.heads[invalidated]._last_camera = (20, 1, 100)
+            else:
+                service.hub.discard_video(invalidated)
         release.set()
         if stage == "queued":
             lock.release()

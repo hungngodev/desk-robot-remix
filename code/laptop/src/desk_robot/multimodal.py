@@ -1174,6 +1174,7 @@ class MultimodalOrchestrator:
         }
         self._model_frame_versions = {r.id: 0 for r in settings.robots}
         self._last_stream_sample = {r.id: -math.inf for r in settings.robots}
+        self._camera_boots: dict[str, int] = {}
         self._sensor_tasks: dict[str, asyncio.Task] = {}
         # Own only the optional HTTP snapshot, not its permanent pet loop.
         self._proactive_snapshots: dict[str, asyncio.Task] = {}
@@ -1430,6 +1431,20 @@ class MultimodalOrchestrator:
                     self._consume_stream(robot_id, head)
                 )
 
+    def _sync_camera_boot(self, robot_id: str) -> None:
+        """Retire cached visual evidence when the authenticated head reboots."""
+        identity = getattr(self.heads.get(robot_id), "_last_camera", None)
+        if identity is None:
+            return
+        boot = identity[0]
+        previous = self._camera_boots.get(robot_id)
+        if boot == previous:
+            return
+        self._camera_boots[robot_id] = boot
+        if previous is not None or self.hub.frames[robot_id]:
+            self.hub.discard_video(robot_id)
+            self._last_stream_sample[robot_id] = -math.inf
+
     async def _consume_stream(self, robot_id: str, head) -> None:
         """Drain continuous JPEGs; drop excess frames instead of queuing them.
 
@@ -1454,6 +1469,7 @@ class MultimodalOrchestrator:
                         source_identity = getattr(head, "_last_camera", None)
                         if self._closed or not self._camera_grant_valid(robot_id, camera_grant):
                             return
+                        self._sync_camera_boot(robot_id)
                         failures = 0  # Healthy frames reset reconnection backoff.
                         metrics = self._metrics[robot_id]
                         metrics["stream_frames_received"] += 1
@@ -1987,6 +2003,7 @@ class MultimodalOrchestrator:
                     and (pending := self._look_tasks.get(robot_id)) is not None
                     and not pending.done()):
                 raise RuntimeError("Explicit human look owns this camera")
+            self._sync_camera_boot(robot_id)
             metrics = self._metrics[robot_id]
             # Recheck AFTER waiting for the one camera lock. Two HTTP
             # consumers racing for the same VAD frame now produce ONE physical
@@ -2046,6 +2063,7 @@ class MultimodalOrchestrator:
                 # A blocked JPEG worker must not revive a stale snapshot.
                 if not _frame_is_fresh(received, time.monotonic(), 1.0):
                     raise RuntimeError("Camera snapshot expired during preprocessing")
+                self._sync_camera_boot(robot_id)
                 evidence = self.hub.offer_prepared(
                     robot_id, prepared, received, source=source,
                     generation=generation, trigger_kind=trigger_kind,
@@ -2164,6 +2182,7 @@ class MultimodalOrchestrator:
                     and self._question_epoch[robot_id] == question_epoch)
 
         try:
+            self._sync_camera_boot(robot_id)
             last = self.hub.frames[robot_id]
             if (not last
                     or time.monotonic() - last[-1].received_at > 0.6
@@ -2174,6 +2193,7 @@ class MultimodalOrchestrator:
                 await self.capture(robot_id, source="voice_question")
             if not current_turn():
                 raise RuntimeError("Visual question superseded by new human speech")
+            self._sync_camera_boot(robot_id)
             chosen = self.hub.selected(robot_id, question, time.monotonic())
             if not chosen:
                 raise RuntimeError("No fresh authenticated camera images available")
@@ -2188,6 +2208,7 @@ class MultimodalOrchestrator:
                 # by another pet. Never dispatch old-grant JPEGs to the model.
                 if not self._camera_grant_valid(robot_id, camera_consent_generation):
                     raise RuntimeError("Camera consent revoked while queued")
+                self._sync_camera_boot(robot_id)
                 if camera_generation != self.hub._generation[robot_id]:
                     raise RuntimeError("Camera evidence invalidated while queued")
                 # Local 4B+ vision inference can be much slower than the
@@ -2214,6 +2235,7 @@ class MultimodalOrchestrator:
                     # the deadline. Its late response must not retain the
                     # common inference lock or become a new human answer.
                     def admit_answer() -> bool:
+                        self._sync_camera_boot(robot_id)
                         now = time.monotonic()
                         return (
                             current_turn()
@@ -2254,6 +2276,7 @@ class MultimodalOrchestrator:
                     and getattr(self.settings, "camera_consent_generation", None)
                     != camera_consent_generation):
                 raise RuntimeError("Camera consent revoked during visual analysis")
+            self._sync_camera_boot(robot_id)
             if camera_generation != self.hub._generation[robot_id]:
                 raise RuntimeError("Camera evidence invalidated during visual analysis")
             completed_at = time.monotonic()
