@@ -767,6 +767,24 @@ def test_multiplicative_light_shift_preserves_real_camera_occlusion():
     assert change_fraction(fingerprint, bytes(changed)) > 0.05
 
 
+@pytest.mark.parametrize("threshold", [16, 18])
+def test_clipped_exposure_ramp_with_noise_preserves_local_motion(threshold):
+    fingerprint = bytes([30, 70, 110, 150, 190, 230] * 512)
+    for gain in (1.0, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 2.0):
+        exposed = bytes(min(255, round(gain * x)) for x in fingerprint)
+        assert change_fraction(fingerprint, exposed, threshold=threshold) == 0
+        noisy = bytes(
+            max(0, min(255, y + (i % 9 - 4))) for i, y in enumerate(exposed)
+        )
+        assert change_fraction(fingerprint, noisy, threshold=threshold) < 0.008
+    changed = bytearray(exposed)
+    changed[120:320] = bytes(200)
+    assert change_fraction(fingerprint, bytes(changed), threshold=threshold) > 0.05
+    assert change_fraction(
+        fingerprint, bytes([20] * len(fingerprint)), threshold=threshold
+    ) > 0.9
+
+
 @pytest.mark.parametrize("cancel", [False, True])
 async def test_direct_visual_request_reserves_fleet_vlm_and_camera_until_finished(cancel):
     """No new speculative JPEG/VLM may overtake the entire human look."""

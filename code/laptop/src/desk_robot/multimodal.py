@@ -91,13 +91,7 @@ def _prepare(jpeg: bytes, max_side: int = 768) -> tuple[bytes, bytes, float]:
     return encoded, fingerprint, brightness
 
 
-def change_fraction(a: bytes, b: bytes, *, threshold: int = 16) -> float:
-    """Ignore broad lighting shifts before detecting localized motion.
-
-    This cheap gate is not calibrated optical flow or object tracking.
-    """
-    if len(a) != len(b) or len(a) != 64 * 48:
-        raise ValueError("Frame fingerprints have incompatible dimensions")
+def _lighting_transform(a: bytes, b: bytes) -> tuple[float, float, bool]:
     count = len(a)
     sum_a, sum_b = sum(a), sum(b)
     sum_aa = sum(x * x for x in a)
@@ -107,9 +101,7 @@ def change_fraction(a: bytes, b: bytes, *, threshold: int = 16) -> float:
     variance_b = count * sum_bb - sum_b * sum_b
     covariance = count * sum_ab - sum_a * sum_b
     gain = 1.0
-    # Bright and dark surfaces change by different amounts under a lamp.
-    # Fit a bounded affine gain only for strongly correlated textured frames;
-    # camera occlusion and changed geometry must still count as motion.
+    fitted = False
     if (variance_a > count * count * 30
             and variance_b > count * count * 30
             and covariance > 0
@@ -117,11 +109,46 @@ def change_fraction(a: bytes, b: bytes, *, threshold: int = 16) -> float:
         candidate_gain = covariance / variance_a
         if 0.55 <= candidate_gain <= 2.5:
             gain = candidate_gain
-    offset = (sum_b - gain * sum_a) / count
-    return sum(
+            fitted = True
+    return gain, (sum_b - gain * sum_a) / count, fitted
+
+
+def change_fraction(a: bytes, b: bytes, *, threshold: int = 16) -> float:
+    """Ignore broad lighting shifts before detecting localized motion.
+
+    This cheap gate is not calibrated optical flow or object tracking.
+    """
+    if len(a) != len(b) or len(a) != 64 * 48:
+        raise ValueError("Frame fingerprints have incompatible dimensions")
+    count = len(a)
+    gain, offset, _ = _lighting_transform(a, b)
+    changed = sum(
         1 for x, y in zip(a, b, strict=True)
         if abs(y - (gain * x + offset)) >= threshold
-    ) / count
+    )
+    if not changed or not any(
+        (y <= 8 or y >= 247) and x != y for x, y in zip(a, b, strict=True)
+    ):
+        return changed / count
+    # Newly clipped highlights/shadows bias an ordinary affine fit. Refit
+    # only when at least half the corresponding samples remain measurable.
+    # Score ALL pixels, including saturated ones, against the clamped model;
+    # never blanket-mask clipping (a real dark object can cover a bright pixel).
+    pairs = [
+        (x, y) for x, y in zip(a, b, strict=True)
+        if 8 < x < 247 and 8 < y < 247
+    ]
+    if len(pairs) < count // 2:
+        return changed / count
+    valid_a, valid_b = map(bytes, zip(*pairs, strict=True))
+    gain, offset, fitted = _lighting_transform(valid_a, valid_b)
+    if not fitted:
+        return changed / count
+    clipped_changed = sum(
+        1 for x, y in zip(a, b, strict=True)
+        if abs(y - min(255, max(0, gain * x + offset))) >= threshold
+    )
+    return min(changed, clipped_changed) / count
 
 
 @dataclass(frozen=True)
