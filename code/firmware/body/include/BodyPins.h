@@ -5,7 +5,8 @@
 #endif
 
 namespace body_pins {
-// ESP32-WROOM-32 dev board: no flash, UART0, input-only or strapping pins used.
+// ESP32-WROOM-32: no flash, UART0 or strapping pins allocated; input-only
+// pins are reserved for inputs with appropriate external bias.
 constexpr int kUartRx = 16;
 constexpr int kUartTx = 17;
 #if DESK_ROBOT_STEPPER
@@ -16,13 +17,16 @@ constexpr int kUartTx = 17;
 // cutoff before production stepper driving or product purchase release.
 constexpr int kLeftStepperPins[] = {13, 14, 25, 26};
 constexpr int kRightStepperPins[] = {27, 32, 33, 23};
-constexpr int kMotorPins[] = {13, 14, 25, 26, 27, 32, 33, 23};
+constexpr int kMotorPins[] = {kLeftStepperPins[0], kLeftStepperPins[1],
+                              kLeftStepperPins[2], kLeftStepperPins[3],
+                              kRightStepperPins[0], kRightStepperPins[1],
+                              kRightStepperPins[2], kRightStepperPins[3]};
 #endif
 #if DESK_ROBOT_STEPPER || (defined(DESK_ROBOT_FULL_SENSORS) && DESK_ROBOT_FULL_SENSORS)
 constexpr int kSensorSda = 21;
 constexpr int kSensorScl = 22;
-// No spare boot-safe output on this pin map. GPIO4 is a boot strapping
-// pin; do not connect the multiplexer RESET there. Pull the active-low
+// GPIO4 is reserved by the project pin policy (not an ESP32 strap pin).
+// Do not connect the multiplexer RESET there. Pull the active-low
 // TCA9548A RESET to 3.3V (through the module's required pull-up).
 constexpr int kMuxReset = -1;
 static_assert(kMuxReset == -1,
@@ -99,6 +103,41 @@ static_assert(kLeftIn1 != kLeftIn2 && kLeftIn1 != kRightIn1 &&
               kGripServo != kLeftIn1 && kGripServo != kLeftIn2 &&
               kGripServo != kRightIn1 && kGripServo != kRightIn2,
               "Motor and servo GPIO assignments must never overlap");
+#endif
+// Only the deliberately approved WROOM output-capable allocation is allowed.
+// GPIO4 remains reserved by policy, not because it is a silicon strap pin.
+constexpr bool approved_output_pin(int pin) {
+  return pin == 13 || pin == 14 || pin == 16 || pin == 17 || pin == 18 ||
+         pin == 19 || pin == 21 || pin == 22 || pin == 23 || pin == 25 ||
+         pin == 26 || pin == 27 || pin == 32 || pin == 33;
+}
+template <unsigned N>
+constexpr bool all_output_capable(const int (&pins)[N], unsigned i = 0) {
+  return i == N || (approved_output_pin(pins[i]) && all_output_capable(pins, i + 1));
+}
+template <unsigned N>
+constexpr bool all_distinct(const int (&pins)[N], unsigned i = 0, unsigned j = 1) {
+  return i >= N ? true : j >= N ? all_distinct(pins, i + 1, i + 2) :
+      pins[i] != pins[j] && all_distinct(pins, i, j + 1);
+}
+constexpr int kAllocatedOutputPins[] = {
+    kUartRx, kUartTx, kLiftServo, kGripServo,
+    kMotorPins[0], kMotorPins[1], kMotorPins[2], kMotorPins[3],
+#if DESK_ROBOT_STEPPER
+    kMotorPins[4], kMotorPins[5], kMotorPins[6], kMotorPins[7],
+#elif defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
+    kDcHeartbeatPin,
+#endif
+#if DESK_ROBOT_STEPPER || (defined(DESK_ROBOT_FULL_SENSORS) && DESK_ROBOT_FULL_SENSORS)
+    kSensorSda, kSensorScl,
+#endif
+};
+static_assert(all_output_capable(kAllocatedOutputPins), "WROOM output pin not approved");
+static_assert(all_distinct(kAllocatedOutputPins), "WROOM GPIO allocation overlaps");
+#if DESK_ROBOT_STEPPER || (defined(DESK_ROBOT_FULL_SENSORS) && DESK_ROBOT_FULL_SENSORS)
+static_assert(kTouchOutput == 34 && kBumperInput == 35 &&
+              kTerminalIrLeftInput == 36 && kTerminalIrRightInput == 39,
+              "WROOM input-only harness allocation changed");
 #endif
 // Conservative generic 1..2 ms span; calibrate actual mechanism before loading.
 constexpr int kServoMinUs = 1000;
