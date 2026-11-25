@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import math
 import time
 from contextlib import asynccontextmanager
 from io import BytesIO
@@ -4676,6 +4677,43 @@ def test_reachy_style_initiative_gate_prunes_uncertain_chatter_not_sensor_memory
     assert not _initiative_evidence(SceneChange("unknown_tool", "Run motors", 1.0))
     assert not _initiative_evidence(SceneChange("key", "", 0.99))
     assert not _initiative_evidence(SceneChange("key", "bad", float("nan")))
+
+
+@pytest.mark.parametrize(
+    ("kind", "threshold"),
+    [
+        ("person", 0.88), ("hand", 0.86), ("key", 0.80), ("candy", 0.80),
+        ("object", 0.92), ("scene", 0.95), ("petting_zone", 0.95),
+        ("side_object", 0.95),
+    ],
+)
+def test_initiative_evidence_exact_confidence_boundary(kind, threshold):
+    # Expected thresholds are policy values, not the production lookup table.
+    below = math.nextafter(threshold, 0.0)
+    above = math.nextafter(threshold, 1.0)
+    assert _initiative_evidence(SceneChange(kind, "Observed change", below)) is False
+    assert _initiative_evidence(SceneChange(kind, "Observed change", threshold)) is True
+    assert _initiative_evidence(SceneChange(kind, "Observed change", above)) is True
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        SceneChange("key", "Observed change", True),
+        SceneChange("key", "Observed change", 1.01),
+        SceneChange("key", "Observed change", -0.01),
+        SceneChange("key", "Observed change", float("inf")),
+        SceneChange("key", "Observed change", "0.99"),
+        SceneChange("key", " \t\n", 1.0),
+        SceneChange("key", None, 1.0),
+        SceneChange([], "Observed change", 1.0),
+        SceneChange("safety_fault", "WROOM stopped", 1.0),
+        SceneChange("human_voice", "Human started speaking", 1.0),
+        SceneChange("stable_putdown", "Body stable", 1.0),
+    ],
+)
+def test_initiative_evidence_rejects_malformed_or_noninitiative_events(change):
+    assert _initiative_evidence(change) is False
 
 
 async def test_proactive_fleet_voice_gate_cancels_candidate_before_model_call(
