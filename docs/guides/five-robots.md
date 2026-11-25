@@ -100,6 +100,17 @@ Revoke/regrant during those reads invalidates the outstanding read. The
 shared historical prompt labels the originating pet and includes observation
 age and confidence; a camera classification remains an unverified model guess.
 
+Each private SQLite database is bound to its persistent robot ID. Renaming or
+swapping already bound databases cannot make one pet inherit another's memories.
+Legacy databases without a binding are migrated under their configured identity;
+contradictory firsthand provenance is rejected. A legacy database containing only
+preferences has no independent proof of its former identity, so verify its backup
+and filename before migration. An operator correction or deletion invalidates
+in-flight group speech derived from that private context, including a pending
+speech memory write. This cannot undo previously audible speech or independently
+stored peer copies. A completed speech receipt must not be duplicated as an
+interrupted fragment when sharing consent is revoked.
+
 
 The Mac now supports **explicitly consented, event-triggered two-pet social
 dialogue** as well as manually requested two-to-five-pet conversation. Set
@@ -169,8 +180,9 @@ uv run desk-robot --config config/local.toml secrets --add-missing
 ```
 
 Values stay in ignored `config/local.env`, permissions 0600, hidden from output.
-**The Sense source build target exists, but the latest GitHub Actions run never reached the compiler, and physical peripheral/fit tests remain open.** After it is
-qualified, prepare each head using its own configured identity,
+**The Sense source build target exists. Check the exact commit's CI result;
+physical peripheral and fit tests remain open regardless of CI status.** After
+it is qualified, prepare each head using its own configured identity,
 rebuilding one private binary at a time; see [firmware builds](build.md):
 
 ```sh
@@ -233,9 +245,10 @@ prevent a claim of assembly-only readiness.
 The Mac `POST /v1/robots/{robot_id}/explore` endpoint now starts an explicitly
 operator approved, persistent exploration job after the normal one-use permit.
 It never renews a two-minute operator token. It reuses the existing Coordinator
-one-runner-per-robot, head camera snapshot, WROOM 100ms pulse, 500ms watchdog,
-local five-channel cliff stop, touch interlock and IMU heartbeat; it stops to
-reobserve after each pulse. A disarm, status failure, missing forward clearance,
+one-runner-per-robot, authenticated live XIAO MJPEG frames, WROOM 100ms pulse,
+500ms watchdog, local five-channel cliff stop, touch interlock and IMU heartbeat;
+it stops to reobserve after each pulse. Hardware requires a fresh, newer live
+frame; synthetic snapshots are for simulation only. A disarm, status failure, missing forward clearance,
 pressed touch, local stop, quiet mode or network loss cancels the job. `/stop`
 remains callable with the authenticated tool token, so voice stop can preempt
 exploration. Only one hardware moving job is admitted across the fleet.
