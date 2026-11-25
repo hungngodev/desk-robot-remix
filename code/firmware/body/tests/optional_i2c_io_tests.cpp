@@ -302,6 +302,48 @@ int main() {
     CHECK(wrap_pulse.poll(0x20U));
     CHECK(wrap_pulse.sample().sample_seq == 1U);
     fake_arduino_millis() = 0U;
+    // The hardware FIFO pointers wrap independently of the uint32 clock.
+    // Exercise all admissible wrapped counts and verify the newest record,
+    // not just that a read succeeded. Both carrier-order builds run this.
+    for (unsigned count = 1; count <= 4; ++count) {
+      TwoWire ring_wire;
+      desk_robot::PulsePad ring;
+      CHECK(ring.begin(ring_wire));
+      ring_wire.pulse_fifo_read_pointer = 31U;
+      ring_wire.pulse_fifo_write_pointer = static_cast<std::uint8_t>(count - 1U);
+      CHECK(ring.poll(100));
+      CHECK(ring.sample().valid && ring.sample().sample_seq == 1U);
+      CHECK(ring.sample().at_ms == 100U);
+#if DESK_ROBOT_MAX30102_FIFO_IR_FIRST
+      CHECK(ring.sample().red == 5000U + count - 1U);
+      CHECK(ring.sample().ir == 1000U + count - 1U);
+#else
+      CHECK(ring.sample().red == 1000U + count - 1U);
+      CHECK(ring.sample().ir == 5000U + count - 1U);
+#endif
+      CHECK(ring_wire.pulse_fifo_read_pointer == ring_wire.pulse_fifo_write_pointer);
+      CHECK(!ring.poll(200));
+      CHECK(!ring.sample().valid && ring.sample().sample_seq == 1U);
+      CHECK(ring.sample().at_ms == 100U);
+      CHECK(ring_wire.ranges == 0 && ring_wire.extras == 0);
+      CHECK(!ring_wire.unsafe_parallel_mux);
+    }
+    // Five wrapped records exceed the bounded fresh-read budget even
+    // without an overflow flag. Flush them without publishing a sample.
+    TwoWire ring_backlog_wire;
+    desk_robot::PulsePad ring_backlog;
+    CHECK(ring_backlog.begin(ring_backlog_wire));
+    ring_backlog_wire.pulse_fifo_read_pointer = 30U;
+    ring_backlog_wire.pulse_fifo_write_pointer = 3U;
+    CHECK(!ring_backlog.poll(100));
+    CHECK(!ring_backlog.sample().valid && ring_backlog.sample().sample_seq == 0U);
+    CHECK(ring_backlog_wire.pulse_fifo_read_pointer == 3U);
+    ring_backlog_wire.pulse_fifo_write_pointer = 4U;
+    CHECK(ring_backlog.poll(200));
+    CHECK(ring_backlog.sample().valid && ring_backlog.sample().sample_seq == 1U);
+    CHECK(ring_backlog.sample().at_ms == 200U);
+    CHECK(ring_backlog_wire.ranges == 0 && ring_backlog_wire.extras == 0);
+    CHECK(!ring_backlog_wire.unsafe_parallel_mux);
     // A long delay is ambiguous even with just two queued FIFO records and
     // no overflow. Old paw contact must not gain a new source timestamp.
     TwoWire delayed_pulse_wire;
