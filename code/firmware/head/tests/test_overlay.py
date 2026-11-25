@@ -626,20 +626,43 @@ class OverlayTests(unittest.TestCase):
         header = (self.root / "main/audio/audio_codec.h").read_text()
         self.assertIn("static constexpr int kSenseTxScratchSamples = 32000;", header)
         self.assertIn("int32_t* sense_tx_scratch_ = nullptr;", header)
+        self.assertIn("std::atomic<int> output_volume_{70};", header)
         writer = "int NoAudioCodec::Write(" + source.split(
             "int NoAudioCodec::Write(", 1
         )[1].split("int NoAudioCodec::Read(", 1)[0]
         lifecycle = "AudioCodec::AudioCodec()" + base.split(
             "AudioCodec::AudioCodec()", 1
         )[1].split("int AudioCodec::OutputData(", 1)[0]
+        volume = "void AudioCodec::SetOutputVolume(" + base.split(
+            "void AudioCodec::SetOutputVolume(", 1
+        )[1].split("void AudioCodec::SetInputGain(", 1)[0]
+        sense = (HEAD / "sense/sense_reference_codec.cc").read_text()
+        sense_writer = "int SenseReferenceCodec::Write(" + sense.split(
+            "int SenseReferenceCodec::Write(", 1
+        )[1].split("void SenseReferenceCodec::ClearReference()", 1)[0]
+        publish = "void SenseReferenceCodec::PublishAcceptedLocked(" + sense.split(
+            "void SenseReferenceCodec::PublishAcceptedLocked(", 1
+        )[1].split("bool SenseReferenceCodec::ReadReferenceLocked(", 1)[0]
+        # Inject a deterministic volume update after wrapper entry but before
+        # the real pinned conversion, or while I2S is consuming its scratch.
+        writer = writer.replace(
+            "std::lock_guard<std::mutex> lock(data_if_mutex_);",
+            "std::lock_guard<std::mutex> lock(data_if_mutex_);"
+            "\n    change_volume_before_conversion();",
+            1,
+        )
         with tempfile.TemporaryDirectory() as directory:
             temp = Path(directory)
             (temp / "writer.inc").write_text(writer)
             (temp / "lifecycle.inc").write_text(lifecycle)
+            (temp / "volume.inc").write_text(volume)
+            (temp / "sense_writer.inc").write_text(sense_writer)
+            (temp / "publish.inc").write_text(publish)
             executable = temp / "sense_tx_scratch_test"
             subprocess.run(
                 [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
-                 "-I", str(temp), str(HEAD / "tests/sense_tx_scratch_test.cc"),
+                 "-I", str(temp), "-I", str(HEAD / "sense"),
+                 str(HEAD / "tests/sense_tx_scratch_test.cc"),
                  "-o", str(executable)],
                 check=True, capture_output=True, text=True, env=native_cpp_env(),
                 timeout=60,
@@ -649,6 +672,7 @@ class OverlayTests(unittest.TestCase):
                 timeout=30,
             )
             self.assertIn("allocations during 1000 TX callbacks: 0", result.stdout)
+            self.assertIn("PASS actual accepted PCM gain", result.stdout)
         overlay.remove(self.root)
         for path in ("main/audio/codecs/no_audio_codec.cc", "main/audio/audio_codec.cc",
                      "main/audio/audio_codec.h"):
@@ -664,7 +688,7 @@ class OverlayTests(unittest.TestCase):
         self.assertIn("#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3", source)
         self.assertIn("pdMS_TO_TICKS(120)", source)
         self.assertIn("size_t bytes_written = 0", source)
-        self.assertIn("const int safe_volume = std::clamp(output_volume_, 0, 100);", source)
+        self.assertIn("const int safe_volume = std::clamp(output_volume(), 0, 100);", source)
         self.assertIn("pow(double(safe_volume) / 100.0, 2) * 65536", source)
         # Only the opt-in Sense build changes gain. Upstream remains byte exact.
         self.assertNotIn("safe_volume", original)

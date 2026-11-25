@@ -39,15 +39,13 @@ void SenseReferenceCodec::FillSilenceLocked(int64_t now_us) {
 }
 
 void SenseReferenceCodec::PublishAcceptedLocked(
-    const int16_t* source, int samples, int volume, int64_t now_us) {
+    const int32_t* source, int samples, int64_t now_us) {
     FillSilenceLocked(now_us);
-    // Xiaozhi's NoAudioCodec::Write performs a squared output volume gain.
-    // Reference samples must reflect THAT gain, not the unclipped WAV bytes.
-    const double ratio = static_cast<double>(volume) / 100.0;
-    const double factor = ratio * ratio;
+    // The canonical TX scratch contains the actual converted PCM32 submitted
+    // to I2S. Do not recompute volume from a setting that may have changed.
     for (int i = 0; i < samples; ++i) {
         const int32_t scaled = static_cast<int32_t>(
-            std::clamp(std::lround(static_cast<double>(source[i]) * factor),
+            std::clamp(std::lround(static_cast<double>(source[i]) / 65536.0),
                        -32768L, 32767L));
         // RIO-inspired three tap low pass followed by 2:1 decimation from the
         // MAX98357A-supported 32 kHz output to the 16 kHz PDM AEC reference. Preserve
@@ -253,13 +251,17 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
         output_sample_rate_ != static_cast<int>(kSpeakerRate)) {
         return 0;
     }
-    // Match the selected Sense-only Xiaozhi I2S gain clamp exactly.
-    // A malformed saved volume must not overflow PCM32 or the echo reference.
-    const int volume = std::clamp(output_volume_, 0, 100);
     uint64_t started_generation = 0;
     {
         std::lock_guard<std::mutex> lock(reference_mutex_);
         started_generation = speaker_activity_.generation();
+    }
+    // Retain the exact TX scratch until reference publication; the base
+    // data_if_mutex_ alone ends before this wrapper can consume its PCM.
+    std::lock_guard<std::mutex> output_lock(output_write_mutex_);
+    {
+        std::lock_guard<std::mutex> lock(reference_mutex_);
+        if (started_generation != speaker_activity_.generation()) return 0;
     }
     // The selected Sense overlay already bounds the pinned Xiaozhi writer's
     // I2S wait. Preserve its mutex, squared-volume PCM conversion and sole
@@ -292,7 +294,7 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
         speaker_activity_.RecordAccepted(
             started_generation, accepted, accepted_at_us);
         if (accepted > 0 && started_generation == speaker_activity_.generation()) {
-            PublishAcceptedLocked(data, accepted, volume, accepted_at_us);
+            PublishAcceptedLocked(sense_tx_scratch_, accepted, accepted_at_us);
         } else if (accepted > 0) {
             // The physical TX DMA may have accepted some old audio. It must
             // NOT be relabeled as current-generation echo reference.

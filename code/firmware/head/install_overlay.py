@@ -494,7 +494,7 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
             codec_source,
             '    int32_t volume_factor = pow(double(output_volume_) / 100.0, 2) * 65536;',
             '''#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
-    const int safe_volume = std::clamp(output_volume_, 0, 100);
+    const int safe_volume = std::clamp(output_volume(), 0, 100);
     int32_t volume_factor = pow(double(safe_volume) / 100.0, 2) * 65536;
 #else
     int32_t volume_factor = pow(double(output_volume_) / 100.0, 2) * 65536;
@@ -569,7 +569,17 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
         codec_header = replace_once(
             codec_header,
             '#include "board.h"',
-            '#include "board.h"\n#include "sdkconfig.h"',
+            '#include "board.h"\n#include "sdkconfig.h"\n#include <atomic>',
+        )
+        codec_header = replace_once(
+            codec_header,
+            "    int output_volume_ = 70;",
+            """#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+    // Volume is changed by control callbacks while the TX task is running.
+    std::atomic<int> output_volume_{70};
+#else
+    int output_volume_ = 70;
+#endif""",
         )
         codec_header = replace_once(
             codec_header,
@@ -624,6 +634,33 @@ AudioCodec::~AudioCodec() {
     if (sense_tx_scratch_) heap_caps_free(sense_tx_scratch_);
 #endif
 }""",
+        )
+        # Read volume once for startup diagnostics and use the actual setter
+        # argument for logging/NVS. Never pass an atomic object to varargs.
+        codec_base = replace_once(
+            codec_base,
+            '    output_volume_ = settings.GetInt("output_volume", output_volume_);',
+            '    output_volume_ = settings.GetInt("output_volume", output_volume());',
+        )
+        codec_base = replace_once(
+            codec_base,
+            '    if (output_volume_ <= 0) {',
+            '    if (const int saved_volume = output_volume(); saved_volume <= 0) {',
+        )
+        codec_base = replace_once(
+            codec_base,
+            'setting to default (10)", output_volume_);',
+            'setting to default (10)", saved_volume);',
+        )
+        codec_base = replace_once(
+            codec_base,
+            'ESP_LOGI(TAG, "Set output volume to %d", output_volume_);',
+            'ESP_LOGI(TAG, "Set output volume to %d", volume);',
+        )
+        codec_base = replace_once(
+            codec_base,
+            'settings.SetInt("output_volume", output_volume_);',
+            'settings.SetInt("output_volume", volume);',
         )
         files[path] = codec_base.encode()
 

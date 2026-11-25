@@ -965,7 +965,7 @@ int main() {
         self.assertIn("stale_write = true;", writer)
         self.assertIn("return stale_write ? 0 : accepted;", writer)
         self.assertIn("reference_integrity_failed_ = true;", writer)
-        self.assertIn("PublishAcceptedLocked(data, accepted, volume", writer)
+        self.assertIn("PublishAcceptedLocked(sense_tx_scratch_, accepted, accepted_at_us)", writer)
         clear = code.split("void SenseReferenceCodec::ClearReference()", 1)[1]
         self.assertLess(
             clear.index("speaker_activity_.Reset();"),
@@ -980,7 +980,9 @@ int main() {
         )[1].split("void SenseReferenceCodec::ClearReference()", 1)[0]
         installer = (HEAD / "install_overlay.py").read_text()
         assert "NoAudioCodec::Write(data, samples)" in writer
-        assert "const int volume = std::clamp(output_volume_, 0, 100);" in writer
+        assert "std::lock_guard<std::mutex> output_lock(output_write_mutex_);" in writer
+        assert "output_volume_" not in writer
+        assert "PublishAcceptedLocked(sense_tx_scratch_, accepted, accepted_at_us)" in writer
         assert "i2s_channel_write(" not in writer
         assert "pdMS_TO_TICKS(120)" in installer
         assert "bytes_written = 0;" in installer

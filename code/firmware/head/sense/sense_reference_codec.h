@@ -134,6 +134,9 @@ private:
     std::atomic<bool> microphone_privacy_muted_{false};
     std::atomic<uint32_t> microphone_privacy_epoch_{0};
     std::mutex input_read_mutex_;
+    // Retain exclusive ownership of submitted PCM through reference publication.
+    // Cancellation never waits on this mutex; it fences the generation instead.
+    std::mutex output_write_mutex_;
     std::array<int16_t, kMaxReadFrames> microphone_frame_{};
     std::array<int16_t, kMaxReadFrames> reference_frame_{};
     std::mutex reference_mutex_;
@@ -178,7 +181,6 @@ private:
 
     void FillSilenceLocked(int64_t now_us);
     void PushLocked(int16_t sample);
-    void PublishAcceptedLocked(const int16_t* source, int samples, int volume,
-                               int64_t now_us);
+    void PublishAcceptedLocked(const int32_t* source, int samples, int64_t now_us);
     bool ReadReferenceLocked(int16_t* dest, int frames, int64_t now_us);
 };
