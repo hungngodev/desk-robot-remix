@@ -1103,7 +1103,10 @@ def test_room_usb_thread_callback_does_not_schedule_after_mac_shutdown():
     events = []
     observation = object()
     runtime._closed = False
-    runtime._on_room_observation = lambda value: events.append(value)
+    def consume(value, *, epoch, grant_generation):
+        events.append((value, epoch, grant_generation))
+
+    runtime._on_room_observation = consume
 
     class Loop:
         def call_soon_threadsafe(self, callback):
@@ -1111,7 +1114,7 @@ def test_room_usb_thread_callback_does_not_schedule_after_mac_shutdown():
             callback()
 
     runtime._queue_room_observation(Loop(), observation)
-    assert events == ["scheduled", observation]
+    assert events == ["scheduled", (observation, 0, 0)]
     events.clear()
 
     class ClosedLoop:
