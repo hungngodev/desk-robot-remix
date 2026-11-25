@@ -204,6 +204,7 @@ def test_fast_lane_collects_private_memory_conversation_and_tool_fences():
     required = set(code.glob("tests/test_memory_*.py"))
     required.update(code.glob("tests/test_conversation_*.py"))
     required.update(code / "tests" / name for name in (
+        "test_api_motion_lifecycle.py",
         "test_episode_memory_mutation_race.py",
         "test_native_startup_memory_fence.py",
         "test_native_omni_consent_grant.py",
