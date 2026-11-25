@@ -589,6 +589,19 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
             # An unversioned private fact cannot be compared with later
             # operator edits immediately before physical speech.
             return None
+        # An authoritative empty Mac lookup is a completed negative fact,
+        # not a missing tool response. Do not let a contradictory payload
+        # reintroduce stale text or a supposedly selected preference.
+        if result.get("matched") is False:
+            if records or result.get("selected_core_fact") is not None:
+                return None
+            return {
+                "source": "private_opt_in_memory_not_current_sight",
+                "private_memory_generation": revision,
+                "recollections": [],
+                "available": False,
+                "reason": "no_matching_retained_memory",
+            }
         recollections = []
         for item in records[:2]:
             if not isinstance(item, dict) or not isinstance(item.get("summary"), str):

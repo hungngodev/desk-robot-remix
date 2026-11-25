@@ -353,16 +353,17 @@ def register_voice_context_route(
                 entry for entry in records
                 if entry.witnessed is True and entry.source_robot == robot_id
             ]
-            # Older string-only recall receipts do not distinguish local
-            # facts from peer copies; never bypass the fresh SQLite filter.
-            tool_cues = [
-                item for item in tool_cues if item.get("kind") != "memory_recall"
-            ]
-            timeline = [
-                item for item in timeline
-                if not (item.get("channel") == "tool"
-                        and item.get("kind") == "memory_recall")
-            ]
+        # Earlier string-only recall receipts have no retained episode ID.
+        # They cannot prove a fact survived rolling retention, even with peer
+        # sharing enabled. A fresh recall must use only the new SQLite result.
+        tool_cues = [
+            item for item in tool_cues if item.get("kind") != "memory_recall"
+        ]
+        timeline = [
+            item for item in timeline
+            if not (item.get("channel") == "tool"
+                    and item.get("kind") == "memory_recall")
+        ]
         # Camera consent revoked or toggled during either SQLite read.
         # Discard cues collected under the previous live vision permit.
         camera_gen_now = getattr(settings, "camera_consent_generation", None)

@@ -545,7 +545,7 @@ def test_voice_context_samples_volatile_cues_after_final_sqlite_read(
     )
     hub = CameraFrameHub(["robot-01"])
     hub.event_history["robot-01"].append(("touch", started))
-    hub.remember_tool("robot-01", "memory_recall", "Past blue key", started)
+    hub.remember_tool("robot-01", "pickup_status", "Pickup status unavailable", started)
 
     class Memory:
         def recent(self, robot_id, *, limit):
@@ -576,7 +576,7 @@ def test_voice_context_samples_volatile_cues_after_final_sqlite_read(
         assert body["live_sensor_cues"][0]["age_ms"] == 1000
         assert body["recent_tool_interpretations"][0]["age_ms"] == 1000
         assert {item["kind"] for item in body["current_interaction_timeline"]} == {
-            "touch", "memory_recall",
+            "touch", "pickup_status",
         }
     else:
         assert body["live_sensor_cues"] == []
@@ -728,3 +728,66 @@ def test_voice_transcript_persists_across_sessions_without_unrelated_recall(
         assert disabled.json()["untrusted_historical_evidence"] == {
             "core": "", "recent": "",
         }
+
+def test_trimmed_memory_is_unavailable_in_mac_and_native_facts(
+    settings, tokens, tmp_path, monkeypatch,
+):
+    import importlib.util
+    import time
+    from types import SimpleNamespace
+
+    from desk_robot.api import create_app
+    from desk_robot.multimodal import CameraFrameHub
+    from fastapi.testclient import TestClient
+
+    source = (Path(__file__).resolve().parents[1]
+              / "laptop/server/overlay/desk_robot_voice_intents.py")
+    spec = importlib.util.spec_from_file_location("desk_trimmed_memory_intents", source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    settings.memory_dir = tmp_path
+    settings.voice_memory_tools_enabled = True
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_vision_tools_enabled = True
+    headers = {"Authorization": f"Bearer {tokens['DESK_ROBOT_TOOL_TOKEN']}"}
+    path = "/v1/pet/robot-01/voice-context"
+    now = time.time()
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        memory = runtime.memory
+        assert memory.remember(
+            "robot-01", "old-obsidian", "Obsidian pendant",
+            kind="object", source_robot="robot-01", witnessed=True, observed_at=now - 1000,
+        )
+        initial = client.get(path, headers=headers, params={"query": "obsidian"})
+        assert initial.status_code == 200 and initial.json()["matched"] is True
+        for index in range(250):
+            assert memory.remember(
+                "robot-01", f"jade-{index:03}", f"Jade token {index}",
+                kind="object", source_robot="robot-01", witnessed=True,
+                observed_at=now - 500 + index,
+            )
+        assert memory.get_episode("robot-01", "old-obsidian") is None
+        hub = CameraFrameHub([robot.id for robot in settings.robots])
+        hub.remember_tool(
+            "robot-01", "memory_recall", "Obsidian pendant", time.monotonic(),
+        )
+        with monkeypatch.context() as patch:
+            patch.setattr(runtime, "multimodal", SimpleNamespace(hub=hub))
+            missing = client.get(path, headers=headers, params={"query": "obsidian"})
+            retained = client.get(path, headers=headers, params={"query": "jade"})
+        assert missing.status_code == retained.status_code == 200
+        assert missing.json()["matched"] is False and missing.json()["memories"] == []
+        assert "Obsidian pendant" not in missing.text
+        unavailable = module.native_grounded_fact("voice-context", missing.json())
+        assert unavailable["available"] is False
+        assert unavailable["reason"] == "no_matching_retained_memory"
+        assert unavailable["recollections"] == []
+        fact = module.native_grounded_fact("voice-context", retained.json())
+        assert retained.json()["matched"] is True
+        assert fact["recollections"]
+        assert all("Jade token" in item["summary"] for item in fact["recollections"])
+        packed = module.pack_grounded_facts([unavailable, fact])
+        assert "no_matching_retained_memory" in packed and "Obsidian" not in packed
+        contradictory = dict(missing.json(), memories=retained.json()["memories"])
+        assert module.native_grounded_fact("voice-context", contradictory) is None
