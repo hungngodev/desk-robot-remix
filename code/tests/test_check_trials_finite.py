@@ -448,3 +448,107 @@ def test_a5_cli_reads_utf8_under_ascii_locale(tmp_path):
     assert report["categories"]["key"]["successes"] == 8
     assert report["physical_acceptance_pass"] is True
     assert report["assembly_identity_physically_verified"] is False
+
+
+def test_a5_summary_exposes_distinct_firmware_and_calibration_and_holds_placeholders():
+    rows_a = trial_rows()
+    rows_b = trial_rows()
+    for row in rows_a:
+        row["firmware"] = "wroom-2026-11-25-sha-aaa1111"
+        row["calibration"] = "jaw-cal-rev1"
+    for row in rows_b:
+        row["firmware"] = "wroom-2026-11-25-sha-bbb2222"
+        row["calibration"] = "jaw-cal-rev2"
+
+    report_a = check_trials.summarize(rows_a, "robot-01")
+    report_b = check_trials.summarize(rows_b, "robot-01")
+    assert report_a["firmware"] == "wroom-2026-11-25-sha-aaa1111"
+    assert report_a["calibration"] == "jaw-cal-rev1"
+    assert report_b["firmware"] == "wroom-2026-11-25-sha-bbb2222"
+    assert report_b["calibration"] == "jaw-cal-rev2"
+    assert report_a != report_b
+    # Outcome-only CSV score remains on HOLD without a matching run manifest,
+    # and placeholder identities are flagged explicitly.
+    assert report_a["outcome_score_only"] is True
+    assert report_a["evidence_status"] == "HOLD"
+    assert report_a["assembly_identity_physically_verified"] is False
+
+    placeholder_report = check_trials.summarize(trial_rows(), "robot-01")
+    assert placeholder_report["physical_acceptance_pass"] is True
+    assert placeholder_report["evidence_status"] == "HOLD"
+    assert "firmware" in placeholder_report["placeholder_identities"]
+    assert "calibration" in placeholder_report["placeholder_identities"]
+
+
+def test_a5_cli_validates_run_manifest_and_rejects_stale_or_placeholder_provenance(tmp_path):
+    import hashlib
+
+    rows = trial_rows()
+    for row in rows:
+        row["firmware"] = "wroom-build-rev3"
+        row["calibration"] = "jaw-profile-rev3"
+        row["assembly_id"] = "pet1-revC"
+        row["object_description"] = "brass house key" if row["category"] == "key" else "mint candy"
+    csv_path = tmp_path / "real-shape.csv"
+    with csv_path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    digest = hashlib.sha256(csv_path.read_bytes()).hexdigest()
+
+    good_manifest = {
+        "run_id": "run-a5-003",
+        "commit_sha": "a" * 40,
+        "robot_id": "robot-01",
+        "assembly_id": "pet1-revC",
+        "firmware": "wroom-build-rev3",
+        "calibration": "jaw-profile-rev3",
+        "calibration_sha": "b" * 40,
+        "objective_evidence_path": "docs/records/runs/a5-003.json",
+        "reviewer": "operator_hana",
+        "acceptance_state": "bench_passed",
+        "trials_csv_sha256": digest,
+    }
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text(json.dumps(good_manifest), encoding="utf-8")
+    ok = subprocess.run(
+        [sys.executable, str(SCRIPT), "--file", str(csv_path),
+         "--run-manifest", str(manifest_path), "--require-pass", "--require-manifest"],
+        capture_output=True, text=True, check=False,
+    )
+    assert ok.returncode == 0, ok.stderr
+    parsed = json.loads(ok.stdout)
+    assert parsed["run_manifest_verified"] is True
+    assert parsed["outcome_score_only"] is False
+    assert parsed["evidence_status"] == "MANIFEST_VERIFIED_PENDING_SIGNOFF"
+    assert parsed["assembly_identity_physically_verified"] is False
+
+    for bad_patch in (
+        {"calibration": "stale-cal-rev1"},
+        {"commit_sha": "short-sha"},
+        {"reviewer": "unknown"},
+        {"trials_csv_sha256": "0" * 64},
+    ):
+        bad_path = tmp_path / "bad_manifest.json"
+        bad_path.write_text(json.dumps({**good_manifest, **bad_patch}), encoding="utf-8")
+        bad = subprocess.run(
+            [sys.executable, str(SCRIPT), "--file", str(csv_path),
+             "--run-manifest", str(bad_path), "--require-manifest"],
+            capture_output=True, text=True, check=False,
+        )
+        assert bad.returncode != 0
+
+
+@pytest.mark.parametrize(
+    ("field", "extreme_value"),
+    [
+        ("mass_g", "5000.0"),
+        ("lift_mm", "9999.0"),
+        ("hold_seconds", "86400.0"),
+    ],
+)
+def test_a5_rejects_finite_measurements_outside_mechanism_envelope(field, extreme_value):
+    rows = trial_rows()
+    rows[0][field] = extreme_value
+    with pytest.raises(ValueError, match=f"Out-of-envelope physical measurement: {field}"):
+        check_trials.summarize(rows, "robot-01")

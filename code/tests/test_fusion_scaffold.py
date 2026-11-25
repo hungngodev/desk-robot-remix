@@ -277,3 +277,171 @@ def test_fusion_original_attribution_must_remain_with_pinned_meshes(tmp_path):
             verify(tmp_path)
         path.write_bytes(original)
     assert verify(tmp_path) == meshes
+
+
+def _stage_full_fusion_repo(tmp_path: Path, *, include_fits: bool = False):
+    canonical = load_script()._load()
+    for rel in (*canonical["SOURCE_MESH_GIT_BLOBS"], *canonical["SOURCE_ATTRIBUTION_GIT_BLOBS"]):
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((ROOT / rel).read_bytes())
+    script_copy = tmp_path / "code/scripts/export_fit_kit.py"
+    script_copy.parent.mkdir(parents=True, exist_ok=True)
+    script_copy.write_text(
+        (ROOT / "code/scripts/export_fit_kit.py").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    if include_fits:
+        fit = tmp_path / "docs/cad/remixes/fit_stls/battery_boost_tray.stl"
+        fit.parent.mkdir(parents=True, exist_ok=True)
+        fit.write_bytes(b"stale fit stl")
+    return canonical
+
+
+def _fake_adsk_modules():
+    from types import ModuleType, SimpleNamespace
+
+    events = []
+    messages = []
+    imported_meshes = []
+
+    class FakeMatrix3D:
+        @staticmethod
+        def create():
+            matrix = ("identity-matrix",)
+            return matrix
+
+    class FakeOccurrences:
+        def addNewComponent(self, transform):
+            events.append(("addNewComponent", transform))
+            comp = SimpleNamespace(name=None, meshBodies=None)
+
+            class FakeMeshBodies:
+                def add(self, path_str, unit):
+                    imported_meshes.append((comp.name, path_str, unit))
+                    events.append(("meshBodies.add", comp.name, unit))
+                    return SimpleNamespace(count=1)
+
+            comp.meshBodies = FakeMeshBodies()
+            return SimpleNamespace(component=comp)
+
+    design_obj = SimpleNamespace(
+        designType=None,
+        rootComponent=SimpleNamespace(occurrences=FakeOccurrences()),
+    )
+
+    class FakeDocuments:
+        def add(self, doc_type):
+            events.append(("documents.add", doc_type))
+            return design_obj
+
+    class FakeUI:
+        def messageBox(self, msg):
+            messages.append(msg)
+
+    app_obj = SimpleNamespace(
+        documents=FakeDocuments(),
+        activeProduct=design_obj,
+        userInterface=FakeUI(),
+    )
+
+    adsk_mod = ModuleType("adsk")
+    core_mod = ModuleType("adsk.core")
+    fusion_mod = ModuleType("adsk.fusion")
+    core_mod.Application = SimpleNamespace(get=lambda: app_obj)
+    core_mod.DocumentTypes = SimpleNamespace(FusionDesignDocumentType="FusionDesignDocumentType")
+    core_mod.Matrix3D = FakeMatrix3D
+    fusion_mod.Design = SimpleNamespace(cast=lambda product: product)
+    fusion_mod.DesignTypes = SimpleNamespace(DirectDesignType="DirectDesignType")
+    fusion_mod.MeshUnits = SimpleNamespace(MillimeterMeshUnit="MillimeterMeshUnit")
+    adsk_mod.core = core_mod
+    adsk_mod.fusion = fusion_mod
+    return {
+        "adsk": adsk_mod,
+        "adsk.core": core_mod,
+        "adsk.fusion": fusion_mod,
+    }, events, messages, imported_meshes
+
+
+def test_fusion_run_verifies_attribution_and_optional_fit_before_creating_document(
+    tmp_path, monkeypatch,
+):
+    import sys
+
+    _stage_full_fusion_repo(tmp_path)
+    adsk_modules, events, messages, imported = _fake_adsk_modules()
+    for name, mod in adsk_modules.items():
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    wrapper = load_script()
+    scaffold_ns = wrapper._load()
+    call_order = []
+    orig_verify_orig = scaffold_ns["verify_original_source_revisions"]
+    orig_jaw = scaffold_ns["jaw_topology_warning"]
+    orig_verify_fit = scaffold_ns["verify_optional_fit_references"]
+
+    def spy_verify_orig(repo):
+        call_order.append("verify_original_source_revisions")
+        return orig_verify_orig(repo)
+
+    def spy_jaw(repo):
+        call_order.append("jaw_topology_warning")
+        return orig_jaw(repo)
+
+    def spy_verify_fit(repo):
+        call_order.append("verify_optional_fit_references")
+        return orig_verify_fit(repo)
+
+    # Test canonical run() via module globals patched in-place.
+    run_fn = scaffold_ns["run"]
+    run_fn.__globals__["find_repo"] = lambda _p: tmp_path
+    run_fn.__globals__["verify_original_source_revisions"] = spy_verify_orig
+    run_fn.__globals__["jaw_topology_warning"] = spy_jaw
+    run_fn.__globals__["verify_optional_fit_references"] = spy_verify_fit
+
+    # Ensure documents.add cannot execute until attribution + fit checks finish.
+    orig_doc_add = adsk_modules["adsk.core"].Application.get().documents.add
+
+    def traced_doc_add(doc_type):
+        call_order.append("documents.add")
+        return orig_doc_add(doc_type)
+
+    adsk_modules["adsk.core"].Application.get().documents.add = traced_doc_add
+    run_fn(None)
+
+    assert call_order == [
+        "verify_original_source_revisions",
+        "jaw_topology_warning",
+        "verify_optional_fit_references",
+        "documents.add",
+    ]
+    assert len(imported) == 12
+    assert all(unit == "MillimeterMeshUnit" for _, _, unit in imported)
+    assert all(
+        ev[1] == ("identity-matrix",) for ev in events if ev[0] == "addNewComponent"
+    )
+    assert len(messages) == 1
+    assert "No candidate kit imported; physical packaging is unqualified." in messages[0]
+    assert "JAW TOPOLOGY HOLD:" in messages[0]
+
+    # Also invoke the legacy wrapper entrypoint end-to-end with failing fit receipt.
+    fit_dir = tmp_path / "docs/cad/remixes/fit_stls"
+    fit_dir.mkdir(parents=True, exist_ok=True)
+    (fit_dir / "battery_boost_tray.stl").write_bytes(b"stale unverified fit")
+    events.clear()
+    imported.clear()
+    messages.clear()
+
+    orig_load = wrapper._load
+
+    def loaded_with_staged_root():
+        ns = orig_load()
+        ns["run"].__globals__["find_repo"] = lambda _p: tmp_path
+        return ns
+
+    monkeypatch.setattr(wrapper, "_load", loaded_with_staged_root)
+    wrapper.run(None)
+    assert not any(ev[0] == "documents.add" for ev in events)
+    assert imported == []
+    assert len(messages) == 1
+    assert "Desk robot Fusion import failure:" in messages[0]

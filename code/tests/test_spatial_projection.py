@@ -62,6 +62,15 @@ def test_horizon_grazing_and_crop_rejected():
     cal = calibration()
     with pytest.raises(ProjectionError, match="grazes"):
         project(cal, 320, 9)
+    # Off-axis ray with raw -ray_z > 0.15 (0.164415) but normalized
+    # downward component < 0.15 (0.128381) must still be rejected as grazing,
+    # while adjacent (600, 100) with normalized 0.155052 projects cleanly.
+    low_cam = replace(cal, camera_height_mm=10)
+    with pytest.raises(ProjectionError, match="grazes"):
+        project(low_cam, 600, 85)
+    valid_edge = project(low_cam, 600, 100)
+    assert valid_edge.x_mm == pytest.approx(52.8732, abs=1e-3)
+    assert valid_edge.y_mm == pytest.approx(-35.5526, abs=1e-3)
     with pytest.raises(ProjectionError, match="crop"):
         project(replace(cal, valid_pixel_roi=(100, 100, 540, 400)), 10, 200)
     with pytest.raises(ProjectionError, match="floor region"):

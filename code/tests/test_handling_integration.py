@@ -95,24 +95,60 @@ async def test_qualified_real_wroom_imu_tilt_reaches_only_own_memory(tmp_path):
 
 
 async def test_unqualified_imu_never_creates_physical_fact_or_camera_trigger(tmp_path):
-    settings = load_settings(
-        Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml"
-    )
-    settings.mode = "hardware"
-    memory = MemoryStore(tmp_path, [robot.id for robot in settings.robots])
-    conversation = Conversation(settings, NoneChat(), SimulatedSpeaker(), memory=memory)
-    pet = PetController(settings, {}, conversation, memory, NoneVision())
-    state = pet.states["robot-01"]
-    state.enabled = True
-    state.generation = 3
-    try:
-        for _ in range(15):
-            await pet._observe_imu("robot-01", 3, status(acc=(16000, 0, 0)))
-        assert state.handling_events == 0
-        assert memory.count("robot-01") == 0
-        assert pet.status("robot-01")["motor_control_enabled_by_pet"] is False
-    finally:
-        await pet.close()
+    async def run_sequence(qualified: bool):
+        settings = load_settings(
+            Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml"
+        )
+        settings.mode = "hardware"
+        settings.robots[0].handling_interactions_qualified = qualified
+        memory = MemoryStore(tmp_path / f"q_{qualified}", [robot.id for robot in settings.robots])
+        conversation = Conversation(settings, NoneChat(), SimulatedSpeaker(), memory=memory)
+        pet = PetController(settings, {}, conversation, memory, NoneVision())
+        seen = []
+
+        class Events:
+            def notify(self, robot_id, kind, at):
+                seen.append((robot_id, kind))
+
+            def clear(self, robot_id):
+                assert robot_id in {r.id for r in settings.robots}
+
+            def discard_video(self, robot_id):
+                assert robot_id in {r.id for r in settings.robots}
+
+        pet.multimodal = SimpleNamespace(hub=Events())
+        state = pet.states["robot-01"]
+        state.enabled = True
+        state.generation = 3
+        state.quiet = True
+        try:
+            for _ in range(8):
+                await pet._observe_imu("robot-01", 3, status())
+            for _ in range(2):
+                await pet._observe_imu("robot-01", 3, status(acc=(12551, 0, 10531)))
+            return (
+                state.handling_gate.reference,
+                state.handling_events,
+                memory.count("robot-01"),
+                seen,
+                pet.status("robot-01")["motor_control_enabled_by_pet"],
+            )
+        finally:
+            await pet.close()
+
+    ref_unq, events_unq, mem_unq, seen_unq, motor_unq = await run_sequence(False)
+    assert ref_unq is None
+    assert events_unq == 0
+    assert mem_unq == 0
+    assert seen_unq == []
+    assert motor_unq is False
+
+    ref_q, events_q, mem_q, seen_q, motor_q = await run_sequence(True)
+    assert ref_q is not None
+    assert events_q == 1
+    assert mem_q == 1
+    assert seen_q == [("robot-01", "handling_tilt")]
+    assert motor_q is False
 
 async def test_body_poll_counts_transport_age_before_handling_memory(tmp_path):
     settings = load_settings(

@@ -202,3 +202,72 @@ async def test_exploration_local_disarm_overrides_host_at_drive_dispatch(
         assert any("stop acknowledged" in event for event in job.events)
     finally:
         await coordinator.close()
+
+
+@pytest.mark.parametrize(
+    "scenario,expected_reason,expect_route",
+    [
+        ("stale_capture", "historical_sighting_only", True),
+        ("pre_request", "historical_sighting_only", True),
+        ("retired_map", "historical_sighting_only", False),
+        ("out_of_order", "not_currently_confirmed", True),
+    ],
+)
+def test_replay_enforces_freshness_pre_request_map_identity_and_frame_order(
+    navigation_replay, scenario, expected_reason, expect_route,
+):
+    query, owner, seen, grid, route, envelope, view = navigation_replay
+    if scenario == "stale_capture":
+        query = replace(query, created_us=600_000)
+        evidence = [replace(seen, captured_us=700_000, receipt_us=990_000)]
+    elif scenario == "pre_request":
+        evidence = [replace(seen, captured_us=890_000, receipt_us=950_000)]
+    elif scenario == "retired_map":
+        evidence = [replace(seen, anchor_id="tag-retired")]
+    else:
+        absent = replace(
+            seen, source="camera_not_seen", frame_seq=24, receipt_us=970_000,
+            captured_us=960_000, floor_mm=None, projection_qualified=False,
+        )
+        stale_frame_late_receipt = replace(
+            seen, frame_seq=23, receipt_us=990_000, captured_us=980_000,
+        )
+        evidence = [absent, stale_frame_late_receipt]
+
+    fixture = (query, owner, seen, grid, route, envelope, view)
+    target, search = plan_replay(fixture, evidence)
+    assert target.status == "last_seen"
+    assert target.reason == expected_reason
+    assert target.confirmed_floor_mm is None
+    if scenario == "retired_map":
+        assert target.search_hint_mm is None
+        assert search.status == "no_current_sighting"
+        assert search.reason == "no_same_map_last_seen_hint"
+        assert search.route is None
+    else:
+        assert target.search_hint_mm == seen.floor_mm
+        assert expect_route is True
+        assert search.status == "viewpoint_proposal"
+        assert search.route is not None
+        assert search.route.may_execute is False
+
+
+def test_unanchoring_grid_after_valid_sighting_revokes_viewpoint_route(
+    navigation_replay,
+):
+    query, owner, seen, grid, route, envelope, view = navigation_replay
+    absent = replace(
+        seen, source="camera_not_seen", frame_seq=24, receipt_us=970_000,
+        captured_us=960_000, floor_mm=None, projection_qualified=False,
+    )
+    _, before = plan_replay(navigation_replay, [seen, absent])
+    assert before.status == "viewpoint_proposal" and before.route is not None
+
+    unanchored_grid = replace(grid, anchored=False)
+    _, after = plan_replay(
+        (query, owner, seen, unanchored_grid, route, envelope, view),
+        [seen, absent],
+    )
+    assert after.status == "rejected"
+    assert after.reason == "unanchored_or_stale_map"
+    assert after.route is None
