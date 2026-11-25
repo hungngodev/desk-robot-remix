@@ -20,8 +20,13 @@ async def _bounded_head_reply(coro: Awaitable[_T], *, seconds: float,
     finally:
         if not task.done():
             task.cancel()
-            # A late transport failure must be observed, never accepted as a
-            # delayed body STOP or as an authorization from a stale status.
+        # Cancellation may arrive after the child finishes but before the
+        # parent resumes from wait(). Observe failures in either state,
+        # without replacing the original cancellation or timeout.
+        if task.done():
+            if not task.cancelled():
+                task.exception()
+        else:
             task.add_done_callback(
                 lambda done: None if done.cancelled() else done.exception()
             )
