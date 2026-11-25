@@ -31,6 +31,21 @@ def replace_once(text: str, old: str, new: str) -> str:
     return text.replace(old, new, 1)
 
 
+def harden_release_tooling(source: str) -> str:
+    """Require remote digest evidence, not only the uploaded byte count."""
+    source = replace_once(
+        source,
+        '    if {a["name"] for a in remote["assets"]} != set(expected):',
+        '    if (len(remote["assets"]) != len(expected)\n'
+        '            or {a["name"] for a in remote["assets"]} != set(expected)):',
+    )
+    return replace_once(
+        source,
+        '        if digest and digest != "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest():',
+        '        if digest != "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest():',
+    )
+
+
 def instrument_p3_player(source: str) -> str:
     """Instrument the pinned host-only blocking PortAudio player."""
     source = replace_once(
@@ -1175,6 +1190,8 @@ void Application::HandleStartListeningEvent() {""",
         # Replace the pinned unauthenticated, unbounded UDP bench receiver.
         path = "scripts/audio_debug_server.py"
         files[path] = (HERE / "audio_debug_server.py").read_bytes()
+        path = "scripts/release.py"
+        files[path] = harden_release_tooling((target / path).read_text()).encode()
         return files
     files = cores3_files(target)
     if board == "cores3":
@@ -1347,7 +1364,7 @@ def read_overlay_journal(target: Path, marker: Path) -> dict:
     for name, info in state.items():
         if (not isinstance(name, str) or not (name.startswith("main/")
                     or name in ("scripts/p3_tools/p3_gui_player.py",
-                                "scripts/audio_debug_server.py"))
+                                "scripts/audio_debug_server.py", "scripts/release.py"))
                 or any(ord(ch) < 32 or ord(ch) == 127 for ch in name)
                 or "\\" in name or any(part in ("", ".", "..") for part in name.split("/"))
                 or not isinstance(info, dict)
