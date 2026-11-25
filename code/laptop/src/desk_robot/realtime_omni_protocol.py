@@ -63,6 +63,53 @@ class OmniAudioDelta:
     total_generated_ms: int
 
 
+@dataclass
+class I2sTransmissionPrefix:
+    """Bound digital I2S receipts to successfully transmitted 60 ms Opus frames.
+
+    This is NOT a speaker playback clock. A receipt racing the WebSocket send
+    is held provisionally until that exact send succeeds. Failed or cancelled
+    sends poison the lease; a new response must use a new prefix.
+    """
+
+    started: bool = False
+    sent_ms: int = 0
+    committed_ms: int = 0
+    _pending_ms: int = 0
+    _deferred: bool = False
+    _failed: bool = False
+
+    def begin_send(self) -> bool:
+        if not self.started or self._failed or self._pending_ms:
+            return False
+        self._pending_ms = self.sent_ms + 60
+        return True
+
+    def accept(self, committed_ms: int) -> bool:
+        if (not self.started or self._failed or type(committed_ms) is not int
+                or committed_ms != self.committed_ms + 60):
+            return False
+        if committed_ms <= self.sent_ms:
+            self.committed_ms = committed_ms
+            return True
+        if committed_ms == self._pending_ms and not self._deferred:
+            self._deferred = True
+            return True
+        return False
+
+    def finish_send(self, success: bool) -> None:
+        if not self._pending_ms:
+            return
+        if success:
+            self.sent_ms = self._pending_ms
+            if self._deferred:
+                self.committed_ms = self._pending_ms
+        else:
+            self._failed = True
+        self._pending_ms = 0
+        self._deferred = False
+
+
 class OmniDuplexWire:
     INPUT_RATE = 16000
     OUTPUT_RATE = 24000

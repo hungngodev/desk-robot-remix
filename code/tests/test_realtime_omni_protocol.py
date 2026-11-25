@@ -2,7 +2,7 @@
 import base64
 
 import pytest
-from desk_robot.realtime_omni_protocol import OmniDuplexWire
+from desk_robot.realtime_omni_protocol import I2sTransmissionPrefix, OmniDuplexWire
 
 
 def delta(response_id="r1", epoch=0, pcm=None):
@@ -714,3 +714,55 @@ def test_response_created_rejects_conflicting_envelope_before_changing_authority
     })
     assert wire.response_id == "candidate"
     assert wire.handle_event(delta("candidate", epoch=1)) is not None
+
+
+def test_i2s_receipt_requires_started_and_transmitted_prefix():
+    prefix = I2sTransmissionPrefix()
+    assert not prefix.begin_send()
+    assert not prefix.accept(60)
+    prefix.started = True
+    assert not prefix.accept(60)
+    assert prefix.begin_send()
+    assert not prefix.begin_send()
+    prefix.finish_send(True)
+    assert prefix.committed_ms == 0
+    for invalid in (True, 0, 59, 60.0, 120, None, [], {}):
+        assert not prefix.accept(invalid)
+    assert prefix.accept(60)
+    assert not prefix.accept(60)
+    assert not prefix.accept(120)
+    assert prefix.begin_send()
+    assert prefix.accept(120)
+    assert not prefix.accept(120)
+    assert prefix.committed_ms == 60
+    prefix.finish_send(True)
+    assert prefix.committed_ms == 120
+
+
+@pytest.mark.parametrize("success", [True, False])
+def test_i2s_receipt_racing_send_stays_provisional(success):
+    prefix = I2sTransmissionPrefix(started=True)
+    assert prefix.begin_send()
+    assert prefix.accept(60)
+    assert not prefix.accept(120)
+    assert prefix.committed_ms == 0
+    prefix.finish_send(success)
+    assert prefix.committed_ms == (60 if success else 0)
+    assert prefix.sent_ms == (60 if success else 0)
+    assert prefix.begin_send() is success
+    if not success:
+        assert not prefix.accept(60)
+
+
+def test_failed_i2s_send_never_accepts_late_receipt_or_retries():
+    prefix = I2sTransmissionPrefix(started=True)
+    assert prefix.begin_send()
+    prefix.finish_send(True)
+    assert prefix.accept(60)
+    assert prefix.begin_send()
+    assert prefix.accept(120)
+    prefix.finish_send(False)
+    assert prefix.committed_ms == 60
+    assert not prefix.accept(120)
+    assert not prefix.begin_send()
+    assert I2sTransmissionPrefix(started=True).committed_ms == 0

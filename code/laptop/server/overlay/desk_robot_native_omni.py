@@ -43,9 +43,17 @@ from desk_robot_voice_intents import (
 # The host test environment installs the Mac package; the isolated pinned
 # Xiaozhi server instead receives desk_robot_omni_wire.py from install_overlay.
 try:
-    from desk_robot.realtime_omni_protocol import OmniDuplexWire, verify_native_server
+    from desk_robot.realtime_omni_protocol import (
+        I2sTransmissionPrefix,
+        OmniDuplexWire,
+        verify_native_server,
+    )
 except ModuleNotFoundError:
-    from desk_robot_omni_wire import OmniDuplexWire, verify_native_server
+    from desk_robot_omni_wire import (
+        I2sTransmissionPrefix,
+        OmniDuplexWire,
+        verify_native_server,
+    )
 
 _sessions: dict[str, "NativeOmniSession"] = {}
 _output_owner: str | None = None
@@ -148,8 +156,8 @@ def status(device: str) -> dict:
         "native_omni_enabled": True,
         "native_backend_connected": s.connected and not s.closed,
         "head_audio_playback_acknowledged": False,
-        "head_audio_i2s_progress_observed": s._head_i2s_receipts > 0,
-        "head_audio_i2s_committed_ms": s._head_i2s_last_device_ms,
+        "head_audio_i2s_progress_observed": s._head_i2s_prefix.committed_ms > 0,
+        "head_audio_i2s_committed_ms": s._head_i2s_prefix.committed_ms,
         "audio_video_latency_physically_measured": False,
         "native_tool_calls_supported": False,
         "live_transcript_context_enabled": s._live_transcript_enabled,
@@ -285,8 +293,7 @@ class NativeOmniSession:
         self._head_playback_response_id: str | None = None
         self._head_playback_generation = -1
         self._head_playback_turn = -1
-        self._head_i2s_last_device_ms = 0
-        self._head_i2s_receipts = 0
+        self._head_i2s_prefix = I2sTransmissionPrefix()
         # Consent comes from THIS pet's authenticated Mac context. Never
         # persist a microphone transcript unless separately enabled there.
         self._transcript_memory_enabled = False
@@ -2201,34 +2208,39 @@ class NativeOmniSession:
         self._head_playback_response_id = response_id
         self._head_playback_generation = generation
         self._head_playback_turn = self._readonly_turn
-        self._head_i2s_last_device_ms = 0
+        self._head_i2s_prefix = I2sTransmissionPrefix()
         return self._head_playback_id
 
+    def _head_playback_current(self, generation: int) -> bool:
+        return (
+            not self.closed
+            and self._head_playback_id != 0
+            and generation == self._generation == self._head_playback_generation
+            and self._head_playback_turn == self._readonly_turn
+            and self._head_playback_response_id == self.wire.response_id
+        )
+
     def accept_head_i2s_progress(self, event: dict) -> bool:
-        """Accept authenticated digital I2S progress without claiming playback."""
+        """Admit current digital telemetry, never physical speaker playback."""
         import desk_robot_bridge as bridge
-        if (self.closed or bridge.connections.get(self.device) is not self.conn
-                or event.get("session_id") != self.conn.session_id):
+        if (not isinstance(event, dict)
+                or event.get("type") != "desk_robot_i2s_progress"
+                or bridge.connections.get(self.device) is not self.conn
+                or event.get("session_id") != self.conn.session_id
+                or not self._head_playback_current(self._generation)):
             return False
         playback_id = event.get("playback_id")
         committed_ms = event.get("committed_ms")
         if (type(playback_id) is not int or type(committed_ms) is not int
-                or playback_id == 0 or playback_id != self._head_playback_id
-                or committed_ms <= 0
-                or self._head_playback_generation != self._generation
-                or self._head_playback_turn != self._readonly_turn
-                or self._head_playback_response_id != self.wire.response_id):
+                or playback_id != self._head_playback_id or committed_ms <= 0):
             return False
         generated_ms = self.wire.generated_bytes * 1000 // (24000 * 2)
         if generated_ms <= 0:
             return False
         max_committed_ms = ((generated_ms + 59) // 60) * 60
-        if (committed_ms != self._head_i2s_last_device_ms + 60
-                or committed_ms > max_committed_ms):
+        if committed_ms > max_committed_ms:
             return False
-        self._head_i2s_last_device_ms = committed_ms
-        self._head_i2s_receipts += 1
-        return True
+        return self._head_i2s_prefix.accept(committed_ms)
 
     async def _play(self) -> None:
         """24k model PCM to the SAME Xiaozhi 16k Opus speaker.
@@ -2344,7 +2356,7 @@ class NativeOmniSession:
                         self._head_playback_response_id = None
                         self._head_playback_generation = -1
                         self._head_playback_turn = -1
-                        self._head_i2s_last_device_ms = 0
+                        self._head_i2s_prefix = I2sTransmissionPrefix()
                     dropped_response_id = response_id
                     current_response = None
                     pending.clear()
@@ -2471,6 +2483,9 @@ class NativeOmniSession:
                         # Do not release the fleet lease for a stale TTS STOP.
                         raise RuntimeError("Head replaced during native TTS control")
                     if state == "start":
+                        if (message.get("desk_playback_id") == self._head_playback_id
+                                and self._head_playback_current(generation)):
+                            self._head_i2s_prefix.started = True
                         if passive_start:
                             _last_passive_speech_started_at = time.monotonic()
                         else:
@@ -2531,14 +2546,28 @@ class NativeOmniSession:
                     # A slow/broken head transport must release the device lock
                     # so urgent human STOP can acquire it. Unsent Opus is never
                     # a delivered PCM or a playback acknowledgement.
-                    await asyncio.wait_for(
-                        self.conn.websocket.send(packet), timeout=0.4,
-                    )
-                    if bridge.connections.get(self.device) is not self.conn:
-                        # A replaced socket cannot acknowledge its new head's
-                        # playback. Teardown must retain uncertain speaker state.
-                        raise RuntimeError("Head replaced during native Opus send")
-                    self.head_packets += 1
+                    prefix = None
+                    if self._head_playback_current(generation):
+                        candidate = self._head_i2s_prefix
+                        if candidate.begin_send():
+                            prefix = candidate
+                    success = False
+                    try:
+                        await asyncio.wait_for(
+                            self.conn.websocket.send(packet), timeout=0.4,
+                        )
+                        if bridge.connections.get(self.device) is not self.conn:
+                            # A replaced socket cannot acknowledge its new head's
+                            # playback. Teardown must retain uncertain speaker state.
+                            raise RuntimeError("Head replaced during native Opus send")
+                        self.head_packets += 1
+                        success = (
+                            self._head_playback_current(generation)
+                            and self._head_i2s_prefix is prefix
+                        )
+                    finally:
+                        if prefix is not None:
+                            prefix.finish_send(success)
         if blocked_by_human:
             events = await self._invalidate_head_first()
             self._schedule_remote_cancel(events)
@@ -2557,7 +2586,7 @@ class NativeOmniSession:
         self._head_playback_response_id = None
         self._head_playback_generation = -1
         self._head_playback_turn = -1
-        self._head_i2s_last_device_ms = 0
+        self._head_i2s_prefix = I2sTransmissionPrefix()
         self._direct_reply_available = False
         self._direct_reply_active = False
         self._readonly_turn += 1

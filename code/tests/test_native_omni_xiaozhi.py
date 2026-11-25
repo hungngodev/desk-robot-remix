@@ -479,6 +479,11 @@ async def test_authenticated_i2s_progress_never_forges_playback_ack(native):
     assert not module.device_i2s_progress(
         conn, {**common, "playback_id": playback_id + 1, "committed_ms": 60}
     )
+    # Model generation and TTS START do not establish a transmitted prefix.
+    assert not module.device_i2s_progress(conn, {**common, "committed_ms": 60})
+    assert await session._send_device_opus(b"test-opus", session._generation)
+    assert session.wire.played_ms == 0
+    assert module.status(conn.device_id)["head_audio_i2s_committed_ms"] == 0
     assert module.device_i2s_progress(conn, {**common, "committed_ms": 60})
     assert not module.device_i2s_progress(conn, {**common, "committed_ms": 60})
     assert not module.device_i2s_progress(conn, {**common, "committed_ms": 59})
@@ -490,13 +495,77 @@ async def test_authenticated_i2s_progress_never_forges_playback_ack(native):
     assert status["head_audio_i2s_progress_observed"] is True
     assert status["head_audio_i2s_committed_ms"] == 60
 
+    assert not module.device_i2s_progress(conn, {**common, "committed_ms": 120})
+    assert await session._send_device_opus(b"test-opus", session._generation)
     assert module.device_i2s_progress(conn, {**common, "committed_ms": 120})
     assert session.wire.played_ms == 0
 
     await session.barge()
+    assert not module.status(conn.device_id)["head_audio_i2s_progress_observed"]
     assert not module.device_i2s_progress(
         conn, {**common, "committed_ms": 120}
     )
+    assert session.wire.played_ms == 0
+    module._sessions.pop(conn.device_id, None)
+
+
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancel"])
+async def test_i2s_receipt_cannot_advance_before_pending_send_finishes(native, outcome):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections[conn.device_id] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+    session.wire.handle_event({
+        "type": "response.created", "response_id": "r1",
+        "response": {"id": "r1", "metadata": {"duplex_event": {"epoch": 0}}},
+    })
+    assert session.wire.handle_event({
+        "type": "response.output_audio.delta", "response_id": "r1",
+        "format": "pcm16", "sample_rate_hz": 24000,
+        "delta": base64.b64encode(b"\0" * 4800).decode("ascii"),
+        "metadata": {"epoch": 0},
+    }) is not None
+    playback_id = session._begin_head_playback("r1", session._generation)
+    assert await session._send_device_state("start", session._generation)
+    entered, release = asyncio.Event(), asyncio.Event()
+    original_send = conn.websocket.send
+
+    async def racing_send(packet):
+        if isinstance(packet, bytes):
+            entered.set()
+            await release.wait()
+            if outcome == "failure":
+                raise RuntimeError("send failed")
+        await original_send(packet)
+
+    conn.websocket.send = racing_send
+    send = asyncio.create_task(session._send_device_opus(b"test-opus", session._generation))
+    await asyncio.wait_for(entered.wait(), 0.2)
+    receipt = {
+        "type": "desk_robot_i2s_progress", "session_id": conn.session_id,
+        "playback_id": playback_id, "committed_ms": 60,
+    }
+    assert module.device_i2s_progress(conn, receipt)
+    assert not module.device_i2s_progress(conn, receipt)
+    assert module.status(conn.device_id)["head_audio_i2s_committed_ms"] == 0
+    if outcome == "cancel":
+        send.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await send
+    else:
+        release.set()
+        if outcome == "failure":
+            with pytest.raises(RuntimeError, match="send failed"):
+                await send
+        else:
+            assert await send
+    expected_ms = 60 if outcome == "success" else 0
+    assert module.status(conn.device_id)["head_audio_i2s_committed_ms"] == expected_ms
+    assert not module.device_i2s_progress(conn, receipt)
     assert session.wire.played_ms == 0
     module._sessions.pop(conn.device_id, None)
 
