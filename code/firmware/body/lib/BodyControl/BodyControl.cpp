@@ -1,4 +1,5 @@
 #include "BodyControl.h"
+#include "BodyCommandParser.h"
 #include "CliffGuard.h"
 
 #include <cstdio>
@@ -1176,36 +1177,11 @@ void BodyControl::execute(const char* line, std::size_t length,
                           std::size_t capacity, bool local_safety_rearm,
                           std::uint64_t sample_us) {
   tick(now_ms);
-  if (length > kMaxLineLength) {
-    std::snprintf(reply, capacity, "ERR input line_too_long");
-    return;
-  }
-  char buffer[kMaxLineLength + 1]{};
-  for (std::size_t i = 0; i < length; ++i) {
-    const unsigned char byte = static_cast<unsigned char>(line[i]);
-    if (byte < 32 || byte > 126) {
-      std::snprintf(reply, capacity, "ERR input invalid_ascii");
-      return;
-    }
-    buffer[i] = line[i];
-  }
-
+  char buffer[kMaxLineLength + 1];
   char* tokens[5]{};
   std::size_t count = 0;
-  char* position = buffer;
-  while (*position != '\0') {
-    while (*position == ' ') ++position;
-    if (*position == '\0') break;
-    if (count == 5) {
-      std::snprintf(reply, capacity, "ERR input trailing_tokens");
-      return;
-    }
-    tokens[count++] = position;
-    while (*position != '\0' && *position != ' ') ++position;
-    if (*position != '\0') *position++ = '\0';
-  }
-  if (count == 0) {
-    std::snprintf(reply, capacity, "ERR input empty");
+  if (const char* error = body_command::tokenize(line, length, buffer, tokens, count)) {
+    std::snprintf(reply, capacity, "%s", error);
     return;
   }
   const char* command = tokens[0];

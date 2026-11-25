@@ -258,7 +258,22 @@ void strict_integer_parser() {
 void malformed_atomicity() {
   BodyControl body;
   send(body, "arm", 0);
-  send(body, "drive 12 -8 250", 0);
+  CHECK(send(body, "  drive 12 -8 250  ", 0) == "OK drive left=12 right=-8 ms=250");
+  CHECK(send(body, "ping" + std::string(91, ' '), 0) == "OK ping");
+  const std::pair<std::string, const char*> wire_errors[] = {
+      {std::string(96, ' '), "ERR input line_too_long"},
+      {std::string(96, '\0'), "ERR input line_too_long"},
+      {std::string("stop\0", 5), "ERR input invalid_ascii"},
+      {"stop\t", "ERR input invalid_ascii"},
+      {"drive 1 2 3 4", "ERR drive bad_arguments"},
+      {"drive 1 2 3 4 5", "ERR input trailing_tokens"},
+      {"   ", "ERR input empty"},
+  };
+  for (const auto& item : wire_errors) {
+    CHECK(send(body, item.first, 0) == item.second);
+    CHECK(body.state().left == 12 && body.state().right == -8);
+    CHECK(body.state().armed);
+  }
   for (const char* command : {"drive 10 20 251", "drive 101 20", "drive 0 -101",
                              "drive 0 0 0", "drive 0 0 -1", "drive 0 0 1 extra",
                              "drive 0", "drive", "drive 10 10 20 30 40",
