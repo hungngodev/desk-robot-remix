@@ -3367,6 +3367,29 @@ async def test_nfc_toy_tag_events_are_real_per_robot_counter_edges(fleet, tmp_pa
         assert "nfc_tag" in kinds
         assert hub.due("robot-01", time.monotonic())
         assert not hub.event_history["robot-02"]
+
+        def authenticated(events, token, *, valid=True, seq=100):
+            packet = report(events, token, valid=valid, seq=seq)
+            packet["force"]["boot_id"] = 77
+            packet["proximity"]["boot_id"] = 77
+            return packet
+
+        # Unlike epochless bench captures, authenticated recovery must not
+        # erase the same-boot replay fence or swallow the first new tag.
+        await pet._observe_aux("robot-01", 14, authenticated(20, 0))
+        await pet._observe_aux("robot-01", 14, authenticated(20, 0, valid=False))
+        await pet._observe_aux("robot-01", 14, authenticated(19, 0xabcd, seq=99))
+        assert (state.last_nfc_events, state.last_nfc_scan_seq) == (20, 100)
+        assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 2
+        await pet._observe_aux("robot-01", 14, authenticated(21, 0xa1b2c3d4, seq=101))
+        assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 3
+        await pet._observe_aux(
+            "robot-01", 14, authenticated(21, 0, valid=False, seq=101)
+        )
+        await pet._observe_aux("robot-01", 14, authenticated(21, 0xa1b2c3d4, seq=102))
+        assert (state.last_nfc_events, state.last_nfc_scan_seq) == (21, 102)
+        assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 3
+        assert memory.count("robot-02") == 0
     finally:
         state.enabled = False
         await pet.close()

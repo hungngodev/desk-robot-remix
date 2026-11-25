@@ -1334,7 +1334,10 @@ class PetController:
                 # packet must never rewind it and manufacture a new toy event.
                 state.last_nfc_events = current_events
                 state.last_nfc_scan_seq = current_scan
-        else:
+        elif not robot.nfc_interactions_qualified or state.last_aux_boot_id is None:
+            # A verified boot keeps its last completed scan through an invalid
+            # RF/transport sample. Only a new boot or opt-out resets the fence.
+            # Epochless bench captures retain their conservative rebaseline.
             state.last_nfc_events = None
             state.last_nfc_scan_seq = None
 
