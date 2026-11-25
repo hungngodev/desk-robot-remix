@@ -236,6 +236,44 @@ int main() {
     CHECK(direct.reading().low_g_status_valid && !direct.reading().low_g_irq);
     CHECK(direct.reading().low_g_event_seq == 1U);
 
+    // Wire fills RX at transfer time, not when the CPU later drains it.
+    // A wrong repeated START address leaves the pending transfer and old
+    // RX intact; a subsequent matching failed read must clear that RX.
+    {
+      TwoWire transfer;
+      const auto select = [&transfer](std::uint8_t reg) {
+        transfer.beginTransmission(0x68);
+        CHECK(transfer.write(reg) == 1);
+        CHECK(transfer.endTransmission(false) == 0);
+      };
+      transfer.registers[0x3a] = 0x80;
+      select(0x3a);
+      CHECK(transfer.requestFrom(0x68, 0) == 0);
+      CHECK(transfer.registers[0x3a] == 0x80);
+      select(0x3a);
+      CHECK(transfer.requestFrom(0x68, 1) == 1);
+      CHECK(transfer.registers[0x3a] == 0);
+      transfer.registers[0x3a] = 0x10;
+      CHECK(transfer.read() == 0x80);
+      CHECK(transfer.registers[0x3a] == 0x10);
+      select(0x3a);
+      CHECK(transfer.requestFrom(0x69, 1) == 0);
+      CHECK(transfer.requestFrom(0x68, 1) == 1);
+      CHECK(transfer.read() == 0x10);
+      transfer.registers[0x3b] = 0x40;
+      select(0x3b);
+      CHECK(transfer.requestFrom(0x68, 14) == 14);
+      transfer.registers[0x3b] = 0x20;
+      CHECK(transfer.read() == 0x40);
+      CHECK(transfer.available() == 13);
+      select(0x3b);
+      CHECK(transfer.requestFrom(0x69, 14) == 0);
+      CHECK(transfer.available() == 13);
+      transfer.reject_read_reg = 0x3b;
+      CHECK(transfer.requestFrom(0x68, 14) == 0);
+      CHECK(transfer.available() == 0 && transfer.read() == -1);
+    }
+
     // The fake must not leak stale RX bytes after a failed acquisition.
     TwoWire fault_wire;
     fault_wire.registers[0x3b] = 0x40;

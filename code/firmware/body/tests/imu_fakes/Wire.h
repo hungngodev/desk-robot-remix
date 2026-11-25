@@ -55,25 +55,32 @@ class TwoWire {
                           bool = true) {
     // A matching read replaces the RX buffer even on failure, as Wire.cpp
     // in Arduino-ESP32 2.0.17 does before i2cWriteReadNonStop.
+    // An address mismatch is rejected before Wire resets its RX buffer
+    // or consumes the pending repeated START.
+    if (read_pending_ && address != read_address_) return 0;
     remaining_ = 0;
+    rx_pos_ = 0;
     const bool pending = read_pending_;
     read_pending_ = false;
-    if (!pending || address != read_address_ ||
-        static_cast<int>(read_register_) == reject_read_reg ||
-        count > 14U) return 0;
-    remaining_ = static_cast<int>(read_register_) == partial_read_reg && count
+    if (!pending || static_cast<int>(read_register_) == reject_read_reg ||
+        count == 0 || count > rx_buffer_.size()) return 0;
+    remaining_ = static_cast<int>(read_register_) == partial_read_reg
         ? count - 1U : count;
+    auto& values = bank(read_address_);
+    for (std::size_t i = 0; i < remaining_; ++i) {
+      const auto reg = static_cast<std::uint8_t>(read_register_ + i);
+      rx_buffer_[i] = values[reg];
+      // The device clears INT_STATUS on the bus read, not CPU consumption.
+      if (reg == 0x3a && (address == 0x68 || address == 0x69))
+        values[reg] = 0;
+    }
     return remaining_;
   }
   int available() const { return static_cast<int>(remaining_); }
   int read() {
     if (!remaining_) return -1;
     --remaining_;
-    const auto reg = read_register_++;
-    auto& values = bank(read_address_);
-    const auto value = values[reg];
-    if (reg == 0x3a) values[reg] = 0; // MPU FF_INT clears on status read
-    return value;
+    return rx_buffer_[rx_pos_++];
   }
   bool wrote(std::uint8_t address, std::uint8_t reg,
              std::uint8_t value) const {
@@ -90,6 +97,8 @@ class TwoWire {
   std::uint8_t address_ = 0;
   std::uint8_t read_address_ = 0;
   std::uint8_t read_register_ = 0;
+  std::array<std::uint8_t, 14> rx_buffer_{};
+  std::size_t rx_pos_ = 0;
   std::size_t remaining_ = 0;
   bool read_pending_ = false;
   std::vector<std::uint8_t> bytes_;
