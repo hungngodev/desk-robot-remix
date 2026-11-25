@@ -88,7 +88,10 @@ def _prepare(jpeg: bytes, max_side: int = 768) -> tuple[bytes, bytes, float]:
             if not 1 <= im.width <= 4096 or not 1 <= im.height <= 4096:
                 raise ValueError("Camera dimensions invalid")
             im.load()
-            rgb = ImageOps.exif_transpose(im).convert("RGB")
+            # The decoded image is privately owned by this worker. Avoid
+            # copying an already upright RGB raster before thumbnailing.
+            ImageOps.exif_transpose(im, in_place=True)
+            rgb = im if im.mode == "RGB" else im.convert("RGB")
     except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
         # Pillow can reject a malicious raster before our size guard runs.
         # Classify it as a bad frame, not a broken continuous connection.
