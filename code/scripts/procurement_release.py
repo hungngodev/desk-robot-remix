@@ -2266,7 +2266,7 @@ def cost_requirements(report: dict, scope: str) -> tuple[dict, dict]:
 
 
 def quoted_carrier_matches_signed_role(line: dict, selected: dict) -> bool:
-    """Strict release must bind the quoted *revision*, not merely chip/SKU.
+    """Strict release binds the quoted revision and any signed model.
 
     Bench sample price projections may have unknown board revisions, but
     irreversible orders must carry the exact revision from the inspected
@@ -2274,7 +2274,10 @@ def quoted_carrier_matches_signed_role(line: dict, selected: dict) -> bool:
     """
     if not isinstance(line, dict) or not isinstance(selected, dict):
         return False
-    for key in ("sku", "pcb_revision"):
+    keys = ("sku", "pcb_revision")
+    if selected.get("model") is not None:
+        keys += ("model",)
+    for key in keys:
         quoted = line.get(key)
         if (not isinstance(quoted, str) or not quoted.strip()
                 or quoted != selected.get(key)):
@@ -3036,7 +3039,7 @@ def main() -> int:
                 print("HOLD: new Adafruit purchase: " + role, file=sys.stderr)
                 return 2
             if not quoted_carrier_matches_signed_role(line, selected):
-                print("HOLD: quoted SKU, PCB revision or chosen retailer "
+                print("HOLD: quoted model/SKU, PCB revision or chosen retailer "
                       "differs from signed carrier: " + role, file=sys.stderr)
                 return 2
             if role == POWER_PARENT_ROLE:

@@ -281,3 +281,19 @@ def test_strict_cli_rejects_mismatched_stock_carrier_under_mocked_audit(
     )
     assert release.main() == 2
     assert "paid_in_flight 0" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("model", [None, "", "VL53L4CD", True, "__missing__"])
+def test_signed_quote_model_cannot_be_substituted(model):
+    signed = {
+        "sku": "SEN-19-006",
+        "pcb_revision": "rev-B",
+        "model": "VL53L0X GY-530",
+    }
+    quote = {**signed, "seller": "Distributor"}
+    assert release.quoted_carrier_matches_signed_role(quote, signed)
+    if model == "__missing__":
+        quote.pop("model")
+    else:
+        quote["model"] = model
+    assert not release.quoted_carrier_matches_signed_role(quote, signed)
