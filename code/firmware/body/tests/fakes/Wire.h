@@ -46,6 +46,9 @@ class TwoWire {
   std::uint8_t pulse_fifo_overflow = 0;
   std::uint8_t pulse_interrupt_status = 0;
   std::uint8_t pulse_interrupt_enable = 0;
+  std::uint8_t pulse_config[14]{};
+  int ignore_pulse_config_write_reg = -1;
+  int fail_pulse_config_read_reg = -1;
   bool fail_pulse_status_read = false;
   bool pulse_clip_ir = false;
   unsigned failed_imu_writes = 0;
@@ -325,7 +328,13 @@ class TwoWire {
         if (register_address == 0x01) mcp_iodirb = outbound[1];
       }
       if (current_address == 0x57 && outbound.size() == 2) {
-        if (register_address == 0x02) pulse_interrupt_enable = outbound[1];
+        if (register_address != ignore_pulse_config_write_reg) {
+          if (register_address == 0x02) pulse_interrupt_enable = outbound[1];
+          else if (register_address == 0x08 || register_address == 0x09 ||
+                   register_address == 0x0a || register_address == 0x0c ||
+                   register_address == 0x0d)
+            pulse_config[register_address] = outbound[1];
+        }
         if (register_address == 0x06)
           pulse_fifo_read_pointer = outbound[1] & 31U;
         if (register_address == 0x05)
@@ -490,6 +499,14 @@ class TwoWire {
     else if (addr == 0x28 && register_address == 0x2a) inbound = {cap_multi_touch_block};
     else if (addr == 0x28 && register_address == 0x44) inbound = {cap_config2};
     else if (addr == 0x57 && register_address == 0xFF) inbound = {0x15};
+    else if (addr == 0x57 && (register_address == 0x02 ||
+             register_address == 0x08 || register_address == 0x09 ||
+             register_address == 0x0a || register_address == 0x0c ||
+             register_address == 0x0d)) {
+      if (register_address == fail_pulse_config_read_reg) return 0;
+      inbound = {register_address == 0x02 ? pulse_interrupt_enable :
+                 pulse_config[register_address]};
+    }
     else if (addr == 0x57 && register_address == 0x00) {
       if (fail_pulse_status_read) return 0;
       inbound = {pulse_interrupt_status};

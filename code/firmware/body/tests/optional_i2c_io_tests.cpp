@@ -55,6 +55,25 @@ int main() {
     CHECK(!desk_robot::ads1115_completed_for_channel(0xD383U, 0U)); // wrong mux
     CHECK(!desk_robot::ads1115_completed_for_channel(0xC383U, 2U)); // no lane 2
     CHECK(pulse.begin(Wire));
+    // A transport ACK does not prove the selected optical mode or cadence.
+    // A failed readback must leave the optional sensor unpublished and close
+    // its mux, even though the MAX30102 identity and mux both responded.
+    for (int reg : {0x09, 0x08, 0x0a, 0x0c, 0x0d, 0x02}) {
+      for (bool ignored : {false, true}) {
+        TwoWire faulty;
+        if (reg == 0x02) faulty.pulse_interrupt_enable = 0xff;
+        else faulty.pulse_config[reg] = 0xff;
+        if (ignored) faulty.ignore_pulse_config_write_reg = reg;
+        else faulty.fail_pulse_config_read_reg = reg;
+        desk_robot::PulsePad candidate;
+        CHECK(!candidate.begin(faulty));
+        CHECK(candidate.mux_present());
+        CHECK(!candidate.sample().present && !candidate.sample().valid);
+        CHECK(!candidate.poll(100));
+        CHECK(candidate.sample().sample_seq == 0U);
+        CHECK(faulty.ranges == 0 && faulty.extras == 0);
+      }
+    }
     Wire.cap_input_enable = 0x01;
     CHECK(touch.begin(Wire));
     CHECK(Wire.cap_input_enable == 0xFF);

@@ -74,15 +74,29 @@ bool PulsePad::begin(TwoWire& wire) {
     // MAX30102 dual LED (RED/IR) mode. No claim of medical SpO2/heart rate.
     // 0x23 = 4096nA ADC, 50sps, 411us pulse from MAX3010x register map.
     // LED pilot settings intentionally low; actual paw enclosure needs trial.
-    configured = write_reg(0x09, 0x03) &&
-                 write_reg(0x08, 0x00) &&
-                 write_reg(0x0a, 0x23) &&
-                 write_reg(0x0c, 0x07) &&
-                 write_reg(0x0d, 0x07) &&
-                 write_reg(0x02, kAmbientOverflow) &&
-                 write_reg(0x04, 0x00) &&
-                 write_reg(0x05, 0x00) &&
-                 write_reg(0x06, 0x00);
+    // Datasheet p. 10: verify only defined configuration bits. FIFO
+    // pointers are live counters, not stable configuration registers.
+    struct Setting { std::uint8_t reg, value, mask; };
+    constexpr Setting settings[] = {
+        {0x09, 0x03, 0xc7},  // mode, shutdown and reset
+        {0x08, 0x00, 0xff},  // FIFO averaging, rollover, almost-full
+        {0x0a, 0x23, 0x7f},  // ADC range, sample rate, pulse width
+        {0x0c, 0x07, 0xff},  // red LED amplitude
+        {0x0d, 0x07, 0xff},  // IR LED amplitude
+        {0x02, kAmbientOverflow, 0xe0},  // interrupt enables
+    };
+    configured = true;
+    for (const auto& setting : settings) {
+      std::uint8_t actual = 0;
+      if (!write_reg(setting.reg, setting.value) ||
+          !read_reg(setting.reg, actual) ||
+          (actual & setting.mask) != setting.value) {
+        configured = false;
+        break;
+      }
+    }
+    configured = configured && write_reg(0x04, 0x00) &&
+                 write_reg(0x05, 0x00) && write_reg(0x06, 0x00);
   }
   if (!close()) configured = false;
   sample_.present = recognized && configured;
