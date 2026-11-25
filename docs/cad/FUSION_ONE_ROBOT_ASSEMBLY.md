@@ -188,8 +188,21 @@ the original README files, including noncommercial and share alike restrictions.
    independent WROOM receiver views, left/right field overlap and aim.
    Place two electrically independent fail-closed seat switches with measured
    travel and service access; the AprilTag and decoded IR are not seat
-   evidence. Never connect bare cell contacts to a live 5 V pad. The
-   CAD does not certify charging.
+   evidence. Before final mounting, create a new source-pinned record for
+   the actual dock number (example for dock 01, from the repository root):
+
+   ```sh
+   python3 code/scripts/screen_dock_seat_mechanics.py --template-for-dock 1 --output dock01_seat.json
+   python3 code/scripts/screen_dock_seat_mechanics.py --measurements dock01_seat.json
+   ```
+
+   Fill measured fields before the second command. Require
+   `source_only_layout_possible` to be true; stop on a failed layout or
+   stale CAD hash. Keep contacts unpowered for physical seat, polarity,
+   bounce, fault and clearance verification. The screen always reports
+   `physical_dock_seating_qualified` and `charging_authorized` false.
+   Never connect bare cell contacts to a live 5 V pad. The CAD does not
+   certify charging.
 10. Use **Inspect > Section Analysis** to examine assembly and removable
     service access. Move tracks through full travel, servos through their
     complete mechanical range, and look at camera/cliff lens field obstructions.
