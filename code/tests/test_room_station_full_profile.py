@@ -328,7 +328,8 @@ def test_bme_completed_native_conversion_cache_with_sanitizers(tmp_path):
     (tmp_path / "bme_step_under_test.h").write_text(temperature + step)
     cmd = [
         compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
-        "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
+        "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
+        "-fno-omit-frame-pointer",
         f"-I{includes}", f"-I{tmp_path}",
     ]
     if platform.system() == "Linux":
