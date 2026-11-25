@@ -3636,6 +3636,14 @@ class PetController:
                     robot_id, choice.get("mood", "none"),
                     model_context_permitted,
                 )
+            # A silent decision is evidence of deliberate restraint only if
+            # its context survived both model inference and optional OLED IO.
+            if choice["action"] == "silence" and not model_context_permitted():
+                state.suppressed += 1
+                state.last_initiative_suppression = "model_context_superseded"
+                if scheduled_activity:
+                    state.last_activity_decision = "defer"
+                return
             if choice["action"] != "speak":
                 state.suppressed += 1
                 state.last_initiative_suppression = (

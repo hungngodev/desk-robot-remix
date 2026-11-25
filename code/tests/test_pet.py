@@ -9072,3 +9072,62 @@ async def test_initial_unhealthy_safety_baseline_revokes_pickup_without_speech_i
         await asyncio.gather(speech_task, return_exceptions=True)
         state.enabled = False
         await pet.close()
+
+
+@pytest.mark.parametrize("phase", ["model", "face"])
+async def test_activity_silence_requires_current_context(fleet, tmp_path, monkeypatch, phase):
+    """A superseded choice is deferral, not a deliberate silence receipt."""
+    entered, resume = asyncio.Event(), asyncio.Event()
+
+    class DecisionChat:
+        calls = 0
+
+        async def proactive_decision(self, history):
+            self.calls += 1
+            if phase == "model" and self.calls == 1:
+                entered.set()
+                await resume.wait()
+            return {"action": "silence", "text": "", "tool": "none", "mood": "thinking"}
+
+    chat, speaker = DecisionChat(), SimulatedSpeaker()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {}, Conversation(fleet, chat, speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0,
+    )
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 41
+
+    async def face_cue(robot_id, mood, permitted):
+        if phase == "face" and chat.calls == 1:
+            assert permitted()
+            entered.set()
+            await resume.wait()
+
+    monkeypatch.setattr(pet, "_cue_decided_face", face_cue)
+    try:
+        pet._reconsider_activity()
+        task = pet._speech_task
+        assert task is not None
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        state.generation += 1
+        resume.set()
+        await asyncio.wait_for(task, timeout=3)
+        assert state.activity_silences == 0
+        assert state.last_activity_decision == "defer"
+        assert state.last_initiative_suppression == "model_context_superseded"
+        assert speaker.spoken == []
+
+        pet._reconsider_activity()
+        task = pet._speech_task
+        assert task is not None
+        await asyncio.wait_for(task, timeout=3)
+        assert state.activity_silences == 1
+        assert state.last_activity_decision == "silence"
+        assert state.last_initiative_suppression == "model_chose_silence"
+        assert speaker.spoken == []
+    finally:
+        resume.set()
+        state.enabled = False
+        await pet.close()
