@@ -31,6 +31,43 @@
 #include <esp_lcd_panel_vendor.h>
 #include <driver/gpio.h>
 
+// Pinned iot_button dispatches these callbacks serially from its button task.
+// Only a matching debounced press/release/single-click may restore consent.
+class BootPrivacyGesture {
+public:
+    bool PressDown() {
+        click_ready_ = false;
+        if (pressed_) {
+            cancelled_ = true;
+            return false;
+        }
+        pressed_ = true;
+        cancelled_ = false;
+        return true;
+    }
+    void PressUp() {
+        if (!pressed_) {
+            click_ready_ = false;
+            return;
+        }
+        pressed_ = false;
+        click_ready_ = !cancelled_;
+    }
+    void Cancel() {
+        cancelled_ = true;
+        click_ready_ = false;
+    }
+    bool TakeClick() {
+        const bool accepted = !pressed_ && click_ready_;
+        click_ready_ = false;
+        return accepted;
+    }
+private:
+    bool pressed_ = false;
+    bool cancelled_ = false;
+    bool click_ready_ = false;
+};
+
 class DeskRobotSenseBoard : public WifiBoard {
 private:
     i2c_master_bus_handle_t display_i2c_bus_ = nullptr;
@@ -57,6 +94,7 @@ private:
     std::atomic<bool> audio_operator_muted_{false};
     // This press latches mute before the release-based click event runs.
     std::atomic<bool> boot_press_muted_{false};
+    BootPrivacyGesture boot_privacy_gesture_;
     bool continuous_audio_started_ = false;
     uint32_t last_audio_listen_attempt_ms_ = 0;
     uint32_t last_audio_failure_epoch_seen_ = 0;
@@ -415,6 +453,7 @@ public:
         // at button press-down, including for a long held BOOT button.
         boot_button_.OnPressDown([this]() {
             audio_operator_touched_.store(true, std::memory_order_release);
+            if (!boot_privacy_gesture_.PressDown()) return;
             const bool already_muted = audio_operator_muted_.exchange(
                 true, std::memory_order_acq_rel);
             boot_press_muted_.store(!already_muted, std::memory_order_release);
@@ -430,8 +469,16 @@ public:
             }
             app.StopListening();
         });
+        boot_button_.OnPressUp([this]() { boot_privacy_gesture_.PressUp(); });
+        boot_button_.OnLongPress([this]() { boot_privacy_gesture_.Cancel(); });
+        boot_button_.OnDoubleClick([this]() { boot_privacy_gesture_.Cancel(); });
 #endif
         boot_button_.OnClick([this]() {
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+            // Orphan, repeated or held-button clicks cannot restore consent.
+            if (!boot_privacy_gesture_.TakeClick() ||
+                gpio_get_level(BOOT_BUTTON_GPIO) == 0) return;
+#endif
             auto& app = Application::GetInstance();
             const auto state = app.GetDeviceState();
             if (state == kDeviceStateStarting) {
