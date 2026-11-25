@@ -1011,3 +1011,23 @@ for line in sys.stdin:
         await dock_runtime.close_detector_pool()
     assert not pool._owned
     assert dock_runtime._DETECTOR_POOL is not pool
+
+
+@pytest.mark.parametrize("verdict", [False, True, 0, {}, {"ok": False}, "stale"])
+async def test_selected_dock_frame_rejects_unexpected_verifier_result(verdict):
+    class Verifier:
+        async def dock_receipt_current(self, receipt):
+            return verdict
+
+    receipt = (b"\xff\xd8\xff\xd9", dock_runtime.time.monotonic(), (1, 1, 1), 1)
+    with pytest.raises(ValueError, match="Dock frame source verification denied"):
+        await dock_runtime.verify_selected_dock_frame(Verifier(), receipt)
+
+
+async def test_selected_dock_frame_accepts_none_return_from_exception_based_verifier():
+    class Verifier:
+        async def dock_receipt_current(self, receipt):
+            assert receipt[2:] == ((1, 1, 1), 1)
+
+    receipt = (b"\xff\xd8\xff\xd9", dock_runtime.time.monotonic(), (1, 1, 1), 1)
+    await dock_runtime.verify_selected_dock_frame(Verifier(), receipt)

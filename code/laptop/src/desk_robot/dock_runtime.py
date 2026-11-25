@@ -157,10 +157,14 @@ async def verify_selected_dock_frame(head, observation) -> None:
         remaining = 0.20 - (time.monotonic() - received_at)
         if remaining <= 0:
             raise ValueError("Invalid or stale dock camera receipt")
-        await _bounded_head_reply(
+        verdict = await _bounded_head_reply(
             verify(observation), seconds=remaining,
             timeout_message="Dock frame source verification timed out",
         )
+        # HttpHead has an exception-based, None-on-success contract. A
+        # false or otherwise unexpected verdict must never authorize motion.
+        if verdict is not None:
+            raise ValueError("Dock frame source verification denied")
         # Even an apparently successful reply can arrive after the receipt
         # expired (for example while the event loop was busy).
         unpack_dock_frame(observation)

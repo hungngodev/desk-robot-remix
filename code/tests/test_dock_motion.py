@@ -930,7 +930,7 @@ async def test_second_pet_cannot_use_first_pet_dock_intrinsics_to_move(
 
 @pytest.mark.parametrize(
     "outcome", ["standoff", "contact", "beacon_loss", "timeout",
-                "marker_loss", "pulse_budget"],
+                "marker_loss", "pulse_budget", "receipt_denial"],
 )
 async def test_public_dock_replay_stops_without_unqualified_recovery(
     settings, tmp_path, monkeypatch, outcome,
@@ -1003,6 +1003,8 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
 
         async def dock_receipt_current(self, receipt):
             assert receipt[2:] == ((1234, self.frames, 1), 1)
+            if outcome == "receipt_denial" and self.ir_reads:
+                return False  # Negative adapter verdict, not an exception.
             self.last_verified = (self.frames, self.ir_reads)
 
         async def ir_status(self):
@@ -1086,7 +1088,10 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
         await asyncio.wait_for(coordinator.tasks[job.id], timeout=10)
         commands = [c for c in head.commands if c != "keepalive"]
         expected = ["arm", "drive 20 -20 100", "stop"]
-        if outcome == "pulse_budget":
+        if outcome == "receipt_denial":
+            expected = ["arm"]
+            assert head.frames == head.ir_reads == 1
+        elif outcome == "pulse_budget":
             expected = ["arm"] + ["drive 20 -20 100", "stop"] * 16
             assert head.frames == head.ir_reads == 16
         elif outcome == "marker_loss":
@@ -1114,6 +1119,8 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
             assert job.result is None
             if outcome == "contact":
                 assert "body disarmed" in job.error
+            elif outcome == "receipt_denial":
+                assert "Dock JPEG source changed before drive" in job.error
             else:
                 assert job.error == "TimeoutError"
                 await asyncio.wait_for(head.snapshot_cancelled.wait(), timeout=1)
