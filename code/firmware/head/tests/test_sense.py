@@ -2390,3 +2390,110 @@ def test_camera_receipt_exhaustion_and_monotonic_completion_are_fail_closed():
         complete = worker.index("bridge->camera_completed_us_ = completed;", commit)
         assert capture < stamp < exhausted < monotonic < reserve < commit < complete
         assert worker.count("++bridge->camera_sequence_;") == 1
+
+
+def test_camera_workers_fault_injection(tmp_path):
+    """Compile the actual workers against deterministic capture/HTTP fakes."""
+    compiler = shutil.which("g++") or shutil.which("c++")
+    if compiler is None:
+        raise unittest.SkipTest("Native C++ compiler unavailable")
+    bridge = (HEAD / "overlay/robot_bridge.cc").read_text()
+    start = bridge.index("void Bridge::CameraTask(void* context) {")
+    end = bridge.index("#if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3)", start)
+    workers = bridge[start:end]
+    prefix = r"""
+#include <atomic>
+#include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <limits>
+#include <string>
+#include <vector>
+using esp_err_t = int;
+constexpr int ESP_OK = 0, ESP_FAIL = -1;
+#define CONFIG_DESK_ROBOT_ID "robot-01"
+#define pdMS_TO_TICKS(x) (x)
+struct httpd_req_t { void* user_ctx; };
+int calls = 0, fail_at = 0, completed_req = 0, errors = 0;
+std::int64_t now = 100;
+int result() { return ++calls == fail_at ? ESP_FAIL : ESP_OK; }
+int httpd_resp_set_type(httpd_req_t*, const char*) { return result(); }
+int httpd_resp_set_hdr(httpd_req_t*, const char*, const char*) { return result(); }
+int httpd_resp_send(httpd_req_t*, const char*, size_t) { return result(); }
+int httpd_resp_send_chunk(httpd_req_t*, const char*, size_t) { return result(); }
+void httpd_req_async_handler_complete(httpd_req_t*) { ++completed_req; }
+void vTaskDelete(void*) {}
+void vTaskDelay(int) {}
+std::int64_t esp_timer_get_time() { return now; }
+std::string Envelope(bool, const std::string& msg) { return msg; }
+bool CompleteJpeg(const uint8_t* bytes, size_t n) {
+    return n >= 4 && bytes[0] == 255 && bytes[1] == 216 &&
+           bytes[n-2] == 255 && bytes[n-1] == 217;
+}
+struct Capture {
+    bool valid;
+    std::vector<uint8_t> bytes;
+    explicit operator bool() const { return valid; }
+    std::string error() const { return "bad capture"; }
+    const std::vector<uint8_t>* operator->() const { return &bytes; }
+};
+struct Camera {
+    int left = 1;
+    bool malformed = false;
+    Capture SnapshotJpeg() {
+        return {left-- > 0, malformed ? std::vector<uint8_t>{255,216,0,0}
+                                     : std::vector<uint8_t>{255,216,255,217}};
+    }
+};
+struct Bridge {
+    Camera* camera_;
+    uint32_t camera_sequence_ = 0, boot_nonce_ = 7;
+    int64_t camera_completed_us_ = 0;
+    std::atomic<bool> camera_busy_{true};
+    void Json(httpd_req_t*, int, const std::string&) { ++errors; }
+    static void CameraTask(void*);
+    static void CameraStreamTask(void*);
+};
+"""
+    suffix = r"""
+int main() {
+    for (bool stream : {false, true}) {
+        auto worker = stream ? Bridge::CameraStreamTask : Bridge::CameraTask;
+        for (int fail = 0; fail <= 7; ++fail) {
+            Camera cam;
+            Bridge bridge{&cam};
+            httpd_req_t req{&bridge};
+            calls = completed_req = errors = 0; fail_at = fail;
+            worker(&req);
+            assert(bridge.camera_sequence_ == (fail == 0 ? 1U : 0U));
+            assert(bridge.camera_completed_us_ == (fail == 0 ? now : 0));
+            assert(!bridge.camera_busy_ && completed_req == 1);
+        }
+        for (int scenario = 0; scenario < 4; ++scenario) {
+            Camera cam;
+            Bridge bridge{&cam};
+            httpd_req_t req{&bridge};
+            calls = completed_req = errors = 0; fail_at = 0;
+            if (scenario == 0) cam.left = 0;
+            if (scenario == 1) cam.malformed = true;
+            if (scenario == 2) bridge.camera_sequence_ = UINT32_MAX;
+            if (scenario == 3) bridge.camera_completed_us_ = now;
+            const auto seq = bridge.camera_sequence_;
+            const auto stamp = bridge.camera_completed_us_;
+            worker(&req);
+            assert(bridge.camera_sequence_ == seq && bridge.camera_completed_us_ == stamp);
+            assert(!bridge.camera_busy_ && completed_req == 1);
+        }
+    }
+}
+"""
+    source = tmp_path / "camera_worker.cc"
+    source.write_text(prefix + workers + suffix)
+    binary = tmp_path / "camera_worker"
+    pie_flags = [] if sys.platform == "darwin" else ["-fno-pie", "-no-pie"]
+    subprocess.run(
+        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+         "-fsanitize=address,undefined", *pie_flags, str(source), "-o", str(binary)],
+        check=True, capture_output=True, text=True, env=native_cpp_env(), timeout=60,
+    )
+    subprocess.run([str(binary)], check=True, timeout=10, env=native_cpp_env())
