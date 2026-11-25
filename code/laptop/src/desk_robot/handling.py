@@ -322,7 +322,7 @@ class HandlingGate:
             )
             if not malformed and valid and not backward:
                 self.last_low_g_seq = seq
-            if malformed or not valid or new_irq or backward:
+            if malformed or not valid or irq or new_irq or backward:
                 # A failed FF status read cannot rule out an unseen fall.
                 # Keep acquisition identity and event fence, but revoke
                 # relative pose until eight fresh quiet observations return.

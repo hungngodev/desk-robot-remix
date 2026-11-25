@@ -1083,7 +1083,10 @@ def test_hardware_low_g_counter_survives_missing_host_pulse():
     assert gate.reference == (0, 0, 1)
     assert qualified(gate, _mpu_native_low_g(1, irq=True),
                      103.25) == ()
-    assert gate.reference == (0, 0, 1)  # same physical event
+    # Deduplicating the event counter must not treat an asserted interrupt
+    # as trustworthy upright evidence.
+    assert gate.reference is None
+    assert gate.startup_samples == []
     assert qualified(gate, _mpu_native_low_g(2), 103.4) == ()
     assert gate.reference is None
     assert gate.last_low_g_seq == 2
@@ -1171,3 +1174,20 @@ def test_partial_native_low_g_status_also_fences_legacy_downgrade():
         assert qualified(gate, sample(), 100.2 + i * 0.1) == ()
     assert gate.reference is None
     assert gate.startup_samples == []
+
+
+def test_asserted_native_low_g_cannot_seed_upright_calibration():
+    gate = HandlingGate()
+    calibrated(gate)
+    assert qualified(gate, _mpu_native_low_g(0), 102.0) == ()
+    assert qualified(gate, _mpu_native_low_g(1, irq=True), 102.1) == ()
+    for i in range(10):
+        assert qualified(gate, _mpu_native_low_g(1, irq=True), 102.2 + i * 0.1) == ()
+        assert gate.reference is None
+        assert gate.startup_samples == []
+        assert gate.last_low_g_seq == 1
+    for i in range(7):
+        assert qualified(gate, _mpu_native_low_g(1), 103.2 + i * 0.1) == ()
+        assert gate.reference is None
+    assert qualified(gate, _mpu_native_low_g(1), 103.9) == ()
+    assert gate.reference == (0, 0, 1)
