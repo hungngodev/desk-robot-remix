@@ -22,7 +22,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Protocol
 
-from .api_robot_status import _aux_boot_epoch, _fresh_aux_acquisition
+from .aux import _aux_boot_epoch, _fresh_aux_acquisition, validate_aux
 from .brain_context import (
     active_job_timeline,
     compose_brain_context,
@@ -1197,8 +1197,6 @@ class PetController:
         received_at = time.monotonic()
         if self.settings.mode != "hardware":
             return
-        from .aux import validate_aux
-
         validate_aux(data, robot_id)
         state = self.states[robot_id]
         if not state.enabled or state.generation != generation or self._closed:

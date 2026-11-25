@@ -9,43 +9,9 @@ import math
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 
+from .aux import _aux_boot_epoch, _fresh_aux_acquisition
 from .config import Settings
 from .transport import HeadError
-
-
-def _fresh_aux_acquisition(
-    reading: object, *, previous_seq: int | None, max_age_ms: int,
-) -> bool:
-    """Require a recent, genuinely newer acquisition for spoken tool context.
-
-    Old firmware may omit a clock in its raw read-only diagnostics. That
-    compatibility must not turn one indefinitely cached sensor value into a
-    succession of new live observations for the model.
-    """
-    if not isinstance(reading, dict) or reading.get("valid") is not True:
-        return False
-    seq, age = reading.get("seq"), reading.get("age_ms")
-    if (type(seq) is not int or not 1 <= seq <= 0xffffffff
-            or type(age) is not int or not 0 <= age < max_age_ms):
-        return False
-    if previous_seq is None:
-        return True
-    # Unsigned half-range ordering accepts genuine uint32 sequence rollover,
-    # but rejects duplicate and reordered old observations.
-    delta = (seq - previous_seq) & 0xffffffff
-    return 0 < delta < 0x80000000
-
-
-def _aux_boot_epoch(data: dict) -> int | None:
-    """Bind conversational ambient samples to one explicit WROOM boot."""
-    force, proximity = data.get("force"), data.get("proximity")
-    if not isinstance(force, dict) or not isinstance(proximity, dict):
-        return None
-    first, second = force.get("boot_id"), proximity.get("boot_id")
-    if (type(first) is int and 1 <= first <= 0xffffffff
-            and type(second) is int and first == second):
-        return first
-    return None
 
 
 def _json_safe_telemetry(value: object) -> object:
