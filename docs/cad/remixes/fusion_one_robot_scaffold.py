@@ -5,10 +5,10 @@ desk-robot-remix/docs/cad/remixes directory. It creates a NEW design.
 Source meshes have arbitrary coordinates; this does not align joints,
 generate missing mounts, or certify any printed part or charging circuit.
 """
-from pathlib import Path
-from hashlib import sha1
 import runpy
 import traceback
+from hashlib import sha1
+from pathlib import Path
 
 SOURCE_MESHES = (
     ("01 Stepper Chassis", "docs/cad/originals/smars-stepper/SMARS_2BJY8-Chassis.stl"),
@@ -77,6 +77,39 @@ SOURCE_MESH_GIT_BLOBS = {
 }
 
 
+# Pin the reviewed author/license/source records as well as the geometry.
+# In particular, retain the stricter SMARS ancestor terms and Sparky SA grant.
+# A metadata revision requires deliberate attribution review before repinning.
+SOURCE_ATTRIBUTION_GIT_BLOBS = {
+    "docs/cad/originals/forklift/source.json":
+        "375cb8b1c2d1a7b29ec8a84d65e255ffca25f2fe",
+    "docs/cad/originals/gripper/source.json":
+        "353fc4e91cbf35e2ef5db39af103db11e38fc279",
+    "docs/cad/originals/smars-stepper/source.json":
+        "22c7d467eb0598992609ad986b587e5ff4d4fb85",
+    "docs/cad/originals/smars/source.json":
+        "030650073575966277660b6aaae7812699d3e403",
+    "docs/cad/originals/sparky-head/LICENSE.md":
+        "c5e094cdaca8f699374fd8811c18e436d9129667",
+    "docs/cad/originals/sparky-head/source.json":
+        "d5ac07640d4c2aa60c779534c6ec74595385bdc1",
+}
+
+
+def _git_blob_sha(content: bytes) -> str:
+    return sha1(b"blob " + str(len(content)).encode("ascii") + b"\0" + content).hexdigest()
+
+
+def verify_original_attribution_records(root: Path) -> None:
+    """Require the reviewed attribution and upstream license records."""
+    for relative, expected in SOURCE_ATTRIBUTION_GIT_BLOBS.items():
+        path = root / relative
+        if not path.is_file():
+            raise FileNotFoundError(f"Missing original CAD attribution: {relative}")
+        if _git_blob_sha(path.read_bytes()) != expected:
+            raise ValueError(f"Original CAD attribution changed: {relative}")
+
+
 def verify_original_source_revisions(root: Path) -> dict[str, str]:
     """Fail before Fusion import when an original licensed STL was replaced.
 
@@ -91,13 +124,11 @@ def verify_original_source_revisions(root: Path) -> dict[str, str]:
         path = root / rel
         if not path.is_file():
             raise FileNotFoundError(f"Missing original CAD source: {rel}")
-        content = path.read_bytes()
-        actual = sha1(
-            b"blob " + str(len(content)).encode("ascii") + b"\0" + content
-        ).hexdigest()
+        actual = _git_blob_sha(path.read_bytes())
         if actual != expected:
             raise ValueError(f"Original licensed CAD source changed: {rel}")
         verified[rel] = actual
+    verify_original_attribution_records(root)
     return verified
 
 
@@ -243,6 +274,8 @@ def run(context):
         ui.messageBox(
             f"Imported {len(sources)} separate unaligned mesh components.\\n"
             "Dock and fit gauges, when available, are labeled unqualified references. "
+            "Retain original CAD attribution and applicable noncommercial/share-alike "
+            "terms; this import grants no commercial or redistribution approval. "
             "This is not the finished robot. Align shaft centers and gears, "
             "validate track compatibility and inspect collisions. Then model "
             "adapters to caliper measurements before printing.\\n"

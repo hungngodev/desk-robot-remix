@@ -194,7 +194,7 @@ def test_original_licensed_fusion_meshes_are_revision_pinned(tmp_path):
     pinned = canonical["SOURCE_MESH_GIT_BLOBS"]
     assert len(pinned) == len(canonical["SOURCE_MESHES"]) == 12
     assert verify(ROOT) == pinned
-    for rel in pinned:
+    for rel in (*pinned, *canonical["SOURCE_ATTRIBUTION_GIT_BLOBS"]):
         path = tmp_path / rel
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes((ROOT / rel).read_bytes())
@@ -247,3 +247,32 @@ def test_cozmars_packaging_precedes_sparky_fallback_without_copying_unlicensed_c
     assert "Sparky therefore remains executable fallback geometry" in guide
     assert not (ROOT / "docs/cad/originals/cozmars-v2").exists()
 
+
+
+def test_fusion_original_attribution_must_remain_with_pinned_meshes(tmp_path):
+    import pytest
+
+    canonical = load_script()._load()
+    verify = canonical["verify_original_source_revisions"]
+    records = canonical["SOURCE_ATTRIBUTION_GIT_BLOBS"]
+    meshes = canonical["SOURCE_MESH_GIT_BLOBS"]
+    expected_records = {
+        (Path(rel).parent / "source.json").as_posix() for rel in meshes
+    } | {"docs/cad/originals/sparky-head/LICENSE.md"}
+    assert set(records) == expected_records
+    for rel in (*meshes, *records):
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes((ROOT / rel).read_bytes())
+    assert verify(tmp_path) == meshes
+    for rel in records:
+        path = tmp_path / rel
+        original = path.read_bytes()
+        path.write_bytes(b'{"license": "MIT"}')
+        with pytest.raises(ValueError, match="Original CAD attribution changed"):
+            verify(tmp_path)
+        path.unlink()
+        with pytest.raises(FileNotFoundError, match="Missing original CAD attribution"):
+            verify(tmp_path)
+        path.write_bytes(original)
+    assert verify(tmp_path) == meshes
