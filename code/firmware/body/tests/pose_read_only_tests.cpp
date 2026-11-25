@@ -5,9 +5,13 @@
 #include <string>
 
 namespace {
-void check(bool condition) {
-  if (!condition) throw std::runtime_error("pose read-only contract failed");
-}
+#define check(condition)                                                     \
+  do {                                                                       \
+    if (!(condition))                                                        \
+      throw std::runtime_error(                                              \
+          "pose read-only contract failed at line " +                        \
+          std::to_string(__LINE__));                                         \
+  } while (false)
 
 std::string request(desk_robot::BodyControl& body,
                     desk_robot::LineReceiver& receiver,
@@ -469,6 +473,90 @@ void verify_qualified_pose_is_never_implicit_navigation() {
   check(!body.state().armed && body.state().left == 0 &&
         body.state().right == 0);
 }
+
+void verify_pickup_low_g_invalidates_valid_origin_before_watchdog() {
+  desk_robot::BodyControl body;
+  desk_robot::LineReceiver receiver;
+  body.set_boot_epoch(602);
+  body.require_imu_for_motion(true);
+  body.set_imu_identity(4, 0x68, 0);
+  desk_robot::ImuYawCapture::Calibration yaw{};
+  yaw.axis = 2; yaw.sign = 1;
+  yaw.max_rate_raw = 500; yaw.bias_uncertainty_raw = 20;
+  yaw.scale_error_ppm = 20000;
+  yaw.accel_norm_min_raw = 12000; yaw.accel_norm_max_raw = 20000;
+  yaw.temp_min_raw = -1000; yaw.temp_max_raw = 1000;
+  yaw.max_gap_ms = 200; yaw.max_age_ms = 150;
+  yaw.max_yaw_error_urad = 500000;
+  check(body.configure_imu_yaw_capture(yaw));
+  check(body.configure_wheel_angle_capture(4000, 4000, 200, 150));
+  check(body.configure_wheel_pair_skew(25));
+  desk_robot::WheelPoseIntegrator::Calibration geom{};
+  geom.left_nm_per_count = geom.right_nm_per_count = 100000;
+  geom.left_forward_sign = 1; geom.right_forward_sign = -1;
+  geom.track_width_mm = 100; geom.max_pair_step_mm = 25;
+  geom.max_pair_skew_ms = 25; geom.max_imu_skew_ms = 50;
+  geom.max_age_ms = 200; geom.wheel_error_ppm = 10000;
+  geom.imu_alignment_error_urad = 1000;
+  geom.max_wheel_gyro_residual_urad = 50000;
+  geom.max_xy_error_mm = 30; geom.max_yaw_error_urad = 500000;
+  geom.stationary_gyro_step_urad = 500; geom.stationary_pairs_required = 3;
+  check(body.configure_wheel_pose(geom));
+
+  desk_robot::BerryReading imu{};
+  imu.model = desk_robot::BerryModel::Mpu6050;
+  imu.valid = imu.low_g_status_valid = true;
+  imu.accel[2] = 16384;
+  imu.temperature_raw = 100;
+  desk_robot::AccessoryReadings angles{};
+  for (unsigned i = 1; i <= 2; ++i) {
+    angles.angle[i].present = angles.angle[i].valid = true;
+    angles.angle[i].magnet_status = 0x20;
+    angles.angle[i].angle = 100;
+  }
+  for (std::uint32_t seq = 1; seq <= 4; ++seq) {
+    const auto at = seq * 100U;
+    imu.at_ms = at + 5;
+    body.set_imu(imu);
+    angles.angle[1].at_ms = at;
+    angles.angle[2].at_ms = at + 10;
+    angles.angle[1].sample_seq = angles.angle[2].sample_seq = seq;
+    body.set_accessories(angles, at + 10);
+  }
+  check(body.start_local_pose_origin(410));
+  check(body.wheel_pose_state().origin == 1);
+  // Active drive commands never synthesize wheel displacement when measured
+  // wheel counts stay identical across fresh acquisitions.
+  check(request(body, receiver, "arm\r\n", 420, 420000) == "OK arm");
+  check(request(body, receiver, "drive 20 20 250\r\n", 430, 430000).find("OK drive") == 0);
+  check(body.state().armed && body.state().left == 20 && body.state().right == 20);
+  imu.at_ms = 455;
+  body.set_imu(imu);
+  angles.angle[1].at_ms = 450;
+  angles.angle[2].at_ms = 460;
+  angles.angle[1].sample_seq = angles.angle[2].sample_seq = 5;
+  body.set_accessories(angles, 460);
+  check(body.state().left == 20 && body.state().right == 20);
+  check(body.wheel_pose_state().x_mm == 0 && body.wheel_pose_state().y_mm == 0);
+  check(body.wheel_pose_state().quality == desk_robot::WheelPoseIntegrator::Quality::Valid);
+
+  // Inject MPU6050 low-g pickup BEFORE any watchdog expiry while Valid & armed.
+  imu.low_g_irq = true;
+  imu.low_g_event_seq = 1;
+  imu.at_ms = 480;
+  body.set_imu(imu);
+  check(!body.state().armed && body.state().left == 0 && body.state().right == 0);
+  check(request(body, receiver, "arm\r\n", 481, 481000) ==
+        "ERR arm imu_low_g_latched");
+  check(body.wheel_pose_state().origin == 0);
+  check(body.wheel_pose_state().quality == desk_robot::WheelPoseIntegrator::Quality::Unavailable);
+  check(!body.wheel_pair_receipt().valid);
+  check(!body.wheel_angle_capture(false).continuous() &&
+        !body.wheel_angle_capture(true).continuous());
+  check(!body.start_local_pose_origin(481));
+  body.set_accessories(angles, 482); // cached pre-pickup packet cannot restore origin
+  check(body.wheel_pose_state().origin == 0);
+}
 }  // namespace
 
 int main() {
@@ -480,5 +568,6 @@ int main() {
   verify_paired_wheel_acquisitions();
   verify_imu_yaw_never_promotes_pose();
   verify_qualified_pose_is_never_implicit_navigation();
+  verify_pickup_low_g_invalidates_valid_origin_before_watchdog();
   return 0;
 }

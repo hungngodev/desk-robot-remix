@@ -23,6 +23,7 @@ class TwoWire {
   bool pending_sht = false;
   bool fail_dock_gpio = false;
   bool fail_fuel_register_read = false;
+  std::uint16_t ina226_shunt_raw = 0x0010U;
   bool fail_optional_gpio = false;
   bool fail_mcp_register_write = false;
   bool fail_pulse_register_write = false;
@@ -394,7 +395,8 @@ class TwoWire {
     else if (addr == 0x40 && register_address == 0x02)
       inbound = {0x10, 0x00};
     else if (addr == 0x40 && register_address == 0x01)
-      inbound = {0x00, 0x10};
+      inbound = {static_cast<std::uint8_t>(ina226_shunt_raw >> 8),
+                 static_cast<std::uint8_t>(ina226_shunt_raw)};
     else if (addr == 0x48 && register_address == 0x01) {
       inbound = {static_cast<std::uint8_t>(
           (ads_config_high & 0x7fU) | (ads_conversion_ready ? 0x80U : 0U)

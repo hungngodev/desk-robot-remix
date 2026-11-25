@@ -952,6 +952,42 @@ int main() {
     CHECK(partial.dock.valid && partial.dock.sample_seq > dock_before);
     CHECK(partial.dock.sample_seq == partial_accessory_wire.dock_gpio_reads);
     CHECK(partial_accessory_wire.nfc_scans == 0U);
+    // INA226 saturated signed endpoints (0x7FFF and 0x8000) must invalidate
+    // monitor and pack current while preserving previous sequence and timestamp.
+    TwoWire shunt_sat_wire;
+    desk_robot::AccessorySensors shunt_accessories;
+    CHECK(shunt_accessories.begin(shunt_sat_wire));
+    for (std::uint32_t ms = 0; ms < 1000; ms += 12)
+      shunt_accessories.poll(ms);
+    const auto& sat_gauge = shunt_accessories.readings().gauge;
+    CHECK(sat_gauge.monitor_valid && sat_gauge.shunt_uv == 40);
+#if defined(DESK_ROBOT_PACK_SHUNT_MOHM) && DESK_ROBOT_PACK_SHUNT_MOHM == 5
+    CHECK(sat_gauge.pack_current_valid && sat_gauge.pack_current_ma == 8);
+#else
+    CHECK(!sat_gauge.pack_current_valid && sat_gauge.pack_current_ma == 0);
+#endif
+    const auto good_mon_seq = sat_gauge.monitor_sample_seq;
+    const auto good_mon_at = sat_gauge.monitor_at_ms;
+    CHECK(good_mon_seq > 0U && good_mon_at > 0U);
+    shunt_sat_wire.ina226_shunt_raw = 0x7FFFU;
+    for (std::uint32_t ms = 1008; ms < 1300; ms += 12)
+      shunt_accessories.poll(ms);
+    CHECK(!sat_gauge.monitor_valid);
+    CHECK(!sat_gauge.pack_current_valid);
+    CHECK(sat_gauge.monitor_sample_seq == good_mon_seq);
+    CHECK(sat_gauge.monitor_at_ms == good_mon_at);
+    shunt_sat_wire.ina226_shunt_raw = 0x8000U;
+    for (std::uint32_t ms = 1308; ms < 1600; ms += 12)
+      shunt_accessories.poll(ms);
+    CHECK(!sat_gauge.monitor_valid);
+    CHECK(!sat_gauge.pack_current_valid);
+    CHECK(sat_gauge.monitor_sample_seq == good_mon_seq);
+    CHECK(sat_gauge.monitor_at_ms == good_mon_at);
+    shunt_sat_wire.ina226_shunt_raw = 0x0010U;
+    for (std::uint32_t ms = 1608; ms < 1900; ms += 12)
+      shunt_accessories.poll(ms);
+    CHECK(sat_gauge.monitor_valid && sat_gauge.monitor_sample_seq > good_mon_seq);
+    CHECK(sat_gauge.monitor_at_ms > good_mon_at);
     std::cout << "PASS optional sensor register IO, MCP GPIOB, NFC and isolated mux slots\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << '\n';

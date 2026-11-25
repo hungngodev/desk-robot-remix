@@ -2056,6 +2056,22 @@ static void jaw_force_ceiling_is_local_and_direction_aware() {
   CHECK(body.state().grip_target == body.state().grip);
   CHECK(send(body, "grip 120", 240) == "ERR grip force_missing_or_stale");
   CHECK(body.state().servos_attached);
+  // Boundary check: delta == max_delta_adc - 1 (1299) admits closing; == max_delta_adc (1300) blocks.
+  r.force.adc[1] = 1299;
+  r.force.jaw_sample_seq = 5U;
+  r.force.at_ms = r.force.jaw_at_ms = 241U;
+  body.set_accessories(r, 241);
+  CHECK(send(body, "grip 120", 241) == "OK grip angle=120");
+  body.tick(260);
+  CHECK(body.state().grip > 93);
+  const int before_ceiling = body.state().grip;
+  r.force.adc[1] = 1300;
+  r.force.jaw_sample_seq = 6U;
+  r.force.at_ms = r.force.jaw_at_ms = 261U;
+  body.set_accessories(r, 261);
+  body.tick(280);
+  CHECK(body.state().grip == before_ceiling && body.state().grip_target == before_ceiling);
+  CHECK(send(body, "grip 120", 280) == "ERR grip local_force_limit_or_reversal");
 }
 
 static void optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract() {

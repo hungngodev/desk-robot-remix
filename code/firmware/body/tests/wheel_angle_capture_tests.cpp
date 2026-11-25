@@ -41,11 +41,14 @@ static void replay_and_reverse() {
   check(left.angular_counts() == 108);
   check(left.observe(angle(9, 3, 200), 201) == Result::Delta);
   check(left.last_delta() == -3 && left.angular_counts() == 105);
+  // Fresh sequence and later timestamp at identical angle is valid zero motion.
+  check(left.observe(angle(9, 4, 225), 226) == Result::Delta);
+  check(left.continuous() && left.last_delta() == 0 && left.angular_counts() == 105);
   // A changed register without a new acquisition identity is a fault.
-  check(left.observe(angle(500, 3, 200), 201) == Result::Invalid);
+  check(left.observe(angle(500, 4, 225), 226) == Result::Invalid);
   check(!left.continuous() && left.angular_counts() == 0);
-  check(left.observe(angle(9, 3, 200), 202) == Result::Invalid);
-  check(left.observe(angle(30, 4, 250), 251) == Result::Baseline);
+  check(left.observe(angle(9, 4, 225), 227) == Result::Invalid);
+  check(left.observe(angle(30, 5, 250), 251) == Result::Baseline);
   check(left.angular_counts() == 0 && left.segment() == 2);
 }
 
