@@ -148,6 +148,7 @@ class OverlayPathTests(unittest.TestCase):
         (self.recipe_root / "overlay").mkdir(parents=True)
         (self.recipe_root / "install_overlay.py").write_bytes(b"installer")
         (self.recipe_root / "BOARD_README.md").write_bytes(b"board readme")
+        (self.recipe_root / "audio_debug_server.py").write_bytes(b"debug receiver")
         self.driver = self.recipe_root / "overlay/driver.cc"
         self.driver.write_bytes(b"driver v1")
         recipe_root = patch.object(overlay, "HERE", self.recipe_root)
@@ -317,6 +318,9 @@ class OverlayPathTests(unittest.TestCase):
         self.assertNotEqual(overlay.overlay_recipe_digest("sense"), before["sense"])
         for board in ("cores3", "modular", "waveshare"):
             self.assertEqual(overlay.overlay_recipe_digest(board), before[board])
+        sense_digest = overlay.overlay_recipe_digest("sense")
+        (self.recipe_root / "audio_debug_server.py").write_bytes(b"debug receiver v2")
+        self.assertNotEqual(overlay.overlay_recipe_digest("sense"), sense_digest)
         self.driver.write_bytes(b"driver v2")
         for board in overlay.BOARDS:
             self.assertNotEqual(overlay.overlay_recipe_digest(board), before[board])
@@ -366,6 +370,20 @@ class OverlayPathTests(unittest.TestCase):
         overlay.remove(self.root)
         self.assertFalse(marker.exists())
 
+    def test_journal_restores_both_new_host_scripts(self):
+        names = ("scripts/audio_debug_server.py", "scripts/release.py")
+        for name in names:
+            script_path = self.root / name
+            script_path.parent.mkdir(parents=True, exist_ok=True)
+            script_path.write_bytes(b"original")
+            self.plan[name] = b"hardened"
+        overlay.apply(self.root)
+        for name in names:
+            self.assertEqual((self.root / name).read_bytes(), b"hardened")
+        overlay.remove(self.root)
+        for name in names:
+            self.assertEqual((self.root / name).read_bytes(), b"original")
+
     def test_journal_allows_p3_player_host_script_and_rejects_arbitrary_path(self):
         script_path = self.root / "scripts/p3_tools/p3_gui_player.py"
         script_path.parent.mkdir(parents=True, exist_ok=True)
@@ -402,6 +420,7 @@ class OverlayTests(unittest.TestCase):
             "main/protocols/websocket_protocol.cc",
             "main/protocols/websocket_protocol.h",
             "scripts/p3_tools/p3_gui_player.py",
+            "scripts/audio_debug_server.py", "scripts/release.py",
         ]
         paths += ["main/boards/common/esp32_camera.h", "main/boards/common/esp32_camera.cc"]
         paths += [p.relative_to(UPSTREAM).as_posix() for p in (UPSTREAM / "main/boards/m5stack/core-s3").iterdir() if p.is_file()]
