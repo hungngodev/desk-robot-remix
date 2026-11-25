@@ -47,7 +47,16 @@ def _stationary_body(body: object) -> bool:
 def raw_mpu6050(
     body: dict, *, request_elapsed_ms: float = 0.0,
 ) -> tuple[tuple[float, ...], float] | None:
-    """Validate the WROOM 6-axis and source metadata before deriving context."""
+    """Validate stationary WROOM evidence before deriving handling context."""
+    if not _stationary_body(body):
+        return None
+    return _decode_mpu6050(body, request_elapsed_ms=request_elapsed_ms)
+
+
+def _decode_mpu6050(
+    body: dict, *, request_elapsed_ms: float,
+) -> tuple[tuple[float, ...], float] | None:
+    """Validate acquisition identity and axes, including during drive."""
     if (not isinstance(body, dict)
             or type(request_elapsed_ms) not in (int, float)
             or not 0 <= request_elapsed_ms <= 200):
@@ -64,8 +73,7 @@ def raw_mpu6050(
             or type(imu.get("sample_ms")) is not int
             or not 0 <= imu["sample_ms"] <= 0xffffffff
             or type(imu.get("boot_id")) is not int
-            or not 1 <= imu["boot_id"] <= 0xffffffff
-            or not _stationary_body(body)):
+            or not 1 <= imu["boot_id"] <= 0xffffffff):
         return None
     accel, gyro = imu.get("acc"), imu.get("gyro")
     if any(
@@ -197,6 +205,14 @@ class HandlingGate:
         if (isinstance(imu, dict) and type(imu.get("boot_id")) is int
                 and imu["boot_id"] in self.retired_boot_ids):
             return ()
+        stationary = _stationary_body(body)
+        if not stationary:
+            # Invalidate pose even for delayed motor-active callbacks. Still
+            # consume new valid IMU identities below so a cached conversion
+            # cannot count as stationary when the motor envelope changes.
+            previous = (self.last_boot_id, self.last_sample_ms, self.last_native_low_g)
+            self.reset(preserve_shake_cooldown=True)
+            self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
         # Conflicting same-acquisition native low-g metadata must revoke any
         # relative pose even when cached/replayed or arriving with a backdated
         # host callback timestamp.
@@ -250,7 +266,6 @@ class HandlingGate:
         # An older acquisition with an intact stationary safety envelope
         # cannot revoke a newer pose merely because its IMU payload was
         # corrupted in transit. Invalid CURRENT acquisitions still fail closed.
-        stationary = _stationary_body(body)
         if (stationary and self.last_boot_id is not None
                 and isinstance(imu, dict)
                 and type(imu.get("boot_id")) is int
@@ -295,7 +310,7 @@ class HandlingGate:
             self.reset(preserve_shake_cooldown=True)
             self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
             # A transport gap invalidates pose, not the gesture cooldown.
-        sample = raw_mpu6050(body, request_elapsed_ms=request_elapsed_ms)
+        sample = _decode_mpu6050(body, request_elapsed_ms=request_elapsed_ms)
         if sample is None:
             # Bad telemetry invalidates pose, not the last trusted acquisition.
             # Otherwise replaying that conversion after a malformed status
@@ -397,6 +412,10 @@ class HandlingGate:
                 self.reset(preserve_shake_cooldown=True)
                 self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
                 return ()
+        if not stationary:
+            # The acquisition fence and native low-g metadata are current,
+            # but motion-contaminated axes must never seed or emit a gesture.
+            return ()
         acceleration, rotation_dps = sample
         # Decode the same validated MPU6050 axes, not a new I2C reader.
         # Estimating stationary bias follows the standard mean-zero-rate
