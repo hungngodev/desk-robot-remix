@@ -61,12 +61,28 @@ polls the existing authenticated Mac WROOM status route and refuses moving
 wheels, wrong robot identity, stale acquisitions and rebooted WROOM epochs.
 The operator must physically establish each labeled condition when prompted;
 the helper never moves or arms the robot. From `code/`, after configuring the
-private API token:
+private API token through [Local AI setup](local-ai.md). Use the actual coordinator
+URL (default port 8765, not the capture helper's historical 8008 default) and
+its operator bearer environment name, not the model tool credential. Keep
+actuator power disconnected for these hand-applied trials. Save the trial in a
+new ignored private directory/file, and substitute the actual flashed firmware
+SHA, mount identity and robot ID:
 
 ```bash
-uv run --no-sync python scripts/capture_handling_trials.py --robot robot-01 --firmware-commit ACTUAL_FLASHED_SHA --mount-id ACTUAL_MOUNT --output actual-trials.jsonl
-uv run --no-sync python scripts/calibrate_handling.py actual-trials.jsonl
+uv run --no-sync --env-file config/local.env python scripts/capture_handling_trials.py \
+  --url http://127.0.0.1:8765 --token-env DESK_ROBOT_API_TOKEN \
+  --robot robot-01 --firmware-commit ACTUAL_FLASHED_SHA --mount-id ACTUAL_MOUNT \
+  --output config/local.handling-trials.jsonl
+uv run --no-sync python scripts/calibrate_handling.py config/local.handling-trials.jsonl
 ```
+
+If the private coordinator configuration uses a different port or token name,
+pass the actual value. The capture helper rejects an existing output path;
+retain each raw trial under its own private filename. Preserve all native
+low-g metadata in the original IMU object when present: `low_g_valid` must be
+true, `low_g_irq` false, and `low_g_seq` unchanged across all three phases.
+A native low-g event, mixed metadata, reboot or acquisition replay invalidates
+the trial rather than becoming a qualified handling threshold.
 
 The JSONL records a host monotonic **receipt time**, not a synchronized IMU
 conversion clock. Only actual `imu.sample_ms` and `imu.boot_id` establish
