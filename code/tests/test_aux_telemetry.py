@@ -425,3 +425,28 @@ def test_wroom_aux_rejects_zero_epoch_even_when_other_group_is_legacy(group):
     assert validate_aux(data, "robot-01")[group]["boot_id"] == 101
     del data[group]["boot_id"]
     assert validate_aux(data, "robot-01") == data
+
+
+@pytest.mark.parametrize("channel", ["red", "ir"])
+@pytest.mark.parametrize("raw", [0, 262142, 262143])
+def test_pulse_adc_rail_matches_firmware_quality_guard(channel, raw):
+    data = sample()
+    data["pulse"].update({channel: raw, "seq": 7, "age_ms": 20})
+    original = copy.deepcopy(data)
+    result = validate_aux(data, "robot-01")
+    assert result == {
+        **original,
+        "pulse": {**original["pulse"], "valid": raw != 262143},
+    }
+    assert data == original
+
+
+async def test_authenticated_head_isolates_clipped_pulse(settings, tokens):
+    data = sample()
+    data["pulse"].update({"ir": 262143, "seq": 8})
+    async with httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=data)
+    )) as client:
+        head = HttpHead(settings.robots[0], client)
+        result = await head.aux_status()
+    assert result == {**data, "pulse": {**data["pulse"], "valid": False}}
