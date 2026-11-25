@@ -1,5 +1,6 @@
 """Online playbook receipts must be checked against actual GitHub metadata."""
 import base64
+import hashlib
 import importlib.util
 import json
 from pathlib import Path
@@ -736,3 +737,63 @@ def test_physical_promotion_requires_authorized_matching_pr_acceptance():
     tested = promoted("TESTED")["procedures"][0]
     tested.pop("manual_review_receipt")
     assert verify.audit(full_ledger_with(tested), lookup) == []
+
+
+@pytest.mark.parametrize("defect", [
+    None, "source", "missing_source", "digest", "missing_digest", "changed_code",
+    "diverged", "record_source", "record_commit", "truncated",
+])
+def test_later_evidence_revision_is_bound_to_tested_source(defect):
+    evidence_sha = "b" * 40
+    row = promoted("MEASURED")["procedures"][0]
+    record = lookup(
+        f"https://api.github.com/repos/{verify.REPO}/contents/docs/records/bench.csv?ref={SHA}"
+    )
+    raw = base64.b64decode(record["content"])
+    signoff = row["physical_measurement_receipt"]
+    signoff.update(
+        raw_data_url=RAW.replace(SHA, evidence_sha),
+        source_sha=SHA,
+        artifact_sha256=hashlib.sha256(raw).hexdigest(),
+    )
+    if defect == "source":
+        signoff["source_sha"] = "c" * 40
+    elif defect == "missing_source":
+        signoff.pop("source_sha")
+    elif defect == "digest":
+        signoff["artifact_sha256"] = "0" * 64
+    elif defect == "missing_digest":
+        signoff.pop("artifact_sha256")
+    elif defect == "record_source":
+        raw = raw.replace(SHA.encode(), evidence_sha.encode())
+        signoff["artifact_sha256"] = hashlib.sha256(raw).hexdigest()
+    elif defect == "record_commit":
+        signoff["raw_data_url"] = RAW.replace(SHA, "c" * 40)
+
+    def later_lookup(url):
+        if "/contents/" in url:
+            assert url.endswith("?ref=" + evidence_sha) or defect == "record_commit"
+            return {**record, "size": len(raw),
+                    "content": base64.b64encode(raw).decode()}
+        if "/compare/" in url:
+            if defect == "record_commit":
+                return {}
+            assert url.endswith(f"{SHA}...{evidence_sha}")
+            files = [{"status": "added", "filename": "docs/records/bench.csv"}]
+            if defect == "changed_code":
+                files.append({"status": "modified", "filename": "code/scripts/verify.py"})
+            return {
+                "status": "diverged" if defect == "diverged" else "ahead",
+                "ahead_by": 2 if defect == "truncated" else 1,
+                "total_commits": 2 if defect == "truncated" else 1,
+                "commits": [{"sha": evidence_sha}],
+                "merge_base_commit": {"sha": SHA},
+                "files": files,
+            }
+        return lookup(url)
+
+    errors = verify.audit(full_ledger_with(row), later_lookup)
+    if defect is None:
+        assert errors == []
+    else:
+        assert any("immutable physical record not matched" in error for error in errors)

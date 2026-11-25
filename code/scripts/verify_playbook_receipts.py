@@ -277,17 +277,46 @@ def bounded_receipt_int(value: str) -> int:
     return number
 
 
+def physical_record_revision(receipt: object, tested_sha: str) -> str | None:
+    """Resolve a record commit without confusing it with the tested source."""
+    if (type(receipt) is not dict or type(tested_sha) is not str
+            or not SHA.fullmatch(tested_sha)
+            or receipt.get("source_sha", tested_sha) != tested_sha):
+        return None
+    url = receipt.get("raw_data_url")
+    if type(url) is not str:
+        return None
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return None
+    match = re.fullmatch(
+        rf"/{REPO}/blob/([0-9a-f]{{40}})/docs/records/(.+)", parsed.path,
+    )
+    if (parsed.scheme != "https" or parsed.netloc != "github.com"
+            or parsed.query or parsed.fragment or match is None
+            or any(part in {"", ".", ".."} for part in match[2].split("/"))):
+        return None
+    evidence_sha = match[1]
+    digest = receipt.get("artifact_sha256")
+    if evidence_sha != tested_sha and (
+        receipt.get("source_sha") != tested_sha
+        or type(digest) is not str or not EVIDENCE_DIGEST.fullmatch(digest)
+    ):
+        return None
+    return evidence_sha
+
+
 def verified_procedure_record(row: dict, sha: str, lookup=github_json) -> bool:
     """Require the immutable data file to identify the measured procedure.
 
     Existence of an unrelated nonempty docs/records file is insufficient.
     """
     signoff = row.get("physical_measurement_receipt")
-    if not isinstance(signoff, dict):
+    evidence_sha = physical_record_revision(signoff, sha)
+    if evidence_sha is None:
         return False
-    url = signoff.get("raw_data_url")
-    if not isinstance(url, str):
-        return False
+    url = signoff["raw_data_url"]
     captured = {}
 
     def capture(target):
@@ -295,7 +324,7 @@ def verified_procedure_record(row: dict, sha: str, lookup=github_json) -> bool:
         captured["file"] = result
         return result
 
-    if not verified_raw_record(url, sha, capture):
+    if not verified_raw_record(url, evidence_sha, capture):
         return False
     file = captured.get("file")
     if (not isinstance(file, dict) or file.get("encoding") != "base64"
@@ -306,13 +335,13 @@ def verified_procedure_record(row: dict, sha: str, lookup=github_json) -> bool:
         raw = base64.b64decode("".join(file["content"].split()), validate=True)
         if len(raw) != file["size"]:
             return False
-        source_revision = signoff.get("source_sha", sha)
+        source_revision = sha
         digest = signoff.get("artifact_sha256")
         if digest is not None and not evidence_digest_matches(raw, digest):
             return False
-        if source_revision != sha and (
+        if source_revision != evidence_sha and (
             not evidence_digest_matches(raw, digest)
-            or not source_unchanged_since_test(source_revision, sha, lookup)
+            or not source_unchanged_since_test(source_revision, evidence_sha, lookup)
         ):
             return False
         content = raw.decode("utf-8-sig")

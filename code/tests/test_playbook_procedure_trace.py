@@ -16,21 +16,27 @@ STATES = {"OPEN", "TESTED", "MEASURED", "QUALIFIED"}
 EVIDENCE_CLASSES = {"source", "mixed", "physical"}
 
 
-def _physical_record_url_is_traceable(url, sha):
-    """Only accept an exact-commit record path in the canonical repository.
-
-    Syntax validation is NOT external attestation that a bench run occurred.
-    Human review must confirm the target object and actual raw data.
-    """
-    if not isinstance(url, str):
+def _physical_record_url_is_traceable(url, sha, receipt):
+    """Check immutable record syntax; the online audit verifies ancestry."""
+    if not isinstance(url, str) or receipt.get("source_sha", sha) != sha:
         return False
-    parsed = urlsplit(url)
-    prefix = f"/hungngodev/desk-robot-remix/blob/{sha}/docs/records/"
-    return (parsed.scheme == "https" and parsed.netloc == "github.com"
-            and not parsed.query and not parsed.fragment
-            and parsed.path.startswith(prefix)
-            and len(parsed.path) > len(prefix)
-            and ".." not in parsed.path.split("/"))
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return False
+    match = re.fullmatch(
+        r"/hungngodev/desk-robot-remix/blob/([0-9a-f]{40})/docs/records/(.+)",
+        parsed.path,
+    )
+    if (parsed.scheme != "https" or parsed.netloc != "github.com"
+            or parsed.query or parsed.fragment or match is None
+            or any(part in {"", ".", ".."} for part in match[2].split("/"))):
+        return False
+    if match[1] == sha:
+        return True
+    digest = receipt.get("artifact_sha256")
+    return (receipt.get("source_sha") == sha and isinstance(digest, str)
+            and re.fullmatch(r"[0-9a-f]{64}", digest) is not None)
 
 
 def _valid_manual_review(record, sha):
@@ -99,7 +105,7 @@ def _valid_release_evidence(record):
                     "received carrier revision", "unknown", "tbd", "generic",
                 }
                 or not _physical_record_url_is_traceable(
-                    measured.get("raw_data_url"), sha)):
+                    measured.get("raw_data_url"), sha, measured)):
             return False
     return True
 
@@ -277,3 +283,17 @@ def test_all_tof_and_handling_procedures_use_existing_distinct_targets():
     assert "test_pet.py" in known[32]
     assert "test_i2c_electrical_preflight.py" in known[27]
     assert len(set(known[i] for i in range(25, 33))) >= 6
+
+
+def test_later_physical_record_requires_explicit_source_and_digest():
+    row = _physical_receipt_fixture()
+    measured = row["physical_measurement_receipt"]
+    sha = row["last_verified_sha"]
+    measured["raw_data_url"] = measured["raw_data_url"].replace(sha, "b" * 40)
+    assert not _valid_release_evidence(row)
+    measured["source_sha"] = sha
+    assert not _valid_release_evidence(row)
+    measured["artifact_sha256"] = "c" * 64
+    assert _valid_release_evidence(row)
+    measured["source_sha"] = "b" * 40
+    assert not _valid_release_evidence(row)
