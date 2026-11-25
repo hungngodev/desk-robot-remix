@@ -9215,7 +9215,7 @@ async def test_activity_silence_requires_current_context(fleet, tmp_path, monkey
 
 @pytest.mark.parametrize("head_failure", [False, True])
 async def test_stream_wait_failure_reports_error_and_preserves_typed_policy(
-    fleet, tmp_path, head_failure,
+    fleet, tmp_path, head_failure, caplog, capsys,
 ):
     from desk_robot.transport import HeadError
 
@@ -9235,9 +9235,8 @@ async def test_stream_wait_failure_reports_error_and_preserves_typed_policy(
     hub = CameraFrameHub([r.id for r in fleet.robots])
     retry = asyncio.Event()
     calls = 0
-    error = Unavailable("stream wait failed") if head_failure else HeadLogicError(
-        "stream wait failed"
-    )
+    private_marker = "synthetic-private-camera-context"
+    error = Unavailable(private_marker) if head_failure else HeadLogicError(private_marker)
 
     async def wake(rid, after, *, timeout_s):
         nonlocal calls
@@ -9267,8 +9266,13 @@ async def test_stream_wait_failure_reports_error_and_preserves_typed_policy(
             assert not observer.done()
             assert pet.status(robot_id)["enabled"]
         assert pet.status(robot_id)["last_error"] == (
-            f"{type(error).__name__}: stream wait failed"
+            "Camera observer: HeadError" if head_failure
+            else "Camera observer: processing failed"
         )
+        assert private_marker not in json.dumps(pet.status(robot_id))
+        assert pet.status("robot-02")["last_error"] is None
+        captured = capsys.readouterr()
+        assert private_marker not in captured.out + captured.err + caplog.text
         assert state.events == 0
         assert state.spoken == 0
     finally:

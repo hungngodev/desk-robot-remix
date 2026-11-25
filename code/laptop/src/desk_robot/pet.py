@@ -2477,13 +2477,15 @@ class PetController:
                     await asyncio.sleep(self.interval)
             except asyncio.CancelledError:
                 raise
-            except HeadError as exc:
-                state.last_error = f"{type(exc).__name__}: {str(exc)[:120]}"
+            except HeadError:
+                # Camera/provider exception messages may contain private media,
+                # paths or context. Publish only a fixed diagnostic category.
+                state.last_error = "Camera observer: HeadError"
                 # A failed authenticated device requires explicit re-enable.
                 state.enabled = False
                 break
-            except Exception as exc:
-                state.last_error = f"{type(exc).__name__}: {str(exc)[:120]}"
+            except Exception:
+                state.last_error = "Camera observer: processing failed"
                 # A broken wait or processing step must not kill the observer
                 # or cause a tight retry loop.
                 await asyncio.sleep(self.interval)
