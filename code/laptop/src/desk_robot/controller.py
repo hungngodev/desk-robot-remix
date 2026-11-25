@@ -1485,10 +1485,23 @@ class Coordinator:
                         "Dock approach refused: robot is seated or powered on dock"
                     )
 
+            def _verify_at_dispatch() -> None:
+                _verify_before_post()
+                # A same-PID reconnect can retire the selected camera stream
+                # inside either command lock even while the JPEG is still fresh.
+                verify_now = getattr(head, "dock_receipt_current_now", None)
+                if not callable(verify_now):
+                    raise OperationError("Dock dispatch camera source verifier unavailable")
+                try:
+                    if verify_now(observation) is not None:
+                        raise ValueError("Dock dispatch camera source verification denied")
+                except Exception as exc:
+                    raise OperationError("Dock JPEG source changed at guarded dispatch") from exc
+
             try:
                 _verify_before_post()
                 if getattr(head, "supports_dispatch_check", False):
-                    await head.command(command, dispatch_check=_verify_before_post)
+                    await head.command(command, dispatch_check=_verify_at_dispatch)
                 else:
                     await head.command(command)
             except _DockCameraQueueExpired:

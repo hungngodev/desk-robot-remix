@@ -948,7 +948,7 @@ async def test_second_pet_cannot_use_first_pet_dock_intrinsics_to_move(
 @pytest.mark.parametrize(
     "outcome", ["standoff", "contact", "beacon_loss", "timeout",
                 "marker_loss", "pulse_budget", "receipt_denial",
-                "queued_camera_expired"],
+                "queued_camera_expired", "queued_stream_replaced"],
 )
 async def test_public_dock_replay_stops_without_unqualified_recovery(
     settings, tmp_path, monkeypatch, outcome,
@@ -983,15 +983,15 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
 
     clock = time
     clock_now = [time.monotonic()]
-    if outcome == "queued_camera_expired":
+    if outcome in {"queued_camera_expired", "queued_stream_replaced"}:
         # Advance only the dock consumers' clock, not asyncio's deadlines.
-        # Camera age will be 210 ms while IR age is only 110 ms.
+        # Expiry: camera age 210 ms, IR age 110 ms. Reconnect: no age advance.
         clock = SimpleNamespace(monotonic=lambda: clock_now[0], time=time.time)
         monkeypatch.setattr("desk_robot.controller.time", clock)
         monkeypatch.setattr("desk_robot.dock_runtime.time", clock)
 
     class ReplayHead:
-        supports_dispatch_check = outcome == "queued_camera_expired"
+        supports_dispatch_check = outcome in {"queued_camera_expired", "queued_stream_replaced"}
 
         def __init__(self):
             self.armed = False
@@ -999,6 +999,7 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
             self.commands = []
             self.frames = self.ir_reads = self.aux_reads = 0
             self.last_verified = None
+            self.stream_generation = 1
             self.snapshot_cancelled = asyncio.Event()
 
         async def status(self):
@@ -1039,6 +1040,10 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
                 return False  # Negative adapter verdict, not an exception.
             self.last_verified = (self.frames, self.ir_reads)
 
+        def dock_receipt_current_now(self, receipt):
+            if receipt[3] != self.stream_generation:
+                raise ValueError("Selected stream replaced")
+
         async def ir_status(self):
             self.ir_reads += 1
             matching = not (outcome == "beacon_loss" and self.ir_reads == 2)
@@ -1054,8 +1059,11 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
 
         async def command(self, command, *, dispatch_check=None):
             if dispatch_check is not None:
-                # Model the time spent waiting for HttpHead's command locks.
-                clock_now[0] += 0.11
+                # Model state changes while waiting for HttpHead's command locks.
+                if outcome == "queued_stream_replaced":
+                    self.stream_generation += 1
+                else:
+                    clock_now[0] += 0.11
                 dispatch_check()
             self.commands.append(command)
             if command == "arm":
@@ -1125,7 +1133,7 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
         await asyncio.wait_for(coordinator.tasks[job.id], timeout=10)
         commands = [c for c in head.commands if c != "keepalive"]
         expected = ["arm", "drive 20 20 100", "stop"]
-        if outcome in {"receipt_denial", "queued_camera_expired"}:
+        if outcome in {"receipt_denial", "queued_camera_expired", "queued_stream_replaced"}:
             expected = ["arm"]
             assert head.frames == head.ir_reads == 1
         elif outcome == "pulse_budget":
@@ -1162,6 +1170,8 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
                 assert "body disarmed" in job.error
             elif outcome == "receipt_denial":
                 assert "Dock JPEG source changed before drive" in job.error
+            elif outcome == "queued_stream_replaced":
+                assert "Dock JPEG source changed at guarded dispatch" in job.error
             else:
                 assert job.error == "TimeoutError"
                 await asyncio.wait_for(head.snapshot_cancelled.wait(), timeout=1)

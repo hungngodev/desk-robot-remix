@@ -143,3 +143,36 @@ async def test_guarded_dock_reconnect_never_dispatches_motor_pulse():
 def test_invalid_source_metadata_never_becomes_dock_pose(identity, epoch):
     with pytest.raises(ValueError, match="Invalid or stale dock camera receipt"):
         unpack_dock_frame((JPEG, time.monotonic(), identity, epoch))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("new_boot", [100, 101])
+@pytest.mark.parametrize("lock_name", ["lock", "command_lock"])
+async def test_dispatch_rejects_replaced_stream_inside_command_queue(
+    new_boot, lock_name, monkeypatch,
+):
+    head = make_head()
+    receipt = await head.snapshot_for_dock()
+    # Keep the original receipt fresh: this tests generation, not expiration.
+    monkeypatch.setattr(
+        "desk_robot.transport.time",
+        SimpleNamespace(monotonic=lambda: receipt[1] + 0.01),
+    )
+    posts = []
+
+    async def request(*args, **kwargs):
+        posts.append((args, kwargs))
+        raise AssertionError("Retired camera receipt reached POST")
+
+    head._request = request
+    lock = getattr(head, lock_name)
+    async with lock:
+        task = asyncio.create_task(head.command(
+            "drive 20 20 100",
+            dispatch_check=lambda: head.dock_receipt_current_now(receipt),
+        ))
+        await asyncio.sleep(0)
+        await replace_boot(head, new_boot)
+    with pytest.raises(HeadError, match="Dock JPEG boot changed"):
+        await asyncio.wait_for(task, 1)
+    assert posts == []

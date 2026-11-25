@@ -494,6 +494,13 @@ class HttpHead:
         The live stream may have published another frame or reconnected while
         HTTP identity, AprilTag detection, IR, or body status was pending.
         """
+        async with self._stream_condition:
+            self.dock_receipt_current_now(receipt, expected_boot=expected_boot)
+
+    def dock_receipt_current_now(
+        self, receipt: tuple, *, expected_boot: int | None = None
+    ) -> None:
+        """Check selected camera provenance without yielding the event loop."""
         if (not isinstance(receipt, tuple) or len(receipt) != 4
                 or not isinstance(receipt[0], bytes)
                 or type(receipt[1]) not in (int, float)
@@ -506,14 +513,15 @@ class HttpHead:
                 or type(receipt[3]) is not int or receipt[3] < 1):
             raise HeadError("Invalid or expired selected dock JPEG provenance")
         boot = receipt[2][0]
-        async with self._stream_condition:
-            if (not self._stream_connected
-                    or receipt[3] != self._stream_generation
-                    or self._last_camera is None
-                    or self._last_camera[0] != boot
-                    or boot in self._retired_camera_boots
-                    or (expected_boot is not None and expected_boot != boot)):
-                raise HeadError("Dock JPEG boot changed during camera identity check")
+        # All live camera state belongs to this event loop. A synchronous
+        # dispatch callback must not await between this check and POST admission.
+        if (not self._stream_connected
+                or receipt[3] != self._stream_generation
+                or self._last_camera is None
+                or self._last_camera[0] != boot
+                or boot in self._retired_camera_boots
+                or (expected_boot is not None and expected_boot != boot)):
+            raise HeadError("Dock JPEG boot changed during camera identity check")
 
     def _accept_camera_identity(self, identity: tuple[int, int, int]) -> None:
         boot, sequence, completed = identity
