@@ -598,7 +598,7 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
                 continue
             kind, source_robot = item.get("kind"), item.get("source_robot")
             witnessed = item.get("witnessed")
-            recollections.append({
+            recollection = {
                 "summary": summary,
                 "kind": kind if isinstance(kind, str) and
                         re.fullmatch(r"[a-z][a-z0-9_]{0,39}", kind) else "unknown",
@@ -607,7 +607,17 @@ def native_grounded_fact(route: str, result: dict) -> dict | None:
                         else "unknown",
                 "witnessed": witnessed if type(witnessed) is bool else None,
                 "historical_untrusted_text": True,
-            })
+            }
+            event_id = item.get("event_id")
+            observed_at = item.get("observed_at")
+            confidence = item.get("confidence")
+            if isinstance(event_id, str) and re.fullmatch(r"[a-zA-Z0-9_-]{1,96}", event_id):
+                recollection["event_id"] = event_id
+            if type(observed_at) in (int, float) and 0 <= observed_at <= 253402300799:
+                recollection["observed_at"] = observed_at
+            if type(confidence) in (int, float) and 0 <= confidence <= 1:
+                recollection["confidence"] = confidence
+            recollections.append(recollection)
         fact = {"source": "private_opt_in_memory_not_current_sight",
                 "private_memory_generation": revision,
                 "recollections": recollections}

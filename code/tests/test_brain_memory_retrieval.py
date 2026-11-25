@@ -601,6 +601,7 @@ def test_live_context_refuses_unowned_private_revision_and_cached_recall(
     settings.memory_dir = tmp_path
     settings.voice_vision_tools_enabled = True
     settings.voice_memory_tools_enabled = True
+    settings.fleet_text_sharing_enabled = True
     robot = settings.robots[0].id
     hub = CameraFrameHub([item.id for item in settings.robots])
     hub.remember_tool(
@@ -641,6 +642,11 @@ def test_live_context_refuses_unowned_private_revision_and_cached_recall(
             assert restored.status_code == 200
             assert restored.json()["private_memory_generation"] == 0
             assert "PRIVATE_STALE_DETAIL" in restored.json()["model_context"]
+            settings.fleet_text_sharing_enabled = False
+            revoked = client.get(url, headers=headers)
+            assert revoked.status_code == 200
+            assert "PRIVATE_STALE_DETAIL" not in revoked.json()["model_context"]
+            assert "touch_tap" in revoked.json()["model_context"]
         finally:
             runtime.multimodal = original
 
@@ -677,6 +683,12 @@ def test_voice_recall_requires_independent_peer_sharing_consent(
         assert {item["source_robot"] for item in allowed.json()["memories"]} == {
             "robot-01", "robot-02",
         }
+        for item in allowed.json()["memories"]:
+            stored = memory.get_episode("robot-02", item["event_id"])
+            assert stored is not None
+            assert item["observed_at"] == stored.observed_at
+            assert item["confidence"] == stored.confidence
+            assert item["witnessed"] == stored.witnessed
         hub = CameraFrameHub([robot.id for robot in settings.robots])
         hub.remember_tool(
             "robot-02", "memory_recall", "Peer silver key secret", time.monotonic(),

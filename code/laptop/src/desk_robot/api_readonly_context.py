@@ -211,7 +211,8 @@ def register_readonly_context_routes(
                 item for item in timeline
                 if not is_camera_derived_timeline_item(item)
             ]
-        if not settings.voice_memory_tools_enabled or not memory_lease_valid:
+        if (not settings.voice_memory_tools_enabled or not memory_lease_valid
+                or not settings.fleet_text_sharing_enabled):
             # Revoking memory consent or losing its per-pet revision owner
             # also revokes any transient private retrieval cached in RAM.
             # Preserve independent WROOM and touch evidence.

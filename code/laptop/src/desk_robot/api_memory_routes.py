@@ -507,6 +507,9 @@ def register_voice_context_route(
                     "kind": entry.kind,
                     "witnessed": entry.witnessed,
                     "source_robot": entry.source_robot,
+                    "event_id": getattr(entry, "event_id", None),
+                    "observed_at": getattr(entry, "observed_at", None),
+                    "confidence": getattr(entry, "confidence", None),
                 } for entry in records
             ],
         }
