@@ -156,25 +156,35 @@ uv sync --extra dev
 uv venv ../.tools/body-pio-venv --python 3.12
 uv pip install --python ../.tools/body-pio-venv/bin/python platformio==6.1.18
 export PLATFORMIO_CORE_DIR="$PWD/../.tools/platformio"
-../.tools/body-pio-venv/bin/pio run -d firmware/body
+../.tools/body-pio-venv/bin/pio run -d firmware/body -e esp32_full
 ```
 
 The platform is pinned to espressif32 6.9.0 (Arduino 2.0.17). Its generic
 `esp32dev` profile compiled for the WROOM development board, but the actual
 board's flash/reset/USB interface still needs confirmation.
 
-No upload is appropriate for the unfinished guarded build. After hardware and
-sensor qualification, identify the exact board/port explicitly; port listing is read-only:
+A guarded logic-only upload is a prerequisite for sensor calibration, not a
+movement release. First verify board identity, logic supply, common ground,
+USB backfeed isolation and unpowered harness continuity. Physically disconnect
+motor, servo, battery and dock/charger power. If any prerequisite is unknown,
+stop before upload. Identify the exact board/port; port listing is read-only:
 
 ```sh
 ../.tools/body-pio-venv/bin/pio device list
 ```
 
-After confirming the port belongs to the WROOM, upload explicitly with
-`pio run -d firmware/body --target upload --upload-port PORT` using the local
-`pio` path above. Replace `PORT` with that real device. Motors disconnected,
-servo horns removed, separate actuator supply and common ground for the first
-test. No port has been selected and nothing has been uploaded in this session.
+After confirming the port belongs to the WROOM, set `PORT` to its exact USB
+device and upload the same explicit full profile (from `code/`):
+
+```sh
+../.tools/body-pio-venv/bin/pio run -d firmware/body -e esp32_full --target upload --upload-port "${PORT:?Set PORT to the verified WROOM USB device}"
+../.tools/body-pio-venv/bin/pio device monitor --port "$PORT" --baud 115200
+```
+
+Expect a disarmed body and local rearm required. Missing calibration or sensor
+faults must not enable outputs. Stop on the wrong profile, unstable supply,
+missing status or unexpectedly armed outputs. Disconnect the serial monitor
+before using the USB bench helper. No hardware upload is claimed.
 
 ### Center the two hornless MG90S before measuring installed lift travel
 
@@ -272,7 +282,46 @@ qualify actual USB board identity, 3.3 V pin levels, camera, PDM mic,
 MAX98357A speaker wiring, OLED and local WiFi. Keep motor and charger
 power physically disconnected during that head bench test. No robot was
 flashed or qualified by writing these commands. See
-[Sense board connections](../../code/firmware/head/sense/README.md).
+[Sense board connections](../../code/firmware/head/sense/README.md), including
+J3 microSD isolation inspection before attaching the GPIO7/8 amplifier (and
+optional GPIO9 RGB). Leave the SD slot empty.
+
+### Private Sense build and isolated USB commissioning
+
+Complete [Local AI setup](local-ai.md) for private `config/local.toml` and
+`config/local.env`. Use the actual robot ID and the reachable Mac LAN IPv4
+of the running server. From `code/`:
+
+```sh
+python3 firmware/head/private_config.py --board sense --config config/local.toml --robot robot-01 --server-ip "${MAC_LAN_IP:?Set MAC_LAN_IP to the Mac LAN IPv4}"
+bash scripts/build_head.sh --board sense --private
+```
+
+Add `--continuous-audio` only with explicit operator consent; camera streaming
+requires separate Mac operator consent. Keep private settings, firmware and
+serial logs private. Do not reuse a generic image or another robot's token.
+
+After a successful private Sense build, identify the actual Sense USB device.
+Keep the WROOM UART and all actuator and charging power disconnected. From
+`code/`, use the same project-local SDK as the build helper:
+
+```sh
+(
+  tools_root="$(cd ../.tools && pwd)" || exit 1
+  export IDF_TOOLS_PATH="$tools_root/idf-tools"
+  export PATH="$tools_root/sdk-bootstrap/bin:$PATH"
+  source "$tools_root/esp-idf/export.sh" || exit 1
+  cd firmware/head/build/xiaozhi-sense || exit 1
+  idf.py -p "${PORT:?Set PORT to the verified Sense USB device}" flash monitor
+)
+```
+
+If the SDK was installed under `code/.tools`, use that verified root instead.
+Recheck the port when switching boards; never assume the WROOM port is Sense.
+Stop on failed flash, unstable supply, unexpected reset, wrong board or failed
+local server registration. Verify OLED, camera, microphone privacy control
+and speaker wiring independently before reconnecting UART. Physical AEC,
+motion, charging and final assembly remain separate gates.
 
 ## Modular S3 head — historical Freenove reference
 
