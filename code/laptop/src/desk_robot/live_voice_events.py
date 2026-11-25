@@ -384,7 +384,41 @@ class VoiceEventListener:
         self.last_error = None
         return len(data["events"])
 
+    async def _shutdown_callbacks(self) -> None:
+        # A cancellation request is not task termination. Keep the monitor
+        # owner alive until every callback has actually stopped; Runtime's
+        # bounded shutdown wait can then report an unconfirmed teardown.
+        self.monitor_ready = False
+        tasks = {
+            task for task in (
+                self._event_task, self._global_abort_task,
+                *self._fallback_abort_tasks.values(),
+            ) if task is not None
+        }
+        for task in tasks:
+            if not task.done() and not task.cancelling():
+                task.cancel()
+        try:
+            try:
+                self._publish_generations(None)
+            finally:
+                await self._set_monitor_ready(False)
+        finally:
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            self._event_task = None
+            self._event_sequence = None
+            self._event_task_generation = None
+            self._global_abort_task = None
+            self._fallback_abort_tasks.clear()
+
     async def run(self) -> None:
+        try:
+            await self._run()
+        finally:
+            await self._shutdown_callbacks()
+
+    async def _run(self) -> None:
         while True:
             retrying_abort = self._stream_abort_pending
             try:
