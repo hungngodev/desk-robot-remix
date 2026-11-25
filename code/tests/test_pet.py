@@ -7431,8 +7431,9 @@ async def test_camera_hub_reconnect_drops_inflight_old_scene_comparison(
         await pet.close()
 
 
+@pytest.mark.parametrize("source_change", ["reconnect", "removed"])
 async def test_visual_memory_write_is_retracted_after_camera_generation_changes(
-    fleet, tmp_path,
+    fleet, tmp_path, source_change,
 ):
     """Late SQLite completion cannot revive an obsolete JPEG as pet memory."""
     import threading
@@ -7466,9 +7467,12 @@ async def test_visual_memory_write_is_retracted_after_camera_generation_changes(
     ))
     try:
         assert await asyncio.wait_for(asyncio.to_thread(entered.wait), timeout=1)
-        hub.discard_video("robot-01")
+        if source_change == "reconnect":
+            hub.discard_video("robot-01")
+        else:
+            del hub._generation["robot-01"]
         release.set()
-        await asyncio.wait_for(work, timeout=2)
+        assert await asyncio.wait_for(work, timeout=2) is False
         assert all(memory.recent(robot.id) == [] for robot in fleet.robots)
     finally:
         release.set()

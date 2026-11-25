@@ -661,10 +661,7 @@ class PetController:
                 not camera_derived
                 or ((preemption_epoch is None
                      or self._vision_preemption_epoch == preemption_epoch)
-                    and (camera_generation is None
-                         or (self.multimodal is not None
-                             and self.multimodal.hub._generation[robot_id]
-                             == camera_generation))
+                    and self._camera_generation_current(robot_id, camera_generation)
                     and (self.settings.mode != "hardware"
                          or (self.settings.voice_vision_tools_enabled
                              and self.settings.camera_consent_generation
@@ -2208,8 +2205,7 @@ class PetController:
                     if (not state.enabled or state.generation != generation
                             or self._closed or not current_camera_grant()):
                         break
-                    if (hub_generation is not None and
-                            self.multimodal.hub._generation[robot_id] != hub_generation):
+                    if not self._camera_generation_current(robot_id, hub_generation):
                         state.stale_camera_events += 1
                         break
                     if (state.last_scene_frame_at is not None
@@ -2244,8 +2240,7 @@ class PetController:
                             or (self.settings.mode == "hardware"
                                 and not self.settings.voice_vision_tools_enabled)
                             or self._vision_preemption_epoch != preemption_epoch
-                            or (hub_generation is not None and
-                                self.multimodal.hub._generation[robot_id] != hub_generation)
+                            or not self._camera_generation_current(robot_id, hub_generation)
                             or self._direct_vision_requests
                             or self._human_active_in_fleet(time.monotonic())
                             or (callable(voice_started_at)
@@ -2263,8 +2258,7 @@ class PetController:
                         # when the explicit question called preempt().
                         if (preemption_epoch != self._vision_preemption_epoch
                                 or not current_camera_grant()
-                                or (hub_generation is not None and
-                                    self.multimodal.hub._generation[robot_id] != hub_generation)
+                                or not self._camera_generation_current(robot_id, hub_generation)
                                 or self._direct_vision_requests
                                 or (self.settings.mode == "hardware"
                                     and not self.settings.voice_vision_tools_enabled)):
@@ -2292,9 +2286,7 @@ class PetController:
                                 and not self._closed and grant_valid()
                                 and admitted_preemption == self._vision_preemption_epoch
                                 and not self._direct_vision_requests
-                                and (admitted_hub is None or
-                                     self.multimodal.hub._generation[robot_id]
-                                     == admitted_hub)
+                                and self._camera_generation_current(robot_id, admitted_hub)
                                 and not self._human_active_in_fleet(now)
                                 and 0 <= now - admitted_received <= self.max_observation_age
                             )
@@ -2339,8 +2331,7 @@ class PetController:
                             # a camera memory or animate the face.
                             or preemption_epoch != self._vision_preemption_epoch
                             or self._direct_vision_requests
-                            or (hub_generation is not None and
-                                self.multimodal.hub._generation[robot_id] != hub_generation)
+                            or not self._camera_generation_current(robot_id, hub_generation)
                             or (self.settings.mode == "hardware"
                                 and not self.settings.voice_vision_tools_enabled)
                             or (callable(voice_started_at)
@@ -2366,9 +2357,7 @@ class PetController:
                             state.last_initiative_suppression = "camera_receipt_not_admitted"
                             continue
                         if (not current_camera_grant()
-                                or (hub_generation is not None and
-                                    self.multimodal.hub._generation[robot_id]
-                                    != hub_generation)):
+                                or not self._camera_generation_current(robot_id, hub_generation)):
                             state.stale_camera_events += 1
                             continue
                         await self._cue_person_face(
@@ -2384,8 +2373,7 @@ class PetController:
                         if (not state.enabled or state.generation != generation
                                 or self._closed or not current_camera_grant()
                                 or self._vision_preemption_epoch != preemption_epoch
-                                or (hub_generation is not None and
-                                    self.multimodal.hub._generation[robot_id] != hub_generation)
+                                or not self._camera_generation_current(robot_id, hub_generation)
                                 or (self.settings.mode == "hardware"
                                     and not self.settings.voice_vision_tools_enabled)
                                 or self._human_active_in_fleet(time.monotonic())
