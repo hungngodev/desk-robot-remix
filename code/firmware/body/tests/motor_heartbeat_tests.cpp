@@ -80,7 +80,39 @@ void touch_timing_boundary() {
   }
 }
 
+// A missed CPU deadline is sticky even after long idle periods or a clock
+// wrap. Neither a fresh command nor a timestamp of zero is a local USB reset.
+void sticky_deadline_across_idle_and_wrap() {
+  for (const std::uint32_t start : {0U, 100U, 0xfffffff0U}) {
+    for (const bool sensor_pass : {false, true}) {
+      MotorHeartbeat heartbeat;
+      CHECK(heartbeat.update(start, true));
+      const auto fault_at = start + 45U;
+      CHECK(!(sensor_pass ? heartbeat.update(fault_at, true)
+                          : heartbeat.check_authority(fault_at, true)));
+      CHECK(heartbeat.missed_deadline());
+      for (const auto now : {fault_at + 1U, fault_at + 250U,
+                            fault_at + 500U, fault_at + 10000U,
+                            0xffffffffU, 0U, 1U}) {
+        CHECK(!heartbeat.check_authority(now, false));
+        CHECK(heartbeat.missed_deadline());
+        CHECK(!heartbeat.check_authority(now, true));
+        CHECK(!heartbeat.update(now, true));
+        CHECK(heartbeat.missed_deadline());
+      }
+      heartbeat.reset();
+      CHECK(!heartbeat.missed_deadline());
+      CHECK(!heartbeat.update(2U, false));
+      CHECK(heartbeat.check_authority(3U, true));
+      CHECK(heartbeat.update(100U, true));
+      CHECK(heartbeat.update(114U, true));
+      CHECK(!heartbeat.update(115U, true));
+    }
+  }
+}
+
 int main() {
+  sticky_deadline_across_idle_and_wrap();
   touch_timing_boundary();
   lease_boundary_handoff();
   MotorHeartbeat heartbeat;
