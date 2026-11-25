@@ -5,8 +5,12 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
-from desk_robot.simulator import SimulatedHead
-from desk_robot.transport import MAX_DRIVE_DURATION_MS, drive_duration_ms, expected_ack
+from desk_robot.simulator import (
+    BODY_ACTIVE_WHEEL_WATCHDOG_MS,
+    BODY_IDLE_WATCHDOG_MS,
+    SimulatedHead,
+)
+from desk_robot.transport import MAX_DRIVE_DURATION_MS, HeadError, drive_duration_ms, expected_ack
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -46,3 +50,61 @@ async def test_simulator_duration_matches_its_wire_ack(command, ms):
         status = await head.status()
     assert response["reply"] == f"OK drive left=20 right=20 ms={ms}"
     assert status["drive_ms"] == ms
+
+
+def test_simulator_watchdog_limits_match_guarded_wroom():
+    owner = ROOT / "code/firmware/body/lib/BodyControl"
+    for path, name, simulated, required in (
+        ("BodyControl.h", "kWatchdogMs", BODY_IDLE_WATCHDOG_MS, 500),
+        ("BodyControl.cpp", "kActiveWheelHostTimeoutMs", BODY_ACTIVE_WHEEL_WATCHDOG_MS, 200),
+    ):
+        match = re.search(
+            rf"\bconstexpr\s+std::uint32_t\s+{name}\s*=\s*(\d+)\s*;",
+            (owner / path).read_text(),
+        )
+        assert match is not None
+        assert simulated == int(match.group(1)) == required
+
+
+@pytest.mark.parametrize(
+    ("duration", "poll_time", "armed", "moving"),
+    [
+        (250, 1.199, True, True),
+        (250, 1.2, False, False),
+        (250, 1.3, False, False),  # delayed poll cannot hide prior watchdog expiry
+        (200, 1.2, False, False),  # body watchdog wins at a simultaneous expiry
+        (100, 1.3, True, False),   # pulse ended before the active watchdog
+    ],
+)
+async def test_simulator_active_and_idle_watchdog_order(duration, poll_time, armed, moving):
+    head = SimulatedHead("robot-01")
+    with patch("desk_robot.simulator.time.monotonic", return_value=1.0) as clock:
+        await head.command("arm")
+        assert (await head.status())["watchdog_ms"] == 500
+        await head.command(f"drive 20 20 {duration}")
+        assert (await head.status())["watchdog_ms"] == 200
+        clock.return_value = poll_time
+        status = await head.status()
+        assert status["armed"] is armed
+        assert status["motor"] == ({"m0": 20, "m1": 20} if moving else {"m0": 0, "m1": 0})
+        if not armed:
+            assert status["watchdog_ms"] == 0
+            assert status["drive_ms"] == 0
+            with pytest.raises(HeadError, match="Body disarmed"):
+                await head.command("keepalive")
+
+
+async def test_simulator_keepalive_extends_watchdog_without_extending_pulse():
+    head = SimulatedHead("robot-01")
+    with patch("desk_robot.simulator.time.monotonic", return_value=1.0) as clock:
+        await head.command("arm")
+        await head.command("drive 20 20")
+        clock.return_value = 1.15
+        await head.command("keepalive")
+        clock.return_value = 1.249
+        assert (await head.status())["motor"] == {"m0": 20, "m1": 20}
+        clock.return_value = 1.25
+        status = await head.status()
+        assert status["armed"]
+        assert status["motor"] == {"m0": 0, "m1": 0}
+        assert status["drive_ms"] == 0

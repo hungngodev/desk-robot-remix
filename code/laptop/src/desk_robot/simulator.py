@@ -13,6 +13,10 @@ from PIL import Image, ImageDraw
 from .transport import HeadError, drive_duration_ms, expected_ack, validate_command
 from .vision import Detection, SceneChange
 
+# Mirror guarded WROOM timing for development only; the body owns real safety.
+BODY_IDLE_WATCHDOG_MS = 500
+BODY_ACTIVE_WHEEL_WATCHDOG_MS = 200
+
 
 class SimulatedHead:
     def __init__(self, robot_id: str):
@@ -52,14 +56,23 @@ class SimulatedHead:
         if not self.armed:
             self._stop_motion()
             return 0
-        elapsed = now - self.last_control
-        if elapsed >= 0.5:
+        idle_deadline = self.last_control + BODY_IDLE_WATCHDOG_MS / 1000
+        active_deadline = self.last_control + BODY_ACTIVE_WHEEL_WATCHDOG_MS / 1000
+        # Simulate the first expiry even when no status poll occurred at that
+        # instant. WROOM checks the active watchdog before drive expiry on a tie.
+        active_expired = (
+            any(self._motor)
+            and self._drive_deadline >= active_deadline
+            and now >= active_deadline
+        )
+        if active_expired or now >= idle_deadline:
             self.armed = False
             self._stop_motion()
             return 0
         if now >= self._drive_deadline:
             self._stop_motion()
-        return 500 - int(elapsed * 1000)
+        limit = BODY_ACTIVE_WHEEL_WATCHDOG_MS if any(self._motor) else BODY_IDLE_WATCHDOG_MS
+        return limit - int((now - self.last_control) * 1000)
 
     async def status(self):
         now = time.monotonic()
