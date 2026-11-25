@@ -239,6 +239,7 @@ foreach(scenario
     rejected_grip_does_not_renew_watchdog
     guarded_head_timeout_cannot_rearm_from_reconnected_uart
     guarded_transition_sequences
+    guarded_reboot_fault_matrix
     deterministic_stream_stress)
   body_add_test(${scenario} body_tests ${scenario})
 endforeach()

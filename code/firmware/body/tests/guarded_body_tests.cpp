@@ -2414,6 +2414,16 @@ static void battery_readiness_matches_stricter_arm_voltage() {
   CHECK(send(body, "status", 101).find("\"ready\":true") !=
         std::string::npos);
   CHECK(send(body, "arm", 101) == "OK arm");
+  // Once boot recovery is authorized, the stricter ARM threshold still
+  // applies independently of the lower emergency trip voltage.
+  readings.gauge.fuel_sample_seq = 3;
+  readings.gauge.fuel_at_ms = 102;
+  readings.gauge.cell_mv = 3250;
+  body.set_accessories(readings, 102);
+  CHECK(send(body, "status", 102).find("\"ready\":false") != std::string::npos);
+  CHECK(send(body, "status", 102).find("\"fault\":\"battery_low\"") !=
+        std::string::npos);
+  CHECK(send(body, "arm", 102) == "ERR arm battery_low");
 }
 
 static void battery_undervoltage_rejects_arm_and_stops_motion() {

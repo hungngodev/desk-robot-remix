@@ -603,6 +603,152 @@ void guarded_transition_sequences() {
   }
 }
 
+// Independent watchdog, optical and bumper trips must compose. A reset
+// reconstructs both owners and UART parsers; persisted calibration is not
+// a persisted permit. The fixture deliberately does not simulate hardware.
+void guarded_reboot_fault_matrix() {
+  using desk_robot::BodyProfile;
+  desk_robot::CliffConfig calibration{};
+  calibration.calibrated = true;
+  calibration.freshness_ms = 100;
+  calibration.front_obstacle_mm = 30;
+  calibration.front_max_mm = 1000;
+  for (auto& floor : calibration.floor) {
+    floor.min_mm = 40;
+    floor.max_mm = 60;
+  }
+  auto refresh = [](desk_robot::CliffGuard& guard, std::uint32_t now,
+                    std::uint8_t count = 5) {
+    for (std::uint8_t lane = 0; lane < count; ++lane)
+      guard.sample(lane, lane < 4 ? 50 : 200, true, now);
+  };
+  auto stopped = [](const BodyControl& body, std::uint32_t now) {
+    const auto& state = body.state();
+    CHECK(!state.armed && state.left == 0 && state.right == 0);
+    CHECK(body.drive_remaining(now) == 0 && body.watchdog_remaining(now) == 0);
+    CHECK(state.lift_target == state.lift && state.grip_target == state.grip);
+  };
+  auto reject_replay = [&](BodyControl& body, LineReceiver& remote,
+                           std::uint32_t now) {
+    auto replies = frame(body, remote, "arm\ndrive 20 20 250\nkeepalive\nrearm\n", now);
+    CHECK(replies.size() == 4);
+    CHECK(replies[0].find("ERR arm ") == 0);
+    CHECK(replies[1] == "ERR drive disarmed");
+    CHECK(replies[2] == "ERR keepalive disarmed");
+    CHECK(replies[3] == "ERR rearm local_only");
+    stopped(body, now);
+  };
+  for (const auto profile : {BodyProfile::StepperGuarded, BodyProfile::DcGuarded}) {
+    auto check_reboot = [&]() {
+      desk_robot::CliffGuard reset_guard;
+      CHECK(reset_guard.configure(calibration));
+      BodyControl reset(profile, &reset_guard);
+      LineReceiver remote, local(true);
+      stopped(reset, 0);
+      CHECK(!reset.state().servos_attached);
+      reject_replay(reset, remote, 0);
+      CHECK(frame(reset, local, "rearm\n", 0).at(0) == "ERR rearm safety_interlock");
+      refresh(reset_guard, 1, 4); // missing forward lane
+      CHECK(frame(reset, local, "rearm\n", 1).at(0) == "ERR rearm safety_interlock");
+      refresh(reset_guard, 2);
+      reject_replay(reset, remote, 2);
+      CHECK(frame(reset, local, "rearm\n", 2).at(0) == "OK rearm");
+      stopped(reset, 2);
+      CHECK(!reset.state().servos_attached);
+      CHECK(send(reset, "drive 20 20 250", 2) == "ERR drive disarmed");
+      CHECK(send(reset, "arm", 2) == "OK arm");
+      CHECK(reset.state().left == 0 && reset.state().right == 0);
+    };
+    for (const std::uint32_t start : {10U, std::numeric_limits<std::uint32_t>::max() - 100U}) {
+      for (bool moving : {false, true}) {
+        // Bits: head-link deadline, cliff, bumper, independent CPU cutoff.
+        for (unsigned mask = 1; mask < 16; ++mask) {
+          for (bool reverse_order : {false, true}) {
+            desk_robot::CliffGuard guard;
+            CHECK(guard.configure(calibration));
+            refresh(guard, start);
+            BodyControl body(profile, &guard);
+            LineReceiver remote, local(true);
+            CHECK(frame(body, local, "rearm\n", start).at(0) == "OK rearm");
+            CHECK(send(body, "arm", start) == "OK arm");
+            CHECK(send(body, "lift 120", start) == "OK lift angle=120");
+            CHECK(send(body, "grip 60", start) == "OK grip angle=60");
+            if (moving)
+              CHECK(send(body, "drive 20 20 250", start).find("OK drive") == 0);
+            auto now = start;
+            if (mask & 1U) {
+              const auto limit = moving ? 200U : 500U;
+              for (unsigned elapsed = 50; elapsed < limit; elapsed += 50) {
+                refresh(guard, start + elapsed);
+                body.tick(start + elapsed);
+                CHECK(body.state().armed);
+              }
+              now = start + limit;
+              refresh(guard, now);
+              // A valid frame at the exact deadline cannot renew the old lease.
+              CHECK(frame(body, remote, "keepalive\n", now).at(0) ==
+                    "ERR keepalive disarmed");
+              stopped(body, now);
+            }
+            ++now;
+            const auto lane = static_cast<std::uint8_t>(mask % 5);
+            auto cliff = [&]() {
+              if (mask & 2U) guard.sample(lane, lane < 4 ? 80 : 30, true, now);
+            };
+            auto bumper = [&]() {
+              if (mask & 4U) {
+                body.sample_bumper_input(true);
+                body.sample_bumper_input(false);
+                body.sample_bumper_input(true);
+              }
+            };
+            auto cpu = [&]() { if (mask & 8U) body.motor_watchdog_trip(); };
+            if (reverse_order) { cpu(); bumper(); cliff(); }
+            else { cliff(); bumper(); cpu(); }
+            body.tick(now);
+            stopped(body, now);
+            CHECK(body.state().servos_attached);
+            reject_replay(body, remote, now);
+            check_reboot(); // reset while the previous session was latched
+            if (mask & 6U)
+              CHECK(frame(body, local, "rearm\n", now).at(0).find("ERR rearm ") == 0);
+            if (mask & 4U) {
+              body.sample_bumper_input(false);
+              body.sample_bumper_input(true); // contact bounce, no event debounce
+              CHECK(frame(body, local, "rearm\n", now).at(0) == "ERR rearm bumper_active");
+              body.sample_bumper_input(false);
+            }
+            if (mask & 2U) {
+              // A putdown may replace the bad range but cannot replace a
+              // complete, fresh safety sweep or the local operator decision.
+              now += 100U;
+              refresh(guard, now, 4);
+              CHECK(frame(body, local, "rearm\n", now).at(0) ==
+                    "ERR rearm safety_interlock");
+            }
+            refresh(guard, ++now);
+            reject_replay(body, remote, now);
+            CHECK(send(body, "stop", now) == "OK stop");
+            CHECK(send(body, "halt", now) == "OK halt");
+            if (reverse_order) {
+              CHECK(send(body, "disarm", now) == "OK disarm");
+              CHECK(!body.state().servos_attached);
+            }
+            reject_replay(body, remote, now);
+            CHECK(frame(body, local, "rearm\n", now).at(0) == "OK rearm");
+            stopped(body, now);
+            CHECK(send(body, "drive 20 20 250", now) == "ERR drive disarmed");
+            CHECK(send(body, "arm", now) == "OK arm");
+            CHECK(body.state().left == 0 && body.state().right == 0);
+            CHECK(send(body, "drive 20 20 250", now).find("OK drive") == 0);
+            check_reboot(); // reset during a newly authorized drive
+          }
+        }
+      }
+    }
+  }
+}
+
 void deterministic_stream_stress() {
   guarded_transition_sequences();
   BodyControl body;
@@ -645,6 +791,7 @@ int main(int argc, char** argv) {
       {"guarded_head_timeout_cannot_rearm_from_reconnected_uart",
        guarded_head_timeout_cannot_rearm_from_reconnected_uart},
       {"guarded_transition_sequences", guarded_transition_sequences},
+      {"guarded_reboot_fault_matrix", guarded_reboot_fault_matrix},
       {"deterministic_stream_stress", deterministic_stream_stress}};
   int ran = 0;
   for (const auto& test : tests) {
