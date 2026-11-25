@@ -56,8 +56,11 @@ def positive_count(value: object, label: str) -> int:
     return value
 
 
-def _url(value: object) -> bool:
-    if not isinstance(value, str) or any(c.isspace() for c in value):
+def evidence_https_url(value: object) -> bool:
+    """Reject ambiguous HTTPS evidence URLs before the parser normalizes them."""
+    if not isinstance(value, str) or any(
+        ch.isspace() or ord(ch) < 32 or ord(ch) == 127 for ch in value
+    ):
         return False
     try:
         parsed = urlsplit(value)
@@ -66,6 +69,9 @@ def _url(value: object) -> bool:
                 and parsed.port != 0)
     except ValueError:
         return False
+
+
+_url = evidence_https_url
 
 
 def _nonempty(value: object, label: str) -> str:

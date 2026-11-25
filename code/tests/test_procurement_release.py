@@ -1935,6 +1935,11 @@ def test_receipt_url_requires_real_https_host():
                "reviewer": "operator", "evidence_url": ""}
     for bad in ("https://", "https:///no-host",
                 "https://user@attacker.example/receipt",
+                "https://@example.org/receipt",
+                "https://:@example.org/receipt",
+                "\x00https://example.org/receipt",
+                "https://example.org/\x00receipt",
+                "https://example.org/\x7freceipt",
                 "https://example.org:0/receipt",
                 "https://example.org:invalid/receipt",
                 "https://example.org/space here"):

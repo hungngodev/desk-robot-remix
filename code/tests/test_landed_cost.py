@@ -780,3 +780,19 @@ def test_canonical_role_count_is_bounded_before_accounting():
             sample(), huge_required, CATEGORIES, expected_scope="evaluation"
         )
     assert mod.positive_count(mod.MAX_ACCOUNTING_UNITS, "units") == 10000
+
+@pytest.mark.parametrize("url", [
+    "https://@example.org/receipt",
+    "https://:@example.org/receipt",
+    "\x00https://example.org/receipt",
+    "https://example.org/\x00receipt",
+    "https://example.org/\x7freceipt",
+])
+def test_ambiguous_supplier_evidence_url_cannot_qualify_cost(url):
+    ev = sample()
+    assert calculate(ev)["errors"] == []
+    ev["lines"][0]["stock_evidence_url"] = url
+    result = calculate(ev)
+    assert result["payable_now_cents"] is None
+    assert not result["calculation_complete_not_physical_approval"]
+    assert any("stock evidence" in error for error in result["errors"])
