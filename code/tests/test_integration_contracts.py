@@ -769,3 +769,21 @@ def test_wiring_manifest_preserves_supported_accessory_address_straps(lane, inde
     body = (ROOT / module.BODY_PINS).read_text()
     head = (ROOT / module.HEAD_PINS).read_text()
     module.verify(plan, body, head)
+
+
+def test_dc_output_helpers_follow_the_cutoff_build_guard():
+    """Cutoff-disabled full DC builds must not compile unused drive helpers."""
+    main = (ROOT / "code/firmware/body/src/main.cpp").read_text()
+    guard = (
+        "#if !DESK_ROBOT_STEPPER && "
+        "(!DESK_ROBOT_FULL_SENSORS || DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED)"
+    )
+    assert guard + "\nint applied_left = 0;\nint applied_right = 0;\n#endif" in main
+    assert guard + "\nvoid write_motor_pair(" in main
+    assert "#elif DESK_ROBOT_STEPPER\nvoid write_stepper(" in main
+    outputs = main.split("void apply_outputs() {", 1)[1]
+    cutoff = "#if DESK_ROBOT_FULL_SENSORS && !DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED"
+    off, on = outputs.split(cutoff, 1)[1].split("#else", 1)
+    assert "zero_motor_pwm();" in off
+    assert "write_motor_pair(" not in off
+    assert "write_motor_pair(" in on.split("#endif", 1)[0]

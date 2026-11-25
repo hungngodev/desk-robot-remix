@@ -214,7 +214,7 @@ ReplyQueue head_replies;
 ReplyQueue usb_replies;
 bool pwm_ready = false;
 bool servo_attached = false;
-#if !DESK_ROBOT_STEPPER
+#if !DESK_ROBOT_STEPPER && (!DESK_ROBOT_FULL_SENSORS || DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED)
 int applied_left = 0;
 int applied_right = 0;
 #endif
@@ -237,7 +237,7 @@ void zero_motor_pwm() {
 #endif
 }
 
-#if !DESK_ROBOT_STEPPER
+#if !DESK_ROBOT_STEPPER && (!DESK_ROBOT_FULL_SENSORS || DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED)
 void write_motor_pair(int forward_channel, int reverse_channel, int percent) {
   // Zero inactive side first; neither direction is driven during a reversal.
   const unsigned duty = static_cast<unsigned>(abs(percent) * 255 / 100);
@@ -249,7 +249,7 @@ void write_motor_pair(int forward_channel, int reverse_channel, int percent) {
     ledcWrite(reverse_channel, percent < 0 ? duty : 0);
   }
 }
-#else
+#elif DESK_ROBOT_STEPPER
 void write_stepper(const int (&pins)[4], std::uint8_t mask) {
   // Remove inactive coils before enabling the next phase. No blocking step call.
   for (int phase = 0; phase < 4; ++phase)
