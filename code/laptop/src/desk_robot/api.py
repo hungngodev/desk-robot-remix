@@ -210,7 +210,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
 
     @app.exception_handler(TimeoutError)
     async def deadline_error(request, exc):
-        return JSONResponse(status_code=503, content={"error": str(exc) or "Hardware deadline exceeded"})
+        return JSONResponse(
+            status_code=503,
+            content={"error": str(exc) or "Hardware deadline exceeded"},
+        )
 
     @app.exception_handler(ValueError)
     async def invalid_input(request, exc):
@@ -765,7 +768,9 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             # even though the endpoint reports a completed conversation.
             sharing_generation = settings.fleet_sharing_consent_generation
             if settings.mode == "hardware" and not settings.fleet_text_sharing_enabled:
-                raise HTTPException(409, "Enable fleet peer text sharing consent before group dialogue")
+                raise HTTPException(
+                    409, "Enable fleet peer text sharing consent before group dialogue"
+                )
             owner = app.state.runtime.conversation
             if owner.active is not None and not owner.active.done():
                 raise HTTPException(409, "A conversation is already active")
