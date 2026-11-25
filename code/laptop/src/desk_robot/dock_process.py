@@ -53,6 +53,7 @@ def _worker_main() -> None:
             )
             result = {"id": request["id"], "pose": asdict(pose) if pose is not None else None}
             print(json.dumps(result, allow_nan=False), flush=True)
+            del jpeg, calibration, pose, request, line
         except Exception:
             # No image, calibration or exception text escapes to logs. The
             # parent rejects EOF and retires this process before serving again.
@@ -87,8 +88,8 @@ class DetectorPool:
                 pass
 
     async def _retire(self, process: asyncio.subprocess.Process) -> None:
-        self._kill(process)
         try:
+            self._kill(process)
             # Drain pipes as well as waiting: Process.wait alone can deadlock
             # when the child filled its stdout pipe before being killed.
             await asyncio.wait_for(process.communicate(), _REAP_S)
@@ -181,6 +182,8 @@ class DetectorPool:
                     pose = DockPose(**pose)
                     if pose.captured_at != captured_at:
                         raise ValueError("AprilTag reply capture timestamp changed")
+                    if not 30 <= pose.z_mm <= 2000 or pose.reprojection_error_px > 3:
+                        raise ValueError("AprilTag reply outside detector pose envelope")
                 if time.monotonic() - captured_at >= FRAME_AGE_S:
                     raise TimeoutError("Stale AprilTag result")
             self._ready.insert(0, process)
@@ -233,6 +236,9 @@ class DetectorPool:
         self._closing = True
         if self._close_task is None or self._close_task.done():
             self._close_task = asyncio.create_task(self._close_owned())
+            self._close_task.add_done_callback(
+                lambda task: None if task.cancelled() else task.exception()
+            )
         await asyncio.shield(self._close_task)
 
     async def _close_owned(self) -> None:
@@ -242,13 +248,20 @@ class DetectorPool:
         # Kill warming/idle children immediately as well. Active owner and
         # warm tasks perform their own pipe draining before we retire leftovers.
         for process in self._owned:
-            self._kill(process)
+            try:
+                self._kill(process)
+            except OSError:
+                self._faulted = True
         if active is not None:
             await asyncio.shield(asyncio.gather(active, return_exceptions=True))
         if self._warming is not None:
             await asyncio.shield(self._warming)
         for process in tuple(self._owned):
-            await self._retire(process)
+            try:
+                await self._retire(process)
+            except DockDetectorBusy:
+                # Continue retiring other children even if one OS reap fails.
+                pass
         if self._owned:
             raise DockDetectorBusy("AprilTag process retirement unconfirmed")
 

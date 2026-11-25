@@ -39,6 +39,10 @@ for line in sys.stdin:
         result["pose"]["captured_at"] -= 1
     elif image == b"nan":
         result["pose"]["z_mm"] = float("nan")
+    elif image == b"out-of-range":
+        result["pose"]["z_mm"] = 2001
+    elif image == b"high-error":
+        result["pose"]["reprojection_error_px"] = 4
     elif image == b"fresh":
         result["pose"]["z_mm"] = 450
     print(json.dumps(result), flush=True)
@@ -56,7 +60,7 @@ async def request(pool, jpeg=b"fresh"):
 
 @pytest.mark.parametrize("failure", [
     b"hang", b"crash", b"malformed", b"oversized", b"duplicate", b"wrong-id",
-    b"wrong-clock", b"nan",
+    b"wrong-clock", b"nan", b"out-of-range", b"high-error",
 ])
 async def test_failed_child_is_reaped_then_fresh_frame_uses_warm_spare(pool, failure):
     await pool.prewarm()
@@ -160,5 +164,52 @@ async def test_real_opencv_worker_receives_generated_jpeg():
         assert pose is not None and 140 < pose.z_mm < 170
         assert pose.captured_at == captured
     finally:
+        await pool.close()
+    assert not pool._owned
+
+
+async def test_large_request_backpressure_and_cancelled_close(pool):
+    await pool.prewarm()
+    child = pool._ready[0]
+    os.kill(child.pid, signal.SIGSTOP)
+    active = asyncio.create_task(request(pool, b"a" * 512000))
+    try:
+        await asyncio.sleep(0.02)
+        closer = asyncio.create_task(pool.close())
+        await asyncio.sleep(0)
+        closer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await closer
+        await pool.close()
+        with pytest.raises(asyncio.CancelledError):
+            await active
+        assert child.returncode == -signal.SIGKILL and not pool._owned
+    finally:
+        await pool.close()
+
+
+async def test_kill_failure_latches_and_retains_native_owner(pool, monkeypatch):
+    await pool.prewarm()
+    child = pool._ready[0]
+    real_kill = pool._kill
+    os.kill(child.pid, signal.SIGSTOP)
+
+    def denied(process):
+        if process is child:
+            raise PermissionError("injected kill failure")
+        real_kill(process)
+
+    monkeypatch.setattr(pool, "_kill", denied)
+    try:
+        with pytest.raises(DockDetectorBusy, match="retirement unconfirmed"):
+            await request(pool)
+        assert child in pool._owned and pool._faulted
+        with pytest.raises(DockDetectorBusy):
+            await request(pool)
+        with pytest.raises(DockDetectorBusy, match="retirement unconfirmed"):
+            await pool.close()
+        assert pool._owned == {child}
+    finally:
+        monkeypatch.setattr(pool, "_kill", real_kill)
         await pool.close()
     assert not pool._owned
