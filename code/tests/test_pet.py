@@ -1833,6 +1833,68 @@ async def test_wroom_stop_callback_runs_before_any_safety_camera_request(
         await pet.close()
 
 
+@pytest.mark.parametrize("baseline", [True, False])
+async def test_wroom_fault_halt_bypasses_cognition_and_motion_locks(
+    fleet, tmp_path, baseline,
+):
+    from desk_robot.controller import Coordinator
+    from desk_robot.simulator import SimulatedHead, SimulationVision
+
+    halt_received = asyncio.Event()
+
+    class RecordingHead(SimulatedHead):
+        async def command(self, command):
+            receipt = await super().command(command)
+            if command == "halt":
+                halt_received.set()
+            return receipt
+
+    robot_id = "robot-01"
+    head = RecordingHead(robot_id)
+    coordinator = Coordinator(fleet, {robot_id: head}, SimulationVision())
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(), on_local_fault=coordinator.stop,
+    )
+    state = pet.states[robot_id]
+    state.enabled, state.generation = True, 7
+    coordinator.permits[robot_id] = time.monotonic() + 30
+    coordinator._deferred_dispatch_lock = asyncio.Lock()
+    try:
+        await head.command("arm")
+        if not baseline:
+            await pet._observe_body_safety(robot_id, 7, {
+                "safety": {"required": True, "ready": True, "fault": "none"},
+            })
+        async with (
+            pet._vision_lock,
+            conversation.session_lock,
+            conversation.speaker_lock,
+            coordinator.locks[robot_id],
+            coordinator._deferred_dispatch_lock,
+        ):
+            task = asyncio.create_task(pet._observe_body_safety(robot_id, 7, {
+                "safety": {"required": True, "ready": False,
+                           "fault": "floor_out_of_range", "sensor": 0},
+            }))
+            try:
+                # Measure host dispatch, not physical motor-stop latency.
+                await asyncio.wait_for(halt_received.wait(), timeout=0.5)
+                assert not head.armed
+                assert robot_id not in coordinator.permits
+                assert coordinator._permit_epoch[robot_id] == 1
+                await asyncio.wait_for(task, timeout=2)
+                assert state.safety_fault_events == (0 if baseline else 1)
+            finally:
+                if not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_local_wroom_safety_transitions_are_firsthand_not_replayed(fleet, tmp_path):
     class GuardedHead:
         def __init__(self):
