@@ -50,6 +50,7 @@ private:
     TimedPersonCue person_cue_{};
     CosmeticMoodCue cosmetic_mood_{};
     std::uint32_t camera_sequence_ = 0; // camera_busy ensures one producer
+    std::int64_t camera_completed_us_ = 0; // last successfully written JPEG
     std::uint32_t boot_nonce_ = 0; // changes across physical Sense reboots
     // Owned by the one Sense face task, not shared with HTTP handlers.
     RealTouchEdges head_touch_edges_{};

@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <limits>
 #include <memory>
 #include <new>
 #include <string_view>
@@ -642,10 +643,14 @@ void Bridge::CameraTask(void* context) {
     auto* bridge = static_cast<Bridge*>(req->user_ctx);
     {
         auto jpeg = bridge->camera_->SnapshotJpeg();
+        const auto completed = esp_timer_get_time();
         if (!jpeg) {
             bridge->Json(req, 503, Envelope(false, jpeg.error()));
         } else if (!CompleteJpeg(jpeg->data(), jpeg->size())) {
             bridge->Json(req, 503, Envelope(false, "incomplete JPEG capture"));
+        } else if (bridge->camera_sequence_ == std::numeric_limits<std::uint32_t>::max() ||
+                   completed <= bridge->camera_completed_us_) {
+            bridge->Json(req, 503, Envelope(false, "camera provenance clock or sequence exhausted"));
         } else {
             // Completion, not guessed exposure time. The Mac can reject old
             // frames from the same boot without synchronizing ESP32/Mac clocks.
@@ -654,7 +659,7 @@ void Bridge::CameraTask(void* context) {
             // provenance header is staged. A header allocation failure must
             // never publish an apparently fresh JPEG without its identity.
             const std::string sequence = std::to_string(bridge->camera_sequence_ + 1);
-            const std::string completed_us = std::to_string(esp_timer_get_time());
+            const std::string completed_us = std::to_string(completed);
             esp_err_t header_status = httpd_resp_set_type(req, "image/jpeg");
             if (header_status == ESP_OK)
                 header_status = httpd_resp_set_hdr(req, "Cache-Control", "no-store");
@@ -669,8 +674,12 @@ void Bridge::CameraTask(void* context) {
             if (header_status != ESP_OK) {
                 bridge->Json(req, 503, Envelope(false, "camera provenance headers unavailable"));
             } else {
-                ++bridge->camera_sequence_;
-                httpd_resp_send(req, reinterpret_cast<const char*>(jpeg->data()), jpeg->size());
+                const auto sent = httpd_resp_send(
+                    req, reinterpret_cast<const char*>(jpeg->data()), jpeg->size());
+                if (sent == ESP_OK) {
+                    ++bridge->camera_sequence_;
+                    bridge->camera_completed_us_ = completed;
+                }
             }
         }
     }  // Destroy JPEG storage before vTaskDelete (which does not unwind C++ locals).
@@ -697,13 +706,15 @@ void Bridge::CameraStreamTask(void* context) {
     while (status == ESP_OK) {
         {
             auto jpeg = bridge->camera_->SnapshotJpeg();
-            if (!jpeg || !CompleteJpeg(jpeg->data(), jpeg->size())) {
+            const auto completed = esp_timer_get_time();
+            if (!jpeg || !CompleteJpeg(jpeg->data(), jpeg->size()) ||
+                bridge->camera_sequence_ == std::numeric_limits<std::uint32_t>::max() ||
+                completed <= bridge->camera_completed_us_) {
                 status = ESP_FAIL; // Never stream a partial camera frame.
             } else {
                 // Per-part provenance is the same trusted monotonic camera
                 // completion metadata as the established snapshot endpoint.
                 const auto seq = bridge->camera_sequence_ + 1;
-                const auto completed = esp_timer_get_time();
                 // Longest legal ID and 64-bit timestamp must fit together.
                 char headers[320] = {};
                 const int n = snprintf(
@@ -720,8 +731,7 @@ void Bridge::CameraStreamTask(void* context) {
                 if (n < 0 || static_cast<std::size_t>(n) >= sizeof(headers)) {
                     status = ESP_FAIL;
                 } else {
-                    // Invalid multipart headers must not consume a source frame identity.
-                    ++bridge->camera_sequence_;
+                    // Only a complete, successfully written part spends a source identity.
                     status = httpd_resp_send_chunk(
                         req, kBoundary, sizeof(kBoundary) - 1);
                     if (status == ESP_OK)
@@ -731,6 +741,10 @@ void Bridge::CameraStreamTask(void* context) {
                             req, reinterpret_cast<const char*>(jpeg->data()), jpeg->size());
                     if (status == ESP_OK)
                         status = httpd_resp_send_chunk(req, "\r\n", 2);
+                    if (status == ESP_OK) {
+                        ++bridge->camera_sequence_;
+                        bridge->camera_completed_us_ = completed;
+                    }
                 }
             }
         } // Release the pinned Xiaozhi JPEG before yielding to audio/other tasks.

@@ -2149,10 +2149,9 @@ def test_camera_snapshot_never_sends_jpeg_on_provenance_header_failure():
     reject = task.index('bridge->Json(req, 503, Envelope(false, "camera provenance headers unavailable"));')
     guarded_success = task.index("} else {", failure)
     advance = task.index("++bridge->camera_sequence_;")
-    jpeg_send = task.index(
-        "httpd_resp_send(req, reinterpret_cast<const char*>(jpeg->data()), jpeg->size());"
-    )
-    assert failure < reject < guarded_success < advance < jpeg_send
+    jpeg_send = task.index("const auto sent = httpd_resp_send(")
+    send_ok = task.index("if (sent == ESP_OK)", jpeg_send)
+    assert failure < reject < guarded_success < jpeg_send < send_ok < advance
     assert "++bridge->camera_sequence_" not in task[:failure]
 
 def test_camera_stream_never_spends_sequence_on_invalid_provenance_headers():
@@ -2167,8 +2166,11 @@ def test_camera_stream_never_spends_sequence_on_invalid_provenance_headers():
     reject = stream.index("status = ESP_FAIL;", invalid)
     valid = stream.index("} else {", reject)
     advance = stream.index("++bridge->camera_sequence_;")
-    send = stream.index("status = httpd_resp_send_chunk(", advance)
-    assert reserve < format_headers < invalid < reject < valid < advance < send
+    send = stream.index("status = httpd_resp_send_chunk(", valid)
+    final_chunk = stream.index('status = httpd_resp_send_chunk(req, "\\r\\n", 2);', send)
+    send_ok = stream.index("if (status == ESP_OK) {", final_chunk)
+    assert reserve < format_headers < invalid < reject < valid < send < final_chunk
+    assert final_chunk < send_ok < advance
     assert "++bridge->camera_sequence_" not in stream[:invalid]
 
 
@@ -2369,3 +2371,21 @@ int main() {
             check=True, capture_output=True, text=True, env=native_cpp_env(),
         )
         subprocess.run([str(binary)], check=True, timeout=30, env=native_cpp_env())
+
+
+def test_camera_receipt_exhaustion_and_monotonic_completion_are_fail_closed():
+    bridge = (HEAD / "overlay/robot_bridge.cc").read_text()
+    camera = bridge.split("void Bridge::CameraTask(void* context) {", 1)[1].split(
+        "#if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3)", 1
+    )[0]
+    snapshot, stream = camera.split("void Bridge::CameraStreamTask(void* context) {", 1)
+    for worker in (snapshot, stream):
+        capture = worker.index("SnapshotJpeg();")
+        stamp = worker.index("const auto completed = esp_timer_get_time();", capture)
+        exhausted = worker.index("std::numeric_limits<std::uint32_t>::max()", stamp)
+        monotonic = worker.index("completed <= bridge->camera_completed_us_", exhausted)
+        reserve = worker.index("bridge->camera_sequence_ + 1", monotonic)
+        commit = worker.index("++bridge->camera_sequence_;", reserve)
+        complete = worker.index("bridge->camera_completed_us_ = completed;", commit)
+        assert capture < stamp < exhausted < monotonic < reserve < commit < complete
+        assert worker.count("++bridge->camera_sequence_;") == 1
