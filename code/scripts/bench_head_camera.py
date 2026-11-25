@@ -390,7 +390,16 @@ async def measure(
     ]
     if stream and callable(read_audio_reference):
         active_tasks.append(poll_concurrent_audio())
-    await asyncio.gather(*active_tasks)
+    tasks = [asyncio.create_task(worker) for worker in active_tasks]
+    try:
+        await asyncio.gather(*tasks)
+    finally:
+        # A child cancellation does not cancel its gather siblings. Close
+        # the camera lease and drain all polls before returning to the caller.
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
     # End the camera/status measurement interval BEFORE the optional AEC
     # GET. A slow diagnostic response cannot dilute measured camera FPS.
     elapsed = max(0.001, time.monotonic() - started)

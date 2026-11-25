@@ -720,3 +720,46 @@ async def test_stream_bench_rejects_invalid_receipt_clock(received):
     )
     assert result["camera_frames_received"] == 0
     assert "Invalid camera stream receipt clock" in result["camera_errors"][0]
+
+
+async def test_cancelled_status_poll_releases_camera_and_audio_leases():
+    """A child cancellation must not leave sibling bench tasks running."""
+    camera_entered, audio_entered = asyncio.Event(), asyncio.Event()
+    camera_closed, audio_closed = asyncio.Event(), asyncio.Event()
+
+    class Head:
+        async def stream_frames(self):
+            try:
+                camera_entered.set()
+                await asyncio.Event().wait()
+                yield JPEG, 0.0
+            finally:
+                camera_closed.set()
+
+        async def status(self):
+            await camera_entered.wait()
+            await audio_entered.wait()
+            raise asyncio.CancelledError
+
+        async def audio_reference_status(self):
+            try:
+                audio_entered.set()
+                await asyncio.Event().wait()
+            finally:
+                audio_closed.set()
+
+    baseline = asyncio.all_tasks()
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(
+                bench.measure(Head(), "robot-01", seconds=60, stream=True),
+                timeout=2,
+            )
+        assert camera_closed.is_set()
+        assert audio_closed.is_set()
+    finally:
+        # Keep the negative regression isolated even on the unfixed code.
+        pending = asyncio.all_tasks() - baseline
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
