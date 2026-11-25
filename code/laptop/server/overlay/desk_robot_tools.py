@@ -170,6 +170,20 @@ async def call(conn, route, payload=None):
         "interaction-context", "look", "plan-readonly",
     }
     observe_turn = getattr(bridge, "tool_turn_cancel_event", None)
+    signal = None
+
+    def connection_current():
+        return (connections.get(conn.device_id) is conn
+                and robot_for_device(conn.device_id) == robot)
+
+    def turn_is_superseded():
+        return (
+            getattr(bridge, "voice_turn_generation", {}).get(conn.device_id, 0)
+            != generation
+            # Cancellation can precede the generation update during cleanup.
+            or (signal is not None and signal.is_set())
+        )
+
     try:
         if readonly and callable(observe_turn):
             signal = observe_turn(conn.device_id)
@@ -222,21 +236,18 @@ async def call(conn, route, payload=None):
         # The Mac may be offline while a real human is still speaking to
         # Xiaozhi. No retry, no stale substitute response, no raw LAN/token
         # diagnostics in the text returned to the language model.
+        if not connection_current() or turn_is_superseded():
+            return {
+                "error": "Robot tool result superseded by new speech or reconnect",
+                "retried": False,
+            }
         return {"error": "Robot Mac connection unavailable", "retried": False}
-    if (connections.get(conn.device_id) is not conn
-            or robot_for_device(conn.device_id) != robot):
+    if not connection_current():
         return {
             "error": "Robot tool result superseded by new speech or reconnect",
             "retried": False,
         }
-    turn_superseded = (
-        getattr(bridge, "voice_turn_generation", {}).get(
-            conn.device_id, 0
-        ) != generation
-        # A new turn can signal cancellation while we await cleanup of the
-        # obsolete HTTP waiter, before the bridge advances its generation.
-        or (readonly and callable(observe_turn) and signal.is_set())
-    )
+    turn_superseded = turn_is_superseded()
     if turn_superseded and readonly:
         return {
             "error": "Robot tool result superseded by new speech or reconnect",

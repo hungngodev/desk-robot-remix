@@ -1395,3 +1395,93 @@ async def test_obsolete_http_teardown_failure_is_observed(
         signal.set()
         await asyncio.gather(task, return_exceptions=True)
         loop.set_exception_handler(previous)
+
+
+@pytest.mark.parametrize("route", ["look", "status", "pickup", "stop"])
+@pytest.mark.parametrize("invalidation", ["current", "generation", "reconnect", "remap"])
+@pytest.mark.parametrize("failure", [httpx.ReadTimeout, httpx.ConnectError])
+async def test_tool_transport_failure_cannot_request_speech_for_obsolete_turn(
+    bridge_tools, monkeypatch, route, invalidation, failure,
+):
+    import asyncio
+
+    bridge = bridge_tools.bridge
+    device = bridge_tools.registered_head.device_id
+    bridge.voice_turn_generation = {device: 3}
+    signal = asyncio.Event()
+    bridge.tool_turn_cancel_event = lambda _device: signal
+    original_client = httpx.AsyncClient
+    calls = []
+
+    async def handler(request):
+        calls.append(request)
+        if invalidation == "generation":
+            bridge.voice_turn_generation[device] += 1
+        elif invalidation == "reconnect":
+            bridge.connections[device] = SimpleNamespace(device_id=device)
+        elif invalidation == "remap":
+            monkeypatch.setattr(bridge_tools, "robot_for_device", lambda _: "robot-02")
+        raise failure("unavailable", request=request)
+
+    def client_factory(*args, **kwargs):
+        return original_client(
+            *args, transport=httpx.MockTransport(handler), **kwargs,
+        )
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    result = await bridge_tools.call(bridge_tools.registered_head, route)
+    response = bridge_tools.voice_turn_response(result)
+    assert len(calls) == 1
+    assert result["retried"] is False
+    if invalidation == "current":
+        assert response.action == bridge_tools.Action.REQLLM
+        assert response.result == {
+            "error": "Robot Mac connection unavailable", "retried": False,
+        }
+    else:
+        assert response.action == bridge_tools.Action.NONE
+        assert response.result is None
+        assert response.response is None
+
+
+async def test_readonly_timeout_during_waiter_cleanup_cannot_request_stale_speech(
+    bridge_tools, monkeypatch,
+):
+    import asyncio
+
+    bridge = bridge_tools.bridge
+    device = bridge_tools.registered_head.device_id
+    bridge.voice_turn_generation = {device: 3}
+    signal = asyncio.Event()
+    bridge.tool_turn_cancel_event = lambda _device: signal
+    original_client = httpx.AsyncClient
+    original_wait = asyncio.wait
+    waits = 0
+
+    async def handler(request):
+        raise httpx.ReadTimeout("late read-only timeout", request=request)
+
+    def client_factory(*args, **kwargs):
+        return original_client(
+            *args, transport=httpx.MockTransport(handler), **kwargs,
+        )
+
+    async def invalidate_during_cleanup(tasks, *args, **kwargs):
+        nonlocal waits
+        result = await original_wait(tasks, *args, **kwargs)
+        waits += 1
+        if waits == 2:
+            # The HTTP exception won the first wait. A new utterance may
+            # signal cancellation before the separate generation update.
+            signal.set()
+        return result
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    monkeypatch.setattr(bridge_tools.asyncio, "wait", invalidate_during_cleanup)
+    result = await bridge_tools.call(bridge_tools.registered_head, "status")
+    response = bridge_tools.voice_turn_response(result)
+    assert waits == 2
+    assert bridge.voice_turn_generation[device] == 3
+    assert response.action == bridge_tools.Action.NONE
+    assert response.result is None
+    assert response.response is None
