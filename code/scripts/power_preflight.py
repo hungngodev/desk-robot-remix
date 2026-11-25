@@ -21,6 +21,14 @@ def _finite_number(value: object) -> bool:
         return False
 
 
+def _ratings_cover(ratings, required) -> bool | None:
+    """Distinguish a known bottleneck from merely missing supplier data."""
+    if any(rating is not None and Decimal(str(rating)) < Decimal(str(need))
+           for rating, need in zip(ratings, required, strict=True)):
+        return False
+    return True if all(rating is not None for rating in ratings) else None
+
+
 def size_5v_supply(
     measured_peak_5v_a: float,
     measured_continuous_5v_a: float,
@@ -79,17 +87,10 @@ def size_5v_supply(
         "thermal_and_brownout_verified": False,
         "physical_load_verified": False,
     }
-    if all(rating is not None for rating in ratings):
-        requirements["candidate_electrically_sufficient_on_paper"] = (
-            Decimal(str(boost_max_input_a)) >= Decimal(str(cell_peak))
-            and Decimal(str(boost_continuous_input_a)) >= Decimal(str(cell_cont))
-            and Decimal(str(boost_continuous_output_a)) >= Decimal(str(boosted_peak))
-            and Decimal(str(protected_cell_continuous_a)) >= Decimal(str(cell_peak))
-        )
-        requirements["candidate_physically_qualified"] = False
-    else:
-        requirements["candidate_electrically_sufficient_on_paper"] = None
-        requirements["candidate_physically_qualified"] = False
+    requirements["candidate_electrically_sufficient_on_paper"] = _ratings_cover(
+        ratings, (cell_peak, cell_cont, boosted_peak, cell_peak)
+    )
+    requirements["candidate_physically_qualified"] = False
     return requirements
 
 
@@ -145,9 +146,12 @@ def screen_protected_pack(
         raise ValueError("Actual connector and wire/crimp current rating must be positive")
     if any(r is not None and (not _finite_number(r) or r <= 0) for r in ratings):
         raise ValueError("Pack discharge and PCM ratings must be positive real amperes")
-    if all(r is not None for r in ratings):
-        if (rated_continuous_discharge_a > rated_peak_discharge_a
-                or pcm_overcurrent_trip_a < rated_peak_discharge_a):
+    for lower, upper in (
+        (rated_continuous_discharge_a, rated_peak_discharge_a),
+        (rated_peak_discharge_a, pcm_overcurrent_trip_a),
+        (rated_continuous_discharge_a, pcm_overcurrent_trip_a),
+    ):
+        if lower is not None and upper is not None and lower > upper:
             raise ValueError("Contradictory protected pack peak, continuous or PCM ratings")
     fits_flat = (
         pack_thickness_mm + 2 * side_clearance_mm <= tray_height_mm
@@ -163,22 +167,13 @@ def screen_protected_pack(
     ratings_complete = all(v is not None for v in ratings)
     peak = Decimal(str(supply["minimum_rated_cell_and_boost_input_a"]))
     continuous = Decimal(str(supply["minimum_continuous_cell_input_a"]))
-    if any(
-        rating is not None and Decimal(str(rating)) < required
-        for rating, required in zip(ratings, (peak, continuous, peak), strict=True)
-    ):
-        current_ok = False
-    else:
-        current_ok = True if ratings_complete else None
+    current_ok = _ratings_cover(ratings, (peak, continuous, peak))
     # A 4A cell can ship with a 0.86A JST harness. Current through the
     # terminated connector and wires is NOT the cell's printed 4A rating.
     # Without a separately published pulse rating, conservatively compare
     # even short motor stalls to the connector's continuous ampacity.
     interconnect_complete = all(v is not None for v in interconnect_ratings)
-    if any(v is not None and Decimal(str(v)) < peak for v in interconnect_ratings):
-        interconnect_ok = False
-    else:
-        interconnect_ok = True if interconnect_complete else None
+    interconnect_ok = _ratings_cover(interconnect_ratings, (peak, peak))
     # Unlike the legacy pack-only indication, this field covers the complete
     # exact wired battery assembly and cannot pass without both ratings.
     # If any known hard bound fails, the answer is definitively NO even
@@ -330,15 +325,12 @@ def assess_docked_load(
     total = ceiling(required_dock_input)
     five_v = ceiling(required_5v)
     charge = ceiling(required_pack)
-    on_paper = None
-    if all(v is not None for v in ratings):
-        on_paper = (
-            motors_confirmed_disarmed
-            and all(decimal(v) >= decimal(total)
-                    for v in ratings[:3])
-            and decimal(rated_5v_boost_continuous_a) >= decimal(five_v)
-            and decimal(protected_pack_max_charge_a) >= decimal(charge)
-        )
+    # The silicon limit and the motor interlock are known independently of
+    # whether every carrier, adapter and pack specification is available.
+    on_paper = (
+        False if not motors_confirmed_disarmed or total > 1.5
+        else _ratings_cover(ratings, (total, total, total, five_v, charge))
+    )
     return {
         "charger_variant": charger_variant,
         "charger_variant_max_docked_out_v": max_out_v,

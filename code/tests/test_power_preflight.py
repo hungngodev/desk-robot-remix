@@ -1268,3 +1268,51 @@ def test_known_undersized_rating_rejects_pack_even_when_other_ratings_missing(fi
     else:
         assert result["current_sufficient_on_paper"] is False
         assert result["pack_only_usable_on_paper"] is False
+
+
+@pytest.mark.parametrize("field", [
+    "boost_max_input_a", "boost_continuous_input_a",
+    "boost_continuous_output_a", "protected_cell_continuous_a",
+])
+def test_known_undersized_supply_rating_is_false_with_missing_ratings(field):
+    result = tool(1, 0.6, **{field: 0.5})
+    assert result["candidate_electrically_sufficient_on_paper"] is False
+    assert result["candidate_physically_qualified"] is False
+
+
+@pytest.mark.parametrize("field", [
+    "charger_input_limit_a", "charger_board_thermal_input_a",
+    "dock_adapter_continuous_a", "rated_5v_boost_continuous_a",
+    "protected_pack_max_charge_a",
+])
+def test_known_dock_bottleneck_is_false_with_missing_ratings(field):
+    result = docked(
+        0.5, 0.25, measured_sys_v=4.0, measured_boost_efficiency=0.85,
+        motors_confirmed_disarmed=True, charger_variant="BQ24075",
+        **{field: 0.1},
+    )
+    assert result["candidate_docked_load_on_paper"] is False
+    assert result["candidate_physically_qualified"] is False
+
+
+def test_dock_interlock_and_silicon_ceiling_do_not_depend_on_supplier_ratings():
+    common = dict(measured_sys_v=4.0, measured_boost_efficiency=0.85,
+                  charger_variant="BQ24075")
+    assert docked(0.5, 0.25, motors_confirmed_disarmed=False, **common)[
+        "candidate_docked_load_on_paper"] is False
+    assert docked(1.0, 0.25, motors_confirmed_disarmed=True, **common)[
+        "candidate_docked_load_on_paper"] is False
+
+
+@pytest.mark.parametrize("ratings", [
+    {"rated_continuous_discharge_a": 8, "rated_peak_discharge_a": 7},
+    {"rated_peak_discharge_a": 8, "pcm_overcurrent_trip_a": 7},
+    {"rated_continuous_discharge_a": 8, "pcm_overcurrent_trip_a": 7},
+])
+def test_partial_pack_ratings_still_reject_known_contradictions(ratings):
+    with pytest.raises(ValueError, match="Contradictory protected pack"):
+        pack_screen(
+            tool(1, 0.6), pack_length_mm=55, pack_width_mm=30,
+            pack_thickness_mm=10, tray_length_mm=68, tray_width_mm=35,
+            tray_height_mm=14, **ratings,
+        )
