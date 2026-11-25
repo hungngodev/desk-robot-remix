@@ -1838,6 +1838,48 @@ int main() {
     consecutive.reference_clock_.future = 0;
     assert(consecutive.ReadReferenceLocked(out.data(), out.size(), 20000));
     assert(consecutive.reference_overwrite_reads_ == 0);
+
+    // Distinct values and a window straddling the physical ring boundary
+    // expose indexing bugs that a ring filled with a constant cannot.
+    SenseReferenceCodec wrapped;
+    for (uint64_t i = 0; i < ring; ++i)
+        wrapped.reference_[i] = static_cast<int16_t>(i + 1);
+    wrapped.write_index_ = ring + 80;
+    std::array<int16_t, 162> guarded{};
+    guarded.fill(-1);
+    assert(wrapped.ReadReferenceLocked(guarded.data() + 1, 160, 10000));
+    for (uint64_t i = 0; i < 160; ++i)
+        assert(guarded[i + 1] == static_cast<int16_t>(((ring - 80 + i) & (ring - 1)) + 1));
+    assert(guarded.front() == -1 && guarded.back() == -1);
+    // A full lap with an otherwise available window must zero only the
+    // requested output and keep the failure latch after later recovery.
+    wrapped.write_index_ += ring;
+    assert(!wrapped.ReadReferenceLocked(guarded.data() + 1, 160, 20000));
+    assert(wrapped.reference_overwrite_reads_ == 1);
+    assert(wrapped.missing_reference_reads_ == 0);
+    assert(wrapped.reference_integrity_failed_);
+    assert(std::all_of(guarded.begin() + 1, guarded.end() - 1,
+                       [](auto v) { return v == 0; }));
+    assert(guarded.front() == -1 && guarded.back() == -1);
+    assert(wrapped.ReadReferenceLocked(guarded.data() + 1, 160, 30000));
+    assert(wrapped.reference_integrity_failed_);
+    // A startup underflow is allowed briefly, not indefinitely.
+    SenseReferenceCodec underflow;
+    for (int i = 0; i < 31; ++i)
+        assert(!underflow.ReadReferenceLocked(out.data(), out.size(), 10000));
+    assert(!underflow.reference_integrity_failed_);
+    assert(!underflow.ReadReferenceLocked(out.data(), out.size(), 10000));
+    assert(underflow.reference_integrity_failed_);
+    assert(underflow.missing_reference_reads_ == 32);
+    underflow.missing_reference_reads_ = UINT32_MAX;
+    underflow.consecutive_missing_reference_reads_ = UINT32_MAX;
+    assert(!underflow.ReadReferenceLocked(out.data(), out.size(), 10000));
+    assert(underflow.missing_reference_reads_ == UINT32_MAX);
+    assert(underflow.consecutive_missing_reference_reads_ == UINT32_MAX);
+    underflow.write_index_ = 160;
+    assert(underflow.ReadReferenceLocked(out.data(), out.size(), 20000));
+    assert(underflow.consecutive_missing_reference_reads_ == 0);
+    assert(underflow.reference_integrity_failed_);
 }
 """
     source = tmp_path / "ring_lap.cc"
