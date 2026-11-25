@@ -963,11 +963,28 @@ class MemoryStore:
             return self._advance_episode_mutation(db, event_id)
 
     @staticmethod
-    def _advance_episode_mutation(db: sqlite3.Connection, event_id: str) -> int:
+    def _sealed_absent_episode(db: sqlite3.Connection, event_id: str) -> bool:
+        """Under the writer lease, a sealed store can never acquire this episode."""
+        return (
+            db.execute(
+                "SELECT writes_sealed FROM deletion_fence_guard WHERE singleton=1"
+            ).fetchone() == (1,)
+            and db.execute(
+                "SELECT 1 FROM memories WHERE event_id=?", (event_id,),
+            ).fetchone() is None
+        )
+
+    @classmethod
+    def _advance_episode_mutation(cls, db: sqlite3.Connection, event_id: str) -> int:
         old = db.execute(
             "SELECT generation FROM episode_mutations WHERE event_id=?",
             (event_id,),
         ).fetchone()
+        if old is None and cls._sealed_absent_episode(db, event_id):
+            # No retained row or earlier mutation to fence, and remember()
+            # cannot insert this ID after the permanent seal. Reuse a no-op
+            # receipt rather than growing the ledger for arbitrary absent IDs.
+            return 1
         if old is not None and old[0] >= _MAX_MUTATION_GENERATION:
             raise ValueError("Episode memory generation exhausted")
         generation = 1 if old is None else old[0] + 1
@@ -993,6 +1010,9 @@ class MemoryStore:
             "SELECT generation FROM episode_mutations WHERE event_id=?",
             (event_id,),
         ).fetchone()
+        if (current is None and generation == 1
+                and cls._sealed_absent_episode(db, event_id)):
+            return
         if current != (generation,):
             raise EpisodeMemoryMutationSuperseded(
                 "A newer operator episode mutation superseded this request"

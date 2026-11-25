@@ -5,7 +5,11 @@ from concurrent.futures import ThreadPoolExecutor
 
 import desk_robot.memory as memory_module
 import pytest
-from desk_robot.memory import MemoryStore, MemoryWriteSealed
+from desk_robot.memory import (
+    EpisodeMemoryMutationSuperseded,
+    MemoryStore,
+    MemoryWriteSealed,
+)
 
 
 def remember(store, pet, event):
@@ -107,3 +111,50 @@ def test_forget_and_delayed_writer_are_serialized_at_saturation(
             attempted.result(timeout=5)
     assert read_fence(root, "robot-01") == (1, 1)
     assert store.count("robot-01") == 0
+
+
+def test_sealed_absent_edits_do_not_grow_episode_mutation_ledger(tmp_path, monkeypatch):
+    monkeypatch.setattr(memory_module, "_MAX_DELETED_EPISODE_IDS", 3)
+    root = tmp_path / "private"
+    store = MemoryStore(root, ["robot-01", "robot-02"])
+    pet = "robot-01"
+
+    def generations(robot_id):
+        with sqlite3.connect(root / f"{robot_id}.sqlite3") as db:
+            return dict(db.execute("SELECT event_id,generation FROM episode_mutations"))
+
+    assert remember(store, pet, "retained")
+    assert remember(store, "robot-02", "peer")
+    for i in range(3):
+        assert not store.forget_episode(pet, f"fence-{i}")
+    initial = generations(pet)
+    assert read_fence(root, pet) == (3, 1)
+
+    for pass_index in range(2):
+        store = MemoryStore(root, ["robot-01", "robot-02"])
+        for i in range(20):
+            event = f"absent-{pass_index}-{i}"
+            assert not store.forget_episode(pet, event)
+            assert not store.correct_episode(pet, event, "new description")
+            # The operator route reserves before the offloaded edit.
+            delete = store.reserve_episode_mutation(pet, event)
+            assert not store.forget_episode(pet, event, mutation_generation=delete)
+            patch = store.reserve_episode_mutation(pet, event, "new description")
+            assert not store.correct_episode(
+                pet, event, "new description", mutation_generation=patch,
+            )
+        assert generations(pet) == initial
+        assert read_fence(root, pet) == (3, 1)
+
+    # Sealing must not weaken ordering for episodes that still exist.
+    old = store.reserve_episode_mutation(pet, "retained")
+    new = store.reserve_episode_mutation(pet, "retained", "corrected")
+    assert store.correct_episode(pet, "retained", "corrected", mutation_generation=new)
+    with pytest.raises(EpisodeMemoryMutationSuperseded):
+        store.forget_episode(pet, "retained", mutation_generation=old)
+    assert store.get_episode(pet, "retained").summary == "corrected"
+    assert store.forget_episode(pet, "retained")
+    with pytest.raises(MemoryWriteSealed):
+        remember(store, pet, "absent-0-0")
+    assert generations("robot-02") == {}
+    assert store.get_episode("robot-02", "peer") is not None
