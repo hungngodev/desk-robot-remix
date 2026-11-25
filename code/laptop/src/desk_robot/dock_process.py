@@ -94,6 +94,11 @@ class DetectorPool:
             # Drain pipes as well as waiting: Process.wait alone can deadlock
             # when the child filled its stdout pipe before being killed.
             await asyncio.wait_for(process.communicate(), _REAP_S)
+        except asyncio.CancelledError:
+            # Direct owner cancellation (including loop shutdown) cannot prove
+            # retirement. Keep the child owned and block promotion of the spare.
+            self._faulted = True
+            raise
         except Exception:
             self._faulted = True
             raise DockDetectorBusy("AprilTag process retirement unconfirmed") from None
