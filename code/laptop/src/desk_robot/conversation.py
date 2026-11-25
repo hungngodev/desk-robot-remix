@@ -1101,10 +1101,12 @@ class Conversation:
                         # returned; cancellation during a WAV send cannot be
                         # treated as an acknowledged transmission.
                         completed_segments: list[str] = []
+                        full_receipt_started = False
                         for index in range(turns):
                             # A revoked next turn must not re-record the
                             # previous turn's already completed segments.
                             completed_segments = []
+                            full_receipt_started = False
                             current_robot = None
                             if not consent_still_valid():
                                 raise RuntimeError("Group conversation consent revoked")
@@ -1187,6 +1189,9 @@ class Conversation:
                                 robots if self.settings.mode != "hardware"
                                 or sharing_at_start else [robot]
                             )
+                            # The full receipt worker owns this turn even
+                            # if the caller is cancelled during its SQLite IO.
+                            full_receipt_started = True
                             await self._persist_spoken_turn(
                                 robot, text, recipients,
                                 private_context_current=private_memory_current,
@@ -1244,7 +1249,10 @@ class Conversation:
                                 except BaseException:
                                     pass
                         if (current_robot is not None and completed_segments
-                                and private_memory_current()):
+                                and private_memory_current()
+                                and not full_receipt_started):
+                            # Never write a second receipt for a turn whose
+                            # completed transmission already has a write owner.
                             # An operator correction/deletion retires the
                             # private prompt, including its partial derivative.
                             # An ordinary interrupted song still has real transmitted

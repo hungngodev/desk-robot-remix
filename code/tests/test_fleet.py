@@ -975,3 +975,38 @@ async def test_five_pet_private_edit_retracts_late_sqlite_speech_write(
     assert not conversation.session_lock.locked()
     assert not conversation.speaker_lock.locked()
     assert all(not memory.search(robot, "ultraviolet") for robot in IDS)
+
+
+async def test_five_pet_sharing_revoked_during_peer_write_keeps_one_own_receipt(
+    fleet, tmp_path, monkeypatch,
+):
+    fleet.mode = "hardware"
+    fleet.fleet_text_sharing_enabled = True
+    memory = MemoryStore(tmp_path, IDS)
+    original = memory.remember
+    peer_attempts = []
+
+    def revoke_on_first_peer(robot_id, event_id, summary, **kwargs):
+        inserted = original(robot_id, event_id, summary, **kwargs)
+        if kwargs["kind"] == "peer_utterance":
+            peer_attempts.append(robot_id)
+            fleet.fleet_text_sharing_enabled = False
+        return inserted
+
+    monkeypatch.setattr(memory, "remember", revoke_on_first_peer)
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, SimulatedChat(), speaker, memory=memory)
+    with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
+        await conversation.run(IDS, "Play a word game")
+    assert peer_attempts == [IDS[1]]
+    assert len(speaker.spoken) == 1
+    own = memory.recent(IDS[0])
+    assert len(own) == 1
+    assert own[0].kind == "own_utterance"
+    assert own[0].source_robot == IDS[0]
+    assert not own[0].summary.startswith("I started to say")
+    assert all(memory.count(robot) == 0 for robot in IDS[1:])
+    assert conversation.active is None
+    assert not conversation.session_lock.locked()
+    assert not conversation.speaker_lock.locked()
+    assert len(await conversation.run(IDS, "Try again", 1)) == 1
