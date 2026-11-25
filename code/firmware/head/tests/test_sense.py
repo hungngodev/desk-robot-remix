@@ -1710,6 +1710,84 @@ def test_body_status_is_async_and_urgent_stop_preempts_uart_telemetry():
     assert "class UrgentStopGate" in protocol
     assert "Request(const Request&) = delete;" in protocol
 
+
+def test_reference_ring_lap_is_checked_even_on_unavailable_reads(tmp_path):
+    """Execute the production ring read method with deterministic clock and ring state."""
+    codec = (HEAD / "sense/sense_reference_codec.cc").read_text()
+    method = "bool SenseReferenceCodec::ReadReferenceLocked(" + codec.split(
+        "bool SenseReferenceCodec::ReadReferenceLocked(", 1
+    )[1].split("int SenseReferenceCodec::Read(", 1)[0]
+    harness = r"""
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <cstdint>
+struct SenseReferenceCodec {
+    static constexpr uint64_t kRingSize = 16384, kDelaySamples = 0;
+    struct Clock {
+        uint64_t future = 0;
+        uint64_t future_reference_frames(int64_t, uint64_t cap) const {
+            return std::min(future, cap);
+        }
+    } reference_clock_;
+    uint64_t write_index_ = 0, last_reference_read_write_index_ = 0;
+    uint32_t missing_reference_reads_ = 0, consecutive_missing_reference_reads_ = 0;
+    uint32_t reference_overwrite_reads_ = 0;
+    bool reference_integrity_failed_ = false, reference_read_seen_ = false;
+    std::array<int16_t, kRingSize> reference_{};
+    bool ReadReferenceLocked(int16_t* dest, int frames, int64_t now_us);
+};
+""" + method + r"""
+int main() {
+    constexpr uint64_t ring = SenseReferenceCodec::kRingSize;
+    std::array<int16_t, 160> out{};
+    SenseReferenceCodec codec;
+    codec.reference_.fill(123);
+    codec.write_index_ = 160;
+    assert(codec.ReadReferenceLocked(out.data(), out.size(), 10000));
+    assert(out[0] == 123);
+    codec.write_index_ += ring;
+    codec.reference_clock_.future = ring;
+    assert(!codec.ReadReferenceLocked(out.data(), out.size(), 20000));
+    assert(codec.reference_overwrite_reads_ == 1);
+    assert(codec.missing_reference_reads_ == 1);
+    assert(codec.reference_integrity_failed_);
+    assert(std::all_of(out.begin(), out.end(), [](auto v) { return v == 0; }));
+    codec.reference_clock_.future = 0;
+    assert(codec.ReadReferenceLocked(out.data(), out.size(), 30000));
+    assert(codec.reference_overwrite_reads_ == 1);
+    assert(codec.reference_integrity_failed_);
+    SenseReferenceCodec startup;
+    startup.reference_clock_.future = ring;
+    assert(!startup.ReadReferenceLocked(out.data(), out.size(), 10000));
+    startup.write_index_ = ring;
+    assert(!startup.ReadReferenceLocked(out.data(), out.size(), 20000));
+    assert(startup.reference_overwrite_reads_ == 1);
+    assert(startup.reference_integrity_failed_);
+    SenseReferenceCodec consecutive;
+    consecutive.reference_clock_.future = ring;
+    for (uint64_t i = 0; i < 3; ++i) {
+        consecutive.write_index_ = i * (ring / 2);
+        assert(!consecutive.ReadReferenceLocked(out.data(), out.size(), 10000));
+    }
+    consecutive.reference_clock_.future = 0;
+    assert(consecutive.ReadReferenceLocked(out.data(), out.size(), 20000));
+    assert(consecutive.reference_overwrite_reads_ == 0);
+}
+"""
+    source = tmp_path / "ring_lap.cc"
+    source.write_text(harness)
+    compiler = shutil.which("c++")
+    assert compiler is not None, "A native C++17 compiler is required"
+    executable = tmp_path / "ring_lap"
+    subprocess.run(
+        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+         str(source), "-o", str(executable)],
+        check=True, env=native_cpp_env(),
+    )
+    subprocess.run([str(executable)], check=True)
+
+
 def test_sense_pcm_window_native_cpp_regression():
     """Compile the same bounded 4s PCM window used by the real Sense codec."""
     compiler = shutil.which("c++")

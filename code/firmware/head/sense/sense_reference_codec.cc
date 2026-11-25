@@ -84,6 +84,17 @@ bool SenseReferenceCodec::ReadReferenceLocked(int16_t* dest, int frames,
         now_us, kRingSize);
     const uint64_t required =
         static_cast<uint64_t>(kDelaySamples) + frames + future;
+    // Check every completed microphone read, even when its requested
+    // reference window is unavailable. Otherwise an underflow can hide a
+    // full lap until a later valid read (or forever if underflow persists).
+    const bool lapped = reference_read_seen_ &&
+        write_index_ - last_reference_read_write_index_ >= kRingSize;
+    last_reference_read_write_index_ = write_index_;
+    reference_read_seen_ = true;
+    if (lapped) {
+        if (reference_overwrite_reads_ != UINT32_MAX) ++reference_overwrite_reads_;
+        reference_integrity_failed_ = true;
+    }
     if (required > kRingSize || write_index_ < required) {
         // A missing reference is silence only, not proof that AEC aligned.
         // Count it without logging inside the audio ring mutex.
@@ -96,17 +107,7 @@ bool SenseReferenceCodec::ReadReferenceLocked(int16_t* dest, int frames,
         return false;
     }
     consecutive_missing_reference_reads_ = 0;
-    // If playback advanced by a whole ring between microphone reads, the
-    // unseen reference interval has been overwritten. Do not align an
-    // apparently fresh echo to a reference history that no longer exists.
-    // This is conservative: even a long idle period needs realignment.
-    const bool lapped = reference_read_seen_ &&
-        write_index_ - last_reference_read_write_index_ >= kRingSize;
-    last_reference_read_write_index_ = write_index_;
-    reference_read_seen_ = true;
     if (lapped) {
-        if (reference_overwrite_reads_ != UINT32_MAX) ++reference_overwrite_reads_;
-        reference_integrity_failed_ = true;
         std::fill_n(dest, frames, 0);
         return false;
     }
