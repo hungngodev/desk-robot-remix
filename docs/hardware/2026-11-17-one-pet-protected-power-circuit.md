@@ -93,9 +93,10 @@ the current curve at the actual low cell voltage. Ordinary 5V-only
 step-down modules fail the 5.6V charger or low cell corner.
 
 Manufacturer sourced batteries evaluated by
-`code/scripts/screen_vendor_battery_harness.py` now include nine
-variants. Existing 68x35x14mm coupon does not physically fit the
-published protected and terminated packs. The THOR pack advertises
+`code/scripts/screen_vendor_battery_harness.py` now include ten
+variants. The earlier 68x35x14mm coupon has been revised to 86x35x14mm
+in the CAD source. Neither coupon establishes physical fit of the
+complete protected and terminated packs with lead relief. The THOR pack advertises
 optional NTC and an incomplete bare assembly outline, so even its
 dimensions cannot prove fit. The final candidate must contain **PCM,
 matched cell, 10k NTC and verified cable/connector**, rated for the

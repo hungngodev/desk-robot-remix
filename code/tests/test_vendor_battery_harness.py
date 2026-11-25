@@ -47,7 +47,9 @@ def test_overlong_five_amp_pack_and_compact_underrated_pack_rejected():
     assert "exact_connector_or_lead_ampacity_missing" in long_pack["blocking_reasons"]
     compact = screen.evaluate("LP103650", demand)
     assert compact["pack_peak_within_published_max_on_paper"] is False
-    assert compact["pack_current_enough_on_paper"] is None
+    assert compact["pack_current_enough_on_paper"] is False
+    assert "manufacturer_continuous_discharge_rating_missing" in compact["blocking_reasons"]
+    assert "pack_current_rating_below_load_budget" in compact["blocking_reasons"]
     assert compact["pack_fits_current_tray_on_paper"] is False
     assert "pack_max_discharge_below_peak_budget" in compact["blocking_reasons"]
 
@@ -221,7 +223,7 @@ def test_thor_cell_ceiling_never_proves_assembled_pack_peak(peak, expected):
         tray_mm=(115, 55, 30),
     )
     assert report["pack_peak_within_published_max_on_paper"] is expected
-    assert report["pack_current_enough_on_paper"] is None
+    assert report["pack_current_enough_on_paper"] is expected
     assert "manufacturer_assembled_pack_peak_discharge_rating_missing" in report["blocking_reasons"]
     assert ("cell_level_discharge_below_peak_budget" in report["blocking_reasons"]) == (expected is False)
     assert report["complete_power_path_safe_to_buy"] is False

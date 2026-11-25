@@ -183,8 +183,13 @@ def evaluate(model: str, demand: dict, *, tray_mm=None,
         # A cell-level ceiling can rule a pack out, but cannot establish
         # that an unspecified protection circuit supports the required load.
         peak_ok = False if cell_ceiling is not None and cell_ceiling < peak else None
-    pack_ok = (None if src["continuous_a"] is None else
-               src["continuous_a"] >= cont and peak_ok)
+    continuous = src["continuous_a"]
+    if peak_ok is False or (continuous is not None and continuous < cont):
+        pack_ok = False
+    elif peak_ok is True and continuous is not None:
+        pack_ok = True
+    else:
+        pack_ok = None
     # A proven cell is still unsafe with a narrower connector/lead assembly.
     conn = src["connector_continuous_a"]
     lead = src["lead_continuous_a"]
@@ -201,9 +206,9 @@ def evaluate(model: str, demand: dict, *, tray_mm=None,
             reasons.append("cell_level_discharge_below_peak_budget")
     elif peak_ok is False:
         reasons.append("pack_max_discharge_below_peak_budget")
-    if pack_ok is None:
+    if continuous is None:
         reasons.append("manufacturer_continuous_discharge_rating_missing")
-    elif not pack_ok:
+    if pack_ok is False:
         reasons.append("pack_current_rating_below_load_budget")
     if conn is None or lead is None:
         reasons.append("exact_connector_or_lead_ampacity_missing")
