@@ -615,6 +615,45 @@ class OverlayTests(unittest.TestCase):
             self.original,
         )
 
+    def test_sense_tx_scratch_reuses_startup_buffer(self):
+        """Compile the installed pinned writer and lifecycle, not a replacement."""
+        compiler = shutil.which("g++") or shutil.which("clang++")
+        if compiler is None:
+            self.skipTest("Native C++ compiler unavailable")
+        overlay.apply(self.root, "sense")
+        source = (self.root / "main/audio/codecs/no_audio_codec.cc").read_text()
+        base = (self.root / "main/audio/audio_codec.cc").read_text()
+        header = (self.root / "main/audio/audio_codec.h").read_text()
+        self.assertIn("static constexpr int kSenseTxScratchSamples = 32000;", header)
+        self.assertIn("int32_t* sense_tx_scratch_ = nullptr;", header)
+        writer = "int NoAudioCodec::Write(" + source.split(
+            "int NoAudioCodec::Write(", 1
+        )[1].split("int NoAudioCodec::Read(", 1)[0]
+        lifecycle = "AudioCodec::AudioCodec()" + base.split(
+            "AudioCodec::AudioCodec()", 1
+        )[1].split("int AudioCodec::OutputData(", 1)[0]
+        with tempfile.TemporaryDirectory() as directory:
+            temp = Path(directory)
+            (temp / "writer.inc").write_text(writer)
+            (temp / "lifecycle.inc").write_text(lifecycle)
+            executable = temp / "sense_tx_scratch_test"
+            subprocess.run(
+                [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+                 "-I", str(temp), str(HEAD / "tests/sense_tx_scratch_test.cc"),
+                 "-o", str(executable)],
+                check=True, capture_output=True, text=True, env=native_cpp_env(),
+                timeout=60,
+            )
+            result = subprocess.run(
+                [str(executable)], check=True, capture_output=True, text=True,
+                timeout=30,
+            )
+            self.assertIn("allocations during 1000 TX callbacks: 0", result.stdout)
+        overlay.remove(self.root)
+        for path in ("main/audio/codecs/no_audio_codec.cc", "main/audio/audio_codec.cc",
+                     "main/audio/audio_codec.h"):
+            self.assertEqual((self.root / path).read_bytes(), self.original[path])
+
     def test_sense_reuses_upstream_i2s_writer_with_finite_stop_bound(self):
         overlay.apply(self.root, "sense")
         codec_path = "main/audio/codecs/no_audio_codec.cc"

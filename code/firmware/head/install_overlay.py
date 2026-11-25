@@ -532,6 +532,28 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
 #endif
         return 0;''',
         )
+        # The upstream TX writer allocates a vector for every PCM callback.
+        # The selected Sense owns one startup scratch buffer instead.
+        codec_source = replace_once(
+            codec_source,
+            "    std::vector<int32_t> buffer(samples);",
+            '''#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+    // Reuse the codec's startup-allocated PSRAM scratch under the existing
+    // TX mutex. Missing memory or an invalid request must not reach I2S.
+    if (data == nullptr || samples <= 0 || samples > kSenseTxScratchSamples ||
+        sense_tx_scratch_ == nullptr) return 0;
+    int32_t* buffer = sense_tx_scratch_;
+#else
+    std::vector<int32_t> buffer(samples);
+#endif''',
+        )
+        codec_source = replace_once(
+            codec_source,
+            "        tx_handle_, buffer.data(), samples * sizeof(int32_t),\n"
+            "        &bytes_written, pdMS_TO_TICKS(120));",
+            "        tx_handle_, buffer, samples * sizeof(int32_t),\n"
+            "        &bytes_written, pdMS_TO_TICKS(120));",
+        )
         files[path] = codec_source.encode()
 
         # Preserve upstream notification progress semantics. Add a separate
@@ -544,6 +566,21 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
             "    virtual void OutputData(std::vector<int16_t>& data);",
             "    virtual int OutputData(std::vector<int16_t>& data);",
         )
+        codec_header = replace_once(
+            codec_header,
+            '#include "board.h"',
+            '#include "board.h"\n#include "sdkconfig.h"',
+        )
+        codec_header = replace_once(
+            codec_header,
+            "    float input_gain_ = 0.0;",
+            """    float input_gain_ = 0.0;
+#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+    // Preserve the Sense wrapper's existing maximum of one second at 32 kHz.
+    static constexpr int kSenseTxScratchSamples = 32000;
+    int32_t* sense_tx_scratch_ = nullptr;
+#endif""",
+        )
         files[path] = codec_header.encode()
 
         path = "main/audio/audio_codec.cc"
@@ -555,6 +592,37 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
 }""",
             """int AudioCodec::OutputData(std::vector<int16_t>& data) {
     return Write(data.data(), data.size());
+}""",
+        )
+        codec_base = replace_once(
+            codec_base,
+            "#include <esp_log.h>",
+            """#include <esp_log.h>
+#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+#include <esp_heap_caps.h>
+#endif""",
+        )
+        codec_base = replace_once(
+            codec_base,
+            """AudioCodec::AudioCodec() {
+}
+
+AudioCodec::~AudioCodec() {
+}""",
+            """AudioCodec::AudioCodec() {
+#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+    // Allocate once at codec construction, never in the realtime TX path.
+    // I2S copies this CPU-readable PSRAM source into its own DMA buffers.
+    sense_tx_scratch_ = static_cast<int32_t*>(heap_caps_malloc(
+        kSenseTxScratchSamples * sizeof(int32_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+    if (!sense_tx_scratch_) ESP_LOGE(TAG, "Sense TX scratch unavailable");
+#endif
+}
+
+AudioCodec::~AudioCodec() {
+#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+    if (sense_tx_scratch_) heap_caps_free(sense_tx_scratch_);
+#endif
 }""",
         )
         files[path] = codec_base.encode()

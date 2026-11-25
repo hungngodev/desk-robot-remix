@@ -108,6 +108,8 @@ private:
                   "Sense AEC microphone rate differs from the active board");
     static_assert(AUDIO_OUTPUT_SAMPLE_RATE == kSpeakerRate,
                   "Sense AEC speaker rate differs from the active board");
+    static_assert(kSpeakerRate == kSenseTxScratchSamples,
+                  "Sense TX scratch must preserve the wrapper's bounded write size");
     static_assert(kSpeakerRate % kMicRate == 0, "AEC decimation ratio must be integral");
     static_assert(kMicRate == desk_robot::PlaybackReferenceClock::kReferenceRate,
                   "AEC ring clock must match microphone rate");
