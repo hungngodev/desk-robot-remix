@@ -21,7 +21,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Awaitable, Callable, Protocol
+from typing import Awaitable, Callable, Literal, Protocol, TypedDict
 
 from .aux import _aux_boot_epoch, _fresh_aux_acquisition, validate_aux
 from .brain_context import (
@@ -153,6 +153,55 @@ def _sensor_counter_advance(current: int, previous: int | None) -> int | None:
     return delta if delta < 0x80000000 else 0
 
 
+class PetStatus(TypedDict):
+    """Stable dashboard payload; sensor uncertainty remains explicit."""
+
+    robot_id: str
+    enabled: bool
+    quiet: bool
+    manual_quiet: bool
+    quiet_hours_active: bool
+    camera_change_events: int
+    spontaneous_speech_turns: int
+    suppressed_speech_candidates: int
+    low_value_speech_candidates: int
+    last_initiative_suppression: str | None
+    activity_reevaluations: int
+    activity_silences: int
+    last_activity_decision: str | None
+    activity_scheduler_running: bool
+    stale_camera_events_dropped: int
+    local_safety_fault_events: int
+    last_local_safety_fault: str | None
+    last_event: str | None
+    aux_sensor_reads: int
+    qualified_handling_events: int
+    last_aux_interaction: str | None
+    dock_seated: bool | None
+    dock_input_good: bool | None
+    dock_charge_indicated: bool | None
+    dock_motion_inhibited: bool
+    charging_verified: Literal[False]
+    aux_sensors_physically_qualified: Literal[False]
+    last_error: str | None
+    motor_control_enabled_by_pet: Literal[False]
+    voice_event_monitor_ready: bool
+    source_capture_timestamp_verified: Literal[False]
+    physical_audio_interruption_verified: Literal[False]
+
+
+class PeerShareReceipt(TypedDict):
+    """Text-only secondhand memory relay, never new physical evidence."""
+
+    from_robot: str
+    to_robot: str
+    source_robot: str
+    event_id: str
+    stored: bool
+    witnessed: Literal[False]
+    text_only: Literal[True]
+
+
 @dataclass
 class PetState:
     enabled: bool = False
@@ -194,7 +243,7 @@ class PetState:
     side_events: SideRangeEvents = field(default_factory=SideRangeEvents, repr=False)
     handling_gate: HandlingGate = field(default_factory=HandlingGate, repr=False)
     handling_events: int = 0
-    aux_task: asyncio.Task | None = field(default=None, repr=False)
+    aux_task: asyncio.Task[None] | None = field(default=None, repr=False)
     aux_read_task: asyncio.Task | None = field(default=None, repr=False)
     aux_reads: int = 0
     last_battery_low: bool | None = None
@@ -208,8 +257,10 @@ class PetState:
     recent_optional_transmissions: deque[tuple[str, float]] = field(
         default_factory=lambda: deque(maxlen=12), repr=False,
     )
-    deferred_speech_candidate: tuple | None = field(default=None, repr=False)
-    deferred_speech_task: asyncio.Task | None = field(default=None, repr=False)
+    deferred_speech_candidate: tuple[SceneChange, int, bool, float, int, int | None] | None = field(
+        default=None, repr=False,
+    )
+    deferred_speech_task: asyncio.Task[None] | None = field(default=None, repr=False)
     last_gesture_events: int | None = None
     last_aux_boot_id: int | None = None
     retired_aux_boot_ids: set[int] = field(default_factory=set, repr=False)
@@ -235,8 +286,8 @@ class PetState:
     dock_charge_indicated: bool | None = None
     dock_charging_verified: bool = False
     session_event_counts: dict[str, int] = field(default_factory=dict, repr=False)
-    task: asyncio.Task | None = field(default=None, repr=False)
-    touch_task: asyncio.Task | None = field(default=None, repr=False)
+    task: asyncio.Task[None] | None = field(default=None, repr=False)
+    touch_task: asyncio.Task[None] | None = field(default=None, repr=False)
     gate: VisualChangeGate = field(default_factory=VisualChangeGate, repr=False)
 
 
@@ -317,10 +368,10 @@ class PetController:
         self.on_local_fault = on_local_fault  # existing Coordinator.stop, not a new motion authority
         self.on_low_battery_dock = on_low_battery_dock
         self.on_dock_inhibit_changed = on_dock_inhibit_changed
-        self.states = {robot.id: PetState() for robot in settings.robots}
+        self.states: dict[str, PetState] = {robot.id: PetState() for robot in settings.robots}
         self._scheduled_quiet = quiet_hours_active(getattr(settings, "pet_quiet_hours", None))
         self._vision_lock = asyncio.Lock()
-        self._vision_inflight: asyncio.Task | None = None
+        self._vision_inflight: asyncio.Task[SceneChange | None] | None = None
         # A queued background camera comparison does not yet have an
         # inference task to cancel. Generation fences queued VLM waiters too.
         self._vision_preemption_epoch = 0
@@ -332,13 +383,13 @@ class PetController:
         # No unsolicited physical speaker output before Xiaozhi VAD has
         # authenticated a healthy live event stream. Simulation stays usable.
         self.voice_monitor_ready = settings.mode != "hardware"
-        self._speech_task: asyncio.Task | None = None
+        self._speech_task: asyncio.Task[None] | None = None
         self._speech_robot: str | None = None
         self._speech_participants: frozenset[str] = frozenset()
         self._group_last_spoken = -math.inf
         self._social_last_started = -math.inf
         self._social_round = 0
-        self._activity_task: asyncio.Task | None = None
+        self._activity_task: asyncio.Task[None] | None = None
         self._activity_round = 0
         # Same class alone is not an identity: two distinct keys appearing
         # in rapid succession must not be merged. Descriptions remain model
@@ -431,7 +482,7 @@ class PetController:
         state = self.states[robot_id]
         return self._quiet_hours_active() or state.quiet
 
-    def status(self, robot_id: str) -> dict:
+    def status(self, robot_id: str) -> PetStatus:
         state = self.states[robot_id]
         scheduled_quiet = self._quiet_hours_active()
         return {
@@ -472,7 +523,7 @@ class PetController:
             "physical_audio_interruption_verified": False,
         }
 
-    def start(self, robot_id: str) -> dict:
+    def start(self, robot_id: str) -> PetStatus:
         state = self.states[robot_id]
         if self._closed:
             raise RuntimeError("Pet runtime closed")
@@ -567,7 +618,7 @@ class PetController:
             )
         return self.status(robot_id)
 
-    async def pause(self, robot_id: str) -> dict:
+    async def pause(self, robot_id: str) -> PetStatus:
         state = self.states[robot_id]
         # Multiple pause callers may overlap. Keep restart fenced until the
         # last caller has finished speech cancellation and camera cleanup.
@@ -577,7 +628,7 @@ class PetController:
         finally:
             state.pause_inflight -= 1
 
-    async def _pause_observers(self, robot_id: str) -> dict:
+    async def _pause_observers(self, robot_id: str) -> PetStatus:
         state = self.states[robot_id]
         state.generation += 1
         state.enabled = False
@@ -622,7 +673,7 @@ class PetController:
                     self.multimodal.hub.discard_video(robot_id)
         return self.status(robot_id)
 
-    async def set_quiet(self, robot_id: str, quiet: bool) -> dict:
+    async def set_quiet(self, robot_id: str, quiet: bool) -> PetStatus:
         if type(quiet) is not bool:
             raise ValueError("quiet must be a boolean")
         state = self.states[robot_id]
@@ -634,7 +685,7 @@ class PetController:
             await self._cancel_speech(robot_id)
         return self.status(robot_id)
 
-    async def interrupt(self, robot_id: str) -> dict:
+    async def interrupt(self, robot_id: str) -> PetStatus:
         """Real human speech takes the floor over proactive narration.
 
         The authenticated Xiaozhi VAD bridge is the source in hardware mode.
@@ -918,7 +969,7 @@ class PetController:
 
     async def share_with_peer(
         self, from_robot: str, to_robot: str, event_id: str
-    ) -> dict:
+    ) -> PeerShareReceipt:
         """Operator selected text-only relay recovered from historical PR #4.
 
         A stored eyewitness event is copied to another robot's private SQLite

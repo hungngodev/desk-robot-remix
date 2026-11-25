@@ -9665,3 +9665,37 @@ async def test_privacy_mode_optional_transmission_dedup_across_cooldown_with_ide
     finally:
         state.enabled = False
         await pet.close()
+
+
+async def test_pet_status_public_type_contract(fleet, tmp_path):
+    from typing import Literal, get_type_hints
+
+    from desk_robot.pet import PeerShareReceipt, PetStatus
+
+    ids = [robot.id for robot in fleet.robots]
+    memory = MemoryStore(tmp_path, ids)
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    try:
+        for method in (pet.status, pet.start, pet.pause, pet.interrupt, pet.set_quiet):
+            assert get_type_hints(method)["return"] is PetStatus
+        assert get_type_hints(pet.share_with_peer)["return"] is PeerShareReceipt
+        hints = get_type_hints(PetStatus)
+        initial = pet.status(ids[0])
+        assert set(initial) == PetStatus.__required_keys__ == set(hints)
+        for key, annotation in hints.items():
+            if annotation == Literal[False]:
+                assert initial[key] is False
+        assert initial["dock_seated"] is None
+        assert initial["dock_input_good"] is None
+        assert initial["dock_charge_indicated"] is None
+        with pytest.raises(ValueError, match="quiet must be a boolean"):
+            await pet.set_quiet(ids[0], 1)
+        assert pet.status(ids[0]) == initial
+        updated = await pet.set_quiet(ids[0], True)
+        assert set(updated) == set(initial)
+        assert updated["manual_quiet"] is True
+        assert updated["quiet"] is True
+        assert pet.status(ids[1])["manual_quiet"] is False
+    finally:
+        await pet.close()
