@@ -120,6 +120,28 @@ constexpr bool all_distinct(const int (&pins)[N], unsigned i = 0, unsigned j = 1
   return i >= N ? true : j >= N ? all_distinct(pins, i + 1, i + 2) :
       pins[i] != pins[j] && all_distinct(pins, i, j + 1);
 }
+// Keep the arrays actually traversed by setup/stop in lockstep with the
+// allocation below. Checking only the first N entries silently misses an
+// appended pin/channel; checking only named pins misses a replaced alias.
+template <unsigned N>
+constexpr unsigned count(const int (&)[N]) { return N; }
+static_assert(count(kServoPins) == 2 && kServoPins[0] == kLiftServo &&
+              kServoPins[1] == kGripServo && count(kServoChannels) == 2,
+              "Servo GPIO/channel arrays must match the two servo owners");
+#if DESK_ROBOT_STEPPER
+static_assert(count(kLeftStepperPins) == 4 && count(kRightStepperPins) == 4 &&
+              count(kMotorPins) == 8 &&
+              kMotorPins[0] == kLeftStepperPins[0] && kMotorPins[1] == kLeftStepperPins[1] &&
+              kMotorPins[2] == kLeftStepperPins[2] && kMotorPins[3] == kLeftStepperPins[3] &&
+              kMotorPins[4] == kRightStepperPins[0] && kMotorPins[5] == kRightStepperPins[1] &&
+              kMotorPins[6] == kRightStepperPins[2] && kMotorPins[7] == kRightStepperPins[3],
+              "Stepper GPIO arrays must match the eight phase owners");
+#else
+static_assert(count(kMotorPins) == 4 && count(kMotorChannels) == 4 &&
+              kMotorPins[0] == kLeftIn1 && kMotorPins[1] == kLeftIn2 &&
+              kMotorPins[2] == kRightIn1 && kMotorPins[3] == kRightIn2,
+              "DC GPIO/channel arrays must match the four PWM owners");
+#endif
 constexpr int kAllocatedOutputPins[] = {
     kUartRx, kUartTx, kLiftServo, kGripServo,
     kMotorPins[0], kMotorPins[1], kMotorPins[2], kMotorPins[3],
