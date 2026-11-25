@@ -281,3 +281,100 @@ async def test_runtime_replayed_touch_release_dispatches_once(settings, tmp_path
         assert not head.commands  # no autonomous physical authority
     finally:
         await runtime.close()
+
+
+
+@pytest.mark.asyncio
+async def test_five_camera_witnesses_keep_distinct_receipts_one_initiative(
+    settings, tmp_path,
+):
+    """One shared scene is one speech candidate, not one camera receipt."""
+    from desk_robot.brain_context import compose_brain_context
+
+    for index in range(3, 6):
+        settings.robots.append(settings.robots[0].model_copy(update={
+            "id": f"robot-{index:02d}", "name": f"Pet {index}",
+            "token_env": f"DESK_ROBOT_HEAD_{index:02d}_TOKEN",
+        }))
+    settings.fleet_text_sharing_enabled = True
+    settings.fleet_text_auto_fanout_enabled = True
+    ids = [robot.id for robot in settings.robots]
+    memory = MemoryStore(tmp_path, ids)
+    pet = isolated_pet(settings)
+    pet.memory = memory
+    pet.group_window = 30.0
+    change = SceneChange("key", "A silver key appeared on the desk", 0.96)
+    identities = {
+        rid: (5 + index, 13, 1400000 + index * 10000)
+        for index, rid in enumerate(ids)
+    }
+    offered = {}
+    for rid, identity in identities.items():
+        received = time.monotonic()
+        assert await pet._store_observation(
+            rid, change, camera_derived=True, camera_received_at=received,
+            camera_source_identity=identity,
+        )
+        offered[rid] = received
+        pet._consider_speech(
+            rid, change, pet.states[rid].generation,
+            camera_derived=True, received_at=received,
+        )
+        if pet._speech_task is not None:
+            await pet._speech_task
+
+    assert len(pet._admitted_event_kinds) == 1
+    assert sum(state.suppressed for state in pet.states.values()) == 4
+    for receiver in ids:
+        records = memory.recent(receiver)
+        assert len(records) == 5
+        assert sum(row.witnessed for row in records) == 1
+        assert {row.source_robot for row in records} == set(ids)
+        for row in records:
+            assert row.witnessed is (row.source_robot == receiver)
+            assert row.confidence == 0.96
+            source = memory.get_episode(row.source_robot, row.event_id)
+            assert source is not None and source.witnessed
+            assert row.observed_at == source.observed_at
+            receipt = memory.get_camera_provenance(receiver, row.event_id)
+            assert receipt is not None
+            assert receipt.source_identity == identities[row.source_robot]
+        peer = next(row for row in records if not row.witnessed)
+        text = compose_brain_context([peer], [], []).recent
+        assert f"{peer.source_robot} reported a camera model guess" in text
+        assert "s old; confidence 0.96" in text
+        assert "My camera model" not in text
+
+    # Same authenticated device completion is not a new observation.
+    assert not await pet._store_observation(
+        ids[0], change, camera_derived=True, camera_received_at=offered[ids[0]],
+        camera_source_identity=identities[ids[0]],
+    )
+    assert all(memory.count(rid) == 5 for rid in ids)
+
+
+@pytest.mark.asyncio
+async def test_proactive_context_filters_old_peer_stories_without_sharing(
+    settings, tmp_path,
+):
+    memory = MemoryStore(tmp_path, [robot.id for robot in settings.robots])
+    pet = isolated_pet(settings)
+    pet.memory = memory
+    rid = "robot-02"
+    assert memory.remember(
+        rid, "peer_key", "Secret silver key story", kind="key",
+        source_robot="robot-01", witnessed=False,
+    )
+    assert memory.remember(
+        rid, "own_key", "Own silver key observation", kind="key",
+        source_robot=rid, witnessed=True,
+    )
+    change = SceneChange("key", "silver key", 0.96)
+    settings.fleet_text_sharing_enabled = True
+    context = await pet._load_proactive_context(rid, change)
+    assert "Secret silver key story" in context[1].recent
+    settings.fleet_text_sharing_enabled = False
+    context = await pet._load_proactive_context(rid, change)
+    assert "Secret silver key story" not in context[1].recent
+    assert "Own silver key observation" in context[1].recent
+    assert all(row.witnessed for row in context[0])

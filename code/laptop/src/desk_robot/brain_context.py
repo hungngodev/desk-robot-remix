@@ -8,6 +8,7 @@ short-term vs long-term context and Qwen Live Harness's silent tool receipts.
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Iterable, Sequence
@@ -134,6 +135,7 @@ def compose_brain_context(
     seen: set[str] = set()
     memory_parts: list[tuple[float, str, str]] = []
     memory_used = 0
+    now_wall = time.time()
     for entry in sorted(
         recent, key=lambda item: (
             item.event_id == topical_event_id, item.observed_at, item.event_id,
@@ -142,7 +144,12 @@ def compose_brain_context(
         if entry.event_id in seen:
             continue
         seen.add(entry.event_id)
-        phrase = f"{memory_provenance_label(entry)}: {_clean(entry.summary, limit=110)}"
+        age = now_wall - entry.observed_at
+        chronology = f"{int(age)}s old" if age >= 0 else "clock ahead"
+        phrase = (
+            f"{memory_provenance_label(entry)}: {_clean(entry.summary, limit=110)}"
+            f" ({chronology}; confidence {entry.confidence:.2f})"
+        )
         cost = len(phrase) + (2 if memory_parts else 0)
         if memory_used + cost > 600:
             continue

@@ -80,6 +80,8 @@ def register_native_omni_routes(
         historical_evidence = {"core": "", "recent": ""}
         if settings.voice_memory_tools_enabled:
             memory_grant = settings.voice_memory_consent_generation
+            sharing_at_start = settings.fleet_text_sharing_enabled
+            sharing_grant = settings.fleet_sharing_consent_generation
             # A SQLite snapshot is valid only for the current memory
             # correction/deletion generation of this particular pet.
             owner = getattr(app.state.runtime, "conversation", None)
@@ -106,6 +108,13 @@ def register_native_omni_routes(
             if (not settings.voice_memory_tools_enabled
                     or settings.voice_memory_consent_generation != memory_grant):
                 raise HTTPException(403, "Native memory consent revoked during read")
+            if settings.fleet_sharing_consent_generation != sharing_grant:
+                raise HTTPException(403, "Native fleet sharing consent revoked during read")
+            if not (sharing_at_start and settings.fleet_text_sharing_enabled):
+                records = [
+                    item for item in records
+                    if item.witnessed is True and item.source_robot == robot_id
+                ]
             if (not settings.voice_vision_tools_enabled
                     or settings.camera_consent_generation != camera_grant):
                 # Even an immediate OFF/ON replaces the old camera grant.

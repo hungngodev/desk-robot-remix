@@ -138,3 +138,46 @@ async def test_native_startup_requires_exact_pet_integer_revision_owner(
         await endpoint(settings.robots[0].id)
     assert exc.value.status_code == 409
     assert "revision unavailable" in exc.value.detail
+
+
+
+async def test_native_startup_filters_stored_peer_stories_when_sharing_revoked(
+    settings, tmp_path,
+):
+    from desk_robot.memory import MemoryStore
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = True
+    settings.fleet_text_sharing_enabled = True
+    robot, peer = settings.robots[0].id, settings.robots[1].id
+    memory = MemoryStore(tmp_path, [robot, peer])
+    assert memory.remember(
+        robot, "peer_key", "Secret silver key story", kind="key",
+        source_robot=peer, witnessed=False,
+    )
+    assert memory.remember(
+        robot, "own_key", "Own silver key observation", kind="key",
+        source_robot=robot, witnessed=True,
+    )
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        memory=memory,
+        conversation=SimpleNamespace(_private_memory_generation={robot: 0}),
+    )
+    register_native_omni_routes(
+        app, settings, authorize=lambda: None,
+        coordinator=lambda: SimpleNamespace(robot=settings.robot),
+        native_pet_speech_policy=lambda _: {},
+    )
+    endpoint = next(
+        route.endpoint for route in app.routes
+        if isinstance(route, APIRoute)
+        and route.path == "/v1/pet/{robot_id}/omni-context"
+    )
+    allowed = await endpoint(robot)
+    assert "Secret silver key story" in allowed["untrusted_historical_evidence"]["recent"]
+    settings.fleet_text_sharing_enabled = False
+    denied = await endpoint(robot)
+    assert "Secret silver key story" not in denied["untrusted_historical_evidence"]["recent"]
+    assert "Own silver key observation" in denied["untrusted_historical_evidence"]["recent"]

@@ -92,6 +92,13 @@ This is implemented host software with provenance tests, not measured five-head
 optical overlap, physical Wi-Fi load or acoustics. `fleet_text_sharing_enabled`
 should be enabled only when the user explicitly chooses local peer memory
 sharing and understands these memories persist in the Mac private directory.
+Turning off fleet sharing blocks stored secondhand stories from new proactive
+context, voice recall, and native startup context, while preserving the pet's
+own memories when their independent memory permission allows retrieval.
+The operator can still inspect or explicitly forget retained private rows.
+Revoke/regrant during those reads invalidates the outstanding read. The
+shared historical prompt labels the originating pet and includes observation
+age and confidence; a camera classification remains an unverified model guess.
 
 
 The Mac now supports **explicitly consented, event-triggered two-pet social

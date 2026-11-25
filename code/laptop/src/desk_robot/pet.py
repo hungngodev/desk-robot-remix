@@ -2920,6 +2920,8 @@ class PetController:
         # Snapshot the exact grant BEFORE SQLite awaits. OFF/ON is a new
         # authorization even when the final boolean is True.
         memory_grant = self.settings.voice_memory_consent_generation
+        sharing_at_start = self.settings.fleet_text_sharing_enabled
+        sharing_grant = self.settings.fleet_sharing_consent_generation
         scheduled_activity = change.kind == _ACTIVITY_RECONSIDERATION_KIND
         if (self.settings.mode == "hardware"
                 and not private_memory_allowed):
@@ -2963,6 +2965,19 @@ class PetController:
             state.suppressed += 1
             state.last_initiative_suppression = "memory_consent_revoked"
             return
+        if self.settings.fleet_sharing_consent_generation != sharing_grant:
+            state.suppressed += 1
+            state.last_initiative_suppression = "fleet_sharing_consent_revoked"
+            return None
+        if not (sharing_at_start and self.settings.fleet_text_sharing_enabled):
+            recent_memory = [
+                item for item in recent_memory
+                if item.witnessed is True and item.source_robot == robot_id
+            ]
+            relevant_memory = [
+                item for item in relevant_memory
+                if item.witnessed is True and item.source_robot == robot_id
+            ]
         selected_memory = {
             item.event_id: item
             # Keep the last three events and up to three topical
@@ -3061,7 +3076,9 @@ class PetController:
                     if live_media_allowed:
                         timeline = [
                             item for item in raw
-                            if (self.settings.voice_memory_tools_enabled
+                            if ((self.settings.voice_memory_tools_enabled
+                                 and sharing_at_start
+                                 and self.settings.fleet_text_sharing_enabled)
                                 or not (item.get("channel") == "tool"
                                         and item.get("kind") == "memory_recall"))
                             and (self.settings.mode != "hardware"
@@ -3453,6 +3470,8 @@ class PetController:
         # retrieval, slow reasoning or even speech synthesis. The operator
         # route invalidates this one pet's memory revision on each real edit.
         memory_grant = self.settings.voice_memory_consent_generation
+        sharing_at_start = self.settings.fleet_text_sharing_enabled
+        sharing_grant = self.settings.fleet_sharing_consent_generation
         # A rapid OFF/ON is a new media grant even if the final opt-in is True.
         # Bind it before the asynchronous memory/context collection begins.
         camera_grant = (
@@ -3513,6 +3532,10 @@ class PetController:
                     or (self.settings.voice_memory_tools_enabled
                         and self.settings.voice_memory_consent_generation
                             == memory_grant
+                        and (not sharing_at_start
+                             or (self.settings.fleet_text_sharing_enabled
+                                 and self.settings.fleet_sharing_consent_generation
+                                     == sharing_grant))
                         and (memory_revision is None
                              or (isinstance(revisions, dict)
                                  and revisions.get(robot_id, 0)
@@ -3525,6 +3548,11 @@ class PetController:
                              or self.settings.voice_memory_consent_generation
                                 != memory_grant)):
                     return "memory_consent_revoked"
+                if (private_memory_allowed and sharing_at_start
+                        and (not self.settings.fleet_text_sharing_enabled
+                             or self.settings.fleet_sharing_consent_generation
+                                != sharing_grant)):
+                    return "fleet_sharing_consent_revoked"
                 return "private_memory_revised"
 
             if not private_memory_current():

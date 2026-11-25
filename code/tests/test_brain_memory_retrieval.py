@@ -648,9 +648,13 @@ def test_live_context_refuses_unowned_private_revision_and_cached_recall(
 
 @pytest.mark.parametrize("query", [None, "silver key"])
 def test_voice_recall_requires_independent_peer_sharing_consent(
-    settings, tokens, tmp_path, query,
+    settings, tokens, tmp_path, query, monkeypatch,
 ):
     """A previously shared story cannot bypass local recall permission."""
+    from types import SimpleNamespace
+
+    from desk_robot.multimodal import CameraFrameHub
+
     settings.memory_dir = tmp_path
     settings.voice_memory_tools_enabled = True
     settings.fleet_text_sharing_enabled = True
@@ -673,11 +677,14 @@ def test_voice_recall_requires_independent_peer_sharing_consent(
         assert {item["source_robot"] for item in allowed.json()["memories"]} == {
             "robot-01", "robot-02",
         }
-        runtime.multimodal.hub.remember_tool(
+        hub = CameraFrameHub([robot.id for robot in settings.robots])
+        hub.remember_tool(
             "robot-02", "memory_recall", "Peer silver key secret", time.monotonic(),
         )
         settings.fleet_text_sharing_enabled = False
-        denied = client.get(url, headers=headers, params=params)
+        with monkeypatch.context() as patch:
+            patch.setattr(runtime, "multimodal", SimpleNamespace(hub=hub))
+            denied = client.get(url, headers=headers, params=params)
         assert denied.status_code == 200
         assert "Peer silver key secret" not in denied.text
         assert "Own silver key observation" in denied.text
