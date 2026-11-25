@@ -106,6 +106,15 @@ target_include_directories(terminal_ir_tests PRIVATE lib/TerminalIr)
 target_compile_features(terminal_ir_tests PRIVATE cxx_std_11)
 target_compile_options(terminal_ir_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
 
+# Exercise the actual legacy RMT poll owner, not just its portable queue gate.
+add_executable(terminal_ir_poll_tests
+  tests/terminal_ir_poll_tests.cpp lib/TerminalIr/TerminalIr.cpp)
+target_include_directories(terminal_ir_poll_tests PRIVATE
+  tests/fakes/terminal_ir lib/TerminalIr)
+target_compile_definitions(terminal_ir_poll_tests PRIVATE DESK_ROBOT_STEPPER=1)
+target_compile_features(terminal_ir_poll_tests PRIVATE cxx_std_11)
+target_compile_options(terminal_ir_poll_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+
 add_executable(pn532_frames_tests tests/pn532_frames_tests.cpp)
 target_include_directories(pn532_frames_tests PRIVATE lib/AccessorySensors)
 target_compile_features(pn532_frames_tests PRIVATE cxx_std_11)
@@ -217,6 +226,7 @@ body_add_test(haptic_edge_rate_and_fault_gating haptic_pulse_tests)
 body_add_test(haptic_mcp23017_dock_bus_gating haptic_mcp_bus_tests)
 body_add_test(pn532_bounded_read_only_protocol pn532_frames_tests)
 body_add_test(independent_nec_terminal_beacon_evidence terminal_ir_tests)
+body_add_test(legacy_rmt_terminal_ir_poll_quarantine terminal_ir_poll_tests)
 body_add_test(optional_sensor_register_math accessory_math_tests)
 body_add_test(paw_pulse_fifo_parser pulse_raw_tests)
 body_add_test(safety_priority_ranging_schedule range_scan_tests)
