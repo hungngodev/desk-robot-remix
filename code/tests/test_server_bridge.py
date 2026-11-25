@@ -2531,9 +2531,13 @@ async def test_stale_session_release_and_speech_cannot_claim_replacement_lease(
     assert not bridge.muted(ids[0])
 
 
-async def test_late_cleanup_cannot_erase_new_lease_incarnation(bridge, monkeypatch):
+@pytest.mark.parametrize("same_device", [False, True])
+async def test_late_cleanup_cannot_erase_new_lease_incarnation(
+    bridge, monkeypatch, same_device,
+):
     ids, handlers = fleet_handlers(bridge, monkeypatch)
     session = handlers["/session"]
+    target_id = ids[0] if same_device else ids[1]
     old = json.loads((await session(body_request({
         "device_ids": [ids[0]], "enabled": True,
     }))).text)["lease_id"]
@@ -2544,18 +2548,19 @@ async def test_late_cleanup_cannot_erase_new_lease_incarnation(bridge, monkeypat
         # Model an adversarial state replacement while cleanup is queued.
         # Production grants are independently inhibited during lease_stopping.
         bridge.lease_token = "a" * 32
-        bridge.lease_ids = frozenset([ids[1]])
+        bridge.lease_ids = frozenset([target_id])
         bridge.lease_until = time.monotonic() + 5
         bridge.lease_stopping = False
     finally:
         bridge.speaker_lock.release()
     await bridge.lease_cleanup_task
     assert bridge.lease_token == "a" * 32
-    assert bridge.lease_ids == frozenset([ids[1]])
-    assert bridge.muted(ids[1])
+    assert bridge.lease_ids == frozenset([target_id])
+    assert bridge.muted(target_id)
+    assert not bridge.lease_stopping
     assert old != bridge.lease_token
     await session(body_request({
-        "device_ids": [ids[1]], "enabled": False, "lease_id": "a" * 32,
+        "device_ids": [target_id], "enabled": False, "lease_id": "a" * 32,
     }))
 
 

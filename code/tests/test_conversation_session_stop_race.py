@@ -200,3 +200,146 @@ async def test_proactive_grant_rechecks_unconfirmed_stop(kind, latch):
         if not pending.done():
             pending.cancel()
         await asyncio.gather(pending, return_exceptions=True)
+
+
+async def test_unsettled_cancellation_resistant_stop_blocks_retry_and_successor(
+    monkeypatch,
+):
+    """Detached overdue STOP must remain fenced until its task actually exits."""
+    monkeypatch.setattr("desk_robot.conversation._SPEAKER_ABORT_TIMEOUT_S", 0.02)
+    monkeypatch.setattr("desk_robot.conversation._CONVERSATION_STOP_TIMEOUT_S", 0.15)
+    entered = asyncio.Event()
+    release_first = asyncio.Event()
+    flush_owners: list[str | None] = []
+    active_session = [None]
+    calls = 0
+
+    class CancellationResistantSpeaker(PausedGrantSpeaker):
+        def __init__(self):
+            super().__init__()
+            self.finish_grant.set()
+
+        @asynccontextmanager
+        async def session(self, robots):
+            active_session[0] = robots[0].id if robots else None
+            try:
+                yield
+            finally:
+                active_session[0] = None
+
+        async def interrupt(self, robot):
+            nonlocal calls
+            calls += 1
+            call_num = calls
+            if call_num == 1:
+                entered.set()
+                try:
+                    await asyncio.Future()
+                except asyncio.CancelledError:
+                    await release_first.wait()
+                    flush_owners.append(active_session[0])
+                    return {"device_id": robot.device_id, "interrupted": True}
+            flush_owners.append(active_session[0])
+            return {"device_id": robot.device_id, "interrupted": True}
+
+    speaker = CancellationResistantSpeaker()
+    conversation = conversation_with(speaker)
+    conversation.active = None
+    conversation.session_lock = asyncio.Lock()
+    conversation.speaker_lock = asyncio.Lock()
+    conversation.settings = SimpleNamespace(
+        mode="hardware",
+        robots=[SimpleNamespace(id="robot-01", device_id="head-01")],
+    )
+    conversation.speaker_stop_unconfirmed = True
+
+    with pytest.raises(RuntimeError, match="STOP unconfirmed"):
+        await conversation.recover_speaker_stop()
+    await asyncio.wait_for(entered.wait(), timeout=1)
+    assert conversation.speaker_stop_unconfirmed is True
+
+    # Retry while first interrupt task still refuses exit must fail without issuing B.
+    with pytest.raises(RuntimeError, match="STOP unconfirmed"):
+        await conversation.recover_speaker_stop()
+    assert calls == 1
+
+    # Successor B cannot enter while stale STOP task is still unsettled.
+    with pytest.raises(RuntimeError, match="STOP unconfirmed"):
+        async with conversation._confirmed_speaker_session(
+            [SimpleNamespace(id="robot-02", device_id="head-02")]
+        ):
+            pytest.fail("Unsettled STOP admitted successor B")
+
+    # Once delayed STOP finishes, recovery performs a fresh STOP and clears the fence.
+    release_first.set()
+    await conversation.recover_speaker_stop()
+    assert conversation.speaker_stop_unconfirmed is False
+    assert calls == 2
+    assert flush_owners == [None, None]
+    async with conversation._confirmed_speaker_session(
+        [SimpleNamespace(id="robot-02", device_id="head-02")]
+    ):
+        assert active_session[0] == "robot-02"
+
+
+async def test_real_aiohttp_delayed_interrupt_remains_fenced_until_settled(
+    settings, monkeypatch, tokens,
+):
+    """Real KokoroHeadSpeaker over aiohttp keeps unconfirmed STOP fenced across retries."""
+    import httpx
+    from aiohttp import web
+    from desk_robot.conversation import KokoroHeadSpeaker
+    from desk_robot.simulator import SimulatedChat
+
+    monkeypatch.setattr("desk_robot.conversation._SPEAKER_ABORT_TIMEOUT_S", 0.05)
+    monkeypatch.setattr("desk_robot.conversation._CONVERSATION_STOP_TIMEOUT_S", 0.25)
+    first_started = asyncio.Event()
+    release_first = asyncio.Event()
+    interrupt_calls = 0
+
+    async def interrupt_handler(request):
+        nonlocal interrupt_calls
+        interrupt_calls += 1
+        body = await request.json()
+        if interrupt_calls == 1:
+            first_started.set()
+            await asyncio.wait_for(release_first.wait(), timeout=2)
+        return web.json_response({
+            "device_id": body["device_id"],
+            "interrupted": True,
+            "head_flush_requested": True,
+        })
+
+    app = web.Application()
+    app.router.add_post("/interrupt", interrupt_handler)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, "127.0.0.1", 0)
+    await site.start()
+    port = site._server.sockets[0].getsockname()[1]
+
+    settings.mode = "hardware"
+    settings.speech_bridge_url = f"http://127.0.0.1:{port}"
+    monkeypatch.setenv(settings.speech_bridge_token_env, "s" * 40)
+    robot = settings.robots[0]
+    robot.device_id = "head-01"
+    settings.robots = [robot]
+    async with httpx.AsyncClient(trust_env=False) as client:
+        speaker = KokoroHeadSpeaker(settings, client)
+        conversation = Conversation(settings, SimulatedChat(), speaker)
+        conversation.speaker_stop_unconfirmed = True
+        try:
+            with pytest.raises(RuntimeError, match="STOP unconfirmed"):
+                await conversation.recover_speaker_stop()
+            await asyncio.wait_for(first_started.wait(), timeout=1)
+            assert conversation.speaker_stop_unconfirmed is True
+            with pytest.raises(RuntimeError, match="STOP unconfirmed"):
+                async with conversation._confirmed_speaker_session([robot]):
+                    pytest.fail("Timeout on real aiohttp /interrupt admitted session")
+            release_first.set()
+            await conversation.recover_speaker_stop()
+            assert conversation.speaker_stop_unconfirmed is False
+            assert interrupt_calls == 2
+        finally:
+            release_first.set()
+            await runner.cleanup()

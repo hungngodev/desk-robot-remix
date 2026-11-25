@@ -130,6 +130,21 @@ def active_job_timeline(jobs: Iterable[object], robot_id: str) -> list[dict[str,
     return []
 
 
+_MAX_TIMELINE_SCAN = 256
+
+
+def _fresh_valid_safety_fault(item: object) -> bool:
+    if not isinstance(item, dict):
+        return False
+    if item.get("channel") != "sensor" or item.get("kind") != "safety_fault":
+        return False
+    source = item.get("source")
+    if source is not None and source != "wroom_event":
+        return False
+    age = item.get("age_ms")
+    return age is None or (type(age) is int and 0 <= age <= 8000)
+
+
 def compose_brain_context(
     recent: Sequence[Memory], core: Sequence[CoreFact],
     timeline: Sequence[dict], *, topical_event_id: str | None = None,
@@ -139,6 +154,10 @@ def compose_brain_context(
     Sensor edge != optical object, JPEG receipt != actual exposure time,
     local VLM answer != a new eyewitness truth, human text != instructions.
     The LLM may use context for language but may not grant motion/charging.
+
+    Caller contract: pass at most 256 chronological timeline entries (newest
+    last); at most the latest 64 entries plus the newest fresh authenticated
+    WROOM safety fault within that bounded window are inspected.
     """
     # MemoryStore.recent returns newest first, while a topical merge from
     # PetController arrives oldest first. Select by source timestamps rather
@@ -217,8 +236,16 @@ def compose_brain_context(
         "sensor_history": 4.5, "camera": 5,
     }
     # A burst of camera receipts must not erase older tool or touch evidence
-    # before modality-aware deduplication. Bound the scan for prompt latency.
-    for item in reversed(timeline[-64:]):
+    # before modality-aware deduplication. Bound the scan for prompt latency,
+    # reserving fresh authenticated safety evidence before suffix windowing.
+    bounded_timeline = timeline[-_MAX_TIMELINE_SCAN:]
+    window = list(bounded_timeline[-64:])
+    if not any(_fresh_valid_safety_fault(item) for item in window):
+        for item in reversed(bounded_timeline[:-64]):
+            if _fresh_valid_safety_fault(item):
+                window = [item, *window]
+                break
+    for item in reversed(window):
         if not isinstance(item, dict):
             continue
         channel, kind = item.get("channel"), item.get("kind")

@@ -322,12 +322,19 @@ def register_voice_context_route(
         room_consent_gen_at_start = settings.room_station_consent_generation
         if query is None:
             records = await asyncio.to_thread(
-                app.state.runtime.memory.recent, robot_id, limit=6
+                app.state.runtime.memory.recent,
+                robot_id,
+                limit=6,
+                **({"own_only": True} if not sharing_at_start else {}),
             )
         else:
             try:
                 records = await asyncio.to_thread(
-                    app.state.runtime.memory.search, robot_id, query, limit=6
+                    app.state.runtime.memory.search,
+                    robot_id,
+                    query,
+                    limit=6,
+                    **({"own_only": True} if not sharing_at_start else {}),
                 )
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from exc

@@ -715,6 +715,78 @@ def test_voice_recall_requires_independent_peer_sharing_consent(
         assert memory.count("robot-02") == 2
 
 
+@pytest.mark.parametrize("query", [None, "silver key"])
+def test_voice_recall_own_firsthand_not_crowded_out_by_peer_reports(
+    settings, tokens, tmp_path, query,
+):
+    """Unauthorized peer reports must not consume limit=6 before filtering."""
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.memory_dir = tmp_path
+    settings.voice_memory_tools_enabled = True
+    settings.fleet_text_sharing_enabled = False
+    headers = {"Authorization": f"Bearer {tokens['DESK_ROBOT_TOOL_TOKEN']}"}
+    url = "/v1/pet/robot-02/voice-context"
+    params = {} if query is None else {"query": query}
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        memory = runtime.memory
+        hub = CameraFrameHub([robot.id for robot in settings.robots])
+
+        class _RuntimeVision:
+            def __init__(self, frame_hub):
+                self.hub = frame_hub
+
+            async def close(self):
+                return None
+
+        runtime.multimodal = _RuntimeVision(hub)
+        # Seed an older, low-confidence firsthand row, then six newer high-confidence
+        # peer reports so unscoped BM25/recent limit=6 would return only peer rows.
+        assert memory.remember(
+            "robot-02", "own_old_silver_key",
+            "Own firsthand silver key under the lamp",
+            kind="key", source_robot="robot-02", witnessed=True,
+            observed_at=1000.0, confidence=0.1,
+        )
+        for index in range(6):
+            assert memory.remember(
+                "robot-02", f"peer_silver_{index}",
+                "silver key on the desk",
+                kind="key", source_robot="robot-01", witnessed=False,
+                observed_at=2000.0 + index, confidence=1.0,
+            )
+
+        assert [item.event_id for item in memory.recent(
+            "robot-02", limit=6, own_only=True,
+        )] == ["own_old_silver_key"]
+        assert [item.event_id for item in memory.search(
+            "robot-02", "silver key", limit=6, own_only=True,
+        )] == ["own_old_silver_key"]
+
+        settings.fleet_text_sharing_enabled = False
+        denied = client.get(url, headers=headers, params=params)
+        assert denied.status_code == 200
+        body = denied.json()
+        assert body["matched"] is True
+        assert "silver key on the desk" not in denied.text
+        assert "Own firsthand silver key under the lamp" in denied.text
+        assert [item["event_id"] for item in body["memories"]] == ["own_old_silver_key"]
+        assert all(
+            item["witnessed"] and item["source_robot"] == "robot-02"
+            for item in body["memories"]
+        )
+
+        settings.fleet_text_sharing_enabled = True
+        allowed = client.get(url, headers=headers, params=params)
+        assert allowed.status_code == 200
+        assert len(allowed.json()["memories"]) == 6
+        assert any(
+            item["source_robot"] == "robot-01"
+            for item in allowed.json()["memories"]
+        )
+
+
 @pytest.mark.parametrize("regrant", [False, True])
 @pytest.mark.parametrize("query", [None, "silver key"])
 def test_voice_recall_rejects_peer_consent_revoked_during_sqlite_read(

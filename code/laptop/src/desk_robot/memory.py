@@ -783,21 +783,35 @@ class MemoryStore:
             raise ValueError("Invalid persisted camera identity")
         return CameraProvenance(received, interpreted, (boot, frame, int(complete)))
 
-    def recent(self, robot_id: str, *, limit: int = 12) -> list[Memory]:
+    def recent(
+        self, robot_id: str, *, limit: int = 12, own_only: bool = False,
+    ) -> list[Memory]:
         if type(limit) is not int or not 1 <= limit <= 50:
             raise ValueError("Limit must be 1..50")
+        if type(own_only) is not bool:
+            raise ValueError("own_only must be a bool")
         with self._connect(robot_id) as db:
-            rows = db.execute(
-                """SELECT event_id,source_robot,witnessed,kind,summary,observed_at,confidence
-                   FROM memories ORDER BY observed_at DESC,event_id DESC LIMIT ?""",
-                (limit,),
-            ).fetchall()
+            if own_only:
+                rows = db.execute(
+                    """SELECT event_id,source_robot,witnessed,kind,summary,observed_at,confidence
+                       FROM memories WHERE witnessed=1 AND source_robot=?
+                       ORDER BY observed_at DESC,event_id DESC LIMIT ?""",
+                    (robot_id, limit),
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    """SELECT event_id,source_robot,witnessed,kind,summary,observed_at,confidence
+                       FROM memories ORDER BY observed_at DESC,event_id DESC LIMIT ?""",
+                    (limit,),
+                ).fetchall()
         return [
             Memory(robot_id, event_id, source, bool(witnessed), kind, summary, at, score)
             for event_id, source, witnessed, kind, summary, at, score in rows
         ]
 
-    def search(self, robot_id: str, query: str, *, limit: int = 6) -> list[Memory]:
+    def search(
+        self, robot_id: str, query: str, *, limit: int = 6, own_only: bool = False,
+    ) -> list[Memory]:
         """Search only this pet's SQLite FTS5 index; never mix peer memories.
 
         Porter unicode61 and BM25 are the proven local SQLite implementation.
@@ -806,6 +820,8 @@ class MemoryStore:
         """
         if type(robot_id) is not str or robot_id not in self.robot_ids:
             raise ValueError("Unknown robot memory identity")
+        if type(own_only) is not bool:
+            raise ValueError("own_only must be a bool")
         if (not isinstance(query, str) or not 1 <= len(query.strip()) <= 240
                 or "\x00" in query or type(limit) is not int
                 or not 1 <= limit <= 12):
@@ -814,14 +830,25 @@ class MemoryStore:
         if not expression:
             return []
         with self._connect(robot_id) as db:
-            rows = db.execute(
-                """SELECT m.event_id,m.source_robot,m.witnessed,m.kind,m.summary,
-                          m.observed_at,m.confidence,bm25(memories_fts,1.0,0.5)
-                   FROM memories_fts
-                   JOIN memories AS m ON m.rowid = memories_fts.rowid
-                   WHERE memories_fts MATCH ? LIMIT 250""",
-                (expression,),
-            ).fetchall()
+            if own_only:
+                rows = db.execute(
+                    """SELECT m.event_id,m.source_robot,m.witnessed,m.kind,m.summary,
+                              m.observed_at,m.confidence,bm25(memories_fts,1.0,0.5)
+                       FROM memories_fts
+                       JOIN memories AS m ON m.rowid = memories_fts.rowid
+                       WHERE memories_fts MATCH ? AND m.witnessed=1 AND m.source_robot=?
+                       LIMIT 250""",
+                    (expression, robot_id),
+                ).fetchall()
+            else:
+                rows = db.execute(
+                    """SELECT m.event_id,m.source_robot,m.witnessed,m.kind,m.summary,
+                              m.observed_at,m.confidence,bm25(memories_fts,1.0,0.5)
+                       FROM memories_fts
+                       JOIN memories AS m ON m.rowid = memories_fts.rowid
+                       WHERE memories_fts MATCH ? LIMIT 250""",
+                    (expression,),
+                ).fetchall()
         now = time.time()
         ranked = []
         for event_id, source, witnessed, kind, summary, at, confidence, relevance in rows:

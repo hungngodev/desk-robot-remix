@@ -24,9 +24,16 @@ _CONVERSATION_STOP_TIMEOUT_S = 2.5
 _GROUP_ACTIVITY_TIMEOUT_S = 300.0
 
 
-async def _bounded_speaker_abort(interrupt, robot: RobotConfig):
+async def _bounded_speaker_abort(
+    interrupt,
+    robot: RobotConfig,
+    *,
+    on_task: Callable[[asyncio.Task], None] | None = None,
+):
     """Attempt physical speaker abort without waiting for ignored cancellation."""
     task = asyncio.create_task(interrupt(robot))
+    if on_task is not None:
+        on_task(task)
     try:
         done, _ = await asyncio.wait({task}, timeout=_SPEAKER_ABORT_TIMEOUT_S)
         if not done:
@@ -481,14 +488,23 @@ class Conversation:
             robot.id: 0 for robot in settings.robots
         }
         self._active_private_memory_ids: frozenset[str] = frozenset()
+        self._unsettled_speaker_aborts: set[asyncio.Task] = set()
 
+    def _track_speaker_abort(self, task: asyncio.Task) -> None:
+        aborts = self.__dict__.setdefault("_unsettled_speaker_aborts", set())
+        aborts.add(task)
+        task.add_done_callback(aborts.discard)
+
+    def _has_unsettled_speaker_abort(self) -> bool:
+        aborts = getattr(self, "_unsettled_speaker_aborts", None)
+        return bool(aborts and any(not task.done() for task in aborts))
 
     @asynccontextmanager
     async def _confirmed_speaker_session(
         self, robots: list[RobotConfig], *, passive: bool | None = None,
     ):
         """Fence both group and optional speaker grants on confirmed STOP."""
-        if self.speaker_stop_unconfirmed:
+        if self.speaker_stop_unconfirmed or self._has_unsettled_speaker_abort():
             raise RuntimeError("Xiaozhi speaker STOP unconfirmed; recovery required")
         session = (
             self.speaker.session(robots) if passive is None
@@ -498,7 +514,7 @@ class Conversation:
             # A failed urgent decoder STOP can latch while the bridge grant
             # is awaiting the network. Never admit a newly granted talker
             # under that now-unconfirmed audio floor; session exit releases it.
-            if self.speaker_stop_unconfirmed:
+            if self.speaker_stop_unconfirmed or self._has_unsettled_speaker_abort():
                 raise RuntimeError("Xiaozhi speaker STOP unconfirmed; recovery required")
             yield
 
@@ -512,7 +528,9 @@ class Conversation:
         # A permission failure can start STOP before any task.cancel().
         # A later pause/VAD must join that bounded cleanup, not cancel it
         # and falsely turn an otherwise valid receipt into an uncertain STOP.
-        abort = asyncio.create_task(_bounded_speaker_abort(interrupt, robot))
+        abort = asyncio.create_task(
+            _bounded_speaker_abort(interrupt, robot, on_task=self._track_speaker_abort)
+        )
         cancellation = None
         try:
             while not abort.done():
@@ -540,7 +558,7 @@ class Conversation:
 
     async def recover_speaker_stop(self) -> None:
         """Explicit recovery requires new STOP receipts from every real head."""
-        if not self.speaker_stop_unconfirmed:
+        if not self.speaker_stop_unconfirmed and not self._has_unsettled_speaker_abort():
             return
         # Recovery shares the same admission owner as group/proactive speech.
         # Two overlapping recoveries must not clear the latch while another
@@ -551,10 +569,21 @@ class Conversation:
         except TimeoutError as exc:
             raise RuntimeError("Xiaozhi speaker recovery session still active") from exc
         try:
-            if not self.speaker_stop_unconfirmed:
+            if not self.speaker_stop_unconfirmed and not self._has_unsettled_speaker_abort():
                 return
             if self.active is not None and not self.active.done():
                 raise RuntimeError("Speaker recovery refused while dialogue is active")
+            aborts = getattr(self, "_unsettled_speaker_aborts", None) or ()
+            pending = [task for task in aborts if not task.done()]
+            if pending:
+                done, not_done = await asyncio.wait(
+                    pending, timeout=_SPEAKER_ABORT_TIMEOUT_S,
+                )
+                for task in done:
+                    if not task.cancelled():
+                        task.exception()
+                if not_done or self._has_unsettled_speaker_abort():
+                    raise RuntimeError("Xiaozhi speaker recovery STOP unconfirmed")
             interrupt = getattr(self.speaker, "interrupt", None)
             targets = [
                 robot for robot in self.settings.robots
@@ -568,7 +597,9 @@ class Conversation:
             drain_gen = getattr(self, "_speaker_drain_generation", {})
             try:
                 for robot in targets:
-                    receipt = await _bounded_speaker_abort(interrupt, robot)
+                    receipt = await _bounded_speaker_abort(
+                        interrupt, robot, on_task=self._track_speaker_abort,
+                    )
                     if require_drain:
                         _validate_head_drain_receipt(
                             robot,
@@ -577,6 +608,8 @@ class Conversation:
                         )
             except BaseException as exc:
                 raise RuntimeError("Xiaozhi speaker recovery STOP unconfirmed") from exc
+            if self._has_unsettled_speaker_abort():
+                raise RuntimeError("Xiaozhi speaker recovery STOP unconfirmed")
             self.speaker_stop_unconfirmed = False
         finally:
             self.session_lock.release()
