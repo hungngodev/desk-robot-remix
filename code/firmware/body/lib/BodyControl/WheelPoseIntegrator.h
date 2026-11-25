@@ -231,17 +231,20 @@ class WheelPoseIntegrator {
         !sources_fresh(now_ms) ||
         next_origin_ == 0 || next_origin_ == 0xffffffffU)
       return false;
-    if (static_cast<std::uint64_t>(latest_imu_error_urad_) +
-            limits_.imu_alignment_error_urad >
-        limits_.max_yaw_error_urad)
-      return false;
+    const std::uint64_t heading_error_urad =
+        static_cast<std::uint64_t>(latest_imu_error_urad_) +
+        limits_.imu_alignment_error_urad;
+    if (heading_error_urad > limits_.max_yaw_error_urad) return false;
     state_ = State{};
     state_.origin = next_origin_++;
-    state_.quality = Quality::Valid;
+    // The initial origin must obey the same heading uncertainty threshold
+    // as every subsequent pose update, even before any wheel movement.
+    state_.quality = heading_error_urad > limits_.max_yaw_error_urad / 2U
+                         ? Quality::Degraded : Quality::Valid;
     state_.sample_seq = last_pair_seq_;
     state_.sample_ms = last_sample_ms_;
     state_.yaw_error_mrad =
-        (latest_imu_error_urad_ + limits_.imu_alignment_error_urad + 999U) /
+        (heading_error_urad + 999U) /
         1000U;
     origin_yaw_urad_ = last_imu_yaw_urad_;
     heading_urad_ = 0;

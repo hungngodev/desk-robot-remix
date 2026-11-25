@@ -230,7 +230,36 @@ static void stationary_pairs_do_not_accumulate_translation_error() {
   check(rotation.state().yaw_mrad == 20 && rotation.state().xy_error_mm > 0);
 }
 
+static void origin_quality_respects_heading_uncertainty() {
+  using Quality = WheelPoseIntegrator::Quality;
+  // Alignment contributes 1000 urad to the 500000 urad total limit.
+  // Verify both inclusive boundaries and a one-unit excess.
+  for (std::uint32_t error : {248999U, 249000U, 249001U, 499000U, 499001U}) {
+    WheelPoseIntegrator pose;
+    check(pose.configure(calibration()));
+    for (std::uint32_t i = 1; i <= 4; ++i) {
+      auto e = observed(i, i * 100);
+      e.imu_error_urad = error;
+      if (error > 499000U) {
+        check(!pose.observe(e, i * 100 + 10));
+        check(!pose.start_origin(i * 100 + 10));
+        check(pose.state().quality == Quality::Unavailable);
+        continue;
+      }
+      check(pose.observe(e, i * 100 + 10));
+      if (i == 3) check(pose.start_origin(i * 100 + 10));
+      if (i >= 3) {
+        const auto expected = error > 249000U ? Quality::Degraded : Quality::Valid;
+        check(pose.state().quality == expected);
+        check(pose.state().origin == 1);
+        check(pose.state().yaw_error_mrad == (error + 1999U) / 1000U);
+      }
+    }
+  }
+}
+
 int main() {
+  origin_quality_respects_heading_uncertainty();
   stationary_pairs_do_not_accumulate_translation_error();
   refuse_future_wheel_acquisition();
   refuse_rotation_and_expired_imu_origin();
