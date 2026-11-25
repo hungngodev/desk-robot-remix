@@ -6,6 +6,8 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING
 
+from .operations import OperationError, _bounded_head_reply
+
 if TYPE_CHECKING:
     from .calibration import Calibration
     from .transport import Head
@@ -38,8 +40,6 @@ async def await_commanded_jaw_target(
     health: Callable[[], Awaitable[dict]], target: int,
 ) -> None:
     """Wait for commanded opening, never infer measured position or force."""
-    from .controller import OperationError
-
     async with asyncio.timeout(_RELIEF_WAIT_S):
         while True:
             status = await health()
@@ -106,8 +106,6 @@ async def guarded_grasp(
     head: "Head", calibration: "Calibration",
     *, robot_id: str, health: Callable[[], Awaitable[dict]],
 ) -> dict:
-    from .controller import OperationError, _bounded_head_reply
-
     threshold = calibration.grip_force_delta_raw
     ceiling = calibration.grip_force_limit_raw
     if threshold is None or ceiling is None:

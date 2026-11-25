@@ -2994,13 +2994,13 @@ async def test_proactive_camera_ignoring_cancel_does_not_pin_live_camera_lock(
     monkeypatch,
 ):
     """An obsolete low-priority camera cannot hold a new human capture lock."""
-    from desk_robot import controller
+    from desk_robot import multimodal
 
-    original = controller._bounded_head_reply
+    original = multimodal._bounded_head_reply
     async def short_deadline(coro, *, seconds, timeout_message):
         return await original(coro, seconds=0.04,
                               timeout_message=timeout_message)
-    monkeypatch.setattr(controller, "_bounded_head_reply", short_deadline)
+    monkeypatch.setattr(multimodal, "_bounded_head_reply", short_deadline)
 
     started = asyncio.Event()
     release = asyncio.Event()
@@ -3081,14 +3081,14 @@ async def test_cancel_resistant_snapshot_keeps_physical_read_owned_across_turns(
     monkeypatch,
 ):
     """A stale snapshot cannot overlap a newer capture on the same XIAO."""
-    from desk_robot import controller
+    from desk_robot import multimodal
 
-    normal = controller._bounded_head_reply
+    normal = multimodal._bounded_head_reply
 
     async def fast_timeout(coro, *, seconds, timeout_message):
         return await normal(coro, seconds=0.04, timeout_message=timeout_message)
 
-    monkeypatch.setattr(controller, "_bounded_head_reply", fast_timeout)
+    monkeypatch.setattr(multimodal, "_bounded_head_reply", fast_timeout)
     entered, released = asyncio.Event(), asyncio.Event()
 
     class StubbornHead(Head):

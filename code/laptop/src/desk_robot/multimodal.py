@@ -25,6 +25,7 @@ from PIL import Image, ImageOps, ImageStat
 if TYPE_CHECKING:
     from .config import Settings
     from .transport import Head
+from .operations import _bounded_head_reply
 from .room_station import ROOM_OBSERVATION_SOURCE, STATION, RoomObservation, fresh_room_summary
 from .sensor_event_contract import DIRECT_INTERACTION_KINDS, TRIGGERS  # public names
 from .vision import OllamaScene
@@ -1918,7 +1919,6 @@ class MultimodalOrchestrator:
         if source == "proactive":
             self._proactive_snapshots[robot_id] = task
         try:
-            from .controller import _bounded_head_reply
             return await _bounded_head_reply(
                 task, seconds=4.0,
                 timeout_message=(
@@ -2195,7 +2195,6 @@ class MultimodalOrchestrator:
                     # An alternate VLM client may swallow cancellation after
                     # the deadline. Its late response must not retain the
                     # common inference lock or become a new human answer.
-                    from .controller import _bounded_head_reply
                     def admit_answer() -> bool:
                         now = time.monotonic()
                         return (

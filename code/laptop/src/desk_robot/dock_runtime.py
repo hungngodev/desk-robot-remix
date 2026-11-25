@@ -8,6 +8,7 @@ from typing import Callable
 
 from .dock_process import DetectorPool, DockDetectorBusy
 from .dock_vision import DockCameraCalibration, DockPose, assess_dock
+from .operations import _bounded_head_reply
 
 # Shared by all five robots and both read-only and guarded dock paths.
 _DETECTOR_POOL = DetectorPool()
@@ -151,7 +152,6 @@ async def verify_selected_dock_frame(head, observation) -> None:
         # The verifier may wait on the live stream lock or an alternate
         # adapter. Its deadline is the original frame's remaining lifetime,
         # not a new timeout that would extend stale camera evidence.
-        from .controller import _bounded_head_reply
 
         _, received_at = unpack_dock_frame(observation)
         remaining = 0.20 - (time.monotonic() - received_at)
@@ -208,7 +208,6 @@ async def observe_actual_dock(
     try:
         # The native AprilTag slot must not be occupied by an alternate
         # head snapshot that suppresses coroutine cancellation indefinitely.
-        from .controller import _bounded_head_reply
         # Read-only dock diagnostics should see the same current MJPEG
         # receipt as a guarded approach, not a near-one-second-old frame.
         capture_dock = getattr(head, "snapshot_for_dock", head.snapshot)

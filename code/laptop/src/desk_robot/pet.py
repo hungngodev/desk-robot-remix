@@ -34,6 +34,7 @@ from .conversation import Conversation
 from .dock_evidence import DockContactInhibit
 from .handling import HandlingGate
 from .memory import CameraProvenance, MemoryStore
+from .operations import _bounded_head_reply
 from .sensor_event_contract import (
     DIRECT_INTERACTION_KINDS,
     PHYSICAL_INITIATIVE_KINDS,
@@ -2056,7 +2057,6 @@ class PetController:
         if self.settings.mode == "hardware":
             # A disconnected or cancellation-resistant alternate head must
             # not leave proactive observation active without touch/safety IO.
-            from .controller import _bounded_head_reply
             try:
                 body = await _bounded_head_reply(
                     getter(), seconds=2.5,
@@ -2446,7 +2446,6 @@ class PetController:
                             # Construct the request inside its cancellable owner:
                             # preemption before the first scheduling step must
                             # not leave an unawaited comparison coroutine.
-                            from .controller import _bounded_head_reply
                             if isinstance(self.scene, OllamaScene):
                                 request = self.scene.compare(
                                     previous, jpeg, admit=admit_comparison
@@ -3697,7 +3696,6 @@ class PetController:
                 # Ollama or an alternate decision client may suppress
                 # cancellation; its obsolete answer cannot retain this
                 # fleet speech candidate past the observation deadline.
-                from .controller import _bounded_head_reply
                 return await _bounded_head_reply(
                     call(), seconds=remaining,
                     timeout_message="Proactive decision deadline expired",

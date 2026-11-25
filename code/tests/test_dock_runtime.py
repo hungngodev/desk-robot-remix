@@ -438,14 +438,14 @@ async def test_dock_diagnostic_uncooperative_camera_returns_hold(
     from types import SimpleNamespace
 
     import desk_robot.dock_runtime as runtime
-    from desk_robot.controller import _bounded_head_reply as real_bounded
+    from desk_robot.operations import _bounded_head_reply as real_bounded
 
     # Tighten only this diagnostic's deadline in the test while exercising
     # the same real bounded helper used by physical motion safety.
     async def tiny_deadline(coro, *, seconds, timeout_message):
         return await real_bounded(coro, seconds=0.04,
                                   timeout_message=timeout_message)
-    monkeypatch.setattr("desk_robot.controller._bounded_head_reply", tiny_deadline)
+    monkeypatch.setattr(runtime, "_bounded_head_reply", tiny_deadline)
 
     entered = asyncio.Event()
     release = asyncio.Event()

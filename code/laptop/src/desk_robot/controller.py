@@ -5,7 +5,7 @@ import time
 import uuid
 from collections import deque
 from dataclasses import asdict, dataclass, field, replace
-from typing import Awaitable, Callable, TypeVar
+from typing import Awaitable, Callable
 
 from .calibration import Calibration
 from .config import Settings
@@ -20,30 +20,9 @@ from .dock_vision import assess_dock
 from .grasp_feedback import await_commanded_jaw_target, guarded_grasp
 from .object_search import ObjectSearchResult, summarize_search_observation
 from .object_targets import ObjectTarget
+from .operations import OperationError, _bounded_head_reply
 from .transport import Head, HeadError, drive_duration_ms, expected_ack, validate_command
 from .vision import Detection, Vision, image_size
-
-_T = TypeVar("_T")
-
-
-async def _bounded_head_reply(coro: Awaitable[_T], *, seconds: float,
-                              timeout_message: str) -> _T:
-    """Bound even adapters that suppress task cancellation; ignore late replies."""
-    # Callers may already own a cancellable snapshot task for VAD preemption.
-    task = asyncio.ensure_future(coro)
-    try:
-        done, _ = await asyncio.wait({task}, timeout=seconds)
-        if not done:
-            raise TimeoutError(timeout_message)
-        return await task
-    finally:
-        if not task.done():
-            task.cancel()
-            # A late transport failure must be observed, never accepted as a
-            # delayed body STOP or as an authorization from a stale status.
-            task.add_done_callback(
-                lambda done: None if done.cancelled() else done.exception()
-            )
 
 
 async def _bounded_body_stop(head: Head) -> dict:
@@ -65,10 +44,6 @@ async def _bounded_pulse_stop(head: Head) -> dict:
         head.command("stop"), seconds=1.0,
         timeout_message="WROOM pulse STOP transport acknowledgement unconfirmed",
     )
-
-
-class OperationError(RuntimeError):
-    pass
 
 
 def _require_safe_fuel_sample(
