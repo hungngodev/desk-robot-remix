@@ -651,3 +651,72 @@ async def test_cli_ignores_ambient_proxy_for_authenticated_live_camera_bench(
     report = json.loads((tmp_path / "camera.json").read_text())
     assert report["speaker_silence_verified"] is False
     assert report["concurrent_audio_required_by_operator"] is False
+
+
+@pytest.mark.parametrize("identity", [
+    None, [], (1, 2), (True, 1, 1), (1, 0, 1), (1, 1, 0),
+    (1, 1, 1 << 63), (1, 1, float("nan")), (-1, 1, 1),
+    (1, [], 1), (1, 1 << 32, 1),
+])
+@pytest.mark.parametrize("stream", [False, True])
+async def test_camera_bench_rejects_missing_or_malformed_provenance(identity, stream):
+    class Head:
+        _last_camera = identity
+
+        async def snapshot(self):
+            return JPEG
+
+        async def stream_frames(self):
+            yield JPEG, time.monotonic()
+
+        async def status(self):
+            return {"robot_id": "robot-01"}
+
+    result = await bench.measure(
+        Head(), "robot-01", seconds=.12, stream=stream,
+        camera_period_s=.05, status_period_s=.05,
+    )
+    assert result["camera_frames_received"] == 0
+    assert result["camera_error_count"] >= 1
+    assert "invalid authenticated camera frame identity" in result["camera_errors"][0]
+    assert result["status_error_count"] == 0
+    assert not bench.bench_passed(result, require_audio=False)
+
+
+@pytest.mark.parametrize("completed", [100, 99])
+async def test_snapshot_bench_rejects_regressed_completion_with_new_sequence(completed):
+    class Head:
+        seq = 0
+
+        async def snapshot(self):
+            self.seq += 1
+            self._last_camera = (1, self.seq, 100 if self.seq == 1 else completed)
+            return JPEG
+
+        async def status(self):
+            return {"robot_id": "robot-01"}
+
+    result = await bench.measure(
+        Head(), "robot-01", seconds=.16, camera_period_s=.05, status_period_s=.05,
+    )
+    assert result["camera_frames_received"] == 1
+    assert result["camera_error_count"] >= 1
+    assert "completion clock regressed" in result["camera_errors"][0]
+
+
+@pytest.mark.parametrize("received", [float("nan"), float("inf"), -1, True])
+async def test_stream_bench_rejects_invalid_receipt_clock(received):
+    class Head:
+        _last_camera = (1, 1, 1)
+
+        async def stream_frames(self):
+            yield JPEG, received
+
+        async def status(self):
+            return {"robot_id": "robot-01"}
+
+    result = await bench.measure(
+        Head(), "robot-01", seconds=.12, stream=True, status_period_s=.05,
+    )
+    assert result["camera_frames_received"] == 0
+    assert "Invalid camera stream receipt clock" in result["camera_errors"][0]

@@ -126,6 +126,17 @@ def _camera_window_audio_delta(
     }
 
 
+def _camera_identity(head) -> tuple[int, int, int]:
+    identity = getattr(head, "_last_camera", None)
+    if (type(identity) is not tuple or len(identity) != 3
+            or any(type(value) is not int for value in identity)
+            or not 0 <= identity[0] <= 0xffffffff
+            or not 1 <= identity[1] <= 0xffffffff
+            or not 1 <= identity[2] <= (1 << 63) - 1):
+        raise ValueError("Missing or invalid authenticated camera frame identity")
+    return identity
+
+
 async def measure(
     head, robot_id: str, *, seconds: float,
     camera_period_s: float = 1.0, status_period_s: float = 0.2,
@@ -157,13 +168,14 @@ async def measure(
     seen_camera_identities: set[tuple[int, int, int]] = set()
     snapshot_boot: int | None = None
     snapshot_sequence: int | None = None
+    snapshot_completed: int | None = None
     camera_window_first: float | None = None
     camera_window_last: float | None = None
     started = time.monotonic()
     deadline = started + seconds
 
     async def poll_camera():
-        nonlocal camera_error_count, snapshot_boot, snapshot_sequence
+        nonlocal camera_error_count, snapshot_boot, snapshot_sequence, snapshot_completed
         due = started
         while time.monotonic() < deadline:
             begin = time.monotonic()
@@ -176,22 +188,19 @@ async def measure(
                 if not isinstance(jpeg, bytes) or not jpeg.startswith(b"\xff\xd8") \
                         or not jpeg.endswith(b"\xff\xd9"):
                     raise ValueError("Head returned truncated or non-JPEG data")
-                identity = getattr(head, "_last_camera", None)
-                if identity is not None:
-                    # A fresh boot is allowed by HttpHead transport recovery,
-                    # but it invalidates a single uninterrupted camera bench.
-                    if snapshot_boot is not None and identity[0] != snapshot_boot:
-                        raise RuntimeError("Sense camera rebooted during snapshot bench")
-                    if identity in seen_camera_identities:
-                        raise ValueError("Head returned duplicate camera identity")
-                    # The completion clock is not a sequence substitute:
-                    # a replay can carry a newly forged completion timestamp.
-                    if (snapshot_sequence is not None
-                            and identity[1] <= snapshot_sequence):
-                        raise ValueError("Head returned replayed camera sequence")
-                    snapshot_boot = identity[0]
-                    snapshot_sequence = identity[1]
-                    seen_camera_identities.add(identity)
+                identity = _camera_identity(head)
+                # A fresh boot is allowed by HttpHead transport recovery,
+                # but invalidates a single uninterrupted camera bench.
+                if snapshot_boot is not None and identity[0] != snapshot_boot:
+                    raise RuntimeError("Sense camera rebooted during snapshot bench")
+                if identity in seen_camera_identities:
+                    raise ValueError("Head returned duplicate camera identity")
+                if snapshot_sequence is not None and identity[1] <= snapshot_sequence:
+                    raise ValueError("Head returned replayed camera sequence")
+                if snapshot_completed is not None and identity[2] <= snapshot_completed:
+                    raise ValueError("Sense frame completion clock regressed")
+                snapshot_boot, snapshot_sequence, snapshot_completed = identity
+                seen_camera_identities.add(identity)
                 camera_sizes.append(len(jpeg))
                 camera_times.append(time.monotonic() - begin)
             except Exception as exc:
@@ -229,6 +238,10 @@ async def measure(
                                 or not jpeg.startswith(b"\xff\xd8")
                                 or not jpeg.endswith(b"\xff\xd9")):
                             raise ValueError("Incomplete JPEG in continuous stream")
+                        if (type(received) not in (int, float)
+                                or not math.isfinite(received)
+                                or not started <= received <= time.monotonic()):
+                            raise ValueError("Invalid camera stream receipt clock")
                         if last_frame_at is None:
                             if received - started > MAX_CAMERA_GAP_S:
                                 raise RuntimeError("Continuous camera stalled before first JPEG")
@@ -242,9 +255,7 @@ async def measure(
                                     f"Continuous camera stalled for {gap:.2f}s between JPEGs"
                                 )
                         last_frame_at = received
-                        identity = getattr(head, "_last_camera", None)
-                        if identity is None:
-                            raise ValueError("Stream has no authenticated frame identity")
+                        identity = _camera_identity(head)
                         if identity in seen_camera_identities:
                             raise ValueError("Duplicate live camera frame identity")
                         if last_source_identity is not None:
