@@ -5,6 +5,7 @@ import shutil
 import subprocess
 from hashlib import sha256
 from pathlib import Path
+from struct import unpack_from
 from xml.etree import ElementTree
 
 import pytest
@@ -33,7 +34,7 @@ def setup_sources(tmp_path):
             "base_length_mm=138;\nguide_run_mm=107;\nbase_thickness_mm=3;\n"
             "backstop_thickness_mm=5;\nentry_coupon_length_mm=48;\n"
             "guide_wall_mm=5;\nwall_outside_margin_mm=8;\n"
-            "entry_flare_each_mm=7;\nguide_height_mm=12;\n"
+            "entry_flare_each_mm=7;\nentry_flare_run_mm=37;\nguide_height_mm=12;\n"
             "backstop_brace_depth_mm=8;\nbackstop_brace_height_mm=10;\n"
             "backstop_height_mm=90;\n",
         "docs/cad/remixes/remaining_fit_gauges.scad":
@@ -92,7 +93,7 @@ def test_a4_real_scale_and_source_dimensions(tmp_path):
     assert report["source_dimensions_mm"] == {
         "ranger": [10.5, 13.3], "speaker": [20, 16],
         "dock": [60, 70, 71.2],
-        "dock_guide": [126, 138, 107, 5, 8, 7, 100],
+        "dock_guide": [126, 138, 107, 5, 8, 7, 100, 37],
         "power": [86, 35, 91.6, 40.6, 8, 9, 5],
     }
     assert len(report["pages"]) == 5
@@ -625,3 +626,67 @@ def test_cad_readme_matches_five_a4_template_sources():
     assert "three A4 SVG pages" not in readme
     for key in source.SOURCES:
         assert key in readme, key
+
+
+@pytest.mark.parametrize(
+    "render_mesh", [
+        False,
+        pytest.param(
+            True, marks=pytest.mark.skipif(
+                shutil.which("openscad") is None, reason="OpenSCAD not installed"
+            )
+        ),
+    ],
+)
+def test_dock_paper_tracks_changed_scad_flare_transition(tmp_path, render_mesh):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    scad.write_bytes((SCRIPT.parent / "dock/dock_passive_fit.scad").read_bytes())
+    output = tmp_path / "paper"
+
+    def paper_transitions():
+        root = ElementTree.parse(output / "dock_guide_reference_A4.svg").getroot()
+        transitions = []
+        for polygon in root.findall("{http://www.w3.org/2000/svg}polygon"):
+            ys = sorted({
+                float(point.split(",")[1])
+                for point in polygon.attrib["points"].split()
+            })
+            transitions.append(ys[1] - ys[0])
+        return transitions
+
+    source.export(tmp_path, output)
+    assert paper_transitions() == [37, 37]
+    original = scad.read_text(encoding="utf-8")
+    assert original.count("entry_flare_run_mm = 37;") == 1
+    scad.write_text(
+        original.replace("entry_flare_run_mm = 37;", "entry_flare_run_mm = 37.5;"),
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="source, dimensions or manifest changed"):
+        source.verify(tmp_path, output)
+    manifest = source.export(tmp_path, output)
+    assert manifest["source_dimensions_mm"]["dock_guide"][-1] == 37.5
+    assert manifest["approved_drill_holes"] == 0
+    assert manifest["actual_fit_verified"] is False
+    assert source.verify(tmp_path, output) == manifest
+    assert paper_transitions() == [37.5, 37.5]
+    if render_mesh:
+        mesh = tmp_path / "coupon.stl"
+        subprocess.run(
+            ["openscad", "--hardwarnings", "--export-format", "binstl",
+             "-o", str(mesh), "-D", 'part="dock_rail_entry_coupon"', str(scad)],
+            check=True, capture_output=True, timeout=60,
+        )
+        blob = mesh.read_bytes()
+        triangles = unpack_from("<I", blob, 80)[0]
+        ys = set()
+        for i in range(triangles):
+            for j in range(3):
+                _, y, z = unpack_from("<fff", blob, 96 + 50 * i + 12 * j)
+                if z > 3:
+                    ys.add(y)
+        ordered = sorted(ys)
+        assert len(ordered) == 3
+        assert paper_transitions() == [ordered[1] - ordered[0]] * 2

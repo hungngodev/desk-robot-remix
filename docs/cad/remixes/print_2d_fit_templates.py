@@ -114,6 +114,7 @@ def values(root: Path, *, source_bytes: dict[str, bytes] | None = None) -> dict:
         raise ValueError("Dock base or guide below printable minimum")
     rail_margin = scad_mm(dock, "wall_outside_margin_mm")
     entry_flare = scad_mm(dock, "entry_flare_each_mm")
+    flare_run = scad_mm(dock, "entry_flare_run_mm")
     channel_w = track_w + 2 * each_side
     outer_w = channel_w + 2 * (rail_wall + rail_margin)
     # The physical OpenSCAD dock rejects any tag pocket that cannot fit
@@ -122,7 +123,7 @@ def values(root: Path, *, source_bytes: dict[str, bytes] | None = None) -> dict:
     if pocket >= channel_w:
         raise ValueError("Dock tag pocket exceeds nominal rail channel")
     if (not 40 < track_w < 200 or not 0.5 <= each_side < 8
-            or guide_run <= 37 or guide_run >= base_l
+            or guide_run <= flare_run or guide_run >= base_l
             or entry_flare >= rail_wall + rail_margin
             or entry_flare > rail_margin
             or channel_w <= 0 or outer_w <= channel_w):
@@ -130,7 +131,7 @@ def values(root: Path, *, source_bytes: dict[str, bytes] | None = None) -> dict:
     # Mirror the full dock and entry coupon OpenSCAD assertions. A paper
     # layout for non-renderable source geometry must fail before export.
     if (base_l <= guide_run + backstop_thickness
-            or not 37 < entry_coupon < guide_run):
+            or not flare_run < entry_coupon < guide_run):
         raise ValueError("Invalid dock backstop or entry coupon dimensions")
     if (base_l - backstop_thickness - brace_depth <= guide_run
             or brace_height > backstop_height):
@@ -142,7 +143,7 @@ def values(root: Path, *, source_bytes: dict[str, bytes] | None = None) -> dict:
                     scad_mm(data["speaker"], "speaker_w")),
         "dock": (black, paper, pocket),
         "dock_guide": (outer_w, base_l, guide_run, rail_wall,
-                       rail_margin, entry_flare, channel_w),
+                       rail_margin, entry_flare, channel_w, flare_run),
         "power": (pack_l, pack_w, tray_l, tray_w, tab_l, tab_w, tab_offset),
     }
 
@@ -192,20 +193,20 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
         )
         title = "Dock paper / passive pocket outline"
     elif name == "dock_guide":
-        outer_w, base_l, run_l, wall_w, margin_w, flare_w, channel_w = dims
+        outer_w, base_l, run_l, wall_w, margin_w, flare_w, channel_w, flare_run = dims
         x, y = (A4_WIDTH_MM - outer_w) / 2, 51
-        if x < 15 or y + base_l > 196 or run_l < 37:
+        if x < 15 or y + base_l > 196 or not 0 < flare_run < run_l:
             raise ValueError("Dock guide outline exceeds A4 printable layout")
-        # The two footprints use the EXACT 37 mm flared-entry polygons
+        # The two footprints use the source-defined flared-entry polygons
         # from dock_passive_fit.scad, translated onto an A4 sheet.
         left_inner = wall_w + margin_w
         left = (
             (x + left_inner - wall_w - flare_w, y),
             (x + left_inner - flare_w, y),
-            (x + left_inner, y + 37),
+            (x + left_inner, y + flare_run),
             (x + left_inner, y + run_l),
             (x + left_inner - wall_w, y + run_l),
-            (x + left_inner - wall_w, y + 37),
+            (x + left_inner - wall_w, y + flare_run),
         )
         right = tuple((2*x + outer_w - px, py) for px, py in left)
         features = (

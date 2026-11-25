@@ -9,6 +9,7 @@ base_thickness_mm = 3;
 guide_wall_mm = 5;
 guide_run_mm = 107;
 entry_flare_each_mm = 7;
+entry_flare_run_mm = 37; // shared nominal transition for CAD and paper
 guide_height_mm = 12;
 backstop_thickness_mm = 5;
 backstop_height_mm = 90;
@@ -29,7 +30,7 @@ inner_wall_x = guide_wall_mm + wall_outside_margin_mm;
 outside_width_mm = channel_mm + 2 * inner_wall_x;
 backstop_front_y_mm = base_length_mm - backstop_thickness_mm;
 backstop_brace_front_y_mm = backstop_front_y_mm - backstop_brace_depth_mm;
-// The reversible coupon includes the 37 mm flare and straight guide.
+// The reversible coupon includes the entry flare and straight guide.
 entry_coupon_length_mm = 48;
 // Unpowered IR pair LOCATION TEST: not an emitter holder or final beam aim.
 // Both transmitter carrier, lens diameter and mounting angles are unmeasured.
@@ -44,12 +45,13 @@ assert(base_length_mm > guide_run_mm + backstop_thickness_mm);
 assert(backstop_brace_depth_mm > 0 && backstop_brace_front_y_mm > guide_run_mm);
 assert(backstop_brace_height_mm > 0 && backstop_brace_height_mm <= backstop_height_mm);
 assert(entry_flare_each_mm > 0 && entry_flare_each_mm < inner_wall_x);
-assert(entry_coupon_length_mm > 37 && entry_coupon_length_mm < guide_run_mm);
+assert(entry_flare_run_mm > 0 && entry_coupon_length_mm > entry_flare_run_mm &&
+       entry_coupon_length_mm < guide_run_mm);
 // Geometry invariants shared by the full dock and its entry coupon.
 // The nominal channel must be measured between the INNER faces of the rails.
 assert(abs((outside_width_mm - 2 * inner_wall_x) - channel_mm) < 0.001);
 assert(inner_wall_x - guide_wall_mm - entry_flare_each_mm >= 0);
-assert(guide_run_mm > 37);
+assert(guide_run_mm > entry_flare_run_mm);
 assert(base_thickness_mm >= 2 && guide_wall_mm >= 2 && guide_height_mm >= 2,
        "Dock base or guide below printable minimum");
 assert(tag_black_side_mm >= 10 && tag_black_side_mm <= 75);
@@ -68,10 +70,10 @@ module one_side_rail() {
             // faces flare outward at entry while keeping wall thickness.
             [inner_wall_x - guide_wall_mm - entry_flare_each_mm, 0],
             [inner_wall_x - entry_flare_each_mm, 0],
-            [inner_wall_x, 37],
+            [inner_wall_x, entry_flare_run_mm],
             [inner_wall_x, guide_run_mm],
             [inner_wall_x - guide_wall_mm, guide_run_mm],
-            [inner_wall_x - guide_wall_mm, 37]
+            [inner_wall_x - guide_wall_mm, entry_flare_run_mm]
         ]);
 }
 
