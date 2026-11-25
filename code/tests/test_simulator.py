@@ -291,3 +291,40 @@ async def test_simulated_control_lease_random_transitions(monkeypatch, seed):
         ) == (armed, motor, max(0, deadline - now), expected_watchdog), (
             seed, step, now, command
         )
+
+
+@pytest.mark.asyncio
+async def test_simulator_bounds_retained_history_chronologically_and_allows_opt_out():
+    robot = SimpleNamespace(id="robot-01")
+    assert simulator.SimulatedHead("robot-01")._max_history == simulator.DEFAULT_MAX_SIMULATOR_HISTORY
+    assert simulator.SimulatedSpeaker()._max_history == simulator.DEFAULT_MAX_SIMULATOR_HISTORY
+
+    for bad in (-1, True, "3"):
+        with pytest.raises(ValueError, match="max_history"):
+            simulator.SimulatedHead("robot-01", max_history=bad)
+        with pytest.raises(ValueError, match="max_history"):
+            simulator.SimulatedSpeaker(max_history=bad)
+
+    bounded_head = simulator.SimulatedHead("robot-01", max_history=3)
+    bounded_speaker = simulator.SimulatedSpeaker(max_history=3)
+    for cmd in ("ping", "arm", "keepalive", "stop", "halt"):
+        await bounded_head.command(cmd)
+    async with bounded_speaker.session([robot]):
+        for idx in range(5):
+            await bounded_speaker.say(robot, f"m{idx}")
+    assert bounded_head.commands == ["keepalive", "stop", "halt"]
+    assert bounded_speaker.spoken == [
+        ("robot-01", "m2"),
+        ("robot-01", "m3"),
+        ("robot-01", "m4"),
+    ]
+
+    unlimited_head = simulator.SimulatedHead("robot-01", max_history=None)
+    unlimited_speaker = simulator.SimulatedSpeaker(max_history=None)
+    for _idx in range(5):
+        await unlimited_head.command("ping")
+    async with unlimited_speaker.session([robot]):
+        for idx in range(5):
+            await unlimited_speaker.say(robot, f"u{idx}")
+    assert len(unlimited_head.commands) == 5
+    assert len(unlimited_speaker.spoken) == 5

@@ -18,12 +18,26 @@ from .vision import Detection, SceneChange
 # so rounding cannot extend a control lease at an exact expiration boundary.
 BODY_IDLE_WATCHDOG_MS = 500
 BODY_ACTIVE_WHEEL_WATCHDOG_MS = 200
+DEFAULT_MAX_SIMULATOR_HISTORY = 1000
+
+
+def _validate_max_history(max_history: int | None) -> int | None:
+    if max_history is not None and (type(max_history) is not int or max_history < 0):
+        raise ValueError("max_history must be a non-negative integer or None")
+    return max_history
+
+
+def _append_bounded(history: list, item: object, max_history: int | None) -> None:
+    history.append(item)
+    if max_history is not None and len(history) > max_history:
+        del history[: len(history) - max_history]
 
 
 class SimulatedHead:
-    def __init__(self, robot_id: str):
+    def __init__(self, robot_id: str, *, max_history: int | None = DEFAULT_MAX_SIMULATOR_HISTORY):
         self.id = robot_id
         self.armed = False
+        self._max_history = _validate_max_history(max_history)
         self.commands: list[str] = []
         self._last_control_ms = 0
         self._motor = (0, 0)
@@ -94,7 +108,7 @@ class SimulatedHead:
 
     async def command(self, command):
         op = validate_command(command)
-        self.commands.append(command)
+        _append_bounded(self.commands, command, self._max_history)
         now = round(time.monotonic() * 1000)
         self._watchdog(now)
         if self.fail_command and command.startswith(self.fail_command):
@@ -164,7 +178,8 @@ class SimulatedSpeaker:
     # It does not assert any physical decoder, DMA, or loudspeaker state.
     supports_permission_checks = True
 
-    def __init__(self):
+    def __init__(self, *, max_history: int | None = DEFAULT_MAX_SIMULATOR_HISTORY):
+        self._max_history = _validate_max_history(max_history)
         self.spoken = []
 
     @asynccontextmanager
@@ -174,7 +189,7 @@ class SimulatedSpeaker:
     async def say(self, robot, text, *, permission_check=None):
         if permission_check is not None and not permission_check():
             raise RuntimeError("Simulated speech permission revoked")
-        self.spoken.append((robot.id, text))
+        _append_bounded(self.spoken, (robot.id, text), self._max_history)
 
 
 class SimulatedChat:
