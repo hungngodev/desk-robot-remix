@@ -1250,3 +1250,36 @@ async def test_relief_wait_does_not_override_interlock_or_unmatched_ack(monkeypa
     assert head.commands == ["grip 64", "grip 60"]
     assert len(polls) == (0 if failure == "wrong_ack" else 1)
 
+
+
+@pytest.mark.parametrize("fault", ["after_ack", "final_target", "unsettled", "healthy"])
+async def test_closing_contact_requires_current_commanded_target(monkeypatch, fault):
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([100, 100, 240, 245])
+
+    async def health():
+        target = int(head.commands[-1].split()[1]) if head.commands else 60
+        angle = target
+        if target == 64:
+            if fault == "after_ack" or (fault == "final_target" and head.seq == 4):
+                target = angle = 61
+            elif fault == "unsettled" and head.seq == 4:
+                angle = 63
+        return {
+            "armed": True, "robot_id": "robot-01", "imu": {"boot_id": 5103},
+            "servo": {"grip": angle, "grip_target": target, "attached": True,
+                      "position_source": "commanded"},
+        }
+
+    if fault == "healthy":
+        result = await guarded_grasp(head, Settings(), robot_id="robot-01", health=health)
+        assert result["commanded_angle"] == 64
+        assert result["physical_acceptance_pass"] is False
+        assert head.commands == ["grip 64"]
+    else:
+        with pytest.raises(OperationError, match="commanded closing target not confirmed"):
+            await guarded_grasp(head, Settings(), robot_id="robot-01", health=health)
+        assert head.commands == ["grip 64", "grip 60"]

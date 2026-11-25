@@ -166,7 +166,7 @@ async def guarded_grasp(
         force_boot_id = observed_boot
         return *observation, expires_at
 
-    async def confirmed_health() -> dict:
+    async def confirmed_health(expected_target: int | None = None, *, settled: bool = False) -> dict:
         nonlocal force_boot_changed
         # The normal Coordinator raises for disarmed/foreign WROOM status,
         # but an alternate head/health adapter may merely return a false
@@ -192,6 +192,20 @@ async def guarded_grasp(
                     or health_boot != force_boot_id):
                 force_boot_changed = True
                 raise OperationError("Gripper WROOM health boot mismatched jaw source")
+        # An accepted ACK does not survive a later local jaw interlock.
+        # Real WROOM status always carries servo telemetry; minimal legacy
+        # unit adapters may omit it, but the hardware caller requires it.
+        if expected_target is not None and "servo" in status:
+            servo = status["servo"]
+            if (not isinstance(servo, dict)
+                    or servo.get("attached") is not True
+                    or servo.get("position_source") != "commanded"
+                    or type(servo.get("grip_target")) is not int
+                    or servo["grip_target"] != expected_target
+                    or type(servo.get("grip")) is not int
+                    or not 60 <= servo["grip"] <= 120
+                    or (settled and servo["grip"] != expected_target)):
+                raise OperationError("Gripper commanded closing target not confirmed")
         return status
 
     async def read_new_jaw(previous_seq: int, failure: str) -> tuple[int, int, float]:
@@ -229,11 +243,12 @@ async def guarded_grasp(
     baseline = (baseline_a + baseline_b) // 2
     latest_seq = seq_b
     motion_attempted = False
+    previous_target = None
     try:
         for angle in grip_angles(
             calibration.grip_open, calibration.grip_closed, calibration.grip_step_deg
         )[1:]:
-            await confirmed_health()
+            await confirmed_health(previous_target)
             if time.monotonic() >= jaw_expires_at:
                 raise OperationError("Jaw ADC evidence expired before closing dispatch")
             motion_attempted = True
@@ -249,13 +264,14 @@ async def guarded_grasp(
                 or reply.get("reply") != f"OK grip angle={angle}"
             ):
                 raise OperationError("Unmatched gripper command ACK")
+            previous_target = angle
             await asyncio.sleep(0.18)
-            await confirmed_health()
+            await confirmed_health(angle)
             # Confirm contact at the same commanded angle. A further
             # closing pulse would compress the object before confirmation.
             for confirmation in range(2):
                 if confirmation:
-                    await confirmed_health()
+                    await confirmed_health(angle)
                 try:
                     measured, seq, jaw_expires_at = await read_new_jaw(
                         latest_seq, "No new jaw sample after servo movement",
@@ -274,8 +290,8 @@ async def guarded_grasp(
                 if raw_delta < threshold:
                     break
                 if confirmation:
-                    # Health may change during the final awaited AUX read.
-                    await confirmed_health()
+                    # Health or target may change during the final awaited AUX read.
+                    await confirmed_health(angle, settled=True)
                     if time.monotonic() >= jaw_expires_at:
                         raise OperationError("Jaw ADC evidence expired before contact confirmation")
                     return {

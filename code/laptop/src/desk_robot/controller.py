@@ -1679,6 +1679,8 @@ class Coordinator:
         async def grasp_health() -> dict:
             body = await self._assert_armed_health(job.robot_id)
             self._pickup_live_media(job.robot_id, camera_grant)
+            if not isinstance(body.get("servo"), dict):
+                raise OperationError("Pickup requires WROOM commanded servo telemetry")
             return body
 
         if self.settings.mode == "hardware":
