@@ -48,10 +48,10 @@ inline bool pn532_response(
     const std::uint8_t*& payload, std::size_t& payload_size) {
   payload = nullptr;
   payload_size = 0;
-  if (!frame || size < 10 || frame[0] != 1 ||
+  if (!frame || size < 10 || size > kPn532MaxWire || frame[0] != 1 ||
       frame[1] != 0 || frame[2] != 0 || frame[3] != 0xff) return false;
   const std::uint8_t length = frame[4];
-  if (length < 2 || length > 24 ||
+  if (length < 2 || length > kPn532MaxWire - 8 ||
       static_cast<std::uint8_t>(length + frame[5]) != 0 ||
       static_cast<std::size_t>(length) + 8 > size ||
       frame[6] != 0xd5 ||
@@ -81,6 +81,12 @@ inline Pn532TagResult pn532_tag(
   if (payload[0] != 1 || n < 6 || payload[1] != 1 ||
       (payload[5] != 4 && payload[5] != 7 && payload[5] != 10) ||
       n < static_cast<std::size_t>(6 + payload[5]))
+    return Pn532TagResult::Invalid;
+  // NXP UM0701-02 section 7.3.5: an optional Type A ATS is length-prefixed
+  // and its length includes the length byte itself. Reject incomplete or
+  // unexplained trailing data before publishing a tag event.
+  const std::size_t uid_end = 6U + payload[5];
+  if (n > uid_end && payload[uid_end] != n - uid_end)
     return Pn532TagResult::Invalid;
   uid_length = payload[5];
   std::uint32_t hash = 2166136261U; // nonsecret game token, NOT authentication

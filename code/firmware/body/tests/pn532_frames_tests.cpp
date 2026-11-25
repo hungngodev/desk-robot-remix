@@ -120,6 +120,39 @@ static void check_tag_boundaries() {
   }
 }
 
+static void check_ats_and_wire_limit() {
+  using desk_robot::Pn532TagResult;
+  std::uint32_t token = 0;
+  std::uint8_t uid_size = 0;
+  const std::uint8_t* payload = nullptr;
+  std::size_t size = 0;
+  // A checksum-valid frame may still contain structurally invalid ATS data.
+  for (unsigned declared = 0; declared <= 255; ++declared) {
+    for (unsigned actual = 1; actual <= 11; ++actual) {
+      std::vector<std::uint8_t> tag = {1, 1, 4, 0, 0x20, 4, 1, 2, 3, 4};
+      tag.resize(10 + actual, 0x75);
+      tag[10] = static_cast<std::uint8_t>(declared);
+      const auto wire = response(0x4a, tag);
+      CHECK(desk_robot::pn532_response(wire.data(), wire.size(), 0x4a, payload, size));
+      token = 123;
+      uid_size = 10;
+      const auto result = desk_robot::pn532_tag(payload, size, token, uid_size);
+      if (declared == actual) {
+        CHECK(result == Pn532TagResult::Present && uid_size == 4 && token != 0);
+      } else {
+        CHECK(result == Pn532TagResult::Invalid && uid_size == 0 && token == 0);
+      }
+    }
+  }
+  // Restore the final postamble truncated by response()'s fixed Wire buffer.
+  auto oversized = response(0x4a, std::vector<std::uint8_t>(22, 0xa5));
+  oversized.push_back(0);
+  CHECK(oversized.size() == desk_robot::kPn532MaxWire + 1);
+  CHECK(!desk_robot::pn532_response(
+      oversized.data(), oversized.size(), 0x4a, payload, size));
+  CHECK(payload == nullptr && size == 0);
+}
+
 static void check_encoder_boundaries() {
   const std::vector<std::uint8_t> body(17, 0xa5);
   const std::vector<std::uint8_t> untouched(26, 0x55);
@@ -147,6 +180,7 @@ int main() {
     check_frame_boundaries();
     check_tag_boundaries();
     check_encoder_boundaries();
+    check_ats_and_wire_limit();
     const std::uint8_t sam[] = {1, 0x14, 1};
     std::uint8_t encoded[32]{};
     const auto n = desk_robot::pn532_encode(0x14, sam, 3, encoded, sizeof(encoded));
