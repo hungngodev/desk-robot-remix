@@ -1220,6 +1220,31 @@ void Application::HandleStartListeningEvent() {""",
     files[path] = header.encode()
     path = "main/boards/common/esp32_camera.cc"
     source = (target / path).read_text()
+    bounds_header = "main/boards/common/desk_robot_camera_frame_bounds.hpp"
+    files[bounds_header] = (HERE / "overlay/camera_frame_bounds.hpp").read_bytes()
+    source = replace_once(
+        source,
+        '#include "esp32_camera.h"',
+        '#include "esp32_camera.h"\n#include "desk_robot_camera_frame_bounds.hpp"',
+    )
+    source = replace_once(
+        source,
+        "    if (current_fb_->format == PIXFORMAT_RGB565) {\n"
+        "        size_t pixel_count = current_fb_->width * current_fb_->height;",
+        """    if (current_fb_->format == PIXFORMAT_RGB565) {
+        if (!current_fb_->buf || !desk_robot::ValidRgb565Frame(
+                current_fb_->width, current_fb_->height, current_fb_->len)) {
+            ESP_LOGE(TAG, "Invalid RGB565 frame dimensions or length");
+            esp_camera_fb_return(current_fb_);
+            current_fb_ = nullptr;
+            return false;
+        }
+        size_t pixel_count = current_fb_->width * current_fb_->height;""",
+    )
+    # Capacity may exceed the current frame after a smaller capture.
+    source = replace_once(
+        source, "jpeg_src_len = encode_buf_size_;", "jpeg_src_len = current_fb_->len;"
+    )
     for anchor in (
         "bool Esp32Camera::Capture() {",
         "std::expected<std::string, std::string> Esp32Camera::Explain(const std::string& question) {",

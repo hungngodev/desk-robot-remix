@@ -129,6 +129,31 @@ class WaveshareOverlayTests(unittest.TestCase):
         for other in ("sense", "modular", "cores3"):
             self.assertFalse((self.root / overlay.BOARDS[other]).exists())
 
+    def test_rgb565_guard_precedes_capture_copy_and_uses_current_length(self):
+        for variant in ("waveshare", "modular"):
+            with self.subTest(variant=variant):
+                overlay.apply(self.root, variant)
+                source = (self.root / "main/boards/common/esp32_camera.cc").read_text()
+                capture = source.split("bool Esp32Camera::Capture() {", 1)[1].split(
+                    "bool Esp32Camera::SetHMirror", 1
+                )[0]
+                guard = capture.index("desk_robot::ValidRgb565Frame(")
+                self.assertLess(guard, capture.index("size_t pixel_count"))
+                self.assertLess(guard, capture.index("memcpy(encode_buf_"))
+                failure = capture[guard:capture.index("size_t pixel_count")]
+                self.assertIn("esp_camera_fb_return(current_fb_);", failure)
+                self.assertIn("current_fb_ = nullptr;", failure)
+                self.assertIn("return false;", failure)
+                self.assertIn("jpeg_src_len = current_fb_->len;", source)
+                self.assertNotIn("jpeg_src_len = encode_buf_size_;", source)
+                installed = self.root / "main/boards/common/desk_robot_camera_frame_bounds.hpp"
+                self.assertEqual(
+                    installed.read_bytes(),
+                    (HEAD / "overlay/camera_frame_bounds.hpp").read_bytes(),
+                )
+                overlay.remove(self.root)
+                self.assertFalse(installed.exists())
+
     def test_display_initialization_precedes_ui_and_network_consumers(self):
         """Check installed board startup against the pinned display/application."""
         overlay.apply(self.root, "waveshare")
