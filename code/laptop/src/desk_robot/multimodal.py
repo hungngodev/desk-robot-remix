@@ -64,6 +64,8 @@ def _prepare(jpeg: bytes, max_side: int = 768) -> tuple[bytes, bytes, float]:
     """Encode bounded JPEG for the VLM and a tiny grayscale motion fingerprint."""
     if not isinstance(jpeg, bytes) or not 12 <= len(jpeg) <= 4_000_000:
         raise ValueError("Camera JPEG size invalid")
+    if not jpeg.startswith(b"\xff\xd8") or not jpeg.endswith(b"\xff\xd9"):
+        raise ValueError("Camera JPEG framing invalid")
     try:
         with Image.open(BytesIO(jpeg)) as im:
             if im.format != "JPEG":
@@ -479,9 +481,9 @@ class CameraFrameHub:
         ):
             raise ValueError("Invalid device camera completion identity")
         reduced, gray, _ = prepared
-        if (not isinstance(reduced, bytes) or not reduced.startswith(b"\xff\xd8")
-                or len(reduced) > 1_000_000 or not isinstance(gray, bytes)
-                or len(gray) != 64 * 48):
+        if (not isinstance(reduced, bytes) or not 12 <= len(reduced) <= 1_000_000
+                or not reduced.startswith(b"\xff\xd8") or not reduced.endswith(b"\xff\xd9")
+                or not isinstance(gray, bytes) or len(gray) != 64 * 48):
             raise ValueError("Invalid preprocessed camera evidence")
         prev = self.previous_gray.get(robot_id)
         motion = change_fraction(prev, gray) if prev is not None else 0.0

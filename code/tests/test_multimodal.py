@@ -76,6 +76,28 @@ def test_oversized_jpeg_header_rejected_before_pixel_decompression(size):
         _prepare(bytes(frame))
 
 
+@pytest.mark.parametrize("kind", ["empty", "truncated", "trailing"])
+def test_invalid_camera_envelope_does_not_advance_hub(kind):
+    hub = CameraFrameHub(["robot-01"])
+    now = time.monotonic()
+    valid = image()
+    bad = {"empty": b"", "truncated": valid[:-2], "trailing": valid + b"\r\n"}[kind]
+    initial = hub.offer("robot-01", valid, now - 0.2, source="proactive")
+    baseline = hub.previous_gray["robot-01"]
+    with pytest.raises((ValueError, OSError)):
+        hub.offer("robot-01", bad, now - 0.1, source="proactive")
+    with pytest.raises(ValueError, match="Invalid preprocessed camera evidence"):
+        hub.offer_prepared(
+            "robot-01", (bad, bytes(64 * 48), 0.0),
+            now - 0.1, source="proactive",
+        )
+    assert list(hub.frames["robot-01"]) == [initial]
+    assert hub.last_capture["robot-01"] == initial.received_at
+    assert hub.previous_gray["robot-01"] == baseline
+    current = hub.offer("robot-01", image(square=True), now, source="proactive")
+    assert hub.selected("robot-01", "What do you see?", now) == [current]
+
+
 class Head:
     def __init__(self):
         self.captures = 0
@@ -263,11 +285,17 @@ async def test_stream_frame_aging_out_during_jpeg_decode_is_not_published():
         await visual.close()
 
 
-@pytest.mark.parametrize("size", [None, 5000, 65535])
+@pytest.mark.parametrize("size", [None, 5000, 65535, "empty", "truncated", "trailing"])
 async def test_corrupt_live_jpeg_drops_frame_without_restarting_camera_stream(size):
     """Malformed bytes and deceptive JPEG dimensions must not break video."""
     bad_frame = b"not a JPEG"
-    if size is not None:
+    if size == "empty":
+        bad_frame = b""
+    elif size == "truncated":
+        bad_frame = image()[:-2]
+    elif size == "trailing":
+        bad_frame = image() + b"\r\n"
+    elif size is not None:
         oversized = bytearray(image())
         sof = oversized.find(b"\xff\xc0")
         assert sof > 0
