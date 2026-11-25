@@ -81,6 +81,15 @@ def steps(suite: str, build: Path) -> list[tuple[str, list[str], Path, int]]:
     return jobs
 
 
+def _unique_lock_fields(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError(f"Duplicate upstream lock field: {key}")
+        result[key] = value
+    return result
+
+
 def required_upstream_fixture_errors() -> list[str]:
     """Validate pinned test fixtures without cloning or modifying a checkout.
 
@@ -88,30 +97,65 @@ def required_upstream_fixture_errors() -> list[str]:
     ambiguous source regression. The user may restore the exact pinned
     sources with the existing scripts/restore_upstreams.py command.
     """
-    lock = json.loads((CODE / "upstream-lock.json").read_text(encoding="utf-8"))
-    sources = {
-        source["name"]: source for source in lock["repositories"]
-    }
+    lock_path = CODE / "upstream-lock.json"
+    if lock_path.is_symlink() or not lock_path.is_file():
+        raise ValueError("Upstream lock must be a regular, non-symlink file")
+    lock = json.loads(lock_path.read_text(encoding="utf-8"),
+                      object_pairs_hook=_unique_lock_fields)
+    if not isinstance(lock, dict) or not isinstance(lock.get("repositories"), list):
+        raise ValueError("Invalid upstream repository list")
+    sources = {}
+    for source in lock["repositories"]:
+        if not isinstance(source, dict) or not isinstance(source.get("name"), str):
+            raise ValueError("Invalid upstream repository identity")
+        name = source["name"]
+        if not name or name in sources:
+            raise ValueError("Missing or duplicate upstream repository identity")
+        sources[name] = source
+    git_env = {key: value for key, value in os.environ.items()
+               if not key.startswith("GIT_")}
     missing = []
     for name in ("xiaozhi-esp32", "xiaozhi-esp32-server"):
         source = sources.get(name)
         if not isinstance(source, dict):
             missing.append(f"{name}: absent from upstream lock")
             continue
-        directory = CODE / source["path"]
-        if not directory.is_dir():
-            missing.append(f"{name}: pinned source directory absent")
+        expected_path = f"upstream/{name}"
+        pin = source.get("commit")
+        if (source.get("path") != expected_path or not isinstance(pin, str)
+                or len(pin) != 40 or any(ch not in "0123456789abcdef" for ch in pin)):
+            missing.append(f"{name}: invalid canonical fixture path or commit pin")
+            continue
+        directory = CODE / expected_path
+        metadata = directory / ".git"
+        if any(path.is_symlink() for path in (directory.parent, directory, metadata)):
+            missing.append(f"{name}: redirected upstream checkout")
+            continue
+        if not directory.is_dir() or not metadata.is_dir():
+            missing.append(f"{name}: pinned standalone source directory absent")
             continue
         try:
+            top = subprocess.check_output(
+                ["git", "rev-parse", "--show-toplevel"], cwd=directory, text=True,
+                stderr=subprocess.DEVNULL, timeout=10, env=git_env,
+            ).strip()
+            common = subprocess.check_output(
+                ["git", "rev-parse", "--git-common-dir"], cwd=directory, text=True,
+                stderr=subprocess.DEVNULL, timeout=10, env=git_env,
+            ).strip()
+            if (not top or not common or Path(top).resolve() != directory.resolve()
+                    or (directory / common).resolve() != metadata.resolve()):
+                missing.append(f"{name}: upstream worktree or metadata mismatch")
+                continue
             actual = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=directory, text=True,
-                stderr=subprocess.DEVNULL, timeout=10,
+                stderr=subprocess.DEVNULL, timeout=10, env=git_env,
             ).strip()
         except (OSError, subprocess.CalledProcessError,
                 subprocess.TimeoutExpired):
             actual = ""
-        if actual != source["commit"]:
-            missing.append(f"{name}: expected locked SHA {source['commit']}")
+        if actual != pin:
+            missing.append(f"{name}: expected locked SHA {pin}")
             continue
         try:
             modifications = subprocess.check_output(

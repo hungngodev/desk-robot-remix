@@ -160,11 +160,15 @@ def test_python_suite_accepts_exact_pinned_upstream_commits(
         ],
     }))
     for name in commits:
-        (tmp_path / "upstream" / name).mkdir(parents=True)
+        (tmp_path / "upstream" / name / ".git").mkdir(parents=True)
     monkeypatch.setattr(verify, "CODE", tmp_path)
     calls = []
 
     def pinned_git(args, **kwargs):
+        if args == ["git", "rev-parse", "--show-toplevel"]:
+            return str(kwargs["cwd"])
+        if args == ["git", "rev-parse", "--git-common-dir"]:
+            return ".git"
         if args == ["git", "status", "--porcelain", "--untracked-files=no"]:
             return ""  # Synthetic locked fixture has no tracked modifications.
         assert args == ["git", "rev-parse", "HEAD"]
@@ -454,3 +458,74 @@ def test_unusable_report_directory(monkeypatch, tmp_path, capsys):
     assert error.value.code == 1
     assert "Cannot create verification report directory" in capsys.readouterr().err
     assert parent.read_text() == "protected content\n"
+
+
+@pytest.mark.parametrize("fault", [
+    "absolute", "traversal", "symlink", "duplicate", "nested", "git_env", "duplicate_key",
+])
+def test_fixture_path_and_lock_faults(monkeypatch, tmp_path, fault):
+    import json
+    import subprocess
+
+    def git(cwd, *args):
+        return subprocess.check_output(
+            ["git", "-C", str(cwd), *args], text=True,
+        ).strip()
+
+    def make_fixture(root):
+        root.mkdir(parents=True)
+        git(root, "init", "-q")
+        git(root, "config", "user.email", "robot-test@example.org")
+        git(root, "config", "user.name", "Robot Test")
+        (root / "fixture.py").write_text("pass\n")
+        git(root, "add", "fixture.py")
+        git(root, "commit", "-qm", "fixture")
+        return git(root, "rev-parse", "HEAD")
+
+    code = tmp_path / "code"
+    code.mkdir()
+    monkeypatch.setattr(verify, "CODE", code)
+    sources = []
+    for name in ("xiaozhi-esp32", "xiaozhi-esp32-server"):
+        directory = code / "upstream" / name
+        sha = make_fixture(directory)
+        sources.append({"name": name, "path": f"upstream/{name}", "commit": sha})
+    first = code / sources[0]["path"]
+    if fault in ("absolute", "traversal", "symlink", "nested"):
+        external = tmp_path / "outside"
+        first.rename(external)
+        if fault == "absolute":
+            sources[0]["path"] = str(external)
+        elif fault == "traversal":
+            sources[0]["path"] = "../outside"
+        elif fault == "symlink":
+            first.symlink_to(external, target_is_directory=True)
+        else:
+            first.mkdir()
+            (external / ".git").rename(code / "upstream" / ".git")
+            (external / "fixture.py").rename(code / "upstream" / "fixture.py")
+    elif fault == "duplicate":
+        sources.insert(0, dict(sources[0], commit="0" * 40))
+    elif fault == "git_env":
+        sources[0]["commit"] = sources[1]["commit"]
+        git(first, "commit", "--allow-empty", "-qm", "different")
+        second = code / sources[1]["path"]
+        monkeypatch.setenv("GIT_DIR", str(second / ".git"))
+        monkeypatch.setenv("GIT_WORK_TREE", str(second))
+    lock = json.dumps({"repositories": sources})
+    if fault == "duplicate_key":
+        lock = lock.replace('"repositories":', '"repositories": [], "repositories":', 1)
+    (code / "upstream-lock.json").write_text(lock)
+
+    executed = []
+
+    def should_not_run(*args, **kwargs):
+        executed.append(args)
+        raise AssertionError("Never launch pytest for ambiguous fixture provenance")
+
+    monkeypatch.setattr(verify.subprocess, "run", should_not_run)
+    result = verify.run("python-tests", ["python", "-m", "pytest"], tmp_path, 2)
+    assert result["pass"] is False
+    assert result["exit_code"] is None
+    assert "INCOMPLETE" in result["error"]
+    assert executed == []
