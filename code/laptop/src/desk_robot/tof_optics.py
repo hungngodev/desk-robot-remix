@@ -36,6 +36,9 @@ def validate_optics(data: object, robot_id: str) -> dict:
             raise ValueError(f"Missing or invalid eight channel {field}")
         raw[field] = tuple(values)
     for channel, age in enumerate(raw["age_ms"]):
+        if not (present & (1 << channel)) and any(
+                raw[field][channel] for field in raw):
+            raise ValueError("Absent optical lane contains sample data")
         if (valid & (1 << channel)) and (
                 age >= 200 if channel < 5 else age > 350):
             raise ValueError("Stale optical sample marked valid")

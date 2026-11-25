@@ -69,3 +69,11 @@ def test_old_optical_raw_words_can_be_reported_without_fake_validity():
     result = validate_optics(data, "robot-01")
     assert result["optics"]["signal_97"][0] == 17767
     assert result["optics"]["valid_mask"] == 0
+
+@pytest.mark.parametrize("field", ["ambient_97", "signal_97", "age_ms"])
+@pytest.mark.parametrize("channel", [1, 2, 3, 4, 6, 7])
+def test_absent_optical_lane_cannot_contain_raw_measurement(field, channel):
+    data = sample()
+    data["optics"][field][channel] = 1
+    with pytest.raises(ValueError, match="Absent optical lane contains sample data"):
+        validate_optics(data, "robot-01")
