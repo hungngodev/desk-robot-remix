@@ -210,6 +210,17 @@ class MicFrame:
     received_at: float
 
 
+@dataclass(frozen=True)
+class HeadPlaybackContext:
+    """Immutable identity of one device playback, independent of I2S progress."""
+
+    playback_id: int
+    response_id: str
+    session_id: str
+    generation: int
+    turn: int
+
+
 class NativeOmniSession:
     """One robot audio route. Full model turn-taking with bounded media queues."""
 
@@ -278,11 +289,7 @@ class NativeOmniSession:
         self._silent_frames = 0
         self._playback_generation = -1
         self._head_playback_counter = uuid.uuid4().int & 0x7ffffffe
-        self._head_playback_id = 0
-        self._head_playback_response_id: str | None = None
-        self._head_playback_session_id: str | None = None
-        self._head_playback_generation = -1
-        self._head_playback_turn = -1
+        self._head_playback: HeadPlaybackContext | None = None
         self._head_i2s_prefix = I2sTransmissionPrefix()
         # Consent comes from THIS pet's authenticated Mac context. Never
         # persist a microphone transcript unless separately enabled there.
@@ -2175,24 +2182,31 @@ class NativeOmniSession:
         self._head_playback_counter = (
             self._head_playback_counter % 0x7ffffffe
         ) + 1
-        self._head_playback_id = self._head_playback_counter
-        self._head_playback_response_id = response_id
-        self._head_playback_session_id = session_id
-        self._head_playback_generation = generation
-        self._head_playback_turn = self._readonly_turn
+        self._head_playback = HeadPlaybackContext(
+            playback_id=self._head_playback_counter,
+            response_id=response_id,
+            session_id=session_id,
+            generation=generation,
+            turn=self._readonly_turn,
+        )
         self._head_i2s_prefix = I2sTransmissionPrefix()
-        return self._head_playback_id
+        return self._head_playback.playback_id
+
+    def _clear_head_playback(self) -> None:
+        self._head_playback = None
+        self._head_i2s_prefix = I2sTransmissionPrefix()
 
     def _head_playback_current(self, generation: int) -> bool:
         import desk_robot_bridge as bridge
+        playback = self._head_playback
         return (
-            not self.closed
+            playback is not None
+            and not self.closed
             and bridge.connections.get(self.device) is self.conn
-            and self._head_playback_id != 0
-            and self._head_playback_session_id == self.conn.session_id
-            and generation == self._generation == self._head_playback_generation
-            and self._head_playback_turn == self._readonly_turn
-            and self._head_playback_response_id == self.wire.response_id
+            and playback.session_id == self.conn.session_id
+            and generation == self._generation == playback.generation
+            and playback.turn == self._readonly_turn
+            and playback.response_id == self.wire.response_id
         )
 
     def accept_head_i2s_progress(self, event: dict) -> bool:
@@ -2204,10 +2218,12 @@ class NativeOmniSession:
                 or event.get("session_id") != self.conn.session_id
                 or not self._head_playback_current(self._generation)):
             return False
+        playback = self._head_playback
         playback_id = event.get("playback_id")
         committed_ms = event.get("committed_ms")
-        if (type(playback_id) is not int or type(committed_ms) is not int
-                or playback_id != self._head_playback_id or committed_ms <= 0):
+        if (playback is None or type(playback_id) is not int
+                or type(committed_ms) is not int
+                or playback_id != playback.playback_id or committed_ms <= 0):
             return False
         generated_ms = self.wire.generated_bytes * 1000 // (24000 * 2)
         if generated_ms <= 0:
@@ -2323,16 +2339,12 @@ class NativeOmniSession:
                 fully_sent = True
                 current_response = response_id
                 generation = self._generation
-                self._begin_head_playback(response_id, generation)
+                playback_id = self._begin_head_playback(response_id, generation)
+                playback = self._head_playback if playback_id else None
                 started = await self._send_device_state("start", generation)
                 if started is False:
-                    if self._head_playback_response_id == response_id:
-                        self._head_playback_id = 0
-                        self._head_playback_response_id = None
-                        self._head_playback_session_id = None
-                        self._head_playback_generation = -1
-                        self._head_playback_turn = -1
-                        self._head_i2s_prefix = I2sTransmissionPrefix()
+                    if playback is not None and self._head_playback is playback:
+                        self._clear_head_playback()
                     dropped_response_id = response_id
                     current_response = None
                     pending.clear()
@@ -2447,10 +2459,10 @@ class NativeOmniSession:
                         "type": "tts", "state": state,
                         "session_id": self.conn.session_id,
                     }
-                    if (state == "start" and self._head_playback_id != 0
-                            and self._head_playback_generation == generation
-                            and self._head_playback_response_id == self.wire.response_id):
-                        message["desk_playback_id"] = self._head_playback_id
+                    playback = self._head_playback
+                    if (state == "start" and playback is not None
+                            and self._head_playback_current(generation)):
+                        message["desk_playback_id"] = playback.playback_id
                     await asyncio.wait_for(
                         self.conn.websocket.send(json.dumps(message)), timeout=0.4,
                     )
@@ -2459,7 +2471,9 @@ class NativeOmniSession:
                         # Do not release the fleet lease for a stale TTS STOP.
                         raise RuntimeError("Head replaced during native TTS control")
                     if state == "start":
-                        if (message.get("desk_playback_id") == self._head_playback_id
+                        if (playback is not None
+                                and self._head_playback is playback
+                                and message.get("desk_playback_id") == playback.playback_id
                                 and self._head_playback_current(generation)):
                             self._head_i2s_prefix.started = True
                         if passive_start:
@@ -2561,12 +2575,7 @@ class NativeOmniSession:
     async def _invalidate_head_first(self) -> tuple[dict, ...]:
         """Local audio generation, queued PCM and actual head flush first."""
         self._generation += 1
-        self._head_playback_id = 0
-        self._head_playback_response_id = None
-        self._head_playback_session_id = None
-        self._head_playback_generation = -1
-        self._head_playback_turn = -1
-        self._head_i2s_prefix = I2sTransmissionPrefix()
+        self._clear_head_playback()
         self._direct_reply_available = False
         self._direct_reply_active = False
         self._readonly_turn += 1

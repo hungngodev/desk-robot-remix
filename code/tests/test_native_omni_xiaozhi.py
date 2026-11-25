@@ -468,6 +468,14 @@ async def test_authenticated_i2s_progress_never_forges_playback_ack(native, inva
 
     playback_id = session._begin_head_playback("r1", session._generation)
     assert 0 < playback_id <= 0x7fffffff
+    binding = session._head_playback
+    assert binding == module.HeadPlaybackContext(
+        playback_id, "r1", conn.session_id,
+        session._generation, session._readonly_turn,
+    )
+    with pytest.raises(AttributeError):
+        binding.turn = binding.turn + 1
+    assert session._head_playback is binding
     assert await session._send_device_state("start", session._generation)
     assert json.loads(sent[-1])["desk_playback_id"] == playback_id
 
@@ -505,6 +513,9 @@ async def test_authenticated_i2s_progress_never_forges_playback_ack(native, inva
 
     if invalidate == "barge":
         await session.barge()
+        assert session._head_playback is None
+        assert session._head_i2s_prefix.committed_ms == 0
+        assert binding.playback_id == playback_id
     elif invalidate == "turn":
         session._readonly_turn += 1
     elif invalidate == "response":
