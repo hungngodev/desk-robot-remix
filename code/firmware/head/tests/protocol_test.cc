@@ -233,6 +233,26 @@ int main() {
         assert(ControlQueueFresh(verb, 100000, 900000));
     }
 
+    // ACK formatting must reject incomplete or surplus argument vectors even
+    // when a caller constructs Command directly rather than using ParseCommand.
+    assert(ExpectedAck(Command{"drive", {}, ""}).empty());
+    assert(ExpectedAck(Command{"drive", {1}, ""}).empty());
+    assert(ExpectedAck(Command{"drive", {1, 2, 3, 4}, ""}).empty());
+    for (const auto verb : {"lift", "grip"}) {
+        assert(ExpectedAck(Command{verb, {}, ""}).empty());
+        assert(ExpectedAck(Command{verb, {60, 61}, ""}).empty());
+        assert(ExpectedAck(Command{verb, {60}, ""}) ==
+               std::string("OK ") + verb + " angle=60");
+    }
+    assert(ExpectedAck(Command{"drive", {100, -100}, ""}) ==
+           "OK drive left=40 right=-40 ms=250");
+    assert(ExpectedAck(Command{"drive", {1, 2, 3}, ""}) ==
+           "OK drive left=1 right=2 ms=3");
+    std::uint8_t bounded_jpeg[] = {0xff, 0xd8, 0x00, 0x11, 0xff, 0xd9};
+    for (std::size_t length = 0; length < sizeof(bounded_jpeg); ++length)
+        assert(!CompleteJpeg(bounded_jpeg, length));
+    assert(CompleteJpeg(bounded_jpeg, sizeof(bounded_jpeg)));
+
     Command c;
     assert(ParseCommand("drive 100 -100 250", false, c));
     assert(ExpectedAck(c) == "OK drive left=40 right=-40 ms=250");

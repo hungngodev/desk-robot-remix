@@ -271,10 +271,12 @@ inline std::string ExpectedAck(const Command& command) {
     const auto& a = command.args;
     std::string reply = "OK " + command.verb;
     if (command.verb == "drive") {
+        if (a.size() != 2 && a.size() != 3) return {};
         reply += " left=" + std::to_string(std::clamp(a[0], -40, 40));
         reply += " right=" + std::to_string(std::clamp(a[1], -40, 40));
         reply += " ms=" + std::to_string(a.size() == 3 ? a[2] : 250);
     } else if (command.verb == "lift" || command.verb == "grip") {
+        if (a.size() != 1) return {};
         reply += " angle=" + std::to_string(a[0]);
     }
     return reply;
