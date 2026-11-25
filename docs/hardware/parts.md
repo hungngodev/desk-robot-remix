@@ -147,7 +147,14 @@ local edge/attitude stopping and physical pickup trials remain open.
 
 `python3 scripts/check_budget.py` now uses the canonical first-unit plan
 and source-locked evaluation cart, reports unknown landed costs, and keeps
-purchase approval on HOLD. The strict release path is
+purchase approval on HOLD. For strict checkout, the two DC drivetrain alternatives replace their STEP
+parents, while separately selected dock adapter and transistor-channel parts
+have distinct landed-cost roles. A dock parent checkout or inspected stock
+entry must declare its `kit_components` list: use an empty list when the
+linked part is separately sourced, or an exact included component identity
+and quantity when it is covered by the parent. Shared station aliases must
+match their already counted parent carrier and never create extra orders.
+The strict release path is
 `python3 scripts/procurement_release.py --require-first-robot --format first-robot-markdown --evidence ACTUAL_RECEIPTS.json`.
 The superseded budget remains inspectable only with
 `python3 scripts/check_budget.py --bom ../docs/hardware/bom.json`; this historical

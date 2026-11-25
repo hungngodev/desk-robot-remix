@@ -2479,3 +2479,51 @@ def test_fleet_checkout_attachment_preserves_scope(power_mode):
         mod.attach_verified_checkout_evidence(
             report, {**cost, "scope": "first_robot"}, evidence
         )
+
+
+def test_separate_dock_pieces_are_costed_once_and_station_aliases_are_not():
+    report = mod.generate(fixture())
+    for item in report["supplemental_decisions"]:
+        if item["id"] in ("dock_5v_adapter", "dock_ir_transistor_channels", "room_scd40"):
+            item.update(reviewed=True, disposition="selected")
+    for scope, count in (("first_robot", 1), ("fleet", 5)):
+        required, categories = mod.cost_requirements(report, scope)
+        assert required["dock:dock_5v_adapter"] == count
+        assert required["dock:dock_ir_transistor_channels"] == count * 2
+        assert categories["dock:dock_5v_adapter"] == "dock"
+        assert "station:room_scd40" not in required
+    for item in report["supplemental_decisions"]:
+        item["disposition"] = "included_in_parent"
+    assert not set(mod.DOCK_LINKED_COST_ROLES) & set(mod.cost_requirements(report, "fleet")[0])
+
+
+def test_dock_kit_and_station_aliases_require_exact_parent_binding():
+    carrier = {"vendor": "generic", "sku": "parent", "pcb_revision": "A"}
+    child = {"id": "dock_5v_adapter", "quantity_per_kit": 1, **carrier}
+    dock = {"id": child["id"], "parent_role": "dock_fixture", "disposition": "selected"}
+    station = {"id": "room_scd40", "parent_role": "scd40", "disposition": "selected"}
+    report = {"supplemental_decisions": [dock, station]}
+    line = {"role_key": "dock:dock_fixture", "kit_components": []}
+    evidence = {
+        "parts": {"dock_fixture": dict(carrier)},
+        "room_pod": {"scd40": dict(carrier)},
+        "supplemental_decisions": {
+            dock["id"]: {"replacement_sku": "parent"},
+            station["id"]: dict(carrier),
+        },
+        "costs": {"lines": [line]},
+    }
+    assert mod.linked_parent_checkout_failures(report, evidence) == []
+    line["kit_components"] = [child]
+    assert any("duplicate dock" in e for e in mod.linked_parent_checkout_failures(
+        report, evidence
+    ))
+    dock["disposition"] = "included_in_parent"
+    assert mod.linked_parent_checkout_failures(report, evidence) == []
+    line["kit_components"] = [child, child]
+    assert mod.linked_parent_checkout_failures(report, evidence)
+    line["kit_components"] = [child]
+    evidence["supplemental_decisions"]["room_scd40"]["pcb_revision"] = "B"
+    assert any("station alias" in e for e in mod.linked_parent_checkout_failures(
+        report, evidence
+    ))

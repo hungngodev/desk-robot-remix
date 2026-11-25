@@ -984,6 +984,9 @@ def first_robot_projection(report: dict) -> dict:
             "selected_drivetrain_substitute": (
                 motor == "dc" and "robot:" + item["id"] in DC_COST_ROLES
             ),
+            "separately_costed_dock_component": (
+                "dock:" + item["id"] in selected_linked_cost_roles(report)
+            ),
             "verified_checkout_order_units": item.get("verified_checkout_order_units"),
             "verified_inspected_first_unit": item.get("verified_inspected_first_unit", 0),
             "verified_checkout_quotes": copy.deepcopy(item.get("verified_checkout_quotes", [])),
@@ -1745,7 +1748,8 @@ def render_first_robot_markdown(report: dict) -> str:
                 f"{first_allocated} |"
             )
     for item in projection["linked_decisions"]:
-        if item["selected_drivetrain_substitute"] and item["verified_inspected_first_unit"]:
+        if ((item["selected_drivetrain_substitute"] or item["separately_costed_dock_component"])
+                and item["verified_inspected_first_unit"]):
             lines.append(
                 f"| {cell(item['name'])} | {item['verified_inspected_first_unit']} | "
                 "0 | 0 | 0 | 0 |"
@@ -1810,16 +1814,18 @@ def render_first_robot_markdown(report: dict) -> str:
             f"{cell(_power_reference_summary(row))} | {cell(quote)} |"
         )
     for item in projection["linked_decisions"]:
-        if item["selected_drivetrain_substitute"]:
+        if item["selected_drivetrain_substitute"] or item["separately_costed_dock_component"]:
+            dc = item["selected_drivetrain_substitute"]
+            label = "linked drivetrain substitution" if dc else "linked dock component"
+            note = "Do not buy excluded STEP hardware" if dc else "Separate from parent kit"
             units = item["verified_checkout_order_units"]
             net = str(units) if type(units) is int else "NOT AUDITED"
             quote = _verified_checkout_quote(item) or "UNQUOTED: delivered total unknown"
             lines.append(
-                f"| linked drivetrain substitution | {cell(item['name'])} | "
+                f"| {label} | {cell(item['name'])} | "
                 f"{item['conditional_one_robot_quantity']} | "
                 f"not independently counted | {net} | {item['disposition']} | "
-                f"replaces {cell(item['parent_role'])} | "
-                "Do not buy excluded STEP hardware | "
+                f"parent {cell(item['parent_role'])} | {note} | "
                 f"{cell(item.get('implementation_source'))} | | {cell(quote)} |"
             )
             continue
@@ -1860,7 +1866,7 @@ def _purchase_rows(report: dict):
 
 
 def render_csv(report: dict) -> str:
-    """Canonical parent roles, plus explicit selected DC replacements when applicable."""
+    """Canonical parent roles, plus selected DC replacements and separate dock pieces."""
     output = io.StringIO(newline="")
     writer = csv.writer(output, lineterminator="\n")
     writer.writerow((
@@ -1885,18 +1891,21 @@ def render_csv(report: dict) -> str:
             ref.get("vendor", ""), ref.get("sku", ""), ref.get("url", ""),
             part["shopping_decision"], part["notes"],
         ))
-    if report.get("physical_motor_variant_in_cart") == "dc":
-        for detail in report["supplemental_decisions"]:
-            role = "robot:" + detail["id"]
-            if role not in DC_COST_ROLES:
+    linked_roles = selected_linked_cost_roles(report)
+    for detail in report["supplemental_decisions"]:
+        for prefix in ("robot:", "dock:"):
+            role = prefix + detail["id"]
+            if role not in linked_roles:
                 continue
-            count = DC_COST_ROLES[role]
+            dc = prefix == "robot:"
+            count = linked_roles[role]
             writer.writerow((
-                "linked drivetrain substitution", detail["id"], detail["name"],
-                count // 5, count, 0, 0, 0, count,
+                "linked drivetrain substitution" if dc else "linked dock component",
+                detail["id"], detail["name"], count // 5, count, 0, 0, 0, count,
                 "yes" if report["order_released"] and detail["reviewed"] else "NO",
-                "", "", "", "replaces_excluded_legacy_drivetrain",
-                "Replaces " + detail["parent_role"] + "; do not buy both",
+                "", "", "",
+                "replaces_excluded_legacy_drivetrain" if dc else "separate_from_parent_kit",
+                "Linked parent " + detail["parent_role"] + "; do not double count",
             ))
     return output.getvalue()
 
@@ -1991,12 +2000,16 @@ def render_markdown(report: dict) -> str:
             if detail["reviewed"] and detail["disposition"] != "deferred_optional"
             else "HOLD SUBASSEMBLY DECISION"
         )
-        if (report.get("physical_motor_variant_in_cart") == "dc"
-                and "robot:" + detail["id"] in DC_COST_ROLES):
+        linked_roles = selected_linked_cost_roles(report)
+        if ("robot:" + detail["id"] in linked_roles
+                or "dock:" + detail["id"] in linked_roles):
+            dc = "robot:" + detail["id"] in linked_roles
+            label = "linked drivetrain substitution" if dc else "linked dock component"
+            note = "Replaces excluded STEP" if dc else "Separate from parent kit"
             output.append(
-                f"| linked drivetrain substitution | {cell(name)} | "
+                f"| {label} | {cell(name)} | "
                 f"{detail['fleet_quantity']} | see audited quote | {status} | "
-                f"Replaces {detail['parent_role']}; do not buy both | | "
+                f"{note}; parent {detail['parent_role']} | | "
                 f"{cell(_verified_checkout_quote(detail))} |"
             )
             continue
@@ -2109,6 +2122,23 @@ DC_COST_ROLES = {
 }
 
 
+DOCK_LINKED_COST_ROLES = {
+    "dock:" + ident: SUPPLEMENTAL_DECISIONS[ident][1]
+    for ident in ("dock_5v_adapter", "dock_ir_transistor_channels")
+}
+
+
+def selected_linked_cost_roles(report: dict) -> dict:
+    """Charge replacements or separately sourced dock pieces, not station aliases."""
+    selected = dict(DC_COST_ROLES) if report.get("physical_motor_variant_in_cart") == "dc" else {}
+    for detail in report.get("supplemental_decisions", []):
+        role = "dock:" + detail["id"]
+        if (role in DOCK_LINKED_COST_ROLES and detail.get("reviewed") is True
+                and detail.get("disposition") in ("selected", "reuse_existing")):
+            selected[role] = DOCK_LINKED_COST_ROLES[role]
+    return selected
+
+
 def cost_requirements(report: dict, scope: str) -> tuple[dict, dict]:
     """Derive payable part counts from the same canonical quantity owner."""
     if scope == "evaluation":
@@ -2135,11 +2165,11 @@ def cost_requirements(report: dict, scope: str) -> tuple[dict, dict]:
         key = category + ":" + ident
         needed[key] = _count(quantity, key)
         categories[key] = category
-    # A qualified DC substitution replaces, rather than supplements, STEP.
-    if report.get("physical_motor_variant_in_cart") == "dc":
-        for role, fleet_quantity in DC_COST_ROLES.items():
-            needed[role] = fleet_quantity // 5 if scope == "first_robot" else fleet_quantity
-            categories[role] = "robot"
+    # DC replaces STEP; separately selected dock components complete their
+    # parent assemblies. Station aliases never create new checkout roles.
+    for role, fleet_quantity in selected_linked_cost_roles(report).items():
+        needed[role] = fleet_quantity // 5 if scope == "first_robot" else fleet_quantity
+        categories[role] = role.split(":", 1)[0]
     return needed, categories
 
 
@@ -2212,14 +2242,14 @@ def stock_carrier_failures(evidence: dict) -> list[str]:
                             or selected.get("disposition") != "selected"):
                         errors.append(f"{label}: unselected power component")
                         continue
-            elif role in DC_COST_ROLES:
+            elif role in DC_COST_ROLES or role in DOCK_LINKED_COST_ROLES:
                 selected = supplemental.get(ident, {})
                 permitted = ("selected", "reuse_existing") if group_name == "inventory" else (
                     "selected",
                 )
                 if (not isinstance(selected, dict)
                         or selected.get("disposition") not in permitted):
-                    errors.append(f"{label}: unselected DC substitute")
+                    errors.append(f"{label}: unselected linked checkout component")
                     continue
             else:
                 selected = (station if prefix == "station" else parts).get(ident, {})
@@ -2242,6 +2272,77 @@ def stock_carrier_failures(evidence: dict) -> list[str]:
                 )
     return errors
 
+
+
+def linked_parent_checkout_failures(report: dict, evidence: dict) -> list[str]:
+    """Bind station aliases and included/separate dock parts to actual checkout items."""
+    errors = []
+    room = evidence.get("room_pod", {})
+    parts = evidence.get("parts", {})
+    decisions = evidence.get("supplemental_decisions", {})
+    costs = evidence.get("costs", {})
+    if any(not isinstance(group, dict) for group in (room, parts, decisions, costs)):
+        return ["malformed linked parent evidence"]
+    lines = costs.get("lines", [])
+    inventory = costs.get("inventory", [])
+    if not isinstance(lines, list) or not isinstance(inventory, list):
+        return ["malformed linked parent checkout rows"]
+    for detail in report.get("supplemental_decisions", []):
+        ident, parent = detail["id"], detail["parent_role"]
+        disposition = detail.get("disposition")
+        if disposition == "deferred_optional":
+            continue
+        decision = decisions.get(ident, {})
+        if not isinstance(decision, dict):
+            errors.append(ident + ": malformed linked decision")
+            continue
+        if parent in REQUIRED_ROOM_PER_STATION or parent in CONDITIONAL_ROOM_PER_STATION:
+            signed = room.get(parent, {})
+            keys = ("vendor", "sku", "pcb_revision")
+            if disposition in ("selected", "reuse_existing"):
+                valid = isinstance(signed, dict) and all(
+                    isinstance(decision.get(key), str) and decision[key].strip()
+                    and signed.get(key) == decision[key] for key in keys
+                )
+            else:
+                valid = (isinstance(signed, dict)
+                         and isinstance(decision.get("replacement_sku"), str)
+                         and bool(decision["replacement_sku"].strip())
+                         and signed.get("sku") == decision["replacement_sku"])
+            if not valid:
+                errors.append(ident + ": station alias differs from signed parent")
+        elif "dock:" + ident in DOCK_LINKED_COST_ROLES:
+            signed = parts.get(parent, {})
+            separate = disposition in ("selected", "reuse_existing")
+            parent_rows = [
+                row for row in [*lines, *inventory]
+                if isinstance(row, dict) and row.get("role_key") == "dock:" + parent
+            ]
+            if not parent_rows or not isinstance(signed, dict):
+                errors.append(ident + ": missing dock parent checkout")
+                continue
+            for row in parent_rows:
+                contents = row.get("kit_components")
+                if not isinstance(contents, list) or any(
+                    not isinstance(piece, dict) for piece in contents
+                ):
+                    errors.append(ident + ": missing explicit dock kit contents")
+                    continue
+                matching = [piece for piece in contents if piece.get("id") == ident]
+                if separate:
+                    if matching:
+                        errors.append(ident + ": duplicate dock kit and separate component")
+                elif (len(matching) != 1
+                      or type(matching[0].get("quantity_per_kit")) is not int
+                      or matching[0]["quantity_per_kit"] != 1
+                      or not all(isinstance(matching[0].get(key), str)
+                                 and matching[0][key].strip()
+                                 for key in ("vendor", "sku", "pcb_revision"))
+                      or not isinstance(decision.get("replacement_sku"), str)
+                      or not decision["replacement_sku"].strip()
+                      or signed.get("sku") != decision["replacement_sku"]):
+                    errors.append(ident + ": unverified included dock component")
+    return errors
 
 
 def cost_quote(report: dict, evidence: dict, scope: str) -> dict:
@@ -2311,10 +2412,11 @@ def attach_verified_checkout_evidence(
         rows[prefix + ":" + part["id"]] = part
     for part in output["room_pod"]:
         rows["station:" + part["id"]] = part
-    if output.get("physical_motor_variant_in_cart") == "dc":
-        for detail in output["supplemental_decisions"]:
-            role = "robot:" + detail["id"]
-            if role in DC_COST_ROLES:
+    linked_roles = selected_linked_cost_roles(output)
+    for detail in output["supplemental_decisions"]:
+        for prefix in ("robot:", "dock:"):
+            role = prefix + detail["id"]
+            if role in linked_roles:
                 rows[role] = detail
     # Only the landed-cost accountant knows how verified inventory, paid
     # allocations and minimum packs cover each role. Never subtract signed
@@ -2729,6 +2831,10 @@ def main() -> int:
             print("HOLD: actual landed quotation, budget or received stock "
                   "has not cleared the purchase gates", file=sys.stderr)
             return 2
+        linked_errors = linked_parent_checkout_failures(report, evidence)
+        if linked_errors:
+            print("HOLD: " + "; ".join(linked_errors), file=sys.stderr)
+            return 2
         # The signed carrier identity must cover the ACTUAL purchased items.
         # A logical cap_power parent is not four physically purchased parts.
         by_role = (evidence.get("room_pod", {}), evidence.get("parts", {}))
@@ -2753,10 +2859,11 @@ def main() -> int:
                               file=sys.stderr)
                         return 2
                     selected = decision
-            elif role in DC_COST_ROLES:
+            elif role in DC_COST_ROLES or role in DOCK_LINKED_COST_ROLES:
                 selected = supplemental.get(ident, {})
                 if selected.get("disposition") != "selected":
-                    print("HOLD: DC substitute not selected: " + ident, file=sys.stderr)
+                    print("HOLD: linked part not selected for purchase: " + ident,
+                          file=sys.stderr)
                     return 2
             else:
                 selected = by_role[0 if kind == "station" else 1].get(ident, {})
