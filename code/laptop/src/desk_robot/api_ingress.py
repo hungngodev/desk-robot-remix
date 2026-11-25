@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
+import math
 import secrets
 from collections.abc import Callable
 
@@ -11,6 +13,35 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 MAX_REQUEST_BYTES = 64 * 1024
 BODY_TIMEOUT_SECONDS = 5.0
+MAX_JSON_DEPTH = 64
+
+
+def _safe_json_body(body: bytearray) -> bool:
+    """Bound parsed values before routing; do not echo unsafe input."""
+    try:
+        value = json.loads(body)
+        pending = [(value, 0)]
+        while pending:
+            value, depth = pending.pop()
+            if isinstance(value, (dict, list)):
+                if depth >= MAX_JSON_DEPTH:
+                    return False
+                if isinstance(value, dict):
+                    for key in value:
+                        key.encode("utf-8")
+                    pending.extend((item, depth + 1) for item in value.values())
+                else:
+                    pending.extend((item, depth + 1) for item in value)
+            elif isinstance(value, str):
+                value.encode("utf-8")
+            elif isinstance(value, float) and not math.isfinite(value):
+                return False
+    except json.JSONDecodeError:
+        # Preserve FastAPI's existing syntax-error response.
+        return True
+    except (ValueError, RecursionError):
+        return False
+    return True
 
 
 def token_matches(credential: str, token: str) -> bool:
@@ -97,6 +128,9 @@ class APIIngress:
                 for parameter in media_type[1:]
             ):
                 await reject(415, "Expected application/json")
+                return
+            if not _safe_json_body(body):
+                await reject(400, "Unsafe JSON input")
                 return
 
         delivered = False

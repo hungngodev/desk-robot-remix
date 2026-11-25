@@ -83,3 +83,63 @@ def test_chunked_body_limit_without_content_length(guarded_app):
         assert guarded_app.state.calls == []
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("body", [
+    b'{"x":' + b'[' * 1500 + b'0' + b']' * 1500 + b'}',
+    b'{"x":' + b'[' * 64 + b'0' + b']' * 64 + b'}',
+    b'{"x":"\\ud800"}',
+    b'{"\\udfff":0}',
+    b'{"x":{"nested":[NaN]}}',
+    b'{"x":Infinity}',
+    b'{"x":-Infinity}',
+    b'{"x":1e999}',
+    b'{"x":-1e999}',
+    b'\xef\xbb\xbf{"x":NaN}',
+    '{"x":"\\ud800"}'.encode("utf-16"),
+])
+def test_unsafe_json_never_reaches_route(guarded_app, body):
+    with TestClient(guarded_app) as client:
+        response = client.post(
+            "/v1/action", content=body,
+            headers={"Authorization": "Bearer tool-secret", "Content-Type": "application/json"},
+        )
+        assert response.status_code == 400
+        assert response.json() == {"detail": "Unsafe JSON input"}
+        assert guarded_app.state.calls == []
+
+
+def test_valid_unicode_and_depth_boundary_reach_route(guarded_app):
+    nested = 0
+    for _ in range(63):
+        nested = [nested]
+    payload = {"x": nested, "emoji": "😀", "literal": '[{\\"' * 1000}
+    with TestClient(guarded_app) as client:
+        response = client.post(
+            "/v1/action", json=payload, headers={"Authorization": "Bearer tool-secret"},
+        )
+        assert response.status_code == 200
+        assert response.json() == payload
+        assert guarded_app.state.calls == [payload]
+
+
+def test_seeded_json_mutation_corpus():
+    import json
+    import random
+
+    from desk_robot.api_ingress import _safe_json_body
+
+    rng = random.Random(71)
+    leaves = [
+        (None, True), (False, True), (-1, True), (10**500, True),
+        ("😀", True), ("\\ud800", True), ("\ud800", False), ("\udfff", False),
+        (float("nan"), False), (float("inf"), False), (float("-inf"), False),
+    ]
+    for _ in range(10_240):
+        value, safe = rng.choice(leaves)
+        depth = rng.randrange(80)
+        for level in range(depth):
+            value = [value] if rng.getrandbits(1) else {f"field_{level}": value}
+        encoding = rng.choice(["utf-8", "utf-8-sig", "utf-16", "utf-32"])
+        body = bytearray(json.dumps(value, ensure_ascii=True).encode(encoding))
+        assert _safe_json_body(body) == (safe and depth <= 64)
