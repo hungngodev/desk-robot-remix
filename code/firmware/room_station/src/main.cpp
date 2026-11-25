@@ -6,6 +6,7 @@
 // Hardware, serial electrical levels, I2C fit, gas warmup and thermal
 // calibration still need a physical one-unit trial.
 #include <Arduino.h>
+#include <Adafruit_TinyUSB.h>
 #include <nrf.h>
 #include <Wire.h>
 #include <SensirionI2cScd4x.h>
@@ -144,6 +145,20 @@ class RoomUsbTx {
 };
 RoomUsbLine telemetry;
 RoomUsbTx usb_tx;
+
+// The Feather core initializes Serial as the first (and only station) CDC
+// interface. Use TinyUSB's single-attempt API instead of Arduino write(),
+// which loops until every requested byte is accepted or DTR drops.
+class RoomUsbPort {
+ public:
+  explicit operator bool() const { return tud_cdc_connected(); }
+  int availableForWrite() const { return tud_cdc_write_available(); }
+  size_t write(const uint8_t* bytes, size_t count) const {
+    return tud_cdc_write(bytes, count);
+  }
+  void flush() const { tud_cdc_write_flush(); }
+};
+RoomUsbPort usb_port;
 
 constexpr uint32_t kReportMs = 1000;
 constexpr uint32_t kScdStaleMs = 8500;
@@ -665,6 +680,6 @@ void loop() {
     now = millis();
     report(now);
   }
-  usb_tx.step(Serial); // one FIFO-space-limited chunk; never wait for a reader
+  usb_tx.step(usb_port); // one FIFO-space-limited chunk; never wait for a reader
   room_watchdog.completed_pass(*NRF_WDT);
 }

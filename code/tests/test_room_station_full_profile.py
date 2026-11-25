@@ -454,7 +454,7 @@ def test_room_usb_backpressure_does_not_block_sensor_loop(tmp_path):
     assert "scd_observation(now);" in report
     assert "soil_observation(now);" in report
     assert "usb_tx.queue_report(telemetry);" in report
-    assert loop.index("report(now);") < loop.index("usb_tx.step(Serial);")
+    assert loop.index("report(now);") < loop.index("usb_tx.step(usb_port);")
     harness = r"""
 #include <algorithm>
 #include <cassert>
@@ -824,7 +824,7 @@ def test_room_loop_watchdog_feeds_only_after_completed_pass(tmp_path):
     assert loop.lstrip().startswith("if (!room_watchdog_ready) return;")
     assert "delay(" not in setup
     assert src.count("room_watchdog.completed_pass(*NRF_WDT);") == 1
-    assert loop.index("usb_tx.step(Serial)") < loop.index("room_watchdog.completed_pass")
+    assert loop.index("usb_tx.step(usb_port)") < loop.index("room_watchdog.completed_pass")
     assert loop.rstrip().endswith("room_watchdog.completed_pass(*NRF_WDT);\n}")
     watchdog = "class RoomLoopWatchdog {" + src.split(
         "class RoomLoopWatchdog {", 1
