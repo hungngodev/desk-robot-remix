@@ -1,5 +1,6 @@
 """Fast Mac CI must not be queued behind a long physical firmware build."""
 
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -96,3 +97,59 @@ def test_sense_python_test_syntax_checked_before_expensive_setup():
     assert steps[compiled]["run"] == (
         "python3 -m compileall -q code/firmware/head/tests"
     )
+
+
+def test_tree_guard_rejects_missing_worktree_and_partial_index(tmp_path):
+    workflow = yaml.safe_load(
+        (Path(__file__).resolve().parents[2]
+         / ".github/workflows/host-verification.yml").read_text()
+    )
+    guard = next(
+        step["run"] for step in workflow["jobs"]["python-and-head-host"]["steps"]
+        if step.get("name") == "Prevent partial repository trees"
+    )
+    counts = {
+        "code/laptop/src": 49, "code/laptop/server": 7,
+        "code/tests": 195, "code/scripts": 36,
+        "code/firmware/head": 47, "code/firmware/body": 70,
+        "docs": 213, "agents": 245,
+    }
+    sentinels = (
+        ".agent3d/fixture", ".github/fixture", ".gitignore", "AGENTS.md",
+        "LICENSE", "README.md", "code/firmware/body/include/BodyPins.h",
+        "code/firmware/head/sense/config.h", "docs/hardware/full-feature-plan.json",
+        "docs/records/verification.md", "code/laptop/src/desk_robot/handling.py",
+    )
+    for name in sentinels:
+        path = tmp_path / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    for scope, count in counts.items():
+        folder = tmp_path / scope
+        folder.mkdir(parents=True, exist_ok=True)
+        for index in range(count):
+            (folder / f"fixture-{index}").touch()
+    unusual = tmp_path / "code/scripts/line\nbreak"
+    unusual.touch()
+
+    def git(*args):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    def verify():
+        return subprocess.run(
+            ["bash", "-e", "-c", guard], cwd=tmp_path, capture_output=True, text=True,
+        )
+
+    git("init", "-q")
+    git("add", ".")
+    assert verify().returncode == 0
+    unusual.unlink()
+    missing = verify()
+    assert missing.returncode != 0
+    assert "Missing tracked worktree path" in missing.stdout
+    unusual.touch()
+    git("rm", "-r", "--cached", "-f", "code/firmware/head")
+    git("add", "code/firmware/head/sense/config.h")
+    partial = verify()
+    assert partial.returncode != 0
+    assert "code/firmware/head has only 1 tracked files" in partial.stdout

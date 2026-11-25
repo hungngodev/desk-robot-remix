@@ -115,17 +115,18 @@ jobs:
           enable-cache: true
       - name: Prevent partial repository trees
         run: |
+          set -euo pipefail
           # Include hidden root entries: a truncated Git Database tree may
           # retain a few visible source files but drop shared agent assets,
           # workflow configuration, or repository license metadata.
-          for directory in .agent3d .github code docs; do
-            if [ ! -d "$directory" ]; then
+          for directory in .agent3d .github agents code docs; do
+            if [ ! -d "$directory" ] || [ -L "$directory" ]; then
               echo "::error::Missing expected repository root directory: $directory"
               exit 1
             fi
           done
           for file in .gitignore AGENTS.md LICENSE README.md; do
-            if [ ! -f "$file" ]; then
+            if [ ! -f "$file" ] || [ -L "$file" ]; then
               echo "::error::Missing expected repository root file: $file"
               exit 1
             fi
@@ -135,15 +136,26 @@ jobs:
           test -f docs/hardware/full-feature-plan.json
           test -f docs/records/verification.md
           test -f code/laptop/src/desk_robot/handling.py
-          # A partial Git tree can retain root sentinels while deleting an
-          # entire test, firmware or documentation subtree. 457 tracked files
-          # were present at the reviewed November 18 baseline; the deliberately
-          # conservative floor blocks a large accidental deletion.
-          tracked_count=$(git ls-files | wc -l)
-          if [ "$tracked_count" -lt 400 ]; then
-            echo "::error::Partial repository tree: only $tracked_count tracked files"
-            exit 1
-          fi
+          # November 24 baseline: 902 tracked blobs. Count NUL delimiters,
+          # not rendered paths. Conservative per-owner floors catch partial
+          # commits even if the overall tree and root sentinels survive.
+          check_tree_count() {
+            local scope="$1" minimum="$2" count
+            count=$(git ls-files -z -- "$scope" | tr -cd '\000' | wc -c)
+            if [ "$count" -lt "$minimum" ]; then
+              echo "::error::Partial repository tree: $scope has only $count tracked files (minimum $minimum)"
+              exit 1
+            fi
+          }
+          check_tree_count . 800
+          check_tree_count code/laptop/src 40
+          check_tree_count code/laptop/server 5
+          check_tree_count code/tests 150
+          check_tree_count code/scripts 25
+          check_tree_count code/firmware/head 35
+          check_tree_count code/firmware/body 55
+          check_tree_count docs 160
+          check_tree_count agents 180
           # git ls-files counts sparse-checkout entries even when an entire
           # non-sentinel subtree is absent from the actual worktree. A green
           # source test requires every tracked path to exist on disk.
