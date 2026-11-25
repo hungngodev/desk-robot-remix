@@ -219,7 +219,11 @@ Owner Robot Integration Fixes. At PR #17 head 0688717123687a24bfc4fabf6870a21f6a
 
 Owner: Robot Integration Fixes. At PR #17 head 5e25198188beb5e64417868220fe52b1afb89628, reconciled 84 issue comments and 84 combined discussion entries, zero submitted reviews and zero inline review threads. Source test commit 2f02f14f42f96c0b583897fa4332b3769afe79af corrects a remaining literal backslash JPEG marker assertion in test_mjpeg_stream_rejects_old_boot_replay_after_real_head_reset. The prior assertion checked for ASCII backslash x characters even though _stream_part emits binary JPEG SOI. This is a test fixture correction, not a production change. Static check located exactly one bad assertion; no pytest suite or physical test was executed. Required: cd code && PYTHONPATH=laptop/src python -m pytest -q tests/test_transport_calibration.py -k old_boot_replay_after_real_head_reset, then camera transport suite. PR #17 remains draft. No physical qualification.
 
-## November 15 XIAO MJPEG reconnect stream ownership fence\n\nOwner: Robot Integration Fixes. Initial PR #17 head 39cb7dd8a3d771a374286ed4e1cc85f6e502ec2d. Source e902e2c61b8683c103cb88618f928af8b0868c7c fences live camera state by stream generation; regression 0fb57d6566bab8b3ec021ad4937ec0d821b93c88 checks old stream cannot overwrite or clear a newer stream. Handoff 876b065ce84242931d72b48dacf2fc98d0907061. STATUS SOURCE_AND_TEST_COMMITTED_NOT_EXECUTED. Actual local git ls-remote failed github.com DNS resolution exit 128. Required: cd code && PYTHONPATH=laptop/src python -m pytest -q tests/test_transport_calibration.py -k replaced_mjpeg_stream, then full suite. No firmware, camera hardware, motion or charging verification. PR remains draft.\n\n
+## Historical November 15 XIAO MJPEG reconnect stream ownership fence
+
+Owner: Robot Integration Fixes. Initial PR #17 head 39cb7dd8a3d771a374286ed4e1cc85f6e502ec2d. Source e902e2c61b8683c103cb88618f928af8b0868c7c fences live camera state by stream generation; regression 0fb57d6566bab8b3ec021ad4937ec0d821b93c88 checks old stream cannot overwrite or clear a newer stream. Handoff 876b065ce84242931d72b48dacf2fc98d0907061. STATUS SOURCE_AND_TEST_COMMITTED_NOT_EXECUTED. Actual local git ls-remote failed github.com DNS resolution exit 128. Required: cd code && PYTHONPATH=laptop/src python -m pytest -q tests/test_transport_calibration.py -k replaced_mjpeg_stream, then full suite. No firmware, camera hardware, motion or charging verification. PR remains draft.
+
+
 
 ## November 15 proactive alternate speaker mid-send consent revocation
 
