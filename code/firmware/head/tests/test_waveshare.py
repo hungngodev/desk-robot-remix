@@ -154,6 +154,24 @@ class WaveshareOverlayTests(unittest.TestCase):
                 overlay.remove(self.root)
                 self.assertFalse(installed.exists())
 
+    def test_explain_uses_one_endpoint_snapshot_for_url_and_token(self):
+        for variant in ("waveshare", "modular", "cores3"):
+            with self.subTest(variant=variant):
+                overlay.apply(self.root, variant)
+                common = self.root / "main/boards/common"
+                drivers = ("esp_video",) if variant == "cores3" else ("esp_video", "esp32_camera")
+                for name in drivers:
+                    source = (common / f"{name}.cc").read_text()
+                    header = (common / f"{name}.h").read_text()
+                    self.assertIn("desk_robot::CameraExplainConfig explain_config_;", header)
+                    self.assertIn("explain_config_.Set(url, token);", source)
+                    self.assertEqual(source.count("explain_config_.Snapshot()"), 1)
+                    self.assertIn('"Bearer " + explain_target.token', source)
+                    self.assertIn('http->Open("POST", explain_target.url)', source)
+                    self.assertNotIn("explain_url_", source)
+                    self.assertNotIn("explain_token_", source)
+                overlay.remove(self.root)
+
     def test_display_initialization_precedes_ui_and_network_consumers(self):
         """Check installed board startup against the pinned display/application."""
         overlay.apply(self.root, "waveshare")

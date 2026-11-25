@@ -182,6 +182,36 @@ def instrument_p3_player(source: str) -> str:
     )
 
 
+def patch_camera_explain_config(header: str, source: str) -> tuple[str, str]:
+    """Take one coherent endpoint snapshot per request, without holding a network lock."""
+    header = replace_once(
+        header,
+        '#include "camera.h"',
+        '#include "camera.h"\n#include "desk_robot_camera_explain_config.hpp"',
+    )
+    header = replace_once(
+        header,
+        "    std::string explain_url_;\n    std::string explain_token_;",
+        "    desk_robot::CameraExplainConfig explain_config_;",
+    )
+    source = replace_once(
+        source,
+        "    explain_url_ = url;\n    explain_token_ = token;",
+        "    explain_config_.Set(url, token);",
+    )
+    source = replace_once(
+        source,
+        "    if (explain_url_.empty()) {",
+        "    const auto explain_target = explain_config_.Snapshot();\n"
+        "    if (explain_target.url.empty()) {",
+    )
+    source = replace_once(source, "!explain_token_.empty()", "!explain_target.token.empty()")
+    source = replace_once(source, '"Bearer " + explain_token_', '"Bearer " + explain_target.token')
+    source = replace_once(source, 'http->Open("POST", explain_url_)',
+                          'http->Open("POST", explain_target.url)')
+    return header, source
+
+
 def cores3_files(target: Path) -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     stock = target / "main/boards/m5stack/core-s3"
@@ -297,6 +327,12 @@ public:
     files[path] = text.encode()
     path = "main/boards/common/esp_video.cc"
     text = (target / path).read_text()
+    header_path = "main/boards/common/esp_video.h"
+    header, text = patch_camera_explain_config(files[header_path].decode(), text)
+    files[header_path] = header.encode()
+    files["main/boards/common/desk_robot_camera_explain_config.hpp"] = (
+        HERE / "overlay/camera_explain_config.hpp"
+    ).read_bytes()
     for anchor in (
         "bool EspVideo::Capture() {",
         "std::expected<std::string, std::string> EspVideo::Explain(const std::string& question) {",
@@ -1289,6 +1325,8 @@ void Application::HandleStartListeningEvent() {""",
     files[path] = header.encode()
     path = "main/boards/common/esp32_camera.cc"
     source = (target / path).read_text()
+    header, source = patch_camera_explain_config(header, source)
+    files["main/boards/common/esp32_camera.h"] = header.encode()
     bounds_header = "main/boards/common/desk_robot_camera_frame_bounds.hpp"
     files[bounds_header] = (HERE / "overlay/camera_frame_bounds.hpp").read_bytes()
     source = replace_once(
