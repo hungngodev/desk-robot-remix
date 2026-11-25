@@ -51,6 +51,34 @@ async def test_watchdog_reports_remaining_lease_and_expires_at_boundary(monkeypa
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("expire_via", ["status", "keepalive"])
+async def test_drive_permit_expires_independently_of_control_watchdog(monkeypatch, expire_via):
+    clock = [10.0]
+    monkeypatch.setattr(simulator, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    head = simulator.SimulatedHead("robot-01")
+    await head.command("arm")
+    await head.command("drive 20 -20 250")
+    clock[0] = 10.125
+    await head.command("keepalive")
+    active = await head.status()
+    assert active["motor"] == {"m0": 20, "m1": -20}
+    assert active["drive_ms"] == 125
+    assert active["watchdog_ms"] == 500
+    clock[0] = 10.25
+    if expire_via == "keepalive":
+        await head.command("keepalive")
+    expired = await head.status()
+    assert expired["armed"] is True
+    assert expired["motor"] == {"m0": 0, "m1": 0}
+    assert expired["drive_ms"] == 0
+    assert expired["watchdog_ms"] == (500 if expire_via == "keepalive" else 375)
+    clock[0] = 10.75
+    with pytest.raises(HeadError, match="disarmed"):
+        await head.command("keepalive")
+    assert (await head.status())["armed"] is False
+
+
+@pytest.mark.asyncio
 async def test_status_failure_does_not_suspend_simulated_watchdog(monkeypatch):
     clock = [10.0]
     monkeypatch.setattr(simulator, "time", SimpleNamespace(monotonic=lambda: clock[0]))
