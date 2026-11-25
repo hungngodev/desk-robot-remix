@@ -266,7 +266,8 @@ int main() {
     CHECK(tag.scan_seq == 1U && tag.tag_token == kTagA);
     tag.transport_failed();
     CHECK(!tag.present && !tag.valid);
-    CHECK(tag.tag_visible && tag.tag_token == kTagA);
+    CHECK(!tag.tag_visible && tag.tag_token == 0U && tag.uid_length == 0U);
+    CHECK(tag.tag_events == 1U && tag.scan_seq == 1U);
     tag.completed_scan(true, kTagA, 4, 200);
     CHECK(tag.tag_events == 1U && tag.scan_seq == 2U);
     // A DIFFERENT confirmed tag after recovery remains a real new event.
