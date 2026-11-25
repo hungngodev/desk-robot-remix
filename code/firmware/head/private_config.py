@@ -21,11 +21,13 @@ from desk_robot.private_files import read_private_env  # noqa: E402
 def robot_token_env(config_path, robot_id):
     """Resolve the selected head's credential name from the same fleet as the Mac."""
     robots = tomllib.loads(Path(config_path).read_text()).get("robots", [])
+    if not isinstance(robots, list) or any(not isinstance(robot, dict) for robot in robots):
+        raise ValueError("Invalid fleet robot configuration")
     matches = [robot for robot in robots if robot.get("id") == robot_id]
     if len(matches) != 1 or not re.fullmatch(r"[a-zA-Z0-9_-]{1,40}", robot_id):
         raise ValueError("Choose one robot ID from the selected fleet configuration")
     name = matches[0].get("token_env", "")
-    if not re.fullmatch(r"[A-Z_][A-Z0-9_]*", name):
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Z_][A-Z0-9_]*", name):
         raise ValueError("The selected head needs a valid credential environment name")
     if sum(robot.get("token_env") == name for robot in robots) != 1:
         raise ValueError("Each head needs its own credential environment name")
@@ -68,7 +70,17 @@ def read_template(directory, parser):
             if not stat.S_ISREG(os.fstat(descriptor).st_mode):
                 raise ValueError("Not a regular template")
             with os.fdopen(descriptor, encoding="utf-8", closefd=False) as stream:
-                return json.load(stream)
+                config = json.load(stream)
+            builds = config.get("builds") if isinstance(config, dict) else None
+            if (not isinstance(builds, list) or len(builds) != 1
+                    or not isinstance(builds[0], dict)):
+                raise ValueError("Expected exactly one private board build")
+            settings = builds[0].get("sdkconfig_append")
+            if not isinstance(settings, list) or any(
+                not isinstance(item, str) for item in settings
+            ):
+                raise ValueError("Invalid SDK configuration entries")
+            return config
         finally:
             os.close(descriptor)
     except (OSError, ValueError):

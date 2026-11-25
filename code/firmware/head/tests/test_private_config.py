@@ -220,3 +220,43 @@ def test_private_config_removes_staged_secret_after_directory_swap(tmp_path, mon
     output = capsys.readouterr()
     assert SYNTHETIC_TOKEN not in output.out + output.err
     assert "y" * 40 not in output.out + output.err
+
+
+@pytest.mark.parametrize("invalid", [
+    None, [], {}, {"builds": []}, {"builds": [None]},
+    {"builds": [{}, {}]}, {"builds": [{}]},
+    {"builds": [{"sdkconfig_append": "CONFIG_OTHER=y"}]},
+    {"builds": [{"sdkconfig_append": [None]}]},
+])
+def test_private_config_invalid_template_preserves_previous(tmp_path, monkeypatch, capsys, invalid):
+    configure(tmp_path, monkeypatch)
+    board = tmp_path / BOARD
+    source = template(board)
+    private.main()
+    target = board / "config.private.json"
+    original = target.read_bytes()
+    source.write_text(json.dumps(invalid))
+    with pytest.raises(SystemExit) as error:
+        private.main()
+    assert error.value.code == 2
+    assert target.read_bytes() == original
+    assert not list(board.glob(".config.private.*.tmp"))
+    output = capsys.readouterr()
+    assert SYNTHETIC_TOKEN not in output.out + output.err
+    assert "template is missing or invalid" in output.err
+
+
+@pytest.mark.parametrize("fleet", [
+    'robots = "robot-01"', 'robots = [1]',
+    '[[robots]]\nid="robot-01"\ntoken_env=123',
+])
+def test_private_config_invalid_fleet_rejected(tmp_path, monkeypatch, capsys, fleet):
+    configure(tmp_path, monkeypatch)
+    (tmp_path / "fleet.toml").write_text(fleet)
+    board = tmp_path / BOARD
+    template(board)
+    with pytest.raises(SystemExit) as error:
+        private.main()
+    assert error.value.code == 2
+    assert not (board / "config.private.json").exists()
+    assert SYNTHETIC_TOKEN not in capsys.readouterr().err
