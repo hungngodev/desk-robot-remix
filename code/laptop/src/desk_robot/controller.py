@@ -1430,25 +1430,11 @@ class Coordinator:
                 job.robot_id, require_front_clearance=True
             )
             if decision.phase == "align":
-                side = body.get("side_ranges")
-                if (not isinstance(side, dict)
-                        or type(side.get("present_mask")) is not int
-                        or side["present_mask"] != 7
-                        or type(side.get("valid_mask")) is not int
-                        or side["valid_mask"] != 7
-                        or not isinstance(side.get("age_ms"), list)
-                        or len(side["age_ms"]) != 3
-                        or any(type(n) is not int or not 0 <= n <= 350
-                               for n in side["age_ms"])
-                        or not isinstance(side.get("mm"), list)
-                        or len(side["mm"]) != 3
-                        or any(type(n) is not int or not 300 <= n <= 1300
-                               for n in side["mm"])):
-                    raise OperationError(
-                        "Dock turn refused: side and rear clearance unqualified"
-                    )
-                direction = turn_sign if aligned.x_mm > 0 else -turn_sign
-                command = f"drive {20 * direction} {-20 * direction} 100"
+                # WROOM accepts only straight forward drive on guarded profiles.
+                # Side/rear observations are context, not swept-footprint proof.
+                raise OperationError(
+                    "Dock turn refused: side and rear clearance unqualified"
+                )
             else:
                 # Stopping at least 300mm away from a detected frontal surface
                 # is intentional. The final cm and charging contacts need a

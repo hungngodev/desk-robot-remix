@@ -292,14 +292,14 @@ async def test_dock_refuses_motion_without_measured_camera_mount_before_permit(
         await controller.close()
 
 
-@pytest.mark.parametrize(("lateral", "yaw", "expected_drive"), [
-    (40, 0, "drive 20 -20 100"),
-    (-40, 0, "drive -20 20 100"),
-    (0, 5, "drive 20 -20 100"),
-    (0, -5, "drive -20 20 100"),
+@pytest.mark.parametrize(("lateral", "yaw"), [
+    (40, 0),
+    (-40, 0),
+    (0, 5),
+    (0, -5),
 ])
-async def test_dock_turns_by_chassis_not_lens_axis(
-    settings, monkeypatch, lateral, yaw, expected_drive,
+async def test_dock_refuses_chassis_turn_even_with_clear_side_ranges(
+    settings, monkeypatch, lateral, yaw,
 ):
     from desk_robot.controller import Job
     from desk_robot.dock_vision import DockCameraCalibration, DockPose
@@ -326,6 +326,7 @@ async def test_dock_turns_by_chassis_not_lens_axis(
                     "present_mask": 7,
                     "valid_mask": 7, "age_ms": [10, 10, 10],
                     "mm": [600, 600, 600],
+                    "motion_certified": False,
                 },
             }
 
@@ -351,13 +352,12 @@ async def test_dock_turns_by_chassis_not_lens_axis(
         ),
     )
     try:
-        result = await coordinator._dock_approach(
-            Job("mount-unit", "robot-01", "dock_approach"),
-            camera, 200, 1, 1,
-        )
-        assert result["phase"] == "hold"
-        assert not result["charging_authorized"]
-        assert head.commands == [expected_drive, "stop"]
+        with pytest.raises(OperationError, match="side and rear clearance unqualified"):
+            await coordinator._dock_approach(
+                Job("mount-unit", "robot-01", "dock_approach"),
+                camera, 200, 1, 1,
+            )
+        assert head.commands == []
     finally:
         await coordinator.close()
 
@@ -1053,7 +1053,8 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
                     c.startswith("drive ") for c in self.commands
                 )
                 assert self.last_verified == (self.frames, self.ir_reads)
-                if outcome == "contact" and command == "drive 20 20 100":
+                assert command == "drive 20 20 100"
+                if outcome == "contact" and self.ir_reads == 2:
                     # Inject the local WROOM contact interlock verdict, not a
                     # simulated proof that the wheels actually reached a dock.
                     self.contacted = True
@@ -1088,12 +1089,12 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
             }
 
     head = ReplayHead()
-    poses = iter(((80, 500), (0, 450), (0, 150)))
+    poses = iter(((0, 500), (0, 450), (0, 150)))
 
     def detect(_jpeg, _camera, *, captured_at):
         if outcome == "marker_loss" and head.frames == 2:
             return None
-        x, z = (80, 500) if outcome == "pulse_budget" else next(poses)
+        x, z = (0, 500) if outcome == "pulse_budget" else next(poses)
         return DockPose(x, 0, z, 0.5, captured_at)
 
     mock_dock_detector(monkeypatch, detect)
@@ -1104,12 +1105,12 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
         job = coordinator.dock(robot.id)
         await asyncio.wait_for(coordinator.tasks[job.id], timeout=10)
         commands = [c for c in head.commands if c != "keepalive"]
-        expected = ["arm", "drive 20 -20 100", "stop"]
+        expected = ["arm", "drive 20 20 100", "stop"]
         if outcome == "receipt_denial":
             expected = ["arm"]
             assert head.frames == head.ir_reads == 1
         elif outcome == "pulse_budget":
-            expected = ["arm"] + ["drive 20 -20 100", "stop"] * 16
+            expected = ["arm"] + ["drive 20 20 100", "stop"] * 16
             assert head.frames == head.ir_reads == 16
         elif outcome == "marker_loss":
             assert head.frames == 2 and head.ir_reads == 1
