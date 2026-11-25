@@ -256,7 +256,7 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
             + _text(15, 37, "PROVISIONAL / UNPOWERED / NOT FOR DRILLING")
             + features
             + _text(20, 218, "Print at 100% or actual size. Disable fit-to-page scaling.")
-            + _text(20, 225, "Check BOTH reference lengths with a ruler before use.")
+            + _text(20, 225, "Measure BOTH lengths between stroke centers, not outer edges.")
             + _rect(20, 239, 100, 8)
             + _text(20, 236, "100 mm horizontal print scale")
             + _rect(173, 229, 8, 25)

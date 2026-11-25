@@ -580,3 +580,39 @@ def test_paper_reads_shared_dock_source_once(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "read_bytes", count_reads)
     source.export(tmp_path, tmp_path / "paper")
     assert reads == 1
+
+
+def test_a4_calibration_centerlines_and_no_drill_marks(tmp_path):
+    source = load()
+    setup_sources(tmp_path)
+    output = tmp_path / "paper"
+    manifest = source.export(tmp_path, output)
+    ns = "{http://www.w3.org/2000/svg}"
+    for filename, digest in manifest["pages"].items():
+        data = (output / filename).read_bytes()
+        assert sha256(data).hexdigest() == digest
+        root = ElementTree.fromstring(data)
+        assert root.attrib == {
+            "width": "210mm", "height": "297mm", "viewBox": "0 0 210 297",
+        }
+        rects = root.findall(f"{ns}rect")
+        horizontal = [r for r in rects if r.get("x") == "20" and r.get("y") == "239"]
+        vertical = [r for r in rects if r.get("x") == "173" and r.get("y") == "229"]
+        assert len(horizontal) == len(vertical) == 1
+        for mark, width, height in ((horizontal[0], 100, 8), (vertical[0], 8, 25)):
+            assert float(mark.attrib["width"]) == width
+            assert float(mark.attrib["height"]) == height
+            assert float(mark.attrib["stroke-width"]) == pytest.approx(0.3)
+        labels = [element.text for element in root.findall(f"{ns}text")]
+        assert "Measure BOTH lengths between stroke centers, not outer edges." in labels
+        assert any("FRONT / TOP" in label for label in labels)
+        assert any("BACK / BOTTOM" in label for label in labels)
+        assert any("NOT FOR DRILLING" in label for label in labels)
+        # Templates are silhouette references: no drill circles or paths,
+        # transforms, embedded images, or other unreviewed SVG primitives.
+        for element in root:
+            assert element.tag in {f"{ns}rect", f"{ns}polygon", f"{ns}text"}
+            assert "transform" not in element.attrib
+            if element.tag != f"{ns}text":
+                assert element.attrib["fill"] == "none"
+    assert source.verify(tmp_path, output) == manifest

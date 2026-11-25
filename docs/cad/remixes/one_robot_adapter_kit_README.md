@@ -107,7 +107,27 @@ python3 docs/cad/remixes/print_2d_fit_templates.py --output /tmp/desk-robot-pape
 ```
 
 Print at **100% actual size**, with any fit-to-page scaling turned off, and
-check both the horizontal 100 mm and vertical 25 mm printed rulers. The
+check both the horizontal 100 mm and vertical 25 mm printed rulers. Measure
+between the **centers of the two opposing strokes** on each rectangle, not
+the outside ink edges. The nominal 0.3 mm stroke makes the outside spans
+100.3 mm and 25.3 mm even at exact scale; the inside spans are 99.7 mm and
+24.7 mm. If the stroke centers are hard to locate, measure both the inside
+and outside spans and average them.
+
+For each printed sheet, record its manifest page SHA256, printer and actual
+size settings, both measured lengths in mm, measuring instrument and
+estimated measurement uncertainty. Calculate the scale ratios as measured
+horizontal / 100 and measured vertical / 25. For the intended fit screen,
+allocate an allowable dimensional error from the smallest relevant fit
+clearance before relying on the sheet. Check each axis independently:
+multiply the absolute scale error by the maximum relevant dimension on that
+axis, and include measurement uncertainty (scaled by that dimension divided
+by the corresponding reference length). Reject the sheet if either error
+budget is exceeded or if the required clearance or uncertainty is unknown.
+Do not average the horizontal and vertical scale ratios or substitute this
+screen for caliper measurements and printed coupon trials.
+
+The
 `power_reference_A4.svg` page outlines the candidate protected 1S pack BODY
 (86 x 35 mm) inside the provisional 91.6 x 40.6 mm tray outer walls. It is a
 paper collision check, **not** an approved pack housing. It excludes the actual
