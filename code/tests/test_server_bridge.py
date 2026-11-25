@@ -2534,6 +2534,39 @@ async def test_stale_session_release_and_speech_cannot_claim_replacement_lease(
     assert not bridge.muted(ids[0])
 
 
+@pytest.mark.parametrize("same_device", [True, False])
+async def test_expired_lease_waits_for_old_speaker(bridge, monkeypatch, same_device):
+    """Expiry cannot let a successor race the old sender's terminal cleanup."""
+    ids, handlers = fleet_handlers(bridge, monkeypatch)
+    session = handlers["/session"]
+    selected = [ids[0]]
+    successor = selected if same_device else [ids[1]]
+    for _ in range(100):
+        old = json.loads((await session(body_request({
+            "device_ids": selected, "enabled": True,
+        }))).text)["lease_id"]
+        async with bridge.speaker_lock:
+            bridge.lease_until = time.monotonic() - 1
+            with pytest.raises(RuntimeError, match="already active"):
+                await session(body_request({
+                    "device_ids": successor, "enabled": True,
+                }))
+            assert bridge.lease_token == old
+        newer = json.loads((await session(body_request({
+            "device_ids": successor, "enabled": True,
+        }))).text)["lease_id"]
+        with pytest.raises(RuntimeError, match="incarnation"):
+            await session(body_request({
+                "device_ids": selected, "enabled": False, "lease_id": old,
+            }))
+        assert bridge.lease_token == newer
+        assert bridge.muted(successor[0])
+        await asyncio.gather(*(session(body_request({
+            "device_ids": successor, "enabled": False, "lease_id": newer,
+        })) for _ in range(5)))
+        assert bridge.lease_token is None
+
+
 @pytest.mark.parametrize("same_device", [False, True])
 async def test_late_cleanup_cannot_erase_new_lease_incarnation(
     bridge, monkeypatch, same_device,

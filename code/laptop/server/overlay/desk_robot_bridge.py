@@ -995,7 +995,10 @@ def create_app():
             # timer, never the authenticated human speech floor.
             if human_speech_active():
                 raise RuntimeError("A human turn owns the speech floor")
-            if lease_stopping or time.monotonic() < lease_until:
+            # Expiry revokes permission, not the old sender's ownership of
+            # the transmit/STOP critical section. Do not admit its successor
+            # until that section has settled, even for a different device.
+            if lease_stopping or speaker_lock.locked() or time.monotonic() < lease_until:
                 raise RuntimeError("A coordinated session is already active")
             for device in selected:
                 conn = connections.get(device)
