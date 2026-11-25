@@ -40,7 +40,6 @@ def validate_aux(data: dict, robot_id: str) -> dict:
             or not _uint(pulse.get("red"), 262143)
             or not _uint(pulse.get("ir"), 262143)
             or not _uint(pulse.get("age_ms"), 0xffffffff)
-            or (pulse["valid"] and pulse["age_ms"] > 250)
             or (pulse.get("seq") is not None and (
                 not _uint(pulse["seq"], 0xffffffff)
                 or (pulse["valid"] and pulse["seq"] == 0)
@@ -231,4 +230,9 @@ def validate_aux(data: dict, robot_id: str) -> dict:
                 or (nfc["v"] and nfc["s"] == 0)
                 or (nfc["t"] != 0 and not nfc["v"])):
             raise ValueError("Invalid read only PN532 toy tag evidence")
+    # A stale optical FIFO sample is not current evidence, but it must not
+    # invalidate independent force, climate, power or proximity telemetry.
+    # Keep all schema checks above and avoid changing the caller's raw frame.
+    if pulse["valid"] and pulse["age_ms"] > 250:
+        return {**data, "pulse": {**pulse, "valid": False}}
     return data

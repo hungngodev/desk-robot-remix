@@ -351,25 +351,42 @@ def test_pulse_validity_matches_wroom_inclusive_freshness_boundary(age):
     assert validate_aux(data, "robot-01")["pulse"]["valid"] is True
 
 
-@pytest.mark.parametrize("age", [251, 0xffffffff])
-def test_stale_pulse_is_only_an_invalid_raw_diagnostic(age):
+@pytest.mark.parametrize("age", [251, 400, 0xffffffff])
+@pytest.mark.parametrize("reported_valid", [True, False])
+def test_stale_pulse_is_only_an_invalid_raw_diagnostic(age, reported_valid):
     data = sample()
-    data["pulse"]["age_ms"] = age
-    with pytest.raises(ValueError, match="MAX30102"):
-        validate_aux(data, "robot-01")
-    data["pulse"]["valid"] = False
-    assert validate_aux(data, "robot-01")["pulse"]["age_ms"] == age
+    data["pulse"].update({"age_ms": age, "valid": reported_valid})
+    original = copy.deepcopy(data)
+    result = validate_aux(data, "robot-01")
+    assert result["pulse"] == {**original["pulse"], "valid": False}
+    assert {k: v for k, v in result.items() if k != "pulse"} == {
+        k: v for k, v in original.items() if k != "pulse"
+    }
+    assert data == original
 
 
-async def test_authenticated_head_rejects_stale_valid_pulse(settings, tokens):
+async def test_authenticated_head_isolates_stale_valid_pulse(settings, tokens):
     data = sample()
-    data["pulse"]["age_ms"] = 251
+    data["pulse"]["age_ms"] = 400
     async with httpx.AsyncClient(transport=httpx.MockTransport(
         lambda request: httpx.Response(200, json=data)
     )) as client:
         head = HttpHead(settings.robots[0], client)
-        with pytest.raises(HeadError, match="MAX30102"):
-            await head.aux_status()
+        result = await head.aux_status()
+    assert result["pulse"] == {**data["pulse"], "valid": False}
+    for group in ("force", "climate", "power", "proximity", "angles"):
+        assert result[group] == data[group]
+
+
+@pytest.mark.parametrize("patch", [
+    {"present": False}, {"seq": 0}, {"medical": True}, {"age_ms": -1},
+])
+def test_stale_pulse_does_not_bypass_schema_or_identity_guards(patch):
+    data = sample()
+    data["pulse"]["age_ms"] = 400
+    data["pulse"].update(patch)
+    with pytest.raises(ValueError, match="MAX30102"):
+        validate_aux(data, "robot-01")
 
 
 @pytest.mark.parametrize("ir_first", [True, False])
