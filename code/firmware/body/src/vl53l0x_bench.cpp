@@ -16,15 +16,21 @@ VL53L0X sensor;
 bool ready = false;
 uint32_t last_report_ms = 0;
 
+bool bus_idle() {
+  return digitalRead(21) == HIGH && digitalRead(22) == HIGH;
+}
+
 bool select_sensor() {
+  if (!bus_idle()) return false;
   Wire.beginTransmission(kMux);
-  if (Wire.write(static_cast<uint8_t>(1U << kSensorChannel)) != 1 ||
-      Wire.endTransmission(true) != 0)
-    return false;
+  // Always terminate a started transmission, including short writes.
+  const bool wrote = Wire.write(static_cast<uint8_t>(1U << kSensorChannel)) == 1;
+  const bool acknowledged = Wire.endTransmission(true) == 0;
+  if (!wrote || !acknowledged || !bus_idle()) return false;
   if (Wire.requestFrom(kMux, static_cast<size_t>(1), true) != 1 ||
       Wire.available() < 1)
     return false;
-  return Wire.read() == (1U << kSensorChannel);
+  return Wire.read() == (1U << kSensorChannel) && bus_idle();
 }
 }
 
@@ -37,7 +43,10 @@ void setup() {
   }
   Serial.begin(115200);
   Serial.println("BENCH_ONLY VL53L0X; motors physically disconnected; no cliff permission");
-  Wire.begin(21, 22, 400000);
+  if (!Wire.begin(21, 22, 400000)) {
+    Serial.println("FAIL i2c_begin");
+    return;
+  }
   Wire.setTimeOut(15);
   if (!select_sensor()) {
     Serial.println("FAIL mux0x70_ch0_select_or_readback");
@@ -45,15 +54,19 @@ void setup() {
   }
   sensor.setBus(&Wire);
   sensor.setTimeout(80); // Pololu timeout is bounded; BENCH ONLY.
-  if (!sensor.init()) {
+  if (!sensor.init() || sensor.timeoutOccurred() || sensor.last_status != 0 || !bus_idle()) {
     Serial.println("FAIL vl53l0x_init_or_absent");
     return;
   }
-  if (!sensor.setMeasurementTimingBudget(33000)) {
+  if (!sensor.setMeasurementTimingBudget(33000) || sensor.last_status != 0 || !bus_idle()) {
     Serial.println("FAIL vl53l0x_timing_budget");
     return;
   }
   sensor.startContinuous();
+  if (sensor.last_status != 0 || sensor.timeoutOccurred() || !bus_idle()) {
+    Serial.println("FAIL vl53l0x_start");
+    return;
+  }
   ready = true;
   Serial.println("READY log real desk readings at 30, 40, 50, 60 mm");
 }
@@ -73,9 +86,12 @@ void loop() {
   }
   const uint16_t mm = sensor.readRangeContinuousMillimeters();
   const bool timed_out = sensor.timeoutOccurred();
-  const bool valid = !timed_out && mm != 65535U && mm != 0U;
+  const bool bus_ok = sensor.last_status == 0 && bus_idle();
+  const bool valid = !timed_out && bus_ok && mm >= 30U && mm <= 1300U;
+  if (timed_out || !bus_ok) ready = false;
   Serial.printf("t_ms=%lu range_mm=%u valid=%u timeout=%u\n",
                 static_cast<unsigned long>(now), static_cast<unsigned>(mm),
                 valid ? 1U : 0U, timed_out ? 1U : 0U);
+  if (!ready) Serial.println("FAIL ranging_io; sampling_latched_off");
   // These are raw measurements, NOT sufficient evidence of safe cliff stops.
 }
