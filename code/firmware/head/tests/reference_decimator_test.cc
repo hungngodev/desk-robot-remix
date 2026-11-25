@@ -1,6 +1,7 @@
 #include "reference_decimator.h"
 #include <cassert>
 #include <cmath>
+#include <cstdio>
 
 using desk_robot::ReferenceDecimator;
 
@@ -28,8 +29,34 @@ int main() {
     assert(gain(f, 0) < 0.002);
     assert(gain(f, pi / 2) < 0.002);
   }
+  // Off-grid frequencies and nonsymmetric phases exercise aliases that a
+  // regular 100 Hz sweep can miss. Keep the existing attenuation contract.
+  double worst_alias = 0.0;
+  for (int f = 9007; f <= 15000; f += 137) {
+    for (double phase : {0.37, 1.11, 2.41}) {
+      const double alias = gain(f, phase);
+      worst_alias = std::max(worst_alias, alias);
+      assert(alias < 0.002);
+    }
+  }
+  std::printf("Worst off-grid alias: %.6f (%.2f dB)\n",
+              worst_alias, 20.0 * std::log10(worst_alias));
   ReferenceDecimator d;
   int16_t y = 0;
+  // Magnitude-only tests cannot detect a shifted FIR. Exercise both input
+  // phases after the ring wraps; the center is 31 input samples after impulse.
+  for (int impulse : {128, 129}) {
+    d.Reset();
+    for (int i = 0; i < 256; ++i) {
+      const bool emitted = d.Push(i == impulse ? 16384 : 0, y);
+      assert(emitted == (i % 2 == 0));
+      if (!emitted) continue;
+      if (i == impulse + 31) assert(y == 7040);
+      else if (i == impulse + 30 || i == impulse + 32) assert(y == 5079);
+      else assert(std::abs(static_cast<int>(y)) < 5079);
+    }
+  }
+  d.Reset();
   for (int i = 0; i < 200; ++i)
     if (d.Push(32767, y) && i >= 64) assert(y == 32767);
   d.Reset();
