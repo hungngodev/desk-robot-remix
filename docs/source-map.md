@@ -296,6 +296,65 @@ is a separate historical objective, not a robot dependency.
 | `S074` | ESP-NOW satellite sensors | RESEARCH | Not required for Mac group; radio channel/messaging/security must be qualified |
 | `S075` | Environmental audio/music tempo | EXPANSION | Use same mic and speaker processing without extra hardware; do not play copyrighted tracks |
 
+### Reserved sensor compatibility and privacy boundaries
+
+The original sensor register is a reservation ledger, not a firmware enable list.
+For every S019–S075 idea, preserve the distinction between selected hardware,
+an electrically qualified acquisition path, consent to collect, consent to
+expose context, and consent to retain or share it. A qualification flag alone
+is not a privacy switch. Never silently promote research or alternative parts
+into either canonical shopping list.
+
+| IDs | Compatibility and activation boundary |
+| --- | --- |
+| S019–S021 | Magnetometer, angle and magnetic contact sources need measured field geometry and isolated bus/address checks; no unqualified yaw, odometry, identity or movement authority. Preserve selected AS5600/reed functions. |
+| S022–S023 | RC522 is an alternative, not another default purchase alongside PN532. PN532 on 0x71 lane 5 must preserve the mandatory MCP23017 dock monitor and bounded bus service. Restrict use to explicitly selected toy tokens; never credentials or access control. |
+| S024–S026 | Optical paw, BLE heart-rate strap and breathing radar require separate affirmative consent before collecting human physiological signals; keep nonmedical and local, no identity, diagnosis, passive retention or peer fanout. MAX30102 interaction qualification is not an acquisition lock. |
+| S027–S029 | Preserve the selected LD2410C shared station role with explicit source and context consent. Optional PIR and Wi-Fi CSI require consent and privacy review; no person identification or exact room position from echoes or movement. |
+| S030–S035 | APDS9960 gesture, ambient light, color, spectral, UV and quadrant experiments require measured optical geometry, current and I2C addresses. No new servo, human inference or safety substitution; separate consent for any human-directed optical monitoring. |
+| S036–S038 | Climate alternatives must not duplicate the selected SHT41/BMP280 or shared BME688. Preserve units, CRC/identity checks, calibration and enclosure airflow; no health, weather or altitude claim from unqualified data. |
+| S039–S042 | DS18B20 liquid probe requires verified sealing and safe isolated low-voltage construction; no immersion of the robot or unattended hot-liquid claims. MLX90614 object-temperature and MLX90640/AMG8833 thermal imaging are not default purchases. Human-directed temperature or thermal collection requires separate explicit consent, no identity/health inference, and no raw thermal-frame retention or sharing. AMG8833 remains deferred. |
+| S043–S047 | Preserve selected SCD40 and BME688 shared station roles. SGP30/ENS160 are alternatives, SPS30/PMS5003 remain research pending fan, airflow, noise and power budgets. No air-safety or calibrated pollutant claim without the appropriate calibrated measurement. |
+| S048–S053 | Preserve the existing Sense PDM/audio/camera pipeline. Analog spare, additional microphone, acoustic sonar, multizone ToF and second AI camera are not default substitutions; audio/video acquisition and derived human monitoring need appropriate consent. No single-mic bearing or replacement of independent cliff sensing. |
+| S054–S058 | Current monitor, HX711/load cell, EDA, stretch cord and break-beam need source-specific electrical/mechanical calibration. HX711 is an object-scale experiment, not a replacement for qualified jaw feedback. Human-contact EDA is sensitive opt-in only with reviewed electrical isolation and no stress or mental-state inference. |
+| S059–S063 | Reflective IR, remote IR, wet-contact, soil and lightning experiments cannot grant motion or safety authority. Preserve the separately selected room soil role; keep unfitted ADC disabled. Liquid/contact experiments require protected low-voltage construction. |
+| S064–S066 | 433 MHz receiving is sensitive opt-in only for explicitly authorized devices, not covert interception. S065 loose mains sensing remains rejected, not a configurable option. Geiger modules remain research pending specialist electrical/radiation safety review; no unreviewed high-voltage or radioactive experiment. |
+| S067–S071 | Remote weather pod, feed slot, magnetic grid and directional sound/LED research require separate fit/power/pin and measurement gates. Preserve mandatory self-test observability and the original grip, safety and audio paths. |
+| S072–S075 | Bluetooth RSSI presence and desktop MCP activity require explicit scoped consent; no raw device identity tracking, precise bearing or covert monitoring. ESP-NOW is research pending provenance and link validation. Tempo extraction uses the existing consented audio path; no raw recording or peer sharing by default. |
+
+Source audit at `ccb0d248cc16e62f5aa479902689573ab328bd74` (DRX-491; source evidence, not a test receipt):
+
+* `code/laptop/src/desk_robot/config.py` uses strict extra-field rejection.
+  Paw, NFC, ambient, BMP280 and gesture interaction qualification defaults
+  are false; room-station source enable and context consent are also false.
+  These settings must not be described as global hardware privacy locks.
+* `code/firmware/body/src/main.cpp` initializes and polls MAX30102 in the
+  full-sensor path even when the Mac paw interaction flag is false.
+  `BodyControl.cpp` serializes raw optical and NFC diagnostics in aux.
+  `pet.py` gates paw/NFC interaction events but its selected sensory context
+  can still expose an NFC event count without the interaction flag.
+  Keep sensitive experiments physically disconnected unless specifically
+  authorized for a controlled session; a future acquisition/privacy gate
+  must also cover diagnostics, model context, retention and revocation.
+* `code/firmware/room_station/src/main.cpp` runs AMG8833 recovery and
+  thermal sampling when a module responds, despite its deferred purchase
+  disposition. The existing `ROOM_SOIL_FITTED=0` pattern is a precedent
+  for an explicit fitted/acquisition gate; thermal remains physically
+  disconnected pending an equivalent gate and separate thermal consent.
+  Station-wide context consent alone does not establish thermal-specific
+  consent. Preserve independent climate/radar/soil telemetry and the
+  no-motion station architecture when adding such a gate.
+* Negative acceptance cases still required: connected sensitive hardware
+  with consent absent; consent withdrawal while a sample is in flight;
+  old samples after regrant; direct diagnostics and model-context reads;
+  attempted persistent or peer retention; unknown experimental config
+  keys; and prohibited S065 even with other experiment flags enabled.
+  Verify the real acquisition and exposure boundaries, not merely the
+  presence of a false default or a source-string assertion.
+
+No new sensor, acquisition authority, hardware qualification, purchase
+approval or runtime privacy implementation is established by this register.
+
 ## D. Pet toys, personality modes, games and cosmetic additions
 
 | ID | Idea or requirement | Design status | Day-zero reservation, constraint, or proof required |
