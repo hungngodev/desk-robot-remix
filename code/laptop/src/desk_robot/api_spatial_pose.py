@@ -13,7 +13,7 @@ import time
 from typing import Annotated
 
 import httpx
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .spatial_pose import PoseFence, PoseReceipt
@@ -53,9 +53,6 @@ def register_spatial_pose_route(
     motion_ready=None,
 ) -> None:
     read_dep = authorize if authorize is not None else operator
-    motion_dependencies = [Depends(operator)]
-    if motion_ready is not None:
-        motion_dependencies.append(Depends(motion_ready))
 
     @app.get("/v1/robots/{robot_id}/pose", dependencies=[Depends(operator)])
     async def read_body_pose(robot_id: str):
@@ -188,13 +185,16 @@ def register_spatial_pose_route(
         return result
 
     @app.post("/v1/robots/{robot_id}/navigate",
-              dependencies=motion_dependencies, status_code=202)
+              dependencies=[Depends(operator)], status_code=202)
     async def navigate_robot(
         robot_id: str,
         request: NavigateRequest,
+        http_request: Request,
         defer_on_voice: bool = False,
     ):
         """Start bounded qualified spatial navigation or object re-observation."""
+        if motion_ready is not None:
+            await motion_ready(http_request)
         coord = coordinator()
         robot = coord.robot(robot_id)
 

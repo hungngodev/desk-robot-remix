@@ -4,8 +4,9 @@ from types import SimpleNamespace
 
 import httpx
 from desk_robot.api_lifecycle import require_runtime_ready, runtime_ready
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.testclient import TestClient
+from pydantic import BaseModel, StrictInt
 
 
 def test_lifecycle_dependency_fails_closed():
@@ -33,6 +34,28 @@ def test_lifecycle_dependency_fails_closed():
         app.state.runtime_started = False
         assert client.post("/motion").status_code == 503
     assert calls == ["motion"]
+
+
+def test_body_validation_precedes_lifecycle_admission():
+    app = FastAPI()
+    calls = []
+
+    class Payload(BaseModel):
+        goal: StrictInt
+
+    @app.post("/motion")
+    async def motion(payload: Payload, request: Request):
+        await require_runtime_ready(request)
+        calls.append(payload.goal)
+        return {"ok": True}
+
+    with TestClient(app) as client:
+        assert client.post("/motion", json={"goal": True}).status_code == 422
+        assert client.post("/motion", json={"goal": 1}).status_code == 503
+        app.state.runtime_started = True
+        app.state.runtime = SimpleNamespace(_closed=False)
+        assert client.post("/motion", json={"goal": 1}).status_code == 200
+    assert calls == [1]
 
 
 def test_motion_routes_reject_requests_during_lifecycle_transitions(settings, tokens):
@@ -73,6 +96,13 @@ def test_motion_routes_reject_requests_during_lifecycle_transitions(settings, to
             for path, headers, payload in routes:
                 response = await client.post(path, headers=headers, json=payload)
                 assert response.status_code == 503, (path, response.text)
+            for suffix, headers, payload in (
+                ("/move", operator, {"command": []}),
+                ("/pickup", tool, {"target": "unknown"}),
+                ("/navigate", operator, {"goal": [True, 0]}),
+            ):
+                response = await client.post(prefix + suffix, headers=headers, json=payload)
+                assert response.status_code == 422, (suffix, response.text)
             # STOP must not inherit the movement admission dependency.
             response = await client.post(prefix + "/stop", headers=tool)
             assert response.status_code == 200

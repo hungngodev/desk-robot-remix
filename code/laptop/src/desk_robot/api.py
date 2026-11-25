@@ -479,9 +479,11 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     async def enable(robot_id: str):
         return await coordinator().operator_arm(robot_id)
 
-    @app.post("/v1/robots/{robot_id}/move",
-              dependencies=[Depends(operator), Depends(require_runtime_ready)], status_code=202)
-    async def move(robot_id: str, request: CommandRequest, defer_on_voice: bool = False):
+    @app.post("/v1/robots/{robot_id}/move", dependencies=[Depends(operator)], status_code=202)
+    async def move(
+        robot_id: str, request: CommandRequest, http_request: Request, defer_on_voice: bool = False,
+    ):
+        await require_runtime_ready(http_request)
         coord = coordinator()
         if defer_on_voice and coord.voice_blocks_motion():
             return coord.defer_motion(
@@ -509,9 +511,11 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
 
     # A spoken key/candy request may consume ONE recent operator-granted
     # permit; the model cannot mint or extend that permit itself.
-    @app.post("/v1/robots/{robot_id}/pickup",
-              dependencies=[Depends(authorize), Depends(require_runtime_ready)], status_code=202)
-    async def pickup(robot_id: str, request: PickupRequest, defer_on_voice: bool = False):
+    @app.post("/v1/robots/{robot_id}/pickup", dependencies=[Depends(authorize)], status_code=202)
+    async def pickup(
+        robot_id: str, request: PickupRequest, http_request: Request, defer_on_voice: bool = False,
+    ):
+        await require_runtime_ready(http_request)
         coord = coordinator()
         if defer_on_voice and coord.voice_blocks_motion():
             return coord.defer_motion(
