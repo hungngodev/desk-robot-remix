@@ -10,6 +10,7 @@ import json
 import re
 from hashlib import sha256
 from pathlib import Path
+from stat import S_ISREG
 from xml.etree import ElementTree
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -283,6 +284,14 @@ def _reject_output_aliases(output: Path) -> None:
         path = output / name
         if path.is_symlink():
             raise ValueError(f"Symlinked paper template output path: {path}")
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            continue
+        # write_bytes/write_text truncate the underlying inode, including
+        # any hardlink outside the output. FIFOs can also block indefinitely.
+        if not S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise ValueError(f"Nonregular or hardlinked paper template output: {path}")
     # A stale source-unpinned SVG alongside verified pages can be mistaken
     # for an authorized, true-scale cut or drill template. Never delete it:
     # make the operator inspect and remove the unexpected artifact first.

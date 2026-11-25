@@ -1,5 +1,6 @@
 """Real A4 page scale and failure on changed source, never fictitious holes."""
 import importlib.util
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -486,3 +487,27 @@ def test_a4_dock_rejects_source_clearances_and_tag_dimensions(tmp_path, old, new
             capture_output=True, text=True, timeout=90,
         )
         assert rendered.returncode != 0
+
+
+@pytest.mark.parametrize("filename", ["paper_manifest.json", "ranger_reference_A4.svg"])
+@pytest.mark.parametrize("kind", ["hardlink", "fifo", "directory"])
+def test_a4_refuses_nonregular_or_hardlinked_artifacts(tmp_path, filename, kind):
+    source = load()
+    setup_sources(tmp_path)
+    output = tmp_path / "paper"
+    output.mkdir()
+    target = output / filename
+    outside = tmp_path / "unrelated"
+    outside.write_bytes(b"unchanged")
+    if kind == "hardlink":
+        target.hardlink_to(outside)
+    elif kind == "fifo":
+        os.mkfifo(target)
+    else:
+        target.mkdir()
+    with pytest.raises(ValueError, match="Nonregular or hardlinked paper template output"):
+        source.export(tmp_path, output)
+    with pytest.raises(ValueError, match="Nonregular or hardlinked paper template output"):
+        source.verify(tmp_path, output)
+    assert outside.read_bytes() == b"unchanged"
+    assert not (output / "speaker_reference_A4.svg").exists()

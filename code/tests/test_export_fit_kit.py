@@ -1,6 +1,7 @@
 """Render candidate CAD parts reproducibly without claiming measured fit."""
 import importlib.util
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -1419,3 +1420,37 @@ def test_render_warning_invalidates_old_manifest_without_publishing(tmp_path):
     assert "unknown variable" in exc.value.stderr
     assert not list(output.rglob("*.stl"))
     assert not manifest.exists()
+
+
+@pytest.mark.parametrize("filename", ["fit_kit_manifest.json", "fit_stls/battery_boost_tray.stl"])
+@pytest.mark.parametrize("kind", ["hardlink", "fifo", "directory"])
+def test_fit_kit_refuses_nonregular_or_hardlinked_artifacts(tmp_path, monkeypatch, filename, kind):
+    source = module()
+    output = tmp_path / "selected"
+    target = output / filename
+    target.parent.mkdir(parents=True)
+    outside = tmp_path / "unrelated"
+    outside.write_bytes(b"unchanged")
+    if kind == "hardlink":
+        target.hardlink_to(outside)
+    elif kind == "fifo":
+        os.mkfifo(target)
+    else:
+        target.mkdir()
+    monkeypatch.setattr(source.shutil, "which", lambda _: "/usr/bin/openscad")
+    with pytest.raises(ValueError, match="Nonregular or hardlinked fit kit output"):
+        source.export_kit(ROOT, output_dir=output)
+    with pytest.raises(ValueError, match="Nonregular or hardlinked fit kit output"):
+        source.verify_fit_kit(ROOT, output_dir=output)
+    assert outside.read_bytes() == b"unchanged"
+
+
+def test_fit_kit_refuses_nondirectory_part_group(tmp_path, monkeypatch):
+    source = module()
+    (tmp_path / "fit_stls").write_bytes(b"unchanged")
+    monkeypatch.setattr(source.shutil, "which", lambda _: "/usr/bin/openscad")
+    with pytest.raises(ValueError, match="Non-directory fit kit output"):
+        source.export_kit(ROOT, output_dir=tmp_path)
+    with pytest.raises(ValueError, match="Non-directory fit kit output"):
+        source.verify_fit_kit(ROOT, output_dir=tmp_path)
+    assert (tmp_path / "fit_stls").read_bytes() == b"unchanged"

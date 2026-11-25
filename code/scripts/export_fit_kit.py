@@ -17,6 +17,7 @@ from collections import Counter
 from hashlib import sha256
 from math import hypot, isfinite
 from pathlib import Path
+from stat import S_ISDIR, S_ISREG
 from struct import unpack_from
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -270,11 +271,26 @@ def _reject_fit_kit_output_aliases(output: Path) -> None:
     )
     for folder, names in groups:
         root = output / folder
-        paths.append(root)
+        if root.is_symlink():
+            raise ValueError(f"Symlinked fit kit output path: {root}")
+        try:
+            info = root.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            if not S_ISDIR(info.st_mode):
+                raise ValueError(f"Non-directory fit kit output path: {root}")
         paths.extend(root / f"{name}.stl" for name in names)
     for path in paths:
         if path.is_symlink():
             raise ValueError(f"Symlinked fit kit output path: {path}")
+        try:
+            info = path.lstat()
+        except FileNotFoundError:
+            continue
+        # Special files can block reads; hardlinks can alias unrelated data.
+        if not S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise ValueError(f"Nonregular or hardlinked fit kit output: {path}")
     # A passing manifest must describe the entire generated STL inventory.
     # Earlier candidate names can otherwise remain beside the current 23
     # signed parts and be mistaken for printable/installed assembly files.
