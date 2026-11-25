@@ -1128,3 +1128,41 @@ async def test_one_below_ceiling_is_tactile_only(monkeypatch, sign):
     assert result["contact_delta_raw"] == 499
     assert result["physical_acceptance_pass"] is False
     assert head.commands == ["grip 64"]
+
+
+@pytest.mark.parametrize("fault", ["disarm", "reboot", "expired", "healthy"])
+async def test_contact_final_health_fence(monkeypatch, fault):
+    from types import SimpleNamespace
+
+    import desk_robot.grasp_feedback as feedback
+
+    clock = 100.0
+    monkeypatch.setattr(feedback, "time", SimpleNamespace(monotonic=lambda: clock))
+
+    class AcknowledgingHead(FakeHead):
+        async def command(self, command):
+            await super().command(command)
+            return {"ok": True, "robot_id": "robot-01",
+                    "reply": f"OK grip angle={command.split()[1]}"}
+
+    head = AcknowledgingHead([100, 100, 240, 245])
+
+    async def health():
+        nonlocal clock
+        final = head.seq == 4
+        if final and fault == "expired":
+            clock += 0.6
+        return {"armed": not (final and fault == "disarm"), "robot_id": "robot-01",
+                "imu": {"boot_id": 5104 if final and fault == "reboot" else 5103}}
+
+    if fault == "healthy":
+        result = await guarded_grasp(head, Settings(), robot_id="robot-01", health=health)
+        assert result["contact_delta_raw"] == 145
+        assert result["physical_acceptance_pass"] is False
+    else:
+        expected = {"disarm": "blocked by WROOM health",
+                    "reboot": "health boot mismatched",
+                    "expired": "expired before contact confirmation"}[fault]
+        with pytest.raises(OperationError, match=expected):
+            await guarded_grasp(head, Settings(), robot_id="robot-01", health=health)
+    assert head.commands == (["grip 64", "grip 60"] if fault == "expired" else ["grip 64"])

@@ -246,6 +246,10 @@ async def guarded_grasp(
                 if raw_delta < threshold:
                     break
                 if confirmation:
+                    # Health may change during the final awaited AUX read.
+                    await confirmed_health()
+                    if time.monotonic() >= jaw_expires_at:
+                        raise OperationError("Jaw ADC evidence expired before contact confirmation")
                     return {
                         "commanded_angle": angle, "contact_delta_raw": raw_delta,
                         "baseline_raw": baseline, "position_measured": False,
