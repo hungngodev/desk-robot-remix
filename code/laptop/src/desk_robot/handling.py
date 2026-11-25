@@ -76,6 +76,18 @@ def raw_mpu6050(body: dict) -> tuple[tuple[float, ...], float] | None:
     return scaled, rate
 
 
+def trial_low_g_counter(imu: dict) -> int | None:
+    """Reject unsafe native IRQ evidence without qualifying legacy trial logs."""
+    fields = ("low_g_valid", "low_g_irq", "low_g_seq")
+    if not any(key in imu for key in fields):
+        return None
+    seq = imu.get("low_g_seq")
+    if (imu.get("low_g_valid") is not True or imu.get("low_g_irq") is not False
+            or type(seq) is not int or not 0 <= seq <= 0xffffffff):
+        raise ValueError("Invalid native low-g status in handling trial")
+    return seq
+
+
 def mpu6050_temperature_raw(body: dict) -> int | None:
     """Expose the current signed MPU register for later measured bias trials.
 

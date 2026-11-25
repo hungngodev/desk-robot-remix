@@ -279,3 +279,37 @@ def test_handling_calibration_rejects_partial_robot_identity(missing_index):
     del rows[missing_index]["body"]["robot_id"]
     with pytest.raises(ValueError, match="Do not mix robot identities"):
         analyze(rows)
+
+
+def native_trial_rows():
+    rows = trials()
+    for row in rows:
+        row["body"]["imu"].update(low_g_valid=True, low_g_irq=False, low_g_seq=3)
+    return rows
+
+
+@pytest.mark.parametrize("update", [
+    {"low_g_irq": True},
+    {"low_g_valid": False},
+    {"low_g_seq": True},
+    {"low_g_seq": 4},
+])
+def test_native_trial_rejects_invalid_or_changed_low_g_evidence(update):
+    rows = native_trial_rows()
+    rows[8]["body"]["imu"].update(update)
+    with pytest.raises(ValueError, match="low-g"):
+        analyze(rows)
+
+
+def test_native_trial_rejects_mixed_low_g_capability():
+    rows = native_trial_rows()
+    for key in ("low_g_valid", "low_g_irq", "low_g_seq"):
+        del rows[8]["body"]["imu"][key]
+    with pytest.raises(ValueError, match="low-g"):
+        analyze(rows)
+
+
+def test_native_trial_allows_unchanged_counter_without_qualification():
+    report = analyze(native_trial_rows())
+    assert report["thresholds_physically_qualified"] is False
+    assert report["motor_authorization"] is False

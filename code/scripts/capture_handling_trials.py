@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 import httpx
-from desk_robot.handling import raw_mpu6050
+from desk_robot.handling import raw_mpu6050, trial_low_g_counter
 
 LABELS = (("upright", 8), ("tilted", 4), ("shaking", 4))
 _ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
@@ -120,6 +120,7 @@ async def capture_phase(
     firmware_commit: str, mount_id: str,
     previous_sample: int | None = None, previous_boot: int | None = None,
     previous_receipt: float | None = None,
+    previous_imu: dict | None = None,
 ) -> list[dict]:
     """Accept only newly acquired WROOM status and immobile wheel commands."""
     if label not in {"upright", "tilted", "shaking"} or not 1 <= count <= 100:
@@ -132,6 +133,8 @@ async def capture_phase(
     endpoint = _safe_endpoint(base_url, robot)
     samples: list[dict] = []
     seen, boot, receipt = previous_sample, previous_boot, previous_receipt
+    previous_low_g_seq = trial_low_g_counter(previous_imu) if previous_imu is not None else None
+    low_g_seen = previous_imu is not None
     for _ in range(count * 10):
         response = await client.get(
             endpoint,
@@ -156,6 +159,13 @@ async def capture_phase(
         # never treat a delayed pre-wrap conversion as a new sample.
         forward = (current - seen) & 0xffffffff if seen is not None else None
         if forward is None or 0 < forward < 0x80000000:
+            try:
+                seq = trial_low_g_counter(body["imu"])
+            except ValueError as exc:
+                raise RuntimeError(str(exc)) from exc
+            if low_g_seen and seq != previous_low_g_seq:
+                raise RuntimeError("Native low-g status changed during handling trial")
+            previous_low_g_seq, low_g_seen = seq, True
             if receipt is not None and observed <= receipt:
                 raise RuntimeError("Nonmonotonic source receipt")
             samples.append({
@@ -207,6 +217,7 @@ async def main() -> None:
                                if rows else None),
                 previous_receipt=(rows[-1]["time_monotonic_s"]
                                   if rows else None),
+                previous_imu=rows[-1]["body"]["imu"] if rows else None,
             )
             rows.extend(phase)
     # Only write the whole capture after all physically labeled phases

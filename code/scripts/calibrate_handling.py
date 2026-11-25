@@ -16,6 +16,7 @@ from pathlib import Path
 from desk_robot.handling import (
     GYRO_COUNTS_PER_DPS,
     raw_mpu6050,
+    trial_low_g_counter,
 )
 
 
@@ -63,6 +64,7 @@ def analyze(records: list[dict]) -> dict:
     }
     boot_id = firmware = mount = robot_id = None
     last_sample = last_time = None
+    previous_low_g_seq = None
     first_sample = first_time = None
     for record in records:
         if (not isinstance(record, dict)
@@ -87,6 +89,10 @@ def analyze(records: list[dict]) -> dict:
         elif observed_robot != robot_id:
             raise ValueError("Do not mix robot identities or unidentified trials")
         imu = body["imu"]
+        seq = trial_low_g_counter(imu)
+        if last_sample is not None and seq != previous_low_g_seq:
+            raise ValueError("Native low-g status changed during handling trial")
+        previous_low_g_seq = seq
         if boot_id is None:
             boot_id = imu["boot_id"]
         if imu["boot_id"] != boot_id:

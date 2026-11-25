@@ -294,3 +294,28 @@ def test_private_trial_output_rejects_nonfinite_values(tmp_path, value):
     with pytest.raises(ValueError, match="Out of range float values"):
         save_private_trial_rows(output, [{"body": {"extra": value}}])
     assert not output.exists()
+
+
+class NativeLowGClient(FakeClient):
+    async def get(self, url, *, headers, timeout):
+        response = await super().get(url, headers=headers, timeout=timeout)
+        response.data["imu"].update(
+            low_g_valid=True, low_g_irq=False, low_g_seq=self.count + 2,
+        )
+        return response
+
+
+async def test_capture_rejects_intervening_native_low_g_event():
+    with pytest.raises(RuntimeError, match="low-g"):
+        await read(NativeLowGClient())
+
+
+async def test_capture_rejects_native_low_g_event_between_phases():
+    with pytest.raises(RuntimeError, match="low-g"):
+        await capture_phase(
+            NativeLowGClient(), base_url="http://127.0.0.1:8008", robot="robot-01",
+            token="operator-valid-token", label="tilted", count=1,
+            sample_interval=0.05, firmware_commit="sha", mount_id="mount-1",
+            previous_sample=0, previous_boot=1,
+            previous_imu={"low_g_valid": True, "low_g_irq": False, "low_g_seq": 2},
+        )
