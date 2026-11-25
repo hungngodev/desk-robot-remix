@@ -281,6 +281,20 @@ def test_backend_audio_fails_closed_on_wrong_format_and_bad_base64():
         wire.handle_event({"type": "error", "error": {"code": "backend_failed"}})
 
 
+@pytest.mark.parametrize("rate", [24000.0, "24000", True, None, 16000])
+def test_backend_audio_requires_integer_sample_rate(rate):
+    wire = OmniDuplexWire()
+    wire.handle_event({"type": "response.created", "response_id": "r1"})
+    packet = delta()
+    packet["sample_rate_hz"] = rate
+    with pytest.raises(ValueError, match="codec"):
+        wire.handle_event(packet)
+    assert wire.generated_bytes == 0
+    accepted = wire.handle_event(delta())
+    assert accepted is not None
+    assert accepted.total_generated_ms == 100
+
+
 @pytest.mark.parametrize("mutation", [
     ("type", "session.error"),
     ("model", "other/model"),

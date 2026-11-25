@@ -385,7 +385,9 @@ class OmniDuplexWire:
                         or (self._server_response_epoch is not None
                             and meta["epoch"] != self._server_response_epoch)):
                     return None
-            if event.get("format") != "pcm16" or event.get("sample_rate_hz") != 24000:
+            rate = event.get("sample_rate_hz")
+            if (event.get("format") != "pcm16"
+                    or type(rate) is not int or rate != self.OUTPUT_RATE):
                 raise ValueError("Unrecognized realtime audio codec or sample rate")
             encoded = event.get("delta")
             if not isinstance(encoded, str) or len(encoded) > 130_000:
