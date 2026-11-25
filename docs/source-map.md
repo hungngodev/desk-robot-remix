@@ -648,14 +648,22 @@ real mechanical or acoustic evidence.
 
 The full historical 75-sensor idea list remains intact. The latest user hardware
 selection is MPU6050, identified with the actual InvenSense register 0x75 and
-0x3B..0x48 14-byte raw sample, sharing WROOM I2C with the existing five range
-sensors. BerryIMU remains a photographed optional spare, not a second required
-purchase. The already owned AT42QT1010 momentary pad is the required petting
-input. Three distinct reserved input-only pins provide **disabled until fitted**
-WROOM bumper (GPIO35), magnet/reed costume closure (GPIO36), and PIR infrared
-motion (GPIO39). C++ edge counters connect to Mac private eyewitness memories;
-bumper invokes immediate local stop plus Mac job cancellation. These are not
-physical tests, and a PIR edge cannot establish who entered a room.
+0x3B..0x48 14-byte raw sample, sharing WROOM I2C with the eight VL53L0X range
+channels on mux 0x70 (five guarded, three read-only). BerryIMU remains a
+photographed optional spare, not a second required purchase. The already owned
+AT42QT1010 momentary pad is the required petting input. The full WROOM profiles
+require the direct normally closed bumper (GPIO35) and enable magnetic reed
+closure on MCP23017 GPIOB0 (active LOW). Optional PIR infrared activity uses
+GPIOB1 (active HIGH) on the same expander, address 0x20, accessory mux 0x71 lane
+5, and is enabled only in `esp32_full_interaction_lab`. GPIO36/39 are reserved
+for separate terminal IR receivers, not reed/PIR wiring. C++ edge counters
+connect to Mac private eyewitness memories; only the bumper invokes immediate
+local stop plus Mac job cancellation. PIR reports infrared activity, not person
+identity, location, count, stationary presence, or movement permission. The
+SW-18010P vibration switch and piezo knock sensor remain reserved expansion
+ideas, not implemented GPIOB inputs; short switch pulses require measured
+capture/debounce, and a piezo requires a protected analog front end. None of
+these source paths establishes physical qualification.
 
 The user-photographed BMP280 is **pressure and temperature, not humidity**.
 Bosch's datasheet specifies I2C 0x76/0x77 and register 0xD0 ID 0x58. It is
