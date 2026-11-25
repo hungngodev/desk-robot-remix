@@ -1,7 +1,6 @@
 from dataclasses import replace
 
 import pytest
-
 from desk_robot.route_planner import (
     GridSnapshot,
     RouteRequest,
