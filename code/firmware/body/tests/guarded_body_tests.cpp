@@ -182,10 +182,10 @@ static void usb_rearm_refuses_unsafe_physical_interlocks() {
   CHECK(guard.configure(config()));
   fresh(guard, 100);
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
-  body.sample_touch_input(true);
+  body.sample_touch_input(true, 100);
   CHECK(send(body, "rearm", 100, true) == "ERR rearm touch_active");
   CHECK(send(body, "arm", 100) == "ERR arm touch_active");
-  body.sample_touch_input(false);
+  body.sample_touch_input(false, 100);
   body.sample_optional_inputs(1U, true, false, false);
   CHECK(send(body, "rearm", 100, true) == "ERR rearm bumper_active");
   body.sample_optional_inputs(1U, false, false, false);
@@ -222,6 +222,67 @@ static void usb_rearm_refuses_unsafe_physical_interlocks() {
   imu.require_imu_for_motion(true);
   CHECK(send(imu, "rearm", 100, true) == "ERR rearm imu_missing_or_stale");
   CHECK(send(imu, "arm", 100) == "ERR arm safety_interlock");
+}
+
+// Contact before the deadline is an ordinary stop. At or after expiry
+// the independent host timeout must remain USB-latched after release.
+static void contact_cannot_hide_expired_host_lease() {
+  for (const auto profile : {desk_robot::BodyProfile::StepperGuarded,
+                             desk_robot::BodyProfile::DcGuarded}) {
+    for (const std::uint32_t start : {10U, 0xffffff80U}) {
+      for (const bool moving : {false, true}) {
+        for (const int contact : {0, 1, 2}) {
+          for (const bool expired : {false, true}) {
+            desk_robot::CliffGuard guard;
+            CHECK(guard.configure(config()));
+            fresh(guard, start);
+            desk_robot::BodyControl body(profile, &guard);
+            CHECK(send(body, "rearm", start, true) == "OK rearm");
+            CHECK(send(body, "arm", start) == "OK arm");
+            if (moving)
+              CHECK(send(body, "drive 20 20 250", start).find("OK drive") == 0);
+            const std::uint32_t limit = moving ? 200U : 500U;
+            for (std::uint32_t dt = 50; dt < limit; dt += 50) {
+              fresh(guard, start + dt);
+              body.tick(start + dt);
+              CHECK(body.state().armed);
+            }
+            const std::uint32_t now = start + limit - (expired ? 0U : 1U);
+            fresh(guard, now);
+            if (contact == 0) {
+              body.sample_touch_input(true, now);
+              body.sample_touch_input(false, now + 1);
+            } else if (contact == 1) {
+              body.set_touch(true, now);
+              body.set_touch(false, now + 1);
+            } else {
+              desk_robot::AccessoryReadings readings{};
+              readings.dock.present = readings.dock.valid = true;
+              readings.dock.left_seated = true;
+              readings.dock.sample_seq = 1;
+              readings.dock.at_ms = now;
+              body.set_accessories(readings, now);
+              readings.dock.left_seated = false;
+              readings.dock.sample_seq = 2;
+              readings.dock.at_ms = now + 1;
+              body.set_accessories(readings, now + 1);
+            }
+            CHECK(!body.state().armed);
+            CHECK(body.state().left == 0 && body.state().right == 0);
+            CHECK(body.state().servos_attached);
+            if (expired) {
+              CHECK(send(body, "arm", now + 1) == "ERR arm command_timeout_latched");
+              CHECK(send(body, "rearm", now + 1) == "ERR rearm local_only");
+              CHECK(send(body, "rearm", now + 1, true) == "OK rearm");
+              CHECK(!body.state().armed);
+            }
+            CHECK(send(body, "arm", now + 1) == "OK arm");
+            CHECK(body.state().left == 0 && body.state().right == 0);
+          }
+        }
+      }
+    }
+  }
 }
 
 static void receiver_recovery_authority_is_not_shared() {
@@ -787,7 +848,7 @@ static void raw_touch_trip_preempts_debounce_without_forging_a_tap() {
   body.tick(20);
   const int commanded_hold = body.state().grip;
   CHECK(body.state().left != 0 && body.state().armed);
-  body.sample_touch_input(true);  // one raw GPIO high, gesture state still false
+  body.sample_touch_input(true, 20);  // one raw GPIO high, gesture state still false
   CHECK(!body.state().armed && body.state().left == 0);
   CHECK(body.state().right == 0);
   CHECK(body.state().servos_attached);
@@ -807,7 +868,7 @@ static void raw_touch_trip_preempts_debounce_without_forging_a_tap() {
   CHECK(!body.state().armed && body.state().left == 0);
   CHECK(send(body, "arm", 75) == "ERR arm touch_active");
   body.set_touch(false, 160);
-  body.sample_touch_input(false);  // one raw low still requires explicit arm
+  body.sample_touch_input(false, 160);  // one raw low still requires explicit arm
   CHECK(!body.state().armed);
   CHECK(send(body, "keepalive", 160) == "ERR keepalive disarmed");
 }
@@ -2752,11 +2813,11 @@ static void guarded_dc_has_identical_cliff_touch_and_usb_rearm_contract() {
   CHECK(send(dc, "drive 40 40 250", 0) ==
         "OK drive left=40 right=40 ms=250");
   CHECK(dc.state().left == 40 && dc.state().armed);
-  dc.sample_touch_input(true);
+  dc.sample_touch_input(true, 1);
   dc.tick(1);
   CHECK(dc.state().left == 0 && dc.state().right == 0 && !dc.state().armed);
   CHECK(send(dc, "arm", 2) == "ERR arm touch_active");
-  dc.sample_touch_input(false);
+  dc.sample_touch_input(false, 3);
   fresh(guard, 3);
   CHECK(send(dc, "rearm", 3, true) == "OK rearm");
   CHECK(send(dc, "arm", 3) == "OK arm");
@@ -2915,12 +2976,12 @@ static void status_readiness_matches_local_arm_interlocks() {
   desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
   CHECK(send(body, "rearm", 0, true) == "OK rearm");
   CHECK(send(body, "status", 0).find("\"ready\":true") != std::string::npos);
-  body.sample_touch_input(true);
+  body.sample_touch_input(true, 1);
   CHECK(send(body, "status", 1).find("\"ready\":false") != std::string::npos);
   CHECK(send(body, "status", 1).find("\"fault\":\"touch_active\"") !=
         std::string::npos);
   CHECK(send(body, "arm", 1) == "ERR arm touch_active");
-  body.sample_touch_input(false);
+  body.sample_touch_input(false, 1);
 
   body.sample_optional_inputs(1U, true, false, false);
   CHECK(send(body, "status", 2).find("\"fault\":\"bumper_active\"") !=
@@ -2940,7 +3001,7 @@ static void status_readiness_matches_local_arm_interlocks() {
   CHECK(send(body, "arm", 3) == "ERR arm imu_missing_or_stale");
   // Even if both a missing IMU and a touch are present, retain the true
   // high priority local cliff fault in the shared safety context.
-  body.sample_touch_input(true);
+  body.sample_touch_input(true, 4);
   guard.bus_fault();
   CHECK(send(body, "status", 4).find("\"fault\":\"bus_failure\"") !=
         std::string::npos);
@@ -3393,6 +3454,7 @@ int main() {
     recovery_is_local_and_not_an_arm();
     usb_rearm_refuses_unsafe_physical_interlocks();
     std::cout << "PASS only local recovery can clear a healthy fault latch\n";
+    contact_cannot_hide_expired_host_lease();
     receiver_recovery_authority_is_not_shared();
     std::cout << "PASS head receiver cannot borrow USB recovery authority\n";
     guarded_directional_drive_rejects_unqualified_sweep();

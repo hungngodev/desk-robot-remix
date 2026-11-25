@@ -128,7 +128,7 @@ class BodyControl {
   // Un-debounced local reflex: even one sensed high stops wheels and ramp,
   // without fabricating a recognized gesture or releasing servo holding PWM.
   void touch_trip();
-  void sample_touch_input(bool active);  // raw GPIO level, no gesture count
+  void sample_touch_input(bool active, std::uint32_t now_ms);  // raw GPIO level, no gesture count
   // Optional multi-zone petting. No movement authority and no fabricated reads.
   void set_cap(bool valid, std::uint8_t zones);
   // Raw optical paw telemetry; never infer BPM or heartbeat from one FIFO read.
@@ -405,6 +405,7 @@ class BodyControl {
   bool dock_telemetry_bad(std::uint32_t now_ms) const;
   bool extra_candidates_[3]{};
   std::uint8_t extra_streaks_[3]{};
+  void latch_expired_control_lease(std::uint32_t now_ms);
   void stop_motion();
   // Local USB only: stage all five measured safety limits atomically.
   // No network or AI path can set or persist them.

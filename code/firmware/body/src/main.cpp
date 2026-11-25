@@ -142,7 +142,7 @@ void poll_touch(std::uint32_t now_ms) {
   // Independent wheel inhibition must not wait for the 25 ms gesture timer.
   const bool active = digitalRead(body_pins::kTouchOutput) == HIGH;
   const bool was_armed = control.state().armed;
-  control.sample_touch_input(active);
+  control.sample_touch_input(active, now_ms);
   if (active && was_armed) apply_outputs();
   // Every observed raw transition restarts the gesture debounce. Otherwise
   // short pulses coinciding with three sample instants can forge a touch.

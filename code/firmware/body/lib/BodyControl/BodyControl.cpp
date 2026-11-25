@@ -237,7 +237,8 @@ void BodyControl::touch_trip() {
   }
 }
 
-void BodyControl::sample_touch_input(bool active) {
+void BodyControl::sample_touch_input(bool active, std::uint32_t now_ms) {
+  if (active) latch_expired_control_lease(now_ms);
   state_.touch_raw_active = active;
   if (active) touch_trip();  // before debounce and before motor output
 }
@@ -385,6 +386,7 @@ void BodyControl::sample_optional_inputs(std::uint8_t enabled_mask, bool bumper,
 }
 
 void BodyControl::set_touch(bool active, std::uint32_t now_ms) {
+  if (active) latch_expired_control_lease(now_ms);
   if (active == state_.touch_active) return;
   state_.touch_active = active;
   if (active) {
@@ -540,6 +542,7 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
   // Other simultaneous faults must not hide a dock GPIOA loss that happened
   // while a guarded motion session was still armed.
   const bool was_armed = state_.armed;
+  latch_expired_control_lease(now_ms);
   state_.accessories = readings;
   if (wheel_capture_configured_) {
     // Capture only real per-conversion AS5600 provenance from the 0x71 bus.
@@ -928,7 +931,16 @@ std::uint32_t BodyControl::drive_remaining(std::uint32_t now_ms) const {
   return elapsed >= drive_duration_ms_ ? 0 : drive_duration_ms_ - elapsed;
 }
 
+void BodyControl::latch_expired_control_lease(std::uint32_t now_ms) {
+  // Record expiry before another interlock can erase the armed state or
+  // zero the active wheels (which would change the applicable deadline).
+  if (guarded_motion_profile() && state_.armed &&
+      watchdog_remaining(now_ms) == 0)
+    command_timeout_latched_ = true;
+}
+
 void BodyControl::tick(std::uint32_t now_ms) {
+  latch_expired_control_lease(now_ms);
   // Keep expired diagnostic validity cleared even after millis wraps.
   // The raw words and timestamps remain available for inspection.
   for (std::uint8_t lane = 0; lane < 8; ++lane) {
