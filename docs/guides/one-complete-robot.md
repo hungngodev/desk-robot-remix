@@ -8,16 +8,18 @@ A first completed, physically qualified pet is required before buying parts for 
 
 For the first unit, use the **only two builder facing lists** printed by the `first-robot-markdown` command below: (1) reported owned or ordered and (2) first-unit remaining parts with conditional holds. Their source is [the canonical full feature plan](../hardware/full-feature-plan.json), [the reported inventory and photos](../hardware/photo-inventory-2026-11-04.md), and [the reviewed purchase register](../hardware/2026-11-16-five-pet-purchase-register.md). The separate [complete shopping checklist](../hardware/complete-shopping-checklist.md) is a **five-pet fleet projection**, NOT a one-unit checkout. Do not order fleet quantities from that static page or hand-edit a second first-unit cart.
 
-From the repository root, regenerate the first complete pet, its dock and one station projection without modifying the ledger:
+From the repository root, enter `code/` and regenerate the first complete
+pet, its dock and one station projection without modifying the ledger:
 
 ```sh
-python code/scripts/procurement_release.py --format first-robot-markdown
+cd code
+uv run --no-sync python scripts/procurement_release.py --format first-robot-markdown
 ```
 
 For **evaluation samples only**, use the separate, source locked pilot worksheet:
 
 ```sh
-python code/scripts/procurement_release.py --format pilot-cart-markdown
+uv run --no-sync python scripts/procurement_release.py --format pilot-cart-markdown
 ```
 
 The November 18 pilot recorded thirteen candidate SKUs, seventeen individual sample items and USD 40.41 of historical merchandise quotes, **excluding shipping, tax, previous spending and unknown mandatory hardware**. It is not a safe to buy finished robot, charger or five pet kit. Check seller stock, exact PCB revision and actual delivered totals before any optional sample order. The first **complete** prototype has a USD 50 delivered cap **including previously paid items**. An unquoted mandatory part or unknown historical payment means no approved total.
@@ -32,7 +34,7 @@ The [Fusion assembly and measured source geometry](../cad/FUSION_ONE_ROBOT_ASSEM
 2. Import the pinned licensed SMARS, Sparky head, forklift and gripper references through the existing Fusion scaffold and check the separate servo lift and jaw swept volumes.
 3. Print small battery, breakout, speaker baffle, sensor angle, servo horn and dock fit coupons where the Fusion guide calls for measurements. Preserve every upstream noncommercial and share alike restriction.
 4. Check lens height against the actual VL53L0X minimum measurement, camera view of floor objects and raised jaw, battery removal and wire bending, microphone/speaker paths, center of gravity, track clearance and dock seating.
-5. **Do not print a numbered final robot or dock assembly as a qualified kit** until the measured, editable fitted assembly, part numbers, quantities, orientation and fasteners exist. The previously proposed 86 mm protected pack does not fit the 68 mm provisional tray; changing that conclusion requires a new measured assembly, not scaling all STLs.
+5. **Do not print a numbered final robot or dock assembly as a qualified kit** until the measured, editable fitted assembly, part numbers, quantities, orientation and fasteners exist. The former 68 mm battery gauge was undersized for the 86 mm candidate pack. The current 86 mm body-only coupon is corrected, but it does not establish connector, charger, boost, restraint or service clearance. Its provisional tray with tabs exceeds the original chassis XY diagonal; resolve that conflict through the measured assembly, not by scaling all STLs.
 
 ## 3. Wiring starts unpowered and with independent safety
 
@@ -82,6 +84,6 @@ Do not put personal audio, camera recordings, room occupancy histories, raw conv
 
 ## 7. Final release decision
 
-The permanent gates are recorded in [product definition](../product-definition.md), [the full engineering plan](../PLAN.md) and [the verification ledger](../records/verification.md). Before claiming the first robot ready, prove complete pinned firmware builds and integrations on the exact release SHA, natural speech and grounded visual behavior, physical device audio cutoff, reliable floor stops, one complete safe physical grasp and place, qualified battery charging and full docking, assembled printable fit, true delivered cost, and the privacy and recovery trials. The [Guide 60 spatial acceptance](../plans/spatial-first-unit/60-object-recall-and-navigation.md#acceptance) is also mandatory. Require at least 9/10 valid re-anchors with translation error at most 20 mm, 8/10 remembered-object returns from changed robot starting positions with stationary targets, and zero false arrivals and zero unsafe commands in the moved/occluded and other negative trials. Record the assembly, calibration, source SHA and fresh target evidence. Missing or failed spatial trials prohibit duplication. Only after that first pet passes should the four sibling robots, four more docks and one shared fleet station proceed to full purchasing.
+The permanent gates are recorded in [product definition](../product-definition.md), [the full engineering plan](../PLAN.md) and [the verification ledger](../records/verification.md). Before claiming the first robot ready, prove complete pinned firmware builds and integrations on the exact release SHA, natural speech and grounded visual behavior, physical device audio cutoff, reliable floor stops, one complete safe physical grasp and place, qualified battery charging and full docking, assembled printable fit, true delivered cost, and the privacy and recovery trials. The [Guide 60 spatial acceptance](../plans/spatial-first-unit/60-object-recall-and-navigation.md#acceptance) is also mandatory. Require at least 9/10 valid re-anchors with translation error at most 20 mm, 8/10 remembered-object returns from changed robot starting positions with stationary targets, and zero false arrivals and zero unsafe commands in the moved/occluded and other negative trials. Record the assembly, calibration, source SHA and fresh target evidence. Missing or failed spatial trials prohibit duplication. Only after that first pet passes should the four sibling robots and four more docks proceed to full purchasing. Retain the same one shared room station; do not purchase a second station as part of fleet expansion.
 
 **Current outcome: source and staged bench engineering can proceed. Final parts printing, full buying release, loaded desk movement, battery charging and autonomous docking remain HOLD until the named receipts exist.**
