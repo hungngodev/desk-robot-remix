@@ -113,3 +113,29 @@ def test_reject_corrupted_merged_bytes(packed_image):
         stream.write(b"\xff")
     with pytest.raises(ValueError, match="Merged firmware"):
         assets.verify(root, reader)
+
+
+@pytest.mark.parametrize("board", [
+    "DESK_ROBOT_MODULAR_S3",
+    "DESK_ROBOT_WAVESHARE_S3_CAM",
+    "DESK_ROBOT_CORE_S3",
+    "ESP32_S3_BOX_3",
+])
+def test_reject_competing_board_selection_before_asset_io(tmp_path, board):
+    config = tmp_path / "sdkconfig"
+    config.write_text("\n".join(sorted(assets.CONFIG)) + f"\nCONFIG_BOARD_TYPE_{board}=y\n")
+
+    def unexpected_reader(_):
+        pytest.fail("Conflicting board must be rejected before asset IO")
+
+    with pytest.raises(ValueError, match="competing board selection"):
+        assets.verify(tmp_path, unexpected_reader)
+
+
+def test_inactive_alternative_board_selection_is_allowed(packed_image):
+    root, config, _, write, reader = packed_image
+    data = write()
+    config.write_text(
+        config.read_text() + "# CONFIG_BOARD_TYPE_DESK_ROBOT_MODULAR_S3 is not set\n"
+    )
+    assert assets.verify(root, reader) == len(data)

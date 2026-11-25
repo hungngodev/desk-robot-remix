@@ -42,6 +42,11 @@ def verify(root: Path, read_entries: Callable) -> int:
                    or line == f"# {key} is not set"]
         if matches != [expected]:
             raise ValueError(f"Unexpected Sense CI configuration: {key}")
+    # A Sense flag alone is insufficient evidence of an exclusive board choice.
+    selected_boards = [line for line in config
+                       if line.startswith("CONFIG_BOARD_TYPE_") and line.endswith("=y")]
+    if selected_boards != ["CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3=y"]:
+        raise ValueError("Unexpected Sense CI configuration: competing board selection")
     assets = root / "build/generated_assets.bin"
     if not 12 <= assets.stat().st_size <= ASSETS_LIMIT:
         raise ValueError("Asset image is empty, truncated or exceeds 2 MiB")
