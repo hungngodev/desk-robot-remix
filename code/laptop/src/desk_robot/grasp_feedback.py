@@ -210,12 +210,9 @@ async def guarded_grasp(
                 head.command(f"grip {angle}"), seconds=_GRIP_COMMAND_TIMEOUT_S,
                 timeout_message="Gripper servo command unconfirmed",
             )
-            # The production HttpHead verifies a full ACK already. Alternate
-            # typed adapters can return an explicit failed or foreign receipt
-            # without raising; do not treat that as a completed jaw pulse.
-            # Older simulation fakes return None and never qualify hardware.
-            if reply is not None and (
-                type(reply) is not dict
+            # A missing receipt is an uncertain pulse, not a successful close.
+            # Even alternate adapters must return the exact authenticated ACK.
+            if (type(reply) is not dict
                 or reply.get("ok") is not True
                 or reply.get("robot_id") != robot_id
                 or reply.get("reply") != f"OK grip angle={angle}"

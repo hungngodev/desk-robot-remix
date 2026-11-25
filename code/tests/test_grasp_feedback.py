@@ -25,6 +25,10 @@ class FakeHead:
 
     async def command(self, command):
         self.commands.append(command)
+        return {
+            "ok": True, "robot_id": "robot-01",
+            "reply": f"OK grip angle={command.split()[1]}",
+        }
 
 
 class Settings:
@@ -959,6 +963,8 @@ async def test_matching_wroom_health_and_jaw_boot_allows_bounded_grasp(monkeypat
     assert head.commands == ["grip 64", "grip 68"]
 
 @pytest.mark.parametrize("bad_ack", [
+    None,
+    {},
     {"ok": False, "robot_id": "robot-01", "reply": "ERR grip rejected"},
     {"ok": True, "robot_id": "robot-02", "reply": "OK grip angle=64"},
     {"ok": True, "robot_id": "robot-01", "reply": "OK grip angle=68"},
@@ -990,6 +996,7 @@ async def test_grasp_rejects_explicit_bad_command_ack_before_more_closing(
     # The uncertain first pulse gets only one health-gated relief attempt.
     # No second closing pulse and no fabricated contact receipt are allowed.
     assert head.commands == ["grip 64", "grip 60"]
+    assert head.seq == 2  # No force sample can compensate for a missing ACK.
 
 
 async def test_grasp_accepts_exact_structured_head_command_ack(monkeypatch):
