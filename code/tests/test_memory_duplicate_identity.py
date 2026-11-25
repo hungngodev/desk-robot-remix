@@ -227,3 +227,69 @@ def test_memory_rejects_linked_sqlite_sidecars(tmp_path, suffix, link):
     assert store.recent("pet_a") == []
     assert store.recent("pet_b")[0].summary == "Pet B private observation"
     assert MemoryStore(tmp_path, ["pet_a", "pet_b"]).count("pet_b") == 1
+
+
+def test_five_pet_database_rename_cannot_relabel_private_memory(tmp_path):
+    ids = [f"pet_{i}" for i in range(1, 6)]
+    store = MemoryStore(tmp_path, ids)
+    for robot in ids:
+        assert store.remember(
+            robot, "shared_event_id", f"Private observation of {robot}",
+            kind="scene", source_robot=robot, witnessed=True,
+        )
+        assert store.set_core_fact(robot, "favorite_game", f"Private game of {robot}")
+
+    # Ordinary renames leave two distinct regular files with one link each.
+    # Neither the existing case nor hard-link guards can detect this swap.
+    third = tmp_path / "pet_3.sqlite3"
+    fourth = tmp_path / "pet_4.sqlite3"
+    temporary = tmp_path / "temporary.sqlite3"
+    third.rename(temporary)
+    fourth.rename(third)
+    temporary.rename(fourth)
+
+    for robot in ("pet_3", "pet_4"):
+        with pytest.raises(ValueError, match="database identity mismatch"):
+            store.recent(robot)
+        with pytest.raises(ValueError, match="database identity mismatch"):
+            store.search(robot, "private")
+        with pytest.raises(ValueError, match="database identity mismatch"):
+            store.core_facts(robot)
+        with pytest.raises(ValueError, match="database identity mismatch"):
+            store.forget_episode(robot, "shared_event_id")
+    with pytest.raises(ValueError, match="database identity mismatch"):
+        MemoryStore(tmp_path, ids)
+
+    # An unrelated pet remains usable; restoring the correct filenames
+    # recovers both owners without rewriting or deleting the private rows.
+    for robot in ("pet_1", "pet_2", "pet_5"):
+        assert store.recent(robot)[0].source_robot == robot
+    third.rename(temporary)
+    fourth.rename(third)
+    temporary.rename(fourth)
+    reopened = MemoryStore(tmp_path, ids)
+    for robot in ids:
+        assert reopened.search(robot, "private")[0].summary == f"Private observation of {robot}"
+        assert reopened.core_facts(robot)[0].value == f"Private game of {robot}"
+
+
+def test_legacy_firsthand_provenance_cannot_be_adopted_by_wrong_pet(tmp_path):
+    import sqlite3
+
+    store = MemoryStore(tmp_path, ["pet_3"])
+    assert store.remember(
+        "pet_3", "private_event", "Private observation",
+        kind="scene", source_robot="pet_3", witnessed=True,
+    )
+    original = tmp_path / "pet_3.sqlite3"
+    with sqlite3.connect(original) as db:
+        db.execute("DROP TABLE memory_identity")
+    original.rename(tmp_path / "pet_4.sqlite3")
+
+    with pytest.raises(ValueError, match="Legacy memory provenance"):
+        MemoryStore(tmp_path, ["pet_4"])
+    # The failing migration must not persist a newly assigned identity.
+    with sqlite3.connect(tmp_path / "pet_4.sqlite3") as db:
+        assert db.execute(
+            "SELECT name FROM sqlite_master WHERE name='memory_identity'"
+        ).fetchone() is None

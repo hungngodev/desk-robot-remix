@@ -151,7 +151,7 @@ class MemoryStore:
         if self.root.stat().st_mode & 0o077:
             raise PermissionError("Robot memory root is accessible to other users")
         for robot in sorted(self.robot_ids):
-            with self._connect(robot) as db:
+            with self._connect(robot, initializing=True) as db:
                 # Serialize schema inspection, DDL, triggers and FTS rebuild.
                 # Otherwise competing initializers can both attempt ALTER TABLE.
                 db.execute("BEGIN IMMEDIATE")
@@ -181,6 +181,7 @@ class MemoryStore:
                          relay_token TEXT
                        )"""
                 )
+                self._bind_database_identity(db, robot)
                 # Older private databases lack this nullable internal receipt.
                 if "relay_token" not in {
                     row[1] for row in db.execute("PRAGMA table_info(memories)")
@@ -342,8 +343,38 @@ class MemoryStore:
                 # incomplete index, without touching original episode rows.
                 db.execute("INSERT INTO memories_fts(memories_fts) VALUES ('rebuild')")
 
+    @staticmethod
+    def _bind_database_identity(db: sqlite3.Connection, robot_id: str) -> None:
+        """Bind the database to its pet inside the existing schema transaction."""
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS memory_identity (
+                 singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+                 robot_id TEXT NOT NULL
+               )"""
+        )
+        identity = db.execute(
+            "SELECT robot_id FROM memory_identity WHERE singleton=1"
+        ).fetchone()
+        if identity is None:
+            # Legacy filenames are the only identity for core-only stores.
+            # At least reject a legacy episode whose provenance contradicts
+            # that filename before adopting the existing database.
+            if db.execute(
+                """SELECT 1 FROM memories WHERE
+                   (witnessed=1 AND source_robot<>?) OR
+                   (witnessed=0 AND source_robot=?) LIMIT 1""",
+                (robot_id, robot_id),
+            ).fetchone() is not None:
+                raise ValueError("Legacy memory provenance disagrees with robot identity")
+            db.execute(
+                "INSERT INTO memory_identity(singleton,robot_id) VALUES (1,?)",
+                (robot_id,),
+            )
+        elif identity != (robot_id,):
+            raise ValueError("Private memory database identity mismatch")
+
     @contextmanager
-    def _connect(self, robot_id: str):
+    def _connect(self, robot_id: str, *, initializing: bool = False):
         # A str subclass can override hashing or filename construction. Only
         # a plain schema string may select a private database.
         if type(robot_id) is not str or robot_id not in self.robot_ids:
@@ -398,6 +429,16 @@ class MemoryStore:
             # databases, before correction, retention trimming or forgetting.
             # This is NOT a claim to erase backups or FTS5 historical pages.
             db.execute("PRAGMA secure_delete=ON")
+            if not initializing:
+                if db.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='memory_identity'"
+                ).fetchone() is None:
+                    raise ValueError("Private memory database identity unavailable")
+                identity = db.execute(
+                    "SELECT robot_id FROM memory_identity WHERE singleton=1"
+                ).fetchone()
+                if identity != (robot_id,):
+                    raise ValueError("Private memory database identity mismatch")
             yield db
             db.commit()
         except BaseException:
