@@ -54,15 +54,17 @@ def instrument_p3_player(source: str) -> str:
         '''    metrics = {
         "submitted_frames": 0,
         "write_calls": 0,
-        "underflow_reports": 0,
+        "underflow_reports": 0,  # All PortAudio reports, including startup/pause.
         "underflow_reports_first_write": 0,
         "underflow_reports_after_pause": 0,
+        "underflow_reports_active": 0,  # Neither startup nor immediately after pause.
         "output_overrun_reports": None,  # Not exposed by blocking OutputStream.
         "writes_exceeding_available_frames": 0,
         "min_write_available_frames": None,
         "output_latency_estimate_ms": None,
         "stream_start_to_first_write_return_ms": None,
         "max_write_ms": None,
+        "termination": "stopped",
     }
     started_at = time.monotonic()
     paused_since_write = False
@@ -73,7 +75,6 @@ def instrument_p3_player(source: str) -> str:
         source,
         "    try:\n        with open(input_file, 'rb') as f:\n",
         "    try:\n        stream.start()\n        stream_started = True\n"
-        "        metrics['output_latency_estimate_ms'] = stream.latency * 1000\n"
         "        with open(input_file, 'rb') as f:\n",
     )
     source = replace_once(
@@ -81,6 +82,40 @@ def instrument_p3_player(source: str) -> str:
         '                if pause_event and pause_event.is_set():\n',
         '                if pause_event and pause_event.is_set():\n'
         '                    paused_since_write = True\n',
+    )
+    source = replace_once(
+        source,
+        '                if not header or len(header) < 4:\n                    break\n',
+        '''                if not header:
+                    metrics["termination"] = "eof" if metrics["write_calls"] else "empty"
+                    break
+                if len(header) != 4:
+                    raise ValueError("Truncated P3 packet header")
+''',
+    )
+    source = replace_once(
+        source,
+        "                packet_type, reserved, data_len = struct.unpack('>BBH', header)\n",
+        '''                packet_type, reserved, data_len = struct.unpack('>BBH', header)
+                if packet_type != 0 or reserved != 0 or data_len == 0:
+                    raise ValueError("Invalid P3 audio packet header")
+''',
+    )
+    source = replace_once(
+        source,
+        '                if not opus_data or len(opus_data) < data_len:\n'
+        '                    break\n',
+        '''                if len(opus_data) != data_len:
+                    raise ValueError("Truncated P3 Opus payload")
+''',
+    )
+    source = replace_once(
+        source,
+        '                pcm_data = decoder.decode(opus_data, frame_size)\n',
+        '''                pcm_data = decoder.decode(opus_data, frame_size)
+                if not pcm_data or len(pcm_data) % 2 or len(pcm_data) > 2 * frame_size:
+                    raise ValueError("Invalid decoded P3 PCM frame")
+''',
     )
     source = replace_once(
         source,
@@ -101,6 +136,7 @@ def instrument_p3_player(source: str) -> str:
                 )
                 first_write = metrics["write_calls"] == 0
                 if first_write:
+                    metrics["output_latency_estimate_ms"] = stream.latency * 1000
                     metrics["stream_start_to_first_write_return_ms"] = (
                         write_finished - started_at
                     ) * 1000
@@ -113,6 +149,9 @@ def instrument_p3_player(source: str) -> str:
                     metrics["underflow_reports"] += 1
                     metrics["underflow_reports_first_write"] += int(first_write)
                     metrics["underflow_reports_after_pause"] += int(paused_since_write)
+                    metrics["underflow_reports_active"] += int(
+                        not first_write and not paused_since_write
+                    )
                 paused_since_write = False
 ''',
     )
@@ -122,11 +161,24 @@ def instrument_p3_player(source: str) -> str:
         "        try:\n            if stream_started:\n                stream.stop()\n"
         "        finally:\n            stream.close()\n",
     )
-    return replace_once(
+    source = replace_once(
         source,
         '        print("播放完成")\n',
-        '        print("P3 host playback metrics (not acoustic latency):", metrics)\n'
+        '    print("P3 host playback metrics (not acoustic latency):", metrics)\n'
         '    return metrics\n',
+    )
+    return replace_once(
+        source,
+        "            play_p3_file(file, self.stop_event, self.pause_event)\n",
+        '''            try:
+                play_p3_file(file, self.stop_event, self.pause_event)
+            except Exception as exc:
+                print(f"P3 playback failed: {exc}")
+                self.is_playing = False
+                self.is_paused = False
+                self.update_status(f"P3 playback failed: {exc}", "red")
+                return
+''',
     )
 
 

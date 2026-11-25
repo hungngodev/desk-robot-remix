@@ -100,6 +100,8 @@ def test_reports_underflow_pressure_and_host_timing(source, tmp_path):
     assert metrics["underflow_reports"] == 2
     assert metrics["underflow_reports_first_write"] == 1
     assert metrics["underflow_reports_after_pause"] == 0
+    assert metrics["underflow_reports_active"] == 1
+    assert metrics["termination"] == "eof"
     assert metrics["output_overrun_reports"] is None
     assert metrics["writes_exceeding_available_frames"] == 2
     assert metrics["min_write_available_frames"] == 0
@@ -119,6 +121,7 @@ def test_pause_underflow_report_separate(source, tmp_path):
     metrics = player(path, pause_event=SimpleNamespace(is_set=lambda: next(states)))
     assert metrics["underflow_reports"] == metrics["underflow_reports_after_pause"] == 1
     assert metrics["underflow_reports_first_write"] == 0
+    assert metrics["underflow_reports_active"] == 0
     assert metrics["max_write_ms"] == pytest.approx(10)
 
 
@@ -130,6 +133,8 @@ def test_empty_file_no_fabricated_measurements(source, tmp_path):
     assert metrics["max_write_ms"] is None
     assert metrics["min_write_available_frames"] is None
     assert metrics["output_overrun_reports"] is None
+    assert metrics["output_latency_estimate_ms"] is None
+    assert metrics["termination"] == "empty"
     assert calls == ["start", "stop", "close"]
 
 
@@ -141,7 +146,10 @@ def test_original_discards_underflow(source, tmp_path):
 
 def test_drift_rejected(source):
     with pytest.raises(ValueError, match="anchor changed"):
-        overlay.instrument_p3_player(source.replace("stream.write(audio_array)", "stream.write(other)"))
+        overlay.instrument_p3_player(
+            source.replace("stream.write(audio_array)", "stream.write(other)")
+        )
+
 
 @pytest.mark.parametrize(("stage", "expected"), [
     ("start", ["start", "close"]),
@@ -169,4 +177,40 @@ def test_stop_preempts_remaining_packets(source, tmp_path):
     )
     assert metrics["submitted_frames"] == 960
     assert metrics["write_calls"] == 1
+    assert metrics["termination"] == "stopped"
     assert calls == ["start", 960, "stop", "close"]
+
+
+@pytest.mark.parametrize("tail", [
+    b"\x00", b"\x00\x00", b"\x00\x00\x00", struct.pack(">BBH", 0, 0, 0),
+    struct.pack(">BBH", 0, 0, 3) + b"9", struct.pack(">BBH", 1, 0, 1) + b"9",
+    struct.pack(">BBH", 0, 1, 1) + b"9", struct.pack(">BBH", 0, 0, 1) + b"0",
+    struct.pack(">BBH", 0, 0, 4) + b"1000", struct.pack(">BBH", 0, 0, 1) + b"!",
+])
+@pytest.mark.parametrize("valid_prefix", [False, True])
+def test_corrupt_packet_never_reports_success(source, tmp_path, capsys, tail, valid_prefix):
+    path = packets(tmp_path / "bad.p3", *([960] if valid_prefix else []))
+    path.write_bytes(path.read_bytes() + tail)
+    player, calls = make_player(
+        overlay.instrument_p3_player(source), [False] if valid_prefix else [],
+        [960] if valid_prefix else [], [0, 0.01, 0.02] if valid_prefix else [0],
+    )
+    with pytest.raises(ValueError):
+        player(path)
+    assert calls == ["start"] + ([960] if valid_prefix else []) + ["stop", "close"]
+    assert "P3 host playback metrics" not in capsys.readouterr().out
+
+
+def test_repeated_pause_does_not_contaminate_active_reports(source, tmp_path):
+    player, _ = make_player(
+        overlay.instrument_p3_player(source), [True] * 4, [960] * 4, list(range(9)),
+    )
+    states = iter([True, True, False, False, True, False, False, False])
+    metrics = player(
+        packets(tmp_path / "pause.p3", 960, 960, 960, 960),
+        pause_event=SimpleNamespace(is_set=lambda: next(states)),
+    )
+    assert metrics["underflow_reports"] == 4
+    assert metrics["underflow_reports_first_write"] == 1
+    assert metrics["underflow_reports_after_pause"] == 2
+    assert metrics["underflow_reports_active"] == 2
