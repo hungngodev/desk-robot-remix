@@ -120,6 +120,36 @@ async def test_uncertain_commands_not_retried_and_stop_finally(settings, failure
         await c.close()
 
 
+@pytest.mark.parametrize("failure", ["drive", "keepalive"])
+async def test_failed_motion_retires_deferred_request_after_halt_recovery(settings, failure):
+    c, head = make(settings)
+    robot_id = "robot-01"
+    try:
+        await c.operator_arm(robot_id)
+        c.set_voice_state(active_robots={"robot-02"})
+        request = c.defer_motion(
+            robot_id, "manual",
+            submit_fn=lambda: c.manual(robot_id, "drive 10 10 100"),
+        )
+        c.set_voice_state(active_robots=set())
+        # A new explicit operation can win the fleet owner before the
+        # deferred dispatcher runs. Its link failure must retire old intent.
+        await c.operator_arm(robot_id)
+        head.fail_command = failure
+        job = c.manual(robot_id, "drive 20 20 100")
+        await c.tasks[job.id]
+        assert job.state == "failed"
+        assert head.commands[-1] == "halt"
+        assert request.state == "discarded"
+        assert request.job_id is None
+        head.fail_command = None
+        assert await c.dispatch_next_deferred() is None
+        assert "drive 10 10 100" not in head.commands
+        assert len(c.jobs) == 1
+    finally:
+        await c.close()
+
+
 async def test_cancel_queued_job_can_enable_next_job(settings):
     c, head = make(settings)
     try:

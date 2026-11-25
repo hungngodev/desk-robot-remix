@@ -861,6 +861,14 @@ class Coordinator:
                             f"{job.error or ''}; cancellation cleanup timed out"
                         )
                         job.state = "failed"
+                if job.state == "failed":
+                    # A recovered HALT confirms stopping, not renewed intent.
+                    # Retire deferred requests for this failed body before
+                    # releasing the fleet owner or scheduling another dispatch.
+                    self.discard_deferred_motion(
+                        robot_id=job.robot_id,
+                        reason="Motion failure discarded deferred requests; fresh consent required",
+                    )
                 if stop_acknowledged and not unresponsive:
                     # An operation result is not a completed job until the
                     # terminal HALT receipt and cancelled children settle.
