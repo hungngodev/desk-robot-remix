@@ -155,43 +155,43 @@ int main() {
     CHECK(cap_failed_write_wire.extras == 0);
     CHECK(!cap_failed_write_wire.unsafe_parallel_mux);
 
-  // A formerly verified CAP1188 must recover from a real address NACK,
-  // without publishing old zones or monopolizing the shared safety bus.
-  for (bool preferred : {false, true}) {
-    TwoWire recovery_wire;
-    recovery_wire.cap_uses_0x29 = preferred;
-    desk_robot::ExpansionTouch recovery_cap;
-    std::uint8_t recovery_zones = 0;
-    CHECK(recovery_cap.begin(recovery_wire));
-    CHECK(recovery_cap.poll(100, recovery_zones));
-    recovery_wire.cap_connected = false;
-    recovery_zones = 0xBC;
-    CHECK(!recovery_cap.poll(180, recovery_zones));
-    CHECK(!recovery_cap.verified() && recovery_zones == 0xBC);
-    const auto transfers = recovery_wire.transactions;
-    CHECK(!recovery_cap.poll(200, recovery_zones));
-    CHECK(recovery_wire.transactions == transfers);
-    recovery_wire.cap_connected = true;
-    recovery_wire.cap_config = 0xF8;
-    recovery_wire.cap_config2 = 0x45;
-    recovery_wire.cap_recal_config = 0x7F;
-    recovery_wire.cap_multi_touch_block = 0x80;
-    recovery_wire.cap_noise_threshold = 3;
-    for (unsigned step = 0; step < 6; ++step) {
-      CHECK(!recovery_cap.poll(430 + step * 250, recovery_zones));
-      CHECK(recovery_cap.verified() == (step == 5));
-      CHECK(recovery_zones == 0xBC && recovery_wire.extras == 0 &&
-            recovery_wire.ranges == 0);
+    // A formerly verified CAP1188 must recover from a real address NACK,
+    // without publishing old zones or monopolizing the shared safety bus.
+    for (bool preferred : {false, true}) {
+      TwoWire recovery_wire;
+      recovery_wire.cap_uses_0x29 = preferred;
+      desk_robot::ExpansionTouch recovery_cap;
+      std::uint8_t recovery_zones = 0;
+      CHECK(recovery_cap.begin(recovery_wire));
+      CHECK(recovery_cap.poll(100, recovery_zones));
+      recovery_wire.cap_connected = false;
+      recovery_zones = 0xBC;
+      CHECK(!recovery_cap.poll(180, recovery_zones));
+      CHECK(!recovery_cap.verified() && recovery_zones == 0xBC);
+      const auto transfers = recovery_wire.transactions;
+      CHECK(!recovery_cap.poll(200, recovery_zones));
+      CHECK(recovery_wire.transactions == transfers);
+      recovery_wire.cap_connected = true;
+      recovery_wire.cap_config = 0xF8;
+      recovery_wire.cap_config2 = 0x45;
+      recovery_wire.cap_recal_config = 0x7F;
+      recovery_wire.cap_multi_touch_block = 0x80;
+      recovery_wire.cap_noise_threshold = 3;
+      for (unsigned step = 0; step < 6; ++step) {
+        CHECK(!recovery_cap.poll(430 + step * 250, recovery_zones));
+        CHECK(recovery_cap.verified() == (step == 5));
+        CHECK(recovery_zones == 0xBC && recovery_wire.extras == 0 &&
+              recovery_wire.ranges == 0);
+      }
+      CHECK(recovery_wire.cap_config == 0xC0 && recovery_wire.cap_config2 == 0x41);
+      CHECK(recovery_wire.cap_recal_config == 0x0A &&
+            recovery_wire.cap_multi_touch_block == 0);
+      CHECK(recovery_wire.cap_noise_threshold == 1);
+      recovery_wire.cap_touch_bits = 0xA5;
+      CHECK(recovery_cap.poll(1760, recovery_zones));
+      CHECK(recovery_zones == 0xA5 && recovery_wire.extras == 0 &&
+            !recovery_wire.unsafe_parallel_mux);
     }
-    CHECK(recovery_wire.cap_config == 0xC0 && recovery_wire.cap_config2 == 0x41);
-    CHECK(recovery_wire.cap_recal_config == 0x0A &&
-          recovery_wire.cap_multi_touch_block == 0);
-    CHECK(recovery_wire.cap_noise_threshold == 1);
-    recovery_wire.cap_touch_bits = 0xA5;
-    CHECK(recovery_cap.poll(1760, recovery_zones));
-    CHECK(recovery_zones == 0xA5 && recovery_wire.extras == 0 &&
-          !recovery_wire.unsafe_parallel_mux);
-  }
     // Corrupted high bits in a FIFO pointer must not be silently masked
     // into a plausible fresh touch sample. The 0x71 lane closes on error.
     for (const int reg : {0, 1, 2}) {
@@ -1105,6 +1105,61 @@ int main() {
       shunt_accessories.poll(ms);
     CHECK(sat_gauge.monitor_valid && sat_gauge.monitor_sample_seq > good_mon_seq);
     CHECK(sat_gauge.monitor_at_ms > good_mon_at);
+    // A failure of either INA226 register invalidates current only.
+    // Independent MAX17048 conversions must continue to advance.
+    for (const int reg : {0x01, 0x02}) {
+      TwoWire ina_wire;
+      desk_robot::AccessorySensors ina_accessories;
+      CHECK(ina_accessories.begin(ina_wire));
+      for (std::uint32_t ms = 0; ms < 1008; ms += 12)
+        ina_accessories.poll(ms);
+      const auto before = ina_accessories.readings().gauge;
+      CHECK(before.monitor_valid && before.fuel_valid);
+      ina_wire.fail_ina_read_register = reg;
+      for (std::uint32_t ms = 1008; ms < 1344; ms += 12)
+        ina_accessories.poll(ms);
+      const auto after = ina_accessories.readings().gauge;
+      CHECK(!after.monitor_valid && !after.pack_current_valid);
+      CHECK(after.monitor_sample_seq == before.monitor_sample_seq);
+      CHECK(after.monitor_at_ms == before.monitor_at_ms);
+      CHECK(after.fuel_valid && after.fuel_sample_seq > before.fuel_sample_seq);
+      ina_wire.fail_ina_read_register = -1;
+      for (std::uint32_t ms = 1344; ms < 1680; ms += 12)
+        ina_accessories.poll(ms);
+      const auto recovered = ina_accessories.readings().gauge;
+      CHECK(recovered.monitor_valid);
+      CHECK(recovered.monitor_sample_seq > before.monitor_sample_seq);
+      CHECK(recovered.monitor_at_ms > before.monitor_at_ms);
+      CHECK(ina_wire.extras == 0 && !ina_wire.unsafe_parallel_mux);
+    }
+
+    // A failed SHT41 conversion command must invalidate the preceding
+    // accepted sample; unrelated force and battery inputs stay live.
+    TwoWire sht_wire;
+    desk_robot::AccessorySensors sht_accessories;
+    CHECK(sht_accessories.begin(sht_wire));
+    for (std::uint32_t ms = 0; ms < 1008; ms += 12)
+      sht_accessories.poll(ms);
+    CHECK(sht_accessories.readings().climate.valid);
+    sht_wire.fail_sht_command = true;
+    for (std::uint32_t ms = 1008; ms < 1344; ms += 12)
+      sht_accessories.poll(ms);
+    const auto failed_climate = sht_accessories.readings().climate;
+    CHECK(!failed_climate.valid);
+    for (std::uint32_t ms = 1344; ms < 1680; ms += 12)
+      sht_accessories.poll(ms);
+    const auto& current_climate = sht_accessories.readings().climate;
+    CHECK(!current_climate.valid);
+    CHECK(current_climate.sample_seq == failed_climate.sample_seq);
+    CHECK(current_climate.at_ms == failed_climate.at_ms);
+    CHECK(sht_accessories.readings().gauge.fuel_valid);
+    CHECK(sht_accessories.readings().force.valid);
+    sht_wire.fail_sht_command = false;
+    for (std::uint32_t ms = 1680; ms < 2016; ms += 12)
+      sht_accessories.poll(ms);
+    CHECK(current_climate.valid);
+    CHECK(current_climate.sample_seq > failed_climate.sample_seq);
+    CHECK(sht_wire.extras == 0 && !sht_wire.unsafe_parallel_mux);
     std::cout << "PASS optional sensor register IO, MCP GPIOB, NFC and isolated mux slots\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << '\n';

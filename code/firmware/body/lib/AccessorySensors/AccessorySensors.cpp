@@ -359,6 +359,8 @@ void AccessorySensors::climate(std::uint32_t now_ms) {
   if (!c.present) return;
   if (!sht_pending_) {
     sht_pending_ = write_command(0x44, 0xFD); // highest precision, no clock stretch
+    // A rejected command is lost transport evidence, not a new conversion.
+    if (!sht_pending_) c.valid = false;
     sht_started_ = now_ms;
     return;
   }

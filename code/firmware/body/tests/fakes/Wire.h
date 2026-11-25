@@ -25,6 +25,8 @@ class TwoWire {
   bool pending_sht = false;
   bool fail_dock_gpio = false;
   bool fail_fuel_register_read = false;
+  int fail_ina_read_register = -1;
+  bool fail_sht_command = false;
   std::uint16_t ina226_shunt_raw = 0x0010U;
   bool fail_optional_gpio = false;
   bool fail_mcp_register_write = false;
@@ -193,6 +195,8 @@ class TwoWire {
       return 5; // Arduino-ESP32 endTransmission timeout
     }
     if (!connected(current_address)) return 4;
+    if (fail_sht_command && current_address == 0x44 &&
+        outbound.size() == 1 && outbound[0] == 0xFD) return 4;
     // Fail only the ADS1115 single-shot config WRITE, not its mux or reads.
     if (fail_ads_config_write && current_address == 0x48 &&
         outbound.size() == 3 && outbound[0] == 0x01) {
@@ -298,6 +302,8 @@ class TwoWire {
             static_cast<std::uint8_t>((pulse_fifo_read_pointer + 1U) & 31U);
       return 0;
     }
+    if (addr == 0x40 && extras == 16 &&
+        register_address == fail_ina_read_register) return 0;
     if (fail_fuel_register_read && addr == 0x36 && extras == 16 &&
         (register_address == 0x02 || register_address == 0x04)) return 0;
     if (addr == 0x70) {
