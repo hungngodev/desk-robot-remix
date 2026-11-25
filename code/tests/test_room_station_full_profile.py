@@ -756,28 +756,40 @@ def test_room_report_uses_completed_sensor_acquisitions():
 def test_scd_completion_timestamp_is_not_poll_start(tmp_path):
     src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
     step = "void scd_step(" + src.split("void scd_step(", 1)[1].split(
-        "void scd_observation(", 1
+        "void bme_step(", 1
     )[0]
     harness = r"""
 #include <cassert>
 #include <cstdint>
 #include <cmath>
+#include <initializer_list>
 #include "scd_sample_freshness.h"
 using std::isfinite;
 uint32_t clock_ms;
 uint32_t millis() { return clock_ms; }
 constexpr uint32_t kScdNoSampleMs = 15000;
+constexpr uint32_t kScdStaleMs = 8500;
+#define F(x) x
+struct FakeTelemetry {
+  unsigned fields = 0;
+  template <typename T> void print(T) { ++fields; }
+} telemetry;
+bool reported_fresh;
+void jsbool(bool value) { reported_fresh = value; }
+void number(float value) { telemetry.print(value); }
 bool scd_started, scd_valid;
 uint32_t last_scd_ms, scd_started_ms;
 uint16_t co2_ppm;
 float scd_temp, scd_humidity;
-bool finite_temperature(float t) { return isfinite(t) && t >= -40 && t <= 85; }
+bool finite_temperature(float t) { return isfinite(t) && t >= -40 && t <= 125; }
 struct FakeScd {
   bool ready = true;
   int status = 0, measurement_status = 0;
+  uint16_t ppm = 700;
+  float temp = 22, humidity = 40;
   int getDataReadyStatus(bool& r) { clock_ms += 3; r = ready; return status; }
   int readMeasurement(uint16_t& p, float& t, float& rh) {
-    clock_ms += 7; p = 700; t = 22; rh = 40; return measurement_status;
+    clock_ms += 7; p = ppm; t = temp; rh = humidity; return measurement_status;
   }
 } scd;
 """ + step + r"""
@@ -798,7 +810,66 @@ void run(uint32_t start) {
   scd_step(clock_ms);
   assert(!scd_valid && !scd_started && last_scd_ms == start + 10U);
 }
-int main() { run(100); run(UINT32_MAX - 5); }
+void run_boundaries(uint32_t start) {
+  const auto reset = [&]() {
+    clock_ms = scd_started_ms = start;
+    scd_started = true; scd_valid = false; scd = FakeScd{};
+    scd_step(clock_ms);
+    assert(scd_valid && scd_started);
+  };
+  const auto check_report = [&](uint32_t now, bool expected) {
+    telemetry.fields = 0;
+    scd_observation(now);
+    assert(reported_fresh == expected);
+    assert(telemetry.fields == (expected ? 10U : 2U));
+  };
+  reset();
+  const uint32_t sample = last_scd_ms;
+  scd.ready = false;
+  clock_ms = sample + 8497U;
+  scd_step(clock_ms);
+  assert(last_scd_ms == sample);
+  check_report(clock_ms, true);
+  check_report(clock_ms + 1U, false);
+  clock_ms = sample + 14994U;
+  scd_step(clock_ms);
+  assert(scd_started);
+  scd_step(clock_ms);
+  assert(!scd_started && !scd_valid);
+  check_report(clock_ms, false);
+  for (uint16_t ppm : {0U, 50001U, 65535U}) {
+    reset();
+    scd.ppm = ppm;
+    scd_step(clock_ms);
+    assert(!scd_started && !scd_valid && last_scd_ms == sample);
+    check_report(clock_ms, false);
+  }
+  for (uint16_t ppm : {1U, 50000U}) {
+    reset();
+    scd.ppm = ppm;
+    scd_step(clock_ms);
+    assert(scd_started && scd_valid && co2_ppm == ppm);
+    check_report(clock_ms, true);
+  }
+  for (float humidity : {-1.0f, 101.0f, NAN, INFINITY}) {
+    reset();
+    scd.humidity = humidity;
+    scd_step(clock_ms);
+    assert(!scd_started && !scd_valid && last_scd_ms == sample);
+    check_report(clock_ms, false);
+  }
+  for (float temp : {-41.0f, 126.0f, NAN, INFINITY}) {
+    reset();
+    scd.temp = temp;
+    scd_step(clock_ms);
+    assert(!scd_started && !scd_valid && last_scd_ms == sample);
+    check_report(clock_ms, false);
+  }
+}
+int main() {
+  run(100); run(UINT32_MAX - 5);
+  run_boundaries(100); run_boundaries(UINT32_MAX - 5);
+}
 """
     compiler = shutil.which("c++")
     assert compiler is not None
