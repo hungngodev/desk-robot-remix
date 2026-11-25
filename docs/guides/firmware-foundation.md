@@ -25,24 +25,29 @@ required purchase or a completed firmware-build claim.
 ## Body builds
 
 ```sh
-PLATFORMIO_CORE_DIR="$PWD/../.tools/platformio" ../.tools/body-pio-venv/bin/pio run -d firmware/body -e esp32_stepper
-PLATFORMIO_CORE_DIR="$PWD/../.tools/platformio" ../.tools/body-pio-venv/bin/pio run -d firmware/body -e esp32dev
+PLATFORMIO_CORE_DIR="$PWD/../.tools/platformio" ../.tools/body-pio-venv/bin/pio run -d firmware/body -e esp32_full
 ```
+
+For the separate guarded DC alternative only, use `-e esp32_dc_full` with
+its own verified harness. The historical `esp32_stepper` and `esp32dev`
+profiles are not the selected first-unit build. See [the complete build
+route](build.md) for prerequisites and logic-only upload.
 
 `esp32_full` is the default eight-VL53L0X profile, with motor power
 intentionally disabled until its independent cutoff is physically qualified.
 The five-channel `esp32_stepper` bench profile uses the eight phase pins in
 [BodyPins.h](../../code/firmware/body/include/BodyPins.h), two positional servo signals
 and existing 115200 UART. `esp32dev` explicitly preserves the earlier DC/DRV8833
-profile with its different four-wire motor allocation. Never connect a binary
-to the other profile's motor wiring. No upload command was run.
+profile with its different four-wire motor allocation, but is actuator inert:
+no successful ARM, wheel or servo actuation. Never connect a binary to the
+other profile's motor wiring. No upload command was run.
 
 `StepperDrive` uses half steps, signed requests clamped to40%, acceleration and
 reversal through zero. Its unqualified scheduling ceiling is160 half-steps/s,
 not measured speed or torque. A stopped/disabled output clears coils immediately
 and preserves the phase index. Delayed calls never emit a catch-up burst. Coil-off
 means coast, not qualified braking; loaded stopping and temperature still need tests.
-Drive remains bounded to250ms and communication loss to500ms. Keepalives do not
+Drive remains bounded to 250 ms and communication loss to 500 ms. Keepalives do not
 extend a drive pulse. Step timing never uses blocking multi-step calls.
 
 ## Sensor policy and recovery
@@ -79,8 +84,9 @@ No fabricated calibration is in firmware, so a fresh unassembled image cannot
 arm on its own. The actual breakouts, optical heights, surface reflectance,
 loaded stop margin, power rail and current cost remain unqualified.
 
-The existing USB bench helper can now inspect five distance/age/validity
-channels and the BerryIMU identity without moving any motor. An explicitly
+The existing USB bench helper can inspect the five guarded distance/age/validity
+channels and IMU identity without moving any motor. The installed target is
+MPU6050; BerryIMU remains an optional spare, not the default sensor. An explicitly
 qualified operator may request a **local USB-only** `--local-rearm` for a
 supervised catch-tray command, after real measured calibration; it cannot
 mint an AI permit or bypass a physical fault. The Mac performs read-only
@@ -127,14 +133,16 @@ Keep the $50 delivered cap, actual inventory gaps and small-remix constraint.
 Qualify real sensing/power/geometry before roaming, then add stationary original
 face animation and the Mac pet scheduler. Repeat one validated core for five.
 
-## Read-only BerryIMU identity and optional peer text sharing
+## Installed MPU6050 and optional peer text sharing
 
-The single WROOM I2C owner also probes WHO_AM_I once at boot to distinguish
-likely BerryIMU V1 LSM9DS0, V2 LSM9DS1 or V3 LSM6DSL/LIS3MDL.
-An unrecognized ID remains unknown. This is **not a gyro/accelerometer
-driver or A11 attitude safety test**. Matching licensed Adafruit or SparkFun
-drivers must be pinned only after actual board identification and checked
-sample timing; no software guess declares the owned module usable.
+The single WROOM I2C owner probes WHO_AM_I for the selected MPU6050 and
+supported legacy BerryIMU identities. The full body requires a fresh IMU and
+qualified installed attitude limits; `main.cpp` reports
+`WARN imu_attitude_unqualified wheels_locked` when those limits are absent.
+Use [IMU handling](imu-handling.md) and measure the installed upright axes,
+limits and vibration before requesting local recovery. Raw samples, a recognized
+identity, and source-level guard tests are not an A11 physical attitude pass.
+The reported BerryIMU is a spare and must not silently replace the MPU6050.
 
 The existing five robot Mac `PetController` can optionally share bounded
 observed text between the **five independent per-robot SQLite memories**.
