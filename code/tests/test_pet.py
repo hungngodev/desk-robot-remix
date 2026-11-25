@@ -8683,9 +8683,13 @@ async def test_quiet_toggle_does_not_replay_touch_awaiting_memory(
         await pet.close()
 
 
-async def test_pet_initial_low_battery_and_dock_pin_inhibition_status(fleet, tmp_path):
+@pytest.mark.parametrize("auto_dock", (False, True))
+async def test_pet_initial_low_battery_and_dock_pin_inhibition_status(
+    fleet, tmp_path, monkeypatch, auto_dock,
+):
     """Initial sustained low battery fires callback once; dock contact flags inhibit without claiming charge."""
     fleet.mode = "hardware"
+    fleet.robots[0].autonomous_low_battery_dock_enabled = auto_dock
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
     dock_calls: list[tuple[str, bool]] = []
     inhibit_calls: list[tuple[str, bool]] = []
@@ -8707,6 +8711,7 @@ async def test_pet_initial_low_battery_and_dock_pin_inhibition_status(fleet, tmp
     state = pet.states["robot-01"]
     state.enabled = True
     state.generation = 92
+    state.quiet = auto_dock
 
     def sample(seq: int, *, soc: int = 1800, dock_seq: int | None = None, seated: bool = False):
         pkt = {
@@ -8734,6 +8739,16 @@ async def test_pet_initial_low_battery_and_dock_pin_inhibition_status(fleet, tmp
             }
         return pkt
 
+    store_observation = pet._store_observation
+
+    async def observe_after_dock_request(robot_id, change):
+        if auto_dock and change.kind == "battery_low":
+            # Optional memory can block; physical handling must already
+            # have been requested, even when the pet is quiet.
+            assert dock_calls == [("robot-01", True)]
+        return await store_observation(robot_id, change)
+
+    monkeypatch.setattr(pet, "_store_observation", observe_after_dock_request)
     try:
         for seq in (1, 2, 3, 4):
             await pet._observe_aux("robot-01", 92, sample(seq, soc=1800))

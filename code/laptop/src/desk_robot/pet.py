@@ -1541,6 +1541,38 @@ class PetController:
             except (OSError, ValueError, sqlite3.Error) as exc:
                 state.last_error = f"Dock retry recovery: {type(exc).__name__}"
 
+        # Reserve and dispatch physical low-charge handling before optional
+        # observation memory and speech can exhaust the fuel freshness budget.
+        if (
+            dock_request_initial_low is not None
+            and state.enabled
+            and state.generation == generation
+            and not self._closed
+            and not state.low_battery_dock_episode_attempted
+            and not self.is_dock_charging_inhibited(robot_id)
+            and callable(getattr(self, "on_low_battery_dock", None))
+        ):
+            state.low_battery_dock_episode_attempted = True
+            dispatch = not robot.autonomous_low_battery_dock_enabled
+            if robot.autonomous_low_battery_dock_enabled and auto_dock and fresh_fuel:
+                try:
+                    reserved = await asyncio.to_thread(
+                        self.memory.dock_retry_transition, robot_id, fuel_boot, fuel_seq,
+                        recovered=False,
+                    )
+                except (OSError, ValueError, sqlite3.Error) as exc:
+                    state.last_error = f"Dock retry reservation: {type(exc).__name__}"
+                else:
+                    dispatch = (
+                        reserved and state.enabled and state.generation == generation
+                        and not self._closed and not self.is_dock_charging_inhibited(robot_id)
+                        and robot.autonomous_low_battery_dock_enabled
+                        and fuel_age + request_elapsed_ms
+                        + (time.monotonic() - received_at) * 1000 < 500
+                    )
+            if dispatch:
+                await self._trigger_low_battery_dock(robot_id, dock_request_initial_low)
+
         for change in changes:
             if not state.enabled or state.generation != generation:
                 return
@@ -1552,34 +1584,6 @@ class PetController:
             self._consider_speech(
                 robot_id, change, generation, received_at=received_at,
             )
-        if (
-            dock_request_initial_low is not None
-            and state.enabled
-            and state.generation == generation
-            and not self._closed
-            and not state.low_battery_dock_episode_attempted
-            and not self.is_dock_charging_inhibited(robot_id)
-            and callable(getattr(self, "on_low_battery_dock", None))
-        ):
-            state.low_battery_dock_episode_attempted = True
-            if robot.autonomous_low_battery_dock_enabled:
-                if not auto_dock or not fresh_fuel:
-                    return
-                try:
-                    reserved = await asyncio.to_thread(
-                        self.memory.dock_retry_transition, robot_id, fuel_boot, fuel_seq,
-                        recovered=False,
-                    )
-                except (OSError, ValueError, sqlite3.Error) as exc:
-                    state.last_error = f"Dock retry reservation: {type(exc).__name__}"
-                    return
-                if (not reserved or not state.enabled or state.generation != generation
-                        or self._closed or self.is_dock_charging_inhibited(robot_id)
-                        or not robot.autonomous_low_battery_dock_enabled
-                        or fuel_age + request_elapsed_ms
-                        + (time.monotonic() - received_at) * 1000 >= 500):
-                    return
-            await self._trigger_low_battery_dock(robot_id, dock_request_initial_low)
 
     async def _poll_touch(self, robot_id: str, generation: int) -> None:
         """Dedicated local body status reader; camera/VLM cannot starve touch.
