@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import math
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 
 from .config import Settings
 from .transport import HeadError
@@ -83,6 +83,14 @@ def register_robot_status_routes(
             owner, robot_id, "Voice telemetry tool turn superseded during read"
         )
 
+    def telemetry_head(robot_id: str):
+        owner = coordinator()
+        owner.robot(robot_id)
+        head = owner.heads.get(robot_id)
+        if head is None:
+            raise HTTPException(503, "Telemetry head unavailable")
+        return head
+
     def previous_seq(key: tuple[str, str], boot: int) -> int | None:
         cursor = last_aux_context_seq.get(key)
         return cursor[1] if cursor is not None and cursor[0] == boot else None
@@ -100,10 +108,13 @@ def register_robot_status_routes(
 
     @app.get("/v1/robots/{robot_id}/status", dependencies=[Depends(authorize)])
     async def status(robot_id: str, request: Request):
-        coordinator().robot(robot_id)
+        head = telemetry_head(robot_id)
         context = requested_tool_context(request, robot_id)
         require_current_voice_tool(request, robot_id, context)
-        data = await coordinator().heads[robot_id].status()
+        getter = getattr(head, "status", None)
+        if not callable(getter):
+            raise HTTPException(503, "Status adapter unavailable")
+        data = await getter()
         require_current_voice_tool(request, robot_id, context)
         if not isinstance(data, dict) or data.get("robot_id") != robot_id:
             raise HeadError("Head status robot identity mismatch")
@@ -120,12 +131,12 @@ def register_robot_status_routes(
 
     @app.get("/v1/robots/{robot_id}/aux", dependencies=[Depends(authorize)])
     async def aux(robot_id: str, request: Request):
-        coordinator().robot(robot_id)
+        head = telemetry_head(robot_id)
         # Bind the requesting human turn before slow physical telemetry.
         # A new VAD epoch must not inherit the older tool's receipt.
         owner = requested_tool_context(request, robot_id)
         require_current_voice_tool(request, robot_id, owner)
-        getter = getattr(coordinator().heads[robot_id], "aux_status", None)
+        getter = getattr(head, "aux_status", None)
         if not callable(getter):
             return {"robot_id": robot_id, "available": False,
                     "reason": "No physical accessory telemetry adapter"}
