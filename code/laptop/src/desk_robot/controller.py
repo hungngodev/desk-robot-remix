@@ -18,7 +18,9 @@ from .dock_runtime import (
 )
 from .dock_vision import assess_dock
 from .grasp_feedback import guarded_grasp
-from .transport import Head, validate_command
+from .object_search import ObjectSearchResult, summarize_search_observation
+from .object_targets import ObjectTarget
+from .transport import Head, HeadError, validate_command
 from .vision import Detection, Vision, image_size
 
 _T = TypeVar("_T")
@@ -1788,7 +1790,12 @@ class Coordinator:
         if spatial is None:
             raise OperationError("Spatial runtime unavailable")
         camera_grant = self._camera_motion_grant()
-        route, _, _ = spatial.plan_navigation(
+        memory_grant = None
+        if label is not None and self.settings.mode == "hardware":
+            if not self.settings.voice_memory_tools_enabled:
+                raise OperationError("Object navigation requires private memory consent")
+            memory_grant = self.settings.voice_memory_consent_generation
+        route, target, search = spatial.plan_navigation(
             robot_id,
             start=start,
             heading=heading,
@@ -1811,6 +1818,9 @@ class Coordinator:
                 expected_epoch=expected_epoch,
                 label=label,
                 camera_grant=camera_grant,
+                memory_grant=memory_grant,
+                target=target,
+                search=search,
             ),
         )
 
@@ -1823,6 +1833,9 @@ class Coordinator:
         expected_epoch: int,
         label: str | None = None,
         camera_grant: int | None = None,
+        memory_grant: int | None = None,
+        target: ObjectTarget | None = None,
+        search: ObjectSearchResult | None = None,
     ) -> dict:
         from .object_detector import DetectorFrame
         from .route_planner import revalidate_route_step
@@ -1843,6 +1856,11 @@ class Coordinator:
             except OperationError:
                 spatial.invalidate_robot(job.robot_id, reason="camera_consent_revoked")
                 raise
+            if label is not None and self.settings.mode == "hardware" and (
+                memory_grant is None or not self.settings.voice_memory_tools_enabled
+                or self.settings.voice_memory_consent_generation != memory_grant
+            ):
+                raise OperationError("Navigation halted: memory consent changed")
             if self.dock_inhibited(job.robot_id):
                 raise OperationError("Navigation halted: robot seated or powered on dock")
             st = spatial.state(job.robot_id)
@@ -1984,26 +2002,50 @@ class Coordinator:
                     "physical_acceptance_pass": False,
                 }
 
-            if not robot.object_detector_qualified:
-                return {
-                    "status": "arrived_pending_detector_qualification",
-                    "arrived": False,
-                    "target_observed": False,
-                    "label": label,
-                    "final_cell": route.cells[-1],
-                    "motor_authorized": False,
-                    "charging_authorized": False,
-                    "physical_acceptance_pass": False,
-                }
+            def target_result(status: str, reason: str) -> dict:
+                return summarize_search_observation(
+                    label=label, final_cell=route.cells[-1], target=target,
+                    search=search, observation_status=status, reason=reason,
+                )
 
-            snap_fn = getattr(head, "snapshot_for_dock", head.snapshot)
-            raw_obs = await _bounded_head_reply(
-                snap_fn(), seconds=2.0, timeout_message="Navigation verification snapshot timeout"
-            )
+            await self._assert_armed_health(job.robot_id)
             _check_step_authority(route.cells[-1], route.cells[-1])
-            jpeg = raw_obs[0] if isinstance(raw_obs, tuple) else raw_obs
+            if self.voice_blocks_motion() is not None:
+                return target_result("rejected", "voice_barge_in")
+            if not robot.object_detector_qualified:
+                return target_result("rejected", "detector_not_qualified")
+
+            # The detector contract requires a mapped Mac capture time, not
+            # merely an MJPEG receipt timestamp or an ESP32 completion clock.
+            # Until the qualified stationary capture producer is integrated,
+            # never manufacture physical frame identity or a current sighting.
+            if self.settings.mode == "hardware":
+                return target_result("rejected", "camera_capture_clock_unmapped")
+
+            # Explicit synthetic replay only. Preserve monotonic simulated
+            # frame sequence even when the bounded observation list evicts rows.
+            try:
+                jpeg = await _bounded_head_reply(
+                    head.snapshot(), seconds=2.0,
+                    timeout_message="Navigation verification snapshot timeout",
+                )
+            except (HeadError, OSError, TimeoutError):
+                _check_step_authority(route.cells[-1], route.cells[-1])
+                return target_result("rejected", "camera_unavailable")
+            _check_step_authority(route.cells[-1], route.cells[-1])
+            if not isinstance(jpeg, bytes):
+                return target_result("rejected", "invalid_camera_jpeg")
             st = spatial.state(job.robot_id)
             now_us = spatial.now_us()
+            frame_seq = 1 + max((
+                item.frame_seq for item in st.observations
+                if item.camera_boot == st.camera_boot
+                and item.host_boot_id == spatial.host_boot_id
+                and item.camera_grant == self.settings.camera_consent_generation
+                and type(item.frame_seq) is int
+            ), default=0)
+            if not 1 <= frame_seq <= 0xFFFFFFFF:
+                return target_result("rejected", "simulation_frame_sequence_exhausted")
             frame = DetectorFrame(
                 robot_id=job.robot_id,
                 session_id=route.session_id,
@@ -2015,7 +2057,7 @@ class Coordinator:
                 camera_boot=st.camera_boot,
                 host_boot_id=spatial.host_boot_id,
                 camera_grant=self.settings.camera_consent_generation,
-                frame_seq=len(st.observations) + 1,
+                frame_seq=frame_seq,
                 captured_us=now_us,
                 received_us=now_us,
                 seen_at_wall_s=time.time(),
@@ -2037,31 +2079,13 @@ class Coordinator:
                     not job.id or self.jobs.get(job.id, job).state == "running"
                 ),
             )
+            await self._assert_armed_health(job.robot_id)
             _check_step_authority(route.cells[-1], route.cells[-1])
+            if self.voice_blocks_motion() is not None:
+                return target_result("rejected", "voice_barge_in")
             if receipt.evidence is not None:
                 spatial.record_object_sighting(job.robot_id, receipt.evidence)
-            if receipt.status == "camera_seen":
-                return {
-                    "status": "arrived_target_confirmed",
-                    "arrived": True,
-                    "target_observed": True,
-                    "label": label,
-                    "final_cell": route.cells[-1],
-                    "motor_authorized": False,
-                    "charging_authorized": False,
-                    "physical_acceptance_pass": False,
-                }
-            return {
-                "status": "no_current_sighting",
-                "reason": receipt.reason,
-                "arrived": False,
-                "target_observed": False,
-                "label": label,
-                "final_cell": route.cells[-1],
-                "motor_authorized": False,
-                "charging_authorized": False,
-                "physical_acceptance_pass": False,
-            }
+            return target_result(receipt.status, receipt.reason)
         except asyncio.CancelledError:
             spatial.invalidate_robot(job.robot_id, reason="navigation_cancelled")
             raise

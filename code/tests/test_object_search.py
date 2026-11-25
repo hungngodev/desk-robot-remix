@@ -3,7 +3,11 @@
 from dataclasses import replace
 
 import pytest
-from desk_robot.object_search import SearchViewpoint, propose_object_search
+from desk_robot.object_search import (
+    SearchViewpoint,
+    propose_object_search,
+    summarize_search_observation,
+)
 from desk_robot.object_targets import ObjectOwner, ObjectQuery, ObjectTarget
 from desk_robot.route_planner import GridSnapshot, RouteRequest, SafetyEnvelope
 
@@ -312,3 +316,34 @@ def test_nested_route_clock_cannot_rewind_outer_search(last_read, expected):
     if expected == "rejected":
         assert result.reason == "invalid_clock" and result.route is None
     assert not result.may_execute and not result.arrived
+
+
+@pytest.mark.parametrize(
+    ("observation", "remaining", "status", "exhausted"),
+    [
+        ("camera_seen", 0, "target_seen_unverified_location", False),
+        ("camera_not_seen", 0, "not_found_after_search", True),
+        ("camera_not_seen", 1, "no_current_sighting", False),
+        ("rejected", 0, "no_current_sighting", False),
+        ("inconclusive", 0, "no_current_sighting", False),
+    ],
+)
+def test_search_observation_never_promotes_detection_to_metric_arrival(
+    observation, remaining, status, exhausted,
+):
+    _, _, _, query, _, target, view = fixtures()
+    candidates = (view,)
+    if remaining:
+        candidates += (replace(view, viewpoint_id="view-2", priority=1, cell=(10, 7)),)
+    proposal = search(candidates=candidates)
+    assert proposal.remaining_viewpoints == remaining
+    result = summarize_search_observation(
+        label=query.label, final_cell=view.cell, target=target, search=proposal,
+        observation_status=observation, reason="detector_outcome",
+    )
+    assert result["status"] == status
+    assert result["search_exhausted"] is exhausted
+    assert result["last_seen_at_wall_s"] == target.seen_at_wall_s
+    assert result["target_observed"] is (observation == "camera_seen")
+    assert result["arrived"] is False and result["final_cell_verified"] is False
+    assert result["motor_authorized"] is False

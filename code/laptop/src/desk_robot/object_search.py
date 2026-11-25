@@ -45,6 +45,40 @@ class ObjectSearchResult:
     considered: int = 0
     may_execute: bool = False
     arrived: bool = False
+    remaining_viewpoints: int | None = None
+
+
+def summarize_search_observation(
+    *, label: str, final_cell: tuple[int, int], target: ObjectTarget | None,
+    search: ObjectSearchResult | None, observation_status: str, reason: str,
+) -> dict:
+    """Report an observation, not a verified metric arrival or search coverage."""
+    seen = observation_status == "camera_seen"
+    exhausted = (
+        observation_status == "camera_not_seen"
+        and search is not None and search.status == "viewpoint_proposal"
+        and search.remaining_viewpoints == 0
+    )
+    return {
+        "status": ("target_seen_unverified_location" if seen else
+                   "not_found_after_search" if exhausted else "no_current_sighting"),
+        "reason": "metric_target_location_unverified" if seen else reason,
+        "arrived": False,
+        "target_observed": seen,
+        "label": label,
+        "last_seen_at_wall_s": (
+            target.seen_at_wall_s if target is not None
+            and target.status == "last_seen" and target.source == "camera_seen" else None
+        ),
+        "search_viewpoint_id": search.viewpoint_id if search is not None else None,
+        "remaining_viewpoints": search.remaining_viewpoints if search is not None else None,
+        "search_exhausted": exhausted,
+        "final_cell": final_cell,
+        "final_cell_verified": False,
+        "motor_authorized": False,
+        "charging_authorized": False,
+        "physical_acceptance_pass": False,
+    }
 
 
 def propose_object_search(
@@ -246,7 +280,7 @@ def propose_object_search(
                 return refuse("invalid_route_receipt", considered)
             return ObjectSearchResult(
                 "viewpoint_proposal", "must_reobserve_target", view.viewpoint_id,
-                proposal, considered,
+                proposal, considered, remaining_viewpoints=len(candidates) - considered,
             )
         if proposal.reason not in {"no_safe_route", "unsafe_goal"}:
             return refuse(proposal.reason, considered)

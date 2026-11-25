@@ -213,7 +213,10 @@ def test_spatial_endpoints_and_navigation_fail_closed_by_default(settings, token
         )
 
 
-def test_api_spatial_search_navigate_and_target_confirmation(settings, tokens, tmp_path, monkeypatch):
+@pytest.mark.parametrize("observation", ["seen", "missing", "camera_failed"])
+def test_api_spatial_search_navigate_and_target_confirmation(
+    settings, tokens, tmp_path, monkeypatch, observation,
+):
     """End-to-end API navigate uses SearchViewpoint -> plan_route -> live head steps -> detector verification."""
     settings.memory_dir = tmp_path / "memory"
     settings.trials_file = tmp_path / "trials.jsonl"
@@ -243,7 +246,13 @@ def test_api_spatial_search_navigate_and_target_confirmation(settings, tokens, t
         head = SpatialHead("robot-01")
         rt.coordinator.heads["robot-01"] = head
         rt.pet.heads["robot-01"] = head
-        rt.coordinator.vision = FakeKeyVision(True)
+        rt.coordinator.vision = FakeKeyVision(observation == "seen")
+        original_snapshot = head.snapshot
+        if observation == "camera_failed":
+            async def unavailable_snapshot():
+                raise TimeoutError("Injected camera interruption")
+
+            head.snapshot = unavailable_snapshot
         rt.coordinator.set_voice_state(monitor_enforced=False, monitor_ready=True)
 
         _seed_safe_grid(rt.spatial, "robot-01", head)
@@ -354,9 +363,20 @@ def test_api_spatial_search_navigate_and_target_confirmation(settings, tokens, t
             time.sleep(0.05)
 
         assert job["state"] == "succeeded"
-        assert job["result"]["status"] == "arrived_target_confirmed"
-        assert job["result"]["arrived"] is True
-        assert job["result"]["target_observed"] is True
+        expected = {
+            "seen": "target_seen_unverified_location",
+            "missing": "not_found_after_search",
+            "camera_failed": "no_current_sighting",
+        }[observation]
+        assert job["result"]["status"] == expected
+        assert job["result"]["arrived"] is False
+        assert job["result"]["target_observed"] is (observation == "seen")
+        assert job["result"]["search_exhausted"] is (observation == "missing")
+        assert job["result"]["last_seen_at_wall_s"] == now_wall - 10.0
+        assert job["result"]["final_cell_verified"] is False
+        if observation == "camera_failed":
+            assert job["result"]["reason"] == "camera_unavailable"
+        head.snapshot = original_snapshot
         assert job["result"]["motor_authorized"] is False
         assert job["result"]["physical_acceptance_pass"] is False
         assert "arm" in head.commands and "halt" in head.commands
