@@ -136,7 +136,9 @@ _MAX_TIMELINE_SCAN = 256
 def _fresh_valid_safety_fault(item: object) -> bool:
     if not isinstance(item, dict):
         return False
-    if item.get("channel") != "sensor" or item.get("kind") != "safety_fault":
+    channel, kind = item.get("channel"), item.get("kind")
+    if (type(channel) is not str or type(kind) is not str
+            or channel != "sensor" or kind != "safety_fault"):
         return False
     source = item.get("source")
     if source is not None and source != "wroom_event":
@@ -249,7 +251,11 @@ def compose_brain_context(
         if not isinstance(item, dict):
             continue
         channel, kind = item.get("channel"), item.get("kind")
-        if not isinstance(channel, str) or channel not in priorities:
+        # Match MemoryStore's plain-string identifier boundary before
+        # using untrusted cue identifiers as dictionary or set keys.
+        # A missing kind is still valid for generic camera/voice receipts.
+        if (type(channel) is not str or channel not in priorities
+                or (kind is not None and type(kind) is not str)):
             continue
         # Group every camera JPEG receipt under one cue, not ten fake new
         # observations; preserve distinct physical sensor event kinds.
