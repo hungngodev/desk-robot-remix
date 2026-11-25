@@ -7,6 +7,7 @@ The existing authenticated HttpHead/PoseFence own the source validation.
 from __future__ import annotations
 
 import asyncio
+import math
 import sqlite3
 import time
 from typing import Annotated
@@ -31,6 +32,14 @@ class NavigateRequest(BaseModel):
     goal_heading: GridHeading | None = None
     start: tuple[GridCoordinate, GridCoordinate] | None = None
     heading: GridHeading | None = None
+
+
+def _mac_age_ms(now: float, observed_at: float | None) -> float | None:
+    """Elapsed Mac time only; missing or inconsistent clock evidence stays unknown."""
+    if type(observed_at) not in (int, float) or not 0 <= observed_at <= now:
+        return None
+    age_ms = (now - observed_at) * 1000
+    return age_ms if math.isfinite(age_ms) else None
 
 
 def register_spatial_pose_route(
@@ -72,12 +81,23 @@ def register_spatial_pose_route(
         if type(receipt) is not PoseReceipt or receipt.robot_id != robot_id:
             raise HeadError("Pose receipt robot identity mismatch")
         fence = getattr(head, "pose_fence", None)
-        current = fence.current(time.monotonic()) if isinstance(fence, PoseFence) else None
+        now = time.monotonic()
+        current = fence.current(now) if isinstance(fence, PoseFence) else None
+        blocked_reason = (
+            fence.blocked_reason if isinstance(fence, PoseFence) else "no_pose_fence"
+        )
+        if current is not None and current is not receipt:
+            blocked_reason = "receipt_not_current"
 
         return {
             "robot_id": robot_id,
             "schema_version": 1,
+            # Availability describes the diagnostic reply, not usable odometry.
             "available": True,
+            "mac_receipt_age_ms": _mac_age_ms(now, receipt.received_at),
+            "mac_request_age_ms": _mac_age_ms(now, receipt.request_started_at),
+            # The body clock has no verified synchronization to the Mac clock.
+            "source_age_ms": None,
             "pose": {
                 "body_boot": receipt.body_boot,
                 "origin": receipt.origin,
@@ -89,10 +109,8 @@ def register_spatial_pose_route(
                 "quality": receipt.quality,
                 "head_boot": receipt.head_boot,
             },
-            "local_odometry_continuous": current == receipt and current is not None,
-            "blocked_reason": (
-                fence.blocked_reason if isinstance(fence, PoseFence) else "no_pose_fence"
-            ),
+            "local_odometry_continuous": current is receipt,
+            "blocked_reason": blocked_reason,
             "needs_reanchor": True,
             "map_anchored": False,
             "navigation_authorized": False,
