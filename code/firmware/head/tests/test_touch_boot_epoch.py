@@ -132,6 +132,25 @@ int main() {
   if (zero.AcceptBoot(0) || zero.AcceptBoot(91)) return 20;
   if (!zero.AcceptBoot(92) || zero.Observe(2) != 0) return 21;
   if (zero.Observe(3) != 1) return 22;
+  // Same-boot stale samples must not lower the counter watermark or turn
+  // the previously seen count into a fresh touch, even across UART failures.
+  desk_robot::RealTouchEdges replay;
+  if (!replay.AcceptBoot(91) || replay.Observe(100) != 0) return 23;
+  if (replay.Observe(98) != 0 || replay.Observe(100) != 0) return 24;
+  if (replay.Observe(101) != 1) return 25;
+  replay.Reset();
+  if (replay.Observe(99) != 0 || replay.Observe(101) != 0) return 26;
+  if (replay.Observe(102) != 1) return 27;
+  if (replay.Observe(102u + 0x80000000u) != 0 ||
+      replay.Observe(103) != 1) return 28;
+  if (!replay.AcceptBoot(92) || replay.Observe(0xfffffffeu) != 0) return 29;
+  if (replay.Observe(0xffffffffu) != 1 || replay.Observe(0) != 1) return 30;
+  if (replay.Observe(0xffffffffu) != 0 || replay.Observe(0) != 0 ||
+      replay.Observe(1) != 1) return 31;
+  if (replay.AcceptBoot(91) || !replay.AcceptBoot(92) ||
+      replay.Observe(2) != 1) return 32;
+  desk_robot::RealTouchEdges no_boot;
+  if (no_boot.Observe(10) != 0 || no_boot.Observe(11) != 0) return 33;
   return 0;
 }
 """
