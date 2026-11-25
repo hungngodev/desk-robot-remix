@@ -44,9 +44,50 @@ static void check_jaw_adc_rail_isolation() {
     CHECK(!wire.unsafe_parallel_mux);
   }
 }
+static void check_ads_start_provenance() {
+  TwoWire wire;
+  desk_robot::AccessorySensors sensors;
+  CHECK(sensors.begin(wire));
+  for (std::uint32_t ms = 0; ms <= 96; ms += 12) sensors.poll(ms);
+  CHECK(sensors.readings().force.belly_sample_seq == 1U);
+  CHECK(sensors.readings().force.belly_at_ms == 12U);
+  // A prior conversion may still be running after a lost acquisition.
+  // The ADC ignores a start while busy; do not overwrite its identity.
+  wire.ads_conversion_ready = false;
+  for (std::uint32_t ms = 108; ms <= 180; ms += 12) sensors.poll(ms);
+  CHECK(wire.ads_config_high == 0xC3U);
+  CHECK(sensors.readings().force.valid_mask == 0U);
+  CHECK(sensors.readings().force.jaw_sample_seq == 0U);
+  wire.ads_conversion_ready = true;
+  for (std::uint32_t ms = 192; ms <= 264; ms += 12) sensors.poll(ms);
+  CHECK(wire.ads_config_high == 0xD3U);
+  CHECK(sensors.readings().force.jaw_sample_seq == 0U);
+  for (std::uint32_t ms = 276; ms <= 348; ms += 12) sensors.poll(ms);
+  CHECK(sensors.readings().force.jaw_sample_seq == 1U);
+  CHECK(sensors.readings().force.jaw_at_ms == 264U);
+  CHECK(sensors.readings().force.valid_mask == 2U);
+  CHECK(!sensors.readings().force.valid);
+  for (std::uint32_t ms = 360; ms <= 516; ms += 12) sensors.poll(ms);
+  CHECK(sensors.readings().force.valid);
+  CHECK(sensors.readings().force.belly_at_ms == 432U);
+  for (std::uint32_t ms = 528; ms <= 600; ms += 12) sensors.poll(ms);
+  wire.ads_conversion_ready = false;
+  for (std::uint32_t ms = 612; ms <= 936; ms += 12) sensors.poll(ms);
+  CHECK(sensors.readings().force.valid_mask == 0U);
+  CHECK(sensors.readings().force.jaw_sample_seq == 1U);
+  wire.ads_conversion_ready = true;
+  for (std::uint32_t ms = 948; ms <= 1020; ms += 12) sensors.poll(ms);
+  CHECK(sensors.readings().force.jaw_sample_seq == 1U);
+  for (std::uint32_t ms = 1032; ms <= 1104; ms += 12) sensors.poll(ms);
+  CHECK(sensors.readings().force.jaw_sample_seq == 2U);
+  CHECK(sensors.readings().force.jaw_at_ms == 1020U);
+  CHECK(sensors.readings().force.valid_mask == 2U);
+  CHECK(!wire.unsafe_parallel_mux);
+}
 int main() {
   try {
     check_jaw_adc_rail_isolation();
+    check_ads_start_provenance();
     desk_robot::AccessorySensors accessories;
     desk_robot::PulsePad pulse;
     desk_robot::ExpansionTouch touch;

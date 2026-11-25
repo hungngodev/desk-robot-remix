@@ -349,6 +349,16 @@ void AccessorySensors::force(std::uint32_t now_ms) {
   if (!f.present) return;
   if (!ads_pending_) {
     const std::uint16_t config = ads_channel_ == 0 ? 0xC383U : 0xD383U;
+    // TI ADS1115 single-shot mode ignores OS writes while a conversion is
+    // running. After a timeout or bus fault, wait for idle before starting
+    // a new conversion; never relabel the abandoned result as a new sample.
+    std::uint16_t previous_config = 0;
+    if (!read16(0x48, 0x01, previous_config) ||
+        (previous_config & 0x8000U) == 0U) {
+      f.valid = false;
+      f.valid_mask = 0;
+      return;
+    }
     // Losing the ADC config write invalidates the ENTIRE two-channel
     // reading, even if the optional mux itself still works correctly.
     // Otherwise an old accepted pair survives indefinitely as fresh force.
@@ -377,7 +387,7 @@ void AccessorySensors::force(std::uint32_t now_ms) {
   const bool status_read = read16(0x48, 0x01, config);
   // Do not increment an acquisition sequence for a cached conversion register.
   // OS=0 means the previous single-shot conversion is still in progress.
-  // Allow another 12ms mux round, but never wait indefinitely on a dead ADC.
+  // Allow another 84ms mux round, but never wait indefinitely on a dead ADC.
   if (status_read && (config & 0x8000U) == 0U &&
       now_ms - ads_started_ < 200U) return;
   std::uint16_t value = 0;
@@ -391,14 +401,16 @@ void AccessorySensors::force(std::uint32_t now_ms) {
   } else if (fresh && value != 0x7fffU && value != 0x8000U) {
     f.adc[ads_channel_] = static_cast<std::int16_t>(value);
     f.valid_mask |= static_cast<std::uint8_t>(1U << ads_channel_);
+    // Timestamp conservatively at the start of the single shot, not the
+    // later mux visit that retrieved its cached result.
     if (ads_channel_ == 0) {
       f.belly_sample_seq = next_nonzero_sensor_sequence(f.belly_sample_seq);
-      f.belly_at_ms = now_ms;
+      f.belly_at_ms = ads_started_;
     } else if (ads_channel_ == 1) {
       f.jaw_sample_seq = next_nonzero_sensor_sequence(f.jaw_sample_seq);
-      f.jaw_at_ms = now_ms;
+      f.jaw_at_ms = ads_started_;
     }
-    f.at_ms = now_ms;
+    f.at_ms = ads_started_;
   } else {
     // A clipped or mismatched conversion is local to this channel. Keep
     // the other channel's raw value, validity and acquisition identity.
