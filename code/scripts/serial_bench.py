@@ -252,6 +252,8 @@ def inspect_status(status: dict) -> dict:
 
 def transact_serial(port, command: str, *, receipt: dict | None = None) -> dict | str:
     """One bounded USB request; never accept a partial or short-written frame."""
+    # Validate the complete command BEFORE writing any bytes to the body.
+    expected = "OK rearm" if command == "rearm" else expected_ack(command)
     request = (command + "\n").encode("ascii")
     started_at = time.monotonic()
     if port.write(request) != len(request):
@@ -281,9 +283,7 @@ def transact_serial(port, command: str, *, receipt: dict | None = None) -> dict 
             response = json.loads(line)
             if not isinstance(response, dict):
                 raise ValueError("Expected one body JSON object")
-        elif command == "rearm" and line == "OK rearm":
-            response = line
-        elif command != "status" and command != "rearm" and line == expected_ack(command):
+        elif command != "status" and line == expected:
             response = line
         else:
             continue
@@ -316,9 +316,9 @@ def main():
         if args.samples != 10:
             p.error("--samples is for --inspect only")
         op = validate_command(args.command)
-        if op not in {"drive", "lift", "grip", "stop", "disarm"}:
-            p.error("Choose bounded drive/lift/grip or a stop/disarm")
-        if args.local_rearm and op in {"stop", "disarm"}:
+        if op not in {"drive", "lift", "grip", "stop", "disarm", "halt"}:
+            p.error("Choose bounded drive/lift/grip or stop/disarm/halt")
+        if args.local_rearm and op in {"stop", "disarm", "halt"}:
             p.error("Stopping does not require and must not invoke rearm")
         # validate_command accepts an omitted drive duration (250ms). Compute
         # this before opening USB or issuing motion, never after actuation.
@@ -388,7 +388,7 @@ def main():
             }, indent=2))
             return
 
-        if op in {"stop", "disarm"}:
+        if op in {"stop", "disarm", "halt"}:
             transact(args.command)
             print("Acknowledged " + op)
             return
@@ -415,8 +415,10 @@ def main():
                 transact("keepalive")
                 time.sleep(min(0.1, max(0, deadline - time.monotonic())))
         finally:
-            transact("stop")
-        print("Job ended; stop acknowledged. Servo angle is commanded, not measured.")
+            # End the standalone job without leaving an armed body lease.
+            # HALT retains servo PWM rather than dropping a held object.
+            transact("halt")
+        print("Job ended; halt acknowledged. Servo angle is commanded, not measured.")
 
 
 if __name__ == "__main__":

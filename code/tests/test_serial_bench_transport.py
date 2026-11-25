@@ -207,5 +207,23 @@ def test_valid_drive_duration_is_resolved_before_actuation(monkeypatch, capsys, 
     ]
     assert port.writes[4:-1]
     assert set(port.writes[4:-1]) == {b"keepalive\n"}
-    assert port.writes[-1] == b"stop\n"
-    assert "stop acknowledged" in capsys.readouterr().out
+    assert port.writes[-1] == b"halt\n"
+    assert "halt acknowledged" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("command", ["arm\nhalt", "drive 99 99", "rearm\narm", "stop\r"])
+def test_invalid_command_never_reaches_usb(monkeypatch, command):
+    port = FakePort([b"OK arm\n"])
+    clock(monkeypatch, port)
+    with pytest.raises(ValueError):
+        transact(port, command)
+    assert port.writes == []
+    assert port.reads == 0
+
+
+@pytest.mark.parametrize("command", ["halt", "rearm", "stop"])
+def test_valid_ack_remains_supported(monkeypatch, command):
+    port = FakePort([f"OK {command}\n".encode()])
+    clock(monkeypatch, port)
+    assert transact(port, command) == f"OK {command}"
+    assert port.writes == [f"{command}\n".encode()]
