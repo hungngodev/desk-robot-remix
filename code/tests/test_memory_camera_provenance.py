@@ -73,3 +73,49 @@ def test_camera_sidecar_is_trimmed_with_bounded_episode_store(tmp_path):
     assert memory.count("robot-01") == 250
     assert memory.get_episode("robot-01", "old-camera") is None
     assert memory.get_camera_provenance("robot-01", "old-camera") is None
+
+@pytest.mark.parametrize(("column", "value"), [
+    ("device_boot", 7.5),
+    ("device_boot", None),
+    ("device_frame", None),
+    ("device_frame", 0),
+    ("device_complete_us", "00019"),
+    ("device_complete_us", "18446744073709551616"),
+    ("device_complete_us", "١٩"),
+    ("device_complete_us", b"19"),
+    pytest.param("device_complete_us", "9" * 5000, id="oversized-device-clock"),
+    ("mac_received_at", "bad"),
+    ("mac_received_at", float("inf")),
+    ("mac_received_at", 1.0),
+])
+def test_dirty_persisted_camera_receipt_cannot_be_reinterpreted(tmp_path, column, value):
+    robots = ["robot-01", "robot-02"]
+    memory = MemoryStore(tmp_path, robots)
+    now = time.time()
+    receipt = CameraProvenance(now - 3, now, (7, 19, (1 << 64) - 1))
+    for robot in robots:
+        assert memory.remember(
+            robot, "same-event", "A key", kind="key", source_robot=robot,
+            witnessed=True, observed_at=now - 3, camera_provenance=receipt,
+        )
+    with memory._connect("robot-01") as conn:
+        conn.execute(
+            f"UPDATE camera_provenance SET {column}=? WHERE event_id=?",
+            (value, "same-event"),
+        )
+    reopened = MemoryStore(tmp_path, robots)
+    with pytest.raises(ValueError, match="Invalid persisted camera"):
+        reopened.get_camera_provenance("robot-01", "same-event")
+    assert reopened.get_camera_provenance("robot-02", "same-event") == receipt
+
+
+def test_camera_receipt_without_device_identity_remains_readable(tmp_path):
+    memory = MemoryStore(tmp_path, ["robot-01"])
+    now = time.time()
+    receipt = CameraProvenance(now - 3, now)
+    assert memory.remember(
+        "robot-01", "legacy-clock", "A key", kind="key", source_robot="robot-01",
+        witnessed=True, observed_at=now - 3, camera_provenance=receipt,
+    )
+    reopened = MemoryStore(tmp_path, ["robot-01"])
+    assert reopened.get_camera_provenance("robot-01", "legacy-clock") == receipt

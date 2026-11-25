@@ -669,17 +669,33 @@ class MemoryStore:
         with self._connect(robot_id) as db:
             row = db.execute(
                 """SELECT p.mac_received_at,p.interpreted_at,
-                          p.device_boot,p.device_frame,p.device_complete_us
+                          p.device_boot,p.device_frame,p.device_complete_us,
+                          m.observed_at
                    FROM camera_provenance AS p JOIN memories AS m
                    ON p.event_id=m.event_id WHERE p.event_id=?""",
                 (event_id,),
             ).fetchone()
         if row is None:
             return None
-        received, interpreted, boot, frame, complete = row
-        identity = ((int(boot), int(frame), int(complete))
-                    if boot is not None else None)
-        return CameraProvenance(received, interpreted, identity)
+        received, interpreted, boot, frame, complete, observed = row
+        # SQLite affinity is not strict validation. Do not normalize a
+        # damaged legacy receipt into a different device/frame identity,
+        # or silently relay it as an episode without camera provenance.
+        if (any(type(value) not in (int, float)
+                for value in (received, interpreted, observed))
+                or not 0 <= received <= interpreted < 1e12
+                or not 0 <= observed < 1e12
+                or abs(observed - received) > 0.01):
+            raise ValueError("Invalid persisted camera chronology")
+        if (boot, frame, complete) == (None, None, None):
+            return CameraProvenance(received, interpreted)
+        if (type(boot) is not int or not 0 <= boot <= 0xffffffff
+                or type(frame) is not int or not 1 <= frame <= 0xffffffff
+                or type(complete) is not str or not 1 <= len(complete) <= 20
+                or not complete.isascii() or not complete.isdigit()
+                or complete.startswith("0") or int(complete) > 0xffffffffffffffff):
+            raise ValueError("Invalid persisted camera identity")
+        return CameraProvenance(received, interpreted, (boot, frame, int(complete)))
 
     def recent(self, robot_id: str, *, limit: int = 12) -> list[Memory]:
         if type(limit) is not int or not 1 <= limit <= 50:
