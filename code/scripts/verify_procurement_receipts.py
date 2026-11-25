@@ -257,13 +257,22 @@ CRITICAL_TRIAL_GATES = {
         # The external diode is a design allocation, not a measured isolation
         # result. Check both reverse-current directions, attach/detach, loaded
         # startup, idle/active head current and a captured 3V3 ramp.
-        # Exact current/ramp-duration limits depend on the inspected board.
+        # Include single-domain power tests with the installed signal harness.
+        # Exact leakage, off-rail and ramp limits depend on the inspected board;
+        # the immutable capture and reviewer must establish those limits.
         # ESP32-S3 hardware design guidelines: 3.0–3.6 V operating supply,
         # and t_STBL >= 50 us before CHIP_PU rises. Measure at the chip rail;
         # exclude the unpowered/startup interval from operating extrema.
         # https://docs.espressif.com/projects/esp-hardware-design-guidelines/en/latest/esp32s3/schematic-checklist.html
-        "minimum_samples": 4,
+        "minimum_samples": 6,
         "quantities": (
+            ("head_only_power_trials", "trials", 1, None, True),
+            ("body_only_power_trials", "trials", 1, None, True),
+            ("unpowered_head_peak_rail_v", "V", 0, None, False),
+            ("unpowered_body_peak_rail_v", "V", 0, None, False),
+            ("unpowered_head_injection_current_ma", "mA", 0, None, False),
+            ("unpowered_body_injection_current_ma", "mA", 0, None, False),
+            ("unexpected_off_domain_energizations", "events", 0, 0, True),
             ("usb_attach_trials", "trials", 1, None, True),
             ("usb_detach_trials", "trials", 1, None, True),
             ("cold_start_trials", "trials", 1, None, True),
@@ -421,7 +430,12 @@ def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
         keys.extend((
             "power_path_revision", "oscilloscope_capture_id",
             "current_capture_id", "head_firmware_commit",
+            "sense_j3_continuity_capture_id", "gpio_isolation_capture_id",
+            "signal_harness_revision", "off_domain_limits_reference",
         ))
+        if (conditions.get("sense_sd_j3_open") is not True
+                or conditions.get("sense_sd_slot_empty") is not True):
+            return False
         firmware_commit = conditions.get("head_firmware_commit")
         if (conditions.get("instrument_type") != "oscilloscope_and_ammeter"
                 or type(firmware_commit) is not str
@@ -459,6 +473,7 @@ def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
         phase_count = sum(values[name] for name in (
             "usb_attach_trials", "usb_detach_trials",
             "cold_start_trials", "loaded_servo_start_trials",
+            "head_only_power_trials", "body_only_power_trials",
         ))
         if (phase_count > measurement["sample_count"]
                 or not 0 < values["idle_head_current_ma"]

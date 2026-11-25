@@ -68,6 +68,12 @@ def measurement_for_gate(scope, gate):
                     "oscilloscope_capture_id": "head_ramp_capture_A",
                     "current_capture_id": "head_current_capture_A",
                     "head_firmware_commit": SHA,
+                    "sense_j3_continuity_capture_id": "synthetic_sense_j3_continuity_capture_id",
+                    "gpio_isolation_capture_id": "synthetic_gpio_isolation_capture_id",
+                    "signal_harness_revision": "synthetic_signal_harness_revision",
+                    "off_domain_limits_reference": "synthetic_off_domain_limits_reference",
+                    "sense_sd_j3_open": True,
+                    "sense_sd_slot_empty": True,
                 } if gate == "xiao_usb_backfeed_diode_and_servo_brownout_trial" else {}),
                 **({
                     "instrument_type": "independent_ammeter",

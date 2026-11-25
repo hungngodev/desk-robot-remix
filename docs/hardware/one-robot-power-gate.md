@@ -19,6 +19,17 @@ After actual measurement, example command:
 
 The numbers above are **illustrative, not measurements of the user's robot**. The printed result never sets physical_load_verified or candidate_physically_qualified true. A charger with a power path and the protection/BMS are separate electrical design and physical verification tasks. Keep the charge contacts unpowered during software-only testing.
 
+## Sense USB and signal-domain isolation
+
+The approved power path must prevent backfeed through both supply and
+signal connections. Until qualified, disconnect the inter-board signal
+harness and any separately powered head peripherals before independently
+powering a board for USB programming. See the
+[XIAO external power and Sense SD J3 acceptance](wiring.md#xiao-external-power-and-sense-sd-j3-acceptance)
+for the installed harness evidence, separate head-only/body-only tests,
+and J3 continuity requirement. A supply diode alone cannot qualify GPIO
+isolation. No battery, dock or actuator release follows from this check.
+
 ## Fixed rectangular 2 W speaker and 5 V amplifier power allocation
 
 The current canonical purchase register retains MAX98357A but has already selected the **Challenge CS20-02P110-04-1X, 8 ohm 2 W, 20 x 16 x 4.7 mm** speaker candidate for the five pets. The earlier round 1 W part was rejected, and its 3.3 V mitigation must not silently override the newer fixed selection. MAX98357A VDD is allocated to a qualified, protected **5 V audio rail**; I2S input logic remains 3.3 V. Analog Devices Rev 16 lists about 1.8 W into an 8 ohm load at 5 V under specified test conditions. Neither speaker terminal connects to ground, and audio power must not bypass the XIAO USB/VBUS isolation design. This allocation does **not** prove the carrier's gain setting, actual speaker impedance, long speech thermal behavior, enclosure acoustics, microphone double talk, or supply transient margin. The printed rectangular speaker coupon is a fit reference, not a qualified sealed 1 cc acoustic chamber. Hold purchasing until exact board and physical evidence are accepted. Manufacturer sources: [MAX98357A datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/max98357a-max98357b.pdf) and [Challenge speaker datasheet](https://www.challengeelectronics.com/speakers/pdf/CS20-02P110-04-1X.pdf).

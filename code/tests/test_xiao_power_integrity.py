@@ -73,6 +73,13 @@ def test_xiao_trial_is_mandatory_for_first_robot_and_fleet(receipt_verifier):
 def _synthetic_power_measurement():
     # Synthetic validator inputs only; not measured current or approved limits.
     values = (
+        ("head_only_power_trials", "trials", 1, 1),
+        ("body_only_power_trials", "trials", 1, 1),
+        ("unpowered_head_peak_rail_v", "V", 0.01, 0.1),
+        ("unpowered_body_peak_rail_v", "V", 0.01, 0.1),
+        ("unpowered_head_injection_current_ma", "mA", 0.01, 0.1),
+        ("unpowered_body_injection_current_ma", "mA", 0.01, 0.1),
+        ("unexpected_off_domain_energizations", "events", 0, 0),
         ("usb_attach_trials", "trials", 1, 1),
         ("usb_detach_trials", "trials", 1, 1),
         ("cold_start_trials", "trials", 1, 1),
@@ -88,7 +95,7 @@ def _synthetic_power_measurement():
         ("unexpected_head_resets", "events", 0, 0),
     )
     return {
-        "sample_count": 4,
+        "sample_count": 6,
         "conditions": {
             "setup": "installed_head_power_fixture",
             "instrument": "scope_and_current_meter",
@@ -99,6 +106,12 @@ def _synthetic_power_measurement():
             "oscilloscope_capture_id": "synthetic_ramp_capture",
             "current_capture_id": "synthetic_current_capture",
             "head_firmware_commit": "a" * 40,
+            "sense_j3_continuity_capture_id": "synthetic_sense_j3_continuity_capture_id",
+            "gpio_isolation_capture_id": "synthetic_gpio_isolation_capture_id",
+            "signal_harness_revision": "synthetic_signal_harness_revision",
+            "off_domain_limits_reference": "synthetic_off_domain_limits_reference",
+            "sense_sd_j3_open": True,
+            "sense_sd_slot_empty": True,
         },
         "quantities": [
             {"name": name, "unit": unit, "value": value,
@@ -118,6 +131,13 @@ def test_xiao_receipt_requires_measurements_not_narrative(receipt_verifier):
 
 
 @pytest.mark.parametrize("metric", [
+    "head_only_power_trials",
+    "body_only_power_trials",
+    "unpowered_head_peak_rail_v",
+    "unpowered_body_peak_rail_v",
+    "unpowered_head_injection_current_ma",
+    "unpowered_body_injection_current_ma",
+    "unexpected_off_domain_energizations",
     "usb_attach_trials", "usb_detach_trials", "cold_start_trials",
     "loaded_servo_start_trials", "usb_to_boost_reverse_current_ma",
     "boost_to_usb_reverse_current_ma", "idle_head_current_ma",
@@ -135,6 +155,13 @@ def test_xiao_receipt_rejects_missing_observation(receipt_verifier, metric):
 
 
 @pytest.mark.parametrize(("metric", "value"), [
+    ("head_only_power_trials", 0),
+    ("body_only_power_trials", 0),
+    ("unpowered_head_peak_rail_v", 0.2),
+    ("unpowered_body_peak_rail_v", 0.2),
+    ("unpowered_head_injection_current_ma", 0.2),
+    ("unpowered_body_injection_current_ma", 0.2),
+    ("unexpected_off_domain_energizations", 1),
     ("usb_attach_trials", True),
     ("usb_detach_trials", 0),
     ("usb_to_boost_reverse_current_ma", 0.2),
@@ -160,6 +187,8 @@ def test_xiao_receipt_rejects_failed_observation(receipt_verifier, metric, value
 @pytest.mark.parametrize("key", [
     "power_path_revision", "oscilloscope_capture_id",
     "current_capture_id", "head_firmware_commit", "instrument_type",
+    "sense_j3_continuity_capture_id", "gpio_isolation_capture_id",
+    "signal_harness_revision", "off_domain_limits_reference",
 ])
 def test_xiao_receipt_requires_instrument_capture_provenance(receipt_verifier, key):
     evidence = _synthetic_power_measurement()
@@ -167,7 +196,7 @@ def test_xiao_receipt_requires_instrument_capture_provenance(receipt_verifier, k
     assert not receipt_verifier._qualified_gate_measurement(POWER_GATE, evidence)
 
 
-@pytest.mark.parametrize("sample_count", [True, 0, 3])
+@pytest.mark.parametrize("sample_count", [True, 0, 3, 5])
 def test_xiao_receipt_rejects_insufficient_trial_count(receipt_verifier, sample_count):
     evidence = _synthetic_power_measurement()
     evidence["sample_count"] = sample_count
@@ -189,4 +218,15 @@ def test_xiao_receipt_rejects_unpinned_firmware_revision(receipt_verifier):
 def test_xiao_receipt_rejects_duplicate_quantity(receipt_verifier):
     evidence = _synthetic_power_measurement()
     evidence["quantities"].append(evidence["quantities"][0].copy())
+    assert not receipt_verifier._qualified_gate_measurement(POWER_GATE, evidence)
+
+
+@pytest.mark.parametrize("key", ["sense_sd_j3_open", "sense_sd_slot_empty"])
+@pytest.mark.parametrize("value", [None, False, 1, "true"])
+def test_xiao_receipt_requires_explicit_sd_isolation(receipt_verifier, key, value):
+    evidence = _synthetic_power_measurement()
+    if value is None:
+        del evidence["conditions"][key]
+    else:
+        evidence["conditions"][key] = value
     assert not receipt_verifier._qualified_gate_measurement(POWER_GATE, evidence)

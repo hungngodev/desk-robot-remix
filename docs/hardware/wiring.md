@@ -227,6 +227,29 @@ diode or tying USB and the robot boost together.
    mode and label it on the enclosure. Never extrapolate this bench result
    to a protected battery, charger or dock acceptance.
 
+The external supply diode does not isolate the signal harness. A powered
+UART transmitter or I2S/RGB signal can feed an unpowered receiver through
+its input protection network. With power absent, disconnect signal harnesses
+before independently powering either board for USB programming unless the
+actual installed interface has qualified partial-power-down isolation or
+a hardware interlock. Do not rely on firmware pin modes, a common ground,
+or an open J3 as proof of power-domain isolation.
+
+For the installed harness receipt, a qualified reviewer must verify each
+applicable UART direction (Sense GPIO2 to WROOM RX16 and WROOM TX17 to
+Sense GPIO1), I2S GPIO4/7/8, OLED pullups, and any fitted RGB buffer.
+Include separate head-only and body-only power trials, including reset
+and power transitions, with actuators and charge contacts disabled. Do not
+connect an unqualified driven signal to an unpowered board to perform a
+trial. Establish a safe fixture and manufacturer-specific off-domain
+voltage and injection-current limits before testing. Capture maximum
+unpowered-rail voltage and injection current in both directions and reject
+any unintended off-domain energization. Record the actual harness revision,
+J3 continuity capture, empty SD slot, GPIO isolation capture, and reviewed
+limit reference in the existing XIAO power gate receipt. The receipt's six
+separate phase counts include head-only and body-only trials in addition
+to USB attach/detach, cold start and loaded servo start.
+
 Log instrument model, board revision, unloaded/loaded voltages,
 reverse current or verified absence of conductive backfeed, photos
 and source-to-connector continuity in the physical trial record.
