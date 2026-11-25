@@ -1283,7 +1283,10 @@ void BodyControl::execute(const char* line, std::size_t length,
       std::snprintf(reply, capacity, "ERR calibration local_usb_only");
       return;
     }
-    if (state_.armed) {
+    // A safety trip disarms wheels but can retain PWM to hold a payload.
+    // Calibration must not implicitly release that hold or write flash while
+    // an actuator remains energized. Require an explicit disarm first.
+    if (state_.armed || state_.servos_attached) {
       std::snprintf(reply, capacity, "ERR calibration disarm_first");
       return;
     }

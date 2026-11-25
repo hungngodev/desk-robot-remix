@@ -568,6 +568,12 @@ static void measured_local_calibration_is_atomic_and_never_arms() {
   CHECK(guard.configuration().front_obstacle_mm == 30);
   CHECK(guard.configuration().freshness_ms == 100);
   CHECK(!body.state().armed);
+  // Stage a different calibration before a later arm and safety trip.
+  for (int i = 0; i < 4; ++i)
+    CHECK(send(body, "calfloor " + std::to_string(i) + " 41 60", 0, true) ==
+          "OK calfloor channel=" + std::to_string(i));
+  CHECK(send(body, "calfront 30 1000", 0, true) == "OK calfront");
+  CHECK(send(body, "calfresh 100", 0, true) == "OK calfresh");
   CHECK(send(body, "arm", 1) == "ERR arm safety_interlock");
   fresh(guard, 2);
   CHECK(send(body, "rearm", 2) == "ERR rearm local_only");
@@ -576,7 +582,17 @@ static void measured_local_calibration_is_atomic_and_never_arms() {
   CHECK(send(body, "arm", 2) == "OK arm");
   CHECK(send(body, "calfloor 0 40 60", 3, true) ==
         "ERR calibration disarm_first");
+  body.sample_touch_input(true, 3);
+  CHECK(!body.state().armed && body.state().servos_attached);
+  const auto held_grip = body.state().grip;
+  CHECK(send(body, "calcommit", 3, true) == "ERR calibration disarm_first");
+  CHECK(body.state().servos_attached && body.state().grip == held_grip);
+  CHECK(guard.configuration().floor[0].min_mm == 40);
   CHECK(send(body, "disarm", 3) == "OK disarm");
+  CHECK(!body.state().servos_attached);
+  CHECK(send(body, "calcommit", 4, true) == "OK calcommit");
+  CHECK(guard.configuration().floor[0].min_mm == 41);
+  CHECK(!body.state().armed && !body.state().servos_attached);
   CHECK(send(body, "calabort", 4, true) == "OK calabort");
   CHECK(send(body, "calcommit", 4, true) == "ERR calcommit incomplete_stage");
 }
