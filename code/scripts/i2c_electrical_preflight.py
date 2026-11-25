@@ -109,6 +109,8 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
     for line in ("sda", "scl"):
         pullups = []
         total_pf = 0.0
+        upstream_count = 0
+        upstream_pf = 0.0
         measured_rises = []
         measured_lows = []
         for label, owner in (("upstream", upstream), ("selected", selected)):
@@ -125,6 +127,9 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
             pullups.extend((_num(v, f"{label}.{line}.pullup_ohms"), power)
                            for v in resistors)
             total_pf += _num(part.get("cap_pf"), f"{label}.{line}.cap_pf")
+            if label == "upstream":
+                upstream_count = len(pullups)
+                upstream_pf = total_pf
             if "measured_rise_ns" in part:
                 measured_rises.append(_num(part["measured_rise_ns"],
                                            f"{label}.{line}.measured_rise_ns"))
@@ -154,12 +159,27 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
         if any(not math.isfinite(value) for value in
                (total_pf, effective, rise_ns, sink_ma)):
             raise ValueError(f"{line}: RC calculation overflowed")
-        model_ok = (total_pf <= MAX_CAP_PF and rise_ns <= RISE_LIMIT_NS
+        # Mux power-on/reset deselects every channel; the direct MPU and mux
+        # control transactions must work without any downstream pullups.
+        upstream_conductance = sum(1.0 / r for r, _ in pullups[:upstream_count])
+        upstream_rise_ns = (0.8473 * upstream_pf / 1000 / upstream_conductance
+                            if upstream_conductance > 0 else None)
+        if upstream_rise_ns is not None and not math.isfinite(upstream_rise_ns):
+            upstream_rise_ns = None
+        upstream_ok = (upstream_rise_ns is not None
+                       and upstream_rise_ns <= RISE_LIMIT_NS)
+        downstream_present = len(pullups) > upstream_count
+        model_ok = (upstream_ok and downstream_present
+                    and total_pf <= MAX_CAP_PF and rise_ns <= RISE_LIMIT_NS
                     and sink_ma <= SINK_MAX_MA
                     and all(v <= RISE_LIMIT_NS for v in measured_rises)
                     and all(v <= LOW_MAX_V for v in measured_lows))
         report[line] = {
             "installed_pullups": len(pullups),
+            "upstream_only_estimated_rise_ns": (
+                round(upstream_rise_ns, 3) if upstream_rise_ns is not None else None),
+            "upstream_only_paper_pass": upstream_ok,
+            "downstream_pullups_present": downstream_present,
             "combined_ohms": round(effective, 3),
             "combined_cap_pf": round(total_pf, 3),
             "estimated_rise_ns": round(rise_ns, 3),

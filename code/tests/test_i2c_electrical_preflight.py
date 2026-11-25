@@ -240,3 +240,28 @@ def test_cli_valid_unqualified_electrical_json_remains_on_hold(tmp_path):
     assert report["all_16_lanes_evaluated"]
     assert not report["all_16_lanes_paper_pass"]
     assert not report["all_16_lanes_physically_qualified"]
+
+
+@pytest.mark.parametrize("line", ["sda", "scl"])
+@pytest.mark.parametrize("upstream_pullups", [[], [10000]])
+def test_selected_pullups_cannot_mask_invalid_unselected_upstream(line, upstream_pullups):
+    upstream, downstream = segment(downstream_pullups=(2200,))
+    upstream[line]["pullup_ohms"] = upstream_pullups
+    report = tool.screen_selected_segment(upstream, downstream)
+    assert report["lines"][line]["estimated_rise_ns"] < 300
+    assert report["lines"][line]["estimated_sink_ma"] <= 3
+    assert not report["selected_branch_paper_pass"]
+
+
+@pytest.mark.parametrize("line", ["sda", "scl"])
+def test_selected_lane_requires_its_own_pullups(line):
+    upstream, downstream = segment()
+    downstream[line]["pullup_ohms"] = []
+    report = tool.screen_selected_segment(upstream, downstream)
+    assert report["lines"][line]["estimated_rise_ns"] < 300
+    assert not report["selected_branch_paper_pass"]
+
+
+def test_valid_selected_and_unselected_bus():
+    upstream, downstream = segment()
+    assert tool.screen_selected_segment(upstream, downstream)["selected_branch_paper_pass"]
