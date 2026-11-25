@@ -34,6 +34,7 @@ class SpatialHead:
         self.commands: list[str] = []
         self.armed = False
         self.pose_seq = 0
+        self._last_sample_us = 0
         self.body_boot = 7
         self.origin = 11
         self.head_boot = 21
@@ -76,6 +77,9 @@ class SpatialHead:
     async def pose_status(self):
         if not self.replay_pose:
             self.pose_seq += 1
+            self._last_sample_us = max(
+                self._last_sample_us + 1, int(time.monotonic() * 1_000_000),
+            )
         return {
             "robot_id": self.robot_id,
             "v": 1,
@@ -84,7 +88,7 @@ class SpatialHead:
             "origin": self.origin,
             "head_boot": self.head_boot,
             "seq": self.pose_seq,
-            "sample_us": 1_000_000 + self.pose_seq * 100_000,
+            "sample_us": self._last_sample_us,
             "x_mm": self.x_mm,
             "y_mm": self.y_mm,
             "yaw_mrad": self.yaw_mrad,

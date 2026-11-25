@@ -1264,10 +1264,11 @@ async def test_pose_version_skew_isolated_from_legacy_head_operations(
     robot = settings.robots[0]
     calls = []
     pose_reads = 0
+    last_sample_us = 0
     jpeg = b"\xff\xd8\xff\xd9"
 
     def handler(request):
-        nonlocal pose_reads
+        nonlocal pose_reads, last_sample_us
         assert request.headers["Authorization"] == "Bearer " + tokens[robot.token_env]
         path = request.url.path
         calls.append(path)
@@ -1287,9 +1288,10 @@ async def test_pose_version_skew_isolated_from_legacy_head_operations(
             })
         assert path == "/api/pose" and request.method == "GET"
         pose_reads += 1
+        last_sample_us = max(last_sample_us + 1, int(time.monotonic() * 1_000_000))
         packet = {
             "robot_id": robot.id, "v": 1, "body_boot": 4, "origin": 1,
-            "seq": pose_reads, "sample_us": pose_reads * 100_000,
+            "seq": pose_reads, "sample_us": last_sample_us,
             "x_mm": 10, "y_mm": -20, "yaw_mrad": 10, "quality": "valid", "head_boot": 8,
         }
         if pose_reads == 3:
