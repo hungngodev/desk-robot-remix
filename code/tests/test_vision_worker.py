@@ -242,3 +242,88 @@ async def test_truncated_camera_jpeg_is_rejected_before_model_work():
         assert detector.model is None
     finally:
         await detector.close()
+
+
+async def test_corrupt_scan_with_valid_jpeg_markers_never_reaches_models(tmp_path):
+    from io import BytesIO
+    from unittest.mock import AsyncMock, Mock
+
+    from desk_robot.vision import OllamaScene
+    from PIL import Image
+
+    output = BytesIO()
+    Image.new("RGB", (32, 32)).save(output, "JPEG")
+    good = output.getvalue()
+    broken = bytearray(good)
+    scan = broken.index(b"\xff\xda")
+    broken[scan + 5] = 0  # Invalid scan component selector, intact SOI/EOI.
+    bad = bytes(broken)
+    with Image.open(BytesIO(bad)) as candidate:
+        assert candidate.size == (32, 32)
+        candidate.verify()  # Header verification does not decode JPEG scans.
+    with Image.open(BytesIO(bad)) as candidate, pytest.raises(OSError):
+        candidate.load()
+
+    client = AsyncMock()
+    scene = OllamaScene(client, url="http://localhost:11434", model="local-vlm")
+    with pytest.raises(OSError):
+        await scene.compare(good, bad)
+    with pytest.raises(OSError):
+        await scene.answer("What do you see?", [bad])
+    client.post.assert_not_awaited()
+
+    weights = tmp_path / "test.pt"
+    weights.touch()
+    detector = YoloWorldVision(weights)
+    detector.model = Mock()
+    try:
+        with pytest.raises(OSError):
+            await detector.detect(bad, "key")
+        detector.model.set_classes.assert_not_called()
+        detector.model.predict.assert_not_called()
+    finally:
+        await detector.close()
+
+
+async def test_cancelled_jpeg_validation_keeps_native_slot_without_blocking_voice(monkeypatch):
+    from desk_robot import vision as module
+
+    entered, release, finished = threading.Event(), threading.Event(), threading.Event()
+    original = module._check_camera_jpeg
+
+    def blocked(frame, **kwargs):
+        entered.set()
+        try:
+            assert release.wait(timeout=2)
+            raise OSError("late corrupt frame")
+        finally:
+            finished.set()
+
+    monkeypatch.setattr(module, "_check_camera_jpeg", blocked)
+    old = asyncio.create_task(module.validated_camera_sizes((b"frame",)))
+    try:
+        assert await asyncio.to_thread(entered.wait, 1)
+        old.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await old
+        # Cancellation must not admit a second native job behind a stalled one.
+        with pytest.raises(RuntimeError, match="validation busy"):
+            await module.validated_camera_sizes((b"second frame",))
+        # The real-time loop remains schedulable while native decoding is held.
+        voice = asyncio.Event()
+        asyncio.get_running_loop().call_soon(voice.set)
+        await asyncio.wait_for(voice.wait(), timeout=0.1)
+    finally:
+        release.set()
+        assert await asyncio.to_thread(finished.wait, 1)
+        monkeypatch.setattr(module, "_check_camera_jpeg", original)
+    for _ in range(100):
+        try:
+            with pytest.raises(ValueError, match="Bounded JPEG"):
+                await module.validated_camera_sizes((b"invalid",))
+            break
+        except RuntimeError as exc:
+            assert "validation busy" in str(exc)
+            await asyncio.sleep(0.01)
+    else:
+        pytest.fail("JPEG validation worker failed to release its slot")

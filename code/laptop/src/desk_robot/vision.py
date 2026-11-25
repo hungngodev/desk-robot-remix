@@ -89,6 +89,9 @@ class YoloWorldVision:
         # size and declared raster dimensions before loading model weights,
         # mutating detector classes or decoding an unbounded RGB image.
         _check_camera_jpeg(jpeg, max_bytes=4_000_000)
+        # Decode before loading weights or changing mutable detector classes.
+        with Image.open(BytesIO(jpeg)) as candidate:
+            image = candidate.convert("RGB")
         if self.weights is None or not self.weights.is_file():
             raise RuntimeError(
                 "Install vision extra and explicitly download/set local YOLO-World weights"
@@ -99,7 +102,6 @@ class YoloWorldVision:
             self.model = YOLOWorld(str(self.weights))
         self.model.set_classes([label])
         # Letterbox/coordinate restoration is handled by the upstream model, not guessed here.
-        image = Image.open(BytesIO(jpeg)).convert("RGB")
         result = self.model.predict(image, verbose=False, device="cpu")[0]
         detections: list[Detection] = []
         # Optional local model output is untrusted geometry. Reject invalid
@@ -232,16 +234,58 @@ class VisualChangeGate:
         return baseline
 
 
-def _check_camera_jpeg(frame: bytes, *, max_bytes: int = 1_000_000) -> None:
-    """Reject unbounded camera images before any native decode or model work."""
+def _check_camera_jpeg(
+    frame: bytes, *, max_bytes: int = 1_000_000, decode: bool = False,
+) -> tuple[int, int]:
+    """Reject unbounded camera images and optionally validate their pixel data."""
     if (not isinstance(frame, bytes) or not 12 <= len(frame) <= max_bytes
             or not frame.startswith(b"\xff\xd8")
             or not frame.endswith(b"\xff\xd9")):
         raise ValueError("Bounded JPEG scene evidence required")
-    with Image.open(BytesIO(frame)) as candidate:
-        if (candidate.format != "JPEG" or not 1 <= candidate.width <= 4096
-                or not 1 <= candidate.height <= 4096):
-            raise ValueError("Camera dimensions invalid")
+    try:
+        with Image.open(BytesIO(frame)) as candidate:
+            if (candidate.format != "JPEG" or not 1 <= candidate.width <= 4096
+                    or not 1 <= candidate.height <= 4096):
+                raise ValueError("Camera dimensions invalid")
+            if decode:
+                candidate.load()
+            return candidate.size
+    except Image.DecompressionBombError as exc:
+        raise ValueError("Camera dimensions invalid") from exc
+
+
+# The existing asyncio executor may run other runtime work. Allow only one
+# additional native JPEG validation job, even after its awaiter is cancelled.
+_camera_validation_slot = threading.BoundedSemaphore(1)
+
+
+async def validated_camera_sizes(
+    frames: tuple[bytes, ...], *, max_bytes: int = 1_000_000,
+) -> tuple[tuple[int, int], ...]:
+    """Decode bounded immutable JPEGs before inference, away from the voice loop."""
+    if type(frames) is not tuple or not 1 <= len(frames) <= 2:
+        raise ValueError("Expected one or two camera JPEGs")
+    if not _camera_validation_slot.acquire(blocking=False):
+        raise RuntimeError("Camera JPEG validation busy")
+
+    def validate() -> tuple[tuple[int, int], ...]:
+        try:
+            return tuple(
+                _check_camera_jpeg(frame, max_bytes=max_bytes, decode=True)
+                for frame in frames
+            )
+        finally:
+            _camera_validation_slot.release()
+
+    try:
+        work = asyncio.get_running_loop().run_in_executor(None, validate)
+    except BaseException:
+        _camera_validation_slot.release()
+        raise
+    # Shield the actual worker future; a cancelled observer must not return
+    # the native slot early or leave an unhandled late decoder exception.
+    work.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+    return await asyncio.shield(work)
 
 
 @dataclass(frozen=True)
@@ -267,10 +311,9 @@ class OllamaScene:
         import json
 
         # Direct comparisons do not necessarily pass through CameraFrameHub.
-        # Check transport size and header dimensions before allocating a
-        # base64 payload or sending private frames to a model endpoint.
-        for frame in (before, after):
-            _check_camera_jpeg(frame)
+        # A valid JPEG header is not a valid scan. Decode before allocating
+        # the network payload, without blocking the realtime voice loop.
+        await validated_camera_sizes((before, after))
 
         response = await self.client.post(
             self.url + "/api/chat",
@@ -337,9 +380,9 @@ class OllamaScene:
                        or len(frame) > 1_000_000 or not frame.startswith(b"\xff\xd8")
                        for frame in jpeg_frames)):
             raise ValueError("Real bounded camera frames and vision model required")
-        for frame in jpeg_frames:
-            _check_camera_jpeg(frame)
-        temporal = len(jpeg_frames) == 2
+        frames = tuple(jpeg_frames)
+        await validated_camera_sizes(frames)
+        temporal = len(frames) == 2
         prompt = (
             "You are this desk robot's local vision adapter. Answer the human's "
             "question using ONLY the actual camera image"
@@ -363,7 +406,7 @@ class OllamaScene:
                     "role": "user", "content": prompt,
                     "images": [
                         base64.b64encode(frame).decode("ascii")
-                        for frame in jpeg_frames
+                        for frame in frames
                     ],
                 }],
                 "options": {"num_predict": 180, "temperature": 0},
