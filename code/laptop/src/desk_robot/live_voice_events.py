@@ -11,6 +11,21 @@ from collections.abc import Awaitable, Callable
 import httpx
 
 
+def _defer_end_for_active_peer(event: dict, events: list[dict], active: list[str]) -> bool:
+    """Leave the old lease in place until a newer active peer start is handled."""
+    return (
+        event["kind"] == "speech_end"
+        and type(event.get("voice_turn_generation")) is int
+        and any(
+            later["seq"] > event["seq"]
+            and later["kind"] == "speech_start"
+            and later["robot_id"] != event["robot_id"]
+            and later["robot_id"] in active
+            for later in events
+        )
+    )
+
+
 class VoiceEventListener:
     def __init__(
         self, client: httpx.AsyncClient, *, url: str, token: str,
@@ -339,6 +354,18 @@ class VoiceEventListener:
                 and type(event.get("voice_turn_generation")) is int
                 and event["voice_turn_generation"]
                     < generations.get(event["robot_id"], -1)
+            ):
+                self.cursor = seq
+                self.handled += 1
+                continue
+            # Another head may already be speaking in this same authenticated
+            # batch. Reconcile the old end from the snapshot after the start,
+            # rather than briefly dispatching work into the occupied floor.
+            if (
+                task is None
+                and self.on_speech_snapshot is not None
+                and isinstance(active, list)
+                and _defer_end_for_active_peer(event, data["events"], active)
             ):
                 self.cursor = seq
                 self.handled += 1

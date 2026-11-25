@@ -1717,3 +1717,75 @@ async def test_legacy_end_without_generation_is_not_silently_dropped():
         assert await listener.poll() == 1
         assert listener.cursor == 4
     assert received == [("robot-01", "speech_end")]
+
+@pytest.mark.parametrize(
+    "later_kind, later_robot, active, generation, later_seq, expected",
+    [
+        ("speech_start", "b", ["b"], 4, 12, True),
+        ("speech_start", "b", [], 4, 12, False),
+        ("speech_start", "b", ["b"], None, 12, False),
+        ("speech_start", "b", ["b"], 4, 9, False),
+        ("speech_end", "b", ["b"], 4, 12, False),
+        ("speech_start", "a", ["a"], 4, 12, False),
+    ],
+)
+def test_cross_peer_lease_gate(later_kind, later_robot, active, generation, later_seq, expected):
+    from desk_robot.live_voice_events import _defer_end_for_active_peer
+
+    event = {"kind": "speech_end", "robot_id": "a", "seq": 10,
+             "voice_turn_generation": generation}
+    later = {"kind": later_kind, "robot_id": later_robot, "seq": later_seq}
+    assert _defer_end_for_active_peer(event, [event, later], active) is expected
+
+
+async def test_cross_peer_vad_handoff_never_opens_fleet_floor():
+    """A delayed end must not admit deferred work before another head's start."""
+    responses = [
+        {
+            "cursor": 10, "events": [], "reset": False, "lost": False,
+            "active_human_robots": ["robot-01"],
+            "voice_turn_generations": {"robot-01": 4, "robot-02": 5},
+        },
+        {
+            "cursor": 12, "reset": False, "lost": False,
+            "active_human_robots": ["robot-02"],
+            "voice_turn_generations": {"robot-01": 4, "robot-02": 6},
+            "events": [
+                {"seq": 11, "robot_id": "robot-01", "kind": "speech_end",
+                 "source": "xiaozhi_server_vad", "voice_turn_generation": 4},
+                {"seq": 12, "robot_id": "robot-02", "kind": "speech_start",
+                 "source": "xiaozhi_server_vad", "voice_turn_generation": 6},
+            ],
+        },
+    ]
+    active = set()
+    events = []
+
+    async def snapshot(robots):
+        active.clear()
+        active.update(robots)
+
+    async def on_event(robot_id, kind):
+        events.append((robot_id, kind))
+        if kind == "speech_start":
+            active.add(robot_id)
+        else:
+            active.discard(robot_id)
+        assert active, "obsolete end briefly opened the fleet speech floor"
+
+    def mock(request):
+        return httpx.Response(200, json=responses.pop(0))
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids={"robot-01", "robot-02"}, on_interrupt=on_event,
+            on_speech_snapshot=snapshot, require_snapshot=True,
+            require_turn_generations=True,
+        )
+        assert await listener.poll() == 0
+        assert active == {"robot-01"}
+        assert await listener.poll() == 2
+        assert listener.cursor == 12 and listener.handled == 2
+    assert active == {"robot-02"}
+    assert events == [("robot-02", "speech_start")]
