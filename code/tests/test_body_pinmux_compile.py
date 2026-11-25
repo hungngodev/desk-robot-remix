@@ -41,3 +41,40 @@ def test_pinmux_mutations_fail(old, new):
     result = compile_header(source.replace(old, new), DC_FLAGS)
     assert result.returncode != 0
     assert "static assertion failed" in result.stderr
+
+
+@pytest.mark.parametrize("flags", [[], ["-DDESK_ROBOT_STEPPER=1"], DC_FLAGS])
+@pytest.mark.parametrize("old,new,diagnostic", [
+    ("kServoChannels[] = {4, 5}", "kServoChannels[] = {4, 3}",
+     "Servo outputs must own 50 Hz LEDC timer 2"),
+    ("kServoFrequency = 50", "kServoFrequency = 20000",
+     "Servo outputs must own 50 Hz LEDC timer 2"),
+    ("kServoResolution = 16", "kServoResolution = 8",
+     "Servo outputs must own 50 Hz LEDC timer 2"),
+    ("kServoChannels[] = {4, 5}", "kServoChannels[] = {4, 5, 0}",
+     "Servo GPIO/channel arrays must match the two servo owners"),
+])
+def test_servo_pwm_mutations_fail(flags, old, new, diagnostic):
+    source = HEADER.read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    result = compile_header(source.replace(old, new), flags)
+    assert result.returncode != 0
+    assert f"static assertion failed: {diagnostic}" in result.stderr
+
+
+@pytest.mark.parametrize("old,new,diagnostic", [
+    ("kMotorChannels[] = {0, 1, 2, 3}", "kMotorChannels[] = {0, 1, 2, 4}",
+     "DC motor outputs must use isolated LEDC timers 0/1"),
+    ("kMotorFrequency = 20000", "kMotorFrequency = 50",
+     "DC motor outputs must use isolated LEDC timers 0/1"),
+    ("kMotorResolution = 8", "kMotorResolution = 16",
+     "DC motor outputs must use isolated LEDC timers 0/1"),
+    ("kMotorChannels[] = {0, 1, 2, 3}", "kMotorChannels[] = {0, 1, 2, 3, 5}",
+     "DC GPIO/channel arrays must match the four PWM owners"),
+])
+def test_motor_pwm_mutations_fail(old, new, diagnostic):
+    source = HEADER.read_text(encoding="utf-8")
+    assert source.count(old) == 1
+    result = compile_header(source.replace(old, new), DC_FLAGS)
+    assert result.returncode != 0
+    assert f"static assertion failed: {diagnostic}" in result.stderr
