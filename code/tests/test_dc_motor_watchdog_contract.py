@@ -421,3 +421,61 @@ int main() {
     assert result.returncode == 0, result.stderr
     result = subprocess.run([str(binary)], capture_output=True, text=True, timeout=5, check=False)
     assert result.returncode == 0, result.stderr
+
+
+def test_motor_output_latch_is_low_before_output_enable(tmp_path):
+    """Execute the actual startup helper against a deliberately HIGH latch."""
+    compiler = shutil.which("c++")
+    if compiler is None:
+        pytest.skip("C++ compiler unavailable for GPIO ordering test")
+    main = (BODY / "src/main.cpp").read_text(encoding="utf-8")
+    helper = "void all_motor_inputs_low() {" + main.split(
+        "void all_motor_inputs_low() {", 1
+    )[1].split("\n}\n", 1)[0] + "\n}"
+    harness = r'''
+#include <array>
+#include <cstdlib>
+#include "BodyPins.h"
+constexpr int LOW = 0, OUTPUT = 1;
+std::array<int, 40> latch{};
+std::array<bool, 40> enabled{};
+void digitalWrite(int pin, int value) { latch.at(pin) = value; }
+void pinMode(int pin, int mode) {
+    if (mode != OUTPUT || latch.at(pin) != LOW) std::abort();
+    enabled.at(pin) = true;
+}
+''' + helper + r'''
+int main() {
+    latch.fill(1);
+    all_motor_inputs_low();
+    for (int pin : body_pins::kMotorPins)
+        if (!enabled.at(pin) || latch.at(pin) != LOW) return 1;
+}
+'''
+    for stepper in (0, 1):
+        binary = tmp_path / f"boot_gpio_{stepper}"
+        result = subprocess.run(
+            [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+             f"-DDESK_ROBOT_STEPPER={stepper}", "-I", str(BODY / "include"),
+             "-x", "c++", "-", "-o", str(binary)],
+            input=harness, text=True, capture_output=True, timeout=15, check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        result = subprocess.run(
+            [str(binary)], capture_output=True, text=True, timeout=5, check=False,
+        )
+        assert result.returncode == 0, result.stderr
+
+
+def test_servo_gpio_preloads_before_output_enable_and_pwm_detach():
+    main = (BODY / "src/main.cpp").read_text(encoding="utf-8")
+    bench = (BODY / "src/servo_center_bench.cpp").read_text(encoding="utf-8")
+    for source in (main, bench):
+        setup = source.split("void setup() {", 1)[1].split("Serial.begin(", 1)[0]
+        servo = setup.split("body_pins::kServoPins) {", 1)[1].split("}", 1)[0]
+        assert servo.index("digitalWrite(pin, LOW);") < servo.index("pinMode(pin, OUTPUT);")
+        detach = source.split("ledcDetachPin(pin);", 1)
+        assert detach[0].rstrip().splitlines()[-1].strip().startswith(
+            "digitalWrite(pin, LOW);"
+        )
+        assert "pinMode(pin, OUTPUT);" in detach[1]

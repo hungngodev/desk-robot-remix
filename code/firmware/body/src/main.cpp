@@ -246,8 +246,9 @@ int applied_right = 0;
 
 void all_motor_inputs_low() {
   for (int pin : body_pins::kMotorPins) {
-    pinMode(pin, OUTPUT);
+    // Preload the GPIO latch before enabling the output (Arduino ESP32 2.0.17).
     digitalWrite(pin, LOW);
+    pinMode(pin, OUTPUT);
   }
 }
 
@@ -381,9 +382,9 @@ void apply_outputs() {
     applied_grip = state.grip;
   } else if (!state.servos_attached && servo_attached) {
     for (int pin : body_pins::kServoPins) {
+      digitalWrite(pin, LOW);  // preload before switching away from LEDC
       ledcDetachPin(pin);
       pinMode(pin, OUTPUT);
-      digitalWrite(pin, LOW);
     }
     servo_attached = false;
     applied_lift = -1;
@@ -512,8 +513,8 @@ void setup() {
 // no IR evidence authorizes motor movement or charger contacts.
 #endif
   for (int pin : body_pins::kServoPins) {
-    pinMode(pin, OUTPUT);
     digitalWrite(pin, LOW);
+    pinMode(pin, OUTPUT);
   }
   pwm_ready = true;
 #if !DESK_ROBOT_STEPPER

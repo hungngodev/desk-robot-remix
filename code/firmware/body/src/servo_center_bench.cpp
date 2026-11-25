@@ -50,16 +50,15 @@ void service_deadline() {
   const std::uint32_t now_ms = millis();
   if (!gate.should_detach(now_ms)) return;
   const int pin = servo_pin(gate.active());
+  digitalWrite(pin, LOW);
   ledcDetachPin(pin);
   pinMode(pin, OUTPUT);
-  digitalWrite(pin, LOW);
   gate.complete(now_ms);
   replies.enqueue_line("OK CENTER_DONE pwm_detached");
 }
 }  // namespace
 
 void setup() {
-  Serial.begin(115200);
   // Even a miswired connected DRV8833 receives BOTH inputs LOW; physical
   // motor disconnection is mandatory and is not software-verifiable.
   for (const int pin : body_pins::kMotorPins) {
@@ -70,6 +69,7 @@ void setup() {
     digitalWrite(pin, LOW);
     pinMode(pin, OUTPUT);
   }
+  Serial.begin(115200);
   // Servo channels own isolated 50 Hz timer 2, exactly as the full body.
   pwm_ready = ledcSetup(body_pins::kServoChannels[0],
                         body_pins::kServoFrequency,

@@ -18,7 +18,9 @@ must never be connected to this stepper map. This is not physically qualified.
 ## Proposed WROOM allocation
 
 Check actual ESP32-WROOM-32 development-board labels and exposed pins first.
-Avoid flash GPIO6–11, strapping GPIO0/2/4/5/12/15 and programming UART0 GPIO1/3.
+Avoid flash GPIO6–11, strapping GPIO0/2/5/12/15 and programming UART0 GPIO1/3. GPIO4 is separately reserved by project policy, not an ESP32 strapping pin.
+
+**Actuator reset safety (both exclusive drivetrain profiles):** ESP32 GPIO14 (left ULN2003 IN2) has a weak internal pullup after reset; GPIO13 has a weak pulldown. Other allocated actuator pins may float before setup. See the [Espressif GPIO reset table](https://docs.espressif.com/projects/esp-hardware-design-guidelines/en/latest/esp32/schematic-checklist.html). Provide verified external LOW bias at each connected driver input (all eight ULN2003 inputs or all four DRV8833 inputs), both servo signal inputs and the DC-only GPIO23 heartbeat when fitted. A 10 kΩ pulldown is a starting candidate, not an accepted value: check the exact carrier's input thresholds, existing bias, leakage and drive margin. Neither a passive bias nor the software LOW preload substitutes for independently inhibited actuator power before explicit authorization. With actuator power physically disconnected initially, scope every input and the independent cutoff across cold start, EN reset, USB upload/reset, watchdog reset, brownout and unequal rail sequencing. Require no unintended input assertion or driver enable, including the interval before setup; assess any powered servo startup motion separately. Only after the logic checks pass may isolated, restrained actuator trials establish absence of unintended motion. Keep physical qualification HOLD until these measurements exist.
 
 | WROOM GPIO | Proposed use |
 | --- | --- |
@@ -27,7 +29,7 @@ Avoid flash GPIO6–11, strapping GPIO0/2/4/5/12/15 and programming UART0 GPIO1/
 | 13, 14, 25, 26 | Left ULN2003 IN1–IN4, phase order to verify |
 | 27, 32, 33, 23 | Right ULN2003 IN1–IN4, phase order to verify |
 | 21 / 22 | Body I²C SDA / SCL to mux upstream |
-| No GPIO | Mux active-low RESET passively pulled HIGH to 3.3V, not ESP32 strapping GPIO4 |
+| No GPIO | Mux active-low RESET passively pulled HIGH to 3.3V, not reserved ESP32 GPIO4 |
 | GND | Head, body, sensors and actuator-supply common logic reference |
 |34 | Owned Adafruit #1374 AT42QT1010 OUT, powered at 3.3 V with common GND, momentary active-high. Firmware has debounced tap, double tap, hold and local motion stop; actual connection, shell timing and noise testing remain open |
 | 35 / 36 / 39 | GPIO35 is the direct normally closed bumper. GPIO36/39 are now reserved **only** for left/right 38 kHz terminal IR demodulated inputs, with bounded read-only RMT decoder source but no measured receiver timing or approved final docking. Slow reed/PIR move to MCP23017 GPIOB0/B1 on mux 0x71 lane 5. See [terminal IR verification](charging-design-and-validation.md#terminal-homing-pin-budget-real-blocker-not-a-fake-finished-dock) before wiring. |
@@ -282,7 +284,7 @@ qualified. [Historical evidence](../research/2026-11-09-html-verification.md).
 
 The current esp32_stepper target selects the cheap **VL53L0X** driver for all five critical range sensors, using pinned MIT Pololu vl53l0x-arduino v1.3.1 for initialization and bounded nonblocking Wire register reads for the local guard. The full esp32_full target adds three read-only directions. The exact generic carrier and measured local stop/edge optical margin remain unqualified. Prior premium VL53L4CD and obsolete VL6180X recommendations are explicitly NOT current purchases.
 
-WROOM GPIO21 SDA and GPIO22 SCL connect to TCA9548A range mux 0x70. Channels 0 through 3 are independent downward corners and channel 4 is forward obstacle; channels 5 through 7 are read-only side and rear measurements. Each inexpensive generic VL53L0X GY-530 compatible I2C module uses 0x29 behind its isolated mux lane. Power only from a verified 3.3V compatible module supply and a 3.3V I2C SDA/SCL bus; do NOT assume a generic board's VIN pin, on-board regulators, pullups or XSHUT logic have Pololu #3692 electrical behavior. Verify the ACTUAL purchased PCB schematic, pin labels, pullups, dimensions and 30 to 80 mm desk range before powering a full system. Keep TCA9548A RESET tied high appropriately at 3.3V, not to unsafe strapping GPIO4. Previous Pololu #3692 carrier voltage notes are historical, not instructions for generic GY-530 boards.
+WROOM GPIO21 SDA and GPIO22 SCL connect to TCA9548A range mux 0x70. Channels 0 through 3 are independent downward corners and channel 4 is forward obstacle; channels 5 through 7 are read-only side and rear measurements. Each inexpensive generic VL53L0X GY-530 compatible I2C module uses 0x29 behind its isolated mux lane. Power only from a verified 3.3V compatible module supply and a 3.3V I2C SDA/SCL bus; do NOT assume a generic board's VIN pin, on-board regulators, pullups or XSHUT logic have Pololu #3692 electrical behavior. Verify the ACTUAL purchased PCB schematic, pin labels, pullups, dimensions and 30 to 80 mm desk range before powering a full system. Keep TCA9548A RESET tied high appropriately at 3.3V, not to reserved GPIO4. Previous Pololu #3692 carrier voltage notes are historical, not instructions for generic GY-530 boards.
 
 Local measured calibration commands are accepted only on the WROOM programming USB Serial. They are rejected over the head UART or Mac network service. **The values below must come from a real measured rig**, actual black/glossy/transparent surfaces and loaded stopping/scan latency with a catch tray:
 
