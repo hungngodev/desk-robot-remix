@@ -830,20 +830,6 @@ def public_purchase_view(report: dict, *, live_receipts_verified: bool = False) 
     return visible
 
 
-
-def _read_exact_bom() -> dict:
-    """Keep numeric BOM tokens exact before applying USD validation."""
-    data = json.loads(
-        (PLAN.parent / "bom.json").read_text(encoding="utf-8"),
-        parse_float=Decimal,
-        parse_constant=_reject_json_constant,
-        object_pairs_hook=_unique_json_object,
-    )
-    if not isinstance(data, dict):
-        raise ValueError("BOM must be an object")
-    return data
-
-
 def _historical_usd_cents(value: int | float | Decimal, label: str) -> int:
     """Convert legacy numeric constants at the boundary, never round money."""
     if type(value) not in (int, float, Decimal):
@@ -1188,8 +1174,8 @@ PILOT_PHYSICAL_SELECTION_HOLDS = frozenset({
 def _historical_pilot_budget(sample_subtotal_usd: float) -> dict:
     """Display earlier reported spending without inventing a landed checkout.
 
-    The historical BOM is only a budget reference. It is NOT proof of an
-    invoice, delivered price, qualified part, or permission to order.
+    The reviewed prior-paid ledger supplies the historical budget baseline.
+    It is NOT proof of a delivered quote, qualified part, or permission to order.
     """
     try:
         reference = _read_prior_paid_ledger()

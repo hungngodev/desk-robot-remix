@@ -272,6 +272,20 @@ def test_legacy_budget_valid_math_still_cannot_authorize_purchase_cli(tmp_path):
     assert budget(data, 5, 2)["known_subtotal_usd"] == 20
     assert budget(data, 5, 2)["quoted_total_usd"] == 27
     assert budget(data, 5, 2)["purchase_ready"] is True
+    path = tmp_path / "valid-historical.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "scripts/check_budget.py"),
+         "--bom", str(path), "--shipping", "5", "--tax", "2",
+         "--require-ready"],
+        capture_output=True, text=True, timeout=15,
+    )
+    assert result.returncode == 2
+    assert "HOLD: legacy BOM cannot approve a purchase" in result.stderr
+    output = json.loads(result.stdout)
+    assert output["historical_math_ready"] is True
+    assert output["purchase_ready"] is False
+    assert output["quoted_total_usd"] == 27
     data["items"][0]["quantity"] = -10
     path = tmp_path / "unsafe-historical.json"
     path.write_text(json.dumps(data), encoding="utf-8")
