@@ -190,7 +190,18 @@ jobs:
 
       - name: Install pinned headless OpenCV for dock geometry tests
         working-directory: code
-        run: uv pip install --python .venv/bin/python opencv-python-headless==4.13.0.92
+        shell: bash
+        run: |
+          set -euo pipefail
+          versions=$(mktemp -d)
+          trap 'rm -rf "$versions"' EXIT
+          uv pip freeze --python .venv/bin/python | sort > "$versions/expected"
+          uv pip install --python .venv/bin/python --no-deps --only-binary :all: --require-hashes -r requirements-ci-opencv.txt
+          uv pip check --python .venv/bin/python
+          printf '%s\n' 'opencv-python-headless==4.13.0.92' >> "$versions/expected"
+          sort -o "$versions/expected" "$versions/expected"
+          uv pip freeze --python .venv/bin/python | sort > "$versions/actual"
+          diff -u "$versions/expected" "$versions/actual"
       - name: Enforce one generated fleet purchase ledger
         working-directory: code
         run: |

@@ -1,0 +1,5 @@
+# Linux x86-64 CI wheels: https://pypi.org/project/opencv-python-headless/4.13.0.92/#files
+# Install with --no-deps after the locked dev sync; never resolve NumPy here.
+opencv-python-headless==4.13.0.92 \
+    --hash=sha256:0bd48544f77c68b2941392fcdf9bcd2b9cdf00e98cb8c29b2455d194763cf99e \
+    --hash=sha256:0525a3d2c0b46c611e2130b5fdebc94cf404845d8fa64d2f3a3b679572a5bd22
