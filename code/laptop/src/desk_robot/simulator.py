@@ -10,7 +10,7 @@ from io import BytesIO
 import numpy as np
 from PIL import Image, ImageDraw
 
-from .transport import HeadError, expected_ack, validate_command
+from .transport import HeadError, drive_duration_ms, expected_ack, validate_command
 from .vision import Detection, SceneChange
 
 
@@ -103,7 +103,7 @@ class SimulatedHead:
         if op == "drive":
             args = command.split()[1:]
             left, right = map(int, args[:2])
-            duration = int(args[2]) if len(args) == 3 else 250
+            duration = drive_duration_ms(command)
             self._motor = (left, right)
             self._drive_deadline = now + duration / 1000
             if left or right:

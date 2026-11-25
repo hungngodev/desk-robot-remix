@@ -20,7 +20,7 @@ from .dock_vision import assess_dock
 from .grasp_feedback import await_commanded_jaw_target, guarded_grasp
 from .object_search import ObjectSearchResult, summarize_search_observation
 from .object_targets import ObjectTarget
-from .transport import Head, HeadError, expected_ack, validate_command
+from .transport import Head, HeadError, drive_duration_ms, expected_ack, validate_command
 from .vision import Detection, Vision, image_size
 
 _T = TypeVar("_T")
@@ -919,8 +919,7 @@ class Coordinator:
         async def work(job):
             result = await self.heads[robot_id].command(command)
             if op == "drive":
-                parts = command.split()
-                duration_ms = int(parts[3]) if len(parts) == 4 else 250
+                duration_ms = drive_duration_ms(command)
                 await asyncio.sleep(duration_ms / 1000)
             else:
                 await asyncio.sleep(2)  # bounded ramp/settling; does not claim measured position

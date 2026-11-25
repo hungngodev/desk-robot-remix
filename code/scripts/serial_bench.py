@@ -11,7 +11,7 @@ import statistics
 import time
 
 import serial
-from desk_robot.transport import expected_ack, validate_command
+from desk_robot.transport import drive_duration_ms, expected_ack, validate_command
 
 
 def inspect_native_low_g(imu: dict, family: int, raw_valid: bool) -> dict:
@@ -323,8 +323,7 @@ def main():
         # validate_command accepts an omitted drive duration (250ms). Compute
         # this before opening USB or issuing motion, never after actuation.
         if op == "drive":
-            tokens = args.command.split()
-            duration = (int(tokens[3]) if len(tokens) == 4 else 250) / 1000 + 0.05
+            duration = drive_duration_ms(args.command) / 1000 + 0.05
         else:
             duration = 1.5
 
