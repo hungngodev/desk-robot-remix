@@ -3,7 +3,9 @@
 This verifies navigation and critical release language, not electrical fit.
 """
 import re
+import shlex
 import subprocess
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -32,7 +34,6 @@ def test_builder_guide_does_not_claim_unqualified_power_or_print_release():
     assert "Do not order fleet quantities" in text
     assert "only two builder facing lists" in text
     assert "pilot-cart-markdown" in text
-    assert "only two builder facing lists" in text
     assert "one shared room station" in text
     assert "read-only" in text
     assert "signed net battery current" in text
@@ -182,3 +183,41 @@ def test_builder_usb_shell_blocks_fail_closed(tmp_path, monkeypatch):
             "--port /dev/mock-body --inspect --samples 10"
         ],
     )
+
+
+def test_documented_procurement_views_execute_without_release_authority():
+    """Run the exact documented read-only CLI argv, never a purchase command."""
+    expected = {
+        "first-robot-markdown": (
+            "# First complete desk robot, one dock and one room station",
+            "**PROTOTYPE BUYING STATUS: HOLD.**",
+            "## 1. Reported owned or ordered",
+            "## 2. First-unit remaining slots",
+        ),
+        "pilot-cart-markdown": (
+            "# Source-locked first robot evaluation cart",
+            "Historical prices are not live checkout quotes",
+            "No lithium charging or motor motion is authorized.",
+        ),
+    }
+    commands = [
+        shlex.split(line) for line in GUIDE.read_text(encoding="utf-8").splitlines()
+        if line.startswith("cd code && python3 scripts/procurement_release.py ")
+    ]
+    assert len(commands) == len(expected)
+    seen = set()
+    for argv in commands:
+        assert argv[:6] == [
+            "cd", "code", "&&", "python3", "scripts/procurement_release.py", "--format",
+        ]
+        assert len(argv) == 7 and argv[6] in expected
+        assert argv[6] not in seen
+        seen.add(argv[6])
+        result = subprocess.run(
+            [sys.executable, *argv[4:]], cwd=ROOT / "code",
+            capture_output=True, text=True, check=False, timeout=30,
+        )
+        assert result.returncode == 0, result.stderr
+        for marker in expected[argv[6]]:
+            assert marker in result.stdout
+    assert seen == set(expected)
