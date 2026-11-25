@@ -1158,9 +1158,12 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
         await coordinator.close()
 
 
-@pytest.mark.parametrize("initial_low", [False, True])
+@pytest.mark.parametrize("initial_low,deferred_fault", [
+    (True, None), (False, None), (False, "recovered"), (False, "stale"),
+    (False, "expired"), (False, "consent_replaced"),
+])
 async def test_autonomous_low_battery_dock_and_charge_inhibition_lifecycle(
-    settings, tmp_path, monkeypatch, initial_low,
+    settings, tmp_path, monkeypatch, initial_low, deferred_fault,
 ):
     """Qualified low-battery auto-dock covers initial/crossing low, voice deferral, and dock inhibition."""
     import asyncio
@@ -1210,6 +1213,8 @@ async def test_autonomous_low_battery_dock_and_charge_inhibition_lifecycle(
             self.frames = 0
             self.ir_reads = 0
             self.sensor_pid = "OV5640"
+            self.fuel_soc = 1800
+            self.fuel_age = 10
 
         async def status(self):
             return {
@@ -1240,10 +1245,10 @@ async def test_autonomous_low_battery_dock_and_charge_inhibition_lifecycle(
                 },
                 "power": {
                     "cell_mv": 3650,
-                    "soc_centi": 1800,
+                    "soc_centi": self.fuel_soc,
                     "fuel_valid": True,
                     "fuel_seq": 50,
-                    "fuel_age_ms": 10,
+                    "fuel_age_ms": self.fuel_age,
                 },
             }
 
@@ -1384,8 +1389,25 @@ async def test_autonomous_low_battery_dock_and_charge_inhibition_lifecycle(
         if not initial_low:
             assert rt.coordinator.jobs == {}
             assert head.commands == []
+            if deferred_fault == "recovered":
+                head.fuel_soc = 3500
+            elif deferred_fault == "stale":
+                head.fuel_age = 500
+            elif deferred_fault == "expired":
+                pending = rt.coordinator._deferred_autonomous_dock
+                initial, _, grant = pending[robot.id]
+                pending[robot.id] = (initial, time.monotonic() - 1, grant)
+            elif deferred_fault == "consent_replaced":
+                settings.voice_vision_tools_enabled = False
+                settings.voice_vision_tools_enabled = True
             rt.coordinator.set_voice_state(active_robots=frozenset(), monitor_ready=True)
             dispatched = await rt.coordinator.dispatch_next_deferred()
+            if deferred_fault:
+                assert dispatched is None
+                assert rt.coordinator.jobs == {}
+                assert head.commands == []
+                assert robot.id not in rt.coordinator.permits
+                return
             assert dispatched is not None and dispatched.kind == "dock_approach"
 
         assert len(rt.coordinator.jobs) == 1
@@ -1547,3 +1569,19 @@ def test_autonomous_dock_retry_rejects_malformed_recovery(tmp_path, boot, seq, p
             "robot-01", boot, seq, recovered=True, previous_fuel_seq=previous,
         )
     assert not store.dock_retry_transition("robot-01", 1, 2, recovered=False)
+
+
+@pytest.mark.parametrize("changes,elapsed", [
+    ({"fuel_valid": False}, 0), ({"fuel_seq": 0}, 0), ({"fuel_seq": True}, 0),
+    ({"fuel_age_ms": 499}, 1), ({"fuel_age_ms": 10**1000}, 0.5),
+    ({"soc_centi": 2001}, 0), ({"soc_centi": True}, 0), ({}, float("nan")),
+])
+def test_auto_dock_fuel_preflight_rejects_stale_or_recovered_evidence(changes, elapsed):
+    from desk_robot.controller import _require_fresh_auto_dock_fuel
+
+    power = {"fuel_valid": True, "fuel_seq": 7, "fuel_age_ms": 10, "soc_centi": 1800}
+    _require_fresh_auto_dock_fuel(power, max_soc_centi=2000, elapsed_ms=0)
+    with pytest.raises(OperationError, match="fresh low battery"):
+        _require_fresh_auto_dock_fuel(
+            power | changes, max_soc_centi=2000, elapsed_ms=elapsed,
+        )

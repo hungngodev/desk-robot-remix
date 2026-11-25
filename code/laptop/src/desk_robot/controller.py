@@ -93,6 +93,22 @@ def _require_safe_fuel_sample(
         raise OperationError(depleted_message)
 
 
+def _require_fresh_auto_dock_fuel(
+    power: object, *, max_soc_centi: int, elapsed_ms: float,
+) -> None:
+    """An old low-battery request is not evidence that the pack is still low."""
+    if (not isinstance(power, dict) or power.get("fuel_valid") is not True
+            or type(power.get("fuel_seq")) is not int
+            or not 1 <= power["fuel_seq"] <= 0xffffffff
+            or type(power.get("fuel_age_ms")) is not int
+            or not 0 <= power["fuel_age_ms"] < 500
+            or type(elapsed_ms) not in (int, float) or not 0 <= elapsed_ms < 500
+            or power["fuel_age_ms"] + elapsed_ms >= 500
+            or type(power.get("soc_centi")) is not int
+            or not 0 <= power["soc_centi"] <= max_soc_centi):
+        raise OperationError("Autonomous dock requires fresh low battery evidence")
+
+
 @dataclass
 class Job:
     id: str
@@ -170,7 +186,7 @@ class Coordinator:
         except KeyError as exc:
             raise OperationError("Unknown robot") from exc
 
-    async def _hardware_preflight(self, robot_id: str) -> None:
+    async def _hardware_preflight(self, robot_id: str) -> dict | None:
         """Read the actual WROOM safety state, never infer safety from a permit.
 
         The head transports this status from the body UART. This is an extra
@@ -255,8 +271,9 @@ class Coordinator:
             context="Hardware preflight",
             depleted_message="Hardware preflight: battery voltage critical (<3350 mV)",
         )
+        return status
 
-    async def operator_arm(self, robot_id: str):
+    async def operator_arm(self, robot_id: str, *, require_low_battery: bool = False):
         robot = self.robot(robot_id)
         if self.closed:
             raise OperationError("Coordinator closing")
@@ -275,7 +292,14 @@ class Coordinator:
         self._permit_epoch[robot_id] += 1
         owner_epoch = self._permit_epoch[robot_id]
         self.permits.pop(robot_id, None)
-        await self._hardware_preflight(robot_id)
+        request_at = time.monotonic()
+        status = await self._hardware_preflight(robot_id)
+        if require_low_battery:
+            _require_fresh_auto_dock_fuel(
+                status.get("power") if isinstance(status, dict) else None,
+                max_soc_centi=robot.battery_low_percent * 100,
+                elapsed_ms=(time.monotonic() - request_at) * 1000,
+            )
         if not self.robot(robot_id).motion_enabled:
             raise OperationError("motion_enabled=false; no permit granted")
         voice_reason = self.voice_blocks_motion()
@@ -692,15 +716,17 @@ class Coordinator:
                 ):
                     return None
                 robot_id = next(iter(pending_auto))
-                initial_low = pending_auto.pop(robot_id)
+                initial_low, expires_at, camera_grant = pending_auto.pop(robot_id)
                 if (
-                    robot_id in self._pending_stops
+                    time.monotonic() >= expires_at
+                    or robot_id in self._pending_stops
                     or robot_id in self._unconfirmed_stops
                     or self.dock_inhibited(robot_id)
                 ):
                     continue
                 job = await self.request_autonomous_low_battery_dock(
                     robot_id, initial_low=initial_low,
+                    _expires_at=expires_at, _camera_grant=camera_grant,
                 )
                 if job is not None:
                     return job
@@ -1013,6 +1039,7 @@ class Coordinator:
 
     async def request_autonomous_low_battery_dock(
         self, robot_id: str, *, initial_low: bool = False,
+        _expires_at: float | None = None, _camera_grant: int | None = None,
     ) -> Job | None:
         """Queue or start bounded dock approach on sustained low battery.
 
@@ -1023,6 +1050,13 @@ class Coordinator:
         operator_arm + dock() checks. Never authorizes terminal charging.
         """
         robot = self.robot(robot_id)
+        expires_at = time.monotonic() + 30 if _expires_at is None else _expires_at
+        camera_grant = (
+            self.settings.camera_consent_generation if _camera_grant is None else _camera_grant
+        )
+        if (time.monotonic() >= expires_at
+                or self.settings.camera_consent_generation != camera_grant):
+            return None
         if not robot.autonomous_low_battery_dock_enabled:
             return None
         if not robot.motion_enabled or not robot.dock_motion_qualified:
@@ -1050,12 +1084,14 @@ class Coordinator:
             if pending_auto is None:
                 pending_auto = {}
                 self._deferred_autonomous_dock = pending_auto
-            pending_auto[robot_id] = initial_low
+            pending_auto[robot_id] = (initial_low, expires_at, camera_grant)
             return None
         try:
-            await self.operator_arm(robot_id)
+            await self.operator_arm(robot_id, require_low_battery=True)
             if (
-                not robot.autonomous_low_battery_dock_enabled
+                time.monotonic() >= expires_at
+                or self.settings.camera_consent_generation != camera_grant
+                or not robot.autonomous_low_battery_dock_enabled
                 or not robot.motion_enabled
                 or not robot.dock_motion_qualified
                 or self.dock_inhibited(robot_id)
