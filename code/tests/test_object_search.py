@@ -347,3 +347,20 @@ def test_search_observation_never_promotes_detection_to_metric_arrival(
     assert result["target_observed"] is (observation == "camera_seen")
     assert result["arrived"] is False and result["final_cell_verified"] is False
     assert result["motor_authorized"] is False
+
+
+@pytest.mark.parametrize(
+    ("inspected", "heading", "expected", "remaining"),
+    [
+        (True, 0, "no_current_sighting", None),
+        (False, 0, "viewpoint_proposal", 0),
+        (False, 1, "viewpoint_proposal", 1),
+    ],
+)
+def test_viewpoint_aliases_do_not_repeat_same_pose(inspected, heading, expected, remaining):
+    _, _, _, _, _, _, view = fixtures()
+    alias = replace(view, viewpoint_id="view-2", priority=1, heading=heading)
+    result = search(candidates=(replace(view, inspected_in_request=inspected), alias))
+    assert result.status == expected
+    assert result.remaining_viewpoints == remaining
+    assert not result.may_execute and not result.arrived

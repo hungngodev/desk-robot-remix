@@ -233,11 +233,15 @@ def propose_object_search(
                  object_query.calibration_id)):
             return refuse("foreign_or_stale_viewpoint")
 
-    candidates = sorted(
-        (v for v in viewpoints
-         if v.previously_reachable and not v.inspected_in_request),
-        key=lambda v: (v.priority, v.viewpoint_id),
-    )
+    # Different record IDs may represent the same fixed-camera pose.
+    seen_poses = {(v.cell, v.heading) for v in viewpoints if v.inspected_in_request}
+    candidates = []
+    for view in sorted(viewpoints, key=lambda v: (v.priority, v.viewpoint_id)):
+        pose = (view.cell, view.heading)
+        if not view.previously_reachable or pose in seen_poses:
+            continue
+        seen_poses.add(pose)
+        candidates.append(view)
     considered = 0
     for view in candidates[:max_viewpoints]:
         invalid = live()
