@@ -15,19 +15,20 @@ import asyncio
 import audioop
 import base64
 import hashlib
-import ipaddress
 import json
 import os
 import re
 import time
 import uuid
-import wave
 from collections import deque
 from dataclasses import dataclass
-from io import BytesIO
-from urllib.parse import urlsplit
 
 import aiohttp
+from desk_robot_omni_http_protocol import (
+    approved_backend_url,
+    chat_completion_endpoint,
+    decode_tool_completion,
+)
 from desk_robot_voice_intents import (
     _advice_only_request,
     addressed_to_other_pet,
@@ -85,23 +86,6 @@ def passive_speech_allowed() -> bool:
 
 
 _NATIVE_WORKER_CANCEL_TIMEOUT_S = 0.8
-
-
-def approved_backend_url(url: str) -> str:
-    """No microphone plaintext may leave this Mac over an arbitrary LAN URL."""
-    value = urlsplit(url)
-    if (value.scheme not in ("ws", "wss") or not value.hostname
-            or value.username or value.password or value.fragment
-            or value.path != "/v1/realtime" or value.query != "duplex=1"):
-        raise ValueError("Use the official realtime /v1/realtime?duplex=1 URL")
-    if value.scheme == "ws":
-        if value.hostname != "localhost":
-            try:
-                if not ipaddress.ip_address(value.hostname).is_loopback:
-                    raise ValueError("Mic traffic over LAN requires wss://")
-            except ValueError as exc:
-                raise ValueError("Mic traffic requires loopback ws or secure wss") from exc
-    return url
 
 
 def opted_in(conn) -> bool:
@@ -1227,11 +1211,7 @@ class NativeOmniSession:
             return
         self._tool_answer_started_turn = (epoch, request_turn)
         audio_queued = False
-        url = urlsplit(self.url)
-        endpoint = (
-            ("https" if url.scheme == "wss" else "http")
-            + "://" + url.netloc + "/v1/chat/completions"
-        )
+        endpoint = chat_completion_endpoint(self.url)
         # Keep current physical sensor and camera-tool cues alongside the
         # human question; don't force the next model to invent continuity.
         private_revisions = [
@@ -1313,42 +1293,7 @@ class NativeOmniSession:
                 if response.status != 200:
                     raise RuntimeError("Model chat completion unavailable")
                 result = await response.json()
-            choices = result.get("choices") if isinstance(result, dict) else None
-            if not isinstance(choices, list):
-                raise ValueError("No model chat completion choices")
-            wav_text = next((
-                choice.get("message", {}).get("audio", {}).get("data")
-                for choice in choices if isinstance(choice, dict)
-                and isinstance(choice.get("message"), dict)
-                and isinstance(choice["message"].get("audio"), dict)
-                and isinstance(choice["message"]["audio"].get("data"), str)
-            ), None)
-            # MiniCPM-o 4.5 returns separate text and speech choices.
-            # This text is *not* proof of what the physical speaker played.
-            generated_text = next((
-                choice.get("message", {}).get("content")
-                for choice in choices if isinstance(choice, dict)
-                and isinstance(choice.get("message"), dict)
-                and isinstance(choice["message"].get("content"), str)
-                and choice["message"]["content"].strip()
-            ), "")
-            if not wav_text or len(wav_text) > 1_600_000:
-                raise ValueError("No bounded model speech audio")
-            encoded = base64.b64decode(wav_text, validate=True)
-            if len(encoded) > 1_200_000:
-                raise ValueError("Model audio exceeds duration limit")
-            with wave.open(BytesIO(encoded), "rb") as wav:
-                if (wav.getnchannels() != 1 or wav.getsampwidth() != 2
-                        or wav.getframerate() != 24000
-                        or not 0 < wav.getnframes() <= 24_000 * 20):
-                    raise ValueError("Expected 24 kHz mono PCM16 model WAV")
-                frames = wav.getnframes()
-                # wave.readframes may return fewer bytes than the header
-                # promises, or a trailing incomplete sample. Do not treat
-                # either as completed speech or feed it to the Opus encoder.
-                pcm = wav.readframes(frames + 1)
-                if len(pcm) != frames * 2:
-                    raise ValueError("Truncated or misaligned model WAV PCM")
+            pcm, generated_text = decode_tool_completion(result)
             if (self.closed or not self.connected
                     or self._tool_speech_turn != (epoch, request_turn)):
                 return
@@ -1385,7 +1330,7 @@ class NativeOmniSession:
         except asyncio.CancelledError:
             raise
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError,
-                RuntimeError, wave.Error):
+                RuntimeError):
             self.native_tool_speech_errors += 1
         finally:
             # A failed backend text+audio request must not retain the

@@ -212,10 +212,11 @@ def test_overlay_targets_pinned_server_and_compiles():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     changes = module.files(ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server")
-    # The shared read-only voice intent module is a required twelfth pinned
-    # overlay file. Its absence would make the native Xiaozhi adapter fail
-    # import at runtime even though the other eleven modules compiled.
-    assert len(changes) == 12
+    # Both extracted pure modules must ship with the pinned native adapter.
+    # Compilation alone does not resolve their imports.
+    assert len(changes) == 13
+    assert "desk_robot_omni_http_protocol.py" in changes
+    assert "decode_tool_completion" in changes["desk_robot_omni_http_protocol.py"]
     assert "desk_robot_voice_intents.py" in changes
     assert "pack_grounded_facts" in changes["desk_robot_voice_intents.py"]
     assert "core/handle/intentHandler.py" in changes

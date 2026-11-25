@@ -328,6 +328,9 @@ def files(root):
     changes["desk_robot_native_omni.py"] = (
         HERE / "overlay/desk_robot_native_omni.py"
     ).read_text()
+    changes["desk_robot_omni_http_protocol.py"] = (
+        HERE / "overlay/desk_robot_omni_http_protocol.py"
+    ).read_text()
     changes["desk_robot_voice_intents.py"] = (
         HERE / "overlay/desk_robot_voice_intents.py"
     ).read_text()
