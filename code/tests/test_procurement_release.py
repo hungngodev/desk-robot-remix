@@ -964,6 +964,36 @@ def test_full_feature_scope_cannot_be_deleted_for_release():
         assert not report["order_released"]
         assert any(expected in gate for gate in report["missing_system_evidence"])
 
+    # The fixed parent ledger is not an open-ended list of minimums. An
+    # extra station, duplicate linked decision, or unknown pet component must
+    # not be released even when all submitted receipts appear complete.
+    for scope, ident, field, count in (
+        ("pet", "fsr", "per_robot", 3),
+        ("room", "room_controller", "quantity_per_room", 2),
+        ("room", "nfc_game_props", "quantity_per_room", 11),
+        ("room", "max30102", "quantity_per_room", 1),
+        ("room", "room_soil_probe", "quantity_per_room", 1),
+        ("pet", "protected_ntc_pack", "per_robot", 1),
+    ):
+        excess = copy.deepcopy(selected)
+        rows = excess["parts"] if scope == "pet" else excess["room_pod"]["modules"]
+        row = next((item for item in rows if item["id"] == ident), None)
+        if row is None:
+            rows.append({
+                "id": ident, "name": ident, field: count,
+                "reported_owned_total": 0, "group": "pet",
+            })
+        else:
+            row[field] = count
+        report = mod.generate(excess, evidence_for(excess))
+        assert any(
+            gate.startswith("unexpected_or_excess_full_feature_roles:")
+            and f"{scope}:{ident}" in gate
+            for gate in report["missing_system_evidence"]
+        )
+        assert not report["order_released"]
+        assert not mod.first_robot_projection(report)["purchase_approved"]
+
     # Even complete synthetic receipts cannot approve installed quantities
     # that exceed the fixed eight lanes and two isolated multiplexers.
     for role, count in (("cliff_obstacle", 9), ("i2c_mux", 3)):

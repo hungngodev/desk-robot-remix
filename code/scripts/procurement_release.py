@@ -242,6 +242,15 @@ def _ad_fruit_new_hardware(part_evidence: object, quantity: int) -> bool:
     )
 
 
+def _unexpected_or_excess_roles(selected: dict, expected: dict, scope: str) -> list[str]:
+    """Identify phantom roles and extra installed units, not spare inventory."""
+    return [
+        f"{scope}:{ident}"
+        for ident, quantity in selected.items()
+        if ident not in expected or quantity > expected[ident]
+    ]
+
+
 def generate(plan: dict, evidence: dict | None = None) -> dict:
     """Produce all design quantities, distinguish reported stock from proof."""
     if not isinstance(plan, dict):
@@ -463,6 +472,15 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
             "missing_or_reduced_conditional_room_roles: "
             + ", ".join(conditional_drift)
         )
+    # The BOM is a fixed installation, not a minimum-size shopping cart.
+    # Spare stock and linked decisions must not become additional parent roles.
+    excess = _unexpected_or_excess_roles(selected_pet, REQUIRED_PET_PER_ROBOT, "pet")
+    excess += _unexpected_or_excess_roles(
+        selected_room, REQUIRED_ROOM_PER_STATION | CONDITIONAL_ROOM_PER_STATION, "room"
+    )
+    if excess:
+        missing_system.append("unexpected_or_excess_full_feature_roles: " +
+                              ", ".join(excess))
     # Checking only the shopping row's model name is insufficient: a parallel
     # agent could silently put premium VL53L4CD lanes into the wiring plan.
     # Every actual 0x70 lane must remain the chosen inexpensive VL53L0X at
