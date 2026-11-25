@@ -116,7 +116,7 @@ class OmniDuplexWire:
     MAX_INPUT_MS = 1000
     MAX_IMAGE_BYTES = 1_000_000
     MAX_OUTPUT_BYTES = 96_000  # A two-second 24k PCM16 response unit.
-    MAX_RESPONSES_PER_EPOCH = 4096  # Bound replay state; reconnect on exhaustion.
+    MAX_RESPONSES_PER_SESSION = 4096  # Bound replay state; reconnect on exhaustion.
 
     def __init__(self, *, model: str = "openbmb/MiniCPM-o-4_5",
                  instructions: str = "You are a helpful desk companion."):
@@ -144,7 +144,6 @@ class OmniDuplexWire:
         self._session_created = False
         self._min_server_epoch: int | None = None
         self._interrupted = False
-        self._response_ids_epoch: int | None = None
         self._response_ids_seen: set[str] = set()
 
     def session_update(self) -> dict:
@@ -350,16 +349,13 @@ class OmniDuplexWire:
                 # response cleared _interrupted. vLLM-Omni advertises epoch
                 # in response.metadata.duplex_event for native sessions.
                 return None
-            # Several utterances can share a server epoch. Retain accepted
-            # identities so A -> B -> delayed A cannot resurrect old output.
-            if response_id == self.response_id:
+            # Downstream terminal events can carry only response_id.
+            # Never reuse an accepted identity within this model session,
+            # even after a server epoch advances. A stale terminal or queued
+            # audio item must not acquire authority over a newer utterance.
+            if response_id == self.response_id or response_id in self._response_ids_seen:
                 return None
-            if server_epoch != self._response_ids_epoch:
-                self._response_ids_seen.clear()
-                self._response_ids_epoch = server_epoch
-            if response_id in self._response_ids_seen:
-                return None
-            if len(self._response_ids_seen) >= self.MAX_RESPONSES_PER_EPOCH:
+            if len(self._response_ids_seen) >= self.MAX_RESPONSES_PER_SESSION:
                 raise RuntimeError("Native response replay window exhausted; reconnect")
             self._response_ids_seen.add(response_id)
             self._interrupted = False

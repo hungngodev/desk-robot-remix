@@ -655,9 +655,9 @@ def test_superseded_response_identity_cannot_reclaim_same_epoch():
     assert wire.response_id == "third"
 
 
-def test_response_replay_tracking_never_evicts_current_epoch_identity(monkeypatch):
+def test_response_replay_tracking_never_evicts_session_identity(monkeypatch):
     wire = OmniDuplexWire()
-    monkeypatch.setattr(wire, "MAX_RESPONSES_PER_EPOCH", 2)
+    monkeypatch.setattr(wire, "MAX_RESPONSES_PER_SESSION", 2)
 
     def created(response_id, epoch=0):
         return {"type": "response.created", "response_id": response_id,
@@ -669,8 +669,36 @@ def test_response_replay_tracking_never_evicts_current_epoch_identity(monkeypatc
         wire.handle_event(created("three"))
     wire.handle_event(created("one"))
     assert wire.response_id == "two"
-    wire.handle_event(created("three", epoch=1))
-    assert wire.response_id == "three"
+    with pytest.raises(RuntimeError, match="replay window exhausted"):
+        wire.handle_event(created("three", epoch=1))
+    assert wire.response_id == "two"
+    # A new session, not a new epoch, restores the bounded replay budget.
+    fresh = OmniDuplexWire()
+    fresh.handle_event(created("three", epoch=1))
+    assert fresh.response_id == "three"
+
+
+@pytest.mark.parametrize("terminal", ["response.done", "output_audio_buffer.cleared"])
+def test_old_response_id_cannot_reclaim_speaker_across_epochs(terminal):
+    wire = OmniDuplexWire()
+    wire.handle_event({"type": "session.created", "session": {"epoch": 0}})
+
+    def created(response_id, epoch):
+        return {"type": "response.created", "response_id": response_id, "epoch": epoch}
+
+    wire.handle_event(created("old", 0))
+    assert wire.handle_event(delta("old", epoch=0)) is not None
+    wire.interrupt()
+    wire.append_audio(b"\0" * 3200, speech=True)
+    wire.commit()
+    wire.handle_event(created("fresh", 2))
+    assert wire.handle_event(delta("fresh", epoch=2)) is not None
+    wire.handle_event(created("old", 3))
+    wire.handle_event({"type": terminal, "response_id": "old"})
+    assert wire.response_id == "fresh"
+    assert wire.handle_event(delta("old", epoch=3)) is None
+    assert wire.handle_event(delta("fresh", epoch=2)) is not None
+
 
 @pytest.mark.parametrize("conflict", ["outer_id", "nested_id", "native_id", "epoch", "bool_epoch"])
 def test_response_created_rejects_conflicting_envelope_before_changing_authority(conflict):
