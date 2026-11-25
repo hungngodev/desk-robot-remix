@@ -186,6 +186,17 @@ bool BodyWireValid(const std::string& line) {
     return line.find("\\u0000") == std::string::npos;
 }
 
+bool PoseVersionUnsupported(cJSON* json) {
+    if (!cJSON_IsObject(json)) return false;
+    const cJSON* version = nullptr;
+    for (const cJSON* item = json->child; item; item = item->next) {
+        if (!item->string || std::strcmp(item->string, "v") != 0) continue;
+        if (version) return false;  // ambiguous version, not negotiation
+        version = item;
+    }
+    return cJSON_IsNumber(version) && UnsupportedPoseWireVersion(version->valuedouble);
+}
+
 bool PoseValid(cJSON* json) {
     // Guide 20 version 1: validate a complete, exact body-origin sample.
     // The body owns quality and sample_us; the head must not invent either.
@@ -475,6 +486,8 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
                 command.verb == "ir" || command.verb == "optics" ||
                 command.verb == "pose") {
                 auto json = Parse(line);
+                if (command.verb == "pose" && json && PoseVersionUnsupported(json.get()))
+                    return {501, false, "pose unsupported by body firmware"};
                 if (json && (command.verb == "status" ?
                              StatusValid(json.get()) : command.verb == "aux" ?
                              AuxValid(json.get()) : command.verb == "ir" ?

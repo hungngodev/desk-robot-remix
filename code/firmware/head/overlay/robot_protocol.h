@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <charconv>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -11,6 +12,12 @@
 #include <vector>
 
 namespace desk_robot {
+// Capability detection is diagnostic only; unknown versions never supply pose.
+inline bool UnsupportedPoseWireVersion(double version) {
+    return std::isfinite(version) && std::floor(version) == version &&
+           version >= 0 && version <= 4294967295.0 && version != 1;
+}
+
 inline bool ContentLengthMatches(std::string_view field, std::size_t parsed) {
     if (field.empty()) return false;
     for (char c : field) if (c < '0' || c > '9') return false;

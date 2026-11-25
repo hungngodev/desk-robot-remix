@@ -200,7 +200,10 @@ promote a degraded/unavailable or uncalibrated pose to safe navigation.
 
 For a legacy WROOM reply `ERR input unknown_command`, the head sends
 HTTP 501 and `{"ok":false,"reply":"pose unsupported by body firmware","robot_id":"robot-01"}`.
-Malformed pose JSON or body-side pose errors return HTTP 503; an uncertain
+An explicit, unique numeric wire version outside v1 (within uint32) also
+returns HTTP 501; no fields from that unknown version are interpreted.
+Missing or ambiguous versions, malformed pose JSON, or other body-side pose
+errors return HTTP 503; an uncertain
 no-reply returns HTTP 504 after the existing 350 ms UART bound. One pending
 read shares the existing nonurgent telemetry latch; urgent STOP preempts
 nonurgent UART reads at the current polling boundary. No `pose` query
@@ -228,7 +231,9 @@ must establish a new baseline. Missing, malformed or duplicate version fields,
 foreign identities, replayed body sequences and other failed head requests
 do not return a usable pose. Additional unknown fields in a v1 head response
 are ignored by the Mac's typed decoder; the body UART schema remains exact.
-No pose compatibility outcome grants movement or disables unrelated routes. A successful diagnostic
+No pose compatibility outcome grants movement or disables unrelated routes.
+A legacy status protocol missing current safety evidence remains rejected;
+compatibility never bypasses the current WROOM motor permit or safety latch. A successful diagnostic
 response includes the version-one body values, head boot, quality and the
 `PoseFence` continuity result. Its `available: true` means that the
 head returned a typed packet, **not** calibrated displacement or localization.

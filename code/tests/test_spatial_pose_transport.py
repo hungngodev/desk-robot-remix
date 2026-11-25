@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from desk_robot import transport
-from desk_robot.transport import HeadError, HttpHead
+from desk_robot.transport import HeadError, HttpHead, PoseUnsupported
 
 
 async def test_authenticated_pose_reader_tracks_identity_and_replay(settings, tokens):
@@ -49,9 +49,9 @@ async def test_old_head_missing_pose_does_not_disable_normal_status(settings, to
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
         head = HttpHead(robot, client)
-        with pytest.raises(HeadError):
+        with pytest.raises(PoseUnsupported):
             await head.pose_status()
-        assert head.pose_fence.blocked_reason == "pose_transport_unavailable"
+        assert head.pose_fence.blocked_reason == "pose_unsupported"
         assert (await head.status())["robot_id"] == robot.id
 
 

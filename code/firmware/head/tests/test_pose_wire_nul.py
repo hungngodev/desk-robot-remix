@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -79,3 +80,81 @@ int main() {
         check=True,
     )
     subprocess.run([str(binary)], check=True)
+
+
+
+def test_explicit_pose_version_skew_is_distinct_from_malformed_wire(tmp_path):
+    overlay = Path(__file__).resolve().parents[1] / "overlay"
+    bridge = (overlay / "robot_bridge.cc").read_text()
+    start = bridge.index("bool PoseVersionUnsupported(")
+    end = bridge.index("\n}", start) + 2
+    gate = 'command.verb == "pose" && json && PoseVersionUnsupported(json.get())'
+    transaction = bridge[bridge.index("auto json = Parse(line);"):]
+    assert transaction.index(gate) < transaction.index("PoseValid(json.get())")
+    assert 'return {501, false, "pose unsupported by body firmware"};' in transaction[
+        transaction.index(gate):transaction.index("PoseValid(json.get())")
+    ]
+    assert 'return {503, false, "malformed or unsupported pose response"};' in transaction
+    compiler = shutil.which("c++")
+    assert compiler is not None, "Native C++17 compiler required"
+    source = tmp_path / "pose_version.cc"
+    source.write_text(r'''
+#include <cassert>
+#include <cstring>
+#include <limits>
+#include "robot_protocol.h"
+using desk_robot::UnsupportedPoseWireVersion;
+
+// Parsed cJSON node fixture: exact types, object membership and duplicate keys.
+struct cJSON {
+    int type = 0;
+    const char* string = nullptr;
+    double valuedouble = 0;
+    cJSON* child = nullptr;
+    cJSON* next = nullptr;
+};
+bool cJSON_IsObject(const cJSON* p) { return p && p->type == 1; }
+bool cJSON_IsNumber(const cJSON* p) { return p && p->type == 2; }
+''' + bridge[start:end] + r'''
+int main() {
+    cJSON version{2, "v", 0};
+    cJSON object{1, nullptr, 0, &version};
+    for (double value : {0.0, 2.0, 4294967295.0}) {
+        version.valuedouble = value;
+        assert(PoseVersionUnsupported(&object));
+    }
+    for (double value : {1.0, -1.0, 0.5, 4294967296.0,
+                         std::numeric_limits<double>::infinity(),
+                         std::numeric_limits<double>::quiet_NaN()}) {
+        version.valuedouble = value;
+        assert(!PoseVersionUnsupported(&object));
+    }
+    version.valuedouble = 0;
+    for (int type : {0, 1, 3, 4}) {
+        version.type = type;
+        assert(!PoseVersionUnsupported(&object));
+    }
+    version.type = 2;
+    version.string = "V";
+    assert(!PoseVersionUnsupported(&object));
+    version.string = "v";
+    cJSON extra{2, "other", 4};
+    version.next = &extra;
+    assert(PoseVersionUnsupported(&object));
+    extra.string = "v";
+    assert(!PoseVersionUnsupported(&object));
+    object.child = nullptr;
+    assert(!PoseVersionUnsupported(&object));
+    assert(!PoseVersionUnsupported(nullptr));
+    assert(!PoseVersionUnsupported(&version));
+}
+''')
+    binary = tmp_path / "pose_version"
+    pie_flags = [] if sys.platform == "darwin" else ["-fno-pie", "-no-pie"]
+    subprocess.run(
+        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+         "-fsanitize=address,undefined", *pie_flags, "-I", str(overlay),
+         str(source), "-o", str(binary)],
+        check=True, timeout=60,
+    )
+    subprocess.run([str(binary)], check=True, timeout=10)
