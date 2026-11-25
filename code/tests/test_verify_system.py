@@ -305,7 +305,7 @@ def test_successful_test_stages_do_not_certify_unpinned_checkout(
 
 
 def test_source_snapshot_rejects_unverified_or_dirty_git(monkeypatch):
-    outputs = iter(("a" * 40, " M code/scripts/verify_system.py\\n", ""))
+    outputs = iter((str(verify.ROOT), "a" * 40, " M code/scripts/verify_system.py\\n", ""))
     monkeypatch.setattr(verify.subprocess, "check_output",
                         lambda *args, **kwargs: next(outputs))
     result = verify.source_snapshot()
@@ -529,3 +529,45 @@ def test_fixture_path_and_lock_faults(monkeypatch, tmp_path, fault):
     assert result["exit_code"] is None
     assert "INCOMPLETE" in result["error"]
     assert executed == []
+
+
+def test_source_snapshot_not_redirected_by_inherited_git_environment(monkeypatch, tmp_path):
+    import shutil
+    import subprocess
+
+    root = tmp_path / "real"
+    root.mkdir()
+    files = (
+        ".agent3d/agent.txt", ".github/workflows/host-verification.yml",
+        ".gitignore", "AGENTS.md", "LICENSE", "README.md",
+        "code/firmware/body/include/BodyPins.h",
+        "code/firmware/head/sense/config.h",
+        "code/laptop/src/desk_robot/handling.py",
+        "docs/hardware/full-feature-plan.json", "docs/records/verification.md",
+    )
+    for name in (*files, *(f"filler/{i}.txt" for i in range(400))):
+        path = root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("original\n")
+
+    def git(*args):
+        return subprocess.check_output(
+            ["git", "-C", str(root), *args], text=True,
+        ).strip()
+
+    git("init", "-q")
+    git("config", "user.name", "Robot Test")
+    git("config", "user.email", "robot@example.org")
+    git("add", "-A")
+    git("commit", "-qm", "original")
+    sha = git("rev-parse", "HEAD")
+    other = tmp_path / "other"
+    shutil.copytree(root, other)
+    (root / "code/laptop/src/desk_robot/handling.py").write_text("changed\n")
+    monkeypatch.setattr(verify, "ROOT", root)
+    monkeypatch.setenv("GIT_DIR", str(other / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(other))
+    snapshot = verify.source_snapshot()
+    assert snapshot["sha"] == sha
+    assert snapshot["root_tree_intact"] is True
+    assert snapshot["tracked_clean"] is False

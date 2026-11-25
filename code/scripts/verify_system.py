@@ -81,6 +81,12 @@ def steps(suite: str, build: Path) -> list[tuple[str, list[str], Path, int]]:
     return jobs
 
 
+def _verification_git_env() -> dict[str, str]:
+    # Git repository and index overrides must not redirect source provenance.
+    return {key: value for key, value in os.environ.items()
+            if not key.startswith("GIT_")}
+
+
 def _unique_lock_fields(pairs: list[tuple[str, object]]) -> dict:
     result = {}
     for key, value in pairs:
@@ -112,8 +118,7 @@ def required_upstream_fixture_errors() -> list[str]:
         if not name or name in sources:
             raise ValueError("Missing or duplicate upstream repository identity")
         sources[name] = source
-    git_env = {key: value for key, value in os.environ.items()
-               if not key.startswith("GIT_")}
+    git_env = _verification_git_env()
     missing = []
     for name in ("xiaozhi-esp32", "xiaozhi-esp32-server"):
         source = sources.get(name)
@@ -196,7 +201,7 @@ def run(name: str, argv: list[str], cwd: Path, timeout: int) -> dict:
         response = subprocess.run(
             argv, cwd=cwd, capture_output=True, text=True,
             errors="replace", timeout=timeout, check=False,
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
+            env={**_verification_git_env(), "PYTHONUNBUFFERED": "1"},
         )
         result["exit_code"] = response.returncode
         result["pass"] = response.returncode == 0
@@ -225,22 +230,29 @@ def source_snapshot() -> dict:
     """
     snapshot = {"sha": None, "tracked_clean": None,
                 "root_tree_intact": False, "error": None}
+    git_env = _verification_git_env()
     try:
+        top = subprocess.check_output(
+            ["git", "rev-parse", "--show-toplevel"], cwd=ROOT, text=True,
+            timeout=10, stderr=subprocess.DEVNULL, env=git_env,
+        ).strip()
+        if not top or Path(top).resolve() != ROOT.resolve():
+            raise ValueError("Git worktree does not match the verification root")
         sha = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True,
-            timeout=10, stderr=subprocess.DEVNULL,
+            timeout=10, stderr=subprocess.DEVNULL, env=git_env,
         ).strip()
         if len(sha) != 40 or any(ch not in "0123456789abcdef" for ch in sha):
             raise ValueError("Git did not return a full commit SHA")
         changes = subprocess.check_output(
             ["git", "status", "--porcelain", "--untracked-files=no"],
-            cwd=ROOT, text=True, timeout=10, stderr=subprocess.DEVNULL,
+            cwd=ROOT, text=True, timeout=10, stderr=subprocess.DEVNULL, env=git_env,
         )
         snapshot["sha"] = sha
         snapshot["tracked_clean"] = not bool(changes.strip())
         tracked = subprocess.check_output(
             ["git", "ls-files", "-z"], cwd=ROOT, text=True, timeout=10,
-            stderr=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL, env=git_env,
         ).split("\0")
         if tracked and tracked[-1] == "":
             tracked.pop()
