@@ -4,7 +4,6 @@ import asyncio
 import gc
 
 import pytest
-
 from desk_robot.operations import _bounded_head_reply
 
 
@@ -25,7 +24,7 @@ async def test_parent_cancelled_by_failing_child_observes_child_exception():
         )
         with pytest.raises(asyncio.CancelledError):
             await parent
-        del parent
+        parent = None
         gc.collect()
         await asyncio.sleep(0)
         assert not unhandled
