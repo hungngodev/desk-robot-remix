@@ -112,6 +112,7 @@ class TwoWire {
   unsigned tof_register_stop_transmissions = 0;
   std::uint8_t tof_raw_status = 11;
   std::uint16_t tof_force_mm = 0; // zero keeps per-lane nominal 45/300 mm
+  bool tof_force_zero = false; // inject an actual zero-mm conversion
   // On-wire raw 9.7 fixed-point optical quality fields for regression.
   std::uint16_t tof_ambient_97 = 0x0123;
   std::uint16_t tof_signal_97 = 0x4567;
@@ -430,8 +431,9 @@ class TwoWire {
         inbound[7] = static_cast<std::uint8_t>(tof_ambient_97);
         inbound[8] = static_cast<std::uint8_t>(tof_signal_97 >> 8);
         inbound[9] = static_cast<std::uint8_t>(tof_signal_97);
-        const unsigned mm = tof_force_mm != 0 ? tof_force_mm :
-                            (ranges == 16 ? 300 : 45);
+        const unsigned mm = tof_force_zero ? 0U :
+                            (tof_force_mm != 0 ? tof_force_mm :
+                             (ranges == 16 ? 300 : 45));
         inbound[10] = static_cast<std::uint8_t>(mm >> 8);
         inbound[11] = static_cast<std::uint8_t>(mm);
         ++tof_samples;

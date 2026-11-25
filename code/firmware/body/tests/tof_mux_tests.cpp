@@ -802,16 +802,26 @@ int main() {
       CHECK(guard.fault() == desk_robot::CliffFault::StaleSample);
     }
     {
-      Wire = TwoWire{};
-      desk_robot::TofBus bus;
-      desk_robot::CliffGuard guard;
-      ready(bus, guard);
-      Wire.tof_raw_status = 1; // ST raw status 11 is the only accepted value
-      bus.poll(guard, 60); // optional lane 5, read-only
-      bus.poll(guard, 61); // critical floor 0
-      CHECK(guard.fault() == desk_robot::CliffFault::InvalidSample);
-      CHECK(!guard.evaluate(61));
-      CHECK(!guard.try_rearm(61));
+      // All non-11 values of the four-bit raw device status are invalid,
+      // including phase and signal failures with plausible distances.
+      for (std::uint8_t status = 0; status < 16; ++status) {
+        Wire = TwoWire{};
+        desk_robot::TofBus trial_bus;
+        desk_robot::CliffGuard trial_guard;
+        ready(trial_bus, trial_guard);
+        Wire.tof_raw_status = status;
+        const bool accepted = status == 11;
+        trial_bus.poll(trial_guard, 60); // optional lane 5, read-only
+        CHECK(trial_bus.extra_diagnostic(0, 60).valid == accepted);
+        CHECK(trial_guard.evaluate(60));
+        trial_bus.poll(trial_guard, 61); // critical floor 0
+        CHECK(trial_guard.diagnostic(0, 61).valid == accepted);
+        CHECK(trial_bus.optical_diagnostic(0, 61).valid == accepted);
+        CHECK(trial_guard.evaluate(61) == accepted);
+        CHECK(trial_guard.fault() == (accepted
+            ? desk_robot::CliffFault::None : desk_robot::CliffFault::InvalidSample));
+        CHECK(trial_guard.try_rearm(61) == accepted);
+      }
     }
     {
       Wire = TwoWire{};
@@ -853,15 +863,23 @@ int main() {
       CHECK(guard.try_rearm(70)); // requires five entirely new samples
     }
     {
-      // The near-field floor minimum is inclusive: 15/29 fail, 30 passes.
-      for (const std::uint16_t too_close : {15U, 29U}) {
+      // Every sub-minimum range, including literal zero, must fail closed.
+      // A valid 30 mm conversion still meets this test's calibration.
+      for (std::uint16_t too_close = 0; too_close < 30; ++too_close) {
         Wire = TwoWire{};
         desk_robot::TofBus bus;
         desk_robot::CliffGuard guard;
         ready(bus, guard);
         Wire.tof_force_mm = too_close;
+        Wire.tof_force_zero = too_close == 0;
         bus.poll(guard, 60); // diagnostic side lane
+        const auto side = bus.extra_diagnostic(0, 60);
+        CHECK(side.present && !side.valid && side.distance_mm == too_close);
+        CHECK(guard.evaluate(60)); // side lane has no movement authority
         bus.poll(guard, 61); // safety-critical floor lane
+        const auto floor = guard.diagnostic(0, 61);
+        CHECK(floor.present && !floor.valid && floor.distance_mm == too_close);
+        CHECK(!bus.optical_diagnostic(0, 61).valid);
         CHECK(guard.fault() == desk_robot::CliffFault::InvalidSample);
         CHECK(!guard.evaluate(61));
         CHECK(!guard.try_rearm(61));
