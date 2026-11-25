@@ -265,3 +265,40 @@ def test_jaw_candidate_refuses_invalid_nonfinite_json_before_file_creation(tmp_p
     with pytest.raises(ValueError):
         jaw.write_jaw_candidate(target, {"measured": False, "raw": float("nan")})
     assert not target.exists()
+
+
+@pytest.mark.parametrize("count", [0, -1, 4, 41, 999])
+async def test_jaw_cli_rejects_bad_sample_count_before_prompt(tmp_path, monkeypatch, count):
+    source = tmp_path / "geometry.json"
+    example = SCRIPT.parents[1] / "config/calibration.example.json"
+    source.write_bytes(example.read_bytes())
+    monkeypatch.setenv("DESK_ROBOT_OPERATOR_TOKEN", "t" * 24)
+    monkeypatch.setattr(
+        "sys.argv",
+        ["calibrate_jaw_fsr.py", "--calibration", str(source), "--samples", str(count)],
+    )
+
+    def no_prompt(*_args):
+        pytest.fail("Invalid sample count must fail before manual force prompts")
+
+    async def no_capture(*_args, **_kwargs):
+        pytest.fail("Invalid sample count must fail before hardware sampling")
+
+    monkeypatch.setattr("builtins.input", no_prompt)
+    monkeypatch.setattr(jaw, "capture", no_capture)
+    with pytest.raises(ValueError, match="5 to 40"):
+        await jaw.main()
+    assert not (tmp_path / "geometry.jaw_candidate.json").exists()
+
+
+@pytest.mark.parametrize("count", [True, 5.0, "8", None, 4, 41])
+async def test_jaw_capture_rejects_invalid_count_before_http(count):
+    def no_http(_request):
+        pytest.fail("Invalid sample count must fail before HTTP")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(no_http)) as client:
+        with pytest.raises(ValueError, match="5 to 40"):
+            await jaw.capture(
+                client, base_url="http://127.0.0.1:8008",
+                robot="robot-01", token="t" * 24, count=count,
+            )

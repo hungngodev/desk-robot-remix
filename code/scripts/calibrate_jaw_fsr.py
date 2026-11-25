@@ -201,12 +201,18 @@ def write_jaw_candidate(target: Path, payload: dict) -> None:
         os.close(directory_fd)
 
 
+def _validate_sample_count(count: int) -> None:
+    if type(count) is not int or not 5 <= count <= 40:
+        raise ValueError("Jaw calibration samples must be an integer from 5 to 40")
+
+
 async def capture(
     client: httpx.AsyncClient, *, base_url: str, robot: str,
     token: str, count: int = 8, interval: float = 0.18,
     boot_state: dict | None = None,
 ) -> list[tuple[int, int]]:
-    if not 5 <= count <= 40 or not 0.12 <= interval <= 2:
+    _validate_sample_count(count)
+    if not 0.12 <= interval <= 2:
         raise ValueError("Invalid real ADC sampling cadence")
     endpoint = _safe_aux_endpoint(base_url, robot)
     samples = []
@@ -263,8 +269,12 @@ async def main() -> None:
     parser.add_argument("--robot", default="robot-01")
     parser.add_argument("--token-env", default="DESK_ROBOT_OPERATOR_TOKEN")
     parser.add_argument("--calibration", type=Path, required=True)
-    parser.add_argument("--samples", type=int, default=8)
+    parser.add_argument(
+        "--samples", type=int, default=8,
+        help="Independent conversions per phase (5 to 40; default: 8)",
+    )
     args = parser.parse_args()
+    _validate_sample_count(args.samples)
     _safe_aux_endpoint(args.url, args.robot)
     token = os.getenv(args.token_env, "")
     if len(token) < 24:
