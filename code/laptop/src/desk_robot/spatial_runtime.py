@@ -126,6 +126,7 @@ class SpatialRuntime:
             epoch=next_epoch,
             ttl_us=ttl_us,
         )
+        grid.inherit_clock_reference(state.grid)
         state.epoch = next_epoch
         state.body_boot = body_boot
         state.origin_id = origin_id

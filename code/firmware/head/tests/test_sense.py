@@ -13,6 +13,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 HEAD = Path(__file__).resolve().parents[1]
 ROOT = HEAD.parents[1]
 UPSTREAM = ROOT / 'upstream/xiaozhi-esp32'
@@ -900,8 +902,11 @@ int main() {
         assert 'Transact(' in bridge
         assert 'std::strcmp(command, "optics")' in body
         assert '"motor_authorized":false' not in body  # JSON is C++ escaped
-        assert 'control.sample_range_optics(' in (
+        assert 'desk_robot::publish_range_telemetry(' in (
             ROOT / "firmware/body/src/main.cpp"
+        ).read_text()
+        assert 'control.sample_range_optics(' in (
+            ROOT / "firmware/body/lib/TofBus/RangeTelemetry.h"
         ).read_text()
 
 
@@ -1418,12 +1423,32 @@ class SenseSelectionTests(unittest.TestCase):
             build.touch()
             python = root / '.tools/sdk-bootstrap/bin/python'
             python.parent.mkdir(parents=True)
-            python.write_text(f'#!{sys.executable}\nimport json,os,sys\n'
-                              'open(os.environ["TRACE_PATH"],"w").write(json.dumps(sys.argv[1:]))\n')
+            python.write_text(
+                f'#!{sys.executable}\nimport json,os,sys\n'
+                'if sys.argv[1:2]==["-c"]:\n exec(sys.argv[2])\nelse:\n'
+                ' open(os.environ["TRACE_PATH"],"w").write(json.dumps(sys.argv[1:]))\n'
+            )
             python.chmod(0o755)
             export = root / '.tools/esp-idf/export.sh'
             export.parent.mkdir(parents=True)
             export.write_text(':\n')
+            sdk = export.parent
+            subprocess.run(['git', '-C', str(sdk), 'init', '-q'], check=True)
+            subprocess.run(['git', '-C', str(sdk), 'add', 'export.sh'], check=True)
+            subprocess.run(
+                [
+                    'git', '-C', str(sdk),
+                    '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+                    'commit', '-qm', 'locked SDK',
+                ],
+                check=True,
+            )
+            sdk_commit = subprocess.check_output(
+                ['git', '-C', str(sdk), 'rev-parse', 'HEAD'], text=True
+            ).strip()
+            (root / 'toolchain-lock.json').write_text(
+                json.dumps({'esp_idf': {'commit': sdk_commit}})
+            )
             trace = root / 'args.json'
             subprocess.run(['bash', str(script), '--board', 'sense', '--private', '--skip-merge'],
                            env=dict(os.environ, TRACE_PATH=str(trace)), check=True)
@@ -2983,6 +3008,218 @@ int main() {
     subprocess.run(
         [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-pthread",
          "-fsanitize=address,undefined", *pie_flags, str(source), "-o", str(binary)],
+        check=True, capture_output=True, text=True, env=native_cpp_env(),
+    )
+    subprocess.run([str(binary)], check=True, timeout=30, env=native_cpp_env())
+
+
+def test_generated_audio_output_task_rejects_flushed_popped_task_before_reenable(
+    tmp_path,
+):
+    """Exercise generated AudioOutputTask vs ResetDecoder race under ASan/UBSan."""
+    compiler = shutil.which("g++") or shutil.which("c++")
+    if compiler is None:
+        pytest.skip("Native C++ compiler unavailable")
+    upstream_copy = tmp_path / "upstream"
+    shutil.copytree(UPSTREAM, upstream_copy, dirs_exist_ok=True)
+    overlay.apply(upstream_copy, "sense")
+    service_h = (upstream_copy / "main/audio/audio_service.h").read_text()
+    service_cc = (upstream_copy / "main/audio/audio_service.cc").read_text()
+    assert "std::mutex desk_output_admission_mutex_;" in service_h
+    output_fn = "void AudioService::AudioOutputTask() {" + service_cc.split(
+        "void AudioService::AudioOutputTask() {", 1
+    )[1].split("\nvoid AudioService::", 1)[0]
+    reset_fn = "void AudioService::ResetDecoder() {" + service_cc.split(
+        "void AudioService::ResetDecoder() {", 1
+    )[1].split("\nbool AudioService::IsPlaybackDrainedLocked()", 1)[0]
+    prefix_struct = "struct DeskPlaybackPrefix {" + service_h.split(
+        "struct DeskPlaybackPrefix {", 1
+    )[1].split("struct DebugStatistics {", 1)[0]
+
+    # Inject a deterministic pause right after pop_front + unlock on the first task.
+    needle = (
+        "        output_in_flight_ = true;\n"
+        "        audio_queue_cv_.notify_all();\n"
+        "        lock.unlock();"
+    )
+    assert output_fn.count(needle) == 1
+    instrumented_output = output_fn.replace(
+        needle,
+        needle + "\n        if (pause_after_pop_once.exchange(false)) {\n"
+        "            popped_reached.store(true);\n"
+        "            pause_cv.notify_all();\n"
+        "            std::unique_lock<std::mutex> pause_lock(pause_mu);\n"
+        "            pause_cv.wait(pause_lock, [&]{ return release_popped.load(); });\n"
+        "        }",
+        1,
+    )
+
+    cpp = tmp_path / "audio_output_race.cc"
+    binary = tmp_path / "audio_output_race"
+    cpp.write_text(
+        """
+#include <atomic>
+#include <cassert>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+#define TAG "AudioService"
+#define ESP_LOGW(tag, fmt, ...) ((void)0)
+#define AUDIO_POWER_CHECK_INTERVAL_MS 1000
+inline void esp_timer_stop(void*) {}
+inline void esp_timer_start_periodic(void*, int64_t) {}
+inline void esp_opus_dec_reset(void*) {}
+inline void* opus_decoder_ = nullptr;
+std::mutex decoder_mutex_;
+
+""" + prefix_struct + """
+struct AudioTask {
+    std::vector<int16_t> pcm;
+    uint32_t timestamp = 0;
+    uint32_t playback_id = 0;
+    uint32_t media_position_ms = 0;
+    int desk_frame_duration_ms = 0;
+};
+struct FakeCodec {
+    std::atomic<bool> enabled{false};
+    std::atomic<int> enable_true_calls{0};
+    std::atomic<int> enable_false_calls{0};
+    std::atomic<int> output_data_calls{0};
+    bool output_enabled() const { return enabled.load(); }
+    int output_sample_rate() const { return 32000; }
+    void EnableOutput(bool v) {
+        enabled.store(v);
+        if (v) ++enable_true_calls; else ++enable_false_calls;
+    }
+    int OutputData(std::vector<int16_t>& pcm) {
+        ++output_data_calls;
+        return static_cast<int>(pcm.size());
+    }
+};
+struct Callbacks {
+    std::atomic<int> progress_calls{0};
+    std::atomic<int> committed_calls{0};
+    std::atomic<int> drained_calls{0};
+    std::function<void(uint32_t, uint32_t)> on_playback_progress =
+        [this](uint32_t, uint32_t) { ++progress_calls; };
+    std::function<void(uint32_t, uint32_t)> on_playback_committed =
+        [this](uint32_t, uint32_t) { ++committed_calls; };
+    std::function<void(void)> on_playback_drained =
+        [this]() { ++drained_calls; };
+};
+struct ServiceHarness {
+    FakeCodec codec_obj;
+    FakeCodec* codec_ = &codec_obj;
+    Callbacks callbacks_;
+    void* audio_power_timer_ = nullptr;
+    std::mutex audio_queue_mutex_;
+    std::mutex desk_output_admission_mutex_;
+    std::condition_variable audio_queue_cv_;
+    std::deque<AudioTask> audio_decode_queue_;
+    std::deque<AudioTask> audio_playback_queue_;
+    std::deque<AudioTask> audio_testing_queue_;
+    std::deque<uint32_t> timestamp_queue_;
+    bool decode_in_flight_ = false;
+    bool output_in_flight_ = false;
+    bool playback_drained_notified_ = true;
+    uint32_t playback_generation_ = 0;
+    std::atomic<bool> service_stopped_{false};
+    std::chrono::steady_clock::time_point last_output_time_;
+    struct { uint32_t playback_count = 0; } debug_statistics_;
+
+    std::atomic<bool> pause_after_pop_once{true};
+    std::atomic<bool> popped_reached{false};
+    std::atomic<bool> release_popped{false};
+    std::mutex pause_mu;
+    std::condition_variable pause_cv;
+
+    bool IsPlaybackDrainedLocked() const {
+        return audio_decode_queue_.empty() && audio_playback_queue_.empty() &&
+               !decode_in_flight_ && !output_in_flight_;
+    }
+    bool MarkPlaybackDrainedLocked() {
+        if (!IsPlaybackDrainedLocked() || playback_drained_notified_) return false;
+        playback_drained_notified_ = true;
+        return true;
+    }
+    bool IsPlaybackIdle() {
+        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+        return IsPlaybackDrainedLocked();
+    }
+    void AudioOutputTask();
+    void ResetDecoder();
+};
+#define AudioService ServiceHarness
+""" + instrumented_output + "\n" + reset_fn + """
+#undef AudioService
+int main() {
+    ServiceHarness svc;
+    std::thread worker([&]() { svc.AudioOutputTask(); });
+    {
+        std::lock_guard<std::mutex> lock(svc.audio_queue_mutex_);
+        svc.playback_drained_notified_ = false;
+        svc.audio_playback_queue_.push_back(AudioTask{
+            std::vector<int16_t>(1920, 42), 0, 1, 60, 60,
+        });
+        svc.audio_queue_cv_.notify_all();
+    }
+    {
+        std::unique_lock<std::mutex> pl(svc.pause_mu);
+        svc.pause_cv.wait(pl, [&]{ return svc.popped_reached.load(); });
+    }
+    // Urgent STOP occurs right after AudioOutputTask popped + unlocked.
+    svc.ResetDecoder();
+    svc.codec_->EnableOutput(false);
+    {
+        std::lock_guard<std::mutex> pl(svc.pause_mu);
+        svc.release_popped.store(true);
+    }
+    svc.pause_cv.notify_all();
+    while (!svc.IsPlaybackIdle()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    assert(svc.codec_obj.output_data_calls.load() == 0);
+    assert(svc.codec_obj.enable_true_calls.load() == 0);
+    assert(!svc.codec_obj.output_enabled());
+    assert(svc.callbacks_.progress_calls.load() == 0);
+    assert(svc.callbacks_.committed_calls.load() == 0);
+    assert(svc.debug_statistics_.playback_count == 0);
+
+    // Next fresh TTS utterance in new generation plays and commits normally.
+    {
+        std::lock_guard<std::mutex> lock(svc.audio_queue_mutex_);
+        svc.playback_drained_notified_ = false;
+        svc.audio_playback_queue_.push_back(AudioTask{
+            std::vector<int16_t>(1920, 99), 0, 2, 60, 60,
+        });
+        svc.audio_queue_cv_.notify_all();
+    }
+    while (svc.callbacks_.committed_calls.load() == 0 || !svc.IsPlaybackIdle()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    assert(svc.codec_obj.output_data_calls.load() == 1);
+    assert(svc.codec_obj.enable_true_calls.load() == 1);
+    assert(svc.codec_obj.output_enabled());
+    assert(svc.callbacks_.progress_calls.load() == 1);
+    assert(svc.debug_statistics_.playback_count == 1);
+
+    svc.service_stopped_.store(true);
+    svc.audio_queue_cv_.notify_all();
+    worker.join();
+}
+""",
+        encoding="utf-8",
+    )
+    pie_flags = [] if sys.platform == "darwin" else ["-fno-pie", "-no-pie"]
+    subprocess.run(
+        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-pthread",
+         "-fsanitize=address,undefined", *pie_flags, str(cpp), "-o", str(binary)],
         check=True, capture_output=True, text=True, env=native_cpp_env(),
     )
     subprocess.run([str(binary)], check=True, timeout=30, env=native_cpp_env())

@@ -927,6 +927,71 @@ int main() {
     CHECK(recovered.valid && recovered.tag_visible);
     CHECK(recovered.tag_events == initial.tag_events + 1U);
     CHECK(recovery_wire.ranges == 0 && recovery_wire.extras == 0);
+    // An in-flight PN532 ScanResponse interrupted by shared-bus invalidation or
+    // dock GPIO failure must never consume the stale response frame on recovery.
+    for (bool dock_nack : {false, true}) {
+      TwoWire inflight_wire;
+      inflight_wire.nfc_connected = true;
+      inflight_wire.nfc_tag_present = true;
+      desk_robot::AccessorySensors inflight;
+      CHECK(inflight.begin(inflight_wire));
+      std::uint32_t ms = 0;
+      for (; ms < 2600; ms += 12) inflight.poll(ms);
+      const auto baseline = inflight.readings().nfc;
+      CHECK(baseline.valid && baseline.tag_visible && baseline.tag_events == 1U);
+      // Advance into an active 0x4a ScanResponse wait (nfc_phase == 2) without completing it.
+      bool armed_scan_response = false;
+      for (; ms < 6000; ms += 12) {
+        inflight.poll(ms);
+        if (inflight_wire.nfc_command == 0x4a && inflight_wire.nfc_phase == 2) {
+          armed_scan_response = true;
+          break;
+        }
+      }
+      CHECK(armed_scan_response);
+      const auto pre_fault_seq = inflight.readings().nfc.scan_seq;
+      const auto pre_fault_scans = inflight_wire.nfc_scans;
+      if (dock_nack) {
+        ms += 12;
+        inflight_wire.fail_dock_gpio = true;
+        for (int step = 0; step < 7; ++step, ms += 12) inflight.poll(ms);
+        CHECK(!inflight.readings().dock.valid);
+      } else {
+        ms += 12;
+        inflight.invalidate_bus();
+      }
+      CHECK(!inflight.readings().nfc.valid);
+      CHECK(inflight.readings().nfc.scan_seq == pre_fault_seq);
+      // Restore the bus; leave nfc_phase == 2 in Wire. If the phase were not
+      // reset, the first lane-5 recovery slot would accept that stale frame.
+      inflight_wire.fail_dock_gpio = false;
+      bool saw_fresh_sam = false;
+      for (int i = 0; i < 60; ++i, ms += 12) {
+        inflight.poll(ms);
+        if (inflight_wire.nfc_command == 0x14) {
+          saw_fresh_sam = true;
+          break;
+        }
+        CHECK(inflight.readings().nfc.scan_seq == pre_fault_seq);
+        CHECK(inflight_wire.nfc_scans == pre_fault_scans);
+      }
+      CHECK(saw_fresh_sam);
+      CHECK(!inflight.readings().nfc.valid);
+      CHECK(inflight.readings().nfc.scan_seq == pre_fault_seq);
+      for (int i = 0; i < 200; ++i, ms += 12) {
+        inflight.poll(ms);
+        if (inflight.readings().nfc.valid &&
+            inflight.readings().nfc.scan_seq > pre_fault_seq) {
+          break;
+        }
+      }
+      const auto& after = inflight.readings().nfc;
+      CHECK(after.valid && after.tag_visible);
+      CHECK(after.tag_token == baseline.tag_token);
+      CHECK(after.tag_events == baseline.tag_events);
+      CHECK(after.scan_seq > pre_fault_seq);
+      CHECK(inflight_wire.nfc_scans == pre_fault_scans + 1U);
+    }
     // A separate GPIOB read can host slow reed/PIR while GPIOA continues
     // owning the compulsory independent dock stop/PGOOD evidence.
     TwoWire optional_wire;

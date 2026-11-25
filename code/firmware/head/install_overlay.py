@@ -725,6 +725,14 @@ struct DeskPlaybackPrefix {
 
 struct DebugStatistics {""",
         )
+        service_header = replace_once(
+            service_header,
+            """    bool playback_drained_notified_ = true;
+    uint32_t playback_generation_ = 0;""",
+            """    bool playback_drained_notified_ = true;
+    uint32_t playback_generation_ = 0;
+    std::mutex desk_output_admission_mutex_;""",
+        )
         files[path] = service_header.encode()
 
         path = "main/protocols/protocol.h"
@@ -1088,20 +1096,107 @@ static bool ParseDeskAudioFrame(int version, const char* data, size_t len,
         )
         service = replace_once(
             service,
-            "        codec_->OutputData(task.pcm);",
-            """        const int transmitted_frames = codec_->OutputData(task.pcm);
-        if (desk_robot_prefix.Accept(
-                task.playback_id, task.media_position_ms,
-                task.desk_frame_duration_ms,
-                !task.pcm.empty() &&
-                    DeskPlaybackPrefix::ExactMediaFrame(
-                        task.pcm.size(), codec_->output_sample_rate(),
-                        task.desk_frame_duration_ms) &&
-                    transmitted_frames == static_cast<int>(task.pcm.size())) &&
-            callbacks_.on_playback_committed) {
-            callbacks_.on_playback_committed(
-                task.playback_id, task.media_position_ms);
+            """        auto task = std::move(audio_playback_queue_.front());
+        audio_playback_queue_.pop_front();
+        output_in_flight_ = true;
+        audio_queue_cv_.notify_all();
+        lock.unlock();
+
+        if (!codec_->output_enabled()) {
+            esp_timer_stop(audio_power_timer_);
+            esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
+            codec_->EnableOutput(true);
+        }
+
+        if (task.playback_id != 0 && callbacks_.on_playback_progress) {
+            callbacks_.on_playback_progress(task.playback_id, task.media_position_ms);
+        }
+
+        codec_->OutputData(task.pcm);
+
+        /* Update the last output time */
+        last_output_time_ = std::chrono::steady_clock::now();
+        debug_statistics_.playback_count++;""",
+            """        auto task = std::move(audio_playback_queue_.front());
+        audio_playback_queue_.pop_front();
+        const uint32_t desk_popped_generation = playback_generation_;
+        output_in_flight_ = true;
+        audio_queue_cv_.notify_all();
+        lock.unlock();
+
+        bool desk_admitted = false;
+        {
+            std::lock_guard<std::mutex> desk_admit_lock(desk_output_admission_mutex_);
+            {
+                std::lock_guard<std::mutex> desk_gen_lock(audio_queue_mutex_);
+                desk_admitted = !service_stopped_.load() &&
+                                desk_popped_generation == playback_generation_;
+            }
+            if (desk_admitted) {
+                if (!codec_->output_enabled()) {
+                    esp_timer_stop(audio_power_timer_);
+                    esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
+                    codec_->EnableOutput(true);
+                }
+
+                if (task.playback_id != 0 && callbacks_.on_playback_progress) {
+                    callbacks_.on_playback_progress(task.playback_id, task.media_position_ms);
+                }
+            }
+        }
+
+        bool desk_wrote = false;
+        if (desk_admitted) {
+            bool desk_still_current = false;
+            {
+                std::lock_guard<std::mutex> desk_gen_lock(audio_queue_mutex_);
+                desk_still_current = !service_stopped_.load() &&
+                                     desk_popped_generation == playback_generation_;
+            }
+            if (desk_still_current) {
+                const int transmitted_frames = codec_->OutputData(task.pcm);
+                desk_wrote = true;
+                bool desk_commit_current = false;
+                {
+                    std::lock_guard<std::mutex> desk_gen_lock(audio_queue_mutex_);
+                    desk_commit_current = !service_stopped_.load() &&
+                                          desk_popped_generation == playback_generation_;
+                }
+                if (desk_commit_current &&
+                    desk_robot_prefix.Accept(
+                        task.playback_id, task.media_position_ms,
+                        task.desk_frame_duration_ms,
+                        !task.pcm.empty() &&
+                            DeskPlaybackPrefix::ExactMediaFrame(
+                                task.pcm.size(), codec_->output_sample_rate(),
+                                task.desk_frame_duration_ms) &&
+                            transmitted_frames == static_cast<int>(task.pcm.size())) &&
+                    callbacks_.on_playback_committed) {
+                    callbacks_.on_playback_committed(
+                        task.playback_id, task.media_position_ms);
+                }
+            }
+        }
+
+        if (desk_wrote) {
+            /* Update the last output time */
+            last_output_time_ = std::chrono::steady_clock::now();
+            debug_statistics_.playback_count++;
         }""",
+        )
+        service = replace_once(
+            service,
+            """void AudioService::ResetDecoder() {
+    bool notify_drained = false;
+    {
+        std::lock_guard<std::mutex> lock(audio_queue_mutex_);""",
+            """void AudioService::ResetDecoder() {
+    bool notify_drained = false;
+    {
+        // Serialize urgent generation advance with AudioOutputTask admission
+        // without holding locks across blocking I2S writes.
+        std::lock_guard<std::mutex> desk_admit_lock(desk_output_admission_mutex_);
+        std::lock_guard<std::mutex> lock(audio_queue_mutex_);""",
         )
         files[path] = service.encode()
         # Urgent stop is an extension to the existing Xiaozhi TTS state event,

@@ -275,6 +275,11 @@ class SpatialGrid:
             return 0.0
         return cell.obstacle_log_odds
 
+    def inherit_clock_reference(self, previous: SpatialGrid | None) -> None:
+        """Preserve WROOM clock offsets when replacing a grid within the same boot."""
+        if previous is not None and previous.body_boot == self.body_boot:
+            self._clock_reference.update(previous._clock_reference)
+
     def invalidate_calibration(self, calibration_id: str) -> None:
         if type(calibration_id) is not str or not calibration_id:
             raise ValueError("Calibration ID required")
@@ -283,19 +288,20 @@ class SpatialGrid:
             self.epoch += 1
             self.anchored = False
             self._last_source.clear()
-            self._clock_reference.clear()
 
     def invalidate_origin(self, body_boot: int, origin_id: str) -> None:
         if (type(body_boot) is not int or not 0 <= body_boot <= 0xffffffff
                 or type(origin_id) is not str or not origin_id):
             raise ValueError("New body origin required")
+        same_body_boot = body_boot == self.body_boot
         self.body_boot = body_boot
         self.origin_id = origin_id
         self.epoch += 1
         self.anchored = False
         self._cells.clear()
         self._last_source.clear()
-        self._clock_reference.clear()
+        if not same_body_boot:
+            self._clock_reference.clear()
         self._last_update_us = 0
 
     def snapshot(self, *, now_us: int) -> SpatialSnapshot:

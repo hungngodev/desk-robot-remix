@@ -32,14 +32,25 @@ bool AccessorySensors::verified_mux(std::uint8_t address, std::uint8_t mask) {
   if (!bus_available() || received != 1 || wire_->available() < 1) return false;
   return wire_->read() == mask;
 }
+void AccessorySensors::reset_nfc_protocol(std::uint32_t now_ms) {
+  data_.nfc.transport_failed();
+  if (nfc_stage_ != NfcStage::Disabled) {
+    nfc_stage_ = NfcStage::StartSam;
+    nfc_phase_at_ms_ = 0;
+    nfc_last_scan_at_ms_ = now_ms;
+  }
+}
+
 void AccessorySensors::invalidate_cached() {
   // One failed shared-bus/mux transfer invalidates ALL cached optional
   // evidence. A valid GPIOA sample can return only after fresh acquisition.
   data_.barometer.valid = false;
   data_.climate.valid = data_.force.valid =
     data_.proximity.valid = data_.gauge.fuel_valid =
-    data_.gauge.monitor_valid = data_.dock.valid = data_.nfc.valid = false;
+    data_.gauge.monitor_valid = data_.dock.valid = false;
   data_.gauge.pack_current_valid = false;
+  // Reset any in-flight PN532 command/response phase while preserving Disabled.
+  reset_nfc_protocol(last_ms_);
   // Invalidate the complete ADS1115 acquisition pair. Otherwise a single
   // post-fault conversion can combine with the other channel's stale bit.
   data_.force.valid_mask = 0;
@@ -715,7 +726,7 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
         nfc_poll(now_ms);
       } else {
         data_.optional_inputs.valid = false;
-        data_.nfc.valid = false; // no optional bus work on dock failure
+        reset_nfc_protocol(now_ms); // no optional bus work or stale scan response on dock failure
       }
       break;
     case 6: angle(1, now_ms); break;

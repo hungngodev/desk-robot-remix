@@ -76,6 +76,7 @@ class AccessorySensors {
   bool mux(std::uint8_t address, std::uint8_t mask);
   bool verified_mux(std::uint8_t address, std::uint8_t mask);
   void invalidate_cached();
+  void reset_nfc_protocol(std::uint32_t now_ms);
   bool select(std::uint8_t lane);
   bool close();
   bool probe(std::uint8_t address);
