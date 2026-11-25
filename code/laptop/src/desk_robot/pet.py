@@ -33,6 +33,7 @@ from .brain_context import (
 from .config import Settings, quiet_hours_active
 from .conversation import Conversation
 from .dock_evidence import DockContactInhibit
+from .habituation import HabituationWindow
 from .handling import HandlingGate
 from .memory import CameraProvenance, MemoryStore
 from .operations import _bounded_head_reply
@@ -55,9 +56,6 @@ _MODEL_FACE_CUE_COOLDOWN_S = 4.0
 _MODEL_FACE_ATTEMPT_INTERVAL_S = 1.0
 _MODEL_FACE_REQUEST_TIMEOUT_S = 0.7
 _ACTIVITY_RECONSIDERATION_KIND = "activity_reconsideration"
-# Candidate software policy, not a calibrated object identity tracker.
-_CAMERA_HABITUATION_S = 900.0
-_CAMERA_HABITUATION_LIMIT = 64
 
 
 class SceneComparator(Protocol):
@@ -220,8 +218,9 @@ class PetState:
     stale_camera_events: int = 0
     last_event: str | None = None
     last_scene_frame_at: float | None = None  # latest processed Mac receipt, this robot only
-    camera_habituation: dict[tuple[str, str], float] = field(default_factory=dict, repr=False)
-    camera_habituation_epoch: tuple[int, int | None] | None = None
+    camera_habituation: HabituationWindow[tuple[str, str]] = field(
+        default_factory=HabituationWindow, repr=False,
+    )
     last_person_face_cue_at: float = -math.inf  # successful visual ACK cooldown
     last_person_face_attempt_at: float = -math.inf  # bounded offline retries
     last_model_face_cue_at: float = -math.inf  # successful model mood ACK cooldown
@@ -285,7 +284,9 @@ class PetState:
     dock_input_good: bool | None = None
     dock_charge_indicated: bool | None = None
     dock_charging_verified: bool = False
-    session_event_counts: dict[str, int] = field(default_factory=dict, repr=False)
+    session_habituation: HabituationWindow[str] = field(
+        default_factory=HabituationWindow, repr=False,
+    )
     task: asyncio.Task[None] | None = field(default=None, repr=False)
     touch_task: asyncio.Task[None] | None = field(default=None, repr=False)
     gate: VisualChangeGate = field(default_factory=VisualChangeGate, repr=False)
@@ -574,9 +575,8 @@ class PetController:
         state.dock_input_good = None
         state.dock_charge_indicated = None
         state.dock_charging_verified = False
-        state.session_event_counts.clear()
-        state.camera_habituation.clear()
-        state.camera_habituation_epoch = None
+        state.session_habituation.reset()
+        state.camera_habituation.reset()
         state.last_nose_angle = None
         state.last_force_squeeze = None
         state.last_belly_seq = None
@@ -633,8 +633,7 @@ class PetController:
         state.generation += 1
         state.enabled = False
         state.gate.reset()  # Pause must forget the previous private JPEG.
-        state.camera_habituation.clear()
-        state.camera_habituation_epoch = None
+        state.camera_habituation.reset()
         state.last_scene_frame_at = None
         state.last_hub_generation = None
         self._clear_deferred_speech(state)
@@ -1120,9 +1119,10 @@ class PetController:
         received_at = time.monotonic() if received_at is None else received_at
         states = getattr(self, "states", None)
         state = states.get(robot_id) if isinstance(states, dict) else None
-        counts = getattr(state, "session_event_counts", None)
-        if isinstance(counts, dict):
-            counts[kind] = counts.get(kind, 0) + 1
+        habituation = getattr(state, "session_habituation", None)
+        if isinstance(habituation, HabituationWindow):
+            # Context only: rejection or decay never blocks sensor delivery.
+            habituation.record(kind, received_at)
         if kind in {"handling_tilt", "handling_shake", "safety_fault"}:
             spatial = getattr(self, "spatial", None)
             if spatial is not None:
@@ -2278,8 +2278,7 @@ class PetController:
         hub_generation = self.multimodal.hub._generation[robot_id]
         state = self.states[robot_id]
         if state.last_hub_generation != hub_generation:
-            state.camera_habituation.clear()
-            state.camera_habituation_epoch = None
+            state.camera_habituation.reset()
             state.gate.reset()
             state.last_scene_frame_at = None
             state.last_hub_generation = hub_generation
@@ -2312,8 +2311,7 @@ class PetController:
                 if (self.settings.mode == "hardware"
                         and not self.settings.voice_vision_tools_enabled):
                     state.gate.reset()
-                    state.camera_habituation.clear()
-                    state.camera_habituation_epoch = None
+                    state.camera_habituation.reset()
                     state.last_scene_frame_at = None
                     await asyncio.sleep(self.interval)
                     continue
@@ -2964,14 +2962,9 @@ class PetController:
         habituation_key = None
         if camera_derived and change.kind in {"key", "candy", "object", "scene"}:
             epoch = (admitted_camera_grant, camera_generation)
-            if state.camera_habituation_epoch != epoch:
-                state.camera_habituation.clear()
-                state.camera_habituation_epoch = epoch
+            state.camera_habituation.begin_epoch(epoch)
             habituation_key = (change.kind, description_key)
-            seen = state.camera_habituation.pop(habituation_key, -math.inf)
-            if now - seen < _CAMERA_HABITUATION_S:
-                # Slide on continued observations, not on elapsed speech time.
-                state.camera_habituation[habituation_key] = now
+            if state.camera_habituation.refresh_if_repeated(habituation_key, now):
                 state.suppressed += 1
                 state.last_initiative_suppression = "repeated_camera_scene"
                 return
@@ -3012,9 +3005,7 @@ class PetController:
             return
         self._admitted_event_kinds[event_key] = now
         if habituation_key is not None:
-            if len(state.camera_habituation) >= _CAMERA_HABITUATION_LIMIT:
-                del state.camera_habituation[next(iter(state.camera_habituation))]
-            state.camera_habituation[habituation_key] = now
+            state.camera_habituation.record(habituation_key, now)
         state.last_initiative_suppression = None
         peer_id = self._social_peer(robot_id, change.kind, now)
         peer_generation = (
@@ -3416,17 +3407,13 @@ class PetController:
                 ),
             ) if attention is not None else []
         )
-        repeated = sorted(
-            (kind, count)
-            for kind, count in state.session_event_counts.items()
-            if count >= 2
-        )
+        repeated = sorted(state.session_habituation.recent_repeats(now).items())
         if repeated or activity:
             parts = []
             if repeated:
                 counts_text = ", ".join(f"{k}={v}" for k, v in repeated[:4])
                 parts.append(
-                    f"Repeated events this session ({counts_text}); adapt naturally and avoid canned repetition"
+                    f"Repeated recent events this session ({counts_text}); adapt naturally and avoid canned repetition"
                 )
             if activity:
                 job_kind = activity[0].get("job_type", "task")
