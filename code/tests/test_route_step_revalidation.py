@@ -73,3 +73,49 @@ def test_no_unproposed_edge_or_invented_detour():
     assert not check(grid, route, envelope, start, (6, 7))
     assert not check(grid, route, envelope, goal, start)
     assert check(grid, route, envelope, goal, goal)
+
+
+def fixture(goal=(6, 7)):
+    grid = GridSnapshot('pet', 'origin', 3, 'tag', 'cal', 15, 15, 20,
+                        ('safe',) * 225, 500, 4000, True)
+    request = RouteRequest('pet', 'origin', 3, 'tag', 's', 't',
+                           (6, 6), 0, goal, 5000)
+    return grid, request
+
+
+def unknown(grid, cell):
+    support = list(grid.support)
+    support[cell[1] * grid.width + cell[0]] = 'unknown'
+    return replace(grid, support=tuple(support), observed_at_us=1400)
+
+
+@pytest.mark.parametrize('cell', [(4, 6), (6, 9)])
+def test_swept_turn_endpoint_requires_both_margins(cell):
+    grid, request = fixture()
+    envelope = SafetyEnvelope(5, 2, 2, 27, True)
+    route = plan_route(grid, request, envelope, now_us=1000)
+    assert route.cells == (request.start, request.goal)
+    assert revalidate_route_step(grid, route, envelope, start=request.start,
+                                 heading=0, goal=request.goal, now_us=1500)
+    assert not revalidate_route_step(unknown(grid, cell), route, envelope,
+                                     start=request.start, heading=0,
+                                     goal=request.goal, now_us=1500)
+
+
+def test_tangential_unknown_cell_is_blocked():
+    grid, request = fixture(goal=(7, 6))
+    envelope = SafetyEnvelope(6, 2, 2, 27, True)
+    assert plan_route(grid, request, envelope, now_us=1500).status == 'planned'
+    result = plan_route(unknown(grid, (6, 5)), request, envelope, now_us=1500)
+    assert (result.status, result.reason, result.cells, result.may_execute) == (
+        'rejected', 'unsafe_start', (), False)
+
+
+def test_map_expiry_during_search_precedes_request_deadline():
+    grid, request = fixture(goal=(8, 6))
+    envelope = SafetyEnvelope(5, 2, 2, 27, True)
+    samples = iter((1000, 4000))
+    result = plan_route(grid, request, envelope, now_us=1000,
+                        clock_us=lambda: next(samples, 4000))
+    assert (result.status, result.reason, result.cells, result.may_execute) == (
+        'rejected', 'deadline_or_map_expired', (), False)
