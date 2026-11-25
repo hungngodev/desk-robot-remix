@@ -107,6 +107,13 @@ def evaluate(records: list[dict]) -> dict:
             raise ValueError("Acoustic monotonic timestamps must be nonnegative")
         if any(later < earlier for earlier, later in zip(stages, stages[1:], strict=False)):
             raise ValueError("Audio stop stage timestamps are not monotonic")
+        # Large absolute counters lose millisecond/sub-millisecond precision
+        # when converted to float (e.g. 501 ms can become 500 ms). Require
+        # a common, rebased trial clock with at least microsecond resolution.
+        if any(math.ulp(stage) > 0.001 for stage in stages):
+            raise ValueError("Acoustic timestamp precision insufficient; rebase the trial clock")
+        if stages[-1] <= stages[0]:
+            raise ValueError("Audible interruption requires positive elapsed time")
         if stages[0] in onset_times:
             raise ValueError("Human acoustic trial onset timestamp reused")
         onset_times.add(stages[0])
@@ -234,6 +241,7 @@ def evaluate(records: list[dict]) -> dict:
     if (
         any(not 5 <= seconds <= 60 for seconds in minute_seconds)
         or speech_seconds < 120
+        or math.fsum(minute_seconds) < 120
         or not math.isclose(
             math.fsum(minute_seconds), speech_seconds,
             rel_tol=0.0, abs_tol=0.01,

@@ -70,7 +70,11 @@ capture and synchronized device logs are still required for physical proof.
 
 Each human row also supplies measured monotonic timestamps, in order:
 `human_onset_ms`, `vad_arrival_ms`, `abort_dispatch_ms`,
-`head_queue_clear_ms`, `i2s_stop_ms`, `audible_stop_ms`. Record
+`head_queue_clear_ms`, `i2s_stop_ms`, `audible_stop_ms`. Use one common
+monotonic trial clock rebased before numeric conversion; its floating-point
+spacing must not exceed 0.001 ms. Reject an audible stop timestamp equal to
+speech onset: an interruption must have positive measured elapsed time.
+Clock alignment still requires synchronized external evidence. Record
 `new_utterance_captured`, `new_intent_correct`,
 `utterance_beginning_intelligible`, and
 `obsolete_audio_never_resumed` as booleans. A claim of correct new intent
@@ -87,7 +91,9 @@ at least **120 cumulative seconds** of audible playback (20% exposure),
 a list `robot_speech_seconds_by_minute` of exactly ten finite values
 between **5 and 60 seconds** (one value for each successive 60-second
 interval), and an aggregate matching `robot_speech_seconds` within
-0.01 second. Record `robot_speech_volumes_observed` with all three
+0.01 second. Both the aggregate and the sum of the ten measured intervals
+must independently meet 120 seconds; the matching tolerance cannot waive the
+minimum exposure. Record `robot_speech_volumes_observed` with all three
 intended playback settings, `low`, `medium`, and `high`, during
 this control, not merely in the human interruptions. For runs longer than
 600 seconds, these metrics describe the first complete ten minutes; later

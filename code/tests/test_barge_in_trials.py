@@ -555,3 +555,53 @@ def test_cli_reports_gate_without_claiming_physical_attestation(tmp_path, echoes
     report = json.loads(completed.stdout)
     assert report["meets_proposed_gate"] is (echoes == 0)
     assert report["records_are_operator_supplied_not_independently_attested"] is True
+
+
+@pytest.mark.parametrize("base", [2**53, 2**54, 2**62])
+def test_huge_clock_cannot_round_late_stops_into_pass(base):
+    rows = both_distances()
+    for row in rows[:-2]:
+        for field in (
+            "human_onset_ms", "vad_arrival_ms", "abort_dispatch_ms",
+            "head_queue_clear_ms", "i2s_stop_ms", "audible_stop_ms",
+        ):
+            row[field] += base
+    for row in rows[:2]:
+        row["audible_stop_ms"] = row["human_onset_ms"] + 501
+    loaded = parse_trial_jsonl("\n".join(json.dumps(row) for row in rows))
+    with pytest.raises(ValueError, match="timestamp precision"):
+        evaluate(loaded)
+
+
+def test_zero_elapsed_cannot_be_audible_stop():
+    rows = both_distances()
+    for field in (
+        "human_onset_ms", "vad_arrival_ms", "abort_dispatch_ms",
+        "head_queue_clear_ms", "i2s_stop_ms", "audible_stop_ms",
+    ):
+        rows[0][field] = rows[0]["human_onset_ms"]
+    with pytest.raises(ValueError, match="positive elapsed"):
+        evaluate(rows)
+
+
+def test_actual_echo_exposure_cannot_round_up_to_minimum():
+    rows = both_distances()
+    rows[-2]["robot_speech_seconds_by_minute"] = [12.0] * 9 + [11.995]
+    with pytest.raises(ValueError, match="120s cumulative"):
+        evaluate(rows)
+
+
+@pytest.mark.parametrize(("latency_ms", "passes"), [
+    (499.999, True), (500, True), (500.001, False),
+])
+def test_large_valid_clock_preserves_stop_boundary(latency_ms, passes):
+    rows = both_distances()
+    for row in rows[:-2]:
+        for field in (
+            "human_onset_ms", "vad_arrival_ms", "abort_dispatch_ms",
+            "head_queue_clear_ms", "i2s_stop_ms", "audible_stop_ms",
+        ):
+            row[field] += 1_800_000_000_000
+    for row in rows[:2]:
+        row["audible_stop_ms"] = row["human_onset_ms"] + latency_ms
+    assert evaluate(rows)["meets_proposed_gate"] is passes
