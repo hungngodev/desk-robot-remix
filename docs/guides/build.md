@@ -400,6 +400,11 @@ only `camera_config_t.sccb_i2c_port` is insufficient when SCCB pins are assigned
 the pinned camera driver chooses that bus through Kconfig.
 
 The verification configuration uses an empty bridge token and disabled wake word.
+The Mac CLI defaults to `local.env` beside the selected TOML configuration, regardless
+of the current working directory. Use an explicit `--secrets` path for a shared
+credential file in another directory; pass it before the subcommand for both
+credential creation and subsequent commands.
+
 For private local-server settings, after generating `config/local.env`:
 
 ```sh

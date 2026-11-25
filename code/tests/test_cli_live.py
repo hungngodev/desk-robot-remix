@@ -326,3 +326,50 @@ async def test_live_doctor_unknown_robot_preserves_lookup_cause():
     with pytest.raises(ValueError, match="Unknown robot ID") as exc:
         await inspect_live_media(configured(), "missing")
     assert isinstance(exc.value.__cause__, KeyError)
+
+@pytest.mark.parametrize("explicit_secrets", [False, True])
+def test_cli_credentials_follow_selected_config(monkeypatch, tmp_path, capsys, explicit_secrets):
+    import json
+
+    import desk_robot.cli as cli
+
+    checkout = tmp_path / "checkout"
+    monkeypatch.setattr(cli, "ROOT", checkout)
+    config = tmp_path / "builder" / "robot.toml"
+    config.parent.mkdir()
+    config.write_text(
+        'mode = "simulation"\n'
+        'coordinator_token_env = "DRX_FIRST_OPERATOR"\n'
+        'tools_token_env = "DRX_FIRST_TOOLS"\n'
+        'speech_bridge_token_env = "DRX_FIRST_SPEECH"\n'
+        '[[robots]]\n'
+        'id = "first"\n'
+        'name = "First"\n'
+        'token_env = "DRX_FIRST_HEAD"\n',
+        encoding="utf-8",
+    )
+    cwd = tmp_path / "unrelated"
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
+    names = ("DRX_FIRST_OPERATOR", "DRX_FIRST_TOOLS", "DRX_FIRST_SPEECH", "DRX_FIRST_HEAD")
+    for name in names:
+        monkeypatch.delenv(name, raising=False)
+    args = ["desk-robot", "--config", str(config)]
+    expected = config.with_name("local.env")
+    if explicit_secrets:
+        expected = tmp_path / "private.env"
+        args += ["--secrets", str(expected)]
+    monkeypatch.setattr(sys, "argv", [*args, "secrets"])
+    cli.main()
+    capsys.readouterr()
+    assert expected.is_file()
+    assert not (checkout / "config" / "local.env").exists()
+    assert not (cwd / "local.env").exists()
+    if explicit_secrets:
+        assert not config.with_name("local.env").exists()
+
+    # The doctor must consume exactly the file created by the secrets command,
+    # not credentials inherited from the host environment or the checkout.
+    monkeypatch.setattr(sys, "argv", [*args, "doctor"])
+    cli.main()
+    assert json.loads(capsys.readouterr().out)["credentials_present"] is True

@@ -265,7 +265,8 @@ async def request(args, settings):
 def main():
     p = argparse.ArgumentParser(description="Desk robot setup and supervised controls")
     p.add_argument("--config", type=Path, default=ROOT / "config/robots.example.toml")
-    p.add_argument("--secrets", type=Path, default=ROOT / "config/local.env")
+    p.add_argument("--secrets", type=Path,
+                   help="Private credentials file (default: local.env beside --config)")
     p.add_argument("--url", default="http://127.0.0.1:8765")
     sub = p.add_subparsers(dest="action", required=True)
     sub.add_parser("demo", help="Run simulated pickup and a bounded group conversation")
@@ -314,6 +315,8 @@ def main():
     args = p.parse_args()
     try:
         settings = load_settings(args.config)
+        if args.secrets is None:
+            args.secrets = args.config.resolve().with_name("local.env")
         if args.action == "secrets":
             count = write_secrets(args.secrets, settings, add_missing=args.add_missing)
             print(f"Added {count} private credentials at {args.secrets}; values hidden")
