@@ -1545,3 +1545,68 @@ def test_export_renders_pinned_source_and_aborts_on_concurrent_edit(tmp_path, mo
     assert original.read_bytes() != original_bytes
     assert not list(output.rglob("*.stl"))
     assert not (output / "fit_kit_manifest.json").exists()
+
+
+def _box_binary_stl(dx: float, dy: float, dz: float) -> bytes:
+    import struct
+
+    v = [
+        (0.0, 0.0, 0.0), (dx, 0.0, 0.0), (dx, dy, 0.0), (0.0, dy, 0.0),
+        (0.0, 0.0, dz), (dx, 0.0, dz), (dx, dy, dz), (0.0, dy, dz),
+    ]
+    tris = [
+        (0, 2, 1), (0, 3, 2), (4, 5, 6), (4, 6, 7),
+        (0, 1, 5), (0, 5, 4), (2, 3, 7), (2, 7, 6),
+        (1, 2, 6), (1, 6, 5), (3, 0, 4), (3, 4, 7),
+    ]
+    chunks = [b"\x00" * 80, struct.pack("<I", len(tris))]
+    for a, b, c in tris:
+        chunks.append(struct.pack("<fff", 0.0, 0.0, 0.0))
+        chunks.extend(struct.pack("<fff", *v[idx]) for idx in (a, b, c))
+        chunks.append(b"\x00\x00")
+    return b"".join(chunks)
+
+
+def test_screen_print_bed_fit_uses_unrounded_stl_bounds_for_cli_decisions(
+    tmp_path, monkeypatch,
+):
+    import json
+    import sys
+
+    src = module()
+    output = tmp_path / "fit"
+    output.mkdir()
+    cases = [
+        ("over_z", 10.0, 10.0, 100.00039672851562, (100, 100, 100), False, True, False),
+        ("under_z", 10.0, 10.0, 99.9999, (100, 100, 100), True, False, False),
+        ("over_x", 100.00039672851562, 10.0, 10.0, (100, 100, 100), False, False, False),
+        ("over_diag", 5.000400066375732, 1.0, 1.0, (3, 4, 10), False, False, True),
+        ("under_diag", 4.9999, 1.0, 1.0, (3, 4, 10), False, False, False),
+    ]
+    for name, dx, dy, dz, bed, exp_fits, exp_z_over, exp_diag_over in cases:
+        rel = f"fit_stls/{name}.stl"
+        mesh_path = output / rel
+        mesh_path.parent.mkdir(parents=True, exist_ok=True)
+        mesh_path.write_bytes(_box_binary_stl(dx, dy, dz))
+        manifest = {
+            "parts": [{"location": rel, "bbox_mm": src.mesh_bounds_mm(mesh_path)}]
+        }
+        monkeypatch.setattr(src, "verify_fit_kit", lambda *_a, _m=manifest, **_kw: _m)
+        monkeypatch.setattr(
+            sys, "argv",
+            ["export_fit_kit.py", "--repo", str(tmp_path), "--output", str(output),
+             "--verify", "--build-volume-mm", str(bed[0]), str(bed[1]), str(bed[2])],
+        )
+        # Capture stdout from main().
+        import io
+        from contextlib import redirect_stdout
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            src.main()
+        result = json.loads(buf.getvalue())["print_bed_screen"]
+        assert result["physical_printer_or_material_qualified"] is False
+        entry = result["parts"][0]
+        assert entry["fits_source_bounds_flat_at_zero_or_ninety_deg"] is exp_fits, name
+        assert entry["flat_height_exceeds_build_volume"] is exp_z_over, name
+        assert entry["flat_yaw_impossible_by_plate_diagonal"] is exp_diag_over, name
+        assert entry["other_orientation_or_support_fit_qualified"] is False

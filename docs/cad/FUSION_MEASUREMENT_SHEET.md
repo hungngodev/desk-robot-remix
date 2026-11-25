@@ -118,4 +118,20 @@ permitting movement. Transfer the four individual floor records to the
 `--floor-mount-template` JSON described in the [assembly guide](FUSION_ONE_ROBOT_ASSEMBLY.md).
 A successful paper screen does not replace calibration or loaded stopping tests.
 
+## Repeatable unpowered coupon trial record
+
+Before printing final robot or dock enclosures, run an unpowered coupon trial
+for each target envelope (`MG90S`, `GY-530`, `Challenge speaker`, and `dock rail entry`)
+using the table below and reject any print with unmeasured clearance or fit error:
+
+| Record field | Required entry before moving to next coupon or assembly |
+| --- | --- |
+| Trial role & source part / SHA-256 | e.g. `mg90s_pocket`, `gy530_carrier`, `speaker_pocket`, or `dock_rail_entry` + `fit_kit_manifest.json` `source_sha256` / `mesh_sha256` |
+| Printer build XYZ (mm), process & material | Actual measured usable printer X/Y/Z, FDM or MSLA/SLA process, exact filament/resin |
+| Slicer profile & print orientation in source XYZ | Exact profile name/version + exported STL axis orientation on build plate |
+| Layer settings & critical-face support exclusion | Layer height, wall count/exposure, support placement (excluded from bore/datum/pocket faces) |
+| Postprocessing state before measurement | Support removal, wash/cure, deburring, or sanded/as-printed condition |
+| Nominal vs post-finishing measured XYZ & feature fit error (mm) | Caliper/pin readings across overall XYZ and tightest hole/slot/pocket mating feature |
+| Allowed error rationale & accept/reject | Derived from mating part clearance (never an arbitrary universal tolerance); `ACCEPT` or `REJECT` |
+
 Do not fabricate any blank measurement to claim print-ready geometry.

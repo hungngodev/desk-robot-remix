@@ -83,8 +83,7 @@ def supplemental_rows():
     return rows
 
 
-def test_all_63_purchase_roles_link_real_current_source_files():
-    """Source coverage for 49 primary and 14 linked purchase roles, not HW signoff."""
+def _validate_purchase_role_audit(audit_text: str, audit_dir: Path) -> None:
     import json
     import re
 
@@ -92,13 +91,13 @@ def test_all_63_purchase_roles_link_real_current_source_files():
     expected_pet = {part["id"] for part in plan["parts"]}
     expected_room = {part["id"] for part in plan["room_pod"]["modules"]}
     assert len(expected_pet) == 42 and len(expected_room) == 7
-    audit = HARDWARE / "2026-11-16-complete-63-row-integration-audit.md"
-    rows = [line for line in audit.read_text(encoding="utf-8").splitlines()
+    rows = [line for line in audit_text.splitlines()
             if line.startswith(("| Pet or dock |", "| Shared station |"))]
     assert len(rows) == 49
     actual_pet = set()
     actual_room = set()
     real_files = set()
+    role_links: dict[str, list[str]] = {}
     root = HARDWARE.parents[1].resolve()
     for row in rows:
         cells = [cell.strip() for cell in row.strip().strip("|").split("|")]
@@ -107,19 +106,47 @@ def test_all_63_purchase_roles_link_real_current_source_files():
         seen = actual_room if cells[0] == "Shared station" else actual_pet
         assert role not in seen, f"Duplicated physical role: {role}"
         seen.add(role)
-        links = re.findall(r"\[[^]]+\]\((\.\./[^)#]+)(?:#[^)]+)?\)", cells[3])
+        links = [
+            target for target in re.findall(r"\[[^]]+\]\(([^)#]+)(?:#[^)]+)?\)", cells[3])
+            if not target.startswith(("http://", "https://"))
+        ]
         assert links, f"Unreferenced physical role: {role}"
+        role_links[role] = links
         for reference in links:
-            source = (audit.parent / reference).resolve()
+            source = (audit_dir / reference).resolve()
             assert source.is_relative_to(root), f"Escaped repository root: {role}"
             assert source.is_file(), f"Missing real source path for {role}: {reference}"
             real_files.add(source)
         assert cells[4], f"No honest implementation status for {role}"
         assert cells[5], f"No qualification blocker for {role}"
+    assert "haptic-one-shot-wiring.md" in role_links["haptic_motor"]
     assert actual_pet == expected_pet
     assert actual_room == expected_room
     assert len(real_files) >= 22
+
+
+def test_all_63_purchase_roles_link_real_current_source_files():
+    """Source coverage for 49 primary and 14 linked purchase roles, not HW signoff."""
+    audit = HARDWARE / "2026-11-16-complete-63-row-integration-audit.md"
+    _validate_purchase_role_audit(audit.read_text(encoding="utf-8"), audit.parent)
     assert len(supplemental_rows()) == 14
+
+
+def test_purchase_role_audit_rejects_broken_or_missing_same_dir_wiring_links():
+    import pytest
+
+    audit = HARDWARE / "2026-11-16-complete-63-row-integration-audit.md"
+    text = audit.read_text(encoding="utf-8")
+    with pytest.raises(AssertionError):
+        _validate_purchase_role_audit(
+            text.replace("haptic-one-shot-wiring.md", "missing-wiring.md"),
+            audit.parent,
+        )
+    with pytest.raises(AssertionError):
+        _validate_purchase_role_audit(
+            text.replace(", [lab wiring](haptic-one-shot-wiring.md)", ""),
+            audit.parent,
+        )
 
 
 def test_every_supplemental_purchase_row_has_one_parent_and_quantity():

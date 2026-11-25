@@ -16,13 +16,43 @@ def _sources():
     return plan, owner
 
 
-def test_all_physical_roles_and_linked_decisions_have_exact_source_owners():
-    plan, owners = _sources()
+VALID_SOURCE_STATES = frozenset({
+    "adc_driver_source", "alternate_dc_firmware_only", "angle_driver_source",
+    "boost_paper_screen_only", "cad_scaffold_not_assembly", "charger_paper_screen_only",
+    "closed_loop_host_source", "dock_adapter_paper_screen_only",
+    "dock_beacon_firmware_source", "dock_driver_source_only", "dock_gpio_haptic_source",
+    "environment_driver_source", "exclusive_legacy_motor_source",
+    "external_hardware_timing_unverified", "full_profile_soil_source",
+    "head_camera_mic_firmware", "head_display_firmware", "host_nfc_game_logic_source",
+    "identity_and_readonly_source", "local_guarded_ranger_source",
+    "local_motor_safety_source", "local_nc_bumper_source", "local_touch_stop_source",
+    "native_i2s_audio_source", "nfc_host_logic_source", "opt_in_haptic_source",
+    "opt_in_rgb_source", "optical_raw_source", "optional_gesture_source",
+    "optional_gpio_read_source", "pack_paper_screen_only", "passive_bom_geometry_only",
+    "passive_dock_adapter_only", "physical_electronics_only",
+    "power_calculator_not_schematic", "power_harness_signal_only",
+    "read_only_dual_nec_source", "read_only_nfc_source",
+    "readonly_contact_detection_only", "readonly_fuel_source",
+    "readonly_power_telemetry_source", "servo_output_source",
+    "shared_feather_firmware_only", "speaker_fit_reference_only",
+    "station_read_only_source", "station_soil_source", "station_thermal_source",
+    "station_usb_source", "touch_driver_source", "two_mux_source",
+})
+
+ROLE_EVIDENCE_MARKERS = {
+    ("pet_roles", "pn532"): (("PN532", "pn532"), ("pn532", "NfcRaw")),
+    ("pet_roles", "oled"): (("SSD1306", "Oled", "Display"), ("oled", "SSD1306", "sense")),
+    ("pet_roles", "xiao_sense"): (("robot_bridge", "CAMERA"), ("sense", "camera")),
+    ("pet_roles", "imu"): (("IMU", "MPU6050", "BerryImu"), ("imu", "probe_imu")),
+    ("pet_roles", "i2c_mux"): (("TCA9548A", "TofBus"), ("mux", "tof")),
+    ("pet_roles", "cliff_obstacle"): (("VL53L0X", "TofBus"), ("cliff", "tof")),
+}
+
+
+def _validate_ownership_matrix(plan, owners):
     assert len(plan["parts"]) == 42
     assert len(plan["room_pod"]["modules"]) == 7
     assert len(plan["linked_subassemblies"]) == 14
-    # CAD and electrical schematic references are legitimate physical role
-    # owners, but may not masquerade as executable drivers or tests.
     non_code_sources = {
         ("pet_roles", "speaker"): "docs/cad/remixes/speaker_rect_fit_gauge.scad",
         ("pet_roles", "touch_electrodes"): "docs/cad/remixes/one_robot_adapter_kit.scad",
@@ -43,8 +73,10 @@ def test_all_physical_roles_and_linked_decisions_have_exact_source_owners():
             section, set(ids) ^ set(owners[section]))
         for id_, row in owners[section].items():
             assert isinstance(row["source_state"], str) and row["source_state"]
+            assert row["source_state"] in VALID_SOURCE_STATES, (id_, row["source_state"])
             assert isinstance(row["remaining_qualification"], str)
             assert len(row["remaining_qualification"]) >= 12, id_
+            texts = {}
             for key in ("source", "host_test"):
                 path = row[key]
                 assert isinstance(path, str)
@@ -58,12 +90,39 @@ def test_all_physical_roles_and_linked_decisions_have_exact_source_owners():
                 assert actual.is_relative_to(ROOT.resolve()), id_
                 assert actual.is_file(), (id_, key, path)
                 assert actual.stat().st_size > 40, (id_, key, path)
-    # Linked alternatives refer to existing frozen parents, never add 14
-    # unbudgeted sixth robots or 14 automatic primary purchasing quantities.
+                texts[key] = actual.read_text(encoding="utf-8")
+            markers = ROLE_EVIDENCE_MARKERS.get((section, id_))
+            if markers is not None:
+                src_tokens, test_tokens = markers
+                assert any(tok in texts["source"] for tok in src_tokens), (id_, row["source"])
+                assert any(tok in texts["host_test"] for tok in test_tokens), (id_, row["host_test"])
     pet_ids = {item["id"] for item in plan["parts"]}
     room_ids = {item["id"] for item in plan["room_pod"]["modules"]}
     for linked in plan["linked_subassemblies"]:
         assert linked["parent_role"] in pet_ids | room_ids
+
+
+def test_all_physical_roles_and_linked_decisions_have_exact_source_owners():
+    plan, owners = _sources()
+    _validate_ownership_matrix(plan, owners)
+
+
+def test_ownership_matrix_rejects_cross_role_substitution_and_unapproved_states():
+    import copy
+
+    import pytest
+
+    plan, owners = _sources()
+    swapped = copy.deepcopy(owners)
+    swapped["pet_roles"]["pn532"]["source"] = "code/firmware/head/sense/desk_robot_sense.cc"
+    swapped["pet_roles"]["pn532"]["host_test"] = "code/firmware/head/tests/test_sense.py"
+    with pytest.raises(AssertionError):
+        _validate_ownership_matrix(plan, swapped)
+
+    bad_state = copy.deepcopy(owners)
+    bad_state["pet_roles"]["pn532"]["source_state"] = "ready_for_purchase"
+    with pytest.raises(AssertionError):
+        _validate_ownership_matrix(plan, bad_state)
 
 
 def test_ownership_matrix_never_equates_source_presence_with_buy_approval():

@@ -85,9 +85,10 @@ or physical fit. No full assembly or cliff-coverage check has occurred.
 ## A4 paper overlays for unpowered fit screening
 
 The source-derived [paper template exporter](remixes/print_2d_fit_templates.py)
-produces three A4 SVG pages for the nominal GY-530 PCB outline, rectangular
-Challenge speaker body and passive dock AprilTag paper/pocket dimensions.
-From the repository root, run:
+produces five A4 SVG pages (`ranger`, `speaker`, `dock`, `dock_guide`, and `power`)
+for the nominal GY-530 PCB outline, rectangular Challenge speaker body,
+passive dock AprilTag paper/pocket dimensions, passive dock rail entry guide,
+and candidate 1S pack/tray footprint. From the repository root, run:
 
 ```sh
 python3 docs/cad/remixes/print_2d_fit_templates.py --output /tmp/robot-paper-fit

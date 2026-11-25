@@ -34,18 +34,18 @@ def _cost():
     }
 
 
-def _quote(role):
+def _quote(role, index=0):
     return {
         "role_key": role,
-        "seller": "Example supplier",
+        "seller": f"Supplier-{index}",
         "sku": "SKU-" + role.rsplit(":", 1)[-1],
-        "pcb_revision": "1",
-        "quantity_packages": 1,
+        "pcb_revision": f"rev-{index}",
+        "quantity_packages": index + 1,
         "units_per_package": 1,
-        "package_price_usd": "1.00",
+        "package_price_usd": f"{index + 1}.25",
         "quoted_at": "2026-11-22",
-        "stock_evidence_url": "https://example.org/parts",
-        "quote_reference": "example",
+        "stock_evidence_url": f"https://example.org/parts/{index}",
+        "quote_reference": f"example-{index}",
     }
 
 
@@ -56,19 +56,30 @@ def _power_row(report):
 def test_split_power_checkout_preserves_child_quotes_in_builder_view():
     roles = [release.POWER_PARENT_ROLE + ":" + child
              for child in release.POWER_CHILDREN]
+    expected_quotes = [_quote(role, idx) for idx, role in enumerate(roles)]
     report = release.attach_verified_checkout_evidence(
         _report(), _cost(),
         {"power_package_mode": "separate_components",
-         "lines": [_quote(role) for role in roles],
+         "lines": expected_quotes,
          "seller_charges": []},
     )
     recorded = _power_row(report)["verified_checkout_quotes"]
-    assert [quote["role_key"] for quote in recorded] == roles
-    assert len({quote["sku"] for quote in recorded}) == len(roles)
+    assert recorded == expected_quotes
     markdown = release.render_first_robot_markdown(report)
-    for role in roles:
-        assert role in markdown
-        assert "SKU-" + role.rsplit(":", 1)[-1] in markdown
+    list_two = markdown.split("## 2. First-unit remaining slots", 1)[1]
+    cap_power_row = next(
+        line for line in list_two.splitlines()
+        if line.startswith("| ") and "robot:cap_power:" in line
+    )
+    for quote in expected_quotes:
+        expected_fragment = (
+            f"{quote['role_key']} {quote['seller']} {quote['sku']} "
+            f"rev {quote['pcb_revision']}; "
+            f"{quote['quantity_packages']} package(s) x "
+            f"{quote['units_per_package']} unit(s) at "
+            f"USD {quote['package_price_usd']}/package"
+        )
+        assert expected_fragment in cap_power_row
 
 
 def test_complete_kit_still_attaches_one_parent_quote_only():

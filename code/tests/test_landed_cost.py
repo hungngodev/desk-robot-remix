@@ -796,3 +796,87 @@ def test_ambiguous_supplier_evidence_url_cannot_qualify_cost(url):
     assert result["payable_now_cents"] is None
     assert not result["calculation_complete_not_physical_approval"]
     assert any("stock evidence" in error for error in result["errors"])
+
+
+def test_two_seller_duties_discounts_and_independent_freight_exact_cents():
+    """Exercise nonzero duties/discounts across two sellers with missing/excess rejections."""
+    ev = {
+        "scope": "evaluation",
+        "currency": "USD",
+        "paid_orders_complete": True,
+        "lines": [
+            {
+                "role_key": "robot:cliff_obstacle",
+                "seller": "ElectroPeak",
+                "sku": "SEN-19-006",
+                "quantity_packages": 1,
+                "units_per_package": 1,
+                "package_price_usd": "3.00",
+                "quote_reference": "ep-quote-1",
+                "quoted_at": "2026-11-22",
+                "stock_evidence_url": "https://electropeak.com/gy-530-vl53l0x",
+            },
+            {
+                "role_key": "robot:i2c_mux",
+                "seller": "DigiKey",
+                "sku": "COM-05-067",
+                "quantity_packages": 1,
+                "units_per_package": 1,
+                "package_price_usd": "5.00",
+                "quote_reference": "dk-quote-1",
+                "quoted_at": "2026-11-22",
+                "stock_evidence_url": "https://www.digikey.com/tca9548a",
+            },
+        ],
+        "seller_charges": [
+            {
+                "seller": "ElectroPeak",
+                "shipping_usd": "1.50",
+                "tax_usd": "0.24",
+                "duties_usd": "1.25",
+                "discount_usd": "0.67",
+            },
+            {
+                "seller": "DigiKey",
+                "shipping_usd": "2.00",
+                "tax_usd": "0.45",
+                "duties_usd": "0.80",
+                "discount_usd": "1.10",
+            },
+        ],
+        "paid_orders": [
+            {"order_reference": "sense-paid", "total_paid_usd": "13.67"},
+        ],
+    }
+    out = mod.account_landed_cost(
+        ev, REQUIRED, CATEGORIES, expected_scope="evaluation",
+    )
+    assert out["errors"] == []
+    assert out["calculation_complete_not_physical_approval"] is True
+    # ElectroPeak: 300 + 150 + 24 + 125 - 67 = 532; DigiKey: 500 + 200 + 45 + 80 - 110 = 715
+    assert out["seller_payable_cents"] == {"ElectroPeak": 532, "DigiKey": 715}
+    assert out["payable_now_cents"] == 1247
+    assert out["prior_paid_orders_cents"] == 1367
+    assert out["prototype_cumulative_cents"] == 2614
+    assert out["remaining_under_cap_cents"] == 2386
+
+    for missing_field in ("shipping_usd", "tax_usd", "duties_usd", "discount_usd"):
+        bad = {**ev, "seller_charges": [dict(ev["seller_charges"][0]), dict(ev["seller_charges"][1])]}
+        del bad["seller_charges"][0][missing_field]
+        res = mod.account_landed_cost(
+            bad, REQUIRED, CATEGORIES, expected_scope="evaluation",
+        )
+        assert res["payable_now_cents"] is None, missing_field
+
+    over_discount = {
+        **ev,
+        "seller_charges": [
+            {**ev["seller_charges"][0], "discount_usd": "6.00"},
+            dict(ev["seller_charges"][1]),
+        ],
+    }
+    excess = mod.account_landed_cost(
+        over_discount, REQUIRED, CATEGORIES, expected_scope="evaluation",
+    )
+    assert excess["payable_now_cents"] is None
+    assert any("discount exceeds seller total" in err for err in excess["errors"])

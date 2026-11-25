@@ -203,6 +203,29 @@ def test_passive_dock_beacon_pair_coupon_preserves_tag_quiet_zone(tmp_path):
         return min(u, v, 1-u-v) > 1e-6
     for x in (14, 112):
         assert not any(top_face_covers(x, 8, face) for face in faces)
+        # Verify parameter-derived 32-segment bore rims exist on BOTH top (z=3)
+        # and bottom (z=0) faces with nominal radius 2.75 mm (+/- 0.01 mm),
+        # rejecting blind bores or undersized openings.
+        top_rim = {
+            (round(p[0], 3), round(p[1], 3))
+            for p in vertices
+            if abs(p[2] - 3.0) < 1e-4
+            and abs(((p[0] - x) ** 2 + (p[1] - 8.0) ** 2) ** 0.5 - 2.75) <= 0.01
+        }
+        bottom_rim = {
+            (round(p[0], 3), round(p[1], 3))
+            for p in vertices
+            if abs(p[2] - 0.0) < 1e-4
+            and abs(((p[0] - x) ** 2 + (p[1] - 8.0) ** 2) ** 0.5 - 2.75) <= 0.01
+        }
+        assert len(top_rim) >= 32 and len(bottom_rim) >= 32, (
+            x, len(top_rim), len(bottom_rim),
+        )
+        assert not any(
+            all(abs(p[2] - 0.0) < 1e-4 for p in face) and
+            ((sum(p[0] for p in face) / 3 - x) ** 2 + (sum(p[1] for p in face) / 3 - 8.0) ** 2) ** 0.5 < 2.74
+            for face in faces
+        )
     # A too-close transmitter spacing would carve into the tag white margin.
     invalid = subprocess.run([
         openscad, "--export-format", "binstl", "-o",
@@ -243,5 +266,16 @@ def test_dock_assembly_requires_independent_seating_and_ir_measurements():
     assert "dock_seat_left" in sheet and "dock_seat_right" in sheet
     assert "dock_seat_overtravel" in sheet
     assert "dock_ir_pair_position_coupon" in guide
+    assert "## Repeatable unpowered coupon trial record" in sheet
+    for required_term in (
+        "MG90S",
+        "GY-530",
+        "Challenge speaker",
+        "dock rail entry",
+        "Slicer profile",
+        "Allowed error rationale",
+        "Postprocessing state",
+    ):
+        assert required_term in sheet, required_term
     assert "two electrically independent fail-closed seat switches" in guide
     assert "decoded IR are not seat" in guide

@@ -616,3 +616,12 @@ def test_a4_calibration_centerlines_and_no_drill_marks(tmp_path):
             if element.tag != f"{ns}text":
                 assert element.attrib["fill"] == "none"
     assert source.verify(tmp_path, output) == manifest
+
+
+def test_cad_readme_matches_five_a4_template_sources():
+    source = load()
+    readme = (Path(__file__).resolve().parents[2] / "docs/cad/README.md").read_text(encoding="utf-8")
+    assert "five A4 SVG pages" in readme
+    assert "three A4 SVG pages" not in readme
+    for key in source.SOURCES:
+        assert key in readme, key

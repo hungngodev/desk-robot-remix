@@ -410,7 +410,12 @@ def export_kit(
     return report
 
 
-def screen_print_bed_fit(report: dict, bed_xyz_mm: tuple[float, float, float]) -> dict:
+def screen_print_bed_fit(
+    report: dict,
+    bed_xyz_mm: tuple[float, float, float],
+    *,
+    output_dir: Path | None = None,
+) -> dict:
     """Conservative source-mesh screen for a user supplied printer volume.
 
     Flat orientation means keeping the exported STL's Z axis vertical.
@@ -441,7 +446,11 @@ def screen_print_bed_fit(report: dict, bed_xyz_mm: tuple[float, float, float]) -
                        for v in dims)
                 or not isinstance(item.get("location"), str)):
             raise ValueError("Missing or invalid exported STL build envelope")
-        sx, sy, sz = dims
+        decision_dims = (
+            mesh_bounds_mm(Path(output_dir) / item["location"], rounded=False)["dimensions_mm"]
+            if output_dir is not None else dims
+        )
+        sx, sy, sz = decision_dims
         fits_flat = (sz <= z_bed and (
             (sx <= x_bed and sy <= y_bed)
             or (sx <= y_bed and sy <= x_bed)))
@@ -634,9 +643,10 @@ def main() -> None:
             args.repo, output_dir=args.output, openscad=args.openscad,
         )
     if args.build_volume_mm is not None:
+        output_dir = args.output or (args.repo / "docs/cad/remixes")
         report = dict(report)
         report["print_bed_screen"] = screen_print_bed_fit(
-            report, tuple(args.build_volume_mm)
+            report, tuple(args.build_volume_mm), output_dir=output_dir,
         )
     print(json.dumps(report, indent=2))
 

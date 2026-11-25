@@ -852,9 +852,22 @@ def _historical_usd_cents(value: int | float | Decimal, label: str) -> int:
     return amount
 
 
+def _read_prior_paid_ledger() -> dict:
+    """Read the canonical reviewed payment ledger independently of archived bom.json."""
+    data = json.loads(
+        (PLAN.parent / "prior-paid-ledger.json").read_text(encoding="utf-8"),
+        parse_float=Decimal,
+        parse_constant=_reject_json_constant,
+        object_pairs_hook=_unique_json_object,
+    )
+    if not isinstance(data, dict):
+        raise ValueError("Prior paid ledger must be an object")
+    return data
+
+
 def _documented_prior_spend_baseline() -> dict:
     """Known paid receipt is a floor, never a completed historical register."""
-    reference = _read_exact_bom()
+    reference = _read_prior_paid_ledger()
     if not isinstance(reference, dict) or reference.get("currency") != "USD":
         raise ValueError("Confirmed prior payment reference is missing or invalid")
     payment = reference.get("paid_reconciliation")
@@ -1177,7 +1190,7 @@ def _historical_pilot_budget(sample_subtotal_usd: float) -> dict:
     invoice, delivered price, qualified part, or permission to order.
     """
     try:
-        reference = _read_exact_bom()
+        reference = _read_prior_paid_ledger()
         cap = _historical_usd_cents(reference.get("cap_usd"), "cap")
         paid = _historical_usd_cents(
             reference.get("reported_already_purchased_usd"), "paid"
@@ -1231,6 +1244,8 @@ def first_robot_pilot_samples(report: dict) -> dict:
         if not remaining:
             if part["decision"] == "OPTIONAL NOT SELECTED, DO NOT BUY":
                 action = "OPTIONAL_NOT_SELECTED_DO_NOT_BUY"
+            elif part["decision"] == "HOLD MOTOR CHOICE":
+                action = "HOLD_MOTOR_CHOICE"
             else:
                 action = ("VERIFY_OWNED_OR_INCOMING_STOCK" if part["prototype_target"]
                           else "EXCLUDED_MOTOR_ALTERNATIVE")
@@ -1253,6 +1268,9 @@ def first_robot_pilot_samples(report: dict) -> dict:
         decisions.append({
             "id": ident, "name": part["name"], "scope": part["scope"],
             "first_robot_target": part["prototype_target"],
+            "fleet_reported_owned_not_verified": part[
+                "fleet_reported_owned_not_verified"
+            ],
             "possible_stock_not_verified": part["prototype_target"] - remaining,
             "conditional_remaining": remaining, "pilot_action": action,
             "pilot_sample_quantity": qty,
@@ -1617,10 +1635,19 @@ def render_first_robot_pilot_samples(report: dict) -> str:
     ])
     for x in p["roles"]:
         deferred = x["pilot_action"] == "OPTIONAL_NOT_SELECTED_DO_NOT_BUY"
-        if not x["conditional_remaining"] and not deferred:
+        hold_motor = x["pilot_action"] == "HOLD_MOTOR_CHOICE"
+        if not x["conditional_remaining"] and not deferred and not hold_motor:
             continue
-        source = ("Deferred optional station role; no purchase required" if deferred
-                  else "Exact PCB, harness or mechanical selection still required")
+        if deferred:
+            source = "Deferred optional station role; no purchase required"
+        elif hold_motor:
+            owned = x.get("fleet_reported_owned_not_verified", 0)
+            source = (
+                f"Unresolved drivetrain selection; {owned} reported owned in "
+                "fleet ledger (not allocated or inspected)"
+            )
+        else:
+            source = "Exact PCB, harness or mechanical selection still required"
         if x["pilot_sample_quantity"]:
             quote = (f"USD {x['historical_unit_quote_usd']:.2f} per unit, old quote"
                      if x["historical_unit_quote_usd"] is not None

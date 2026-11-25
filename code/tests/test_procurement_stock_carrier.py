@@ -52,26 +52,51 @@ def test_exact_inspected_and_paid_stock_identity_matches_signed_carrier():
     assert release.stock_carrier_failures(record) == []
 
 
+@pytest.mark.parametrize("group", ["inventory", "paid_in_flight"])
 @pytest.mark.parametrize("field,value", [
-    ("sku", "GY-521-other"), ("pcb_revision", "rev-b"),
-    ("vendor", "Different Manufacturer"), ("pcb_revision", None),
+    ("sku", "GY-521-other"),
+    ("sku", None),
     ("sku", True),
+    ("sku", "__MISSING__"),
+    ("pcb_revision", "rev-b"),
+    ("pcb_revision", None),
+    ("pcb_revision", True),
+    ("pcb_revision", "__MISSING__"),
+    ("vendor", "Different Manufacturer"),
+    ("vendor", None),
+    ("vendor", True),
+    ("vendor", "__MISSING__"),
+    ("model", "wrong-model"),
+    ("model", None),
+    ("model", True),
+    ("model", "__MISSING__"),
 ])
-def test_inspected_stock_cannot_substitute_a_similar_part(field, value):
+def test_inspected_and_paid_stock_cannot_substitute_carrier_identity(group, field, value):
+    signed = {**IMU, "model": "MPU6050-GY521"}
     record = evidence()
-    record["costs"]["inventory"][0][field] = value
-    assert "stock vendor, model/SKU or PCB revision" in " ".join(
-        release.stock_carrier_failures(record)
-    )
+    record["parts"]["imu"] = dict(signed)
+    valid_row = {
+        "role_key": "robot:imu",
+        **signed,
+        **(
+            {"acquisition_kind": "already_owned", "inspection_receipt_url": "https://example.org/receipt"}
+            if group == "inventory"
+            else {"quantity": 1, "order_reference": "paid-1"}
+        ),
+    }
+    other_group = "paid_in_flight" if group == "inventory" else "inventory"
+    record["costs"][other_group] = []
+    record["costs"][group] = [dict(valid_row)]
+    assert release.stock_carrier_failures(record) == []
 
-
-def test_paid_in_flight_cannot_claim_different_board_revision():
-    record = evidence()
-    record["costs"]["paid_in_flight"] = [{
-        "role_key": "robot:imu", **IMU, "pcb_revision": "uninspected",
-        "quantity": 1, "order_reference": "paid-1",
-    }]
-    assert "paid_in_flight 0" in release.stock_carrier_failures(record)[0]
+    bad_row = dict(valid_row)
+    if value == "__MISSING__":
+        bad_row.pop(field)
+    else:
+        bad_row[field] = value
+    record["costs"][group] = [bad_row]
+    failures = release.stock_carrier_failures(record)
+    assert failures and any(f"{group} 0" in msg and "robot:imu" in msg for msg in failures)
 
 
 def test_stock_role_must_be_selected_and_well_formed():
@@ -216,3 +241,43 @@ def test_checkout_attachment_rejects_bad_inspected_quantities():
     checkout["inventory"][0]["role_key"] = "robot:unselected_role"
     with pytest.raises(ValueError, match="unknown shopping role"):
         release.attach_verified_checkout_evidence(source, cost, checkout)
+
+
+def test_strict_cli_rejects_mismatched_stock_carrier_under_mocked_audit(
+    tmp_path, monkeypatch, capsys,
+):
+    import json
+    import sys
+    from types import SimpleNamespace
+
+    record = evidence()
+    record["costs"]["paid_in_flight"] = [{
+        "role_key": "robot:imu",
+        **IMU,
+        "vendor": "Counterfeit",
+        "quantity": 1,
+        "order_reference": "paid-cli-1",
+    }]
+    evidence_path = tmp_path / "evidence.json"
+    evidence_path.write_text(json.dumps(record), encoding="utf-8")
+    monkeypatch.setitem(
+        sys.modules,
+        "verify_procurement_receipts",
+        SimpleNamespace(
+            audit_release=lambda *_a, **_kw: [],
+            checkout_sha=lambda: "0" * 40,
+            verified_required_ci_jobs=lambda *_a, **_kw: True,
+        ),
+    )
+    monkeypatch.setattr(release, "generate", lambda _p, _e=None: {"supplemental_decisions": [], "room_pod": []})
+    monkeypatch.setattr(release, "first_robot_projection", lambda _r: {"purchase_approved": True})
+    monkeypatch.setattr(release, "cost_quote", lambda *_a, **_kw: {"calculation_complete_not_physical_approval": True, "within_prototype_cap": True, "awaiting_arrival_roles": []})
+    monkeypatch.setattr(release, "_confirmed_first_unit_prior_payment_missing", lambda *_a, **_kw: False)
+    monkeypatch.setattr(release, "_first_unit_paid_history_review_missing", lambda *_a, **_kw: False)
+    monkeypatch.setattr(
+        sys, "argv",
+        ["procurement_release.py", "--evidence", str(evidence_path),
+         "--require-first-robot", "--format", "first-robot-json"],
+    )
+    assert release.main() == 2
+    assert "paid_in_flight 0" in capsys.readouterr().err

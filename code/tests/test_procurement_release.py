@@ -1665,7 +1665,10 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
         assert rows[ident]["pilot_sample_quantity"] == 0
         assert rows[ident]["source_sku"] is None
     for ident in ("stepper", "uln2003"):
-        assert rows[ident]["pilot_action"] == "EXCLUDED_MOTOR_ALTERNATIVE"
+        assert rows[ident]["pilot_action"] == "HOLD_MOTOR_CHOICE"
+        assert rows[ident]["pilot_sample_quantity"] == 0
+        assert rows[ident]["possible_stock_not_verified"] == 0
+        assert rows[ident]["fleet_reported_owned_not_verified"] == 5
     for ident in (
         "cap_power", "ina226", "max17048", "switch_power",
         "dock_contacts", "assembly", "as5600",
@@ -1676,6 +1679,9 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     text = mod.render_first_robot_pilot_samples(report)
     assert text.count("## 1.") == 1
     assert text.count("## 2.") == 1
+    for ident in ("stepper", "uln2003"):
+        assert f"| {rows[ident]['name']} | 0 | 0 | HOLD_MOTOR_CHOICE |" in text
+        assert "5 reported owned in fleet ledger (not allocated or inspected)" in text
     for ident in ("amg8833", "nfc_game_props"):
         assert (f"| {rows[ident]['name']} | 0 | 0 | "
                 "OPTIONAL_NOT_SELECTED_DO_NOT_BUY | "
@@ -1685,6 +1691,23 @@ def test_first_robot_bench_samples_do_not_require_completed_robot_first():
     assert "13.67" in text and "54.08" in text and "4.08" in text
     assert "NOT a current landed quote or purchase approval" in text
     assert "not a physically qualified robot" in text
+
+    # Confirmed DC selection excludes stepper/ULN2003 without altering cart SKUs/subtotal.
+    import copy as _copy
+    dc_report = _copy.deepcopy(report)
+    dc_report["physical_motor_variant_in_cart"] = "dc"
+    for row in dc_report["robots"]:
+        if row["id"] in ("stepper", "uln2003"):
+            row["excluded_from_order_as_alternative"] = True
+    dc_pilot = mod.first_robot_pilot_samples(dc_report)
+    dc_rows = {x["id"]: x for x in dc_pilot["roles"]}
+    for ident in ("stepper", "uln2003"):
+        assert dc_rows[ident]["pilot_action"] == "EXCLUDED_MOTOR_ALTERNATIVE"
+        assert dc_rows[ident]["fleet_reported_owned_not_verified"] == 5
+    base_cart = mod.pilot_supplier_cart(report)
+    dc_cart = mod.pilot_supplier_cart(dc_report)
+    assert [x["sku"] for x in base_cart["items"]] == [x["sku"] for x in dc_cart["items"]]
+    assert base_cart["historical_priced_partial_subtotal_usd"] == dc_cart["historical_priced_partial_subtotal_usd"]
 
 
 
@@ -1700,7 +1723,7 @@ def test_pilot_budget_rejects_untrusted_or_invalid_historical_reference(
     import json
 
     monkeypatch.setattr(mod, "PLAN", tmp_path / "full-feature-plan.json")
-    (tmp_path / "bom.json").write_text(json.dumps({
+    (tmp_path / "prior-paid-ledger.json").write_text(json.dumps({
         "currency": currency, "cap_usd": cap,
         "reported_already_purchased_usd": paid,
     }), encoding="utf-8")
@@ -2650,11 +2673,12 @@ def test_historical_pilot_rejects_binary_float_hidden_subcent(
     tmp_path, monkeypatch, paid_token,
 ):
     monkeypatch.setattr(mod, "PLAN", tmp_path / "full-feature-plan.json")
-    (tmp_path / "bom.json").write_text(
+    payload = (
         '{"currency":"USD","cap_usd":50,"reported_already_purchased_usd":'
-        + paid_token + ',"paid_reconciliation":{"payment_total_usd":13.67}}',
-        encoding="utf-8",
+        + paid_token + ',"paid_reconciliation":{"payment_total_usd":13.67}}'
     )
+    (tmp_path / "bom.json").write_text(payload, encoding="utf-8")
+    (tmp_path / "prior-paid-ledger.json").write_text(payload, encoding="utf-8")
     with pytest.raises(ValueError, match="Invalid historical first-unit"):
         mod._historical_pilot_budget(40.41)
     with pytest.raises(ValueError):
@@ -2663,12 +2687,87 @@ def test_historical_pilot_rejects_binary_float_hidden_subcent(
 
 def test_historical_pilot_exact_cents_preserve_budget_output(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "PLAN", tmp_path / "full-feature-plan.json")
-    (tmp_path / "bom.json").write_text(
+    payload = (
         '{"currency":"USD","cap_usd":50.00,"reported_already_purchased_usd":'
-        '13.6700,"paid_reconciliation":{"payment_total_usd":13.6700}}',
-        encoding="utf-8",
+        '13.6700,"paid_reconciliation":{"payment_total_usd":13.6700}}'
     )
+    (tmp_path / "bom.json").write_text(payload, encoding="utf-8")
+    (tmp_path / "prior-paid-ledger.json").write_text(payload, encoding="utf-8")
     out = mod._historical_pilot_budget(36.34)
     assert out["historical_combined_before_tax_shipping_usd"] == 50.01
     assert out["historical_over_cap_before_tax_shipping_usd"] == 0.01
     assert mod._documented_prior_spend_baseline()["known_paid_cents"] == 1367
+
+
+@pytest.mark.parametrize("bom_mode", ["absent", "poisoned_penny"])
+def test_drx131_canonical_prior_ledger_ignores_archived_bom(
+    tmp_path, monkeypatch, capsys, bom_mode,
+):
+    import json
+    import shutil
+    import sys
+
+    src_hw = Path(__file__).resolve().parents[2] / "docs/hardware"
+    for fname in ("full-feature-plan.json", "full-63-role-source-ownership.json", "prior-paid-ledger.json"):
+        shutil.copy(src_hw / fname, tmp_path / fname)
+    if bom_mode == "poisoned_penny":
+        (tmp_path / "bom.json").write_text(
+            json.dumps({
+                "currency": "USD",
+                "cap_usd": 50,
+                "reported_already_purchased_usd": "0.01",
+                "paid_reconciliation": {"payment_total_usd": "0.01", "all_project_prior_spend_reconciled": True},
+            }),
+            encoding="utf-8",
+        )
+    monkeypatch.setattr(mod, "PLAN", tmp_path / "full-feature-plan.json")
+    report = mod.generate(json.loads((tmp_path / "full-feature-plan.json").read_text(encoding="utf-8")))
+    one_cent_costs = {
+        "power_package_mode": "complete_kit",
+        "paid_orders_complete": True,
+        "lines": [],
+        "seller_charges": [],
+        "paid_orders": [{
+            "order_reference": "fake-penny",
+            "total_paid_usd": "0.01",
+            "allocations": [{"role_key": "robot:xiao_sense", "quantity": 1}],
+        }],
+    }
+    quoted = mod.cost_quote(report, {"costs": one_cent_costs}, "evaluation")
+    assert quoted["documented_prior_paid_minimum_cents"] == 1367
+    assert quoted["prior_paid_orders_cents"] is None
+    assert any("Cannot reconcile confirmed Sense payment" in e for e in quoted["errors"])
+
+    pilot_q = mod.pilot_landed_cost(report, {"pilot_costs": {**one_cent_costs, "scope": "pilot_samples", "lines": []}})
+    assert pilot_q["documented_prior_paid_minimum_cents"] == 1367
+    assert pilot_q["prior_paid_orders_cents"] is None
+    assert any("omits the confirmed Sense payment" in e for e in pilot_q["errors"])
+
+    baseline = mod._documented_prior_spend_baseline()
+    assert baseline["known_paid_cents"] == 1367
+    assert baseline["all_prior_spending_reconciled"] is False
+
+    from types import SimpleNamespace
+    ev_path = tmp_path / "ev.json"
+    ev_path.write_text(json.dumps({"costs": one_cent_costs}), encoding="utf-8")
+    monkeypatch.setitem(
+        sys.modules,
+        "verify_procurement_receipts",
+        SimpleNamespace(
+            audit_release=lambda *_a, **_kw: [],
+            checkout_sha=lambda: "0" * 40,
+            verified_required_ci_jobs=lambda *_a, **_kw: True,
+        ),
+    )
+    monkeypatch.setattr(mod, "stock_carrier_failures", lambda *_a, **_kw: [])
+    monkeypatch.setattr(
+        mod, "first_robot_projection",
+        lambda _r: {"purchase_approved": True, "documented_prior_paid_cents": 1367, "all_prior_spending_reconciled": False, "roles": [], "linked_decisions": []},
+    )
+    monkeypatch.setattr(
+        sys, "argv",
+        ["procurement_release.py", "--evidence", str(ev_path),
+         "--require-first-robot", "--format", "first-robot-json"],
+    )
+    assert mod.main() == 2
+    assert "confirmed Sense payment is absent" in capsys.readouterr().err
