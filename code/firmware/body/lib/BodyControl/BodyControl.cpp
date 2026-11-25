@@ -88,6 +88,20 @@ void BodyControl::veto_unapplied_motion_ack(char* reply, std::size_t capacity) c
       (!state_.armed && std::strcmp(reply, "OK rearm") != 0) ||
       (drive_duration_ms_ == 0 && std::strncmp(reply, "OK drive ", 9) == 0)) {
     veto_motion_ack(reply, capacity, MotionAckVeto::SafetyInterlock);
+    return;
+  }
+  // Jaw feedback may expire during the final tick without disarming the
+  // body. An accepted servo target can therefore be frozen independently
+  // of wheel permission. Check the exact target echoed by the parser.
+  const bool lift = std::strncmp(reply, "OK lift ", 8) == 0;
+  const bool grip = std::strncmp(reply, "OK grip ", 8) == 0;
+  if (lift || grip) {
+    char applied[32]{};
+    std::snprintf(applied, sizeof(applied), "OK %s angle=%d",
+                  lift ? "lift" : "grip",
+                  lift ? state_.lift_target : state_.grip_target);
+    if (std::strcmp(reply, applied) != 0)
+      veto_motion_ack(reply, capacity, MotionAckVeto::SafetyInterlock);
   }
 }
 

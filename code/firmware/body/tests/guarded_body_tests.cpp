@@ -2298,6 +2298,52 @@ static void stale_range_veto_survives_saturated_uart() {
   CHECK(std::string(reply) == "ERR rearm safety_interlock");
 }
 
+static void jaw_expiry_during_output_vetoes_accepted_target() {
+  for (const std::uint32_t start : {100U, 0xffffff05U}) {
+    desk_robot::CliffGuard guard;
+    CHECK(guard.configure(config()));
+    fresh(guard, start);
+    desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+    body.require_grip_feedback(true);
+    CHECK(body.configure_jaw_force_limits({60, 120, 1000, 1, 300}));
+    desk_robot::AccessoryReadings r{};
+    r.force.present = r.force.valid = true;
+    r.force.valid_mask = 2U;
+    r.force.adc[1] = 1000;
+    r.force.jaw_sample_seq = 1U;
+    r.force.at_ms = r.force.jaw_at_ms = start;
+    body.set_accessories(r, start);
+    CHECK(send(body, "rearm", start, true) == "OK rearm");
+    CHECK(send(body, "arm", start) == "OK arm");
+    // Keep independent floor evidence fresh while allowing jaw feedback
+    // to reach its own 500 ms freshness boundary.
+    for (std::uint32_t delta = 90U; delta < 499U; delta += 90U)
+      fresh(guard, start + delta);
+    fresh(guard, start + 499U);
+    char reply[128]{};
+    const char command[] = "grip 120";
+    body.execute(command, sizeof(command) - 1, start + 499U, reply, sizeof(reply));
+    CHECK(std::string(reply) == "OK grip angle=120");
+    body.veto_unapplied_motion_ack(reply, sizeof(reply));
+    CHECK(std::string(reply) == "OK grip angle=120");
+    body.tick(start + 500U);
+    CHECK(body.state().armed && body.state().servos_attached);
+    CHECK(guard.fault() == desk_robot::CliffFault::None);
+    CHECK(body.state().grip_target == body.state().grip);
+    CHECK(body.state().grip_target != 120);
+    body.veto_unapplied_motion_ack(reply, sizeof(reply));
+    CHECK(std::string(reply) == "ERR grip safety_interlock");
+    // Other valid targets and inert replies are not rewritten.
+    std::snprintf(reply, sizeof(reply), "OK lift angle=%d", body.state().lift_target);
+    const std::string lift_reply(reply);
+    body.veto_unapplied_motion_ack(reply, sizeof(reply));
+    CHECK(std::string(reply) == lift_reply);
+    std::snprintf(reply, sizeof(reply), "OK halt");
+    body.veto_unapplied_motion_ack(reply, sizeof(reply));
+    CHECK(std::string(reply) == "OK halt");
+  }
+}
+
 void output_fault_vetoes_all_motion_acknowledgments() {
   using desk_robot::MotionAckVeto;
   const char* acks[] = {"OK arm", "OK rearm", "OK keepalive",
@@ -3484,6 +3530,7 @@ int main() {
     optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract();
     dual_ir_evidence_never_authorizes_body_motion_or_charging();
     output_fault_vetoes_all_motion_acknowledgments();
+    jaw_expiry_during_output_vetoes_accepted_target();
     stale_range_veto_survives_saturated_uart();
     raw_bumper_trip_preempts_debounce_and_preserves_payload();
     raw_bumper_bounce_resets_both_edge_classifiers();
