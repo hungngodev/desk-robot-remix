@@ -26,7 +26,9 @@ _HEALTH_READ_TIMEOUT_S = 2.5
 # mistaking a healthy ADC for a stall after one 180 ms sleep.
 _JAW_FRESH_WAIT_S = 0.45
 _JAW_POLL_INTERVAL_S = 0.075
-_JAW_MAX_POLLS = 5
+# Include a poll at 375 ms: five attempts only reach 300 ms and can miss
+# the next nominal 336 ms sample during immediate contact confirmation.
+_JAW_MAX_POLLS = 6
 
 
 # At four degrees per independent conversion and ~336 ms cadence, a full

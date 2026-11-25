@@ -141,11 +141,47 @@ async def test_repeated_adc_frame_cannot_confirm_twice(monkeypatch):
         pass
     monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
     head = FakeHead([
-        (100, 1), (100, 2), (240, 3), *([(240, 3)] * 5),
+        (100, 1), (100, 2), (240, 3), *([(240, 3)] * 6),
     ])
     with pytest.raises(OperationError, match="No new jaw sample"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
     assert head.commands == ["grip 64", "grip 60"]
+
+
+async def test_contact_confirmation_covers_full_mux_cadence(monkeypatch):
+    elapsed_ms = 0
+    contact_at_ms = None
+
+    async def advance(seconds):
+        nonlocal elapsed_ms
+        elapsed_ms += round(seconds * 1000)
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", advance)
+
+    class CadencedHead(FakeHead):
+        async def aux_status(self):
+            nonlocal contact_at_ms
+            if contact_at_ms is not None and elapsed_ms - contact_at_ms < 336:
+                return {
+                    "robot_id": "robot-01",
+                    "force": {
+                        "valid": True, "calibrated": False, "jaw_valid": True,
+                        "jaw_seq": 3, "adc": [0, 240], "boot_id": 5103,
+                        "jaw_age_ms": 84 + elapsed_ms - contact_at_ms,
+                    },
+                }
+            reading = await super().aux_status()
+            reading["force"]["jaw_age_ms"] = 84
+            if self.seq == 3:
+                contact_at_ms = elapsed_ms
+            return reading
+
+    head = CadencedHead([100, 100, 240, 245])
+    result = await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
+    assert head.commands == ["grip 64"]
+    assert result["contact_delta_raw"] == 145
+    assert elapsed_ms - contact_at_ms == 375
+    assert result["physical_acceptance_pass"] is False
 
 
 async def test_overforce_and_bad_baseline_fail_closed(monkeypatch):
@@ -485,7 +521,7 @@ async def test_jaw_baseline_rejects_replayed_or_backwards_sequence(
     async def instant(_seconds):
         pass
     monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
-    repeats = [(101, second)] * (4 if first == second else 0)
+    repeats = [(101, second)] * (5 if first == second else 0)
     head = FakeHead([(100, first), (101, second), *repeats])
     with pytest.raises(OperationError, match="No new ADS1115 jaw sample"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=healthy)
@@ -806,7 +842,7 @@ async def test_stalled_jaw_after_close_cannot_authorize_another_pulse(
 
     monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
     head = FakeHead([
-        (100, 1), (101, 2), *([(101, 2)] * 5),
+        (100, 1), (101, 2), *([(101, 2)] * 6),
     ])
     with pytest.raises(OperationError, match="No new jaw sample"):
         await guarded_grasp(
