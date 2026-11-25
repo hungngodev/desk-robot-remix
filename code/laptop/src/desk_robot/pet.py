@@ -145,6 +145,7 @@ class PetState:
     enabled: bool = False
     quiet: bool = False
     generation: int = 0
+    pause_inflight: int = 0  # Restart waits for every pause caller's cleanup.
     quiet_changed_at: float = -math.inf  # Retire queued optional events across quiet toggles.
     events: int = 0
     spoken: int = 0
@@ -453,7 +454,8 @@ class PetController:
         if state.enabled:
             return self.status(robot_id)
         if (
-            (state.task is not None and not state.task.done())
+            state.pause_inflight
+            or (state.task is not None and not state.task.done())
             or (state.touch_task is not None and not state.touch_task.done())
             or (state.aux_task is not None and not state.aux_task.done())
             or (state.aux_read_task is not None and not state.aux_read_task.done())
@@ -535,6 +537,16 @@ class PetController:
         return self.status(robot_id)
 
     async def pause(self, robot_id: str) -> dict:
+        state = self.states[robot_id]
+        # Multiple pause callers may overlap. Keep restart fenced until the
+        # last caller has finished speech cancellation and camera cleanup.
+        state.pause_inflight += 1
+        try:
+            return await self._pause_observers(robot_id)
+        finally:
+            state.pause_inflight -= 1
+
+    async def _pause_observers(self, robot_id: str) -> dict:
         state = self.states[robot_id]
         state.generation += 1
         state.enabled = False

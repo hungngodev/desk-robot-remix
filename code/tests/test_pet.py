@@ -8699,3 +8699,68 @@ async def test_operator_peer_share_rejects_conflicting_camera_receipt(
         assert memory.count("robot-03") == 1
     finally:
         await pet.close()
+
+
+@pytest.mark.parametrize("outcome", ["normal", "error", "cancel"])
+async def test_pet_restart_waits_for_every_pause_cleanup(
+    fleet, tmp_path, monkeypatch, outcome,
+):
+    """Cleared observer references alone do not release pause ownership."""
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    robot_id = "robot-01"
+    pet = PetController(fleet, {robot_id: StaticCamera()}, conversation, memory, KeyScene())
+    state = pet.states[robot_id]
+    state.enabled = True
+    state.task = asyncio.create_task(asyncio.sleep(3600))
+    entered = [asyncio.Event(), asyncio.Event()]
+    release = [asyncio.Event(), asyncio.Event()]
+    discarded = []
+    pet.multimodal = SimpleNamespace(hub=SimpleNamespace(discard_video=discarded.append))
+    calls = 0
+
+    async def cancel_speech(_robot_id):
+        nonlocal calls
+        index = calls
+        calls += 1
+        entered[index].set()
+        await release[index].wait()
+        if index == 1 and outcome == "error":
+            raise RuntimeError("speaker cleanup failed")
+
+    pauses = []
+    with monkeypatch.context() as patch:
+        patch.setattr(pet, "_cancel_speech", cancel_speech)
+        try:
+            pauses.append(asyncio.create_task(pet.pause(robot_id)))
+            await asyncio.wait_for(entered[0].wait(), timeout=1)
+            assert state.task is None
+            pauses.append(asyncio.create_task(pet.pause(robot_id)))
+            await asyncio.wait_for(entered[1].wait(), timeout=1)
+            with pytest.raises(RuntimeError, match="Previous pet task still shutting down"):
+                pet.start(robot_id)
+            release[0].set()
+            await asyncio.wait_for(pauses[0], timeout=1)
+            with pytest.raises(RuntimeError, match="Previous pet task still shutting down"):
+                pet.start(robot_id)
+            if outcome == "cancel":
+                pauses[1].cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await pauses[1]
+            elif outcome == "error":
+                release[1].set()
+                with pytest.raises(RuntimeError, match="speaker cleanup failed"):
+                    await asyncio.wait_for(pauses[1], timeout=1)
+            else:
+                release[1].set()
+                await asyncio.wait_for(pauses[1], timeout=1)
+            assert not state.enabled
+            assert pet.start(robot_id)["enabled"]
+            assert discarded == [robot_id, robot_id, robot_id]
+        finally:
+            for event in release:
+                event.set()
+            await asyncio.gather(*pauses, return_exceptions=True)
+            pet.multimodal = None
+            patch.undo()
+            await pet.close()
