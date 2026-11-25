@@ -9542,3 +9542,81 @@ async def test_native_startup_requires_authenticated_private_revision(
     else:
         assert session.closed
         assert not session._mac_context_verified
+
+
+@pytest.mark.asyncio
+async def test_native_failure_before_run_still_retires_registry(native):
+    """An invalid first PCM frame must not strand a closed session."""
+    module, bridge = native
+    conn, packets = connection()
+    bridge.connections[conn.device_id] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+
+    async def unexpected_start():
+        pytest.fail("A failed session must not open its legacy or model transport")
+
+    session._retire_legacy_audio = unexpected_start
+    session.started = asyncio.create_task(session.run())
+    session.queue_mic(b"invalid", True)
+    await asyncio.wait_for(session.started, timeout=1)
+    assert session.closed
+    assert conn.device_id not in module._sessions
+    assert "Unexpected 16k PCM" in module._terminal_errors[conn.device_id]
+    assert module._retry_after[conn.device_id] > module.time.monotonic()
+    assert not packets
+
+
+@pytest.mark.asyncio
+async def test_native_repeat_failure_does_not_cancel_decoder_cleanup(native, monkeypatch):
+    """A second fault while draining workers cannot skip STOP or registry cleanup."""
+    module, bridge = native
+    conn, packets = connection()
+    bridge.connections[conn.device_id] = conn
+    conn.client_is_speaking = True
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions[conn.device_id] = session
+    module._output_owner = conn.device_id
+    started = asyncio.Event()
+    draining = asyncio.Event()
+    release = asyncio.Event()
+
+    async def startup():
+        started.set()
+        await asyncio.Event().wait()
+
+    async def worker():
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            draining.set()
+            await release.wait()
+
+    monkeypatch.setattr(module, "_NATIVE_WORKER_CANCEL_TIMEOUT_S", 1.0)
+    session._retire_legacy_audio = startup
+    task = asyncio.create_task(worker())
+    session._tasks = [task]
+    session.started = asyncio.create_task(session.run())
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        session.fail("First native fault")
+        await asyncio.wait_for(draining.wait(), timeout=1)
+        session.fail("Second native fault")
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(session.started, timeout=2)
+        assert conn.device_id not in module._sessions
+        assert module._terminal_errors[conn.device_id] == "First native fault"
+        assert module._output_owner is None
+        assert module._output_owner_unverified is None
+        assert not conn.client_is_speaking
+        assert json.loads(packets[-1])["state"] == "stop"
+    finally:
+        release.set()
+        await asyncio.gather(task, session.started, return_exceptions=True)

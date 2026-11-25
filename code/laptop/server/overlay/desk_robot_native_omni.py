@@ -253,6 +253,7 @@ class NativeOmniSession:
             asyncio.Queue(maxsize=40)
         )
         self.started: asyncio.Task | None = None
+        self._run_entered = False
         self.connected = False
         self.closed = False
         self.last_error: str | None = None
@@ -405,11 +406,17 @@ class NativeOmniSession:
             self.fail("Microphone backlog overflow; native stream stopped")
 
     def fail(self, reason: str) -> None:
+        # Failure is a one-way transition. Repeated notifications must not
+        # interrupt the worker drain and physical STOP in run's finally.
+        if self.closed:
+            return
         self.last_error = reason[:140]
         self.closed = True
         self._mac_context_verified = False
         task = self.started
-        if task is not None and not task.done():
+        # Cancelling before run enters skips its finally altogether, leaving
+        # a permanently closed session in the registry.
+        if self._run_entered and task is not None and not task.done():
             task.cancel()
 
     def _check_private_memory_revision(
@@ -2684,7 +2691,10 @@ class NativeOmniSession:
 
     async def run(self) -> None:
         global _output_owner, _output_owner_unverified
+        self._run_entered = True
         try:
+            if self.closed:
+                return  # Failed before startup; still run lease/registry cleanup.
             await self._retire_legacy_audio()
             async with aiohttp.ClientSession() as http:
                 await self._load_private_persona(http)
