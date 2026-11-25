@@ -601,3 +601,53 @@ async def test_navigation_rechecks_swept_neighbor_after_pose_io(settings, tmp_pa
         assert "halt" in head.commands
     finally:
         await rt.close()
+
+
+async def test_navigation_consumes_real_typed_pose_receipt(settings, tmp_path):
+    from desk_robot.runtime import Runtime
+    from desk_robot.spatial_pose import PoseError, PoseFence
+
+    settings.memory_dir = tmp_path / "memory"
+    settings.trials_file = tmp_path / "trials.jsonl"
+    rt = Runtime(settings)
+    head = SpatialHead("robot-01")
+    try:
+        _seed_safe_grid(rt.spatial, "robot-01", head)
+        fence = PoseFence("robot-01")
+        fence.observe(await head.pose_status(), time.monotonic())
+        receipt = fence.observe(await head.pose_status(), time.monotonic())
+        assert rt.spatial.observe_pose(
+            "robot-01", receipt, source_fence=fence,
+        ) is receipt
+        assert rt.spatial.state("robot-01").grid.anchored
+        with pytest.raises(PoseError, match="not current"):
+            rt.spatial.observe_pose("robot-01", receipt, source_fence=fence)
+        assert not rt.spatial.state("robot-01").grid.anchored
+    finally:
+        await rt.close()
+
+
+async def test_plan_callback_rejects_in_place_epoch_change(settings, tmp_path, monkeypatch):
+    from desk_robot.runtime import Runtime
+    from desk_robot.route_planner import plan_route
+
+    settings.memory_dir = tmp_path / "memory"
+    settings.trials_file = tmp_path / "trials.jsonl"
+    rt = Runtime(settings)
+    head = SpatialHead("robot-01")
+    try:
+        _seed_safe_grid(rt.spatial, "robot-01", head)
+
+        def invalidate_during_plan(*args, **kwargs):
+            rt.spatial.invalidate_robot("robot-01", reason="pickup")
+            return plan_route(*args, **kwargs)
+
+        monkeypatch.setattr("desk_robot.spatial_runtime.plan_route", invalidate_during_plan)
+        route, _, _ = rt.spatial.plan_navigation(
+            "robot-01", start=(2, 2), goal=(3, 2),
+        )
+        assert route.status == "rejected"
+        assert not route.may_execute
+        assert not rt.spatial.state("robot-01").grid.anchored
+    finally:
+        await rt.close()

@@ -1802,7 +1802,11 @@ class Coordinator:
         cur_heading = initial_heading
 
         def _check_step_authority(start_cell: tuple[int, int], goal_cell: tuple[int, int]):
-            self._require_camera_motion_grant(camera_grant)
+            try:
+                self._require_camera_motion_grant(camera_grant)
+            except OperationError:
+                spatial.invalidate_robot(job.robot_id, reason="camera_consent_revoked")
+                raise
             if self.dock_inhibited(job.robot_id):
                 raise OperationError("Navigation halted: robot seated or powered on dock")
             st = spatial.state(job.robot_id)
@@ -1839,18 +1843,24 @@ class Coordinator:
             pose_reader = getattr(head, "pose_status", None)
             if callable(pose_reader):
                 req_start = time.monotonic()
-                pose_payload = await _bounded_head_reply(
-                    pose_reader(),
-                    seconds=1.0,
-                    timeout_message="Spatial navigation pose status timeout",
-                )
+                try:
+                    pose_payload = await _bounded_head_reply(
+                        pose_reader(),
+                        seconds=1.0,
+                        timeout_message="Spatial navigation pose status timeout",
+                    )
+                except Exception:
+                    spatial.invalidate_robot(job.robot_id, reason="pose_transport_lost")
+                    raise
                 spatial.observe_pose(
                     job.robot_id,
                     pose_payload,
                     received_at=time.monotonic(),
                     request_started_at=req_start,
+                    source_fence=getattr(head, "pose_fence", None),
                 )
             elif self.settings.mode == "hardware":
+                spatial.invalidate_robot(job.robot_id, reason="pose_transport_lost")
                 raise OperationError("Navigation halted: live pose unavailable")
             # Pose IO can yield to sensor updates, STOP and consent revocation.
             # Refresh local health and then recheck the full inflated edge

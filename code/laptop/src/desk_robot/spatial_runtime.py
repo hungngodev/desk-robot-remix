@@ -23,7 +23,7 @@ from .object_targets import (
     resolve_object_target,
 )
 from .route_planner import GridSnapshot, RouteRequest, RouteResult, SafetyEnvelope, plan_route
-from .spatial_grid import CELL_MM, RangeCellBatch, SpatialGrid
+from .spatial_grid import CELL_MM, GridEvidenceError, RangeCellBatch, SpatialGrid
 from .spatial_memory import SpatialEvidence, SpatialMemory, SpatialSighting
 from .spatial_pose import PoseError, PoseFence, PoseReceipt
 from .vision import Vision
@@ -34,6 +34,7 @@ class RobotSpatialState:
     robot_id: str
     pose_fence: PoseFence
     grid: SpatialGrid | None = None
+    last_navigation_pose: PoseReceipt | None = None
     epoch: int = 1
     body_boot: int = 0
     origin_id: str = "unanchored"
@@ -74,6 +75,7 @@ class SpatialRuntime:
         state.epoch += 1
         state.invalidated_reason = reason
         state.pose_fence.invalidate(reason)
+        state.last_navigation_pose = None
         if state.grid is not None:
             state.grid.invalidate_origin(state.body_boot, f"reset-{state.epoch}")
             state.grid.epoch = state.epoch
@@ -99,14 +101,10 @@ class SpatialRuntime:
     ) -> SpatialGrid:
         """Bind a bounded per-robot occupancy grid for an identified origin and calibration."""
         state = self.states[robot_id]
-        state.epoch += 1
-        state.body_boot = body_boot
-        state.origin_id = origin_id
-        state.anchor_id = anchor_id
-        state.calibration_id = calibration_id
-        state.camera_boot = camera_boot
-        state.envelope = envelope
-        state.invalidated_reason = None if anchored else "unanchored"
+        if (type(anchored) is not bool or type(camera_boot) is not int
+                or not 0 <= camera_boot <= 0xffffffff):
+            raise ValueError("Invalid spatial anchor identity")
+        next_epoch = state.epoch + 1
         grid = SpatialGrid(
             robot_id,
             body_boot,
@@ -115,10 +113,18 @@ class SpatialRuntime:
             calibration_id,
             width,
             height,
-            epoch=state.epoch,
+            epoch=next_epoch,
             ttl_us=ttl_us,
         )
-        grid.anchored = bool(anchored)
+        state.epoch = next_epoch
+        state.body_boot = body_boot
+        state.origin_id = origin_id
+        state.anchor_id = anchor_id
+        state.calibration_id = calibration_id
+        state.camera_boot = camera_boot
+        state.envelope = envelope
+        state.invalidated_reason = None if anchored else "unanchored"
+        grid.anchored = anchored
         state.grid = grid
         state.viewpoints.clear()
         return grid
@@ -126,28 +132,52 @@ class SpatialRuntime:
     def observe_pose(
         self,
         robot_id: str,
-        payload: dict,
+        payload: dict | PoseReceipt,
         *,
         received_at: float | None = None,
         request_started_at: float | None = None,
+        source_fence: PoseFence | None = None,
     ) -> PoseReceipt:
         """Validate pose stream continuity; reset spatial map epoch if origin/boot changes."""
         state = self.states[robot_id]
         stamp = time.monotonic() if received_at is None else received_at
-        try:
-            receipt = state.pose_fence.observe(
-                payload,
-                stamp,
-                request_started_at=request_started_at,
-            )
-        except PoseError:
-            self.invalidate_robot(robot_id, reason=state.pose_fence.blocked_reason)
-            raise
+        if type(payload) is PoseReceipt:
+            previous = state.last_navigation_pose
+            if (not isinstance(source_fence, PoseFence)
+                    or payload.robot_id != robot_id
+                    or source_fence.current(stamp) is not payload
+                    or not source_fence.owns_continuous_receipt(payload)
+                    or (previous is not None and payload.seq <= previous.seq)):
+                self.invalidate_robot(robot_id, reason="pose_receipt_not_current")
+                raise PoseError("Navigation pose receipt not current")
+            state.pose_fence = source_fence
+            receipt = payload
+        else:
+            if self.settings.mode == "hardware":
+                self.invalidate_robot(robot_id, reason="pose_receipt_untyped")
+                raise PoseError("Hardware navigation requires authenticated pose receipt")
+            try:
+                receipt = state.pose_fence.observe(
+                    payload,
+                    stamp,
+                    request_started_at=request_started_at,
+                )
+            except PoseError:
+                self.invalidate_robot(robot_id, reason=state.pose_fence.blocked_reason)
+                raise
         if state.grid is not None and state.body_boot > 0 and (
             receipt.body_boot != state.body_boot
         ):
             self.invalidate_robot(robot_id, reason="body_boot_changed")
             raise PoseError("Pose body boot differs from anchored map")
+        if state.grid is not None and state.grid.anchored and (
+            str(receipt.origin) != state.origin_id
+            or receipt.head_boot != state.camera_boot
+            or receipt.quality != "valid"
+        ):
+            self.invalidate_robot(robot_id, reason="pose_anchor_identity_changed")
+            raise PoseError("Pose origin, head boot or quality differs from anchored map")
+        state.last_navigation_pose = receipt
         return receipt
 
     def record_range_batch(
@@ -156,7 +186,13 @@ class SpatialRuntime:
         state = self.states[robot_id]
         if state.grid is None:
             raise ValueError("Spatial grid not initialized for robot")
-        state.grid.record(batch, now_us=self.now_us() if now_us is None else now_us)
+        was_anchored = state.grid.anchored
+        try:
+            state.grid.record(batch, now_us=self.now_us() if now_us is None else now_us)
+        except GridEvidenceError:
+            if was_anchored and not state.grid.anchored:
+                self.invalidate_robot(robot_id, reason="range_clock_invalidated")
+            raise
 
     def register_viewpoint(self, robot_id: str, viewpoint: SearchViewpoint) -> None:
         state = self.states[robot_id]
@@ -237,7 +273,28 @@ class SpatialRuntime:
         if state.grid is None or state.envelope is None:
             return RouteResult("rejected", "unanchored_or_stale_map"), None, None
         current_us = self.now_us() if now_us is None else now_us
-        snapshot: GridSnapshot = state.grid.to_route_snapshot(now_us=current_us)
+        grid = state.grid
+        envelope = state.envelope
+        epoch = state.epoch
+        camera_boot = state.camera_boot
+        camera_grant = self.settings.camera_consent_generation
+        snapshot: GridSnapshot = grid.to_route_snapshot(now_us=current_us)
+
+        def request_current() -> bool:
+            current = self.states[robot_id]
+            return (
+                current is state and current.epoch == epoch and current.grid is grid
+                and current.envelope == envelope and grid.epoch == epoch and grid.anchored
+                and current.origin_id == snapshot.origin_id
+                and current.anchor_id == snapshot.anchor_id
+                and current.calibration_id == snapshot.calibration_id
+                and current.camera_boot == camera_boot
+                and (self.settings.mode != "hardware" or (
+                    self.settings.voice_vision_tools_enabled
+                    and self.settings.camera_consent_generation == camera_grant
+                ))
+            )
+
         target_res: ObjectTarget | None = None
         search_res: ObjectSearchResult | None = None
         chosen_goal = goal
@@ -294,7 +351,7 @@ class SpatialRuntime:
                         tuple(state.viewpoints),
                         now_us=current_us,
                         clock_us=self.now_us,
-                        request_is_current=lambda: self.states[robot_id].epoch == state.epoch,
+                        request_is_current=request_current,
                     )
                     if search_res.status == "viewpoint_proposal" and search_res.route is not None:
                         return search_res.route, target_res, search_res
@@ -324,7 +381,7 @@ class SpatialRuntime:
             state.envelope,
             now_us=current_us,
             clock_us=self.now_us,
-            request_is_current=lambda: self.states[robot_id].epoch == state.epoch,
+            request_is_current=request_current,
         )
         return route_res, target_res, search_res
 
