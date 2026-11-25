@@ -306,13 +306,38 @@ def test_same_acquisition_cannot_change_cached_values(sensor, field, changed_val
     with pytest.raises(ValueError, match=f"Contradictory {sensor} acquisition values"):
         accept(contradiction, decoder=decoder, now=8.0)
 
-    # Rejection is atomic, and the identical cached observation is allowed.
+    # Rejection is atomic, but an explicitly invalidated conversion stays retired.
     corrected = frame(4, 8000)
     corrected["readings"][sensor]["sample_ms"] = 5000
-    assert accept(corrected, decoder=decoder, now=8.0).seq == 4
+    observed = accept(corrected, decoder=decoder, now=8.0)
+    assert observed.seq == 4
+    assert observed.readings[sensor] == {"valid": False}
+    assert sensor not in observed.sensor_ages_ms
+    assert observed.readings["bme688"]["valid"]
+    if sensor == "scd40":
+        assert "CO2" not in observed.summary
+        assert "raw gas resistance" in observed.summary
     newer = frame(5, 9000)
     newer["readings"][sensor][field] = changed_value
     assert accept(newer, decoder=decoder, now=9.0).readings[sensor][field] == changed_value
+
+
+def test_rejected_frame_does_not_revoke_co2_and_new_conversion_recovers():
+    decoder = RoomStationDecoder()
+    accept(frame(1, 5000), decoder=decoder, now=5.0)
+    bad = frame(2, 6000)
+    bad["readings"]["scd40"] = {"valid": False}
+    bad["readings"]["amg8833"]["pixels_c"] = []
+    with pytest.raises(ValueError):
+        accept(bad, decoder=decoder, now=6.0)
+    cached = frame(2, 6000)
+    cached["readings"]["scd40"]["sample_ms"] = 5000
+    assert accept(cached, decoder=decoder, now=6.0).readings["scd40"]["valid"]
+    missing = frame(3, 7000)
+    missing["readings"]["scd40"] = {"valid": False}
+    assert "CO2" not in accept(missing, decoder=decoder, now=7.0).summary
+    recovered = accept(frame(4, 8000), decoder=decoder, now=8.0)
+    assert "Station CO2 630 ppm" in recovered.summary
 
 
 def test_sensor_acquisition_rollover_and_rejection_are_atomic():
