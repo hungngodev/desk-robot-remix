@@ -84,3 +84,32 @@ def test_selected_builder_route_uses_explicit_full_and_private_sense_targets():
     assert "J3 microSD isolation" in selected
     assert "explicit operator consent" in selected
     assert "all actuator and charging power disconnected" in selected.replace("\n", " ")
+
+
+def test_commissioning_and_paper_screen_fail_closed():
+    build = GUIDE.with_name("build.md").read_text(encoding="utf-8")
+    cad = (ROOT / "docs/cad/FUSION_ONE_ROBOT_ASSEMBLY.md").read_text(encoding="utf-8")
+    measurements = (ROOT / "docs/cad/FUSION_MEASUREMENT_SHEET.md").read_text(
+        encoding="utf-8"
+    )
+    gripper = GUIDE.with_name("first-gripper-test.md").read_text(encoding="utf-8")
+    assert '${WROOM_PORT:?' in build
+    assert '${SENSE_PORT:?' in build
+    assert '--upload-port "$WROOM_PORT" || exit 1' in build
+    assert "--inspect --samples 10" in build
+    assert "issues HALT in cleanup" in build
+    for flag in (
+        "--floor-mount-template",
+        "--floor-mount-measurements",
+        "--planar-template",
+        "--planar-measurements",
+    ):
+        assert flag in cad
+    for gate in (
+        "all_floor_mounts_possible_on_paper",
+        "necessary_planar_coverage_on_paper",
+        "necessary_stability_on_paper",
+    ):
+        assert gate in cad
+    assert "floor_mount_records[4]" in measurements
+    assert "check_trials.py --robot robot-01 --require-pass" in gripper
