@@ -372,7 +372,9 @@ class Coordinator:
                                 and task in pending):
                             self.jobs[jid].state = "failed"
                             if stop_acknowledged:
-                                self.jobs[jid].error = "Cancelled job ignored timeout; WROOM stop dispatched"
+                                self.jobs[jid].error = (
+                                    "Cancelled job ignored timeout; WROOM stop dispatched"
+                                )
         for jid in active_job_ids:
             task = self.tasks[jid]
             if task.cancelled() and self.jobs[jid].state != "failed":
@@ -627,7 +629,10 @@ class Coordinator:
                     continue
                 if (
                     not self.robot(req.robot_id).motion_enabled
-                    or (self.dock_inhibited(req.robot_id) and req.kind in {"exploration", "pickup", "navigate"})
+                    or (
+                        self.dock_inhibited(req.robot_id)
+                        and req.kind in {"exploration", "pickup", "navigate"}
+                    )
                     or (req.consent_check is not None and not req.consent_check())
                 ):
                     self._deferred_voice_queue.popleft()
@@ -648,7 +653,10 @@ class Coordinator:
                     or self._permit_epoch[req.robot_id] != dispatch_epoch
                     or self._stop_confirmations.blocked(req.robot_id)
                     or not self.robot(req.robot_id).motion_enabled
-                    or (self.dock_inhibited(req.robot_id) and req.kind in {"exploration", "pickup", "navigate"})
+                    or (
+                        self.dock_inhibited(req.robot_id)
+                        and req.kind in {"exploration", "pickup", "navigate"}
+                    )
                     or (req.consent_check is not None and not req.consent_check())
                     or self._fleet_motion_owner is not None
                 ):
@@ -714,7 +722,8 @@ class Coordinator:
         voice_reason = self.voice_blocks_motion()
         if voice_reason is not None:
             raise OperationError(voice_reason)
-        # Retain only bounded history; never accumulate infinite tasks/results in a long-running server.
+        # Retain only bounded history; never accumulate infinite tasks/results
+        # in a long-running server.
         if len(self.jobs) >= 100:
             for jid in list(self.jobs):
                 if self.tasks[jid].done():
@@ -1818,17 +1827,24 @@ class Coordinator:
         return {
             "visually_verified": True,
             "placed_visually_verified": True,
-            "criterion": "raised-jaw lift and hold followed by observed lower, release and stable placement",
+            "criterion": (
+                "raised-jaw lift and hold followed by observed lower, "
+                "release and stable placement"
+            ),
             "physical_acceptance_pass": False,
             "target": target,
-            "note": "Image evidence is experimental; no physical 10 mm lift or loaded object acceptance is claimed",
+            "note": (
+                "Image evidence is experimental; no physical 10 mm lift "
+                "or loaded object acceptance is claimed"
+            ),
         }
 
     def _require_navigation_qualification(self, robot_id: str) -> None:
         robot = self.robot(robot_id)
         if robot.motion_enabled is not True or robot.spatial_navigation_qualified is not True:
             raise OperationError(
-                "Spatial navigation requires motion_enabled=true and spatial_navigation_qualified=true"
+                "Spatial navigation requires motion_enabled=true "
+                "and spatial_navigation_qualified=true"
             )
 
     def navigate(
@@ -2014,7 +2030,9 @@ class Coordinator:
                 requested_heading is not None and observed_heading != requested_heading
             ):
                 spatial.invalidate_robot(job.robot_id, reason="pose_odometry_divergence")
-                raise OperationError("Navigation halted: requested start diverges from localized pose")
+                raise OperationError(
+                    "Navigation halted: requested start diverges from localized pose"
+                )
             route, target, search = spatial.plan_navigation(
                 job.robot_id,
                 start=observed_cell,
