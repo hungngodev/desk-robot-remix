@@ -18,7 +18,7 @@ overlay = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(overlay)
 
 
-def make_player(source, flags, available, times):
+def make_player(source, flags, available, times, *, fail_at=None):
     flags = iter(flags)
     available = iter(available)
     times = iter(times)
@@ -33,13 +33,19 @@ def make_player(source, flags, available, times):
 
         def start(self):
             calls.append("start")
+            if fail_at == "start":
+                raise OSError("start failure")
 
         def write(self, audio):
             calls.append(len(audio))
+            if fail_at == "write":
+                raise OSError("write failure")
             return next(flags)
 
         def stop(self):
             calls.append("stop")
+            if fail_at == "stop":
+                raise OSError("stop failure")
 
         def close(self):
             calls.append("close")
@@ -136,3 +142,31 @@ def test_original_discards_underflow(source, tmp_path):
 def test_drift_rejected(source):
     with pytest.raises(ValueError, match="anchor changed"):
         overlay.instrument_p3_player(source.replace("stream.write(audio_array)", "stream.write(other)"))
+
+@pytest.mark.parametrize(("stage", "expected"), [
+    ("start", ["start", "close"]),
+    ("write", ["start", 960, "stop", "close"]),
+    ("stop", ["start", 960, "stop", "close"]),
+])
+def test_player_releases_stream_on_fault(source, tmp_path, stage, expected):
+    player, calls = make_player(
+        overlay.instrument_p3_player(source), [False], [960], [0, 0.01, 0.02],
+        fail_at=stage,
+    )
+    with pytest.raises(OSError, match=f"{stage} failure"):
+        player(packets(tmp_path / "audio.p3", 960))
+    assert calls == expected
+
+
+def test_stop_preempts_remaining_packets(source, tmp_path):
+    player, calls = make_player(
+        overlay.instrument_p3_player(source), [False], [960], [0, 0.01, 0.02],
+    )
+    states = iter([False, True])
+    metrics = player(
+        packets(tmp_path / "audio.p3", 960, 960),
+        stop_event=SimpleNamespace(is_set=lambda: next(states)),
+    )
+    assert metrics["submitted_frames"] == 960
+    assert metrics["write_calls"] == 1
+    assert calls == ["start", 960, "stop", "close"]

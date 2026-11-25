@@ -51,13 +51,14 @@ def instrument_p3_player(source: str) -> str:
     }
     started_at = time.monotonic()
     paused_since_write = False
-    stream.start()
+    stream_started = False
 ''',
     )
     source = replace_once(
         source,
         "    try:\n        with open(input_file, 'rb') as f:\n",
-        "    try:\n        metrics['output_latency_estimate_ms'] = stream.latency * 1000\n"
+        "    try:\n        stream.start()\n        stream_started = True\n"
+        "        metrics['output_latency_estimate_ms'] = stream.latency * 1000\n"
         "        with open(input_file, 'rb') as f:\n",
     )
     source = replace_once(
@@ -99,6 +100,12 @@ def instrument_p3_player(source: str) -> str:
                     metrics["underflow_reports_after_pause"] += int(paused_since_write)
                 paused_since_write = False
 ''',
+    )
+    source = replace_once(
+        source,
+        "        stream.stop()\n        stream.close()\n",
+        "        try:\n            if stream_started:\n                stream.stop()\n"
+        "        finally:\n            stream.close()\n",
     )
     return replace_once(
         source,
