@@ -50,9 +50,15 @@ def scad_mm(source: str, variable: str) -> float:
     return value
 
 
-def values(root: Path) -> dict:
-    data = {name: (root / path).read_text(encoding="utf-8")
-            for name, path in SOURCES.items()}
+def source_snapshot(root: Path) -> dict[str, bytes]:
+    """Read each distinct SCAD file once for both dimensions and digests."""
+    return {path: (root / path).read_bytes() for path in dict.fromkeys(SOURCES.values())}
+
+
+def values(root: Path, *, source_bytes: dict[str, bytes] | None = None) -> dict:
+    if source_bytes is None:
+        source_bytes = source_snapshot(root)
+    data = {name: source_bytes[path].decode("utf-8") for name, path in SOURCES.items()}
     black = scad_mm(data["dock"], "tag_black_side_mm")
     quiet = scad_mm(data["dock"], "tag_white_margin_each_mm")
     slack = scad_mm(data["dock"], "tag_paper_slack_each_mm")
@@ -260,7 +266,8 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
 
 
 def _expected(root: Path) -> tuple[dict, dict[str, bytes]]:
-    dimensions = values(root)
+    source_bytes = source_snapshot(root)
+    dimensions = values(root, source_bytes=source_bytes)
     pages = {f"{name}_reference_A4.svg": svg(name, dims).encode("utf-8")
              for name, dims in dimensions.items()}
     manifest = {
@@ -268,8 +275,8 @@ def _expected(root: Path) -> tuple[dict, dict[str, bytes]]:
         "provisional_only": True, "approved_drill_holes": 0,
         "actual_fit_verified": False,
         "source_sha256": {
-            path: sha256((root / path).read_bytes()).hexdigest()
-            for path in SOURCES.values()
+            path: sha256(data).hexdigest()
+            for path, data in source_bytes.items()
         },
         "pages": {file: sha256(data).hexdigest() for file, data in pages.items()},
         "source_dimensions_mm": {name: list(dims) for name, dims in dimensions.items()},

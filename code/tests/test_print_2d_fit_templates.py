@@ -3,6 +3,7 @@ import importlib.util
 import os
 import shutil
 import subprocess
+from hashlib import sha256
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -537,3 +538,45 @@ def test_a4_ignores_commented_and_quoted_assignment_text():
         'board_x=10.5; // mm\necho("board_x=12;");'
     )
     assert load().scad_mm(contents, "board_x") == 10.5
+
+
+def test_paper_source_digest_matches_dimensions_during_source_edit(tmp_path, monkeypatch):
+    source = load()
+    setup_sources(tmp_path)
+    output = tmp_path / "paper"
+    relative = source.SOURCES["speaker"]
+    scad = tmp_path / relative
+    original = scad.read_bytes()
+    parse_values = source.values
+
+    def edit_after_parse(root, **kwargs):
+        dimensions = parse_values(root, **kwargs)
+        scad.write_bytes(original.replace(b"speaker_l=20", b"speaker_l=21"))
+        return dimensions
+
+    with monkeypatch.context() as patch:
+        patch.setattr(source, "values", edit_after_parse)
+        report = source.export(tmp_path, output)
+    assert report["source_dimensions_mm"]["speaker"] == [20, 16]
+    assert report["source_sha256"][relative] == sha256(original).hexdigest()
+    assert 'width="20"' in (output / "speaker_reference_A4.svg").read_text()
+    with pytest.raises(ValueError, match="source, dimensions or manifest changed"):
+        source.verify(tmp_path, output)
+
+
+def test_paper_reads_shared_dock_source_once(tmp_path, monkeypatch):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / source.SOURCES["dock"]
+    read_bytes = Path.read_bytes
+    reads = 0
+
+    def count_reads(path):
+        nonlocal reads
+        if path == scad:
+            reads += 1
+        return read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", count_reads)
+    source.export(tmp_path, tmp_path / "paper")
+    assert reads == 1
