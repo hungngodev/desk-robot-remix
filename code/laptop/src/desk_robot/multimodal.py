@@ -60,6 +60,16 @@ def _admissible_mac_event_clock(value: float) -> bool:
     return _finite(value) and value <= time.monotonic() + 1
 
 
+def _validate_camera_cue(source: object, trigger_kind: object = None) -> None:
+    """Check source labels before acquisition or publishing any camera evidence."""
+    if type(source) is not str or source not in {"proactive", "speech", "voice_question", "sensor"}:
+        raise ValueError("Unknown image source or invalid time")
+    if trigger_kind is not None and (
+        source != "sensor" or type(trigger_kind) is not str or trigger_kind not in TRIGGERS
+    ):
+        raise ValueError("Only a real sensor burst can label its trigger")
+
+
 def _prepare(jpeg: bytes, max_side: int = 768) -> tuple[bytes, bytes, float]:
     """Encode bounded JPEG for the VLM and a tiny grayscale motion fingerprint."""
     if not isinstance(jpeg, bytes) or not 12 <= len(jpeg) <= 4_000_000:
@@ -189,7 +199,8 @@ class CameraFrameHub:
         active_fps: float = 0.8, max_frames: int = 3,
         room_settings: "Settings | None" = None,
     ):
-        if not robot_ids or len(set(robot_ids)) != len(robot_ids):
+        if (not robot_ids or any(type(robot_id) is not str for robot_id in robot_ids)
+                or len(set(robot_ids)) != len(robot_ids)):
             raise ValueError("Unique camera source identities required")
         if any(not _finite(v) or not 0 < v <= 5 for v in
                (idle_fps, speaking_fps, active_fps)):
@@ -321,7 +332,7 @@ class CameraFrameHub:
         self._shared_room_epoch = epoch
 
     def _check(self, robot_id: str) -> None:
-        if robot_id not in self.robots:
+        if type(robot_id) is not str or robot_id not in self.robots:
             raise ValueError("Unknown robot camera identity")
 
     def notify(self, robot_id: str, kind: str, now: float) -> None:
@@ -440,6 +451,8 @@ class CameraFrameHub:
 
     def offer(self, robot_id: str, jpeg: bytes, received_at: float,
               *, source: str) -> CameraEvidence:
+        self._check(robot_id)
+        _validate_camera_cue(source)
         return self.offer_prepared(
             robot_id, _prepare(jpeg), received_at, source=source
         )
@@ -462,14 +475,9 @@ class CameraFrameHub:
             raise RuntimeError("Old camera generation discarded")
         # Camera receipts are stamped on this Mac, not on a remote clock.
         # Even a subsecond future receipt can poison the ordering cursor.
-        if (not _finite(received_at) or received_at > time.monotonic()
-                or type(source) is not str
-                or source not in {"proactive", "speech", "voice_question", "sensor"}):
+        if not _finite(received_at) or received_at > time.monotonic():
             raise ValueError("Unknown image source or invalid time")
-        if trigger_kind is not None and (
-            source != "sensor" or type(trigger_kind) is not str or trigger_kind not in TRIGGERS
-        ):
-            raise ValueError("Only a real sensor burst can label its trigger")
+        _validate_camera_cue(source, trigger_kind)
         if received_at <= self.last_capture[robot_id]:
             raise ValueError("Out of order camera reception timestamp")
         if source_identity is not None and (
@@ -1885,18 +1893,15 @@ class MultimodalOrchestrator:
                       reuse_if_recent_s: float = 0.0,
                       trigger_kind: str | None = None) -> CameraEvidence:
         self.hub._check(robot_id)
+        _validate_camera_cue(source, trigger_kind)
+        if not _finite(reuse_if_recent_s) or not 0 <= reuse_if_recent_s <= 1.0:
+            raise ValueError("Invalid shared live camera age")
         camera_grant = getattr(self.settings, "camera_consent_generation", None)
         if self._closed:
             raise RuntimeError("Multimodal orchestrator closed")
         if (getattr(self.settings, "mode", "hardware") == "hardware"
                 and not self._camera_grant_valid(robot_id, camera_grant)):
             raise RuntimeError("Camera consent revoked for capture")
-        if not 0 <= reuse_if_recent_s <= 1.0:
-            raise ValueError("Invalid shared live camera age")
-        if trigger_kind is not None and (
-            source != "sensor" or trigger_kind not in TRIGGERS
-        ):
-            raise ValueError("Invalid sensor camera scheduling cause")
         if (source == "proactive"
                 and (pending := self._look_tasks.get(robot_id)) is not None
                 and not pending.done()):

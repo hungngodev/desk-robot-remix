@@ -3529,6 +3529,60 @@ def test_unhashable_multimodal_cues_are_rejected_without_mutation(invalid):
     assert hub.spoken_history["robot-01"][-1][0] == "Hello"
 
 
+@pytest.mark.parametrize("robot_id,kwargs", [
+    ("robot-01", {"source": []}),
+    ("robot-01", {"source": {}}),
+    ("robot-01", {"source": "unknown"}),
+    ("robot-01", {"source": "sensor", "trigger_kind": []}),
+    ("robot-01", {"source": "sensor", "trigger_kind": {}}),
+    ("robot-01", {"source": "speech", "trigger_kind": "touch_tap"}),
+    ("robot-01", {"source": "speech", "reuse_if_recent_s": []}),
+    ("robot-01", {"source": "speech", "reuse_if_recent_s": True}),
+    ([], {"source": "speech"}),
+    ({}, {"source": "speech"}),
+])
+async def test_invalid_capture_cues_do_not_acquire_camera_or_change_metrics(robot_id, kwargs):
+    settings = config()
+    settings.mode = "simulation"
+    head, peer = Head(), Head()
+    service = MultimodalOrchestrator(
+        settings, {"robot-01": head, "robot-02": peer}, Vision(), asyncio.Lock(),
+    )
+    try:
+        before = [service.status(rid) for rid in ("robot-01", "robot-02")]
+        with pytest.raises(ValueError):
+            await service.capture(robot_id, **kwargs)
+        assert head.captures == peer.captures == 0
+        assert [service.status(rid) for rid in ("robot-01", "robot-02")] == before
+        assert not service.hub.frames["robot-01"]
+        assert not service.hub.frames["robot-02"]
+        # Invalid cues must not impair the subsequent authorized source path.
+        frame = await service.capture(
+            "robot-01", source="sensor", trigger_kind="touch_tap",
+        )
+        assert frame.trigger_kind == "touch_tap"
+        assert head.captures == 1 and peer.captures == 0
+    finally:
+        await service.close()
+
+
+@pytest.mark.parametrize("robot_id,source", [
+    ([], "speech"), ({}, "speech"), ("robot-01", []), ("robot-01", {}),
+    ("robot-01", "unknown"),
+])
+def test_invalid_hub_camera_cues_are_rejected_before_decode(monkeypatch, robot_id, source):
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+
+    def forbidden_decode(_jpeg):
+        pytest.fail("invalid camera cue reached JPEG decoding")
+
+    monkeypatch.setattr("desk_robot.multimodal._prepare", forbidden_decode)
+    with pytest.raises(ValueError):
+        hub.offer(robot_id, b"not a JPEG", time.monotonic(), source=source)
+    assert not hub.frames["robot-01"] and not hub.frames["robot-02"]
+    assert not any(hub.urgent.values())
+
+
 def test_discarded_live_asr_event_cannot_replay_or_leak_to_peer():
     hub = CameraFrameHub(["robot-01", "robot-02"])
     event_id = "omni_" + "a" * 12 + "_" + "b" * 20
