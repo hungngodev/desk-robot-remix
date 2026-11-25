@@ -3814,9 +3814,12 @@ def test_native_tool_fact_pack_fails_closed_not_dropping_last_receipt(native):
     for facts in (
         [], [None], [{}] * 7,
         [{"source": "status", "value": float("nan")}],
+        [{"source": "status", "value": float("nan")}] * 7,
     ):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError) as error:
             module.pack_grounded_facts(facts)
+        if facts and len(facts) > 6 and "value" in facts[0]:
+            assert "speech context budget" not in str(error.value)
 
 
 @pytest.mark.parametrize("wav_fault", ["valid", "short_byte", "short_sample", "empty", "odd"])
@@ -8941,7 +8944,13 @@ async def test_native_failed_local_tool_is_explicitly_unavailable_in_compound_fa
     assert "wroom_fuel_gauge" in packed
 
 
-async def test_native_overcapacity_facts_speak_explicit_limitation_instead_of_silence(native):
+@pytest.mark.parametrize("facts", [
+    [{"source": "raw_measurements", "values": list(range(600))}],
+    [{"source": f"tool_{index}", "sequence": index} for index in range(7)],
+])
+async def test_native_overcapacity_facts_speak_explicit_limitation_instead_of_silence(
+    native, facts,
+):
     import io
     import wave
 
@@ -8984,8 +8993,7 @@ async def test_native_overcapacity_facts_speak_explicit_limitation_instead_of_si
             sent.append(json)
             return Response()
 
-    # A large immutable measurement array cannot be shortened as model text.
-    facts = [{"source": "raw_measurements", "values": list(range(600))}]
+    # Both a large immutable array and seven valid receipts exceed capacity.
     with pytest.raises(ValueError, match="Complete tool facts"):
         module.pack_grounded_facts(facts)
     await session._speak_tool_results(
@@ -8997,6 +9005,7 @@ async def test_native_overcapacity_facts_speak_explicit_limitation_instead_of_si
     assert '"complete_answer_available":false' in text_prompt
     assert '"tool_measurements_included":false' in text_prompt
     assert '"values":' not in text_prompt
+    assert '"sequence":' not in text_prompt
     assert session.native_tool_audio_queued == 1
     assert session.outgoing.get_nowait()[1] == b"\x00" * 4800
     assert session.outgoing.get_nowait()[1] is None

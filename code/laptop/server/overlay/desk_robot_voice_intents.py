@@ -384,7 +384,7 @@ def pack_grounded_facts(facts: list[dict], *, limit: int = 1800) -> str:
     interpretations and historical memory excerpts if necessary.
     """
     if (type(limit) is not int or not 256 <= limit <= 4096
-            or not isinstance(facts, list) or not 1 <= len(facts) <= 6
+            or not isinstance(facts, list) or not facts
             or any(not isinstance(fact, dict) for fact in facts)):
         raise ValueError("Expected one to six grounded facts and bounded budget")
 
@@ -416,6 +416,11 @@ def pack_grounded_facts(facts: list[dict], *, limit: int = 1800) -> str:
         ))
     except (TypeError, ValueError, OverflowError, RecursionError) as exc:
         raise ValueError("Tool facts must be JSON values") from exc
+
+    # Distinguish a valid but over-capacity batch from malformed evidence.
+    # The native speech caller can disclose this limit without any measurements.
+    if len(values) > 6:
+        raise ValueError("Complete tool facts do not fit the speech context budget")
 
     def encode() -> str:
         return json.dumps(values, ensure_ascii=True, allow_nan=False,
