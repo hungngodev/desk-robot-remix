@@ -3091,14 +3091,14 @@ async def test_hardware_aux_sensors_react_only_to_real_calibrated_edges(fleet, t
                       "red": 0, "ir": 0, "age_ms": 0, "bpm": None, "medical": False},
             "angles": {"raw": [nose, 0, 0], "present_mask": 1,
                        "valid_mask": 1, "magnet": [32, 0, 0]},
-            "force": {"adc": [pressure, 0], "jaw_seq": 10, "valid": True, "calibrated": False},
+            "force": {"adc": [pressure, 0], "jaw_seq": 10, "valid": True, "calibrated": False, "boot_id": 3},
             "climate": {"temp_centi": 2150, "rh_centi": 5000, "valid": True},
             "power": {"cell_mv": 3700, "soc_centi": soc, "bus_mv": 5100,
-                      "shunt_uv": 5, "fuel_valid": True, "fuel_seq": fuel_seq,
+                      "shunt_uv": 5, "fuel_valid": True, "fuel_seq": fuel_seq, "fuel_age_ms": 10,
                       "monitor_valid": True,
                       "current_calibrated": False},
             "proximity": {"raw": nearby, "valid": True, "gesture": 0,
-                          "gesture_events": 0, "physically_qualified": False},
+                          "gesture_events": 0, "physically_qualified": False, "boot_id": 3},
         }
 
     try:
@@ -3266,13 +3266,13 @@ async def test_optical_paw_requires_fresh_fifo_edges_and_measured_threshold(flee
             "angles": {"raw": [0, 0, 0], "present_mask": 0,
                        "valid_mask": 0, "magnet": [0, 0, 0]},
             "force": {"adc": [0, 0], "jaw_seq": 0, "valid": False,
-                      "calibrated": False},
+                      "calibrated": False, "boot_id": 3},
             "climate": {"temp_centi": 0, "rh_centi": 0, "valid": False},
             "power": {"cell_mv": 0, "soc_centi": 0, "bus_mv": 0,
                       "shunt_uv": 0, "fuel_valid": False,
                       "monitor_valid": False, "current_calibrated": False},
             "proximity": {"raw": 0, "valid": False, "gesture": 0,
-                          "gesture_events": 0, "physically_qualified": False},
+                          "gesture_events": 0, "physically_qualified": False, "boot_id": 3},
         }
 
     try:
@@ -3299,7 +3299,7 @@ async def test_optical_paw_requires_fresh_fifo_edges_and_measured_threshold(flee
         assert state.last_paw_seq is None
         assert sum(m.kind == "paw_contact" for m in memory.recent("robot-01")) == 2
         stale = report(9, 1000, age=400, valid=False)
-        stale["power"].update({"cell_mv": 3950, "soc_centi": 8000, "fuel_valid": True, "fuel_seq": 10})
+        stale["power"].update({"cell_mv": 3950, "soc_centi": 8000, "fuel_valid": True, "fuel_seq": 10, "fuel_age_ms": 10})
         await pet._observe_aux("robot-01", 7, stale)  # stale pulse resets only paw baseline
         assert state.aux_reads == reads_before + 2
         assert state.last_paw_seq is None
@@ -8800,6 +8800,27 @@ async def test_pet_initial_low_battery_and_dock_pin_inhibition_status(
 
     monkeypatch.setattr(pet, "_store_observation", observe_after_dock_request)
     try:
+        # Read-only legacy captures, missing ages and delayed HTTP responses
+        # cannot create proactive battery events, even without auto docking.
+        for provenance in ("missing_boot", "missing_age", "late_response"):
+            for seq in (1, 2, 3, 4):
+                packet = sample(seq)
+                elapsed = 0
+                if provenance == "missing_boot":
+                    packet["force"].pop("boot_id")
+                    packet["proximity"].pop("boot_id")
+                elif provenance == "missing_age":
+                    packet["power"].pop("fuel_age_ms")
+                else:
+                    elapsed = 490  # 10 ms source age + 490 ms transport
+                await pet._observe_aux(
+                    "robot-01", 92, packet, request_elapsed_ms=elapsed,
+                )
+            assert state.last_fuel_seq is None
+            assert state.low_fuel_streak == 0
+            assert dock_calls == []
+            assert not any(m.kind == "battery_low" for m in memory.recent("robot-01"))
+
         for seq in (1, 2, 3, 4):
             await pet._observe_aux("robot-01", 92, sample(seq, soc=1800))
         assert dock_calls == [("robot-01", True)]
@@ -8811,6 +8832,15 @@ async def test_pet_initial_low_battery_and_dock_pin_inhibition_status(
         # and repeated low transition while docked does not dispatch dock approach.
         await pet._observe_aux("robot-01", 92, sample(5, soc=3500))
         await pet._observe_aux("robot-01", 92, sample(6, soc=3500))
+        invalid = sample(7)
+        invalid["power"]["fuel_valid"] = False
+        await pet._observe_aux("robot-01", 92, invalid)
+        for seq in (1, 2, 3, 4):
+            await pet._observe_aux("robot-01", 92, sample(seq))
+        assert state.last_fuel_seq == 6
+        assert state.last_battery_low is False
+        assert dock_calls == [("robot-01", True)]
+        assert sum(m.kind == "battery_low" for m in memory.recent("robot-01")) == 1
         await pet._observe_aux("robot-01", 92, sample(7, soc=3500, dock_seq=1, seated=True))
         assert inhibit_calls == [("robot-01", True)]
         st = pet.status("robot-01")

@@ -1113,9 +1113,8 @@ class PetController:
                 # Loss of an OPTIONAL sensor is not an excuse to bypass or
                 # overwrite the independent WROOM local motion safety guard.
                 state.last_error = f"Optional sensor: {type(exc).__name__}: {str(exc)[:80]}"
-                # A failed optional read breaks confirmation, but does not
-                # erase an already announced low-charge state.
-                state.last_fuel_seq = None
+                # A failed optional read breaks confirmation, but cannot
+                # erase an accepted sequence or an announced low-charge state.
                 state.low_fuel_streak = 0
                 state.recovered_fuel_streak = 0
                 # A failed optional read cannot prove that the contacts opened.
@@ -1403,12 +1402,11 @@ class PetController:
         )
         if (power["fuel_valid"] and 2500 <= power["cell_mv"] <= 4500
                 and type(fuel_seq) is int and 0 < fuel_seq <= 0xffffffff
-                and (not auto_dock or fresh_fuel)):
+                and fresh_fuel):
             advance = _sensor_counter_advance(fuel_seq, state.last_fuel_seq)
             if advance == 0:
-                # Replayed evidence cannot complete an autonomous confirmation streak.
-                if auto_dock:
-                    state.low_fuel_streak = state.recovered_fuel_streak = 0
+                # Replay cannot complete a battery confirmation for speech or docking.
+                state.low_fuel_streak = state.recovered_fuel_streak = 0
             elif advance is None or advance > 1000:
                 state.last_fuel_seq = fuel_seq
                 state.low_fuel_streak = 0
@@ -1460,7 +1458,8 @@ class PetController:
                     state.low_fuel_streak = 0
                     state.recovered_fuel_streak = 0
         else:
-            state.last_fuel_seq = None
+            # Invalid or stale evidence breaks confirmation without rewinding
+            # the last accepted acquisition within this WROOM boot.
             state.low_fuel_streak = 0
             state.recovered_fuel_streak = 0
 
