@@ -2001,3 +2001,29 @@ def test_direct_touch_survives_routine_sensor_flood_at_both_context_boundaries()
                    for item in hub.interaction_timeline(robot, now + 9))
     hub.clear(robot)
     assert hub.interaction_timeline(robot, now) == []
+
+
+@pytest.mark.parametrize(
+    ("kind", "limit", "label"),
+    [
+        ("visual_look", 90, "Earlier local VLM guess"),
+        ("memory_recall", 100, "Opt-in private past memory"),
+        ("sensor_telemetry", 115, "Recent validated raw WROOM accessory read"),
+        ("robot_status", 85, "Recent head telemetry"),
+        ("pickup_status", 85, "Mac pickup job receipt"),
+    ],
+)
+def test_tool_context_marks_clipped_receipts_without_expanding_budget(kind, limit, label):
+    # A clipped numeric value or qualifier must not look like a complete receipt.
+    prefix = "x" * (limit - 1)
+    timeline = [{"channel": "tool", "kind": kind, "content": prefix + "123"}]
+    clipped = compose_brain_context([], [], timeline).interaction
+    assert label in clipped
+    assert clipped.endswith(prefix + "…")
+    assert len(clipped) <= 400
+
+    timeline[0]["content"] = prefix + "1"
+    exact = compose_brain_context([], [], timeline).interaction
+    assert exact.endswith(prefix + "1")
+    assert len(clipped) == len(exact)
+    assert "…" not in exact

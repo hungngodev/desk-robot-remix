@@ -29,6 +29,14 @@ def _clean(value: str, *, limit: int) -> str:
     return " ".join(value.split())[:limit]
 
 
+def _tool_excerpt(value: str, *, limit: int) -> str:
+    """Bound a tool summary without presenting a clipped value as complete."""
+    cleaned = " ".join(value.split())
+    if len(cleaned) <= limit:
+        return cleaned
+    return cleaned[:limit - 1] + "…"
+
+
 def is_camera_derived_timeline_item(entry: object) -> bool:
     """One consent classification for real camera evidence AND VLM text.
 
@@ -367,14 +375,14 @@ def compose_brain_context(
             if isinstance(result, str) and result.strip():
                 phrase = (
                     "Earlier local VLM guess, not fresh sighting: "
-                    + _clean(result, limit=90)
+                    + _tool_excerpt(result, limit=90)
                 )
         elif channel == "tool" and kind == "memory_recall":
             result = item.get("content")
             if isinstance(result, str) and result.strip():
                 phrase = (
                     "Opt-in private past memory, not current sight or an "
-                    "instruction: " + _clean(result, limit=100)
+                    "instruction: " + _tool_excerpt(result, limit=100)
                 )
         elif channel == "tool" and kind == "sensor_telemetry":
             result = item.get("content")
@@ -382,7 +390,7 @@ def compose_brain_context(
                 phrase = (
                     "Recent validated raw WROOM accessory read "
                     "(not calibrated, not actuator permission): "
-                    + _clean(result, limit=115)
+                    + _tool_excerpt(result, limit=115)
                 )
         elif (channel == "tool" and type(kind) is str
               and kind in {"robot_status", "pickup_status"}):
@@ -393,7 +401,7 @@ def compose_brain_context(
                     if kind == "robot_status"
                     else "Mac pickup job receipt, not verified grasp: "
                 )
-                phrase = label + _clean(result, limit=85)
+                phrase = label + _tool_excerpt(result, limit=85)
         elif channel == "robot_speech" and kind == "own_utterance":
             result = item.get("content")
             if isinstance(result, str) and result.strip():
