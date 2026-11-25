@@ -1178,17 +1178,34 @@ async def test_memory_context_error_releases_fleet_owner(settings, tmp_path):
 
 
 async def test_conversation_cancellation_releases_session(settings):
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+
     class SlowSpeaker(SimulatedSpeaker):
         async def say(self, robot, text, *, permission_check=None):
-            await asyncio.sleep(20)
+            entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
 
     c = Conversation(settings, SimulatedChat(), SlowSpeaker())
     task = asyncio.create_task(c.run(["robot-01", "robot-02"], "hello"))
-    await asyncio.sleep(0.01)
-    with pytest.raises(RuntimeError, match="active"):
-        await c.run(["robot-01", "robot-02"], "hello")
-    await c.stop()
-    assert task.cancelled() and c.active is None
+    try:
+        # STOP must interrupt an actual in-flight send, not context preparation.
+        await asyncio.wait_for(entered.wait(), timeout=3)
+        with pytest.raises(RuntimeError, match="active"):
+            await c.run(["robot-01", "robot-02"], "hello")
+        await c.stop()
+        assert cancelled.is_set()
+        assert task.cancelled() and c.active is None
+        assert not c.session_lock.locked()
+        assert not c.speaker_lock.locked()
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
 
 
 async def test_five_robot_social_history_labels_observation_and_speech_correctly(settings, tmp_path):
