@@ -9799,3 +9799,30 @@ async def test_native_opus_pacing_includes_socket_send_time(
     interval = max(0.060, send_seconds)
     assert starts == pytest.approx([100.0, 100.0 + interval, 100.0 + 2 * interval])
     assert session.head_packets == 3
+
+
+@pytest.mark.parametrize("route", ["pickup", "stop", "plan-readonly", "", None, [], {}])
+def test_grounded_fact_dispatch_rejects_non_observation_routes(native, route):
+    module, _ = native
+    assert module.native_grounded_fact(route, {"available": True}) is None
+
+
+@pytest.mark.parametrize("route", [
+    "look", "aux-status", "power-status", "latest-pickup", "status",
+    "interaction-context", "voice-context",
+])
+def test_grounded_fact_dispatch_rejects_non_object_receipts(native, route):
+    module, _ = native
+    assert module.native_grounded_fact(route, []) is None
+    assert module.native_grounded_fact(route, None) is None
+
+
+def test_grounded_fact_dispatch_registry_is_closed(native):
+    import desk_robot_voice_intents as intents
+
+    assert set(intents._GROUNDED_FACT_HANDLERS) == {
+        "look", "aux-status", "power-status", "latest-pickup", "status",
+        "interaction-context", "voice-context",
+    }
+    with pytest.raises(TypeError):
+        intents._GROUNDED_FACT_HANDLERS["pickup"] = lambda result: result

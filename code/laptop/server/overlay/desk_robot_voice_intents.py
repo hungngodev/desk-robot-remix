@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable, Mapping
+from types import MappingProxyType
 
 
 def _addressed_request_text(
@@ -459,221 +461,246 @@ def pack_grounded_facts(facts: list[dict], *, limit: int = 1800) -> str:
     raise ValueError("Complete tool facts do not fit the speech context budget")
 
 
+def _measured(value: object, low: int, high: int) -> bool:
+    return type(value) is int and low <= value <= high
+
+
+def _ground_look(result: dict) -> dict | None:
+    answer = result.get("answer")
+    if (result.get("source") != "authenticated_xiao_camera_and_local_vlm"
+            or not isinstance(answer, str) or not answer.strip()):
+        return None
+    return {"source": "local_camera_model_guess",
+            "interpretation_not_proof": " ".join(answer.split())[:350]}
+
+
+def _ground_aux_status(result: dict) -> dict | None:
+    if result.get("available") is False:
+        return {"source": "wroom_aux", "available": False}
+    climate = result.get("climate")
+    power = result.get("power")
+    if not isinstance(climate, dict) or not isinstance(power, dict):
+        return None  # Never infer real measurements from a partial payload.
+
+    # The Mac validates WROOM telemetry first. This LAST model-facing
+    # boundary must also reject arbitrary nested strings, booleans as
+    # integers, and out-of-range fields instead of forwarding them into
+    # a generated spoken response as supposed physical observations.
+
+    observed = {
+        "source": "validated_wroom_raw_aux_not_calibrated",
+        "physical_acceptance_verified": False,
+    }
+    temp, humidity = climate.get("temp_centi"), climate.get("rh_centi")
+    if (climate.get("valid") is True
+            and _measured(temp, -4500, 13000)
+            and _measured(humidity, 0, 10000)
+            and (climate.get("age_ms") is None
+                 or _measured(climate["age_ms"], 0, 999))):
+        reading = {"temp_centi": temp, "humidity_centi": humidity}
+        age = climate.get("age_ms")
+        if _measured(age, 0, 999):
+            reading["age_ms"] = age
+        observed["sht41"] = reading
+    bmp = result.get("bmp280")
+    if (isinstance(bmp, dict) and bmp.get("valid") is True
+            and _measured(bmp.get("pressure_pa"), 30000, 120000)
+            and _measured(bmp.get("temp_centi"), -4000, 8500)
+            and (bmp.get("age_ms") is None
+                 or _measured(bmp["age_ms"], 0, 1999))):
+        observed["bmp280"] = {
+            "pressure_pa": bmp["pressure_pa"],
+            "temp_centi": bmp["temp_centi"],
+            "physically_verified": False,
+        }
+    prox = result.get("proximity")
+    if (isinstance(prox, dict) and prox.get("valid") is True
+            and _measured(prox.get("raw"), 0, 255)
+            and _measured(prox.get("gesture"), 0, 4)):
+        observed["apds9960"] = {
+            "raw": prox["raw"], "gesture": prox["gesture"],
+            "physically_qualified": False,
+        }
+    if (power.get("fuel_valid") is True
+            and _measured(power.get("fuel_seq"), 1, 0xffffffff)
+            and _measured(power.get("soc_centi"), 0, 10000)
+            and _measured(power.get("cell_mv"), 2500, 4500)):
+        observed["fuel_gauge"] = {
+            "reported_soc_centi": power["soc_centi"],
+            "reported_cell_mv": power["cell_mv"],
+            "qualified": False,
+        }
+    dock = result.get("dock")
+    if (isinstance(dock, dict) and dock.get("present") is True
+            and dock.get("valid") is True
+            and dock.get("charging_verified") is False
+            and _measured(dock.get("seq"), 1, 0xffffffff)
+            and _measured(dock.get("age_ms"), 0, 499)
+            and all(type(dock.get(field)) is bool for field in (
+                "left_seated", "right_seated", "input_good",
+                "charge_indicated",
+            ))
+            and (not dock["charge_indicated"] or dock["input_good"])):
+        observed["dock_pins"] = {
+            "left_seated": dock["left_seated"],
+            "right_seated": dock["right_seated"],
+            "charge_indicated": dock["charge_indicated"],
+            "charging_verified": False,
+        }
+    nfc = result.get("nfc")
+    if (isinstance(nfc, dict) and nfc.get("v") is True
+            and _measured(nfc.get("e"), 0, 0xffffffff)):
+        observed["nfc"] = {"events": nfc["e"]}
+    return observed
+
+
+def _ground_power_status(result: dict) -> dict | None:
+    if result.get("source") != "wroom_aux_fuel_gauge_raw_unqualified":
+        return None
+    if result.get("gauge_available") is not True:
+        return {"source": "wroom_fuel_gauge", "available": False}
+    soc, mv = result.get("reported_soc_centi"), result.get("reported_cell_mv")
+    # The authenticated Mac endpoint forwards only successful MAX17048
+    # I2C acquisitions. A model-facing transport may not drop this token
+    # and still assert that an estimate is current.
+    if not _measured(result.get("raw_fuel_acquisition_seq"), 1, 0xffffffff):
+        return None
+    if (type(soc) is not int or type(mv) is not int
+            or not 0 <= soc <= 10000 or not 2500 <= mv <= 4500):
+        return None
+    return {"source": "unqualified_wroom_gauge",
+            "estimated_percent": round(soc / 100, 1),
+            "cell_mv": mv, "charging_verified": False}
+
+
+def _ground_latest_pickup(result: dict) -> dict | None:
+    # Actual Coordinator.Job states are a small closed set. An HTTP
+    # source field must not turn model-visible tool evidence into a
+    # free-form instruction or an invented successful grasp.
+    state = result.get("state")
+    if state not in ("queued", "running", "succeeded", "failed", "cancelled"):
+        state = "unknown"
+    return {"source": "mac_pickup_job",
+            "state": state if result.get("available") is True else "none",
+            "physical_grasp_verified": False}
+
+
+def _ground_status(result: dict) -> dict | None:
+    safety = result.get("safety")
+    if not isinstance(safety, dict):
+        return None
+    fault = safety.get("fault")
+    if (not isinstance(fault, str)
+            or re.fullmatch(r"[a-z][a-z0-9_]{0,47}", fault) is None):
+        fault = "unknown"
+    # A status read must not silently turn an absent, string or integer
+    # armed value into a confident motor state. Keep faults observable,
+    # but expose the arm latch only when WROOM provided a real boolean.
+    armed = result.get("armed")
+    if type(armed) is not bool:
+        return {"source": "wroom_status", "available": False,
+                "safety_fault": fault, "physical_acceptance_verified": False}
+    return {"source": "wroom_status", "available": True,
+            "armed": armed, "safety_fault": fault,
+            "physical_acceptance_verified": False}
+
+
+def _ground_interaction_context(result: dict) -> dict | None:
+    summary = result.get("model_context")
+    if (result.get("persistent_memory_included") is not False
+            or result.get("raw_media_included") is not False
+            or not isinstance(summary, str)):
+        return None
+    return {"source": "transient_mac_events",
+            "untrusted_summary": " ".join(summary.split())[:350]}
+
+
+def _ground_voice_context(result: dict) -> dict | None:
+    records = result.get("memories")
+    revision = result.get("private_memory_generation")
+    if (not isinstance(records, list)
+            or type(revision) is not int or not 0 <= revision < 2**63):
+        # An unversioned private fact cannot be compared with later
+        # operator edits immediately before physical speech.
+        return None
+    # An authoritative empty Mac lookup is a completed negative fact,
+    # not a missing tool response. Do not let a contradictory payload
+    # reintroduce stale text or a supposedly selected preference.
+    if result.get("matched") is False:
+        if records or result.get("selected_core_fact") is not None:
+            return None
+        return {
+            "source": "private_opt_in_memory_not_current_sight",
+            "private_memory_generation": revision,
+            "recollections": [],
+            "available": False,
+            "reason": "no_matching_retained_memory",
+        }
+    recollections = []
+    for item in records[:2]:
+        if not isinstance(item, dict) or not isinstance(item.get("summary"), str):
+            continue
+        summary = " ".join(item["summary"].split())[:155]
+        if not summary:
+            continue
+        kind, source_robot = item.get("kind"), item.get("source_robot")
+        witnessed = item.get("witnessed")
+        recollection = {
+            "summary": summary,
+            "kind": kind if isinstance(kind, str) and
+                    re.fullmatch(r"[a-z][a-z0-9_]{0,39}", kind) else "unknown",
+            "source_robot": source_robot if isinstance(source_robot, str)
+                    and re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", source_robot)
+                    else "unknown",
+            "witnessed": witnessed if type(witnessed) is bool else None,
+            "historical_untrusted_text": True,
+        }
+        event_id = item.get("event_id")
+        observed_at = item.get("observed_at")
+        confidence = item.get("confidence")
+        if isinstance(event_id, str) and re.fullmatch(r"[a-zA-Z0-9_-]{1,96}", event_id):
+            recollection["event_id"] = event_id
+        if type(observed_at) in (int, float) and 0 <= observed_at <= 253402300799:
+            recollection["observed_at"] = observed_at
+        if type(confidence) in (int, float) and 0 <= confidence <= 1:
+            recollection["confidence"] = confidence
+        recollections.append(recollection)
+    fact = {"source": "private_opt_in_memory_not_current_sight",
+            "private_memory_generation": revision,
+            "recollections": recollections}
+    selected = result.get("selected_core_fact")
+    if selected is not None:
+        if not isinstance(selected, dict):
+            return None
+        slot, value = selected.get("slot"), selected.get("value")
+        if (not isinstance(slot, str)
+                or re.fullmatch(r"[a-z][a-z0-9_]{1,39}", slot) is None
+                or not isinstance(value, str)
+                or not 1 <= len(value) <= 200 or not value.strip()
+                or result.get("matched") is not True):
+            return None
+        # Keep the actual preference intact; never reinterpret its text
+        # as instructions, a live observation, or a physical receipt.
+        fact["operator_curated_preference"] = {
+            "slot": slot, "value": value, "historical_untrusted_text": True,
+        }
+    return fact
+
+
+_GROUNDED_FACT_HANDLERS: Mapping[str, Callable[[dict], dict | None]] = MappingProxyType({
+    "look": _ground_look,
+    "aux-status": _ground_aux_status,
+    "power-status": _ground_power_status,
+    "latest-pickup": _ground_latest_pickup,
+    "status": _ground_status,
+    "interaction-context": _ground_interaction_context,
+    "voice-context": _ground_voice_context,
+})
+
+
 def native_grounded_fact(route: str, result: dict) -> dict | None:
     """Small source-labelled facts, never full private HTTP/JSON dumps."""
-    if not isinstance(result, dict):
+    if not isinstance(route, str) or not isinstance(result, dict):
         return None
-    def measured(value, low, high):
-        return type(value) is int and low <= value <= high
-
-    if route == "look":
-        answer = result.get("answer")
-        if (result.get("source") != "authenticated_xiao_camera_and_local_vlm"
-                or not isinstance(answer, str) or not answer.strip()):
-            return None
-        return {"source": "local_camera_model_guess",
-                "interpretation_not_proof": " ".join(answer.split())[:350]}
-    if route == "aux-status":
-        if result.get("available") is False:
-            return {"source": "wroom_aux", "available": False}
-        climate = result.get("climate")
-        power = result.get("power")
-        if not isinstance(climate, dict) or not isinstance(power, dict):
-            return None  # Never infer real measurements from a partial payload.
-
-        # The Mac validates WROOM telemetry first. This LAST model-facing
-        # boundary must also reject arbitrary nested strings, booleans as
-        # integers, and out-of-range fields instead of forwarding them into
-        # a generated spoken response as supposed physical observations.
-
-        observed = {
-            "source": "validated_wroom_raw_aux_not_calibrated",
-            "physical_acceptance_verified": False,
-        }
-        temp, humidity = climate.get("temp_centi"), climate.get("rh_centi")
-        if (climate.get("valid") is True
-                and measured(temp, -4500, 13000)
-                and measured(humidity, 0, 10000)
-                and (climate.get("age_ms") is None
-                     or measured(climate["age_ms"], 0, 999))):
-            reading = {"temp_centi": temp, "humidity_centi": humidity}
-            age = climate.get("age_ms")
-            if measured(age, 0, 999):
-                reading["age_ms"] = age
-            observed["sht41"] = reading
-        bmp = result.get("bmp280")
-        if (isinstance(bmp, dict) and bmp.get("valid") is True
-                and measured(bmp.get("pressure_pa"), 30000, 120000)
-                and measured(bmp.get("temp_centi"), -4000, 8500)
-                and (bmp.get("age_ms") is None
-                     or measured(bmp["age_ms"], 0, 1999))):
-            observed["bmp280"] = {
-                "pressure_pa": bmp["pressure_pa"],
-                "temp_centi": bmp["temp_centi"],
-                "physically_verified": False,
-            }
-        prox = result.get("proximity")
-        if (isinstance(prox, dict) and prox.get("valid") is True
-                and measured(prox.get("raw"), 0, 255)
-                and measured(prox.get("gesture"), 0, 4)):
-            observed["apds9960"] = {
-                "raw": prox["raw"], "gesture": prox["gesture"],
-                "physically_qualified": False,
-            }
-        if (power.get("fuel_valid") is True
-                and measured(power.get("fuel_seq"), 1, 0xffffffff)
-                and measured(power.get("soc_centi"), 0, 10000)
-                and measured(power.get("cell_mv"), 2500, 4500)):
-            observed["fuel_gauge"] = {
-                "reported_soc_centi": power["soc_centi"],
-                "reported_cell_mv": power["cell_mv"],
-                "qualified": False,
-            }
-        dock = result.get("dock")
-        if (isinstance(dock, dict) and dock.get("present") is True
-                and dock.get("valid") is True
-                and dock.get("charging_verified") is False
-                and measured(dock.get("seq"), 1, 0xffffffff)
-                and measured(dock.get("age_ms"), 0, 499)
-                and all(type(dock.get(field)) is bool for field in (
-                    "left_seated", "right_seated", "input_good",
-                    "charge_indicated",
-                ))
-                and (not dock["charge_indicated"] or dock["input_good"])):
-            observed["dock_pins"] = {
-                "left_seated": dock["left_seated"],
-                "right_seated": dock["right_seated"],
-                "charge_indicated": dock["charge_indicated"],
-                "charging_verified": False,
-            }
-        nfc = result.get("nfc")
-        if (isinstance(nfc, dict) and nfc.get("v") is True
-                and measured(nfc.get("e"), 0, 0xffffffff)):
-            observed["nfc"] = {"events": nfc["e"]}
-        return observed
-    if route == "power-status":
-        if result.get("source") != "wroom_aux_fuel_gauge_raw_unqualified":
-            return None
-        if result.get("gauge_available") is not True:
-            return {"source": "wroom_fuel_gauge", "available": False}
-        soc, mv = result.get("reported_soc_centi"), result.get("reported_cell_mv")
-        # The authenticated Mac endpoint forwards only successful MAX17048
-        # I2C acquisitions. A model-facing transport may not drop this token
-        # and still assert that an estimate is current.
-        if not measured(result.get("raw_fuel_acquisition_seq"), 1, 0xffffffff):
-            return None
-        if (type(soc) is not int or type(mv) is not int
-                or not 0 <= soc <= 10000 or not 2500 <= mv <= 4500):
-            return None
-        return {"source": "unqualified_wroom_gauge",
-                "estimated_percent": round(soc / 100, 1),
-                "cell_mv": mv, "charging_verified": False}
-    if route == "latest-pickup":
-        # Actual Coordinator.Job states are a small closed set. An HTTP
-        # source field must not turn model-visible tool evidence into a
-        # free-form instruction or an invented successful grasp.
-        state = result.get("state")
-        if state not in ("queued", "running", "succeeded", "failed", "cancelled"):
-            state = "unknown"
-        return {"source": "mac_pickup_job",
-                "state": state if result.get("available") is True else "none",
-                "physical_grasp_verified": False}
-    if route == "status":
-        safety = result.get("safety")
-        if not isinstance(safety, dict):
-            return None
-        fault = safety.get("fault")
-        if (not isinstance(fault, str)
-                or re.fullmatch(r"[a-z][a-z0-9_]{0,47}", fault) is None):
-            fault = "unknown"
-        # A status read must not silently turn an absent, string or integer
-        # armed value into a confident motor state. Keep faults observable,
-        # but expose the arm latch only when WROOM provided a real boolean.
-        armed = result.get("armed")
-        if type(armed) is not bool:
-            return {"source": "wroom_status", "available": False,
-                    "safety_fault": fault, "physical_acceptance_verified": False}
-        return {"source": "wroom_status", "available": True,
-                "armed": armed, "safety_fault": fault,
-                "physical_acceptance_verified": False}
-    if route == "interaction-context":
-        summary = result.get("model_context")
-        if (result.get("persistent_memory_included") is not False
-                or result.get("raw_media_included") is not False
-                or not isinstance(summary, str)):
-            return None
-        return {"source": "transient_mac_events",
-                "untrusted_summary": " ".join(summary.split())[:350]}
-    if route == "voice-context":
-        records = result.get("memories")
-        revision = result.get("private_memory_generation")
-        if (not isinstance(records, list)
-                or type(revision) is not int or not 0 <= revision < 2**63):
-            # An unversioned private fact cannot be compared with later
-            # operator edits immediately before physical speech.
-            return None
-        # An authoritative empty Mac lookup is a completed negative fact,
-        # not a missing tool response. Do not let a contradictory payload
-        # reintroduce stale text or a supposedly selected preference.
-        if result.get("matched") is False:
-            if records or result.get("selected_core_fact") is not None:
-                return None
-            return {
-                "source": "private_opt_in_memory_not_current_sight",
-                "private_memory_generation": revision,
-                "recollections": [],
-                "available": False,
-                "reason": "no_matching_retained_memory",
-            }
-        recollections = []
-        for item in records[:2]:
-            if not isinstance(item, dict) or not isinstance(item.get("summary"), str):
-                continue
-            summary = " ".join(item["summary"].split())[:155]
-            if not summary:
-                continue
-            kind, source_robot = item.get("kind"), item.get("source_robot")
-            witnessed = item.get("witnessed")
-            recollection = {
-                "summary": summary,
-                "kind": kind if isinstance(kind, str) and
-                        re.fullmatch(r"[a-z][a-z0-9_]{0,39}", kind) else "unknown",
-                "source_robot": source_robot if isinstance(source_robot, str)
-                        and re.fullmatch(r"[a-zA-Z0-9_-]{1,64}", source_robot)
-                        else "unknown",
-                "witnessed": witnessed if type(witnessed) is bool else None,
-                "historical_untrusted_text": True,
-            }
-            event_id = item.get("event_id")
-            observed_at = item.get("observed_at")
-            confidence = item.get("confidence")
-            if isinstance(event_id, str) and re.fullmatch(r"[a-zA-Z0-9_-]{1,96}", event_id):
-                recollection["event_id"] = event_id
-            if type(observed_at) in (int, float) and 0 <= observed_at <= 253402300799:
-                recollection["observed_at"] = observed_at
-            if type(confidence) in (int, float) and 0 <= confidence <= 1:
-                recollection["confidence"] = confidence
-            recollections.append(recollection)
-        fact = {"source": "private_opt_in_memory_not_current_sight",
-                "private_memory_generation": revision,
-                "recollections": recollections}
-        selected = result.get("selected_core_fact")
-        if selected is not None:
-            if not isinstance(selected, dict):
-                return None
-            slot, value = selected.get("slot"), selected.get("value")
-            if (not isinstance(slot, str)
-                    or re.fullmatch(r"[a-z][a-z0-9_]{1,39}", slot) is None
-                    or not isinstance(value, str)
-                    or not 1 <= len(value) <= 200 or not value.strip()
-                    or result.get("matched") is not True):
-                return None
-            # Keep the actual preference intact; never reinterpret its text
-            # as instructions, a live observation, or a physical receipt.
-            fact["operator_curated_preference"] = {
-                "slot": slot, "value": value, "historical_untrusted_text": True,
-            }
-        return fact
-    return None
-
-
+    handler = _GROUNDED_FACT_HANDLERS.get(route)
+    return handler(result) if handler is not None else None
