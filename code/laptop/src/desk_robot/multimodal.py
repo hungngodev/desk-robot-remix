@@ -1828,9 +1828,18 @@ class MultimodalOrchestrator:
                 and (pending := self._look_tasks.get(robot_id)) is not None
                 and not pending.done()):
             raise RuntimeError("Explicit human look owns this camera")
+        # Keep the request's original conversation ownership while queued.
+        # Waiting for a camera lock does not admit a new human turn.
+        turn = self._turn_epoch[robot_id]
+        question = self._question_epoch[robot_id]
         # HttpHead.capture_lock provides serialization with pet observation,
         # dock calibration and pickup. Do not bypass its strict source checks.
         async with self._camera_locks[robot_id]:
+            if self._closed:
+                raise RuntimeError("Multimodal orchestrator closed")
+            if (turn != self._turn_epoch[robot_id]
+                    or question != self._question_epoch[robot_id]):
+                raise RuntimeError("Camera capture superseded by newer conversation turn")
             if (getattr(self.settings, "mode", "hardware") == "hardware"
                     and not self._camera_grant_valid(robot_id, camera_grant)):
                 raise RuntimeError("Camera consent revoked for capture")
@@ -1855,18 +1864,20 @@ class MultimodalOrchestrator:
             metrics["camera_requests"] += 1
             started = time.monotonic()
             generation = self.hub._generation[robot_id]
-            turn = self._turn_epoch[robot_id]
-            question = self._question_epoch[robot_id]
             # Camera latency is measured before CPU postprocessing. A new
             # human voice can still preempt the event loop during decoding.
             try:
                 if source == "proactive" and self._any_human_active(time.monotonic()):
                     raise RuntimeError("Human speech preempts autonomous camera")
                 jpeg = await self._head_snapshot(robot_id, source=source)
+                if self._closed:
+                    raise RuntimeError("Multimodal orchestrator closed")
                 received = time.monotonic()
                 prepared = await self._prepare_bounded(
                     jpeg, priority=source in ("speech", "voice_question")
                 )
+                if self._closed:
+                    raise RuntimeError("Multimodal orchestrator closed")
                 # Source JPEG reception is not the last priority boundary.
                 # A human can begin speaking while the CPU worker is
                 # decoding/resizing this JPEG, after the proactive network

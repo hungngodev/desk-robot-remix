@@ -4011,3 +4011,40 @@ async def test_external_photo_preprocessing_cannot_publish_expired_receipt(monke
     finally:
         await visual.close()
 
+
+@pytest.mark.parametrize("transition", ["shutdown", "voice_turn", "voice_reset"])
+async def test_queued_native_capture_keeps_original_lifecycle(transition):
+    """An HTTP capture waiting for a lock must not acquire a newer turn."""
+    head = Head()
+    service = MultimodalOrchestrator(
+        config(), {"robot-01": head, "robot-02": Head()}, Vision(), asyncio.Lock(),
+    )
+    entered = asyncio.Event()
+
+    async def request():
+        entered.set()
+        return await service.native_frame("robot-01")
+
+    task = None
+    try:
+        async with service._camera_locks["robot-01"]:
+            task = asyncio.create_task(request())
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            assert not task.done()
+            if transition == "shutdown":
+                await service.close()
+            elif transition == "voice_turn":
+                service.prepare_human_turn("robot-02", end_expected=True)
+                service.voice_ended("robot-02")
+            else:
+                service.voice_transport_unavailable()
+        reason = "closed" if transition == "shutdown" else "superseded"
+        with pytest.raises(RuntimeError, match=reason):
+            await asyncio.wait_for(task, timeout=1)
+        assert head.captures == 0
+        assert not service.hub.frames["robot-01"]
+    finally:
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+        await service.close()
