@@ -84,8 +84,10 @@ the original README files, including noncommercial and share alike restrictions.
    as assembled positions. Use Modify > Move/Copy and align using actual
    axle, shaft and mating geometry. Autodesk help:
    https://help.autodesk.com/cloudhelp/ENU/Fusion-Mesh/files/MESH-INSERT-MESH.htm
-3. Install two **28BYJ48** motor envelope components and ULN2003 electronics
-   placeholders in the chassis. Align real shaft centers, verify two wheels,
+3. In the stepper reference design, install two **28BYJ48** motor envelope
+   components and ULN2003 electronics placeholders in the chassis. These are
+   reference envelopes, not a released drivetrain purchase or a qualified
+   motor cutoff. Do not reuse the fit result for the guarded DC alternative. Align real shaft centers, verify two wheels,
    rear/slave and repeated track links rotate without intersecting chassis.
    Use the SMARS original instructions for exact track piece count; do not
    infer track count from one STL file. Verify the slow stepper output torque,
@@ -114,7 +116,8 @@ the original README files, including noncommercial and share alike restrictions.
    print tolerance, cable sweep and loaded deflection. The WROOM measured
    lift and jaw travel/force limits and no-motion commissioning gate stay
    authoritative; a command ACK is not a measured horn position.
-5. Insert the selected **Sparky v0.1** shell as a head reference, with center
+5. If the Cozmars comparison requires the fallback, insert the **Sparky v0.1**
+   shell as a head reference, with center
    facing the vehicle's forward axis. Preserve its visible outside surface.
    Design a new small solid *adapter plate* between chassis and shell, with
    measured M2/M3 clearance holes and trapped heat-set inserts. Design a
@@ -139,11 +142,23 @@ the original README files, including noncommercial and share alike restrictions.
    lens opening with the 10.5 mm pilot board. Design and verify a separate
    real PCB retainer after measuring the purchased carrier; do not treat
    eight imported aperture references as mounted cliff sensors.
-   For each intended straight, reverse or pivot command, use the same existing
-   planar cliff preflight through its builder CLI:
+   Before screening any motion, use the same builder CLI to record each
+   downward mux lane separately (0 through 3):
 
    ```sh
-   python3 code/scripts/cliff_mount_preflight.py --planar-template
+   (set -C; python3 code/scripts/cliff_mount_preflight.py --floor-mount-template > robot01_floor_mounts.json)
+   python3 code/scripts/cliff_mount_preflight.py --floor-mount-measurements robot01_floor_mounts.json
+   ```
+
+   Fill the blank record with the measured lens height, angle from downward
+   vertical and calibrated minimum/maximum floor interval for each lane before
+   running the second command. Require `all_floor_mounts_possible_on_paper`
+   to be true. Stop on missing lanes, failures or malformed evidence. This is
+   not a live sensor qualification. For each intended straight, reverse or
+   pivot command, separately use the planar cliff preflight:
+
+   ```sh
+   (set -C; python3 code/scripts/cliff_mount_preflight.py --planar-template > robot01_cliff_motion.json)
    python3 code/scripts/cliff_mount_preflight.py --planar-measurements robot01_cliff_motion.json
    ```
 
@@ -152,7 +167,10 @@ the original README files, including noncommercial and share alike restrictions.
    track width, signed wheel velocities, mount datum, downward tilt, worst
    loaded stop distance and detection latency. Keep lateral coverage at zero
    until measured; the 10 mm paper margin is a design input, not a calibration.
-   Repeat for distinct motion commands. A positive paper result neither verifies
+   Repeat for distinct motion commands using new records. Both screens print
+   JSON even when a paper screen fails: require
+   `necessary_planar_coverage_on_paper` to be true, not just exit status zero.
+   A positive paper result neither verifies
    the real lens-to-desk height and optical orientation nor releases motion.
 8. Create small, independent mounting/vent openings for eight capacitive
    touch electrodes, the MAX30102 finger contact pad, APDS9960 gesture sensor,
@@ -272,6 +290,9 @@ maximum body roll and pitch and required static reserve, fill the
 ```sh
 python3 code/scripts/screen_assembly_stability.py --measurements robot01_stability.json
 ```
+
+Require `necessary_stability_on_paper` to be true, not merely exit status
+zero. A negative result is a stop before loaded or moving trials.
 
 The input body frame is X forward, Y left, Z upward, with millimeters
 and grams. The tool computes a DISTINCT convex support footprint per pose,
