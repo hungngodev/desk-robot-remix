@@ -202,7 +202,9 @@ target_compile_options(guarded_body_tests PRIVATE -Wall -Wextra -Wpedantic -Werr
 get_property(body_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 if(BODY_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   foreach(target IN LISTS body_targets)
-    target_compile_options(${target} PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    # UBSan normally recovers and can leave CTest green after undefined behavior.
+    target_compile_options(${target} PRIVATE -fsanitize=address,undefined
+      -fno-sanitize-recover=undefined -fno-omit-frame-pointer)
     target_link_options(${target} PRIVATE -fsanitize=address,undefined)
   endforeach()
 endif()
