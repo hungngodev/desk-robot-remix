@@ -1300,3 +1300,36 @@ async def test_navigation_discards_pose_after_map_epoch_replacement(
     finally:
         release.set()
         await rt.close()
+
+
+@pytest.mark.parametrize("flag", ["motion_enabled", "spatial_navigation_qualified"])
+async def test_navigation_rechecks_qualification_after_pose_io(settings, tmp_path, flag):
+    """Revoking either motion qualification during pose IO must prevent dispatch."""
+    from desk_robot.runtime import Runtime
+
+    settings.memory_dir = tmp_path / "memory"
+    settings.trials_file = tmp_path / "trials.jsonl"
+    robot = settings.robots[0]
+    robot.motion_enabled = True
+    robot.spatial_navigation_qualified = True
+    rt = Runtime(settings)
+
+    class RevokingHead(SpatialHead):
+        async def pose_status(self):
+            receipt = await super().pose_status()
+            setattr(robot, flag, False)
+            return receipt
+
+    head = RevokingHead("robot-01")
+    rt.coordinator.heads["robot-01"] = head
+    try:
+        _seed_safe_grid(rt.spatial, "robot-01", head)
+        await rt.coordinator.operator_arm("robot-01")
+        job = rt.coordinator.navigate("robot-01", start=(2, 2), goal=(3, 2))
+        await asyncio.wait_for(rt.coordinator.tasks[job.id], timeout=5)
+        assert job.state == "failed"
+        assert "Spatial navigation requires" in (job.error or "")
+        assert not any(cmd.startswith("drive ") for cmd in head.commands)
+        assert "halt" in head.commands
+    finally:
+        await rt.close()

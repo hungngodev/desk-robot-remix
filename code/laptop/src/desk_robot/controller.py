@@ -1824,6 +1824,13 @@ class Coordinator:
             "note": "Image evidence is experimental; no physical 10 mm lift or loaded object acceptance is claimed",
         }
 
+    def _require_navigation_qualification(self, robot_id: str) -> None:
+        robot = self.robot(robot_id)
+        if robot.motion_enabled is not True or robot.spatial_navigation_qualified is not True:
+            raise OperationError(
+                "Spatial navigation requires motion_enabled=true and spatial_navigation_qualified=true"
+            )
+
     def navigate(
         self,
         robot_id: str,
@@ -1835,11 +1842,7 @@ class Coordinator:
         heading: int | None = None,
     ) -> Job:
         """Execute a bounded, revalidated Guide 60 route proposal through Coordinator."""
-        robot = self.robot(robot_id)
-        if not robot.motion_enabled or not robot.spatial_navigation_qualified:
-            raise OperationError(
-                "Spatial navigation requires motion_enabled=true and spatial_navigation_qualified=true"
-            )
+        self._require_navigation_qualification(robot_id)
         if self.dock_inhibited(robot_id):
             raise OperationError("Navigation refused: robot is seated or powered on dock")
         spatial = getattr(self, "spatial", None)
@@ -2027,6 +2030,7 @@ class Coordinator:
             cur_heading = observed_heading
 
         def _check_step_authority(start_cell: tuple[int, int], goal_cell: tuple[int, int]):
+            self._require_navigation_qualification(job.robot_id)
             try:
                 self._require_camera_motion_grant(camera_grant)
             except OperationError:
