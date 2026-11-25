@@ -388,7 +388,25 @@ def pack_grounded_facts(facts: list[dict], *, limit: int = 1800) -> str:
             or any(not isinstance(fact, dict) for fact in facts)):
         raise ValueError("Expected one to six grounded facts and bounded budget")
 
+    def validate_structure(node: object, depth: int = 0) -> None:
+        # JSON encoders coerce non-string keys and permit lone surrogates.
+        # Neither is a lossless, interoperable model-facing receipt.
+        if depth > 32:
+            raise ValueError("Tool fact nesting exceeds 32 levels")
+        if isinstance(node, str):
+            node.encode("utf-8")
+        elif isinstance(node, dict):
+            for key, item in node.items():
+                if not isinstance(key, str):
+                    raise ValueError("Tool fact object keys must be strings")
+                key.encode("utf-8")
+                validate_structure(item, depth + 1)
+        elif isinstance(node, (list, tuple)):
+            for item in node:
+                validate_structure(item, depth + 1)
+
     try:
+        validate_structure(facts)
         # JSON round-trip deliberately strips mutable references to source
         # objects before any summarization. No arbitrary repr or Python
         # object reaches model instructions.
@@ -396,7 +414,7 @@ def pack_grounded_facts(facts: list[dict], *, limit: int = 1800) -> str:
             facts, ensure_ascii=True, allow_nan=False,
             separators=(",", ":"),
         ))
-    except (TypeError, ValueError, OverflowError) as exc:
+    except (TypeError, ValueError, OverflowError, RecursionError) as exc:
         raise ValueError("Tool facts must be JSON values") from exc
 
     def encode() -> str:
