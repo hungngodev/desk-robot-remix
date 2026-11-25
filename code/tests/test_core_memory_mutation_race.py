@@ -124,10 +124,11 @@ def test_old_delete_cannot_remove_newer_operator_update(tmp_path):
     ["core_put", "core_delete", "episode_patch", "episode_delete",
      "episode_missing_delete"],
 )
+@pytest.mark.parametrize("stage", ["reservation", "mutation"])
 def test_cancelled_dispatched_memory_edit_still_retracts_prompt(
-    settings, tmp_path, monkeypatch, action,
+    settings, tmp_path, monkeypatch, action, stage,
 ):
-    """Cancelling the route cannot abandon cleanup for a committed edit."""
+    """Cancelling the route cannot abandon a reserved edit or its cleanup."""
     async def run():
         robot_id, event_id, slot = "robot-01", "old_event", "nickname"
         store = MemoryStore(tmp_path, ["robot-01", "robot-02"])
@@ -175,6 +176,11 @@ def test_cancelled_dispatched_memory_edit_still_retracts_prompt(
         else:
             method, route_name = "forget_episode", "delete_episode"
             args = (robot_id, event_id)
+        if stage == "reservation":
+            method = (
+                "reserve_core_fact_mutation" if action.startswith("core_")
+                else "reserve_episode_mutation"
+            )
         original = getattr(store, method)
 
         def delayed(*args, **kwargs):

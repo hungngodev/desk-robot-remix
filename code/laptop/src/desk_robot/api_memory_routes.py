@@ -59,34 +59,18 @@ def register_memory_routes(
     # blocked SQLite BEGIN IMMEDIATE stays OFF the Mac audio event loop.
     reservation_locks = {robot.id: asyncio.Lock() for robot in settings.robots}
 
-    async def reserve_ordered(robot_id: str, reserve, *args) -> int:
-        async def owned_reservation() -> int:
-            # The reservation task, not its HTTP request, owns the lock.
-            # Otherwise caller cancellation releases the lease while an
-            # already-started SQLite worker can still reorder future edits.
-            async with reservation_locks[robot_id]:
-                return await asyncio.to_thread(reserve, robot_id, *args)
-
-        worker = asyncio.create_task(owned_reservation())
-
-        def consume_unclaimed_result(done: asyncio.Task) -> None:
-            # A disconnected client may stop awaiting the shield, but the
-            # owner must complete and any error must still be observed.
-            if not done.cancelled():
-                done.exception()
-
-        worker.add_done_callback(consume_unclaimed_result)
-        return await asyncio.shield(worker)
-
-    # A dispatched SQLite mutation can outlive a cancelled HTTP request.
-    # Its owner must also complete the event-loop prompt invalidation.
+    # One owned task spans reservation, mutation and prompt invalidation.
+    # A disconnected request must not leave a committed reservation without
+    # its corresponding privacy edit. Keep a strong reference until completion.
     pending_mutations: set[asyncio.Task] = set()
 
-    async def apply_mutation(mutate, *args, generation, invalidate,
+    async def apply_mutation(reserve, mutate, robot_id, *args, invalidate,
                              always_invalidate=False):
         async def owned_mutation():
+            async with reservation_locks[robot_id]:
+                generation = await asyncio.to_thread(reserve, robot_id, *args)
             changed = await asyncio.to_thread(
-                mutate, *args, mutation_generation=generation,
+                mutate, robot_id, *args, mutation_generation=generation,
             )
             if changed or always_invalidate:
                 invalidate()
@@ -186,13 +170,10 @@ def register_memory_routes(
         try:
             # Record authenticated request order BEFORE dispatch to a worker.
             # A delayed PUT must never restore a completed newer DELETE.
-            generation = await reserve_ordered(
-                robot_id, app.state.runtime.memory.reserve_core_fact_mutation,
-                slot, request.value,
-            )
             changed = await apply_mutation(
+                app.state.runtime.memory.reserve_core_fact_mutation,
                 app.state.runtime.memory.set_core_fact,
-                robot_id, slot, request.value, generation=generation,
+                robot_id, slot, request.value,
                 invalidate=lambda: invalidate_private_prompt(robot_id),
             )
         except CoreMemoryMutationSuperseded as exc:
@@ -210,13 +191,9 @@ def register_memory_routes(
         except KeyError as exc:
             raise HTTPException(404, "Robot not found") from exc
         try:
-            generation = await reserve_ordered(
-                robot_id, app.state.runtime.memory.reserve_core_fact_mutation,
-                slot,
-            )
             removed = await apply_mutation(
+                app.state.runtime.memory.reserve_core_fact_mutation,
                 app.state.runtime.memory.forget_core_fact, robot_id, slot,
-                generation=generation,
                 invalidate=lambda: invalidate_private_prompt(robot_id),
             )
         except CoreMemoryMutationSuperseded as exc:
@@ -236,13 +213,10 @@ def register_memory_routes(
             raise HTTPException(404, "Robot not found") from exc
         try:
             # Reserve request order before asynchronously scheduling SQLite.
-            generation = await reserve_ordered(
-                robot_id, app.state.runtime.memory.reserve_episode_mutation,
-                event_id, request.summary,
-            )
             corrected = await apply_mutation(
+                app.state.runtime.memory.reserve_episode_mutation,
                 app.state.runtime.memory.correct_episode,
-                robot_id, event_id, request.summary, generation=generation,
+                robot_id, event_id, request.summary,
                 invalidate=lambda: retract_live_asr(robot_id, event_id),
             )
         except EpisodeMemoryMutationSuperseded as exc:
@@ -266,15 +240,11 @@ def register_memory_routes(
         except KeyError as exc:
             raise HTTPException(404, "Robot not found") from exc
         try:
-            generation = await reserve_ordered(
-                robot_id, app.state.runtime.memory.reserve_episode_mutation,
-                event_id,
-            )
             # Even a missing episode gets a durable tombstone, so retract
             # the volatile event regardless of the returned row count.
             removed = await apply_mutation(
+                app.state.runtime.memory.reserve_episode_mutation,
                 app.state.runtime.memory.forget_episode, robot_id, event_id,
-                generation=generation,
                 invalidate=lambda: retract_live_asr(robot_id, event_id),
                 always_invalidate=True,
             )
