@@ -3583,13 +3583,51 @@ static void mpu_slow_lift_stops_before_drive_lease_expires() {
     imu.accel[0] = 0;
     imu.accel[2] = 16384;
     imu.gyro[1] = 0;
-    for (int i = 0; i < 2; ++i) {
+    // A full stationary desk settlement is evidence of posture, not authority.
+    for (int i = 0; i < 8; ++i) {
       imu.at_ms += 50;
       fresh(guard, imu.at_ms);
       body.set_imu(imu);
+      body.tick(imu.at_ms);
+      CHECK(!body.state().armed && body.drive_remaining(imu.at_ms) == 0);
+      CHECK(body.state().left == 0 && body.state().right == 0);
+      CHECK(send(body, "arm", imu.at_ms) == "ERR arm imu_attitude_latched");
+      CHECK(send(body, "keepalive", imu.at_ms) == "ERR keepalive disarmed");
+      CHECK(send(body, "drive 40 40 250", imu.at_ms) == "ERR drive disarmed");
+      CHECK(send(body, "status", imu.at_ms).find(
+          "\"fault\":\"imu_attitude_latched\"") != std::string::npos);
+      CHECK(send(body, "rearm", imu.at_ms) == "ERR rearm local_only");
     }
-    CHECK(send(body, "arm", imu.at_ms) == "ERR arm imu_attitude_latched");
-    CHECK(send(body, "rearm", imu.at_ms) == "ERR rearm local_only");
+
+    // A fresh controller and guard model a body reboot on the flat desk.
+    // Reacquisition of all five ranges and two upright IMU samples must not
+    // recreate the old motion authorization, even with a queued head ARM.
+    desk_robot::CliffGuard boot_guard;
+    CHECK(boot_guard.configure(config()));
+    desk_robot::BodyControl boot_body(profile, &boot_guard);
+    boot_body.require_imu_for_motion(true);
+    boot_body.require_imu_attitude_guard(true);
+    boot_body.set_imu_identity(4, 0x68, 0);
+    CHECK(boot_body.configure_imu_attitude_limits({{0, 0, 16384}, 800, 12000, 20000}));
+    for (std::uint32_t now : {50U, 100U}) {
+      imu.at_ms = now;
+      fresh(boot_guard, now);
+      boot_body.set_imu(imu);
+      boot_body.tick(now);
+    }
+    CHECK(send(boot_body, "arm", 100) == "ERR arm safety_interlock");
+    CHECK(send(boot_body, "rearm", 100) == "ERR rearm local_only");
+    CHECK(send(boot_body, "drive 40 40 250", 100) == "ERR drive disarmed");
+    CHECK(!boot_body.state().armed && !boot_body.state().servos_attached);
+    CHECK(send(boot_body, "rearm", 100, true) == "OK rearm");
+    CHECK(!boot_body.state().armed && boot_body.drive_remaining(100) == 0);
+    CHECK(send(boot_body, "arm", 100) == "OK arm");
+    CHECK(boot_body.state().left == 0 && boot_body.state().right == 0);
+
+    // Recover the original body independently with a current conversion.
+    imu.at_ms = 100U + 50U * (38U + 9U);
+    fresh(guard, imu.at_ms);
+    body.set_imu(imu);
     CHECK(send(body, "rearm", imu.at_ms, true) == "OK rearm");
     CHECK(!body.state().armed && body.state().left == 0 && body.state().right == 0);
   }
