@@ -2078,7 +2078,7 @@ def test_verified_checkout_evidence_is_embedded_in_existing_shopping_lists():
         "sku": "MUX-REV-A",
         "pcb_revision": "A",
         "quantity_packages": 1,
-        "units_per_package": 2,
+        "units_per_package": 5,
         "package_price_usd": "3.25",
         "quote_reference": "checkout-2026-11-20",
         "quoted_at": "2026-11-20",
@@ -2091,6 +2091,7 @@ def test_verified_checkout_evidence_is_embedded_in_existing_shopping_lists():
         "prior_paid_orders_cents": 1250,
         "prototype_cumulative_cents": 1975,
         "remaining_under_cap_cents": 3025,
+        "reviewed_pack_surplus_units": {"robot:i2c_mux": 3},
     }
     evidence = {
         "lines": [quote],
@@ -2105,6 +2106,9 @@ def test_verified_checkout_evidence_is_embedded_in_existing_shopping_lists():
     shown_report = mod.attach_verified_checkout_evidence(report, cost, evidence)
     projected = mod.first_robot_projection(shown_report)
     assert projected["verified_checkout_cost"]["payable_now_cents"] == 725
+    assert projected["verified_checkout_cost"]["reviewed_pack_surplus_units"] == {
+        "robot:i2c_mux": 3
+    }
     projected_mux = next(
         row for row in projected["roles"] if row["id"] == "i2c_mux"
     )
@@ -2117,7 +2121,9 @@ def test_verified_checkout_evidence_is_embedded_in_existing_shopping_lists():
         assert "Previously paid: $12.50" in shown
         assert "shipping 0.50 USD, tax 0.25 USD" in shown
         assert "Example Seller MUX-REV-A rev A" in shown
-        assert "1 package(s) x 2 unit(s) at USD 3.25/package" in shown
+        assert "1 package(s) x 5 unit(s) at USD 3.25/package" in shown
+        assert ("Reviewed minimum-pack surplus (not allocated stock): "
+                "robot:i2c_mux = 3 unit(s).") in shown
         assert "quoted 2026-11-20" in shown
         assert "https://supplier.example/mux" in shown
     assert "Remaining under prototype $50 cap: $30.25" in one
@@ -2141,6 +2147,7 @@ def test_landed_cost_markdown_allocations_are_visible_and_not_checkout_prices():
         },
         "within_prototype_cap": True, "prototype_cap_cents": 5000,
         "seller_payable_cents": {"Example": 755}, "errors": [],
+        "reviewed_pack_surplus_units": {"robot:i2c_mux": 4},
     }
     shown = mod.cost_quote_markdown(values)
     assert "Robot materials: $2.23" in shown
@@ -2148,6 +2155,8 @@ def test_landed_cost_markdown_allocations_are_visible_and_not_checkout_prices():
     assert "Dock allocated landed cost: $2.34" in shown
     assert "Station allocated landed cost: $0.00" in shown
     assert "They are not individual supplier checkout prices." in shown
+    assert ("Reviewed minimum-pack surplus (not allocated stock): "
+            "robot:i2c_mux = 4 unit(s).") in shown
     values["calculation_complete_not_physical_approval"] = False
     values["allocated_landed_subtotals_cents"] = None
     shown = mod.cost_quote_markdown(values)
@@ -2160,6 +2169,7 @@ def test_landed_cost_markdown_allocations_are_visible_and_not_checkout_prices():
     assert "Cumulative prototype spending: unknown" in shown
     assert "Remaining under prototype $50 cap: unknown" in shown
     assert "Partial supplier quote Example: $7.55" in shown
+    assert "Reviewed minimum-pack surplus" not in shown
 
 
 def test_strict_signed_quote_requires_exact_carrier_revision():

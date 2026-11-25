@@ -1682,6 +1682,14 @@ def _checkout_money(value: object) -> str:
     return f"{sign}$" + str(absolute // 100) + f".{absolute % 100:02d}"
 
 
+def _reviewed_pack_surplus_summary(cost: dict) -> list[str]:
+    """Keep charged minimum-pack leftovers distinct from allocated stock."""
+    return [
+        f"Reviewed minimum-pack surplus (not allocated stock): {role} = {units} unit(s)."
+        for role, units in sorted(cost.get("reviewed_pack_surplus_units", {}).items())
+    ]
+
+
 def _verified_checkout_summary(report: dict) -> list[str]:
     checkout = report.get("verified_checkout_cost")
     if not isinstance(checkout, dict):
@@ -1701,6 +1709,7 @@ def _verified_checkout_summary(report: dict) -> list[str]:
             "Remaining under prototype $50 cap: "
             + _checkout_money(checkout.get("remaining_under_cap_cents"))
         )
+    lines.extend(_reviewed_pack_surplus_summary(checkout))
     for charge in checkout.get("seller_charges", []):
         if not isinstance(charge, dict):
             continue
@@ -2544,6 +2553,9 @@ def attach_verified_checkout_evidence(
         "prototype_cumulative_cents": cost.get("prototype_cumulative_cents"),
         "remaining_under_cap_cents": cost.get("remaining_under_cap_cents"),
         "seller_charges": copy.deepcopy(charges),
+        "reviewed_pack_surplus_units": copy.deepcopy(
+            cost.get("reviewed_pack_surplus_units", {})
+        ),
     }
     rows = {}
     for part in output["robots"]:
@@ -2714,6 +2726,8 @@ def cost_quote_markdown(cost: dict) -> str:
             and not cost["within_prototype_cap"]):
         lines.append("HOLD: cumulative prototype spending exceeds the "
                      + amount(cost["prototype_cap_cents"]) + " cap")
+    if complete:
+        lines.extend(_reviewed_pack_surplus_summary(cost))
     for supplier, total in cost["seller_payable_cents"].items():
         # Seller strings are evidence inputs, not trusted Markdown.
         safe_name = str(supplier).replace("\n", " ").replace("\r", " ").strip()
