@@ -118,34 +118,53 @@ async def test_streamed_peer_turn_uses_one_existing_speech_session(settings):
 
 async def test_cancelled_streamed_voice_sends_urgent_real_head_abort(settings):
     in_speaker = asyncio.Event()
-    interrupts = []
+    events = []
 
     class Chat:
-        async def stream_reply(self, history):
-            yield "Speaking while you interrupt. "
-            yield "This must never be spoken."
+        def stream_reply(self, history):
+            # Retain the iterator so GC cannot satisfy the cleanup assertion.
+            self.stream = self.generate()
+            return self.stream
+
+        async def generate(self):
+            try:
+                yield "Speaking while you interrupt. "
+                yield "This must never be spoken."
+            finally:
+                events.append("provider_closed")
 
     class Speaker:
         @asynccontextmanager
         async def session(self, robots):
-            yield
+            try:
+                yield
+            finally:
+                events.append("session_released")
 
         async def say(self, robot, text):
+            events.append(text)
             in_speaker.set()
             await asyncio.Event().wait()
 
         async def interrupt(self, robot):
-            interrupts.append(robot.id)
+            events.append(robot.id)
 
-    speaker = Speaker()
-    c = Conversation(settings, Chat(), speaker)
+    chat = Chat()
+    c = Conversation(settings, chat, Speaker())
     task = asyncio.create_task(c.run(["robot-01", "robot-02"], "hello", 1))
     await asyncio.wait_for(in_speaker.wait(), timeout=1)
-    await c.stop()
-    assert task.cancelled()
-    assert interrupts == ["robot-01"]
-    assert c.active is None
-
+    try:
+        await c.stop()
+        assert task.cancelled()
+        assert events == [
+            "Speaking while you interrupt. ",
+            "robot-01",
+            "provider_closed",
+            "session_released",
+        ]
+        assert c.active is None
+    finally:
+        await chat.stream.aclose()
 
 
 async def test_failed_stream_flushes_physical_head_before_group_lease_releases(settings):

@@ -1104,6 +1104,7 @@ class Conversation:
                 raise RuntimeError("Group conversation consent revoked")
             async with asyncio.timeout_at(deadline):
                 async with self.session_lock, self._confirmed_speaker_session(robots):
+                    reply_stream = None
                     try:
                         # Track only segments whose speaker.say actually
                         # returned; cancellation during a WAV send cannot be
@@ -1150,9 +1151,8 @@ class Conversation:
                                 if callable(stream_reply):
                                     # Speech and generation share the same Xiaozhi
                                     # session. No detached TTS tasks outlive it.
-                                    async for segment in stream_reply(
-                                        turn_history
-                                    ):
+                                    reply_stream = stream_reply(turn_history)
+                                    async for segment in reply_stream:
                                         if not consent_still_valid():
                                             raise RuntimeError(
                                                 "Group conversation consent revoked"
@@ -1165,6 +1165,7 @@ class Conversation:
                                         if (origin == "autonomous_social"
                                                 and segment_sent is not None):
                                             segment_sent(robot.id)
+                                    reply_stream = None  # Exhausted normally.
                                     if not completed_segments:
                                         # A successful HTTP stream with zero
                                         # spoken segments is not a completed
@@ -1256,6 +1257,15 @@ class Conversation:
                                     await _bounded_speaker_abort(interrupt, current_robot)
                                 except BaseException:
                                     pass
+                        # A cancelled TTS await leaves the async generator suspended
+                        # at its last yield. Close it after urgent head STOP, before
+                        # releasing the session, rather than relying on GC finalization.
+                        close_stream = getattr(reply_stream, "aclose", None)
+                        if callable(close_stream):
+                            try:
+                                await close_stream()
+                            except Exception:
+                                pass  # Preserve the original turn failure.
                         if (current_robot is not None and completed_segments
                                 and private_memory_current()
                                 and not full_receipt_started):
