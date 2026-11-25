@@ -413,3 +413,15 @@ def test_aux_rejects_forged_optional_physical_qualification(group, field, value)
     data[group][field] = value
     with pytest.raises(ValueError):
         validate_aux(data, "robot-01")
+
+
+@pytest.mark.parametrize("group", ["force", "proximity"])
+def test_wroom_aux_rejects_zero_epoch_even_when_other_group_is_legacy(group):
+    data = sample()
+    data[group]["boot_id"] = 0
+    with pytest.raises(ValueError, match="WROOM auxiliary boot provenance"):
+        validate_aux(data, "robot-01")
+    data[group]["boot_id"] = 101
+    assert validate_aux(data, "robot-01")[group]["boot_id"] == 101
+    del data[group]["boot_id"]
+    assert validate_aux(data, "robot-01") == data
