@@ -3570,7 +3570,8 @@ static void mpu_slow_lift_stops_before_drive_lease_expires() {
         body.set_imu(imu); // identical cached sample is not a second conversion
         body.tick(imu.at_ms);
         CHECK(body.state().armed && body.state().left == 40);
-        if (degrees % 4 == 0)
+        // Active guarded host timeout is 200 ms, not the 250 ms drive lease.
+        if (degrees % 3 == 0)
           CHECK(send(body, "drive 40 40 250", imu.at_ms).find("OK drive") == 0);
       }
     }
