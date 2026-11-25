@@ -1254,11 +1254,11 @@ def test_fsr_retaining_ring_has_printable_wall_and_separate_m2_bores(tmp_path):
     ], check=True, capture_output=True, text=True, timeout=90)
     assert module().closed_mesh_edges(valid) > 0
     assert module().mesh_bounds_mm(valid)["dimensions_mm"] == [
-        28.0, 28.0, 4.0
+        34.3, 34.3, 3.5
     ]
-    assert (17 - 12.35) / 2 >= 2.0
+    assert (23.3 - 18.65) / 2 >= 2.0
     assert 2.5 - (2.5 - 0.5) >= 0.4
-    assert (28 / 2 - 3.5) - 1.0 - 17 / 2 >= 0.75
+    assert (34.3 / 2 - 3.5) - 1.0 - 23.3 / 2 >= 0.75
     for override, message in (
         ("fsr_ring_extra_d_mm=2", "retaining ring below printable"),
         ("fsr_plate_extra_mm=10", "screw bore intersects"),

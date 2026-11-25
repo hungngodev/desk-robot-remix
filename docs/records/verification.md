@@ -41,6 +41,8 @@ purchasing fail-closed default (`motion_enabled=false`,
   while preserving independent telemetry); scoped `code/tests/test_first_unit_owned_station.py`
   to the `Missing for one complete core` quantity table after the sourcing-risk
   table addition in `docs/hardware/parts.md`; updated
+  `code/tests/test_export_fit_kit.py` (`test_fsr_retaining_ring_has_printable_wall_and_separate_m2_bores`)
+  to match the updated FSR402 pocket geometry (`[34.3, 34.3, 3.5]`); updated
   `code/tests/test_integration_contracts.py` (`TofBus::quiesce_optional_mux`) to
   match `return wire_.read() == 0 && bus_idle();`; rewrote
   `code/firmware/head/tests/test_pinned_power_startup.py` for clean relative
