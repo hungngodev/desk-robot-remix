@@ -49,6 +49,14 @@ def require_checkout(path):
         raise RuntimeError(f"Git metadata mismatch in {path}")
 
 
+def require_visible_index(path):
+    # Git status can ignore edits to assume-unchanged or skip-worktree entries.
+    # Reject the flags rather than clearing them or overwriting local work.
+    entries = subprocess.check_output(["git", "ls-files", "-v", "-z"], cwd=path, env=git_env())
+    if any(entry[:1].islower() or entry.startswith(b"S ") for entry in entries.split(b"\0")):
+        raise RuntimeError(f"Preserve local changes and clear hidden index flags in {path}")
+
+
 def main():
     sources = json.loads((ROOT / "upstream-lock.json").read_text())["repositories"]
     paths = [restore_path(source) for source in sources]
@@ -63,6 +71,7 @@ def main():
             require_checkout(path)
         else:
             require_checkout(path)
+            require_visible_index(path)
             if run(["git", "status", "--porcelain", "--untracked-files=all"], path):
                 raise RuntimeError(f"Preserve local changes in {path} before restoring sources")
         if run(["git", "remote", "get-url", "origin"], path) != source["url"]:
@@ -77,6 +86,7 @@ def main():
         git(["checkout", "--detach", "--no-overwrite-ignore", source["commit"]], path, check=True)
         if run(["git", "rev-parse", "HEAD"], path) != source["commit"]:
             raise RuntimeError(f"Upstream commit mismatch in {path}")
+        require_visible_index(path)
         print(f"Verified {source['name']} at {source['commit'][:12]}")
 
 

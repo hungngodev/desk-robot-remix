@@ -139,3 +139,17 @@ def test_ignored_file_not_overwritten_by_checkout(tmp_path, monkeypatch):
     with pytest.raises(subprocess.CalledProcessError):
         restore.main()
     assert (path / "local-secret").read_text() == "private local data"
+
+
+@pytest.mark.parametrize("flag", ["assume-unchanged", "skip-worktree"])
+def test_hidden_index_edits_preserved(tmp_path, monkeypatch, flag):
+    path = tmp_path / "upstream/source"
+    original = repository(path)
+    configure(tmp_path, monkeypatch, commit=original)
+    git(path, "update-index", "--" + flag, "tracked")
+    (path / "tracked").write_text("local edit")
+    assert not git(path, "status", "--porcelain", "--untracked-files=all")
+    with pytest.raises(RuntimeError, match="index flags"):
+        restore.main()
+    assert (path / "tracked").read_text() == "local edit"
+    assert git(path, "symbolic-ref", "HEAD")
