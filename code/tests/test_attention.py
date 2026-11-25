@@ -1,6 +1,6 @@
 """The attention ledger is volatile context, never a second motion or voice owner."""
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, call
 
 import pytest
 from desk_robot.attention import AttentionLedger
@@ -282,23 +282,51 @@ def test_pet_sensor_producer_uses_same_attention_without_second_camera_owner():
 
 
 @pytest.mark.asyncio
-async def test_authenticated_runtime_voice_edge_fences_attention_speech():
-    ledger = AttentionLedger(["pet"])
+@pytest.mark.parametrize("fail_peer", [False, True])
+async def test_authenticated_runtime_voice_edge_fences_attention_speech(fail_peer):
+    ledger = AttentionLedger(["pet", "peer"])
     runtime = Runtime.__new__(Runtime)
     runtime._closed = False
-    runtime.settings = SimpleNamespace(robots=[SimpleNamespace(id="pet")])
+    runtime.settings = SimpleNamespace(
+        robots=[SimpleNamespace(id=robot_id) for robot_id in ("pet", "peer")],
+    )
     runtime.multimodal = None
     runtime.attention = ledger
-    runtime._preempt_audio_floor = AsyncMock()
-    runtime._stop_autonomous_roaming_for_voice = AsyncMock()
-    await runtime._on_voice_interrupt("pet", "speech_start")
+
+    async def interrupt(robot_id):
+        if fail_peer and robot_id == "peer":
+            raise OSError("speaker STOP unavailable")
+
+    # Substitute only downstream side effects; exercise the real fleet STOP
+    # fanout, error aggregation, roaming cancellation and deferred dispatch gate.
+    runtime.pet = SimpleNamespace(interrupt=AsyncMock(side_effect=interrupt))
+    runtime.conversation = SimpleNamespace(stop=AsyncMock())
+    runtime.coordinator = SimpleNamespace(
+        stop_active_exploration=AsyncMock(), dispatch_next_deferred=AsyncMock(),
+    )
+    if fail_peer:
+        with pytest.raises(RuntimeError, match="Unable to preempt"):
+            await runtime._on_voice_interrupt("pet", "speech_start")
+    else:
+        await runtime._on_voice_interrupt("pet", "speech_start")
     assert ledger._state("pet").human_turns == 1
     assert ledger._state("pet").voice_active is True
+    assert ledger._state("peer").human_turns == 0
     assert not ledger.sent("pet", "A delayed obsolete response", 0)
+    assert runtime._voice_stop_unconfirmed is fail_peer
+    runtime.coordinator.dispatch_next_deferred.assert_not_awaited()
+
     await runtime._on_voice_interrupt("pet", "speech_end")
     assert ledger._state("pet").voice_active is False
-    runtime._preempt_audio_floor.assert_awaited_once()
-    runtime._stop_autonomous_roaming_for_voice.assert_awaited_once()
+    assert runtime._voice_stop_unconfirmed is fail_peer
+    runtime.pet.interrupt.assert_has_awaits([call("pet"), call("peer")], any_order=True)
+    assert runtime.pet.interrupt.await_count == 2
+    runtime.conversation.stop.assert_awaited_once_with()
+    runtime.coordinator.stop_active_exploration.assert_awaited_once_with()
+    if fail_peer:
+        runtime.coordinator.dispatch_next_deferred.assert_not_awaited()
+    else:
+        runtime.coordinator.dispatch_next_deferred.assert_awaited_once_with()
 
 
 def test_delayed_old_topic_sensor_and_speech_do_not_enter_new_generation(monkeypatch):
