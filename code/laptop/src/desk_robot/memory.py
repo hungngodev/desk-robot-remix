@@ -20,9 +20,12 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-from .private_files import validate_private_sqlite_files
+from .private_files import (
+    is_private_robot_id,
+    validate_private_directory_ancestry,
+    validate_private_sqlite_files,
+)
 
-_ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
 _EVENT_ID = re.compile(r"[A-Za-z0-9_-]{1,96}\Z")
 _EVENT_KIND = re.compile(r"[a-z_]{1,40}\Z")
 _RELAY_TOKEN = re.compile(r"[0-9a-f]{32}\Z")
@@ -150,8 +153,7 @@ class MemoryStore:
         # absolute() preserves lexical symlinks and ".." for the checks below.
         self.root = Path(root).absolute()
         if (not isinstance(robot_ids, (list, tuple)) or not robot_ids
-                or not all(type(i) is str and _ROBOT_ID.fullmatch(i)
-                           for i in robot_ids)):
+                or not all(is_private_robot_id(i) for i in robot_ids)):
             raise ValueError("Every robot ID must be a safe nonempty identifier")
         self.robot_ids = frozenset(robot_ids)
         # The Mac's APFS volume may be case insensitive. Different Python
@@ -161,9 +163,10 @@ class MemoryStore:
             raise ValueError("Duplicate robot memory identities are not allowed")
         # An ancestor alias bypasses a check of the final directory alone.
         # Refuse it BEFORE mkdir can create private records in another tree.
-        if any(part.is_symlink() for part in (self.root, *self.root.parents)):
-            raise ValueError("Memory root ancestry must not contain symlinks")
+        validate_private_directory_ancestry(self.root)
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if self.root.lstat().st_uid != os.geteuid():
+            raise PermissionError("Robot memory root must be owner-owned")
         try:
             os.chmod(self.root, 0o700)
         except OSError as exc:
@@ -408,8 +411,7 @@ class MemoryStore:
             raise ValueError("Unknown robot memory identity")
         # Repeat the ancestry check at each SQLite open: a linked parent
         # introduced after boot must not redirect subsequent private reads.
-        if any(part.is_symlink() for part in (self.root, *self.root.parents)):
-            raise ValueError("Memory root ancestry must not contain symlinks")
+        validate_private_directory_ancestry(self.root)
         # The root can lose its private permission boundary after startup.
         # Refuse access before SQLite opens or creates any database sidecar.
         root_info = self.root.lstat()

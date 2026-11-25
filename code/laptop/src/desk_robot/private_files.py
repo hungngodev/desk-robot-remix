@@ -6,6 +6,32 @@ import stat
 from pathlib import Path
 
 
+_ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
+_RESERVED_ROBOT_ID = re.compile(r"(?:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])\Z", re.I)
+
+
+def is_private_robot_id(value: object) -> bool:
+    """Admit portable, unambiguous private database filename stems."""
+    return (type(value) is str and _ROBOT_ID.fullmatch(value) is not None
+            and _RESERVED_ROBOT_ID.fullmatch(value) is None)
+
+
+def validate_private_directory_ancestry(path: Path) -> None:
+    """Check lexical ancestors before directory creation or private SQLite access."""
+    if "\x00" in os.fspath(path):
+        raise ValueError("Memory root must not contain null bytes")
+    # Inspect outermost first, without resolving aliases or discarding '..'.
+    for directory in (*reversed(path.parents), path):
+        try:
+            info = directory.lstat()
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode):
+            raise ValueError("Memory root ancestry must not contain symlinks")
+        if not stat.S_ISDIR(info.st_mode):
+            raise ValueError("Memory root ancestry must contain only directories")
+
+
 def read_private_text(path: Path, *, missing_ok: bool = False) -> str:
     """Read bounded owner-only text without following a leaf symlink."""
     try:
