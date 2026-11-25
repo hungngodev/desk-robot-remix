@@ -3,11 +3,12 @@
 import asyncio
 from dataclasses import replace
 from io import BytesIO
+from types import SimpleNamespace
 
 import pytest
 from desk_robot.object_detector import DetectorFrame, detect_object_frame
 from desk_robot.object_targets import ObjectOwner, ObjectQuery, resolve_object_target
-from desk_robot.vision import Detection
+from desk_robot.vision import Detection, YoloWorldVision
 from PIL import Image
 
 
@@ -432,3 +433,31 @@ async def test_malformed_frame_identity_is_rejected_before_inference(changes):
     result = await inspect(fake, frame=replace(frame, **changes))
     assert result.reason == "invalid_frame"
     assert fake.calls == 0 and result.evidence is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("corrupt,over_budget", [(True, False), (False, True)])
+async def test_native_partial_results_cannot_certify_an_object_observation(
+    tmp_path, corrupt, over_budget,
+):
+    weights = tmp_path / "local-model.pt"
+    weights.write_bytes(b"fixture only")
+    detector = YoloWorldVision(weights)
+    box = SimpleNamespace(
+        conf=SimpleNamespace(item=lambda: float("nan") if corrupt else 0.95),
+        xyxy=[SimpleNamespace(tolist=lambda: [4, 4, 14, 14])],
+    )
+    detector.model = SimpleNamespace(
+        set_classes=lambda classes: None,
+        predict=lambda *args, **kwargs: [
+            SimpleNamespace(boxes=[box] * (129 if over_budget else 1))
+        ],
+    )
+    try:
+        receipt = await inspect(detector)
+        assert receipt.status == "rejected"
+        assert receipt.reason == "detector_failed"
+        assert receipt.evidence is None
+        assert not receipt.may_execute and not receipt.arrived
+    finally:
+        await detector.close()

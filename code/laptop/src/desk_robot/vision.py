@@ -104,28 +104,27 @@ class YoloWorldVision:
         # Letterbox/coordinate restoration is handled by the upstream model, not guessed here.
         result = self.model.predict(image, verbose=False, device="cpu")[0]
         detections: list[Detection] = []
-        # Optional local model output is untrusted geometry. Reject invalid
-        # boxes before any caller can project them to desk coordinates.
-        # Bounding inspected boxes also bounds work after native inference.
+        # A partial or invalid native result cannot prove absence or uniqueness.
+        # Fail the whole observation, with bounded work after native inference.
         for index, box in enumerate(result.boxes):
             if index >= 128:
-                break
+                raise ValueError("Native detection result exceeds observation budget")
             try:
                 raw_score = box.conf.item()
                 corners = box.xyxy[0].tolist()
-                if (type(raw_score) is bool or not isinstance(corners, (list, tuple))
-                        or len(corners) != 4
-                        or any(type(value) is bool for value in corners)):
-                    continue
+                if (type(raw_score) not in (int, float)
+                        or not isinstance(corners, (list, tuple)) or len(corners) != 4
+                        or any(type(value) not in (int, float) for value in corners)):
+                    raise ValueError("Invalid native detection geometry or score")
                 confidence = float(raw_score)
                 x0, y0, x1, y1 = (float(value) for value in corners)
-            except (AttributeError, IndexError, TypeError, ValueError, OverflowError):
-                continue
+            except (AttributeError, IndexError, TypeError, ValueError, OverflowError) as exc:
+                raise ValueError("Invalid native detection geometry or score") from exc
             if (not math.isfinite(confidence) or not 0 < confidence <= 1
                     or not all(math.isfinite(value) for value in (x0, y0, x1, y1))
                     or not 0 <= x0 < x1 <= image.width
                     or not 0 <= y0 < y1 <= image.height):
-                continue
+                raise ValueError("Invalid native detection geometry or score")
             detections.append(Detection(label, confidence, (x0, y0, x1, y1)))
         return detections
 

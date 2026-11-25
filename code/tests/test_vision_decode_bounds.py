@@ -100,7 +100,7 @@ class FakeBoxesModel(CountingModel):
         return [SimpleNamespace(boxes=self.boxes)]
 
 
-def test_yolo_disposes_untrusted_confidence_and_geometry_before_recall(tmp_path):
+def test_yolo_rejects_untrusted_confidence_and_geometry_before_recall(tmp_path):
     weights = tmp_path / "local-model.pt"
     weights.write_bytes(b"fixture only")
     valid = FakeBox(0.92, [3, 5, 25, 30])
@@ -118,21 +118,35 @@ def test_yolo_disposes_untrusted_confidence_and_geometry_before_recall(tmp_path)
         FakeBox(0.7, [3, 5, 10**1000, 30]),
         FakeBox(0.7, [3, 5, 25]),
         FakeBox(0.0, [3, 5, 25, 30]),
+        FakeBox("0.9", [3, 5, 25, 30]),
+        FakeBox(0.9, ["3", 5, 25, 30]),
     ]
     detector = YoloWorldVision(weights)
-    detector.model = FakeBoxesModel(invalid + [valid])
+    for bad in invalid:
+        detector.model = FakeBoxesModel([bad])
+        with pytest.raises(ValueError, match="Invalid native detection"):
+            detector._detect(frame(), "key")
+        detector.model = FakeBoxesModel([valid, bad])
+        with pytest.raises(ValueError, match="Invalid native detection"):
+            detector._detect(frame(), "key")
+    detector.model = FakeBoxesModel([valid])
     assert detector._detect(frame(), "key") == [
         Detection("key", 0.92, (3.0, 5.0, 25.0, 30.0))
     ]
     assert detector.model.calls == 2
 
 
-def test_yolo_caps_untrusted_number_of_model_boxes(tmp_path):
+def test_yolo_rejects_incomplete_native_results_above_budget(tmp_path):
     weights = tmp_path / "local-model.pt"
     weights.write_bytes(b"fixture only")
     detector = YoloWorldVision(weights)
     detector.model = FakeBoxesModel([
-        FakeBox(0.8, [1, 1, 10, 10]) for _ in range(200)
+        FakeBox(0.8, [1, 1, 10, 10]) for _ in range(129)
+    ])
+    with pytest.raises(ValueError, match="observation budget"):
+        detector._detect(frame(), "key")
+    detector.model = FakeBoxesModel([
+        FakeBox(0.8, [1, 1, 10, 10]) for _ in range(128)
     ])
     detections = detector._detect(frame(), "key")
     assert len(detections) == 128
