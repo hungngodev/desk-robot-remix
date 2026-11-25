@@ -142,6 +142,7 @@ class PetState:
     enabled: bool = False
     quiet: bool = False
     generation: int = 0
+    quiet_changed_at: float = -math.inf  # Retire queued optional events across quiet toggles.
     events: int = 0
     spoken: int = 0
     suppressed: int = 0
@@ -560,6 +561,8 @@ class PetController:
         if type(quiet) is not bool:
             raise ValueError("quiet must be a boolean")
         state = self.states[robot_id]
+        if state.quiet != quiet:
+            state.quiet_changed_at = time.monotonic()
         state.quiet = quiet
         if quiet:
             await self._cancel_speech(robot_id)
@@ -2678,6 +2681,10 @@ class PetController:
             state.suppressed += 1
             state.last_initiative_suppression = "event_expired_before_admission"
             return
+        if offered_at < state.quiet_changed_at:
+            state.suppressed += 1
+            state.last_initiative_suppression = "quiet_transition_superseded_event"
+            return
         latest = getattr(self.multimodal, "latest_fleet_human_turn_at", None)
         if callable(latest) and latest() > offered_at:
             state.suppressed += 1
@@ -3242,6 +3249,7 @@ class PetController:
                 or state.generation != generation or self._closed
                 or not peer.enabled or self.is_quiet(social_peer_id)
                 or peer.generation != social_peer_generation
+                or offered_at < max(state.quiet_changed_at, peer.quiet_changed_at)
                 or (camera_derived and not self._camera_generation_current(
                     robot_id, camera_generation))
                 or (camera_derived and self.settings.mode == "hardware"
@@ -3281,6 +3289,7 @@ class PetController:
                 and state.generation == generation
                 and peer.enabled and not self.is_quiet(social_peer_id)
                 and peer.generation == social_peer_generation
+                and offered_at >= max(state.quiet_changed_at, peer.quiet_changed_at)
                 and (not camera_derived or self._camera_generation_current(
                     robot_id, camera_generation))
                 and (not camera_derived
@@ -3593,6 +3602,10 @@ class PetController:
             )
 
         try:
+            if offered_at < state.quiet_changed_at:
+                state.suppressed += 1
+                state.last_initiative_suppression = "quiet_transition_superseded_event"
+                return
             if self._quiet_hours_active():
                 state.suppressed += 1
                 state.last_initiative_suppression = "scheduled_quiet_hours"
@@ -3683,6 +3696,7 @@ class PetController:
                 return (
                     not self._closed and self.voice_monitor_ready
                     and state.enabled and not self.is_quiet(robot_id)
+                    and offered_at >= state.quiet_changed_at
                     and state.generation == generation
                     and private_memory_current()
                     and (not private_memory_allowed
@@ -3702,6 +3716,10 @@ class PetController:
                 model_context_permitted=model_context_permitted,
             )
             if text is None:
+                return
+            if offered_at < state.quiet_changed_at:
+                state.suppressed += 1
+                state.last_initiative_suppression = "quiet_transition_superseded_event"
                 return
             if (not camera_source_current()
                     or not self._camera_generation_current(robot_id, camera_context_generation)):
@@ -3793,6 +3811,7 @@ class PetController:
                 return (
                     not self._closed and self.voice_monitor_ready
                     and state.enabled and not self.is_quiet(robot_id)
+                    and offered_at >= state.quiet_changed_at
                     and state.generation == generation
                     and private_memory_current()
                     and (not private_memory_allowed

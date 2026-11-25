@@ -8190,6 +8190,52 @@ async def test_tactile_reply_fences_admitted_camera_context(
         await pet.close()
 
 
+
+async def test_quiet_toggle_does_not_replay_touch_awaiting_memory(fleet, tmp_path, monkeypatch):
+    """Only a fresh post-resumption touch may initiate optional speech."""
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {}, Conversation(fleet, GroundedChat(), speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0,
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 94
+    entered, resume = asyncio.Event(), asyncio.Event()
+    original = pet._store_observation
+
+    async def delayed_store(robot_id, change, **kwargs):
+        entered.set()
+        await resume.wait()
+        return await original(robot_id, change, **kwargs)
+
+    monkeypatch.setattr(pet, "_store_observation", delayed_store)
+    await pet.set_quiet("robot-01", True)
+    pending = asyncio.create_task(pet._remember_touch(
+        "robot-01", 94, "touch_tap", "My head was tapped",
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=2)
+        await pet.set_quiet("robot-01", False)
+        resume.set()
+        await asyncio.wait_for(pending, timeout=3)
+        assert pet._speech_task is None
+        assert speaker.spoken == []
+        assert state.last_initiative_suppression == "quiet_transition_superseded_event"
+        assert state.enabled and not state.quiet
+        # A fresh genuine receipt with the same description is not a replay.
+        await pet._remember_touch("robot-01", 94, "touch_tap", "My head was tapped")
+        await wait_for(lambda: state.spoken == 1)
+        await wait_for(lambda: pet._speech_task is None)
+        assert len(speaker.spoken) == 1
+    finally:
+        resume.set()
+        pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
+        state.enabled = False
+        await pet.close()
+
+
 async def test_pet_initial_low_battery_and_dock_pin_inhibition_status(fleet, tmp_path):
     """Initial sustained low battery fires callback once; dock contact flags inhibit without claiming charge."""
     fleet.mode = "hardware"
