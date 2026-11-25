@@ -59,6 +59,39 @@ void move_toward(int& current, int target, std::uint32_t steps) {
   }
 }
 
+// Keep event classification separate from the raw bumper safety interlock.
+void update_extra_input(bool level, bool rebaseline, bool qualified,
+                        bool& stable, std::uint32_t& count,
+                        bool& candidate, std::uint8_t& streak) {
+  if (rebaseline) {
+    // Missing/recovered input is not a new physical edge.
+    stable = level;
+    candidate = level;
+    streak = 1;
+    return;
+  }
+  if (qualified) {
+    // MCP23017 has already debounced three distinct GPIOB conversions.
+    if (level != stable) {
+      stable = level;
+      if (level) ++count;
+    }
+    candidate = level;
+    streak = 3;
+    return;
+  }
+  if (level != candidate) {
+    candidate = level;
+    streak = 1;
+  } else if (streak < 3) {
+    ++streak;
+  }
+  if (streak == 3 && level != stable) {
+    stable = level;
+    if (level) ++count;
+  }
+}
+
 }  // namespace
 
 void veto_motion_ack(char* reply, std::size_t capacity, MotionAckVeto fault) {
@@ -375,50 +408,14 @@ void BodyControl::sample_optional_inputs(std::uint8_t enabled_mask, bool bumper,
                           bool((enabled_mask & 4U) && pir)};
   bool* stable[3] = {&state_.bumper_active, &state_.reed_active, &state_.pir_active};
   std::uint32_t* counts[3] = {&state_.bumper_events, &state_.reed_events, &state_.pir_events};
-  if (!extras_initialized_) {
-    for (int i = 0; i < 3; ++i) {
-      *stable[i] = levels[i];
-      extra_candidates_[i] = levels[i];
-      extra_streaks_[i] = 1;
-    }
-    extras_initialized_ = true;
-    return; // boot baseline, not a real new event
-  }
   for (int i = 0; i < 3; ++i) {
     const auto bit = static_cast<std::uint8_t>(1U << i);
-    if (!(enabled_mask & bit) || !(previously_enabled & bit)) {
-      // A missing/expired expander reading is NOT a new low contact, and a
-      // subsequently recovered high value is NOT a fresh rising event.
-      // Rebaseline only the affected input without touching unrelated
-      // bumper, reed, or PIR history. Raw bumper still trips immediately.
-      *stable[i] = levels[i];
-      extra_candidates_[i] = levels[i];
-      extra_streaks_[i] = 1;
-      continue;
-    }
-    if (qualified_optional && i > 0) {
-      // The MCP23017 filter already required three different, ordered GPIOB
-      // conversions for this stable state. A cached 25ms poll must neither
-      // add a second debounce delay nor invent another physical edge.
-      if (levels[i] != *stable[i]) {
-        *stable[i] = levels[i];
-        if (levels[i]) ++*counts[i];
-      }
-      extra_candidates_[i] = levels[i];
-      extra_streaks_[i] = 3;
-      continue;
-    }
-    if (levels[i] != extra_candidates_[i]) {
-      extra_candidates_[i] = levels[i];
-      extra_streaks_[i] = 1;
-    } else if (extra_streaks_[i] < 3) {
-      ++extra_streaks_[i];
-    }
-    if (extra_streaks_[i] == 3 && levels[i] != *stable[i]) {
-      *stable[i] = levels[i];
-      if (levels[i]) ++*counts[i];
-    }
+    const bool rebaseline = !extras_initialized_ ||
+                            !(enabled_mask & bit) || !(previously_enabled & bit);
+    update_extra_input(levels[i], rebaseline, qualified_optional && i > 0,
+                       *stable[i], *counts[i], extra_candidates_[i], extra_streaks_[i]);
   }
+  extras_initialized_ = true;
 }
 
 void BodyControl::set_touch(bool active, std::uint32_t now_ms) {

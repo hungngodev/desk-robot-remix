@@ -38,6 +38,33 @@ std::vector<std::string> frame(BodyControl& body, LineReceiver& receiver,
   return replies;
 }
 
+void optional_inputs_preserve_raw_stop_and_event_history() {
+  BodyControl body;
+  body.sample_optional_inputs(7, false, true, false);
+  CHECK(body.state().reed_active && body.state().reed_events == 0);
+  body.sample_optional_inputs(5, false, false, false, true);
+  CHECK(!body.state().reed_active && body.state().reed_events == 0);
+  body.sample_optional_inputs(7, false, true, false, true);
+  CHECK(body.state().reed_active && body.state().reed_events == 0);
+  body.sample_optional_inputs(7, false, false, false, true);
+  CHECK(!body.state().reed_active);
+  body.sample_optional_inputs(7, false, true, false, true);
+  body.sample_optional_inputs(7, false, true, false, true);
+  CHECK(body.state().reed_events == 1);
+  body.sample_optional_inputs(7, false, true, true);
+  body.sample_optional_inputs(7, false, true, true);
+  CHECK(!body.state().pir_active && body.state().pir_events == 0);
+  body.sample_optional_inputs(7, false, true, true);
+  CHECK(body.state().pir_active && body.state().pir_events == 1);
+  CHECK(send(body, "arm", 10) == "OK arm");
+  CHECK(send(body, "drive 20 20", 10).find("OK drive") == 0);
+  body.sample_optional_inputs(7, true, true, true, true);
+  CHECK(body.state().bumper_raw && !body.state().armed);
+  CHECK(body.state().left == 0 && body.state().right == 0);
+  CHECK(!body.state().bumper_active && body.state().bumper_events == 0);
+  CHECK(body.state().reed_events == 1 && body.state().pir_events == 1);
+}
+
 void disarmed_boot() {
   BodyControl body;
   CHECK(!body.state().armed);
@@ -877,6 +904,8 @@ void deterministic_stream_stress() {
 int main(int argc, char** argv) {
   using Test = std::pair<const char*, void (*)()>;
   const std::vector<Test> tests = {
+      {"optional_inputs_preserve_raw_stop_and_event_history",
+       optional_inputs_preserve_raw_stop_and_event_history},
       {"disarmed_boot", disarmed_boot}, {"arm_clears_old_motion", arm_clears_old_motion},
       {"drive_limits", drive_limits}, {"drive_duration", drive_duration},
       {"keepalive_does_not_extend_drive", keepalive_does_not_extend_drive},
