@@ -358,7 +358,7 @@ def test_mac_semantic_planner_discards_revoked_context_during_model_decision(
         async def reply(self, history):
             self.calls += 1
             if revocation == "memory":
-                assert "private historical" in str(history)
+                assert "private historical" not in str(history)
                 settings.voice_memory_tools_enabled = False
             else:
                 if revocation in ("derived_live", "derived_reenabled"):
@@ -384,7 +384,11 @@ def test_mac_semantic_planner_discards_revoked_context_during_model_decision(
             json={"transcript": "What is your safety status?"},
         )
     assert model.calls == 1
-    if revocation == "derived_reenabled":
+    if revocation == "memory":
+        # No private receipt was admitted to this unrelated safety plan.
+        assert response.status_code == 200
+        assert [item["route"] for item in response.json()["tools"]] == ["status"]
+    elif revocation == "derived_reenabled":
         assert settings.voice_vision_tools_enabled is True
         assert settings.camera_consent_generation == 1
         assert response.status_code == 409
@@ -461,7 +465,7 @@ def test_room_station_context_plan_uses_original_permission_epoch(
 def test_semantic_planner_private_memory_grant_survives_no_revoke(
     settings, tokens, grant_change, expected_status,
 ):
-    """A stale model prompt cannot use private recall after consent regrant."""
+    """Fresh recall planning is grant-fenced without cached private text."""
     import json
     import time
     from types import SimpleNamespace
@@ -480,7 +484,7 @@ def test_semantic_planner_private_memory_grant_survives_no_revoke(
 
     class Model:
         async def reply(self, history):
-            assert "PRIVATE_PRE_REVOKE_RECALL" in str(history)
+            assert "PRIVATE_PRE_REVOKE_RECALL" not in str(history)
             if grant_change != "unchanged":
                 settings.voice_memory_tools_enabled = False
                 if grant_change == "regranted":

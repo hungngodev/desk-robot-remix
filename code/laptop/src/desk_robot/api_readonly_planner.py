@@ -96,10 +96,14 @@ def register_readonly_planner_routes(
                     entry for entry in timeline
                     if not is_camera_derived_timeline_item(entry)
                 ]
-            if not settings.voice_memory_tools_enabled:
-                timeline = [entry for entry in timeline
-                            if not (entry.get("channel") == "tool"
-                                    and entry.get("kind") == "memory_recall")]
+            # The planner needs the current request, not a string-only
+            # private recall that may have been evicted from SQLite. Route
+            # selection may request a fresh, authenticated voice-context read.
+            timeline = [
+                entry for entry in timeline
+                if not (entry.get("channel") == "tool"
+                        and entry.get("kind") == "memory_recall")
+            ]
             if not settings.room_station_context_enabled:
                 timeline = [
                     entry for entry in timeline
@@ -116,11 +120,6 @@ def register_readonly_planner_routes(
             item.get("channel") == "room_station" for item in timeline
         )
         room_consent_generation = settings.room_station_consent_generation
-        private_context_used = any(
-            item.get("channel") == "tool"
-            and item.get("kind") == "memory_recall"
-            for item in timeline
-        )
         memory_granted_at_request = settings.voice_memory_tools_enabled
         memory_consent_generation = settings.voice_memory_consent_generation
         context = compose_brain_context([], [], timeline).interaction[:280]
@@ -168,11 +167,6 @@ def register_readonly_planner_routes(
         if (camera_context_used
                 and settings.camera_consent_generation != camera_consent_generation):
             raise HTTPException(409, "Live observation grant changed during planning")
-        if private_context_used and not settings.voice_memory_tools_enabled:
-            raise HTTPException(403, "Private memory consent revoked during planning")
-        if (private_context_used
-                and settings.voice_memory_consent_generation != memory_consent_generation):
-            raise HTTPException(409, "Private memory grant changed during planning")
         if room_context_used and not settings.room_station_context_enabled:
             raise HTTPException(403, "Room station consent revoked during planning")
         if (room_context_used
@@ -273,6 +267,17 @@ def register_readonly_planner_routes(
                 ) is not None
                 for piece in re.split(r"\b(?:and|then|also)\b", utterance)
             )
+        # Fence a requested fresh recall against the grant at planner entry.
+        # Unrelated safety/status plans no longer depend on private recall.
+        if (memory_question and memory_granted_at_request
+                and isinstance(choices, list) and any(
+                    isinstance(item, dict) and item.get("route") == "voice-context"
+                    for item in choices[:8]
+                )):
+            if not settings.voice_memory_tools_enabled:
+                raise HTTPException(403, "Private memory consent revoked during planning")
+            if settings.voice_memory_consent_generation != memory_consent_generation:
+                raise HTTPException(409, "Private memory grant changed during planning")
         # A model-selected camera route needs an EXPLICIT human observation
         # request. Substring-only checks interpreted ordinary "see you later"
         # and "I left a photo on the desk" as permission to look. Keep

@@ -211,19 +211,15 @@ def register_readonly_context_routes(
                 item for item in timeline
                 if not is_camera_derived_timeline_item(item)
             ]
-        if (not settings.voice_memory_tools_enabled or not memory_lease_valid
-                or not settings.fleet_text_sharing_enabled):
-            # Revoking memory consent or losing its per-pet revision owner
-            # also revokes any transient private retrieval cached in RAM.
-            # Preserve independent WROOM and touch evidence.
-            # Revoking memory consent also revokes the transient retrieval
-            # result. A still-active camera permit is not permission to read
-            # yesterday's private text through a native model prompt.
-            timeline = [
-                entry for entry in timeline
-                if not (entry.get("channel") == "tool"
-                        and entry.get("kind") == "memory_recall")
-            ]
+        # A string-only cached recall has no retained episode identity.
+        # Even a valid private revision and consent cannot prove it survived
+        # rolling retention. Fresh recall uses the authenticated voice-context
+        # endpoint; preserve independent physical cues in this live view.
+        timeline = [
+            entry for entry in timeline
+            if not (entry.get("channel") == "tool"
+                    and entry.get("kind") == "memory_recall")
+        ]
         # The native audio session receives a compact source-labeled text
         # summary through its existing authenticated Mac context endpoint.
         # Neither raw media nor historical SQLite memory enters this view.

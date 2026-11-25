@@ -593,7 +593,7 @@ def test_exact_episode_lookup_reaches_beyond_recent_fifty_without_peer_leak(tmp_
 def test_live_context_refuses_unowned_private_revision_and_cached_recall(
     settings, tokens, tmp_path,
 ):
-    """No absent/bool private lease may appear as revision zero to Xiaozhi."""
+    """No invalid private lease or unverified cached recall reaches Xiaozhi."""
     from types import SimpleNamespace
 
     from desk_robot.multimodal import CameraFrameHub
@@ -621,7 +621,12 @@ def test_live_context_refuses_unowned_private_revision_and_cached_recall(
             good = client.get(url, headers=headers)
             assert good.status_code == 200
             assert good.json()["private_memory_generation"] == 0
-            assert "PRIVATE_STALE_DETAIL" in good.json()["model_context"]
+            assert "PRIVATE_STALE_DETAIL" not in good.text
+            assert "touch_tap" in good.json()["model_context"]
+            assert all(
+                item.get("kind") != "memory_recall"
+                for item in good.json()["current_interaction_timeline"]
+            )
             for invalid in (None, True, -1, "0", 2**63):
                 if invalid is None:
                     generations.pop(robot, None)
@@ -641,7 +646,8 @@ def test_live_context_refuses_unowned_private_revision_and_cached_recall(
             restored = client.get(url, headers=headers)
             assert restored.status_code == 200
             assert restored.json()["private_memory_generation"] == 0
-            assert "PRIVATE_STALE_DETAIL" in restored.json()["model_context"]
+            assert "PRIVATE_STALE_DETAIL" not in restored.text
+            assert "touch_tap" in restored.json()["model_context"]
             settings.fleet_text_sharing_enabled = False
             revoked = client.get(url, headers=headers)
             assert revoked.status_code == 200
