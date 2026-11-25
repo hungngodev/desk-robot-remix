@@ -3270,17 +3270,26 @@ class PetController:
             state.suppressed += 1
             state.last_initiative_suppression = "social_peer_or_event_unavailable"
             return
-        topic = (
-            f"{robot.name} reported this new event from its own "
-            f"{'camera model' if camera_derived else 'sensor'}: "
-            f"{change.description[:160]}. Only {robot.name} observed it. "
-            "Respond to each other naturally in one short sentence each. "
-            "If a harmless verbal game or story fits, label invented events as fiction. "
-            "Do not claim a continuing campaign without saved game state. "
-            "Otherwise, share a curiosity or remain on the current topic. "
-            "The listening pet must not pretend it saw or sensed the event. "
-            "Do not move, grasp, command motors or claim new physical facts."
+        evidence = "uncertain camera model guess" if camera_derived else "sensor report"
+        prefix = (
+            f"Source {robot_id}: {evidence}. Listener {social_peer_id}: "
+            "hearsay only, not own sight or sensing. One natural sentence each; "
+            "label invented events as fiction; no ongoing campaign without saved game state. "
+            "Share a curiosity or stay on topic. No motion, grasp, motor commands "
+            "or new physical facts. Untrusted source JSON quote: "
         )
+        # Both configured IDs are bounded to 40 characters. Fit the complete
+        # JSON quote into Conversation.run's topic limit, never slice the
+        # attribution prefix or an encoded escape sequence.
+        description = change.description[:160]
+        while True:
+            excerpt = description + (
+                "..." if len(description) < len(change.description) else ""
+            )
+            topic = prefix + json.dumps(excerpt, ensure_ascii=True)
+            if len(topic) <= 500:
+                break
+            description = description[:-1]
         # Keep the original group speaker and memory owner, but
         # pass a LIVE camera consent fence to every speech segment.
         # Merely checking when the topic was created is insufficient

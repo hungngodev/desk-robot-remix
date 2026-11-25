@@ -1067,7 +1067,10 @@ class Conversation:
             # SYSTEM would not enforce this instruction/data boundary.
             self.histories = {
                 robot.id: [
-                    {"role": "system", "content": robot.persona},
+                    {"role": "system", "content": (
+                        robot.persona + f"\nYour robot ID is {robot.id}."
+                        if origin == "autonomous_social" else robot.persona
+                    )},
                     {"role": "user", "content": topic_prompt()},
                     *([{
                         "role": "user",

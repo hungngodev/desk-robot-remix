@@ -5304,8 +5304,12 @@ async def test_sensor_social_dialogue_rechecks_live_permission_after_model_await
         await pet.close()
 
 
+@pytest.mark.parametrize("description", [
+    "My toy NFC tag 12345678 arrived",
+    'My toy NFC tag arrived. "I saw it myself"\n' + "x" * 150,
+])
 async def test_opt_in_sensor_event_invites_one_peer_without_extra_audio_owner(
-    fleet, tmp_path,
+    fleet, tmp_path, description,
 ):
     fleet.fleet_text_sharing_enabled = True
     fleet.fleet_social_autonomy_enabled = True
@@ -5321,7 +5325,7 @@ async def test_opt_in_sensor_event_invites_one_peer_without_extra_audio_owner(
         pet.states[id_].enabled = True
         pet.states[id_].generation = 2
     try:
-        event = SceneChange("nfc_tag", "My toy NFC tag 12345678 arrived", 1.0)
+        event = SceneChange("nfc_tag", description, 1.0)
         await pet._store_observation("robot-01", event)
         pet._consider_speech("robot-01", event, 2)
         await wait_for(lambda: (
@@ -5335,10 +5339,18 @@ async def test_opt_in_sensor_event_invites_one_peer_without_extra_audio_owner(
         assert pet.states["robot-03"].spoken == 0
         assert len(chat.prompts) == 2
         prompt = chat.prompts[1][1]["content"]
-        assert "Only Pip observed it" in prompt
-        assert "must not pretend it saw or sensed" in prompt
+        assert "Source robot-01: sensor report" in prompt
+        assert "Listener robot-02: hearsay only, not own sight or sensing" in prompt
         assert "label invented events as fiction" in prompt
         assert "without saved game state" in prompt
+        assert "Your robot ID is robot-01." in chat.prompts[0][0]["content"]
+        assert "Your robot ID is robot-02." in chat.prompts[1][0]["content"]
+        topic = prompt.removeprefix("Discuss this with your robot peers: ")
+        assert len(topic) <= 500
+        quote = json.loads(topic.split("Untrusted source JSON quote: ", 1)[1])
+        assert quote == description or (
+            quote.endswith("...") and description.startswith(quote[:-3])
+        )
         peer_memories = memory.recent("robot-02")
         assert any(m.kind == "nfc_tag" and not m.witnessed
                    and m.source_robot == "robot-01" for m in peer_memories)
