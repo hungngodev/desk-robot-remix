@@ -6,7 +6,45 @@
 
 using desk_robot::MotorHeartbeat;
 
+// Model only the caller's authority input; BodyControl owns the actual leases.
+// A long-running pulse train must neither hide a late CPU transition nor
+// generate an extra edge when the caller revokes authority at its deadline.
+void lease_boundary_handoff() {
+  for (const std::uint32_t start : {100U, 0xfffffff0U}) {
+    for (const std::uint32_t cutoff : {250U, 500U}) {
+      for (const std::uint32_t elapsed : {cutoff - 1U, cutoff, cutoff + 1U}) {
+        for (const std::uint32_t gap : {14U, 15U, 44U, 45U, 46U}) {
+          for (const bool sensor_pass : {false, true}) {
+            MotorHeartbeat heartbeat;
+            const auto edge = elapsed - gap;
+            const auto first = edge % 15U;
+            bool high = true;
+            for (auto t = first; t <= edge; t += 15U) {
+              CHECK(heartbeat.update(start + t, true) == high);
+              if (t != edge) high = !high;
+            }
+            const auto now = start + elapsed;
+            const bool authorized = elapsed < cutoff;
+            const bool missed = gap >= 45U;
+            const bool expected = authorized && !missed &&
+                (!sensor_pass || (gap < 15U ? high : !high));
+            CHECK((sensor_pass ? heartbeat.update(now, authorized)
+                               : heartbeat.check_authority(now, authorized)) == expected);
+            CHECK(heartbeat.missed_deadline() == missed);
+            if (!authorized || missed) {
+              CHECK(!heartbeat.update(now + 1U, false));
+              CHECK(heartbeat.missed_deadline() == missed);
+              CHECK(heartbeat.update(now + 2U, true) == !missed);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 int main() {
+  lease_boundary_handoff();
   MotorHeartbeat heartbeat;
   CHECK(!heartbeat.update(0, false));
   CHECK(heartbeat.update(100, true)); // first CPU motion sample starts pulses
