@@ -41,6 +41,8 @@ def position_records():
                     "left_age_ms": 20 if left_seen else 0xffffffff,
                     "right_age_ms": 20 if r else 0xffffffff,
                     "code": 0xCB34ED12 if left_seen and r else 0,
+                    "left_code": 0xCB34ED12 if left_seen else 0,
+                    "right_code": 0xCB34ED12 if r else 0,
                     "motor_authorized": False,
                     "charging_authorized": False,
                     "physical_qualified": False,
@@ -88,6 +90,7 @@ def test_unbalanced_optics_cannot_be_sold_as_differential_bearing():
         row["ir"].update(
             left_valid=True, right_valid=True, match=True,
             left_seq=n, right_seq=n, code=0xCB34ED12,
+            left_code=0xCB34ED12, right_code=0xCB34ED12,
             left_age_ms=15, right_age_ms=15,
         )
     result = cal.analyze(rows, "robot-01")
@@ -207,13 +210,14 @@ def test_labeled_trial_rejects_dock_from_another_physical_robot():
         cal.analyze(rows, "robot-01", expected_dock_id=1)
 
 
-async def test_capture_rejects_foreign_assigned_dock_at_http_boundary(monkeypatch):
+@pytest.mark.parametrize(("index", "label"), [(0, "left"), (20, "center"), (40, "right")])
+async def test_capture_rejects_foreign_assigned_dock_at_http_boundary(monkeypatch, index, label):
     monkeypatch.setattr(cal.asyncio, "sleep", fast_sleep)
     calls = []
 
     def handler(request):
         calls.append(request)
-        frame = position_records()[20]["ir"]  # both sides fresh, dock 04
+        frame = position_records()[index]["ir"]  # dock 04
         return httpx.Response(200, json=frame)
 
     actual = httpx.AsyncClient
@@ -224,7 +228,7 @@ async def test_capture_rejects_foreign_assigned_dock_at_http_boundary(monkeypatc
     monkeypatch.setattr(cal.httpx, "AsyncClient", create_client)
     with pytest.raises(ValueError, match="Foreign NEC dock beacon"):
         await cal.capture("http://localhost:8765", "S" * 40,
-                          "robot-01", "center", 20, .05, 1)
+                          "robot-01", label, 20, .05, 1)
     assert len(calls) == 1
 
 
@@ -237,6 +241,7 @@ def test_cached_one_sided_rmt_frame_does_not_count_twenty_left_optical_votes():
             left_valid=True, right_valid=True,
             left_age_ms=15, right_age_ms=15,
             match=False, code=0,
+            left_code=0xCB34ED12, right_code=0xCB34ED12,
         )
     for row in rows[20:]:
         if row["ir"]["right_seq"]:
@@ -286,7 +291,7 @@ def test_mixed_dock_codes_in_center_records_rejected():
     rows = position_records()
     # Alternate center records between dock 4 (0xCB34ED12) and dock 5 (0xCA35ED12)
     for i in range(21, 40, 2):
-        rows[i]["ir"]["code"] = 0xCA35ED12
+        rows[i]["ir"].update(code=0xCA35ED12, left_code=0xCA35ED12, right_code=0xCA35ED12)
     with pytest.raises(ValueError, match="Mixed NEC dock beacons in trial"):
         cal.analyze(rows, "robot-01")
 
@@ -539,6 +544,8 @@ def reflection_control(rows, *, left=False, right=False, count=20):
                 "right_seq": right_seq, "left_age_ms": 20 if left else 0xffffffff,
                 "right_age_ms": 20 if right else 0xffffffff,
                 "code": 0xCB34ED12 if left and right else 0,
+                "left_code": 0xCB34ED12 if left else 0,
+                "right_code": 0xCB34ED12 if right else 0,
             },
         })
     return rows
@@ -597,3 +604,39 @@ async def test_capture_rejects_ambiguous_live_json(monkeypatch, extra, message):
             "http://localhost:8765", "S" * 40, "robot-01", "left", 20, .05,
         )
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize(("index", "side"), [(0, "left"), (40, "right")])
+def test_assigned_trial_rejects_single_receiver_foreign_dock(index, side):
+    rows = position_records()
+    rows[index]["ir"][f"{side}_code"] = 0xCA35ED12
+    assert not rows[index]["ir"]["match"]
+    with pytest.raises(ValueError, match="Foreign NEC dock beacon"):
+        cal.analyze(rows, "robot-01", expected_dock_id=4)
+
+
+def test_assigned_trial_rejects_unidentified_legacy_directional_votes():
+    rows = position_records()
+    for row in rows:
+        del row["ir"]["left_code"]
+        del row["ir"]["right_code"]
+    with pytest.raises(ValueError, match="individual NEC receiver identities"):
+        cal.analyze(rows, "robot-01", expected_dock_id=4)
+
+
+@pytest.mark.parametrize(("field", "value"), [
+    ("left_code", True), ("left_code", 0), ("left_code", 0xCB34ED13),
+    ("right_code", 0xCB34ED12), ("right_code", None),
+])
+def test_individual_receiver_identity_is_validated(field, value):
+    rows = position_records()
+    rows[0]["ir"][field] = value
+    with pytest.raises(ValueError, match="Invalid NEC"):
+        cal.analyze(rows, "robot-01", expected_dock_id=4)
+
+
+def test_matched_pair_cannot_hide_different_receiver_identities():
+    rows = position_records()
+    rows[20]["ir"]["right_code"] = 0xCA35ED12
+    with pytest.raises(ValueError, match="disagrees with receiver identity"):
+        cal.analyze(rows, "robot-01")

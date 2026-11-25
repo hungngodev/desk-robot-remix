@@ -1639,12 +1639,14 @@ static void dual_ir_evidence_never_authorizes_body_motion_or_charging() {
   sample.right_seq = 12;
   sample.left_age_ms = 15;
   sample.right_age_ms = 21;
-  sample.code = 0xcb34ed12U;
+  sample.code = sample.left_code = sample.right_code = 0xcb34ed12U;
   body.set_terminal_ir(sample);
   const std::string data = send(body, "ir", 100);
   CHECK(data.find("\"match\":true") != std::string::npos);
   CHECK(data.find("\"left_seq\":9") != std::string::npos);
   CHECK(data.find("\"right_seq\":12") != std::string::npos);
+  CHECK(data.find("\"left_code\":" + std::to_string(sample.code)) != std::string::npos);
+  CHECK(data.find("\"right_code\":" + std::to_string(sample.code)) != std::string::npos);
   CHECK(data.find("\"motor_authorized\":false") != std::string::npos);
   CHECK(data.find("\"charging_authorized\":false") != std::string::npos);
   CHECK(!body.state().armed);
@@ -1653,9 +1655,12 @@ static void dual_ir_evidence_never_authorizes_body_motion_or_charging() {
   // Even a matched NEC code is never a local calibration or arm permit.
   CHECK(send(body, "drive 20 20 100", 102) != "OK drive left=20 right=20 ms=100");
   sample.left_fresh = sample.same_code = false;
-  sample.code = 0;
+  sample.code = sample.left_code = 0;
   body.set_terminal_ir(sample);
-  CHECK(send(body, "ir", 103).find("\"match\":false") != std::string::npos);
+  const auto single = send(body, "ir", 103);
+  CHECK(single.find("\"match\":false") != std::string::npos);
+  CHECK(single.find("\"left_code\":0") != std::string::npos);
+  CHECK(single.find("\"right_code\":" + std::to_string(sample.right_code)) != std::string::npos);
 }
 
 static void belly_adc_does_not_refresh_stale_jaw_sample() {

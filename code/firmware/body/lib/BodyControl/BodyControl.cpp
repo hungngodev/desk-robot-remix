@@ -1328,6 +1328,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         "{\"left_valid\":%s,\"right_valid\":%s,\"match\":%s,"
         "\"left_seq\":%lu,\"right_seq\":%lu,"
         "\"left_age_ms\":%lu,\"right_age_ms\":%lu,\"code\":%lu,"
+        "\"left_code\":%lu,\"right_code\":%lu,"
         "\"motor_authorized\":false,\"charging_authorized\":false,"
         "\"physical_qualified\":false}",
         e.left_fresh ? "true" : "false",
@@ -1337,7 +1338,9 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(e.right_seq),
         static_cast<unsigned long>(e.left_age_ms),
         static_cast<unsigned long>(e.right_age_ms),
-        static_cast<unsigned long>(e.code));
+        static_cast<unsigned long>(e.code),
+        static_cast<unsigned long>(e.left_code),
+        static_cast<unsigned long>(e.right_code));
     if (written < 0 || static_cast<std::size_t>(written) >= capacity)
       std::snprintf(reply, capacity, "ERR ir response_too_long");
   } else if (optics) {

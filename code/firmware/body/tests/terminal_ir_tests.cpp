@@ -440,6 +440,21 @@ int main() {
       dock.accept(1, code, 135);
       CHECK(dock.assess(135).same_code);
     }
+    // Directional diagnostics retain the actual ID for each fresh receiver.
+    desk_robot::DualIrEvidence individual;
+    constexpr std::uint32_t dock4 = 0xcb34ed12U, dock5 = 0xca35ed12U;
+    CHECK(individual.accept(0, dock4, 100));
+    auto single = individual.assess(100);
+    CHECK(single.left_code == dock4 && single.right_code == 0 && single.code == 0);
+    CHECK(individual.accept(1, dock5, 110));
+    single = individual.assess(110);
+    CHECK(single.left_code == dock4 && single.right_code == dock5 && !single.same_code);
+    single = individual.assess(301);
+    CHECK(single.left_code == 0 && single.right_code == dock5 && single.code == 0);
+    individual.invalidate();
+    single = individual.assess(302);
+    CHECK(single.left_code == 0 && single.right_code == 0);
+    CHECK(!single.motor_authorized && !single.charging_authorized);
     // 100 independent classic NEC beacons, and 400 deterministic fault
     // mutations. This is protocol stress, NOT 100 physical robot iterations.
     for (unsigned seed = 0; seed != 100; ++seed) {

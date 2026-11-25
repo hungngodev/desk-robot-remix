@@ -70,4 +70,16 @@ def validate_ir(data: dict, robot_id: str, *,
         # A valid code from robot-04's dock is not robot-01's dock.
         # Never let calibration or an observer silently accept a foreign dock.
         raise ValueError("Foreign NEC dock beacon: expected assigned dock")
+    side_keys = ("left_code", "right_code")
+    if any(key in data for key in side_keys):
+        for side in ("left", "right"):
+            value = data.get(f"{side}_code")
+            if type(value) is not int or (
+                value not in _KNOWN_DOCK_CODES if data[f"{side}_valid"] else value != 0
+            ):
+                raise ValueError(f"Invalid NEC {side} beacon identity")
+            if data[f"{side}_valid"] and expected_code is not None and value != expected_code:
+                raise ValueError("Foreign NEC dock beacon: expected assigned dock")
+        if data["match"] and any(data[key] != data["code"] for key in side_keys):
+            raise ValueError("Matched NEC beacon disagrees with receiver identity")
     return data

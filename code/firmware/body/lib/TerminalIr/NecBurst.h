@@ -63,6 +63,7 @@ struct IrPairEvidence {
   std::uint32_t code = 0;
   bool motor_authorized = false;
   bool charging_authorized = false;
+  std::uint32_t left_code = 0, right_code = 0;
 };
 
 // IDF 4.4 RMT ringbuffers have no source-time timestamp. An observation
@@ -195,6 +196,8 @@ class DualIrEvidence {
       out.same_code = out.left_age_ms <= right_min_age + 120U &&
                       out.right_age_ms <= left_min_age + 120U;
     }
+    if (out.left_fresh) out.left_code = left.code;
+    if (out.right_fresh) out.right_code = right.code;
     if (out.same_code) out.code = left.code;
     return out;
   }

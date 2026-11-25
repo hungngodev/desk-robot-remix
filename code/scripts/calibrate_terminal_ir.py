@@ -148,6 +148,16 @@ def load_trial_rows(path: Path) -> list[dict]:
     ]
 
 
+def _validate_trial_ir(data: dict, robot_id: str,
+                       expected_dock_id: int | None) -> dict:
+    reading = validate_ir(data, robot_id, expected_dock_id=expected_dock_id)
+    if expected_dock_id is not None and not all(
+        key in reading for key in ("left_code", "right_code")
+    ):
+        raise ValueError("Assigned dock calibration requires individual NEC receiver identities")
+    return reading
+
+
 def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
             expected_dock_id: int | None = None) -> dict:
     if not robot_id or not 10 <= min_per_position <= 500:
@@ -162,12 +172,14 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
     for row in rows:
         if not isinstance(row, dict) or row.get("label") not in LABELS:
             raise ValueError("Explicitly labeled left/center/right records required")
-        reading = validate_ir(row.get("ir"), robot_id,
-                              expected_dock_id=expected_dock_id)
-        if reading["match"] and reading["code"] != 0:
+        reading = _validate_trial_ir(row.get("ir"), robot_id, expected_dock_id)
+        codes = (reading.get("left_code", 0), reading.get("right_code", 0), reading["code"])
+        for code in codes:
+            if code == 0:
+                continue
             if observed_dock_code is None:
-                observed_dock_code = reading["code"]
-            elif reading["code"] != observed_dock_code:
+                observed_dock_code = code
+            elif code != observed_dock_code:
                 raise ValueError(
                     "Mixed NEC dock beacons in trial: observations must share one assigned dock"
                 )
@@ -317,7 +329,7 @@ async def capture(base_url: str, token: str, robot_id: str,
                 object_pairs_hook=_unique_trial_fields,
                 parse_constant=_reject_nonfinite_trial_json,
             )
-            reading = validate_ir(payload, robot_id, expected_dock_id=expected_dock_id)
+            reading = _validate_trial_ir(payload, robot_id, expected_dock_id)
             roundtrip_ms = (received_at - request_started) * 1000.0
             if (not math.isfinite(roundtrip_ms) or roundtrip_ms < 0
                     or any(
