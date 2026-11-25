@@ -366,6 +366,13 @@ void scd_observation(uint32_t now) {
 void bme_step(uint32_t now) {
   if (!bme_started) return;
   if (!bme_pending) {
+    // Adafruit_BME680 2.0.5 reserves zero for both _meas_start and a
+    // failed beginReading(). A completion deadline of zero leaves the
+    // private driver clock pending even after begin() re-probes the chip.
+    // Avoid new conversions around rollover; the four-second loop WDT
+    // plus the sub-second configured conversion fit within this guard.
+    // Other sensors keep running and the old BME tuple expires normally.
+    if (now == 0U || now >= UINT32_MAX - 5000U) return;
     if (bme_last_start_ms != 0 && now - bme_last_start_ms < kReportMs)
       return;
     bme_last_start_ms = now;

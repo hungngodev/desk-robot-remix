@@ -15,10 +15,29 @@ struct Adafruit_BME680 {
   float temperature = 0, humidity = 0, next_temp = -10, next_humidity = 55;
   uint32_t pressure = 0, gas_resistance = 0, next_pressure = 101000, next_gas = 12345;
   unsigned ends = 0;
-  uint32_t beginReading() { return start_ok ? 1 : 0; }
-  int remainingReadingMillis() { return remaining; }
+  bool model_driver_clock = false;
+  uint32_t driver_start = 0;
+  unsigned starts = 0;
+  uint32_t beginReading() {
+    ++starts;
+    if (!start_ok) return 0;
+    if (!model_driver_clock) return 1;
+    // Pinned 2.0.5 uses zero as both failure and a timestamp sentinel.
+    if (driver_start == 0) driver_start = clock_ms;
+    return driver_start + 200U;
+  }
+  int remainingReadingMillis() {
+    if (!model_driver_clock) return remaining;
+    if (driver_start == 0) return -1;
+    const uint32_t elapsed = clock_ms - driver_start;
+    return elapsed < 200U ? static_cast<int>(200U - elapsed) : 0;
+  }
   bool endReading() {
     ++ends;
+    if (model_driver_clock) {
+      if (beginReading() == 0) return false;
+      driver_start = 0;
+    }
     if (end_ok && fields) {
       temperature = next_temp; humidity = next_humidity;
       pressure = next_pressure; gas_resistance = next_gas;
@@ -86,10 +105,25 @@ int main() {
     if (fault == 8) bme.remaining = -1;
     step(2200); assert(!bme_completed.valid && !bme_started && !bme_pending);
   }
-  // Unsigned elapsed time and acquisition timestamp survive rollover.
-  reset(); step(0xfffffff0U); step(0x000000b8U);
-  assert(bme_completed.fresh(0x000000b8U, kBmeStaleMs));
-  assert(bme_completed.sample_ms == 0xfffffff0U);
-  reset(); step(0xfffffff0U); step(0x00000ba9U);
-  assert(!bme_completed.valid);
+  // A conversion started 200 ticks before wrap would return zero and
+  // leave the pinned driver permanently pending, even across begin().
+  reset(); bme.model_driver_clock = true;
+  step(UINT32_MAX - 199U);
+  assert(bme_started && !bme_pending && bme.starts == 0);
+  step(0U);
+  assert(bme_started && !bme_pending && bme.starts == 0);
+  step(1U); step(201U);
+  assert(bme_completed.valid && bme_completed.sample_ms == 1U);
+  assert(bme_started && !bme_pending && bme.driver_start == 0U);
+  // A normal acquisition just before the guard remains valid, and its
+  // cache expires at the usual age without a new conversion in the gap.
+  reset(); bme.model_driver_clock = true;
+  step(UINT32_MAX - 5200U); step(UINT32_MAX - 5000U);
+  assert(bme_completed.valid && bme_completed.sample_ms == UINT32_MAX - 5200U);
+  step(UINT32_MAX - 4000U);
+  assert(bme_completed.fresh(UINT32_MAX - 4000U, kBmeStaleMs));
+  step(UINT32_MAX - 2199U);
+  assert(!bme_completed.fresh(UINT32_MAX - 2199U, kBmeStaleMs));
+  step(1U); step(201U);
+  assert(bme_completed.valid && bme_completed.sample_ms == 1U);
 }
