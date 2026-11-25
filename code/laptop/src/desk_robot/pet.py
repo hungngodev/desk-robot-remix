@@ -45,6 +45,9 @@ _PET_SPEECH_ABORT_TIMEOUT_S = 2.5
 _PET_OBSERVER_CANCEL_TIMEOUT_S = 2.0
 _PROACTIVE_TOOL_TIMEOUT_S = 1.5
 _ACTIVITY_RECONSIDERATION_KIND = "activity_reconsideration"
+# Candidate software policy, not a calibrated object identity tracker.
+_CAMERA_HABITUATION_S = 900.0
+_CAMERA_HABITUATION_LIMIT = 64
 
 
 class SceneComparator(Protocol):
@@ -154,6 +157,8 @@ class PetState:
     stale_camera_events: int = 0
     last_event: str | None = None
     last_scene_frame_at: float | None = None  # latest processed Mac receipt, this robot only
+    camera_habituation: dict[tuple[str, str], float] = field(default_factory=dict, repr=False)
+    camera_habituation_epoch: tuple[int, int | None] | None = None
     last_person_face_cue_at: float = -math.inf  # successful visual ACK cooldown
     last_person_face_attempt_at: float = -math.inf  # bounded offline retries
     last_model_face_cue_at: float = -math.inf  # successful model mood ACK cooldown
@@ -479,6 +484,8 @@ class PetController:
         state.dock_charge_indicated = None
         state.dock_charging_verified = False
         state.session_event_counts.clear()
+        state.camera_habituation.clear()
+        state.camera_habituation_epoch = None
         state.last_nose_angle = None
         state.last_force_squeeze = None
         state.last_near_hand = None
@@ -522,6 +529,8 @@ class PetController:
         state.generation += 1
         state.enabled = False
         state.gate.reset()  # Pause must forget the previous private JPEG.
+        state.camera_habituation.clear()
+        state.camera_habituation_epoch = None
         state.last_scene_frame_at = None
         state.last_hub_generation = None
         tasks = [
@@ -2076,6 +2085,8 @@ class PetController:
         hub_generation = self.multimodal.hub._generation[robot_id]
         state = self.states[robot_id]
         if state.last_hub_generation != hub_generation:
+            state.camera_habituation.clear()
+            state.camera_habituation_epoch = None
             state.gate.reset()
             state.last_scene_frame_at = None
             state.last_hub_generation = hub_generation
@@ -2108,6 +2119,8 @@ class PetController:
                 if (self.settings.mode == "hardware"
                         and not self.settings.voice_vision_tools_enabled):
                     state.gate.reset()
+                    state.camera_habituation.clear()
+                    state.camera_habituation_epoch = None
                     state.last_scene_frame_at = None
                     await asyncio.sleep(self.interval)
                     continue
@@ -2737,6 +2750,24 @@ class PetController:
                 if now - seen < self.group_window
             }
         self._event_kinds[event_key] = now
+        # A repeated VLM arrival guess after unrelated pixel movement must not
+        # become novel merely because the short fleet budget has expired.
+        # Keep this longer window local to a camera grant and pet. Person/hand
+        # arrivals and physical interactions retain the existing short policy.
+        habituation_key = None
+        if camera_derived and change.kind in {"key", "candy", "object", "scene"}:
+            epoch = (admitted_camera_grant, camera_generation)
+            if state.camera_habituation_epoch != epoch:
+                state.camera_habituation.clear()
+                state.camera_habituation_epoch = epoch
+            habituation_key = (change.kind, description_key)
+            seen = state.camera_habituation.pop(habituation_key, -math.inf)
+            if now - seen < _CAMERA_HABITUATION_S:
+                # Slide on continued observations, not on elapsed speech time.
+                state.camera_habituation[habituation_key] = now
+                state.suppressed += 1
+                state.last_initiative_suppression = "repeated_camera_scene"
+                return
         relevant_cooldown = (
             min(self.speech_cooldown, self.interaction_cooldown)
             if not camera_derived and change.kind in _DIRECT_INTERACTION_KINDS
@@ -2754,6 +2785,10 @@ class PetController:
             state.last_initiative_suppression = "quiet_voice_or_group_budget"
             return
         self._admitted_event_kinds[event_key] = now
+        if habituation_key is not None:
+            if len(state.camera_habituation) >= _CAMERA_HABITUATION_LIMIT:
+                del state.camera_habituation[next(iter(state.camera_habituation))]
+            state.camera_habituation[habituation_key] = now
         state.last_initiative_suppression = None
         peer_id = self._social_peer(robot_id, change.kind, now)
         peer_generation = (

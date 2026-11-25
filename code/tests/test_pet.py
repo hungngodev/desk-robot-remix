@@ -1443,6 +1443,78 @@ async def test_cross_camera_paraphrases_keep_distinct_events_and_touches(
         await pet.close()
 
 
+async def test_camera_scene_habituation_outlasts_fleet_cooldown(
+    fleet, tmp_path, monkeypatch,
+):
+    """Repeat VLM guesses over 12 minutes, then offer genuinely distinct evidence."""
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    pet = PetController(
+        fleet, {}, Conversation(
+            fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+        ), memory, KeyScene(),
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 1
+    now = [1000.0]
+    admitted = []
+
+    async def record_admission(robot_id, change, generation, **kwargs):
+        # Observe actual task admission, independently of language-model
+        # reply repetition and physical playback.
+        admitted.append(change.description)
+        pet._group_last_spoken = now[0]
+
+    monkeypatch.setattr(
+        "desk_robot.pet.time", SimpleNamespace(monotonic=lambda: now[0]),
+    )
+    monkeypatch.setattr(pet, "_speak", record_admission)
+
+    async def offer(kind, description):
+        pet._consider_speech(
+            "robot-01", SceneChange(kind, description, .97), 1,
+            camera_derived=True,
+        )
+        if pet._speech_task is not None:
+            await pet._speech_task
+
+    try:
+        await offer("object", "A red mug appeared beside the laptop")
+        for _ in range(6):
+            now[0] += 121
+            await offer("object", "I noticed a red mug next to the laptop")
+            assert state.last_initiative_suppression == "repeated_camera_scene"
+        assert admitted == ["A red mug appeared beside the laptop"]
+        now[0] += 121
+        await offer("key", "A silver key appeared beside the laptop")
+        assert admitted[-1] == "A silver key appeared beside the laptop"
+        assert len(admitted) == 2
+        # A finite observation-free interval permits a later same-worded
+        # arrival. This is a heuristic, not persistent object tracking.
+        now[0] += 901
+        await offer("object", "A red mug appeared beside the laptop")
+        assert len(admitted) == 3
+    finally:
+        await pet.close()
+
+
+def test_stationary_camera_fingerprint_does_not_trigger_again_over_660_frames():
+    gate = VisualChangeGate()
+    assert gate.observe(WHITE) is None
+    assert gate.observe(RED) is None
+    assert gate.observe(RED) == WHITE
+    gray = gate._reduced(RED)
+    # 660 consecutive samples at a nominal one frame per second.
+    for _ in range(660):
+        assert gate.observe_reduced(RED, gray) is None
+    with Image.open(BytesIO(RED)) as image:
+        ImageDraw.Draw(image).rectangle((90, 15, 117, 42), fill=(0, 0, 0))
+        out = BytesIO()
+        image.save(out, "JPEG")
+    arrival = out.getvalue()
+    assert gate.observe(arrival) is None
+    assert gate.observe(arrival) == RED
+
+
 async def test_independent_touch_poll_silences_pet_while_camera_vlm_is_blocked(
     fleet, tmp_path
 ):
