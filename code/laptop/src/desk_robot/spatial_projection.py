@@ -145,11 +145,11 @@ class FloorProjectionCalibration:
         ray_x = math.cos(pitch) - down * math.sin(pitch)
         ray_y = -right
         ray_z = -math.sin(pitch) - down * math.cos(pitch)
-        # Reject horizon and near-parallel rays before distance amplification.
+        # Require a strictly downward margin before distance amplification.
         ray_length = math.sqrt(ray_x * ray_x + ray_y * ray_y + ray_z * ray_z)
         if (not all(math.isfinite(x) for x in (ray_x, ray_y, ray_z, ray_length))
                 or ray_length == 0
-                or -ray_z / ray_length < self.min_downward_ray):
+                or -ray_z / ray_length <= self.min_downward_ray):
             raise ProjectionError("Pixel ray grazes floor or points above horizon")
         distance_scale = self.camera_height_mm / -ray_z
         yaw = math.radians(self.lens.mount_yaw_deg)

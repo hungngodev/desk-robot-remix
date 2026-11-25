@@ -1,3 +1,4 @@
+import math
 from dataclasses import replace
 
 import pytest
@@ -117,3 +118,43 @@ def test_off_axis_distortion_changes_metric_projection():
     result = project(distorted, 504.390785, 342.439325)
     assert result.x_mm == pytest.approx(103.4220286821, abs=0.01)
     assert result.y_mm == pytest.approx(-62.8047468673, abs=0.01)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf"), 10**400, True])
+@pytest.mark.parametrize("axis", [0, 1])
+def test_invalid_pixel_coordinates_are_rejected(value, axis):
+    pixel = [320, 240]
+    pixel[axis] = value
+    with pytest.raises(ProjectionError, match="crop"):
+        project(calibration(), *pixel)
+
+
+@pytest.mark.parametrize("pitch", [-30, 0, 90, float("nan"), float("inf")])
+def test_invalid_camera_pitch_rejected(pitch):
+    with pytest.raises(ProjectionError, match="pitch_down_deg"):
+        replace(calibration(), pitch_down_deg=pitch)
+
+
+@pytest.mark.parametrize("axis", ["fx", "fy"])
+@pytest.mark.parametrize("value", [-400, 0, float("nan"), float("inf")])
+def test_invalid_focal_length_rejected(axis, value):
+    with pytest.raises(ValueError):
+        replace(calibration().lens, **{axis: value})
+
+
+def test_horizon_and_exact_grazing_limit_are_rejected():
+    cal = replace(calibration(), pitch_down_deg=15)
+    horizon_v = cal.lens.cy - cal.lens.fy * math.tan(math.radians(15))
+    for v in (horizon_v - 1, horizon_v, horizon_v + 1):
+        with pytest.raises(ProjectionError, match="grazes"):
+            project(cal, 320, v)
+
+    # At the optical center the ray has unit length. Set its measured
+    # minimum to exactly the computed downward component, not a rounded angle.
+    pitch = math.radians(cal.pitch_down_deg)
+    downward = math.sin(pitch) / math.sqrt(math.cos(pitch)**2 + math.sin(pitch)**2)
+    boundary = replace(cal, min_downward_ray=downward)
+    with pytest.raises(ProjectionError, match="grazes"):
+        project(boundary, 320, 240)
+    accepted = project(replace(boundary, min_downward_ray=downward - 1e-6), 320, 240)
+    assert accepted.x_mm == pytest.approx(cal.camera_height_mm / math.tan(pitch))
