@@ -43,8 +43,8 @@ reference, but use the editable SCAD source and the Fusion assembly guide
 for real dimensional revisions; do not blindly scale the mesh and call
 it a parametric dock.
 
-See: ../FUSION_ONE_ROBOT_ASSEMBLY.md and
-../FUSION_MEASUREMENT_SHEET.md.
+See [Fusion assembly](../../FUSION_ONE_ROBOT_ASSEMBLY.md) and
+[measurement sheet](../../FUSION_MEASUREMENT_SHEET.md).
 
 
 ## Reversible two beam alignment coupon
@@ -75,6 +75,12 @@ Its exported source and watertight mesh are checked by the regular
 
 The dock vision consumer uses OpenCV's **AprilTag 36h11** dictionary and
 the same explicit marker ID in the per robot camera calibration.
+The generated artwork uses the installed OpenCV dictionary, not a separately
+vendored AprilTag detector. See [OpenCV license](https://github.com/opencv/opencv/blob/4.x/LICENSE)
+(Apache-2.0) and [AprilTag source and notice](https://github.com/AprilRobotics/apriltag/blob/master/LICENSE.md)
+(BSD-2-Clause). Retain the notices of the exact installed package and applicable
+bundled third-party files; this is not a claim that every OpenCV wheel artifact
+is covered solely by Apache-2.0.
 Do not draw an arbitrary QR pattern or use printer "fit to page" scaling.
 Generate a true vector tag directly from the installed OpenCV AprilTag dictionary:
 
