@@ -102,7 +102,7 @@ def test_amg8833_scan_is_bounded_incremental_and_never_fakes_frame_time():
     assert "thermal_valid = false;" in stage
     assert "thermal_next_chunk == AMG88xx_PIXEL_ARRAY_SIZE / 8U" in stage
     assert "thermal[i] = thermal_staging[i];" in stage
-    assert "thermal_sample_ms = now;" in stage
+    assert "thermal_sample_ms = thermal_started_ms;" in stage
     assert "thermal_valid = true;" in stage
     assert "kThermalScanMaxMs = 250;" in firmware
     assert "read_thermal_chunk" not in report
@@ -253,7 +253,7 @@ def test_thermal_scan_publishes_only_complete_staged_frames():
     assert scan.index("thermal[i] = thermal_staging[i];") < scan.index(
         "thermal_valid = true;"
     )
-    assert "thermal_sample_ms = now;" in scan
+    assert "thermal_sample_ms = thermal_started_ms;" in scan
     assert "read_thermal_chunk(" not in report
     assert "thermal_valid && now - thermal_sample_ms <= kThermalStaleMs" in report
     assert "thermal_step(now);" in source
@@ -350,6 +350,7 @@ def test_room_transaction_clocks_follow_completed_io():
 def test_thermal_transfer_deadline_in_actual_firmware_function(tmp_path):
     # Compile the actual runtime function with a fake I2C clock. A final
     # successful chunk reaching 250 ms must not publish a completed frame.
+    # A valid scan is dated from its oldest possible pixel read.
     src = (ROOT / "code/firmware/room_station/src/main.cpp").read_text()
     step = "void thermal_step(" + src.split("void thermal_step(", 1)[1].split(
         "void thermal_observation(", 1
@@ -391,7 +392,12 @@ void run(uint32_t start, uint32_t last_start, uint32_t last_duration, bool valid
   assert(thermal_valid == valid);
   assert(!thermal_scan_active);
   assert(amg_started == valid);
-  assert(thermal_sample_ms == (valid ? clock_ms : 123U));
+  assert(thermal_sample_ms == (valid ? start : 123U));
+  if (valid) {
+    assert(clock_ms - thermal_sample_ms == last_start + last_duration);
+    assert(start + 3000U - thermal_sample_ms == 3000U);
+    assert(start + 3001U - thermal_sample_ms > 3000U);
+  }
   assert(thermal[63] == (valid ? 8.0f : 99.0f));
 }
 int main() {

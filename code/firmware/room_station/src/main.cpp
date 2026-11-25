@@ -502,7 +502,9 @@ void thermal_step(uint32_t now) {
   if (++thermal_next_chunk == AMG88xx_PIXEL_ARRAY_SIZE / 8U) {
     for (unsigned i = 0; i < AMG88xx_PIXEL_ARRAY_SIZE; ++i)
       thermal[i] = thermal_staging[i];
-    thermal_sample_ms = now;
+    // The first chunk is older than the final chunk. Age the entire tuple
+    // from the scan start, not the final transfer; this is not exposure time.
+    thermal_sample_ms = thermal_started_ms;
     thermal_valid = true;
     thermal_scan_active = false;
   }
