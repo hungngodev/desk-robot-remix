@@ -21,7 +21,7 @@ Known source paths below refer to those revisions. [Source record](../hardware/r
 | `main/audio/codecs/no_audio_codec.cc`, `NoAudioCodecSimplexPdm::Read` | Current Sense input is mono 16 kHz PDM-demodulated PCM on I²S0. |
 | Same file, `NoAudioCodec::Write` | Takes 32 kHz output PCM after XiaoZhi resamples its usual 24 kHz Opus stream, applies squared software volume/clamping, writes 32-bit mono I²S on I²S1. The MAX98357A excludes 24 kHz LRCLK; a tap before this method misses the effective speaker gain/clipping. |
 | `firmware/head/sense/desk_robot_sense.cc`, `GetAudioCodec` | Isolated place to select a Sense-only reference codec without changing camera, OLED, UART or amplifier pins. |
-| `firmware/head/install_overlay.py`, `planned_files` | Copies Sense board sources. A future opt-in must also extend the upstream device-AEC whitelist narrowly and reversibly. |
+| `firmware/head/install_overlay.py`, `planned_files` | Copies Sense board sources and extends the upstream device-AEC whitelist narrowly for the Sense profile. |
 
 ## Smallest substantive port
 
@@ -111,13 +111,17 @@ while capturing absolute acoustic latency, and the firmware rejects
 incomplete or invalid microphone/reference windows. Keep the selected
 Sense 16 kHz PDM, 32 kHz speaker and device AEC setup. The endpoint
 requires the existing per-head bearer token, uses the existing
-`/api/audio.capture.start`, `/api/audio.capture.status`, and
-`/api/audio.capture.raw` HTTP handlers, and streams one bounded
+`/api/audio.capture.start`, `/api/audio.capture.abort`,
+`/api/audio.capture.status`, and `/api/audio.capture.raw` HTTP handlers, and streams one bounded
 256000-byte RAM window through an asynchronous worker so HTTP dispatch
 can continue serving emergency STOP. Firmware wipes the PSRAM buffer
 after transfer, timeout, revocation or failed capture.
 
-The operator must explicitly consent to recording microphone data.
+The operator must explicitly consent to recording microphone data. Generate the
+private Sense configuration with `--continuous-audio --bench-aec-capture
+--aec-delay-ms 0` using `firmware/head/private_config.py`, together with the
+required robot, private configuration and Mac LAN IP, then build with
+`bash scripts/build_head.sh --board sense --private` from `code/`.
 A private firmware build and bearer alone do not grant raw recording.
 For EACH trial, mute with BOOT, hold BOOT while already muted until the
 long-press event, release, then deliberately tap within 30 seconds to

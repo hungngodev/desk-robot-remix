@@ -325,6 +325,19 @@ class OverlayPathTests(unittest.TestCase):
         for board in overlay.BOARDS:
             self.assertNotEqual(overlay.overlay_recipe_digest(board), before[board])
 
+    def test_recipe_digest_tracks_copied_documentation(self):
+        (self.recipe_root / "modular_snapshot.inc").write_bytes(b"snapshot")
+        for board in ("modular", "sense", "waveshare"):
+            folder = self.recipe_root / board
+            folder.mkdir()
+            (folder / "README.md").write_bytes(b"readme")
+        for filename in ("sense/README.md", "BOARD_README.md"):
+            before = {board: overlay.overlay_recipe_digest(board) for board in overlay.BOARDS}
+            (self.recipe_root / filename).write_bytes(b"updated")
+            for board in overlay.BOARDS:
+                changed = overlay.overlay_recipe_digest(board) != before[board]
+                self.assertEqual(changed, board == "sense" or filename == "BOARD_README.md")
+
     def test_malformed_recipe_digest_refused_before_removal(self):
         overlay.apply(self.root)
         marker = self.root / overlay.MARKER

@@ -47,9 +47,10 @@ under the camera mutex and now checks both JPEG boundary markers and a 512 KiB
 size cap. The OLED is used for emotional expressions, not the upstream LVGL
 camera preview, which the pinned upstream explicitly skips for JPEG.
 A separate read-only body-polling task now protects the 100 ms local
-Stackchan face renderer from a 350 ms WROOM UART timeout. Bounded atomic
-touch cues and a 1.2 second body health freshness gate prevent a missing
-controller from appearing healthy or replaying queued touch events.
+Stackchan face renderer from a 350 ms WROOM UART timeout. A coherent body
+health snapshot and a 1.2 second freshness gate prevent a missing controller
+from appearing healthy. WROOM touch counters are observations for the Mac;
+they do not directly trigger a local mood or nod.
 The actual five-minute unplugged face responsiveness test remains open.
 
 A physical non-motion camera/status stress probe is in
@@ -172,8 +173,9 @@ an SD card or initialize SD.
 
 **Required real-board mod for the chosen audio+RGB pins:** The microSD slot shares S3 GPIO7, GPIO8 and GPIO9 via the Sense expansion's **J3 solder bridge, shipped enabled by default**. Merely disabling SD software does **not** electrically remove the slot. Before connecting speaker amp on GPIO7/8 or optional RGB on GPIO9, use Seeed's [official J3 instructions](https://wiki.seeedstudio.com/xiao_esp32s3_sense_filesystem/) on the actual shipped expansion revision: remove camera to protect the lens, open J3 for SPI header use, then electrically inspect and confirm no microSD routing is active. **No SD card**, no SD.begin(). The current firmware compile does not verify physical J3.
 
-No touch pad is allocated. Floor/obstacle sensors
-belong to the WROOM bus, not this head's display bus.
+No touch pad GPIO is allocated on Sense. The physical head-touch input is
+owned by WROOM; floor/obstacle sensors also belong to the body, not the head's
+display bus.
 
 SSD1306 pin order/voltage, address, orientation and the rounded Sparky bezel fit still need
 checking. MAX98357 speaker connects across SPK+ and SPK−, neither to ground;
@@ -318,14 +320,26 @@ python3 firmware/head/install_overlay.py --board sense --target firmware/head/bu
 ```
 
 The installer rejects drift and different-board overlays. It never edits the
-source clone. `--remove` restores only unchanged generated files. Private
-settings remain under the ignored build copy, with mode0600 and the selected
+source clone. Its recipe digest includes copied Markdown, so even a change to
+this README can require a remove/reinstall. Preserve private settings securely
+outside the disposable build directory first. `--remove` restores journaled
+original bytes and removes unchanged generated files; it refuses modified
+journaled files. Reapply to the same pinned checkout with `--target` after
+removal, or create a new disposable clone using `--output`. Private settings
+are written under the ignored build copy, with mode 0600 and the selected
 robot's existing credential:
 
 ```sh
 python3 firmware/head/private_config.py --board sense --config config/local.toml --robot robot-01 --server-ip MAC_LAN_IP
 bash scripts/build_head.sh --board sense --private
 ```
+
+Add `--continuous-audio` to the private configuration command only with explicit
+operator consent. For a temporary private AEC capture build, also add
+`--bench-aec-capture --aec-delay-ms 0` and follow the per-capture physical BOOT
+consent procedure in the [AEC guide](../../../../docs/guides/sense-aec-port.md).
+Neither option is implied by `--private`. The default 90 ms reference delay
+is not a measured acoustic calibration.
 
 These commands require valid existing private configuration; no credentials are
 embedded in the generic verification build. That build uses an empty bridge

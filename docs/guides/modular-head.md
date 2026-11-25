@@ -56,7 +56,11 @@ mutes the microphone during playback cannot pass the interruption requirement.
 Implemented, physically unqualified header budget: OLED2 + amplifier3 + UART2 = seven signals, with
 camera/PDM internally connected. The allocation was checked against official documentation and compiled; it is
 not physically qualified. OLED5/6, amplifier4/7/8 and UART2/1 preserve nativeUSB,
-camera/PDM and PSRAM pins. SD is disabled and CS21 held high; leave its slot empty. Do not copy video GPIO1/2
+camera/PDM and PSRAM pins. SD is disabled and CS21 held high; leave its slot
+empty. Before attaching the amplifier on GPIO7/8 or the optional, disabled
+GPIO9 RGB heart, follow the actual Sense expansion revision's J3 isolation
+procedure in the [Sense wiring guide](../../code/firmware/head/sense/README.md#pin-source-and-allocation).
+Software SD disable is not electrical isolation. Do not copy video GPIO1/2
 sensor wiring or the old Freenove UART pin numbers blindly. The body owns all
 cliff sensors; the head owns OLED, so no shared two-master bus is required.
 
@@ -90,8 +94,10 @@ Only the existing local face task owns OLED updates. The WROOM status poll
 uses a separate task so an interrupted UART read cannot stall blink timing,
 Xiaozhi audio or emergency STOP. The OLED remains available during
 continuous listening as well as idle; status and mood owners are separate.
-The selected inexpensive generic AT42QT1010 head-touch input needs actual
-through-case placement and bounce tests. Reuse any genuinely owned compatible
+The selected inexpensive generic AT42QT1010 head-touch input belongs to the
+WROOM body, not an extra Sense GPIO. It needs actual through-case placement
+and bounce tests. Touch is evidence for the Mac's contextual decision, not an
+unconditional local expression. Reuse any genuinely owned compatible
 sensor rather than ordering a new Adafruit module. Head patting does not
 locate the user or navigate back to them.
 
