@@ -40,14 +40,14 @@ async def test_stream_motion_instrumentation_reports_light_and_cover_without_med
             self.commands = []
 
         async def stream_frames(self):
-            began = time.monotonic()
             for index, frame in enumerate((
                 jpeg(40, 110), jpeg(80, 220), jpeg(0, 0, cover=True),
             )):
-                self._last_camera = (19, index + 1, (index + 1) * 1_000_000)
-                yield frame, began - 2 + index
-                await asyncio.sleep(0)
-            await asyncio.sleep(.22)
+                if index:
+                    await asyncio.sleep(1.01)
+                self._last_camera = (19, index + 1, (index + 1) * 1_010_000)
+                yield frame, time.monotonic()
+            await asyncio.sleep(.25)
 
         async def status(self):
             return {"robot_id": "robot-01"}
@@ -61,7 +61,7 @@ async def test_stream_motion_instrumentation_reports_light_and_cover_without_med
 
     head = PhotometricHead()
     result = await bench.measure(
-        head, "robot-01", seconds=.2, status_period_s=.05,
+        head, "robot-01", seconds=2.2, status_period_s=.05,
         stream=True, score_motion=True,
     )
     assert result["camera_error_count"] == 0
