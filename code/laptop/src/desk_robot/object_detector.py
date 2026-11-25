@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Callable
 
 from .object_targets import ObjectEvidence, ObjectOwner, ObjectQuery
-from .vision import Detection, Vision, image_size
+from .vision import Detection, Vision, validated_camera_sizes
 
 
 @dataclass(frozen=True)
@@ -193,13 +193,24 @@ async def detect_object_frame(
     reason = live()
     if reason:
         return reject(reason)
+    loop = asyncio.get_running_loop()
+    real_deadline = loop.time() + timeout_s
     try:
-        width, height = image_size(frame.jpeg)
+        ((width, height),) = await asyncio.wait_for(
+            validated_camera_sizes((frame.jpeg,), max_bytes=4_000_000),
+            timeout=timeout_s,
+        )
+    except TimeoutError:
+        return reject("inference_timeout")
+    except RuntimeError:
+        return reject("camera_validation_busy")
     except (OSError, ValueError, TypeError):
         return reject("invalid_camera_jpeg")
     reason = live()
     if reason:
         return reject(reason)
+    if loop.time() >= real_deadline:
+        return reject("inference_timeout")
 
     # A noncooperative native inference must not retain an obsolete callback.
     # The existing Vision worker, not this coroutine, owns native completion.
@@ -208,8 +219,6 @@ async def detect_object_frame(
 
     task = asyncio.create_task(predict())
     task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
-    loop = asyncio.get_running_loop()
-    real_deadline = loop.time() + timeout_s
     try:
         while not task.done():
             reason = live()

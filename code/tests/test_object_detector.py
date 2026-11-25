@@ -329,3 +329,48 @@ async def test_detector_capture_age_is_preserved_at_target_resolution():
     assert late.status == "last_seen"
     assert late.confirmed_floor_mm is None
     assert not late.arrived and not late.may_execute
+
+
+@pytest.mark.asyncio
+async def test_corrupt_scan_cannot_become_qualified_object_evidence():
+    _, _, frame = fixtures()
+    broken = bytearray(frame.jpeg)
+    scan = broken.index(b"\xff\xda")
+    broken[scan + 5] = 0
+    detector = FakeDetector()
+    result = await inspect(detector, frame=replace(frame, jpeg=bytes(broken)))
+    assert result.reason == "invalid_camera_jpeg"
+    assert result.evidence is None and detector.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_object_decode_rechecks_owner_before_model(monkeypatch):
+    import desk_robot.object_detector as module
+
+    active = True
+
+    async def validate(frames, **kwargs):
+        nonlocal active
+        active = False
+        return ((40, 30),)
+
+    monkeypatch.setattr(module, "validated_camera_sizes", validate)
+    detector = FakeDetector()
+    result = await inspect(detector, request_is_current=lambda: active)
+    assert result.reason == "request_invalidated"
+    assert result.evidence is None and detector.calls == 0
+
+
+@pytest.mark.asyncio
+async def test_object_decode_counts_against_inference_budget(monkeypatch):
+    import desk_robot.object_detector as module
+
+    async def validate(frames, **kwargs):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(module, "validated_camera_sizes", validate)
+    detector = FakeDetector()
+    result = await asyncio.wait_for(inspect(detector, timeout_s=0.02), timeout=0.5)
+    assert result.reason == "inference_timeout"
+    assert result.evidence is None and detector.calls == 0
+
