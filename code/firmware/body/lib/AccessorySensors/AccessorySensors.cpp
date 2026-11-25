@@ -171,7 +171,13 @@ bool AccessorySensors::begin(TwoWire& wire) {
     std::uint16_t manufacturer = 0;
     data_.gauge.monitor_present =
         read16(0x40, 0xFE, manufacturer) && manufacturer == 0x5449;
-    data_.gauge.fuel_present = probe(0x36);
+    // MAX17048/MAX17049 datasheet Rev 7, table 2: VERSION is 0x001x.
+    // See also Zephyr drivers/fuel_gauge/max17048/max17048.c init check.
+    // An address ACK alone is not identity (AS5600 also uses 0x36).
+    // The family signature does not distinguish 1S from 2S hardware.
+    std::uint16_t version = 0;
+    data_.gauge.fuel_present =
+        read16(0x36, 0x08, version) && (version & 0xFFF0U) == 0x0010U;
   }
   if (!close()) return false;
   // MCP23017 on accessory mux lane 5 only READS physical dock evidence.

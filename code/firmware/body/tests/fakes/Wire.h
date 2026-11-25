@@ -25,6 +25,8 @@ class TwoWire {
   bool pending_sht = false;
   bool fail_dock_gpio = false;
   bool fail_fuel_register_read = false;
+  bool fail_fuel_version_read = false;
+  std::uint16_t fuel_version = 0x0011U;
   int fail_ina_read_register = -1;
   bool fail_sht_command = false;
   std::uint16_t ina226_shunt_raw = 0x0010U;
@@ -315,6 +317,8 @@ class TwoWire {
     }
     if (addr == 0x40 && extras == 16 &&
         register_address == fail_ina_read_register) return 0;
+    if (fail_fuel_version_read && addr == 0x36 && extras == 16 &&
+        register_address == 0x08) return 0;
     if (fail_fuel_register_read && addr == 0x36 && extras == 16 &&
         (register_address == 0x02 || register_address == 0x04)) return 0;
     if (addr == 0x70) {
@@ -449,6 +453,9 @@ class TwoWire {
       inbound = {0x20};
     else if (addr == 0x36 && extras != 16 && register_address == 0x0C)
       inbound = {0x07, 0xD0};
+    else if (addr == 0x36 && extras == 16 && register_address == 0x08)
+      inbound = {static_cast<std::uint8_t>(fuel_version >> 8),
+                 static_cast<std::uint8_t>(fuel_version)};
     else if (addr == 0x36 && extras == 16 && register_address == 0x02)
       inbound = {0xB4, 0x00};
     else if (addr == 0x36 && extras == 16 && register_address == 0x04)

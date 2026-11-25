@@ -949,6 +949,39 @@ int main() {
     CHECK(stuck_wire.transactions >= before_failed_write + 4);
     // The WROOM must increment MAX17048 identity on successful I2C register
     // acquisition only. Failure and retry never advance stale fuel data.
+    // ACKing devices with plausible voltage/SOC but the wrong VERSION
+    // must not become fuel evidence. INA226 remains independently usable.
+    for (const unsigned version : {0x0000U, 0xFFFFU, 0x1000U, 0x0020U}) {
+      TwoWire wrong_gauge;
+      wrong_gauge.fuel_version = static_cast<std::uint16_t>(version);
+      desk_robot::AccessorySensors wrong_accessories;
+      CHECK(wrong_accessories.begin(wrong_gauge));
+      for (std::uint32_t ms = 0; ms < 1000; ms += 12)
+        wrong_accessories.poll(ms);
+      const auto& wrong = wrong_accessories.readings().gauge;
+      CHECK(!wrong.fuel_present && !wrong.fuel_valid);
+      CHECK(wrong.fuel_sample_seq == 0U);
+      CHECK(wrong.monitor_present && wrong.monitor_valid);
+    }
+    for (const unsigned version : {0x0010U, 0x001FU}) {
+      TwoWire family_gauge;
+      family_gauge.fuel_version = static_cast<std::uint16_t>(version);
+      desk_robot::AccessorySensors family_accessories;
+      CHECK(family_accessories.begin(family_gauge));
+      for (std::uint32_t ms = 0; ms < 1000; ms += 12)
+        family_accessories.poll(ms);
+      CHECK(family_accessories.readings().gauge.fuel_valid);
+    }
+    TwoWire failed_identity;
+    failed_identity.fail_fuel_version_read = true;
+    desk_robot::AccessorySensors failed_identity_accessories;
+    CHECK(failed_identity_accessories.begin(failed_identity));
+    for (std::uint32_t ms = 0; ms < 1000; ms += 12)
+      failed_identity_accessories.poll(ms);
+    const auto& unidentified = failed_identity_accessories.readings().gauge;
+    CHECK(!unidentified.fuel_present && !unidentified.fuel_valid);
+    CHECK(unidentified.fuel_sample_seq == 0U);
+    CHECK(unidentified.monitor_valid);
     TwoWire fuel_wire;
     desk_robot::AccessorySensors fuel_accessories;
     CHECK(fuel_accessories.begin(fuel_wire));
