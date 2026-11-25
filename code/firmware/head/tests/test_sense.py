@@ -2401,7 +2401,7 @@ def test_camera_stream_never_spends_sequence_on_invalid_provenance_headers():
 
 
 def test_local_eye_display_arbitrates_faults_subtitles_and_malformed_coordinates():
-    """Compile the actual renderer against a recursive-lock LVGL test double."""
+    """Exercise renderer geometry and cross-thread arbitration with a lock-checking fake."""
     source = (HEAD / "sense/desk_robot_sense.cc").read_text()
     assert "board->local_eye_display_->SetLocalStatus(local_status);" in source
     compiler = shutil.which("g++") or shutil.which("c++")
@@ -2413,7 +2413,9 @@ def test_local_eye_display_arbitrates_faults_subtitles_and_malformed_coordinates
 #include <cassert>
 #include <string>
 #include <vector>
-inline int lock_depth = 0;
+#include <mutex>
+inline std::recursive_mutex lvgl_mutex;
+inline thread_local int lock_depth = 0;
 struct lv_obj_t {
     bool hidden = false;
     int x = 0, y = 0, w = 0, h = 0;
@@ -2422,8 +2424,8 @@ struct lv_obj_t {
     std::string text;
 };
 inline lv_obj_t screen;
-inline const char* lv_label_get_text(lv_obj_t* n) { return n->text.c_str(); }
-inline lv_obj_t* lv_screen_active() { return &screen; }
+inline const char* lv_label_get_text(lv_obj_t* n) { assert(lock_depth > 0); return n->text.c_str(); }
+inline lv_obj_t* lv_screen_active() { assert(lock_depth > 0); return &screen; }
 inline lv_obj_t* lv_obj_create(lv_obj_t* parent) {
     assert(lock_depth > 0);
     auto* node = new lv_obj_t;
@@ -2444,9 +2446,10 @@ inline void lv_obj_move_foreground(lv_obj_t* node) {
     siblings.erase(std::find(siblings.begin(), siblings.end(), node));
     siblings.push_back(node);
 }
-inline void lv_obj_set_size(lv_obj_t* n, int w, int h) { n->w = w; n->h = h; }
-inline void lv_obj_set_pos(lv_obj_t* n, int x, int y) { n->x = x; n->y = y; }
+inline void lv_obj_set_size(lv_obj_t* n, int w, int h) { assert(lock_depth > 0); n->w = w; n->h = h; }
+inline void lv_obj_set_pos(lv_obj_t* n, int x, int y) { assert(lock_depth > 0); n->x = x; n->y = y; }
 inline void lv_obj_align(lv_obj_t* n, int, int x, int y) {
+    assert(lock_depth > 0);
     n->x = (128 - n->w) / 2 + x;
     n->y = y;
 }
@@ -2456,17 +2459,19 @@ inline constexpr int LV_ALIGN_TOP_MID = 0, LV_RADIUS_CIRCLE = 1, LV_OPA_COVER = 
 inline constexpr int LV_SCROLLBAR_MODE_OFF = 3, LV_OBJ_FLAG_HIDDEN = 4;
 inline int lv_color_white() { return 1; }
 inline int lv_color_black() { return 0; }
-inline void lv_obj_set_style_radius(lv_obj_t*, int, int) {}
-inline void lv_obj_set_style_pad_all(lv_obj_t*, int, int) {}
-inline void lv_obj_set_style_border_width(lv_obj_t*, int, int) {}
-inline void lv_obj_set_style_bg_color(lv_obj_t*, int, int) {}
-inline void lv_obj_set_style_bg_opa(lv_obj_t*, int, int) {}
-inline void lv_obj_set_scrollbar_mode(lv_obj_t*, int) {}
+inline void lv_obj_set_style_radius(lv_obj_t*, int, int) { assert(lock_depth > 0); }
+inline void lv_obj_set_style_pad_all(lv_obj_t*, int, int) { assert(lock_depth > 0); }
+inline void lv_obj_set_style_border_width(lv_obj_t*, int, int) { assert(lock_depth > 0); }
+inline void lv_obj_set_style_bg_color(lv_obj_t*, int, int) { assert(lock_depth > 0); }
+inline void lv_obj_set_style_bg_opa(lv_obj_t*, int, int) { assert(lock_depth > 0); }
+inline void lv_obj_set_scrollbar_mode(lv_obj_t*, int) { assert(lock_depth > 0); }
 class OledDisplay;
 class DisplayLockGuard {
 public:
-    explicit DisplayLockGuard(OledDisplay*) { ++lock_depth; }
-    ~DisplayLockGuard() { --lock_depth; }
+    explicit DisplayLockGuard(OledDisplay*) { lvgl_mutex.lock(); ++lock_depth; }
+    ~DisplayLockGuard() { assert(lock_depth > 0); --lock_depth; lvgl_mutex.unlock(); }
+    DisplayLockGuard(const DisplayLockGuard&) = delete;
+    DisplayLockGuard& operator=(const DisplayLockGuard&) = delete;
     explicit operator bool() const { return true; }
 };
 class OledDisplay {
@@ -2493,13 +2498,13 @@ public:
         ++status_writes;
         status_label_->text = value;
         status_label_->hidden = false;
-        notification.clear();
+        notification_text.clear();
     }
     virtual void ShowNotification(const char* value, int = 3000) {
         DisplayLockGuard lock(this);
         if (!status_label_) return;
         status_label_->hidden = true;
-        notification = value;
+        notification_text = value;
     }
     virtual void ShowNotification(const std::string& value, int duration = 3000) {
         ShowNotification(value.c_str(), duration);
@@ -2507,25 +2512,25 @@ public:
     std::string Status() const { return status_label_->text; }
     bool StatusVisible() const { return !status_label_->hidden; }
     int status_writes = 0;
-    std::string notification;
+    std::string notification_text;
     virtual bool SetEmotion(const char* value) {
         DisplayLockGuard lock(this);
-        emotion = value;
+        emotion_text = value;
         return true;
     }
     virtual void SetChatMessage(const char*, const char* value) {
         DisplayLockGuard lock(this);
-        subtitle = value;
-        std::replace(subtitle.begin(), subtitle.end(), '\n', ' ');
+        subtitle_text = value;
+        std::replace(subtitle_text.begin(), subtitle_text.end(), '\n', ' ');
     }
     virtual void RemoveChatMessage(const char*, const char* value) {
         DisplayLockGuard lock(this);
         std::string text = value;
         std::replace(text.begin(), text.end(), '\n', ' ');
-        if (text == subtitle) subtitle.clear();
+        if (text == subtitle_text) subtitle_text.clear();
     }
     lv_obj_t* BatteryPopup() const { return low_battery_popup_; }
-    std::string emotion, subtitle;
+    std::string emotion_text, subtitle_text;
 protected:
     lv_obj_t status_storage_;
     lv_obj_t* status_label_ = nullptr;
@@ -2535,6 +2540,7 @@ protected:
     native = r"""
 #include "face_eye_display.hpp"
 #include <cassert>
+#include <thread>
 int main() {
     using desk_robot::FaceStatus;
     using desk_robot::SelectFaceStatus;
@@ -2567,7 +2573,7 @@ int main() {
     display.ShowEyes({true, false, -127, 127});
     assert(!layer->hidden && pupil->x == 1 && pupil->y == 8);
     upstream->SetChatMessage("assistant", "first\nline");
-    assert(layer->hidden && display.subtitle == "first line");
+    assert(layer->hidden && display.subtitle_text == "first line");
     display.ShowEyes({true, false, 3, 0});
     assert(layer->hidden);
     upstream->RemoveChatMessage("assistant", "old");
@@ -2581,7 +2587,7 @@ int main() {
     upstream->ShowNotification("Earlier notification");
     assert(!display.StatusVisible());
     display.SetLocalStatus(FaceStatus::kBodyFault);
-    assert(layer->hidden && display.emotion == "neutral");
+    assert(layer->hidden && display.emotion_text == "neutral");
     assert(display.StatusVisible() && display.Status() == "Body safety stop");
     const int fault_writes = display.status_writes;
     for (int i = 0; i < 12; ++i) {
@@ -2591,12 +2597,12 @@ int main() {
         display.SetLocalStatus(FaceStatus::kBodyFault);
         display.ShowEyes({true, true, 0, 0});
         assert(display.StatusVisible() && display.Status() == "Body safety stop");
-        assert(display.notification.empty() && layer->hidden);
+        assert(display.notification_text.empty() && layer->hidden);
         assert(display.status_writes == fault_writes);
     }
     assert(!upstream->SetEmotion("happy"));
     assert(!upstream->SetEmotion(nullptr));
-    assert(display.emotion == "neutral");
+    assert(display.emotion_text == "neutral");
     display.ShowEyes({true, false, 3, 0});
     assert(layer->hidden);
     upstream->SetChatMessage("user", "new");
@@ -2612,7 +2618,7 @@ int main() {
     display.SetLocalStatus(FaceStatus::kNormal);
     assert(display.StatusVisible() && display.Status() == "12:34");
     upstream->ShowNotification("Normal again");
-    assert(!display.StatusVisible() && display.notification == "Normal again");
+    assert(!display.StatusVisible() && display.notification_text == "Normal again");
     display.ShowEyes({true, false, 3, 0});
     assert(layer->hidden);
     upstream->SetChatMessage("user", nullptr);
@@ -2641,9 +2647,34 @@ int main() {
             }
         }
     }
+    // FaceTask and Xiaozhi are separate callers. A recursive mutex and
+    // thread-local ownership check must guard every fake LVGL access.
+    display.SetLocalStatus(FaceStatus::kBodyFault);
+    std::thread upstream_writer([&] {
+        for (int i = 0; i < 10000; ++i) {
+            upstream->SetStatus("Listening");
+            upstream->ShowNotification("Ignored");
+            assert(!upstream->SetEmotion("happy"));
+        }
+        assert(lock_depth == 0);
+    });
+    std::thread face_writer([&] {
+        for (int i = 0; i < 10000; ++i)
+            display.ShowEyes({true, false, 3, 3});
+        assert(lock_depth == 0);
+    });
+    upstream_writer.join();
+    face_writer.join();
+    assert(layer->hidden && display.StatusVisible());
+    assert(display.Status() == "Body safety stop" && display.notification_text.empty());
+    display.SetLocalStatus(FaceStatus::kNormal);
+    assert(display.Status() == "Listening");
     assert(lock_depth == 0);
 }
 """
+    pie_flags = [] if sys.platform == "darwin" else ["-fno-pie", "-no-pie"]
+    env = native_cpp_env()
+    env.update(ASAN_OPTIONS="halt_on_error=1", UBSAN_OPTIONS="halt_on_error=1")
     with tempfile.TemporaryDirectory() as temp:
         root = Path(temp)
         (root / "display").mkdir()
@@ -2652,10 +2683,13 @@ int main() {
         binary = root / "face_display_test"
         cpp.write_text(native)
         subprocess.run([
-            compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+            compiler, "-std=c++17", "-Wall", "-Wextra", "-Wshadow", "-Werror",
+            "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+            "-fno-omit-frame-pointer", "-pthread", *pie_flags,
             "-I", str(root), "-I", str(HEAD / "overlay"), str(cpp), "-o", str(binary),
-        ], check=True, capture_output=True, text=True, env=native_cpp_env())
-        subprocess.run([str(binary)], check=True, capture_output=True, text=True)
+        ], check=True, capture_output=True, text=True, env=env, timeout=60)
+        subprocess.run([str(binary)], check=True, capture_output=True, text=True,
+                       env=env, timeout=30)
 
 
 def test_body_face_snapshot_is_coherent_and_expires_across_clock_rollover():
