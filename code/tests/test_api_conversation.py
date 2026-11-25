@@ -2354,9 +2354,10 @@ def test_group_api_partial_stream_failure_releases_real_runtime_and_retries(
 
 
 def test_operator_group_api_refuses_revoke_regrant_during_preemption(
-    settings, tokens, monkeypatch,
+    settings, tokens, monkeypatch, tmp_path,
 ):
     """A newer fleet consent epoch cannot authorize an older group request."""
+    settings.memory_dir = tmp_path
     app = create_app(settings)
     headers = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
     body = {
@@ -2364,27 +2365,49 @@ def test_operator_group_api_refuses_revoke_regrant_during_preemption(
         "topic": "Check the desks", "utterances": 2,
     }
     with TestClient(app) as client:
+        runtime = app.state.runtime
         settings.mode = "hardware"
         settings.fleet_text_sharing_enabled = True
         starts = []
+        original_interrupt = runtime.pet.interrupt
+        epoch = runtime.pet._vision_preemption_epoch
+        grant = settings.fleet_sharing_consent_generation
 
         async def interrupt(robot_id):
+            result = await original_interrupt(robot_id)
             if not starts:
                 settings.fleet_text_sharing_enabled = False
                 settings.fleet_text_sharing_enabled = True
             starts.append(robot_id)
+            return result
 
-        async def run(*args):
-            raise AssertionError("Revoked group request reached speech")
-
-        monkeypatch.setattr(app.state.runtime.pet, "interrupt", interrupt)
-        monkeypatch.setattr(app.state.runtime.conversation, "run", run)
+        # Inject only the consent race, without replacing preemption or speech.
+        monkeypatch.setattr(runtime.pet, "interrupt", interrupt)
         result = client.post("/v1/conversation", json=body, headers=headers)
         assert result.status_code == 409
         assert "consent changed" in result.json()["detail"].lower()
         assert settings.fleet_text_sharing_enabled is True
-        assert settings.fleet_sharing_consent_generation > 0
+        assert settings.fleet_sharing_consent_generation > grant
         assert starts == [robot.id for robot in settings.robots]
+        assert runtime.pet._vision_preemption_epoch == epoch + len(settings.robots)
+        assert runtime.conversation.speaker.spoken == []
+        assert runtime.conversation.histories == {}
+        assert runtime.conversation.active is None
+        assert runtime.memory.recent("robot-01") == []
+        assert runtime.memory.recent("robot-02") == []
+
+        # A new request owns the newer grant and can actually transmit speech.
+        accepted = client.post("/v1/conversation", json=body, headers=headers)
+        assert accepted.status_code == 200
+        transcript = accepted.json()["transcript"]
+        assert [turn["robot_id"] for turn in transcript] == body["robot_ids"]
+        assert runtime.conversation.speaker.spoken == [
+            (turn["robot_id"], turn["text"]) for turn in transcript
+        ]
+        assert runtime.conversation.active is None
+        assert not runtime.conversation.session_lock.locked()
+        assert not runtime.conversation.speaker_lock.locked()
+        assert accepted.json()["physical_playback_verified"] is False
 
 
 @pytest.mark.parametrize("late_grant", ["sharing", "memory"])
