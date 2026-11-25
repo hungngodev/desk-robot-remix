@@ -1,5 +1,6 @@
 """One optional pinned-upstream Xiaozhi streaming profile, no fake credentials."""
 import importlib.util
+import sys
 from copy import deepcopy
 from pathlib import Path
 
@@ -76,3 +77,49 @@ def test_streaming_profile_refuses_unconfigured_secrets(missing, value):
         module.enable_streaming_voice(original, env)
     assert original == baseline
     assert original["selected_module"]["ASR"] == "FunASR"
+
+
+@pytest.mark.parametrize("address", ["not-an-ip", "127.0.0.1", "0.0.0.0", "::1"])
+def test_configure_invalid_address(monkeypatch, capsys, address):
+    module = configure_module()
+    monkeypatch.setattr(sys, "argv", ["configure.py", "--server-ip", address])
+    with pytest.raises(SystemExit) as exc:
+        module.main()
+    assert exc.value.code == 2
+    assert "reachable LAN IPv4" in capsys.readouterr().err
+
+
+@pytest.fixture
+def configure_target(monkeypatch, tmp_path):
+    module = configure_module()
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    template = tmp_path / "config/xiaozhi.local.example.yaml"
+    template.parent.mkdir()
+    template.write_text((ROOT / "config/xiaozhi.local.example.yaml").read_text())
+    target = tmp_path / "laptop/server/build/xiaozhi/main/xiaozhi-server/data/.config.yaml"
+    target.parent.parent.mkdir(parents=True)
+    monkeypatch.setattr(sys, "argv", ["configure.py", "--server-ip", "192.168.1.10"])
+    return module, target
+
+
+def test_configure_rerun_preserves_file(configure_target, capsys):
+    module, target = configure_target
+    module.main()
+    original = target.read_bytes()
+    assert target.stat().st_mode & 0o777 == 0o600
+    with pytest.raises(SystemExit) as exc:
+        module.main()
+    assert exc.value.code == 2
+    assert "already exists" in capsys.readouterr().err
+    assert target.read_bytes() == original
+
+
+def test_configure_missing_provider_credentials(configure_target, monkeypatch, capsys):
+    module, target = configure_target
+    monkeypatch.delenv("DASHSCOPE_API_KEY", raising=False)
+    monkeypatch.setattr(sys, "argv", [*sys.argv, "--streaming-profile", "aliyun-volcengine"])
+    with pytest.raises(SystemExit) as exc:
+        module.main()
+    assert exc.value.code == 2
+    assert "DASHSCOPE_API_KEY" in capsys.readouterr().err
+    assert not target.exists()
