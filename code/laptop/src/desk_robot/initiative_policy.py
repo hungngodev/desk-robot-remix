@@ -1,6 +1,7 @@
 """Pure admission rules for the existing fleet initiative owner."""
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 
 
@@ -38,3 +39,44 @@ def event_cooldown(
     if not camera_derived and direct_interaction:
         return min(speech_interval, interaction_interval)
     return speech_interval
+
+
+_CAMERA_SCENE_FILLER = frozenset({
+    "a", "an", "the", "i", "we", "my", "our", "there", "is", "are", "was",
+    "were", "have", "has", "see", "saw", "seen", "notice", "noticed",
+    "show", "shows", "showed", "appeared", "appears", "just", "now", "new",
+    "near", "beside", "next", "to", "by", "on", "at",
+})
+# Reordering these clauses could reverse the event or erase a safety detail.
+_CAMERA_SCENE_ORDER_SENSITIVE = frozenset({
+    "not", "no", "left", "right", "behind", "front", "under", "over",
+    "inside", "outside", "before", "after", "moved", "moving", "approached",
+    "leaving", "turned", "rotated", "vanished", "disappeared", "removed",
+    "picked", "dropped", "fell",
+})
+
+
+def camera_scene_signature(description: str) -> str:
+    """Group cautious lexical paraphrases, never claim shared spatial identity."""
+    normalized = " ".join(description.casefold().split())
+    if not normalized.isascii():
+        return normalized
+    words = re.findall(r"[a-z0-9]+", normalized)
+    if any(word in _CAMERA_SCENE_ORDER_SENSITIVE for word in words):
+        return normalized
+    content = [word for word in words if word not in _CAMERA_SCENE_FILLER]
+    return " ".join(sorted(content)) if len(content) >= 2 else normalized
+
+
+def event_identity(
+    *, robot_id: str, kind: str, description: str, camera_derived: bool,
+    physical_event: bool,
+) -> tuple[tuple[str | None, str, str], str]:
+    """Separate physical eyewitnesses; camera dedup is a speech budget only."""
+    owner = robot_id if not camera_derived and physical_event else None
+    signature = (
+        camera_scene_signature(description) if camera_derived
+        else " ".join(description.casefold().split())
+    )
+    key = (owner, kind, ("camera:" if camera_derived else "other:") + signature)
+    return key, signature

@@ -14,7 +14,6 @@ import inspect
 import json
 import math
 import random
-import re
 import sqlite3
 import time
 import uuid
@@ -36,7 +35,13 @@ from .dock_evidence import DockContactInhibit
 from .expression_policy import model_mood_event, reserve_face_cue
 from .habituation import HabituationWindow
 from .handling import HandlingGate
-from .initiative_policy import cooldown_pending, event_cooldown, quiet_voice_veto, receipt_veto
+from .initiative_policy import (
+    cooldown_pending,
+    event_cooldown,
+    event_identity,
+    quiet_voice_veto,
+    receipt_veto,
+)
 from .memory import CameraProvenance, MemoryStore
 from .operations import _bounded_head_reply
 from .sensor_event_contract import (
@@ -87,39 +92,7 @@ _DIRECT_INTERACTION_KINDS = DIRECT_INTERACTION_KINDS
 _PHYSICAL_INITIATIVE_KINDS = PHYSICAL_INITIATIVE_KINDS
 
 
-_CAMERA_SCENE_FILLER = frozenset({
-    "a", "an", "the", "i", "we", "my", "our", "there", "is", "are", "was",
-    "were", "have", "has", "see", "saw", "seen", "notice", "noticed",
-    "show", "shows", "showed", "appeared", "appears", "just", "now", "new",
-    "near", "beside", "next", "to", "by", "on", "at",
-})
-# Reordering these clauses could reverse the event or erase a safety detail.
-_CAMERA_SCENE_ORDER_SENSITIVE = frozenset({
-    "not", "no", "left", "right", "behind", "front", "under", "over",
-    "inside", "outside", "before", "after", "moved", "moving", "approached",
-    "leaving", "turned", "rotated", "vanished", "disappeared", "removed",
-    "picked", "dropped", "fell",
-})
-
-
 _OPTIONAL_SPEECH_DEDUP_WINDOW_S = 600.0
-
-
-def _camera_scene_signature(description: str) -> str:
-    """Group cautious lexical paraphrases, never claim shared spatial identity.
-
-    The object's type, attributes, number and location words remain evidence.
-    Motion, negation, and non-ASCII text keep exact normalized descriptions,
-    rather than risk merging unrelated scene changes across cameras.
-    """
-    normalized = " ".join(description.casefold().split())
-    if not normalized.isascii():
-        return normalized
-    words = re.findall(r"[a-z0-9]+", normalized)
-    if any(word in _CAMERA_SCENE_ORDER_SENSITIVE for word in words):
-        return normalized
-    content = [word for word in words if word not in _CAMERA_SCENE_FILLER]
-    return " ".join(sorted(content)) if len(content) >= 2 else normalized
 
 
 def _initiative_evidence(change: SceneChange) -> bool:
@@ -2927,27 +2900,10 @@ class PetController:
             state.suppressed += 1
             state.last_initiative_suppression = "voice_monitor_unavailable"
             return
-        # Restore content-aware cross-camera deduplication from the earlier
-        # source prototype instead of suppressing all distinct "object" events.
-        # This remains text-based, NOT calibrated multi-camera spatial tracking.
-        # Two pets making the same physical contact are TWO real events.
-        # Deduplicate repeated camera descriptions across heads to avoid a
-        # chorus about one shared scene, but never conflate independent touch,
-        # bump, paw, tilt or other WROOM sensor events across pet identities.
-        physical_owner = (
-            robot_id if not camera_derived
-            and change.kind in _PHYSICAL_INITIATIVE_KINDS else None
-        )
-        # Reworded camera descriptions can represent one shared visual
-        # scene. Keep this as a speech budget key, never an eyewitness claim.
-        # Physical sensor identities must remain independent.
-        description_key = (
-            _camera_scene_signature(change.description) if camera_derived
-            else " ".join(change.description.casefold().split())
-        )
-        event_key = (
-            physical_owner, change.kind,
-            ("camera:" if camera_derived else "other:") + description_key,
+        event_key, description_key = event_identity(
+            robot_id=robot_id, kind=change.kind, description=change.description,
+            camera_derived=camera_derived,
+            physical_event=change.kind in _PHYSICAL_INITIATIVE_KINDS,
         )
         if len(self._admitted_event_kinds) >= 64:
             self._admitted_event_kinds = {

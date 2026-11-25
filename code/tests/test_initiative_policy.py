@@ -5,6 +5,7 @@ import pytest
 from desk_robot.initiative_policy import (
     cooldown_pending,
     event_cooldown,
+    event_identity,
     quiet_voice_veto,
     receipt_veto,
 )
@@ -61,3 +62,34 @@ def test_event_cooldown_uses_only_deliberate_physical_interaction(
     assert cooldown_pending(now=interval - 0.01, last=0.0, interval=interval)
     assert not cooldown_pending(now=interval, last=0.0, interval=interval)
     assert not cooldown_pending(now=0.0, last=-math.inf, interval=interval)
+
+
+def test_camera_paraphrases_share_budget_but_never_physical_identity():
+    def identity(robot, description, camera):
+        return event_identity(
+            robot_id=robot, kind="key", description=description,
+            camera_derived=camera, physical_event=True,
+        )[0]
+
+    first = identity("a", "A red key appeared", True)
+    assert first == identity("b", "I noticed the red key", True)
+    assert first != identity("a", "A blue key appeared", True)
+    assert first != identity("a", "A red key appeared", False)
+    assert identity("a", "Touch", False) != identity("b", "Touch", False)
+    assert identity("a", "Touch", False) == identity("a", "  TOUCH  ", False)
+
+
+@pytest.mark.parametrize("left,right", [
+    ("key left of candy", "candy left of key"),
+    ("key moved near candy", "candy moved near key"),
+    ("key not beside candy", "candy not beside key"),
+    ("钥匙 糖果", "糖果 钥匙"),
+])
+def test_camera_signature_preserves_order_sensitive_evidence(left, right):
+    def identity(description):
+        return event_identity(
+            robot_id="a", kind="scene", description=description,
+            camera_derived=True, physical_event=False,
+        )[0]
+
+    assert identity(left) != identity(right)
