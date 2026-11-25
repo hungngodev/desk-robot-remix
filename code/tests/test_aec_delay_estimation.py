@@ -270,3 +270,25 @@ def test_cli_emits_integer_candidate_without_qualifying_hardware(tmp_path):
     assert report["clock_drift_status"] == "unavailable"
     assert not report["aec_physically_verified"]
     assert not report["natural_barge_in_verified"]
+
+
+@pytest.mark.parametrize("rate", [16000, 24000, 32000])
+def test_odd_pcm_chunk_byte_cannot_be_silently_discarded(tmp_path, rate):
+    """wave reports whole frames even when the data chunk ends mid-sample."""
+    import struct
+    import wave
+
+    file = tmp_path / "odd_pcm.wav"
+    with wave.open(str(file), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(bytes(rate * 2))
+    # Include a valid RIFF pad byte; only the PCM chunk itself is malformed.
+    raw = bytearray(file.read_bytes())
+    struct.pack_into("<I", raw, 4, len(raw) - 8 + 2)
+    struct.pack_into("<I", raw, raw.index(b"data") + 4, rate * 2 + 1)
+    raw.extend(b"\xff\x00")
+    file.write_bytes(raw)
+    with pytest.raises(ValueError, match="incomplete PCM16"):
+        source["read_wav"](file)

@@ -2,6 +2,8 @@
 
 This does not perform AEC and does not imply a physically qualified robot.
 Speaker and microphone WAV files must represent aligned actual board capture.
+For the Sense, use capture_sense_aec.py with the private zero-delay bench image;
+see docs/guides/audio-barge-in.md for acquisition and physical acceptance.
 """
 from __future__ import annotations
 
@@ -24,9 +26,13 @@ def read_wav(path: Path) -> tuple[np.ndarray, int]:
                 or rate not in (16000, 24000, 32000)
                 or not rate // 50 <= count <= 10 * rate):
             raise ValueError("WAV needs mono PCM16 at 16, 24 or 32 kHz, from 20 ms to ten seconds")
-        pcm = file.readframes(count)
-        if len(pcm) != 2 * count:
+        # wave rounds an odd data-chunk byte count down to whole frames.
+        # Read one extra frame to detect a trailing incomplete PCM16 sample.
+        pcm = file.readframes(count + 1)
+        if len(pcm) < 2 * count:
             raise ValueError("WAV file truncated: header frame count exceeds PCM data")
+        if len(pcm) != 2 * count:
+            raise ValueError("WAV contains incomplete PCM16 sample")
         samples = np.frombuffer(pcm, dtype="<i2").astype(np.float64)
     return samples / 32768, rate
 
