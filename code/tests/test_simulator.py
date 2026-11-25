@@ -176,7 +176,13 @@ async def test_body_replay_feeds_existing_sensor_fusion_and_rejects_foreign_iden
     )
     state = pet.states[robot_id]
     state.enabled, state.generation, state.quiet = True, 1, True
-    monkeypatch.setattr(pet, "_notify_sensor", lambda robot, kind: order.append((kind, robot)))
+    receipts: list[float] = []
+
+    def notify_sensor(robot: str, kind: str, *, received_at: float) -> None:
+        order.append((kind, robot))
+        receipts.append(received_at)
+
+    monkeypatch.setattr(pet, "_notify_sensor", notify_sensor)
     body = {
         "robot_id": robot_id,
         "touch": {"active": False, "count": 0},
@@ -197,6 +203,8 @@ async def test_body_replay_feeds_existing_sensor_fusion_and_rejects_foreign_iden
         await pet._touch_from_body(robot_id, 1)
         await pet._touch_from_body(robot_id, 1)
         assert order[:2] == [("stop", robot_id), ("safety_fault", robot_id)]
+        assert len(receipts) == 4
+        assert len(set(receipts)) == 1  # One body receipt, not four fresh observations.
         events = memory.recent(robot_id)
         assert sorted(event.kind for event in events) == [
             "magnet", "petting_zone", "safety_fault", "touch",
