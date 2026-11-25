@@ -5,7 +5,7 @@
     "commit": "b911305e48ce6a1b75fe6c07fc02f86ad7bfeb0a",
     "local_path": "code/upstream/rio-sense-reference",
     "license": "MIT",
-    "status": "source reference; not flashed/integrated, AEC and pins need review",
+    "status": "playback-reference ring and resampling adapted in SenseReferenceCodec; independent RIO voice stack not incorporated; physical AEC qualification open",
     "files": {
       "LICENSE": "85ea69e65e95eaa7367a1da0255db25f7c4500279a0b9080bbb88d48bf6144a6",
       "config.h": "afacbdf5b09ef8213ab7db3b662ad483f9041d3a695211972cab25be559b722f",
