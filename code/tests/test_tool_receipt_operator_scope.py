@@ -4,8 +4,10 @@ import hashlib
 import hmac
 import json
 import time
+from itertools import combinations
 from types import SimpleNamespace
 
+import pytest
 from desk_robot.api import create_app
 from desk_robot.multimodal import CameraFrameHub
 from fastapi.testclient import TestClient
@@ -250,3 +252,69 @@ def test_tool_bearer_alone_cannot_promote_dashboard_read_to_voice_tool(
             situation_url, headers={**tool, **context_signed},
         ).status_code == 409
         assert len(hub.tool_history[robot_id]) == 1
+
+
+@pytest.mark.parametrize("left,right", list(combinations(range(5), 2)))
+def test_api_startup_rejects_reused_credential_values(settings, monkeypatch, left, right):
+    names = [
+        settings.coordinator_token_env,
+        settings.tools_token_env,
+        settings.speech_bridge_token_env,
+        *(r.token_env for r in settings.robots),
+    ]
+    values = [chr(97 + index) * 40 for index in range(len(names))]
+    for name, value in zip(names, values, strict=True):
+        monkeypatch.setenv(name, value)
+    # Match secret() normalization, not just raw environment strings.
+    monkeypatch.setenv(names[right], " " + values[left] + " ")
+    started = []
+
+    async def start():
+        started.append(True)
+
+    async def close():
+        pass
+
+    runtime = SimpleNamespace(start=start, close=close)
+    with pytest.raises(ValueError, match="different|distinct") as exc:
+        with TestClient(create_app(settings, runtime=runtime)):
+            pytest.fail("API served requests despite credential reuse")
+    assert not started
+    assert values[left] not in str(exc.value)
+
+
+def test_distinct_head_and_tool_tokens_cannot_call_operator_routes(settings, monkeypatch):
+    names = [
+        settings.coordinator_token_env,
+        settings.tools_token_env,
+        settings.speech_bridge_token_env,
+        *(r.token_env for r in settings.robots),
+    ]
+    values = [chr(97 + index) * 40 for index in range(len(names))]
+    for name, value in zip(names, values, strict=True):
+        monkeypatch.setenv(name, value)
+
+    async def noop():
+        pass
+
+    # No actuator or memory handler exists on this runtime: any accidental
+    # execution of an operator handler will fail this regression.
+    runtime = SimpleNamespace(start=noop, close=noop)
+    robot_id = settings.robots[0].id
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        for index, token in enumerate(values[1:], start=1):
+            headers = {"Authorization": "Bearer " + token}
+            expected = 403 if index == 1 else 401
+            assert client.post(
+                f"/v1/robots/{robot_id}/enable", headers=headers,
+            ).status_code == expected
+            assert client.post(
+                f"/v1/robots/{robot_id}/move", headers=headers,
+                json={"command": "drive 20 20"},
+            ).status_code == expected
+            assert client.delete(
+                f"/v1/pet/{robot_id}/memories/example", headers=headers,
+            ).status_code == expected
+            assert client.delete(
+                f"/v1/pet/{robot_id}/core-memory/example", headers=headers,
+            ).status_code == expected

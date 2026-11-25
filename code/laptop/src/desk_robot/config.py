@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import secrets
 import time
 import tomllib
 from collections.abc import Mapping
@@ -360,6 +361,24 @@ def secret(name: str) -> str:
     if not re.fullmatch(r"[A-Za-z0-9._~+/-]+=*", value):
         raise ValueError(f"Set {name} to a valid ASCII bearer token")
     return value
+
+
+def api_credentials(settings: Settings) -> tuple[str, str]:
+    """Reject configured bearer reuse before the Mac starts serving requests."""
+    operator = secret(settings.coordinator_token_env)
+    tool = secret(settings.tools_token_env)
+    if secrets.compare_digest(operator, tool):
+        raise ValueError("Operator and tool tokens must be different")
+    seen = {operator: settings.coordinator_token_env, tool: settings.tools_token_env}
+    for name in (settings.speech_bridge_token_env, *(r.token_env for r in settings.robots)):
+        # Simulation and unused transports need not configure a credential.
+        if not os.environ.get(name, "").strip():
+            continue
+        value = secret(name)
+        if value in seen:
+            raise ValueError(f"Credential values must be distinct: {seen[value]} and {name}")
+        seen[value] = name
+    return operator, tool
 
 
 def load_settings(

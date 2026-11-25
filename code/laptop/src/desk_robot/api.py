@@ -41,7 +41,7 @@ from .api_readonly_planner import (
 )
 from .api_robot_status import register_robot_status_routes
 from .api_spatial_pose import register_spatial_pose_route
-from .config import Settings, quiet_hours_active, secret
+from .config import Settings, api_credentials, quiet_hours_active, secret
 from .controller import OperationError
 from .conversation import conversation_turns
 from .dock_evidence import observe_dock_evidence
@@ -115,10 +115,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     @asynccontextmanager
     async def lifespan(app):
         # Separate operator and model credentials: models cannot mint motion permits.
-        app.state.operator_token = secret(settings.coordinator_token_env)
-        app.state.tool_token = secret(settings.tools_token_env)
-        if secrets.compare_digest(app.state.operator_token, app.state.tool_token):
-            raise ValueError("Operator and tool tokens must be different")
+        app.state.operator_token, app.state.tool_token = api_credentials(settings)
         app.state.runtime = runtime or Runtime(settings)
         try:
             start = getattr(app.state.runtime, "start", None)
