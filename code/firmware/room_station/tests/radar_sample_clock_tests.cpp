@@ -25,6 +25,16 @@ bool feed(desk_robot_room::RadarDataFrameGate& gate,
 }  // namespace
 
 int main() {
+  // A dropped suffix (e.g. UART overflow during an I2C transaction)
+  // must not consume the next complete basic packet.
+  for (std::size_t cut = 1; cut < sizeof(kBasicFrame); ++cut) {
+    desk_robot_room::RadarDataFrameGate recovery;
+    assert(!feed(recovery, kBasicFrame, 0, cut));
+    assert(feed(recovery, kBasicFrame));
+    assert(recovery.completed_sample().moving_cm == 42);
+    assert(recovery.completed_sample().stationary_cm == 35);
+  }
+
   // Simulate a full millis cycle with periodic reports but no new packet.
   // Once stale, the old sample must never become fresh at the same raw clock.
   desk_robot_room::RadarSampleClock expired;
