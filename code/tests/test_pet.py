@@ -1647,10 +1647,12 @@ async def test_local_wroom_fault_transition_cancels_mac_motion_authority(fleet, 
         assert observed == ["robot-01"]
         await pet._observe_body_safety("robot-01", 4, body("none", True))
         await pet._observe_body_safety("robot-01", 4, body("front_obstacle"))
-        assert observed == ["robot-01", "robot-01"]
-        assert state.safety_fault_events == 2
+        await pet._observe_body_safety("robot-01", 4, body("none", True))
+        await pet._observe_body_safety("robot-01", 4, body("floor_out_of_range"))
+        assert observed == ["robot-01", "robot-01", "robot-01"]
+        assert state.safety_fault_events == 3
         assert len([m for m in memory.recent("robot-01")
-                    if m.kind == "safety_fault"]) == 2
+                    if m.kind == "safety_fault"]) == 3
         assert memory.count("robot-02") == 0
     finally:
         state.enabled = False
@@ -1726,6 +1728,12 @@ async def test_retired_safety_observer_cannot_consume_current_fault(
         await pet._observe_body_safety("robot-01", 5, status)
         assert stopped == ["robot-01"]
         assert state.safety_fault_events == (0 if fault == "touch_active" else 1)
+        await pet._observe_body_safety("robot-01", 5, {
+            "safety": {"required": True, "ready": True, "fault": "none"},
+        })
+        await pet._observe_body_safety("robot-01", 5, status)
+        assert stopped == ["robot-01", "robot-01"]
+        assert state.safety_fault_events == (0 if fault == "touch_active" else 2)
     finally:
         state.enabled = False
         await pet.close()
@@ -3238,6 +3246,40 @@ async def test_belly_squeeze_decoupled_from_jaw_clipping_staleness_and_recovery(
         await pet._observe_aux(robot_id, 5, validate_aux(belly_stale, robot_id))
         assert state.last_force_squeeze is None
         assert len([m for m in memory.recent(robot_id) if m.kind == "squeeze"]) == 1
+
+        # 6. Same-boot belly_seq replay fence + uint32 wrap + transport age charge.
+        def auth_report(*, belly_adc=100, belly_seq=10, belly_age=20, belly_valid=True):
+            pkt = report(
+                belly_adc=belly_adc, jaw_adc=500,
+                belly_valid=belly_valid, jaw_valid=True,
+                belly_seq=belly_seq, jaw_seq=belly_seq, belly_age=belly_age,
+            )
+            pkt["force"]["boot_id"] = 77
+            pkt["proximity"]["boot_id"] = 77
+            return pkt
+
+        await pet._observe_aux(robot_id, 5, validate_aux(auth_report(belly_adc=100, belly_seq=10), robot_id))
+        await pet._observe_aux(robot_id, 5, validate_aux(auth_report(belly_adc=10000, belly_seq=11), robot_id))
+        await pet._observe_aux(robot_id, 5, validate_aux(auth_report(belly_adc=100, belly_seq=12), robot_id))
+        # Delayed replay of pressed belly_seq=11 must NOT manufacture a 2nd squeeze.
+        await pet._observe_aux(robot_id, 5, validate_aux(auth_report(belly_adc=10000, belly_seq=11), robot_id))
+        assert len([m for m in memory.recent(robot_id) if m.kind == "squeeze"]) == 2
+        # Genuine subsequent fresh press works, plus uint32 wrap and transport age expiry.
+        await pet._observe_aux(robot_id, 5, validate_aux(auth_report(belly_adc=10000, belly_seq=13), robot_id))
+        assert len([m for m in memory.recent(robot_id) if m.kind == "squeeze"]) == 3
+        await pet._observe_aux(robot_id, 5, validate_aux(auth_report(belly_adc=100, belly_seq=0x7fffffff), robot_id))
+        await pet._observe_aux(robot_id, 5, validate_aux(auth_report(belly_adc=100, belly_seq=0xfffffffe), robot_id))
+        await pet._observe_aux(robot_id, 5, validate_aux(auth_report(belly_adc=100, belly_seq=0xffffffff), robot_id))
+        await pet._observe_aux(robot_id, 5, validate_aux(auth_report(belly_adc=10000, belly_seq=1), robot_id))
+        assert len([m for m in memory.recent(robot_id) if m.kind == "squeeze"]) == 4
+        await pet._observe_aux(
+            robot_id, 5, validate_aux(auth_report(belly_adc=100, belly_seq=2), robot_id),
+        )
+        await pet._observe_aux(
+            robot_id, 5, validate_aux(auth_report(belly_adc=10000, belly_seq=3, belly_age=20), robot_id),
+            request_elapsed_ms=490.0,
+        )
+        assert len([m for m in memory.recent(robot_id) if m.kind == "squeeze"]) == 4
     finally:
         state.enabled = False
         await pet.close()
@@ -3505,6 +3547,22 @@ async def test_nfc_toy_tag_events_are_real_per_robot_counter_edges(fleet, tmp_pa
         await pet._observe_aux("robot-01", 14, authenticated(21, 0xa1b2c3d4, seq=102))
         assert (state.last_nfc_events, state.last_nfc_scan_seq) == (21, 102)
         assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 3
+        # Contradictory fresh scan with rolled-back event counter (20 < 21) must not rewind fences or emit.
+        await pet._observe_aux("robot-01", 14, authenticated(20, 0xabcd, seq=103))
+        assert (state.last_nfc_events, state.last_nfc_scan_seq) == (21, 102)
+        assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 3
+        await pet._observe_aux("robot-01", 14, authenticated(21, 0xabcd, seq=104))
+        assert (state.last_nfc_events, state.last_nfc_scan_seq) == (21, 104)
+        assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 3
+        await pet._observe_aux("robot-01", 14, authenticated(22, 0x11223344, seq=105))
+        assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 4
+        # Genuine uint32 wrap on both scan and event counters emits exactly one arrival.
+        await pet._observe_aux("robot-01", 14, authenticated(0x7fffffff, 0, seq=0x7fffffff))
+        await pet._observe_aux("robot-01", 14, authenticated(0xfffffffe, 0, seq=0xfffffffe))
+        await pet._observe_aux("robot-01", 14, authenticated(0xffffffff, 0, seq=0xffffffff))
+        await pet._observe_aux("robot-01", 14, authenticated(1, 0x55667788, seq=1))
+        assert (state.last_nfc_events, state.last_nfc_scan_seq) == (1, 1)
+        assert sum(m.kind == "nfc_tag" for m in memory.recent("robot-01")) == 5
         assert memory.count("robot-02") == 0
     finally:
         state.enabled = False
@@ -9317,3 +9375,178 @@ def test_pet_timing_parameters_preserve_valid_numeric_boundaries(fleet, tmp_path
     assert pet.touch_interval == 5
     assert pet.activity_min_interval == 0.01
     assert pet.activity_max_interval == 3600
+
+
+async def test_deferred_touch_coalesces_busy_floor_and_enforces_expiry_vetoes(
+    fleet, tmp_path,
+):
+    """B026: temporary busy floor defers and re-evaluates once, subject to TTL/vetoes."""
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, GroundedChat(), speaker, memory=memory)
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(),
+        speech_cooldown=0, interaction_cooldown=0, max_observation_age=0.25,
+    )
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 1
+
+    try:
+        # 1. Busy group floor defers touch_tap and re-evaluates once after floor frees inside TTL.
+        floor_task = asyncio.create_task(asyncio.sleep(0.5))
+        conversation.active = floor_task
+        await pet._remember_touch(
+            "robot-01", 1, "touch_tap", "First gentle tap", received_at=time.monotonic(),
+        )
+        assert state.last_initiative_suppression == "deferred_floor_busy"
+        assert state.deferred_speech_candidate is not None
+        assert speaker.spoken == []
+        # Repeated taps coalesce to a single candidate without replay.
+        await pet._remember_touch(
+            "robot-01", 1, "touch_tap", "Coalesced second tap", received_at=time.monotonic(),
+        )
+        assert state.deferred_speech_candidate[0].description == "Coalesced second tap"
+        floor_task.cancel()
+        await asyncio.gather(floor_task, return_exceptions=True)
+        conversation.active = None
+        await wait_for(lambda: state.spoken == 1)
+        assert len(speaker.spoken) == 1
+
+        # 2. Expiry past max_observation_age before floor frees drops candidate cleanly.
+        pet._group_last_spoken = -1000.0
+        pet._admitted_event_kinds.clear()
+        conversation.active = asyncio.create_task(asyncio.sleep(0.5))
+        stale_t = time.monotonic() - 0.30
+        await pet._remember_touch(
+            "robot-01", 1, "touch_double", "Stale tap", received_at=stale_t,
+        )
+        assert state.deferred_speech_candidate is None
+        conversation.active.cancel()
+        await asyncio.gather(conversation.active, return_exceptions=True)
+        conversation.active = None
+
+        # 3. Quiet toggle cancels deferred candidate with zero audio.
+        conversation.active = asyncio.create_task(asyncio.sleep(0.5))
+        await pet._remember_touch(
+            "robot-01", 1, "touch_tap", "Quiet vetoed tap", received_at=time.monotonic(),
+        )
+        assert state.deferred_speech_candidate is not None
+        await pet.set_quiet("robot-01", True)
+        assert state.deferred_speech_candidate is None
+        conversation.active.cancel()
+        await asyncio.gather(conversation.active, return_exceptions=True)
+        conversation.active = None
+        await asyncio.sleep(0.05)
+        assert len(speaker.spoken) == 1
+    finally:
+        if conversation.active is not None:
+            conversation.active.cancel()
+            await asyncio.gather(conversation.active, return_exceptions=True)
+            conversation.active = None
+        state.enabled = False
+        await pet.close()
+
+
+async def test_privacy_mode_optional_transmission_dedup_across_cooldown_with_identical_cliff_faults(
+    fleet, tmp_path, monkeypatch,
+):
+    """DRX-112: repeating optional line >120s deduped without SQLite, blocking STOP, or user replies."""
+    import desk_robot.multimodal as multimodal_module
+    import desk_robot.pet as pet_module
+    from desk_robot.multimodal import CameraEvidence, CameraFrameHub
+
+    fake_now = [1000.0]
+
+    class FakeTime:
+        @staticmethod
+        def monotonic():
+            return fake_now[0]
+
+        @staticmethod
+        def time():
+            return 1_700_000_000.0 + (fake_now[0] - 1000.0)
+
+    class RepeatChat:
+        async def reply(self, history):
+            if any(m["role"] == "user" and "hello robot" in m["content"].lower() for m in history):
+                return "I am doing great, thanks!"
+            return "Whoa, another cliff edge near me!"
+
+    class HardwareSpeaker:
+        supports_permission_checks = True
+        supports_passive_speech_budget = True
+
+        def __init__(self):
+            self.spoken = []
+
+        @asynccontextmanager
+        async def session(self, robots, *, passive=False):
+            yield
+
+        async def say(self, robot, text, *, permission_check=None):
+            assert permission_check is None or permission_check()
+            self.spoken.append((robot.id, text))
+
+    monkeypatch.setattr(pet_module, "time", FakeTime)
+    monkeypatch.setattr(multimodal_module, "time", FakeTime)
+
+    fleet.mode = "hardware"
+    fleet.voice_memory_tools_enabled = False
+    fleet.voice_vision_tools_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = HardwareSpeaker()
+    conversation = Conversation(fleet, RepeatChat(), speaker, memory=memory)
+    stopped = []
+
+    async def on_fault(rid):
+        stopped.append(rid)
+
+    hub = CameraFrameHub([r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(),
+        on_local_fault=on_fault, speech_cooldown=120.0, group_window=3.0,
+    )
+    pet.multimodal = SimpleNamespace(hub=hub)
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 31
+
+    fault_body = {"safety": {"required": True, "ready": False, "fault": "floor_out_of_range", "sensor": 1}}
+    clear_body = {"safety": {"required": True, "ready": True, "fault": "none"}}
+
+    try:
+        # Baseline ready -> cliff 1 -> first optional speech at t=1000
+        await pet._observe_body_safety("robot-01", 31, clear_body)
+        await pet._observe_body_safety("robot-01", 31, fault_body)
+        assert stopped == ["robot-01"]
+        hub.frames["robot-01"].append(CameraEvidence(b"jpeg1", fake_now[0], 0.0, "safety_fault"))
+        pet._consider_speech(
+            "robot-01", SceneChange("object", "A cliff edge appeared at left", 0.99),
+            31, camera_derived=True, received_at=fake_now[0],
+        )
+        await wait_for(lambda: state.spoken == 1)
+        assert speaker.spoken == [("robot-01", "Whoa, another cliff edge near me!")]
+
+        # Explicit clear then advance past 120s cooldown to t=1121, identical cliff 2 -> model repeats line
+        await pet._observe_body_safety("robot-01", 31, clear_body)
+        fake_now[0] = 1121.0
+        await pet._observe_body_safety("robot-01", 31, fault_body)
+        assert stopped == ["robot-01", "robot-01"]
+        assert state.safety_fault_events == 2
+        hub.frames["robot-01"].append(CameraEvidence(b"jpeg2", fake_now[0], 0.0, "safety_fault"))
+        pet._consider_speech(
+            "robot-01", SceneChange("key", "A bright silver edge item appeared", 0.99),
+            31, camera_derived=True, received_at=fake_now[0],
+        )
+        await wait_for(
+            lambda: state.last_initiative_suppression == "repetitive_spontaneous_reply"
+        )
+        assert speaker.spoken == [("robot-01", "Whoa, another cliff edge near me!")]
+
+        # Unrelated user conversation reply remains unaffected
+        reply = await RepeatChat().reply([{"role": "user", "content": "hello robot"}])
+        assert reply == "I am doing great, thanks!"
+    finally:
+        state.enabled = False
+        await pet.close()

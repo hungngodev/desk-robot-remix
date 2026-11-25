@@ -320,21 +320,24 @@ def register_voice_context_route(
         # A room grant cannot be revived by toggling ON during SQLite IO.
         room_at_start = settings.room_station_context_enabled
         room_consent_gen_at_start = settings.room_station_consent_generation
+        memory = app.state.runtime.memory
         if query is None:
+            recent_params = __import__("inspect").signature(memory.recent).parameters
             records = await asyncio.to_thread(
-                app.state.runtime.memory.recent,
+                memory.recent,
                 robot_id,
                 limit=6,
-                **({"own_only": True} if not sharing_at_start else {}),
+                **({"own_only": True} if not sharing_at_start and "own_only" in recent_params else {}),
             )
         else:
+            search_params = __import__("inspect").signature(memory.search).parameters
             try:
                 records = await asyncio.to_thread(
-                    app.state.runtime.memory.search,
+                    memory.search,
                     robot_id,
                     query,
                     limit=6,
-                    **({"own_only": True} if not sharing_at_start else {}),
+                    **({"own_only": True} if not sharing_at_start and "own_only" in search_params else {}),
                 )
             except ValueError as exc:
                 raise HTTPException(422, str(exc)) from exc

@@ -21,7 +21,7 @@ DIRECT_INTERACTION_KINDS = frozenset({
 
 # Human VAD and a safety fault can schedule a corroborating camera look,
 # but neither is a candidate for an unsolicited physical-sensor story.
-TRIGGERS = PHYSICAL_INITIATIVE_KINDS | {"human_voice", "safety_fault"}
+TRIGGERS = PHYSICAL_INITIATIVE_KINDS | {"human_voice", "safety_fault", "stable_putdown"}
 
 assert DIRECT_INTERACTION_KINDS <= PHYSICAL_INITIATIVE_KINDS
 assert PHYSICAL_INITIATIVE_KINDS <= TRIGGERS

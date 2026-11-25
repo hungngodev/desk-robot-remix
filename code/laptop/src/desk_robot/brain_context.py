@@ -287,10 +287,20 @@ def compose_brain_context(
                 # An actual WROOM fault transition outranks idle VLM/memory
                 # context, but is NOT evidence of a measured desk drop, a
                 # physical motor halt, or a license to auto-rearm the body.
+                detail = item.get("fault_detail")
+                cause = (
+                    f" ({detail})"
+                    if (item.get("source") in (None, "wroom_event")
+                        and isinstance(detail, str)
+                        and re.fullmatch(r"[a-z0-9_]{1,64}", detail))
+                    else ""
+                )
                 phrase = (
-                    "WROOM reported latched safety fault and local disarm; "
+                    f"WROOM reported latched safety fault{cause} and local disarm; "
                     "do not drive, reverse, rearm, or claim a measured cliff."
                 )
+            elif kind == "stable_putdown":
+                phrase = "Physical sensor edge: stable_putdown (context only, no motor rearm)"
             else:
                 phrase = f"Physical sensor edge: {_clean(kind, limit=40)}"
         elif channel == "mac_activity" and kind == "coordinator_job":

@@ -64,6 +64,7 @@ class _Attention:
     sensor_edges: deque[tuple[str, float, int]] = field(
         default_factory=lambda: deque(maxlen=6)
     )
+    sensor_details: dict[str, str] = field(default_factory=dict)
 
 
 class AttentionLedger:
@@ -233,12 +234,19 @@ class AttentionLedger:
         state.sent, state.sent_at = cleaned, at
         return True
 
-    def sensor(self, robot_id: str, kind: str, at: float) -> bool:
+    def sensor(
+        self, robot_id: str, kind: str, at: float, *, detail: str | None = None,
+    ) -> bool:
         """Preserve independent physical evidence during a dialogue or activity."""
         _clock(at)
         state = self._state(robot_id)
         if not isinstance(kind, str) or not re.fullmatch(r"[a-z_]{1,40}", kind):
             return False
+        if detail is not None and (
+            not isinstance(detail, str)
+            or not re.fullmatch(r"[a-z0-9_]{1,64}", detail)
+        ):
+            detail = None
         if (state.topic_state == "active"
                 and at < state.topic_updated_at):
             # An old queued callback cannot become fresh context for a new goal.
@@ -270,6 +278,10 @@ class AttentionLedger:
             )
             state.sensor_edges.remove(victim)
         state.sensor_edges.append((kind, at, state.generation))
+        if detail is not None:
+            state.sensor_details[kind] = detail
+        else:
+            state.sensor_details.pop(kind, None)
         return True
 
     def timeline(
@@ -346,7 +358,10 @@ class AttentionLedger:
                 ((kind, stamp) for kind, stamp in reversed(events)
                  if kind == "safety_fault"), events[-1]
             )
+            detail = state.sensor_details.get(kind)
             description = f"WROOM {kind} edge {int(now - stamp)}s ago"
+            if detail:
+                description += f" ({detail[:20]})"
             # Preserve a handling cue over a flood of routine touch, but
             # never infer a scripted emotion or a physical command from it.
             another = next(

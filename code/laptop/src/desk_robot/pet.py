@@ -18,6 +18,7 @@ import re
 import sqlite3
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Awaitable, Callable, Protocol
 
@@ -97,6 +98,9 @@ _CAMERA_SCENE_ORDER_SENSITIVE = frozenset({
     "leaving", "turned", "rotated", "vanished", "disappeared", "removed",
     "picked", "dropped", "fell",
 })
+
+
+_OPTIONAL_SPEECH_DEDUP_WINDOW_S = 600.0
 
 
 def _camera_scene_signature(description: str) -> str:
@@ -197,7 +201,13 @@ class PetState:
     recovered_fuel_streak: int = 0
     last_nose_angle: int | None = None
     last_force_squeeze: bool | None = None
+    last_belly_seq: int | None = None
     last_near_hand: bool | None = None
+    recent_optional_transmissions: deque[tuple[str, float]] = field(
+        default_factory=lambda: deque(maxlen=12), repr=False,
+    )
+    deferred_speech_candidate: tuple | None = field(default=None, repr=False)
+    deferred_speech_task: asyncio.Task | None = field(default=None, repr=False)
     last_gesture_events: int | None = None
     last_aux_boot_id: int | None = None
     retired_aux_boot_ids: set[int] = field(default_factory=set, repr=False)
@@ -477,6 +487,7 @@ class PetController:
         state.gate = VisualChangeGate()  # never promote a pre-reconnect frame
         state.last_scene_frame_at = None
         state.last_hub_generation = None
+        self._clear_deferred_speech(state)
         if self.multimodal is not None:
             self.multimodal.hub.discard_video(robot_id)
         state.last_touch_count = None
@@ -512,7 +523,10 @@ class PetController:
         state.camera_habituation_epoch = None
         state.last_nose_angle = None
         state.last_force_squeeze = None
+        state.last_belly_seq = None
         state.last_near_hand = None
+        state.recent_optional_transmissions.clear()
+        self._clear_deferred_speech(state)
         state.last_gesture_events = None
         state.last_aux_boot_id = None
         state.retired_aux_boot_ids.clear()
@@ -567,6 +581,7 @@ class PetController:
         state.camera_habituation_epoch = None
         state.last_scene_frame_at = None
         state.last_hub_generation = None
+        self._clear_deferred_speech(state)
         tasks = [
             t for t in (state.task, state.touch_task, state.aux_task,
                         state.aux_read_task) if t is not None
@@ -610,6 +625,7 @@ class PetController:
             state.quiet_changed_at = time.monotonic()
         state.quiet = quiet
         if quiet:
+            self._clear_deferred_speech(state)
             await self._cancel_speech(robot_id)
         return self.status(robot_id)
 
@@ -620,7 +636,8 @@ class PetController:
         Hold off autonomous remarks for the existing cooldown after interruption
         rather than starting a fresh observation line while a person is talking.
         """
-        self.states[robot_id]  # Unknown identity fails explicitly.
+        state = self.states[robot_id]  # Unknown identity fails explicitly.
+        self._clear_deferred_speech(state)
         self._group_last_spoken = time.monotonic()
         # Priority inversion would let an old 45-second background VLM call
         # block a human's direct look request. Abort the candidate analysis.
@@ -1026,8 +1043,18 @@ class PetController:
             "text_only": True,
         }
 
+    def _clear_deferred_speech(self, state: PetState) -> None:
+        """Discard coalesced busy-floor candidate without blocking pause/quiet."""
+        state.deferred_speech_candidate = None
+        waiter = state.deferred_speech_task
+        if waiter is not None and waiter is not asyncio.current_task():
+            if not waiter.done() and not waiter.cancelling():
+                waiter.cancel()
+            state.deferred_speech_task = None
+
     def _notify_sensor(
         self, robot_id: str, kind: str, *, received_at: float | None = None,
+        detail: str | None = None,
     ) -> None:
         """One physical event path into the existing adaptive camera owner.
 
@@ -1049,14 +1076,24 @@ class PetController:
         # safety authority or mandatory speech response is introduced.
         attention = getattr(self, "attention", None)
         if attention is not None:
-            attention.sensor(robot_id, kind, received_at)
+            if detail is not None:
+                try:
+                    attention.sensor(robot_id, kind, received_at, detail=detail)
+                except TypeError:
+                    attention.sensor(robot_id, kind, received_at)
+            else:
+                attention.sensor(robot_id, kind, received_at)
         if self.multimodal is None:
             return
         schedule = getattr(self.multimodal, "sensor_event", None)
-        if callable(schedule):
-            schedule(robot_id, kind, received_at)
+        target = schedule if callable(schedule) else self.multimodal.hub.notify
+        if detail is not None:
+            try:
+                target(robot_id, kind, received_at, detail=detail)
+            except TypeError:
+                target(robot_id, kind, received_at)
         else:
-            self.multimodal.hub.notify(robot_id, kind, received_at)
+            target(robot_id, kind, received_at)
 
     async def _remember_touch(
         self, robot_id: str, generation: int, kind: str, description: str,
@@ -1196,6 +1233,7 @@ class PetController:
                 state.last_fuel_seq = None
                 state.low_fuel_streak = state.recovered_fuel_streak = 0
                 state.last_force_squeeze = None
+                state.last_belly_seq = None
                 state.last_near_hand = None
                 state.last_nose_angle = None
         elif state.last_aux_boot_id is not None:
@@ -1357,20 +1395,25 @@ class PetController:
             # independently new actual PN532 scan, including after reconnect.
             scan_advance = _sensor_counter_advance(current_scan, prior_scan)
             event_advance = _sensor_counter_advance(current_events, prior_events)
-            if scan_advance == 0:
-                pass  # replay/backwards scan never awards or erases a transition
-            elif (scan_advance is not None and prior_events is not None
-                  and event_advance is not None
-                  and 0 < event_advance <= min(3, scan_advance)
-                  and nfc["t"] != 0):
-                changes.append(SceneChange(
-                    "nfc_tag",
-                    f"My NFC toy accessory with game token {nfc['t']:08x} was presented",
-                    1.0,
-                ))
-            if scan_advance != 0:
-                # A genuine fresh scan advances the per-pet baseline. A stale
-                # packet must never rewind it and manufacture a new toy event.
+            # Same-boot event count can stay equal or advance (mod uint32), never
+            # move backwards. A contradictory rollback must neither emit nor rewind.
+            event_rollback = (
+                prior_events is not None
+                and current_events != prior_events
+                and ((current_events - prior_events) & 0xffffffff) >= 0x80000000
+            )
+            if scan_advance == 0 or event_rollback:
+                pass  # replay or contradictory event rollback leaves fences intact
+            else:
+                if (scan_advance is not None and prior_events is not None
+                        and event_advance is not None
+                        and 0 < event_advance <= min(3, scan_advance)
+                        and nfc["t"] != 0):
+                    changes.append(SceneChange(
+                        "nfc_tag",
+                        f"My NFC toy accessory with game token {nfc['t']:08x} was presented",
+                        1.0,
+                    ))
                 state.last_nfc_events = current_events
                 state.last_nfc_scan_seq = current_scan
         elif not robot.nfc_interactions_qualified or state.last_aux_boot_id is None:
@@ -1491,21 +1534,46 @@ class PetController:
 
         force = data["force"]
         belly_valid = force.get("belly_valid", force["valid"])
-        if robot.squeeze_raw_threshold is not None and belly_valid:
+        belly_seq = force.get("belly_seq")
+        belly_age = force.get("belly_age_ms")
+        aux_boot = _aux_boot_epoch(data)
+        belly_fresh = (
+            belly_age is None
+            or (type(belly_age) is int and type(request_elapsed_ms) in (int, float)
+                and 0 <= request_elapsed_ms < 500
+                and belly_age + request_elapsed_ms < 500)
+        )
+        if robot.squeeze_raw_threshold is not None and belly_valid and belly_fresh:
             # ADS1115 channel 0 is the belly FSR. Channel 1 is the jaw
             # contact for guarded grasp; gripping an object cannot claim
             # that a person squeezed this robot's pressure pad.
             # An invalid or clipped jaw channel 1 must not suppress
             # independent belly squeeze observation.
             # Both remain nonlinear raw ADC values, never Newtons.
-            squeezed = force["adc"][0] >= robot.squeeze_raw_threshold
-            if state.last_force_squeeze is False and squeezed:
-                changes.append(SceneChange(
-                    "squeeze", "Someone pressed my calibrated pressure pad", 1.0
-                ))
-            state.last_force_squeeze = squeezed
+            if aux_boot is not None and belly_seq is not None:
+                if type(belly_seq) is int and 0 < belly_seq <= 0xffffffff:
+                    advance = _sensor_counter_advance(belly_seq, state.last_belly_seq)
+                    if advance != 0:
+                        state.last_belly_seq = belly_seq
+                        squeezed = force["adc"][0] >= robot.squeeze_raw_threshold
+                        if state.last_force_squeeze is False and squeezed:
+                            changes.append(SceneChange(
+                                "squeeze", "Someone pressed my calibrated pressure pad", 1.0
+                            ))
+                        state.last_force_squeeze = squeezed
+                else:
+                    state.last_force_squeeze = None
+            else:
+                squeezed = force["adc"][0] >= robot.squeeze_raw_threshold
+                if state.last_force_squeeze is False and squeezed:
+                    changes.append(SceneChange(
+                        "squeeze", "Someone pressed my calibrated pressure pad", 1.0
+                    ))
+                state.last_force_squeeze = squeezed
         else:
             state.last_force_squeeze = None
+            if aux_boot is None:
+                state.last_belly_seq = None
 
         proximity = data["proximity"]
         if robot.proximity_near_raw_threshold is not None and proximity["valid"]:
@@ -1719,12 +1787,39 @@ class PetController:
             safety["ready"] is True or not state.enabled or
             state.generation != generation
         ):
+            if (fault == "none" and safety["ready"] is True
+                    and state.enabled and state.generation == generation
+                    and previous not in (None, "none", "not_required", "touch_active")
+                    and state.handling_gate.reference is not None):
+                self._notify_sensor(robot_id, "stable_putdown", received_at=received_at)
             return
         sensor = safety.get("sensor")
         location = (
             f" at channel {sensor}" if type(sensor) is int and 0 <= sensor <= 4
             else ""
         )
+        detail = f"{fault}_ch{sensor}" if type(sensor) is int and 0 <= sensor <= 4 else fault
+        if fault == "floor_out_of_range" and state.handling_gate.reference is not None:
+            ranges = body.get("ranges")
+            imu = body.get("imu")
+            if isinstance(ranges, dict) and isinstance(ranges.get("mm"), list):
+                mm = ranges["mm"]
+                v_mask = ranges.get("valid_mask", 0)
+                if len(mm) >= 4 and type(v_mask) is int:
+                    cliff_lost = sum(
+                        not (v_mask & (1 << ch)) or (type(mm[ch]) is int and mm[ch] > 120)
+                        for ch in range(4)
+                    )
+                    imu_upright = (
+                        isinstance(imu, dict) and imu.get("valid") is True
+                        and isinstance(imu.get("acc"), list) and len(imu["acc"]) == 3
+                        and type(imu["acc"][2]) is int and abs(imu["acc"][2]) >= 12000
+                        and state.handling_gate.tilt_hits == 0
+                        and state.handling_gate.shake_hits == 0
+                    )
+                    if cliff_lost >= 2 and imu_upright:
+                        detail = "floor_out_of_range_upright_lift"
+        detail = detail[:64]
         description = (
             f"My WROOM body reported a latched {fault} safety fault{location} "
             "and disarmed motion"
@@ -1743,7 +1838,7 @@ class PetController:
                 state.last_error = f"Local stop: {type(exc).__name__}: {str(exc)[:80]}"
         # A context JPEG must never compete with the urgent Mac stop and
         # permit invalidation. Schedule it only after the stop attempt.
-        self._notify_sensor(robot_id, "safety_fault", received_at=received_at)
+        self._notify_sensor(robot_id, "safety_fault", received_at=received_at, detail=detail)
         # Report the firmware's own status, not an inferred physical drop,
         # desk height, or an unverified cliff-stop distance.
         await self._store_observation(robot_id, SceneChange(
@@ -2835,11 +2930,26 @@ class PetController:
             or self._human_active_in_fleet(now)
             or now - previous < self.group_window
             or now - self._group_last_spoken < relevant_cooldown
-            or self.conversation.active is not None
+        ):
+            if state.quiet or scheduled_quiet or self._human_active_in_fleet(now):
+                self._clear_deferred_speech(state)
+            state.suppressed += 1
+            state.last_initiative_suppression = "quiet_voice_or_group_budget"
+            return
+        if (
+            self.conversation.active is not None
             or (self._speech_task is not None and not self._speech_task.done())
         ):
             state.suppressed += 1
-            state.last_initiative_suppression = "quiet_voice_or_group_budget"
+            state.last_initiative_suppression = "deferred_floor_busy"
+            state.deferred_speech_candidate = (
+                change, generation, camera_derived, offered_at,
+                admitted_camera_grant, camera_generation,
+            )
+            if state.deferred_speech_task is None or state.deferred_speech_task.done():
+                state.deferred_speech_task = asyncio.create_task(
+                    self._await_deferred_speech_floor(robot_id, generation)
+                )
             return
         self._admitted_event_kinds[event_key] = now
         if habituation_key is not None:
@@ -2868,6 +2978,47 @@ class PetController:
                         camera_derived=camera_derived,
                         camera_consent_generation=admitted_camera_grant,
                         camera_generation=camera_generation)
+        )
+
+    async def _await_deferred_speech_floor(
+        self, robot_id: str, generation: int,
+    ) -> None:
+        """Re-evaluate at most one coalesced candidate after floor busyness ends."""
+        state = self.states[robot_id]
+        try:
+            while (not self._closed and state.enabled
+                   and state.generation == generation
+                   and state.deferred_speech_candidate is not None):
+                offered_at = state.deferred_speech_candidate[3]
+                remaining = self.max_observation_age - (time.monotonic() - offered_at)
+                if remaining <= 0:
+                    break
+                owners = [
+                    owner for owner in (self.conversation.active, self._speech_task)
+                    if owner is not None and (not hasattr(owner, "done") or not owner.done())
+                ]
+                if not owners:
+                    break
+                futures = [owner for owner in owners if isinstance(owner, asyncio.Future)]
+                if futures:
+                    await asyncio.wait(
+                        futures, timeout=min(0.05, remaining),
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                else:
+                    await asyncio.sleep(min(0.01, remaining))
+        finally:
+            if asyncio.current_task() is state.deferred_speech_task:
+                state.deferred_speech_task = None
+        candidate = state.deferred_speech_candidate
+        state.deferred_speech_candidate = None
+        if candidate is None or self._closed or not state.enabled or state.generation != generation:
+            return
+        change, cand_gen, camera_derived, offered_at, cam_grant, cam_gen = candidate
+        self._consider_speech(
+            robot_id, change, cand_gen,
+            camera_derived=camera_derived, received_at=offered_at,
+            camera_consent_generation=cam_grant, camera_generation=cam_gen,
         )
 
     async def _proactive_tool_receipt(
@@ -3875,14 +4026,17 @@ class PetController:
             # Native MiniCPM and Mac TTS share one current-robot timeline.
             # Check it AGAIN after slow reasoning, since native speech may
             # have finished while the proactive model was considering a reply.
-            sent_recently: list[str] = []
+            now = time.monotonic()
+            sent_recently: list[str] = [
+                line for line, sent_at in state.recent_optional_transmissions
+                if 0 <= now - sent_at <= _OPTIONAL_SPEECH_DEDUP_WINDOW_S
+            ]
             if self.multimodal is not None:
                 spoken = getattr(self.multimodal.hub, "spoken_history", {})
-                now = time.monotonic()
-                sent_recently = [
+                sent_recently.extend(
                     item[0] for item in spoken.get(robot_id, ())
                     if 0 <= now - item[1] <= 30
-                ]
+                )
             if repeated_spontaneous_line(
                 text, recent_memory, now_wall=time.time(),
                 recent_transmitted=sent_recently,
@@ -3968,6 +4122,7 @@ class PetController:
                 now = time.monotonic()
                 self._group_last_spoken = now
                 state.spoken += 1
+                state.recent_optional_transmissions.append((text, now))
                 if scheduled_activity:
                     state.last_activity_decision = "speak"
                 if self.multimodal is not None:
@@ -3998,6 +4153,9 @@ class PetController:
 
     async def close(self) -> None:
         self._closed = True
+        for state in self.states.values():
+            state.recent_optional_transmissions.clear()
+            self._clear_deferred_speech(state)
         activity_task = self._activity_task
         if activity_task is not None and not activity_task.done():
             activity_task.cancel()

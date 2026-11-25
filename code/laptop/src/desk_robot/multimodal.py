@@ -237,6 +237,9 @@ class CameraFrameHub:
         # edges within its eight-second context lifetime. This is a cached
         # observation timestamp, never an independent motion authority.
         self.latest_safety_fault = {robot: -math.inf for robot in robot_ids}
+        self.latest_safety_fault_detail: dict[str, str | None] = {
+            robot: None for robot in robot_ids
+        }
         # One direct-contact cue survives routine sensor chatter for the same
         # original eight-second TTL. It does not grant speech or motion.
         self.latest_direct_interaction: dict[str, tuple[str, float] | None] = {
@@ -343,10 +346,17 @@ class CameraFrameHub:
         if type(robot_id) is not str or robot_id not in self.robots:
             raise ValueError("Unknown robot camera identity")
 
-    def notify(self, robot_id: str, kind: str, now: float) -> None:
+    def notify(
+        self, robot_id: str, kind: str, now: float, *, detail: str | None = None,
+    ) -> None:
         self._check(robot_id)
         if type(kind) is not str or kind not in TRIGGERS or not _admissible_mac_event_clock(now):
             raise ValueError("Unknown physical event or invalid time")
+        if detail is not None and (
+            not isinstance(detail, str)
+            or not re.fullmatch(r"[a-z0-9_]{1,64}", detail)
+        ):
+            detail = None
         self.urgent[robot_id] = True
         self.event_history[robot_id].append((kind, now))
         if kind in DIRECT_INTERACTION_KINDS:
@@ -365,9 +375,10 @@ class CameraFrameHub:
             if len(past) > 12:
                 del past[min(past, key=past.get)]
         if kind == "safety_fault":
-            self.latest_safety_fault[robot_id] = max(
-                self.latest_safety_fault[robot_id], now
-            )
+            prior_at = self.latest_safety_fault[robot_id]
+            if now >= prior_at:
+                self.latest_safety_fault[robot_id] = now
+                self.latest_safety_fault_detail[robot_id] = detail
         if kind == "human_voice":
             self.voice_started_at[robot_id] = max(self.voice_started_at[robot_id], now)
             # Real Xiaozhi speech_end (or explicit disconnect/clear) owns
@@ -580,12 +591,18 @@ class CameraFrameHub:
             if len(required) >= 6:
                 break
             required.add(index)
+        fault_detail = self.latest_safety_fault_detail.get(robot_id)
         return [
             {
                 "kind": events[i][0],
                 "age_ms": round(1000 * (now - events[i][1])),
                 "source": ("xiaozhi_vad" if events[i][0] == "human_voice"
                            else "wroom_sensed_event"),
+                **(
+                    {"fault_detail": fault_detail}
+                    if events[i][0] == "safety_fault" and fault_detail is not None
+                    else {}
+                ),
             }
             for i in sorted(required)
         ]
@@ -805,9 +822,10 @@ class CameraFrameHub:
                     "identity_verified": False,
                     "physical_action_verified": False,
                 }))
+        fault_detail = self.latest_safety_fault_detail.get(robot_id)
         for kind, stamp in self.event_history[robot_id]:
             if 0 <= now - stamp <= 8:
-                items.append((stamp, {
+                item = {
                     "channel": "human_voice" if kind == "human_voice" else "sensor",
                     "kind": kind,
                     "age_ms": round(1000 * (now - stamp)),
@@ -815,7 +833,10 @@ class CameraFrameHub:
                               else "wroom_event",
                     "content": None,
                     "physical_action_verified": False,
-                }))
+                }
+                if kind == "safety_fault" and fault_detail is not None:
+                    item["fault_detail"] = fault_detail
+                items.append((stamp, item))
         # Keep original ages visible when an old tilt or nearby object
         # may explain the conversation. This is NOT a live sensor state.
         for kind, stamp in self.situation_edges[robot_id].items():
@@ -835,12 +856,15 @@ class CameraFrameHub:
         if (0 <= now - fault_at <= 8
                 and not any(kind == "safety_fault" and stamp == fault_at
                             for kind, stamp in self.event_history[robot_id])):
-            items.append((fault_at, {
+            item = {
                 "channel": "sensor", "kind": "safety_fault",
                 "age_ms": round(1000 * (now - fault_at)),
                 "source": "wroom_event", "content": None,
                 "physical_action_verified": False,
-            }))
+            }
+            if fault_detail is not None:
+                item["fault_detail"] = fault_detail
+            items.append((fault_at, item))
         # A fresh direct interaction must not be displaced by background
         # sensors before the model's modality budget even sees it.
         direct = self.latest_direct_interaction[robot_id]
@@ -1078,6 +1102,7 @@ class CameraFrameHub:
         self.event_history[robot_id].clear()
         self.situation_edges[robot_id].clear()
         self.latest_safety_fault[robot_id] = -math.inf
+        self.latest_safety_fault_detail[robot_id] = None
         self.latest_direct_interaction[robot_id] = None
         self.voice_started_at[robot_id] = -math.inf
         self.voice_until[robot_id] = -math.inf
@@ -1553,6 +1578,7 @@ class MultimodalOrchestrator:
 
     def sensor_event(
         self, robot_id: str, kind: str, received_at: float | None = None,
+        *, detail: str | None = None,
     ) -> None:
         """Fast event priority, separate from VLM, TTS and WROOM motion.
 
@@ -1570,7 +1596,7 @@ class MultimodalOrchestrator:
         # PetController still retains independently timestamped attention and memory.
         if now - stamp > 8:
             return
-        self.hub.notify(robot_id, kind, stamp)
+        self.hub.notify(robot_id, kind, stamp, detail=detail)
         self._metrics[robot_id]["sensor_triggers"] += 1
         if self._closed or self._any_human_active(now):
             self._metrics[robot_id]["sensor_deferred_human"] += 1
