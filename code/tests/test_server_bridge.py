@@ -3254,3 +3254,61 @@ async def test_normal_barge_propagates_cancellation_during_native_cleanup(bridge
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+@pytest.mark.parametrize("alias", ["leaf", "parent", "marker", "new-parent", "escape", "none"])
+def test_overlay_refresh_rejects_unsafe_paths(tmp_path, monkeypatch, alias):
+    import hashlib
+
+    spec = importlib.util.spec_from_file_location(
+        "server_overlay_paths", ROOT / "laptop/server/install_overlay.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    upstream = tmp_path / "upstream"
+    output = tmp_path / "build"
+    root = output / "main/xiaozhi-server"
+    root.mkdir(parents=True)
+    upstream.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    victim = outside / "app.py"
+    victim.write_text("old")
+    (root / "first.py").write_text("old")
+    (root / "core").mkdir()
+    (root / "core/app.py").write_text("old")
+    digest = hashlib.sha256(b"old").hexdigest()
+    manifest = {"first.py": digest, "core/app.py": digest}
+    marker = output / ".desk-robot-server-overlay.json"
+    changes = {"first.py": "new", "core/app.py": "new", "extra/app.py": "new"}
+    if alias == "leaf":
+        (root / "core/app.py").unlink()
+        (root / "core/app.py").symlink_to(victim)
+    elif alias == "parent":
+        (root / "core/app.py").unlink()
+        (root / "core").rmdir()
+        (root / "core").symlink_to(outside, target_is_directory=True)
+    elif alias == "new-parent":
+        (root / "extra").symlink_to(outside, target_is_directory=True)
+    elif alias == "escape":
+        manifest["../../../outside/app.py"] = digest
+    if alias == "marker":
+        external_marker = outside / "manifest.json"
+        external_marker.write_text(json.dumps(manifest))
+        marker.symlink_to(external_marker)
+    else:
+        marker.write_text(json.dumps(manifest))
+    monkeypatch.setattr(module, "files", lambda _root: changes)
+    monkeypatch.setattr(
+        module.subprocess, "check_output",
+        lambda args, **_kwargs: module.PIN if args[1] == "rev-parse" else "",
+    )
+    if alias == "none":
+        module.install(upstream, output)
+        module.install(upstream, output)
+        assert (root / "first.py").read_text() == "new"
+    else:
+        with pytest.raises(ValueError, match="Symbolic link|Invalid managed overlay path"):
+            module.install(upstream, output)
+        assert (root / "first.py").read_text() == "old"
+    assert victim.read_text() == "old"

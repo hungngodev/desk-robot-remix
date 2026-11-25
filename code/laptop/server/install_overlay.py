@@ -350,6 +350,21 @@ def files(root):
     return changes
 
 
+def checked_path(root: Path, name: str) -> Path:
+    """Never follow a link or accept a path outside the managed build."""
+    relative = Path(name)
+    if relative.is_absolute() or not relative.parts or ".." in relative.parts:
+        raise ValueError(f"Invalid managed overlay path: {name}")
+    path = root
+    if path.is_symlink():
+        raise ValueError(f"Symbolic link in managed overlay path: {path}")
+    for part in relative.parts:
+        path = path / part
+        if path.is_symlink():
+            raise ValueError(f"Symbolic link in managed overlay path: {path}")
+    return path
+
+
 def install(upstream: Path, output: Path):
     pin = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=upstream, text=True).strip()
     if pin != PIN:
@@ -357,13 +372,17 @@ def install(upstream: Path, output: Path):
     if subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=upstream, text=True).strip():
         raise ValueError("Preserve upstream source changes before installing")
     changes = files(upstream / "main/xiaozhi-server")
-    marker = output / ".desk-robot-server-overlay.json"
+    marker = checked_path(output, ".desk-robot-server-overlay.json")
+    root = checked_path(output, "main/xiaozhi-server")
     if output.exists():
         current = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=output, text=True).strip()
         if current != PIN or not marker.is_file():
             raise ValueError("Existing output is not this pinned managed build")
-        for name, checksum in json.loads(marker.read_text()).items():
-            path = output / "main/xiaozhi-server" / name
+        manifest = json.loads(marker.read_text())
+        if not isinstance(manifest, dict) or not manifest:
+            raise ValueError("Invalid managed overlay manifest")
+        for name, checksum in manifest.items():
+            path = checked_path(root, name)
             if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != checksum:
                 raise ValueError(f"Preserve changed overlaid file before refresh: {name}")
     else:
@@ -373,9 +392,12 @@ def install(upstream: Path, output: Path):
             check=True,
         )
         subprocess.run(["git", "checkout", "--detach", PIN], cwd=output, check=True)
-    root = output / "main/xiaozhi-server"
+    # Validate every destination before changing any managed source, including
+    # new paths absent from an older manifest.
+    root = checked_path(output, "main/xiaozhi-server")
+    destinations = {name: checked_path(root, name) for name in changes}
     for name, source in changes.items():
-        path = root / name
+        path = destinations[name]
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(source)
     manifest = {
