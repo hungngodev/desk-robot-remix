@@ -107,7 +107,9 @@ class PoseFence:
         self.blocked_reason = "no_pose"
         self._continuous = False
         self._healthy_samples = 0
-        self._retired: set[tuple[int, int, int | None]] = set()
+        self._retired_body_boots: set[int] = set()
+        self._retired_origins: set[tuple[int, int]] = set()
+        self._retired_head_boots: set[int] = set()
         self._failed: set[tuple[int, int, int | None]] = set()
         # Retain only actual receipt objects from this uninterrupted fence.
         # Bounded eviction fails closed for an old bracket, never restores it.
@@ -130,7 +132,10 @@ class PoseFence:
                 raise PoseError("Pose request age exceeds local freshness budget")
             reading = replace(reading, request_started_at=float(request_started_at))
         identity = (reading.body_boot, reading.origin, reading.head_boot)
-        if identity in self._retired or identity in self._failed:
+        if (reading.body_boot in self._retired_body_boots
+                or (reading.body_boot, reading.origin) in self._retired_origins
+                or reading.head_boot in self._retired_head_boots
+                or identity in self._failed):
             self.invalidate("retired_or_failed_origin")
             raise PoseError("Retired or failed body/head pose origin")
         old = self.last
@@ -142,7 +147,22 @@ class PoseFence:
         if old is not None:
             old_identity = (old.body_boot, old.origin, old.head_boot)
             if identity != old_identity:
-                self._retired.add(old_identity)
+                # Body source clocks do not reset when only the head or origin
+                # changes. Reject a replay before replacing the known baseline.
+                if (reading.received_at < old.received_at
+                        or (reading.body_boot == old.body_boot
+                            and (reading.seq <= old.seq or reading.sample_us <= old.sample_us))):
+                    self.invalidate("replayed_or_reset_pose_clock")
+                    raise PoseError("Pose sequence, sample clock, or receipt clock reset")
+                # Retire each changed identity independently: a different head
+                # boot must never resurrect a previously invalidated body origin.
+                if reading.body_boot != old.body_boot:
+                    self._retired_body_boots.add(old.body_boot)
+                elif reading.origin != old.origin and old.origin != 0:
+                    self._retired_origins.add((old.body_boot, old.origin))
+                if reading.head_boot != old.head_boot and old.head_boot is not None:
+                    self._retired_head_boots.add(old.head_boot)
+                # Origin zero is a repeatable unavailable diagnostic, not a frame.
                 self.last = reading
                 self._clock_reference = reading
                 self.invalidate("origin_changed")
