@@ -141,5 +141,34 @@ int main() {
   }
   assert(jitter.ready() && !jitter.failed());
   assert(jitter.take().frames == SensePcmWindow::kFrames);
+  // A dropped PDM callback can fit both timing tolerances, so explicit
+  // failure notification must invalidate the active window immediately.
+  SensePcmWindow short_read;
+  short_read.invalidate_read(1000000);
+  assert(!short_read.failed());
+  assert(short_read.begin(data.data(), 1000000));
+  short_read.invalidate_read(999999);
+  assert(!short_read.failed());
+  short_read.offer(mic.data(), ref.data(), 320, 1020000, true);
+  short_read.invalidate_read(1040000);
+  for (int i = 2; i <= 200; ++i)
+    short_read.offer(mic.data(), ref.data(), 320,
+                     1000000 + (i + 1) * 20000, true);
+  assert(short_read.failed() && !short_read.ready());
+  assert(short_read.frames_received() == 320);
+  assert(short_read.take().interleaved == nullptr);
+  assert(short_read.discard() == data.data());
+  assert(short_read.begin(data.data(), 6000000));
+  short_read.invalidate_read(6000000);
+  assert(short_read.failed());
+  assert(short_read.discard() == data.data());
+  assert(short_read.begin(data.data(), 7000000));
+  short_read.invalidate_read(6000001);
+  for (int i = 1; i <= 200; ++i)
+    short_read.offer(mic.data(), ref.data(), 320, 7000000 + i * 20000, true);
+  assert(short_read.ready());
+  short_read.invalidate_read(11020000);
+  assert(short_read.ready() && !short_read.failed());
+  assert(short_read.take().frames == SensePcmWindow::kFrames);
   return 0;
 }

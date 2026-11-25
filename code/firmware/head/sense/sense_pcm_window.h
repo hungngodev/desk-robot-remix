@@ -123,6 +123,14 @@ class SensePcmWindow {
     }
   }
 
+  // A short/error PDM read has no trustworthy source sample interval.
+  // Never let a known loss hide inside the callback jitter tolerance.
+  // Ignore a stale completion from before START or after the window closed.
+  void invalidate_read(std::int64_t end_us) noexcept {
+    if (storage_ != nullptr && !ready_ && end_us >= requested_us_)
+      failed_ = true;
+  }
+
   bool ready() const noexcept { return ready_ && !failed_; }
   std::int64_t first_sample_us() const noexcept { return first_sample_us_; }
   std::int64_t last_sample_us() const noexcept { return last_sample_us_; }

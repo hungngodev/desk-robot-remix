@@ -142,6 +142,16 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
     // samples and must never prevent output publishing an AEC reference.
     const int mic_read = NoAudioCodecSimplexPdm::Read(microphone_frame_.data(), frames);
     if (mic_read != frames) {
+#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+        // A known missing PDM interval cannot be treated as scheduler jitter.
+        // Timestamp the failure before waiting for the bench owner; a late
+        // callback from before the current START cannot poison its window.
+        const int64_t failed_read_us = esp_timer_get_time();
+        {
+            std::lock_guard<std::mutex> lock(bench_mutex_);
+            bench_window_.invalidate_read(failed_read_us);
+        }
+#endif
         // An error or short PDM read can still have written raw microphone PCM.
         std::fill_n(microphone_frame_.begin(), frames, 0);
         return 0; // AudioCodec::InputData is boolean; reject partial frames.

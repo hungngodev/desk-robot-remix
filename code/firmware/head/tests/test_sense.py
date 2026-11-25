@@ -1730,6 +1730,24 @@ def test_sense_pcm_capture_reuses_the_actual_pdm_read_end_clock():
     assert "static_cast<uint32_t>(frames), esp_timer_get_time()" not in read
 
 
+def test_short_pdm_read_invalidates_the_private_pcm_window():
+    """A known device read failure must not disappear into tolerated timing jitter."""
+    codec = (HEAD / "sense/sense_reference_codec.cc").read_text()
+    read = codec.split("int SenseReferenceCodec::Read(", 1)[1].split(
+        "int SenseReferenceCodec::Write(", 1
+    )[0]
+    short_read = read.split("if (mic_read != frames) {", 1)[1].split(
+        "return 0;", 1
+    )[0]
+    assert "#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED" in short_read
+    assert "const int64_t failed_read_us = esp_timer_get_time();" in short_read
+    assert short_read.index("failed_read_us = esp_timer_get_time()") < short_read.index(
+        "std::lock_guard<std::mutex> lock(bench_mutex_);"
+    )
+    assert "bench_window_.invalidate_read(failed_read_us);" in short_read
+    assert "std::fill_n(microphone_frame_.begin(), frames, 0);" in short_read
+
+
 def test_private_sense_pcm_bench_requires_explicit_fresh_consent():
     """No private image may inherit earlier raw microphone capture permission."""
     with tempfile.TemporaryDirectory() as directory:
