@@ -2491,6 +2491,7 @@ inline thread_local int lock_depth = 0;
 struct lv_obj_t {
     bool hidden = false;
     int x = 0, y = 0, w = 0, h = 0;
+    int radius = -1;
     lv_obj_t* parent = nullptr;
     std::vector<lv_obj_t*> children;
     std::string text;
@@ -2531,7 +2532,10 @@ inline constexpr int LV_ALIGN_TOP_MID = 0, LV_RADIUS_CIRCLE = 1, LV_OPA_COVER = 
 inline constexpr int LV_SCROLLBAR_MODE_OFF = 3, LV_OBJ_FLAG_HIDDEN = 4;
 inline int lv_color_white() { return 1; }
 inline int lv_color_black() { return 0; }
-inline void lv_obj_set_style_radius(lv_obj_t*, int, int) { assert(lock_depth > 0); }
+inline void lv_obj_set_style_radius(lv_obj_t* n, int radius, int) {
+    assert(lock_depth > 0);
+    n->radius = radius;
+}
 inline void lv_obj_set_style_pad_all(lv_obj_t*, int, int) { assert(lock_depth > 0); }
 inline void lv_obj_set_style_border_width(lv_obj_t*, int, int) { assert(lock_depth > 0); }
 inline void lv_obj_set_style_bg_color(lv_obj_t*, int, int) { assert(lock_depth > 0); }
@@ -2611,8 +2615,27 @@ protected:
 """
     native = r"""
 #include "face_eye_display.hpp"
+#include <array>
 #include <cassert>
 #include <thread>
+using Framebuffer = std::array<unsigned char, 128 * 64>;
+
+// A conservative rectangular footprint, not a replacement LVGL rasterizer.
+// Check absolute bounds before each simulated framebuffer write.
+static void PaintBounds(const lv_obj_t* node, int parent_x, int parent_y,
+                        Framebuffer& pixels) {
+    if (node->hidden) return;
+    const int x = parent_x + node->x;
+    const int y = parent_y + node->y;
+    assert(node->w > 0 && node->h > 0);
+    assert(x >= 48 && x <= 80 && node->w <= 80 - x);
+    assert(y >= 16 && y <= 64 && node->h <= 64 - y);
+    for (int row = y; row < y + node->h; ++row)
+        for (int col = x; col < x + node->w; ++col)
+            pixels[static_cast<size_t>(row) * 128 + col] = 1;
+    for (const auto* child : node->children) PaintBounds(child, x, y, pixels);
+}
+
 int main() {
     using desk_robot::FaceStatus;
     using desk_robot::SelectFaceStatus;
@@ -2701,6 +2724,25 @@ int main() {
     { DisplayLockGuard lock(&display); lv_obj_remove_flag(popup, LV_OBJ_FLAG_HIDDEN); }
     assert(!layer->hidden && !popup->hidden);
     assert(screen.children.back() == popup);
+    assert(layer->radius == 0);
+    for (auto* eye : layer->children) {
+        assert(eye->radius == LV_RADIUS_CIRCLE);
+        assert(eye->children.at(0)->radius == LV_RADIUS_CIRCLE);
+    }
+    for (int x : {-128, -3, 0, 3, 127}) {
+        for (int y : {-128, -3, 0, 3, 127}) {
+            for (bool closed : {false, true}) {
+                display.ShowEyes({true, closed, static_cast<int8_t>(x), static_cast<int8_t>(y)});
+                Framebuffer pixels{};
+                PaintBounds(layer, 0, 0, pixels);
+                assert(std::count(pixels.begin(), pixels.end(), 1) == 32 * 48);
+            }
+        }
+    }
+    display.ShowEyes({});
+    Framebuffer hidden_pixels{};
+    PaintBounds(layer, 0, 0, hidden_pixels);
+    assert(std::count(hidden_pixels.begin(), hidden_pixels.end(), 1) == 0);
     for (int x = -128; x <= 127; ++x) {
         for (int y = -128; y <= 127; ++y) {
             for (bool closed : {false, true}) {
