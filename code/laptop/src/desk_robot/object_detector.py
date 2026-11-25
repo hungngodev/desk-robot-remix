@@ -203,11 +203,35 @@ async def detect_object_frame(
         return reject(reason)
     loop = asyncio.get_running_loop()
     real_deadline = loop.time() + timeout_s
+    async def wait_current(task: asyncio.Task) -> str | None:
+        # Cancel the obsolete waiter, not the shielded native decoder or
+        # the running YOLO worker. Both retain their own admission slots.
+        task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
+        try:
+            while not task.done():
+                reason = live()
+                if reason:
+                    return reason
+                remaining = real_deadline - loop.time()
+                if remaining <= 0:
+                    return "inference_timeout"
+                await asyncio.wait((task,), timeout=min(0.025, remaining))
+            # The event loop may resume after both the deadline and completion.
+            if loop.time() >= real_deadline:
+                return "inference_timeout"
+            return live()
+        finally:
+            if not task.done():
+                task.cancel()
+
+    validation = asyncio.create_task(
+        validated_camera_sizes((frame.jpeg,), max_bytes=4_000_000),
+    )
     try:
-        ((width, height),) = await asyncio.wait_for(
-            validated_camera_sizes((frame.jpeg,), max_bytes=4_000_000),
-            timeout=timeout_s,
-        )
+        reason = await wait_current(validation)
+        if reason:
+            return reject(reason)
+        ((width, height),) = validation.result()
     except TimeoutError:
         return reject("inference_timeout")
     except RuntimeError:
@@ -226,22 +250,10 @@ async def detect_object_frame(
         return await detector.detect(frame.jpeg, query.label)
 
     task = asyncio.create_task(predict())
-    task.add_done_callback(lambda done: None if done.cancelled() else done.exception())
     try:
-        while not task.done():
-            reason = live()
-            if reason:
-                task.cancel()
-                return reject(reason)
-            remaining = real_deadline - loop.time()
-            if remaining <= 0:
-                task.cancel()
-                return reject("inference_timeout")
-            await asyncio.wait((task,), timeout=min(0.025, remaining))
-        # A stalled event loop may resume after both the timeout and native
-        # completion. Never accept that result solely because task.done().
-        if loop.time() >= real_deadline:
-            return reject("inference_timeout")
+        reason = await wait_current(task)
+        if reason:
+            return reject(reason)
         # Native completion, not merely request submission, is the receipt.
         try:
             results = task.result()

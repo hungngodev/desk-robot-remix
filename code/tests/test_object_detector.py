@@ -461,3 +461,42 @@ async def test_native_partial_results_cannot_certify_an_object_observation(
         assert not receipt.may_execute and not receipt.arrived
     finally:
         await detector.close()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stop,reason", [
+    (False, "request_invalidated"),
+    (True, "safety_preempted"),
+])
+async def test_pending_object_decode_yields_to_live_invalidation(monkeypatch, stop, reason):
+    import desk_robot.object_detector as module
+
+    entered = asyncio.Event()
+    cancelled = asyncio.Event()
+    active = True
+
+    async def validate(frames, **kwargs):
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(module, "validated_camera_sizes", validate)
+    detector = FakeDetector()
+    task = asyncio.create_task(inspect(
+        detector,
+        request_is_current=lambda: active or stop,
+        safety_clear=lambda: active or not stop,
+        timeout_s=2.0,
+    ))
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+        active = False
+        receipt = await asyncio.wait_for(task, timeout=1.0)
+        assert receipt.reason == reason
+        assert receipt.evidence is None and detector.calls == 0
+        await asyncio.wait_for(cancelled.wait(), timeout=1.0)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
