@@ -249,12 +249,51 @@ class OverlayPathTests(unittest.TestCase):
         state = json.loads(marker.read_text())
         for info in state.values():
             del info["recipe_sha256"]
+            del info["manifest_sha256"]
         marker.write_text(json.dumps(state))
         with self.assertRaisesRegex(ValueError, "predates recipe tracking"):
             overlay.apply(self.root)
         overlay.remove(self.root)
         self.assertFalse(marker.exists())
         self.assertFalse(self.board.exists())
+
+    def test_manifest_rejects_missing_entry_and_changed_original(self):
+        existing = self.root / "main/existing.cc"
+        existing.write_bytes(b"original")
+        self.plan["main/existing.cc"] = b"new"
+        overlay.apply(self.root)
+        marker = self.root / overlay.MARKER
+        original_marker = marker.read_text()
+        for case in ("missing entry", "changed original"):
+            with self.subTest(case=case):
+                state = json.loads(original_marker)
+                if case == "missing entry":
+                    del state["main/existing.cc"]
+                else:
+                    state["main/existing.cc"]["original"] = "Zm9yZ2Vk"
+                damaged = json.dumps(state)
+                marker.write_text(damaged)
+                for action in (overlay.apply, overlay.remove):
+                    with self.assertRaisesRegex(ValueError, "manifest digest"):
+                        action(self.root)
+                    self.assertEqual(marker.read_text(), damaged)
+                    self.assertEqual(existing.read_bytes(), b"new")
+                    self.assertEqual((self.board / "config.json").read_bytes(), b"{}")
+        marker.write_text(original_marker)
+        overlay.remove(self.root)
+        self.assertEqual(existing.read_bytes(), b"original")
+
+    def test_recipe_only_legacy_journal_remains_recoverable_but_not_current(self):
+        overlay.apply(self.root)
+        marker = self.root / overlay.MARKER
+        state = json.loads(marker.read_text())
+        for info in state.values():
+            del info["manifest_sha256"]
+        marker.write_text(json.dumps(state))
+        with self.assertRaisesRegex(ValueError, "predates manifest tracking"):
+            overlay.apply(self.root)
+        overlay.remove(self.root)
+        self.assertFalse(marker.exists())
 
     def test_recipe_mutation_during_planning_refused_before_journal(self):
         def changing_plan(*args):

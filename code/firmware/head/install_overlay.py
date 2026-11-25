@@ -1297,6 +1297,15 @@ def unique_journal_object(pairs: list[tuple[str, object]]) -> dict:
     return result
 
 
+def overlay_journal_digest(state: dict) -> str:
+    """Detect journal entry loss or corruption, independent of JSON order."""
+    payload = {
+        name: {key: value for key, value in info.items() if key != "manifest_sha256"}
+        for name, info in state.items()
+    }
+    return digest(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
+
+
 def read_overlay_journal(target: Path, marker: Path) -> dict:
     """Reject malformed or escaping recovery journals before any file IO."""
     if not marker.is_file() or marker.is_symlink() or marker.stat().st_size > 16_000_000:
@@ -1312,7 +1321,8 @@ def read_overlay_journal(target: Path, marker: Path) -> dict:
                 or "\\" in name or any(part in ("", ".", "..") for part in name.split("/"))
                 or not isinstance(info, dict)
                 or set(info) not in ({"sha256", "original"},
-                                     {"sha256", "original", "recipe_sha256"})
+                                     {"sha256", "original", "recipe_sha256"},
+                                     {"sha256", "original", "recipe_sha256", "manifest_sha256"})
                 or type(info["sha256"]) is not str
                 or len(info["sha256"]) != 64
                 or any(ch not in "0123456789abcdef" for ch in info["sha256"])
@@ -1324,6 +1334,11 @@ def read_overlay_journal(target: Path, marker: Path) -> dict:
             if (type(recipe) is not str or len(recipe) != 64
                     or any(ch not in "0123456789abcdef" for ch in recipe)):
                 raise ValueError("Invalid head overlay journal recipe digest")
+        if "manifest_sha256" in info:
+            manifest = info["manifest_sha256"]
+            if (type(manifest) is not str or len(manifest) != 64
+                    or any(ch not in "0123456789abcdef" for ch in manifest)):
+                raise ValueError("Invalid head overlay journal manifest digest")
         parts = name.split("/")
         if any("/".join(parts[:i]) in state for i in range(1, len(parts))):
             raise ValueError("Invalid head overlay journal: overlapping paths")
@@ -1337,6 +1352,12 @@ def read_overlay_journal(target: Path, marker: Path) -> dict:
                 raise ValueError("Invalid original bytes in overlay journal") from exc
     if len({info.get("recipe_sha256") for info in state.values()}) != 1:
         raise ValueError("Invalid head overlay journal: mixed recipe digests")
+    manifests = {info.get("manifest_sha256") for info in state.values()}
+    if len(manifests) != 1:
+        raise ValueError("Invalid head overlay journal: mixed manifest digests")
+    manifest = next(iter(manifests))
+    if manifest is not None and manifest != overlay_journal_digest(state):
+        raise ValueError("Invalid head overlay journal manifest digest")
     return state
 
 
@@ -1413,6 +1434,10 @@ def apply(target: Path, board: str = "cores3") -> None:
                 "Overlay recipe changed or journal predates recipe tracking; "
                 "preserve local changes, use --remove, then reinstall"
             )
+        if any("manifest_sha256" not in info for info in state.values()):
+            raise ValueError(
+                "Overlay journal predates manifest tracking; use --remove, then reinstall"
+            )
         print("Overlay already applied, unchanged")
         return
     changed = subprocess.check_output(
@@ -1439,6 +1464,9 @@ def apply(target: Path, board: str = "cores3") -> None:
     # or its complete overlay bytes, and --remove can recover using the
     # still-present marker. A marker written only after file replacements
     # would strand a force-killed build with no rollback information.
+    manifest = overlay_journal_digest(state)
+    for info in state.values():
+        info["manifest_sha256"] = manifest
     atomic_replace_bytes(marker, (json.dumps(state, indent=2) + "\n").encode())
     attempted = []
     try:
