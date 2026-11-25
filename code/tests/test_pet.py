@@ -3830,6 +3830,54 @@ async def test_optional_bumper_magnet_pir_are_real_masked_fleet_events(fleet, tm
         await pet.close()
 
 
+async def test_optional_mask_changes_preserve_continuously_enabled_events(fleet, tmp_path):
+    cancellations = []
+
+    async def stop(robot_id):
+        cancellations.append(robot_id)
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene(),
+                        on_local_fault=stop, speech_cooldown=120)
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 3
+
+    def status(mask, bumps, reed, pir):
+        return {"extras": {"mask": mask, "bumper": bool(bumps),
+                "bumps": bumps, "reed": bool(reed), "reed_count": reed,
+                "pir": bool(pir), "pir_count": pir}}
+
+    def kinds():
+        return sorted(row.kind for row in memory.recent("robot-01")
+                      if row.kind in {"bumper", "magnet", "pir"})
+
+    try:
+        await pet._observe_optional("robot-01", 3, status(7, 10, 20, 30))
+        # GPIOB disappears while the independent bumper registers a contact.
+        await pet._observe_optional("robot-01", 3, status(1, 11, 20, 30))
+        await pet._observe_optional("robot-01", 3, status(1, 11, 20, 30))
+        assert cancellations == ["robot-01"]
+        assert kinds() == ["bumper"]
+
+        # Recovery baselines reed/PIR only, even if their counts jumped.
+        await pet._observe_optional("robot-01", 3, status(7, 12, 25, 35))
+        assert cancellations == ["robot-01", "robot-01"]
+        assert kinds() == ["bumper", "bumper"]
+        await pet._observe_optional("robot-01", 3, status(7, 12, 26, 36))
+        assert kinds() == ["bumper", "bumper", "magnet", "pir"]
+
+        # A stale bumper count cannot rewind its baseline during mask changes.
+        await pet._observe_optional("robot-01", 3, status(1, 11, 26, 36))
+        await pet._observe_optional("robot-01", 3, status(1, 12, 26, 36))
+        assert cancellations == ["robot-01", "robot-01"]
+        assert kinds() == ["bumper", "bumper", "magnet", "pir"]
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_optional_counters_reject_stale_replays_and_handle_uint32_wrap_and_reboot(fleet, tmp_path):
     cancellations = []
     async def stop(robot_id):
@@ -3887,7 +3935,9 @@ async def test_optional_counters_reject_stale_replays_and_handle_uint32_wrap_and
 
         # 3. Uint32 wrap: 0xfffffffe -> 0xffffffff -> 0
         # Reconfigure mask or establish large baseline
-        await pet._observe_optional("robot-01", 5, status(1, 0xfffffffe, 0, 0))  # mask change rebaselines
+        # Disable and reenable the bumper itself to establish the wrap baseline.
+        await pet._observe_optional("robot-01", 5, status(0, 0xfffffffe, 0, 0))
+        await pet._observe_optional("robot-01", 5, status(1, 0xfffffffe, 0, 0))
         bumps_before = len([m for m in memory.recent("robot-01") if m.kind == "bumper"])
 
         await pet._observe_optional("robot-01", 5, status(1, 0xffffffff, 0, 0))

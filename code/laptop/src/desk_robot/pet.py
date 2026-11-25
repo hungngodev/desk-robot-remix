@@ -1855,17 +1855,20 @@ class PetController:
         previous = state.last_extra_events
         previous_mask = state.last_extra_mask
 
-        if previous is None or previous_mask != mask:
+        if previous is None or previous_mask is None:
             state.last_extra_mask = mask
             state.last_extra_events = dict(values)
             return
 
+        # A GPIOB outage must not discard a simultaneously observed bumper edge.
+        # Rebaseline only sources whose own enable bit changed, as on WROOM.
+        state.last_extra_mask = mask
         for key, bit, kind, description in (
             ("bumps", 1, "bumper", "My optional bumper registered a contact and stopped my tracks"),
             ("reed_count", 2, "magnet", "My optional reed switch detected a magnetic accessory closure"),
             ("pir_count", 4, "pir", "My optional PIR detected changing infrared motion, not an identified person"),
         ):
-            if not mask & bit:
+            if not (mask & bit and previous_mask & bit):
                 state.last_extra_events[key] = values[key]
                 continue
             current = values[key]
