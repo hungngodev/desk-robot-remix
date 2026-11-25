@@ -75,14 +75,38 @@ public:
             case Motion::kLookRight: frame.x = 3; break;
             case Motion::kLookUp: frame.y = -3; break;
             case Motion::kLookDown: frame.y = 3; break;
-            case Motion::kNod: frame.y = gaze_age < 450U ? 3 : -2; break;
-            case Motion::kShake: frame.x = gaze_age < 450U ? -3 : 3; break;
+            case Motion::kNod:
+                frame.y = gaze_age <= 350U ? 3 : EaseAxis(3, -2, gaze_age - 350U, 200U);
+                break;
+            case Motion::kShake:
+                frame.x = gaze_age <= 350U ? -3 : EaseAxis(-3, 3, gaze_age - 350U, 200U);
+                break;
             default: break;
+        }
+        // Keep the initial quick saccade, then settle back to center within
+        // the existing 1.1 s gesture window. Never delay a priority cancel.
+        if (gaze_age >= 800U && gaze_ != Motion::kNone) {
+            frame.x = EaseAxis(frame.x, 0, gaze_age - 800U, 300U);
+            frame.y = EaseAxis(frame.y, 0, gaze_age - 800U, 300U);
         }
         return frame;
     }
 
 private:
+    // Integer smoothstep (3t^2 - 2t^3), rounded to the nearest pixel.
+    // Only the 200/300 ms phases call this helper; clamp before multiplying.
+    static int8_t EaseAxis(int8_t from, int8_t to, uint32_t elapsed,
+                           uint32_t duration) noexcept {
+        if (elapsed >= duration) return to;
+        constexpr uint32_t scale = 256U;
+        const uint32_t t = elapsed * scale / duration;
+        const uint32_t weight = (t * t * (3U * scale - 2U * t) + 32768U) / 65536U;
+        const int delta = static_cast<int>(to) - from;
+        const uint32_t distance = static_cast<uint32_t>(delta < 0 ? -delta : delta);
+        const int step = static_cast<int>((distance * weight + scale / 2U) / scale);
+        return static_cast<int8_t>(from + (delta < 0 ? -step : step));
+    }
+
     uint32_t seed_ = 0;
     bool started_ = false;
     bool blink_active_ = false;

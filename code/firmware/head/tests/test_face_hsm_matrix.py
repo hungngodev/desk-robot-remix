@@ -21,9 +21,34 @@ def test_face_hsm_preemption_and_timer_matrix(tmp_path):
 #include "face_eye_animator.hpp"
 #include <cassert>
 #include <limits>
+#include <initializer_list>
 using namespace stackchan::behavior;
 using desk_robot::FaceEyeAnimator;
 int main() {
+    // The real FaceTask samples every 100 ms. Require intermediate pixels,
+    // not merely endpoints that the original abrupt implementation passed.
+    for (uint32_t start : {0U, 0xffffff00U}) {
+        FaceEyeAnimator gaze;
+        assert(gaze.Step(start, Motion::kLookRight, true).x == 3);
+        assert(gaze.Step(start + 800U, Motion::kNone, true).x == 3);
+        assert(gaze.Step(start + 900U, Motion::kNone, true).x == 2);
+        assert(gaze.Step(start + 1000U, Motion::kNone, true).x == 1);
+        assert(!gaze.Step(start + 1100U, Motion::kNone, true).visible);
+        FaceEyeAnimator nod;
+        assert(nod.Step(start, Motion::kNod, true).y == 3);
+        assert(nod.Step(start + 350U, Motion::kNone, true).y == 3);
+        const int middle = nod.Step(start + 450U, Motion::kNone, true).y;
+        assert(middle > -2 && middle < 3);
+        assert(nod.Step(start + 550U, Motion::kNone, true).y == -2);
+        assert(nod.Step(start + 900U, Motion::kNone, true).y == -1);
+        assert(!nod.Step(start + 901U, Motion::kNone, false).visible);
+        assert(!nod.Step(start + 902U, Motion::kNone, true).visible);
+        FaceEyeAnimator shake;
+        assert(shake.Step(start, Motion::kShake, true).x == -3);
+        assert(shake.Step(start + 450U, Motion::kNone, true).x == 0);
+        assert(shake.Step(start + 550U, Motion::kNone, true).x == 3);
+        assert(!shake.Step(start + 551U, Motion::kLookFront, true).visible);
+    }
     for (uint32_t seed = 1; seed <= 1000; ++seed) {
         HsmBehavior pet(seed);
         FaceEyeAnimator eyes;
