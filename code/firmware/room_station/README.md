@@ -111,8 +111,10 @@ The pinned Adafruit BME680 2.0.5 source uses `beginReading()` and
 `remainingReadingMillis()` to avoid holding the Feather loop during its
 150 ms gas-heater cycle. The firmware calls `endReading()` only after the
 conversion reports completion; the LD2410C UART remains polled independently.
-The USB frame timestamps the last successfully collected BME sample, and
-the Mac rejects a sample older than 3 seconds. The source regression checks
+The USB frame timestamps the last successfully collected BME tuple at its
+conservative acquisition start, not its potentially delayed collection time.
+The firmware rejects a conversion collected more than 3 seconds after its
+start, and the Mac independently rejects a sample older than 3 seconds. The source regression checks
 this producer contract but does not prove actual UART packet loss, gas warmup,
 electrical fit, thermal accuracy or a physical station trial. Upstream:
 https://github.com/adafruit/Adafruit_BME680/tree/2.0.5

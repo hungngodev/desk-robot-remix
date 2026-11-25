@@ -124,7 +124,7 @@ def test_bme_empty_upstream_conversion_cannot_reuse_old_gas_as_fresh():
     assert "bme.gas_resistance >= 1" in start
     assert "bme.gas_resistance <= 1000000000U" in start
     assert "bme_completed.publish(bme.temperature, bme.humidity, bme.pressure," in start
-    assert "bme.gas_resistance, millis());" in start
+    assert "bme.gas_resistance, bme_last_start_ms);" in start
 
 
 def test_bme_unstable_gas_sentinel_is_not_sent_as_valid():
@@ -301,7 +301,7 @@ def test_bme_pending_conversion_reports_only_last_completed_tuple():
     assert "bme_completed.invalidate();" in failed_begin
     assert "bme_started = false;" in failed_begin
     assert "bme_completed.publish(" in scan
-    assert "bme.gas_resistance, millis());" in scan
+    assert "bme.gas_resistance, bme_last_start_ms);" in scan
     assert "bme_completed.invalidate();" in scan
     assert "bme_completed.fresh(now, kBmeStaleMs)" in report
     assert "if (valid && now_ms - sample_ms > max_age_ms) invalidate();" in helper
@@ -313,17 +313,26 @@ def test_bme_pending_conversion_reports_only_last_completed_tuple():
 
 
 def test_bme_completed_native_conversion_cache_with_sanitizers(tmp_path):
-    # Executed C++ behavior, not just text matching a possible implementation.
+    # Compile both the cache and actual production acquisition function.
     compiler = shutil.which("c++")
     assert compiler is not None, "C++17 compiler is required for station tests"
-    src = ROOT / "code/firmware/room_station/tests/bme_completed_sample_tests.cpp"
-    includes = ROOT / "code/firmware/room_station/src"
-    executable = tmp_path / "bme_completed_sample_tests"
+    station = ROOT / "code/firmware/room_station"
+    includes = station / "src"
+    firmware = (includes / "main.cpp").read_text()
+    temperature = "bool finite_temperature(" + firmware.split(
+        "bool finite_temperature(", 1
+    )[1].split("void jsbool(", 1)[0]
+    step = "void bme_step(" + firmware.split(
+        "void bme_step(", 1
+    )[1].split("void bme_observation(", 1)[0]
+    (tmp_path / "bme_step_under_test.h").write_text(temperature + step)
     cmd = [
         compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
         "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
-        f"-I{includes}", str(src), "-o", str(executable),
+        f"-I{includes}", f"-I{tmp_path}",
     ]
+    if platform.system() == "Linux":
+        cmd.append("-no-pie")
     if platform.system() == "Darwin":
         for sdk in (
             Path("/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk/usr/include/c++/v1"),
@@ -332,9 +341,13 @@ def test_bme_completed_native_conversion_cache_with_sanitizers(tmp_path):
             if sdk.exists():
                 cmd.extend(["-stdlib=libc++", f"-I{sdk}"])
                 break
-    subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=30)
-    subprocess.run([str(executable)], check=True, capture_output=True,
-                   text=True, timeout=15)
+    for name in ("bme_completed_sample_tests", "bme_step_tests"):
+        src = station / "tests" / f"{name}.cpp"
+        executable = tmp_path / name
+        subprocess.run([*cmd, str(src), "-o", str(executable)], check=True,
+                       capture_output=True, text=True, timeout=30)
+        subprocess.run([str(executable)], check=True, capture_output=True,
+                       text=True, timeout=15)
 
 
 def test_room_transaction_clocks_follow_completed_io():

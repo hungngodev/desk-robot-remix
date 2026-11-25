@@ -389,7 +389,9 @@ void bme_step(uint32_t now) {
     bme_started = false;
     return;
   }
-  const bool complete = finite_temperature(bme.temperature)
+  // A delayed loop or bus read must not relabel old measurements as fresh.
+  const bool complete = millis() - bme_last_start_ms <= kBmeStaleMs
+      && finite_temperature(bme.temperature)
       && isfinite(bme.humidity) && bme.humidity >= 0 && bme.humidity <= 100
       // Match the Mac room decoder. An out-of-range BME must not
       // poison the entire USB frame and hide independent room sensors.
@@ -398,10 +400,10 @@ void bme_step(uint32_t now) {
       && isfinite(bme.gas_resistance) && bme.gas_resistance >= 1
       && bme.gas_resistance <= 1000000000U;
   if (complete) {
-    // Publish every field together with the actual completed-conversion time.
+    // Publish the complete tuple with its conservative acquisition start time.
     // Upstream scratch may be reset while the next conversion is pending.
     bme_completed.publish(bme.temperature, bme.humidity, bme.pressure,
-                          bme.gas_resistance, millis());
+                          bme.gas_resistance, bme_last_start_ms);
   } else {
     bme_completed.invalidate();
     bme_started = false;
@@ -409,7 +411,7 @@ void bme_step(uint32_t now) {
 }
 void bme_observation(uint32_t now) {
   // Serial reporting never starts or waits for a gas conversion.
-  // Preserve the actual last completed sample time, not the report time.
+  // Preserve the last completed tuple's acquisition start, not the report time.
   const bool fresh = bme_completed.fresh(now, kBmeStaleMs);
   telemetry.print(F("\"bme688\":{\"valid\":")); jsbool(fresh);
   if (fresh) {
