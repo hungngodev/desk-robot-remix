@@ -3932,3 +3932,59 @@ async def test_completed_visual_question_rechecks_every_selected_frame(
         assert not service._look_tasks
     finally:
         await service.close()
+
+@pytest.mark.parametrize("delay", [0.2, 1.1, 7.0])
+@pytest.mark.parametrize("source", ["proactive", "speech", "voice_question", "sensor"])
+async def test_snapshot_preprocessing_cannot_publish_expired_receipt(monkeypatch, delay, source):
+    """The snapshot path must obey the same one-second limit as MJPEG."""
+    clock = [time.monotonic()]
+    monkeypatch.setattr(
+        "desk_robot.multimodal.time", SimpleNamespace(monotonic=lambda: clock[0]),
+    )
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+
+    async def delayed_decode(jpeg, *, priority=False):
+        clock[0] += delay
+        return _prepare(jpeg)
+
+    visual._prepare_bounded = delayed_decode
+    try:
+        if delay > 1:
+            with pytest.raises(RuntimeError, match="snapshot expired"):
+                await visual.capture("robot-01", source=source)
+            assert not visual.hub.frames["robot-01"]
+            assert visual._metrics["robot-01"]["camera_successes"] == 0
+            assert visual._metrics["robot-01"]["camera_errors"] == 1
+        else:
+            frame = await visual.capture("robot-01", source=source)
+            assert visual.hub.frames["robot-01"][-1] is frame
+    finally:
+        await visual.close()
+
+
+@pytest.mark.parametrize("delay", [0.2, 1.1, 7.0])
+async def test_external_photo_preprocessing_cannot_publish_expired_receipt(monkeypatch, delay):
+    """External pet JPEG admission must not extend receipt freshness."""
+    clock = [time.monotonic()]
+    monkeypatch.setattr(
+        "desk_robot.multimodal.time", SimpleNamespace(monotonic=lambda: clock[0]),
+    )
+    visual = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        Vision(), asyncio.Lock(),
+    )
+
+    async def delayed_decode(jpeg):
+        clock[0] += delay
+        return _prepare(jpeg)
+
+    visual._prepare_bounded = delayed_decode
+    try:
+        await visual.offer_proactive("robot-01", image(), clock[0])
+        assert bool(visual.hub.frames["robot-01"]) == (delay <= 1)
+    finally:
+        await visual.close()
+

@@ -1880,6 +1880,10 @@ class MultimodalOrchestrator:
                     raise RuntimeError(
                         "Human speech preempts autonomous camera preprocessing"
                     )
+                # Apply the same receipt-age limit as the continuous stream.
+                # A blocked JPEG worker must not revive a stale snapshot.
+                if not 0 <= time.monotonic() - received <= 1.0:
+                    raise RuntimeError("Camera snapshot expired during preprocessing")
                 evidence = self.hub.offer_prepared(
                     robot_id, prepared, received, source=source,
                     generation=generation, trigger_kind=trigger_kind,
@@ -1915,12 +1919,16 @@ class MultimodalOrchestrator:
         # An external JPEG is not consent: mirror the continuous Sense stream.
         if not self._camera_grant_valid(robot_id, camera_grant):
             return
+        if not _finite(now) or not 0 <= time.monotonic() - now <= 1.0:
+            return
         generation = self.hub._generation[robot_id]
         turn = self._turn_epoch[robot_id]
         question = self._question_epoch[robot_id]
         prepared = await self._prepare_bounded(jpeg)
         if not self._camera_grant_valid(robot_id, camera_grant):
             # An old JPEG cannot enter the regranted scene after Pillow.
+            return
+        if not 0 <= time.monotonic() - now <= 1.0:
             return
         if (self._any_human_active(time.monotonic())
                 or self._turn_epoch[robot_id] != turn
