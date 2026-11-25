@@ -299,6 +299,9 @@ jobs:
       cancel-in-progress: false
     name: Body C++ host tests with sanitizers
     runs-on: ubuntu-latest
+    env:
+      # UBSan otherwise reports recoverable errors but exits successfully.
+      UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
     steps:
       - uses: actions/checkout@v4
         with:
@@ -315,12 +318,33 @@ jobs:
             exit 1
           }
       - *repository_integrity
+      - name: Verify UBSan failures cannot pass CI
+        shell: bash
+        run: |
+          probe="$(mktemp -d)"
+          trap 'rm -rf "$probe"' EXIT
+          cat > "$probe/overflow.cpp" <<'CPP'
+          #include <climits>
+          int main() {
+            volatile int maximum = INT_MAX;
+            volatile int result = maximum + 1;
+            (void)result;
+            return 0;
+          }
+          CPP
+          c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=undefined \
+            "$probe/overflow.cpp" -o "$probe/overflow"
+          if "$probe/overflow" > "$probe/output" 2>&1; then
+            echo "::error::UBSan reported undefined behavior without failing"
+            exit 1
+          fi
+          grep -F 'runtime error: signed integer overflow' "$probe/output"
       - name: Configure portable C++ tests
         run: cmake -S code/firmware/body -B /tmp/desk-robot-body-host -DBODY_SANITIZERS=ON -DCMAKE_BUILD_TYPE=Debug
       - name: Build
         run: cmake --build /tmp/desk-robot-body-host --parallel 2
       - name: Run tests
-        run: ctest --test-dir /tmp/desk-robot-body-host --output-on-failure
+        run: ctest --test-dir /tmp/desk-robot-body-host --output-on-failure --no-tests=error
       - name: Verify complete room thermal pixel decoding with sanitizers
         run: |
           c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/thermal_pixels_tests.cpp -o /tmp/desk-room-thermal-test
