@@ -35,6 +35,7 @@ def setup_sources(tmp_path):
         "docs/cad/remixes/remaining_fit_gauges.scad":
             "candidate_pack_body_l_mm = 86;\npower_l = 86;\n"
             "power_w = 35;\npower_h = 14;\nfit_xy = 0.4;\nwall = 2.4;\n"
+            "base = 2.8;\ntray_strap_slot_w = 3.2;\n"
             "m3_clearance = 3.4;\n"
             "tray_tab_l_mm = 8;\ntray_tab_w_mm = 9;\ntray_tab_offset_mm = 5;\n",
     }
@@ -330,17 +331,17 @@ def test_a4_power_tabs_must_exceed_mounting_bore(tmp_path, old, new):
     assert not output.exists()
 
 
-def test_a4_power_tabs_strictly_above_bore_remain_provisional(tmp_path):
+def test_a4_power_tabs_with_printable_web_remain_provisional(tmp_path):
     source = load()
     setup_sources(tmp_path)
     scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
     scad.write_text(
-        scad.read_text().replace("tray_tab_l_mm = 8;", "tray_tab_l_mm = 3.5;")
-        .replace("tray_tab_w_mm = 9;", "tray_tab_w_mm = 3.5;"),
+        scad.read_text().replace("tray_tab_l_mm = 8;", "tray_tab_l_mm = 7.5;")
+        .replace("tray_tab_w_mm = 9;", "tray_tab_w_mm = 7.5;"),
         encoding="utf-8",
     )
     manifest = source.export(tmp_path, tmp_path / "paper")
-    assert manifest["source_dimensions_mm"]["power"][4:6] == [3.5, 3.5]
+    assert manifest["source_dimensions_mm"]["power"][4:6] == [7.5, 7.5]
     assert manifest["approved_drill_holes"] == 0
     assert manifest["actual_fit_verified"] is False
 
@@ -431,5 +432,25 @@ def test_a4_dock_rejects_thin_base_or_guides(tmp_path, old, new):
     scad.write_text(original.replace(old, new), encoding="utf-8")
     output = tmp_path / "paper"
     with pytest.raises(ValueError, match="Dock base or guide below printable minimum"):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+@pytest.mark.parametrize(("old", "new", "message"), [
+    ("wall = 2.4;", "wall = 0.5;", "wall or floor below printable"),
+    ("base = 2.8;", "base = 0.5;", "wall or floor below printable"),
+    ("fit_xy = 0.4;", "fit_xy = 0.1;", "wall or floor below printable"),
+    ("tray_tab_l_mm = 8;", "tray_tab_l_mm = 3.5;", "insufficient M3 web"),
+    ("tray_tab_w_mm = 9;", "tray_tab_w_mm = 3.5;", "insufficient M3 web"),
+    ("tray_strap_slot_w = 3.2;", "tray_strap_slot_w = 31;", "openings missing or intersecting"),
+])
+def test_a4_power_rejects_unprintable_tray_geometry(tmp_path, old, new, message):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/remaining_fit_gauges.scad"
+    original = scad.read_text(encoding="utf-8")
+    assert old in original
+    scad.write_text(original.replace(old, new), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match=message):
         source.export(tmp_path, output)
     assert not output.exists()

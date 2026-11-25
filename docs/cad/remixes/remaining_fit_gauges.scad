@@ -42,7 +42,14 @@ module battery_boost_tray() {
            "Battery tray shorter than selected candidate pack body");
     assert(power_w > 12 && power_w < 100);
     assert(power_h > 4 && power_h < 60);
-    assert(tray_tab_l_mm > m3_clearance && tray_tab_w_mm > m3_clearance);
+    assert(fit_xy >= 0.2 && wall >= 2 && base >= 2,
+           "Battery tray clearance, wall or floor below printable minimum");
+    assert(m3_clearance >= 3 && tray_tab_l_mm > m3_clearance &&
+           tray_tab_w_mm > m3_clearance);
+    assert(min(tray_tab_l_mm, tray_tab_w_mm) - m3_clearance >= 4,
+           "Battery tray mounting tab leaves insufficient M3 web");
+    assert(tray_strap_slot_w >= 2 && l/3-tray_strap_slot_w >= 2,
+           "Battery tray strap openings missing or intersecting");
     assert(tray_tab_offset_mm > 0 && tray_tab_offset_mm + tray_tab_w_mm <= w);
     difference() {
         union() {

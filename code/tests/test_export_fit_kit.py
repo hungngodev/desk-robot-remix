@@ -1306,3 +1306,22 @@ def test_dock_rails_and_base_require_printable_dimensions(tmp_path, part, overri
     ], capture_output=True, text=True, timeout=90)
     assert bad.returncode != 0
     assert "Dock base or guide below printable minimum" in bad.stdout + bad.stderr
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+@pytest.mark.parametrize(("override", "message"), [
+    ("wall=0.5", "clearance, wall or floor below printable"),
+    ("base=0.5", "clearance, wall or floor below printable"),
+    ("fit_xy=0", "clearance, wall or floor below printable"),
+    ("tray_tab_l_mm=3.5", "insufficient M3 web"),
+    ("tray_tab_w_mm=3.5", "insufficient M3 web"),
+    ("tray_strap_slot_w=0", "strap openings missing or intersecting"),
+    ("tray_strap_slot_w=31", "strap openings missing or intersecting"),
+])
+def test_battery_tray_requires_printable_mounts_and_strap_openings(tmp_path, override, message):
+    source = ROOT / "docs/cad/remixes/remaining_fit_gauges.scad"
+    bad = subprocess.run([
+        "openscad", "--export-format", "binstl", "-o", str(tmp_path / "bad.stl"),
+        "-D", 'part="battery_boost_tray"', "-D", override, str(source),
+    ], capture_output=True, text=True, timeout=90)
+    assert bad.returncode != 0
+    assert message in bad.stdout + bad.stderr

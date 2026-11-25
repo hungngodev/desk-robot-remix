@@ -57,6 +57,10 @@ def values(root: Path) -> dict:
         raise ValueError("Power tray dimensions exceed OpenSCAD limits")
     fit_xy = scad_mm(power, "fit_xy")
     wall = scad_mm(power, "wall")
+    base = scad_mm(power, "base")
+    strap_slot = scad_mm(power, "tray_strap_slot_w")
+    if fit_xy < 0.2 or wall < 2 or base < 2:
+        raise ValueError("Power tray clearance, wall or floor below printable minimum")
     if pack_l < candidate_length:
         raise ValueError("Power tray shorter than candidate protected pack body")
     tray_l = pack_l + 2 * (fit_xy + wall)
@@ -65,8 +69,12 @@ def values(root: Path) -> dict:
     tab_w = scad_mm(power, "tray_tab_w_mm")
     tab_offset = scad_mm(power, "tray_tab_offset_mm")
     mounting_bore = scad_mm(power, "m3_clearance")
-    if tab_l <= mounting_bore or tab_w <= mounting_bore:
+    if mounting_bore < 3 or tab_l <= mounting_bore or tab_w <= mounting_bore:
         raise ValueError("Power tab must exceed mounting bore")
+    if min(tab_l, tab_w) - mounting_bore < 4:
+        raise ValueError("Power tab leaves insufficient M3 web")
+    if strap_slot < 2 or tray_l / 3 - strap_slot < 2:
+        raise ValueError("Power tray strap openings missing or intersecting")
     if tab_offset + tab_w > tray_w:
         raise ValueError("Power tab exceeds tray body width")
     dock = data["dock"]
