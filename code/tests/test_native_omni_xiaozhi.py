@@ -9868,3 +9868,26 @@ def test_pack_grounded_facts_rejects_invalid_structure_and_budget(
 
     with pytest.raises(ValueError):
         pack_grounded_facts(facts, limit=limit)
+
+
+@pytest.mark.asyncio
+async def test_native_send_rechecks_closed_under_socket_lock(native):
+    from unittest.mock import AsyncMock
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    send_json = AsyncMock()
+    session._socket = SimpleNamespace(send_json=send_json)
+    await session._socket_lock.acquire()
+    pending = asyncio.create_task(session._send({"type": "ping"}))
+    await asyncio.sleep(0)
+    session.fail("x")
+    session._socket_lock.release()
+    with pytest.raises(RuntimeError, match="unavailable"):
+        await pending
+    send_json.assert_not_called()

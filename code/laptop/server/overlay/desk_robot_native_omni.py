@@ -446,7 +446,10 @@ class NativeOmniSession:
         if self._socket is None or self.closed:
             raise RuntimeError("Native realtime socket unavailable")
         async with self._socket_lock:
-            await self._socket.send_json(event)
+            sock = self._socket
+            if sock is None or self.closed:
+                raise RuntimeError("Native realtime socket unavailable")
+            await sock.send_json(event)
 
     async def _retire_legacy_audio(self) -> None:
         """Clear any previous Xiaozhi welcome/TTS before native model output.
