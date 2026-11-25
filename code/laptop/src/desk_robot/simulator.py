@@ -20,6 +20,8 @@ class SimulatedHead:
         self.armed = False
         self.commands: list[str] = []
         self.last_control = 0.0
+        self._motor = (0, 0)
+        self._drive_deadline = 0.0
         self.position = [130.0, 120.0]
         self.gripped = False
         self.lifted = False
@@ -40,18 +42,28 @@ class SimulatedHead:
             raise ValueError("Simulated body replay requires a status dictionary")
         self._body_replay = deepcopy(sample)
         self.armed = False
+        self._stop_motion()
 
-    def _watchdog(self) -> int:
+    def _stop_motion(self) -> None:
+        self._motor = (0, 0)
+        self._drive_deadline = 0.0
+
+    def _watchdog(self, now: float) -> int:
         if not self.armed:
+            self._stop_motion()
             return 0
-        elapsed = time.monotonic() - self.last_control
+        elapsed = now - self.last_control
         if elapsed >= 0.5:
             self.armed = False
+            self._stop_motion()
             return 0
+        if now >= self._drive_deadline:
+            self._stop_motion()
         return 500 - int(elapsed * 1000)
 
     async def status(self):
-        watchdog_ms = self._watchdog()
+        now = time.monotonic()
+        watchdog_ms = self._watchdog(now)
         if self.fail_status:
             raise HeadError("Simulated body status failure")
         if self._body_replay is not None:
@@ -59,7 +71,8 @@ class SimulatedHead:
         return {
             "robot_id": self.id,
             "armed": self.armed,
-            "motor": {"m0": 0, "m1": 0},
+            "motor": {"m0": self._motor[0], "m1": self._motor[1]},
+            "drive_ms": max(0, round((self._drive_deadline - now) * 1000)),
             "servo": {"position_source": "commanded"},
             "watchdog_ms": watchdog_ms,
         }
@@ -67,23 +80,32 @@ class SimulatedHead:
     async def command(self, command):
         op = validate_command(command)
         self.commands.append(command)
-        self._watchdog()
+        now = time.monotonic()
+        self._watchdog(now)
         if self.fail_command and command.startswith(self.fail_command):
             raise HeadError("Simulated uncertain ACK")
         if self._body_replay is not None and op in {"arm", "drive", "lift", "grip", "keepalive"}:
             raise HeadError("Simulated body replay has no motion authority")
         if op == "arm":
+            self._stop_motion()
             self.armed = True
         elif op in {"disarm", "halt"}:
+            self._stop_motion()
             self.armed = False
+        elif op == "stop":
+            self._stop_motion()
         elif op in {"drive", "lift", "grip", "keepalive"} and not self.armed:
             raise HeadError("Body disarmed")
         if op in {"arm", "drive", "lift", "grip", "keepalive"} or (
             op == "stop" and self.armed
         ):
-            self.last_control = time.monotonic()
+            self.last_control = now
         if op == "drive":
-            left, right = map(int, command.split()[1:3])
+            args = command.split()[1:]
+            left, right = map(int, args[:2])
+            duration = int(args[2]) if len(args) == 3 else 250
+            self._motor = (left, right)
+            self._drive_deadline = now + duration / 1000
             if left or right:
                 if left == -right:
                     self.position[0] -= 10 if left > 0 else -10
