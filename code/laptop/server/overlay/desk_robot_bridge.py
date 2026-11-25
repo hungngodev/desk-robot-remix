@@ -705,11 +705,17 @@ async def interrupt_for_user_voice(conn, have_voice: bool) -> bool:
     # device ID after reconnection, but never owns the current group turn.
     if connections.get(device) is not conn:
         return False
+    # The installed audio handler invokes this group guard before the normal
+    # guard on every frame. Outside a group lease, only the normal guard owns
+    # the shared two-frame streak; clearing it here prevents ordinary barge-in.
+    if not muted(device):
+        return False
     if (
-        not muted(device) or active_device_id != device
+        active_device_id != device
         or not duplex_available(conn) or lease_stopping
     ):
         voice_frames.pop(device, None)
+        voice_last_frame_at.pop(device, None)
         return False
     if not sustained_voice(device, have_voice):
         return False

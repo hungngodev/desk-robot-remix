@@ -1175,10 +1175,17 @@ async def test_normal_xiaozhi_realtime_listening_barges_into_its_own_tts(bridge)
         cleared.append("speaker"),
         setattr(one, "client_is_speaking", False),
     )
-    assert not await bridge.interrupt_for_normal_voice(one, False)
-    assert not await bridge.interrupt_for_normal_voice(one, True)
+    async def feed_vad(voice):
+        # Match the installed receiveAudioHandle order on every real frame.
+        assert not await bridge.interrupt_for_user_voice(one, voice)
+        return await bridge.interrupt_for_normal_voice(one, voice)
+
+    assert not await feed_vad(False)
+    assert not await feed_vad(True)
+    assert not await feed_vad(False)  # Silence breaks the two-frame streak.
+    assert not await feed_vad(True)
     assert sent == []
-    assert await bridge.interrupt_for_normal_voice(one, True)
+    assert await feed_vad(True)
     assert one.client_abort and not one.client_is_speaking
     assert cleared == ["queues", "speaker"]
     assert sent == [{
