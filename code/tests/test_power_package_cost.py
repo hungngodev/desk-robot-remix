@@ -57,7 +57,12 @@ def report_quote(monkeypatch, mode, lines, *, scope="first_robot", qty=1):
             "tax_usd": "0.00", "duties_usd": "0.00",
             "discount_usd": "0.00",
         }],
-        "paid_orders_complete": True, "paid_orders": [],
+        "paid_orders_complete": True,
+        "paid_orders": [{
+            "order_reference": "test-sense-payment",
+            "total_paid_usd": "13.67",
+            "allocations": [{"role_key": "robot:xiao_sense", "quantity": 1}],
+        }] if scope == "first_robot" else [],
     }
     return release.cost_quote({}, {"costs": costs}, scope)
 
@@ -85,7 +90,7 @@ def test_first_robot_exact_complete_kit_charges_once(monkeypatch):
     assert cost["errors"] == []
     assert cost["calculation_complete_not_physical_approval"]
     assert cost["payable_now_cents"] == 200
-    assert cost["prototype_cumulative_cents"] == 200
+    assert cost["prototype_cumulative_cents"] == 1567
 
 
 @pytest.mark.parametrize("mutation", [
