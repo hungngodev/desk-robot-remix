@@ -27,6 +27,36 @@ _JAW_POLL_INTERVAL_S = 0.075
 _JAW_MAX_POLLS = 5
 
 
+# At four degrees per independent conversion and ~336 ms cadence, a full
+# 60-degree opening can take about five seconds. This is a bounded software
+# wait, not a physical timing guarantee.
+_RELIEF_WAIT_S = 6.0
+_RELIEF_POLL_INTERVAL_S = 0.075
+
+
+async def _await_relief_target(
+    health: Callable[[], Awaitable[dict]], target: int,
+) -> None:
+    """Wait for commanded opening, never infer measured position or force."""
+    from .controller import OperationError
+
+    async with asyncio.timeout(_RELIEF_WAIT_S):
+        while True:
+            status = await health()
+            servo = status.get("servo")
+            if (not isinstance(servo, dict)
+                    or servo.get("attached") is not True
+                    or servo.get("position_source") != "commanded"
+                    or type(servo.get("grip_target")) is not int
+                    or servo["grip_target"] != target
+                    or type(servo.get("grip")) is not int
+                    or not 60 <= servo["grip"] <= 120):
+                raise OperationError("Gripper relief target not confirmed")
+            if servo["grip"] == target:
+                return
+            await asyncio.sleep(_RELIEF_POLL_INTERVAL_S)
+
+
 def grip_angles(start: int, end: int, step: int) -> tuple[int, ...]:
     if (type(start) is not int or type(end) is not int or type(step) is not int
             or not 60 <= start <= 120 or not 60 <= end <= 120
@@ -136,7 +166,7 @@ async def guarded_grasp(
         force_boot_id = observed_boot
         return *observation, expires_at
 
-    async def confirmed_health() -> None:
+    async def confirmed_health() -> dict:
         nonlocal force_boot_changed
         # The normal Coordinator raises for disarmed/foreign WROOM status,
         # but an alternate head/health adapter may merely return a false
@@ -162,6 +192,7 @@ async def guarded_grasp(
                     or health_boot != force_boot_id):
                 force_boot_changed = True
                 raise OperationError("Gripper WROOM health boot mismatched jaw source")
+        return status
 
     async def read_new_jaw(previous_seq: int, failure: str) -> tuple[int, int, float]:
         """Wait for one distinct same-boot conversion, not repeated cached ADC.
@@ -253,7 +284,7 @@ async def guarded_grasp(
                         "force_newtons_measured": False, "physical_acceptance_pass": False,
                     }
         raise OperationError("Closed jaw limit reached with no tactile contact")
-    except (Exception, asyncio.CancelledError):
+    except (Exception, asyncio.CancelledError) as failure:
         if force_boot_changed or not motion_attempted:
             raise  # No relief across a reboot or before any attempted close.
         # Cancellation also can arrive AFTER a jaw command has moved the servo.
@@ -266,11 +297,20 @@ async def guarded_grasp(
         # If touch/cliff/IMU disarmed the body, NEVER bypass that interlock.
         try:
             await confirmed_health()
-            await _bounded_head_reply(
+            reply = await _bounded_head_reply(
                 head.command(f"grip {calibration.grip_open}"),
                 seconds=_GRIP_COMMAND_TIMEOUT_S,
                 timeout_message="Gripper relief command unconfirmed",
             )
+            if (type(reply) is not dict
+                    or reply.get("ok") is not True
+                    or reply.get("robot_id") != robot_id
+                    or reply.get("reply") != f"OK grip angle={calibration.grip_open}"):
+                raise OperationError("Unmatched gripper relief command ACK")
+            # Ordinary failure must not let Coordinator HALT freeze a
+            # still-opening jaw. Cancellation remains immediately preemptible.
+            if not isinstance(failure, asyncio.CancelledError):
+                await _await_relief_target(confirmed_health, calibration.grip_open)
         except Exception:
             pass  # Preserve the primary failure; body stop/watchdog is next.
         raise

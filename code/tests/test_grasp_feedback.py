@@ -1173,3 +1173,80 @@ async def test_contact_final_health_fence(monkeypatch, fault):
         with pytest.raises(OperationError, match=expected):
             await guarded_grasp(head, Settings(), robot_id="robot-01", health=health)
     assert head.commands == (["grip 64", "grip 60"] if fault == "expired" else ["grip 64"])
+
+
+@pytest.mark.parametrize("open_angle,closed_angle,positions", [
+    (60, 100, [64, 63, 60]),
+    (100, 60, [96, 97, 100]),
+])
+async def test_overforce_relief_waits_for_commanded_open_before_job_failure(
+    monkeypatch, open_angle, closed_angle, positions,
+):
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+
+    class Reversible(Settings):
+        grip_open = open_angle
+        grip_closed = closed_angle
+
+    head = FakeHead([100, 100, 600])  # Exactly at the exclusive ceiling.
+    relief = f"grip {open_angle}"
+    polls = []
+
+    async def health():
+        result = {"armed": True, "robot_id": "robot-01",
+                  "imu": {"boot_id": 5103}}
+        if relief in head.commands:
+            angle = positions[len(polls)]
+            polls.append(angle)
+            result["servo"] = {
+                "grip": angle, "grip_target": open_angle,
+                "attached": True, "position_source": "commanded",
+            }
+        return result
+
+    with pytest.raises(OperationError, match="ceiling"):
+        await guarded_grasp(head, Reversible(), robot_id="robot-01", health=health)
+
+    assert polls == positions
+    assert head.commands == [f"grip {positions[0]}", relief]
+
+
+@pytest.mark.parametrize("failure", ["disarm", "frozen_target", "wrong_ack"])
+async def test_relief_wait_does_not_override_interlock_or_unmatched_ack(monkeypatch, failure):
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+    head = FakeHead([100, 100, 600])
+    original = head.command
+    polls = []
+
+    async def command(value):
+        reply = await original(value)
+        if value == "grip 60" and failure == "wrong_ack":
+            reply["reply"] = "OK grip angle=64"
+        return reply
+
+    head.command = command
+
+    async def health():
+        result = {"armed": True, "robot_id": "robot-01",
+                  "imu": {"boot_id": 5103}}
+        if "grip 60" in head.commands:
+            polls.append(True)
+            result["armed"] = failure != "disarm"
+            result["servo"] = {
+                "grip": 64, "grip_target": 64,
+                "attached": True, "position_source": "commanded",
+            }
+        return result
+
+    with pytest.raises(OperationError, match="ceiling"):
+        await guarded_grasp(head, Settings(), robot_id="robot-01", health=health)
+
+    assert head.commands == ["grip 64", "grip 60"]
+    assert len(polls) == (0 if failure == "wrong_ack" else 1)
+
