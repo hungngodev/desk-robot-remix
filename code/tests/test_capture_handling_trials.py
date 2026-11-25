@@ -314,6 +314,27 @@ def test_private_trial_output_rejects_nonfinite_values(tmp_path, value):
     assert not output.exists()
 
 
+@pytest.mark.parametrize("conflict", [
+    {"low_g_irq": True}, {"low_g_seq": 4}, {"low_g_valid": False}, None,
+])
+async def test_capture_rejects_conflicting_native_status_on_duplicate(conflict):
+    class DuplicateNativeClient(SequencedFakeClient):
+        async def get(self, url, *, headers, timeout):
+            response = await super().get(url, headers=headers, timeout=timeout)
+            imu = response.data["imu"]
+            imu.update(low_g_valid=True, low_g_irq=False, low_g_seq=3)
+            if self.count == 2:
+                if conflict is None:
+                    for key in ("low_g_valid", "low_g_irq", "low_g_seq"):
+                        del imu[key]
+                else:
+                    imu.update(conflict)
+            return response
+
+    with pytest.raises(RuntimeError, match="low-g"):
+        await read(DuplicateNativeClient([1, 1, 2]))
+
+
 class NativeLowGClient(FakeClient):
     async def get(self, url, *, headers, timeout):
         response = await super().get(url, headers=headers, timeout=timeout)

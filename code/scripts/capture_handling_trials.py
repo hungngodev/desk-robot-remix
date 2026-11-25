@@ -160,13 +160,18 @@ async def capture_phase(
         # The WROOM sample clock is uint32: accept a true rollover, but
         # never treat a delayed pre-wrap conversion as a new sample.
         forward = (current - seen) & 0xffffffff if seen is not None else None
-        if forward is None or 0 < forward < 0x80000000:
+        fresh = forward is None or 0 < forward < 0x80000000
+        # Duplicate conversions do not count as independent samples, but
+        # contradictory native low-g evidence on that same conversion must
+        # still invalidate the trial, just as it revokes the live pose.
+        if fresh or (forward == 0 and low_g_seen):
             try:
                 seq = trial_low_g_counter(body["imu"])
             except ValueError as exc:
                 raise RuntimeError(str(exc)) from exc
             if low_g_seen and seq != previous_low_g_seq:
                 raise RuntimeError("Native low-g status changed during handling trial")
+        if fresh:
             previous_low_g_seq, low_g_seen = seq, True
             if receipt is not None and observed <= receipt:
                 raise RuntimeError("Nonmonotonic source receipt")
