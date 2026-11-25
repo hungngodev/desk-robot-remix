@@ -287,8 +287,14 @@ def _valid_intent_payload(rule: _IntentRule, payload: dict[str, str]) -> bool:
     if rule.question_limit == 0 or payload.keys() != {"question"}:
         return False
     question = payload["question"]
-    return (type(question) is str and 1 <= len(question) <= rule.question_limit
-            and bool(question.strip()) and "\x00" not in question)
+    if (type(question) is not str or not 1 <= len(question) <= rule.question_limit
+            or not question.strip() or "\x00" in question):
+        return False
+    try:
+        question.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
 
 
 def native_readonly_request(

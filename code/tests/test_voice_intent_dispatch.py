@@ -62,3 +62,13 @@ def test_dispatch_rejects_malformed_matching_payload(intents, monkeypatch, route
     fallback = intents._INTENT_RULES["status"]._replace(handler=lambda *_: {})
     monkeypatch.setattr(intents, "_INTENT_RULES", {route: invalid, "status": fallback})
     assert intents.native_readonly_request("Check your battery") is None
+
+
+@pytest.mark.parametrize("question", ["Look at \ud800", "Remind me about \udfff"])
+def test_dispatch_rejects_non_utf8_question(intents, question):
+    assert intents.native_readonly_request(question) is None
+
+
+def test_dispatch_preserves_valid_unicode(intents):
+    question = "Look at the cà phê cup"
+    assert intents.native_readonly_request(question) == ("look", {"question": question})
