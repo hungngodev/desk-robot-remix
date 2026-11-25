@@ -118,19 +118,25 @@ void poll_optional(std::uint32_t now_ms) {
   control.sample_optional_inputs(mask, bumper, reed, pir, true);
 }
 
+void apply_outputs();
+
 void poll_touch(std::uint32_t now_ms) {
   // Independent wheel inhibition must not wait for the 25 ms gesture timer.
   const bool active = digitalRead(body_pins::kTouchOutput) == HIGH;
+  const bool was_armed = control.state().armed;
   control.sample_touch_input(active);
-  if (now_ms - touch_last_sample_ms < 25) return;
-  touch_last_sample_ms = now_ms;
-  // Only recognized gestures need three equal 25 ms samples.
+  if (active && was_armed) apply_outputs();
+  // Every observed raw transition restarts the gesture debounce. Otherwise
+  // short pulses coinciding with three sample instants can forge a touch.
   if (active != touch_candidate) {
     touch_candidate = active;
     touch_candidate_samples = 1;
-  } else if (touch_candidate_samples < 3) {
-    ++touch_candidate_samples;
+    touch_last_sample_ms = now_ms;
+    return;
   }
+  if (now_ms - touch_last_sample_ms < 25) return;
+  touch_last_sample_ms = now_ms;
+  if (touch_candidate_samples < 3) ++touch_candidate_samples;
   if (touch_candidate_samples >= 3 && touch_candidate != touch_stable) {
     touch_stable = touch_candidate;
     control.set_touch(touch_stable, now_ms);
@@ -673,6 +679,9 @@ void setup() {
 
 void loop() {
 #if DESK_ROBOT_FULL_SENSORS
+  // Sample raw touch before any potentially blocking shared bus transfer.
+  // Poll again after IMU work below; the gesture clock is independent.
+  poll_touch(millis());
   // Real I2C sampling precedes every physical motor update. The pure
   // CliffGuard remains the only local motion/safety authority.
   if (tof.ready()) {

@@ -201,3 +201,64 @@ def test_bridge_rejects_zero_wroom_boot_before_a_healthy_face():
     assert "!integer(imu_boot, 1, 4294967295.0)" in bridge
     assert "!integer(side_boot, 1, 4294967295.0)" in bridge
     assert "boot->valuedouble < 1 || boot->valuedouble > 4294967295.0" in bridge
+
+
+def test_wroom_touch_poll_rejects_inter_sample_bounce_and_stops_before_bus(tmp_path):
+    """Execute the actual GPIO polling function with fake hardware boundaries."""
+    compiler = shutil.which("c++")
+    if not compiler:
+        pytest.skip("native C++ compiler unavailable")
+    body = (HEAD.parent / "body/src/main.cpp").read_text()
+    start = body.index("void poll_touch(std::uint32_t now_ms) {")
+    end = body.index("\n}\n", start) + 3
+    loop = body.split("void loop() {", 1)[1]
+    assert loop.index("poll_touch(millis());") < loop.index("tof.poll(")
+    cpp = tmp_path / "raw_touch.cc"
+    exe = tmp_path / "raw_touch"
+    cpp.write_text(
+        """
+#include <cassert>
+#include <cstdint>
+namespace body_pins { constexpr int kTouchOutput=34; }
+constexpr int HIGH=1;
+bool raw=false;
+int digitalRead(int) { return raw; }
+struct Control {
+  struct State { bool armed=true; bool touch_raw_active=false; } s;
+  unsigned edges=0;
+  State const& state() const { return s; }
+  void sample_touch_input(bool a) { s.touch_raw_active=a; if(a) s.armed=false; }
+  void set_touch(bool a, std::uint32_t) { if(a) ++edges; }
+} control;
+unsigned output_calls=0;
+void apply_outputs() { assert(!control.state().armed); ++output_calls; }
+bool touch_stable=false, touch_candidate=false;
+std::uint8_t touch_candidate_samples=0;
+std::uint32_t touch_last_sample_ms=0;
+""" + body[start:end] + """
+void sample(std::uint32_t t,bool a){raw=a;poll_touch(t);}
+int main(){
+  // Three 1ms pulses coincident with nominal 25ms sample instants.
+  for(std::uint32_t t=0;t<=100;++t) sample(t,t==25||t==50||t==75);
+  assert(control.edges==0);
+  assert(!control.state().armed);
+  assert(output_calls==1);
+  for(std::uint32_t t=101;t<=60101;++t) sample(t,true);
+  assert(control.edges==1 && touch_stable && output_calls==1);
+  for(std::uint32_t t=60102;t<=60160;++t) sample(t,false);
+  assert(!touch_stable && control.edges==1);
+  touch_last_sample_ms=0xffffffe0u;
+  sample(0xfffffff0u,true);
+  sample(8,true); assert(!touch_stable);
+  sample(9,true); assert(!touch_stable);
+  sample(33,true); assert(!touch_stable);
+  sample(34,true); assert(touch_stable && control.edges==2);
+}
+""",
+        encoding="utf-8",
+    )
+    _compile_checked(compiler, cpp, exe, toolchain_probe=False)
+    result = subprocess.run(
+        [str(exe)], check=False, capture_output=True, text=True, timeout=5,
+    )
+    assert result.returncode == 0, result.stderr
