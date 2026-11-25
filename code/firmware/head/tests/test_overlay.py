@@ -33,9 +33,9 @@ def native_cpp_env() -> dict[str, str]:
     try:
         sdk = subprocess.run(
             [xcrun, "--show-sdk-path"], capture_output=True, text=True,
-            check=False,
+            check=False, timeout=5,
         )
-    except OSError:
+    except (OSError, subprocess.TimeoutExpired):
         return env
     if sdk.returncode == 0 and sdk.stdout.strip():
         headers = Path(sdk.stdout.strip()) / "usr/include/c++/v1"
@@ -68,9 +68,44 @@ class ProtocolTests(unittest.TestCase):
             env = native_cpp_env()
             self.assertEqual(
                 env["CPLUS_INCLUDE_PATH"],
-                "/fake/MacOSX.sdk/usr/include/c++/v1",
+                str(Path("/fake/MacOSX.sdk") / "usr/include/c++/v1"),
             )
             probe.assert_called_once()
+            self.assertEqual(probe.call_args.kwargs["timeout"], 5)
+            self.assertEqual(os.environ["CPLUS_INCLUDE_PATH"], "")
+
+    def test_native_cpp_env_skips_non_apple_platforms(self):
+        for platform in ("linux", "win32"):
+            with self.subTest(platform=platform), patch.object(
+                sys, "platform", platform
+            ), patch.dict(os.environ, {"CPLUS_INCLUDE_PATH": ""}), patch.object(
+                shutil, "which"
+            ) as lookup:
+                self.assertEqual(native_cpp_env(), dict(os.environ))
+                lookup.assert_not_called()
+
+    def test_native_cpp_env_falls_back_on_unavailable_or_timed_out_sdk(self):
+        with patch.object(sys, "platform", "darwin"), patch.dict(
+            os.environ, {"CPLUS_INCLUDE_PATH": ""}
+        ):
+            with patch.object(shutil, "which", return_value=None):
+                self.assertEqual(native_cpp_env(), dict(os.environ))
+            for error in (OSError("missing xcrun"), subprocess.TimeoutExpired("xcrun", 5)):
+                with self.subTest(error=error), patch.object(
+                    shutil, "which", return_value="/usr/bin/xcrun"
+                ), patch("subprocess.run", side_effect=error):
+                    self.assertEqual(native_cpp_env(), dict(os.environ))
+
+    def test_native_cpp_env_rejects_missing_headers_or_failed_probe(self):
+        with patch.object(sys, "platform", "darwin"), patch.dict(
+            os.environ, {"CPLUS_INCLUDE_PATH": ""}
+        ), patch.object(shutil, "which", return_value="/usr/bin/xcrun"):
+            for returncode, stdout in ((1, "/fake/sdk"), (0, ""), (0, "/fake/sdk")):
+                with self.subTest(returncode=returncode, stdout=stdout), patch(
+                    "subprocess.run",
+                    return_value=subprocess.CompletedProcess([], returncode, stdout),
+                ), patch.object(Path, "is_dir", return_value=False):
+                    self.assertEqual(native_cpp_env(), dict(os.environ))
 
     def test_native_protocol_and_ack_regressions(self):
         compiler = shutil.which("c++")
