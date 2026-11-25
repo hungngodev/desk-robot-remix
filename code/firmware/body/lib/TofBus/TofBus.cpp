@@ -9,6 +9,7 @@
 namespace desk_robot {
 
 bool TofBus::quiesce_optional_mux() {
+  if (!pins_restored_ || !bus_idle()) return false;
   if (!optional_mux_present_) return true;
   // A fitted optional bus must not keep a lane selected while the local
   // guard reads the 0x70 floor mux. Verify the CONTROL REGISTER, not just
@@ -220,20 +221,21 @@ ImuIdentity TofBus::probe_imu() {
   wire_.beginTransmission(kMuxAddress);
   const bool disconnected = wire_.write(static_cast<std::uint8_t>(0)) == 1;
   const bool acknowledged = wire_.endTransmission(true) == 0;
-  if (!disconnected || !acknowledged ||
+  if (!disconnected || !acknowledged || !bus_idle() ||
       wire_.requestFrom(kMuxAddress, static_cast<size_t>(1), true) != 1 ||
-      wire_.available() < 1 || wire_.read() != 0)
+      wire_.available() < 1 || wire_.read() != 0 || !bus_idle())
     return ImuIdentity{}; // Never probe a potentially selected 0x70 lane.
 
   auto identity = [this](std::uint8_t address, std::uint8_t& value) {
+    if (!bus_idle()) return false;
     wire_.beginTransmission(address);
     const bool wrote = wire_.write(static_cast<std::uint8_t>(0x0f)) == 1;
     const bool acknowledged = wire_.endTransmission(!wrote) == 0;
-    if (!wrote || !acknowledged) return false;
+    if (!wrote || !acknowledged || !bus_idle()) return false;
     if (wire_.requestFrom(address, static_cast<size_t>(1), true) != 1 ||
         wire_.available() < 1) return false;
     const int byte = wire_.read();
-    if (byte < 0) return false;
+    if (byte < 0 || !bus_idle()) return false;
     value = static_cast<std::uint8_t>(byte);
     return true;
   };
@@ -242,10 +244,11 @@ ImuIdentity TofBus::probe_imu() {
   std::uint8_t mpu_matches = 0;
   std::uint8_t mpu_address = 0;
   for (std::uint8_t addr : {static_cast<std::uint8_t>(0x68), static_cast<std::uint8_t>(0x69)}) {
+    if (!bus_idle()) return ImuIdentity{};
     wire_.beginTransmission(addr);
     const bool wrote = wire_.write(static_cast<std::uint8_t>(0x75)) == 1;
     const bool acknowledged = wire_.endTransmission(!wrote) == 0;
-    if (wrote && acknowledged &&
+    if (wrote && acknowledged && bus_idle() &&
         wire_.requestFrom(addr, static_cast<size_t>(1), true) == 1 &&
         wire_.available() >= 1) {
       const int value = wire_.read();
@@ -277,6 +280,7 @@ ImuIdentity TofBus::probe_imu() {
       result.aux_address = addr;
     }
   }
+  if (!bus_idle()) return ImuIdentity{};
   if (mpu_matches > 0) {
     if (mpu_matches != 1 || gyro_matches != 0 || aux_matches != 0)
       return ImuIdentity{}; // ambiguous installed IMUs: fail closed

@@ -97,6 +97,15 @@ def test_late_optional_mux_detection_reaches_active_tof_safety_owner():
     assert setup.index("accessories.begin(Wire)") < setup.index(discovery)
 
 
+def test_cliff_fault_reaches_motor_outputs_before_other_i2c_work():
+    body = (ROOT / "code/firmware/body/src/main.cpp").read_text()
+    loop = body.split("void loop()", 1)[1]
+    loop = re.sub(r"//[^\n]*|/\*.*?\*/", "", loop, flags=re.S)
+    loop = re.sub(r"\s+", "", loop)
+    stop = "if(!cliff_guard.evaluate(millis()))apply_outputs();"
+    assert loop.index("tof.poll(") < loop.index(stop) < loop.index("berry_imu.poll(")
+
+
 def test_real_robot_pin_allocations_do_not_double_book_same_gpio():
     bus = PLAN["bus"]
     for key in ("body_gpio", "sense_gpio"):

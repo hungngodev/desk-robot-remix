@@ -306,6 +306,18 @@ int main() {
       CHECK(bus.probe_imu().family == 0);
       CHECK(Wire.imu_probe_attempts == 0);
       Wire.range_mux_stuck = false;
+      auto& lines = fake_i2c_lines();
+      lines.scl_stuck = true;
+      const auto blocked = Wire.transactions;
+      CHECK(bus.probe_imu().family == 0);
+      CHECK(Wire.transactions == blocked);
+      CHECK(Wire.imu_probe_attempts == 0);
+      lines.scl_stuck = false;
+      Wire.hold_sda_on_range_disconnect = true;
+      CHECK(bus.probe_imu().family == 0);
+      CHECK(Wire.transactions - blocked == 3);
+      CHECK(Wire.imu_probe_attempts == 0);
+      lines.sda_stuck = false;
       Wire.range_mux_read_nack = true;
       CHECK(bus.probe_imu().family == 0);
       CHECK(Wire.imu_probe_attempts == 0);

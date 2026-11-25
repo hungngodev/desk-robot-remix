@@ -84,6 +84,7 @@ class TwoWire {
   bool range_mux_write_nack = false;
   bool range_mux_read_nack = false;
   bool range_mux_bad_readback = false;
+  bool hold_sda_on_range_disconnect = false;
   std::uint8_t hold_sda_on_range_mask = 0; // one-shot downstream hang on STOP
   std::uint16_t tof_register = 0;
   unsigned tof_samples = 0;
@@ -202,6 +203,10 @@ class TwoWire {
       if (range_mux_write_nack) return 4;
       if (!range_mux_stuck) {
         ranges = outbound[0];
+        if (hold_sda_on_range_disconnect && ranges == 0) {
+          fake_i2c_lines().sda_stuck = true;
+          hold_sda_on_range_disconnect = false;
+        }
         if (hold_sda_on_range_mask != 0 && ranges == hold_sda_on_range_mask) {
           fake_i2c_lines().sda_stuck = true;
           hold_sda_on_range_mask = 0;

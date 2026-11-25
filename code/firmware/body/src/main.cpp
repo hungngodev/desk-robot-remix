@@ -698,6 +698,9 @@ void loop() {
       control.sample_side_range(extra, sample.distance_mm, sample.valid, scan_ms);
     }
   }
+  // A fault must reach the physical outputs before another shared I2C
+  // transaction can block. Preserve holding PWM through apply_outputs().
+  if (!cliff_guard.evaluate(millis())) apply_outputs();
   berry_imu.poll(millis());   // read-only; no motor permission even if ToF fails
   control.set_imu(berry_imu.reading());
   poll_touch(millis());
