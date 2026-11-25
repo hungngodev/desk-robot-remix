@@ -283,3 +283,46 @@ def test_cli_doctor_uses_custom_url(monkeypatch, tmp_path):
     ])
     cli.main()
     assert seen == [("robot-01", False, "http://127.0.0.1:9876")]
+
+
+@pytest.mark.parametrize("command", [
+    ["doctor", "--live", "--robot", "missing"],
+    ["look", "missing", "What do you see?"],
+    ["situation", "missing"],
+    ["vision", "missing"],
+    ["power", "missing"],
+])
+def test_cli_unknown_robot_is_clean_error(command, monkeypatch, capsys):
+    import desk_robot.cli as cli
+
+    settings = configured()
+    settings.tools_token_env = "DESK_ROBOT_TOOL_TOKEN"
+    settings.robots = [SimpleNamespace(
+        id="robot-01", motion_enabled=False, calibration=None,
+    )]
+    monkeypatch.setattr(cli, "load_settings", lambda path: settings)
+    monkeypatch.setattr(cli, "load_env", lambda path: None)
+    monkeypatch.setenv("DESK_ROBOT_API_TOKEN", "a" * 40)
+    transport, calls = simulated_mac()
+    original_client = httpx.AsyncClient
+
+    def fake_client(*args, **kwargs):
+        return original_client(*args, transport=transport, **kwargs)
+
+    monkeypatch.setattr(cli.httpx, "AsyncClient", fake_client)
+    monkeypatch.setattr(sys, "argv", ["desk-robot", *command])
+    with pytest.raises(SystemExit) as exc:
+        cli.main()
+    assert exc.value.code == 1
+    captured = capsys.readouterr()
+    assert "Unknown robot ID" in captured.err
+    assert "desk-robot doctor" in captured.err
+    assert "Traceback" not in captured.err
+    assert not captured.out
+    assert calls == []
+
+
+async def test_live_doctor_unknown_robot_preserves_lookup_cause():
+    with pytest.raises(ValueError, match="Unknown robot ID") as exc:
+        await inspect_live_media(configured(), "missing")
+    assert isinstance(exc.value.__cause__, KeyError)

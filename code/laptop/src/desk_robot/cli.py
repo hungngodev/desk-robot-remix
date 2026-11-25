@@ -12,7 +12,7 @@ from pathlib import Path
 
 import httpx
 
-from .config import load_settings, read_private_env, secret
+from .config import RobotConfig, Settings, load_settings, read_private_env, secret
 from .conversation import conversation_turns
 from .runtime import Runtime
 
@@ -64,13 +64,23 @@ def write_secrets(path: Path, settings, *, add_missing: bool = False) -> int:
         return len(missing)
 
 
+def _configured_robot(settings: Settings, robot_id: str) -> RobotConfig:
+    """Translate an operator lookup failure without changing the shared API."""
+    try:
+        return settings.robot(robot_id)
+    except KeyError as exc:
+        raise ValueError(
+            "Unknown robot ID; check the configured IDs with desk-robot doctor"
+        ) from exc
+
+
 async def inspect_live_media(settings, robot_id: str, *, look: bool = False,
                              client: httpx.AsyncClient | None = None,
                              base_url: str = "http://127.0.0.1:8765") -> dict:
     """Read-only end-to-end Mac/head/vision preflight, with NO actuator permit."""
     if settings.mode != "hardware" or not settings.voice_vision_tools_enabled:
         raise ValueError("Real XIAO camera preflight requires hardware vision consent")
-    robot = settings.robot(robot_id)
+    robot = _configured_robot(settings, robot_id)
     if not robot.device_id:
         raise ValueError("A configured real Xiaozhi head device ID is required")
     selected_backend = robot.motor_backend
@@ -210,7 +220,7 @@ async def request(args, settings):
         elif args.action in ("look", "situation", "vision", "power"):
             if settings.mode != "hardware":
                 raise ValueError("Live camera tools require a physical XIAO head")
-            settings.robot(args.robot)  # Validate configured robot identity.
+            _configured_robot(settings, args.robot)  # Validate configured robot identity.
             if args.action in ("look", "situation") and not settings.voice_vision_tools_enabled:
                 raise ValueError("Live vision consent is disabled in local configuration")
             if args.action == "look":
