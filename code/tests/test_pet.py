@@ -1969,6 +1969,105 @@ async def test_camera_source_receipt_keeps_order_and_identity_across_restart(
 
 
 
+
+async def test_late_cancel_resistant_camera_comparison_cannot_replace_newer_receipt(
+    fleet, tmp_path,
+):
+    """Exercise the real observer, not just reversed calls to the memory writer."""
+    class ReorderedScene:
+        def __init__(self):
+            self.first_started = asyncio.Event()
+            self.first_cancelled = asyncio.Event()
+            self.release_first = asyncio.Event()
+            self.first_task = None
+            self.calls = []
+
+        async def compare(self, before, after):
+            self.calls.append((before, after))
+            if len(self.calls) == 1:
+                self.first_task = asyncio.current_task()
+                self.first_started.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    # A provider can finish despite cancellation. Its result
+                    # must not become a memory, status event, or speech input.
+                    self.first_cancelled.set()
+                    await self.release_first.wait()
+                return SceneChange("key", "Older key appeared", 0.96)
+            return SceneChange("key", "Newer key removed", 0.97)
+
+    fleet.fleet_text_sharing_enabled = False
+    ids = [robot.id for robot in fleet.robots]
+    memory = MemoryStore(tmp_path, ids)
+    speaker = SimulatedSpeaker()
+    scene = ReorderedScene()
+    pet = PetController(
+        fleet, {},
+        Conversation(fleet, GroundedChat(), speaker, memory=memory),
+        memory, scene, interval=0.01,
+    )
+    hub = CameraFrameHub(ids)
+    pet.multimodal = SimpleNamespace(
+        hub=hub, stream_owns_camera=lambda rid: rid == "robot-01",
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation, state.quiet = True, 73, True
+
+    def publish(image, sequence):
+        return hub.offer_prepared(
+            "robot-01",
+            (image, VisualChangeGate._reduced(image), 0.0),
+            time.monotonic(), source="proactive",
+            source_identity=(5, sequence, sequence * 100000),
+        )
+
+    publish(WHITE, 11)
+    publish(RED, 12)
+    older = publish(RED, 13)
+    observer = asyncio.create_task(pet._observe("robot-01", 73))
+    try:
+        await asyncio.wait_for(scene.first_started.wait(), timeout=2)
+        pet.preempt_background_vision()
+        await asyncio.wait_for(scene.first_cancelled.wait(), timeout=2)
+        publish(WHITE, 14)
+        newer = publish(WHITE, 15)
+        assert older.received_at < newer.received_at
+        await wait_for(lambda: state.events == 1)
+        assert scene.calls == [(WHITE, RED), (RED, WHITE)]
+        assert scene.first_task is not None and not scene.first_task.done()
+
+        # Force semantic completion order to differ from capture order.
+        scene.release_first.set()
+        late = await asyncio.wait_for(asyncio.shield(scene.first_task), timeout=2)
+        assert late.description == "Older key appeared"
+        await asyncio.sleep(0)
+
+        records = memory.recent("robot-01")
+        assert len(records) == 1
+        assert records[0].summary == "Newer key removed"
+        assert records[0].event_id == "camera_robot-01_00000005_0000000f_16e360"
+        assert records[0].witnessed and records[0].source_robot == "robot-01"
+        provenance = memory.get_camera_provenance("robot-01", records[0].event_id)
+        assert provenance.source_identity == newer.source_identity
+        assert provenance.received_at == records[0].observed_at
+        assert provenance.interpreted_at >= provenance.received_at
+        assert state.last_event == "Newer key removed"
+        assert state.events == 1
+        assert all(memory.count(peer) == 0 for peer in ids if peer != "robot-01")
+        assert not speaker.spoken
+        assert not observer.done()
+        assert state.last_error is None
+    finally:
+        scene.release_first.set()
+        state.enabled = False
+        observer.cancel()
+        await asyncio.gather(observer, return_exceptions=True)
+        if scene.first_task is not None:
+            await asyncio.gather(scene.first_task, return_exceptions=True)
+        await pet.close()
+
+
 async def test_live_camera_hub_receipt_reaches_private_memory_with_source_id(
     fleet, tmp_path,
 ):
