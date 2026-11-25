@@ -499,7 +499,7 @@ void verify_qualified_pose_is_never_implicit_navigation() {
         body.state().right == 0);
 }
 
-void verify_pickup_low_g_invalidates_valid_origin_before_watchdog() {
+void verify_commanded_motion_requires_measured_travel(bool lose_encoder) {
   desk_robot::BodyControl body;
   desk_robot::LineReceiver receiver;
   body.set_boot_epoch(602);
@@ -564,6 +564,46 @@ void verify_pickup_low_g_invalidates_valid_origin_before_watchdog() {
   check(body.state().left == 20 && body.state().right == 20);
   check(body.wheel_pose_state().x_mm == 0 && body.wheel_pose_state().y_mm == 0);
   check(body.wheel_pose_state().quality == desk_robot::WheelPoseIntegrator::Quality::Valid);
+
+  // The command is still forward, but the two measured wheels now move
+  // backward. Signed travel must follow the encoders rather than PWM.
+  const auto stationary_pair = body.wheel_pose_state().sample_seq;
+  imu.at_ms = 470;
+  body.set_imu(imu);
+  angles.angle[1].at_ms = 465;
+  angles.angle[2].at_ms = 475;
+  angles.angle[1].sample_seq = angles.angle[2].sample_seq = 6;
+  angles.angle[1].angle = 90;
+  angles.angle[2].angle = 110;
+  body.set_accessories(angles, 475);
+  check(body.state().armed && body.state().left == 20 && body.state().right == 20);
+  check(body.wheel_pose_state().sample_seq == stationary_pair + 1);
+  check(body.wheel_pose_state().x_mm == -1 && body.wheel_pose_state().y_mm == 0 &&
+        body.wheel_pose_state().yaw_mrad == 0);
+  check(body.wheel_pose_state().quality == desk_robot::WheelPoseIntegrator::Quality::Valid);
+
+  if (lose_encoder) {
+    // A missing wheel during an active command is NOT zero measured travel,
+    // and the previous signed displacement cannot be extrapolated from PWM.
+    angles.angle[1].valid = false;
+    body.set_accessories(angles, 478);
+    check(body.wheel_pose_state().origin == 0);
+    check(body.wheel_pose_state().quality ==
+          desk_robot::WheelPoseIntegrator::Quality::Unavailable);
+    check(!body.wheel_pair_receipt().valid);
+    check(!body.wheel_angle_capture(false).continuous() &&
+          !body.wheel_angle_capture(true).continuous());
+    const auto wire = request(body, receiver, "pose\r\n", 478, 478000);
+    check(wire ==
+          "{\"v\":1,\"body_boot\":602,\"origin\":0,\"seq\":1,"
+          "\"sample_us\":478000,\"x_mm\":0,\"y_mm\":0,"
+          "\"yaw_mrad\":0,\"quality\":\"unavailable\"}");
+    // Restoring validity on the same cached conversion cannot restore pose.
+    angles.angle[1].valid = true;
+    body.set_accessories(angles, 479);
+    check(body.wheel_pose_state().origin == 0 && !body.wheel_pair_receipt().valid);
+    return;
+  }
 
   // Inject MPU6050 low-g pickup BEFORE any watchdog expiry while Valid & armed.
   imu.low_g_irq = true;
@@ -696,7 +736,8 @@ int main() {
   verify_paired_wheel_acquisitions();
   verify_imu_yaw_never_promotes_pose();
   verify_qualified_pose_is_never_implicit_navigation();
-  verify_pickup_low_g_invalidates_valid_origin_before_watchdog();
+  verify_commanded_motion_requires_measured_travel(false);
+  verify_commanded_motion_requires_measured_travel(true);
   verify_slow_lift_invalidates_origin_without_low_g();
   return 0;
 }
