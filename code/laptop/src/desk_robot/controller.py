@@ -1485,7 +1485,7 @@ class Coordinator:
                         "Dock approach refused: robot is seated or powered on dock"
                     )
 
-            def _verify_at_dispatch() -> None:
+            def _verify_at_dispatch(observation=observation) -> None:
                 _verify_before_post()
                 # A same-PID reconnect can retire the selected camera stream
                 # inside either command lock even while the JPEG is still fresh.
