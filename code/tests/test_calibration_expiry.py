@@ -1,7 +1,8 @@
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
+from desk_robot import calibration as calibration_module
 from desk_robot.calibration import Calibration
 
 
@@ -28,11 +29,13 @@ def test_expired_calibration_blocks_pickup_admission(tmp_path):
 
 def test_future_expiry_survives_save_and_load(tmp_path):
     path = tmp_path / "calibration.json"
-    calibration = Calibration.model_validate({**_payload(), "expires_at": "2099-01-01T05:00:00+05:00"})
+    calibration = Calibration.model_validate(
+        {**_payload(), "expires_at": "2099-01-01T05:00:00+05:00"}
+    )
     calibration.save(path)
     restored = Calibration.load(path)
     assert restored == calibration
-    assert restored.expires_at == datetime(2099, 1, 1, tzinfo=timezone.utc)
+    assert restored.expires_at == datetime(2099, 1, 1, tzinfo=UTC)
     restored.verify_ready()
 
 
@@ -45,3 +48,18 @@ def test_legacy_calibration_does_not_invent_expiry():
     calibration = Calibration.model_validate(_payload())
     assert calibration.expires_at is None
     calibration.verify_ready()
+
+
+def test_exact_expiry_in_different_timezone_blocks_pickup(monkeypatch):
+    class FixedClock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            assert tz is UTC
+            return datetime(2099, 1, 1, tzinfo=UTC)
+
+    monkeypatch.setattr(calibration_module, "datetime", FixedClock)
+    calibration = Calibration.model_validate(
+        {**_payload(), "expires_at": "2099-01-01T05:00:00+05:00"}
+    )
+    with pytest.raises(ValueError, match="expired"):
+        calibration.verify_ready()
