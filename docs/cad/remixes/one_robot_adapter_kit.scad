@@ -176,6 +176,7 @@ module speaker_grille(){
   panel_x=speaker_l+2*speaker_grille_border;
   panel_y=speaker_w+2*speaker_grille_border;
   assert(speaker_grille_min_web>=2);
+  assert(m2_clearance_d>=2, "Speaker grille M2 bore is undersized");
   assert(speaker_grille_hole_edge-m2_clearance_d/2 >=
          speaker_grille_min_web,
          "Speaker grille hole breaches outside printable web");

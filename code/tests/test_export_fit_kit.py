@@ -784,6 +784,7 @@ def test_current_2w_rectangular_front_grille_renders(tmp_path):
     for assignment, message in (
         ("speaker_grille_border=6", "gasket/pocket printable web"),
         ("speaker_grille_hole_edge=2", "outside printable web"),
+        ("m2_clearance_d=1.5", "M2 bore is undersized"),
     ):
         invalid = subprocess.run([
             "openscad", "--export-format", "binstl",
