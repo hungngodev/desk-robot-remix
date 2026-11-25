@@ -10,7 +10,11 @@ import pytest
 from desk_robot.multimodal import (
     CameraFrameHub,
     MultimodalOrchestrator,
+    _frame_is_fresh,
     _prepare,
+    _score_scene_change,
+    _validate_camera_raster,
+    _validate_prepared_raster,
     change_fraction,
 )
 from desk_robot.vision import OllamaScene, VisualChangeGate
@@ -4222,3 +4226,34 @@ async def test_queued_native_capture_keeps_original_lifecycle(transition):
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
         await service.close()
+
+
+@pytest.mark.parametrize("received, expected", [
+    (10.0, True), (9.0, True), (8.999, False), (10.001, False),
+    (float("nan"), False), (float("inf"), False), (True, False),
+])
+def test_frame_freshness_boundaries(received, expected):
+    assert _frame_is_fresh(received, 10.0, 1.0) is expected
+
+
+@pytest.mark.parametrize("size, fmt", [((4097, 1), "JPEG"), ((1, 1), "PNG")])
+def test_camera_raster_rejects_invalid_header(size, fmt):
+    raster = Image.new("RGB", size)
+    raster.format = fmt
+    with pytest.raises(ValueError):
+        _validate_camera_raster(raster)
+
+
+@pytest.mark.parametrize("jpeg, gray", [
+    (b"bad", bytes(64 * 48)),
+    (b"\xff\xd8" + bytes(8) + b"\xff\xd9", bytes(64 * 48 - 1)),
+])
+def test_prepared_raster_rejects_invalid_payload(jpeg, gray):
+    with pytest.raises(ValueError, match="Invalid preprocessed camera evidence"):
+        _validate_prepared_raster(jpeg, gray)
+
+
+def test_scene_score_preserves_threshold_and_clipping():
+    assert _score_scene_change(bytes([10, 20]), bytes([26, 35]), 1, 0, 16) == 1
+    assert _score_scene_change(bytes([250]), bytes([255]), 2, 0, 16) == 1
+    assert _score_scene_change(bytes([250]), bytes([255]), 2, 0, 16, clamp=True) == 0

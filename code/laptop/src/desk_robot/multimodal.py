@@ -52,6 +52,11 @@ def _finite(value: float) -> bool:
         return False  # Huge Python integers cannot represent host timestamps.
 
 
+def _frame_is_fresh(received_at: float, now: float, max_age: float) -> bool:
+    """Compare Mac receipt age, never device exposure time."""
+    return _finite(received_at) and 0 <= now - received_at <= max_age
+
+
 def _admissible_mac_event_clock(value: float) -> bool:
     """Accept historical fixture times, never implausible future local receipts.
 
@@ -71,6 +76,20 @@ def _validate_camera_cue(source: object, trigger_kind: object = None) -> None:
         raise ValueError("Only a real sensor burst can label its trigger")
 
 
+def _validate_camera_raster(im: Image.Image) -> None:
+    if im.format != "JPEG":
+        raise ValueError("Authenticated camera source must return JPEG")
+    if not 1 <= im.width <= 4096 or not 1 <= im.height <= 4096:
+        raise ValueError("Camera dimensions invalid")
+
+
+def _validate_prepared_raster(reduced: bytes, gray: bytes) -> None:
+    if (not isinstance(reduced, bytes) or not 12 <= len(reduced) <= 1_000_000
+            or not reduced.startswith(b"\xff\xd8") or not reduced.endswith(b"\xff\xd9")
+            or not isinstance(gray, bytes) or len(gray) != 64 * 48):
+        raise ValueError("Invalid preprocessed camera evidence")
+
+
 def _prepare(jpeg: bytes, max_side: int = 768) -> tuple[bytes, bytes, float]:
     """Encode bounded JPEG for the VLM and a tiny grayscale motion fingerprint."""
     if not isinstance(jpeg, bytes) or not 12 <= len(jpeg) <= 4_000_000:
@@ -79,14 +98,8 @@ def _prepare(jpeg: bytes, max_side: int = 768) -> tuple[bytes, bytes, float]:
         raise ValueError("Camera JPEG framing invalid")
     try:
         with Image.open(BytesIO(jpeg)) as im:
-            if im.format != "JPEG":
-                raise ValueError("Authenticated camera source must return JPEG")
-            # JPEG headers expose the declared dimensions without decoding the
-            # image. Reject oversized frames BEFORE allocating the RGB raster.
-            # With five active heads an untrusted decompression bomb must never
-            # consume the live audio/camera worker's memory budget.
-            if not 1 <= im.width <= 4096 or not 1 <= im.height <= 4096:
-                raise ValueError("Camera dimensions invalid")
+            # Reject oversized frames BEFORE allocating the RGB raster.
+            _validate_camera_raster(im)
             im.load()
             # The decoded image is privately owned by this worker. Avoid
             # copying an already upright RGB raster before thumbnailing.
@@ -135,6 +148,19 @@ def _lighting_transform(a: bytes, b: bytes) -> tuple[float, float, bool]:
     return gain, (sum_b - gain * sum_a) / count, fitted
 
 
+def _score_scene_change(a: bytes, b: bytes, gain: float, offset: float,
+                        threshold: int, *, clamp: bool = False) -> int:
+    if clamp:
+        return sum(
+            1 for x, y in zip(a, b, strict=True)
+            if abs(y - min(255, max(0, gain * x + offset))) >= threshold
+        )
+    return sum(
+        1 for x, y in zip(a, b, strict=True)
+        if abs(y - (gain * x + offset)) >= threshold
+    )
+
+
 def change_fraction(a: bytes, b: bytes, *, threshold: int = 16) -> float:
     """Ignore broad lighting shifts before detecting localized motion.
 
@@ -144,10 +170,7 @@ def change_fraction(a: bytes, b: bytes, *, threshold: int = 16) -> float:
         raise ValueError("Frame fingerprints have incompatible dimensions")
     count = len(a)
     gain, offset, _ = _lighting_transform(a, b)
-    changed = sum(
-        1 for x, y in zip(a, b, strict=True)
-        if abs(y - (gain * x + offset)) >= threshold
-    )
+    changed = _score_scene_change(a, b, gain, offset, threshold)
     if not changed or not any(
         (y <= 8 or y >= 247) and x != y for x, y in zip(a, b, strict=True)
     ):
@@ -166,10 +189,7 @@ def change_fraction(a: bytes, b: bytes, *, threshold: int = 16) -> float:
     gain, offset, fitted = _lighting_transform(valid_a, valid_b)
     if not fitted:
         return changed / count
-    clipped_changed = sum(
-        1 for x, y in zip(a, b, strict=True)
-        if abs(y - min(255, max(0, gain * x + offset))) >= threshold
-    )
+    clipped_changed = _score_scene_change(a, b, gain, offset, threshold, clamp=True)
     return min(changed, clipped_changed) / count
 
 
@@ -512,10 +532,7 @@ class CameraFrameHub:
         ):
             raise ValueError("Invalid device camera completion identity")
         reduced, gray, _ = prepared
-        if (not isinstance(reduced, bytes) or not 12 <= len(reduced) <= 1_000_000
-                or not reduced.startswith(b"\xff\xd8") or not reduced.endswith(b"\xff\xd9")
-                or not isinstance(gray, bytes) or len(gray) != 64 * 48):
-            raise ValueError("Invalid preprocessed camera evidence")
+        _validate_prepared_raster(reduced, gray)
         prev = self.previous_gray.get(robot_id)
         motion = change_fraction(prev, gray) if prev is not None else 0.0
         self.previous_gray[robot_id] = gray
@@ -537,7 +554,7 @@ class CameraFrameHub:
             raise ValueError("Invalid clock")
         fresh = [
             item for item in self.frames[robot_id]
-            if 0 <= now - item.received_at <= _VISUAL_FRAME_MAX_AGE_S
+            if _frame_is_fresh(item.received_at, now, _VISUAL_FRAME_MAX_AGE_S)
         ]
         if not fresh:
             return []
@@ -1298,7 +1315,7 @@ class MultimodalOrchestrator:
             if (not self._camera_grant_valid(robot_id, camera_grant)):
                 return
             if (frame is not None and frame.received_at > last_delivered
-                    and 0 <= time.monotonic() - frame.received_at <= 1):
+                    and _frame_is_fresh(frame.received_at, time.monotonic(), 1.0)):
                 last_delivered = frame.received_at
                 yield frame
 
@@ -1448,9 +1465,7 @@ class MultimodalOrchestrator:
                         # Validate before storing the sampler cursor: a future
                         # timestamp would otherwise suppress every later real
                         # frame, while NaN would disable cadence filtering.
-                        if (not _finite(received)
-                                or received > now
-                                or now - received > 6.0
+                        if (not _frame_is_fresh(received, now, _VISUAL_FRAME_MAX_AGE_S)
                                 or received <= self._last_stream_sample[robot_id]):
                             metrics["stream_frames_skipped"] += 1
                             continue
@@ -1514,7 +1529,7 @@ class MultimodalOrchestrator:
                         # frame's one-second live-video freshness window.
                         # Do not revive an obsolete scene, even if its receipt
                         # was valid before the asynchronous decode began.
-                        if not 0 <= time.monotonic() - received <= 1.0:
+                        if not _frame_is_fresh(received, time.monotonic(), 1.0):
                             metrics["stream_frames_skipped"] += 1
                             continue
                         if (self._closed or turn != self._turn_epoch[robot_id]
@@ -1982,7 +1997,7 @@ class MultimodalOrchestrator:
                     frame = recent[-1]
                     now = time.monotonic()
                     if (frame.source in ("speech", "voice_question")
-                            and 0 <= now - frame.received_at <= reuse_if_recent_s
+                            and _frame_is_fresh(frame.received_at, now, reuse_if_recent_s)
                             and frame.received_at >= self._voice_turn_at[robot_id]):
                         metrics["native_speech_camera_reuses"] += 1
                         return frame
@@ -2029,7 +2044,7 @@ class MultimodalOrchestrator:
                     )
                 # Apply the same receipt-age limit as the continuous stream.
                 # A blocked JPEG worker must not revive a stale snapshot.
-                if not 0 <= time.monotonic() - received <= 1.0:
+                if not _frame_is_fresh(received, time.monotonic(), 1.0):
                     raise RuntimeError("Camera snapshot expired during preprocessing")
                 evidence = self.hub.offer_prepared(
                     robot_id, prepared, received, source=source,
@@ -2066,7 +2081,7 @@ class MultimodalOrchestrator:
         # An external JPEG is not consent: mirror the continuous Sense stream.
         if not self._camera_grant_valid(robot_id, camera_grant):
             return
-        if not _finite(now) or not 0 <= time.monotonic() - now <= 1.0:
+        if not _frame_is_fresh(now, time.monotonic(), 1.0):
             return
         generation = self.hub._generation[robot_id]
         turn = self._turn_epoch[robot_id]
@@ -2075,7 +2090,7 @@ class MultimodalOrchestrator:
         if not self._camera_grant_valid(robot_id, camera_grant):
             # An old JPEG cannot enter the regranted scene after Pillow.
             return
-        if not 0 <= time.monotonic() - now <= 1.0:
+        if not _frame_is_fresh(now, time.monotonic(), 1.0):
             return
         if (self._any_human_active(time.monotonic())
                 or self._turn_epoch[robot_id] != turn
@@ -2181,7 +2196,7 @@ class MultimodalOrchestrator:
                 model_started = time.monotonic()
                 # Both images of a temporal comparison must still be fresh.
                 if not all(
-                    0 <= model_started - frame.received_at <= _VISUAL_FRAME_MAX_AGE_S
+                    _frame_is_fresh(frame.received_at, model_started, _VISUAL_FRAME_MAX_AGE_S)
                     for frame in chosen
                 ):
                     raise RuntimeError("Camera observation expired while queued")
@@ -2205,7 +2220,7 @@ class MultimodalOrchestrator:
                             and self._camera_grant_valid(robot_id, camera_consent_generation)
                             and camera_generation == self.hub._generation[robot_id]
                             and all(
-                                0 <= now - frame.received_at <= _VISUAL_FRAME_MAX_AGE_S
+                                _frame_is_fresh(frame.received_at, now, _VISUAL_FRAME_MAX_AGE_S)
                                 for frame in chosen
                             )
                         )
@@ -2243,7 +2258,7 @@ class MultimodalOrchestrator:
                 raise RuntimeError("Camera evidence invalidated during visual analysis")
             completed_at = time.monotonic()
             if not all(
-                0 <= completed_at - frame.received_at <= _VISUAL_FRAME_MAX_AGE_S
+                _frame_is_fresh(frame.received_at, completed_at, _VISUAL_FRAME_MAX_AGE_S)
                 for frame in chosen
             ):
                 raise RuntimeError("Camera observation expired during visual analysis")
