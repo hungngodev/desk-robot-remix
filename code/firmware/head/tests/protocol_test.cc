@@ -190,6 +190,35 @@ int main() {
         assert(!gate.preempts(false));
     }
 
+    // A queued ARM/drive/keepalive must not become eligible after a
+    // completed HALT merely because the urgent request count reaches zero.
+    {
+        UrgentStopGate::Request queued(gate, false);
+        assert(!queued.preempted());
+        {
+            UrgentStopGate::Request halt(gate, true);
+            assert(queued.preempted());
+            assert(!halt.preempted());
+            UrgentStopGate::Request during(gate, false);
+            assert(during.preempted());
+            {
+                UrgentStopGate::Request stop(gate, true);
+                assert(!stop.preempted());
+            }
+            assert(during.preempted());
+        }
+        assert(queued.preempted());
+        assert(!gate.preempts(false));
+        UrgentStopGate::Request fresh(gate, false);
+        assert(!fresh.preempted());
+    }
+    // Requests survive ordinary telemetry scheduling but never a STOP epoch.
+    for (unsigned i = 0; i < 1000; ++i) {
+        UrgentStopGate::Request queued(gate, false);
+        { UrgentStopGate::Request stop(gate, true); }
+        assert(queued.preempted());
+    }
+
     Command c;
     assert(ParseCommand("drive 100 -100 250", false, c));
     assert(ExpectedAck(c) == "OK drive left=40 right=-40 ms=250");

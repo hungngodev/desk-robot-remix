@@ -1699,7 +1699,8 @@ def test_body_status_is_async_and_urgent_stop_preempts_uart_telemetry():
     assert source.index("UrgentStopGate::Request urgency") < source.index(
         "std::lock_guard<std::mutex> lock(uart_mutex_)"
     )
-    assert "if (urgent_stop_gate_.preempts(urgent))" in source
+    assert source.count("if (urgency.preempted())") == 3
+    assert source.index("if (urgency.preempted())") < source.index("uart_write_bytes(")
     assert "void Bridge::BodyReadTask(void* context)" in source
     assert 'xTaskCreate(BodyReadTask, "robot_body_read"' in source
     assert "httpd_req_async_handler_begin(req, &async_req)" in source
@@ -2099,7 +2100,7 @@ def test_authenticated_pose_bridge_is_read_only_bounded_and_versioned():
     assert 'return {501, false, "pose unsupported by body firmware"};' in bridge
     assert 'command.verb == "pose" && !line.empty() && line.front() == \'{\'' in bridge
     assert 'const bool urgent = command.verb == "stop" || command.verb == "halt";' in bridge
-    assert 'urgent_stop_gate_.preempts(urgent)' in bridge
+    assert 'urgency.preempted()' in bridge
     assert 'body_read_busy_.exchange(true, std::memory_order_acq_rel)' in bridge
     assert 'if (!Authorize(req)) return Json(req, 401' in bridge
     assert 'if (!cJSON_AddStringToObject(body, "robot_id", CONFIG_DESK_ROBOT_ID))' in bridge

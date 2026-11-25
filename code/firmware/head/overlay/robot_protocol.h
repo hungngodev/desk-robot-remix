@@ -82,17 +82,31 @@ class UrgentStopGate {
 public:
     class Request {
     public:
-        Request(UrgentStopGate& gate, bool urgent) : gate_(gate), urgent_(urgent) {
-            if (urgent_) gate_.pending_.fetch_add(1, std::memory_order_acq_rel);
+        Request(UrgentStopGate& gate, bool urgent)
+            : gate_(gate), urgent_(urgent),
+              generation_(gate.generation_.load(std::memory_order_acquire)),
+              blocked_at_entry_(gate.preempts(urgent)) {
+            if (urgent_) {
+                gate_.pending_.fetch_add(1, std::memory_order_acq_rel);
+                gate_.generation_.fetch_add(1, std::memory_order_acq_rel);
+            }
         }
         Request(const Request&) = delete;
         Request& operator=(const Request&) = delete;
         ~Request() {
             if (urgent_) gate_.pending_.fetch_sub(1, std::memory_order_acq_rel);
         }
+        // A request queued before STOP/HALT stays canceled even after the
+        // urgent transaction releases the UART and its pending count drops.
+        bool preempted() const {
+            return !urgent_ && (blocked_at_entry_ || gate_.preempts(false) ||
+                generation_ != gate_.generation_.load(std::memory_order_acquire));
+        }
     private:
         UrgentStopGate& gate_;
         bool urgent_;
+        std::uint32_t generation_;
+        bool blocked_at_entry_;
     };
 
     bool preempts(bool urgent) const {
@@ -100,6 +114,7 @@ public:
     }
 private:
     std::atomic<unsigned> pending_{0};
+    std::atomic<std::uint32_t> generation_{0};
 };
 
 // The WROOM status "none" is healthy only with an active AND ready local

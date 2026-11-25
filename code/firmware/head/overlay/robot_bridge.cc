@@ -462,7 +462,7 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
     // Announce urgent STOP before waiting for the body UART lock.
     UrgentStopGate::Request urgency(urgent_stop_gate_, urgent);
     std::lock_guard<std::mutex> lock(uart_mutex_);
-    if (urgent_stop_gate_.preempts(urgent))
+    if (urgency.preempted())
         return {503, false, "body read superseded by urgent stop"};
     if (!uart_ready_) return {503, false, "body UART unavailable"};
     // No retries: an uncertain ACK may still mean that physical movement happened.
@@ -474,10 +474,12 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
     std::string line;
     bool body_cr_pending = false;
     while (esp_timer_get_time() < deadline) {
-        if (urgent_stop_gate_.preempts(urgent))
+        if (urgency.preempted())
             return {503, false, "body response superseded by urgent stop"};
         uint8_t c = 0;
         if (uart_read_bytes(kUart, &c, 1, pdMS_TO_TICKS(10)) != 1) continue;
+        if (urgency.preempted())
+            return {503, false, "body response superseded by urgent stop"};
         if (!BodyWireByteValid(body_cr_pending, c))
             return {503, false, "malformed body response"};
         if (c == '\r') continue;
