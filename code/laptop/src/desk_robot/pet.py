@@ -44,6 +44,13 @@ from .vision import OllamaScene, SceneChange, VisualChangeGate
 _PET_SPEECH_ABORT_TIMEOUT_S = 2.5
 _PET_OBSERVER_CANCEL_TIMEOUT_S = 2.0
 _PROACTIVE_TOOL_TIMEOUT_S = 1.5
+# Cosmetic OLED delivery and retry budgets are distinct from speech cooldowns.
+_PERSON_FACE_CUE_COOLDOWN_S = 10.0
+_PERSON_FACE_ATTEMPT_INTERVAL_S = 2.0
+_PERSON_FACE_REQUEST_TIMEOUT_S = 1.0
+_MODEL_FACE_CUE_COOLDOWN_S = 4.0
+_MODEL_FACE_ATTEMPT_INTERVAL_S = 1.0
+_MODEL_FACE_REQUEST_TIMEOUT_S = 0.7
 _ACTIVITY_RECONSIDERATION_KIND = "activity_reconsideration"
 # Candidate software policy, not a calibrated object identity tracker.
 _CAMERA_HABITUATION_S = 900.0
@@ -224,9 +231,10 @@ class PetState:
 class PetController:
     """One observation producer per robot, ONE group speaker and VLM owner.
 
-    Camera activity is event-triggered rather than a periodic greeting. Scene
-    content comes from an explicitly configured local model; its confidence is
-    not a physical truth guarantee. No images or raw audio are written to disk.
+    Camera scene changes can offer event-driven initiative. A separate fleet
+    policy clock offers context reconsideration without claiming new perception
+    or requiring speech. Scene confidence is not a physical truth guarantee.
+    No images or raw audio are written to disk here.
     """
 
     def __init__(
@@ -252,7 +260,7 @@ class PetController:
         on_dock_inhibit_changed: (
             Callable[[str, bool], Awaitable[object] | object] | None
         ) = None,
-    ):
+    ) -> None:
         activity_min_interval = (
             settings.pet_activity_min_interval_seconds
             if activity_min_interval is None else activity_min_interval
@@ -262,10 +270,14 @@ class PetController:
             if activity_max_interval is None else activity_max_interval
         )
         if (
-            type(activity_min_interval) not in (int, float)
-            or type(activity_max_interval) not in (int, float)
-            or not math.isfinite(activity_min_interval)
-            or not math.isfinite(activity_max_interval)
+            any(
+                type(value) not in (int, float)
+                for value in (
+                    interval, speech_cooldown, interaction_cooldown, group_window,
+                    max_observation_age, touch_interval,
+                    activity_min_interval, activity_max_interval,
+                )
+            )
             or not 0.01 <= activity_min_interval <= activity_max_interval <= 3600
             or not 0 < interval <= 60
             or not 0 <= speech_cooldown <= 3600
@@ -2501,8 +2513,8 @@ class PetController:
                 or self._vision_preemption_epoch != preemption_epoch
                 or self._human_active_in_fleet(now)
                 or now - captured_at > self.max_observation_age
-                or now - state.last_person_face_cue_at < 10.0
-                or now - state.last_person_face_attempt_at < 2.0):
+                or now - state.last_person_face_cue_at < _PERSON_FACE_CUE_COOLDOWN_S
+                or now - state.last_person_face_attempt_at < _PERSON_FACE_ATTEMPT_INTERVAL_S):
             return
         cue = getattr(self.heads.get(robot_id), "face_event", None)
         if not callable(cue):
@@ -2512,7 +2524,7 @@ class PetController:
         state.last_person_face_cue_at = now
         acknowledged = False
         try:
-            await asyncio.wait_for(cue("person_detected"), timeout=1.0)
+            await asyncio.wait_for(cue("person_detected"), timeout=_PERSON_FACE_REQUEST_TIMEOUT_S)
             # A delayed OLED receipt must still belong to the same live
             # visual and human-voice grant before consuming the cue budget.
             # A device frame already rendered cannot be recalled from Mac.
@@ -2553,8 +2565,8 @@ class PetController:
             return
         state = self.states[robot_id]
         now = time.monotonic()
-        if (now - state.last_model_face_cue_at < 4.0
-                or now - state.last_model_face_attempt_at < 1.0):
+        if (now - state.last_model_face_cue_at < _MODEL_FACE_CUE_COOLDOWN_S
+                or now - state.last_model_face_attempt_at < _MODEL_FACE_ATTEMPT_INTERVAL_S):
             return
         cue = getattr(self.heads.get(robot_id), "face_event", None)
         if not callable(cue):
@@ -2564,7 +2576,7 @@ class PetController:
         state.last_model_face_cue_at = now
         acknowledged = False
         try:
-            await asyncio.wait_for(cue("mood:" + mood), timeout=0.7)
+            await asyncio.wait_for(cue("mood:" + mood), timeout=_MODEL_FACE_REQUEST_TIMEOUT_S)
             # A queued head request can outlive the Mac voice/consent grant.
             # Do not count its late receipt as a current accepted expression.
             # This cannot undo a frame already displayed by the device.

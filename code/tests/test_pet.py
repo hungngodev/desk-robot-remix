@@ -9276,3 +9276,40 @@ async def test_stream_wait_failure_reports_error_and_preserves_typed_policy(
         observer.cancel()
         await asyncio.gather(observer, return_exceptions=True)
         await pet.close()
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "interval", "speech_cooldown", "interaction_cooldown", "group_window",
+        "max_observation_age", "touch_interval",
+        "activity_min_interval", "activity_max_interval",
+    ],
+)
+@pytest.mark.parametrize(
+    "value",
+    [True, False, "1", float("nan"), float("inf"), -float("inf"), 10**400],
+    ids=["true", "false", "string", "nan", "positive-inf", "negative-inf", "huge-int"],
+)
+def test_pet_timing_parameters_reject_invalid_numeric_values(fleet, tmp_path, name, value):
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    with pytest.raises(ValueError, match="Invalid pet intervals"):
+        PetController(fleet, {}, conversation, memory, KeyScene(), **{name: value})
+
+
+def test_pet_timing_parameters_preserve_valid_numeric_boundaries(fleet, tmp_path):
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(),
+        interval=60, speech_cooldown=0, interaction_cooldown=0,
+        group_window=60, max_observation_age=60, touch_interval=5,
+        activity_min_interval=0.01, activity_max_interval=3600,
+    )
+    assert pet.interval == 60
+    assert pet.speech_cooldown == pet.interaction_cooldown == 0
+    assert pet.group_window == pet.max_observation_age == 60
+    assert pet.touch_interval == 5
+    assert pet.activity_min_interval == 0.01
+    assert pet.activity_max_interval == 3600
