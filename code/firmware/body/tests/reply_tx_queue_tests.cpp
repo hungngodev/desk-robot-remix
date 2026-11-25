@@ -20,12 +20,12 @@ struct FakeSerial {
 };
 
 using Queue = desk_robot::ReplyTxQueue<128>;
-static_assert(noexcept(std::declval<Queue&>().enqueue_line(nullptr)));
-static_assert(noexcept(std::declval<Queue&>().enqueue_priority_line(nullptr)));
-static_assert(noexcept(std::declval<const Queue&>().pending()));
-static_assert(noexcept(std::declval<const Queue&>().dropped()));
+static_assert(noexcept(std::declval<Queue&>().enqueue_line(nullptr)), "normal enqueue must not throw");
+static_assert(noexcept(std::declval<Queue&>().enqueue_priority_line(nullptr)), "urgent enqueue must not throw");
+static_assert(noexcept(std::declval<const Queue&>().pending()), "pending query must not throw");
+static_assert(noexcept(std::declval<const Queue&>().dropped()), "drop count query must not throw");
 // The generic serial backend can allocate or throw; do not promise otherwise.
-static_assert(!noexcept(std::declval<Queue&>().drain(std::declval<FakeSerial&>())));
+static_assert(!noexcept(std::declval<Queue&>().drain(std::declval<FakeSerial&>())), "serial drain can propagate backend exceptions");
 
 int main() {
   desk_robot::ReplyTxQueue<128> head, usb;

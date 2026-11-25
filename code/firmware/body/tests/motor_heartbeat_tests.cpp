@@ -7,10 +7,10 @@
 
 using desk_robot::MotorHeartbeat;
 
-static_assert(noexcept(std::declval<MotorHeartbeat&>().reset()));
-static_assert(noexcept(std::declval<const MotorHeartbeat&>().missed_deadline()));
-static_assert(noexcept(std::declval<MotorHeartbeat&>().check_authority(0U, false)));
-static_assert(noexcept(std::declval<MotorHeartbeat&>().update(0U, false)));
+static_assert(noexcept(std::declval<MotorHeartbeat&>().reset()), "reset must not throw");
+static_assert(noexcept(std::declval<const MotorHeartbeat&>().missed_deadline()), "deadline query must not throw");
+static_assert(noexcept(std::declval<MotorHeartbeat&>().check_authority(0U, false)), "authority check must not throw");
+static_assert(noexcept(std::declval<MotorHeartbeat&>().update(0U, false)), "heartbeat update must not throw");
 
 // Model only the caller's authority input; BodyControl owns the actual leases.
 // A long-running pulse train must neither hide a late CPU transition nor
