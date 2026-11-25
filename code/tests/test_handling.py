@@ -1191,3 +1191,48 @@ def test_asserted_native_low_g_cannot_seed_upright_calibration():
         assert gate.reference is None
     assert qualified(gate, _mpu_native_low_g(1), 103.9) == ()
     assert gate.reference == (0, 0, 1)
+
+
+@pytest.mark.parametrize("valid", [True, False])
+def test_delayed_pre_wrap_packet_cannot_revoke_pose_after_poll_gap(valid):
+    gate = HandlingGate()
+    for i in range(8):
+        assert qualified(gate, sample(sample_ms=2 + i), 100 + i * .1,
+                         new_sample=False) == ()
+    previous_at = gate.last_at
+    assert gate.reference == (0, 0, 1)
+    assert qualified(gate, sample(sample_ms=0xfffffffe, valid=valid),
+                     previous_at + 2, new_sample=False) == ()
+    assert gate.reference == (0, 0, 1)
+    assert gate.last_at == previous_at
+    assert gate.last_sample_ms == 9
+    assert qualified(gate, sample(sample_ms=10), previous_at + 2.1,
+                     new_sample=False) == ()
+    assert gate.reference is None
+
+
+@pytest.mark.parametrize("offset", [-.05, 0])
+def test_new_rollover_acquisition_with_late_callback_revokes_pose(offset):
+    gate = HandlingGate()
+    for i in range(8):
+        assert qualified(gate, sample(sample_ms=0xfffffff0 + i), 100 + i * .1,
+                         new_sample=False) == ()
+    previous_at = gate.last_at
+    gate.last_shake = previous_at
+    assert qualified(gate, sample(sample_ms=2), previous_at + offset,
+                     new_sample=False) == ()
+    assert gate.reference is None
+    assert gate.last_sample_ms == 2
+    assert gate.last_at == previous_at
+    assert gate.last_shake == previous_at
+    assert len(gate.startup_samples) == 1
+
+
+def test_pre_wrap_motor_active_still_revokes_pose():
+    gate = HandlingGate()
+    for i in range(8):
+        qualified(gate, sample(sample_ms=2 + i), 100 + i * .1, new_sample=False)
+    assert gate.reference is not None
+    assert qualified(gate, sample(sample_ms=0xfffffffe, left=1), 103,
+                     new_sample=False) == ()
+    assert gate.reference is None

@@ -197,7 +197,10 @@ class HandlingGate:
                 if (isinstance(imu, dict)
                         and type(imu.get("sample_ms")) is int
                         and self.last_sample_ms is not None
-                        and imu["sample_ms"] <= self.last_sample_ms):
+                        and 0 <= imu["sample_ms"] <= 0xffffffff
+                        and imu["sample_ms"] <= self.last_sample_ms
+                        and not (self.last_sample_ms >= 0xffff0000
+                                 and imu["sample_ms"] <= 0xffff)):
                     return ()
         # An older acquisition with an intact stationary safety envelope
         # cannot revoke a newer pose merely because its IMU payload was
@@ -210,9 +213,12 @@ class HandlingGate:
                 and type(imu.get("sample_ms")) is int
                 and 0 <= imu["sample_ms"] <= 0xffffffff
                 and self.last_sample_ms is not None
-                and imu["sample_ms"] < self.last_sample_ms
-                and not (self.last_sample_ms >= 0xffff0000
-                         and imu["sample_ms"] <= 0xffff)):
+                and (
+                    imu["sample_ms"] - self.last_sample_ms > 0x7fffffff
+                    or (imu["sample_ms"] < self.last_sample_ms
+                        and not (self.last_sample_ms >= 0xffff0000
+                                 and imu["sample_ms"] <= 0xffff))
+                )):
             return ()
         # A valid late conversion must not impersonate a polling outage.
         # Invalid current telemetry still falls through to fail closed.
@@ -287,7 +293,9 @@ class HandlingGate:
                     return ()
                 # A 32-bit sensor clock rollover invalidates pose but must
                 # not reset the human gesture cooldown on the host clock.
+                previous_at = self.last_at
                 self.reset(preserve_shake_cooldown=True)
+                self.last_at = previous_at
             elif sample_ms - self.last_sample_ms > 0x7fffffff:
                 # A pre-wrap conversion arriving after wrap looks numerically
                 # newer. Reject implausibly large forward jumps as replay.
