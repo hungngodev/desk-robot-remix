@@ -122,3 +122,16 @@ def test_max30102_compiled_fifo_layout_is_disclosed_not_qualified():
     assert "esp32_full_pulse_reversed_lab" in (
         ROOT / ".github/workflows/host-verification.yml"
     ).read_text()
+
+
+def test_imu_role_tracks_selected_mpu6050_without_physical_qualification():
+    plan, owners = _sources()
+    selected = next(part for part in plan["parts"] if part["id"] == "imu")
+    assert selected["per_robot"] == 1
+    assert "MPU6050" in selected["name"]
+    assert "BerryIMU preserved as spare" in selected["notes"]
+    owner = owners["pet_roles"]["imu"]
+    assert owner["source"] == "code/firmware/body/lib/BerryImu/BerryImu.cpp"
+    assert owner["host_test"] == "code/firmware/body/tests/berry_imu_tests.cpp"
+    assert owner["source_state"] == "identity_and_readonly_source"
+    assert "orientation calibration" in owner["remaining_qualification"]

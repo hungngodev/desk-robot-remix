@@ -47,10 +47,22 @@ def test_berryimu_spare_does_not_replace_selected_mpu6050():
     assert "BerryIMU" not in parts["imu"]["name"]
     owned = {p["component"]: p for p in inventory["components"]}
     berry = next(p for name, p in owned.items() if name.startswith("OzzMaker BerryIMU"))
-    assert berry["needed_per_robot"] == 0
+    assert berry["needed_per_robot"] == berry["needed_for_five"] == 0
+    assert "additional_units_unconfirmed_if_only_one" not in berry
     assert berry["functionality_tested"] is False
+    mpu = next(p for name, p in owned.items() if name.startswith("MPU6050 six-axis"))
+    assert mpu["needed_per_robot"] == 1
+    assert mpu["needed_for_five"] == plan["target_robots"] == 5
+    assert mpu["functionality_tested"] is False
+    fallback = owned["LSM6DS3TR-C six-axis IMU breakout"]
+    assert fallback["needed_per_robot"] == fallback["needed_for_five"] == 0
+    assert "selected MPU6050 is proven unsuitable" in fallback["note"]
     assert "MPU6050 remains the selected first-unit IMU" in inventory["note"]
     assert "BerryIMU replaces new IMU procurement" not in inventory["note"]
+    parts_doc = (ROOT / "docs/hardware/parts.md").read_text(encoding="utf-8")
+    assert "| MPU6050 motion board | 1 / 5 |" in parts_doc
+    assert "| BerryIMU motion board | 0 required |" in parts_doc
+    assert "BerryIMU remains a photographed spare" in parts_doc
 
 
 def test_station_and_imu_supersessions_retained_in_decision_log():
