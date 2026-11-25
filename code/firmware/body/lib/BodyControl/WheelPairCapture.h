@@ -31,6 +31,11 @@ class WheelPairCapture {
   // wheel pair immediately on pickup, MPU invalidation or CPU watchdog.
   void discard_continuity() { invalidate(); }
   const Receipt& receipt() const { return receipt_; }
+  // A historical pair can remain readable while a new one is incomplete.
+  // Do not use it to establish a new origin across an unmatched interval.
+  bool ready_for_origin() const {
+    return synchronized_ && receipt_.valid && !pending_[0] && !pending_[1];
+  }
 
   Result observe(WheelAngleCapture::Result left_result,
                  WheelAngleCapture::Result right_result,

@@ -429,7 +429,20 @@ void verify_qualified_pose_is_never_implicit_navigation() {
     body.set_accessories(angles, at + 10);
   }
   check(body.wheel_pose_state().origin == 0);
-  check(body.start_local_pose_origin(410));
+  // A previously stationary receipt is still readable during a new,
+  // unmatched wheel acquisition, but cannot authorize a new origin.
+  imu.at_ms = 415;
+  body.set_imu(imu);
+  angles.angle[1].at_ms = 415;
+  angles.angle[1].sample_seq = 5;
+  body.set_accessories(angles, 415);
+  check(body.wheel_pair_receipt().valid);
+  check(!body.start_local_pose_origin(415));
+  check(body.wheel_pose_state().origin == 0);
+  angles.angle[2].at_ms = 420;
+  angles.angle[2].sample_seq = 5;
+  body.set_accessories(angles, 420);
+  check(body.start_local_pose_origin(420));
   check(body.wheel_pose_state().origin == 1);
   imu.at_ms = 505;
   body.set_imu(imu);
@@ -437,8 +450,8 @@ void verify_qualified_pose_is_never_implicit_navigation() {
   angles.angle[2].angle = 90;
   angles.angle[1].at_ms = 500;
   angles.angle[2].at_ms = 510;
-  angles.angle[1].sample_seq = 5;
-  angles.angle[2].sample_seq = 5;
+  angles.angle[1].sample_seq = 6;
+  angles.angle[2].sample_seq = 6;
   body.set_accessories(angles, 510);
   check(body.wheel_pose_state().x_mm == 1);
   check(body.wheel_pose_state().quality == desk_robot::WheelPoseIntegrator::Quality::Valid);

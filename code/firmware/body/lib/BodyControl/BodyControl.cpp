@@ -515,7 +515,8 @@ bool BodyControl::configure_wheel_pose(
 }
 
 bool BodyControl::start_local_pose_origin(std::uint32_t now_ms) {
-  if (!wheel_pose_configured_ || state_.armed || state_.servos_attached ||
+  if (!wheel_pose_configured_ || !wheel_pairs_.ready_for_origin() ||
+      state_.armed || state_.servos_attached ||
       state_.touch_raw_active || state_.bumper_raw ||
       imu_low_g_latched_ || imu_attitude_latched_ ||
       imu_sensor_fault_latched_ || motor_watchdog_latched_ ||
