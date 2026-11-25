@@ -96,3 +96,15 @@ def test_distortion_uses_opencv_when_present():
                         distortion_coeffs=(0.1, -0.03, 0.0, 0.0, 0.0)))
     result = project(distorted, 320, 240)
     assert result.x_mm == pytest.approx(173.2050807569)
+
+def test_off_axis_distortion_changes_metric_projection():
+    pytest.importorskip("cv2")
+    cal = calibration()
+    distorted = replace(cal, lens=replace(cal.lens,
+                        distortion_coeffs=(0.1, -0.03, 0.0, 0.0, 0.0)))
+    # Brown-Conrady forward distortion of normalized ray (0.45, 0.25).
+    # At the optical center distortion is zero, so the center-only test
+    # cannot detect an implementation that silently uses a pinhole model.
+    result = project(distorted, 504.390785, 342.439325)
+    assert result.x_mm == pytest.approx(103.4220286821, abs=0.01)
+    assert result.y_mm == pytest.approx(-62.8047468673, abs=0.01)
