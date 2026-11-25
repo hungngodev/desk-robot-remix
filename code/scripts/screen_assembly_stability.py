@@ -123,9 +123,10 @@ def screen(measurement: object) -> dict:
     if not isinstance(cases, list) or not 4 <= len(cases) <= 40:
         raise ValueError("All stowed, key, candy and docked poses required")
     names = [case.get("name") for case in cases if isinstance(case, dict)]
-    if (len(names) != len(cases) or len(set(names)) != len(names)
-            or not REQUIRED_POSES.issubset(names)
-            or any(not isinstance(name, str) or not name for name in names)):
+    if (len(names) != len(cases)
+            or any(not isinstance(name, str) or not name.strip() for name in names)
+            or len(set(names)) != len(names)
+            or not REQUIRED_POSES.issubset(names)):
         raise ValueError("Missing, unnamed or duplicated load pose")
     results = []
     baseline_components: dict[str, float] | None = None
@@ -180,7 +181,7 @@ def screen(measurement: object) -> dict:
                     f"from '{baseline_pose_name}'"
                 )
             for role, base_mass in baseline_components.items():
-                if not math.isclose(masses[role][0], base_mass, rel_tol=1e-7, abs_tol=1e-7):
+                if not math.isclose(masses[role][0], base_mass, rel_tol=1e-7, abs_tol=0.0):
                     raise ValueError(
                         f"Fixed assembly role '{role}' mass changed between poses "
                         f"({base_mass}g in '{baseline_pose_name}' vs {masses[role][0]}g in '{case['name']}'); "
@@ -204,8 +205,13 @@ def screen(measurement: object) -> dict:
         ):
             raise ValueError("Loaded grasp poses need actual key and candy mass")
         total = sum(m for m, _ in masses.values())
+        # Scale before multiplying to avoid underflow in tiny positive masses
+        # falsely moving the center toward the origin.
+        scale = max(m for m, _ in masses.values())
+        weights = [(m / scale, xyz) for m, xyz in masses.values()]
+        weight_total = math.fsum(w for w, _ in weights)
         com = tuple(
-            sum(m * xyz[axis] for m, xyz in masses.values()) / total
+            math.fsum(w * xyz[axis] for w, xyz in weights) / weight_total
             for axis in range(3)
         )
         # For Ry(pitch) Rx(roll), gravity-line projection contributes

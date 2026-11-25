@@ -260,3 +260,37 @@ def test_fixed_sense_head_cannot_shift_on_paper_without_a_moving_joint():
     head["com_mm"] = [3, 0, 68]
     with pytest.raises(ValueError, match="Fixed assembly role 'head_and_sense' center changed"):
         load().screen(data)
+
+
+@pytest.mark.parametrize("name", [[], {}, None, "  ", True])
+def test_malformed_extra_pose_name_is_rejected(name):
+    record = complete()
+    record["poses"].append({**record["poses"][0], "name": name})
+    with pytest.raises(ValueError, match="Missing, unnamed or duplicated load pose"):
+        load().screen(record)
+
+
+def test_subnormal_mass_arithmetic_cannot_inflate_static_margin():
+    record = complete()
+    record.update(required_static_edge_margin_mm=2, max_roll_deg=0, max_pitch_deg=0)
+    for pose in record["poses"]:
+        pose["support_contacts_mm"] = [
+            [-2.25, -2.25], [2.25, -2.25], [2.25, 2.25], [-2.25, 2.25],
+        ]
+        for part in pose["components"]:
+            part["mass_g"] = 5e-324 if part["mass_g"] else 0
+            part["com_mm"] = [0.49, 0, 15]
+    report = load().screen(record)
+    assert not report["necessary_stability_on_paper"]
+    assert all(pose["source_center_of_mass_mm"][0] == pytest.approx(0.49)
+               for pose in report["poses"])
+    assert all(not pose["necessary_static_margin_on_paper"] for pose in report["poses"])
+
+
+def test_tiny_fixed_mass_change_cannot_hide_behind_absolute_tolerance():
+    record = complete()
+    for pose in record["poses"]:
+        power = next(part for part in pose["components"] if part["id"] == "power_stack")
+        power["mass_g"] = 1e-12 if pose["name"] == "key_grasp_extended" else 1e-9
+    with pytest.raises(ValueError, match="Fixed assembly role 'power_stack' mass changed"):
+        load().screen(record)
