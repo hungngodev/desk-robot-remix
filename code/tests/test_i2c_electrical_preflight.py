@@ -351,3 +351,20 @@ def test_selected_estimated_rise_below_minimum(line):
     assert report["lines"][line]["estimated_rise_ns"] < 20
     assert report["lines"][line]["estimated_sink_ma"] <= 3
     assert not report["selected_branch_paper_pass"]
+
+@pytest.mark.parametrize("line", ["sda", "scl"])
+@pytest.mark.parametrize("owner", [0, 1])
+@pytest.mark.parametrize("voltage, accepted", [
+    (3.2499999999999996, False), (3.25, True), (3.3, True),
+    (3.35, True), (3.3500000000000005, False), (5.0, False),
+])
+def test_inclusive_pullup_voltage_bounds(line, owner, voltage, accepted):
+    segments = segment()
+    segments[owner][line]["pullup_v"] = voltage
+    if not accepted:
+        with pytest.raises(ValueError, match="pullup not 3.3V"):
+            tool.screen_selected_segment(*segments)
+        return
+    report = tool.screen_selected_segment(*segments)
+    assert report["selected_branch_paper_pass"]
+    assert not report["qualified_hardware"]

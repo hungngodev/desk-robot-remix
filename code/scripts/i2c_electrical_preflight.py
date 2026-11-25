@@ -20,6 +20,9 @@ TOF = ROOT / "code/firmware/body/lib/TofBus/TofBus.cpp"
 SOURCE = "https://www.ti.com/lit/ds/symlink/tca9548a.pdf"
 FAST_HZ = 400000
 VCC = 3.3
+# Literal endpoints avoid cancellation error at the inclusive voltage tolerance.
+PULLUP_MIN_V = 3.25
+PULLUP_MAX_V = 3.35
 RISE_MIN_NS = 20.0
 RISE_LIMIT_NS = 300.0
 LOW_MAX_V = 0.4
@@ -139,7 +142,7 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
             part = owner[line]
             power = _num(part.get("pullup_v"), f"{label}.{line}.pullup_v")
             # Design contract prohibits 5V generic carrier pullups on WROOM.
-            if abs(power - VCC) > 0.05:
+            if not PULLUP_MIN_V <= power <= PULLUP_MAX_V:
                 raise ValueError(f"{label}.{line}: pullup not 3.3V")
             resistors = part.get("pullup_ohms")
             if not isinstance(resistors, list):
