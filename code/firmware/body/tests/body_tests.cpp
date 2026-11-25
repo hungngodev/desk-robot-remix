@@ -286,6 +286,69 @@ void malformed_atomicity() {
   }
 }
 
+// Exercise every forbidden byte at every position in an otherwise valid
+// command. The parser and the actual serial receiver must both reject it,
+// without extending an existing control lease or changing actuator targets.
+void exhaustive_malformed_drive() {
+  BodyControl body;
+  LineReceiver receiver;
+  CHECK(send(body, "arm", 0) == "OK arm");
+  CHECK(send(body, "drive 12 -8 250", 0) == "OK drive left=12 right=-8 ms=250");
+  auto unchanged = [&]() {
+    CHECK(body.state().armed);
+    CHECK(body.state().left == 12 && body.state().right == -8);
+    CHECK(body.state().lift_target == 90 && body.state().grip_target == 90);
+    CHECK(body.drive_remaining(1) == 249);
+    CHECK(body.watchdog_remaining(1) == 499);
+  };
+  const std::string valid = "drive 12 -8 250";
+  for (unsigned byte = 0; byte < 256; ++byte) {
+    if (byte >= 32 && byte <= 126) continue;
+    for (std::size_t pos = 0; pos <= valid.size(); ++pos) {
+      auto malformed = valid;
+      malformed.insert(pos, 1, static_cast<char>(byte));
+      CHECK(send(body, malformed, 1) == "ERR input invalid_ascii");
+      unchanged();
+      // LF is a frame delimiter; CR immediately before LF is legal.
+      if (byte == 10 || (byte == 13 && pos == valid.size())) continue;
+      const auto replies = frame(body, receiver, malformed + "\n", 1);
+      CHECK(replies.size() == 1 && replies[0] == "ERR input invalid_ascii");
+      unchanged();
+    }
+  }
+  for (const char* value : {"NaN", "nan", "Inf", "-inf", "1e2", "1.0",
+                            "+1", "2147483648", "-2147483649"}) {
+    const std::string invalid(value);
+    for (const auto& command : {"drive " + invalid + " 8 250",
+                                "drive 12 " + invalid + " 250",
+                                "drive 12 8 " + invalid,
+                                "lift " + invalid, "grip " + invalid}) {
+      CHECK(send(body, command, 1).find("ERR") == 0);
+      const auto replies = frame(body, receiver, command + "\n", 1);
+      CHECK(replies.size() == 1 && replies[0].find("ERR") == 0);
+      unchanged();
+    }
+  }
+  // Small output buffers must return an explicit error, not partial JSON
+  // that could be mistaken for a complete sensor observation.
+  for (const char* command : {"status", "aux", "ir", "optics"}) {
+    char storage[66];
+    std::memset(storage, 'X', sizeof(storage));
+    body.execute(command, std::strlen(command), 1, storage + 1, 64);
+    CHECK(storage[0] == 'X' && storage[65] == 'X');
+    CHECK(std::memchr(storage + 1, '\0', 64) != nullptr);
+    CHECK(std::string(storage + 1) == std::string("ERR ") + command +
+          " response_too_long");
+    unchanged();
+  }
+  CHECK(frame(body, receiver, "ping\n", 1).at(0) == "OK ping");
+  unchanged();
+  body.tick(250);
+  CHECK(body.state().left == 0 && body.state().right == 0);
+  body.tick(500);
+  CHECK(!body.state().armed);
+}
+
 void overlong_frame_recovery() {
   BodyControl body;
   LineReceiver receiver;
@@ -790,6 +853,7 @@ void guarded_reboot_fault_matrix() {
 }
 
 void deterministic_stream_stress() {
+  exhaustive_malformed_drive();
   guarded_transition_sequences();
   BodyControl body;
   LineReceiver receiver;
