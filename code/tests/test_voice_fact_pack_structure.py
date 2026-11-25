@@ -34,3 +34,23 @@ def test_pack_preserves_real_unicode_and_typed_receipts(pack):
     packed = pack(facts)
     assert packed.isascii()
     assert json.loads(packed) == facts
+
+
+@pytest.mark.parametrize("limit", [256, 257, 4096])
+def test_pack_exact_budget_preserves_order_and_typed_values(pack, limit):
+    facts = [{"source": "status", "armed": False, "raw": ""},
+             {"source": "power", "cell_mv": 3700}]
+    base = len(pack(facts, limit=limit))
+    facts[0]["raw"] = "x" * (limit - base)
+    packed = pack(facts, limit=limit)
+    assert len(packed) == limit
+    assert json.loads(packed) == facts
+    facts[0]["raw"] += "x"
+    with pytest.raises(ValueError, match="speech context budget"):
+        pack(facts, limit=limit)
+
+
+@pytest.mark.parametrize("limit", [True, 255, 4097, 256.0, None])
+def test_pack_rejects_invalid_budget_type_or_range(pack, limit):
+    with pytest.raises(ValueError):
+        pack([{"source": "status"}], limit=limit)

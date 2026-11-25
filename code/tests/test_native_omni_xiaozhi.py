@@ -3174,6 +3174,8 @@ def test_native_long_natural_asr_uses_only_explicit_final_readonly_question(nati
     "What is the best way to charge my battery?",
     "How can I see what the camera captures?",
     "Could you tell me how to fix the sensor?",
+    "How does your battery work?",
+    "How do the temperature sensors function?",
 ])
 def test_native_howto_does_not_fall_through_to_semantic_tool_planner(
     native, spoken,
