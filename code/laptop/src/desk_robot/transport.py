@@ -209,6 +209,7 @@ class HttpHead:
     # These operations cannot create a new moving/armed session. Only an
     # acknowledged terminal HALT clears an uncertain command outcome.
     _RECOVERY_COMMANDS = frozenset({"ping", "status", "stop", "disarm", "halt"})
+    supports_dispatch_check = True
 
     def __init__(
         self, config: RobotConfig, client: httpx.AsyncClient,
@@ -257,13 +258,16 @@ class HttpHead:
             raise HeadError(f"{self.config.id}: head request failed; no retry: {exc}") from exc
 
     async def _ordered_command(
-        self, command: str, expected: str, generation: int
+        self, command: str, expected: str, generation: int,
+        *, dispatch_check=None,
     ) -> dict:
         # Retire queued control after either terminal HALT or uncertain writes.
         async with self.command_lock:
             if generation != self._command_generation:
                 raise HeadError("Command superseded by WROOM transport fence")
             self._check_command_recovery(command)
+            if dispatch_check is not None:
+                dispatch_check()
             try:
                 response = await self._request(
                     "POST", "/api/command", json={"command": command}
@@ -293,7 +297,7 @@ class HttpHead:
         if self._command_uncertain and command not in self._RECOVERY_COMMANDS:
             raise HeadError("WROOM command outcome unconfirmed; require acknowledged HALT")
 
-    async def command(self, command: str) -> dict:
+    async def command(self, command: str, *, dispatch_check=None) -> dict:
         expected = expected_ack(command)
         if command == "halt":
             # Retire already queued commands immediately. An in-flight POST
@@ -309,7 +313,9 @@ class HttpHead:
         self._check_command_recovery(command)
         generation = self._command_generation
         async with self.lock:
-            return await self._ordered_command(command, expected, generation)
+            return await self._ordered_command(
+                command, expected, generation, dispatch_check=dispatch_check,
+            )
 
     async def face_event(self, event: str) -> None:
         """Send an explicitly bounded cosmetic face cue to THIS robot's head.

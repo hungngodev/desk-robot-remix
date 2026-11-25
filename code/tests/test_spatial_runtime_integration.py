@@ -476,10 +476,14 @@ async def test_spatial_navigation_halts_on_pickup_invalidation_and_pose_replay(s
             rt.spatial.observe_pose("robot-01", await head.pose_status())
         _seed_safe_grid(rt.spatial, "robot-01", head)
 
+        drive_injections = 0
+
         class DelayOnceHead(SpatialHead):
             async def command(self, cmd: str):
+                nonlocal drive_injections
                 await super().command(cmd)
                 if cmd.startswith("drive "):
+                    drive_injections += 1
                     rt.pet._notify_sensor("robot-01", "handling_tilt")
 
         delayed_head = DelayOnceHead("robot-01")
@@ -492,7 +496,46 @@ async def test_spatial_navigation_halts_on_pickup_invalidation_and_pose_replay(s
         assert job.state == "failed"
         assert "invalidated" in (job.error or "")
         assert rt.spatial.state("robot-01").grid.anchored is False
-        assert "halt" in delayed_head.commands
+        assert drive_injections == 1
+        assert sum(1 for c in delayed_head.commands if c.startswith("drive ")) == 1
+        assert delayed_head.commands.index("halt") > max(
+            i for i, c in enumerate(delayed_head.commands) if c.startswith("drive ")
+        )
+
+        # Also exercise pickup invalidation during second-edge pose IO after 1 clean drive.
+        delayed_head.origin += 1
+        delayed_head.pose_seq += 1
+        with pytest.raises(Exception, match="origin"):
+            rt.spatial.observe_pose("robot-01", await delayed_head.pose_status())
+        _seed_safe_grid(rt.spatial, "robot-01", delayed_head)
+
+        class SecondEdgePickupHead(SpatialHead):
+            def __init__(self, robot_id: str):
+                super().__init__(robot_id)
+                self.drives = 0
+                self.triggered = False
+
+            async def command(self, cmd: str):
+                await super().command(cmd)
+                if cmd.startswith("drive "):
+                    self.drives += 1
+
+            async def pose_status(self):
+                if self.drives >= 1 and not self.triggered:
+                    self.triggered = True
+                    rt.pet._notify_sensor("robot-01", "handling_tilt")
+                return await super().pose_status()
+
+        edge2_head = SecondEdgePickupHead("robot-01")
+        edge2_head.origin = delayed_head.origin
+        edge2_head.pose_seq = delayed_head.pose_seq
+        rt.coordinator.heads["robot-01"] = edge2_head
+        await rt.coordinator.operator_arm("robot-01")
+        job2 = rt.coordinator.navigate("robot-01", goal=(5, 2), start=(2, 2), heading=0)
+        await asyncio.wait_for(rt.coordinator.tasks[job2.id], timeout=5)
+        assert job2.state == "failed"
+        assert sum(1 for c in edge2_head.commands if c.startswith("drive ")) == 1
+        assert "halt" in edge2_head.commands
     finally:
         await rt.close()
 
@@ -1082,3 +1125,129 @@ async def test_hardware_navigation_rejects_pose_expired_during_health_io(
         assert not rt.spatial.state("robot-01").grid.anchored
     finally:
         await rt.close()
+
+
+@pytest.mark.parametrize("hazard_kind", ["clean", "floor_unsafe", "front_obstacle"])
+async def test_three_cell_straight_route_revalidates_later_edges_independently(
+    settings, tmp_path, hazard_kind,
+):
+    """DRX-070: multi-edge route reaches goal in 3 drives cleanly, or aborts after 1 drive on later edge loss."""
+    from desk_robot.runtime import Runtime
+
+    settings.memory_dir = tmp_path / "memory"
+    settings.trials_file = tmp_path / "trials.jsonl"
+    robot = settings.robots[0]
+    robot.motion_enabled = True
+    robot.spatial_navigation_qualified = True
+    rt = Runtime(settings)
+
+    class MultiEdgeHead(SpatialHead):
+        def __init__(self, robot_id: str):
+            super().__init__(robot_id)
+            self.drive_count = 0
+            self.injected = False
+
+        async def command(self, cmd: str):
+            await super().command(cmd)
+            if cmd.startswith("drive "):
+                self.drive_count += 1
+
+        async def pose_status(self):
+            if hazard_kind != "clean" and self.drive_count >= 1 and not self.injected:
+                self.injected = True
+                st = rt.spatial.state("robot-01")
+                now_us = rt.spatial.now_us()
+                rt.spatial.record_range_batch(
+                    "robot-01",
+                    RangeCellBatch(
+                        robot_id="robot-01",
+                        body_boot=self.body_boot,
+                        origin_id=st.origin_id,
+                        epoch=st.epoch,
+                        calibration_id=st.calibration_id,
+                        kind=("floor_unsafe" if hazard_kind == "floor_unsafe" else "obstacle_hit"),
+                        lane=(2 if hazard_kind == "floor_unsafe" else 4),
+                        sequence=2,
+                        sample_us=200_000,
+                        received_us=now_us,
+                        geometry_qualified=True,
+                        cells=((4, 2),),
+                    ),
+                    now_us=now_us,
+                )
+            return await super().pose_status()
+
+    head = MultiEdgeHead("robot-01")
+    rt.coordinator.heads["robot-01"] = head
+    try:
+        _seed_safe_grid(rt.spatial, "robot-01", head)
+        await rt.coordinator.operator_arm("robot-01")
+        job = rt.coordinator.navigate("robot-01", goal=(5, 2), start=(2, 2), heading=0)
+        await asyncio.wait_for(rt.coordinator.tasks[job.id], timeout=5)
+        drives = [c for c in head.commands if c.startswith("drive ")]
+        if hazard_kind == "clean":
+            assert job.state == "succeeded"
+            assert len(drives) == 3
+        else:
+            assert job.state == "failed"
+            assert "route clearance or validity lost" in (job.error or "")
+            assert len(drives) == 1
+            assert "halt" in head.commands
+    finally:
+        await rt.close()
+
+
+def test_explicit_goal_report_only_target_omits_eyewitness_timestamp(
+    settings, tokens, tmp_path, monkeypatch,
+):
+    """DRX-170 API check: report_only / user_reported target has no camera eyewitness timestamp."""
+    from desk_robot.object_targets import ObjectEvidence
+
+    settings.memory_dir = tmp_path / "memory"
+    settings.trials_file = tmp_path / "trials.jsonl"
+    app = create_app(settings)
+    op = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
+    tool = {"Authorization": f"Bearer {tokens['DESK_ROBOT_TOOL_TOKEN']}"}
+    monkeypatch.setattr("desk_robot.controller.image_size", lambda _jpeg: (640, 480))
+
+    class MissingVision:
+        async def detect(self, _jpeg: bytes, _target: str):
+            return []
+
+    with TestClient(app) as client:
+        rt = app.state.runtime
+        rt.coordinator.vision = MissingVision()
+        robot = settings.robots[0]
+        robot.spatial_navigation_qualified = True
+        robot.object_detector_qualified = True
+        head = SpatialHead("robot-01")
+        rt.coordinator.heads["robot-01"] = head
+        _seed_safe_grid(rt.spatial, "robot-01", head)
+        now_wall = time.time()
+        rt.spatial.record_object_sighting(
+            "robot-01",
+            ObjectEvidence(
+                robot_id="robot-01",
+                label="key",
+                source="user_reported",
+                seen_at_wall_s=now_wall - 10.0,
+            ),
+        )
+        assert client.post("/v1/robots/robot-01/enable", headers=op).status_code == 200
+        resp = client.post(
+            "/v1/robots/robot-01/navigate",
+            headers=op,
+            json={"label": "key", "goal": [3, 2], "start": [2, 2], "heading": 0},
+        )
+        assert resp.status_code == 202
+        job_id = resp.json()["id"]
+        for _ in range(40):
+            job = client.get(f"/v1/jobs/{job_id}", headers=tool).json()
+            if job["state"] in ("succeeded", "failed", "cancelled"):
+                break
+            time.sleep(0.05)
+        assert job["state"] == "succeeded"
+        assert job["result"]["status"] == "no_current_sighting"
+        assert job["result"]["last_seen_at_wall_s"] is None
+        assert job["result"]["arrived"] is False
+        assert job["result"]["motor_authorized"] is False

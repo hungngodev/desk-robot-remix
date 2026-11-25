@@ -1478,10 +1478,42 @@ class Coordinator:
                         "charging_authorized": False,
                         "physical_acceptance_pass": False,
                     }
-            # Seat or charger evidence may arrive during any preceding await.
-            if self.dock_inhibited(job.robot_id):
-                raise OperationError("Dock approach refused: robot is seated or powered on dock")
-            await head.command(command)
+            # Seat or charger evidence may arrive during any preceding await,
+            # AND assigned IR/consent/seat freshness may expire while queued
+            # behind HttpHead.lock or HttpHead.command_lock.
+            class _DockIrQueueExpired(Exception):
+                pass
+
+            def _verify_before_post(
+                reading=reading, ir_request_at=ir_request_at,
+            ) -> None:
+                self._require_camera_motion_grant(camera_grant)
+                if expected_dock is not None:
+                    try:
+                        validate_ir(
+                            reading, job.robot_id, expected_dock_id=expected_dock,
+                            elapsed_ms=(time.monotonic() - ir_request_at) * 1000,
+                        )
+                    except ValueError as exc:
+                        raise _DockIrQueueExpired(str(exc)) from exc
+                if self.dock_inhibited(job.robot_id):
+                    raise OperationError(
+                        "Dock approach refused: robot is seated or powered on dock"
+                    )
+
+            _verify_before_post()
+            try:
+                if getattr(head, "supports_dispatch_check", False):
+                    await head.command(command, dispatch_check=_verify_before_post)
+                else:
+                    await head.command(command)
+            except _DockIrQueueExpired:
+                return {
+                    "phase": "hold",
+                    "reason": "Assigned dock IR expired before guarded drive",
+                    "charging_authorized": False,
+                    "physical_acceptance_pass": False,
+                }
             await asyncio.sleep(0.12)
             await _bounded_pulse_stop(head)
             await asyncio.sleep(0.05)

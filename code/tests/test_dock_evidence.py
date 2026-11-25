@@ -553,12 +553,94 @@ async def test_dock_observation_expires_after_scheduling_pause_and_retry_is_fres
     assert head.commands == []
 
 
-def dock_pin_sample(seq, *, asserted=False, age=5):
+def dock_pin_sample(seq, *, asserted_pin=None, asserted=False, age=5):
+    pin = asserted_pin or ("left_seated" if asserted else None)
     return dict(
         present=True, valid=True, charging_verified=False, seq=seq, age_ms=age,
-        left_seated=asserted, right_seated=False, input_good=False,
-        charge_indicated=False,
+        left_seated=(pin == "left_seated"),
+        right_seated=(pin == "right_seated"),
+        input_good=(pin == "input_good"),
+        charge_indicated=(pin == "charge_indicated"),
     )
+
+
+@pytest.mark.parametrize(
+    "pin_name",
+    ["left_seated", "right_seated", "input_good", "charge_indicated"],
+)
+def test_dock_inhibit_one_hot_pins_and_streak_reset(pin_name):
+    guard = DockContactInhibit()
+    assert guard.observe(dock_pin_sample(1, asserted_pin=pin_name), 17)
+    assert guard.inhibited
+    # Two consecutive fresh all-clear packets must not release yet.
+    assert guard.observe(dock_pin_sample(2), 17)
+    assert guard.inhibited
+    assert guard.observe(dock_pin_sample(3), 17)
+    assert guard.inhibited
+    # A newly asserted pin resets the clear streak so clear #1/#2 must restart.
+    assert guard.observe(dock_pin_sample(4, asserted_pin=pin_name), 17)
+    assert guard.inhibited
+    for seq in (5, 6):
+        assert guard.observe(dock_pin_sample(seq), 17)
+        assert guard.inhibited
+    # Only the third consecutive fresh all-clear releases.
+    assert guard.observe(dock_pin_sample(7), 17)
+    assert not guard.inhibited
+
+
+@pytest.mark.parametrize(
+    "pin_name",
+    ["left_seated", "right_seated", "input_good", "charge_indicated"],
+)
+async def test_mac_aux_telemetry_ingestion_inhibits_for_each_one_hot_pin(
+    tmp_path, pin_name,
+):
+    from pathlib import Path
+
+    from desk_robot.config import load_settings
+    from desk_robot.conversation import Conversation
+    from desk_robot.memory import MemoryStore
+    from desk_robot.pet import PetController, SceneChange
+    from desk_robot.simulator import SimulatedChat, SimulatedSpeaker
+
+    class NoScene:
+        async def compare(self, *_a, **_kw):
+            return SceneChange("none", "", 0.0)
+
+    root = Path(__file__).resolve().parents[2]
+    settings = load_settings(root / "code/config/fleet.simulation.toml")
+    settings.mode = "hardware"
+    memory = MemoryStore(tmp_path, [r.id for r in settings.robots])
+    conversation = Conversation(settings, SimulatedChat(), SimulatedSpeaker(), memory=memory)
+    inhibit_events = []
+    pet = PetController(
+        settings, {}, conversation, memory, NoScene(),
+        on_dock_inhibit_changed=lambda rid, flag: inhibit_events.append((rid, flag)),
+    )
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 1
+
+    def make_aux(seq: int, asserted: str | None = None) -> dict:
+        frame = payload()
+        frame["dock"] = dock_pin_sample(seq, asserted_pin=asserted)
+        return frame
+
+    try:
+        await pet._observe_aux(
+            "robot-01", 1, make_aux(1, asserted=pin_name), request_elapsed_ms=5.0,
+        )
+        assert pet.is_dock_charging_inhibited("robot-01") is True
+        assert inhibit_events == [("robot-01", True)]
+        await pet._observe_aux("robot-01", 1, make_aux(2), request_elapsed_ms=5.0)
+        await pet._observe_aux("robot-01", 1, make_aux(3), request_elapsed_ms=5.0)
+        assert pet.is_dock_charging_inhibited("robot-01") is True
+        await pet._observe_aux("robot-01", 1, make_aux(4), request_elapsed_ms=5.0)
+        assert pet.is_dock_charging_inhibited("robot-01") is False
+        assert inhibit_events == [("robot-01", True), ("robot-01", False)]
+    finally:
+        state.enabled = False
+        await pet.close()
 
 
 def test_dock_inhibit_missing_replayed_and_legacy_cannot_release():

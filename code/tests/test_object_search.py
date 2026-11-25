@@ -319,6 +319,17 @@ def test_nested_route_clock_cannot_rewind_outer_search(last_read, expected):
 
 
 @pytest.mark.parametrize(
+    ("target_spec", "expect_timestamp"),
+    [
+        (("last_seen", "camera_seen"), True),
+        (("user_reported", "user_reported"), False),
+        (("current_sighting", "camera_seen"), False),
+        (("unknown", "user_reported"), False),
+        (("rejected", "camera_seen"), False),
+        (None, False),
+    ],
+)
+@pytest.mark.parametrize(
     ("observation", "remaining", "status", "exhausted"),
     [
         ("camera_seen", 0, "target_seen_unverified_location", False),
@@ -329,9 +340,14 @@ def test_nested_route_clock_cannot_rewind_outer_search(last_read, expected):
     ],
 )
 def test_search_observation_never_promotes_detection_to_metric_arrival(
-    observation, remaining, status, exhausted,
+    observation, remaining, status, exhausted, target_spec, expect_timestamp,
 ):
-    _, _, _, query, _, target, view = fixtures()
+    _, _, _, query, _, default_target, view = fixtures()
+    if target_spec is None:
+        target = None
+    else:
+        t_status, t_source = target_spec
+        target = replace(default_target, status=t_status, source=t_source)
     candidates = (view,)
     if remaining:
         candidates += (replace(view, viewpoint_id="view-2", priority=1, cell=(10, 7)),)
@@ -343,7 +359,8 @@ def test_search_observation_never_promotes_detection_to_metric_arrival(
     )
     assert result["status"] == status
     assert result["search_exhausted"] is exhausted
-    assert result["last_seen_at_wall_s"] == target.seen_at_wall_s
+    expected_ts = default_target.seen_at_wall_s if expect_timestamp else None
+    assert result["last_seen_at_wall_s"] == expected_ts
     assert result["target_observed"] is (observation == "camera_seen")
     assert result["arrived"] is False and result["final_cell_verified"] is False
     assert result["motor_authorized"] is False
