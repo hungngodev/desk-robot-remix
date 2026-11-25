@@ -858,7 +858,11 @@ class Runtime:
         spatial = getattr(self, "spatial", None)
         if spatial is not None:
             for robot in self.settings.robots:
-                spatial.invalidate_robot(robot.id, reason="runtime_closed")
+                try:
+                    spatial.invalidate_robot(robot.id, reason="runtime_closed")
+                except Exception as exc:
+                    # One damaged map cannot skip the remaining pets or IO owners.
+                    errors.append(exc)
         unconfirmed = getattr(self.coordinator, "shutdown_stop_failures", {})
         if unconfirmed:
             # An idle robot can still have an uncertain prior motor pulse.

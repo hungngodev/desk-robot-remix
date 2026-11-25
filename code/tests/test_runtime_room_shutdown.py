@@ -382,3 +382,62 @@ def test_repeated_shutdown_retains_cancellation_resistant_owner(monkeypatch, own
             await asyncio.gather(*tasks, return_exceptions=True)
 
     asyncio.run(scenario())
+
+
+def test_spatial_invalidation_failure_does_not_skip_fleet_shutdown(monkeypatch):
+    """One damaged map must not prevent any of five heads from stopping."""
+    monkeypatch.setattr("desk_robot.dock_runtime.close_detector_pool", AsyncMock())
+
+    async def scenario():
+        robots = [
+            SimpleNamespace(id=f"robot-{i:02d}", device_id=f"head-{i:02d}")
+            for i in range(1, 6)
+        ]
+        invalidated = []
+
+        def invalidate(robot_id, *, reason):
+            assert reason == "runtime_closed"
+            invalidated.append(robot_id)
+            if robot_id == robots[1].id:
+                raise ValueError("spatial invalidation fault")
+
+        runtime = Runtime.__new__(Runtime)
+        runtime.settings = SimpleNamespace(mode="hardware", robots=robots)
+        runtime.coordinator = SimpleNamespace(
+            close=AsyncMock(), shutdown_stop_failures={}
+        )
+        runtime.spatial = SimpleNamespace(invalidate_robot=invalidate)
+        runtime.pet = SimpleNamespace(
+            close=AsyncMock(), set_voice_monitor_ready=lambda ready: None,
+        )
+        speaker = SimpleNamespace(monitor_lost=AsyncMock())
+        runtime.conversation = SimpleNamespace(stop=AsyncMock(), speaker=speaker)
+        runtime.client = SimpleNamespace(aclose=AsyncMock())
+        runtime.multimodal = SimpleNamespace(close=AsyncMock())
+        runtime._voice_task = None
+        runtime._room_stop = asyncio.Event()
+        runtime._room_dispatch_lock = threading.Lock()
+        runtime._room_dispatch_pending = None
+        reader = asyncio.create_task(runtime._room_stop.wait())
+        runtime._room_task = reader
+
+        try:
+            with pytest.raises(ValueError, match="spatial invalidation fault"):
+                await runtime.close()
+            assert invalidated == [robot.id for robot in robots]
+            assert runtime._room_stop.is_set()
+            assert reader.done() and not reader.cancelled()
+            assert runtime._room_task is None
+            assert speaker.monitor_lost.await_count == 5
+            for robot in robots:
+                speaker.monitor_lost.assert_any_await(robot)
+            runtime.coordinator.close.assert_awaited_once()
+            runtime.pet.close.assert_awaited_once()
+            runtime.multimodal.close.assert_awaited_once()
+            runtime.conversation.stop.assert_awaited_once()
+            runtime.client.aclose.assert_awaited_once()
+        finally:
+            runtime._room_stop.set()
+            await reader
+
+    asyncio.run(scenario())
