@@ -354,3 +354,38 @@ def test_grid_clock_reference_restarts_with_explicit_new_origin():
                      body_boot=8, origin_id="odom-2", epoch=1), now_us=1_700_000)
     assert g.log_odds(1, 1) == pytest.approx(-0.8)
     assert not g.snapshot(now_us=1_700_000).anchored
+
+
+@pytest.mark.parametrize("kind,lane", [
+    ("floor_supported", 0),
+    ("obstacle_clear", 4),
+    ("obstacle_hit", 5),
+])
+def test_expired_partial_evidence_is_stale_not_never_observed(kind, lane):
+    g = grid()
+    g.record(evidence(kind, lane), now_us=1_000_000)
+    assert g.state(1, 1, now_us=1_000_000) == "unknown"
+    assert g.state(1, 1, now_us=2_000_001) == "stale"
+    assert g.state(0, 0, now_us=2_000_001) == "unknown"
+    assert g.snapshot(now_us=2_000_001).support[5] == "stale"
+
+
+@pytest.mark.parametrize("kind,lane,initial", [
+    ("floor_supported", 0, "unknown"),
+    ("floor_unsafe", 0, "unsafe"),
+    ("obstacle_hit", 5, "unknown"),
+])
+def test_later_clock_reference_marks_partial_observation_stale(kind, lane, initial):
+    g = grid()
+    g.record(evidence(kind, lane), now_us=1_000_000)
+    assert g.state(1, 1, now_us=1_000_010) == initial
+    # A newer conversion from a different lane reveals that the first
+    # conversion lagged by nearly 400 ms despite its recent Mac receipt.
+    g.record(
+        replace(evidence("obstacle_clear", 4, received_us=1_000_010, cells=((2, 1),)),
+                sample_us=500_000),
+        now_us=1_000_010,
+    )
+    assert g.state(1, 1, now_us=1_000_010) == "stale"
+    assert g.state(2, 1, now_us=1_000_010) == "unknown"
+    assert g.snapshot(now_us=1_000_010).support[5] == "stale"

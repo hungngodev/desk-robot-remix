@@ -244,24 +244,25 @@ class SpatialGrid:
                 or cell.floor_calibration and (cell.floor_calibration != self.calibration_id
                                                or cell.floor_epoch != self.epoch)):
             return "out_of_calibration"
-        if cell.floor == "unsafe":
-            # An expired cliff observation is still nontraversable, but it is
-            # no longer current evidence. Keep stale provenance visible.
-            if not 0 <= now_us - cell.floor_received_us <= self.ttl_us:
-                return "stale"
-            return "unsafe"
-        if (cell.floor_received_us == 0 or cell.obstacle_received_us == 0):
-            return "unknown"
-        if (not 0 <= now_us - cell.floor_received_us <= self.ttl_us
-                or not 0 <= now_us - cell.obstacle_received_us <= self.ttl_us):
-            return "stale"
         # A later lane can reveal that a previously received conversion was old.
-        best_offset = min(r - s for s, r in self._clock_reference.values())
-        if (cell.floor_received_us - cell.floor_sample_us - best_offset
-                > _MAX_SOURCE_RECEIPT_LAG_US
-                or cell.obstacle_received_us - cell.obstacle_sample_us - best_offset
-                > _MAX_SOURCE_RECEIPT_LAG_US):
+        best_offset = min((r - s for s, r in self._clock_reference.values()), default=None)
+
+        def stale(received_us: int, sample_us: int) -> bool:
+            return received_us != 0 and (
+                not 0 <= now_us - received_us <= self.ttl_us
+                or best_offset is None
+                or received_us - sample_us - best_offset > _MAX_SOURCE_RECEIPT_LAG_US
+            )
+
+        if stale(cell.floor_received_us, cell.floor_sample_us):
             return "stale"
+        if cell.floor == "unsafe":
+            # A fresh floor hazard overrides all obstacle evidence.
+            return "unsafe"
+        if stale(cell.obstacle_received_us, cell.obstacle_sample_us):
+            return "stale"
+        if cell.floor_received_us == 0 or cell.obstacle_received_us == 0:
+            return "unknown"
         if cell.obstacle_log_odds >= 0.5:
             return "occupied"
         if cell.floor == "supported" and cell.obstacle_log_odds <= -0.5:
