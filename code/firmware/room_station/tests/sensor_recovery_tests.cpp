@@ -13,7 +13,36 @@ struct FakeSensor {
   void sample() { if (started) ++fresh_frames; }
 };
 
+struct FakeStopWire {
+  uint8_t address = 0;
+  uint8_t bytes[2] = {};
+  unsigned writes = 0, begins = 0, ends = 0;
+  unsigned rejected_write = 2;
+  int result = 0;
+  void beginTransmission(uint8_t value) { address = value; ++begins; }
+  unsigned write(uint8_t value) {
+    assert(writes < 2);
+    bytes[writes] = value;
+    return writes++ == rejected_write ? 0U : 1U;
+  }
+  int endTransmission() { ++ends; return result; }
+};
+
 int main() {
+  // A partial write can still receive an ACK. Only a complete stop command
+  // may start the settle interval. End the transaction on every error path.
+  for (unsigned rejected = 0; rejected <= 2; ++rejected) {
+    for (int result = 0; result <= 4; ++result) {
+      FakeStopWire wire;
+      wire.rejected_write = rejected;
+      wire.result = result;
+      assert(desk_robot_room::scd_request_stop(wire, 0x62) ==
+             (rejected == 2 && result == 0));
+      assert(wire.address == 0x62 && wire.begins == 1 && wire.ends == 1);
+      assert(wire.writes == 2 && wire.bytes[0] == 0x3f && wire.bytes[1] == 0x86);
+    }
+  }
+
   using Recovery = desk_robot_room::SensorRecoverySchedule;
   Recovery schedule;
   FakeSensor devices[Recovery::kCount];

@@ -565,10 +565,7 @@ void recover_sensors(uint32_t now) {
     // The pinned Sensirion stopPeriodicMeasurement() internally delay(500).
     // Send that same documented command as one I2C transaction;
     // start only after 500 ms in a different main-loop pass.
-    Wire.beginTransmission(SCD41_I2C_ADDR_62);
-    Wire.write(0x3f);
-    Wire.write(0x86);
-    if (Wire.endTransmission() == 0) {
+    if (desk_robot_room::scd_request_stop(Wire, SCD41_I2C_ADDR_62)) {
       // The required settle interval starts after the successful transfer.
       scd_stop_ms = millis();
       scd_stop_pending = true;

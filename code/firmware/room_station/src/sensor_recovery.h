@@ -10,6 +10,17 @@ inline bool scd_stop_settled(uint32_t now, uint32_t stop_ms) {
   return now - stop_ms >= 500U;
 }
 
+// Require both command bytes and the bus acknowledgement. A buffered write
+// can fail even if endTransmission() acknowledges the partial transaction.
+template <typename WireLike>
+bool scd_request_stop(WireLike& wire, uint8_t address) {
+  wire.beginTransmission(address);
+  const bool high_ok = wire.write(0x3f) == 1;
+  const bool low_ok = wire.write(0x86) == 1;
+  const int result = wire.endTransmission();
+  return high_ok && low_ok && result == 0;
+}
+
 // All three I2C peripherals recover independently. A failed probe must not
 // keep the 256 kbaud radar and USB readers out of their normal loop cadence.
 class SensorRecoverySchedule {
