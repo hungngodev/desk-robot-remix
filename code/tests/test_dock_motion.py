@@ -786,15 +786,31 @@ async def test_unidentified_or_wrong_sensor_cannot_steer_real_dock(
     legacy = SimulatedHead("robot-01")
     controller = Coordinator(settings, {"robot-01": legacy}, SimulationVision())
 
-    async def healthy(*args, **kwargs):
-        return None
-
-    monkeypatch.setattr(controller, "_assert_armed_health", healthy)
+    # Replay raw WROOM status through the real Coordinator health checks.
+    # Do not stub the entire physical safety admission boundary.
+    body = {
+        "robot_id": "robot-01", "armed": True,
+        "safety": {"required": True, "ready": True, "fault": "none"},
+        "ranges": {
+            "present_mask": 31, "valid_mask": 31,
+            "mm": [50, 50, 50, 50, 600], "age_ms": [5] * 5,
+        },
+        "imu": {"valid": True, "age_ms": 10},
+        "touch": {"active": False},
+    }
+    legacy.replay_body_status({**body, "robot_id": "robot-02"})
     camera = DockCameraCalibration(
         410, 410, 320, 240, 60, 1,
         camera_sensor_pid="OV5640",
     )
     try:
+        with pytest.raises(OperationError, match="body identity mismatch"):
+            await controller._dock_approach(
+                Job("foreign-body", "robot-01", "dock_approach"),
+                camera, 200, 1, 1,
+            )
+        assert legacy.commands == []
+        legacy.replay_body_status(body)
         # A compatibility snapshot is never an authenticated stream receipt.
         # Reject it before even consulting the calibration's sensor label.
         with pytest.raises(OperationError, match="authenticated live camera stream receipt"):
@@ -808,6 +824,7 @@ async def test_unidentified_or_wrong_sensor_cannot_steer_real_dock(
             pass
 
         head = AuthenticatedSensorHead("robot-01")
+        head.replay_body_status(body)
         controller.heads["robot-01"] = head
         # With a valid immutable boot/frame receipt, missing or wrong live
         # PID must still be rejected before any motor command is possible.
