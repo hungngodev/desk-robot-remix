@@ -3285,7 +3285,9 @@ class PetController:
             f"{'camera model' if camera_derived else 'sensor'}: "
             f"{change.description[:160]}. Only {robot.name} observed it. "
             "Respond to each other naturally in one short sentence each. "
-            "Suggest a harmless verbal game or shared curiosity. "
+            "If a harmless verbal game or story fits, label invented events as fiction. "
+            "Do not claim a continuing campaign without saved game state. "
+            "Otherwise, share a curiosity or remain on the current topic. "
             "The listening pet must not pretend it saw or sensed the event. "
             "Do not move, grasp, command motors or claim new physical facts."
         )

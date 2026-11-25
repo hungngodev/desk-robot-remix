@@ -5337,6 +5337,8 @@ async def test_opt_in_sensor_event_invites_one_peer_without_extra_audio_owner(
         prompt = chat.prompts[1][1]["content"]
         assert "Only Pip observed it" in prompt
         assert "must not pretend it saw or sensed" in prompt
+        assert "label invented events as fiction" in prompt
+        assert "without saved game state" in prompt
         peer_memories = memory.recent("robot-02")
         assert any(m.kind == "nfc_tag" and not m.witnessed
                    and m.source_robot == "robot-01" for m in peer_memories)
