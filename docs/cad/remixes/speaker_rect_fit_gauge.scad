@@ -28,6 +28,8 @@ module speaker_rect_fit_gauge() {
     total_h=speaker_base+speaker_h+0.4;
     assert(speaker_l==20 && speaker_w==16 && speaker_h>=4.7);
     assert(speaker_fit_xy>=0.2 && speaker_fit_xy<=0.8);
+    assert(speaker_wall>=2 && speaker_base>=1.5,
+           "Speaker fit cup wall or floor below printable minimum");
     difference() {
         cube([outer_l,outer_w,total_h]);
         // One rectangular test pocket, intentionally OPEN TOP.
@@ -50,6 +52,12 @@ module speaker_rear_chamber_reference() {
     total_h=speaker_chamber_back_wall+speaker_chamber_depth;
     conservative_air_mm3=inner_l*inner_w*speaker_chamber_depth
                          -speaker_l*speaker_w*speaker_h;
+    assert(speaker_l==20 && speaker_w==16 && speaker_h>=4.7);
+    assert(speaker_fit_xy>=0.2 && speaker_fit_xy<=0.8);
+    assert(speaker_chamber_min_air_cc>=1,
+           "Speaker chamber minimum air requirement cannot be reduced below 1cc");
+    assert(speaker_chamber_bolt_d>=2,
+           "Speaker chamber M2 bore is undersized");
     assert(conservative_air_mm3 >= speaker_chamber_min_air_cc*1000,
            "Speaker nominal net air volume below 1cc");
     assert(speaker_chamber_back_wall>=2 && speaker_chamber_border>=6,

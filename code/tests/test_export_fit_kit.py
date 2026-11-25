@@ -1272,3 +1272,22 @@ def test_fsr_retaining_ring_has_printable_wall_and_separate_m2_bores(tmp_path):
         ], capture_output=True, text=True, timeout=90)
         assert bad.returncode != 0
         assert message in bad.stderr + bad.stdout
+
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+@pytest.mark.parametrize(("part", "override", "message"), [
+    ("speaker_rect_fit_gauge", "speaker_wall=0.5", "wall or floor below printable"),
+    ("speaker_rect_fit_gauge", "speaker_base=0", "wall or floor below printable"),
+    ("speaker_rear_chamber_reference", "speaker_chamber_min_air_cc=0",
+     "minimum air requirement cannot be reduced"),
+    ("speaker_rear_chamber_reference", "speaker_chamber_bolt_d=0", "M2 bore is undersized"),
+    ("speaker_rear_chamber_reference", "speaker_fit_xy=-0.1", "Assertion"),
+])
+def test_speaker_coupons_reject_missing_printable_geometry(tmp_path, part, override, message):
+    source = ROOT / "docs/cad/remixes/speaker_rect_fit_gauge.scad"
+    bad = subprocess.run([
+        "openscad", "--export-format", "binstl", "-o", str(tmp_path / "bad.stl"),
+        "-D", f'part="{part}"', "-D", override, str(source),
+    ], capture_output=True, text=True, timeout=90)
+    assert bad.returncode != 0
+    assert message in bad.stdout + bad.stderr
