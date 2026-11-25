@@ -89,13 +89,30 @@ class ObjectTarget:
 
 
 def _identity(value: object) -> bool:
-    return type(value) is str and 0 < len(value) <= 96
+    return type(value) is str and 0 < len(value) <= 96 and "\x00" not in value
 
 
 def _label(value: object) -> bool:
     return (_identity(value) and len(value) <= 64
             and value[0].isalpha()
             and all(c.isascii() and (c.isalnum() or c in " _") for c in value))
+
+
+def _valid_request_identity(query: object, owner: object) -> bool:
+    """Validate identities before equality checks or any camera inference."""
+    return (isinstance(query, ObjectQuery) and isinstance(owner, ObjectOwner)
+            and all(_identity(s) for s in (
+                query.robot_id, query.session_id, query.turn_id, query.origin_id,
+                query.anchor_id, query.calibration_id, query.host_boot_id,
+                owner.robot_id, owner.session_id, owner.turn_id, owner.origin_id,
+                owner.anchor_id, owner.calibration_id, owner.host_boot_id))
+            and _label(query.label)
+            and all(type(x) is int and x >= 0 for x in (query.epoch, owner.epoch))
+            and all(type(x) is int and 0 <= x <= 0xFFFFFFFF for x in (
+                query.camera_boot, query.camera_grant, owner.camera_boot, owner.camera_grant))
+            and type(query.cancelled) is bool
+            and type(owner.camera_allowed) is bool
+            and type(owner.memory_allowed) is bool)
 
 
 def _floor(value: object) -> bool:
@@ -160,27 +177,13 @@ def resolve_object_target(
                             confirmed, hint,
                             request_fence=query if status != "rejected" else None)
 
-    if (not isinstance(query, ObjectQuery) or not isinstance(owner, ObjectOwner)
-            or not all(_identity(s) for s in (
-                query.robot_id, query.session_id, query.turn_id, query.origin_id,
-                query.anchor_id, query.calibration_id, query.host_boot_id,
-                owner.robot_id, owner.host_boot_id,
-                owner.session_id, owner.turn_id, owner.origin_id,
-                owner.anchor_id, owner.calibration_id))
-            or not _label(query.label)
+    if (not _valid_request_identity(query, owner)
             or any(type(x) is not int for x in (
-                query.epoch, query.camera_boot, query.camera_grant,
-                query.created_us, query.deadline_us,
-                owner.epoch, owner.camera_boot, owner.camera_grant, now_us, fresh_us))
-            or min(query.epoch, query.camera_boot, query.camera_grant,
-                   query.created_us, owner.epoch, owner.camera_boot,
-                   owner.camera_grant, now_us) < 0
+                query.created_us, query.deadline_us, now_us, fresh_us))
+            or min(query.created_us, now_us) < 0
             or not 1 <= fresh_us <= 5_000_000
             or type(min_confidence) not in (int, float)
             or not 0 < min_confidence <= 1
-            or type(query.cancelled) is not bool
-            or type(owner.camera_allowed) is not bool
-            or type(owner.memory_allowed) is not bool
             or not isinstance(evidence, (tuple, list)) or len(evidence) > 128):
         return result("rejected", "invalid_request_or_evidence_budget")
     if query.cancelled:

@@ -374,3 +374,61 @@ async def test_object_decode_counts_against_inference_budget(monkeypatch):
     assert result.reason == "inference_timeout"
     assert result.evidence is None and detector.calls == 0
 
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changes", [
+    {"cancelled": 0},
+    {"label": []},
+    {"label": "key\x00"},
+])
+async def test_invalid_object_query_does_not_enter_detector(changes):
+    q, _, _ = fixtures()
+    fake = FakeDetector([])
+    result = await inspect(fake, query=replace(q, **changes))
+    assert result.reason == "invalid_detection_request"
+    assert fake.calls == 0 and result.evidence is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changes", [
+    {"epoch": 8.0},
+    {"camera_boot": 101.0},
+    {"camera_grant": 12.0},
+])
+async def test_numeric_equality_does_not_establish_request_identity(changes):
+    q, owner, _ = fixtures()
+    fake = FakeDetector([])
+    result = await inspect(fake, query=replace(q, **changes), owner=replace(owner, **changes))
+    assert result.reason == "invalid_detection_request"
+    assert fake.calls == 0 and result.evidence is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changes", [
+    {"session_id": ""},
+    {"origin_id": "origin\x00"},
+    {"calibration_id": "x" * 97},
+])
+async def test_matching_malformed_frame_and_request_identities_do_not_admit_inference(changes):
+    q, owner, frame = fixtures()
+    fake = FakeDetector([])
+    result = await inspect(
+        fake, query=replace(q, **changes), owner=replace(owner, **changes),
+        frame=replace(frame, **changes),
+    )
+    assert result.reason == "invalid_detection_request"
+    assert fake.calls == 0 and result.evidence is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changes", [
+    {"session_id": ""},
+    {"anchor_id": "tag\x00"},
+    {"calibration_id": "x" * 97},
+])
+async def test_malformed_frame_identity_is_rejected_before_inference(changes):
+    _, _, frame = fixtures()
+    fake = FakeDetector([])
+    result = await inspect(fake, frame=replace(frame, **changes))
+    assert result.reason == "invalid_frame"
+    assert fake.calls == 0 and result.evidence is None

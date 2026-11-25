@@ -11,7 +11,13 @@ import asyncio
 from dataclasses import dataclass
 from typing import Callable
 
-from .object_targets import ObjectEvidence, ObjectOwner, ObjectQuery
+from .object_targets import (
+    ObjectEvidence,
+    ObjectOwner,
+    ObjectQuery,
+    _identity,
+    _valid_request_identity,
+)
 from .vision import Detection, Vision, validated_camera_sizes
 
 DEFAULT_FRAME_FRESH_US = 250_000
@@ -50,8 +56,9 @@ class DetectorReceipt:
 
 def _frame_valid(frame: DetectorFrame, query: ObjectQuery, owner: ObjectOwner,
                  *, now_us: int, fresh_us: int) -> str | None:
-    if (type(frame.robot_id) is not str or not frame.robot_id
-            or type(frame.host_boot_id) is not str or not frame.host_boot_id
+    if (not all(_identity(s) for s in (
+                frame.robot_id, frame.session_id, frame.turn_id, frame.origin_id,
+                frame.anchor_id, frame.calibration_id, frame.host_boot_id))
             or type(frame.frame_seq) is not int
             or not 1 <= frame.frame_seq <= 0xFFFFFFFF
             or any(type(x) is not int or not 0 <= x <= 0xFFFFFFFF
@@ -148,8 +155,7 @@ async def detect_object_frame(
         return DetectorReceipt("rejected", reason)
 
     if (not isinstance(frame, DetectorFrame)
-            or not isinstance(query, ObjectQuery)
-            or not isinstance(owner, ObjectOwner)
+            or not _valid_request_identity(query, owner)
             or type(model_qualified) is not bool
             or type(now_us) is not int or now_us < 0
             or type(fresh_us) is not int or not 1 <= fresh_us <= 5_000_000

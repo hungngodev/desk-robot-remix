@@ -436,3 +436,18 @@ def test_different_camera_boot_is_not_same_frame():
     absent = replace(seen, source="camera_not_seen", camera_boot=100,
                      floor_mm=None, projection_qualified=False)
     assert resolve([seen, absent]).confirmed_floor_mm == seen.floor_mm
+
+
+@pytest.mark.parametrize("changes", [
+    {"camera_boot": 1 << 32},
+    {"camera_grant": 1 << 32},
+    {"origin_id": "origin\x00"},
+])
+def test_recall_rejects_invalid_matching_owner_identity(changes):
+    q, owner, _ = fixtures()
+    result = resolve_object_target(
+        replace(q, **changes), replace(owner, **changes), [], now_us=1_000_000,
+    )
+    assert result.reason == "invalid_request_or_evidence_budget"
+    assert result.status == "rejected" and result.request_fence is None
+    assert not result.may_execute and not result.arrived
