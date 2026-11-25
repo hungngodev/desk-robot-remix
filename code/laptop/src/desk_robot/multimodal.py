@@ -1461,7 +1461,9 @@ class MultimodalOrchestrator:
             else:
                 failures = 0
 
-    def sensor_event(self, robot_id: str, kind: str) -> None:
+    def sensor_event(
+        self, robot_id: str, kind: str, received_at: float | None = None,
+    ) -> None:
         """Fast event priority, separate from VLM, TTS and WROOM motion.
 
         Schedule at most one bounded two-frame confirmation burst per head
@@ -1469,7 +1471,16 @@ class MultimodalOrchestrator:
         The existing capture lock still serializes real XIAO JPEG requests.
         """
         now = time.monotonic()
-        self.hub.notify(robot_id, kind, now)
+        stamp = now if received_at is None else received_at
+        self.hub._check(robot_id)
+        if (type(kind) is not str or kind not in TRIGGERS
+                or not _finite(stamp) or stamp > now):
+            raise ValueError("Unknown physical event or invalid receipt time")
+        # Do not resurrect an edge after its existing eight-second live TTL.
+        # PetController still retains independently timestamped attention and memory.
+        if now - stamp > 8:
+            return
+        self.hub.notify(robot_id, kind, stamp)
         self._metrics[robot_id]["sensor_triggers"] += 1
         if self._closed or self._any_human_active(now):
             self._metrics[robot_id]["sensor_deferred_human"] += 1
@@ -1501,7 +1512,7 @@ class MultimodalOrchestrator:
         self._last_sensor_request[robot_id] = now
         self._metrics[robot_id]["sensor_bursts"] += 1
         self._sensor_tasks[robot_id] = asyncio.create_task(
-            self._sensor_frame(robot_id, requested_at=now, trigger_kind=kind)
+            self._sensor_frame(robot_id, requested_at=stamp, trigger_kind=kind)
         )
 
     async def _sensor_frame(self, robot_id: str, *, requested_at: float,

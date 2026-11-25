@@ -986,12 +986,15 @@ class PetController:
             "text_only": True,
         }
 
-    def _notify_sensor(self, robot_id: str, kind: str) -> None:
+    def _notify_sensor(
+        self, robot_id: str, kind: str, *, received_at: float | None = None,
+    ) -> None:
         """One physical event path into the existing adaptive camera owner.
 
         Sensor polling never awaits a JPEG or VLM. A test shim that exposes
         only the old hub continues to receive the pure priority hint.
         """
+        received_at = time.monotonic() if received_at is None else received_at
         states = getattr(self, "states", None)
         state = states.get(robot_id) if isinstance(states, dict) else None
         counts = getattr(state, "session_event_counts", None)
@@ -1006,14 +1009,14 @@ class PetController:
         # safety authority or mandatory speech response is introduced.
         attention = getattr(self, "attention", None)
         if attention is not None:
-            attention.sensor(robot_id, kind, time.monotonic())
+            attention.sensor(robot_id, kind, received_at)
         if self.multimodal is None:
             return
         schedule = getattr(self.multimodal, "sensor_event", None)
         if callable(schedule):
-            schedule(robot_id, kind)
+            schedule(robot_id, kind, received_at)
         else:
-            self.multimodal.hub.notify(robot_id, kind, time.monotonic())
+            self.multimodal.hub.notify(robot_id, kind, received_at)
 
     async def _remember_touch(
         self, robot_id: str, generation: int, kind: str, description: str,
@@ -1025,7 +1028,7 @@ class PetController:
         received_at = time.monotonic() if received_at is None else received_at
         change = SceneChange(kind, description, 1.0)
         if kind in ("touch", "touch_tap", "touch_double", "touch_hold"):
-            self._notify_sensor(robot_id, kind)
+            self._notify_sensor(robot_id, kind, received_at=received_at)
         state.events += 1
         state.last_event = description
         if kind == "touch_hold":
@@ -1510,7 +1513,7 @@ class PetController:
         for change in changes:
             if not state.enabled or state.generation != generation:
                 return
-            self._notify_sensor(robot_id, change.kind)
+            self._notify_sensor(robot_id, change.kind, received_at=received_at)
             state.events += 1
             state.last_event = change.description
             state.last_aux_kind = change.kind
@@ -1608,7 +1611,7 @@ class PetController:
                 "My qualified MPU6050 sensed a short acceleration and rotation event"
             )
             change = SceneChange(kind, description, 1.0)
-            self._notify_sensor(robot_id, kind)
+            self._notify_sensor(robot_id, kind, received_at=received_at)
             state.events += 1
             state.handling_events += 1
             state.last_event = description
@@ -1618,7 +1621,8 @@ class PetController:
             )
 
     async def _observe_body_safety(
-        self, robot_id: str, generation: int, body: dict
+        self, robot_id: str, generation: int, body: dict, *,
+        received_at: float | None = None,
     ) -> None:
         """Record actual local WROOM fault transitions, never inferred movement.
 
@@ -1626,6 +1630,7 @@ class PetController:
         Startup with a pre-existing fault is only a baseline; it is not an
         incident and must not create repeated autobiographical memories.
         """
+        received_at = time.monotonic() if received_at is None else received_at
         safety = body.get("safety")
         if not isinstance(safety, dict):
             return
@@ -1686,7 +1691,7 @@ class PetController:
                 state.last_error = f"Local stop: {type(exc).__name__}: {str(exc)[:80]}"
         # A context JPEG must never compete with the urgent Mac stop and
         # permit invalidation. Schedule it only after the stop attempt.
-        self._notify_sensor(robot_id, "safety_fault")
+        self._notify_sensor(robot_id, "safety_fault", received_at=received_at)
         # Report the firmware's own status, not an inferred physical drop,
         # desk height, or an unverified cliff-stop distance.
         await self._store_observation(robot_id, SceneChange(
@@ -1751,7 +1756,7 @@ class PetController:
         state.events += 1
         state.last_event = description
         change = SceneChange("petting_zone", description, 1.0)
-        self._notify_sensor(robot_id, "petting_zone")
+        self._notify_sensor(robot_id, "petting_zone", received_at=received_at)
         await self._store_observation(robot_id, change)
         self._consider_speech(
             robot_id, change, generation, received_at=received_at,
@@ -1843,7 +1848,7 @@ class PetController:
             state.events += 1
             state.last_event = description
             change = SceneChange(kind, description, 1.0)
-            self._notify_sensor(robot_id, kind)
+            self._notify_sensor(robot_id, kind, received_at=received_at)
             await self._store_observation(robot_id, change)
             if key != "bumps":
                 self._consider_speech(
@@ -1881,7 +1886,7 @@ class PetController:
             state.events += 1
             state.last_event = change.description
             state.last_aux_kind = change.kind
-            self._notify_sensor(robot_id, "side_object")
+            self._notify_sensor(robot_id, "side_object", received_at=received_at)
             await self._store_observation(robot_id, change)
             self._consider_speech(
                 robot_id, change, generation, received_at=received_at,
@@ -1926,7 +1931,9 @@ class PetController:
         # Awaited safety handling or storage cannot make later events newer.
         received_at = time.monotonic()
         if isinstance(body, dict):
-            await self._observe_body_safety(robot_id, generation, body)
+            await self._observe_body_safety(
+                robot_id, generation, body, received_at=received_at,
+            )
             # WROOM's sample age stops at serialization. Include transport
             # and any awaited fault processing before classifying handling.
             await self._observe_imu(

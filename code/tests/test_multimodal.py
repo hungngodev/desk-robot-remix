@@ -929,6 +929,28 @@ async def test_sensor_events_keep_wroom_context_without_camera_consent():
         await visual.close()
 
 
+async def test_delayed_sensor_callback_keeps_receipt_age_and_cannot_resurrect_edge():
+    heads = {"robot-01": Head(), "robot-02": Head()}
+    visual = MultimodalOrchestrator(
+        config(enabled=True), heads, Vision(), asyncio.Lock(),
+    )
+    try:
+        now = time.monotonic()
+        visual.sensor_event("robot-01", "touch_tap", now - 9)
+        assert not visual.sensor_burst_pending("robot-01")
+        assert not visual.hub.urgent["robot-01"]
+        assert not visual.hub.event_history["robot-01"]
+        visual.sensor_event("robot-01", "handling_tilt", now - 3)
+        assert list(visual.hub.event_history["robot-01"]) == [
+            ("handling_tilt", now - 3),
+        ]
+        timeline = visual.hub.interaction_timeline("robot-01", now)
+        assert timeline[0]["age_ms"] == 3000
+        assert not visual.hub.event_history["robot-02"]
+    finally:
+        await visual.close()
+
+
 async def test_sensor_capture_revoked_during_jpeg_preparation_never_publishes():
     """Consent can disappear after the real JPEG, before Mac publication."""
     entered, release = asyncio.Event(), asyncio.Event()

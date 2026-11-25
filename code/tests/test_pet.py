@@ -1634,8 +1634,8 @@ async def test_wroom_stop_callback_runs_before_any_safety_camera_request(
     class CameraHook:
         hub = SimpleNamespace(discard_video=lambda robot_id: None)
 
-        def sensor_event(self, robot_id, kind):
-            observed.append(("camera", robot_id, kind))
+        def sensor_event(self, robot_id, kind, received_at):
+            observed.append(("camera", robot_id, kind, received_at))
 
     memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
     conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(),
@@ -1650,13 +1650,14 @@ async def test_wroom_stop_callback_runs_before_any_safety_camera_request(
         await pet._observe_body_safety("robot-01", 19, {
             "safety": {"required": True, "ready": True, "fault": "none"},
         })
+        receipt = time.monotonic() - 1.0
         await pet._observe_body_safety("robot-01", 19, {
             "safety": {"required": True, "ready": False,
                        "fault": "floor_out_of_range", "sensor": 0},
-        })
+        }, received_at=receipt)
         assert observed == [
             ("stop", "robot-01"),
-            ("camera", "robot-01", "safety_fault"),
+            ("camera", "robot-01", "safety_fault", receipt),
         ]
         assert any(record.kind == "safety_fault"
                    for record in memory.recent("robot-01"))
