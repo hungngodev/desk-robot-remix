@@ -44,6 +44,16 @@ def native_cpp_env() -> dict[str, str]:
     return env
 
 
+def native_cpp_sanitizer_flags() -> list[str]:
+    """Match the Linux cross-board sanitizer policy without changing Apple SDK setup."""
+    if sys.platform.startswith("linux"):
+        return [
+            "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+            "-fno-omit-frame-pointer", "-no-pie",
+        ]
+    return []
+
+
 class ProtocolTests(unittest.TestCase):
     def test_native_cpp_env_preserves_user_configuration(self):
         with patch.object(sys, "platform", "darwin"), patch.dict(
@@ -112,8 +122,12 @@ class ProtocolTests(unittest.TestCase):
         self.assertIsNotNone(compiler, "A native C++20 compiler is required")
         with tempfile.TemporaryDirectory() as d:
             exe = Path(d) / "protocol-test"
-            subprocess.run([compiler, "-std=c++20", "-Wall", "-Wextra", "-Werror", "-I", str(HEAD / "overlay"), str(HEAD / "tests/protocol_test.cc"), "-o", str(exe)], check=True, env=native_cpp_env())
-            subprocess.run([str(exe)], check=True)
+            subprocess.run([
+                compiler, "-std=c++20", "-Wall", "-Wextra", "-Werror",
+                *native_cpp_sanitizer_flags(), "-I", str(HEAD / "overlay"),
+                str(HEAD / "tests/protocol_test.cc"), "-o", str(exe),
+            ], check=True, env=native_cpp_env(), timeout=60)
+            subprocess.run([str(exe)], check=True, timeout=30)
 
 
 class BuildSelectionTests(unittest.TestCase):
@@ -163,8 +177,12 @@ class BuildSelectionTests(unittest.TestCase):
         self.assertIsNotNone(compiler, "A native C++23 compiler is required")
         with tempfile.TemporaryDirectory() as d:
             exe = Path(d) / "snapshot-test"
-            subprocess.run([compiler, "-std=c++23", "-Wall", "-Wextra", "-Werror", "-I", str(HEAD), str(HEAD / "tests/snapshot_test.cc"), "-o", str(exe)], check=True, env=native_cpp_env())
-            subprocess.run([str(exe)], check=True)
+            subprocess.run([
+                compiler, "-std=c++23", "-Wall", "-Wextra", "-Werror",
+                *native_cpp_sanitizer_flags(), "-I", str(HEAD),
+                str(HEAD / "tests/snapshot_test.cc"), "-o", str(exe),
+            ], check=True, env=native_cpp_env(), timeout=60)
+            subprocess.run([str(exe)], check=True, timeout=30)
 
 class OverlayPathTests(unittest.TestCase):
     """Exercise the installer transaction without requiring an upstream clone."""
