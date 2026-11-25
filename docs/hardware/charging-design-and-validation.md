@@ -101,6 +101,41 @@ measurement exists, #4082 remains a **candidate, not an approved battery
 regulator or a justified purchase**. The existing 1S preflight equations
 and physical HOLD remain unchanged.
 
+## DRR-094: separate charge-current and thermal acceptance
+
+The requested 2 A pack-charge trial is **not permitted for the provisional
+stack**. The BQ24075 IC supports at most 1.5 A charge current, and the
+LP103650 2000 mAh 2510-3P candidate in issue #25 is rated for 400 mA
+standard charge, 1 A maximum charge and 2 A maximum discharge. Dock input
+current, system load current and pack charge current are distinct. A
+2 A input or discharge rating is not a 2 A pack-charge allowance.
+See the [pack manufacturer's FD_6437_10 drawing](https://www.lipobattery.us/wp-content/uploads/2023/03/LP103650-2000mAh-with-2510-3P-lipo-battery-datasheet.pdf)
+and [TI BQ24075](https://www.ti.com/product/BQ24075).
+
+The requested BQ25895 comparison is not a board selection or substitution.
+Its [TI Rev C datasheet, section 8.2.13.1](https://www.ti.com/lit/ds/symlink/bq25895.pdf)
+specifies junction-temperature regulation from 60 to 120 degrees C;
+THERM_STAT indicates internal regulation, not a measured PCB surface
+temperature. The separate project PCB hotspot limit is strictly below
+45 degrees C, including measurement uncertainty. Internal throttling
+cannot by itself satisfy that limit.
+
+After prerequisites DRR-087, DRR-089, DRR-091 and DRR-093 and explicit
+operator authorization, record exact assembly/PCB/pack revision and firmware
+SHA, calibrated independent bidirectional pack current, configured and
+measured input/charge limits, ambient temperature, PCB hotspot, pack and
+converter temperatures, seat state, concurrent load and timestamps.
+Evaluate the worst measured temperature with uncertainty over the authorized
+load/charge cycle. Stop safely before exceeding any pack, PCB or other
+component limit. Demonstrate charge inhibition and recovery separately from
+normal thermal acceptance; use an independently reviewed safe test fixture
+or fault simulation for internal regulation behavior without deliberately
+overheating the fitted robot or battery. For a separately qualified
+BQ25895 setup only, distinguish THERM_STAT and measured charge-current
+reduction from input-current/voltage limiting and normal charge taper.
+No measurements, charging permission or component changes are recorded
+by this procedure clarification. Keep physical charging HOLD.
+
 ## Required physical acceptance before purchasing five sets or energizing contacts
 
 * Confirm the actual cell/pack chemistry, connector polarity, PCM/protection board, allowable charge/discharge C-rates, NTC wiring, low-cell cutout, dimensions and verified manufacturer datasheet. No bare lithium cell or floating dock terminal.
@@ -227,7 +262,7 @@ The current canonical PR now delegates AprilTag inference to the existing `async
 
 Record these *real measured values* at the lowest intended protected-cell voltage and separately while docked, rather than projecting a charger from the advertised motor or amplifier rating. Do not mark unmeasured fields as zero.
 
-| Mode | 5 V continuous A | 5 V transient peak A | charger IN A | boost input A | signed battery A (+ discharge) | minimum 5 V rail V | charger/boost temperature C | notes |
+| Mode | 5 V continuous A | 5 V transient peak A | charger IN A | boost input A | signed battery A (+ into pack, − out of pack) | minimum 5 V rail V | charger/boost temperature C | notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Idle with WiFi and all sensors | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | |
 | Camera capture, reasoning and OLED | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | unmeasured | |
@@ -271,6 +306,6 @@ The existing charging design already requires signed pack current. This review n
 | [Adafruit INA228 PCB](https://github.com/adafruit/Adafruit-INA228-PCB) | Published PCB under Creative Commons Attribution ShareAlike, with its own notice | Higher-resolution alternative for a bench measurement fixture, **not** an interchangeable INA226 module or an approved battery wiring design |
 | [Adafruit INA228 Arduino library](https://github.com/adafruit/Adafruit_INA228) | BSD licensed software, subject to its notices | Reusable driver candidate only if that specific INA228 device is selected; do not import into the WROOM motion-critical loop merely to gather charging data |
 
-**Minimum evidence record per operating mode:** timestamp, charger input voltage/current, boosted 5 V voltage/current, battery terminal voltage and **signed battery current** (positive direction explicitly defined), ambient/charger/boost temperature, dock contact state, CHG/PGOOD state, and sensor acquisition freshness. Capture idle, camera/WiFi burst, full-duplex audio, stepper startup, servo loaded hold, low-pack-voltage and unplug/brownout. Report current measurement bandwidth and peak capture method: slow averaged I2C samples can miss servo inrush, so independently capture transient peaks with suitable instrumentation. Treat negative signed pack current while docked as battery supplement, not a charging success. Do not infer cell charge acceptance from voltage or GPIO alone.
+**Minimum evidence record per operating mode:** timestamp, charger input voltage/current, boosted 5 V voltage/current, battery terminal voltage and **signed battery current** (positive into pack, negative out of pack; normalize and record the calibrated instrument polarity to match the Mac dock evidence convention), ambient/charger/boost temperature, dock contact state, CHG/PGOOD state, and sensor acquisition freshness. Capture idle, camera/WiFi burst, full-duplex audio, stepper startup, servo loaded hold, low-pack-voltage and unplug/brownout. Report current measurement bandwidth and peak capture method: slow averaged I2C samples can miss servo inrush, so independently capture transient peaks with suitable instrumentation. Treat negative signed pack current while docked as battery supplement, not a charging success. Do not infer cell charge acceptance from voltage or GPIO alone.
 
 **Decision:** no new driver, charging enable, battery connection, or board selection is justified by this research. The existing power preflight and WROOM dock lockout remain the owners. Next integration step after real measurements is to record the calibrated shunt/polarity and worst-case transient data, then evaluate whether BQ24074 or a different protected power path can satisfy the complete robot's simultaneous loads. No tests or hardware trials were performed for this note.
