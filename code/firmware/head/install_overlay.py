@@ -1176,6 +1176,9 @@ static bool ParseDeskAudioFrame(int version, const char* data, size_t len,
             if (desk_still_current) {
                 const int transmitted_frames = codec_->OutputData(task.pcm);
                 desk_wrote = true;
+                // ResetDecoder takes the same admission lock before advancing
+                // the generation. Do not hold it across the blocking I2S write.
+                std::lock_guard<std::mutex> desk_admit_lock(desk_output_admission_mutex_);
                 bool desk_commit_current = false;
                 {
                     std::lock_guard<std::mutex> desk_gen_lock(audio_queue_mutex_);
