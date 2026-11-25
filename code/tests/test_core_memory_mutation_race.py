@@ -2,9 +2,10 @@
 
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
-from threading import Event
+from threading import Event, Lock
 from types import SimpleNamespace
 
+import httpx
 import pytest
 from desk_robot.api import create_app
 from desk_robot.api_memory_routes import (
@@ -219,5 +220,242 @@ def test_cancelled_dispatched_memory_edit_still_retracts_prompt(
                 assert facts == []
         assert store.core_facts("robot-02")[0].value == "peer"
         assert store.get_episode("robot-02", event_id).summary == "peer episode"
+
+    asyncio.run(run())
+
+
+def test_core_memory_reservation_lock_orders_put_before_competing_delete(
+    settings, tokens, tmp_path, monkeypatch,
+):
+    """Stalling PUT before its reservation must serialize competing DELETE on the same pet."""
+    settings.memory_dir = tmp_path
+    auth = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
+    key = "/v1/pet/robot-01/core-memory/favorite_color"
+    peer = "/v1/pet/robot-02/core-memory/favorite_color"
+
+    async def run():
+        app = create_app(settings)
+        async with app.router.lifespan_context(app):
+            store = app.state.runtime.memory
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://testserver",
+            ) as client:
+                assert (await client.put(
+                    key, headers=auth, json={"value": "red"},
+                )).status_code == 200
+                assert (await client.put(
+                    peer, headers=auth, json={"value": "yellow"},
+                )).status_code == 200
+
+                order_lock = Lock()
+                reserved_order = []
+                put_reserve_entered = Event()
+                release_put_reserve = Event()
+                delete_reserve_entered = Event()
+                put_mutate_entered = Event()
+                release_put_mutate = Event()
+
+                orig_reserve = store.reserve_core_fact_mutation
+                orig_set = store.set_core_fact
+
+                def gated_reserve(robot_id, slot, value=None):
+                    if robot_id == "robot-01" and value == "blue":
+                        put_reserve_entered.set()
+                        assert release_put_reserve.wait(timeout=8), (
+                            "Timed out waiting to release stalled PUT reservation"
+                        )
+                    elif robot_id == "robot-01" and value is None:
+                        delete_reserve_entered.set()
+                    gen = orig_reserve(robot_id, slot, value)
+                    with order_lock:
+                        reserved_order.append(
+                            (robot_id, "put" if value is not None else "delete", gen)
+                        )
+                    return gen
+
+                def delayed_put(robot_id, slot, value, *, mutation_generation=None):
+                    if robot_id == "robot-01" and value == "blue":
+                        put_mutate_entered.set()
+                        assert release_put_mutate.wait(timeout=8), (
+                            "Timed out waiting to release stalled PUT mutation"
+                        )
+                    return orig_set(
+                        robot_id, slot, value,
+                        mutation_generation=mutation_generation,
+                    )
+
+                monkeypatch.setattr(store, "reserve_core_fact_mutation", gated_reserve)
+                monkeypatch.setattr(store, "set_core_fact", delayed_put)
+
+                old_put = asyncio.create_task(
+                    client.put(key, headers=auth, json={"value": "blue"})
+                )
+                del_task = None
+                try:
+                    assert await asyncio.to_thread(put_reserve_entered.wait, 8), (
+                        "Older PUT never reached reservation gate"
+                    )
+                    del_task = asyncio.create_task(client.delete(key, headers=auth))
+                    await asyncio.sleep(0.05)
+
+                    # Another pet makes independent progress while robot-01 is gated.
+                    peer_resp = await asyncio.wait_for(
+                        client.put(peer, headers=auth, json={"value": "cyan"}),
+                        timeout=4,
+                    )
+                    assert peer_resp.status_code == 200
+                    assert store.core_facts("robot-02")[0].value == "cyan"
+
+                    # Per-pet reservation lock keeps DELETE behind PUT's reservation.
+                    assert not delete_reserve_entered.is_set()
+
+                    release_put_reserve.set()
+                    assert await asyncio.to_thread(put_mutate_entered.wait, 8), (
+                        "Older PUT never reached SQLite mutation"
+                    )
+                    del_resp = await asyncio.wait_for(del_task, timeout=8)
+                    assert del_resp.status_code == 200
+                    assert del_resp.json()["removed"] is True
+
+                    release_put_mutate.set()
+                    put_resp = await asyncio.wait_for(old_put, timeout=8)
+                    assert put_resp.status_code == 409
+                finally:
+                    release_put_reserve.set()
+                    release_put_mutate.set()
+                    pending = [t for t in (old_put, del_task) if t is not None and not t.done()]
+                    if pending:
+                        await asyncio.gather(*pending, return_exceptions=True)
+
+                r1_order = [
+                    (op, gen) for rid, op, gen in reserved_order if rid == "robot-01"
+                ]
+                assert len(r1_order) == 2
+                assert r1_order[0][0] == "put" and r1_order[1][0] == "delete"
+                assert r1_order[0][1] < r1_order[1][1]
+                assert store.core_facts("robot-01") == []
+                assert store.core_facts("robot-02")[0].value == "cyan"
+
+    asyncio.run(run())
+
+
+def test_episode_reservation_lock_orders_patch_before_competing_delete(
+    settings, tokens, tmp_path, monkeypatch,
+):
+    """Stalling PATCH before its reservation must serialize competing DELETE on the same pet."""
+    settings.memory_dir = tmp_path
+    auth = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
+    event_id = "ep-01"
+    key = f"/v1/pet/robot-01/memories/{event_id}"
+    peer = f"/v1/pet/robot-02/memories/{event_id}"
+
+    async def run():
+        app = create_app(settings)
+        async with app.router.lifespan_context(app):
+            store = app.state.runtime.memory
+            assert store.remember(
+                "robot-01", event_id, "initial memory", kind="key",
+                source_robot="robot-01", witnessed=True,
+            )
+            assert store.remember(
+                "robot-02", event_id, "peer memory", kind="key",
+                source_robot="robot-02", witnessed=True,
+            )
+
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://testserver",
+            ) as client:
+                order_lock = Lock()
+                reserved_order = []
+                patch_reserve_entered = Event()
+                release_patch_reserve = Event()
+                delete_reserve_entered = Event()
+                patch_mutate_entered = Event()
+                release_patch_mutate = Event()
+
+                orig_reserve = store.reserve_episode_mutation
+                orig_correct = store.correct_episode
+
+                def gated_reserve(robot_id, eid, summary=None):
+                    if robot_id == "robot-01" and summary == "stale patch":
+                        patch_reserve_entered.set()
+                        assert release_patch_reserve.wait(timeout=8), (
+                            "Timed out waiting to release stalled PATCH reservation"
+                        )
+                    elif robot_id == "robot-01" and summary is None:
+                        delete_reserve_entered.set()
+                    gen = orig_reserve(robot_id, eid, summary)
+                    with order_lock:
+                        reserved_order.append(
+                            (robot_id, "patch" if summary is not None else "delete", gen)
+                        )
+                    return gen
+
+                def delayed_patch(robot_id, eid, summary, *, mutation_generation=None):
+                    if robot_id == "robot-01" and summary == "stale patch":
+                        patch_mutate_entered.set()
+                        assert release_patch_mutate.wait(timeout=8), (
+                            "Timed out waiting to release stalled PATCH mutation"
+                        )
+                    return orig_correct(
+                        robot_id, eid, summary,
+                        mutation_generation=mutation_generation,
+                    )
+
+                monkeypatch.setattr(store, "reserve_episode_mutation", gated_reserve)
+                monkeypatch.setattr(store, "correct_episode", delayed_patch)
+
+                old_patch = asyncio.create_task(
+                    client.patch(key, headers=auth, json={"summary": "stale patch"})
+                )
+                del_task = None
+                try:
+                    assert await asyncio.to_thread(patch_reserve_entered.wait, 8), (
+                        "Older PATCH never reached reservation gate"
+                    )
+                    del_task = asyncio.create_task(client.delete(key, headers=auth))
+                    await asyncio.sleep(0.05)
+
+                    peer_resp = await asyncio.wait_for(
+                        client.patch(peer, headers=auth, json={"summary": "peer updated"}),
+                        timeout=4,
+                    )
+                    assert peer_resp.status_code == 200
+                    assert store.get_episode("robot-02", event_id).summary == "peer updated"
+
+                    assert not delete_reserve_entered.is_set()
+
+                    release_patch_reserve.set()
+                    assert await asyncio.to_thread(patch_mutate_entered.wait, 8), (
+                        "Older PATCH never reached SQLite mutation"
+                    )
+                    del_resp = await asyncio.wait_for(del_task, timeout=8)
+                    assert del_resp.status_code == 200
+                    assert del_resp.json()["removed"] is True
+
+                    release_patch_mutate.set()
+                    patch_resp = await asyncio.wait_for(old_patch, timeout=8)
+                    assert patch_resp.status_code == 409
+                finally:
+                    release_patch_reserve.set()
+                    release_patch_mutate.set()
+                    pending = [t for t in (old_patch, del_task) if t is not None and not t.done()]
+                    if pending:
+                        await asyncio.gather(*pending, return_exceptions=True)
+
+                r1_order = [
+                    (op, gen) for rid, op, gen in reserved_order if rid == "robot-01"
+                ]
+                assert len(r1_order) == 2
+                assert r1_order[0][0] == "patch" and r1_order[1][0] == "delete"
+                assert r1_order[0][1] < r1_order[1][1]
+                assert store.get_episode("robot-01", event_id) is None
+                assert not store.remember(
+                    "robot-01", event_id, "late transcript", kind="key",
+                    source_robot="robot-01", witnessed=True,
+                )
+                assert store.get_episode("robot-02", event_id).summary == "peer updated"
 
     asyncio.run(run())

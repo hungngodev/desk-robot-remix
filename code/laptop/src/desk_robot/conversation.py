@@ -23,20 +23,38 @@ _CONVERSATION_STOP_TIMEOUT_S = 2.5
 _GROUP_ACTIVITY_TIMEOUT_S = 300.0
 
 
-async def _bounded_speaker_abort(interrupt, robot: RobotConfig) -> None:
+async def _bounded_speaker_abort(interrupt, robot: RobotConfig):
     """Attempt physical speaker abort without waiting for ignored cancellation."""
     task = asyncio.create_task(interrupt(robot))
     try:
         done, _ = await asyncio.wait({task}, timeout=_SPEAKER_ABORT_TIMEOUT_S)
         if not done:
             raise TimeoutError("Speaker interruption unconfirmed")
-        await task
+        return await task
     finally:
         if not task.done():
             task.cancel()
             task.add_done_callback(
                 lambda done: None if done.cancelled() else done.exception()
             )
+
+
+def _validate_head_drain_receipt(
+    robot: RobotConfig, receipt: object, expected_generation: int,
+) -> dict:
+    """Verify current generation-bound head PCM drain without claiming acoustic stop."""
+    if (not isinstance(receipt, dict)
+            or receipt.get("device_id") != robot.device_id
+            or receipt.get("interrupted") is not True
+            or receipt.get("head_flush_requested") is not True
+            or receipt.get("head_flush_acknowledged") is not True
+            or receipt.get("head_queue_drained") is not True
+            or type(receipt.get("queued_pcm_samples")) is not int
+            or receipt["queued_pcm_samples"] != 0
+            or type(receipt.get("flush_generation")) is not int
+            or receipt["flush_generation"] < expected_generation):
+        raise RuntimeError("Xiaozhi speaker head drain unconfirmed")
+    return receipt
 
 
 class Chat(Protocol):
@@ -253,8 +271,14 @@ class KokoroHeadSpeaker:
     supports_passive_speech_budget = True
 
 
-    def __init__(self, settings: Settings, client: httpx.AsyncClient):
+    def __init__(
+        self, settings: Settings, client: httpx.AsyncClient,
+        *, require_head_drain_receipt: bool = False,
+    ):
+        if type(require_head_drain_receipt) is not bool:
+            raise ValueError("Head drain receipt policy must be a boolean")
         self.settings, self.client = settings, client
+        self.supports_head_drain_receipt = require_head_drain_receipt
         self._lease_context: ContextVar[str | None] = ContextVar(
             f"xiaozhi_lease_{id(self)}", default=None,
         )
@@ -340,7 +364,7 @@ class KokoroHeadSpeaker:
     async def _confirmed_flush_request(
         self, robot: RobotConfig, **intent: bool,
     ) -> dict:
-        """Verify exact authenticated head STOP request, not physical audio end."""
+        """Verify exact authenticated head STOP request and optional drain."""
         receipt = await self._bridge(
             "/interrupt", {"device_id": robot.device_id, **intent},
         )
@@ -349,6 +373,8 @@ class KokoroHeadSpeaker:
                 or receipt.get("interrupted") is not True
                 or receipt.get("head_flush_requested") is not True):
             raise RuntimeError("Xiaozhi STOP request unconfirmed")
+        if self.supports_head_drain_receipt:
+            _validate_head_drain_receipt(robot, receipt, 0)
         return receipt
 
     async def interrupt(self, robot: RobotConfig):
@@ -450,6 +476,9 @@ class Conversation:
         self._private_memory_generation: dict[str, int] = {
             robot.id: 0 for robot in settings.robots
         }
+        self._speaker_drain_generation: dict[str, int] = {
+            robot.id: 0 for robot in settings.robots
+        }
         self._active_private_memory_ids: frozenset[str] = frozenset()
 
 
@@ -480,7 +509,14 @@ class Conversation:
                 self.speaker_stop_unconfirmed = True
             return
         try:
-            await _bounded_speaker_abort(interrupt, robot)
+            receipt = await _bounded_speaker_abort(interrupt, robot)
+            if getattr(self.speaker, "supports_head_drain_receipt", False) is True:
+                drain_gen = getattr(self, "_speaker_drain_generation", {})
+                _validate_head_drain_receipt(
+                    robot,
+                    receipt,
+                    drain_gen.get(robot.id, 0),
+                )
         except BaseException:
             if self.settings.mode == "hardware":
                 self.speaker_stop_unconfirmed = True
@@ -510,9 +546,19 @@ class Conversation:
             ]
             if not callable(interrupt) or not targets:
                 raise RuntimeError("Xiaozhi speaker STOP unconfirmed; no recovery route")
+            require_drain = (
+                getattr(self.speaker, "supports_head_drain_receipt", False) is True
+            )
+            drain_gen = getattr(self, "_speaker_drain_generation", {})
             try:
                 for robot in targets:
-                    await _bounded_speaker_abort(interrupt, robot)
+                    receipt = await _bounded_speaker_abort(interrupt, robot)
+                    if require_drain:
+                        _validate_head_drain_receipt(
+                            robot,
+                            receipt,
+                            drain_gen.get(robot.id, 0),
+                        )
             except BaseException as exc:
                 raise RuntimeError("Xiaozhi speaker recovery STOP unconfirmed") from exc
             self.speaker_stop_unconfirmed = False
@@ -619,6 +665,11 @@ class Conversation:
         # A revoked model output before this point never entered the decoder.
         # Mark risk synchronously at the real speaker call boundary, not when
         # we merely acquire a session or start generating model text.
+        drain_gen = getattr(self, "_speaker_drain_generation", None)
+        if drain_gen is None:
+            drain_gen = {}
+            self._speaker_drain_generation = drain_gen
+        drain_gen[robot.id] = drain_gen.get(robot.id, 0) + 1
         if transmission_started is not None:
             transmission_started()
         if aware:
