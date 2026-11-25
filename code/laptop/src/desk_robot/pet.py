@@ -30,6 +30,7 @@ from .brain_context import (
 )
 from .config import Settings
 from .conversation import Conversation
+from .dock_evidence import DockContactInhibit
 from .handling import HandlingGate
 from .memory import CameraProvenance, MemoryStore
 from .sensor_event_contract import (
@@ -201,7 +202,7 @@ class PetState:
     last_aux_kind: str | None = None
     low_battery_memory_recorded: bool = False
     low_battery_dock_episode_attempted: bool = False
-    last_dock_seq: int | None = None
+    dock_guard: DockContactInhibit = field(default_factory=DockContactInhibit, repr=False)
     dock_seated: bool | None = None
     dock_contact_present: bool | None = None
     dock_input_good: bool | None = None
@@ -340,7 +341,8 @@ class PetController:
         """
         state = self.states[robot_id]
         return bool(
-            state.dock_seated
+            state.dock_guard.inhibited
+            or state.dock_seated
             or state.dock_contact_present
             or state.dock_input_good
             or state.dock_charge_indicated
@@ -459,7 +461,8 @@ class PetController:
         state.recovered_fuel_streak = 0
         state.low_battery_memory_recorded = False
         state.low_battery_dock_episode_attempted = False
-        state.last_dock_seq = None
+        # A new pet observation session is not evidence of physical undocking.
+        state.dock_guard.invalidate()
         state.dock_seated = None
         state.dock_contact_present = None
         state.dock_input_good = None
@@ -1036,6 +1039,7 @@ class PetController:
                     if not pending.cancelled():
                         pending.exception()  # observe late transport failure
                     state.aux_read_task = None
+                request_started = time.monotonic()
                 pending = asyncio.create_task(getter())
                 state.aux_read_task = pending
                 # Even a child that ignores cancellation can fail long after
@@ -1051,7 +1055,10 @@ class PetController:
                     raise TimeoutError("Optional sensor read timed out")
                 sample = pending.result()  # HttpHead validates full schema
                 state.aux_read_task = None
-                await self._observe_aux(robot_id, generation, sample)
+                await self._observe_aux(
+                    robot_id, generation, sample,
+                    request_elapsed_ms=(time.monotonic() - request_started) * 1000,
+                )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -1063,15 +1070,13 @@ class PetController:
                 state.last_fuel_seq = None
                 state.low_fuel_streak = 0
                 state.recovered_fuel_streak = 0
-                was_inhibited = self.is_dock_charging_inhibited(robot_id)
-                state.last_dock_seq = None
+                # A failed optional read cannot prove that the contacts opened.
+                state.dock_guard.invalidate()
                 state.dock_seated = None
                 state.dock_contact_present = None
                 state.dock_input_good = None
                 state.dock_charge_indicated = None
                 state.dock_charging_verified = False
-                if was_inhibited:
-                    self._notify_dock_inhibit(robot_id, False)
                 state.last_nose_angle = None
                 state.last_force_squeeze = None
                 state.last_near_hand = None
@@ -1089,7 +1094,9 @@ class PetController:
                 state.last_nfc_scan_seq = None
             await asyncio.sleep(1.0)
 
-    async def _observe_aux(self, robot_id: str, generation: int, data: dict) -> None:
+    async def _observe_aux(
+        self, robot_id: str, generation: int, data: dict, *, request_elapsed_ms: float = 0,
+    ) -> None:
         """Record only real, fresh and optionally calibrated sensor transitions."""
         received_at = time.monotonic()
         if self.settings.mode != "hardware":
@@ -1308,55 +1315,23 @@ class PetController:
             state.last_nfc_scan_seq = None
 
         dock = data.get("dock")
-        if dock is not None:
-            was_inhibited = self.is_dock_charging_inhibited(robot_id)
-            dock_seq = dock.get("seq") if isinstance(dock, dict) else None
-            dock_age = dock.get("age_ms") if isinstance(dock, dict) else None
-            if (
-                isinstance(dock, dict)
-                and dock.get("present") is True
-                and dock.get("valid") is True
-                and dock.get("charging_verified") is False
-                and type(dock_seq) is int
-                and 0 < dock_seq <= 0xffffffff
-                and type(dock_age) is int
-                and 0 <= dock_age < 500
-                and all(
-                    type(dock.get(field)) is bool
-                    for field in (
-                        "left_seated",
-                        "right_seated",
-                        "input_good",
-                        "charge_indicated",
-                    )
-                )
-            ):
-                dock_advance = _sensor_counter_advance(dock_seq, state.last_dock_seq)
-                if dock_advance != 0:
-                    state.last_dock_seq = dock_seq
-                    state.dock_seated = bool(
-                        dock["left_seated"] and dock["right_seated"]
-                    )
-                    state.dock_contact_present = bool(
-                        dock["left_seated"] or dock["right_seated"]
-                    )
-                    state.dock_input_good = dock["input_good"]
-                    state.dock_charge_indicated = dock["charge_indicated"]
-                    state.dock_charging_verified = False
-            else:
-                state.last_dock_seq = None
-                state.dock_seated = None
-                state.dock_contact_present = None
-                state.dock_input_good = None
-                state.dock_charge_indicated = None
-                state.dock_charging_verified = False
-            now_inhibited = self.is_dock_charging_inhibited(robot_id)
-            if (
-                now_inhibited != was_inhibited
-                and state.enabled
-                and state.generation == generation
-            ):
-                self._notify_dock_inhibit(robot_id, now_inhibited)
+        was_inhibited = self.is_dock_charging_inhibited(robot_id)
+        if state.dock_guard.observe(dock, _aux_boot_epoch(data), request_elapsed_ms):
+            state.dock_seated = dock["left_seated"] and dock["right_seated"]
+            state.dock_contact_present = dock["left_seated"] or dock["right_seated"]
+            state.dock_input_good = dock["input_good"]
+            state.dock_charge_indicated = dock["charge_indicated"]
+        else:
+            # Clear the displayed observation, not the last unsafe interlock.
+            state.dock_seated = None
+            state.dock_contact_present = None
+            state.dock_input_good = None
+            state.dock_charge_indicated = None
+        state.dock_charging_verified = False
+        now_inhibited = self.is_dock_charging_inhibited(robot_id)
+        if (now_inhibited != was_inhibited and state.enabled
+                and state.generation == generation):
+            self._notify_dock_inhibit(robot_id, now_inhibited)
 
         dock_request_initial_low: bool | None = None
         power = data["power"]

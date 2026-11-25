@@ -1412,6 +1412,19 @@ async def test_autonomous_low_battery_dock_and_charge_inhibition_lifecycle(
         for seq, soc in ((23, 3500), (24, 3500), (25, 1800), (26, 1800), (27, 1800)):
             await rt.pet._observe_aux(robot.id, 1, aux_packet(soc, seq, dock_seq=seq - 20, seated=True))
         assert len(rt.coordinator.jobs) == 1
+
+        # Losing optional telemetry and receiving an old all-open packet
+        # cannot release the Mac motion interlock.
+        await rt.pet._observe_aux(robot.id, 1, aux_packet(1800, 28))
+        assert rt.pet.status(robot.id)["dock_seated"] is None
+        assert rt.coordinator.dock_inhibited(robot.id)
+        await rt.pet._observe_aux(robot.id, 1, aux_packet(1800, 29, dock_seq=7))
+        assert rt.coordinator.dock_inhibited(robot.id)
+        for seq in (8, 9, 10):
+            await rt.pet._observe_aux(robot.id, 1, aux_packet(1800, seq + 22, dock_seq=seq))
+            assert rt.coordinator.dock_inhibited(robot.id) is (seq < 10)
+        assert not rt.pet.status(robot.id)["charging_verified"]
+        assert len(rt.coordinator.jobs) == 1
     finally:
         state.enabled = False
         await rt.close()

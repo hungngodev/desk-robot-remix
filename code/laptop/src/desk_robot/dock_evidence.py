@@ -7,12 +7,79 @@ diagnostic, not electrical qualification.
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass, field
 from time import monotonic
 
 from .aux import validate_aux
 
 _DOCK_READ_TIMEOUT_S = 2.0
 _DOCK_SAMPLE_MAX_AGE_MS = 500
+
+
+@dataclass
+class DockContactInhibit:
+    """Remember unsafe contact evidence independently of telemetry availability.
+
+    This Mac-side interlock is not a WROOM motion permit or electrical proof.
+    """
+
+    inhibited: bool = False
+    boot_id: int | None = None
+    sequence: int | None = None
+    clear_streak: int = 0
+    retired_boots: set[int] = field(default_factory=set)
+
+    def invalidate(self) -> None:
+        """Missing or stale observations break confirmation, never release it."""
+        self.clear_streak = 0
+
+    def observe(self, dock: object, boot_id: int | None, elapsed_ms: float = 0) -> bool:
+        """Return whether this is displayable evidence, not motion authority."""
+        pins = ("left_seated", "right_seated", "input_good", "charge_indicated")
+        if (not isinstance(dock, dict)
+                or dock.get("present") is not True or dock.get("valid") is not True
+                or dock.get("charging_verified") is not False
+                or type(dock.get("seq")) is not int or not 1 <= dock["seq"] <= 0xffffffff
+                or type(dock.get("age_ms")) is not int or dock["age_ms"] < 0
+                or type(elapsed_ms) not in (int, float) or not 0 <= elapsed_ms < 500
+                or dock["age_ms"] + elapsed_ms >= _DOCK_SAMPLE_MAX_AGE_MS
+                or any(type(dock.get(pin)) is not bool for pin in pins)):
+            self.invalidate()
+            return False
+        asserted = any(dock[pin] for pin in pins)
+        if type(boot_id) is not int or not 1 <= boot_id <= 0xffffffff:
+            # Legacy pins can conservatively inhibit, never release a latch.
+            self.inhibited |= asserted
+            self.invalidate()
+            return True
+        if boot_id in self.retired_boots:
+            self.invalidate()
+            return False
+        if boot_id != self.boot_id:
+            if self.boot_id is not None:
+                if len(self.retired_boots) >= 8:
+                    self.inhibited = True
+                    self.invalidate()
+                    return False
+                self.retired_boots.add(self.boot_id)
+            self.boot_id = boot_id
+            self.sequence = None
+            self.invalidate()
+        seq = dock["seq"]
+        if (self.sequence is not None
+                and not 0 < ((seq - self.sequence) & 0xffffffff) < 0x80000000):
+            self.invalidate()
+            return False
+        self.sequence = seq
+        if asserted:
+            self.inhibited = True
+            self.invalidate()
+        elif self.inhibited:
+            self.clear_streak += 1
+            if self.clear_streak == 3:
+                self.inhibited = False
+                self.invalidate()
+        return True
 
 
 def classify_dock(dock: dict) -> str:

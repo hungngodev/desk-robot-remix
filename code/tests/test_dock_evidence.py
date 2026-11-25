@@ -2,7 +2,7 @@
 import copy
 
 import pytest
-from desk_robot.dock_evidence import classify_dock, observe_dock_evidence
+from desk_robot.dock_evidence import DockContactInhibit, classify_dock, observe_dock_evidence
 
 
 def payload():
@@ -516,3 +516,60 @@ async def test_dock_observation_expires_after_scheduling_pause_and_retry_is_fres
     assert not retry["charging_authorized"]
     assert not retry["motor_authorized"]
     assert head.commands == []
+
+def dock_pin_sample(seq, *, asserted=False, age=5):
+    return dict(
+        present=True, valid=True, charging_verified=False, seq=seq, age_ms=age,
+        left_seated=asserted, right_seated=False, input_good=False,
+        charge_indicated=False,
+    )
+
+
+def test_dock_inhibit_missing_replayed_and_legacy_cannot_release():
+    guard = DockContactInhibit()
+    assert guard.observe(dock_pin_sample(5, asserted=True), 17)
+    assert guard.inhibited
+    assert not guard.observe(None, 17)
+    guard.invalidate()
+    assert not guard.observe(dock_pin_sample(4), 17)
+    assert not guard.observe(dock_pin_sample(5), 17)
+    assert guard.observe(dock_pin_sample(6), None)
+    assert guard.inhibited
+    for seq in (6, 7):
+        assert guard.observe(dock_pin_sample(seq), 17)
+        assert guard.inhibited
+    assert guard.observe(dock_pin_sample(8), 17)
+    assert not guard.inhibited
+
+
+def test_dock_inhibit_reboot_and_retired_epoch_do_not_release():
+    guard = DockContactInhibit()
+    assert guard.observe(dock_pin_sample(100, asserted=True), 17)
+    assert guard.observe(dock_pin_sample(1), 18)
+    assert guard.inhibited
+    assert not guard.observe(dock_pin_sample(101), 17)
+    assert guard.inhibited
+    for seq in (2, 3, 4):
+        assert guard.observe(dock_pin_sample(seq), 18)
+    assert not guard.inhibited
+
+
+@pytest.mark.parametrize("elapsed", [495, float("nan"), float("inf"), -1, True])
+def test_dock_inhibit_invalid_or_expired_never_releases(elapsed):
+    guard = DockContactInhibit()
+    assert guard.observe(dock_pin_sample(1, asserted=True), 17)
+    assert not guard.observe(dock_pin_sample(2), 17, elapsed)
+    assert guard.inhibited
+
+
+def test_dock_inhibit_rollover_and_replay_break_confirmation():
+    guard = DockContactInhibit()
+    assert guard.observe(dock_pin_sample(0xfffffffe, asserted=True), 17)
+    assert guard.observe(dock_pin_sample(0xffffffff), 17)
+    assert guard.observe(dock_pin_sample(1), 17)
+    assert not guard.observe(dock_pin_sample(1), 17)
+    for seq in (2, 3):
+        assert guard.observe(dock_pin_sample(seq), 17)
+        assert guard.inhibited
+    assert guard.observe(dock_pin_sample(4), 17)
+    assert not guard.inhibited
