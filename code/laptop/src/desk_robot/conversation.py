@@ -846,6 +846,7 @@ class Conversation:
         # acquisition and all turns. Never renew it after slow SQLite reads.
         loop = asyncio.get_running_loop()
         deadline = loop.time() + _GROUP_ACTIVITY_TIMEOUT_S
+        stop_generation = self.stop_generation
         if self.speaker_stop_unconfirmed:
             raise RuntimeError("Xiaozhi speaker STOP unconfirmed; recovery required")
         if self.active is not None and not self.active.done():
@@ -873,7 +874,8 @@ class Conversation:
 
         def consent_still_valid() -> bool:
             return (
-                loop.time() < deadline
+                self.stop_generation == stop_generation
+                and loop.time() < deadline
                 and (origin != "autonomous_social"
                      or not quiet_hours_active(self.settings.pet_quiet_hours))
                 and not consent.revoked(private_memory_current=private_memory_current())

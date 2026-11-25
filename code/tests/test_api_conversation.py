@@ -1581,6 +1581,69 @@ def test_stop_api_does_not_hide_body_timeout_behind_pet_cleanup_failure(
             runtime.pet.pause = original_pause
 
 
+
+@pytest.mark.parametrize("phase", ["model", "stream", "persist"])
+async def test_group_stop_fences_late_cancellation_resistant_continuations(
+    settings, monkeypatch, phase,
+):
+    """STOP must retire the group even if an awaited dependency swallows cancellation."""
+    entered = asyncio.Event()
+    swallowed = asyncio.Event()
+
+    async def delayed_text():
+        entered.set()
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            swallowed.set()
+        return "Late words must not become a new turn"
+
+    class LateChat:
+        async def reply(self, history):
+            return await delayed_text()
+
+    class LateStreamChat:
+        async def stream_reply(self, history):
+            yield await delayed_text()
+
+    chat = {"model": LateChat(), "stream": LateStreamChat()}.get(phase, SimulatedChat())
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(settings, chat, speaker)
+
+    async def delayed_persist(robot, text, peers, *, private_context_current):
+        await delayed_text()
+
+    if phase == "persist":
+        monkeypatch.setattr(conversation, "_persist_spoken_turn", delayed_persist)
+
+    task = asyncio.create_task(conversation.run(
+        ["robot-01", "robot-02"], "Discuss a toy", 2,
+    ))
+    barrier = asyncio.create_task(entered.wait())
+    try:
+        done, _ = await asyncio.wait(
+            {barrier, task}, timeout=1, return_when=asyncio.FIRST_COMPLETED,
+        )
+        if task in done:
+            await task
+            pytest.fail("Group completed before the cancellation barrier")
+        assert barrier in done
+        await asyncio.wait_for(conversation.stop(), timeout=1)
+        assert swallowed.is_set()
+        with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
+            await task
+        assert len(speaker.spoken) == (1 if phase == "persist" else 0)
+        assert all(len(history) == 2 for history in conversation.histories.values())
+        assert conversation.active is None
+        assert not conversation.session_lock.locked()
+        assert not conversation.speaker_lock.locked()
+    finally:
+        for pending in (barrier, task):
+            if not pending.done():
+                pending.cancel()
+        await asyncio.gather(barrier, task, return_exceptions=True)
+
+
 async def test_conversation_stop_does_not_wait_forever_on_ignored_cancellation(
     settings, monkeypatch,
 ):
