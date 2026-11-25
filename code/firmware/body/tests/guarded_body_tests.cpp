@@ -2925,6 +2925,30 @@ static void mpu_static_attitude_fails_closed_and_needs_usb_recovery() {
   body.tick(501);
   CHECK(!body.state().armed);
   CHECK(send(body, "arm", 501) == "ERR arm imu_sensor_fault_latched");
+
+  // Prior upright evidence cannot survive the contradictory conversion.
+  // Two distinct fresh, healthy samples after the fault are required.
+  imu.accel[1] = 0;
+  imu.at_ms = 550;
+  body.set_imu(imu);
+  fresh(guard, 550);
+  CHECK(send(body, "rearm", 550, true) == "ERR rearm imu_attitude_not_upright");
+  imu.at_ms = 600;
+  body.set_imu(imu);
+  fresh(guard, 600);
+  CHECK(send(body, "rearm", 600, true) == "OK rearm");
+
+  // A new valid sample after the freshness window cannot inherit old
+  // upright credit, even when no intervening tick observed the outage.
+  imu.at_ms = 850;
+  body.set_imu(imu);
+  fresh(guard, 850);
+  CHECK(send(body, "rearm", 850, true) == "ERR rearm imu_attitude_not_upright");
+  imu.at_ms = 900;
+  body.set_imu(imu);
+  fresh(guard, 900);
+  CHECK(send(body, "rearm", 900, true) == "OK rearm");
+  CHECK(!body.state().armed && body.state().left == 0 && body.state().right == 0);
 }
 
 

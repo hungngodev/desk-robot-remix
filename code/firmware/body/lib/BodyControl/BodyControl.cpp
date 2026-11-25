@@ -807,11 +807,19 @@ void BodyControl::set_imu(const BerryReading& reading) {
   const bool newly_acquired = !imu_sample_seen_ ||
       (advance != 0U && advance < 0x80000000U);
   if (newly_acquired) {
+    if (imu_sample_seen_ && advance > 200U) {
+      // A gap longer than the IMU freshness window breaks upright
+      // recovery continuity, even if no tick ran during the gap.
+      imu_attitude_good_streak_ = 0;
+    }
     imu_sample_seen_ = true;
     imu_last_at_ms_ = reading.at_ms;
     imu_provenance_bad_ = false;
   } else if (!identical) {
     imu_provenance_bad_ = true;
+    // A conflicting or reordered frame retires all prior recovery credit.
+    // Do not clear the unsafe streak or any independent safety latch.
+    imu_attitude_good_streak_ = 0;
     if (imu_motion_required_ && state_.armed) {
       imu_sensor_fault_latched_ = true;
       stop_motion();
