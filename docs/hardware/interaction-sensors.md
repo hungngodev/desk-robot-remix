@@ -24,7 +24,7 @@ engineering decision. The follow-up photo identifies an owned Adafruit
 | Owned AT42QT1010 touch breakout #1374 | 1 | WROOM GPIO34, powered at 3.3 V, common ground and momentary active-high OUT | One concealed head pad. Bench-test response through the shell and costume. TTP223 is a possible fleet equivalent |
 | MPU6050 / likely GY-521 module (user reported) | 1 | WROOM GPIO21 SDA / GPIO22 SCL upstream of TCA9548A; verify 3.3 V logic and actual breakout power path | **Selected first robot and fleet IMU**, family 4. Boot WHO_AM_I register 0x75 must return 0x68 at bus address 0x68 or 0x69. Six-axis signed samples via register 0x3B. Physical mounting and handling classification still unqualified. Stock count unknown | 
 | Photographed BerryIMU (optional compatible alternative) | 0 required | Same upstream I2C only if MPU6050 removed | Preserve V1/V2/V3 support; never join two unqualified IMUs or assume this photographed chip revision |
-| Diffused RGB pixel + logic buffer/passives | 0 required;1 optional | Candidate SenseD10/GPIO9; qualified5V pixel, proper3.3-to-5V buffer | Optional mood/turn-taking glow. SD stays disabled/empty. Do not use body GPIO4 for the mux reset: it is a boot strapping pin and
+| Diffused RGB pixel + logic buffer/passives | 0 required;1 optional | Candidate SenseD10/GPIO9; qualified5V pixel, proper3.3-to-5V buffer | Optional mood/turn-taking glow. SD stays disabled/empty. Do not use body GPIO4 for the mux reset: it is reserved by project policy and
 the TCA9548A RESET must be pulled high to 3.3 V |
 | Mechanical bumper switch | 0 required;1 optional | BodyGPIO35 with external3.3V pullup | Useful cheap collision reflex after a small mount; not a substitute for floor sensors |
 
@@ -56,7 +56,24 @@ For an optional5V NeoPixel, use a guaranteed compatible level buffer such as
 SN74AHCT1G125, plus appropriate decoupling/data resistor. Native ESP-IDF
 `espressif/led_strip` is the reviewed head integration route. A bare LED plus
 resistor or the existing onboard indicator is a cheaper alternative; do not
-assume direct3.3V data works with every5V RGB pixel. No LED route is compiled yet.
+assume direct 3.3 V data works with every 5 V RGB pixel. The Sense-only
+`CONFIG_DESK_ROBOT_RGB_HEART_ENABLED` flag defaults to off; when enabled,
+`GetLed()` uses the pinned Xiaozhi `SingleLed` RMT driver on GPIO9.
+See [Sense RGB and J3 gates](../../code/firmware/head/sense/README.md).
+The pinned driver clears the pixel in Xiaozhi device idle, but listening and
+other states can illuminate it. Mac pet quiet mode is not a proven LED-dark
+command, and a black RGB frame does not disconnect pixel or buffer power.
+
+Before enabling or purchasing the final heart assembly, verify the exact
+BOB-13282 revision, SN74AHCT1G125DBVR 5 V supply, defined active-low OE and
+data input during reset, common ground, local decoupling, data resistor,
+power sequencing without backfeed, and physical J3 isolation. Measure actual
+5 V branch current with RGB disabled, black, listening, speaking and worst
+permitted brightness; repeat through quiet-mode entry, continuous listening,
+reboot and simultaneous audio/camera load. Record dark current separately
+from illumination and include it in the battery budget. Keep the feature
+unqualified until the measured results and quiet-mode behavior are reviewed.
+No new GPIO, power switch or purchase is authorized by this description.
 A visible laser supplies no additional sensing and the fixed head cannot aim it
 independently; the first build uses eyes/audio and optional diffused light.
 
