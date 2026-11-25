@@ -75,7 +75,7 @@ def _reading(body: object, robot: str, side: str, elapsed_ms: float):
             or type(valid) is not int or not 0 <= valid <= 7
             or (valid & ~present) or not valid & (1 << channel)
             or data.get("motion_certified") is not False
-            or type(mm[channel]) is not int or not 1 <= mm[channel] <= 1300
+            or type(mm[channel]) is not int or not 30 <= mm[channel] <= 1300
             or type(age[channel]) is not int or not 0 <= age[channel] <= 350
             or type(stamps[channel]) is not int
             or not 0 <= stamps[channel] <= 0xffffffff
@@ -91,6 +91,7 @@ async def capture_phase(
     side: str, label: str, count: int, interval: float,
     firmware_commit: str, mount_id: str, sample_id_start: int,
     previous_ms: int | None = None, previous_boot: int | None = None,
+    surface_condition: str | None = None,
 ) -> list[dict]:
     if (side not in SIDES or label not in {"near", "far"}
             or type(count) is not int or not 1 <= count <= 100
@@ -98,7 +99,10 @@ async def capture_phase(
             or type(sample_id_start) is not int or sample_id_start < 1
             or type(token) is not str or len(token) < 24 or not token.isascii()
             or any(type(x) is not str or not 1 <= len(x.strip()) <= 128
-                   for x in (firmware_commit, mount_id))):
+                   for x in (firmware_commit, mount_id))
+            or (surface_condition is not None and (
+                type(surface_condition) is not str
+                or not 1 <= len(surface_condition.strip()) <= 128))):
         raise ValueError("Authenticated, labeled physical ToF capture required")
     endpoint = _status_url(base_url, robot)
     samples = []
@@ -110,8 +114,9 @@ async def capture_phase(
         )
         response.raise_for_status()
         received = time.monotonic()
+        elapsed_ms = (received - start) * 1000
         raw, sample_ms, next_boot = _reading(
-            response.json(), robot, side, (received - start) * 1000,
+            response.json(), robot, side, elapsed_ms,
         )
         if boot is not None and next_boot != boot:
             raise RuntimeError("WROOM reboot during side range calibration")
@@ -125,8 +130,11 @@ async def capture_phase(
                 "robot_id": robot, "direction": side, "label": label,
                 "sample_id": sample_id_start + len(samples),
                 "side_ranges": raw, "captured_at_monotonic_s": received,
-                "firmware_commit": firmware_commit, "mount_id": mount_id,
+                "request_elapsed_ms": elapsed_ms,
+                "firmware_commit": firmware_commit.strip(), "mount_id": mount_id.strip(),
             })
+            if surface_condition is not None:
+                samples[-1]["surface_condition"] = surface_condition.strip()
             last_ms = sample_ms
         if len(samples) == count:
             return samples
@@ -215,6 +223,10 @@ async def main() -> None:
     parser.add_argument("--token-env", default="DESK_ROBOT_API_TOKEN")
     parser.add_argument("--firmware-commit", required=True)
     parser.add_argument("--mount-id", required=True)
+    parser.add_argument(
+        "--surface-condition",
+        help="Operator description of target material and lighting for this run",
+    )
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--interval", default=.18, type=float)
     args = parser.parse_args()
@@ -238,6 +250,7 @@ async def main() -> None:
                 sample_id_start=len(rows) + 1,
                 firmware_commit=args.firmware_commit, mount_id=args.mount_id,
                 previous_ms=last_side.get(side), previous_boot=boot,
+                surface_condition=args.surface_condition,
             )
             rows.extend(phase)
             last = phase[-1]["side_ranges"]

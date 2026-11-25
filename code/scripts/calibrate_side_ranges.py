@@ -53,6 +53,31 @@ def percentile(values: list[int], proportion: float) -> int:
     return sorted_values[max(0, min(len(sorted_values) - 1, index))]
 
 
+def _capture_provenance(line: dict, age_ms: int) -> dict | None:
+    """Validate claimed capture metadata without authenticating physical evidence."""
+    keys = ("firmware_commit", "mount_id", "captured_at_monotonic_s",
+            "request_elapsed_ms", "surface_condition")
+    if not any(key in line for key in keys):
+        return None  # Legacy raw rows remain candidate-only, with unknown provenance.
+    firmware, mount, captured, elapsed, surface = (line.get(key) for key in keys)
+    if (any(type(value) is not str or not 1 <= len(value.strip()) <= 128
+            for value in (firmware, mount))
+            or type(captured) not in (int, float) or not 0 <= captured < math.inf
+            or ("surface_condition" in line and (
+                type(surface) is not str or not 1 <= len(surface.strip()) <= 128))):
+        raise ValueError("Incomplete or invalid side-range capture provenance")
+    if "request_elapsed_ms" in line and (
+        type(elapsed) not in (int, float) or not 0 <= elapsed <= 350
+        or age_ms + elapsed > 350
+    ):
+        raise ValueError("Invalid side-range capture provenance or transport age")
+    return {
+        "firmware_commit": firmware.strip(), "mount_id": mount.strip(),
+        "surface_condition": surface.strip() if surface is not None else None,
+        "request_age_recorded": "request_elapsed_ms" in line,
+    }
+
+
 def analyze(rows: list[dict], robot_id: str) -> dict:
     samples = defaultdict(list)
     seen_capture_ids = defaultdict(set)
@@ -61,7 +86,8 @@ def analyze(rows: list[dict], robot_id: str) -> dict:
     # measurement: repeated HTTP reads may still show the same conversion.
     last_conversion_ms: dict[str, int] = {}
     measured_boot_id: int | None = None
-    for line in rows:
+    measured_provenance: dict | None = None
+    for index, line in enumerate(rows):
         if (not isinstance(line, dict) or line.get("robot_id") != robot_id
                 or line.get("direction") not in SIDE
                 or line.get("label") not in {"near", "far"}):
@@ -89,6 +115,11 @@ def analyze(rows: list[dict], robot_id: str) -> dict:
                 or type(boot_id) is not int
                 or not 1 <= boot_id <= 0xffffffff):
             raise ValueError("Invalid, stale, absent or forged real side sample")
+        provenance = _capture_provenance(line, age[channel])
+        if index == 0:
+            measured_provenance = provenance
+        elif provenance != measured_provenance:
+            raise ValueError("Cannot mix side-range capture provenance in one calibration")
         # A repeated GET /status is NOT an independently measured conversion.
         # Require a physical record ID (monotonic camera/logger capture number)
         # assigned by the measurement capture utility, not by this analyzer.
@@ -157,6 +188,7 @@ def analyze(rows: list[dict], robot_id: str) -> dict:
         "suggested_side_near_threshold_mm": proposed,
         "directions": summary,
         "samples_total": sum(len(x) for x in samples.values()),
+        "capture_provenance": measured_provenance,
         "physical_acceptance_pass": False,
         "independent_sample_provenance_verified": False,
         "human_review_required": True,

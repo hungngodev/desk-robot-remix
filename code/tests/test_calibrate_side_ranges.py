@@ -224,3 +224,58 @@ def test_calibration_rejects_subminimum_measurement_even_when_mask_claims_valid(
     rows[0]["side_ranges"]["mm"][0] = 29
     with pytest.raises(ValueError, match="Invalid"):
         module().analyze(rows, "robot-01")
+
+
+
+def tagged_side_samples():
+    rows = samples()
+    for i, row in enumerate(rows):
+        row.update(
+            firmware_commit="flash-sha", mount_id="mount-a",
+            captured_at_monotonic_s=100.0 + i, request_elapsed_ms=20.0,
+            surface_condition="matte black, indoor lighting",
+        )
+    return rows
+
+
+@pytest.mark.parametrize("field,value", [
+    ("firmware_commit", "another-flash"),
+    ("mount_id", "another-mount"),
+    ("surface_condition", "glossy white, sunlight"),
+    ("captured_at_monotonic_s", float("nan")),
+    ("request_elapsed_ms", 316),
+])
+def test_calibration_rejects_inconsistent_capture_provenance(field, value):
+    rows = tagged_side_samples()
+    rows[-1][field] = value
+    with pytest.raises(ValueError, match="provenance|age"):
+        module().analyze(rows, "robot-01")
+
+
+@pytest.mark.parametrize("field", [
+    "firmware_commit", "mount_id", "captured_at_monotonic_s",
+    "request_elapsed_ms", "surface_condition",
+])
+def test_calibration_rejects_partial_capture_provenance(field):
+    rows = tagged_side_samples()
+    del rows[-1][field]
+    with pytest.raises(ValueError, match="provenance"):
+        module().analyze(rows, "robot-01")
+
+
+def test_calibration_retains_operator_tags_without_certifying_them():
+    rows = tagged_side_samples()
+    rows[0]["firmware_commit"] = " flash-sha "
+    rows[0]["request_elapsed_ms"] = 315
+    result = module().analyze(rows, "robot-01")
+    assert result["capture_provenance"] == {
+        "firmware_commit": "flash-sha", "mount_id": "mount-a",
+        "surface_condition": "matte black, indoor lighting",
+        "request_age_recorded": True,
+    }
+    assert result["independent_sample_provenance_verified"] is False
+    assert result["physical_acceptance_pass"] is False
+    assert result["no_motion_authority"] is True
+    legacy = module().analyze(samples(), "robot-01")
+    assert legacy["capture_provenance"] is None
+    assert legacy["physical_acceptance_pass"] is False

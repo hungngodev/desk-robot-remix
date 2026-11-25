@@ -316,3 +316,39 @@ async def test_side_capture_main_ignores_ambient_proxy_and_keeps_private_output(
         capture["PHASES"]
     )
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
+
+
+
+@pytest.mark.parametrize("side", ["left", "right", "rear"])
+@pytest.mark.parametrize("distance", [1, 29, 1301])
+async def test_capture_rejects_outside_production_range(side, distance):
+    with pytest.raises(RuntimeError, match="Invalid"):
+        await get(FakeClient([frame(side=side, mm=distance)]), side=side)
+
+
+@pytest.mark.parametrize("side", ["left", "right", "rear"])
+@pytest.mark.parametrize("distance", [30, 1300])
+async def test_capture_preserves_selected_lens_at_valid_range_boundaries(side, distance):
+    rows = await get(FakeClient([frame(side=side, mm=distance)]), side=side)
+    index = {"left": 0, "right": 1, "rear": 2}[side]
+    assert rows[0]["side_ranges"]["mm"][index] == distance
+
+
+async def test_capture_records_request_age_and_operator_surface_condition(monkeypatch):
+    ticks = iter([10.0, 10.125])
+    monkeypatch.setitem(capture_phase.__globals__, "time", type(
+        "Clock", (), {"monotonic": staticmethod(lambda: next(ticks))},
+    ))
+    rows = await capture_phase(
+        FakeClient([frame(age=225)]), base_url="http://127.0.0.1:8008",
+        robot="robot-01", token="operator-private-demo-token", side="left",
+        label="near", count=1, interval=.05, sample_id_start=1,
+        firmware_commit=" flash-sha ", mount_id=" mount-a ",
+        surface_condition=" matte black, indoor lighting ",
+    )
+    assert rows[0]["request_elapsed_ms"] == 125
+    assert rows[0]["captured_at_monotonic_s"] == 10.125
+    assert rows[0]["side_ranges"]["age_ms"][0] == 225
+    assert rows[0]["firmware_commit"] == "flash-sha"
+    assert rows[0]["mount_id"] == "mount-a"
+    assert rows[0]["surface_condition"] == "matte black, indoor lighting"
