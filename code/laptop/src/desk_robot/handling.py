@@ -125,9 +125,20 @@ class HandlingGate:
     last_at: float | None = None
     last_boot_id: int | None = None
     last_sample_ms: int | None = None
+    last_native_low_g: tuple[bool, object, object, object] | None = None
     last_low_g_seq: int | None = None  # MPU FF interrupt counter for same boot
     native_low_g_seen: bool = False  # session-sticky telemetry capability
     retired_boot_ids: list[int] = field(default_factory=list)
+
+    @staticmethod
+    def _native_low_g_snapshot(imu: dict) -> tuple[bool, object, object, object]:
+        fields = ("low_g_valid", "low_g_irq", "low_g_seq")
+        return (
+            any(key in imu for key in fields),
+            imu.get("low_g_valid"),
+            imu.get("low_g_irq"),
+            imu.get("low_g_seq"),
+        )
 
     def reset(self, *, preserve_shake_cooldown: bool = False) -> None:
         """Clear a stale pose without rearming a recent gesture cooldown.
@@ -148,6 +159,7 @@ class HandlingGate:
         self.last_at = None
         self.last_boot_id = None
         self.last_sample_ms = None
+        self.last_native_low_g = None
         self.last_low_g_seq = low_g_seq
         if not preserve_shake_cooldown:
             # The bounded retired-boot replay fence belongs to one operator
@@ -176,15 +188,42 @@ class HandlingGate:
         if not qualified:
             # Revoking qualification clears pose, never trusted source identity.
             # Otherwise an old conversion can seed calibration when reenabled.
-            previous = (self.last_boot_id, self.last_sample_ms)
+            previous = (self.last_boot_id, self.last_sample_ms, self.last_native_low_g)
             self.reset(preserve_shake_cooldown=True)
-            self.last_boot_id, self.last_sample_ms = previous
+            self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
             return ()
         # Retired packets cannot reset a current pose on late delivery.
         imu = body.get("imu") if isinstance(body, dict) else None
         if (isinstance(imu, dict) and type(imu.get("boot_id")) is int
                 and imu["boot_id"] in self.retired_boot_ids):
             return ()
+        # Conflicting same-acquisition native low-g metadata must revoke any
+        # relative pose even when cached/replayed or arriving with a backdated
+        # host callback timestamp.
+        if (isinstance(imu, dict) and self.last_boot_id is not None
+                and type(imu.get("boot_id")) is int
+                and imu["boot_id"] == self.last_boot_id
+                and type(imu.get("sample_ms")) is int
+                and imu["sample_ms"] == self.last_sample_ms
+                and self.last_native_low_g is not None):
+            current_native = self._native_low_g_snapshot(imu)
+            if current_native != self.last_native_low_g:
+                if current_native[0]:
+                    self.native_low_g_seen = True
+                seq = imu.get("low_g_seq")
+                valid = imu.get("low_g_valid")
+                irq = imu.get("low_g_irq")
+                if (type(valid) is bool and type(irq) is bool and type(seq) is int
+                        and 0 <= seq <= 0xffffffff and valid
+                        and not (irq and seq == 0)
+                        and (self.last_low_g_seq is None or seq >= self.last_low_g_seq)):
+                    self.last_low_g_seq = seq
+                previous = (self.last_boot_id, self.last_sample_ms, self.last_native_low_g)
+                previous_at = self.last_at
+                self.reset(preserve_shake_cooldown=True)
+                self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
+                self.last_at = previous_at
+                return ()
         if self.last_at is not None and now <= self.last_at:
             # Old stationary observations cannot replace newer calibration.
             # An explicit motor-active status must still revoke the pose:
@@ -240,9 +279,9 @@ class HandlingGate:
                     # still exposing the last cached conversion as fresh.
                     # Invalidate the pose/baseline, but retain the exact
                     # acquisition identity so that cached data cannot seed it.
-                    previous = (self.last_boot_id, self.last_sample_ms)
+                    previous = (self.last_boot_id, self.last_sample_ms, self.last_native_low_g)
                     self.reset(preserve_shake_cooldown=True)
-                    self.last_boot_id, self.last_sample_ms = previous
+                    self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
                 return ()
             if (stamp < self.last_sample_ms
                     and not (self.last_sample_ms >= 0xffff0000
@@ -252,18 +291,18 @@ class HandlingGate:
                 return ()
         if self.last_at is not None and now - self.last_at > 1.0:
             # Host reconnect invalidates calibration, not source identity.
-            previous = (self.last_boot_id, self.last_sample_ms)
+            previous = (self.last_boot_id, self.last_sample_ms, self.last_native_low_g)
             self.reset(preserve_shake_cooldown=True)
-            self.last_boot_id, self.last_sample_ms = previous
+            self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
             # A transport gap invalidates pose, not the gesture cooldown.
         sample = raw_mpu6050(body, request_elapsed_ms=request_elapsed_ms)
         if sample is None:
             # Bad telemetry invalidates pose, not the last trusted acquisition.
             # Otherwise replaying that conversion after a malformed status
             # could seed a fresh calibration with stale sensor data.
-            previous = (self.last_boot_id, self.last_sample_ms)
+            previous = (self.last_boot_id, self.last_sample_ms, self.last_native_low_g)
             self.reset(preserve_shake_cooldown=True)
-            self.last_boot_id, self.last_sample_ms = previous
+            self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
             # Bad telemetry revokes pose, not the recent gesture cooldown.
             # Otherwise a quick recalibration can repeat a shake announcement.
             return ()
@@ -281,9 +320,9 @@ class HandlingGate:
                 if len(self.retired_boot_ids) >= 8:
                     # An unrecognized generation cannot be trusted. Keep the
                     # replay fence, but revoke any calibrated handling pose.
-                    previous = (self.last_boot_id, self.last_sample_ms)
+                    previous = (self.last_boot_id, self.last_sample_ms, self.last_native_low_g)
                     self.reset(preserve_shake_cooldown=True)
-                    self.last_boot_id, self.last_sample_ms = previous
+                    self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
                     return ()
                 old_boot = self.last_boot_id
                 self.reset(preserve_shake_cooldown=True)  # new WROOM boot identity requires fresh calibration
@@ -319,6 +358,7 @@ class HandlingGate:
         # count across automatic telemetry faults. This is an unqualified
         # low-g candidate, never a verified fall or motor/speech command.
         source = body["imu"]
+        self.last_native_low_g = self._native_low_g_snapshot(source)
         fields = ("low_g_valid", "low_g_irq", "low_g_seq")
         if any(key in source for key in fields):
             self.native_low_g_seen = True
@@ -353,9 +393,9 @@ class HandlingGate:
                 # Keep acquisition identity and event fence, but revoke
                 # relative pose until eight fresh quiet observations return.
                 # This never initiates motion or reports a verified fall.
-                previous = (self.last_boot_id, self.last_sample_ms)
+                previous = (self.last_boot_id, self.last_sample_ms, self.last_native_low_g)
                 self.reset(preserve_shake_cooldown=True)
-                self.last_boot_id, self.last_sample_ms = previous
+                self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
                 return ()
         acceleration, rotation_dps = sample
         # Decode the same validated MPU6050 axes, not a new I2C reader.

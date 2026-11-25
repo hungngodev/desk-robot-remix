@@ -890,3 +890,154 @@ async def test_hardware_navigate_refuses_missing_map_to_odom(settings, tmp_path)
         assert head.commands == []
     finally:
         await rt.close()
+
+
+def test_f036_first_unit_anchoring_split_and_reanchor_replay(tmp_path):
+    """F036 keeps first-unit AprilTag anchoring required while testing fail-closed re-anchor."""
+    from pathlib import Path
+
+    from desk_robot.spatial_bracket import validate_stationary_bracket
+    from desk_robot.spatial_frames import (
+        PlanarTransform,
+        map_odom_transform,
+        odom_base_transform,
+    )
+    from desk_robot.spatial_pose import PoseFence
+    from desk_robot.spatial_runtime import SpatialRuntime
+
+    root = Path(__file__).resolve().parents[2]
+    source_map = (root / "docs/source-map.md").read_text(encoding="utf-8")
+    coverage = (root / "agents/coverage.md").read_text(encoding="utf-8")
+    product_def = (root / "docs/product-definition.md").read_text(encoding="utf-8")
+
+    f036_src = next(
+        line for line in source_map.splitlines() if line.startswith("| `F036` |")
+    )
+    f036_cov = next(
+        line for line in coverage.splitlines() if 'id="feature-f036"' in line
+    )
+    assert "REQUIRED FIRST-UNIT ANCHORING" in f036_src
+    assert "| EXPANSION |" not in f036_src
+    assert "REQUIRED FIRST-UNIT ANCHORING" in f036_cov
+    assert "| EXPANSION |" not in f036_cov
+    assert "9/10 reanchors within 20 mm" in product_def
+    for guide in (
+        "50-map-and-spatial-memory.md",
+        "60-object-recall-and-navigation.md",
+        "90-integration-and-release-evidence.md",
+    ):
+        assert guide in f036_src and guide in f036_cov
+
+    # Trusted JPEG/pose bracket -> anchor -> pickup invalidation -> fresh re-anchor.
+    class FakeSettings:
+        def __init__(self, memory_dir):
+            self.memory_dir = memory_dir
+            self.robots = [type("R", (), {"id": "robot-01"})()]
+
+        def robot(self, rid):
+            assert rid == "robot-01"
+            return self.robots[0]
+
+    from desk_robot.memory import MemoryStore
+
+    store = MemoryStore(tmp_path / "mem", ["robot-01"])
+    spatial = SpatialRuntime(FakeSettings(tmp_path / "mem"), store)
+    fence = PoseFence("robot-01")
+    t0 = 1000.0
+    before = fence.observe(
+        {
+            "robot_id": "robot-01", "v": 1, "body_boot": 7, "origin": 11,
+            "head_boot": 21, "seq": 1, "sample_us": 100_000,
+            "x_mm": 0, "y_mm": 0, "yaw_mrad": 0, "quality": "valid",
+        },
+        t0,
+        request_started_at=t0 - 0.01,
+    )
+    after = fence.observe(
+        {
+            "robot_id": "robot-01", "v": 1, "body_boot": 7, "origin": 11,
+            "head_boot": 21, "seq": 2, "sample_us": 380_000,
+            "x_mm": 0, "y_mm": 0, "yaw_mrad": 0, "quality": "valid",
+        },
+        t0 + 0.28,
+        request_started_at=t0 + 0.27,
+    )
+    bracket = validate_stationary_bracket(
+        fence=fence, before=before, after=after,
+        previous_camera=(21, 1, 100), camera=(21, 2, 200),
+        camera_received_at=t0 + 0.11,
+        stream_generation_before=1, stream_generation_after=1,
+        motion_epoch_before=1, motion_epoch_after=1,
+        disarmed_before=True, disarmed_after=True,
+        now=t0 + 0.28, max_optical_lag_s=0.10, max_body_lag_s=0.15,
+    )
+    map_base = PlanarTransform("map", "base_link", 40.0, 20.0, 0.0)
+    map_to_odom = map_odom_transform(map_base, bracket.odom_base)
+    env = SafetyEnvelope(3, 2, 2, 15, True)
+    spatial.bind_qualified_grid(
+        "robot-01", body_boot=7, origin_id="11", anchor_id="tag-1",
+        calibration_id="cal-1", camera_boot=21, width=6, height=6,
+        envelope=env, ttl_us=5_000_000, anchored=True, map_to_odom=map_to_odom,
+    )
+    assert spatial.state("robot-01").grid.anchored is True
+    assert spatial.state("robot-01").map_to_odom == map_to_odom
+
+    # Pickup invalidates the anchor and map_to_odom (fail closed).
+    spatial.invalidate_robot("robot-01", reason="pickup")
+    assert spatial.state("robot-01").grid.anchored is False
+    assert spatial.state("robot-01").map_to_odom is None
+
+    # Origin transition (11 -> 12) raises PoseError to retire old origin and
+    # force re-anchoring; the subsequent two continuous frames in origin 12
+    # establish the new bracket safely without motion.
+    with pytest.raises(Exception, match="re-anchor required"):
+        fence.observe(
+            {
+                "robot_id": "robot-01", "v": 1, "body_boot": 7, "origin": 12,
+                "head_boot": 21, "seq": 3, "sample_us": 820_000,
+                "x_mm": 10, "y_mm": 0, "yaw_mrad": 0, "quality": "valid",
+            },
+            t0 + 0.72,
+            request_started_at=t0 + 0.71,
+        )
+    b2 = fence.observe(
+        {
+            "robot_id": "robot-01", "v": 1, "body_boot": 7, "origin": 12,
+            "head_boot": 21, "seq": 4, "sample_us": 1_100_000,
+            "x_mm": 10, "y_mm": 0, "yaw_mrad": 0, "quality": "valid",
+        },
+        t0 + 1.0,
+        request_started_at=t0 + 0.99,
+    )
+    a2 = fence.observe(
+        {
+            "robot_id": "robot-01", "v": 1, "body_boot": 7, "origin": 12,
+            "head_boot": 21, "seq": 5, "sample_us": 1_380_000,
+            "x_mm": 10, "y_mm": 0, "yaw_mrad": 0, "quality": "valid",
+        },
+        t0 + 1.28,
+        request_started_at=t0 + 1.27,
+    )
+    br2 = validate_stationary_bracket(
+        fence=fence, before=b2, after=a2,
+        previous_camera=(21, 2, 200), camera=(21, 3, 300),
+        camera_received_at=t0 + 1.11,
+        stream_generation_before=1, stream_generation_after=1,
+        motion_epoch_before=2, motion_epoch_after=2,
+        disarmed_before=True, disarmed_after=True,
+        now=t0 + 1.28, max_optical_lag_s=0.10, max_body_lag_s=0.15,
+    )
+    new_map_to_odom = map_odom_transform(
+        PlanarTransform("map", "base_link", 40.0, 20.0, 0.0),
+        br2.odom_base,
+    )
+    assert a2.origin == 12
+    assert b2.body_boot == 7 and odom_base_transform(a2) == br2.odom_base
+    spatial.bind_qualified_grid(
+        "robot-01", body_boot=7, origin_id="12", anchor_id="tag-1",
+        calibration_id="cal-1", camera_boot=21, width=6, height=6,
+        envelope=env, ttl_us=5_000_000, anchored=True, map_to_odom=new_map_to_odom,
+    )
+    assert spatial.state("robot-01").grid.anchored is True
+    assert spatial.state("robot-01").origin_id == "12"
+    assert spatial.state("robot-01").map_to_odom == new_map_to_odom

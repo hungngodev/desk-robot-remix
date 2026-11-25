@@ -140,7 +140,7 @@ def test_purchasing_release_rechecks_live_pr_after_receipts_before_output(
     # decision map before CI or source checkout. This synthetic checkout has
     # no selected options, not an absent or unverified decision map.
     monkeypatch.setattr(
-        release, "generate", lambda *args: {"supplemental_decisions": []},
+        release, "generate", lambda *args: {"supplemental_decisions": [], "room_pod": []},
     )
     monkeypatch.setattr(
         release, "first_robot_projection",

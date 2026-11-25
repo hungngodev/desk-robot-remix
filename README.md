@@ -1,11 +1,24 @@
 **Single procurement authority:** The machine plan is [full-feature-plan.json](docs/hardware/full-feature-plan.json). The [owned and remaining lists](docs/hardware/complete-shopping-checklist.md) and [fleet CSV](docs/hardware/fleet-components.csv) are generated views, not independently editable shopping decisions. The 2026-11-04 $50 prototype quote and earlier sensor/mux counts are historical. Current full five-robot purchase approval is **HOLD** until loaded drive, actual power/charging, optics, fit, voice and physical trials are qualified.
 
-To regenerate both views from the same source (no separate BOM), from the repository root run:
+**Read-only preview (ordinary builders, no files overwritten):**
 
 ```sh
-python code/scripts/procurement_release.py --format markdown > docs/hardware/complete-shopping-checklist.md
-python code/scripts/procurement_release.py --format csv > docs/hardware/fleet-components.csv
-python -m pytest code/tests/test_procurement_release.py
+python3 code/scripts/procurement_release.py --format first-robot-markdown
+python3 code/scripts/procurement_release.py --format pilot-cart-markdown
+```
+
+**Atomic regeneration (maintainers only; preserves existing views on any failure):**
+
+```sh
+tmp_md="$(mktemp docs/hardware/.complete-shopping-checklist.md.XXXXXX)" && \
+tmp_csv="$(mktemp docs/hardware/.fleet-components.csv.XXXXXX)" && \
+trap 'rm -f "$tmp_md" "$tmp_csv"' EXIT && \
+python3 code/scripts/procurement_release.py --format markdown > "$tmp_md" && \
+python3 code/scripts/procurement_release.py --format csv > "$tmp_csv" && \
+mv "$tmp_md" docs/hardware/complete-shopping-checklist.md && \
+mv "$tmp_csv" docs/hardware/fleet-components.csv && \
+trap - EXIT && \
+python3 -m pytest code/tests/test_procurement_release.py
 ```
 
 # Desk Robot Remix

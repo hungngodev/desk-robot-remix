@@ -309,3 +309,38 @@ def test_invalid_goal_heading_cannot_produce_route(heading):
     result = route(request=replace(request, goal_heading=heading))
     assert result.reason == "invalid_pose" and result.cells == ()
     assert result.final_heading is None and not result.may_execute
+
+
+def test_plan_route_rejects_live_map_expiry_during_search():
+    samples = iter([1000, 4000])
+    grid = GridSnapshot(
+        "pet", "origin", 3, "tag", "cal", 15, 15, 20,
+        ("safe",) * 225, 500, 4000, True,
+    )
+    request = RouteRequest(
+        "pet", "origin", 3, "tag", "s", "t", (6, 6), 0, (8, 6), 5000,
+    )
+    envelope = SafetyEnvelope(3, 2, 2, 32, True)
+    result = plan_route(
+        grid, request, envelope, now_us=1000, clock_us=lambda: next(samples),
+    )
+    assert result.status == "rejected"
+    assert result.reason == "deadline_or_map_expired"
+    assert result.cells == () and not result.may_execute
+
+
+def test_plan_route_rejects_tangential_unknown_at_start_clearance():
+    support = ["safe"] * 225
+    support[5 * 15 + 6] = "unknown"
+    grid = GridSnapshot(
+        "pet", "origin", 3, "tag", "cal", 15, 15, 20,
+        tuple(support), 500, 4000, True,
+    )
+    request = RouteRequest(
+        "pet", "origin", 3, "tag", "s", "t", (6, 6), 0, (7, 6), 3000,
+    )
+    envelope = SafetyEnvelope(6, 2, 2, 27, True)
+    result = plan_route(grid, request, envelope, now_us=1000)
+    assert result.status == "rejected"
+    assert result.reason == "unsafe_start"
+    assert result.cells == () and not result.may_execute

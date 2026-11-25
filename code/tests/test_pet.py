@@ -8836,3 +8836,137 @@ async def test_pet_restart_waits_for_every_pause_cleanup(
             pet.multimodal = None
             patch.undo()
             await pet.close()
+
+
+async def test_initial_unhealthy_safety_baseline_revokes_pickup_without_speech_interrupt(
+    fleet, tmp_path,
+):
+    """Initial unhealthy baseline stops in-flight Mac pickup while deduplicating repeats."""
+    from desk_robot.calibration import Calibration
+    from desk_robot.controller import Coordinator
+    from desk_robot.vision import Detection
+
+    fleet.memory_dir = tmp_path / "memory"
+    fleet.trials_file = tmp_path / "trials.jsonl"
+    cal_path = tmp_path / "cal.json"
+    cal_path.write_text(
+        Calibration(
+            measured=True,
+            simulation_only=True,
+            image_width=128,
+            image_height=96,
+            pixel_points=[(10, 10), (110, 10), (110, 80), (10, 80)],
+            ground_points_mm=[(-50, 100), (50, 100), (50, 200), (-50, 200)],
+            work_area_mm=(-80, 80, 80, 250),
+            grip_ground_mm=(0, 140),
+            lifted_roi_px=(10, 10, 110, 50),
+            servo_settle_seconds=0.5,
+        ).model_dump_json()
+    )
+    robot = fleet.robot("robot-01")
+    robot.motion_enabled = True
+    robot.calibration = cal_path
+
+    class BlockingVision:
+        def __init__(self):
+            self.started = asyncio.Event()
+
+        async def detect(self, jpeg, target):
+            self.started.set()
+            await asyncio.Event().wait()
+            return [Detection(target, 0.99, (10, 10, 20, 20))]
+
+    class PickupHead:
+        def __init__(self):
+            self.commands = []
+
+        async def status(self):
+            return {
+                "robot_id": "robot-01",
+                "armed": True,
+                "safety": {"required": True, "ready": True, "fault": "none"},
+            }
+
+        async def command(self, cmd):
+            from desk_robot.transport import expected_ack
+
+            self.commands.append(cmd)
+            return {"ok": True, "robot_id": "robot-01", "reply": expected_ack(cmd)}
+
+        async def snapshot(self):
+            return WHITE
+
+    class ActiveSpeechSpeaker:
+        def __init__(self):
+            self.started = asyncio.Event()
+
+        @asynccontextmanager
+        async def session(self, robots):
+            yield
+
+        async def say(self, _robot, _text):
+            self.started.set()
+            await asyncio.Event().wait()
+
+        async def interrupt(self, _robot):
+            return {"interrupted": True, "head_flush_requested": True}
+
+    memory = MemoryStore(tmp_path / "memory", [r.id for r in fleet.robots])
+    head = PickupHead()
+    coordinator = Coordinator(fleet, {"robot-01": head}, BlockingVision())
+    speaker = ActiveSpeechSpeaker()
+    conversation = Conversation(fleet, GroundedChat(), speaker, memory=memory)
+
+    stop_calls = []
+    original_stop = coordinator.stop
+
+    async def tracked_stop(robot_id):
+        stop_calls.append(robot_id)
+        return await original_stop(robot_id)
+
+    pet = PetController(
+        fleet, {"robot-01": head}, conversation, memory, KeyScene(),
+        on_local_fault=tracked_stop,
+    )
+    state = pet.states["robot-01"]
+    speech_task = asyncio.create_task(
+        conversation.run(["robot-01", "robot-02"], "chatting", 2)
+    )
+    try:
+        await asyncio.wait_for(speaker.started.wait(), timeout=2)
+        await coordinator.operator_arm("robot-01")
+        assert "robot-01" in coordinator.permits
+        pickup_job = coordinator.pickup("robot-01", "key")
+        await asyncio.wait_for(coordinator.vision.started.wait(), timeout=4)
+
+        state.enabled = True
+        state.generation = 1
+        assert state.last_safety_fault is None
+
+        fault_payload = {
+            "safety": {
+                "required": True,
+                "ready": False,
+                "fault": "floor_out_of_range",
+                "sensor": 1,
+            }
+        }
+        await pet._observe_body_safety("robot-01", 1, fault_payload)
+        # Repeat identical frame must be deduplicated cleanly.
+        await pet._observe_body_safety("robot-01", 1, fault_payload)
+
+        await asyncio.wait_for(coordinator.tasks[pickup_job.id], timeout=2)
+        assert stop_calls == ["robot-01"]
+        assert "robot-01" not in coordinator.permits
+        assert pickup_job.state in {"cancelled", "failed"}
+        assert not any(cmd.startswith("drive ") for cmd in head.commands)
+        assert head.commands[-1] == "halt"
+        assert state.safety_fault_events == 0
+        assert [m for m in memory.recent("robot-01") if m.kind == "safety_fault"] == []
+        # Unrelated active human/group speech must not be cancelled.
+        assert not speech_task.done()
+    finally:
+        await conversation.stop()
+        await asyncio.gather(speech_task, return_exceptions=True)
+        state.enabled = False
+        await pet.close()

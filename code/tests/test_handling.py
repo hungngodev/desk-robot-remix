@@ -1258,3 +1258,46 @@ def test_stale_delivered_imu_cannot_confirm_handling_tilt():
     assert gate.observe(late, 101.4, qualified=True, request_elapsed_ms=30) == ()
     assert gate.reference is None
 
+
+@pytest.mark.parametrize("backdated", [False, True])
+@pytest.mark.parametrize(
+    ("variant", "should_revoke"),
+    [
+        ("duplicate", False),
+        ("irq_seq_advance", True),
+        ("invalid_flag", True),
+        ("omitted_native", True),
+    ],
+)
+def test_same_acquisition_conflicting_native_low_g_revokes_pose(
+    backdated, variant, should_revoke,
+):
+    gate = HandlingGate()
+    for i in range(8):
+        frame = _mpu_native_low_g(0, irq=False, valid=True, boot_id=1)
+        assert qualified(gate, frame, 100.0 + i * 0.1) == ()
+    assert gate.reference == (0, 0, 1)
+    previous_at = gate.last_at
+    gate.last_shake = previous_at
+    last_stamp = gate.last_sample_ms
+
+    replay = _mpu_native_low_g(0, irq=False, valid=True, boot_id=1)
+    replay["imu"]["sample_ms"] = last_stamp
+    if variant == "irq_seq_advance":
+        replay["imu"].update(low_g_valid=True, low_g_irq=True, low_g_seq=1)
+    elif variant == "invalid_flag":
+        replay["imu"].update(low_g_valid=False, low_g_irq=False, low_g_seq=0)
+    elif variant == "omitted_native":
+        for key in ("low_g_valid", "low_g_irq", "low_g_seq"):
+            replay["imu"].pop(key, None)
+
+    observe_at = previous_at - 0.05 if backdated else previous_at + 0.05
+    assert qualified(gate, replay, observe_at, new_sample=False) == ()
+    assert gate.last_shake == previous_at
+    assert gate.last_at == previous_at
+    if should_revoke:
+        assert gate.reference is None
+        assert gate.startup_samples == []
+    else:
+        assert gate.reference == (0, 0, 1)
+

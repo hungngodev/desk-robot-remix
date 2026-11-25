@@ -954,6 +954,120 @@ int main() {
         }
       }
     }
+    {
+      // Exercise upstream probe_imu() across MPU6050 (0x68/0x69), BerryIMU
+      // V1 (0x1d)/V2/V3 positive matches, and ambiguous multi-device rejection.
+      auto configure_mpu = [](std::uint8_t addr) {
+        Wire.add_upstream_imu_reg(addr, 0x75, 0x68);
+      };
+      auto configure_berry = [](std::uint8_t gyro_addr, std::uint8_t gyro_id,
+                                std::uint8_t aux_addr, std::uint8_t aux_id) {
+        Wire.add_upstream_imu_reg(gyro_addr, 0x0f, gyro_id);
+        Wire.add_upstream_imu_reg(aux_addr, 0x0f, aux_id);
+      };
+      // Positive single MPU6050 on 0x68 and 0x69.
+      for (std::uint8_t addr : {std::uint8_t{0x68}, std::uint8_t{0x69}}) {
+        Wire = TwoWire{};
+        configure_mpu(addr);
+        desk_robot::TofBus bus;
+        desk_robot::CliffGuard guard;
+        ready(bus, guard);
+        const auto id = bus.probe_imu();
+        CHECK(id.family == 4 && id.gyro_id == 0x68 && id.aux_id == 0);
+        CHECK(id.gyro_address == addr && id.aux_address == 0);
+      }
+      // Positive BerryIMU V1 (including 0x1d aux), V2, V3.
+      struct BerryCase {
+        std::uint8_t gyro_id;
+        std::uint8_t aux_addr;
+        std::uint8_t aux_id;
+        std::uint8_t expected_family;
+      };
+      const BerryCase berry_cases[] = {
+          {0xd4, 0x1d, 0x49, 1},
+          {0x68, 0x1c, 0x3d, 2},
+          {0x6a, 0x1c, 0x3d, 3},
+      };
+      for (const auto& c : berry_cases) {
+        Wire = TwoWire{};
+        configure_berry(0x6a, c.gyro_id, c.aux_addr, c.aux_id);
+        desk_robot::TofBus bus;
+        desk_robot::CliffGuard guard;
+        ready(bus, guard);
+        const auto id = bus.probe_imu();
+        CHECK(id.family == c.expected_family);
+        CHECK(id.gyro_id == c.gyro_id && id.aux_id == c.aux_id);
+        CHECK(id.gyro_address == 0x6a && id.aux_address == c.aux_addr);
+      }
+      // Ambiguous or failed mux isolation cases must all fail closed.
+      {
+        Wire = TwoWire{};
+        configure_mpu(0x68);
+        configure_mpu(0x69);
+        desk_robot::TofBus bus;
+        desk_robot::CliffGuard guard;
+        ready(bus, guard);
+        CHECK(bus.probe_imu().family == 0);
+      }
+      {
+        Wire = TwoWire{};
+        configure_mpu(0x68);
+        Wire.add_upstream_imu_reg(0x6a, 0x0f, 0xd4);
+        desk_robot::TofBus bus;
+        desk_robot::CliffGuard guard;
+        ready(bus, guard);
+        CHECK(bus.probe_imu().family == 0);
+      }
+      {
+        Wire = TwoWire{};
+        configure_mpu(0x68);
+        Wire.add_upstream_imu_reg(0x1c, 0x0f, 0x3d);
+        desk_robot::TofBus bus;
+        desk_robot::CliffGuard guard;
+        ready(bus, guard);
+        CHECK(bus.probe_imu().family == 0);
+      }
+      {
+        Wire = TwoWire{};
+        Wire.add_upstream_imu_reg(0x6a, 0x0f, 0xd4);
+        Wire.add_upstream_imu_reg(0x6b, 0x0f, 0x68);
+        Wire.add_upstream_imu_reg(0x1c, 0x0f, 0x3d);
+        desk_robot::TofBus bus;
+        desk_robot::CliffGuard guard;
+        ready(bus, guard);
+        CHECK(bus.probe_imu().family == 0);
+      }
+      {
+        Wire = TwoWire{};
+        Wire.add_upstream_imu_reg(0x6a, 0x0f, 0x68);
+        Wire.add_upstream_imu_reg(0x1c, 0x0f, 0x3d);
+        Wire.add_upstream_imu_reg(0x1e, 0x0f, 0x49);
+        desk_robot::TofBus bus;
+        desk_robot::CliffGuard guard;
+        ready(bus, guard);
+        CHECK(bus.probe_imu().family == 0);
+      }
+      {
+        // Mismatched Berry ID pair (V1 gyro 0xd4 + V2/V3 aux 0x3d).
+        Wire = TwoWire{};
+        configure_berry(0x6a, 0xd4, 0x1c, 0x3d);
+        desk_robot::TofBus bus;
+        desk_robot::CliffGuard guard;
+        ready(bus, guard);
+        CHECK(bus.probe_imu().family == 0);
+      }
+      {
+        // Active downstream mux lane with stuck range mux cannot accept MPU.
+        Wire = TwoWire{};
+        configure_mpu(0x68);
+        desk_robot::TofBus bus;
+        desk_robot::CliffGuard guard;
+        ready(bus, guard);
+        Wire.ranges = 0x01;
+        Wire.range_mux_stuck = true;
+        CHECK(bus.probe_imu().family == 0);
+      }
+    }
     std::cout << "PASS cheap VL53L0X TCA9548A selected-channel readback and fail-closed cliff paths\n";
     return 0;
   } catch (const std::exception& ex) {

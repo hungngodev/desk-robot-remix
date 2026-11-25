@@ -112,6 +112,30 @@ class TwoWire {
   std::uint16_t tof_ambient_97 = 0x0123;
   std::uint16_t tof_signal_97 = 0x4567;
   unsigned imu_probe_attempts = 0;
+  struct UpstreamImuReg {
+    std::uint8_t address;
+    std::uint8_t reg;
+    std::uint8_t value;
+  };
+  std::vector<UpstreamImuReg> upstream_imu_regs;
+
+  void add_upstream_imu_reg(std::uint8_t address, std::uint8_t reg,
+                            std::uint8_t value) {
+    upstream_imu_regs.push_back(UpstreamImuReg{address, reg, value});
+  }
+  const UpstreamImuReg* find_upstream_imu_reg(std::uint8_t address,
+                                              std::uint8_t reg) const {
+    for (const auto& entry : upstream_imu_regs) {
+      if (entry.address == address && entry.reg == reg) return &entry;
+    }
+    return nullptr;
+  }
+  bool has_upstream_imu_addr(std::uint8_t address) const {
+    for (const auto& entry : upstream_imu_regs) {
+      if (entry.address == address) return true;
+    }
+    return false;
+  }
 
   bool fail_begin = false;
   bool begin(int, int, int) { return !fail_begin; }
@@ -171,6 +195,7 @@ class TwoWire {
     if (addr == 0x29)
       return (ranges != 0 && extras == 0 && (ranges & (ranges - 1U)) == 0) ||
              (ranges == 0 && extras == 1 && cap_uses_0x29 && cap_connected);
+    if (ranges == 0 && extras == 0 && has_upstream_imu_addr(addr)) return true;
     if (ranges != 0 || extras == 0) return false;
     switch (extras) {
       case 1: return (addr == 0x28 && !cap_uses_0x29 && cap_connected) || addr == 0x57;
@@ -477,6 +502,10 @@ class TwoWire {
     else if (addr == 0x48 && register_address == 0x00) {
       if (ads_config_high == 0xC3) inbound = {0x04, 0x00};
       else inbound = {0xFE, 0xDC};
+    } else if (ranges == 0 && extras == 0) {
+      if (const auto* imu_reg = find_upstream_imu_reg(addr, register_address)) {
+        inbound = {imu_reg->value};
+      }
     }
     if (inbound.size() != count) {
       inbound.clear();

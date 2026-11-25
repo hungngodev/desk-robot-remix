@@ -1012,3 +1012,61 @@ def test_noncanonical_physical_urls_rejected_by_online_audit(url):
     assert any("immutable physical record not matched" in error
                for error in verify.audit(full_ledger_with(row), no_record_lookup))
 
+
+def test_procedure_16_requires_authorized_manual_review_approval():
+    """Architecture diagram row 16 cannot promote via CI without manual approval."""
+    row = json.loads(
+        (ROOT / "docs/reviews/100_page_procedure_trace.json").read_text(encoding="utf-8")
+    )["procedures"][15]
+    assert row["id"] == 16
+    assert row["gate"] == "OPEN"
+    assert row["verification_method"] == "manual_review"
+    assert row["manual_review_receipt"] is None
+
+    promoted_16 = {
+        **row,
+        "gate": "TESTED",
+        "last_verified_sha": SHA,
+        "executed_test_receipt": {
+            "sha": SHA,
+            "exit_code": 0,
+            "command": row["verification_command"],
+            "url": RUN,
+        },
+    }
+
+    def lookup_16(url):
+        if "/issues/comments/" in url:
+            return {
+                "html_url": REVIEW_URL,
+                "body": f"ACCEPTED procedure 16 at {SHA}",
+                "author_association": "OWNER",
+                "user": {"login": "arch_reviewer", "type": "User"},
+            }
+        return lookup(url)
+
+    # Missing manual_review_receipt must fail even with valid 5-lane CI.
+    assert any(
+        "procedure 16: manual review not verified" in err
+        for err in verify.audit(full_ledger_with(promoted_16), lookup_16)
+    )
+
+    # Removing verification_method must fail even when manual_review_receipt is present.
+    no_method = {
+        **promoted_16,
+        "verification_method": None,
+        "manual_review_receipt": {
+            "sha": SHA,
+            "reviewer": "arch_reviewer",
+            "review_url": REVIEW_URL,
+        },
+    }
+    assert any(
+        "procedure 16: manual review evidence is compulsory" in err
+        for err in verify.audit(full_ledger_with(no_method), lookup_16)
+    )
+
+    # Only authorized standalone manual approval at the exact SHA + CI passes.
+    valid_16 = {**no_method, "verification_method": "manual_review"}
+    assert verify.audit(full_ledger_with(valid_16), lookup_16) == []
+

@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 LEDGER = ROOT / "docs/reviews/100_page_procedure_trace.json"
 RUN_PATH = re.compile(r"^/hungngodev/desk-robot-remix/actions/runs/([0-9]+)$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
+MANUAL_REVIEW_PROCEDURE_IDS = frozenset(range(1, 9)) | {16}
 
 
 def github_json(url: str, token: str | None = None) -> dict:
@@ -574,7 +575,8 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
         if method not in (None, "manual_review"):
             errors.append(f"procedure {identifier}: unsupported verification method")
             continue
-        if type(identifier) is int and 1 <= identifier <= 8 and method != "manual_review":
+        if (type(identifier) is int and identifier in MANUAL_REVIEW_PROCEDURE_IDS
+                and method != "manual_review"):
             errors.append(f"procedure {identifier}: manual review evidence is compulsory")
             continue
         # A physical pass must be accepted by an authorized GitHub reviewer,

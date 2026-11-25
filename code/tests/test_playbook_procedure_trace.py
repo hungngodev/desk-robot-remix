@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[2]
 LEDGER = ROOT / "docs/reviews/100_page_procedure_trace.json"
 STATES = {"OPEN", "TESTED", "MEASURED", "QUALIFIED"}
 EVIDENCE_CLASSES = {"source", "mixed", "physical"}
+MANUAL_REVIEW_PROCEDURE_IDS = frozenset(range(1, 9)) | {16}
 
 
 def _parse_ledger(raw):
@@ -198,7 +199,7 @@ def test_all_96_playbook_procedures_have_distinct_source_and_verification_owners
         for relative in re.findall(r"tests/[A-Za-z0-9_./-]+\.py", command):
             assert (ROOT / "code" / relative).is_file(), (row["id"], relative)
         assert row.get("verification_method") in (None, "manual_review")
-        if row["id"] <= 8:
+        if row["id"] in MANUAL_REVIEW_PROCEDURE_IDS:
             assert row["verification_method"] == "manual_review"
         assert row["gate"] in STATES
         assert row["evidence_class"] in EVIDENCE_CLASSES

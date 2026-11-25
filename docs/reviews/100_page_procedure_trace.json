@@ -234,7 +234,9 @@
       "last_verified_sha": null,
       "executed_test_receipt": null,
       "physical_measurement_receipt": null,
-      "evidence_class": "source"
+      "evidence_class": "source",
+      "verification_method": "manual_review",
+      "manual_review_receipt": null
     },
     {
       "id": 17,

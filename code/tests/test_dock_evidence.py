@@ -132,18 +132,53 @@ async def test_asymmetric_switch_or_changing_input_refuses_seated_claim(monkeypa
 
 @pytest.mark.parametrize(("left", "right", "good", "charging", "state"), [
     (False, False, False, False, "not_seated"),
-    (True, True, False, False, "seated_but_unpowered"),
-    (True, True, True, False, "input_present_not_charging"),
-    (False, False, True, True, "charge_signal_without_seat_fault"),
-    (False, False, True, False, "charger_input_without_seat"),
     (False, False, False, True, "charge_signal_without_input_fault"),
+    (False, False, True, False, "charger_input_without_seat"),
+    (False, False, True, True, "charge_signal_without_seat_fault"),
+    (False, True, False, False, "asymmetric_seat_or_fault"),
+    (False, True, False, True, "charge_signal_without_input_fault"),
+    (False, True, True, False, "asymmetric_seat_or_fault"),
+    (False, True, True, True, "asymmetric_seat_or_fault"),
+    (True, False, False, False, "asymmetric_seat_or_fault"),
+    (True, False, False, True, "charge_signal_without_input_fault"),
+    (True, False, True, False, "asymmetric_seat_or_fault"),
+    (True, False, True, True, "asymmetric_seat_or_fault"),
+    (True, True, False, False, "seated_but_unpowered"),
     (True, True, False, True, "charge_signal_without_input_fault"),
+    (True, True, True, False, "input_present_not_charging"),
+    (True, True, True, True, "charger_reports_active"),
 ])
 def test_independent_input_truth_table(left, right, good, charging, state):
     dock = payload()["dock"]
     dock.update(left_seated=left, right_seated=right,
                 input_good=good, charge_indicated=charging)
     assert classify_dock(dock) == state
+
+
+@pytest.mark.parametrize(("left", "right"), [(True, False), (False, True)])
+@pytest.mark.parametrize("charging", [False, True])
+async def test_asymmetric_seat_both_orientations_refuse_charge_and_motion(
+    monkeypatch, left, right, charging,
+):
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for frame in samples:
+        frame["dock"].update(
+            left_seated=left, right_seated=right,
+            input_good=True, charge_indicated=charging,
+        )
+    head = FakeHead(samples)
+    result = await observe_dock_evidence(head, "robot-01")
+    assert result["state"] == "asymmetric_seat_or_fault"
+    assert result["stable_three_samples"] is True
+    assert result["charging_verified"] is False
+    assert result["charging_authorized"] is False
+    assert result["motor_authorized"] is False
+    assert result["raw_pack_direction"] == "not_available"
+    assert head.commands == []
 
 
 

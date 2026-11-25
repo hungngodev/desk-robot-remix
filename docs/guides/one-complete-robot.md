@@ -6,20 +6,20 @@ A first completed, physically qualified pet is required before buying parts for 
 
 ## 1. Buy only against the canonical two lists
 
+**Clean-checkout prerequisite (no existing Python venv required for read-only views):** Running these read-only procurement generators requires only standard-library Python 3 (`python3`) from `code/` and preserves all `HOLD` gates without modifying any file. For full repository tests, calibration scripts, or later firmware/integration work, set up the pinned Python 3.11 environment in [the firmware and Mac setup guide](build.md) (`uv sync --extra dev --python 3.11 --locked`) first before using `uv run --no-sync`.
+
 For the first unit, use the **only two builder facing lists** printed by the `first-robot-markdown` command below: (1) reported owned or ordered and (2) first-unit remaining parts with conditional holds. Their source is [the canonical full feature plan](../hardware/full-feature-plan.json), [the reported inventory and photos](../hardware/photo-inventory-2026-11-04.md), and [the reviewed purchase register](../hardware/2026-11-16-five-pet-purchase-register.md). The separate [complete shopping checklist](../hardware/complete-shopping-checklist.md) is a **five-pet fleet projection**, NOT a one-unit checkout. Do not order fleet quantities from that static page or hand-edit a second first-unit cart.
 
-From the repository root, enter `code/` and regenerate the first complete
-pet, its dock and one station projection without modifying the ledger:
+From the repository root, enter `code/` and print the verified stdlib-only first complete pet, its dock, and one station projection without modifying the ledger or requiring a virtualenv:
 
 ```sh
-cd code
-uv run --no-sync python scripts/procurement_release.py --format first-robot-markdown
+cd code && python3 scripts/procurement_release.py --format first-robot-markdown
 ```
 
-For **evaluation samples only**, use the separate, source locked pilot worksheet:
+For **evaluation samples only**, print the separate, source-locked pilot worksheet:
 
 ```sh
-uv run --no-sync python scripts/procurement_release.py --format pilot-cart-markdown
+cd code && python3 scripts/procurement_release.py --format pilot-cart-markdown
 ```
 
 The November 18 pilot recorded thirteen candidate SKUs, seventeen individual sample items and USD 40.41 of historical merchandise quotes, **excluding shipping, tax, previous spending and unknown mandatory hardware**. It is not a safe to buy finished robot, charger or five pet kit. Check seller stock, exact PCB revision and actual delivered totals before any optional sample order. The first **complete** prototype has a USD 50 delivered cap **including previously paid items**. An unquoted mandatory part or unknown historical payment means no approved total.

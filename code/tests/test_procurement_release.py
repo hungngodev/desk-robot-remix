@@ -2541,11 +2541,73 @@ def test_dock_kit_and_station_aliases_require_exact_parent_binding():
     assert mod.linked_parent_checkout_failures(report, evidence) == []
     line["kit_components"] = [child, child]
     assert mod.linked_parent_checkout_failures(report, evidence)
+    line["kit_components"] = [{**child, "quantity_per_kit": 2}]
+    assert any("unverified included dock component" in e
+               for e in mod.linked_parent_checkout_failures(report, evidence))
+
+    # A received inventory kit duplicating a separate component must fail
+    # even when the checkout lines row itself contains no duplicate entry.
+    dock["disposition"] = "selected"
+    line["kit_components"] = []
+    evidence["costs"]["inventory"] = [
+        {"role_key": "dock:dock_fixture", "kit_components": [child]},
+    ]
+    assert any("duplicate dock" in e
+               for e in mod.linked_parent_checkout_failures(report, evidence))
+
+    dock["disposition"] = "included_in_parent"
+    evidence["costs"]["inventory"] = []
     line["kit_components"] = [child]
     evidence["supplemental_decisions"]["room_scd40"]["pcb_revision"] = "B"
     assert any("station alias" in e for e in mod.linked_parent_checkout_failures(
         report, evidence
     ))
+
+
+def test_readme_atomic_regeneration_preserves_existing_views_on_failure(tmp_path):
+    """Failed generator invocation in root README command must leave artifacts intact."""
+    import re
+
+    root = mod.PLAN.parents[2]
+    readme = (root / "README.md").read_text(encoding="utf-8")
+    blocks = re.findall(r"```sh\n(.*?)```", readme, re.S)
+    regen = next(b for b in blocks if "--format markdown" in b and "mv " in b)
+
+    hw_dir = tmp_path / "docs/hardware"
+    hw_dir.mkdir(parents=True)
+    md_path = hw_dir / "complete-shopping-checklist.md"
+    csv_path = hw_dir / "fleet-components.csv"
+    sentinel_md = b"# existing HOLD checklist\n"
+    sentinel_csv = b"role,hold\npack,HOLD\n"
+    md_path.write_bytes(sentinel_md)
+    csv_path.write_bytes(sentinel_csv)
+
+    (tmp_path / "code/scripts").mkdir(parents=True)
+    (tmp_path / "code/tests").mkdir(parents=True)
+    marker = tmp_path / "pytest_ran"
+    (tmp_path / "code/scripts/procurement_release.py").write_text(
+        "import sys\nsys.stderr.write('simulated generator failure\\n')\nraise SystemExit(2)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "code/tests/test_procurement_release.py").write_text(
+        f"open({str(marker)!r}, 'w').write('ran')\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "fakebin").mkdir()
+    # Provide python3 wrapper that forwards to sys.executable cleanly.
+    result = subprocess.run(
+        ["bash", "-c", regen],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode != 0
+    assert md_path.read_bytes() == sentinel_md
+    assert csv_path.read_bytes() == sentinel_csv
+    assert not marker.exists()
+    leftover_temps = [p.name for p in hw_dir.iterdir() if p.name.startswith(".")]
+    assert leftover_temps == []
 
 
 @pytest.mark.parametrize("invalid_first", [None, False, {}, {"result": "fail"}])
