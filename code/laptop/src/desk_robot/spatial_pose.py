@@ -7,11 +7,11 @@ anchor a map, clear local safety faults, or grant an actuator lease.
 
 from __future__ import annotations
 
-import math
 from collections import deque
 from dataclasses import dataclass, replace
 
 _MAX_SAMPLE_US = (1 << 53) - 1
+_MAX_LOCAL_CLOCK_S = _MAX_SAMPLE_US / 1_000_000
 _MAX_COORD_MM = 1_000_000
 _MAX_RECEIPT_LAG_S = 0.25
 _MAX_CONTINUITY_RECEIPTS = 64
@@ -48,12 +48,17 @@ def _bounded_int(data: dict, name: str, lo: int, hi: int) -> int:
     return value
 
 
+def _valid_local_clock(value: object) -> bool:
+    # Bound before float conversion; huge ints overflow and huge floats lose timing precision.
+    return type(value) in (int, float) and 0 <= value <= _MAX_LOCAL_CLOCK_S
+
+
 def decode_pose(data: dict, robot_id: str, received_at: float) -> PoseReceipt:
     """Validate a version-one head-forwarded body sample without side effects."""
     if (not isinstance(data, dict) or type(robot_id) is not str
             or data.get("robot_id") != robot_id):
         raise PoseError("Pose robot identity mismatch")
-    if type(received_at) not in (float, int) or not math.isfinite(received_at) or received_at < 0:
+    if not _valid_local_clock(received_at):
         raise PoseError("Invalid local pose receipt time")
     if _bounded_int(data, "v", 1, 1) != 1:
         raise PoseError("Unsupported pose version")
@@ -119,9 +124,7 @@ class PoseFence:
         if request_started_at is not None:
             # Local GET duration is a conservative transport age allowance,
             # not proof of UART transaction correlation or device capture time.
-            if (type(request_started_at) not in (int, float)
-                    or not math.isfinite(request_started_at)
-                    or request_started_at < 0
+            if (not _valid_local_clock(request_started_at)
                     or not 0 <= received_at - request_started_at <= _MAX_RECEIPT_LAG_S):
                 self.invalidate("pose_transport_delayed")
                 raise PoseError("Pose request age exceeds local freshness budget")
@@ -208,9 +211,8 @@ class PoseFence:
         return self._continuous and any(item is receipt for item in self._receipts)
 
     def current(self, now: float, *, max_age_s: float = 0.25) -> PoseReceipt | None:
-        if (type(now) not in (int, float) or not math.isfinite(now)
-                or type(max_age_s) not in (int, float)
-                or not math.isfinite(max_age_s) or not 0 < max_age_s <= 1):
+        if (not _valid_local_clock(now)
+                or type(max_age_s) not in (int, float) or not 0 < max_age_s <= 1):
             self.invalidate("invalid_freshness_window")
             return None
         if self.last is None or not self._continuous or self.last.quality != "valid":

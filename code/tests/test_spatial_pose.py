@@ -314,3 +314,33 @@ def test_relative_clock_baseline_resets_only_for_new_identity():
     fresh = gate.observe(pose(body_boot=10, origin=1, seq=3, sample_us=200_010), 101.2)
     assert gate.current(101.2) is fresh
     assert gate.needs_reanchor
+
+
+@pytest.mark.parametrize("bad", [10**400, -(10**400), 1e300, -1e300],
+                         ids=["huge-int", "negative-int", "huge-float", "negative-float"])
+def test_excessive_pose_clock_values_revoke_continuity(bad):
+    with pytest.raises(PoseError):
+        decode_pose(pose(), "robot-01", bad)
+    for boundary in ("receipt", "request", "now", "window"):
+        gate = PoseFence("robot-01")
+        gate.observe(pose(), 100.0)
+        fresh = gate.observe(pose(seq=2, sample_us=1_100_000), 100.1)
+        assert gate.current(100.1) is fresh
+        packet = pose(seq=3, sample_us=1_200_000)
+        if boundary == "receipt":
+            with pytest.raises(PoseError):
+                gate.observe(packet, bad)
+        elif boundary == "request":
+            with pytest.raises(PoseError):
+                gate.observe(packet, 100.2, request_started_at=bad)
+        elif boundary == "now":
+            assert gate.current(bad) is None
+        else:
+            assert gate.current(100.2, max_age_s=bad) is None
+        assert gate.current(100.2) is None
+        assert not gate.owns_continuous_receipt(fresh)
+        assert gate.needs_reanchor
+        gate.observe(packet, 100.2)
+        assert gate.current(100.2) is None
+        recovered = gate.observe(pose(seq=4, sample_us=1_300_000), 100.3)
+        assert gate.current(100.3) is recovered
