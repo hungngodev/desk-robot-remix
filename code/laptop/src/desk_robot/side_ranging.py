@@ -161,6 +161,10 @@ class SideRangeEvents:
             detected_near = distances[i] <= near_mm
             clearly_far = distances[i] >= near_mm + 60
             if not track.initialized:
+                # A reading inside the hysteresis band proves neither near nor far.
+                # Preserve its acquisition fence without inventing an arrival baseline.
+                if not detected_near and not clearly_far:
+                    continue
                 track.initialized = True
                 track.near = detected_near
                 continue

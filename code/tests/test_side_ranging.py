@@ -486,3 +486,43 @@ def test_side_ranges_still_reject_nonuint16_raw_data(malformed):
     assert observe(600, 80, 200) == []
     assert observe(malformed, 85, 300) == []
     assert observe(600, 85, 400) == []
+
+
+@pytest.mark.parametrize("hardware", [False, True])
+@pytest.mark.parametrize("reset", ["startup", "invalid_lane", "reboot", "gap", "threshold"])
+def test_deadband_never_establishes_far_baseline(hardware, reset):
+    if reset == "reboot" and not hardware:
+        pytest.skip("legacy source has no boot identity")
+    tracker = SideRangeEvents()
+    threshold = 170
+    boot = 901
+    stamp = 0
+
+    def observe(left, right=600, valid=7, step=100):
+        nonlocal stamp
+        stamp += step
+        side = {"mm": [left, right, 600], "age_ms": [30] * 3,
+                "present_mask": 7, "valid_mask": valid, "motion_certified": False}
+        data = {"side_ranges": side}
+        if hardware:
+            side.update(sample_ms=[stamp] * 3, boot_id=boot)
+            data["imu"] = {"boot_id": boot}
+        return tracker.observe(data, now=10 + stamp / 1000, near_mm=threshold,
+                               require_hardware_identity=hardware)
+
+    if reset != "startup":
+        assert observe(600) == []
+        if reset == "invalid_lane":
+            assert observe(600, valid=6) == []
+        elif reset == "reboot":
+            boot += 1
+        elif reset == "threshold":
+            threshold = 200
+    assert observe(threshold + 30, step=2100 if reset == "gap" else 100) == []
+    assert observe(threshold, right=90) == []
+    assert observe(threshold - 1, right=95) == [("right", 95)]
+    assert observe(threshold - 1, right=95) == []
+    assert observe(threshold + 60, right=95) == []
+    assert observe(threshold + 60, right=95) == []
+    assert observe(threshold, right=95) == []
+    assert observe(threshold - 1, right=95) == [("left", threshold - 1)]
