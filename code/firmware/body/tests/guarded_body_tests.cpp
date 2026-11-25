@@ -54,7 +54,7 @@ static void cold_boot_complete_unsafe_sweep_reports_real_fault() {
   fresh(guard, 101);
   CHECK(!guard.evaluate(101));
   CHECK(guard.fault() == desk_robot::CliffFault::FloorOutOfRange);
-  CHECK(send(body, "arm", 101) == "ERR arm battery_low_latched");
+  CHECK(send(body, "arm", 101) == "ERR arm safety_interlock");
   CHECK(send(body, "rearm", 101) == "ERR rearm local_only");
   CHECK(send(body, "rearm", 101, true) == "OK rearm");
   CHECK(!body.state().armed);
@@ -2848,7 +2848,7 @@ static void battery_readiness_matches_stricter_arm_voltage() {
   readings.gauge.fuel_at_ms = 101;
   readings.gauge.cell_mv = 3350;
   body.set_accessories(readings, 101);
-  CHECK(send(body, "arm", 101) == "ERR arm safety_interlock");
+  CHECK(send(body, "arm", 101) == "ERR arm battery_low_latched");
   CHECK(send(body, "rearm", 101) == "ERR rearm local_only");
   CHECK(send(body, "rearm", 101, true) == "OK rearm");
   CHECK(send(body, "status", 101).find("\"ready\":true") !=
