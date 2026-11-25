@@ -13,7 +13,6 @@ import httpx
 from desk_robot_bridge import connections, robot_for_device
 from plugins_func.register import Action, ActionResponse, ToolType, register_function
 
-
 # HTTPX timeouts bound individual network operations, not total elapsed time.
 # Keep these existing route budgets for optional tools; STOP/pickup keep
 # their separate physical acknowledgment and job ownership semantics.

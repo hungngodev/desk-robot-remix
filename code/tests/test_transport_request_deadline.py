@@ -7,7 +7,6 @@ from unittest.mock import patch
 
 import httpx
 import pytest
-
 from desk_robot.transport import HeadError, HttpHead
 
 
