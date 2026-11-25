@@ -75,6 +75,43 @@ The EVA case has its own CC BY-SA 4.0 terms; preserve its attribution and mark
 changes to it. A combined mechanical remix must respect every applicable source
 license; do not assume the software MIT license covers the assembled robot CAD.
 
+## Distribution boundary: separate components versus combined derivatives
+
+Keep upstream meshes as individually attributed components in the Fusion
+scaffold. A collection of independent components is not automatically a
+single licensed adaptation; each component retains its terms, including
+any noncommercial restrictions. A fused or otherwise inseparable derivative
+of CC BY-SA 4.0 head geometry and CC BY-NC-SA 4.0 SMARS geometry cannot
+be cleared for sharing by simply choosing the more restrictive license:
+the two share-alike grants are not compatible for that adaptation.
+Obtain separate permission or redesign the affected geometry independently
+before distributing such a derivative. File separation alone does not
+establish legal independence. See the [Creative Commons remix guidance](https://creativecommons.org/faq/#can-i-combine-material-under-different-creative-commons-licenses-in-my-work)
+and [official compatible-license list](https://creativecommons.org/compatible-licenses/).
+
+Original integration software remains MIT; independently authored adapter
+geometry with an explicit CC0 declaration remains CC0. A source comment
+or a matching mesh hash is provenance evidence, not proof of ownership
+or permission for imported geometry. Preserve the original sources,
+creator credits, change records and applicable terms in every release.
+
+Tiny Engineer remains a CERN-OHL-S-2.0 reference, not an MIT head design.
+Before adopting or conveying hardware based on it, review the
+[definitive CERN OHL text](https://cern-ohl.web.cern.ch/) for Complete Source,
+notices, source availability and the scope of the strongly reciprocal grant.
+
+Cozmars is version-specific: the
+[external V2 comparison](FUSION_ONE_ROBOT_ASSEMBLY.md#cozmars-packaging-comparison-before-sparky-fallback)
+uses the pinned model repository without a LICENSE file and records the
+creator's noncommercial share-alike distribution terms.
+The [Cozmars V3 hardware README](https://github.com/hyansuper/cozmars_v3_hardware)
+instead names the TAPR Open Hardware License. Do not apply the V3 declaration
+retroactively to V2, infer a grant from the separate firmware, or import
+V3 files until the exact revision, applicable license and ancestor rights
+are recorded. TAPR OHL has its own documentation and distribution
+obligations ([license text and guidance](https://tapr.org/the-tapr-open-hardware-license/)).
+Neither version is a newly authorized CAD import or commercial release.
+
 The saved N20 screwless chassis is historical and does not fit 28BYJ-48 motors.
 The stepper remix is a different variant; verify matching track/slave-wheel
 selection and forklift interface, not only motor mounting. STL source-coordinate
