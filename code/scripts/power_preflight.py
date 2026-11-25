@@ -161,26 +161,24 @@ def screen_protected_pack(
         )
     )
     ratings_complete = all(v is not None for v in ratings)
-    current_ok = None
-    if ratings_complete:
-        current_ok = (
-            Decimal(str(rated_peak_discharge_a)) >= Decimal(str(
-                supply["minimum_rated_cell_and_boost_input_a"]))
-            and Decimal(str(rated_continuous_discharge_a)) >= Decimal(str(
-                supply["minimum_continuous_cell_input_a"]))
-            and Decimal(str(pcm_overcurrent_trip_a)) >= Decimal(str(
-                supply["minimum_rated_cell_and_boost_input_a"]))
-        )
+    peak = Decimal(str(supply["minimum_rated_cell_and_boost_input_a"]))
+    continuous = Decimal(str(supply["minimum_continuous_cell_input_a"]))
+    if any(
+        rating is not None and Decimal(str(rating)) < required
+        for rating, required in zip(ratings, (peak, continuous, peak), strict=True)
+    ):
+        current_ok = False
+    else:
+        current_ok = True if ratings_complete else None
     # A 4A cell can ship with a 0.86A JST harness. Current through the
     # terminated connector and wires is NOT the cell's printed 4A rating.
     # Without a separately published pulse rating, conservatively compare
     # even short motor stalls to the connector's continuous ampacity.
     interconnect_complete = all(v is not None for v in interconnect_ratings)
-    interconnect_ok = None
-    if interconnect_complete:
-        demanded = Decimal(str(supply["minimum_rated_cell_and_boost_input_a"]))
-        interconnect_ok = all(Decimal(str(v)) >= demanded
-                              for v in interconnect_ratings)
+    if any(v is not None and Decimal(str(v)) < peak for v in interconnect_ratings):
+        interconnect_ok = False
+    else:
+        interconnect_ok = True if interconnect_complete else None
     # Unlike the legacy pack-only indication, this field covers the complete
     # exact wired battery assembly and cannot pass without both ratings.
     # If any known hard bound fails, the answer is definitively NO even
@@ -195,7 +193,7 @@ def screen_protected_pack(
         "current_sufficient_on_paper": current_ok,
         "candidate_usable_on_paper": complete_harness_usable,
         "pack_only_usable_on_paper": (
-            False if not fits_flat else current_ok if ratings_complete else None
+            False if not fits_flat else current_ok
         ),
         "connector_and_wire_ratings_complete": interconnect_complete,
         "connector_and_wire_current_sufficient_on_paper": interconnect_ok,

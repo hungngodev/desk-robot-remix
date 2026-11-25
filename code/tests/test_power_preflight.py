@@ -1245,3 +1245,26 @@ def test_published_lp103650_short_pack_is_still_too_wide_and_underrated():
     assert verdict["current_sufficient_on_paper"] is False
     assert verdict["candidate_usable_on_paper"] is False
     assert verdict["candidate_physically_qualified"] is False
+
+
+@pytest.mark.parametrize("field", [
+    "rated_peak_discharge_a",
+    "rated_continuous_discharge_a",
+    "pcm_overcurrent_trip_a",
+    "connector_continuous_a",
+    "wire_and_crimp_continuous_a",
+])
+def test_known_undersized_rating_rejects_pack_even_when_other_ratings_missing(field):
+    demand = tool(1, 0.6)
+    result = pack_screen(
+        demand, pack_length_mm=55, pack_width_mm=30, pack_thickness_mm=10,
+        tray_length_mm=68, tray_width_mm=35, tray_height_mm=14,
+        **{field: 0.5},
+    )
+    assert result["candidate_usable_on_paper"] is False
+    assert result["candidate_physically_qualified"] is False
+    if field in ("connector_continuous_a", "wire_and_crimp_continuous_a"):
+        assert result["connector_and_wire_current_sufficient_on_paper"] is False
+    else:
+        assert result["current_sufficient_on_paper"] is False
+        assert result["pack_only_usable_on_paper"] is False
