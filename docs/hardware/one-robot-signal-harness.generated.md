@@ -39,10 +39,10 @@ Signal-only list. Never infer a power source from a logic voltage.
 | WROOM GPIO21 SDA + GPIO22 SCL | MPU6050 (0x68) + 0x70 + 0x71 mux inputs | 3.3V I2C; actual breakout pullups need checking | Source allocated |
 | 3.3V logic via appropriate pullups | Both TCA9548A active-LOW RESET inputs | Passive HIGH; no WROOM GPIO4 or other MCU RESET drive | Exact breakout and startup levels HOLD |
 | TCA9548A address straps | 0x70 ranges and 0x71 accessories | 0x70 A2/A1/A0 LOW; 0x71 A2/A1 LOW, A0 HIGH | Verify actual board address straps before power-up |
-| WROOM GPIO34 | AT42QT1010 OUT | 3.3V input; external bias required on GPIO34 through GPIO39 | Source allocated |
-| WROOM GPIO35 | NC bumper series OUT | 3.3V input; external bias required on GPIO34 through GPIO39 | Source allocated |
-| MCP23017 GPB0 | optional reed switch | 3.3V input; closes LOW to GND | Source polled; physically unqualified |
-| MCP23017 GPB1 | optional PIR output | 3.3V input; active HIGH | Source polled; physically unqualified |
+| AT42QT1010 OUT | WROOM GPIO34 | 3.3V active-HIGH capacitive input; external bias required on GPIO34 through GPIO39 | Source allocated |
+| 3.3V external pullup node + NC bumper switch series -> GND | WROOM GPIO35 | 3.3V passive NC input (HIGH on open/fault, LOW when seated); external bias required on GPIO34 through GPIO39 | Source allocated |
+| Optional reed switch to GND (with external 3.3V pullup) | MCP23017 GPB0 | 3.3V input; closes LOW to GND | Source polled; physically unqualified |
+| Optional PIR output | MCP23017 GPB1 | 3.3V input; active HIGH | Source polled; physically unqualified |
 | DRV8833 nFAULT (DC only) | MCP23017 GPB3 | Open drain active LOW; 4.7k 3.3V pullup at driver, 100k pulldown at expander | Disconnected lead must read LOW/fault; carrier and fault response HOLD |
 | MCP23017 GPB2 | CD74HC123 rising-edge haptic trigger (1B pin 2) | 3.3V lab-only edge, not motor current; external defined LOW at boot | Source gated in esp32_full_haptic_lab and esp32_dc_integrated_lab; physical one-shot NOT qualified |
 | Regulated 3.3V logic rail | CD74HC123 VCC pin 16 | 100nF local bypass to ground; HC not HCT | Haptic bench candidate only |
@@ -51,8 +51,8 @@ Signal-only list. Never infer a power source from a logic voltage.
 | 180kOhm timing resistor to 3.3V | CD74HC123 1RxCx pin 15 | 1uF candidate capacitor between pin 15 and 1Cx pin 14 | Timing at actual 3.3V NOT measured |
 | CD74HC123 1Q pin 13 | AO3400 gate through series resistor | External gate pulldown; inverted Q pin 4 unused | Haptic bench candidate only |
 | Rated regulated 3V motor supply | Coin motor positive; motor negative to AO3400 drain | Flyback diode cathode to motor positive, anode to drain | Current limit, stall, heat and independent pulse termination HOLD |
-| WROOM GPIO36 reserved | left 38kHz IR demodulator | Demodulated NEC burst input, external bias; ESP32 erratum | Bounded RMT decoder in source; NO physical receiver acceptance, do NOT wire yet |
-| WROOM GPIO39 reserved | right 38kHz IR demodulator | Demodulated NEC burst input, external bias; ESP32 erratum | Bounded RMT decoder in source; NO physical receiver acceptance, do NOT wire yet |
+| left 38kHz IR demodulator | WROOM GPIO36 reserved | Demodulated NEC burst input, external bias; ESP32 erratum | Bounded RMT decoder in source; NO physical receiver acceptance, do NOT wire yet |
+| right 38kHz IR demodulator | WROOM GPIO39 reserved | Demodulated NEC burst input, external bias; ESP32 erratum | Bounded RMT decoder in source; NO physical receiver acceptance, do NOT wire yet |
 | XIAO GPIO5 | SSD1306 SDA | 3.3V head signal | Source allocated |
 | XIAO GPIO6 | SSD1306 SCL | 3.3V head signal | Source allocated |
 | XIAO GPIO4 | MAX98357A BCLK | 3.3V head signal | Source allocated |

@@ -726,9 +726,10 @@ these source paths establishes physical qualification.
 
 The user-photographed BMP280 is **pressure and temperature, not humidity**.
 Bosch's datasheet specifies I2C 0x76/0x77 and register 0xD0 ID 0x58. It is
-reserved for isolated TCA9548A lane 5 to avoid possible 0x77 Berry pressure
-conflicts; no BMP driver or claimed reading is enabled before the physical
-board and a vendor-compatible compensated driver are verified. Optional MAX30102
+assigned to isolated TCA9548A 0x71 lane 3 (`AccessorySensors.cpp:173–192`
+implements chip-ID, NVM compensation and conservative rate bounds; physical board
+and electrical qualification remain OPEN, and 0x77 Berry pressure alternates
+stay off the shared bus). Optional MAX30102
 heartbeat requires user consent and a physically qualified 1.8V chip/breakout,
 never the Sense GPIO41/42 already assigned to its PDM microphone. Optional
 light/camera gestures and environmental sensors occupy the remaining mux lanes

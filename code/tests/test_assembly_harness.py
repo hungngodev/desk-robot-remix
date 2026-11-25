@@ -43,15 +43,17 @@ def test_full_wroom_xiao_signal_harness_matches_real_firmware():
     assert "| WROOM GPIO18 | MG90S lift signal |" in page
     assert "| WROOM GPIO19 | MG90S jaw signal |" in page
     assert "| XIAO GPIO4 | MAX98357A BCLK |" in page
-    assert "| WROOM GPIO34 | AT42QT1010 OUT |" in page
+    assert "| AT42QT1010 OUT | WROOM GPIO34 |" in page
+    assert "| 3.3V external pullup node + NC bumper switch series -> GND | WROOM GPIO35 |" in page
+    assert "NC bumper series OUT" not in page
     assert page.count("Range TCA9548A 0x70 CH") == 8
     assert page.count("Accessory TCA9548A 0x71 CH") == 8
     assert "PN532 I2C (0x24)" in page
     assert "MCP23017 (0x20)" in page
-    assert "| MCP23017 GPB0 | optional reed switch |" in page
-    assert "| MCP23017 GPB1 | optional PIR output |" in page
-    assert "| WROOM GPIO36 reserved | left 38kHz IR demodulator |" in page
-    assert "| WROOM GPIO39 reserved | right 38kHz IR demodulator |" in page
+    assert "| Optional reed switch to GND (with external 3.3V pullup) | MCP23017 GPB0 |" in page
+    assert "| Optional PIR output | MCP23017 GPB1 |" in page
+    assert "| left 38kHz IR demodulator | WROOM GPIO36 reserved |" in page
+    assert "| right 38kHz IR demodulator | WROOM GPIO39 reserved |" in page
     assert "VL53L0X (0x29)" in page
     assert "CAP1188 (0x29), MAX30102 paw pad (0x57)" in page
     # All eight Pololu-style carrier lanes are UNPOWERED until actual

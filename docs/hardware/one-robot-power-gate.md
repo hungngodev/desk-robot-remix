@@ -30,6 +30,16 @@ for the installed harness evidence, separate head-only/body-only tests,
 and J3 continuity requirement. A supply diode alone cannot qualify GPIO
 isolation. No battery, dock or actuator release follows from this check.
 
+## Staged connector-level first-power preflight checklist
+
+Before applying USB or battery power to Step 6 of [the build guide](../guides/build.md):
+
+1. **Supply and USB isolation (WROOM + XIAO Sense):** Keep WROOM and XIAO USB/robot 5 V rails physically isolated until verified; never tie an external 5 V boost rail directly to XIAO USB VBUS without the manufacturer-specified Schottky diode path (`anode` on fused 5 V, `cathode` on XIAO 5 V), and keep dock charging contacts unpowered.
+2. **Connector pinout, polarity, and signal direction:** Confirm every connector pin order and polarity against [the generated signal harness](one-robot-signal-harness.generated.md) and [the wiring guide](wiring.md) before mating (`GND`, `3V3`, `5V`, UART TX/RX crossover, `I2C SDA/SCL`).
+3. **Rated conductor gauge, switches, and branch fuses (HOLD):** Confirm per-branch conductor gauge, fuse/disconnect rating, and local 3.3 V regulator / boost capacity on the physical harness; software arithmetic alone does not unlock actuator or pack rails (**HOLD** until measured receipts exist).
+4. **Unpowered continuity and adjacent-pin short checks:** With all supplies disconnected, verify continuity end-to-end and confirm no shorts (`>100 kΩ` / open) between `GND`, `3V3`, `5V`, `VM`, and adjacent signal pins before applying logic-only 3.3 V power.
+5. **STOP conditions:** Halt immediately and leave motors/charger disconnected if any continuity check fails, adjacent pins short, unknown carrier VIN/pullups expose 3.3 V pins to 5 V, or measured rails drift out of tolerance.
+
 ## Fixed rectangular 2 W speaker and 5 V amplifier power allocation
 
 The current canonical purchase register retains MAX98357A but has already selected the **Challenge CS20-02P110-04-1X, 8 ohm 2 W, 20 x 16 x 4.7 mm** speaker candidate for the five pets. The earlier round 1 W part was rejected, and its 3.3 V mitigation must not silently override the newer fixed selection. MAX98357A VDD is allocated to a qualified, protected **5 V audio rail**; I2S input logic remains 3.3 V. Analog Devices Rev 16 lists about 1.8 W into an 8 ohm load at 5 V under specified test conditions. Neither speaker terminal connects to ground, and audio power must not bypass the XIAO USB/VBUS isolation design. This allocation does **not** prove the carrier's gain setting, actual speaker impedance, long speech thermal behavior, enclosure acoustics, microphone double talk, or supply transient margin. The printed rectangular speaker coupon is a fit reference, not a qualified sealed 1 cc acoustic chamber. Hold purchasing until exact board and physical evidence are accepted. Manufacturer sources: [MAX98357A datasheet](https://www.analog.com/media/en/technical-documentation/data-sheets/max98357a-max98357b.pdf) and [Challenge speaker datasheet](https://www.challengeelectronics.com/speakers/pdf/CS20-02P110-04-1X.pdf).

@@ -84,11 +84,14 @@ them into a second shopping list or hand-edit generated pin tables.
    [generated signal harness](../hardware/one-robot-signal-harness.generated.md)
    together with [the wiring and power guide](../hardware/wiring.md). Do not
    infer a pin from a concept render and do not energize dock contacts.
-6. **First power.** Apply the
-   [protected single cell power gate](../hardware/one-robot-power-gate.md).
-   Bring up logic with motors and charger power disconnected first. The power
-   gate, actual regulator behavior, pack temperature path and protected dock
-   circuit must pass before actuator or charging qualification.
+6. **First power.** Complete the staged connector-level preflight in
+   [the protected single cell power gate](../hardware/one-robot-power-gate.md#staged-connector-level-first-power-preflight-checklist)
+   before energizing anything: verify WROOM and XIAO USB/5 V supply isolation,
+   connector pin/polarity order, unpowered continuity and adjacent-pin short
+   checks, and explicit STOP on any failed branch/fuse HOLD. Bring up logic with
+   motors and charger power disconnected first. The power gate, actual regulator
+   behavior, pack temperature path and protected dock circuit must pass before
+   actuator or charging qualification.
 7. **Build and flash.** Use the exact WROOM and XIAO Sense commands later in
    this guide. Confirm the physical USB device before any upload. The selected
    body profile is `esp32_full`; the selected head is `sense`.

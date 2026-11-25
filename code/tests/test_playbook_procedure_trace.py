@@ -499,3 +499,33 @@ def test_standalone_ledger_cli_accepts_complete_open_ledger(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert "No procedures promoted. No live evidence receipts checked" in result.stdout
+
+
+def test_rows_65_to_80_bind_exact_required_tokens_and_manual_reviews():
+    rows = _load_ledger()["procedures"]
+    sha = "a" * 40
+    for proc_id in range(65, 81):
+        row = rows[proc_id - 1].copy()
+        tokens = REQUIRED_PROCEDURE_COMMAND_TOKENS[proc_id]
+        assert tokens
+        assert all(tok in row["verification_command"] for tok in tokens), proc_id
+        if proc_id in {66, 75}:
+            assert proc_id in MANUAL_REVIEW_PROCEDURE_IDS
+            assert row["verification_method"] == "manual_review"
+            no_review = {
+                **row,
+                "gate": "TESTED",
+                "last_verified_sha": sha,
+                "executed_test_receipt": {
+                    "sha": sha, "exit_code": 0,
+                    "command": row["verification_command"],
+                    "url": "https://github.com/hungngodev/desk-robot-remix/actions/runs/1",
+                },
+            }
+            assert not _valid_release_evidence(no_review), proc_id
+        # Swapping to an unrelated target test must fail command binding.
+        mismatched = {
+            **row,
+            "verification_command": "cd code && pytest -q tests/test_unrelated_placeholder_target.py",
+        }
+        assert not _valid_release_evidence(mismatched), proc_id

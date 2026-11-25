@@ -183,13 +183,19 @@ The report explicitly keeps those physical flags `false`.
 
 ## Real build and test sequence
 
-1. Use the existing owned Feather alone on USB. Build with
+1. Use the existing owned Feather alone on USB (confirm the exact local `/dev/`
+   port and DFU/UF2 bootloader readiness; keep EXP-033 bootloader HOLD intact and
+   do **not** assume OTA rollback or PCB revision). Build with
    `uvx --from platformio==6.1.18 pio run -d code/firmware/room_station -e feather_nrf52840_room_bench`.
-   Run the committed C++ soil host test and thermal tests first.
+   Run the committed C++ soil host test and thermal tests first, then flash the
+   bench profile to the verified board with
+   `uvx --from platformio==6.1.18 pio run -d code/firmware/room_station -e feather_nrf52840_room_bench -t upload --upload-port <CONFIRMED_PORT>`
+   (STOP immediately on upload/bootloader error). Observe post-boot firmware
+   banner and USB CDC enumeration before any sensor reads.
 2. Check the actual I2C carrier rails/pullups and address scan, then validate
    SCD40, BME688 and AMG8833 one module at a time. Add LD2410C at the
    exact 256000 baud on UART1 after confirming board supply and logic levels.
-3. Soil remains **OFF** in the safe default `feather_nrf52840_room_bench`, but the full required profile `feather_nrf52840_room_full` now compiles the actual A0 ADC code with `ROOM_SOIL_FITTED=1`. Select the full build ONLY when the installed probe is fed from the 3.3V rail, its AOUT maximum is under 3.3V across its operating conditions, its ground is common and no 5V output reaches A0.
+3. Soil remains **OFF** in the safe default `feather_nrf52840_room_bench`, but the full required profile `feather_nrf52840_room_full` now compiles the actual A0 ADC code with `ROOM_SOIL_FITTED=1`. Select the full build ONLY when the installed probe is fed from the 3.3V rail, its AOUT maximum is under 3.3V across its operating conditions, its ground is common and no 5V output reaches A0, and explicitly reflash it with `uvx --from platformio==6.1.18 pio run -d code/firmware/room_station -e feather_nrf52840_room_full -t upload --upload-port <CONFIRMED_PORT>` after stopping on any failed port/upload check.
    Reject saturated and unstable ADC readings; floating A0 can still look
    plausible, so software alone does not prove a connected probe.
 4. Measure the **same probe** in physically dry and wet reference media.

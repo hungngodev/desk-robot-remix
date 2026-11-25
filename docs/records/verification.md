@@ -19,6 +19,13 @@ job for one commit is not evidence that newer commits or an actual robot pass.
 | Previous November 17 source baseline | [historical run 44203205736](https://github.com/hungngodev/desk-robot-remix/actions/runs/44203205736), SHA `91c248a034d0f3ee4b8d8b93608cacc6dadc8fe3` | Host, Body, WROOM, Sense previously passed **only** on that older SHA | Historical software evidence only |
 | Protected pack, charger, dock, final print and real grasp | No actual fitted assembly ID, charge log or measured part-set revision | **NO HARDWARE MEASUREMENTS** | **HOLD** |
 
+### Historical Nov 25 failed CI runs (resolved/superseded in subsequent commits)
+
+* `ebd0cc7b` ([run 45655176384](https://github.com/hungngodev/desk-robot-remix/actions/runs/45655176384), job `139349806966`): dock vision `test_accurate_back_facing_or_overtilted_pose_does_not_retry[0]` failed (`1 failed, 208 passed`).
+* `6cf37d78` ([run 45654924551](https://github.com/hungngodev/desk-robot-remix/actions/runs/45654924551), job `139348908310`): `test_scene_comparator_unhashable_model_kind_is_rejected_without_crash` failed 6 cases (`6 failed, 1829 passed, 1 skipped`).
+* `56c75825` ([run 45655092621](https://github.com/hungngodev/desk-robot-remix/actions/runs/45655092621), job `139349509879`): failed Ruff `B905` in Python host lane.
+* Preserve all physical and purchasing **HOLD**s regardless of intermediate or current host CI state.
+
 Never close a physical safety or buying gate from synthetic tests,
 documentation improvements or a historical all green CI run.
 

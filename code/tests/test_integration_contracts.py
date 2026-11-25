@@ -36,7 +36,7 @@ def test_one_shared_real_sensor_event_registry_owns_camera_and_pet_kinds():
     assert _PHYSICAL_INITIATIVE_KINDS is PHYSICAL_INITIATIVE_KINDS
     assert _DIRECT_INTERACTION_KINDS is DIRECT_INTERACTION_KINDS
     assert TRIGGERS - PHYSICAL_INITIATIVE_KINDS == {
-        "human_voice", "safety_fault",
+        "human_voice", "safety_fault", "stable_putdown",
     }
     assert _DIRECT_INTERACTION_KINDS <= _PHYSICAL_INITIATIVE_KINDS
 
@@ -274,8 +274,10 @@ def test_current_body_and_sense_firmware_gpio_match_machine_readable_harness():
     assert "#define AUDIO_PDM_MIC_GPIO_SCK GPIO_NUM_42" in sense
     assert "#define AUDIO_PDM_MIC_GPIO_DIN GPIO_NUM_41" in sense
     assert PLAN["bus"]["sense_gpio"]["rgb_data"] == 9
-    # RGB is allocated, not automatically wired or implemented on hardware.
-    assert "GPIO_NUM_9" not in sense
+    # RGB is reserved for collision checks, not enabled or wired on hardware.
+    assert "#define RGB_HEART_GPIO GPIO_NUM_9" in sense
+    assert "RGB_HEART_GPIO == GPIO_NUM_9" in sense
+    assert sum(line.count("GPIO_NUM_9") for line in sense.splitlines()) == 2
 
 
 
@@ -965,3 +967,36 @@ def test_dc_output_helpers_follow_the_cutoff_build_guard():
     assert "zero_motor_pwm();" in off
     assert "write_motor_pair(" not in off
     assert "write_motor_pair(" in on.split("#endif", 1)[0]
+
+
+def _validate_decision_log_eight_tof_consistency(text: str) -> None:
+    d03 = text.split("| D03 ", 1)[1].split("\n| D04 ", 1)[0]
+    d04 = text.split("| D04 ", 1)[1].split("\n| D05 ", 1)[0]
+    legacy = text.split("## No silent replacement matrix", 1)[1].split(
+        "## Stage 0 final sign-off checklist", 1,
+    )[0]
+    assert "source selection is frozen on **8 generic VL53L0X" in d03
+    assert "without reopening sensor selection or evaluating VL53L4CD" in d03
+    assert "select final type" not in d03.casefold()
+    assert "All eight `0x70` lanes (0–7" in d04
+    assert "`0x71` accessory lanes 0–7" in d04
+    assert "channels 5–7 remaining" not in d04.casefold()
+    assert "Sensor selection **open**; evaluate VL53L4CD" not in legacy
+    assert "8 generic VL53L0X (GY-530)" in legacy
+
+
+def test_decision_log_stays_consistent_with_frozen_eight_tof_source_selection():
+    text = (ROOT / "docs/decision-log.md").read_text(encoding="utf-8")
+    _validate_decision_log_eight_tof_consistency(text)
+    with pytest.raises(AssertionError):
+        _validate_decision_log_eight_tof_consistency(
+            text.replace("without reopening sensor selection", "select final type later")
+        )
+    with pytest.raises(AssertionError):
+        _validate_decision_log_eight_tof_consistency(
+            text.replace("`0x71` accessory lanes 0–7", "count mux channels 5–7 remaining")
+        )
+    with pytest.raises(AssertionError):
+        _validate_decision_log_eight_tof_consistency(
+            text.replace("8 generic VL53L0X (GY-530)", "Sensor selection **open**; evaluate VL53L4CD")
+        )

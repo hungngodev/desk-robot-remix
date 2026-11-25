@@ -438,13 +438,14 @@ def render(plan: dict, body: str, head: str) -> str:
     row("TCA9548A address straps", "0x70 ranges and 0x71 accessories",
         "0x70 A2/A1/A0 LOW; 0x71 A2/A1 LOW, A0 HIGH",
         "Verify actual board address straps before power-up")
-    for signal, target in (("head_touch", "AT42QT1010 OUT"),
-                           ("bumper_nc_series", "NC bumper series OUT")):
-        row(f"WROOM GPIO{bus['body_gpio'][signal]}", target,
-            "3.3V input; external bias required on GPIO34 through GPIO39")
-    row("MCP23017 GPB0", "optional reed switch",
+    row("AT42QT1010 OUT", f"WROOM GPIO{bus['body_gpio']['head_touch']}",
+        "3.3V active-HIGH capacitive input; external bias required on GPIO34 through GPIO39")
+    row("3.3V external pullup node + NC bumper switch series -> GND",
+        f"WROOM GPIO{bus['body_gpio']['bumper_nc_series']}",
+        "3.3V passive NC input (HIGH on open/fault, LOW when seated); external bias required on GPIO34 through GPIO39")
+    row("Optional reed switch to GND (with external 3.3V pullup)", "MCP23017 GPB0",
         "3.3V input; closes LOW to GND", "Source polled; physically unqualified")
-    row("MCP23017 GPB1", "optional PIR output",
+    row("Optional PIR output", "MCP23017 GPB1",
         "3.3V input; active HIGH", "Source polled; physically unqualified")
     row("DRV8833 nFAULT (DC only)", "MCP23017 GPB3",
         "Open drain active LOW; 4.7k 3.3V pullup at driver, 100k pulldown at expander",
@@ -470,12 +471,12 @@ def render(plan: dict, body: str, head: str) -> str:
     row("Rated regulated 3V motor supply", "Coin motor positive; motor negative to AO3400 drain",
         "Flyback diode cathode to motor positive, anode to drain",
         "Current limit, stall, heat and independent pulse termination HOLD")
-    row(f"WROOM GPIO{bus['body_gpio']['terminal_ir_left_reserved']} reserved",
-        "left 38kHz IR demodulator",
+    row("left 38kHz IR demodulator",
+        f"WROOM GPIO{bus['body_gpio']['terminal_ir_left_reserved']} reserved",
         "Demodulated NEC burst input, external bias; ESP32 erratum",
         "Bounded RMT decoder in source; NO physical receiver acceptance, do NOT wire yet")
-    row(f"WROOM GPIO{bus['body_gpio']['terminal_ir_right_reserved']} reserved",
-        "right 38kHz IR demodulator",
+    row("right 38kHz IR demodulator",
+        f"WROOM GPIO{bus['body_gpio']['terminal_ir_right_reserved']} reserved",
         "Demodulated NEC burst input, external bias; ESP32 erratum",
         "Bounded RMT decoder in source; NO physical receiver acceptance, do NOT wire yet")
     for signal, target in (("oled_sda", "SSD1306 SDA"), ("oled_scl", "SSD1306 SCL"),

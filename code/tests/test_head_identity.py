@@ -129,9 +129,11 @@ def test_optional_sense_rgb_heart_reuses_pinned_xiaozhi_state_led_and_stays_off_
     board = (root / "firmware/head/sense/desk_robot_sense.cc").read_text()
     installer = (root / "firmware/head/install_overlay.py").read_text()
     plan = (root.parent / "docs/hardware/one-robot-signal-harness.generated.md").read_text()
+    config = (root / "firmware/head/sense/config.h").read_text()
     assert '#include "led/single_led.h"' in board
     assert "#ifdef CONFIG_DESK_ROBOT_RGB_HEART_ENABLED" in board
-    assert "static SingleLed heart(GPIO_NUM_9)" in board
+    assert "#define RGB_HEART_GPIO GPIO_NUM_9" in config
+    assert "static SingleLed heart(RGB_HEART_GPIO)" in board
     assert "return WifiBoard::GetLed();" in board
     assert "config DESK_ROBOT_RGB_HEART_ENABLED" in installer
     # Source Kconfig must include an actual default-off flag in the Sense

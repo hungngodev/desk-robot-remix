@@ -31,7 +31,7 @@ ROOT = Path(__file__).resolve().parents[2]
 LEDGER = ROOT / "docs/reviews/100_page_procedure_trace.json"
 RUN_PATH = re.compile(r"^/hungngodev/desk-robot-remix/actions/runs/([0-9]+)$")
 SHA = re.compile(r"^[0-9a-f]{40}$")
-MANUAL_REVIEW_PROCEDURE_IDS = frozenset(range(1, 9)) | {16, 59}
+MANUAL_REVIEW_PROCEDURE_IDS = frozenset(range(1, 9)) | {16, 59, 66, 75}
 PHYSICAL_PROCEDURE_IDS = frozenset({
     19, 22, 23, 24, 27, 28, 29, 30, 43, 44, 45, 65, 67, 68, 69, 70, 71, 72,
     77, 78, 79, 80, 87, 88, 89, 90, 91, 92, 94,
@@ -48,6 +48,22 @@ REQUIRED_PROCEDURE_COMMAND_TOKENS = {
     23: ("tests/test_integrated_1s_power_stack_contract.py",),
     24: ("tests/test_aec_delay_estimation.py", "tests/test_power_preflight.py"),
     59: ("tests/test_xiaozhi_tool_resilience.py", "tests/test_voice_memory_reuse.py"),
+    65: ("tests/test_print_2d_fit_templates.py", "tests/test_export_fit_kit.py"),
+    66: ("tests/test_export_fit_kit.py", "tests/test_fusion_scaffold.py"),
+    67: ("tests/test_print_2d_fit_templates.py", "tests/test_export_fit_kit.py"),
+    68: ("tests/test_cliff_mount_preflight.py", "tests/test_export_fit_kit.py"),
+    69: ("tests/test_cliff_mount_preflight.py", "tests/test_print_2d_fit_templates.py"),
+    70: ("tests/test_calibrate_jaw_fsr.py", "tests/test_grasp_feedback.py"),
+    71: ("tests/test_calibrate_terminal_ir.py", "tests/test_dock_runtime.py"),
+    72: ("tests/test_print_2d_fit_templates.py", "tests/test_power_preflight.py"),
+    73: ("tests/test_procurement_release.py", "tests/test_full_purchase_register_integrity.py"),
+    74: ("tests/test_procurement_release.py", "tests/test_full_purchase_register_integrity.py"),
+    75: ("tests/test_procurement_release.py", "tests/test_full_purchase_register_integrity.py"),
+    76: ("tests/test_procurement_release.py", "tests/test_landed_cost.py"),
+    77: ("tests/test_i2c_electrical_preflight.py",),
+    78: ("tests/test_power_preflight.py",),
+    79: ("tests/test_export_fit_kit.py", "tests/test_print_2d_fit_templates.py"),
+    80: ("tests/test_procurement_release.py", "tests/test_full_purchase_register_integrity.py"),
 }
 
 
