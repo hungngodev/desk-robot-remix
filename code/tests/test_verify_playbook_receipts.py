@@ -966,3 +966,24 @@ def test_online_audit_rejects_nonregular_receipt_tree_entry(mode):
 def test_noncanonical_run_urls_rejected_without_lookup(url):
     assert not verify.verified_actions_run(url, SHA, lambda _: pytest.fail("Unexpected lookup"))
 
+
+@pytest.mark.parametrize("url", [
+    RAW + "\n", RAW + "\r", RAW + "\t", RAW + "?", RAW + "#",
+    " " + RAW, RAW.replace("bench", "be\tnch"),
+    RAW.replace("bench", "be nch"), RAW.replace("bench", "be\x7fnch"),
+])
+def test_noncanonical_physical_urls_rejected_by_online_audit(url):
+    row = promoted("MEASURED")["procedures"][0]
+    row["physical_measurement_receipt"]["raw_data_url"] = url
+
+    def no_record_lookup(target):
+        if any(part in target for part in ("/contents/", "/git/", "/compare/")):
+            pytest.fail("Malformed physical URL reached a record lookup")
+        return lookup(target)
+
+    assert verify.physical_record_revision(row["physical_measurement_receipt"], SHA) is None
+    assert not verify.verified_raw_record(url, SHA, no_record_lookup)
+    assert not verify.verified_regular_record_path(url, SHA, no_record_lookup)
+    assert any("immutable physical record not matched" in error
+               for error in verify.audit(full_ledger_with(row), no_record_lookup))
+

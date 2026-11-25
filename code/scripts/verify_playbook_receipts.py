@@ -150,19 +150,28 @@ def verified_required_ci_jobs(
         return False
 
 
-def verified_raw_record(url: str, sha: str, lookup=github_json) -> bool:
-    if (type(url) is not str or type(sha) is not str or not SHA.fullmatch(sha)):
-        return False
+def _canonical_record_path(url: object) -> str | None:
+    """Reject spellings urlsplit would silently normalize."""
+    if type(url) is not str or any(ord(ch) <= 32 or ord(ch) == 127 for ch in url):
+        return None
     try:
         parsed = urlsplit(url)
     except ValueError:
-        return False
-    base = f"/{REPO}/blob/{sha}/docs/records/"
+        return None
     if (parsed.scheme != "https" or parsed.netloc != "github.com"
-            or parsed.query or parsed.fragment
-            or not parsed.path.startswith(base)):
+            or url != f"https://github.com{parsed.path}"):
+        return None
+    return parsed.path
+
+
+def verified_raw_record(url: str, sha: str, lookup=github_json) -> bool:
+    if (type(url) is not str or type(sha) is not str or not SHA.fullmatch(sha)):
         return False
-    filename = parsed.path[len(base):]
+    path = _canonical_record_path(url)
+    base = f"/{REPO}/blob/{sha}/docs/records/"
+    if path is None or not path.startswith(base):
+        return False
+    filename = path[len(base):]
     if (not filename or any(segment in {"", ".", ".."}
                             for segment in filename.split("/"))):
         return False
@@ -240,12 +249,11 @@ def verified_regular_record_path(url: str, sha: str, lookup) -> bool:
     if type(url) is not str or type(sha) is not str or not SHA.fullmatch(sha):
         return False
     try:
-        parsed = urlsplit(url)
+        record_path = _canonical_record_path(url)
         base = f"/{REPO}/blob/{sha}/docs/records/"
-        if (parsed.scheme != "https" or parsed.netloc != "github.com"
-                or parsed.query or parsed.fragment or not parsed.path.startswith(base)):
+        if record_path is None or not record_path.startswith(base):
             return False
-        suffix = parsed.path[len(base):]
+        suffix = record_path[len(base):]
         if not suffix or any(part in ("", ".", "..") for part in suffix.split("/")):
             return False
         path = "docs/records/" + suffix
@@ -332,18 +340,13 @@ def physical_record_revision(receipt: object, tested_sha: str) -> str | None:
             or not SHA.fullmatch(tested_sha)
             or receipt.get("source_sha", tested_sha) != tested_sha):
         return None
-    url = receipt.get("raw_data_url")
-    if type(url) is not str:
-        return None
-    try:
-        parsed = urlsplit(url)
-    except ValueError:
+    path = _canonical_record_path(receipt.get("raw_data_url"))
+    if path is None:
         return None
     match = re.fullmatch(
-        rf"/{REPO}/blob/([0-9a-f]{{40}})/docs/records/(.+)", parsed.path,
+        rf"/{REPO}/blob/([0-9a-f]{{40}})/docs/records/(.+)", path,
     )
-    if (parsed.scheme != "https" or parsed.netloc != "github.com"
-            or parsed.query or parsed.fragment or match is None
+    if (match is None
             or any(part in {"", ".", ".."} for part in match[2].split("/"))):
         return None
     evidence_sha = match[1]
