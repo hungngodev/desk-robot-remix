@@ -11,6 +11,16 @@ assert spec and spec.loader
 mod = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(mod)
 
+def test_shared_integer_cost_arithmetic():
+    subtotal = mod.sum_line_cost_cents([(3, 1666), (2, 11)])
+    assert subtotal == 5020
+    assert mod.landed_total_cents(
+        subtotal, shipping=21, tax=10, duties=4, discount=15,
+    ) == 5040
+    with pytest.raises(ValueError, match="discount exceeds"):
+        mod.landed_total_cents(1, shipping=0, tax=0, duties=0, discount=2)
+
+
 REQUIRED = {"robot:cliff_obstacle": 1, "robot:i2c_mux": 1}
 CATEGORIES = {"robot:cliff_obstacle": "robot", "robot:i2c_mux": "robot"}
 

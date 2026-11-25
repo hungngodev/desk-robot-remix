@@ -8,9 +8,13 @@ The strict procurement release still owns receipt verification.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Iterable
 from datetime import date
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
+
+
+MAX_ACCOUNTING_USD = Decimal("1000000000000")
 
 
 def cents(value: object, label: str) -> int:
@@ -26,7 +30,7 @@ def cents(value: object, label: str) -> int:
     # Keep all supplier and prior-order amounts bounded before Decimal
     # arithmetic. An absurd exponent can otherwise raise decimal.Overflow
     # instead of producing a failed receipt.
-    if number > Decimal("1000000000000"):
+    if number > MAX_ACCOUNTING_USD:
         raise ValueError(f"{label}: USD amount exceeds receipt bound")
     # Inspect the exact Decimal representation before multiplication:
     # finite nonzero 1e-999999 * 100 silently underflows to 0 under the
@@ -41,6 +45,21 @@ def cents(value: object, label: str) -> int:
     if scaled != scaled.to_integral_value():
         raise ValueError(f"{label}: subcent amount")
     return int(scaled)
+
+
+def sum_line_cost_cents(lines: Iterable[tuple[int, int]]) -> int:
+    """Sum validated (quantity, unit or package price in cents) pairs exactly."""
+    return sum(quantity * price for quantity, price in lines)
+
+
+def landed_total_cents(
+    subtotal: int, *, shipping: int, tax: int, duties: int, discount: int,
+) -> int:
+    """Combine validated integer cents; callers own missing-charge policy."""
+    total = subtotal + shipping + tax + duties - discount
+    if total < 0:
+        raise ValueError("discount exceeds seller total")
+    return total
 
 
 # A supplier may not inject arbitrary-precision counts into cost arithmetic.
@@ -396,16 +415,13 @@ def account_landed_cost(
             if seller not in seller_subtotals or seller in charged_sellers:
                 raise ValueError("unknown or duplicate seller charges")
             charged_sellers.add(seller)
-            charges_cents = (
-                cents(group.get("shipping_usd"), "shipping")
-                + cents(group.get("tax_usd"), "tax")
-                + cents(group.get("duties_usd"), "duties")
-                - cents(group.get("discount_usd"), "discount")
+            seller_totals[seller] = landed_total_cents(
+                seller_subtotals[seller],
+                shipping=cents(group.get("shipping_usd"), "shipping"),
+                tax=cents(group.get("tax_usd"), "tax"),
+                duties=cents(group.get("duties_usd"), "duties"),
+                discount=cents(group.get("discount_usd"), "discount"),
             )
-            total = seller_subtotals[seller] + charges_cents
-            if total < 0:
-                raise ValueError("discount exceeds seller total")
-            seller_totals[seller] = total
         except (AttributeError, ValueError) as exc:
             errors.append(f"seller charges {index}: {exc}")
     if set(seller_subtotals) != charged_sellers:

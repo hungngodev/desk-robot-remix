@@ -20,7 +20,13 @@ from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from landed_cost import MAX_ACCOUNTING_UNITS, account_landed_cost, cents, evidence_https_url
+from landed_cost import (
+    MAX_ACCOUNTING_UNITS,
+    account_landed_cost,
+    cents,
+    evidence_https_url,
+    sum_line_cost_cents,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 PLAN = ROOT / "docs/hardware/full-feature-plan.json"
@@ -1281,10 +1287,10 @@ def first_robot_pilot_samples(report: dict) -> dict:
                 if ident == "dock_ir_emitter_channels" else []
             ),
         })
-    subtotal_cents = sum(
-        x["pilot_sample_quantity"] * _historical_usd_cents(
+    subtotal_cents = sum_line_cost_cents(
+        (x["pilot_sample_quantity"], _historical_usd_cents(
             x["historical_unit_quote_usd"], "sample unit quote"
-        )
+        ))
         for x in decisions if x["pilot_sample_quantity"]
         and x["historical_unit_quote_usd"] is not None
     )
@@ -1397,10 +1403,10 @@ def pilot_supplier_cart(report: dict) -> dict:
         x["checkout_seller_candidate"].casefold(), x["sku"]
     ))
     qty_sum = sum(x["quantity"] for x in items)
-    known_subtotal_cents = sum(
-        x["quantity"] * _historical_usd_cents(
+    known_subtotal_cents = sum_line_cost_cents(
+        (x["quantity"], _historical_usd_cents(
             x["historical_unit_quote_usd"], "sample unit quote"
-        )
+        ))
         for x in items if x["historical_unit_quote_usd"] is not None
     )
     known_subtotal = known_subtotal_cents / 100

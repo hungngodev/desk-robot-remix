@@ -2,6 +2,7 @@ import hashlib
 import importlib.util
 import json
 import re
+import sys
 from pathlib import Path
 
 import pytest
@@ -12,8 +13,35 @@ ROOT = Path(__file__).resolve().parents[1]
 def module(name):
     spec = importlib.util.spec_from_file_location(name, ROOT / f"scripts/{name}.py")
     value = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(value)
+    sys.path.insert(0, str(ROOT / "scripts"))
+    try:
+        spec.loader.exec_module(value)
+    finally:
+        sys.path.pop(0)
     return value
+
+
+def test_legacy_budget_exact_cap_with_both_fees():
+    budget = module("check_budget").budget
+    data = {
+        "cap_usd": 50, "fit_confirmed": True,
+        "items": [{"item": "sample", "quantity": 3,
+                   "unit_usd": "16.66", "price_status": "verified"}],
+    }
+    exact = budget(data, "0.01", "0.01")
+    assert exact["known_subtotal_usd"] == 49.98
+    assert exact["quoted_total_usd"] == 50.00
+    assert exact["remaining_under_cap_usd"] == 0.00
+    assert exact["purchase_ready"] is True
+    over = budget(data, "0.01", "0.02")
+    assert over["known_landed_subtotal_usd"] == 50.01
+    assert over["remaining_under_cap_usd"] == -0.01
+    assert over["purchase_ready"] is False
+    partial = budget(data, "0.03", None)
+    assert partial["known_landed_subtotal_usd"] == 50.01
+    assert partial["unknown_landed_fees"] == ["tax"]
+    assert partial["quoted_total_usd"] is None
+    assert partial["planning_over_cap"] is True
 
 
 def test_allowances_and_over_budget_are_not_ready():

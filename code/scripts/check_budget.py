@@ -7,15 +7,18 @@ import sys
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
+from landed_cost import MAX_ACCOUNTING_UNITS, MAX_ACCOUNTING_USD, cents, landed_total_cents
+
 ROOT = Path(__file__).resolve().parents[1]
 
 # Match the canonical landed-cost receipt limits; historical JSON floats
 # additionally require the aggregate to stay within the same cent-safe bound.
-MAX_BUDGET_USD = Decimal("1000000000000")
-MAX_BUDGET_UNITS = 10_000
+MAX_BUDGET_USD = MAX_ACCOUNTING_USD
+MAX_BUDGET_CENTS = int(MAX_BUDGET_USD) * 100
+MAX_BUDGET_UNITS = MAX_ACCOUNTING_UNITS
 
 
-def _money(value, *, label: str) -> Decimal:
+def _money(value, *, label: str) -> int:
     """Finite nonnegative planning money, not a proof of a payable quote."""
     if value is None or type(value) is bool:
         raise ValueError(f"{label} must be a finite non-negative amount")
@@ -32,17 +35,10 @@ def _money(value, *, label: str) -> Decimal:
         raise ValueError(f"{label} must be a finite non-negative amount")
     if amount > MAX_BUDGET_USD:
         raise ValueError(f"{label} exceeds historical USD bound")
-    # Historical planning output is converted to JSON floats. Nonzero
-    # subcent values must not underflow to an apparent free item or fee.
-    # Inspect the Decimal digits directly: quantize() can overflow for
-    # finite inputs such as 1e-999999 and must not silently round them.
-    if amount and amount.as_tuple().exponent < -2:
-        digits = amount.as_tuple().digits
-        extra_places = -amount.as_tuple().exponent - 2
-        if (extra_places >= len(digits)
-                or any(digit != 0 for digit in digits[-extra_places:])):
-            raise ValueError(f"{label} must use exact USD cents")
-    return amount
+    try:
+        return cents(amount, label)
+    except ValueError as exc:
+        raise ValueError(f"{label} must use exact USD cents") from exc
 
 
 def budget(data, shipping=None, tax=None):
@@ -61,7 +57,7 @@ def budget(data, shipping=None, tax=None):
             or any(not isinstance(name, str) or type(passed) is not bool
                    for name, passed in checks.items())):
         raise ValueError("Readiness checks must contain boolean results")
-    known_subtotal = Decimal(0)
+    known_subtotal = 0
     unknown_prices = []
     unresolved = []
     for row in data["items"]:
@@ -88,32 +84,32 @@ def budget(data, shipping=None, tax=None):
         if status not in {"verified", "owned"} or price is None:
             unresolved.append(name)
     # Bound aggregate costs too, so JSON floats retain cent resolution.
-    if known_subtotal > MAX_BUDGET_USD:
+    if known_subtotal > MAX_BUDGET_CENTS:
         raise ValueError("Historical budget subtotal exceeds historical USD bound")
-    total = known_subtotal
-    unknown_fees = []
-    for label, fee in (("shipping", freight), ("tax", taxes)):
-        if fee is None:
-            unknown_fees.append(label)
-        else:
-            total += fee
-    if total > MAX_BUDGET_USD:
+    unknown_fees = [
+        label for label, fee in (("shipping", freight), ("tax", taxes)) if fee is None
+    ]
+    # Unknown fees remain explicit; zero here contributes only to the known floor.
+    total = landed_total_cents(
+        known_subtotal, shipping=freight or 0, tax=taxes or 0, duties=0, discount=0,
+    )
+    if total > MAX_BUDGET_CENTS:
         raise ValueError("Historical budget total exceeds historical USD bound")
     all_costs_known = not unknown_prices and not unknown_fees
     complete = not unresolved and all_costs_known
     pending_checks = [name for name, passed in checks.items() if not passed]
     return {
-        "known_subtotal_usd": float(known_subtotal),
-        "known_landed_subtotal_usd": float(total),
+        "known_subtotal_usd": known_subtotal / 100,
+        "known_landed_subtotal_usd": total / 100,
         "unknown_landed_fees": unknown_fees,
         "planning_over_cap": True if total > cap else (False if all_costs_known else None),
         "unknown_price_items": unknown_prices,
-        "parts_estimate_usd": None if unknown_prices else float(known_subtotal),
-        "quoted_total_usd": float(total) if complete else None,
-        "planning_total_usd": None if unknown_prices else float(total),
-        "cap_usd": float(cap),
+        "parts_estimate_usd": None if unknown_prices else known_subtotal / 100,
+        "quoted_total_usd": total / 100 if complete else None,
+        "planning_total_usd": None if unknown_prices else total / 100,
+        "cap_usd": cap / 100,
         "remaining_under_cap_usd": (
-            float(cap - total) if all_costs_known else None
+            (cap - total) / 100 if all_costs_known else None
         ),
         "unquoted_items": unresolved,
         "fit_confirmed": fit,
