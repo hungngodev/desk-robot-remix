@@ -1304,7 +1304,10 @@ class Conversation:
                             interrupt = getattr(self.speaker, "interrupt", None)
                             if callable(interrupt):
                                 try:
-                                    await _bounded_speaker_abort(interrupt, current_robot)
+                                    await _bounded_speaker_abort(
+                                        interrupt, current_robot,
+                                        on_task=self._track_speaker_abort,
+                                    )
                                 except BaseException:
                                     pass
                         # A cancelled TTS await leaves the async generator suspended
@@ -1485,7 +1488,9 @@ class Conversation:
                             interrupt = getattr(self.speaker, "interrupt", None)
                             if callable(interrupt):
                                 try:
-                                    await _bounded_speaker_abort(interrupt, robot)
+                                    await _bounded_speaker_abort(
+                                        interrupt, robot, on_task=self._track_speaker_abort,
+                                    )
                                 except BaseException:
                                     pass
                         raise
