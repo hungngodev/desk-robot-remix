@@ -552,7 +552,11 @@ def suppress_message(conn, message):
     if not muted(conn.device_id):
         return False
     if isinstance(message, bytes):
-        return not (conn.device_id == active_device_id and duplex_available(conn))
+        return not (
+            connections.get(conn.device_id) is conn
+            and conn.device_id == active_device_id
+            and duplex_available(conn)
+        )
     # The existing listener setup is established before the speaker lease.
     # A fresh listen request during group playback cannot reset ASR state.
     return isinstance(data, dict) and data.get("type") == "listen"

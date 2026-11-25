@@ -833,10 +833,15 @@ def test_only_current_duplex_speaker_passes_microphone_while_group_talks(bridge)
     one, two = conn("mac-01"), conn("mac-02")
     one.client_listen_mode = "realtime"
     two.client_listen_mode = "realtime"
+    bridge.register(one)
+    bridge.register(two)
     bridge.lease_ids = frozenset(["mac-01", "mac-02"])
     bridge.lease_until = time.monotonic() + 20
     bridge.active_device_id = "mac-01"
     assert not bridge.suppress_message(one, b"live clean microphone PCM")
+    retired = conn("mac-01")
+    retired.client_listen_mode = "realtime"
+    assert bridge.suppress_message(retired, b"retired socket audio")
     assert bridge.suppress_message(two, b"the other robot heard robot 1")
     assert bridge.suppress_message(one, '{"type":"listen","state":"start"}')
     one.client_listen_mode = "auto"  # no confirmed head AEC: fail closed
