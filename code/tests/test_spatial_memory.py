@@ -306,3 +306,74 @@ def test_legacy_pre_spatial_sqlite_migrates_and_reads_back_original_records(tmp_
     assert remember(reopened, "robot-01", "post-upgrade-1", now2)
     assert spatial2.attach("robot-01", "post-upgrade-1", evidence(now2))
     assert spatial.last_seen("robot-01", "flat_key", now=now2 + 0.1).event_id == "post-upgrade-1"
+
+
+def test_forgotten_spatial_episode_cannot_replay_after_wal_restart(tmp_path):
+    """Retire one pet's episode across reopened, concurrent SQLite writers."""
+    import sqlite3
+    from concurrent.futures import ThreadPoolExecutor
+    from contextlib import closing
+    from threading import Barrier
+
+    root = tmp_path / "private"
+    robots = ["robot-01", "robot-02"]
+    store = MemoryStore(root, robots)
+    when = time.time() - 1
+    old = evidence(when)
+    fresh = replace(old, observed_at=when + 0.5, camera_seq=5,
+                    camera_complete_us=950_000)
+    for robot in robots:
+        assert remember(store, robot, "forgotten", when)
+        assert SpatialMemory(store).attach(robot, "forgotten", old)
+
+    path = root / "robot-01.sqlite3"
+    with closing(sqlite3.connect(path)) as reader:
+        assert reader.execute("PRAGMA journal_mode=WAL").fetchone() == ("wal",)
+        reader.execute("BEGIN")
+        assert reader.execute(
+            "SELECT event_id FROM memories",
+        ).fetchone() == ("forgotten",)
+        # Keep an older WAL read snapshot alive while deleting and reopening.
+        assert store.forget_episode("robot-01", "forgotten")
+        reopened = MemoryStore(root, robots)
+        spatial = SpatialMemory(reopened)
+        barrier = Barrier(2)
+
+        def replay():
+            barrier.wait(timeout=5)
+            assert not remember(reopened, "robot-01", "forgotten", when)
+            assert not spatial.attach("robot-01", "forgotten", old)
+
+        def new_sighting():
+            barrier.wait(timeout=5)
+            assert remember(
+                reopened, "robot-01", "fresh", fresh.observed_at,
+                identity=(11, 5, 950_000),
+            )
+            assert spatial.attach("robot-01", "fresh", fresh)
+
+        with ThreadPoolExecutor(max_workers=2) as workers:
+            futures = [workers.submit(replay), workers.submit(new_sighting)]
+            for future in futures:
+                future.result(timeout=10)
+
+        assert reopened.get_episode("robot-01", "forgotten") is None
+        assert reopened.get_camera_provenance("robot-01", "forgotten") is None
+        sighting = spatial.last_seen("robot-01", "flat_key", now=when + 1)
+        assert sighting is not None and sighting.event_id == "fresh"
+        with reopened._connect("robot-01") as conn:
+            assert conn.execute(
+                "SELECT event_id FROM spatial_observations",
+            ).fetchall() == [("fresh",)]
+        # A different robot may have independently retained the same ID.
+        peer = spatial.last_seen("robot-02", "flat_key", now=when + 1)
+        assert peer is not None and peer.event_id == "forgotten"
+        reader.rollback()
+
+    final = MemoryStore(root, robots)
+    assert final.get_episode("robot-01", "forgotten") is None
+    assert [entry.event_id for entry in final.search("robot-01", "key")] == ["fresh"]
+    sighting = SpatialMemory(final).last_seen(
+        "robot-01", "flat_key", now=when + 200_000,
+    )
+    assert sighting is not None and sighting.status == "stale"
