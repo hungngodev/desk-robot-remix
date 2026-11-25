@@ -303,3 +303,44 @@ def test_representative_contact_must_fit_below_conservative_stop(sign):
     # The 80% ceiling is 1720, below the observed 2000 contact delta.
     with pytest.raises(ValueError, match="Representative contact"):
         propose(samples)
+
+
+@pytest.mark.parametrize("bad", [(101, 10), (100, 9)])
+async def test_capture_rejects_contradictory_or_backward_conversion(bad):
+    rows = iter([(100, 10), bad, *[(100, i) for i in range(11, 15)]])
+
+    def respond(_request):
+        adc, seq = next(rows)
+        return httpx.Response(200, json={
+            "robot_id": "robot-01",
+            "force": {"valid": True, "jaw_valid": True, "calibrated": False,
+                      "adc": [0, adc], "jaw_seq": seq, "boot_id": 17, "jaw_age_ms": 0},
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(ValueError, match="Contradictory or backward"):
+            await capture(client, base_url="http://127.0.0.1:8008",
+                          robot="robot-01", token="s" * 32, count=5,
+                          interval=0.12, boot_state={})
+
+
+async def test_capture_preserves_conversion_fence_between_phases_and_wrap():
+    ids = iter([0xfffffffb, 0xfffffffc, 0xfffffffd, 0xfffffffe, 0xffffffff,
+                0xffffffff, 1, 2, 3, 4, 5])
+
+    def respond(_request):
+        return httpx.Response(200, json={
+            "robot_id": "robot-01",
+            "force": {"valid": True, "jaw_valid": True, "calibrated": False,
+                      "adc": [0, 100], "jaw_seq": next(ids),
+                      "boot_id": 17, "jaw_age_ms": 0},
+        })
+
+    state = {}
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        for expected in ([0xfffffffb, 0xfffffffc, 0xfffffffd, 0xfffffffe, 0xffffffff],
+                         [1, 2, 3, 4, 5]):
+            rows = await capture(client, base_url="http://127.0.0.1:8008",
+                                 robot="robot-01", token="s" * 32, count=5,
+                                 interval=0.12, boot_state=state)
+            assert [seq for _, seq in rows] == expected

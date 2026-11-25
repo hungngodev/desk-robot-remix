@@ -210,7 +210,7 @@ async def capture(
         raise ValueError("Invalid real ADC sampling cadence")
     endpoint = _safe_aux_endpoint(base_url, robot)
     samples = []
-    seen = None
+    seen = None if boot_state is None else boot_state.get("last_jaw_sample")
     for _ in range(count * 5):
         started = time.monotonic()
         response = await client.get(
@@ -242,9 +242,15 @@ async def capture(
             if age + max(0, int((time.monotonic() - started) * 1000)) >= 500:
                 raise ValueError("Stale jaw force calibration sample in transport")
             boot_state["boot_id"] = boot
-        if seen is None or _fresh_jaw_sequence(seq, seen):
+        # A cached conversion may appear at a manual phase boundary.
+        # Do not assign it to two loads, or overlook conflicting ADC data.
+        if seen is None or _fresh_jaw_sequence(seq, seen[1]):
             samples.append((adc, seq))
-            seen = seq
+            seen = (adc, seq)
+            if boot_state is not None:
+                boot_state["last_jaw_sample"] = seen
+        elif seq != seen[1] or adc != seen[0]:
+            raise ValueError("Contradictory or backward jaw conversion in calibration")
         if len(samples) == count:
             return samples
         await asyncio.sleep(interval)
