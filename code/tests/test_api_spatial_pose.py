@@ -185,27 +185,45 @@ def test_readonly_pose_unqualified_source_never_looks_map_anchored(settings, tok
 
 def test_pose_route_registration_is_unique_and_operator_only(settings, tokens):
     """Never let a tool-token route shadow the established operator route."""
-    def no_device_request(request):
-        raise AssertionError("An unauthorized pose request reached the head")
+    robot = settings.robots[0]
+    calls = []
 
-    client, commands, _ = _client(settings, no_device_request)
+    def handler(request):
+        calls.append((request.method, request.url.path))
+        assert request.headers["Authorization"] == "Bearer " + tokens[robot.token_env]
+        return httpx.Response(200, json={
+            "robot_id": robot.id, "v": 1, "body_boot": 41,
+            "origin": 3, "seq": 1, "sample_us": 100_000,
+            "x_mm": 25, "y_mm": -10, "yaw_mrad": 300,
+            "quality": "valid", "head_boot": 99,
+        })
+
+    client, commands, _ = _client(settings, handler)
     routes = [
         route for route in client.app.routes
         if isinstance(route, APIRoute)
         and route.path == "/v1/robots/{robot_id}/pose"
     ]
     assert len(routes) == 1
-    route = routes[0]
-    assert route.methods == {"GET"}
-    assert route.endpoint.__module__ == "desk_robot.api_spatial_pose"
-    assert route.endpoint.__name__ == "read_body_pose"
-    assert {dep.call.__name__ for dep in route.dependant.dependencies} == {"operator"}
+    assert routes[0].methods == {"GET"}
+
+    path = f"/v1/robots/{robot.id}/pose"
+    operator = {"Authorization": "Bearer " + tokens["DESK_ROBOT_API_TOKEN"]}
+    tool = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
     with client:
-        denied = client.get(
-            f"/v1/robots/{settings.robots[0].id}/pose",
-            headers={"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]},
-        )
-        assert denied.status_code == 403
+        assert client.get(path).status_code == 401
+        assert client.get(path, headers=tool).status_code == 403
+        assert client.post(path, headers=operator).status_code == 405
+        assert calls == []
+
+        result = client.get(path, headers=operator)
+        assert result.status_code == 200
+        data = result.json()
+        assert data["robot_id"] == robot.id
+        assert data["pose"]["seq"] == 1
+        assert data["motor_authorized"] is False
+        assert data["navigation_authorized"] is False
+    assert calls == [("GET", "/api/pose")]
     assert commands == []
 
 def test_readonly_pose_missing_head_adapter_fails_closed(settings, tokens):
