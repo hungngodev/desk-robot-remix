@@ -1,6 +1,7 @@
 #include "WheelPoseIntegrator.h"
 #include <stdexcept>
 #include <cstdint>
+#include <initializer_list>
 #include <limits>
 
 using desk_robot::WheelPoseIntegrator;

@@ -352,7 +352,7 @@ def test_corrupt_camera_metadata_cannot_mutate_fleet_frame_hub(metadata, error):
     ids = [f"robot-{i:02d}" for i in range(1, 6)]
     hub = CameraFrameHub(ids)
     robot_id = ids[0]
-    prepared = (b"\xff\xd8", bytes(64 * 48), 0.0)
+    prepared = (b"\xff\xd8" + b"\x00" * 10 + b"\xff\xd9", bytes(64 * 48), 0.0)
     stamp = time.monotonic()
     hub.urgent[robot_id] = True
     kwargs = {"source": "proactive", **metadata}

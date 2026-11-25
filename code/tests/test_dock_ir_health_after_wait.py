@@ -144,7 +144,7 @@ async def test_dock_queued_command_rechecks_ir_seat_and_consent_after_transport_
     settings.robots[0].dock_beacon_id = 1
     monkeypatch.setenv(settings.robots[0].token_env, "H" * 32)
     posted = []
-    ir_age = 40
+    ir_age = 160 if scenario in ("lock_expire", "command_lock_expire") else 40
 
     def handler(request: httpx.Request) -> httpx.Response:
         import json as _json
@@ -197,8 +197,12 @@ async def test_dock_queued_command_rechecks_ir_seat_and_consent_after_transport_
             ready_to_block.set()
             await asyncio.wait_for(proceed_to_command.wait(), 2)
 
+    def dock_receipt_current_now(receipt):
+        assert receipt[2:] == ((1234, 1, 1), 1)
+
     monkeypatch.setattr(head, "snapshot_for_dock", snapshot_for_dock)
     monkeypatch.setattr(head, "dock_receipt_current", dock_receipt_current)
+    monkeypatch.setattr(head, "dock_receipt_current_now", dock_receipt_current_now)
 
     coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
     camera = DockCameraCalibration(
@@ -224,7 +228,7 @@ async def test_dock_queued_command_rechecks_ir_seat_and_consent_after_transport_
             while not hold_lock._waiters:
                 await asyncio.sleep(0.01)
             if scenario in ("lock_expire", "command_lock_expire"):
-                await asyncio.sleep(0.22)
+                await asyncio.sleep(0.11)
             elif scenario == "seat_inhibit":
                 coordinator.set_dock_charge_inhibition("robot-01", True)
             elif scenario == "consent_revoked":

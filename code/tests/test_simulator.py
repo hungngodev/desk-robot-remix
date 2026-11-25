@@ -179,7 +179,9 @@ async def test_body_replay_feeds_existing_sensor_fusion_and_rejects_foreign_iden
     state.enabled, state.generation, state.quiet = True, 1, True
     receipts: list[float] = []
 
-    def notify_sensor(robot: str, kind: str, *, received_at: float) -> None:
+    def notify_sensor(
+        robot: str, kind: str, *, received_at: float, detail: str | None = None,
+    ) -> None:
         order.append((kind, robot))
         receipts.append(received_at)
 

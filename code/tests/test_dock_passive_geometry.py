@@ -32,8 +32,9 @@ def test_dock_rail_preserves_selected_straight_channel_and_entry_flare():
     # At y=0 both rail faces shift OUTWARD equally, preserving wall thickness.
     assert "[inner_wall_x - guide_wall_mm - entry_flare_each_mm, 0]" in source
     assert "[inner_wall_x - entry_flare_each_mm, 0]" in source
-    assert "[inner_wall_x, 37]" in source
-    assert "[inner_wall_x - guide_wall_mm, 37]" in source
+    assert abs(value("entry_flare_run_mm") - 37) < 1e-6
+    assert "[inner_wall_x, entry_flare_run_mm]" in source
+    assert "[inner_wall_x - guide_wall_mm, entry_flare_run_mm]" in source
     assert (outside - 2 * (inner_x - flare)) > channel
     assert "intersection()" in source
     assert "dock_rail_entry_coupon()" in source

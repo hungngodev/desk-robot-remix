@@ -1,8 +1,10 @@
 """Exercise the CI gate with genuinely packed and merged synthetic asset images."""
 
+import hashlib
 import importlib.util
 import json
 import runpy
+import struct
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,24 @@ UPSTREAM = HEAD.parents[1] / "upstream/xiaozhi-esp32/scripts/build_default_asset
 SPEC = importlib.util.spec_from_file_location("sense_ci_assets", HEAD / "verify_sense_ci_assets.py")
 assets = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(assets)
+TABLE_OFFSET = 0x8000
+PARTITION_ROWS = [
+    struct.pack("<2sBBII16sI", b"\xaa\x50", kind, subtype, offset, size, name, 0)
+    for kind, subtype, offset, size, name in (
+        (1, 2, 0x9000, 0x4000, b"nvs"),
+        (1, 0, 0xD000, 0x2000, b"otadata"),
+        (1, 1, 0xF000, 0x1000, b"phy_init"),
+        (0, 0x10, 0x20000, 0x2F0000, b"ota_0"),
+        (0, 0x11, 0x310000, 0x2F0000, b"ota_1"),
+        (1, 0x82, assets.ASSETS_OFFSET, 2 * 1024 * 1024, b"assets"),
+    )
+]
+
+
+def _partition_table():
+    data = b"".join(PARTITION_ROWS)
+    checksum = hashlib.md5(data, usedforsecurity=False).digest()
+    return (data + b"\xeb\xeb" + b"\xff" * 14 + checksum).ljust(0xC00, b"\xff")
 
 
 @pytest.fixture
@@ -33,6 +53,9 @@ def packed_image(tmp_path):
     (component / "manifest.json").write_text('{"bundle_id":"test"}')
     build = tmp_path / "build"
     build.mkdir()
+    table = _partition_table()
+    (build / "partition_table").mkdir()
+    (build / "partition_table/partition-table.bin").write_bytes(table)
 
     def write(index_bytes=None):
         if index_bytes is None:
@@ -43,6 +66,8 @@ def packed_image(tmp_path):
         })
         (build / "generated_assets.bin").write_bytes(data)
         with (build / "merged-binary.bin").open("wb") as stream:
+            stream.seek(TABLE_OFFSET)
+            stream.write(table)
             stream.seek(assets.ASSETS_OFFSET)
             stream.write(data)
         return data

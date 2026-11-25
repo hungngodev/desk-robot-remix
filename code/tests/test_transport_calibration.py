@@ -1347,8 +1347,8 @@ async def test_pose_version_skew_isolated_from_legacy_head_operations(
                     "v0": 0, "v2": 2, "bool_version": True, "string_version": "1",
                     "float_version": 1.0, "negative_version": -1, "huge_version": 2**32,
                 }[fault]
-        elif pose_reads >= 4:
-            # Additional head fields do not enter the typed pose or grant authority.
+        elif pose_reads == 4:
+            # Unexpected pose fields are rejected rather than stripped or promoted.
             packet["future_extension"] = {"navigation_authorized": True}
         return httpx.Response(200, json=packet)
 
@@ -1369,13 +1369,14 @@ async def test_pose_version_skew_isolated_from_legacy_head_operations(
         await head.face_event("mood:happy")
         assert await head.snapshot() == jpeg
         assert (await head.command("stop"))["reply"] == "OK stop"
+        with pytest.raises(HeadError, match="Unexpected pose field"):
+            await head.pose_status()
         recovered = await head.pose_status()
         assert head.pose_fence.current(recovered.received_at) is None
         fresh = await head.pose_status()
         assert head.pose_fence.current(fresh.received_at) is fresh
-        assert not hasattr(fresh, "future_extension")
         assert head.pose_fence.needs_reanchor
     assert calls == [
         "/api/pose", "/api/pose", "/api/pose", "/api/status", "/api/face",
-        "/api/camera.jpg", "/api/command", "/api/pose", "/api/pose",
+        "/api/camera.jpg", "/api/command", "/api/pose", "/api/pose", "/api/pose",
     ]

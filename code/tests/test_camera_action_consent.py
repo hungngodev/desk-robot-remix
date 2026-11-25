@@ -63,8 +63,8 @@ async def test_pickup_revocation_during_observe_never_grasps(settings, regrant):
     settings.voice_vision_tools_enabled = True
     controller, head = make_controller(settings)
     grant = controller._camera_motion_grant()
-    head.armed = True
-    head.last_control = time.monotonic()
+    await head.command("arm")
+    head.commands.clear()
     controller.multimodal = SimpleNamespace(
         stream_owns_camera=lambda robot_id: True,
         status=lambda robot_id: {"camera_stream_connected": True},

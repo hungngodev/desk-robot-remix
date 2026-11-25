@@ -312,12 +312,30 @@ class WaveshareSelectionTests(unittest.TestCase):
             python.parent.mkdir(parents=True)
             python.write_text(
                 f"#!{sys.executable}\nimport json,os,sys\n"
-                'open(os.environ["TRACE_PATH"],"w").write(json.dumps(sys.argv[1:]))\n'
+                'if sys.argv[1:2]==["-c"]:\n exec(sys.argv[2])\nelse:\n'
+                ' open(os.environ["TRACE_PATH"],"w").write(json.dumps(sys.argv[1:]))\n'
             )
             python.chmod(0o755)
             export = root / ".tools/esp-idf/export.sh"
             export.parent.mkdir(parents=True)
             export.write_text(":\n")
+            sdk = export.parent
+            subprocess.run(["git", "-C", str(sdk), "init", "-q"], check=True)
+            subprocess.run(["git", "-C", str(sdk), "add", "export.sh"], check=True)
+            subprocess.run(
+                [
+                    "git", "-C", str(sdk),
+                    "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                    "commit", "-qm", "locked SDK",
+                ],
+                check=True,
+            )
+            sdk_commit = subprocess.check_output(
+                ["git", "-C", str(sdk), "rev-parse", "HEAD"], text=True
+            ).strip()
+            (root / "toolchain-lock.json").write_text(
+                json.dumps({"esp_idf": {"commit": sdk_commit}})
+            )
             trace = root / "args.json"
             for extra in ([], ["--private"]):
                 subprocess.run(

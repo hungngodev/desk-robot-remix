@@ -66,7 +66,11 @@ def report_quote(
             "allocations": [{"role_key": "robot:xiao_sense", "quantity": 1}],
         }] if scope == "first_robot" else [],
     }
-    return release.cost_quote({}, {"costs": costs}, scope)
+    return release.cost_quote(
+        {"physical_motor_variant_in_cart": "stepper", "missing_system_evidence": []},
+        {"costs": costs},
+        scope,
+    )
 
 
 def test_complete_power_kit_requires_exact_four_carriers():

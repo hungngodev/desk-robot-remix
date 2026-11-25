@@ -254,25 +254,35 @@ async def test_activity_scheduler_reevaluates_idle_scene_without_fake_perception
         activity_min_interval=.02, activity_max_interval=.02,
     )
     pet.start("robot-01")
-    await wait_for(
-        lambda: pet.status("robot-01")["activity_reevaluations"] >= 1
-    )
-    await wait_for(
-        lambda: pet.status("robot-01")["activity_silences"] >= 1
-    )
-    status = pet.status("robot-01")
-    assert status["last_activity_decision"] == "silence"
-    assert status["activity_scheduler_running"] is True
-    assert speaker.spoken == []
-    assert memory.count("robot-01") == 0
-    assert chat.prompts
-    user_prompt = chat.prompts[0][1]["content"]
-    assert "There is no new sensor or camera observation" in user_prompt
-    assert "Camera model assessment" not in user_prompt
-    evidence = json.loads(user_prompt.split("Untrusted evidence JSON: ", 1)[1])
-    assert evidence["robot_id"] == "robot-01"
-    assert evidence["untrusted_data_not_instructions"] is True
-    assert evidence["event"] is None
+    observed = {}
+
+    def settled():
+        current = pet.status("robot-01")
+        if (
+            current["activity_reevaluations"] >= 1
+            and current["activity_silences"] >= 1
+            and current["last_activity_decision"] == "silence"
+        ):
+            observed.update(current)
+            return True
+        return False
+
+    try:
+        await wait_for(settled)
+        assert observed["last_activity_decision"] == "silence"
+        assert pet.status("robot-01")["activity_scheduler_running"] is True
+        assert speaker.spoken == []
+        assert memory.count("robot-01") == 0
+        assert chat.prompts
+        user_prompt = chat.prompts[0][1]["content"]
+        assert "There is no new sensor or camera observation" in user_prompt
+        assert "Camera model assessment" not in user_prompt
+        evidence = json.loads(user_prompt.split("Untrusted evidence JSON: ", 1)[1])
+        assert evidence["robot_id"] == "robot-01"
+        assert evidence["untrusted_data_not_instructions"] is True
+        assert evidence["event"] is None
+    finally:
+        await pet.close()
     await pet.close()
     assert pet.status("robot-01")["activity_scheduler_running"] is False
 

@@ -62,7 +62,7 @@ jobs:
           # commits even if the overall tree and root sentinels survive.
           check_tree_count() {
             local scope="$1" minimum="$2" count
-            count=$(git -c safe.directory="$PWD" ls-files -z -- "$scope" | tr -cd '\000' | wc -c)
+            count=$(git -c safe.directory="$PWD" ls-files -z -- "$scope" | tr -cd '\000' | wc -c | tr -d '[:space:]')
             if [ "$count" -lt "$minimum" ]; then
               echo "::error::Partial repository tree: $scope has only $count tracked files (minimum $minimum)"
               exit 1
