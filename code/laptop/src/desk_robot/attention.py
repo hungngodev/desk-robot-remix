@@ -360,7 +360,9 @@ class AttentionLedger:
             )
             detail = state.sensor_details.get(kind)
             description = f"WROOM {kind} edge {int(now - stamp)}s ago"
-            if detail:
+            if kind == "safety_fault" and detail == "floor_out_of_range_upright_lift":
+                description += " (floor out of range; possible lift, not confirmed)"
+            elif detail:
                 description += f" ({detail[:20]})"
             # Preserve a handling cue over a flood of routine touch, but
             # never infer a scripted emotion or a physical command from it.
