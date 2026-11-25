@@ -442,7 +442,18 @@ void verify_qualified_pose_is_never_implicit_navigation() {
   angles.angle[2].at_ms = 420;
   angles.angle[2].sample_seq = 5;
   body.set_accessories(angles, 420);
-  check(body.start_local_pose_origin(420));
+  // A fresh IMU conversion may contain motion since the paired evidence.
+  imu.at_ms = 421;
+  body.set_imu(imu);
+  check(!body.start_local_pose_origin(421));
+  check(body.wheel_pose_state().origin == 0);
+  imu.at_ms = 435;
+  body.set_imu(imu);
+  angles.angle[1].at_ms = 430;
+  angles.angle[2].at_ms = 440;
+  angles.angle[1].sample_seq = angles.angle[2].sample_seq = 6;
+  body.set_accessories(angles, 440);
+  check(body.start_local_pose_origin(440));
   check(body.wheel_pose_state().origin == 1);
   imu.at_ms = 505;
   body.set_imu(imu);
@@ -450,8 +461,8 @@ void verify_qualified_pose_is_never_implicit_navigation() {
   angles.angle[2].angle = 90;
   angles.angle[1].at_ms = 500;
   angles.angle[2].at_ms = 510;
-  angles.angle[1].sample_seq = 6;
-  angles.angle[2].sample_seq = 6;
+  angles.angle[1].sample_seq = 7;
+  angles.angle[2].sample_seq = 7;
   body.set_accessories(angles, 510);
   check(body.wheel_pose_state().x_mm == 1);
   check(body.wheel_pose_state().quality == desk_robot::WheelPoseIntegrator::Quality::Valid);

@@ -213,6 +213,12 @@ class WheelPoseIntegrator {
            stationary_streak_ >= limits_.stationary_pairs_required;
   }
 
+  // A newer unpaired gyro conversion may contain rotation after the last
+  // stationary wheel pair. Require that exact current acquisition first.
+  bool stationary_origin_ready_for_imu(std::uint32_t acquisition_ms) const {
+    return stationary_origin_ready() && acquisition_ms == last_imu_ms_;
+  }
+
   // Only the physically verified local reanchor workflow may call this.
   // No UART/LLM handler uses it. It defines a fresh *local* odom frame,
   // not a verified global map location or motor arming permission.

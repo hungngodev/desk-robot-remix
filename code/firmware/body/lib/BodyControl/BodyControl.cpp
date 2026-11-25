@@ -521,7 +521,8 @@ bool BodyControl::start_local_pose_origin(std::uint32_t now_ms) {
       imu_low_g_latched_ || imu_attitude_latched_ ||
       imu_sensor_fault_latched_ || motor_watchdog_latched_ ||
       command_timeout_latched_ || imu_provenance_bad_ ||
-      !imu_yaw_.fresh(now_ms))
+      !imu_yaw_.fresh(now_ms) ||
+      !wheel_pose_.stationary_origin_ready_for_imu(imu_yaw_.acquisition_ms()))
     return false;
   return wheel_pose_.start_origin(now_ms);
 }

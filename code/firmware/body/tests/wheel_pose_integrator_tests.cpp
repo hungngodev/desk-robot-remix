@@ -61,7 +61,11 @@ static void refuse_unqualified_and_reanchor() {
   check(pose.observe(observed(2, 200), 210));
   check(pose.observe(observed(3, 300), 310));
   check(pose.stationary_origin_ready());
+  check(pose.stationary_origin_ready_for_imu(305));
+  check(!pose.stationary_origin_ready_for_imu(306));
+  check(!pose.stationary_origin_ready_for_imu(304));
   check(pose.start_origin(310));
+  check(!pose.stationary_origin_ready_for_imu(305));
   check(pose.state().origin == 1 &&
         pose.state().quality == WheelPoseIntegrator::Quality::Valid);
   check(!pose.start_origin(311));
