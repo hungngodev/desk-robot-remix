@@ -22,7 +22,10 @@ JPEG = bytes.fromhex("ffd8696d616765ffd9")
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("fault", ("body_reboot", "head_reboot", "foreign_robot", "pose_replay"))
+@pytest.mark.parametrize("fault", (
+    "body_reboot", "head_reboot", "head_reboot_body_clock_reset",
+    "foreign_robot", "pose_replay",
+))
 async def test_fresh_camera_frame_never_rescues_invalid_body_origin(
     settings, tokens, fault,
 ):
@@ -46,6 +49,12 @@ async def test_fresh_camera_frame_never_rescues_invalid_body_origin(
                 "seq": 1, "sample_us": 10_000,
             })
         if sequence == 3 and fault == "head_reboot":
+            # A Sense reboot does not restart the WROOM source clock.
+            return httpx.Response(200, json={
+                **packet, "head_boot": 78,
+                "seq": 3, "sample_us": 1_060_000,
+            })
+        if sequence == 3 and fault == "head_reboot_body_clock_reset":
             return httpx.Response(200, json={
                 **packet, "head_boot": 78,
                 "seq": 1, "sample_us": 10_000,
@@ -94,6 +103,12 @@ async def test_fresh_camera_frame_never_rescues_invalid_body_origin(
             await head.pose_status()
         assert head.pose_fence.current(time.monotonic()) is None
         assert head.pose_fence.needs_reanchor is True
+        if fault == "head_reboot_body_clock_reset":
+            # Invalid source clock cannot replace the last trusted body baseline.
+            assert head.pose_fence.last is continuous
+        elif fault == "head_reboot":
+            assert head.pose_fence.last.head_boot == 78
+            assert head.pose_fence.last.body_boot == 8
 
         # The next still-fresh live JPEG cannot restore retired body pose.
         head._stream_version = 2
