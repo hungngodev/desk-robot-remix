@@ -14,6 +14,30 @@ Own `code/firmware/body/`, its host tests and body-side pin allocation. Share th
 4. **Expose the versioned read-only reply.** Use the existing UART dispatch and output queue. Propose `pose` over 115200 baud, 8N1, ASCII CRLF with no arguments. Send version `v=1`, body boot identifier, origin, strictly increasing sample sequence, body monotonic sample-start time, `x_mm`, `y_mm`, `yaw_mrad` and `quality` (`valid`, `degraded`, `unavailable`). Agree bounded field widths, canonical names (`body_boot`, `origin`, `seq`, `sample_us`, `x_mm`, `y_mm`, `yaw_mrad`, `quality`) and the reply budget with 30 before deploying. Document exactly how origin and boot change and how timeout and an older body are represented. No pose read refreshes the control watchdog or arms the robot. Fuzz parser bounds locally as ordinary input validation, including overflow, repeated and truncated fields and unknown versions.
 5. **Prove fault priority under load.** Preserve throughput for local ToF safety on `0x70` when accessory `0x71`, IMU, serial queue or encoder faults occur. Confirm local STOP and latch, watchdog expiration, reset and deliberate rearm. Run worst-case scheduled reads, heavy pose polling and simultaneous wheel counting. Measure loop latency and queue drops. Hand off the actual cutoff wiring and safe-state readings to 70 for separate CPU-stall validation.
 
+## Head-to-body authority boundary
+
+The production Sense background status poll and the HTTP status, aux, IR,
+optics and pose routes issue only fixed read-only UART verbs; camera workers
+and WiFi audio reconnection do not issue body control. The WROOM runs its
+own active-wheel host silence limit (200 ms), maximum drive duration
+(250 ms), and idle control watchdog (500 ms). Normal operator keepalive
+can renew the host lease but cannot extend an existing drive pulse.
+Only a local USB receiver may clear a body fault using `rearm`, after
+healthy interlocks; recovery does not restore an old motion command.
+
+The head cancels queued nonurgent transactions across STOP/HALT generations
+and rejects ARM, drive, lift, grip and keepalive queued for 200 ms or more
+before UART transmission. STOP/HALT are exempt from this age gate.
+These defenses do not cryptographically authenticate the head-to-WROOM
+UART. A compromised head that can emit otherwise valid operator commands
+is outside the read-only endpoint guarantee; it still cannot use UART
+`rearm` or override independent WROOM safety interlocks.
+
+Run the native joint head-parser/WROOM regression with
+`pytest -q firmware/head/tests/test_cross_board_safety.py` from `code/`.
+The synthetic range readings test software timing only, not physical
+cliff geometry, stopping distance or motor cutoff.
+
 ## Acceptance
 
 - Run `cmake -S code/firmware/body -B /tmp/desk-robot-body-host -DBODY_SANITIZERS=ON -DCMAKE_BUILD_TYPE=Debug`, then `cmake --build /tmp/desk-robot-body-host --parallel 2` and `ctest --test-dir /tmp/desk-robot-body-host --output-on-failure`. Build `esp32_full` and `esp32_dc_full` with the pinned PlatformIO command in [host CI](../../../.github/workflows/host-verification.yml). Exercise no ticks during commanded motion, free spin, reverse counts on a bench, rollover, reboot, pickup, stale/degraded samples, mux faults, heartbeat loss and request flooding.
