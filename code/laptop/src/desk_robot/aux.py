@@ -123,8 +123,9 @@ def validate_aux(data: dict, robot_id: str) -> dict:
             or power.get("current_calibrated") is not False):
         raise ValueError("Invalid uncalibrated battery or shunt source")
     # TI INA226 raw rails 0x7fff and 0x8000 are rejected by the WROOM
-    # before conversion; the greatest accepted magnitude is 81915 uV.
-    if power["monitor_valid"] and not -81915 <= power["shunt_uv"] <= 81915:
+    # before conversion. The nonrail codes -32767..32766 truncate toward
+    # zero to -81917..81915 uV (the signed bounds are asymmetric).
+    if power["monitor_valid"] and not -81917 <= power["shunt_uv"] <= 81915:
         raise ValueError("Invalid INA226 saturated shunt source")
     # Missing sequence is accepted for old read-only firmware, but cannot
     # trigger proactive low-battery speech on the Mac.

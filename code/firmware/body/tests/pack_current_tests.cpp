@@ -28,6 +28,7 @@ int main() {
   CHECK(ina226_pack_current_ma(0, 5, ma) && ma == 0);
   CHECK(ina226_pack_current_ma(81915, 5, ma) && ma == 16383);
   CHECK(ina226_pack_current_ma(-81915, 5, ma) && ma == -16383);
+  CHECK(ina226_pack_current_ma(-81917, 5, ma) && ma == -16383);
 
   // Exercise the production raw-code gate before conversion. Positive
   // full-scale rounds below 81920uV, so testing only converted values misses it.
@@ -55,7 +56,8 @@ int main() {
 
   // Invalid conversions preserve the caller's output. Validity, not an old
   // current value or a zero sentinel, is what a consumer must check.
-  for (int sample : {81920, -81920, 90000, -90000,
+  for (int sample : {81916, 81917, 81918, -81918,
+                     81919, -81919, 81920, -81920, 90000, -90000,
                      std::numeric_limits<int>::min(), std::numeric_limits<int>::max()}) {
     ma = 999;
     CHECK(!ina226_pack_current_ma(sample, 5, ma));

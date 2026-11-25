@@ -583,7 +583,7 @@ def test_dock_inhibit_huge_age_cannot_raise_or_release():
     assert guard.inhibited
 
 
-@pytest.mark.parametrize("shunt", [-81920, -81916, 81916, 81917, 81919, 81920])
+@pytest.mark.parametrize("shunt", [-81920, -81919, -81918, 81916, 81917, 81918, 81919, 81920])
 @pytest.mark.parametrize("include_pack", [False, True])
 def test_saturated_shunt_cannot_be_valid_telemetry(shunt, include_pack):
     from desk_robot.aux import validate_aux
@@ -598,7 +598,7 @@ def test_saturated_shunt_cannot_be_valid_telemetry(shunt, include_pack):
         validate_aux(frame, "robot-01")
 
 
-@pytest.mark.parametrize("shunt", [-81915, 0, 81915])
+@pytest.mark.parametrize("shunt", [-81917, -81915, 0, 81915])
 @pytest.mark.parametrize("include_pack", [False, True])
 def test_unsaturated_shunt_wire_boundaries_remain_valid(shunt, include_pack):
     from desk_robot.aux import validate_aux

@@ -45,8 +45,10 @@ inline bool ina226_pack_current_ma(int signed_shunt_uv,
   // inspected 5mOhm / 2W Kelvin-sensed shunt for pack-line measurements.
   // uV / mOhm = mA. Never guess current from a breakout board's
   // uninspected built-in shunt, nor from CHG/PGOOD indicator pins.
+  // Nonrail raw codes span -32767..32766, or -81917..81915uV.
+  // Keep this standalone conversion consistent with the raw-code gate.
   if (shunt_milliohm != 5U ||
-      signed_shunt_uv <= -81920 || signed_shunt_uv >= 81920) return false;
+      signed_shunt_uv < -81917 || signed_shunt_uv > 81915) return false;
   out_ma = signed_shunt_uv / static_cast<int>(shunt_milliohm);
   return true;
 }
