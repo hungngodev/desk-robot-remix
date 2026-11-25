@@ -122,6 +122,11 @@ def validate_stationary_bracket(
             or before.received_at - before.request_started_at > max_body_lag_s
             or after.received_at - after.request_started_at > max_body_lag_s):
         raise BracketError("Pose transport timing unavailable or excessive")
+    # A short HTTP request can still carry a cached WROOM conversion. Apply
+    # the measured body budget to relative source lag at the actual receipt,
+    # rather than accepting the fence's looser general-purpose 250 ms limit.
+    if fence.current(after.received_at, max_age_s=max_body_lag_s) is not after:
+        raise BracketError("After pose source freshness exceeds measured body lag")
     earliest = camera_received_at - max_optical_lag_s
     if (earliest < 0 or before.received_at > earliest
             or after.request_started_at < camera_received_at
