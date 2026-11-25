@@ -20,7 +20,7 @@ from io import BytesIO
 from statistics import median
 from typing import TYPE_CHECKING
 
-from PIL import Image, ImageOps, ImageStat
+from PIL import Image, ImageOps
 
 if TYPE_CHECKING:
     from .config import Settings
@@ -112,7 +112,7 @@ def _prepare(jpeg: bytes, max_side: int = 768) -> tuple[bytes, bytes, float]:
     rgb.thumbnail((max_side, max_side), Image.Resampling.BILINEAR)
     gray = ImageOps.grayscale(rgb).resize((64, 48))
     fingerprint = gray.tobytes()
-    brightness = ImageStat.Stat(gray).mean[0]
+    brightness = sum(fingerprint) / len(fingerprint)
     out = BytesIO()
     rgb.save(out, "JPEG", quality=78, optimize=True)
     encoded = out.getvalue()

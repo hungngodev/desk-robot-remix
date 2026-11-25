@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import math
 import threading
+from collections.abc import Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -92,10 +94,12 @@ class YoloWorldVision:
         # Live YOLO input is also a network camera frame. Validate its JPEG
         # size and declared raster dimensions before loading model weights,
         # mutating detector classes or decoding an unbounded RGB image.
-        _check_camera_jpeg(jpeg, max_bytes=4_000_000)
         # Decode before loading weights or changing mutable detector classes.
-        with Image.open(BytesIO(jpeg)) as candidate:
-            image = candidate.convert("RGB")
+        with _open_camera_jpeg(jpeg, max_bytes=4_000_000) as candidate:
+            candidate.load()
+            # The loaded RGB raster belongs to this worker; Pillow's context
+            # exit closes the input stream, not the decoded pixel storage.
+            image = candidate if candidate.mode == "RGB" else candidate.convert("RGB")
         if self.weights is None or not self.weights.is_file():
             raise RuntimeError(
                 "Install vision extra and explicitly download/set local YOLO-World weights"
@@ -135,10 +139,8 @@ class YoloWorldVision:
 
 def image_size(jpeg: bytes) -> tuple[int, int]:
     # A camera geometry check must not trust decompression-bomb dimensions.
-    _check_camera_jpeg(jpeg, max_bytes=4_000_000)
-    with Image.open(BytesIO(jpeg)) as im:
+    with _open_camera_jpeg(jpeg, max_bytes=4_000_000) as im:
         im.verify()
-    with Image.open(BytesIO(jpeg)) as im:
         return im.size
 
 
@@ -241,11 +243,9 @@ class _InsufficientSceneDetail(ValueError):
     """A decodable latest frame does not provide usable visual contrast."""
 
 
-def _check_camera_jpeg(
-    frame: bytes, *, max_bytes: int = 1_000_000, decode: bool = False,
-    require_detail: bool = False,
-) -> tuple[int, int]:
-    """Reject unbounded camera images and optionally validate their pixel data."""
+@contextmanager
+def _open_camera_jpeg(frame: bytes, *, max_bytes: int) -> Iterator[Image.Image]:
+    """Own one bounded camera JPEG decoder for the caller's entire inspection."""
     if (not isinstance(frame, bytes) or not 12 <= len(frame) <= max_bytes
             or not frame.startswith(b"\xff\xd8")
             or not frame.endswith(b"\xff\xd9")):
@@ -255,18 +255,29 @@ def _check_camera_jpeg(
             if (candidate.format != "JPEG" or not 1 <= candidate.width <= 4096
                     or not 1 <= candidate.height <= 4096):
                 raise ValueError("Camera dimensions invalid")
-            if decode:
-                candidate.load()
-            if require_detail:
-                # Only reject near-flat frames, not all dark scenes or blur.
-                # This is a conservative software heuristic, not calibrated
-                # focus, occlusion or exposure measurement.
-                reduced = candidate.resize((64, 48)).convert("RGB")
-                if all(high - low <= 8 for low, high in reduced.getextrema()):
-                    raise _InsufficientSceneDetail("Latest camera image lacks visible detail")
-            return candidate.size
+            yield candidate
     except Image.DecompressionBombError as exc:
         raise ValueError("Camera dimensions invalid") from exc
+
+
+def _check_camera_jpeg(
+    frame: bytes, *, max_bytes: int = 1_000_000, decode: bool = False,
+    require_detail: bool = False,
+) -> tuple[int, int]:
+    """Reject unbounded camera images and optionally validate their pixel data."""
+    with _open_camera_jpeg(frame, max_bytes=max_bytes) as candidate:
+        if decode:
+            candidate.load()
+        if require_detail:
+            # Only reject near-flat frames, not all dark scenes or blur.
+            # This is a conservative software heuristic, not calibrated
+            # focus, occlusion or exposure measurement.
+            reduced = candidate.resize((64, 48))
+            if reduced.mode != "RGB":
+                reduced = reduced.convert("RGB")
+            if all(high - low <= 8 for low, high in reduced.getextrema()):
+                raise _InsufficientSceneDetail("Latest camera image lacks visible detail")
+        return candidate.size
 
 
 # The existing asyncio executor may run other runtime work. Allow only one
