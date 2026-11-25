@@ -247,3 +247,41 @@ async def test_real_opencv_frozen_child_recovers_with_different_jpeg():
     finally:
         await pool.close()
     assert not pool._owned
+
+
+async def test_cancel_during_timeout_retirement_keeps_active_slot(pool, monkeypatch):
+    """Caller cancellation must not interrupt an already retiring native owner."""
+    await pool.prewarm()
+    failed = pool._ready[0]
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    retire = pool._retire
+
+    async def gated_retire(process):
+        if process is failed:
+            entered.set()
+            await release.wait()
+        await retire(process)
+
+    monkeypatch.setattr(pool, "_retire", gated_retire)
+    observer = asyncio.create_task(request(pool, b"hang"))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        observer.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await observer
+        # Allow cancellation and the active owner's completion callback to run.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        with pytest.raises(DockDetectorBusy):
+            await request(pool)
+        assert failed in pool._owned
+        release.set()
+        async with asyncio.timeout(2):
+            while pool._active is not None:
+                await asyncio.sleep(0.001)
+        assert failed.returncode is not None and failed not in pool._owned
+        assert (await request(pool)).z_mm == 450
+    finally:
+        release.set()
+        await pool.close()

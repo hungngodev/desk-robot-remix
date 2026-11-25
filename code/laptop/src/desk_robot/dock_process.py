@@ -73,6 +73,7 @@ class DetectorPool:
         self._owned: set[asyncio.subprocess.Process] = set()
         self._warming: asyncio.Task | None = None
         self._active: asyncio.Task | None = None
+        self._active_retiring = False
         self._closing = False
         self._faulted = False
         self._retry_at = 0.0
@@ -189,9 +190,13 @@ class DetectorPool:
             self._ready.insert(0, process)
             return pose
         except BaseException:
-            # Even cancellation kills the actual native owner. Only this task
-            # can retire it; repeated cancellation cannot free its slot early.
-            await self._retire(process)
+            # A timeout can enter retirement before any caller cancellation.
+            # Keep the active slot until the native owner is confirmed reaped.
+            self._active_retiring = True
+            try:
+                await self._retire(process)
+            finally:
+                self._active_retiring = False
             raise
 
     def _completed(self, task: asyncio.Task) -> None:
@@ -225,7 +230,7 @@ class DetectorPool:
         try:
             pose = await asyncio.shield(task)
         except asyncio.CancelledError:
-            if not task.done() and not task.cancelling():
+            if not task.done() and not task.cancelling() and not self._active_retiring:
                 task.cancel()
             raise
         if self._closing or not 0 <= time.monotonic() - captured_at < FRAME_AGE_S:
@@ -243,7 +248,8 @@ class DetectorPool:
 
     async def _close_owned(self) -> None:
         active = self._active
-        if active is not None and not active.done() and not active.cancelling():
+        if (active is not None and not active.done() and not active.cancelling()
+                and not self._active_retiring):
             active.cancel()
         # Kill warming/idle children immediately as well. Active owner and
         # warm tasks perform their own pipe draining before we retire leftovers.
