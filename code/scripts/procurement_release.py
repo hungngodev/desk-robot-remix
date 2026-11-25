@@ -2357,6 +2357,31 @@ def cost_quote(report: dict, evidence: dict, scope: str) -> dict:
     cost = account_landed_cost(
         values, required, categories, expected_scope=scope,
     )
+    # Both the two-sample evaluation and the full first-unit preview spend
+    # from the same prototype budget as the larger pilot cart. An unsigned
+    # preview must not erase the documented Sense payment either.
+    if scope != "fleet":
+        try:
+            baseline = _documented_prior_spend_baseline()
+            cost["documented_prior_paid_minimum_cents"] = baseline["known_paid_cents"]
+            missing_payment = _confirmed_first_unit_prior_payment_missing(
+                cost, {"costs": values},
+            )
+        except (OSError, ValueError, TypeError):
+            missing_payment = True
+        if missing_payment:
+            cost["errors"].append(
+                "Cannot reconcile confirmed Sense payment and paid role allocation"
+            )
+            cost["prior_paid_orders_cents"] = None
+            cost["calculation_complete_not_physical_approval"] = False
+            for field in (
+                "payable_now_cents", "prototype_cumulative_cents",
+                "remaining_under_cap_cents", "allocated_landed_subtotals_cents",
+            ):
+                cost[field] = None
+            cost["seller_payable_cents"] = {}
+            cost["within_prototype_cap"] = False
     if scope == "evaluation":
         return cost
     if type(mode) is not str or mode not in POWER_KIT_MODES:
@@ -2521,7 +2546,7 @@ def cost_quote_markdown(cost: dict) -> str:
         return f"{sign}\u0024{absolute // 100}.{absolute % 100:02d}"
     complete = cost["calculation_complete_not_physical_approval"]
     prior_paid = amount(cost["prior_paid_orders_cents"])
-    if cost["scope"] == "pilot_samples" and cost["prior_paid_orders_cents"] is None:
+    if cost["scope"] != "fleet" and cost["prior_paid_orders_cents"] is None:
         minimum = cost.get("documented_prior_paid_minimum_cents")
         if type(minimum) is int:
             prior_paid = "unknown (confirmed minimum " + amount(minimum) + ")"

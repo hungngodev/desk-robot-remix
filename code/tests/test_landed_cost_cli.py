@@ -50,7 +50,8 @@ def sample_quote():
         }],
         "paid_orders": [{
             "order_reference": "already-paid",
-            "total_paid_usd": "12.50",
+            "total_paid_usd": "13.67",
+            "allocations": [{"role_key": "robot:xiao_sense", "quantity": 1}],
         }],
     }}
 
@@ -76,9 +77,36 @@ def test_cli_reports_only_evaluation_cart_delivered_amount(tmp_path):
     data = json.loads(result.stdout)
     assert data["scope"] == "evaluation"
     assert data["payable_now_cents"] == 655
-    assert data["prototype_cumulative_cents"] == 1905
+    assert data["prototype_cumulative_cents"] == 2022
     assert not data["landed_price_is_a_verified_supplier_checkout"]
     assert data["material_subtotals_cents"]["robot"] == 223
+
+
+@pytest.mark.parametrize("mutation", ["empty", "underpaid", "wrong_role"])
+def test_evaluation_quote_cannot_erase_confirmed_payment(tmp_path, mutation):
+    quote = sample_quote()
+    orders = quote["costs"]["paid_orders"]
+    if mutation == "empty":
+        orders.clear()
+    elif mutation == "underpaid":
+        orders[0]["total_paid_usd"] = "13.66"
+    else:
+        orders[0]["allocations"][0]["role_key"] = "robot:oled"
+    path = tmp_path / "unreconciled.json"
+    path.write_text(json.dumps(quote), encoding="utf-8")
+    result = run_cost("--evidence", str(path), "--format", "landed-cost-json")
+    assert result.returncode == 0, result.stderr
+    data = json.loads(result.stdout)
+    assert not data["calculation_complete_not_physical_approval"]
+    assert data["prior_paid_orders_cents"] is None
+    assert data["documented_prior_paid_minimum_cents"] == 1367
+    assert data["prototype_cumulative_cents"] is None
+    assert data["payable_now_cents"] is None
+    assert not data["within_prototype_cap"]
+    assert any("Sense" in error for error in data["errors"])
+    markdown = run_cost("--evidence", str(path), "--format", "landed-cost-markdown")
+    assert markdown.returncode == 0, markdown.stderr
+    assert "Previously paid: unknown (confirmed minimum $13.67)" in markdown.stdout
 
 
 def test_cli_keeps_supplier_quote_distinct_from_irreversible_cart(tmp_path):
