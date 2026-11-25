@@ -103,6 +103,12 @@ microphone and digital post-volume speaker reference. No second audio
 reader, AEC engine or separate UDP audio path is required. The original
 Xiaozhi microphone, AFE, camera, Opus and speaker remain canonical.
 
+The legacy upstream UDP audio debugger has no per-recording consent or expiry.
+It is disabled for Sense builds, and its retained host receiver accepts only
+explicitly consented loopback test traffic. Closing that receiver is not a
+device microphone stop command. Use the authenticated one-shot procedure below
+for physical calibration.
+
 **This bench feature is disabled in normal firmware.** For a temporary
 operator-authorized lab image only, configure
 `CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED=y` and

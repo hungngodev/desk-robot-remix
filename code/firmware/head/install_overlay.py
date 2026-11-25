@@ -432,6 +432,13 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
             "depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_ESP32_S3_BOX_3",
             "depends on USE_AUDIO_PROCESSOR && (BOARD_TYPE_DESK_ROBOT_SENSE_S3 || BOARD_TYPE_ESP32_S3_BOX_3",
         ).encode()
+        # The legacy upstream UDP sender has no per-capture consent or expiry.
+        files[path] = replace_once(
+            files[path].decode(),
+            'config USE_AUDIO_DEBUGGER\n    bool "Enable Audio Debugger"\n',
+            'config USE_AUDIO_DEBUGGER\n    bool "Enable Audio Debugger"\n'
+            '    depends on !BOARD_TYPE_DESK_ROBOT_SENSE_S3\n',
+        ).encode()
         # Add only to the selected Sense menu. The upstream remains untouched.
         files[path] = replace_once(
             files[path].decode(),

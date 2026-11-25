@@ -12,6 +12,9 @@
 #include "face_eye_display.hpp"
 #include "led/single_led.h"
 #include "sdkconfig.h"
+#if CONFIG_USE_AUDIO_DEBUGGER
+#error "Sense raw UDP audio debugger is forbidden; use consented one-shot PCM capture"
+#endif
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
 #include <wifi_manager.h>
 #endif

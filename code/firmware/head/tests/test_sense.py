@@ -249,6 +249,11 @@ int main() {
         source = (board / 'desk_robot_sense.cc').read_text()
         self.assertIn('SenseReferenceCodec audio_codec', source)
         kconfig = (self.root / 'main/Kconfig.projbuild').read_text()
+        debugger_config = kconfig.split('config USE_AUDIO_DEBUGGER\n', 1)[1].split(
+            '\nconfig ', 1
+        )[0]
+        self.assertIn('depends on !BOARD_TYPE_DESK_ROBOT_SENSE_S3', debugger_config)
+        self.assertIn('#if CONFIG_USE_AUDIO_DEBUGGER\n#error', source)
         self.assertIn('config DESK_ROBOT_AEC_DELAY_MS', kconfig)
         self.assertIn('range 0 250', kconfig)
         self.assertIn('config DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED', kconfig)

@@ -24,12 +24,12 @@ def port():
 def test_no_pcm_and_no_overwrite(tmp_path):
     output = tmp_path / "record.wav"
     with pytest.raises(ValueError, match="no valid PCM"):
-        server.capture("127.0.0.1", "127.0.0.1", port(), 8000, 1, .02, output)
+        server.capture("127.0.0.1", "127.0.0.1", port(), 8000, 1, .02, output, consent=True)
     with wave.open(str(output)) as wav:
         assert wav.getnframes() == 0
     output.write_bytes(b"private")
     with pytest.raises(FileExistsError):
-        server.capture("127.0.0.1", "127.0.0.1", port(), 8000, 1, .02, output)
+        server.capture("127.0.0.1", "127.0.0.1", port(), 8000, 1, .02, output, consent=True)
     assert output.read_bytes() == b"private"
 
 
@@ -48,7 +48,7 @@ def test_alignment_and_bounds_real_udp(tmp_path):
     sender = threading.Thread(target=send)
     sender.start()
     try:
-        assert server.capture("127.0.0.1", "127.0.0.1", target, 8000, 1, .1, output) == 800
+        assert server.capture("127.0.0.1", "127.0.0.1", target, 8000, 1, .1, output, consent=True) == 800
     finally:
         sender.join()
     with wave.open(str(output)) as wav:
@@ -59,7 +59,7 @@ def test_alignment_and_bounds_real_udp(tmp_path):
 @pytest.mark.parametrize("duration", [0, -1, float("nan"), float("inf"), 301])
 def test_invalid_duration(tmp_path, duration):
     with pytest.raises(ValueError):
-        server.capture("127.0.0.1", "127.0.0.1", port(), 8000, 1, duration, tmp_path / "x")
+        server.capture("127.0.0.1", "127.0.0.1", port(), 8000, 1, duration, tmp_path / "x", consent=True)
 
 
 def test_wrong_peer_and_symlink(tmp_path):
@@ -77,10 +77,39 @@ def test_wrong_peer_and_symlink(tmp_path):
     sender.start()
     try:
         with pytest.raises(ValueError, match="no valid PCM"):
-            server.capture("127.0.0.1", "127.0.0.2", target, 8000, 1, .1, output)
+            server.capture("127.0.0.1", "127.0.0.2", target, 8000, 1, .1, output, consent=True)
     finally:
         sender.join()
     link = tmp_path / "link.wav"
     link.symlink_to(output)
     with pytest.raises(FileExistsError):
-        server.capture("127.0.0.1", "127.0.0.1", port(), 8000, 1, .02, link)
+        server.capture("127.0.0.1", "127.0.0.1", port(), 8000, 1, .02, link, consent=True)
+
+
+@pytest.mark.parametrize("bind, peer", [
+    ("0.0.0.0", "127.0.0.1"),
+    ("192.168.1.10", "127.0.0.1"),
+    ("127.0.0.1", "192.168.1.11"),
+    ("127.0.0.1", "0.0.0.0"),
+])
+def test_non_loopback_rejected_before_socket(tmp_path, monkeypatch, bind, peer):
+    def unexpected_socket(*args, **kwargs):
+        pytest.fail("socket opened before address validation")
+
+    monkeypatch.setattr(server.socket, "socket", unexpected_socket)
+    output = tmp_path / "record.wav"
+    with pytest.raises(ValueError, match="loopback"):
+        server.capture(bind, peer, 8000, 8000, 1, .1, output, consent=True)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"consent": False}, {"consent": 1}])
+def test_consent_required_before_socket(tmp_path, monkeypatch, kwargs):
+    def unexpected_socket(*args, **kwargs):
+        pytest.fail("socket opened before consent")
+
+    monkeypatch.setattr(server.socket, "socket", unexpected_socket)
+    output = tmp_path / "record.wav"
+    with pytest.raises(ValueError, match="consent"):
+        server.capture("127.0.0.1", "127.0.0.1", 8000, 8000, 1, .1, output, **kwargs)
+    assert not output.exists()
