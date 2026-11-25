@@ -32,6 +32,60 @@ jobs:
           expected="${{ github.event.pull_request.head.sha || github.sha }}"
           actual="$(git -c safe.directory="$PWD" rev-parse HEAD)"
           test "$actual" = "$expected"
+      - &repository_integrity
+        name: Prevent partial repository trees
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Include hidden root entries: a truncated Git Database tree may
+          # retain a few visible source files but drop shared agent assets,
+          # workflow configuration, or repository license metadata.
+          for directory in .agent3d .github agents code docs; do
+            if [ ! -d "$directory" ] || [ -L "$directory" ]; then
+              echo "::error::Missing expected repository root directory: $directory"
+              exit 1
+            fi
+          done
+          for file in .gitignore AGENTS.md LICENSE README.md; do
+            if [ ! -f "$file" ] || [ -L "$file" ]; then
+              echo "::error::Missing expected repository root file: $file"
+              exit 1
+            fi
+          done
+          test -f code/firmware/body/include/BodyPins.h
+          test -f code/firmware/head/sense/config.h
+          test -f docs/hardware/full-feature-plan.json
+          test -f docs/records/verification.md
+          test -f code/laptop/src/desk_robot/handling.py
+          # November 24 baseline: 902 tracked blobs. Count NUL delimiters,
+          # not rendered paths. Conservative per-owner floors catch partial
+          # commits even if the overall tree and root sentinels survive.
+          check_tree_count() {
+            local scope="$1" minimum="$2" count
+            count=$(git -c safe.directory="$PWD" ls-files -z -- "$scope" | tr -cd '\000' | wc -c)
+            if [ "$count" -lt "$minimum" ]; then
+              echo "::error::Partial repository tree: $scope has only $count tracked files (minimum $minimum)"
+              exit 1
+            fi
+          }
+          check_tree_count . 800
+          check_tree_count code/laptop/src 40
+          check_tree_count code/laptop/server 5
+          check_tree_count code/tests 150
+          check_tree_count code/scripts 25
+          check_tree_count code/firmware/head 35
+          check_tree_count code/firmware/body 55
+          check_tree_count docs 160
+          check_tree_count agents 180
+          # git ls-files counts sparse-checkout entries even when an entire
+          # non-sentinel subtree is absent from the actual worktree. A green
+          # source test requires every tracked path to exist on disk.
+          while IFS= read -r -d '' tracked_path; do
+            if [ ! -e "$tracked_path" ] && [ ! -L "$tracked_path" ]; then
+              echo "::error::Missing tracked worktree path: $tracked_path"
+              exit 1
+            fi
+          done < <(git -c safe.directory="$PWD" ls-files -z)
       - uses: astral-sh/setup-uv@v6
       - name: Install locked Mac test dependencies
         working-directory: code
@@ -110,61 +164,10 @@ jobs:
             echo "::error::Wrong checkout: expected $expected, got $actual"
             exit 1
           }
+      - *repository_integrity
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - name: Prevent partial repository trees
-        run: |
-          set -euo pipefail
-          # Include hidden root entries: a truncated Git Database tree may
-          # retain a few visible source files but drop shared agent assets,
-          # workflow configuration, or repository license metadata.
-          for directory in .agent3d .github agents code docs; do
-            if [ ! -d "$directory" ] || [ -L "$directory" ]; then
-              echo "::error::Missing expected repository root directory: $directory"
-              exit 1
-            fi
-          done
-          for file in .gitignore AGENTS.md LICENSE README.md; do
-            if [ ! -f "$file" ] || [ -L "$file" ]; then
-              echo "::error::Missing expected repository root file: $file"
-              exit 1
-            fi
-          done
-          test -f code/firmware/body/include/BodyPins.h
-          test -f code/firmware/head/sense/config.h
-          test -f docs/hardware/full-feature-plan.json
-          test -f docs/records/verification.md
-          test -f code/laptop/src/desk_robot/handling.py
-          # November 24 baseline: 902 tracked blobs. Count NUL delimiters,
-          # not rendered paths. Conservative per-owner floors catch partial
-          # commits even if the overall tree and root sentinels survive.
-          check_tree_count() {
-            local scope="$1" minimum="$2" count
-            count=$(git ls-files -z -- "$scope" | tr -cd '\000' | wc -c)
-            if [ "$count" -lt "$minimum" ]; then
-              echo "::error::Partial repository tree: $scope has only $count tracked files (minimum $minimum)"
-              exit 1
-            fi
-          }
-          check_tree_count . 800
-          check_tree_count code/laptop/src 40
-          check_tree_count code/laptop/server 5
-          check_tree_count code/tests 150
-          check_tree_count code/scripts 25
-          check_tree_count code/firmware/head 35
-          check_tree_count code/firmware/body 55
-          check_tree_count docs 160
-          check_tree_count agents 180
-          # git ls-files counts sparse-checkout entries even when an entire
-          # non-sentinel subtree is absent from the actual worktree. A green
-          # source test requires every tracked path to exist on disk.
-          while IFS= read -r -d '' tracked_path; do
-            if [ ! -e "$tracked_path" ] && [ ! -L "$tracked_path" ]; then
-              echo "::error::Missing tracked worktree path: $tracked_path"
-              exit 1
-            fi
-          done < <(git ls-files -z)
       - name: Compile head test Python before expensive toolchain setup
         working-directory: code
         run: python3 -m compileall -q laptop/src laptop/server/overlay laptop/server/*.py tests scripts firmware/head/*.py firmware/head/tests
@@ -237,6 +240,7 @@ jobs:
             echo "::error::Wrong checkout: expected $expected, got $actual"
             exit 1
           }
+      - *repository_integrity
       - uses: astral-sh/setup-uv@v6
       - name: Compile guarded stepper firmware
         run: uvx --from platformio==6.1.18 pio run -d code/firmware/body -e esp32_stepper
@@ -291,6 +295,7 @@ jobs:
             echo "::error::Wrong checkout: expected $expected, got $actual"
             exit 1
           }
+      - *repository_integrity
       - name: Configure portable C++ tests
         run: cmake -S code/firmware/body -B /tmp/desk-robot-body-host -DBODY_SANITIZERS=ON -DCMAKE_BUILD_TYPE=Debug
       - name: Build
@@ -351,6 +356,7 @@ jobs:
             echo "::error::Wrong checkout: expected $expected, got $actual"
             exit 1
           }
+      - *repository_integrity
       - name: Restore pinned device source and generate isolated Sense overlay
         working-directory: code
         shell: bash
