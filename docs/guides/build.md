@@ -290,8 +290,12 @@ origin, revision, submodules and Python environment instead of deleting it.
 (
   set -eu
   mkdir -p ../.tools
-  test ! -e ../.tools/sdk-bootstrap && test ! -L ../.tools/sdk-bootstrap
-  test ! -e ../.tools/esp-idf && test ! -L ../.tools/esp-idf
+  for existing in ../.tools/sdk-bootstrap ../.tools/esp-idf; do
+    if [ -e "$existing" ] || [ -L "$existing" ]; then
+      printf 'Preserve and inspect existing path: %s\n' "$existing" >&2
+      exit 1
+    fi
+  done
   uv venv ../.tools/sdk-bootstrap --python 3.12
   idf_commit="$(python3 -c 'import json; print(json.load(open("toolchain-lock.json"))["esp_idf"]["commit"])')"
   git clone --no-checkout https://github.com/espressif/esp-idf.git ../.tools/esp-idf
