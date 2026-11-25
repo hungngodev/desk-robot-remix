@@ -66,9 +66,7 @@ void SenseReferenceCodec::FillSilenceLocked(int64_t now_us) {
     // pre-gap filter history when the next chunk arrives. Keep the 2:1
     // phase: inserting whole reference frames does not change its parity.
     if (sample_gap != 0) {
-        filter_last1_ = 0;
-        filter_last2_ = 0;
-        last_filtered_ = 0;
+        reference_decimator_.ClearHistory();
     }
     for (uint64_t n = 0; n < sample_gap; ++n) {
         PushLocked(0);
@@ -84,25 +82,12 @@ void SenseReferenceCodec::PublishAcceptedLocked(
         const int32_t scaled = static_cast<int32_t>(
             std::clamp(std::lround(static_cast<double>(source[i]) / 65536.0),
                        -32768L, 32767L));
-        // RIO-inspired three tap low pass followed by 2:1 decimation from the
-        // MAX98357A-supported 32 kHz output to the 16 kHz PDM AEC reference. Preserve
-        // filter and fractional phase across decoder chunk boundaries.
-        const int32_t filtered = (static_cast<int32_t>(filter_last2_) +
-                                  2 * static_cast<int32_t>(filter_last1_) +
-                                  scaled) / 4;
-        filter_last2_ = filter_last1_;
-        filter_last1_ = static_cast<int16_t>(scaled);
-        // The board contract fixes a 32 kHz output and 16 kHz microphone.
-        // Each output sample can publish at most one reference sample.
-        // A loop would misleadingly suggest unsupported fractional ratios.
-        if (phase_ < 1.0f) {
-            const int32_t result = static_cast<int32_t>(
-                last_filtered_ + (filtered - last_filtered_) * phase_);
-            PushLocked(static_cast<int16_t>(std::clamp(result, static_cast<int32_t>(-32768), static_cast<int32_t>(32767))));
-            phase_ += static_cast<float>(kSpeakerRate) / kMicRate;
+        // Filter the actual accepted PCM before reducing its sample rate.
+        // One output at most per input, with history and pair phase retained.
+        int16_t filtered = 0;
+        if (reference_decimator_.Push(static_cast<int16_t>(scaled), filtered)) {
+            PushLocked(filtered);
         }
-        phase_ -= 1.0f;
-        last_filtered_ = static_cast<int16_t>(filtered);
     }
     // The accepted chunk advances the clock by its actual sample duration.
     // Never reset it to the callback time: that would count the same 60 ms
@@ -379,10 +364,7 @@ void SenseReferenceCodec::ClearReference() {
     reference_.fill(0);
     write_index_ = 0;
     reference_clock_.reset();
-    filter_last1_ = 0;
-    filter_last2_ = 0;
-    last_filtered_ = 0;
-    phase_ = 0.0f;
+    reference_decimator_.Reset();
 }
 
 SenseReferenceCodec::ReferenceDiagnostics

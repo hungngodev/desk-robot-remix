@@ -11,6 +11,7 @@
 #include "codecs/no_audio_codec.h"
 #include "config.h"  // Selected Sense board AUDIO_*_SAMPLE_RATE contract.
 #include "reference_timeline.h"
+#include "reference_decimator.h"
 #include "sense_speaker_activity.hpp"
 #include "sdkconfig.h"
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
@@ -110,7 +111,7 @@ private:
                   "Sense AEC speaker rate differs from the active board");
     static_assert(kSpeakerRate == kSenseTxScratchSamples,
                   "Sense TX scratch must preserve the wrapper's bounded write size");
-    static_assert(kSpeakerRate % kMicRate == 0, "AEC decimation ratio must be integral");
+    static_assert(kSpeakerRate == 2 * kMicRate, "AEC decimation ratio must be 2:1");
     static_assert(kMicRate == desk_robot::PlaybackReferenceClock::kReferenceRate,
                   "AEC ring clock must match microphone rate");
     static_assert(kSpeakerRate == desk_robot::PlaybackReferenceClock::kOutputRate,
@@ -174,10 +175,7 @@ private:
     bool reference_read_seen_ = false;
     uint64_t last_reference_read_write_index_ = 0;
     desk_robot::PlaybackReferenceClock reference_clock_{};
-    int16_t filter_last1_ = 0;
-    int16_t filter_last2_ = 0;
-    int16_t last_filtered_ = 0;
-    float phase_ = 0.0f;
+    desk_robot::ReferenceDecimator reference_decimator_{};
 
     void FillSilenceLocked(int64_t now_us);
     void PushLocked(int16_t sample);

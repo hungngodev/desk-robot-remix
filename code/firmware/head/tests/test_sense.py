@@ -1707,6 +1707,21 @@ def test_playback_reference_clock_native_cpp_regression():
         subprocess.run([str(exe)], check=True)
 
 
+def test_reference_decimator_native_cpp_regression(tmp_path):
+    """Run the same fixed point FIR as the Sense codec against spectral and state invariants."""
+    compiler = shutil.which("c++")
+    assert compiler is not None, "A native C++17 compiler is required"
+    executable = tmp_path / "reference_decimator"
+    subprocess.run(
+        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+         "-I", str(HEAD / "sense"),
+         str(HEAD / "tests/reference_decimator_test.cc"),
+         "-o", str(executable)],
+        check=True, env=native_cpp_env(),
+    )
+    subprocess.run([str(executable)], check=True)
+
+
 def test_max98357a_output_rate_and_aec_reference_contract():
     """The selected generic MAX98357A excludes 24 kHz LRCLK; preserve AEC timing."""
     config = (HEAD / "sense/config.h").read_text()
@@ -1720,14 +1735,14 @@ def test_max98357a_output_rate_and_aec_reference_contract():
     assert output == 32000 and microphone == 16000
     assert "static constexpr uint32_t kSpeakerRate = 32000;" in header
     assert "static constexpr uint32_t kMicRate = 16000;" in header
-    assert "kSpeakerRate % kMicRate == 0" in header
+    assert "kSpeakerRate == 2 * kMicRate" in header
     assert "static_assert(AUDIO_INPUT_SAMPLE_RATE == kMicRate" in header
     assert "static_assert(AUDIO_OUTPUT_SAMPLE_RATE == kSpeakerRate" in header
     # The fixed 2:1 ratio permits zero or one publish per output sample,
     # never a misleading loop over unsupported fractional rate profiles.
-    assert "if (phase_ < 1.0f)" in codec
-    assert "while (phase_ < 1.0f)" not in codec
-    assert "phase_ += static_cast<float>(kSpeakerRate) / kMicRate;" in codec
+    assert "reference_decimator_.Push(static_cast<int16_t>(scaled), filtered)" in codec
+    assert "reference_decimator_.ClearHistory();" in codec
+    assert "reference_decimator_.Reset();" in codec
     assert "samples > static_cast<int>(kSpeakerRate)" in codec
     # Audio chunks have a virtual playback END, so the 10 ms Read cadence
     # cannot count the 60 ms reference data a second time.
@@ -1813,6 +1828,7 @@ def test_reference_silence_gap_retires_filter_history(tmp_path):
     )[1].split("bool SenseReferenceCodec::ReadReferenceLocked(", 1)[0]
     harness = r"""
 #include "reference_timeline.h"
+#include "reference_decimator.h"
 #include <algorithm>
 #include <array>
 #include <cassert>
@@ -1825,8 +1841,7 @@ struct SenseReferenceCodec {
     std::array<int16_t, kRingSize> reference_{};
     uint64_t write_index_ = 0;
     desk_robot::PlaybackReferenceClock reference_clock_{};
-    int16_t filter_last1_ = 0, filter_last2_ = 0, last_filtered_ = 0;
-    float phase_ = 0.0f;
+    desk_robot::ReferenceDecimator reference_decimator_{};
     void PushLocked(int16_t sample);
     void FillSilenceLocked(int64_t now_us);
     void PublishAcceptedLocked(const int32_t* source, int samples, int64_t now_us);

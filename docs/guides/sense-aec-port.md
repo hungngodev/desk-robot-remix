@@ -54,6 +54,21 @@ TX DMA. Keep reference for any tail that really plays; discard reference for
 audio canceled before playback. The Mac [flush contract](live-conversation.md)
 must reach this device path and receive actual playback-completion information.
 
+## Reference decimation and bandwidth
+
+The Sense-only 32 kHz to 16 kHz bridge filters accepted post-volume PCM
+with a causal 63-tap symmetric Q15 equiripple FIR. The design uses
+[scipy.signal.remez](https://docs.scipy.org/doc/scipy/reference/generated/scipy.signal.remez.html)
+with 6 kHz passband, 8 kHz stopband and 1:10 band weighting. Coefficients
+are rounded to Q15 and the center is adjusted to unity DC gain. The native
+regression exercises the production helper, including spectral rejection,
+full-scale PCM, phase preservation across gaps and generation reset.
+The linear-phase filter adds 31 input samples (0.969 ms) of delay.
+Recalibrate the assembled head's acoustic delay with this filter; do not
+treat digital spectral checks as evidence of acoustic AEC qualification.
+The existing I2S owner, ESP-SR AFE, reference clock, cancellation fence
+and short-write failure accounting remain authoritative.
+
 ## Reference buffer integrity and observable failure
 
 The selected `SenseReferenceCodec` now reads real mono PDM input and
