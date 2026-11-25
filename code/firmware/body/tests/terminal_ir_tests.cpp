@@ -115,8 +115,46 @@ static void check_atomic_receiver_batch() {
   }
 }
 
+static void check_corrupt_complements_and_empty_batch() {
+  desk_robot::IrMarkSpace frame[34]{};
+  std::uint32_t code = 0;
+  constexpr std::uint32_t expected = 0xcb34ed12U;
+  const desk_robot::IrMarkSpace repeat[] = {{9000, 2250}, {560, 0}};
+  code = expected;
+  CHECK(!desk_robot::decode_nec(repeat, 2, code) && code == 0);
+  make_frame(frame, 0x12, 0x34);
+  code = expected;
+  CHECK(!desk_robot::decode_nec(frame, static_cast<std::size_t>(-1), code) && code == 0);
+  for (unsigned seed = 0; seed != 100; ++seed) {
+    for (unsigned byte = 0; byte != 4; ++byte) {
+      make_frame(frame, static_cast<std::uint8_t>(seed),
+                 static_cast<std::uint8_t>(seed * 37U));
+      auto& space = frame[1 + byte * 8 + seed % 8].space_us;
+      space = space == 560 ? 1690 : 560;
+      code = expected;
+      CHECK(!desk_robot::decode_nec(frame, 34, code) && code == 0);
+    }
+  }
+  const std::uint32_t codes[2] = {expected, expected};
+  const bool both[2] = {true, true}, empty[2] = {false, false};
+  for (std::uint32_t start : {100U, 0xfffffff0U}) {
+    desk_robot::DualIrEvidence evidence;
+    evidence.accept_batch(codes, both, start, 0);
+    evidence.accept_batch(codes, empty, start, 100);
+    CHECK(evidence.assess(start + 100).same_code);
+    evidence.accept_batch(codes, empty, start, 101);
+    const auto rejected = evidence.assess(start + 101);
+    CHECK(!rejected.left_fresh && !rejected.right_fresh && !rejected.same_code);
+    CHECK(rejected.left_seq == 1 && rejected.right_seq == 1);
+    CHECK(!rejected.motor_authorized && !rejected.charging_authorized);
+    evidence.accept_batch(codes, both, start + 102, 0);
+    CHECK(evidence.assess(start + 102).same_code);
+  }
+}
+
 int main() {
   try {
+    check_corrupt_complements_and_empty_batch();
     check_atomic_receiver_batch();
     check_envelope_and_noise();
     desk_robot::IrMarkSpace frame[34]{};

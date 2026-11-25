@@ -185,6 +185,11 @@ class DualIrEvidence {
   // candidate must not let the opposite side repopulate a quarantined batch.
   void accept_batch(const std::uint32_t (&codes)[2], const bool (&valid)[2],
                     std::uint32_t now_ms, std::uint32_t receipt_window_ms) {
+    // An invalid receipt window revokes evidence even when both queues are empty.
+    if (receipt_window_ms > 100U) {
+      invalidate();
+      return;
+    }
     DualIrEvidence next = *this;
     for (unsigned side = 0; side != 2; ++side) {
       if (valid[side] && !next.accept(side, codes[side], now_ms, receipt_window_ms)) {
