@@ -33,6 +33,7 @@ from .brain_context import (
 from .config import Settings, quiet_hours_active
 from .conversation import Conversation
 from .dock_evidence import DockContactInhibit
+from .expression_policy import model_mood_event, reserve_face_cue
 from .habituation import HabituationWindow
 from .handling import HandlingGate
 from .memory import CameraProvenance, MemoryStore
@@ -2662,16 +2663,20 @@ class PetController:
                 or not self._camera_generation_current(robot_id, camera_generation)
                 or self._vision_preemption_epoch != preemption_epoch
                 or self._human_active_in_fleet(now)
-                or now - captured_at > self.max_observation_age
-                or now - state.last_person_face_cue_at < _PERSON_FACE_CUE_COOLDOWN_S
-                or now - state.last_person_face_attempt_at < _PERSON_FACE_ATTEMPT_INTERVAL_S):
+                or now - captured_at > self.max_observation_age):
+            return
+        reservation = reserve_face_cue(
+            now, last_cue_at=state.last_person_face_cue_at,
+            last_attempt_at=state.last_person_face_attempt_at,
+            cooldown_s=_PERSON_FACE_CUE_COOLDOWN_S, retry_s=_PERSON_FACE_ATTEMPT_INTERVAL_S,
+        )
+        if reservation is None:
             return
         cue = getattr(self.heads.get(robot_id), "face_event", None)
         if not callable(cue):
             return
-        previous = state.last_person_face_cue_at
-        state.last_person_face_attempt_at = now
-        state.last_person_face_cue_at = now
+        state.last_person_face_attempt_at = reservation.at
+        state.last_person_face_cue_at = reservation.at
         acknowledged = False
         try:
             await asyncio.wait_for(cue("person_detected"), timeout=_PERSON_FACE_REQUEST_TIMEOUT_S)
@@ -2696,11 +2701,12 @@ class PetController:
         finally:
             # An unacknowledged or cancelled HTTP send is not a real cue.
             # Only this attempt may restore its previous cooldown.
-            if not acknowledged and state.last_person_face_cue_at == now:
-                state.last_person_face_cue_at = previous
+            state.last_person_face_cue_at = reservation.settled_cue_at(
+                state.last_person_face_cue_at, acknowledged=acknowledged,
+            )
 
     async def _cue_decided_face(
-        self, robot_id: str, mood: str, permitted: Callable[[], bool],
+        self, robot_id: str, mood: object, permitted: Callable[[], bool],
     ) -> None:
         """Queue only a current model-selected cosmetic OLED expression.
 
@@ -2708,25 +2714,26 @@ class PetController:
         model, or speaker arbitration. Invalid or obsolete decisions fail
         silently without disturbing the actual speech owner.
         """
-        if (type(mood) is not str
-                or mood not in {"neutral", "happy", "thinking", "surprised"}
-                or self.settings.mode != "hardware"
-                or not permitted()):
+        event = model_mood_event(mood)
+        if event is None or self.settings.mode != "hardware" or not permitted():
             return
         state = self.states[robot_id]
         now = time.monotonic()
-        if (now - state.last_model_face_cue_at < _MODEL_FACE_CUE_COOLDOWN_S
-                or now - state.last_model_face_attempt_at < _MODEL_FACE_ATTEMPT_INTERVAL_S):
+        reservation = reserve_face_cue(
+            now, last_cue_at=state.last_model_face_cue_at,
+            last_attempt_at=state.last_model_face_attempt_at,
+            cooldown_s=_MODEL_FACE_CUE_COOLDOWN_S, retry_s=_MODEL_FACE_ATTEMPT_INTERVAL_S,
+        )
+        if reservation is None:
             return
         cue = getattr(self.heads.get(robot_id), "face_event", None)
         if not callable(cue):
             return
-        previous = state.last_model_face_cue_at
-        state.last_model_face_attempt_at = now
-        state.last_model_face_cue_at = now
+        state.last_model_face_attempt_at = reservation.at
+        state.last_model_face_cue_at = reservation.at
         acknowledged = False
         try:
-            await asyncio.wait_for(cue("mood:" + mood), timeout=_MODEL_FACE_REQUEST_TIMEOUT_S)
+            await asyncio.wait_for(cue(event), timeout=_MODEL_FACE_REQUEST_TIMEOUT_S)
             # A queued head request can outlive the Mac voice/consent grant.
             # Do not count its late receipt as a current accepted expression.
             # This cannot undo a frame already displayed by the device.
@@ -2736,8 +2743,9 @@ class PetController:
                 f"Optional contextual OLED cue unavailable: {type(error).__name__}"
             )
         finally:
-            if not acknowledged and state.last_model_face_cue_at == now:
-                state.last_model_face_cue_at = previous
+            state.last_model_face_cue_at = reservation.settled_cue_at(
+                state.last_model_face_cue_at, acknowledged=acknowledged,
+            )
 
     def _human_active_in_fleet(self, now: float) -> bool:
         """Human VAD and brief post-turn quiet protect the fleet speech floor.
