@@ -1405,23 +1405,40 @@ def overlay_recipe_digest(board: str) -> str:
         if board != "modular":
             folders.append(HERE / board)
     for folder in folders:
+        checked_overlay_path(HERE, folder.relative_to(HERE).as_posix())
+        if not folder.is_dir():
+            raise ValueError("Overlay recipe source directory is missing or invalid")
         inputs.update(
             path for path in folder.iterdir()
-            if path.is_file() and path.suffix in (".cc", ".h", ".hpp", ".json", ".md")
+            if path.suffix in (".cc", ".h", ".hpp", ".json", ".md")
         )
-    manifest = {path.relative_to(HERE).as_posix(): digest(path.read_bytes())
-                for path in sorted(inputs)}
+    manifest = {}
+    for path in sorted(inputs):
+        name = path.relative_to(HERE).as_posix()
+        checked_overlay_path(HERE, name, regular_file=True)
+        manifest[name] = digest(path.read_bytes())
     return digest(json.dumps({"pin": PIN, "board": board, "inputs": manifest},
                              sort_keys=True).encode())
 
 
-def checked_overlay_path(target: Path, name: str) -> Path:
-    """Reject symlink components even when their destination is absent."""
+def checked_overlay_path(target: Path, name: str, *, regular_file: bool = False) -> Path:
+    """Reject links and incompatible existing objects before any content IO."""
     path = target
-    for part in name.split("/"):
+    parts = name.split("/")
+    for index, part in enumerate(parts):
         path = path / part
-        if path.is_symlink():
-            raise ValueError(f"Overlay path escapes pinned checkout or aliases another path via symlink: {name}")
+        try:
+            mode = path.lstat().st_mode
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(mode):
+            raise ValueError(
+                f"Overlay path escapes pinned checkout or aliases another path via symlink: {name}"
+            )
+        if index < len(parts) - 1 and not stat.S_ISDIR(mode):
+            raise ValueError(f"Overlay path has a non-directory intermediate: {name}")
+        if index == len(parts) - 1 and regular_file and not stat.S_ISREG(mode):
+            raise ValueError(f"Overlay path must be a regular file: {name}")
     return path
 
 
@@ -1480,7 +1497,7 @@ def read_overlay_journal(target: Path, marker: Path) -> dict:
         parts = name.split("/")
         if any("/".join(parts[:i]) in state for i in range(1, len(parts))):
             raise ValueError("Invalid head overlay journal: overlapping paths")
-        path = checked_overlay_path(target, name)
+        path = checked_overlay_path(target, name, regular_file=True)
         if not path.parent.resolve().is_relative_to(root):
             raise ValueError("Overlay journal path escapes pinned checkout")
         if info["original"] is not None:
@@ -1500,7 +1517,7 @@ def read_overlay_journal(target: Path, marker: Path) -> dict:
 
 
 def remove(target: Path) -> None:
-    marker = checked_overlay_path(target, MARKER)
+    marker = checked_overlay_path(target, MARKER, regular_file=True)
     if not marker.exists():
         return
     state = read_overlay_journal(target, marker)
@@ -1555,7 +1572,7 @@ def apply(target: Path, board: str = "cores3") -> None:
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=target, text=True).strip()
     if head != PIN:
         raise ValueError(f"Requires Xiaozhi commit {PIN}, found {head}")
-    marker = checked_overlay_path(target, MARKER)
+    marker = checked_overlay_path(target, MARKER, regular_file=True)
     if marker.exists():
         state = read_overlay_journal(target, marker)
         if not any(name.startswith(BOARDS[board] + "/") for name in state):
@@ -1591,7 +1608,7 @@ def apply(target: Path, board: str = "cores3") -> None:
         raise ValueError("Overlay recipe changed while planning; retry with stable sources")
     state = {}
     for name, data in files.items():
-        path = checked_overlay_path(target, name)
+        path = checked_overlay_path(target, name, regular_file=True)
         state[name] = {
             "sha256": digest(data),
             "recipe_sha256": recipe,
