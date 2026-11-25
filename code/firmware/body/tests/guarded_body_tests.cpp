@@ -2551,8 +2551,9 @@ static void fuel_voltage_replay_cannot_rearm_or_restore_drive() {
   readings.gauge.cell_mv = 3250; // below the new ARM minimum
   readings.gauge.soc_centi = 5000;
   body.set_accessories(readings, 100);
-  CHECK(send(body, "rearm", 100, true) == "OK rearm");
-  CHECK(send(body, "arm", 100) == "ERR arm battery_low");
+  CHECK(send(body, "rearm", 100, true) == "ERR rearm battery_unsafe_or_stale");
+  CHECK(send(body, "arm", 100) == "ERR arm safety_interlock");
+  CHECK(!guard.evaluate(100) && !body.state().armed);
 
   // A second caller must not relabel the same conversion as 3.8 V.
   readings.gauge.cell_mv = 3800;
