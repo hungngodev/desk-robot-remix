@@ -72,6 +72,27 @@ int main() {
         assert(step(112).mood == Mood::kSurprised && pet.state() == State::kIdle);
         assert(!eyes.Step(start + 112, Motion::kNod, false).visible);
         assert(!eyes.Step(start + 113, Motion::kNone, true).visible);
+        // A fault or Mac mood can suppress the transition frame. At recovery
+        // the HSM still owns its current mood, not the empty action's default.
+        HsmBehavior offline(seed);
+        offline.pick_min_ms = 6000;
+        offline.pick_max_ms = 15000;
+        offline.update({start});
+        for (uint32_t t = 100; t <= 360000; t += 100) {
+            a = offline.update({start + t});
+            if (t > 300100) {
+                assert(a.empty());
+                assert(offline.state() == State::kSleeping);
+                assert(offline.mood() == Mood::kSleepy);
+            }
+        }
+        offline.pushEvent(Event(EventType::kLoudSound));
+        a = offline.update({start + 360100});
+        assert(offline.mood() == Mood::kSurprised);
+        assert(offline.update({start + 360200}).empty());
+        assert(offline.mood() == Mood::kSurprised);
+        offline.update({start + 361600});
+        assert(offline.mood() == Mood::kNeutral);
         HsmBehavior inverted(seed);
         inverted.pick_min_ms = 100;
         inverted.pick_max_ms = 1;

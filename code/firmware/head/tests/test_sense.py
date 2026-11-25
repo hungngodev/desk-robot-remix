@@ -317,7 +317,7 @@ int main() {
         # The contextual Mac cue has priority; local Stackchan remains an
         # idle fallback rather than directly overwriting the model's mood.
         self.assertIn('SetEmotion(CosmeticMoodName(requested_mood))', source)
-        self.assertIn('action.set_mood ? MoodName(action.mood) : "neutral"', source)
+        self.assertIn('MoodName(board->face_behavior_.mood())', source)
         self.assertIn('Stackchan', (board / 'stackchan_behavior.hpp').read_text())
         self.assertIn('MIT License', (board / 'stackchan_behavior.hpp').read_text())
         self.assertIn('NoAudioCodecSimplexPdm::Read', (board / 'sense_reference_codec.cc').read_text())

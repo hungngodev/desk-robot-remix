@@ -157,6 +157,10 @@ class HsmBehavior {
 
   State state() const { return state_; }
 
+  // Actions are deltas; a display owner returning from preemption needs the
+  // current HSM mood even when this update emitted no new mood action.
+  Mood mood() const { return mood_; }
+
   /// Queue an event. It is handled in the next update(). Events are dropped if the queue is full.
   void pushEvent(const Event& e) {
     if (queue_len_ < kQueueSize) {
@@ -191,6 +195,7 @@ class HsmBehavior {
   static constexpr uint8_t kQueueSize = 8;
 
   State state_ = State::kIdle;
+  Mood mood_ = Mood::kNeutral;
   bool started_ = false;
   uint32_t now_ = 0;
   uint32_t entered_ms_ = 0;
@@ -226,6 +231,7 @@ class HsmBehavior {
   }
 
   void setMood(Mood m) {
+    mood_ = m;
     action_.set_mood = true;
     action_.mood = m;
   }

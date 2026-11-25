@@ -395,7 +395,7 @@ private:
                     if (last_idle_face_fault || model_mood_active ||
                         !last_face_available || action.set_mood)
                         board->display_->SetEmotion(
-                            action.set_mood ? MoodName(action.mood) : "neutral");
+                            MoodName(board->face_behavior_.mood()));
                     model_mood_active = false;
                 }
             }
