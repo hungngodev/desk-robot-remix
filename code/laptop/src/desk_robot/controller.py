@@ -17,7 +17,7 @@ from .dock_runtime import (
     verify_selected_dock_frame,
 )
 from .dock_vision import assess_dock
-from .grasp_feedback import guarded_grasp
+from .grasp_feedback import await_commanded_jaw_target, guarded_grasp
 from .object_search import ObjectSearchResult, summarize_search_observation
 from .object_targets import ObjectTarget
 from .transport import Head, HeadError, expected_ack, validate_command
@@ -1676,12 +1676,12 @@ class Coordinator:
             raise OperationError("Alignment attempt limit reached")
         await self._assert_armed_health(job.robot_id)
         require_fresh_observation()
-        if self.settings.mode == "hardware":
-            async def grasp_health() -> dict:
-                body = await self._assert_armed_health(job.robot_id)
-                self._require_camera_motion_grant(camera_grant)
-                return body
+        async def grasp_health() -> dict:
+            body = await self._assert_armed_health(job.robot_id)
+            self._pickup_live_media(job.robot_id, camera_grant)
+            return body
 
+        if self.settings.mode == "hardware":
             self._require_camera_motion_grant(camera_grant)
             tactile = await guarded_grasp(
                 head, c, robot_id=job.robot_id, health=grasp_health,
@@ -1752,8 +1752,15 @@ class Coordinator:
         # the empty jaws to distinguish a placed object from one stuck in them.
         self._require_camera_motion_grant(camera_grant)
         await send_command(f"grip {c.grip_open}")
+        if self.settings.mode == "hardware":
+            # WROOM opening is limited by fresh jaw conversions, not the
+            # command ACK or a fixed servo settle interval.
+            await await_commanded_jaw_target(grasp_health, c.grip_open)
         await asyncio.sleep(c.servo_settle_seconds)
-        await self._assert_armed_health(job.robot_id)
+        if self.settings.mode == "hardware":
+            await await_commanded_jaw_target(grasp_health, c.grip_open)
+        else:
+            await self._assert_armed_health(job.robot_id)
         self._require_camera_motion_grant(camera_grant)
         await send_command(f"lift {c.lift_up}")
         await asyncio.sleep(c.servo_settle_seconds)

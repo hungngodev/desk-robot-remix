@@ -34,7 +34,7 @@ _RELIEF_WAIT_S = 6.0
 _RELIEF_POLL_INTERVAL_S = 0.075
 
 
-async def _await_relief_target(
+async def await_commanded_jaw_target(
     health: Callable[[], Awaitable[dict]], target: int,
 ) -> None:
     """Wait for commanded opening, never infer measured position or force."""
@@ -51,7 +51,7 @@ async def _await_relief_target(
                     or servo["grip_target"] != target
                     or type(servo.get("grip")) is not int
                     or not 60 <= servo["grip"] <= 120):
-                raise OperationError("Gripper relief target not confirmed")
+                raise OperationError("Gripper commanded target not confirmed")
             if servo["grip"] == target:
                 return
             await asyncio.sleep(_RELIEF_POLL_INTERVAL_S)
@@ -310,7 +310,7 @@ async def guarded_grasp(
             # Ordinary failure must not let Coordinator HALT freeze a
             # still-opening jaw. Cancellation remains immediately preemptible.
             if not isinstance(failure, asyncio.CancelledError):
-                await _await_relief_target(confirmed_health, calibration.grip_open)
+                await await_commanded_jaw_target(confirmed_health, calibration.grip_open)
         except Exception:
             pass  # Preserve the primary failure; body stop/watchdog is next.
         raise

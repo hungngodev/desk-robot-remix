@@ -2215,7 +2215,10 @@ async def test_motion_disabled_before_manual_dispatch(settings, stage):
         resume.set()
         await c.close()
 
-async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(settings, tmp_path):
+@pytest.mark.parametrize("release_frozen", [False, True])
+async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(
+    settings, tmp_path, release_frozen,
+):
     """Replay real Mac grasp code with synthetic WROOM and live-frame receipts."""
     import json
 
@@ -2238,13 +2241,28 @@ async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(settin
     halt_pending = asyncio.Event()
     allow_halt = asyncio.Event()
     seq = 0
+    release_polls = 0
+    open_angle = calibration.get("grip_open", 60)
+    closed_angle = calibration.get("grip_closed", 110)
+    open_command = f"grip {open_angle}"
+    lift_command = f"lift {calibration.get('lift_up', 110)}"
     original_command = head.command
     original_status = head.status
 
     async def status():
+        nonlocal release_polls
         body = await original_status()
         head._watchdog(time.monotonic())
-        return {**body, "armed": head.armed, "imu": {**body["imu"], "boot_id": 1}}
+        result = {**body, "armed": head.armed, "imu": {**body["imu"], "boot_id": 1}}
+        if head.commands.count(open_command) == 2:
+            release_polls += 1
+            partial = open_angle + (4 if closed_angle > open_angle else -4)
+            result["servo"] = {
+                "attached": True, "position_source": "commanded",
+                "grip": partial if release_frozen or release_polls == 1 else open_angle,
+                "grip_target": partial if release_frozen else open_angle,
+            }
+        return result
 
     async def aux_status():
         nonlocal seq
@@ -2262,6 +2280,9 @@ async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(settin
         }
 
     async def command(value):
+        if value == lift_command and head.commands.count(open_command) == 2:
+            assert not release_frozen
+            assert release_polls >= 2, "Lift withdrawal preceded commanded jaw opening"
         receipt = await original_command(value)
         if value == "halt" and not halt_pending.is_set():
             halt_pending.set()
@@ -2318,9 +2339,16 @@ async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(settin
         assert peer.commands == []
         allow_halt.set()
         await c.tasks[job.id]
-        assert job.state == "succeeded", job.error
-        assert job.result["placed_visually_verified"]
-        assert job.result["physical_acceptance_pass"] is False
+        if release_frozen:
+            assert job.state == "failed"
+            assert job.result is None
+            assert head.commands.count(lift_command) == 1
+            assert "Gripper commanded target not confirmed" in job.error
+        else:
+            assert job.state == "succeeded", job.error
+            assert job.result["placed_visually_verified"]
+            assert job.result["physical_acceptance_pass"] is False
+            assert head.commands.count(lift_command) == 2
         assert any(event.startswith("tactile contact delta=") for event in job.events)
         assert c._fleet_motion_owner is None
 
