@@ -3559,3 +3559,66 @@ def test_launcher_verifies_overlay_before_upstream_app():
     assert source.index("verify_installed_overlay(") < source.index(
         'runpy.run_path(str(server / "app.py")'
     )
+
+
+@pytest.mark.parametrize("phase", ["queued", "encoding", "delayed_request"])
+async def test_peer_vad_permanently_invalidates_coordinated_grant(
+    bridge, monkeypatch, phase,
+):
+    """An expired VAD hangover cannot resurrect an earlier peer utterance."""
+    ids, handlers = fleet_handlers(bridge, monkeypatch)
+    entered, release = asyncio.Event(), asyncio.Event()
+    delivered = []
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: None)
+    monkeypatch.setattr(bridge, "wav_audio", lambda value: b"RIFF")
+
+    async def encode(audio):
+        entered.set()
+        if phase == "encoding":
+            await release.wait()
+        return [b"opus"]
+
+    async def transmit(connection, text, frames):
+        delivered.append(text)
+
+    monkeypatch.setattr(bridge, "encode_opus_owned", encode)
+    monkeypatch.setattr(bridge, "transmit", transmit)
+    await handlers["/session"](body_request({"device_ids": ids, "enabled": True}))
+    request = body_request({
+        "device_id": ids[1], "text": "obsolete peer line", "wav_base64": "",
+    })
+
+    def human_turn():
+        source = bridge.connections[ids[0]]
+        assert bridge.record_human_voice(source, "speech_start")
+        assert bridge.record_human_voice(source, "speech_end")
+        bridge.human_vad_until[ids[0]] = time.monotonic() - 1
+        assert not bridge.human_speech_active()
+
+    if phase == "queued":
+        await bridge.speaker_lock.acquire()
+    if phase == "delayed_request":
+        human_turn()
+    pending = asyncio.create_task(handlers["/speak"](request))
+    try:
+        if phase == "queued":
+            await asyncio.sleep(0)
+        elif phase == "encoding":
+            await asyncio.wait_for(entered.wait(), timeout=1)
+        if phase != "delayed_request":
+            human_turn()
+    finally:
+        if phase == "queued":
+            bridge.speaker_lock.release()
+        release.set()
+    with pytest.raises(RuntimeError, match="interrupted"):
+        await pending
+    assert delivered == []
+    # The Mac may release the superseded grant and obtain a new one.
+    await handlers["/session"](body_request({"device_ids": ids, "enabled": False}))
+    await handlers["/session"](body_request({"device_ids": ids, "enabled": True}))
+    await handlers["/speak"](body_request({
+        "device_id": ids[1], "text": "fresh peer line", "wav_base64": "",
+    }))
+    assert delivered == ["fresh peer line"]
+    await handlers["/session"](body_request({"device_ids": ids, "enabled": False}))

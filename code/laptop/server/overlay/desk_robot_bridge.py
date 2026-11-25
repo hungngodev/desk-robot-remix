@@ -30,6 +30,10 @@ lease_ids: frozenset[str] = frozenset()
 lease_until = 0.0
 lease_stopping = False
 lease_passive = False
+# Human speech permanently supersedes the current coordinated grant, even
+# when its short VAD hangover expires before a queued encoder finishes.
+fleet_human_generation = 0
+lease_human_generation = 0
 # A grant incarnation is not identified by devices and passive mode alone.
 lease_token: str | None = None
 last_released_lease: tuple[str, frozenset[str], bool] | None = None
@@ -135,6 +139,11 @@ def human_speech_active() -> bool:
     )
 
 
+def coordinated_speech_preempted() -> bool:
+    return (lease_human_generation != fleet_human_generation
+            or human_speech_active())
+
+
 def current_voice_turn_generations() -> dict[str, int]:
     """Expose signed tool owner generations only for registered head identities.
 
@@ -164,7 +173,7 @@ def _native_adapter():
 
 def record_human_voice(conn, kind: str) -> bool:
     """Only a CURRENT authenticated Xiaozhi websocket can publish human VAD."""
-    global voice_event_cursor
+    global voice_event_cursor, fleet_human_generation
     if kind not in ("normal", "group", "speech_start", "speech_end"):
         raise ValueError("Unknown interruption class")
     device = getattr(conn, "device_id", None)
@@ -180,6 +189,7 @@ def record_human_voice(conn, kind: str) -> bool:
     else:
         human_vad_until[device] = time.monotonic() + 1.0
     if kind in ("speech_start", "normal", "group"):
+        fleet_human_generation += 1
         voice_turn_generation[device] = voice_turn_generation.get(device, 0) + 1
         _invalidate_tool_turn(device)
     voice_event_cursor += 1
@@ -772,7 +782,7 @@ async def transmit(conn, text, frames, *, passive: bool = False):
         if not leased:
             raise RuntimeError("Live human/native tool speech owns the Xiaozhi speaker")
     if (generation != interrupt_generation.get(conn.device_id, 0)
-            or human_speech_active()):
+            or coordinated_speech_preempted()):
         # The lease succeeded, but a real human started speaking while
         # awaiting it. Release it BEFORE raising; never reset that abort.
         if leased:
@@ -811,13 +821,13 @@ async def transmit(conn, text, frames, *, passive: bool = False):
         # Never publish even the old caption or subsequent Opus in that case.
         if (conn.client_abort
                 or generation != interrupt_generation.get(conn.device_id, 0)
-                or not muted(conn.device_id) or human_speech_active()):
+                or not muted(conn.device_id) or coordinated_speech_preempted()):
             raise RuntimeError("Speech interrupted before the first sentence")
         await send_control("sentence_start", text)
         for packet in frames:
             if (conn.client_abort
                     or generation != interrupt_generation.get(conn.device_id, 0)
-                    or not muted(conn.device_id) or human_speech_active()):
+                    or not muted(conn.device_id) or coordinated_speech_preempted()):
                 raise RuntimeError("Speech interrupted or session expired")
             # Reuse the firmware's existing 16 kHz mono, 60 ms Opus
             # framing. The native adapter already owns the device send lock:
@@ -832,7 +842,7 @@ async def transmit(conn, text, frames, *, passive: bool = False):
         await asyncio.sleep(0.24)  # estimated buffer tail; no physical playback acknowledgement
         if (conn.client_abort
                 or generation != interrupt_generation.get(conn.device_id, 0)
-                or human_speech_active()):
+                or coordinated_speech_preempted()):
             raise RuntimeError("Speech interrupted during playback tail")
     finally:
         stop_confirmed = False
@@ -840,7 +850,7 @@ async def transmit(conn, text, frames, *, passive: bool = False):
             async def send_stop():
                 if (conn.client_abort
                         or generation != interrupt_generation.get(conn.device_id, 0)
-                        or human_speech_active()):
+                        or coordinated_speech_preempted()):
                     # Bypass upstream normal stop's wait-for-all-audio behavior.
                     if hasattr(conn, "websocket") and conn.websocket is not None:
                         await conn.websocket.send(json.dumps({
@@ -918,7 +928,7 @@ def create_app():
 
     async def session(request):
         global lease_ids, lease_until, lease_stopping, lease_cleanup_task
-        global lease_passive, lease_token
+        global lease_passive, lease_token, lease_human_generation
         body = await request.json()
         ids = body.get("device_ids")
         passive = body.get("passive", False)
@@ -980,6 +990,7 @@ def create_app():
             lease_ids, lease_until = selected, time.monotonic() + 305
             lease_passive = passive
             lease_token = token
+            lease_human_generation = fleet_human_generation
         elif body.get("enabled") is False:
             if lease_token != token:
                 # Retrying an already completed stop is safe only when no
@@ -1024,6 +1035,8 @@ def create_app():
                 or not isinstance(request_token, str)
                 or request_token != lease_token):
             raise RuntimeError("No active matching coordinated session for this robot")
+        if coordinated_speech_preempted():
+            raise RuntimeError("Coordinated session interrupted by human speech")
         if not isinstance(text, str) or not 1 <= len(text) <= 2000:
             raise ValueError("Speech text must be 1..2000 characters")
         audio = wav_audio(body.get("wav_base64"))
@@ -1032,12 +1045,14 @@ def create_app():
         generation = interrupt_generation.get(device, 0)
         async with speaker_lock:
             if (lease_stopping or not muted(device) or connections.get(device) is not connection
-                    or request_token != lease_token
+                    or coordinated_speech_preempted()
+                or request_token != lease_token
                     or generation != interrupt_generation.get(device, 0)):
                 raise RuntimeError("Coordinated session stopped, interrupted or robot disconnected")
             async with asyncio.timeout(40):
                 frames = await encode_opus_owned(audio)
                 if (lease_stopping or not muted(device) or connections.get(device) is not connection
+                        or coordinated_speech_preempted()
                         or request_token != lease_token
                         or generation != interrupt_generation.get(device, 0)):
                     raise RuntimeError("Coordinated session stopped, interrupted or robot disconnected")
