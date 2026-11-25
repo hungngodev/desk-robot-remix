@@ -28,6 +28,7 @@ These blank fields are **intentional** and are not permission to guess a fit.
 | TCA9548A and ULN2003 board physical widths | | mux_w, driver_w |
 | Generic VL53L0X GY-530 I2C carrier length, width, lens center and 3.3 V pullup verification | | tof_l / w / lens_offset |
 | Sensor lens to floor nominal measured standoff | | tof_floor_height |
+| Each downward mux lane 0 through 3: installed lens height, tilt from downward vertical (degrees), measured minimum/maximum calibrated floor interval (mm) | | floor_mount_records[4] |
 | Dock track guide clear width | | dock_clear_width |
 | Two independent terminal IR emitter carriers, their lateral separation, lens height, aim and optical overlap | | dock_ir_spacing / ir_left_z / ir_right_z / ir_yaw |
 | Exact two independent seat switch bodies, mount pitch / hole diameter, free and operating positions, normally closed polarity, overtravel and wire clearance | | dock_seat_left / dock_seat_right / dock_seat_body / dock_seat_mount_pitch / dock_seat_hole_d / dock_seat_fp / dock_seat_op / dock_seat_overtravel / dock_seat_wire_clearance |
@@ -113,6 +114,8 @@ against the enclosure, bracket, fasteners and moving gripper in all
 permitted poses. A nominal circular opening and watertight STL cannot
 establish optical clearance. Verify floor returns and cliff detection
 at the calibrated installed heights on the actual desk surfaces before
-permitting movement.
+permitting movement. Transfer the four individual floor records to the
+`--floor-mount-template` JSON described in the [assembly guide](FUSION_ONE_ROBOT_ASSEMBLY.md).
+A successful paper screen does not replace calibration or loaded stopping tests.
 
 Do not fabricate any blank measurement to claim print-ready geometry.
