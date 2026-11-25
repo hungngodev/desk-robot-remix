@@ -594,6 +594,8 @@ def test_native_apriltag_setup_failure_cannot_reach_pose_or_motion(monkeypatch, 
     # Both have nonzero polygon area and edges longer than two pixels.
     [[100., 100.], [160., 100.], [120., 120.], [100., 160.]],
     [[100., 100.], [160., 150.], [160., 100.], [100., 160.]],
+    # Convex but counterclockwise: violates the native detector contract.
+    [[100., 100.], [100., 140.], [140., 140.], [140., 100.]],
 ])
 def test_degenerate_dock_quad_rejected_before_native_pnp(monkeypatch, points):
     """Collapsed, crossed, concave and subpixel tags cannot provide a pose."""

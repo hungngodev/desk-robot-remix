@@ -247,11 +247,11 @@ def detect_apriltag(
     if not np.isfinite(signed_twice_area) or abs(signed_twice_area) < 32.0:
         return None
     # Area alone does not reject asymmetric bowties or concave quads.
-    # All four consecutive turns must have the same nonzero orientation.
+    # ArucoDetector returns clockwise corners in image coordinates (y down).
     turns = (edges[:, 0] * np.roll(edges[:, 1], -1)
              - edges[:, 1] * np.roll(edges[:, 0], -1))
     if (not np.isfinite(turns).all()
-            or not (np.all(turns > 0) or np.all(turns < 0))):
+            or not np.all(turns > 0)):
         return None
     side = calibration.tag_side_mm / 2
     object_points = np.array([
