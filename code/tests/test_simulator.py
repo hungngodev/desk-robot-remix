@@ -1,4 +1,5 @@
 """Synthetic motion and control lease regressions; not physical qualification."""
+import random
 from types import SimpleNamespace
 
 import pytest
@@ -63,7 +64,7 @@ async def test_drive_permit_expires_independently_of_control_watchdog(monkeypatc
     active = await head.status()
     assert active["motor"] == {"m0": 20, "m1": -20}
     assert active["drive_ms"] == 125
-    assert active["watchdog_ms"] == 500
+    assert active["watchdog_ms"] == 200
     clock[0] = 10.25
     if expire_via == "keepalive":
         await head.command("keepalive")
@@ -220,3 +221,71 @@ async def test_body_replay_feeds_existing_sensor_fusion_and_rejects_foreign_iden
     finally:
         state.enabled = False
         await pet.close()
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("seed", range(32))
+async def test_simulated_control_lease_random_transitions(monkeypatch, seed):
+    """Compare observable synthetic receipts to an integer millisecond oracle."""
+    clock = [10_000]
+    monkeypatch.setattr(simulator, "time", SimpleNamespace(monotonic=lambda: clock[0] / 1000))
+    head = simulator.SimulatedHead("robot-01")
+    rng = random.Random(seed)
+    armed = False
+    motor = (0, 0)
+    last = deadline = 0
+    for step in range(512):
+        clock[0] += rng.choice(
+            [0, 1, 2, 10, 20, 50, 100, 125, 199, 200, 201, 249, 250, 499, 500, 501]
+        )
+        now = clock[0]
+        if armed:
+            if (any(motor) and deadline >= last + 200 and now >= last + 200) or now >= last + 500:
+                armed = False
+                motor = (0, 0)
+                deadline = 0
+            elif now >= deadline:
+                motor = (0, 0)
+                deadline = 0
+        op = rng.choice(["arm", "halt", "stop", "keepalive", "ping", "drive", "grip", "lift", "status"])
+        command = op
+        if op == "drive":
+            left, right = rng.choice([(20, 20), (20, -20), (0, 0), (-40, 40)])
+            duration = rng.choice([1, 50, 199, 200, 201, 250])
+            command = f"drive {left} {right} {duration}"
+        elif op in ("grip", "lift"):
+            command += f" {rng.choice([60, 90, 120])}"
+        rejected = op in ("drive", "grip", "lift", "keepalive") and not armed
+        if op == "arm":
+            armed = True
+            motor = (0, 0)
+            deadline = 0
+            last = now
+        elif op == "halt":
+            armed = False
+            motor = (0, 0)
+            deadline = 0
+        elif op == "stop":
+            motor = (0, 0)
+            deadline = 0
+            if armed:
+                last = now
+        elif not rejected and op in ("drive", "grip", "lift", "keepalive"):
+            last = now
+            if op == "drive":
+                motor = (left, right)
+                deadline = now + duration
+        if rejected:
+            with pytest.raises(HeadError, match="disarmed"):
+                await head.command(command)
+        elif op != "status":
+            assert (await head.command(command))["ok"] is True
+        status = await head.status()
+        expected_watchdog = (200 if any(motor) else 500) - (now - last) if armed else 0
+        assert (
+            status["armed"],
+            (status["motor"]["m0"], status["motor"]["m1"]),
+            status["drive_ms"],
+            status["watchdog_ms"],
+        ) == (armed, motor, max(0, deadline - now), expected_watchdog), (
+            seed, step, now, command
+        )

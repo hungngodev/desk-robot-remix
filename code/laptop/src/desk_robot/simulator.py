@@ -14,6 +14,8 @@ from .transport import HeadError, drive_duration_ms, expected_ack, validate_comm
 from .vision import Detection, SceneChange
 
 # Mirror guarded WROOM timing for development only; the body owns real safety.
+# Quantize the sampled monotonic clock to integer milliseconds once per operation
+# so rounding cannot extend a control lease at an exact expiration boundary.
 BODY_IDLE_WATCHDOG_MS = 500
 BODY_ACTIVE_WHEEL_WATCHDOG_MS = 200
 
@@ -23,9 +25,9 @@ class SimulatedHead:
         self.id = robot_id
         self.armed = False
         self.commands: list[str] = []
-        self.last_control = 0.0
+        self._last_control_ms = 0
         self._motor = (0, 0)
-        self._drive_deadline = 0.0
+        self._drive_deadline_ms = 0
         self.position = [130.0, 120.0]
         self.gripped = False
         self.lifted = False
@@ -50,32 +52,32 @@ class SimulatedHead:
 
     def _stop_motion(self) -> None:
         self._motor = (0, 0)
-        self._drive_deadline = 0.0
+        self._drive_deadline_ms = 0
 
-    def _watchdog(self, now: float) -> int:
+    def _watchdog(self, now: int) -> int:
         if not self.armed:
             self._stop_motion()
             return 0
-        idle_deadline = self.last_control + BODY_IDLE_WATCHDOG_MS / 1000
-        active_deadline = self.last_control + BODY_ACTIVE_WHEEL_WATCHDOG_MS / 1000
+        idle_deadline = self._last_control_ms + BODY_IDLE_WATCHDOG_MS
+        active_deadline = self._last_control_ms + BODY_ACTIVE_WHEEL_WATCHDOG_MS
         # Simulate the first expiry even when no status poll occurred at that
         # instant. WROOM checks the active watchdog before drive expiry on a tie.
         active_expired = (
             any(self._motor)
-            and self._drive_deadline >= active_deadline
+            and self._drive_deadline_ms >= active_deadline
             and now >= active_deadline
         )
         if active_expired or now >= idle_deadline:
             self.armed = False
             self._stop_motion()
             return 0
-        if now >= self._drive_deadline:
+        if now >= self._drive_deadline_ms:
             self._stop_motion()
         limit = BODY_ACTIVE_WHEEL_WATCHDOG_MS if any(self._motor) else BODY_IDLE_WATCHDOG_MS
-        return limit - int((now - self.last_control) * 1000)
+        return limit - (now - self._last_control_ms)
 
     async def status(self):
-        now = time.monotonic()
+        now = round(time.monotonic() * 1000)
         watchdog_ms = self._watchdog(now)
         if self.fail_status:
             raise HeadError("Simulated body status failure")
@@ -85,7 +87,7 @@ class SimulatedHead:
             "robot_id": self.id,
             "armed": self.armed,
             "motor": {"m0": self._motor[0], "m1": self._motor[1]},
-            "drive_ms": max(0, round((self._drive_deadline - now) * 1000)),
+            "drive_ms": max(0, self._drive_deadline_ms - now),
             "servo": {"position_source": "commanded"},
             "watchdog_ms": watchdog_ms,
         }
@@ -93,7 +95,7 @@ class SimulatedHead:
     async def command(self, command):
         op = validate_command(command)
         self.commands.append(command)
-        now = time.monotonic()
+        now = round(time.monotonic() * 1000)
         self._watchdog(now)
         if self.fail_command and command.startswith(self.fail_command):
             raise HeadError("Simulated uncertain ACK")
@@ -112,13 +114,13 @@ class SimulatedHead:
         if op in {"arm", "drive", "lift", "grip", "keepalive"} or (
             op == "stop" and self.armed
         ):
-            self.last_control = now
+            self._last_control_ms = now
         if op == "drive":
             args = command.split()[1:]
             left, right = map(int, args[:2])
             duration = drive_duration_ms(command)
             self._motor = (left, right)
-            self._drive_deadline = now + duration / 1000
+            self._drive_deadline_ms = now + duration
             if left or right:
                 if left == -right:
                     self.position[0] -= 10 if left > 0 else -10
