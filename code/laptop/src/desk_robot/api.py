@@ -117,12 +117,15 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         # Separate operator and model credentials: models cannot mint motion permits.
         app.state.operator_token, app.state.tool_token = api_credentials(settings)
         app.state.runtime = runtime or Runtime(settings)
+        app.state.runtime_started = False
         try:
             start = getattr(app.state.runtime, "start", None)
             if callable(start):
                 await start()
+            app.state.runtime_started = True
             yield
         finally:
+            app.state.runtime_started = False
             await app.state.runtime.close()
 
     app = FastAPI(title="Desk robot controls", version="0.1.0", lifespan=lifespan)
@@ -149,6 +152,35 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             or not token_matches(credentials.credentials, app.state.operator_token)
         ):
             raise HTTPException(403, "Only the operator can enable movement")
+
+    @app.get("/v1/health", dependencies=[Depends(operator)])
+    async def health() -> JSONResponse:
+        """Report Mac lifecycle, not physical connectivity or movement authority."""
+        owner = app.state.runtime
+        ready = (
+            app.state.runtime_started is True
+            and not getattr(owner, "_closed", False)
+            and getattr(owner, "_fatal_service_error", None) is None
+        )
+        warnings = []
+        if settings.mode == "simulation":
+            warnings.append({"code": "simulation_mode"})
+        else:
+            warnings.append({"code": "hardware_connectivity_not_verified_by_health"})
+        room = getattr(owner, "room_feed", None)
+        if settings.room_station_enabled and getattr(room, "last_error", None):
+            warnings.append({"code": "room_usb_unavailable"})
+        if not ready:
+            warnings.append({"code": "runtime_unavailable"})
+        return JSONResponse(
+            {
+                "mode": settings.mode,
+                "runtime_ready": ready,
+                "physical_acceptance_pass": False,
+                "warnings": warnings,
+            },
+            status_code=200 if ready else 503,
+        )
 
     @app.exception_handler(RequestValidationError)
     async def invalid_request(request, exc):

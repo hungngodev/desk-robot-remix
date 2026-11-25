@@ -296,6 +296,16 @@ End experience: robots look alive while idle; notice real scene/person/object ev
 | Mac shared coordinator | Fleet world events, deduplication, one speaker token, one rover motion owner initially, social turns, user pause/quiet and immutable event log | Never invent observations or grant motion from AI recommendations |
 | Mac operator gateway | Authenticated human enable, one bounded job or continuing pet permission until paused, hard revocation and audited permits | Never accept LLM/model token as human operator |
 
+**Mac cold start:** The operator-authenticated `GET /v1/health` reports
+Mac lifespan completion (HTTP 200) or a closed/fatal runtime (HTTP 503).
+Its configured mode and structured warnings distinguish explicit simulation
+from hardware mode; it never certifies hardware connectivity or physical
+acceptance. The shared room USB reader is optional, independently reconnects,
+and cannot grant movement authority. A missing room connection must not
+silently switch a physical robot to simulation. The authenticated Sense HTTP
+bridge carries body UART status, and the Coordinator requires fresh WROOM
+preflight evidence and an operator permit before scheduling movement.
+
 A single request/response protocol is preferable to simultaneous independent Pipecat/Xiaozhi/MQTT owners. Keep the current authenticated head API, WROOM UART `115200 8N1`, local server bridge and tested `LiveTurns` epoch logic. Put future provider/transport implementations behind the same session adapter. Avoid two independent speech loops, memory writers or robot body controllers.
 
 **Proposed typed event envelope**, to reserve from day one even before every producer exists:
