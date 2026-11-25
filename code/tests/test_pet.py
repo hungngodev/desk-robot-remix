@@ -217,6 +217,80 @@ async def test_activity_reconsideration_round_robins_enabled_pets_with_one_speak
     await pet.close()
 
 
+
+@pytest.mark.parametrize(("count", "blocked_ticks"), [(2, 1), (3, 2), (4, 3), (5, 3)])
+async def test_activity_cooldown_does_not_consume_fleet_rotation(
+    fleet, tmp_path, count, blocked_ticks,
+):
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {}, Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    robot_ids = [r.id for r in fleet.robots[:count]]
+    for robot_id in robot_ids:
+        pet.states[robot_id].enabled = True
+    offers = []
+
+    async def record_offer(robot_id, change, generation, **kwargs):
+        offers.append(robot_id)
+        pet._group_last_spoken = time.monotonic()
+
+    pet._speak = record_offer
+    try:
+        for _ in robot_ids:
+            pet._group_last_spoken = time.monotonic() - 121
+            pet._reconsider_activity()
+            await pet._speech_task
+            previous = pet._speech_task
+            for _ in range(blocked_ticks):
+                pet._reconsider_activity()
+                assert pet._speech_task is previous
+        assert offers == robot_ids
+    finally:
+        await pet.close()
+
+
+async def test_activity_skips_quiet_docked_peers_without_consuming_human_priority(
+    fleet, tmp_path,
+):
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {}, Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory),
+        memory, KeyScene(),
+    )
+    robot_ids = [r.id for r in fleet.robots]
+    assert len(robot_ids) == 5
+    for robot_id in robot_ids:
+        pet.states[robot_id].enabled = True
+    offers = []
+    human = True
+
+    async def record_offer(robot_id, change, generation, **kwargs):
+        offers.append(robot_id)
+
+    pet._speak = record_offer
+    pet._human_active_in_fleet = lambda now: human
+    try:
+        await pet.set_quiet(robot_ids[0], True)
+        pet.states[robot_ids[1]].dock_seated = True
+        pet._reconsider_activity()
+        assert pet._speech_task is None
+        human = False
+        pet._reconsider_activity()
+        assert pet._speech_task is not None
+        await pet._speech_task
+        assert offers == [robot_ids[2]]
+        await pet.set_quiet(robot_ids[0], False)
+        pet.states[robot_ids[1]].dock_seated = False
+        for _ in range(4):
+            pet._reconsider_activity()
+            await pet._speech_task
+        assert offers == robot_ids[2:] + robot_ids[:2]
+    finally:
+        await pet.close()
+
+
 def test_visual_change_gate_requires_persistent_difference():
     gate = VisualChangeGate(min_changed_fraction=0.008, confirmations=2)
     assert gate.observe(WHITE) is None

@@ -2503,21 +2503,27 @@ class PetController:
 
     def _reconsider_activity(self) -> None:
         """Offer one enabled pet a bounded context decision without fake evidence."""
-        enabled = [
-            robot.id for robot in self.settings.robots
-            if self.states[robot.id].enabled
-        ]
-        if not enabled or self._closed:
+        if self._closed:
             return
-        robot_id = enabled[self._activity_round % len(enabled)]
-        self._activity_round += 1
-        state = self.states[robot_id]
-        state.activity_reevaluations += 1
+        robots = self.settings.robots
+        # Use a stable fleet index and skip locally unavailable pets. A quiet
+        # or docked peer must not consume the only fleet reconsideration tick.
+        for offset in range(len(robots)):
+            index = (self._activity_round + offset) % len(robots)
+            robot_id = robots[index].id
+            state = self.states[robot_id]
+            if not state.enabled:
+                continue
+            state.activity_reevaluations += 1
+            if state.quiet or self.is_dock_charging_inhibited(robot_id):
+                state.last_activity_decision = "defer"
+                continue
+            break
+        else:
+            return
         now = time.monotonic()
         if (
-            state.quiet
-            or self.is_dock_charging_inhibited(robot_id)
-            or not self.voice_monitor_ready
+            not self.voice_monitor_ready
             or self._human_active_in_fleet(now)
             or now - self._group_last_spoken < self.speech_cooldown
             or self.conversation.active is not None
@@ -2525,6 +2531,9 @@ class PetController:
         ):
             state.last_activity_decision = "defer"
             return
+        # Advance only on admission. Otherwise a fixed activity interval
+        # dividing the 120-second cooldown can always select the same pet.
+        self._activity_round = (index + 1) % len(robots)
         state.last_activity_decision = "consider"
         change = SceneChange(
             _ACTIVITY_RECONSIDERATION_KIND,
