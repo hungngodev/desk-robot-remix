@@ -84,6 +84,9 @@ int main() {
   assert(!read_thermal_chunk(bus, 0x69, 0, frame.data()));
   bus.invalid_byte = false;
   // Last pixel invalid: the chunk must not partially overwrite old data.
+  // Make every preceding pixel distinct from the cached 25 C frame.
+  // Otherwise direct writes before a late failure are unobservable.
+  for (int i = 0; i < 7; ++i) bus.data[2 * i] = 0x50;  // 20 C
   bus.data[14] = 0x41;
   bus.data[15] = 0x01;  // 80.25 C is outside AMG8833 high-gain spec.
   assert(!read_thermal_chunk(bus, 0x69, 0, frame.data()));
@@ -91,6 +94,8 @@ int main() {
   bus.data[14] = 0x40;
   bus.data[15] = 0x01;
   assert(read_thermal_chunk(bus, 0x69, 0, frame.data()));
+  for (int i = 0; i < 7; ++i) assert(frame[i] == 20.0f);
   assert(frame[7] == 80.0f);
+  for (int i = 8; i < 64; ++i) assert(frame[i] == 25.0f);
   std::cout << "PASS room thermal 8x16 I2C chunks, bounded AMG8833 pixels, atomic chunk and faults\n";
 }

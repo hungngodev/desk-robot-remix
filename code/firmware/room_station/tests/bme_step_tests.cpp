@@ -56,6 +56,22 @@ int main() {
   step(4001); assert(!bme_completed.fresh(4001, kBmeStaleMs));
   bme.remaining = 0; step(5001);
   assert(!bme_completed.valid && !bme_pending && bme.ends == 2);
+  // A successful next conversion must replace every field together, not
+  // just the gas value and timestamp. Use distinct scratch and new values.
+  reset(); step(1000); step(1200);
+  step(2000); bme.remaining = 50;
+  bme.temperature = 90; bme.humidity = 99; bme.pressure = 40000;
+  bme.next_temp = 21; bme.next_humidity = 42;
+  bme.next_pressure = 102000; bme.next_gas = 67890;
+  step(2050);
+  assert(bme_completed.fresh(2050, kBmeStaleMs));
+  assert(bme_completed.temperature_c == -10 && bme_completed.humidity_pct == 55);
+  assert(bme_completed.pressure_pa == 101000 && bme_completed.gas_ohms == 12345);
+  assert(bme_completed.sample_ms == 1000);
+  bme.remaining = 0; step(2200);
+  assert(bme_completed.fresh(2200, kBmeStaleMs) && bme_completed.sample_ms == 2000);
+  assert(bme_completed.temperature_c == 21 && bme_completed.humidity_pct == 42);
+  assert(bme_completed.pressure_pa == 102000 && bme_completed.gas_ohms == 67890);
   for (int fault = 0; fault < 9; ++fault) {
     reset(); step(1000); step(1200); assert(bme_completed.valid);
     if (fault == 0) bme.start_ok = false;
