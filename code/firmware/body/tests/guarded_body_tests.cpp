@@ -2164,6 +2164,51 @@ static void raw_bumper_trip_preempts_debounce_and_preserves_payload() {
   CHECK(send(startup, "arm", 0) == "ERR arm bumper_active");
 }
 
+static void raw_bumper_bounce_resets_both_edge_classifiers() {
+  desk_robot::CliffGuard guard;
+  CHECK(guard.configure(config()));
+  fresh(guard, 0);
+  desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+  body.sample_optional_inputs(1U, false, false, false);
+  CHECK(send(body, "rearm", 0, true) == "OK rearm");
+  CHECK(send(body, "arm", 0) == "OK arm");
+  CHECK(send(body, "drive 30 30 250", 0).find("OK drive") == 0);
+  body.sample_bumper_input(true);
+  CHECK(!body.state().armed && body.state().left == 0 && body.state().right == 0);
+  CHECK(body.state().servos_attached);
+  // Three classifier calls seeing HIGH are not consecutive if the fast
+  // safety sampler observed a LOW transition between each pair.
+  for (int i = 0; i < 3; ++i) {
+    body.sample_optional_inputs(1U, true, false, false);
+    CHECK(body.state().bumper_events == 0 && !body.state().bumper_active);
+    body.sample_bumper_input(false);
+    body.sample_bumper_input(true);
+  }
+  // Fast repeated HIGH reads alone never advance the event classifier.
+  for (int i = 0; i < 20; ++i) body.sample_bumper_input(true);
+  CHECK(body.state().bumper_events == 0);
+  for (int i = 0; i < 3; ++i) {
+    body.sample_optional_inputs(1U, true, false, false);
+    CHECK(body.state().bumper_events == (i == 2 ? 1U : 0U));
+  }
+  // A momentary NC closure must not count toward stable release either.
+  for (int i = 0; i < 3; ++i) {
+    body.sample_optional_inputs(1U, false, false, false);
+    CHECK(body.state().bumper_active);
+    body.sample_bumper_input(true);
+    body.sample_bumper_input(false);
+  }
+  for (int i = 0; i < 3; ++i) {
+    body.sample_optional_inputs(1U, false, false, false);
+    CHECK(body.state().bumper_active == (i < 2));
+  }
+  CHECK(body.state().bumper_events == 1);
+  CHECK(send(body, "arm", 20) == "ERR arm bumper_latched");
+  CHECK(send(body, "rearm", 20) == "ERR rearm local_only");
+  CHECK(send(body, "rearm", 20, true) == "OK rearm");
+  CHECK(!body.state().armed && body.state().left == 0 && body.state().right == 0);
+}
+
 static void accessory_reconnect_does_not_invent_petting_events() {
   // A reed hat switch or PIR can stay HIGH while its MCP23017 transport
   // disappears. Recovered data is an initial state, not a new physical tap.
@@ -3136,6 +3181,7 @@ int main() {
     optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract();
     dual_ir_evidence_never_authorizes_body_motion_or_charging();
     raw_bumper_trip_preempts_debounce_and_preserves_payload();
+    raw_bumper_bounce_resets_both_edge_classifiers();
     accessory_reconnect_does_not_invent_petting_events();
     optional_sensor_inputs_never_arm_or_forge_boot_events();
     battery_readiness_matches_stricter_arm_voltage();

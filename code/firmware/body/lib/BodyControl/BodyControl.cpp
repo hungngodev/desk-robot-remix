@@ -294,6 +294,13 @@ void BodyControl::set_cap(bool valid, std::uint8_t zones) {
 }
 
 void BodyControl::sample_bumper_input(bool active) {
+  // A raw transition between slow event samples invalidates the old
+  // candidate streak. Only the classifier advances the streak, never
+  // repeated fast GPIO reads. Safety still trips on the first raw HIGH.
+  if (active != state_.bumper_raw) {
+    extra_candidates_[0] = active;
+    extra_streaks_[0] = 0;
+  }
   state_.bumper_raw = active;
   if (active) {
     // A released switch is not a new operator permission. The guarded
