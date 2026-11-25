@@ -133,12 +133,10 @@ def evaluate(*, chassis_mount_above_desk_mm: float | None = None,
         baseline["firmware_valid_min_mm"] <= nearest_slant
         and farthest_slant <= baseline["firmware_valid_max_mm"]
     )
-    # Worst case: floor remains at the rear rim of the optical cone even
-    # after the center ray has crossed the tabletop edge. For forward
-    # tilted sensors we conservatively credit NO additional forward lead.
-    rear_floor_setback = max(
-        0.0, -height * math.tan(math.radians(rear_angle))
-    )
+    # Tilt is a magnitude; this interface has no measured azimuth.
+    # The cone may lean toward the trailing floor, so use its maximum
+    # radial reach, as in the planar coverage screen.
+    rear_floor_setback = height * math.tan(math.radians(front_angle))
     stopping = ((measured_worst_stopping_distance_mm if worst_supplied
                  else measured_p95_stopping_distance_mm)
                 + remaining_vision_or_sensor_latency_ms
@@ -441,7 +439,8 @@ def main():
                              help="Chassis datum plus provisional CAD aperture offset")
     height_args.add_argument("--lens-above-desk-mm", type=float,
                              help="Measured optical center above tabletop, not coupon rim")
-    parser.add_argument("--tilt-deg", type=float)
+    parser.add_argument("--tilt-deg", type=float,
+                        help="Tilt magnitude from downward vertical; worst azimuth assumed")
     parser.add_argument("--sensor-ahead-of-wheel-mm", type=float)
     parser.add_argument("--measured-worst-stopping-mm", type=float,
                         help="Highest observed loaded stop, never p95 alone")

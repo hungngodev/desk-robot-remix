@@ -1,5 +1,6 @@
 """Host source/geometry safety contract for the 8 inexpensive VL53L0X lanes."""
 import importlib.util
+import math
 from pathlib import Path
 
 import pytest
@@ -495,3 +496,21 @@ def test_measured_lens_cli_preserves_datum_and_rejects_conflicts():
                         ["--floor-mount-template"]):
         rejected = subprocess.run([*cmd, *conflicting], capture_output=True, text=True)
         assert rejected.returncode == 2
+
+
+@pytest.mark.parametrize("height, tilt, setback", [
+    (31.15, 0, 6.9057887),
+    (33.5, 0, 7.4267712),
+    (31.15, 20, 19.8447386),
+])
+def test_unsigned_tilt_uses_worst_rearward_azimuth(height, tilt, setback):
+    args = dict(chassis_mount_above_desk_mm=None,
+                measured_lens_above_desk_mm=height, optical_tilt_deg=tilt)
+    required = 28 + height * math.tan(math.radians(tilt + 12.5))
+    result = evaluate(**args, leading_wheel_behind_sensor_mm=required)
+    assert result["rear_floor_return_setback_mm"] == pytest.approx(setback, abs=0.001)
+    assert result["required_wheel_behind_sensor_mm"] == pytest.approx(required)
+    assert not result["candidate_geometry_possible_on_paper"]
+    assert evaluate(**args, leading_wheel_behind_sensor_mm=required + 0.001)[
+        "candidate_geometry_possible_on_paper"]
+    assert not result["40_sensor_fleet_purchase_approved"]

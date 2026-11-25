@@ -67,10 +67,13 @@ The manufacturer's range tables assume the full FoV is covered. A desk edge
 violates that assumption, so its reported range may remain plausible while
 some of its optical cone still intersects the table.
 
-For a downward optical center at height `H`, nominal tilt `t` degrees
-toward the front, and ST half FoV `b = 12.5 degrees`, the worst
-backward floor echo footprint is bounded geometrically by
-`rearward echo setback = max(0, -H * tan(t - b))`.
+For a downward optical center at height `H`, nominal tilt magnitude `t`
+from downward vertical, and ST half FoV `b = 12.5 degrees`, the worst
+backward floor echo footprint with unknown tilt azimuth is bounded by
+`rearward echo setback = H * tan(t + b)`.
+The straight-drive and planar screens both use this bound. At zero tilt,
+the footprint diameter is twice the setback; 7.43 mm is the rounded
+radius for a 33.5 mm lens height, not the current 31.15 mm example.
 This geometric bound is a conservative **model**, not a guaranteed signal
 response of a mixed/partial field or a measured false-negative probability.
 
@@ -82,8 +85,9 @@ engineering clearance margin + rearward echo setback`.
 
 The source also checks the closest and farthest optical path across the
 full FoV against the **actual firmware** 30..1300 mm acceptance range, and
-rejects tilt where the cone reaches the horizon. It deliberately gives no
-extra braking credit for a forward tilted optical axis.
+rejects tilt where the cone reaches the horizon. Without measured azimuth,
+it deliberately assumes the cone could tilt rearward rather than crediting
+a forward tilt.
 
 **Specific prior false positive:** with mount 20 mm above desk and current
 11.15 mm adapter optical center, height is 31.15 mm. ST's 25 degree FoV
