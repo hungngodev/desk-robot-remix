@@ -6,14 +6,12 @@
 #include <Arduino.h>
 
 #include "BodyPins.h"
+#include "ReplyTxQueue.h"
 #include "ServoCenterBenchGate.h"
 
 namespace {
 desk_robot::ServoCenterBenchGate gate;
-constexpr std::size_t kLineCapacity = 24;
-char line[kLineCapacity]{};
-std::size_t length = 0;
-bool invalid_line = false;
+desk_robot::ReplyTxQueue<256> replies;
 bool pwm_ready = false;
 
 unsigned center_duty() {
@@ -32,21 +30,31 @@ int servo_channel(desk_robot::ServoCenterBenchGate::Channel ch) {
       body_pins::kServoChannels[0] : body_pins::kServoChannels[1];
 }
 
-void process_line(std::uint32_t now_ms) {
-  line[length] = '\0';
-  if (invalid_line || !pwm_ready || !gate.request(line, now_ms)) {
-    Serial.println("ERR CENTER invalid_busy_or_already_used");
-  } else {
+void process_byte(int byte, std::uint32_t now_ms) {
+  using Result = desk_robot::ServoCenterBenchGate::InputResult;
+  const auto result = gate.feed(byte, now_ms, pwm_ready);
+  if (result == Result::Rejected) {
+    replies.enqueue_line("ERR CENTER invalid_busy_or_already_used");
+  } else if (result == Result::Started) {
     const auto channel = gate.active();
     // Program the 1500 us commanded position BEFORE attaching PWM.
     ledcWrite(servo_channel(channel), center_duty());
     ledcAttachPin(servo_pin(channel), servo_channel(channel));
-    Serial.println(channel == desk_robot::ServoCenterBenchGate::Channel::Lift ?
-                   "OK CENTER LIFT started_400ms" :
-                   "OK CENTER GRIP started_400ms");
+    replies.enqueue_line(channel == desk_robot::ServoCenterBenchGate::Channel::Lift ?
+                         "OK CENTER LIFT started_400ms" :
+                         "OK CENTER GRIP started_400ms");
   }
-  length = 0;
-  invalid_line = false;
+}
+
+void service_deadline() {
+  const std::uint32_t now_ms = millis();
+  if (!gate.should_detach(now_ms)) return;
+  const int pin = servo_pin(gate.active());
+  ledcDetachPin(pin);
+  pinMode(pin, OUTPUT);
+  digitalWrite(pin, LOW);
+  gate.complete(now_ms);
+  replies.enqueue_line("OK CENTER_DONE pwm_detached");
 }
 }  // namespace
 
@@ -69,38 +77,26 @@ void setup() {
   pwm_ready = ledcSetup(body_pins::kServoChannels[1],
                         body_pins::kServoFrequency,
                         body_pins::kServoResolution) != 0 && pwm_ready;
-  Serial.println("INFO BENCH ONLY: motors disconnected, both horns removed");
-  Serial.println("INFO USB commands CENTER LIFT or CENTER GRIP, once each");
-  if (!pwm_ready) Serial.println("ERR LEDC setup_no_servo_output");
+  replies.enqueue_line("INFO BENCH ONLY: motors disconnected, both horns removed");
+  replies.enqueue_line("INFO USB commands CENTER LIFT or CENTER GRIP, once each");
+  if (!pwm_ready) replies.enqueue_line("ERR LEDC setup_no_servo_output");
 }
 
 void loop() {
-  const std::uint32_t now_ms = millis();
-  if (gate.should_detach(now_ms)) {
-    const int pin = servo_pin(gate.active());
-    ledcDetachPin(pin);
-    pinMode(pin, OUTPUT);
-    digitalWrite(pin, LOW);
-    gate.complete(now_ms);
-    Serial.println("OK CENTER_DONE pwm_detached");
-  }
+  service_deadline();
   // A continuous 115200-baud input stream cannot keep this loop busy
   // indefinitely and postpone the next servo PWM detachment deadline.
   const int available = Serial.available();
   const std::size_t budget = gate.serial_budget(
       available > 0 ? static_cast<std::size_t>(available) : 0U);
   for (std::size_t scanned = 0; scanned < budget; ++scanned) {
+    service_deadline();
     const int byte = Serial.read();
     if (byte < 0) break;
-    if (byte == '\r') continue;  // Accept common CRLF terminal mode.
-    if (byte == '\n') {
-      process_line(millis());
-      continue;
-    }
-    if (byte < 32 || byte > 126 || length >= kLineCapacity - 1) {
-      invalid_line = true;
-    } else if (!invalid_line) {
-      line[length++] = static_cast<char>(byte);
-    }
+    process_byte(byte, millis());
   }
+  // A saturated or disconnected USB TX must never extend an active pulse.
+  // Replies may be dropped; loss of a receipt is not permission to retry.
+  service_deadline();
+  replies.drain(Serial);
 }

@@ -1,9 +1,59 @@
 #include "ServoCenterBenchGate.h"
+#include <Arduino.h>
 
 #include <cassert>
 #include <cstdint>
 
 using Gate = desk_robot::ServoCenterBenchGate;
+
+namespace servo_bench_fake {
+std::uint32_t clock_ms = 0, attached_at = 0, detached_at = 0;
+int attached_pin = -1;
+unsigned writes = 0;
+}
+FakeServoSerial Serial;
+#include "../src/servo_center_bench.cpp"
+
+static void test_live_loop() {
+  using namespace servo_bench_fake;
+  setup();
+  Serial.feed("CENTER LIFT\r\n");
+  loop();
+  assert(attached_pin == body_pins::kLiftServo);
+  assert(Serial.blocking_prints == 0 && clock_ms == 0);
+  Serial.feed(std::string(5000, '\n'));
+  // Even when the clock advances *within* a slice of RX bytes, detach
+  // at the deadline rather than at the end of that slice.
+  clock_ms = 390;
+  Serial.rx_read_ms = 1;
+  loop();
+  assert(attached_pin == -1 && detached_at - attached_at == 400);
+  assert(Serial.blocking_prints == 0);
+  assert(Serial.rx.size() == 5000 - Gate::kMaxSerialBytesPerPoll);
+  Serial.rx.clear();
+  Serial.rx_read_ms = 0;
+  Serial.feed("CEN\rTER GRIP\nCENTER GRIP\r\r\n");
+  loop();
+  assert(attached_pin == -1 && writes == 1);
+  Serial.feed(std::string(80, 'X') + "CENTER GRIP\n");
+  while (!Serial.rx.empty()) loop();
+  assert(attached_pin == -1 && writes == 1);
+  Serial.feed("CENTER GRIP\n");
+  loop();
+  assert(attached_pin == body_pins::kGripServo && writes == 2);
+  clock_ms = attached_at + Gate::kCenterWindowMs;
+  loop();
+  assert(attached_pin == -1 && detached_at - attached_at == 400);
+  Serial.feed("CENTER LIFT\nCENTER GRIP\n");
+  loop();
+  assert(attached_pin == -1 && writes == 2);
+  // Restore TX after saturation: no partial or fabricated frames.
+  for (unsigned i = 0; i < 16; ++i) {
+    Serial.free = 7;
+    loop();
+  }
+  assert(Serial.blocking_prints == 0);
+}
 
 int main() {
   // Even a continuously refilled USB RX queue leaves each loop iteration
@@ -59,5 +109,6 @@ int main() {
   // Nothing automatically starts after idle or expiry.
   assert(wrapped.active() == Gate::Channel::None);
   assert(!wrapped.should_detach(0x00000400U));
+  test_live_loop();
   return 0;
 }

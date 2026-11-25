@@ -41,6 +41,29 @@ class ServoCenterBenchGate {
     return true;
   }
 
+  enum class InputResult { Incomplete, Rejected, Started };
+  // Only a terminal CR immediately followed by LF is framing. Embedded CR,
+  // repeated CR, control bytes and overflow poison the entire command.
+  InputResult feed(int byte, std::uint32_t now_ms, bool pwm_ready) {
+    if (byte == '\n') {
+      line_[length_] = '\0';
+      const bool started = !invalid_line_ && pwm_ready && request(line_, now_ms);
+      length_ = 0;
+      invalid_line_ = false;
+      trailing_cr_ = false;
+      return started ? InputResult::Started : InputResult::Rejected;
+    }
+    if (trailing_cr_) invalid_line_ = true;
+    if (byte == '\r') {
+      trailing_cr_ = true;
+    } else if (byte < 32 || byte > 126 || length_ >= sizeof(line_) - 1) {
+      invalid_line_ = true;
+    } else if (!invalid_line_) {
+      line_[length_++] = static_cast<char>(byte);
+    }
+    return InputResult::Incomplete;
+  }
+
   Channel active() const { return active_; }
   bool should_detach(std::uint32_t now_ms) const {
     return active_ != Channel::None &&
@@ -61,6 +84,10 @@ class ServoCenterBenchGate {
   Channel active_ = Channel::None;
   std::uint8_t used_ = 0U;
   std::uint32_t started_ms_ = 0U;
+  char line_[24]{};
+  std::size_t length_ = 0;
+  bool invalid_line_ = false;
+  bool trailing_cr_ = false;
 };
 
 }  // namespace desk_robot
