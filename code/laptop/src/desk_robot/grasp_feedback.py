@@ -29,6 +29,9 @@ _JAW_POLL_INTERVAL_S = 0.075
 # Include a poll at 375 ms: five attempts only reach 300 ms and can miss
 # the next nominal 336 ms sample during immediate contact confirmation.
 _JAW_MAX_POLLS = 6
+# Require a bounded no-motion observation interval after first contact.
+# This is a software dwell, not a measured mechanical hold qualification.
+_CONTACT_DWELL_S = 0.15
 
 
 # At four degrees per independent conversion and ~336 ms cadence, a full
@@ -166,7 +169,9 @@ async def guarded_grasp(
         force_boot_id = observed_boot
         return *observation, expires_at
 
-    async def confirmed_health(expected_target: int | None = None, *, settled: bool = False) -> dict:
+    async def confirmed_health(
+        expected_target: int | None = None, *, settled: bool = False,
+    ) -> dict:
         nonlocal force_boot_changed
         # The normal Coordinator raises for disarmed/foreign WROOM status,
         # but an alternate head/health adapter may merely return a false
@@ -271,7 +276,10 @@ async def guarded_grasp(
             # closing pulse would compress the object before confirmation.
             for confirmation in range(2):
                 if confirmation:
-                    await confirmed_health(angle)
+                    await confirmed_health(angle, settled=True)
+                    if time.monotonic() >= jaw_expires_at:
+                        raise OperationError("Jaw ADC evidence expired before contact dwell")
+                    await asyncio.sleep(_CONTACT_DWELL_S)
                 try:
                     measured, seq, jaw_expires_at = await read_new_jaw(
                         latest_seq, "No new jaw sample after servo movement",
