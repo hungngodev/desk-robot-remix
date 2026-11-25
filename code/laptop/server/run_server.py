@@ -94,6 +94,11 @@ def main():
         p.error("Create data/.config.yaml using config/xiaozhi.local.example.yaml first")
     try:
         verified_xiaozhi_auth_config(local_config)
+        from install_overlay import verify_installed_overlay
+
+        verify_installed_overlay(
+            ROOT / "upstream/xiaozhi-esp32-server", server.parent.parent,
+        )
     except ValueError as exc:
         p.error(str(exc))
     import sys

@@ -367,7 +367,7 @@ def checked_path(root: Path, name: str) -> Path:
     return path
 
 
-def install(upstream: Path, output: Path):
+def verify_upstream(upstream: Path) -> None:
     pin = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=upstream, text=True).strip()
     if pin != PIN:
         raise ValueError("Use the pinned server source from upstream-lock.json")
@@ -375,6 +375,42 @@ def install(upstream: Path, output: Path):
         ["git", "status", "--porcelain", "--untracked-files=no"], cwd=upstream, text=True,
     ).strip():
         raise ValueError("Preserve upstream source changes before installing")
+
+
+def verify_installed_overlay(upstream: Path, output: Path) -> None:
+    """Require the current pinned overlay before opening authenticated sockets."""
+    try:
+        verify_upstream(upstream)
+        marker = checked_path(output, ".desk-robot-server-overlay.json")
+        root = checked_path(output, "main/xiaozhi-server")
+        current = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], cwd=output, text=True,
+        ).strip()
+        if current != PIN or not marker.is_file():
+            raise ValueError("Launch requires the pinned managed server build")
+        changes = files(upstream / "main/xiaozhi-server")
+        expected = {
+            name: hashlib.sha256(source.encode()).hexdigest()
+            for name, source in changes.items()
+        }
+        if json.loads(marker.read_text()) != expected:
+            raise ValueError("Server overlay is stale or incomplete; reinstall before launch")
+        for name, digest in expected.items():
+            path = checked_path(root, name)
+            if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != digest:
+                raise ValueError(f"Server overlay file differs before launch: {name}")
+        tracked = subprocess.check_output(
+            ["git", "diff", "--name-only", "-z", "HEAD", "--"], cwd=output,
+        )
+        allowed = {f"main/xiaozhi-server/{name}".encode() for name in changes}
+        if set(tracked.split(b"\0")) - allowed - {b""}:
+            raise ValueError("Unmanaged tracked changes in server build; preserve before launch")
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ValueError("Cannot verify installed pinned server build") from exc
+
+
+def install(upstream: Path, output: Path):
+    verify_upstream(upstream)
     changes = files(upstream / "main/xiaozhi-server")
     marker = checked_path(output, ".desk-robot-server-overlay.json")
     root = checked_path(output, "main/xiaozhi-server")

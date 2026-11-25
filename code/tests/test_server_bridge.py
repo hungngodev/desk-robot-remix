@@ -3436,3 +3436,63 @@ def test_overlay_refresh_preserves_unmanaged_files(tmp_path, monkeypatch, scenar
             assert (built / "managed.py").read_text() == "user change"
         elif scenario == "new-edit":
             assert (built / "tracked.py").read_text() == "user change"
+
+
+@pytest.mark.parametrize(
+    "scenario", ["valid", "stale", "modified", "missing", "wrong-pin", "unmanaged"],
+)
+def test_launch_verifies_current_overlay(tmp_path, monkeypatch, scenario):
+    import hashlib
+    import subprocess
+
+    spec = importlib.util.spec_from_file_location(
+        "server_overlay_launch", ROOT / "laptop/server/install_overlay.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    upstream = tmp_path / "upstream"
+    root = upstream / "main/xiaozhi-server"
+    root.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q"], cwd=upstream, check=True)
+    (root / "app.py").write_text("upstream")
+    (root / "untouched.py").write_text("untouched")
+    subprocess.run(["git", "add", "."], cwd=upstream, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+         "commit", "-qm", "fixture"], cwd=upstream, check=True,
+    )
+    pin = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=upstream, text=True).strip()
+    monkeypatch.setattr(module, "PIN", pin)
+    monkeypatch.setattr(module, "files", lambda _root: {"app.py": "current overlay"})
+    output = tmp_path / "build"
+    module.install(upstream, output)
+    marker = output / ".desk-robot-server-overlay.json"
+    built = output / "main/xiaozhi-server"
+    if scenario == "stale":
+        (built / "app.py").write_text("previous overlay")
+        marker.write_text(json.dumps({
+            "app.py": hashlib.sha256(b"previous overlay").hexdigest(),
+        }))
+    elif scenario == "modified":
+        (built / "app.py").write_text("modified")
+    elif scenario == "missing":
+        marker.unlink()
+    elif scenario == "wrong-pin":
+        subprocess.run(
+            ["git", "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+             "commit", "--allow-empty", "-qm", "wrong pin"], cwd=output, check=True,
+        )
+    elif scenario == "unmanaged":
+        (built / "untouched.py").write_text("modified")
+    if scenario == "valid":
+        module.verify_installed_overlay(upstream, output)
+    else:
+        with pytest.raises(ValueError):
+            module.verify_installed_overlay(upstream, output)
+
+
+def test_launcher_verifies_overlay_before_upstream_app():
+    source = (ROOT / "laptop/server/run_server.py").read_text()
+    assert source.index("verify_installed_overlay(") < source.index(
+        'runpy.run_path(str(server / "app.py")'
+    )
