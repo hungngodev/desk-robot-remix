@@ -171,7 +171,8 @@ def test_sense_32khz_speaker_wav_matches_reference_phase(tmp_path):
     assert rate == 32000
     assert len(reference) == 32000
     assert reference[0] == 0
-    expected_pcm = int((2 * recorded[0] + recorded[1]) * 32768 / 4)
+    accumulated = 21 * recorded[0] + 15 * recorded[1] + recorded[2]
+    expected_pcm = int(np.copysign(np.floor(abs(accumulated) + 0.5), accumulated))
     assert reference[1] == expected_pcm / 32768
     microphone = np.concatenate((np.zeros(1120), reference))[:len(reference)]
     report = estimate_delay(reference, microphone)
@@ -370,20 +371,55 @@ def test_capture_receipt_binds_same_length_wavs(tmp_path):
         validate(receipt, ref, rate, received, mic_rate)
 
 
+@pytest.fixture(scope="module")
+def reference_decimator_executable(tmp_path_factory):
+    import shutil
+    import subprocess
+
+    compiler = shutil.which("c++")
+    if compiler is None:
+        pytest.skip("C++17 compiler unavailable")
+    directory = tmp_path_factory.mktemp("sense_fir")
+    probe = directory / "probe.cc"
+    probe.write_text(
+        '#include "reference_decimator.h"\n'
+        '#include <iostream>\n'
+        'int main() {\n'
+        '  desk_robot::ReferenceDecimator fir;\n'
+        '  int value;\n'
+        '  while (std::cin >> value) {\n'
+        '    int16_t output = 0;\n'
+        '    if (fir.Push(static_cast<int16_t>(value), output)) std::cout << output << "\\n";\n'
+        '  }\n'
+        '}\n'
+    )
+    executable = directory / "probe"
+    include = Path(__file__).resolve().parents[1] / "firmware/head/sense"
+    subprocess.run(
+        [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-I", str(include),
+         str(probe), "-o", str(executable)],
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    return executable
+
+
 @pytest.mark.parametrize("samples", [
     [1, -3, -4, 0, 1, 1, 0],
     [32767, -32768, -32768, 32767, 32767, -32768],
     [1, 1, 1, -1, -1, -1, 0, 0],
+    [32767] + [0] * 79,
+    [0, -32768] + [0] * 79,
+    [32767] * 120 + [-32768] * 121,
+    np.random.default_rng(7).integers(-32768, 32768, 2049).tolist(),
 ])
-def test_sense_exact_integer_filter(samples):
-    # Mirror the codec's reset phase and signed C++ integer division.
-    expected = []
-    previous2 = previous1 = previous_filtered = 0
-    for index, sample in enumerate(samples):
-        if index % 2 == 0:
-            expected.append(previous_filtered)
-        previous_filtered = int((previous2 + 2 * previous1 + sample) / 4)
-        previous2, previous1 = previous1, sample
+def test_sense_exact_integer_filter(samples, reference_decimator_executable):
+    import subprocess
+
+    result = subprocess.run(
+        [str(reference_decimator_executable)], input="\n".join(map(str, samples)),
+        check=True, capture_output=True, text=True, timeout=30,
+    )
+    expected = np.fromstring(result.stdout, dtype=np.int64, sep=" ")
     actual = resample_reference(np.asarray(samples, dtype=np.float64) / 32768, 32000)
     np.testing.assert_array_equal(actual * 32768, expected)
 

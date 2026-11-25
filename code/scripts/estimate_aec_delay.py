@@ -83,8 +83,7 @@ def resample_reference(source: np.ndarray, original_rate: int) -> np.ndarray:
     if original_rate == 16000:
         return source
     if original_rate == 32000:
-        # Match the selected Sense 3-tap 32-to-16 kHz AEC reference phase.
-        # Real acoustic delay still requires synchronized board recordings.
+        # Mirror ReferenceDecimator's causal Q15 FIR, zero history and even phase.
         values = np.asarray(source, dtype=np.float64)
         if values.ndim != 1 or len(values) < 2:
             raise ValueError("Need mono speaker PCM")
@@ -92,13 +91,16 @@ def resample_reference(source: np.ndarray, original_rate: int) -> np.ndarray:
             (values < -1.0) | (values > 32767 / 32768)
         ):
             raise ValueError("Speaker reference must contain finite normalized PCM16")
-        # SenseReferenceCodec filters signed PCM16 with integer division,
-        # truncating toward zero before decimation. Preserve its reset phase.
-        pcm = np.rint(values * 32768).astype(np.int32)
-        padded = np.pad(pcm, (2, 0))
-        numerator = padded[:-2] + 2 * padded[1:-1] + padded[2:]
-        filtered = np.trunc(numerator / 4).astype(np.int32)
-        return np.concatenate((np.zeros(1), filtered[1:-1:2])) / 32768
+        half = np.array([
+            1, 15, 21, -1, -34, -19, 43, 57, -34, -106, -9, 151, 96, -163, -221, 111,
+            362, 35, -475, -291, 497, 649, -350, -1078, -64, 1519, 908, -1906,
+            -2698, 2170, 10158,
+        ], dtype=np.int64)
+        taps = np.concatenate((half, [14080], half[::-1]))
+        pcm = np.rint(values * 32768).astype(np.int64)
+        sums = np.convolve(pcm, taps, mode="full")[:len(pcm):2]
+        rounded = np.sign(sums) * ((np.abs(sums) + 16384) // 32768)
+        return np.clip(rounded, -32768, 32767) / 32768
     if original_rate != 24000:
         raise ValueError("Unsupported speaker sample rate")
     # Historical RIO captures at 24 kHz remain supported.
