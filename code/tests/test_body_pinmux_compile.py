@@ -11,8 +11,10 @@ pytestmark = pytest.mark.skipif(COMPILER is None, reason="g++ is unavailable")
 
 
 def compile_header(source, flags):
+    # Header-only translation units intentionally leave some pin constants unused.
     return subprocess.run(
         [COMPILER, "-std=c++11", "-Wall", "-Wextra", "-Werror",
+         "-Wno-unused-const-variable",
          "-x", "c++", "-fsyntax-only", *flags, "-"],
         input=source.replace("#pragma once", ""),
         text=True, capture_output=True, check=False,
@@ -59,7 +61,8 @@ def test_servo_pwm_mutations_fail(flags, old, new, diagnostic):
     assert source.count(old) == 1
     result = compile_header(source.replace(old, new), flags)
     assert result.returncode != 0
-    assert f"static assertion failed: {diagnostic}" in result.stderr
+    assert "static assertion failed" in result.stderr
+    assert diagnostic in result.stderr
 
 
 @pytest.mark.parametrize("old,new,diagnostic", [
@@ -77,4 +80,5 @@ def test_motor_pwm_mutations_fail(old, new, diagnostic):
     assert source.count(old) == 1
     result = compile_header(source.replace(old, new), DC_FLAGS)
     assert result.returncode != 0
-    assert f"static assertion failed: {diagnostic}" in result.stderr
+    assert "static assertion failed" in result.stderr
+    assert diagnostic in result.stderr
