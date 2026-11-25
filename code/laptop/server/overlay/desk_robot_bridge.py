@@ -851,12 +851,15 @@ async def transmit(conn, text, frames, *, passive: bool = False):
             # framing. The native adapter already owns the device send lock:
             # a human STOP must not race past an in-flight Mac Opus packet.
             send_native = getattr(native, "send_external_opus", None)
+            packet_started = time.monotonic()
             if leased and callable(send_native):
                 await send_native(conn, packet, generation)
             else:
                 await conn.websocket.send(packet)
             conn.last_activity_time = time.time() * 1000
-            await asyncio.sleep(0.06)
+            # Transport time already consumed part of this 60 ms frame.
+            # Never add a second full frame of delay after the socket send.
+            await asyncio.sleep(max(0.0, 0.06 - (time.monotonic() - packet_started)))
         await asyncio.sleep(0.24)  # estimated buffer tail; no physical playback acknowledgement
         if (conn.client_abort
                 or generation != interrupt_generation.get(conn.device_id, 0)

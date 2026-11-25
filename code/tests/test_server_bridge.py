@@ -3740,3 +3740,46 @@ async def test_group_barge_orders_stop_after_inflight_opus(bridge, monkeypatch):
         bridge.speaker_lock.release()
         if bridge.lease_cleanup_task is not None:
             await bridge.lease_cleanup_task
+
+
+@pytest.mark.parametrize("send_seconds", [0.015, 0.060, 0.090])
+async def test_mac_opus_pacing_includes_socket_send_time(
+    bridge, monkeypatch, send_seconds,
+):
+    """Socket write duration must not accumulate on top of frame duration."""
+    current = conn("mac-01")
+    current.conn_from_mqtt_gateway = False
+    current.session_id = "pacing-session"
+    current.clearSpeakStatus = lambda: None
+    bridge.register(current)
+    clock = [100.0]
+    starts = []
+    bridge.lease_ids = frozenset({current.device_id})
+    bridge.lease_until = 120.0
+
+    class Socket:
+        async def send(self, packet):
+            starts.append(clock[0])
+            clock[0] += send_seconds
+
+    current.websocket = Socket()
+
+    async def fake_tts(_conn, _state, _text=None):
+        pass
+
+    async def fake_sleep(seconds):
+        assert seconds >= 0
+        clock[0] += seconds
+
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: None)
+    monkeypatch.setattr(
+        bridge, "time", SimpleNamespace(monotonic=lambda: clock[0], time=time.time),
+    )
+    monkeypatch.setattr(bridge.asyncio, "sleep", fake_sleep)
+    monkeypatch.setitem(
+        sys.modules, "core.handle.sendAudioHandle",
+        SimpleNamespace(send_tts_message=fake_tts),
+    )
+    await bridge.transmit(current, "test", [b"a", b"b", b"c"])
+    interval = max(0.060, send_seconds)
+    assert starts == pytest.approx([100.0, 100.0 + interval, 100.0 + 2 * interval])

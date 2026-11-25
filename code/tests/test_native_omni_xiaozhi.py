@@ -9763,3 +9763,39 @@ async def test_native_five_buffered_camera_streams_yield_to_mic(native):
         for worker in workers:
             worker.cancel()
         await asyncio.gather(*workers, mic, return_exceptions=True)
+
+
+@pytest.mark.parametrize("send_seconds", [0.015, 0.060, 0.090])
+async def test_native_opus_pacing_includes_socket_send_time(
+    native, monkeypatch, send_seconds,
+):
+    """Native Opus uses the same frame interval, without a catch-up backlog."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections[conn.device_id] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    clock = [100.0]
+    starts = []
+
+    class Socket:
+        async def send(self, packet):
+            starts.append(clock[0])
+            clock[0] += send_seconds
+
+    async def fake_sleep(seconds):
+        assert seconds >= 0
+        clock[0] += seconds
+
+    conn.websocket = Socket()
+    monkeypatch.setattr(
+        module, "time", SimpleNamespace(monotonic=lambda: clock[0], time=time.time),
+    )
+    monkeypatch.setattr(module.asyncio, "sleep", fake_sleep)
+    for packet in (b"a", b"b", b"c"):
+        assert await session._send_device_opus(packet, session._generation)
+    interval = max(0.060, send_seconds)
+    assert starts == pytest.approx([100.0, 100.0 + interval, 100.0 + 2 * interval])
+    assert session.head_packets == 3

@@ -2583,6 +2583,7 @@ class NativeOmniSession:
                         if candidate.begin_send():
                             prefix = candidate
                     success = False
+                    packet_started = time.monotonic()
                     try:
                         await asyncio.wait_for(
                             self.conn.websocket.send(packet), timeout=0.4,
@@ -2606,8 +2607,10 @@ class NativeOmniSession:
                 if _output_owner == self.device:
                     _output_owner = None
             return False
-        # 60ms Opus audio pacing, not an acoustic playback confirmation.
-        await asyncio.sleep(0.060)
+        # Include elapsed transport time in this 60 ms packet interval.
+        # Do not accumulate a second full frame delay after every send.
+        # This is pacing, not acoustic playback confirmation.
+        await asyncio.sleep(max(0.0, 0.060 - (time.monotonic() - packet_started)))
         return True
 
     async def _invalidate_head_first(self) -> tuple[dict, ...]:
