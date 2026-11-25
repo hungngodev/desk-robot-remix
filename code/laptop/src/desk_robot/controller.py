@@ -20,7 +20,7 @@ from .dock_vision import assess_dock
 from .grasp_feedback import guarded_grasp
 from .object_search import ObjectSearchResult, summarize_search_observation
 from .object_targets import ObjectTarget
-from .transport import Head, HeadError, validate_command
+from .transport import Head, HeadError, expected_ack, validate_command
 from .vision import Detection, Vision, image_size
 
 _T = TypeVar("_T")
@@ -1629,12 +1629,31 @@ class Coordinator:
             nonlocal last_live_frame_at
             last_live_frame_at = max(last_live_frame_at, time.monotonic())
 
+        def require_ack(reply: object, command: str) -> None:
+            if (type(reply) is not dict or reply.get("ok") is not True
+                    or reply.get("robot_id") != job.robot_id
+                    or reply.get("reply") != expected_ack(command)):
+                raise OperationError(f"Unmatched pickup command ACK: {command}")
+
+        async def send_command(command: str) -> None:
+            reply = await _bounded_head_reply(
+                head.command(command), seconds=2.5,
+                timeout_message="Pickup command acknowledgement timed out",
+            )
+            require_ack(reply, command)
+
+        def require_fresh_observation() -> None:
+            if self.settings.mode == "hardware":
+                self._pickup_live_media(job.robot_id, camera_grant)
+                if not 0 <= time.monotonic() - last_live_frame_at <= 2.0:
+                    raise OperationError("Pickup visual evidence expired after health check")
+
         await self._assert_armed_health(job.robot_id)
         self._require_camera_motion_grant(camera_grant)
-        await head.command(f"grip {c.grip_open}")
+        await send_command(f"grip {c.grip_open}")
         await self._assert_armed_health(job.robot_id)
         self._require_camera_motion_grant(camera_grant)
-        await head.command(f"lift {c.lift_down}")
+        await send_command(f"lift {c.lift_down}")
         await asyncio.sleep(c.servo_settle_seconds)
         fence_observation()
         initial = None
@@ -1662,14 +1681,15 @@ class Coordinator:
                     and time.monotonic() - visual_received_at > 2.0):
                 raise OperationError("Pickup visual evidence expired before movement")
             self._require_camera_motion_grant(camera_grant)
-            await head.command(command)  # exactly once: an uncertain ACK is a failure
+            await send_command(command)  # exactly once: an uncertain ACK is a failure
             await asyncio.sleep(0.12)
-            await _bounded_pulse_stop(head)
+            require_ack(await _bounded_pulse_stop(head), "stop")
             fence_observation()
             await self._assert_armed_health(job.robot_id)
         if initial is None:
             raise OperationError("Alignment attempt limit reached")
         await self._assert_armed_health(job.robot_id)
+        require_fresh_observation()
         if self.settings.mode == "hardware":
             async def grasp_health() -> dict:
                 body = await self._assert_armed_health(job.robot_id)
@@ -1686,15 +1706,15 @@ class Coordinator:
             )
         else:
             self._require_camera_motion_grant(camera_grant)
-            await head.command(f"grip {c.grip_closed}")
+            await send_command(f"grip {c.grip_closed}")
             await asyncio.sleep(c.servo_settle_seconds)
         await self._assert_armed_health(job.robot_id)
         self._require_camera_motion_grant(camera_grant)
-        await head.command(f"lift {c.lift_up}")
+        await send_command(f"lift {c.lift_up}")
         await asyncio.sleep(c.servo_settle_seconds)
         # Image evidence: same category moves upward into measured raised-jaw region and remains
         # there in two fresh frames while wheels are stopped. A servo ACK alone never passes.
-        await _bounded_pulse_stop(head)
+        require_ack(await _bounded_pulse_stop(head), "stop")
         fence_observation()
         a, b, x, y = c.lifted_roi_px
         observed = []
@@ -1724,10 +1744,11 @@ class Coordinator:
         # suspended in the claw. Placement is a separate, observed phase: do
         # not open the jaws unless the object is visibly back over the
         # calibrated ground area. No blind wheel movement or drop command.
-        job.events.append("lift and hold visually verified; begin supervised placement")
         await self._assert_armed_health(job.robot_id)
+        require_fresh_observation()
+        job.events.append("lift and hold visually verified; begin supervised placement")
         self._require_camera_motion_grant(camera_grant)
-        await head.command(f"lift {c.lift_down}")
+        await send_command(f"lift {c.lift_down}")
         await asyncio.sleep(c.servo_settle_seconds)
         fence_observation()
         lowered, _ = await observe()
@@ -1740,14 +1761,15 @@ class Coordinator:
             raise OperationError("Placement unverified: object not over calibrated release area")
 
         await self._assert_armed_health(job.robot_id)
+        require_fresh_observation()
         # Release only after observing the object near the table, then raise
         # the empty jaws to distinguish a placed object from one stuck in them.
         self._require_camera_motion_grant(camera_grant)
-        await head.command(f"grip {c.grip_open}")
+        await send_command(f"grip {c.grip_open}")
         await asyncio.sleep(c.servo_settle_seconds)
         await self._assert_armed_health(job.robot_id)
         self._require_camera_motion_grant(camera_grant)
-        await head.command(f"lift {c.lift_up}")
+        await send_command(f"lift {c.lift_up}")
         await asyncio.sleep(c.servo_settle_seconds)
         fence_observation()
         placed_positions = []
@@ -1771,6 +1793,8 @@ class Coordinator:
             abs(placed_positions[0][i] - placed_positions[1][i]) for i in (0, 1)
         ) > c.alignment_tolerance_mm:
             raise OperationError("Placement unverified: object moved after jaw withdrawal")
+        await self._assert_armed_health(job.robot_id)
+        require_fresh_observation()
         job.events.append("two frames support placement after jaw withdrawal")
         return {
             "visually_verified": True,

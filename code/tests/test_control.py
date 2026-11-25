@@ -2343,3 +2343,57 @@ async def test_pickup_camera_receipts_follow_motion_and_hold_boundaries(settings
         assert job.result["physical_acceptance_pass"] is False
     finally:
         await c.close()
+
+
+@pytest.mark.parametrize("phase", ["grip", "lift", "drive", "stop"])
+async def test_pickup_fails_when_command_ack_is_lost(settings, phase):
+    c, head = make(settings)
+    original = head.command
+
+    async def dropped_ack(command):
+        receipt = await original(command)
+        if command.split()[0] == phase:
+            return None
+        return receipt
+
+    head.command = dropped_ack
+    try:
+        await c.operator_arm("robot-01")
+        job = c.pickup("robot-01", "key")
+        await c.tasks[job.id]
+        assert job.state == "failed"
+        assert "Unmatched pickup command ACK" in job.error
+        assert job.result is None
+        assert head.commands[-1] == "halt"
+    finally:
+        await c.close()
+
+
+async def test_pickup_final_inference_cannot_hide_body_disarm(settings):
+    c, head = make(settings)
+    original = c._observe
+    placement_frames = 0
+
+    async def observe(robot_id, target, calibration, *, after, camera_grant):
+        nonlocal placement_frames
+        result = await original(
+            robot_id, target, calibration, after=after, camera_grant=camera_grant,
+        )
+        if head.commands.count(f"lift {calibration.lift_up}") == 2:
+            placement_frames += 1
+            if placement_frames == 2:
+                head.armed = False
+        return result
+
+    c._observe = observe
+    try:
+        await c.operator_arm("robot-01")
+        job = c.pickup("robot-01", "key")
+        await c.tasks[job.id]
+        assert placement_frames == 2
+        assert job.state == "failed"
+        assert job.result is None
+        assert head.commands[-1] == "halt"
+        assert "two frames support placement after jaw withdrawal" not in job.events
+    finally:
+        await c.close()
