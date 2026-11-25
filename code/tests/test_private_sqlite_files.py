@@ -1,0 +1,64 @@
+"""The SQLite filesystem boundary rejects unsafe entries before database open."""
+
+import os
+
+import pytest
+from desk_robot.private_files import validate_private_sqlite_files
+
+
+@pytest.mark.parametrize("suffix", ["", "-journal", "-wal", "-shm"])
+def test_private_sqlite_rejects_case_aliases(tmp_path, suffix):
+    path = tmp_path / "pet_a.sqlite3"
+    alias = tmp_path / ("PET_A.sqlite3" + suffix)
+    alias.touch(mode=0o600)
+    with pytest.raises(ValueError, match="Case-aliased"):
+        validate_private_sqlite_files(path)
+
+
+@pytest.mark.parametrize("suffix", ["", "-journal", "-wal", "-shm"])
+@pytest.mark.parametrize("kind", ["directory", "fifo", "symlink", "hardlink"])
+def test_private_sqlite_rejects_unsafe_entries(tmp_path, suffix, kind):
+    path = tmp_path / "pet_a.sqlite3"
+    entry = tmp_path / (path.name + suffix)
+    peer = tmp_path / "pet_b.sqlite3"
+    peer.write_bytes(b"private peer data")
+    if kind == "directory":
+        entry.mkdir()
+    elif kind == "fifo":
+        os.mkfifo(entry)
+    elif kind == "symlink":
+        entry.symlink_to(peer)
+    else:
+        os.link(peer, entry)
+    with pytest.raises(ValueError, match="memory database|memory sidecar"):
+        validate_private_sqlite_files(path)
+    assert peer.read_bytes() == b"private peer data"
+
+
+@pytest.mark.parametrize("suffix", ["-journal", "-wal", "-shm"])
+def test_private_sqlite_rejects_readable_sidecar(tmp_path, suffix):
+    path = tmp_path / "pet_a.sqlite3"
+    sidecar = tmp_path / (path.name + suffix)
+    sidecar.touch()
+    sidecar.chmod(0o644)
+    with pytest.raises(PermissionError, match="sidecar must be owner-only"):
+        validate_private_sqlite_files(path)
+
+
+def test_private_sqlite_rejects_foreign_owner(tmp_path, monkeypatch):
+    path = tmp_path / "pet_a.sqlite3"
+    path.touch(mode=0o600)
+    uid = os.geteuid()
+    monkeypatch.setattr(os, "geteuid", lambda: uid + 1)
+    with pytest.raises(PermissionError, match="owner-owned"):
+        validate_private_sqlite_files(path)
+
+
+def test_private_sqlite_accepts_regular_private_files_and_legacy_main(tmp_path):
+    path = tmp_path / "pet_a.sqlite3"
+    validate_private_sqlite_files(path)
+    path.touch()
+    path.chmod(0o644)
+    for suffix in ("-journal", "-wal", "-shm"):
+        (tmp_path / (path.name + suffix)).touch(mode=0o600)
+    validate_private_sqlite_files(path)

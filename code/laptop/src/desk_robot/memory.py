@@ -20,6 +20,8 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from .private_files import validate_private_sqlite_files
+
 _ROBOT_ID = re.compile(r"[A-Za-z0-9_-]{1,40}\Z")
 _EVENT_ID = re.compile(r"[A-Za-z0-9_-]{1,96}\Z")
 _EVENT_KIND = re.compile(r"[a-z_]{1,40}\Z")
@@ -414,30 +416,7 @@ class MemoryStore:
                 or root_info.st_uid != os.geteuid() or root_info.st_mode & 0o077):
             raise PermissionError("Robot memory root must remain an owner-only directory")
         path = self.root / (robot_id + ".sqlite3")
-        # A renamed fleet identity must not inherit an old pet's private
-        # database on a case-insensitive Mac volume. Directory entries retain
-        # their actual spelling even when a differently cased lookup succeeds.
-        if any(entry.name != path.name
-               and entry.name.casefold() == path.name.casefold()
-               for entry in self.root.iterdir()):
-            raise ValueError("Case-aliased robot memory database")
-        if path.is_symlink():
-            raise ValueError("Refusing symlinked memory database")
-        # Two pet filenames must never share one SQLite inode, including
-        # aliases introduced after MemoryStore was initialized.
-        if path.exists() and path.stat().st_nlink > 1:
-            raise ValueError("Refusing hard-linked memory database")
-        # SQLite can open existing WAL/SHM/journal files itself. In particular,
-        # a hard-linked WAL or SHM can overwrite an unrelated private file.
-        # Reject preexisting aliases before handing any filename to SQLite.
-        for suffix in ("-journal", "-wal", "-shm"):
-            sidecar = path.with_name(path.name + suffix)
-            try:
-                info = sidecar.lstat()
-            except FileNotFoundError:
-                continue
-            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
-                raise ValueError("Refusing linked or nonregular memory sidecar")
+        validate_private_sqlite_files(path)
         # Only initialization may create a database. A runtime read or write
         # must not leave an empty replacement if the private file vanished.
         # SQLite URI mode=rw enforces this at open, without an exists/open race.

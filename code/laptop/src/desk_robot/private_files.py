@@ -47,3 +47,32 @@ def read_private_env(path: Path) -> dict[str, str]:
             raise ValueError("Credential file contains a malformed or duplicate entry")
         values[key] = value
     return values
+
+
+def validate_private_sqlite_files(path: Path) -> None:
+    """Reject existing unsafe database and sidecar entries before SQLite opens them."""
+    names = (path.name, *(path.name + suffix for suffix in ("-journal", "-wal", "-shm")))
+    spellings = {name.casefold(): name for name in names}
+    for entry in path.parent.iterdir():
+        expected = spellings.get(entry.name.casefold())
+        if expected is not None and entry.name != expected:
+            raise ValueError("Case-aliased robot memory database or sidecar")
+    for name in names:
+        candidate = path.parent / name
+        try:
+            info = candidate.lstat()
+        except FileNotFoundError:
+            continue
+        if name == path.name:
+            if stat.S_ISLNK(info.st_mode):
+                raise ValueError("Refusing symlinked memory database")
+            if info.st_nlink > 1:
+                raise ValueError("Refusing hard-linked memory database")
+            if not stat.S_ISREG(info.st_mode):
+                raise ValueError("Refusing nonregular memory database")
+        elif not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+            raise ValueError("Refusing linked or nonregular memory sidecar")
+        if info.st_uid != os.geteuid():
+            raise PermissionError("Robot memory database and sidecars must be owner-owned")
+        if name != path.name and info.st_mode & 0o077:
+            raise PermissionError("Robot memory sidecar must be owner-only")
