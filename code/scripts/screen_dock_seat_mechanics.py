@@ -32,7 +32,8 @@ NUMERICS = ("seat_pair_spacing_mm",) + tuple(
 
 
 def dock_constants(source: Path = CAD) -> dict:
-    text = source.read_text(encoding="utf-8")
+    raw = source.read_bytes()
+    text = raw.decode("utf-8")
     names = (
         "track_outer_width_mm", "side_clearance_each_mm",
         "guide_wall_mm", "wall_outside_margin_mm",
@@ -147,13 +148,14 @@ def dock_constants(source: Path = CAD) -> dict:
         "tag_paper_z_max_mm": values["tag_bottom_z_mm"] + paper,
         "ir_pair_spacing_mm": values["ir_pair_spacing_mm"],
         "ir_hole_radius_mm": values["ir_probe_bore_d_mm"] / 2,
-        "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "source_sha256": hashlib.sha256(raw).hexdigest(),
     }
 
 
 def contact_constants(source: Path = CONTACT_CAD) -> dict:
     """Original NONCONDUCTIVE contact fit gauge, never a selected connector."""
-    text = source.read_text(encoding="utf-8")
+    raw = source.read_bytes()
+    text = raw.decode("utf-8")
     values = {}
     for name in (
         "contact_carrier_l", "contact_carrier_w", "contact_carrier_h",
@@ -198,7 +200,7 @@ def contact_constants(source: Path = CONTACT_CAD) -> dict:
         "carrier_length_mm": values["contact_carrier_l"],
         "carrier_depth_mm": values["contact_carrier_w"],
         "carrier_height_mm": values["contact_carrier_h"],
-        "source_sha256": hashlib.sha256(source.read_bytes()).hexdigest(),
+        "source_sha256": hashlib.sha256(raw).hexdigest(),
         "electrical_contact_selected": False,
     }
 

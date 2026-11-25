@@ -420,3 +420,36 @@ def test_dock_template_cli_refuses_to_replace_previous_evidence(tmp_path):
     )
     assert rejected.returncode != 0
     assert "finite measured" in rejected.stderr
+
+
+@pytest.mark.parametrize("parser_name,source_name,old,new,field,expected", [
+    ("dock_constants", "CAD", b"track_outer_width_mm = 96;",
+     b"track_outer_width_mm = 100;", "backstop_width_mm", 126),
+    ("contact_constants", "CONTACT_CAD", b"contact_carrier_l = 54;",
+     b"contact_carrier_l = 56;", "carrier_length_mm", 54),
+])
+def test_source_hash_binds_exact_bytes_used_for_geometry(
+    parser_name, source_name, old, new, field, expected,
+):
+    import hashlib
+
+    tool = load()
+    original = getattr(tool, source_name).read_bytes()
+    changed = original.replace(old, new)
+    assert changed != original
+
+    class ReplacedSource:
+        reads = 0
+
+        def read_bytes(self):
+            self.reads += 1
+            return original if self.reads == 1 else changed
+
+        def read_text(self, encoding):
+            return self.read_bytes().decode(encoding)
+
+    source = ReplacedSource()
+    result = getattr(tool, parser_name)(source)
+    assert result[field] == expected
+    assert result["source_sha256"] == hashlib.sha256(original).hexdigest()
+    assert source.reads == 1
