@@ -205,6 +205,19 @@ private:
     std::atomic<std::uint32_t> pending_{0U};
 };
 
+// Only commands that may renew body control authority have a queue deadline.
+// STOP/HALT must always remain admissible; telemetry never renews the lease.
+inline bool ControlQueueFresh(std::string_view verb, std::int64_t admitted_us,
+                              std::int64_t now_us) {
+    if (verb != "arm" && verb != "drive" && verb != "lift" &&
+        verb != "grip" && verb != "keepalive") return true;
+    // Match the WROOM's stricter active wheel host-silence window, rather
+    // than the longer UART read timeout or 500 ms idle watchdog.
+    constexpr std::int64_t kMaxQueueUs = 200000;
+    return admitted_us >= 0 && now_us >= admitted_us &&
+           now_us - admitted_us < kMaxQueueUs;
+}
+
 struct Command {
     std::string verb;
     std::vector<int> args;

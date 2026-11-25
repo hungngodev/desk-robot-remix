@@ -219,6 +219,20 @@ int main() {
         assert(queued.preempted());
     }
 
+    for (const auto verb : {"arm", "drive", "lift", "grip", "keepalive"}) {
+        assert(ControlQueueFresh(verb, 100000, 100000));
+        assert(ControlQueueFresh(verb, 100000, 299999));
+        assert(!ControlQueueFresh(verb, 100000, 300000));
+        assert(!ControlQueueFresh(verb, 100000, 450000));
+        assert(!ControlQueueFresh(verb, 100000, 99999));
+        assert(!ControlQueueFresh(verb, -1, std::numeric_limits<std::int64_t>::max()));
+        assert(!ControlQueueFresh(verb, 0, std::numeric_limits<std::int64_t>::max()));
+    }
+    for (const auto verb : {"stop", "halt", "disarm", "status", "pose", "ir",
+                            "optics", "aux", "ping"}) {
+        assert(ControlQueueFresh(verb, 100000, 900000));
+    }
+
     Command c;
     assert(ParseCommand("drive 100 -100 250", false, c));
     assert(ExpectedAck(c) == "OK drive left=40 right=-40 ms=250");

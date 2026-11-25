@@ -462,6 +462,7 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
     if (!enabled_) return {503, false, "control disabled"};
     if (!ParseCommand(text, operator_control, command)) return {400, false, "invalid or unauthorized command"};
     const bool urgent = command.verb == "stop" || command.verb == "halt";
+    const auto admitted_us = esp_timer_get_time();
     // Announce urgent STOP before waiting for the body UART lock.
     UrgentStopGate::Request urgency(urgent_stop_gate_, urgent);
     std::lock_guard<std::mutex> lock(uart_mutex_);
@@ -471,6 +472,10 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
     // No retries: an uncertain ACK may still mean that physical movement happened.
     uart_flush_input(kUart);
     const std::string wire = command.wire + "\r\n";
+    // A stalled read must not resurrect old operator intent or feed the
+    // body watchdog with an aged keepalive. Never expire STOP or HALT.
+    if (!ControlQueueFresh(command.verb, admitted_us, esp_timer_get_time()))
+        return {503, false, "body control expired before UART write"};
     if (uart_write_bytes(kUart, wire.data(), wire.size()) != static_cast<int>(wire.size()) ||
         uart_wait_tx_done(kUart, pdMS_TO_TICKS(30)) != ESP_OK) return {503, false, "body UART write failed"};
     const auto deadline = esp_timer_get_time() + kTimeoutMs * 1000;
