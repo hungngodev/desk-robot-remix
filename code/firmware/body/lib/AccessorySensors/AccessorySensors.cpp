@@ -388,7 +388,7 @@ void AccessorySensors::force(std::uint32_t now_ms) {
     // Both FSR channels share this ADC. A transport failure is not an
     // independent channel fault; require two new successful conversions.
     f.valid_mask = 0;
-  } else if (fresh) {
+  } else if (fresh && value != 0x7fffU && value != 0x8000U) {
     f.adc[ads_channel_] = static_cast<std::int16_t>(value);
     f.valid_mask |= static_cast<std::uint8_t>(1U << ads_channel_);
     if (ads_channel_ == 0) {
@@ -400,6 +400,8 @@ void AccessorySensors::force(std::uint32_t now_ms) {
     }
     f.at_ms = now_ms;
   } else {
+    // A clipped or mismatched conversion is local to this channel. Keep
+    // the other channel's raw value, validity and acquisition identity.
     f.valid_mask &= static_cast<std::uint8_t>(~(1U << ads_channel_));
   }
   f.valid = f.valid_mask == 3U;

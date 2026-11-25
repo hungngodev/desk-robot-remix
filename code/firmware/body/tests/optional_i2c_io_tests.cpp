@@ -7,8 +7,46 @@
 #include "ExpansionTouch.h"
 TwoWire Wire;
 #define CHECK(x) do { if (!(x)) throw std::runtime_error(#x); } while (false)
+static void check_jaw_adc_rail_isolation() {
+  for (const auto rail : {0x7fffU, 0x8000U}) {
+    TwoWire wire;
+    desk_robot::AccessorySensors sensors;
+    CHECK(sensors.begin(wire));
+    for (std::uint32_t ms = 0; ms <= 516; ms += 12) sensors.poll(ms);
+    CHECK(wire.ads_config_high == 0xD3U);
+    const auto before = sensors.readings().force;
+    CHECK(before.valid && before.valid_mask == 3U);
+    wire.ads_jaw_raw = static_cast<std::uint16_t>(rail);
+    for (std::uint32_t ms = 528; ms <= 600; ms += 12) sensors.poll(ms);
+    const auto clipped = sensors.readings().force;
+    CHECK(!clipped.valid && clipped.valid_mask == 1U);
+    CHECK(clipped.adc[0] == before.adc[0]);
+    CHECK(clipped.belly_sample_seq == before.belly_sample_seq);
+    CHECK(clipped.belly_at_ms == before.belly_at_ms);
+    CHECK(clipped.adc[1] == before.adc[1]);
+    CHECK(clipped.jaw_sample_seq == before.jaw_sample_seq);
+    CHECK(clipped.jaw_at_ms == before.jaw_at_ms);
+    CHECK(clipped.at_ms == before.at_ms);
+    for (std::uint32_t ms = 612; ms <= 768; ms += 12) sensors.poll(ms);
+    const auto belly = sensors.readings().force;
+    CHECK(!belly.valid && belly.valid_mask == 1U);
+    CHECK(belly.belly_sample_seq > before.belly_sample_seq);
+    CHECK(belly.belly_at_ms > before.belly_at_ms);
+    CHECK(belly.jaw_sample_seq == before.jaw_sample_seq);
+    wire.ads_jaw_raw = 0xFEDCU;
+    for (std::uint32_t ms = 780; ms <= 936; ms += 12) sensors.poll(ms);
+    const auto recovered = sensors.readings().force;
+    CHECK(recovered.valid && recovered.valid_mask == 3U);
+    CHECK(recovered.jaw_sample_seq > before.jaw_sample_seq);
+    CHECK(recovered.jaw_at_ms > before.jaw_at_ms);
+    CHECK(recovered.belly_sample_seq == belly.belly_sample_seq);
+    CHECK(recovered.belly_at_ms == belly.belly_at_ms);
+    CHECK(!wire.unsafe_parallel_mux);
+  }
+}
 int main() {
   try {
+    check_jaw_adc_rail_isolation();
     desk_robot::AccessorySensors accessories;
     desk_robot::PulsePad pulse;
     desk_robot::ExpansionTouch touch;

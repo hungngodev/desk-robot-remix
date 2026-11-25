@@ -14,6 +14,7 @@ class TwoWire {
   unsigned transactions = 0;
   std::uint8_t ads_config_high = 0xC3;
   bool ads_conversion_ready = true;
+  std::uint16_t ads_jaw_raw = 0xFEDCU;
   bool fail_ads_config_write = false;
   int fail_ads_read_register = -1;
   unsigned rejected_ads_reads = 0;
@@ -561,7 +562,8 @@ class TwoWire {
     }
     else if (addr == 0x48 && register_address == 0x00) {
       if (ads_config_high == 0xC3) inbound = {0x04, 0x00};
-      else inbound = {0xFE, 0xDC};
+      else inbound = {static_cast<std::uint8_t>(ads_jaw_raw >> 8),
+                      static_cast<std::uint8_t>(ads_jaw_raw)};
     } else if (ranges == 0 && extras == 0) {
       if (const auto* imu_reg = find_upstream_imu_reg(addr, register_address)) {
         inbound = {imu_reg->value};
