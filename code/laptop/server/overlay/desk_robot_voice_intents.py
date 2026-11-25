@@ -10,6 +10,7 @@ import json
 import re
 from collections.abc import Callable, Mapping
 from types import MappingProxyType
+from typing import NamedTuple
 
 
 def _addressed_request_text(
@@ -81,36 +82,9 @@ def _advice_only_request(text: str, *, robot_name: str | None = None,
     ))
 
 
-def native_readonly_request(
-    transcript: str, *, robot_name: str | None = None,
-    fleet_names: tuple[str, ...] = (),
-) -> tuple[str, dict] | None:
-    """Route explicit natural questions to existing read-only Mac authorities.
-
-    MiniCPM-o native duplex has no verified function-call stream here. This
-    small conservative speech grammar does not infer permission for pickup,
-    drive, charger, operator memory changes or any physical side effect.
-    """
-    if not isinstance(transcript, str):
-        return None
-    text = " ".join(transcript.split())
-    if not 3 <= len(text) <= 280 or "\x00" in text:
-        return None
-    spoken = _addressed_request_text(
-        text, robot_name=robot_name, fleet_names=fleet_names,
-    )
-    if spoken is None:
-        return None
-    spoken = spoken.strip(" ?!.,")
-    spoken = re.sub(r"^please\s+", "", spoken)
-    # A polite question still has to name the read-only observation action.
-    polite = re.sub(
-        r"^(?:can|could|would|will) you (?:please )?", "", spoken,
-    )
-    if _advice_only_request(
-        text, robot_name=robot_name, fleet_names=fleet_names,
-    ):
-        return None
+def _match_look(
+    text: str, spoken: str, polite: str,
+) -> dict[str, str] | None:
     look = (
         r"(?:look (?:at|around|over|toward|for)\b|"
         r"what (?:can|do) you see\b|"
@@ -126,7 +100,7 @@ def native_readonly_request(
         r"(?:describe|inspect) (?:this|that|the desk|what you see)\b)"
     )
     if re.match(r"^(?:" + look + r")", polite):
-        return "look", {"question": text}
+        return {"question": text}
     # A person can ask about a visible attribute or spatial relationship
     # without saying "look" or "see". Keep this limited to explicit visual
     # questions; do not turn statements, memories or motor requests into tools.
@@ -153,7 +127,13 @@ def native_readonly_request(
     )
     if (visual_attribute or (scene_location and (visual_count or visual_relation))
             or visible_text):
-        return "look", {"question": text}
+        return {"question": text}
+    return None
+
+
+def _match_latest_pickup(
+    text: str, spoken: str, polite: str,
+) -> dict[str, str] | None:
     # A status query must ASK about an existing action. Merely saying
     # "pick up the key" must NEVER be interpreted as a job submission.
     if re.match(
@@ -163,18 +143,30 @@ def native_readonly_request(
                   r"complete|completed|job|already|yet)\b", polite)
         or polite.startswith(("did you pick up", "have you picked up"))
     ):
-        return "latest-pickup", {}
+        return {}
+    return None
+
+
+def _match_power_status(
+    text: str, spoken: str, polite: str,
+) -> dict[str, str] | None:
     # A physical battery estimate comes from the real WROOM auxiliary fuel
     # gauge, not from generic motor status. An absent/unqualified gauge must
     # return unavailable rather than a fabricated percentage.
     if (re.match(r"^(?:check|what|how|is|are|tell|show)\b", polite)
             and re.search(r"\b(?:battery|charge level|power level|"
                           r"battery voltage|cell voltage)\b", polite)):
-        return "power-status", {}
+        return {}
     if re.match(
         r"^(?:how much (?:battery|power) (?:is )?left)\b", polite
     ):
-        return "power-status", {}
+        return {}
+    return None
+
+
+def _match_aux_status(
+    text: str, spoken: str, polite: str,
+) -> dict[str, str] | None:
     # Source-qualified accessory readings are different from generic body
     # status or a visual guess. The pinned WROOM aux adapter validates raw
     # SHT41, BMP280, contact, NFC and proximity fields before they become
@@ -194,7 +186,13 @@ def native_readonly_request(
                 r"how (?:does|do) )",
                 polite,
             )):
-        return "aux-status", {}
+        return {}
+    return None
+
+
+def _match_status(
+    text: str, spoken: str, polite: str,
+) -> dict[str, str] | None:
     # A question about the current motor arm latch is observation, never an
     # instruction to arm, move or clear a local WROOM safety stop. Preserve
     # conversational ASR without punctuation, but reject historical statements.
@@ -208,7 +206,7 @@ def native_readonly_request(
         r"(?: (?:right now|at the moment))?",
         polite,
     ):
-        return "status", {}
+        return {}
     if (
         re.match(r"^(?:check|what|how|is|are|tell)\b", polite)
         and re.search(
@@ -219,7 +217,13 @@ def native_readonly_request(
         r"^(?:how much (?:battery|power) (?:is )?left|"
         r"how are your sensors)\b", polite
     ):
-        return "status", {}
+        return {}
+    return None
+
+
+def _match_voice_context(
+    text: str, spoken: str, polite: str,
+) -> dict[str, str] | None:
     # Memory recall uses the existing opt-in private SQLite authority.
     # A missing Mac voice-memory permit returns 403, never a stale answer.
     if re.match(
@@ -240,13 +244,88 @@ def native_readonly_request(
             r"(?:can you )?recall anything)(?: (?:from|about) yesterday)?",
             polite,
         )
-        return "voice-context", {} if generic else {"question": text[:240]}
+        return {} if generic else {"question": text[:240]}
+    return None
+
+
+def _match_interaction_context(
+    text: str, spoken: str, polite: str,
+) -> dict[str, str] | None:
     if re.match(
         r"^(?:what (?:just )?happened|what did you (?:just )?(?:notice|"
         r"sense|detect)|did (?:i|someone) (?:touch|tap) you)\b",
         polite.removeprefix("tell me "),
     ):
-        return "interaction-context", {}
+        return {}
+    return None
+
+
+class _IntentRule(NamedTuple):
+    handler: Callable[[str, str, str], dict[str, str] | None]
+    question_limit: int = 0
+    question_required: bool = False
+
+
+# Insertion order is grammar precedence, not tool execution priority.
+# A camera question may mention a battery; dedicated power precedes status.
+_INTENT_RULES: Mapping[str, _IntentRule] = MappingProxyType({
+    "look": _IntentRule(_match_look, question_limit=280, question_required=True),
+    "latest-pickup": _IntentRule(_match_latest_pickup),
+    "power-status": _IntentRule(_match_power_status),
+    "aux-status": _IntentRule(_match_aux_status),
+    "status": _IntentRule(_match_status),
+    "voice-context": _IntentRule(_match_voice_context, question_limit=240),
+    "interaction-context": _IntentRule(_match_interaction_context),
+})
+
+
+def _valid_intent_payload(rule: _IntentRule, payload: dict[str, str]) -> bool:
+    if type(payload) is not dict:
+        return False
+    if not payload:
+        return not rule.question_required
+    if rule.question_limit == 0 or payload.keys() != {"question"}:
+        return False
+    question = payload["question"]
+    return (type(question) is str and 1 <= len(question) <= rule.question_limit
+            and bool(question.strip()) and "\x00" not in question)
+
+
+def native_readonly_request(
+    transcript: str, *, robot_name: str | None = None,
+    fleet_names: tuple[str, ...] = (),
+) -> tuple[str, dict[str, str]] | None:
+    """Route explicit natural questions to existing read-only Mac authorities.
+
+    MiniCPM-o native duplex has no verified function-call stream here. This
+    small conservative speech grammar does not infer permission for pickup,
+    drive, charger, operator memory changes or any physical side effect.
+    """
+    if not isinstance(transcript, str):
+        return None
+    text = " ".join(transcript.split())
+    if not 3 <= len(text) <= 280 or "\x00" in text:
+        return None
+    spoken = _addressed_request_text(
+        text, robot_name=robot_name, fleet_names=fleet_names,
+    )
+    if spoken is None:
+        return None
+    spoken = spoken.strip(" ?!.,")
+    spoken = re.sub(r"^please\s+", "", spoken)
+    # A polite question still has to name the read-only observation action.
+    polite = re.sub(
+        r"^(?:can|could|would|will) you (?:please )?", "", spoken,
+    )
+    if _advice_only_request(
+        text, robot_name=robot_name, fleet_names=fleet_names,
+    ):
+        return None
+    for route, rule in _INTENT_RULES.items():
+        payload = rule.handler(text, spoken, polite)
+        if payload is not None:
+            # An invalid matched rule is not permission to try another route.
+            return (route, payload) if _valid_intent_payload(rule, payload) else None
     return None
 
 
