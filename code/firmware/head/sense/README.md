@@ -330,7 +330,9 @@ are written under the ignored build copy, with mode 0600 and the selected
 robot's existing credential:
 
 ```sh
-python3 firmware/head/private_config.py --board sense --config config/local.toml --robot robot-01 --server-ip MAC_LAN_IP
+python3 firmware/head/private_config.py --board sense \
+  --config config/local.toml --robot robot-01 \
+  --server-ip "${MAC_LAN_IP:?Set MAC_LAN_IP to the Mac LAN IPv4}"
 bash scripts/build_head.sh --board sense --private
 ```
 
