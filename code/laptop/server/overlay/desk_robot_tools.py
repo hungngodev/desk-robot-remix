@@ -13,6 +13,11 @@ import httpx
 from desk_robot_bridge import connections, robot_for_device
 from plugins_func.register import Action, ActionResponse, ToolType, register_function
 
+try:
+    from desk_robot_omni_wire import coordinator_base_url
+except ModuleNotFoundError:
+    from desk_robot.realtime_omni_protocol import coordinator_base_url
+
 # HTTPX timeouts bound individual network operations, not total elapsed time.
 # Keep these existing route budgets for optional tools; STOP/pickup keep
 # their separate physical acknowledgment and job ownership semantics.
@@ -128,10 +133,14 @@ async def call(conn, route, payload=None):
     generation = getattr(bridge, "voice_turn_generation", {}).get(conn.device_id, 0)
     if type(generation) is not int or not 0 <= generation <= 0x7fffffffffffffff:
         return {"error": "Robot tool turn identity invalid", "retried": False}
+    try:
+        coordinator_url = coordinator_base_url()
+    except ValueError:
+        return {"error": "Invalid local Mac coordinator URL", "retried": False}
 
     async def request_mac():
         async with httpx.AsyncClient(
-            base_url="http://127.0.0.1:8765",
+            base_url=coordinator_url,
             timeout=5,
             # Never send the local tool bearer through ambient HTTP proxies.
             trust_env=False,

@@ -123,3 +123,51 @@ def test_configure_missing_provider_credentials(configure_target, monkeypatch, c
     assert exc.value.code == 2
     assert "DASHSCOPE_API_KEY" in capsys.readouterr().err
     assert not target.exists()
+
+
+def test_configure_streaming_cli_round_trip(configure_target, monkeypatch, capsys):
+    module, target = configure_target
+    baseline = yaml.safe_load((ROOT / "config/xiaozhi.local.example.yaml").read_text())
+    padded_env = {
+        "DASHSCOPE_API_KEY": "  test-private-cli-api-key \n",
+        "VOLCENGINE_TTS_APPID": "\ttest-private-cli-app-id  ",
+        "VOLCENGINE_TTS_ACCESS_TOKEN": "  test-private-cli-token\t",
+        "VOLCENGINE_TTS_SPEAKER": "  test-private-cli-speaker  ",
+    }
+    for key, value in padded_env.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.setattr(sys, "argv", [*sys.argv, "--streaming-profile", "aliyun-volcengine"])
+    module.main()
+    captured = capsys.readouterr()
+    assert target.stat().st_mode & 0o777 == 0o600
+    for secret_value in padded_env.values():
+        stripped = secret_value.strip()
+        assert stripped not in captured.out
+        assert stripped not in captured.err
+
+    written = yaml.safe_load(target.read_text())
+    assert written["read_config_from_api"] is False
+    assert written["server"]["websocket"] == "ws://192.168.1.10:8000/xiaozhi/v1/"
+    assert written["server"]["auth"] == {"enabled": True, "allowed_devices": []}
+    auth_key = written["server"]["auth_key"]
+    assert isinstance(auth_key, str) and len(auth_key.strip()) >= 32
+    assert auth_key != "LOCAL_RANDOM_SECRET"
+
+    assert written["selected_module"]["ASR"] == "AliyunBLStreamASR"
+    assert written["selected_module"]["TTS"] == "HuoshanDoubleStreamTTSV2"
+    assert written["selected_module"]["LLM"] == baseline["selected_module"]["LLM"]
+    assert written["selected_module"]["Intent"] == "function_call"
+    assert written["selected_module"]["VAD"] == baseline["selected_module"]["VAD"]
+    assert written["Intent"] == baseline["Intent"]
+    assert written["ASR"]["FunASR"] == baseline["ASR"]["FunASR"]
+    assert written["TTS"]["CustomTTS"] == baseline["TTS"]["CustomTTS"]
+    assert written["ASR"]["AliyunBLStreamASR"]["api_key"] == "test-private-cli-api-key"
+    assert written["ASR"]["AliyunBLStreamASR"]["model"] == "paraformer-realtime-v2"
+    assert written["ASR"]["AliyunBLStreamASR"]["sample_rate"] == 16000
+    assert (
+        written["TTS"]["HuoshanDoubleStreamTTSV2"]["ws_url"]
+        == "wss://openspeech.bytedance.com/api/v3/tts/bidirection"
+    )
+    assert written["TTS"]["HuoshanDoubleStreamTTSV2"]["appid"] == "test-private-cli-app-id"
+    assert written["TTS"]["HuoshanDoubleStreamTTSV2"]["access_token"] == "test-private-cli-token"
+    assert written["TTS"]["HuoshanDoubleStreamTTSV2"]["speaker"] == "test-private-cli-speaker"

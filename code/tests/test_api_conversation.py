@@ -2725,3 +2725,168 @@ def test_group_startup_cannot_outlive_stop(settings, tokens, monkeypatch, stop_p
         # Fresh operator authorization after STOP is not permanently disabled.
         assert client.post("/v1/conversation", json=body, headers=headers).status_code == 200
         assert len(runs) == 1
+
+
+@pytest.mark.parametrize("trigger", ["consent_revoked", "urgent_stop"])
+async def test_blocked_speak_enforces_revocation_stop_and_lease_release(
+    settings, monkeypatch, trigger,
+):
+    """While /speak blocks, concurrent turns cannot hijack the lease and STOP releases it."""
+    import json as json_mod
+
+    import httpx
+
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_memory_tools_enabled = True
+    settings.robots[0].device_id = "mac-01"
+    settings.robots[1].device_id = "mac-02"
+    monkeypatch.setenv(settings.speech_bridge_token_env, "s" * 40)
+    monkeypatch.setenv("DESK_ROBOT_SPEECH_TOKEN", "s" * 40)
+    speak_entered = asyncio.Event()
+    speak_release = asyncio.Event()
+    calls: list[tuple[str, dict]] = []
+    active_lease: str | None = None
+    permit = True
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal active_lease
+        path = request.url.path
+        if path == "/v1/audio/speech":
+            calls.append(("kokoro", {}))
+            return httpx.Response(200, content=b"RIFF" + b"\x00" * 64)
+        payload = json_mod.loads(request.content or b"{}")
+        calls.append((path, payload))
+        if path == "/session":
+            if payload["enabled"]:
+                if active_lease is not None:
+                    return httpx.Response(409, json={"error": "busy"})
+                active_lease = payload["lease_id"]
+                return httpx.Response(
+                    200,
+                    json={
+                        "device_ids": sorted(payload["device_ids"]),
+                        "enabled": True,
+                        "expires_in_seconds": 305,
+                        "lease_id": active_lease,
+                    },
+                )
+            assert payload["lease_id"] == active_lease
+            active_lease = None
+            return httpx.Response(
+                200,
+                json={
+                    "device_ids": sorted(payload["device_ids"]),
+                    "enabled": False,
+                    "expires_in_seconds": 0,
+                    "lease_id": payload["lease_id"],
+                },
+            )
+        if path == "/speak":
+            assert active_lease == payload["lease_id"]
+            speak_entered.set()
+            await speak_release.wait()
+            return httpx.Response(
+                200,
+                json={
+                    "device_id": payload["device_id"],
+                    "transmitted": True,
+                    "physical_playback_verified": False,
+                },
+            )
+        if path == "/interrupt":
+            return httpx.Response(
+                200,
+                json={
+                    "device_id": payload["device_id"],
+                    "interrupted": True,
+                    "head_flush_requested": True,
+                },
+            )
+        raise AssertionError(f"Unexpected bridge route: {path}")
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http:
+        speaker = KokoroHeadSpeaker(settings, http)
+        conversation = Conversation(settings, SimulatedChat(), speaker)
+        robot = settings.robots[0]
+        contender: asyncio.Task | None = None
+        if trigger == "consent_revoked":
+            primary = asyncio.create_task(
+                conversation.say_proactive(
+                    robot,
+                    "Blocked outbound remark",
+                    permission_check=lambda: permit,
+                    deliberate=True,
+                )
+            )
+        else:
+            primary = asyncio.create_task(
+                conversation.run(
+                    [robot.id, settings.robots[1].id],
+                    "Blocked group topic",
+                    2,
+                )
+            )
+        try:
+            await asyncio.wait_for(speak_entered.wait(), timeout=3)
+            assert conversation.session_lock.locked()
+            assert conversation.speaker_lock.locked()
+            speaks_while_blocked = sum(1 for route, _ in calls if route == "/speak")
+            assert speaks_while_blocked == 1
+
+            contender = asyncio.create_task(
+                conversation.say_proactive(
+                    robot,
+                    "Stale contender remark",
+                    permission_check=lambda: permit,
+                    deliberate=True,
+                )
+            )
+            await asyncio.sleep(0.02)
+            assert sum(1 for route, _ in calls if route == "/speak") == 1
+
+            if trigger == "consent_revoked":
+                permit = False
+                speak_release.set()
+                with pytest.raises(RuntimeError, match="revoked during transmission"):
+                    await asyncio.wait_for(primary, timeout=3)
+            else:
+                permit = False
+                stop_task = asyncio.create_task(conversation.stop())
+                await asyncio.sleep(0.02)
+                assert sum(1 for route, _ in calls if route == "/speak") == 1
+                speak_release.set()
+                await asyncio.wait_for(stop_task, timeout=3)
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(primary, timeout=3)
+            assert await asyncio.wait_for(contender, timeout=3) is False
+        finally:
+            speak_release.set()
+            if contender is not None and not contender.done():
+                await asyncio.gather(contender, return_exceptions=True)
+            await asyncio.gather(primary, return_exceptions=True)
+
+        assert not conversation.session_lock.locked()
+        assert not conversation.speaker_lock.locked()
+        assert active_lease is None
+        assert conversation.speaker_stop_unconfirmed is False
+        assert any(route == "/interrupt" for route, _ in calls)
+        assert not any(
+            payload.get("text") == "Stale contender remark"
+            for route, payload in calls if route == "/speak"
+        )
+
+        # Successor speech reclaims a fresh lease cleanly once permission resumes.
+        permit = True
+        assert await asyncio.wait_for(
+            conversation.say_proactive(
+                robot, "Fresh successor remark", permission_check=lambda: permit, deliberate=True,
+            ),
+            timeout=3,
+        ) is True
+        assert not conversation.session_lock.locked()
+        assert not conversation.speaker_lock.locked()
+        assert any(
+            payload.get("text") == "Fresh successor remark"
+            for route, payload in calls if route == "/speak"
+        )

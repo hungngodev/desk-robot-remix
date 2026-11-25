@@ -15,8 +15,9 @@ from fastapi.testclient import TestClient
     "operation",
     ["core_put", "core_delete", "episode_patch", "episode_delete"],
 )
+@pytest.mark.parametrize("phase", ["reserve", "mutate"])
 def test_operator_memory_reservation_does_not_block_mac_event_loop(
-    settings, tokens, tmp_path, monkeypatch, operation,
+    settings, tokens, tmp_path, monkeypatch, operation, phase,
 ):
     settings.memory_dir = tmp_path
     auth = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
@@ -33,25 +34,46 @@ def test_operator_memory_reservation_does_not_block_mac_event_loop(
                 kind="key", source_robot="robot-01", witnessed=True,
             )
 
-        method_name = (
+        reserve_name = (
             "reserve_core_fact_mutation"
             if operation.startswith("core")
             else "reserve_episode_mutation"
         )
-        original = getattr(memory, method_name)
+        mutate_name = {
+            "core_put": "set_core_fact",
+            "core_delete": "forget_core_fact",
+            "episode_patch": "correct_episode",
+            "episode_delete": "forget_episode",
+        }[operation]
+        original_reserve = getattr(memory, reserve_name)
+        original_mutate = getattr(memory, mutate_name)
+        reserved = Event()
+        reserve_release = Event()
         started = Event()
 
         def observed_reserve(*args, **kwargs):
-            started.set()
-            return original(*args, **kwargs)
+            if phase == "reserve":
+                started.set()
+                return original_reserve(*args, **kwargs)
+            generation = original_reserve(*args, **kwargs)
+            reserved.set()
+            assert reserve_release.wait(timeout=8), "Test did not acquire SQLite lock for mutation phase"
+            return generation
 
-        monkeypatch.setattr(memory, method_name, observed_reserve)
+        def observed_mutate(*args, **kwargs):
+            if phase == "mutate":
+                started.set()
+            return original_mutate(*args, **kwargs)
+
+        monkeypatch.setattr(memory, reserve_name, observed_reserve)
+        monkeypatch.setattr(memory, mutate_name, observed_mutate)
         # Obtain the real ASGI loop BEFORE blocking its SQLite writer.
         # A status callback can stand in for any urgent VAD/STOP callback.
         loop = client.portal.call(asyncio.get_running_loop)
         conn = sqlite3.connect(memory.root / "robot-01.sqlite3")
         try:
-            conn.execute("BEGIN IMMEDIATE")
+            if phase == "reserve":
+                conn.execute("BEGIN IMMEDIATE")
 
             def request():
                 if operation == "core_put":
@@ -69,15 +91,23 @@ def test_operator_memory_reservation_does_not_block_mac_event_loop(
             with ThreadPoolExecutor(max_workers=1) as pool:
                 pending = pool.submit(request)
                 try:
-                    assert started.wait(timeout=8), "Reservation never began"
+                    if phase == "mutate":
+                        assert reserved.wait(timeout=8), "Reservation never committed"
+                        conn.execute("BEGIN IMMEDIATE")
+                        reserve_release.set()
+                    assert started.wait(timeout=8), f"{phase} SQLite phase never began"
                     # Original inline BEGIN IMMEDIATE blocks the Mac loop for
                     # the 3s SQLite busy timeout. The threaded owner does not.
                     tick = Event()
                     loop.call_soon_threadsafe(tick.set)
                     assert tick.wait(timeout=0.5), (
-                        "SQLite reservation blocked urgent event-loop work"
+                        f"SQLite {phase} blocked urgent event-loop work"
+                    )
+                    assert not pending.done(), (
+                        f"HTTP request returned while SQLite write lock held during {phase}"
                     )
                 finally:
+                    reserve_release.set()
                     conn.rollback()
                 result = pending.result(timeout=8)
                 assert result.status_code == 200, result.text

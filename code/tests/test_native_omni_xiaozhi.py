@@ -9837,3 +9837,32 @@ def test_grounded_fact_dispatch_registry_is_closed(native):
     }
     with pytest.raises(TypeError):
         intents._GROUNDED_FACT_HANDLERS["pickup"] = lambda result: result
+
+
+def _deeply_nested_fact(levels: int) -> list[dict]:
+    node: object = "leaf"
+    for _ in range(levels):
+        node = {"k": node}
+    return [{"nested": node}]
+
+
+@pytest.mark.parametrize(
+    ("facts", "limit"),
+    [
+        ([{"items": {1: "bad"}}], 1800),
+        ([{"summary": "\ud800bad"}], 1800),
+        ([{"bad\ud800": "ok"}], 1800),
+        (_deeply_nested_fact(34), 1800),
+        ([{"answer": "ok"}], True),
+        ([{"answer": "ok"}], 255),
+        ([{"answer": "ok"}], 4097),
+        ([{"answer": "ok"}], 1800.0),
+    ],
+)
+def test_pack_grounded_facts_rejects_invalid_structure_and_budget(
+    native, facts, limit,
+):
+    from desk_robot_voice_intents import pack_grounded_facts
+
+    with pytest.raises(ValueError):
+        pack_grounded_facts(facts, limit=limit)

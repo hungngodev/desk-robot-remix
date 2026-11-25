@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[2]
 # Standalone launcher uses Xiaozhi's interpreter, not the Mac package venv.
 sys.path.insert(0, str(ROOT / "laptop/src"))
 from desk_robot.private_files import read_private_env, read_private_text  # noqa: E402
+from desk_robot.realtime_omni_protocol import coordinator_base_url  # noqa: E402
 
 
 def fleet_device_and_voice_maps(robots: list[dict]) -> tuple[dict[str, str], dict[str, str]]:
@@ -76,6 +77,23 @@ def verified_xiaozhi_auth_config(path: Path) -> None:
         raise ValueError("Set a private non-placeholder Xiaozhi auth_key")
 
 
+def verified_xiaozhi_fleet_tts_config(path: Path, devices: dict[str, str]) -> None:
+    """Reject cloud streaming TTS profiles when mapped fleet devices are configured."""
+    if not devices:
+        return
+    try:
+        config = yaml.safe_load(read_private_text(path))
+    except (OSError, UnicodeError, yaml.YAMLError):
+        raise ValueError("Cannot verify private Xiaozhi TTS config") from None
+    selected = config.get("selected_module") if isinstance(config, dict) else None
+    tts = selected.get("TTS") if isinstance(selected, dict) else None
+    if tts != "CustomTTS":
+        raise ValueError(
+            "Fleet Xiaozhi requires selected_module.TTS=CustomTTS (local Kokoro); "
+            "cloud streaming profiles are isolated single-head benchmarks only"
+        )
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--config", type=Path, default=ROOT / "config/local.toml")
@@ -88,18 +106,21 @@ def main() -> None:
     try:
         credentials = read_private_env(ROOT / "config/local.env")
         mapping, voices = fleet_device_and_voice_maps(config["robots"])
+        for key, value in credentials.items():
+            os.environ.setdefault(key, value)
+        coordinator_url = coordinator_base_url()
     except (OSError, KeyError, TypeError, ValueError) as exc:
         p.error(str(exc))
-    for key, value in credentials.items():
-        os.environ.setdefault(key, value)
     os.environ["DESK_ROBOT_DEVICE_MAP"] = json.dumps(mapping)
     os.environ["DESK_ROBOT_NATIVE_VOICE_MAP"] = json.dumps(voices)
+    os.environ["DESK_ROBOT_COORDINATOR_URL"] = coordinator_url
     server = ROOT / "laptop/server/build/xiaozhi/main/xiaozhi-server"
     local_config = server / "data/.config.yaml"
     if not local_config.is_file():
         p.error("Create data/.config.yaml using config/xiaozhi.local.example.yaml first")
     try:
         verified_xiaozhi_auth_config(local_config)
+        verified_xiaozhi_fleet_tts_config(local_config, mapping)
         from install_overlay import verify_installed_overlay
 
         verify_installed_overlay(

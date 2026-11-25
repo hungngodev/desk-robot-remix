@@ -13,7 +13,51 @@ from __future__ import annotations
 
 import base64
 import binascii
+import ipaddress
+import os
 from dataclasses import dataclass
+from urllib.parse import urlsplit
+
+DEFAULT_COORDINATOR_URL = "http://127.0.0.1:8765"
+
+
+def coordinator_base_url(value: str | None = None) -> str:
+    """Return the operator-controlled validated loopback coordinator origin."""
+    raw = os.environ.get("DESK_ROBOT_COORDINATOR_URL") if value is None else value
+    if raw is None:
+        return DEFAULT_COORDINATOR_URL
+    if type(raw) is not str or not raw or any(ch.isspace() or ord(ch) < 32 for ch in raw):
+        raise ValueError("Coordinator URL must be a plain loopback http:// origin")
+    parsed = urlsplit(raw)
+    if (
+        parsed.scheme != "http"
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.query
+        or parsed.fragment
+        or parsed.path not in {"", "/"}
+        or parsed.hostname is None
+    ):
+        raise ValueError(
+            "Coordinator URL must be a loopback http:// origin without credentials, path, or query"
+        )
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("Coordinator URL port is invalid") from exc
+    if port is not None and not (1 <= port <= 65535):
+        raise ValueError("Coordinator URL port out of range")
+    host = parsed.hostname.lower()
+    is_loopback = host == "localhost"
+    if not is_loopback:
+        try:
+            is_loopback = ipaddress.ip_address(host).is_loopback
+        except ValueError:
+            is_loopback = False
+    if not is_loopback:
+        raise ValueError("Coordinator URL must target loopback (127.0.0.1, ::1, or localhost)")
+    formatted_host = f"[{host}]" if ":" in host else host
+    return f"http://{formatted_host}" if port is None else f"http://{formatted_host}:{port}"
 
 
 def verify_native_server(greeting: dict, requested_model: str) -> None:

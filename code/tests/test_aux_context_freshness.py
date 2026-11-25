@@ -261,3 +261,81 @@ def test_canceled_turn_does_not_consume_sensor_acquisition():
         assert "seq=51" in heard[0][3]
         assert request().status_code == 200
         assert len(heard) == 1
+
+
+@pytest.mark.parametrize("sensor", ["climate", "bmp280"])
+@pytest.mark.parametrize("invalid_valid", [False, 1, "true", None])
+def test_non_true_valid_flag_rejected_and_does_not_burn_sequence(sensor, invalid_valid):
+    payload = _climate(seq=19, age_ms=25) if sensor == "climate" else _bmp(seq=19, age_ms=25)
+    payload["valid"] = invalid_valid
+    app, data, heard, _owner = _route({sensor: payload})
+    headers = {"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"}
+    with TestClient(app) as client:
+        assert client.get("/v1/robots/robot-01/aux", headers=headers).status_code == 200
+        assert heard == []
+        data[sensor]["valid"] = True
+        assert client.get("/v1/robots/robot-01/aux", headers=headers).status_code == 200
+        assert len(heard) == 1
+        assert "seq=19" in heard[0][3]
+
+
+@pytest.mark.parametrize("present_value", [False, 1, None, "missing"])
+def test_bmp_presence_must_be_strict_boolean_true(present_value):
+    bmp = _bmp(seq=25, age_ms=40)
+    if present_value == "missing":
+        del bmp["present"]
+    else:
+        bmp["present"] = present_value
+    app, _data, heard, _owner = _route({"bmp280": bmp})
+    headers = {"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"}
+    with TestClient(app) as client:
+        assert client.get("/v1/robots/robot-01/aux", headers=headers).status_code == 200
+    assert heard == []
+
+
+def test_mismatched_force_and_proximity_boot_epochs_reject_ambient_provenance():
+    app, data, heard, _owner = _route({"climate": _climate(seq=30, age_ms=20)})
+    data["force"]["boot_id"] = 123
+    data["proximity"]["boot_id"] = 124
+    headers = {"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"}
+    with TestClient(app) as client:
+        assert client.get("/v1/robots/robot-01/aux", headers=headers).status_code == 200
+    assert heard == []
+
+
+@pytest.mark.parametrize("sensor", ["climate", "bmp280"])
+def test_uint32_sequence_wrap_and_half_range_boundary(sensor):
+    payload = _climate(seq=0xFFFFFFFF, age_ms=10) if sensor == "climate" else _bmp(seq=0xFFFFFFFF, age_ms=10)
+    app, data, heard, _owner = _route({sensor: payload})
+    headers = {"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"}
+    with TestClient(app) as client:
+        assert client.get("/v1/robots/robot-01/aux", headers=headers).status_code == 200
+        assert len(heard) == 1
+
+        data[sensor]["seq"] = 1
+        assert client.get("/v1/robots/robot-01/aux", headers=headers).status_code == 200
+        assert len(heard) == 2
+
+        data[sensor]["seq"] = 0xFFFFFFFF
+        assert client.get("/v1/robots/robot-01/aux", headers=headers).status_code == 200
+        assert len(heard) == 2
+
+        # Exactly 0x80000000 ahead of 1 sits outside strictly-newer half-range.
+        data[sensor]["seq"] = 0x80000001
+        assert client.get("/v1/robots/robot-01/aux", headers=headers).status_code == 200
+        assert len(heard) == 2
+
+        data[sensor]["seq"] = 2
+        assert client.get("/v1/robots/robot-01/aux", headers=headers).status_code == 200
+        assert len(heard) == 3
+
+
+@pytest.mark.parametrize(("sensor", "max_valid_age"), [("climate", 999), ("bmp280", 1999)])
+def test_positive_max_age_boundaries_are_accepted(sensor, max_valid_age):
+    payload = _climate(seq=99, age_ms=max_valid_age) if sensor == "climate" else _bmp(seq=99, age_ms=max_valid_age)
+    app, _data, heard, _owner = _route({sensor: payload})
+    headers = {"x-test-turn": "active", "x-desk-robot-tool-receipt": "1"}
+    with TestClient(app) as client:
+        assert client.get("/v1/robots/robot-01/aux", headers=headers).status_code == 200
+    assert len(heard) == 1
+    assert "seq=99" in heard[0][3]

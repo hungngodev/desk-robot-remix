@@ -47,14 +47,20 @@ try:
     from desk_robot.realtime_omni_protocol import (
         I2sTransmissionPrefix,
         OmniDuplexWire,
+        coordinator_base_url,
         verify_native_server,
     )
 except ModuleNotFoundError:
     from desk_robot_omni_wire import (
         I2sTransmissionPrefix,
         OmniDuplexWire,
+        coordinator_base_url,
         verify_native_server,
     )
+
+
+def _pet_coordinator_url(robot: str, route: str) -> str:
+    return f"{coordinator_base_url()}/v1/pet/{robot}/{route}"
 
 _sessions: dict[str, "NativeOmniSession"] = {}
 _output_owner: str | None = None
@@ -542,7 +548,7 @@ class NativeOmniSession:
         voice memory tools in local.toml. An unreachable or rejecting Mac
         authority is NOT a valid grant to stream private audio to a model.
         """
-        url = f"http://127.0.0.1:8765/v1/pet/{self.robot}/omni-context"
+        url = _pet_coordinator_url(self.robot, "omni-context")
         try:
             async with http.get(
                 url, headers={"Authorization": f"Bearer {self.token}"},
@@ -715,7 +721,7 @@ class NativeOmniSession:
 
     async def _persist_heard(self, http: aiohttp.ClientSession) -> None:
         """Deliver uncertain ASR for live RAM context or opt-in disk memory."""
-        url = f"http://127.0.0.1:8765/v1/pet/{self.robot}/omni-heard"
+        url = _pet_coordinator_url(self.robot, "omni-heard")
         while not self.closed:
             queued = await self._heard_queue.get()
             if len(queued) == 4:
@@ -800,7 +806,7 @@ class NativeOmniSession:
 
     async def _persist_spoken(self, http: aiohttp.ClientSession) -> None:
         """Share no PCM, only recent native model text tied to sent head Opus."""
-        url = f"http://127.0.0.1:8765/v1/pet/{self.robot}/omni-spoken"
+        url = _pet_coordinator_url(self.robot, "omni-spoken")
         while not self.closed:
             event_id, text, sent_at_us = await self._spoken_queue.get()
             try:
@@ -848,7 +854,7 @@ class NativeOmniSession:
         calling. It never injects raw PCM/JPEG or an arbitrary model message,
         and the Mac API separately enforces live context opt-in.
         """
-        address = f"http://127.0.0.1:8765/v1/pet/{self.robot}/interaction-context"
+        address = _pet_coordinator_url(self.robot, "interaction-context")
         while not self.closed:
             try:
                 # Even a quiet connected session must detect revoked consent
@@ -1100,7 +1106,7 @@ class NativeOmniSession:
             return ""
         try:
             async with http.get(
-                f"http://127.0.0.1:8765/v1/pet/{self.robot}/interaction-context",
+                _pet_coordinator_url(self.robot, "interaction-context"),
                 headers={"Authorization": f"Bearer {self.token}"},
                 timeout=aiohttp.ClientTimeout(total=1.2),
             ) as response:
@@ -1763,7 +1769,7 @@ class NativeOmniSession:
         including silence. Reuse that same native realtime session for video,
         rather than fetching one photograph only after human VAD turns true.
         """
-        address = f"http://127.0.0.1:8765/v1/pet/{self.robot}/omni-stream"
+        address = _pet_coordinator_url(self.robot, "omni-stream")
         headers = {"Authorization": f"Bearer {self.token}"}
         # A clean EOF after Mac revokes consent must be reauthorized now,
         # before the normal one-second retry delay. Allow one immediate
@@ -1906,7 +1912,7 @@ class NativeOmniSession:
         or a periodic static refresh while this head's user is speaking.
         Optional camera HTTP never blocks a microphone or cancellation packet.
         """
-        address = f"http://127.0.0.1:8765/v1/pet/{self.robot}/omni-frame"
+        address = _pet_coordinator_url(self.robot, "omni-frame")
         while not self.closed:
             if not self._user_was_talking:
                 await self._camera_wakeup.wait()

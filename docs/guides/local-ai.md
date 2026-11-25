@@ -123,9 +123,7 @@ Start the coordinator:
 uv run desk-robot --config config/local.toml serve
 ```
 
-Local API documentation is at localhost:8765/docs. If you explicitly change
-`serve --port`, pass the matching `--url` before `doctor --live` or other CLI
-requests. The speech server and head must also use their configured endpoints.
+Local API documentation is at localhost:8765/docs. For integrated Xiaozhi voice operation, tools and optional native context default to `http://127.0.0.1:8765`. If you explicitly change `serve --port`, pass the matching `--url` before `doctor --live` or other CLI requests and set `DESK_ROBOT_COORDINATOR_URL=http://127.0.0.1:<port>` (an operator-controlled loopback `http://` origin without credentials, paths, or queries) before launching `run_server.py` so the speech server, tools, and native omni share that validated loopback coordinator endpoint. The speech server and head must also use their configured endpoints.
 Use the operator token for
 manual enable/move, the separate tool token for the Xiaozhi pickup/stop/job
 functions. Tools cannot enable movement themselves. Ordinary head camera

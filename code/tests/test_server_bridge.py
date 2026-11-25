@@ -3784,3 +3784,245 @@ async def test_mac_opus_pacing_includes_socket_send_time(
     await bridge.transmit(current, "test", [b"a", b"b", b"c"])
     interval = max(0.060, send_seconds)
     assert starts == pytest.approx([100.0, 100.0 + interval, 100.0 + 2 * interval])
+
+
+def test_cloud_streaming_profile_rejected_before_mapped_fleet_startup(
+    bridge, tmp_path, monkeypatch, capsys,
+):
+    """Streaming cloud profile cannot launch a mapped multi-robot CustomTTS fleet."""
+    import types
+
+    import yaml
+
+    spec_cfg = importlib.util.spec_from_file_location(
+        "streaming_cfg", ROOT / "laptop/server/configure.py"
+    )
+    cfg_mod = importlib.util.module_from_spec(spec_cfg)
+    spec_cfg.loader.exec_module(cfg_mod)
+
+    spec_run = importlib.util.spec_from_file_location(
+        "streaming_runner", ROOT / "laptop/server/run_server.py"
+    )
+    runner = importlib.util.module_from_spec(spec_run)
+    spec_run.loader.exec_module(runner)
+
+    fake_root = tmp_path / "code"
+    (fake_root / "config").mkdir(parents=True)
+    (fake_root / "laptop/server/build/xiaozhi/main/xiaozhi-server/data").mkdir(parents=True)
+    (fake_root / "laptop/server/build/xiaozhi/main/xiaozhi-server/app.py").write_text(
+        "raise AssertionError('app.py must not launch')\n"
+    )
+    (fake_root / "upstream/xiaozhi-esp32-server").mkdir(parents=True)
+    local_env = fake_root / "config/local.env"
+    local_env.write_text(
+        "DESK_ROBOT_API_TOKEN=" + "a" * 40 + "\n"
+        "DESK_ROBOT_TOOL_TOKEN=" + "b" * 40 + "\n"
+        "DESK_ROBOT_SPEECH_TOKEN=" + "s" * 40 + "\n",
+        encoding="utf-8",
+    )
+    local_env.chmod(0o600)
+    fleet_toml = fake_root / "config/local.toml"
+    fleet_toml.write_text(
+        '[[robots]]\nid = "robot-01"\ndevice_id = "mac-01"\nvoice = "af_heart"\n',
+        encoding="utf-8",
+    )
+
+    local_cfg = fake_root / "laptop/server/build/xiaozhi/main/xiaozhi-server/data/.config.yaml"
+    example = yaml.safe_load((ROOT / "config/xiaozhi.local.example.yaml").read_text())
+    example["server"] = dict(example["server"])
+    example["server"]["auth"] = {"enabled": True, "allowed_devices": []}
+    example["server"]["auth_key"] = "x" * 40
+    streamed = cfg_mod.enable_streaming_voice(
+        example,
+        {
+            "DASHSCOPE_API_KEY": "dash-test",
+            "VOLCENGINE_TTS_APPID": "app-test",
+            "VOLCENGINE_TTS_ACCESS_TOKEN": "tok-test",
+            "VOLCENGINE_TTS_SPEAKER": "spk-test",
+        },
+    )
+    local_cfg.write_text(yaml.safe_dump(streamed, sort_keys=False), encoding="utf-8")
+    local_cfg.chmod(0o600)
+
+    installer_stub = types.ModuleType("install_overlay")
+    installer_stub.verify_installed_overlay = lambda *_a, **_kw: (_ for _ in ()).throw(
+        AssertionError("verify_installed_overlay should not be reached before TTS rejection")
+    )
+    monkeypatch.setitem(sys.modules, "install_overlay", installer_stub)
+    monkeypatch.setattr(runner, "ROOT", fake_root)
+    monkeypatch.setattr(sys, "argv", ["run_server.py", "--config", str(fleet_toml)])
+
+    with pytest.raises(SystemExit) as exc:
+        runner.main()
+    assert exc.value.code == 2
+    assert "CustomTTS" in capsys.readouterr().err
+
+    # Runtime connection guard independently blocks the same generated profile.
+    monkeypatch.setenv("DESK_ROBOT_NATIVE_VOICE_MAP", json.dumps({"robot-01": "af_heart"}))
+    monkeypatch.setenv("DESK_ROBOT_DEVICE_MAP", json.dumps({"robot-01": "mac-01"}))
+    head = SimpleNamespace(device_id="mac-01", config=streamed)
+    bridge.register(head)
+    with pytest.raises(RuntimeError, match="requires CustomTTS"):
+        bridge.native_tts_config(head)
+
+    # Local Kokoro baseline remains accepted end-to-end.
+    bridge.unregister(head)
+    local_cfg.write_text(yaml.safe_dump(example, sort_keys=False), encoding="utf-8")
+    runner.verified_xiaozhi_auth_config(local_cfg)
+    runner.verified_xiaozhi_fleet_tts_config(local_cfg, {"robot-01": "mac-01"})
+    local_head = SimpleNamespace(device_id="mac-01", config=example)
+    bridge.register(local_head)
+    resolved = bridge.native_tts_config(local_head)
+    assert resolved["TTS"]["CustomTTS"]["params"]["voice"] == "af_heart"
+
+
+async def test_alternate_coordinator_port_routes_tools_and_native_omni_without_8765(
+    monkeypatch,
+):
+    """Both Xiaozhi tools and native omni honor a validated alternate loopback port."""
+    from aiohttp import web
+    from desk_robot.realtime_omni_protocol import coordinator_base_url
+
+    spec_run = importlib.util.spec_from_file_location(
+        "coord_runner", ROOT / "laptop/server/run_server.py"
+    )
+    runner = importlib.util.module_from_spec(spec_run)
+    spec_run.loader.exec_module(runner)
+    for bad in (
+        "http://example.com:8765",
+        "http://192.168.1.20:8765",
+        "https://127.0.0.1:8765",
+        "http://user:pass@127.0.0.1:8765",
+        "http://127.0.0.1:8765/extra",
+        "http://127.0.0.1:8765?x=1",
+        " ",
+        "",
+    ):
+        with pytest.raises(ValueError):
+            coordinator_base_url(bad)
+
+    seen_ports: list[int] = []
+    seen_paths: list[str] = []
+    got_interaction = asyncio.Event()
+
+    async def status_handler(request: web.Request) -> web.Response:
+        seen_paths.append(request.path)
+        if request.url.port is not None:
+            seen_ports.append(request.url.port)
+        return web.json_response(
+            {"robot_id": "robot-01", "mode": "simulation", "motor_authorized": False}
+        )
+
+    async def context_handler(request: web.Request) -> web.Response:
+        seen_paths.append(request.path)
+        if request.url.port is not None:
+            seen_ports.append(request.url.port)
+        if request.path.endswith("/interaction-context"):
+            got_interaction.set()
+        return web.json_response(
+            {
+                "robot_id": "robot-01",
+                "instructions": "Be brief",
+                "persona": "Pip",
+                "model_can_arm_motors": False,
+                "live_transcript_context_enabled": True,
+                "memory_enabled": False,
+                "transcript_memory_enabled": False,
+                "voice_monitor_ready": True,
+                "model_context": "",
+                "raw_media_included": False,
+                "persistent_memory_included": False,
+                "model_context_untrusted_not_instructions": True,
+                "motor_authorized": False,
+                "charging_authorized": False,
+            }
+        )
+
+    app = web.Application()
+    app.router.add_get("/v1/robots/robot-01/status", status_handler)
+    app.router.add_get("/v1/pet/robot-01/omni-context", context_handler)
+    app.router.add_get("/v1/pet/robot-01/interaction-context", context_handler)
+
+    async with TestServer(app) as coordinator:
+        assert coordinator.port != 8765
+        alt_url = f"http://127.0.0.1:{coordinator.port}/"
+        normalized = runner.coordinator_base_url(alt_url)
+        assert normalized == f"http://127.0.0.1:{coordinator.port}"
+        monkeypatch.setenv("DESK_ROBOT_COORDINATOR_URL", normalized)
+        monkeypatch.setenv("DESK_ROBOT_TOOL_TOKEN", "b" * 40)
+        monkeypatch.setenv("DESK_ROBOT_SPEECH_TOKEN", "s" * 40)
+
+        cancel_event = asyncio.Event()
+        fake_bridge = SimpleNamespace(
+            connections={},
+            voice_turn_generation={"mac-01": 1},
+            tool_turn_cancel_event=lambda _dev: cancel_event,
+            robot_for_device=lambda dev: "robot-01" if dev == "mac-01" else None,
+            lease_stopping=False,
+            lease_ids=frozenset(),
+            lease_until=0.0,
+            human_speech_active=lambda: False,
+        )
+        monkeypatch.setitem(sys.modules, "desk_robot_bridge", fake_bridge)
+        pkg = types.ModuleType("plugins_func")
+        pkg.__path__ = []
+        reg = types.ModuleType("plugins_func.register")
+        reg.Action = SimpleNamespace(NONE="none", REQLLM="reqllm")
+        reg.ActionResponse = lambda action, result=None: SimpleNamespace(action=action, result=result)
+        reg.ToolType = SimpleNamespace(IOT_CTL="iot_ctl")
+        reg.register_function = lambda *_a, **_kw: (lambda fn: fn)
+        monkeypatch.setitem(sys.modules, "plugins_func", pkg)
+        monkeypatch.setitem(sys.modules, "plugins_func.register", reg)
+
+        tools_spec = importlib.util.spec_from_file_location(
+            "alt_port_tools", ROOT / "laptop/server/overlay/desk_robot_tools.py"
+        )
+        tools = importlib.util.module_from_spec(tools_spec)
+        tools_spec.loader.exec_module(tools)
+
+        head = SimpleNamespace(
+            device_id="mac-01",
+            client_is_speaking=False,
+            client_listen_mode="realtime",
+        )
+        fake_bridge.connections["mac-01"] = head
+        tool_result = await tools.call(head, "status")
+        assert tool_result["robot_id"] == "robot-01"
+
+        monkeypatch.syspath_prepend(str(ROOT / "laptop/server/overlay"))
+        omni_spec = importlib.util.spec_from_file_location(
+            "alt_port_omni", ROOT / "laptop/server/overlay/desk_robot_native_omni.py"
+        )
+        omni = importlib.util.module_from_spec(omni_spec)
+        monkeypatch.setitem(sys.modules, "alt_port_omni", omni)
+        omni_spec.loader.exec_module(omni)
+
+        assert omni._pet_coordinator_url("robot-01", "omni-context") == (
+            f"http://127.0.0.1:{coordinator.port}/v1/pet/robot-01/omni-context"
+        )
+        session = omni.NativeOmniSession(
+            head,
+            url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+            model="openbmb/MiniCPM-o-4_5",
+            token="p" * 32,
+        )
+        import aiohttp
+
+        async with aiohttp.ClientSession() as http:
+            await session._load_private_persona(http)
+            assert session._mac_context_verified is True
+            session.connected = True
+            session._context_last_sync_at = time.monotonic() - 10.0
+            session._context_wakeup.set()
+            refresher = asyncio.create_task(session._refresh_live_context(http))
+            try:
+                await asyncio.wait_for(got_interaction.wait(), timeout=2)
+            finally:
+                session.closed = True
+                refresher.cancel()
+                await asyncio.gather(refresher, return_exceptions=True)
+        assert "/v1/robots/robot-01/status" in seen_paths
+        assert "/v1/pet/robot-01/omni-context" in seen_paths
+        assert "/v1/pet/robot-01/interaction-context" in seen_paths
+        assert seen_ports and all(p == coordinator.port for p in seen_ports)
+        assert 8765 not in seen_ports

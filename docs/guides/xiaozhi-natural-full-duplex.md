@@ -55,7 +55,7 @@ Do not call this feature finished until the current branch checks pass AND acous
 
 The server pinned at `d9c2e8c5d92627b670dec57d72a07a4226a410a3` already contains `AliyunBLStreamASR` (type `aliyunbl_stream`) and `HuoshanDoubleStreamTTSV2` (type `huoshan_double_stream`, resource `seed-tts-2.0`). These are actual established xinnan source modules, **not** pseudo provider names. The original server includes its own `performance_tester.py` to measure ASR, LLM, VLLM and TTS independently.
 
-The robot's private `code/laptop/server/configure.py` now has `--streaming-profile aliyun-volcengine`. This is optional: the default remains private local FunASR + Ollama + Kokoro, and the script will refuse to generate a profile when any required credential or activated voice ID is absent. The profile uses third-party services with possible charges and audio leaving the Mac. It is **not** an offline mode.
+The robot's private `code/laptop/server/configure.py` now has `--streaming-profile aliyun-volcengine` for **isolated single-head cloud provider benchmarking only**, not a supported provisioned robot fleet setup. The default remains private local FunASR + Ollama + Kokoro, and the script will refuse to generate a profile when any required credential or activated voice ID is absent. `run_server.py` and `desk_robot_bridge.py` explicitly refuse any non-`CustomTTS` TTS module when mapped fleet devices are configured until a per-robot streaming voice mapping is implemented. The profile uses third-party services with possible charges and audio leaving the Mac. It is **not** an offline mode.
 
 ```sh
 # Keys are provider-issued; never add them to GitHub or a shell history file.
