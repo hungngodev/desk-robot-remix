@@ -24,7 +24,9 @@ std::expected<std::vector<uint8_t>, std::string> Esp32Camera::SnapshotJpeg() {
     size_t len = 0;
     const bool ok = image_to_jpeg(encode_buf_, current_fb_->width * current_fb_->height * 2,
         current_fb_->width, current_fb_->height, V4L2_PIX_FMT_RGB565, 80, &jpeg, &len);
-    if (!ok || !jpeg || len < 4 || len > 512 * 1024) {
+    if (!ok || !jpeg || len < 4 || len > 512 * 1024 ||
+        jpeg[0] != 0xff || jpeg[1] != 0xd8 ||
+        jpeg[len - 2] != 0xff || jpeg[len - 1] != 0xd9) {
         free(jpeg);
         return std::unexpected("JPEG encoding failed");
     }

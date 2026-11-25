@@ -18,6 +18,7 @@ struct Frame {
     int format;
 };
 bool encoder_ok = true;
+bool encoder_framing_ok = true;
 bool image_to_jpeg(uint8_t* src, size_t size, uint16_t width, uint16_t height,
                    int format, int quality, uint8_t** out, size_t* len) {
     assert(size == 8 && width == 2 && height == 2);
@@ -25,7 +26,7 @@ bool image_to_jpeg(uint8_t* src, size_t size, uint16_t width, uint16_t height,
     if (!encoder_ok) return false;
     *len = 5;
     *out = static_cast<uint8_t*>(malloc(*len));
-    const uint8_t bytes[] = {0xff, 0xd8, src[0], 0xff, 0xd9};
+    const uint8_t bytes[] = {0xff, 0xd8, src[0], 0xff, static_cast<uint8_t>(encoder_framing_ok ? 0xd9 : 0)};
     std::copy(bytes, bytes + 5, *out);
     return true;
 }
@@ -73,6 +74,10 @@ int main() {
     encoder_ok = false;
     assert(!camera.SnapshotJpeg());
     encoder_ok = true;
+    encoder_framing_ok = false;
+    assert(!camera.SnapshotJpeg());
+    encoder_framing_ok = true;
+    assert(camera.SnapshotJpeg());
     camera.frame.format = PIXFORMAT_OTHER;
     assert(!camera.SnapshotJpeg());
     camera.frame.format = PIXFORMAT_JPEG;
