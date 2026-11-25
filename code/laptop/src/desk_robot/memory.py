@@ -25,6 +25,10 @@ _EVENT_ID = re.compile(r"[A-Za-z0-9_-]{1,96}\Z")
 _EVENT_KIND = re.compile(r"[a-z_]{1,40}\Z")
 _RELAY_TOKEN = re.compile(r"[0-9a-f]{32}\Z")
 
+# G005 producers must use fictional_dream; retain dream as a legacy alias.
+# The event kind, not a generated story's wording, owns this boundary.
+FICTIONAL_MEMORY_KINDS = ("dream", "fictional_dream")
+
 # Every retained deletion ID is an exact cross-restart replay prohibition.
 # Unlike bounded episode rows, tombstones CANNOT be silently evicted.
 # At this generous per-pet budget (~274 unique deletions/day for a year),
@@ -546,7 +550,11 @@ class MemoryStore:
         camera_provenance: CameraProvenance | None = None,
         relay_token: str | None = None,
     ) -> bool:
-        """Idempotently store one fact; duplicates do not rewrite earlier evidence."""
+        """Retain one episode; duplicates cannot rewrite its evidence kind.
+
+        For a fictional dream, the local witnessed bit identifies authorship
+        under the existing consent contract, not a physical observation.
+        """
         if (type(robot_id) is not str or type(source_robot) is not str
                 or robot_id not in self.robot_ids or source_robot not in self.robot_ids):
             raise ValueError("Unknown robot identity")
@@ -590,6 +598,8 @@ class MemoryStore:
         if when > time.time() + 60:
             raise ValueError("Observation timestamp exceeds local clock")
         if camera_provenance is not None:
+            if kind in FICTIONAL_MEMORY_KINDS:
+                raise ValueError("Fictional memory cannot carry camera provenance")
             if type(camera_provenance) is not CameraProvenance:
                 raise ValueError("Invalid camera provenance type")
             received = camera_provenance.received_at
@@ -728,8 +738,9 @@ class MemoryStore:
                 """SELECT m.summary, COALESCE(e.generation,0)
                    FROM memories AS m
                    LEFT JOIN episode_mutations AS e ON e.event_id=m.event_id
-                   WHERE m.event_id=? AND m.source_robot=? AND m.witnessed=1""",
-                (event_id, robot_id),
+                   WHERE m.event_id=? AND m.source_robot=? AND m.witnessed=1
+                   AND m.kind NOT IN (?,?)""",
+                (event_id, robot_id, *FICTIONAL_MEMORY_KINDS),
             ).fetchone()
         return (str(row[0]), int(row[1])) if row is not None else None
 
@@ -743,14 +754,16 @@ class MemoryStore:
             row = db.execute(
                 """SELECT p.mac_received_at,p.interpreted_at,
                           p.device_boot,p.device_frame,p.device_complete_us,
-                          m.observed_at
+                          m.observed_at,m.kind
                    FROM camera_provenance AS p JOIN memories AS m
                    ON p.event_id=m.event_id WHERE p.event_id=?""",
                 (event_id,),
             ).fetchone()
         if row is None:
             return None
-        received, interpreted, boot, frame, complete, observed = row
+        received, interpreted, boot, frame, complete, observed, kind = row
+        if kind in FICTIONAL_MEMORY_KINDS:
+            raise ValueError("Invalid persisted camera provenance for fictional memory")
         # SQLite affinity is not strict validation. Do not normalize a
         # damaged legacy receipt into a different device/frame identity,
         # or silently relay it as an episode without camera provenance.

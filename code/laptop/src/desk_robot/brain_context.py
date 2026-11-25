@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from typing import Iterable, Sequence
 
-from .memory import CoreFact, Memory
+from .memory import FICTIONAL_MEMORY_KINDS, CoreFact, Memory
 from .sensor_event_contract import DIRECT_INTERACTION_KINDS
 
 
@@ -66,6 +66,9 @@ def live_asr_in_current_grant(
 
 def memory_provenance_label(entry: Memory) -> str:
     """Describe evidence consistently in every model-facing memory consumer."""
+    if entry.kind in FICTIONAL_MEMORY_KINDS:
+        owner = "My" if entry.source_robot == entry.robot_id else f"{entry.source_robot}'s"
+        return f"{owner} fictional dream (imagined, not a physical observation)"
     if entry.kind == "heard_human":
         return ("I may have heard (uncertain transcription)"
                 if entry.source_robot == entry.robot_id
@@ -147,9 +150,13 @@ def compose_brain_context(
         seen.add(entry.event_id)
         age = now_wall - entry.observed_at
         chronology = f"{int(age)}s old" if age >= 0 else "clock ahead"
+        metadata = (
+            f"recorded {chronology}" if entry.kind in FICTIONAL_MEMORY_KINDS
+            else f"{chronology}; confidence {entry.confidence:.2f}"
+        )
         phrase = (
             f"{memory_provenance_label(entry)}: {_clean(entry.summary, limit=110)}"
-            f" ({chronology}; confidence {entry.confidence:.2f})"
+            f" ({metadata})"
         )
         cost = len(phrase) + (2 if memory_parts else 0)
         if memory_used + cost > 600:

@@ -17,7 +17,12 @@ from .brain_context import (
     memory_provenance_label,
 )
 from .config import Settings
-from .memory import CoreMemoryMutationSuperseded, EpisodeMemoryMutationSuperseded
+from .memory import (
+    FICTIONAL_MEMORY_KINDS,
+    CoreMemoryMutationSuperseded,
+    EpisodeMemoryMutationSuperseded,
+    Memory,
+)
 
 
 class CoreMemoryRequest(BaseModel):
@@ -29,6 +34,20 @@ class EpisodeMemoryCorrectionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     summary: str = Field(min_length=1, max_length=300)
 
+
+
+def _fictional_episode_metadata(entry: Memory) -> dict[str, object]:
+    """Expose authored fiction without the legacy local-origin witness bit."""
+    if entry.kind not in FICTIONAL_MEMORY_KINDS:
+        return {}
+    return {
+        "fictional": True,
+        "witnessed": False,
+        "provenance": memory_provenance_label(entry),
+        "observed_at": None,
+        "recorded_at": entry.observed_at,
+        "confidence": None,
+    }
 
 
 def _matching_curated_fact(core: list, query: str | None):
@@ -136,6 +155,7 @@ def register_memory_routes(
                     "summary": entry.summary,
                     "observed_at": entry.observed_at,
                     "confidence": entry.confidence,
+                    **_fictional_episode_metadata(entry),
                 }
                 for entry in records
             ],
@@ -481,6 +501,7 @@ def register_voice_context_route(
                     "event_id": getattr(entry, "event_id", None),
                     "observed_at": getattr(entry, "observed_at", None),
                     "confidence": getattr(entry, "confidence", None),
+                    **_fictional_episode_metadata(entry),
                 } for entry in records
             ],
         }

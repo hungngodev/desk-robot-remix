@@ -13,6 +13,8 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .memory import FICTIONAL_MEMORY_KINDS
+
 if TYPE_CHECKING:
     from .memory import MemoryStore
 
@@ -107,8 +109,8 @@ class SpatialMemory:
                    FROM memories AS m
                    LEFT JOIN camera_provenance AS p ON p.event_id=m.event_id
                    LEFT JOIN episode_mutations AS e ON e.event_id=m.event_id
-                   WHERE m.event_id=?""",
-                (event_id,),
+                   WHERE m.event_id=? AND m.kind NOT IN (?,?)""",
+                (event_id, *FICTIONAL_MEMORY_KINDS),
             ).fetchone()
             if episode is None:
                 return False
@@ -196,6 +198,7 @@ class SpatialMemory:
                    JOIN camera_provenance AS p ON p.event_id=m.event_id
                    LEFT JOIN episode_mutations AS e ON e.event_id=m.event_id
                    WHERE s.object_key=? AND m.source_robot=? AND m.witnessed=1
+                   AND m.kind NOT IN (?,?)
                    AND COALESCE(e.generation,0)=0
                    AND s.frame='odom' AND s.anchor_id IS NULL
                    AND p.device_boot=s.camera_boot AND p.device_frame=s.camera_seq
@@ -203,7 +206,7 @@ class SpatialMemory:
                    AND ABS(m.observed_at-s.observed_at)<=0.01
                    AND ABS(p.mac_received_at-s.observed_at)<=0.01
                    ORDER BY s.observed_at DESC,s.event_id DESC LIMIT 1""",
-                (object_key, robot_id),
+                (object_key, robot_id, *FICTIONAL_MEMORY_KINDS),
             ).fetchone()
         if row is None:
             return None
