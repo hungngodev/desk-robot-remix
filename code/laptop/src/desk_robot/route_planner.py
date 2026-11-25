@@ -110,6 +110,12 @@ def plan_route(
     if (type(now_us) is not int or now_us < 0
             or type(max_expansions) is not int or not 1 <= max_expansions <= 4096):
         return refuse("invalid_budget")
+    if not isinstance(grid, GridSnapshot):
+        return refuse("invalid_grid")
+    if not isinstance(request, RouteRequest):
+        return refuse("invalid_request")
+    if not isinstance(envelope, SafetyEnvelope):
+        return refuse("unqualified_clearance")
     if (type(grid.width) is not int or type(grid.height) is not int
             or type(grid.cell_mm) is not int or not 1 <= grid.width <= 128
             or not 1 <= grid.height <= 128 or grid.width * grid.height > 8192
@@ -308,9 +314,15 @@ def revalidate_route_step(
     clock_us: Callable[[], int] | None = None,
 ) -> bool:
     """Recheck one exact proposed edge (or stationary pose), never detour or renew it."""
-    if (route.status != "planned" or route.may_execute is not False
+    if (not isinstance(grid, GridSnapshot) or not isinstance(route, RouteResult)
+            or not isinstance(envelope, SafetyEnvelope)
+            or route.status != "planned" or route.may_execute is not False
             or type(now_us) is not int or type(route.valid_until_us) is not int
-            or now_us >= route.valid_until_us
+            or type(route.map_observed_at_us) is not int
+            or not 0 < route.map_observed_at_us <= now_us < route.valid_until_us
+            or type(route.cells) is not tuple or not 1 <= len(route.cells) <= 4096
+            or any(type(cell) is not tuple or len(cell) != 2
+                   or any(type(axis) is not int for axis in cell) for cell in route.cells)
             or (grid.robot_id, grid.origin_id, grid.epoch, grid.anchor_id, grid.calibration_id)
             != (route.robot_id, route.origin_id, route.epoch, route.anchor_id, route.calibration_id)
             or type(grid.observed_at_us) is not int
