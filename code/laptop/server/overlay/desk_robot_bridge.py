@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import copy
+import hashlib
 import json
 import logging
 import os
@@ -887,13 +888,24 @@ async def transmit(conn, text, frames, *, passive: bool = False):
 
 def create_app():
     token = os.environ.get("DESK_ROBOT_SPEECH_TOKEN", "")
-    if len(token) < 24:
-        raise ValueError("Set private DESK_ROBOT_SPEECH_TOKEN before starting server")
+    if len(token) < 24 or not re.fullmatch(r"[A-Za-z0-9._~+/-]+=*", token):
+        raise ValueError("Set private DESK_ROBOT_SPEECH_TOKEN to a valid ASCII bearer token")
+    expected_digest = hashlib.sha256(token.encode("ascii")).digest()
     device_map()
 
     @web.middleware
     async def auth(request, handler):
-        if not secrets.compare_digest(request.headers.get("Authorization", ""), f"Bearer {token}"):
+        values = request.headers.getall("Authorization", [])
+        if len(values) != 1 or not values[0].isascii():
+            raise web.HTTPUnauthorized()
+        scheme, _, credential = values[0].partition(" ")
+        if (
+            scheme.lower() != "bearer"
+            or not re.fullmatch(r"[A-Za-z0-9._~+/-]+=*", credential)
+            or not secrets.compare_digest(
+                hashlib.sha256(credential.encode("ascii")).digest(), expected_digest
+            )
+        ):
             raise web.HTTPUnauthorized()
         try:
             return await handler(request)
