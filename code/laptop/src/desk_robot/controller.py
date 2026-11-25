@@ -18,6 +18,7 @@ from .dock_runtime import (
 )
 from .dock_vision import assess_dock
 from .grasp_feedback import await_commanded_jaw_target, guarded_grasp
+from .motion_authority import StopConfirmationTracker
 from .object_search import ObjectSearchResult, summarize_search_observation
 from .object_targets import ObjectTarget
 from .operations import OperationError, _bounded_head_reply
@@ -144,9 +145,7 @@ class Coordinator:
         self.permits: dict[str, float] = {}
         self.shutdown_stop_failures: dict[str, str] = {}
         self._permit_epoch = {r.id: 0 for r in settings.robots}
-        self._pending_stops: dict[str, int] = {}
-        self._stop_generation = {r.id: 0 for r in settings.robots}
-        self._unconfirmed_stops: set[str] = set()
+        self._stop_confirmations = StopConfirmationTracker(r.id for r in settings.robots)
         self._voice_active_robots: set[str] = set()
         self._voice_monitor_enforced = False
         self._voice_monitor_ready = True
@@ -250,25 +249,37 @@ class Coordinator:
         )
         return status
 
+    def _robot_busy(self, robot_id: str) -> bool:
+        return self.locks[robot_id].locked() or any(
+            job.robot_id == robot_id and job.state in {"queued", "running"}
+            for job in self.jobs.values()
+        )
+
+    def _require_live_permit(self, robot_id: str) -> None:
+        if self.permits.get(robot_id, 0) < time.monotonic():
+            self.permits.pop(robot_id, None)
+            raise OperationError("Operator permit missing or expired; enable one operation first")
+
+    def _retire_permit(self, robot_id: str) -> int:
+        self._permit_epoch[robot_id] += 1
+        self.permits.pop(robot_id, None)
+        return self._permit_epoch[robot_id]
+
     async def operator_arm(self, robot_id: str, *, require_low_battery: bool = False):
         robot = self.robot(robot_id)
         if self.closed:
             raise OperationError("Coordinator closing")
         if not robot.motion_enabled:
             raise OperationError("motion_enabled=false; no arm sent")
-        if robot_id in self._pending_stops or robot_id in self._unconfirmed_stops:
+        if self._stop_confirmations.blocked(robot_id):
             raise OperationError("WROOM STOP pending or unconfirmed; require acknowledged halt")
         voice_reason = self.voice_blocks_motion()
         if voice_reason is not None:
             raise OperationError(voice_reason)
-        if self.locks[robot_id].locked() or any(
-            j.robot_id == robot_id and j.state in {"queued", "running"} for j in self.jobs.values()
-        ):
+        if self._robot_busy(robot_id):
             raise OperationError("Robot busy")
         # Retire any older in-flight preflight before awaiting the head.
-        self._permit_epoch[robot_id] += 1
-        owner_epoch = self._permit_epoch[robot_id]
-        self.permits.pop(robot_id, None)
+        owner_epoch = self._retire_permit(robot_id)
         request_at = time.monotonic()
         status = await self._hardware_preflight(robot_id)
         if require_low_battery:
@@ -283,9 +294,7 @@ class Coordinator:
         if voice_reason is not None:
             raise OperationError(voice_reason)
         if (self.closed or self._permit_epoch[robot_id] != owner_epoch
-                or self.locks[robot_id].locked()
-                or any(j.robot_id == robot_id and j.state in {"queued", "running"}
-                       for j in self.jobs.values())):
+                or self._robot_busy(robot_id)):
             raise OperationError("Operator arm superseded or robot became busy")
         self.permits[robot_id] = time.monotonic() + 30
         return {
@@ -298,35 +307,22 @@ class Coordinator:
 
     async def stop(self, robot_id: str):
         self.robot(robot_id)
-        # Fence new permits and fleet admission even for an idle body. An
-        # explicit STOP without a job owner must still require a valid receipt.
-        self._pending_stops[robot_id] = self._pending_stops.get(robot_id, 0) + 1
-        self._stop_generation[robot_id] += 1
-        generation = self._stop_generation[robot_id]
+        # Fence new permits and fleet admission even for an idle body.
+        generation = self._stop_confirmations.begin(robot_id)
+        acknowledged = False
         try:
             acknowledgement = await self._stop(robot_id)
-        except BaseException:
-            if self._stop_generation[robot_id] == generation:
-                self._unconfirmed_stops.add(robot_id)
-            raise
-        else:
-            # An older HALT finishing cleanup cannot clear a newer failed
-            # receipt. Only the latest explicit attempt owns this evidence.
-            if self._stop_generation[robot_id] == generation:
-                self._unconfirmed_stops.discard(robot_id)
+            acknowledged = True
             return acknowledgement
         finally:
-            self._pending_stops[robot_id] -= 1
-            if not self._pending_stops[robot_id]:
-                del self._pending_stops[robot_id]
+            self._stop_confirmations.finish(robot_id, generation, acknowledged=acknowledged)
 
     async def _stop(self, robot_id: str):
         self.discard_deferred_motion(
             robot_id=robot_id,
             reason="STOP requested; deferred motion discarded",
         )
-        self._permit_epoch[robot_id] += 1
-        self.permits.pop(robot_id, None)
+        self._retire_permit(robot_id)
         running = [
             task
             for jid, task in self.tasks.items()
@@ -576,7 +572,7 @@ class Coordinator:
         """
         self._ensure_voice_gate()
         robot = self.robot(robot_id)
-        if self.closed or robot_id in self._pending_stops or robot_id in self._unconfirmed_stops:
+        if self.closed or self._stop_confirmations.blocked(robot_id):
             raise OperationError("Robot unavailable or STOP unconfirmed; cannot defer motion")
         if not robot.motion_enabled:
             raise OperationError("Deferred motion requires motion_enabled=true")
@@ -584,13 +580,10 @@ class Coordinator:
             self._voice_monitor_enforced and not self._voice_monitor_ready
         ):
             raise OperationError("Voice monitor unavailable; cannot defer motion")
-        if self.permits.get(robot_id, 0) < time.monotonic():
-            self.permits.pop(robot_id, None)
-            raise OperationError("Operator permit missing or expired; enable one operation first")
+        self._require_live_permit(robot_id)
         # Consume and retire the pre-speech permit immediately so it cannot
         # outlive the turn or bypass fresh preflight at speech_end dispatch.
-        self.permits.pop(robot_id, None)
-        self._permit_epoch[robot_id] += 1
+        self._retire_permit(robot_id)
         if len(self._deferred_voice_queue) >= 16:
             raise OperationError("Deferred voice motion queue is full")
         if len(self._deferred_requests) >= 128:
@@ -624,8 +617,7 @@ class Coordinator:
                     return None
                 req = self._deferred_voice_queue[0]
                 if (
-                    req.robot_id in self._pending_stops
-                    or req.robot_id in self._unconfirmed_stops
+                    self._stop_confirmations.blocked(req.robot_id)
                 ):
                     return None
                 if time.monotonic() > req.expires_at:
@@ -654,8 +646,7 @@ class Coordinator:
                     self.closed
                     or req.queue_generation != self._deferred_voice_generation
                     or self._permit_epoch[req.robot_id] != dispatch_epoch
-                    or req.robot_id in self._pending_stops
-                    or req.robot_id in self._unconfirmed_stops
+                    or self._stop_confirmations.blocked(req.robot_id)
                     or not self.robot(req.robot_id).motion_enabled
                     or (self.dock_inhibited(req.robot_id) and req.kind in {"exploration", "pickup", "navigate"})
                     or (req.consent_check is not None and not req.consent_check())
@@ -696,8 +687,7 @@ class Coordinator:
                 initial_low, expires_at, camera_grant = pending_auto.pop(robot_id)
                 if (
                     time.monotonic() >= expires_at
-                    or robot_id in self._pending_stops
-                    or robot_id in self._unconfirmed_stops
+                    or self._stop_confirmations.blocked(robot_id)
                     or self.dock_inhibited(robot_id)
                 ):
                     continue
@@ -712,24 +702,15 @@ class Coordinator:
 
     def _submit(self, robot_id: str, kind: str, work: Callable[[Job], Awaitable[dict]]) -> Job:
         self.robot(robot_id)
-        if self.permits.get(robot_id, 0) < time.monotonic():
-            self.permits.pop(robot_id, None)
-            raise OperationError("Operator permit missing or expired; enable one operation first")
+        self._require_live_permit(robot_id)
         if (
             self.closed
-            or self.locks[robot_id].locked()
-            or any(
-                j.robot_id == robot_id and j.state in {"queued", "running"}
-                for j in self.jobs.values()
-            )
+            or self._robot_busy(robot_id)
         ):
             raise OperationError("Robot busy or coordinator closing")
-        if self._fleet_motion_owner is not None:
-            raise OperationError(
-                "Fleet motion busy: one moving pet until WROOM STOP is acknowledged"
-            )
-        if self._pending_stops or self._unconfirmed_stops:
-            raise OperationError("Fleet motion blocked: WROOM STOP pending or unconfirmed")
+        fleet_reason = self._stop_confirmations.fleet_block_reason(self._fleet_motion_owner)
+        if fleet_reason is not None:
+            raise OperationError(fleet_reason)
         voice_reason = self.voice_blocks_motion()
         if voice_reason is not None:
             raise OperationError(voice_reason)
@@ -740,8 +721,7 @@ class Coordinator:
                     del self.jobs[jid]
                     del self.tasks[jid]
                     break
-        self._permit_epoch[robot_id] += 1
-        self.permits.pop(robot_id, None)  # consume once, even if ACK/job later fails
+        self._retire_permit(robot_id)  # consume once, even if ACK/job later fails
         job = Job(uuid.uuid4().hex, robot_id, kind)
         # Claim synchronously, before the task is even scheduled. No queued
         # second body can slip in between per-robot task starts.
