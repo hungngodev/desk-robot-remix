@@ -593,10 +593,10 @@ void setup() {
   // Optional CAP1188 on mux 0x71 channel 0: prefer 0x29, accept 0x28
   // only after manufacturer and product ID checks on the isolated bus.
   // The dedicated AT42QT1010 GPIO34 remains the actual touch stop.
-  const bool petting_present = cap1188.begin(Wire);
+  const bool petting_present = tof.bus_accessible() && cap1188.begin(Wire);
   Serial.println(petting_present ? "INFO cap1188_read_only_available" :
                    "INFO cap1188_missing_or_wrong_id");
-  const bool paw_present = paw_pulse.begin(Wire);
+  const bool paw_present = tof.bus_accessible() && paw_pulse.begin(Wire);
   Serial.println(paw_present ? "INFO max30102_raw_optical_available" :
                                "INFO max30102_optional_unavailable");
 #if defined(DESK_ROBOT_MAX30102_FIFO_IR_FIRST) && DESK_ROBOT_MAX30102_FIFO_IR_FIRST
@@ -604,7 +604,7 @@ void setup() {
 #else
   Serial.println("INFO max30102_fifo_red_first_compiled_unqualified");
 #endif
-  const bool accessory_mux = accessories.begin(Wire);
+  const bool accessory_mux = tof.bus_accessible() && accessories.begin(Wire);
 #if defined(DESK_ROBOT_REQUIRE_FUEL_MONITOR) && DESK_ROBOT_REQUIRE_FUEL_MONITOR
   // Full battery robot cannot move when its fuel gauge is missing/stale.
   // A valid digital voltage read does not certify the pack or charger.
@@ -701,17 +701,24 @@ void loop() {
   // A fault must reach the physical outputs before another shared I2C
   // transaction can block. Preserve holding PWM through apply_outputs().
   if (!cliff_guard.evaluate(millis())) apply_outputs();
-  berry_imu.poll(millis());   // read-only; no motor permission even if ToF fails
+  if (tof.bus_accessible()) berry_imu.poll(millis());
+  if (!tof.bus_accessible()) {
+    berry_imu.invalidate_bus();
+    accessories.invalidate_bus();
+  }
   control.set_imu(berry_imu.reading());
   poll_touch(millis());
   poll_optional(millis());
   // Safety sampling first, optional petting second. No motion authority.
   std::uint8_t cap_zones = 0;
-  if (cap1188.present() && cap1188.verified()) {
+  if (tof.bus_accessible() && cap1188.present() && cap1188.verified()) {
     if (cap1188.poll(millis(), cap_zones)) control.set_cap(true, cap_zones);
     else if (!cap1188.verified()) control.set_cap(false, 0);
+  } else {
+    control.set_cap(false, 0);
   }
-  paw_pulse.poll(millis());
+  if (tof.bus_accessible()) paw_pulse.poll(millis());
+  if (!tof.bus_accessible()) paw_pulse.invalidate_bus();
   control.set_paw_pulse(paw_pulse.sample());
 #if DESK_ROBOT_ENABLE_HAPTIC
   // React only to a genuine fresh CAP1188 rising touch zone, not a boot
@@ -725,7 +732,20 @@ void loop() {
       accessories.request_haptic(millis());
   }
 #endif
-  accessories.poll(millis());
+  if (tof.bus_accessible()) accessories.poll(millis());
+  if (!tof.bus_accessible()) {
+    // A client after the range scan can hold SDA/SCL. No more I2C work,
+    // no cached evidence and no wait for the next scan before stopping.
+    tof.observe_shared_bus_fault(cliff_guard);
+    control.invalidate_side_ranges();
+    control.invalidate_range_optics();
+    berry_imu.invalidate_bus();
+    control.set_imu(berry_imu.reading());
+    control.set_cap(false, 0);
+    paw_pulse.invalidate_bus();
+    control.set_paw_pulse(paw_pulse.sample());
+    accessories.invalidate_bus();
+  }
   control.set_accessories(accessories.readings(), millis());
 #if defined(DESK_ROBOT_ENABLE_TERMINAL_IR) && DESK_ROBOT_ENABLE_TERMINAL_IR
   terminal_ir.poll(millis());  // bounded, nonblocking, after cliff/dock reads

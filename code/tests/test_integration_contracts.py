@@ -104,6 +104,10 @@ def test_cliff_fault_reaches_motor_outputs_before_other_i2c_work():
     loop = re.sub(r"\s+", "", loop)
     stop = "if(!cliff_guard.evaluate(millis()))apply_outputs();"
     assert loop.index("tof.poll(") < loop.index(stop) < loop.index("berry_imu.poll(")
+    for client in ("berry_imu", "paw_pulse", "accessories"):
+        assert f"if(tof.bus_accessible()){client}.poll(" in loop
+    assert "if(tof.bus_accessible()&&cap1188.present()&&cap1188.verified())" in loop
+    assert "tof.observe_shared_bus_fault(cliff_guard);" in loop
 
 
 def test_real_robot_pin_allocations_do_not_double_book_same_gpio():

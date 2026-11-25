@@ -20,6 +20,9 @@ class AccessorySensors {
   bool begin(TwoWire& wire);
   void poll(std::uint32_t now_ms);
   const AccessoryReadings& readings() const { return data_; }
+  // No bus transaction: invalidate every cached conversion when another
+  // shared client detects a held line or detached pin matrix.
+  void invalidate_bus() { invalidate_cached(); }
   // Independent of successful downstream initialization and final close.
   bool mux_present() const { return mux_present_; }
   // Local CAP1188 transition only. No speech/network motor commands.

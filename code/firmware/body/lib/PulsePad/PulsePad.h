@@ -15,6 +15,7 @@ class PulsePad {
   // No access to motor pins, arm, safety guard, or lift servo.
   bool poll(std::uint32_t now_ms);
   const OpticalRaw& sample() const { return sample_; }
+  void invalidate_bus() { sample_.valid = false; fifo_unsynced_ = true; }
   // Acknowledged 0x71 even if selection/readback or optical init failed.
   bool mux_present() const { return mux_present_; }
  private:

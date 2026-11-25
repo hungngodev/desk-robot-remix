@@ -54,6 +54,10 @@ class TofBus {
   // Any bus fault or invalid data immediately feeds the local CliffGuard.
   void poll(CliffGuard& guard, std::uint32_t now_ms);
   bool ready() const { return initialized_; }
+  // Other synchronous Wire clients must never run while recovery owns GPIOs
+  // or when Wire initialization failed. No motion authorization follows.
+  bool bus_accessible() const { return wire_started_ && pins_restored_ && bus_idle(); }
+  void observe_shared_bus_fault(CliffGuard& guard);
   // The optional 0x71 mux can NACK our first startup probe and then be
   // independently recognized by a later touch or accessory driver. Once
   // observed, ALWAYS prove 0x71 is disabled before selecting a 0x70 lane:
@@ -105,6 +109,7 @@ class TofBus {
   };
   ExtraSample extra_[3]{};
   bool initialized_ = false;
+  bool wire_started_ = false;
   int sda_pin_ = -1;
   int scl_pin_ = -1;
   int mux_reset_pin_ = -1;

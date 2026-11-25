@@ -9,7 +9,7 @@
 namespace desk_robot {
 
 bool TofBus::quiesce_optional_mux() {
-  if (!pins_restored_ || !bus_idle()) return false;
+  if (!bus_accessible()) return false;
   if (!optional_mux_present_) return true;
   // A fitted optional bus must not keep a lane selected while the local
   // guard reads the 0x70 floor mux. Verify the CONTROL REGISTER, not just
@@ -77,6 +77,12 @@ void TofBus::failed(CliffGuard& guard) {
   for (auto& sample : extra_) sample.valid = false;
   for (auto& sample : optical_) sample.valid = false;
   guard.bus_fault();
+}
+
+void TofBus::observe_shared_bus_fault(CliffGuard& guard) {
+  // A sibling client may hold a line after the current floor scan. Retire
+  // evidence immediately, but leave actual GPIO recovery to a later poll.
+  if (!bus_accessible() && !recovery_pending_) failed(guard);
 }
 
 // The pinned ESP-IDF driver already attempts a nine-clock clear on some
@@ -172,8 +178,10 @@ bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   // Pinned Pololu VL53L0X setup uses an 80ms timeout per device.
   // The critical polling path uses nonblocking status checks and the Wire
   // controller's independent 15ms I2C timeout.
-  wire_.begin(sda, scl, 400000);
+  wire_started_ = wire_.begin(sda, scl, 400000);
+  if (!wire_started_) return false;
   wire_.setTimeOut(15);
+  if (!bus_accessible()) return false;
   // Optional second mux: 0x71 (A0 high, A1/A2 low). No second board is
   // required for the existing five sensor firmware, and an absent board NACK
   // must not block prototype diagnostics. A fitted board is always set to

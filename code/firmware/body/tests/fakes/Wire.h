@@ -100,7 +100,8 @@ class TwoWire {
   std::uint16_t tof_signal_97 = 0x4567;
   unsigned imu_probe_attempts = 0;
 
-  void begin(int, int, int) {}
+  bool fail_begin = false;
+  bool begin(int, int, int) { return !fail_begin; }
   void setTimeOut(unsigned) {}
 
   void beginTransmission(std::uint8_t addr) {

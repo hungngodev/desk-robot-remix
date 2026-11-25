@@ -279,6 +279,39 @@ int main() {
     }
     {
       Wire = TwoWire{};
+      desk_robot::TofBus bus;
+      CHECK(!bus.bus_accessible());
+      Wire.fail_begin = true;
+      CHECK(!bus.begin(21, 22, -1));
+      CHECK(!bus.ready() && !bus.bus_accessible());
+      CHECK(Wire.transactions == 0);
+      CHECK(bus.probe_imu().family == 0 && Wire.transactions == 0);
+    }
+    {
+      Wire = TwoWire{};
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      ready(bus, guard);
+      CHECK(bus.bus_accessible());
+      auto& lines = fake_i2c_lines();
+      lines.sda_stuck = true;
+      CHECK(!bus.bus_accessible());
+      const auto before = Wire.transactions;
+      bus.observe_shared_bus_fault(guard);
+      CHECK(Wire.transactions == before);
+      faulted(guard);
+      lines.release_after_pulses = 1;
+      lines.fail_restore = true;
+      bus.poll(guard, 60);
+      CHECK(!bus.bus_accessible());
+      lines.fail_restore = false;
+      bus.poll(guard, 160);
+      CHECK(bus.bus_accessible());
+      CHECK(!guard.try_rearm(160)); // recovery is not a new range sweep
+      fake_i2c_lines() = FakeI2cLines{};
+    }
+    {
+      Wire = TwoWire{};
       Wire.optional_mux_installed = false; // five sensor bench profile
       desk_robot::TofBus bus;
       desk_robot::CliffGuard guard;

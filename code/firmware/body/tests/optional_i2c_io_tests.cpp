@@ -784,6 +784,28 @@ int main() {
     desk_robot::AccessorySensors failed_close;
     CHECK(!failed_close.begin(failed_close_wire));
     CHECK(failed_close.mux_present());
+    TwoWire externally_faulted_wire;
+    desk_robot::AccessorySensors externally_faulted;
+    CHECK(externally_faulted.begin(externally_faulted_wire));
+    for (std::uint32_t ms = 0; ms < 600; ms += 12)
+      externally_faulted.poll(ms);
+    CHECK(externally_faulted.readings().dock.valid);
+    const auto dock_seq = externally_faulted.readings().dock.sample_seq;
+    const auto transactions = externally_faulted_wire.transactions;
+    externally_faulted.invalidate_bus();
+    CHECK(!externally_faulted.readings().dock.valid);
+    CHECK(externally_faulted.readings().dock.sample_seq == dock_seq);
+    CHECK(externally_faulted_wire.transactions == transactions);
+    TwoWire external_pulse_wire;
+    desk_robot::PulsePad external_pulse;
+    CHECK(external_pulse.begin(external_pulse_wire));
+    CHECK(external_pulse.poll(0));
+    const auto pulse_seq = external_pulse.sample().sample_seq;
+    external_pulse.invalidate_bus();
+    CHECK(!external_pulse.sample().valid);
+    CHECK(external_pulse.sample().sample_seq == pulse_seq);
+    CHECK(!external_pulse.poll(100)); // quarantine old FIFO on resumption
+    CHECK(external_pulse.sample().sample_seq == pulse_seq);
     // A missing PN532 or jammed optional lane must never preserve a cached
     // MCP dock status as current valid physical evidence.
     TwoWire stuck_wire;
