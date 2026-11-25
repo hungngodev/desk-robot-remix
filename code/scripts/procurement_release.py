@@ -400,7 +400,8 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
         if selected_carrier is None:
             missing.insert(0, "exact_vendor_sku_and_pcb_revision")
         remaining = qty - owned - estimated - ordered
-        if _ad_fruit_new_hardware(ev, remaining):
+        # Unreceived and estimated boards are not already-owned exceptions.
+        if _ad_fruit_new_hardware(ev, qty - owned):
             missing.append("no_new_adafruit_hardware")
         room.append({"id": ident, "name": module.get("name"),
                      "shared_total": qty, "per_robot": 0,
@@ -2761,6 +2762,9 @@ def main() -> int:
                 selected = by_role[0 if kind == "station" else 1].get(ident, {})
             # A supplier can be a distributor (for example DigiKey) rather
             # than the carrier manufacturer; exact PCB revision still binds.
+            if _ad_fruit_new_hardware(selected, 1) or _ad_fruit_new_hardware(line, 1):
+                print("HOLD: new Adafruit purchase: " + role, file=sys.stderr)
+                return 2
             if not quoted_carrier_matches_signed_role(line, selected):
                 print("HOLD: quoted SKU, PCB revision or chosen retailer "
                       "differs from signed carrier: " + role, file=sys.stderr)

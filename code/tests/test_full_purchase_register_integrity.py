@@ -241,3 +241,38 @@ def test_instructional_buy_wire_and_print_docs_do_not_name_retired_speaker():
     assert "set volume for the 8 Ω / 1 W speaker" not in wiring
     assert "speaker diameter/depth" not in fusion
     assert "speaker_od=20;" not in adapter
+
+
+def test_source_ownership_has_exact_unique_roles_and_in_tree_paths():
+    """Reject duplicate JSON keys, missing role owners and out-of-tree paths."""
+    import json
+
+    def unique_pairs(pairs):
+        result = {}
+        for key, value in pairs:
+            assert key not in result, f"Duplicate JSON key: {key}"
+            result[key] = value
+        return result
+
+    plan = json.loads(PLAN.read_text(encoding="utf-8"), object_pairs_hook=unique_pairs)
+    owners = json.loads(
+        (HARDWARE / "full-63-role-source-ownership.json").read_text(encoding="utf-8"),
+        object_pairs_hook=unique_pairs,
+    )
+    groups = {
+        "pet_roles": [item["id"] for item in plan["parts"]],
+        "room_roles": [item["id"] for item in plan["room_pod"]["modules"]],
+        "linked_roles": [item["id"] for item in plan["linked_subassemblies"]],
+    }
+    root = HARDWARE.parents[1].resolve()
+    all_ids = []
+    for group, ids in groups.items():
+        assert len(ids) == len(set(ids))
+        assert set(owners[group]) == set(ids)
+        all_ids.extend(ids)
+        for owner in owners[group].values():
+            for key in ("source", "host_test"):
+                path = root / owner[key]
+                assert path.resolve().is_relative_to(root)
+                assert path.is_file()
+    assert len(all_ids) == len(set(all_ids)) == 63

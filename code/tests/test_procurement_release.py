@@ -1,5 +1,6 @@
 """A design slot, popular part, or fabricated boolean is not a purchase approval."""
 import importlib.util
+import subprocess
 import sys
 from pathlib import Path
 
@@ -367,6 +368,19 @@ def test_adafruit_brand_hidden_behind_generic_reseller_is_still_blocked(field, l
     )["missing_part_evidence"]
 
 
+@pytest.mark.parametrize("stock_key", ["estimated_owned_total", "ordered_unreceived_total"])
+def test_unverified_station_stock_cannot_bypass_no_new_adafruit(stock_key):
+    plan = fixture()
+    module = next(item for item in plan["room_pod"]["modules"] if item["id"] == "scd40")
+    module[stock_key] = module["quantity_per_room"]
+    evidence = {"room_pod": {"scd40": {
+        "vendor": "Adafruit", "sku": "SCD40", "pcb_revision": "A",
+    }}}
+    row = next(item for item in mod.generate(plan, evidence)["room_pod"]
+               if item["id"] == "scd40")
+    assert "no_new_adafruit_hardware" in row["missing_part_evidence"]
+
+
 def test_battery_babysitter_and_second_fuel_gauge_not_bought_together():
     p = fixture()
     p["parts"].extend([
@@ -625,6 +639,19 @@ def test_reviewed_optional_deferral_still_prints_shopping_hold():
         assert expected in rendered
     assert "REVIEWED DECISION, CHECK DISPOSITION | Linked parent amg8833" not in rendered
     assert "REVIEWED DECISION, CHECK DISPOSITION | Linked parent nfc_game_props" not in rendered
+
+
+@pytest.mark.parametrize("fmt, filename", [
+    ("csv", "fleet-components.csv"),
+    ("markdown", "complete-shopping-checklist.md"),
+])
+def test_shopping_cli_matches_checked_in_bytes(fmt, filename):
+    expected = (mod.PLAN.parent / filename).read_bytes()
+    result = subprocess.run(
+        [sys.executable, str(SCRIPT), "--format", fmt],
+        capture_output=True, check=True, cwd=mod.PLAN.parents[2],
+    )
+    assert result.stdout == expected
 
 
 def test_entire_shopping_csv_and_two_lists_match_authoritative_source():
