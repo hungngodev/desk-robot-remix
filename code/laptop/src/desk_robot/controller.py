@@ -1707,9 +1707,7 @@ class Coordinator:
         spatial = getattr(self, "spatial", None)
         if spatial is None:
             raise OperationError("Spatial runtime unavailable")
-        camera_grant = None
-        if self.settings.mode == "hardware" and label is not None:
-            camera_grant = self._camera_motion_grant()
+        camera_grant = self._camera_motion_grant()
         route, _, _ = spatial.plan_navigation(
             robot_id,
             start=start,
@@ -1718,9 +1716,11 @@ class Coordinator:
             label=label,
             goal_heading=goal_heading,
         )
-        if route.status != "planned" or route.may_execute is not False:
+        if route.status != "planned" or route.may_execute is not False or not route.cells:
             raise OperationError(f"Navigation refused: {route.reason}")
-        expected_epoch = spatial.state(robot_id).epoch
+        expected_epoch = route.epoch
+        if spatial.state(robot_id).epoch != expected_epoch:
+            raise OperationError("Navigation refused: spatial map invalidated")
         return self._submit(
             robot_id,
             "navigate",
@@ -1745,6 +1745,7 @@ class Coordinator:
         camera_grant: int | None = None,
     ) -> dict:
         from .object_detector import DetectorFrame
+        from .route_planner import revalidate_route_step
 
         spatial = getattr(self, "spatial", None)
         if spatial is None:
@@ -1756,21 +1757,41 @@ class Coordinator:
         step_vectors = {(1, 0): 0, (0, 1): 1, (-1, 0): 2, (0, -1): 3}
         cur_heading = initial_heading
 
-        async def _verify_step_authority(cell: tuple[int, int] | None = None) -> None:
-            if camera_grant is not None:
-                self._require_camera_motion_grant(camera_grant)
+        def _check_step_authority(start_cell: tuple[int, int], goal_cell: tuple[int, int]):
+            self._require_camera_motion_grant(camera_grant)
             if self.dock_inhibited(job.robot_id):
                 raise OperationError("Navigation halted: robot seated or powered on dock")
             st = spatial.state(job.robot_id)
-            if st.epoch != expected_epoch or st.grid is None or not st.grid.anchored:
+            if (st.epoch != expected_epoch or st.grid is None or not st.grid.anchored
+                    or st.envelope is None):
                 reason = st.invalidated_reason or "epoch_changed"
                 raise OperationError(f"Navigation halted: spatial map invalidated ({reason})")
-            if cell is not None:
-                cell_state = st.grid.state(cell[0], cell[1], now_us=spatial.now_us())
-                if cell_state != "safe":
-                    raise OperationError(
-                        f"Navigation halted: cell {cell} no longer safe ({cell_state})"
-                    )
+            if self.settings.mode == "hardware":
+                media = self.multimodal
+                # Reuse the authenticated MJPEG owner; a cached JPEG after
+                # disconnect or from another camera boot is not current evidence.
+                if (media is None or not media.stream_owns_camera(job.robot_id)
+                        or not media.status(job.robot_id)["camera_stream_connected"]
+                        or not any(
+                            frame.source == "proactive"
+                            and frame.source_identity is not None
+                            and frame.source_identity[0] == st.camera_boot
+                            and 0 <= time.monotonic() - frame.received_at <= 1.0
+                            for frame in media.hub.frames.get(job.robot_id, ())
+                        )):
+                    spatial.invalidate_robot(job.robot_id, reason="camera_lost")
+                    raise OperationError("Navigation halted: live anchored camera unavailable")
+            now_us = spatial.now_us()
+            if not revalidate_route_step(
+                st.grid.to_route_snapshot(now_us=now_us), route, st.envelope,
+                start=start_cell, heading=cur_heading, goal=goal_cell,
+                now_us=now_us, clock_us=spatial.now_us,
+            ):
+                raise OperationError("Navigation halted: route clearance or validity lost")
+
+        async def _verify_step_authority(start_cell: tuple[int, int],
+                                         goal_cell: tuple[int, int]) -> None:
+            _check_step_authority(start_cell, goal_cell)
             pose_reader = getattr(head, "pose_status", None)
             if callable(pose_reader):
                 req_start = time.monotonic()
@@ -1785,6 +1806,17 @@ class Coordinator:
                     received_at=time.monotonic(),
                     request_started_at=req_start,
                 )
+            elif self.settings.mode == "hardware":
+                raise OperationError("Navigation halted: live pose unavailable")
+            # Pose IO can yield to sensor updates, STOP and consent revocation.
+            # Refresh local health and then recheck the full inflated edge
+            # synchronously immediately before the caller dispatches a pulse.
+            await self._assert_armed_health(
+                job.robot_id, require_front_clearance=start_cell != goal_cell,
+            )
+            _check_step_authority(start_cell, goal_cell)
+            if self.voice_blocks_motion() is not None:
+                raise OperationError("Navigation halted: voice preempted motion")
 
         def _turn_once(target_heading: int) -> str:
             delta = (target_heading - cur_heading) % 4
@@ -1801,7 +1833,7 @@ class Coordinator:
                 route.final_heading is None or route.final_heading == cur_heading
             ):
                 await self._assert_armed_health(job.robot_id, require_front_clearance=False)
-                await _verify_step_authority(route.cells[0] if route.cells else None)
+                await _verify_step_authority(route.cells[0], route.cells[0])
             else:
                 prev_cell = route.cells[0]
                 for next_cell in route.cells[1:]:
@@ -1816,7 +1848,7 @@ class Coordinator:
                             "charging_authorized": False,
                             "physical_acceptance_pass": False,
                         }
-                    await _verify_step_authority(next_cell)
+                    await _verify_step_authority(prev_cell, next_cell)
                     dx = next_cell[0] - prev_cell[0]
                     dy = next_cell[1] - prev_cell[1]
                     desired_heading = step_vectors.get((dx, dy))
@@ -1840,7 +1872,7 @@ class Coordinator:
                                 "charging_authorized": False,
                                 "physical_acceptance_pass": False,
                             }
-                        await _verify_step_authority(next_cell)
+                        await _verify_step_authority(prev_cell, next_cell)
                     await head.command(f"drive {20 * forward_sign} {20 * forward_sign} 100")
                     await asyncio.sleep(0.05)
                     await _bounded_pulse_stop(head)
@@ -1848,13 +1880,9 @@ class Coordinator:
                     prev_cell = next_cell
 
                 if route.final_heading is not None and route.final_heading != cur_heading:
-                    await self._assert_armed_health(job.robot_id, require_front_clearance=True)
-                    await _verify_step_authority(prev_cell)
-                    await head.command(_turn_once(route.final_heading))
-                    await asyncio.sleep(0.05)
-                    await _bounded_pulse_stop(head)
-                    cur_heading = route.final_heading
+                    raise OperationError("Navigation halted: unplanned final turn")
 
+            _check_step_authority(route.cells[-1], route.cells[-1])
             if label is None:
                 return {
                     "status": "waypoint_reached",
@@ -1882,6 +1910,7 @@ class Coordinator:
             raw_obs = await _bounded_head_reply(
                 snap_fn(), seconds=2.0, timeout_message="Navigation verification snapshot timeout"
             )
+            _check_step_authority(route.cells[-1], route.cells[-1])
             jpeg = raw_obs[0] if isinstance(raw_obs, tuple) else raw_obs
             st = spatial.state(job.robot_id)
             now_us = spatial.now_us()
@@ -1918,6 +1947,7 @@ class Coordinator:
                     not job.id or self.jobs.get(job.id, job).state == "running"
                 ),
             )
+            _check_step_authority(route.cells[-1], route.cells[-1])
             if receipt.evidence is not None:
                 spatial.record_object_sighting(job.robot_id, receipt.evidence)
             if receipt.status == "camera_seen":

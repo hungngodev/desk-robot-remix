@@ -294,3 +294,45 @@ def plan_route(
             heapq.heappush(queue, (priority, new_cost, turns + int(turning),
                                    nx, ny, new_heading))
     return refuse("no_safe_route")
+
+
+def revalidate_route_step(
+    grid: GridSnapshot,
+    route: RouteResult,
+    envelope: SafetyEnvelope,
+    *,
+    start: tuple[int, int],
+    heading: int,
+    goal: tuple[int, int],
+    now_us: int,
+    clock_us: Callable[[], int] | None = None,
+) -> bool:
+    """Recheck one exact proposed edge (or stationary pose), never detour or renew it."""
+    if (route.status != "planned" or route.may_execute is not False
+            or type(now_us) is not int or type(route.valid_until_us) is not int
+            or now_us >= route.valid_until_us
+            or (grid.robot_id, grid.origin_id, grid.epoch, grid.anchor_id, grid.calibration_id)
+            != (route.robot_id, route.origin_id, route.epoch, route.anchor_id, route.calibration_id)
+            or type(grid.observed_at_us) is not int
+            or grid.observed_at_us < route.map_observed_at_us):
+        return False
+    expected = (start,) if start == goal else (start, goal)
+    if (start == goal and start not in route.cells
+            or start != goal and not any(
+                (a, b) == expected for a, b in zip(route.cells, route.cells[1:])
+            )):
+        return False
+    check = plan_route(
+        grid,
+        RouteRequest(
+            robot_id=route.robot_id, origin_id=route.origin_id,
+            epoch=route.epoch, anchor_id=route.anchor_id,
+            session_id=route.session_id, turn_id=route.turn_id,
+            start=start, heading=heading, goal=goal, deadline_us=route.valid_until_us,
+        ),
+        envelope,
+        now_us=now_us,
+        max_expansions=2,
+        clock_us=clock_us,
+    )
+    return check.status == "planned" and check.cells == expected

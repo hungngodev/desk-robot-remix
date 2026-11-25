@@ -560,3 +560,44 @@ async def test_spatial_navigate_barrier_cancellation_and_pre_pickup_rejection(
     finally:
         release_first_drive.set()
         await rt.close()
+
+
+async def test_navigation_rechecks_swept_neighbor_after_pose_io(settings, tmp_path):
+    """An unsafe cell outside the centerline vetoes the pending turn."""
+    from desk_robot.runtime import Runtime
+
+    settings.memory_dir = tmp_path / "memory"
+    settings.trials_file = tmp_path / "trials.jsonl"
+    robot = settings.robots[0]
+    robot.motion_enabled = True
+    robot.spatial_navigation_qualified = True
+    rt = Runtime(settings)
+
+    class HazardHead(SpatialHead):
+        async def pose_status(self):
+            st = rt.spatial.state("robot-01")
+            now_us = rt.spatial.now_us()
+            rt.spatial.record_range_batch(
+                "robot-01",
+                RangeCellBatch(
+                    "robot-01", self.body_boot, st.origin_id, st.epoch,
+                    st.calibration_id, 0, 2, 200_000, now_us,
+                    "floor_unsafe", ((1, 2),), True,
+                ),
+                now_us=now_us,
+            )
+            return await super().pose_status()
+
+    head = HazardHead("robot-01")
+    rt.coordinator.heads["robot-01"] = head
+    try:
+        _seed_safe_grid(rt.spatial, "robot-01", head)
+        await rt.coordinator.operator_arm("robot-01")
+        job = rt.coordinator.navigate("robot-01", start=(2, 2), goal=(2, 3))
+        await asyncio.wait_for(rt.coordinator.tasks[job.id], timeout=5)
+        assert job.state == "failed"
+        assert "route clearance or validity lost" in (job.error or "")
+        assert not any(cmd.startswith("drive ") for cmd in head.commands)
+        assert "halt" in head.commands
+    finally:
+        await rt.close()
