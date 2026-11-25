@@ -354,10 +354,19 @@ class HttpHead:
 
     async def status(self) -> dict:
         async with self.lock:
-            data = _response_object(await self._request("GET", "/api/status"))
-            if not isinstance(data, dict) or data.get("robot_id") != self.config.id:
-                raise HeadError("Status robot identity mismatch")
-            return data
+            generation = self._command_generation
+            try:
+                data = _response_object(await self._request("GET", "/api/status"))
+                if data.get("robot_id") != self.config.id:
+                    raise HeadError("Status robot identity mismatch")
+                return data
+            except (HeadError, asyncio.CancelledError):
+                # A lost body read also means queued keepalives cannot prove
+                # continuity. Preserve a newer or already pending HALT.
+                if generation == self._command_generation and not self._command_uncertain:
+                    self._command_uncertain = True
+                    self._command_generation += 1
+                raise
 
     async def pose_status(self) -> PoseReceipt:
         """Read authenticated v1 odometry without giving it any motion permit.

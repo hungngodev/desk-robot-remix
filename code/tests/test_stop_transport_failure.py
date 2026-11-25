@@ -427,5 +427,60 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
                     )
 
 
+    async def test_uart_status_disconnect_fences_queued_control_until_halt(self):
+        import httpx
+        from desk_robot.transport import HeadError, HttpHead
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+        online = False
+        sent = []
+
+        async def handler(request):
+            if request.method == "GET":
+                if not online:
+                    entered.set()
+                    await release.wait()
+                    return httpx.Response(504, json={"ok": False})
+                return httpx.Response(200, json={"robot_id": "robot-01"})
+            command = json.loads(request.content)["command"]
+            sent.append(command)
+            return httpx.Response(200, json={
+                "ok": True, "robot_id": "robot-01", "reply": f"OK {command}",
+            })
+
+        config = SimpleNamespace(
+            id="robot-01", head_url="http://robot.invalid", token_env="HEAD_TOKEN",
+        )
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            head = HttpHead(config, client)
+            with patch("desk_robot.transport.secret", return_value="fixture-token"):
+                await head.command("arm")
+                status = asyncio.create_task(head.status())
+                queued = None
+                try:
+                    await asyncio.wait_for(entered.wait(), timeout=1)
+                    queued = asyncio.create_task(head.command("keepalive"))
+                    await asyncio.sleep(0)
+                    release.set()
+                    with self.assertRaises(HeadError):
+                        await asyncio.wait_for(status, timeout=1)
+                    with self.assertRaisesRegex(HeadError, "superseded"):
+                        await asyncio.wait_for(queued, timeout=1)
+                    online = True
+                    await head.status()
+                    with self.assertRaisesRegex(HeadError, "require acknowledged HALT"):
+                        await head.command("arm")
+                    await head.command("halt")
+                    await head.command("arm")
+                    self.assertEqual(sent, ["arm", "halt", "arm"])
+                finally:
+                    release.set()
+                    await asyncio.gather(
+                        *(task for task in (status, queued) if task is not None),
+                        return_exceptions=True,
+                    )
+
+
 if __name__ == "__main__":
     unittest.main()
