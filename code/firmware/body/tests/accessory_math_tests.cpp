@@ -1,6 +1,7 @@
 #include "AccessoryReadings.h"
 #include "Bmp280Math.h"
 #include "GestureDecoder.h"
+#include <cfenv>
 #include <iostream>
 #include <stdexcept>
 #define CHECK(x) do { if (!(x)) throw std::runtime_error(#x); } while (false)
@@ -172,10 +173,52 @@ static void check_bmp280_boundaries() {
   }
 }
 
+static void check_bmp280_zero_divisor() {
+  desk_robot::Bmp280Trim d{};
+  d.t1 = 1;
+  d.p1 = 65535;
+  int t = 0;
+  unsigned p = 0;
+  // ADC endpoints are not the disabled-conversion sentinel (0x80000).
+  CHECK(desk_robot::bmp280_compensate(d, 0, 0, t, p));
+  CHECK(t == 0 && p == 100002);
+  d.p1 = 6250;
+  d.p4 = -6250;
+  CHECK(desk_robot::bmp280_compensate(d, 0xfffffU, 0xfffffU, t, p));
+  CHECK(t == 0 && p == 100001);
+  const auto reject = [&t, &p](const desk_robot::Bmp280Trim& trim,
+                              std::uint32_t rt, std::uint32_t rp) {
+    t = 1234; p = 56789;
+    std::feclearexcept(FE_ALL_EXCEPT);
+    CHECK(!desk_robot::bmp280_compensate(trim, rt, rp, t, p));
+    CHECK(std::fetestexcept(FE_DIVBYZERO | FE_INVALID | FE_OVERFLOW) == 0);
+    CHECK(t == 1234 && p == 56789);
+  };
+  d.t1 = 0; // otherwise produces a plausible temperature and pressure
+  reject(d, 0xfffffU, 0xfffffU);
+  d.t1 = 1; d.p1 = 0;
+  reject(d, 0xfffffU, 0xfffffU);
+  std::uint8_t words[24]{};
+  desk_robot::Bmp280Trim decoded{};
+  words[6] = 1;
+  CHECK(!desk_robot::bmp280_trim(words, decoded));
+  words[0] = 1; words[6] = 0;
+  CHECK(!desk_robot::bmp280_trim(words, decoded));
+  words[6] = 1;
+  CHECK(desk_robot::bmp280_trim(words, decoded));
+  // Nonzero P1 is insufficient: these coefficients produce fine=-920576,
+  // a=-524288, then a pressure divisor of exactly zero.
+  d = {};
+  d.t1 = 32768; d.t2 = 28768; d.p1 = 1;
+  d.p2 = 32767; d.p3 = -1;
+  reject(d, 0, 415148);
+}
+
 int main() {
   try {
     check_register_precision();
     check_bmp280_boundaries();
+    check_bmp280_zero_divisor();
     check_gesture_boundaries();
     check_gesture_session_recovery();
     const std::uint8_t known[2] = {0xBE, 0xEF};
