@@ -18,7 +18,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from .spatial_pose import PoseFence, PoseReceipt
 from .transport import HeadError
 
-
 # SpatialGrid admits at most 64 cells per axis. Reject coercions before
 # submitting or deferring any job; the planner still checks the actual grid.
 GridCoordinate = Annotated[int, Field(strict=True, ge=0, le=63)]
