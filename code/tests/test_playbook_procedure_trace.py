@@ -4,6 +4,7 @@ The canonical PR owns execution. A source, URL or proposed command never
 becomes a physical or same-commit test receipt by changing a status string.
 """
 import json
+import math
 import re
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -14,6 +15,35 @@ ROOT = Path(__file__).resolve().parents[2]
 LEDGER = ROOT / "docs/reviews/100_page_procedure_trace.json"
 STATES = {"OPEN", "TESTED", "MEASURED", "QUALIFIED"}
 EVIDENCE_CLASSES = {"source", "mixed", "physical"}
+
+
+def _parse_ledger(raw):
+    """Reject ambiguous evidence before any gate or receipt is inspected."""
+    def unique_fields(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"Duplicate procedure ledger field: {key}")
+            result[key] = value
+        return result
+
+    def reject_constant(token):
+        raise ValueError(f"Nonfinite procedure ledger constant: {token}")
+
+    def finite_float(token):
+        value = float(token)
+        if not math.isfinite(value):
+            raise ValueError(f"Nonfinite procedure ledger number: {token}")
+        return value
+
+    return json.loads(
+        raw, object_pairs_hook=unique_fields,
+        parse_constant=reject_constant, parse_float=finite_float,
+    )
+
+
+def _load_ledger():
+    return _parse_ledger(LEDGER.read_text(encoding="utf-8"))
 
 
 def _physical_record_url_is_traceable(url, sha, receipt):
@@ -142,7 +172,7 @@ def _valid_release_evidence(record):
 
 
 def test_all_96_playbook_procedures_have_distinct_source_and_verification_owners():
-    ledger = json.loads(LEDGER.read_text())
+    ledger = _load_ledger()
     assert ledger["schema_version"] == 2
     assert ledger["canonical_repository"] == "hungngodev/desk-robot-remix"
     assert ledger["canonical_pr"] == 17
@@ -179,7 +209,7 @@ def test_all_96_playbook_procedures_have_distinct_source_and_verification_owners
 def test_status_string_cannot_fake_same_sha_or_physical_acceptance(claimed_status):
     # An executable source task can be promoted with an actual test receipt.
     # The first eight process/review tasks require separate human evidence.
-    row = json.loads(LEDGER.read_text())["procedures"][8].copy()
+    row = _load_ledger()["procedures"][8].copy()
     row["gate"] = claimed_status
     assert not _valid_release_evidence(row)
     row["last_verified_sha"] = "a" * 40
@@ -203,14 +233,14 @@ def test_status_string_cannot_fake_same_sha_or_physical_acceptance(claimed_statu
 
 
 def test_procurement_and_physical_procedures_remain_open_without_bench_receipts():
-    rows = json.loads(LEDGER.read_text())["procedures"]
+    rows = _load_ledger()["procedures"]
     for row in rows:
         if row["physical_measurement_receipt"] is None:
             assert row["gate"] not in {"MEASURED", "QUALIFIED"}
 
 
 def test_physical_procedures_cannot_be_promoted_by_source_only_receipts():
-    rows = json.loads(LEDGER.read_text())["procedures"]
+    rows = _load_ledger()["procedures"]
     required = {19, 24, 27, 28, 44, 65, 67, 70, 72, 77, 78, 80,
                 87, 88, 89, 90, 91, 92, 94}
     assert all(rows[index - 1]["evidence_class"] == "physical"
@@ -232,7 +262,7 @@ def test_physical_procedures_cannot_be_promoted_by_source_only_receipts():
 
 def _physical_receipt_fixture():
     """A structurally valid synthetic receipt, never actual bench evidence."""
-    row = json.loads(LEDGER.read_text())["procedures"][88].copy()
+    row = _load_ledger()["procedures"][88].copy()
     assert row["evidence_class"] == "physical"
     sha = "a" * 40
     row.update(gate="MEASURED", last_verified_sha=sha)
@@ -274,7 +304,7 @@ def test_physical_receipts_reject_invalid_signoff(field, value):
 
 
 def test_manual_process_procedures_need_review_receipts_beyond_green_ci():
-    row = json.loads(LEDGER.read_text())["procedures"][0].copy()
+    row = _load_ledger()["procedures"][0].copy()
     sha = "a" * 40
     row["gate"] = "TESTED"
     row["last_verified_sha"] = sha
@@ -305,7 +335,7 @@ def test_manual_process_procedures_need_review_receipts_beyond_green_ci():
 
 
 def test_all_tof_and_handling_procedures_use_existing_distinct_targets():
-    rows = json.loads(LEDGER.read_text())["procedures"]
+    rows = _load_ledger()["procedures"]
     known = {x["id"]: x["verification_command"] for x in rows}
     for index in range(25, 33):
         assert "test_tof_mux.py" not in known[index]
@@ -395,3 +425,20 @@ def test_manual_review_rejects_noncanonical_comment_ids(suffix):
     }
     assert not _valid_manual_review(record, sha)
 
+
+@pytest.mark.parametrize("raw", [
+    '{"gate":"OPEN","gate":"QUALIFIED"}',
+    '{"procedures":[{"gate":"OPEN","gate":"QUALIFIED"}]}',
+    '{"executed_test_receipt":{"exit_code":1,"exit_code":0}}',
+    '{"value":NaN}', '{"value":Infinity}', '{"value":-Infinity}',
+    '{"value":1e999}',
+])
+def test_procedure_ledger_rejects_ambiguous_or_nonfinite_json(raw):
+    with pytest.raises(ValueError):
+        _parse_ledger(raw)
+
+
+def test_procedure_ledger_accepts_unambiguous_finite_json():
+    assert _parse_ledger('{"gate":"OPEN","value":1.25}') == {
+        "gate": "OPEN", "value": 1.25,
+    }
