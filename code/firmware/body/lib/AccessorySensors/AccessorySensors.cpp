@@ -330,10 +330,14 @@ void AccessorySensors::force(std::uint32_t now_ms) {
   if (status_read && (config & 0x8000U) == 0U &&
       now_ms - ads_started_ < 200U) return;
   std::uint16_t value = 0;
-  const bool fresh = status_read &&
-      ads1115_completed_for_channel(config, ads_channel_) &&
-      read16(0x48, 0x00, value);
-  if (fresh) {
+  const bool conversion_matches = status_read &&
+      ads1115_completed_for_channel(config, ads_channel_);
+  const bool fresh = conversion_matches && read16(0x48, 0x00, value);
+  if (!status_read || (conversion_matches && !fresh)) {
+    // Both FSR channels share this ADC. A transport failure is not an
+    // independent channel fault; require two new successful conversions.
+    f.valid_mask = 0;
+  } else if (fresh) {
     f.adc[ads_channel_] = static_cast<std::int16_t>(value);
     f.valid_mask |= static_cast<std::uint8_t>(1U << ads_channel_);
     if (ads_channel_ == 0) {

@@ -15,6 +15,8 @@ class TwoWire {
   std::uint8_t ads_config_high = 0xC3;
   bool ads_conversion_ready = true;
   bool fail_ads_config_write = false;
+  int fail_ads_read_register = -1;
+  unsigned rejected_ads_reads = 0;
   unsigned rejected_ads_config_writes = 0;
   std::uint8_t current_address = 0, register_address = 0;
   std::vector<std::uint8_t> outbound;
@@ -263,6 +265,11 @@ class TwoWire {
     if (addr == 0x28 || (addr == 0x29 && extras == 1 && cap_uses_0x29))
       ++cap_register_requests;
     if (!connected(addr)) return 0;
+    if (addr == 0x48 && extras == 4 &&
+        register_address == fail_ads_read_register) {
+      ++rejected_ads_reads;
+      return 0;
+    }
     if (addr == 0x57 && register_address == 0x07 &&
         fail_pulse_fifo_read_once) {
       // I2C transfer drops after silicon advanced one sample.

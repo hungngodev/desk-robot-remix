@@ -621,6 +621,53 @@ int main() {
     }
     CHECK(reacquired_one && reacquired_pair);
     CHECK(config_fault_wire.ranges == 0 && config_fault_wire.extras == 0);
+    // A transport failure on either ADS1115 read is a shared ADC fault,
+    // not an independent channel conversion timeout.
+    for (const int reg : {0x00, 0x01}) {
+      TwoWire adc_read_fault_wire;
+      desk_robot::AccessorySensors adc_read_fault;
+      CHECK(adc_read_fault.begin(adc_read_fault_wire));
+      for (std::uint32_t ms = 0; ms < 2400; ms += 12)
+        adc_read_fault.poll(ms);
+      CHECK(adc_read_fault.readings().force.valid_mask == 3U);
+      adc_read_fault_wire.fail_ads_read_register = reg;
+      std::uint32_t resume = 0;
+      bool failed = false;
+      for (std::uint32_t ms = 2400; ms < 3600; ms += 12) {
+        const auto before = adc_read_fault.readings().force;
+        adc_read_fault.poll(ms);
+        if (adc_read_fault_wire.rejected_ads_reads == 0U) continue;
+        const auto& after = adc_read_fault.readings().force;
+        CHECK(!after.valid && after.valid_mask == 0U);
+        CHECK(after.belly_sample_seq == before.belly_sample_seq);
+        CHECK(after.jaw_sample_seq == before.jaw_sample_seq);
+        CHECK(after.belly_at_ms == before.belly_at_ms);
+        CHECK(after.jaw_at_ms == before.jaw_at_ms);
+        CHECK(adc_read_fault_wire.ranges == 0 && adc_read_fault_wire.extras == 0);
+        CHECK(!adc_read_fault_wire.unsafe_parallel_mux);
+        failed = true;
+        resume = ms + 12;
+        break;
+      }
+      CHECK(failed);
+      adc_read_fault_wire.fail_ads_read_register = -1;
+      bool partial_pair = false, complete_pair = false;
+      for (std::uint32_t ms = resume; ms < resume + 2400; ms += 12) {
+        adc_read_fault.poll(ms);
+        const auto& after = adc_read_fault.readings().force;
+        if (after.valid_mask == 1U || after.valid_mask == 2U) {
+          CHECK(!after.valid);
+          partial_pair = true;
+        }
+        if (after.valid_mask == 3U) {
+          CHECK(partial_pair && after.valid);
+          complete_pair = true;
+          break;
+        }
+      }
+      CHECK(partial_pair && complete_pair);
+      CHECK(!adc_read_fault_wire.unsafe_parallel_mux);
+    }
     CHECK(read.gauge.fuel_present && read.gauge.fuel_valid);
     CHECK(read.gauge.cell_mv == 3600);
     CHECK(read.gauge.soc_centi == 5000);
