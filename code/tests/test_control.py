@@ -2244,6 +2244,7 @@ async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(
     release_polls = 0
     open_angle = calibration.get("grip_open", 60)
     closed_angle = calibration.get("grip_closed", 110)
+    commanded_grip = open_angle
     open_command = f"grip {open_angle}"
     lift_command = f"lift {calibration.get('lift_up', 110)}"
     original_command = head.command
@@ -2253,7 +2254,9 @@ async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(
         nonlocal release_polls
         body = await original_status()
         head._watchdog(time.monotonic())
-        result = {**body, "armed": head.armed, "imu": {**body["imu"], "boot_id": 1}}
+        result = {**body, "armed": head.armed, "imu": {**body["imu"], "boot_id": 1},
+                  "servo": {"attached": True, "position_source": "commanded",
+                            "grip": commanded_grip, "grip_target": commanded_grip}}
         if head.commands.count(open_command) == 2:
             release_polls += 1
             partial = open_angle + (4 if closed_angle > open_angle else -4)
@@ -2280,10 +2283,13 @@ async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(
         }
 
     async def command(value):
+        nonlocal commanded_grip
         if value == lift_command and head.commands.count(open_command) == 2:
             assert not release_frozen
             assert release_polls >= 2, "Lift withdrawal preceded commanded jaw opening"
         receipt = await original_command(value)
+        if value.startswith("grip "):
+            commanded_grip = int(value.split()[1])
         if value == "halt" and not halt_pending.is_set():
             halt_pending.set()
             await allow_halt.wait()
