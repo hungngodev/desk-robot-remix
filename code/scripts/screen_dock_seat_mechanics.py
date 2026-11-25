@@ -38,7 +38,7 @@ def dock_constants(source: Path = CAD) -> dict:
         "track_outer_width_mm", "side_clearance_each_mm",
         "guide_wall_mm", "wall_outside_margin_mm",
         "guide_run_mm", "guide_height_mm", "entry_flare_each_mm",
-        "entry_coupon_length_mm",
+        "entry_coupon_length_mm", "entry_flare_run_mm",
         "base_length_mm", "backstop_thickness_mm",
         "backstop_height_mm", "backstop_brace_depth_mm",
         "backstop_brace_height_mm", "base_thickness_mm", "tag_black_side_mm",
@@ -65,8 +65,8 @@ def dock_constants(source: Path = CAD) -> dict:
             or not 0.5 <= values["side_clearance_each_mm"] < 8
             or min(values["guide_height_mm"], values["guide_wall_mm"],
                    values["base_thickness_mm"]) < 2
-            or not values["guide_run_mm"] > 37
-            or not 37 < values["entry_coupon_length_mm"] < values["guide_run_mm"]
+            or not values["entry_flare_run_mm"] < values["entry_coupon_length_mm"]
+                < values["guide_run_mm"]
             or not values["base_length_mm"] >
                 values["guide_run_mm"] + values["backstop_thickness_mm"]
             or not values["base_length_mm"] - values["backstop_thickness_mm"]

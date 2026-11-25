@@ -453,3 +453,40 @@ def test_source_hash_binds_exact_bytes_used_for_geometry(
     assert result[field] == expected
     assert result["source_sha256"] == hashlib.sha256(original).hexdigest()
     assert source.reads == 1
+
+
+@pytest.mark.parametrize("flare_run", [0, 48, 49, 107])
+def test_screen_rejects_invalid_source_funnel_run(tmp_path, flare_run):
+    tool = load()
+    source = tool.CAD.read_text(encoding="utf-8")
+    original = "entry_flare_run_mm = 37;"
+    assert source.count(original) == 1
+    changed = tmp_path / "invalid_funnel.scad"
+    changed.write_text(
+        source.replace(original, f"entry_flare_run_mm = {flare_run};"),
+        encoding="utf-8",
+    )
+    with pytest.raises(
+        ValueError, match="(violates printable geometry|Invalid dock CAD dimensions)"
+    ):
+        tool.dock_constants(changed)
+
+
+@pytest.mark.parametrize("flare_run,coupon_length", [(37.5, 48), (20, 30)])
+def test_screen_accepts_valid_nondefault_funnel_run(tmp_path, flare_run, coupon_length):
+    tool = load()
+    source = tool.CAD.read_text(encoding="utf-8")
+    changed = tmp_path / "valid_funnel.scad"
+    assert source.count("entry_flare_run_mm = 37;") == 1
+    assert source.count("entry_coupon_length_mm = 48;") == 1
+    changed.write_text(
+        source.replace("entry_flare_run_mm = 37;", f"entry_flare_run_mm = {flare_run};")
+        .replace("entry_coupon_length_mm = 48;", f"entry_coupon_length_mm = {coupon_length};"),
+        encoding="utf-8",
+    )
+    datum = example()
+    datum["cad_source_sha256"] = tool.dock_constants(changed)["source_sha256"]
+    result = tool.screen(datum, cad=changed)
+    assert result["source_only_layout_possible"]
+    assert not result["physical_dock_seating_qualified"]
+    assert not result["charging_authorized"]
