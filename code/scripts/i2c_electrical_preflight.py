@@ -2,7 +2,8 @@
 
 TI SCPS207H section 8.2.2 and NXP UM10204:
 R(min)=(Vpullup-0.4V)/3mA; 30%-70% rise=0.8473*R*C.
-At 400kHz Fast mode, rise <=300 ns and segment capacitance <=400 pF.
+At 400kHz Fast mode, rise is 20 to 300 ns (UM10204 Rev. 7 Table 11)
+and segment capacitance <=400 pF.
 The ONE selected downstream branch shares upstream sink and capacitance.
 No component-vendor schematic, carrier voltage, pullup or wire is assumed.
 """
@@ -19,6 +20,7 @@ TOF = ROOT / "code/firmware/body/lib/TofBus/TofBus.cpp"
 SOURCE = "https://www.ti.com/lit/ds/symlink/tca9548a.pdf"
 FAST_HZ = 400000
 VCC = 3.3
+RISE_MIN_NS = 20.0
 RISE_LIMIT_NS = 300.0
 LOW_MAX_V = 0.4
 SINK_MAX_MA = 3.0
@@ -185,12 +187,13 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
         if upstream_rise_ns is not None and not math.isfinite(upstream_rise_ns):
             upstream_rise_ns = None
         upstream_ok = (upstream_rise_ns is not None
-                       and upstream_rise_ns <= RISE_LIMIT_NS)
+                       and RISE_MIN_NS <= upstream_rise_ns <= RISE_LIMIT_NS)
         downstream_present = len(pullups) > upstream_count
         model_ok = (upstream_ok and downstream_present
-                    and total_pf <= MAX_CAP_PF and rise_ns <= RISE_LIMIT_NS
+                    and total_pf <= MAX_CAP_PF
+                    and RISE_MIN_NS <= rise_ns <= RISE_LIMIT_NS
                     and sink_ma <= SINK_MAX_MA
-                    and all(v <= RISE_LIMIT_NS for v in measured_rises)
+                    and all(RISE_MIN_NS <= v <= RISE_LIMIT_NS for v in measured_rises)
                     and all(v <= LOW_MAX_V for v in measured_lows))
         report[line] = {
             "installed_pullups": len(pullups),
@@ -207,7 +210,8 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
         }
     return {
         "fast_mode_hz": FAST_HZ,
-        "manufacturer_limits": {"rise_ns": RISE_LIMIT_NS,
+        "manufacturer_limits": {"rise_min_ns": RISE_MIN_NS,
+                                "rise_ns": RISE_LIMIT_NS,
                                 "sink_ma": SINK_MAX_MA,
                                 "cap_pf": MAX_CAP_PF},
         "lines": report,

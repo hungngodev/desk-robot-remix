@@ -315,3 +315,39 @@ def test_explicit_null_evidence_file_is_invalid(tmp_path):
     )
     assert result.returncode != 0
     assert "Evidence must map physical circuits" in result.stderr
+
+
+@pytest.mark.parametrize("line", ["sda", "scl"])
+@pytest.mark.parametrize("owner", [0, 1])
+@pytest.mark.parametrize("rise_ns, passes", [(19.999, False), (20, True),
+                                             (300, True), (300.001, False)])
+def test_measured_rise_requires_fast_mode_window(line, owner, rise_ns, passes):
+    segments = segment()
+    segments[owner][line]["measured_rise_ns"] = rise_ns
+    report = tool.screen_selected_segment(*segments)
+    assert report["lines"][line]["paper_electrical_pass"] is passes
+    assert report["selected_branch_paper_pass"] is passes
+    assert not report["qualified_hardware"]
+
+
+@pytest.mark.parametrize("line", ["sda", "scl"])
+def test_upstream_only_too_fast_not_masked_by_selected_capacitance(line):
+    upstream, downstream = segment()
+    upstream[line]["cap_pf"] = 5
+    report = tool.screen_selected_segment(upstream, downstream)
+    assert report["lines"][line]["upstream_only_estimated_rise_ns"] < 20
+    assert 20 <= report["lines"][line]["estimated_rise_ns"] <= 300
+    assert not report["lines"][line]["upstream_only_paper_pass"]
+    assert not report["selected_branch_paper_pass"]
+
+
+@pytest.mark.parametrize("line", ["sda", "scl"])
+def test_selected_estimated_rise_below_minimum(line):
+    upstream, downstream = segment()
+    upstream[line]["cap_pf"] = 12
+    downstream[line]["cap_pf"] = 1
+    report = tool.screen_selected_segment(upstream, downstream)
+    assert report["lines"][line]["upstream_only_paper_pass"]
+    assert report["lines"][line]["estimated_rise_ns"] < 20
+    assert report["lines"][line]["estimated_sink_ma"] <= 3
+    assert not report["selected_branch_paper_pass"]

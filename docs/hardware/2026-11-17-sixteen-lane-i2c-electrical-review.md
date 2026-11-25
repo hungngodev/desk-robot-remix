@@ -12,7 +12,8 @@ breakout's pullups, wire capacitance, clock stretching or voltage rail.
 
 TI [TCA9548A SCPS207H](https://www.ti.com/lit/ds/symlink/tca9548a.pdf)
 section 8.2.2 and NXP [UM10204 I2C bus specification](https://www.nxp.com/docs/en/user-guide/UM10204.pdf)
-require at 400 kHz Fast mode: maximum 300 ns rise from 30% to 70%, maximum
+require at 400 kHz Fast mode: 20 to 300 ns rise from 30% to 70%
+(NXP UM10204 Rev. 7.0 Table 11), maximum
 400 pF bus capacitance, and approximately 3 mA low sink with 0.4 V maximum
 VOL. NXP [PN532/C1](https://www.nxp.com/docs/en/nxp/data-sheets/PN532_C1.pdf)
 supports 100 and 400 kHz I2C but clock stretching remains a real risk
