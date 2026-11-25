@@ -574,3 +574,55 @@ def test_source_snapshot_not_redirected_by_inherited_git_environment(monkeypatch
     assert snapshot["sha"] == sha
     assert snapshot["root_tree_intact"] is True
     assert snapshot["tracked_clean"] is False
+
+
+@pytest.mark.parametrize("failed_prerequisite, skipped", [
+    ("body-cmake", ["body-compile", "body-ctest"]),
+    ("body-compile", ["body-ctest"]),
+])
+def test_independent_stages_continue_and_failed_dependencies_skip(
+    monkeypatch, tmp_path, failed_prerequisite, skipped,
+):
+    import json
+
+    jobs = verify.steps("all", tmp_path)
+    names = [name for name, *_ in jobs]
+    calls = []
+
+    def execute(name, argv, cwd, timeout):
+        calls.append(name)
+        missing = name == "python-tests"
+        failed = name == failed_prerequisite
+        return {
+            "name": name, "argv": argv, "cwd": str(cwd),
+            "pass": not (missing or failed),
+            "exit_code": None if missing else (7 if failed else 0),
+            "elapsed_s": 0.1, "output_tail": "assertion failed" if failed else "",
+            "error": "FileNotFoundError: tool missing" if missing else None,
+        }
+
+    monkeypatch.setattr(verify, "run", execute)
+    monkeypatch.setattr(verify, "source_snapshot", lambda: {
+        "sha": "a" * 40, "tracked_clean": True,
+        "root_tree_intact": True, "error": None,
+    })
+    report = tmp_path / "partial.json"
+    monkeypatch.setattr(verify.sys, "argv", [
+        "verify_system.py", "--suite", "all", "--report", str(report),
+    ])
+    assert verify.main() == 1
+    receipt = json.loads(report.read_text())
+    assert receipt["source_suite_pass"] is False
+    assert receipt["physical_hardware_verified"] is False
+    records = receipt["stages"]
+    assert [record["name"] for record in records] == names
+    assert calls == [name for name in names if name not in skipped]
+    by_name = {record["name"]: record for record in records}
+    assert by_name["python-tests"]["exit_code"] is None
+    assert "FileNotFoundError" in by_name["python-tests"]["error"]
+    assert by_name[failed_prerequisite]["exit_code"] == 7
+    for name in skipped:
+        assert by_name[name]["pass"] is False
+        assert by_name[name]["exit_code"] is None
+        assert by_name[name]["error"].startswith("SKIPPED:")
+    assert by_name["dock-05"]["pass"] is True

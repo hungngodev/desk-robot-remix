@@ -286,6 +286,32 @@ def source_snapshot() -> dict:
     return snapshot
 
 
+def run_stages(jobs: list[tuple[str, list[str], Path, int]]) -> list[dict]:
+    """Continue independent checks; never execute a failed CMake dependency."""
+    dependencies = {"body-compile": "body-cmake", "body-ctest": "body-compile"}
+    records = []
+    by_name = {}
+    for name, argv, cwd, timeout in jobs:
+        dependency = dependencies.get(name)
+        if dependency is not None and not by_name[dependency]["pass"]:
+            record = {
+                "name": name, "argv": argv, "cwd": str(cwd),
+                "pass": False, "exit_code": None,
+                "error": f"SKIPPED: prerequisite {dependency} did not pass",
+                "elapsed_s": None, "output_tail": "",
+            }
+        else:
+            record = run(name, argv, cwd, timeout)
+        records.append(record)
+        by_name[name] = record
+        print(f"{name}: {'PASS' if record['pass'] else 'FAIL'} "
+              f"(exit={record['exit_code']}, time={record['elapsed_s']}s)",
+              flush=True)
+        if not record["pass"]:
+            print(record["output_tail"][-2000:] or record["error"], file=sys.stderr)
+    return records
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", choices=["python", "body", "wroom", "sense", "room", "dock", "all"],
@@ -302,16 +328,7 @@ def main() -> int:
     checkout_before = source_snapshot()
     # A workspace or remote environment failing before pytest/cmake/Pio is
     # explicitly INCOMPLETE. Never manufacture a green CI result.
-    records = []
-    for name, argv, cwd, timeout in steps(args.suite, args.build_dir):
-        record = run(name, argv, cwd, timeout)
-        records.append(record)
-        print(f"{name}: {'PASS' if record['pass'] else 'FAIL'} "
-              f"(exit={record['exit_code']}, time={record['elapsed_s']}s)",
-              flush=True)
-        if not record["pass"]:
-            print(record["output_tail"][-2000:] or record["error"], file=sys.stderr)
-            break
+    records = run_stages(steps(args.suite, args.build_dir))
     checkout_after = source_snapshot()
     clean_same_commit = (
         checkout_before["sha"] is not None
