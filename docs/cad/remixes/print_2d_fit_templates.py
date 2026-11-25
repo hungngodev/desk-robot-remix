@@ -77,11 +77,14 @@ def values(root: Path) -> dict:
     backstop_thickness = scad_mm(dock, "backstop_thickness_mm")
     entry_coupon = scad_mm(dock, "entry_coupon_length_mm")
     # A zero-height rail has no printable guide even if its footprint fits.
-    scad_mm(dock, "guide_height_mm")
+    guide_height = scad_mm(dock, "guide_height_mm")
+    base_thickness = scad_mm(dock, "base_thickness_mm")
     brace_depth = scad_mm(dock, "backstop_brace_depth_mm")
     brace_height = scad_mm(dock, "backstop_brace_height_mm")
     backstop_height = scad_mm(dock, "backstop_height_mm")
     rail_wall = scad_mm(dock, "guide_wall_mm")
+    if min(guide_height, base_thickness, rail_wall) < 2:
+        raise ValueError("Dock base or guide below printable minimum")
     rail_margin = scad_mm(dock, "wall_outside_margin_mm")
     entry_flare = scad_mm(dock, "entry_flare_each_mm")
     channel_w = track_w + 2 * each_side

@@ -185,6 +185,9 @@ def test_screen_rejects_ir_pair_coupons_breaching_paper_or_outer_web(
     ("tag_recess_depth_mm = 0.8;", "tag_recess_depth_mm = 3.5;"),
     ("ir_coupon_height_mm = 16;", "ir_coupon_height_mm = 8;"),
     ("guide_height_mm = 12;", "guide_height_mm = 0;"),
+    ("guide_height_mm = 12;", "guide_height_mm = 0.5;"),
+    ("guide_wall_mm = 5;", "guide_wall_mm = 0.5;"),
+    ("base_thickness_mm = 3;", "base_thickness_mm = 0.5;"),
     ("backstop_brace_depth_mm = 8;", "backstop_brace_depth_mm = 30;"),
     ("backstop_brace_height_mm = 10;", "backstop_brace_height_mm = 100;"),
 ])

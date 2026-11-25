@@ -49,7 +49,9 @@ assert(entry_coupon_length_mm > 37 && entry_coupon_length_mm < guide_run_mm);
 // The nominal channel must be measured between the INNER faces of the rails.
 assert(abs((outside_width_mm - 2 * inner_wall_x) - channel_mm) < 0.001);
 assert(inner_wall_x - guide_wall_mm - entry_flare_each_mm >= 0);
-assert(guide_wall_mm > 0 && guide_run_mm > 37);
+assert(guide_run_mm > 37);
+assert(base_thickness_mm >= 2 && guide_wall_mm >= 2 && guide_height_mm >= 2,
+       "Dock base or guide below printable minimum");
 assert(tag_black_side_mm >= 10 && tag_black_side_mm <= 75);
 assert(tag_white_margin_each_mm >= 4 && tag_white_margin_each_mm <= 10);
 assert(tag_paper_slack_each_mm >= 0.25 && tag_paper_slack_each_mm <= 1.5);

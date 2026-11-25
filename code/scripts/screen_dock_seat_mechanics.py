@@ -62,7 +62,8 @@ def dock_constants(source: Path = CAD) -> dict:
     inner_wall = values["guide_wall_mm"] + values["wall_outside_margin_mm"]
     if (not 40 < values["track_outer_width_mm"] < 200
             or not 0.5 <= values["side_clearance_each_mm"] < 8
-            or not values["guide_height_mm"] > 0
+            or min(values["guide_height_mm"], values["guide_wall_mm"],
+                   values["base_thickness_mm"]) < 2
             or not values["guide_run_mm"] > 37
             or not 37 < values["entry_coupon_length_mm"] < values["guide_run_mm"]
             or not values["base_length_mm"] >

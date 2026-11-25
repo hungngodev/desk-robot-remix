@@ -26,7 +26,7 @@ def setup_sources(tmp_path):
             "tag_black_side_mm = 60;\ntag_white_margin_each_mm=5;\n"
             "tag_paper_slack_each_mm=0.6;\n"
             "track_outer_width_mm=96;\nside_clearance_each_mm=2;\n"
-            "base_length_mm=138;\nguide_run_mm=107;\n"
+            "base_length_mm=138;\nguide_run_mm=107;\nbase_thickness_mm=3;\n"
             "backstop_thickness_mm=5;\nentry_coupon_length_mm=48;\n"
             "guide_wall_mm=5;\nwall_outside_margin_mm=8;\n"
             "entry_flare_each_mm=7;\nguide_height_mm=12;\n"
@@ -414,5 +414,22 @@ def test_a4_dock_requires_printable_brace_and_guide_height(
     scad.write_text(original.replace(before, after), encoding="utf-8")
     output = tmp_path / "paper"
     with pytest.raises(ValueError, match=message):
+        source.export(tmp_path, output)
+    assert not output.exists()
+
+@pytest.mark.parametrize(("old", "new"), [
+    ("guide_height_mm=12;", "guide_height_mm=0.5;"),
+    ("guide_wall_mm=5;", "guide_wall_mm=0.5;"),
+    ("base_thickness_mm=3;", "base_thickness_mm=0.5;"),
+])
+def test_a4_dock_rejects_thin_base_or_guides(tmp_path, old, new):
+    source = load()
+    setup_sources(tmp_path)
+    scad = tmp_path / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    original = scad.read_text(encoding="utf-8")
+    assert old in original
+    scad.write_text(original.replace(old, new), encoding="utf-8")
+    output = tmp_path / "paper"
+    with pytest.raises(ValueError, match="Dock base or guide below printable minimum"):
         source.export(tmp_path, output)
     assert not output.exists()

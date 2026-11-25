@@ -1291,3 +1291,18 @@ def test_speaker_coupons_reject_missing_printable_geometry(tmp_path, part, overr
     ], capture_output=True, text=True, timeout=90)
     assert bad.returncode != 0
     assert message in bad.stdout + bad.stderr
+
+@pytest.mark.skipif(shutil.which("openscad") is None, reason="Needs OpenSCAD CLI")
+@pytest.mark.parametrize("part", ["dock_passive_fit", "dock_rail_entry_coupon"])
+@pytest.mark.parametrize("override", [
+    "guide_height_mm=0", "guide_height_mm=0.5", "guide_wall_mm=0.5",
+    "base_thickness_mm=0.5",
+])
+def test_dock_rails_and_base_require_printable_dimensions(tmp_path, part, override):
+    source = ROOT / "docs/cad/remixes/dock/dock_passive_fit.scad"
+    bad = subprocess.run([
+        "openscad", "--export-format", "binstl", "-o", str(tmp_path / "bad.stl"),
+        "-D", f'part="{part}"', "-D", override, str(source),
+    ], capture_output=True, text=True, timeout=90)
+    assert bad.returncode != 0
+    assert "Dock base or guide below printable minimum" in bad.stdout + bad.stderr
