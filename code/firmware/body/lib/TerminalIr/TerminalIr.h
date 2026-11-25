@@ -9,7 +9,7 @@
 namespace desk_robot {
 // RMT driver is the pinned ESP-IDF 4.4 legacy API, not Arduino 3.x.
 // Read-only source of left/right NEC observations. NEVER drive/charge here.
-// IrFrameQueueGate's drain bound, two-packet-per-side poll and 100ms gap
+// IrFrameQueueGate's drain bound, one accepted packet per side and 100ms gap
 // are UNQUALIFIED engineering candidates on legacy ESP-IDF 4.4 RMT, whose
 // ringbuffer does not provide arrival timestamps. These must be evaluated
 // against real biased GPIO36/39 receivers, WiFi/ADC noise, NEC waveform

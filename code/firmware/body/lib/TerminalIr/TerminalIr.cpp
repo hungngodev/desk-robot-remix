@@ -74,9 +74,9 @@ void TerminalIr::poll(std::uint32_t now_ms) {
         emptied = true;
         break;
       }
-      // A poll may see at most two full packets before treating the entire
-      // batch as ambiguous. Defer accepting either side until both drained.
-      if (!discard_queued && packets < 2 &&
+      // Only the first packet can qualify. A second packet makes the
+      // entire batch ambiguous; still return all items within the budget.
+      if (!discard_queued && packets == 0 &&
           size == 34 * sizeof(rmt_item32_t)) {
         IrMarkSpace samples[34]{};
         bool polarity_ok = true;
@@ -108,6 +108,7 @@ void TerminalIr::poll(std::uint32_t now_ms) {
   if (!window_ok || receipt_window_ms > 100U) {
     // Also discard a candidate from the opposite receiver on any stall.
     // Quarantine lasts through a complete queue drain on both receivers.
+    if (window_ok) queue_.quarantine(); // timely start, overlong drain
     readings_.invalidate();
     return;
   }

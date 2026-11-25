@@ -159,6 +159,46 @@ int main() {
     CHECK(queues[1].pending.size() == 1);
     poll(ir, 900); check_unmatched(ir);
     pair(); poll(ir, 925); check_matched(ir, 25);
+    // A long drain can exceed the receipt window even though the next
+    // start-to-start gap is timely. Require another drain-only poll.
+    const auto before_stall = ir.evidence(now);
+    receive_cost = 20;
+    pair(); poll(ir, 950); check_unmatched(ir);
+    CHECK(now == 1030);
+    receive_cost = 0;
+    pair(); poll(ir, 1031); check_unmatched(ir);
+    CHECK(ir.evidence(now).left_seq == before_stall.left_seq);
+    CHECK(ir.evidence(now).right_seq == before_stall.right_seq);
+    // The two directions must independently reacquire after quarantine.
+    push(0); poll(ir, 1056);
+    auto left_only = ir.evidence(now);
+    CHECK(left_only.left_fresh && !left_only.right_fresh && !left_only.same_code);
+    CHECK(left_only.left_seq == before_stall.left_seq + 1);
+    CHECK(left_only.right_seq == before_stall.right_seq);
+    CHECK(left_only.code == 0 && left_only.left_code == kCode && left_only.right_code == 0);
+    push(1); poll(ir, 1081);
+    auto recovered = ir.evidence(now);
+    CHECK(recovered.same_code && recovered.left_age_ms == 50 && recovered.right_age_ms == 25);
+    CHECK(recovered.left_seq == left_only.left_seq);
+    CHECK(recovered.right_seq == left_only.right_seq + 1);
+    CHECK(!recovered.motor_authorized && !recovered.charging_authorized);
+    // Repeated saturation on either side must not advance either sequence.
+    for (unsigned side = 0; side != 2; ++side) {
+      const auto before_overflow = ir.evidence(now);
+      push(side, 17); push(1 - side);
+      for (unsigned batch = 0; batch != 3; ++batch) {
+        poll(ir, now + 25); check_unmatched(ir);
+        CHECK(ir.evidence(now).left_seq == before_overflow.left_seq);
+        CHECK(ir.evidence(now).right_seq == before_overflow.right_seq);
+        if (batch != 2) push(1 - side);
+      }
+      push(1 - side); poll(ir, now + 25);
+      const auto first = ir.evidence(now);
+      CHECK(!first.same_code && first.left_fresh == (side == 1));
+      CHECK(first.right_fresh == (side == 0));
+      push(side); poll(ir, now + 25);
+      CHECK(ir.evidence(now).same_code);
+    }
     // Tear down before isolating a second receiver history for rollover.
     CHECK(!ir.begin(36, 36));
     CHECK(!queues[0].installed && !queues[1].installed);

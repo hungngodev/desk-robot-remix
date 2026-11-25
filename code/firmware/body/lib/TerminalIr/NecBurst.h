@@ -106,6 +106,9 @@ class IrFrameQueueGate {
     last_ms_ = now_ms;
     return timely;
   }
+  // A drain that itself exceeded the receipt window cannot establish a
+  // clean acquisition boundary, even if both queues reported empty.
+  void quarantine() { draining_[0] = draining_[1] = true; }
   // Only usable after a timely poll and successful drain of both queues.
   std::uint32_t earliest_receipt_ms() const { return earliest_receipt_ms_; }
   bool draining(unsigned side) const {
