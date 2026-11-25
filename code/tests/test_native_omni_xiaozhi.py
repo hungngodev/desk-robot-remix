@@ -1382,6 +1382,46 @@ async def test_mac_speaker_refuses_other_pets_unverified_decoder_even_without_ow
     assert sent == []
 
 
+@pytest.mark.parametrize("elapsed, passive, granted", [
+    (20.0, True, False),
+    (119.999, True, False),
+    (120.0, True, True),
+    (20.0, False, True),
+])
+async def test_native_cooldown_rejects_before_peer_stop(
+    native, monkeypatch, elapsed, passive, granted,
+):
+    module, bridge = native
+    first, _ = connection()
+    second, _ = connection()
+    second.device_id = "mac-02"
+    second.session_id = "second-robot"
+    bridge.connections.update({"mac-01": first, "mac-02": second})
+    previous = module.NativeOmniSession(
+        first, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    next_pet = module.NativeOmniSession(
+        second, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    module._sessions.update({"mac-01": previous, "mac-02": next_pet})
+    module._output_owner = "mac-01"
+    module._last_passive_speech_started_at = 1000.0
+    monkeypatch.setattr(module.time, "monotonic", lambda: 1000.0 + elapsed)
+    calls = []
+
+    async def old_flush():
+        calls.append("stop")
+        return ()
+
+    previous._invalidate_head_first = old_flush
+    previous._schedule_remote_cancel = lambda _events: calls.append("cancel")
+    assert await module.claim_speaker(next_pet, passive=passive) is granted
+    assert calls == (["stop", "cancel"] if granted else [])
+    assert module._output_owner == ("mac-02" if granted else "mac-01")
+
+
 async def test_native_handoff_rechecks_failed_stop_after_old_flush_await(native):
     """A failed STOP during peer handoff must block a later speaker grant."""
     module, bridge = native

@@ -3113,6 +3113,9 @@ async def claim_speaker(
                 return False
             if bridge.human_speech_active() or _external_speaker_owner is not None:
                 return False
+            # An ineligible passive candidate must not interrupt an active peer.
+            if passive and not passive_speech_allowed():
+                return False
             other_id = _output_owner
             previous = (
                 _sessions.get(other_id)
