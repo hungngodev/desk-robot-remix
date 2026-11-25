@@ -237,7 +237,8 @@ async def guarded_grasp(
                     raise OperationError("Lost fresh force sensor during closing") from exc
                 latest_seq = seq
                 raw_delta = (measured - baseline) * calibration.grip_force_sign
-                if raw_delta > ceiling:
+                # Match the WROOM's exclusive calibrated closing limit.
+                if raw_delta >= ceiling:
                     raise OperationError("Gripper raw force ceiling exceeded")
                 # Contradictory polarity is not evidence of a clear jaw.
                 if raw_delta <= -threshold:

@@ -1090,3 +1090,41 @@ async def test_jaw_evidence_must_still_be_fresh_at_closing_dispatch(
     with pytest.raises(OperationError, match="expired before closing dispatch"):
         await guarded_grasp(head, Settings(), robot_id="robot-01", health=slow_health)
     assert head.commands == (["grip 64", "grip 60"] if expire_after_close else [])
+
+
+@pytest.mark.parametrize("sign", [-1, 1])
+@pytest.mark.parametrize("ceiling_first", [False, True])
+async def test_exclusive_force_ceiling(monkeypatch, sign, ceiling_first):
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+
+    class Calibrated(Settings):
+        grip_force_sign = sign
+
+    baseline = 1000
+    ceiling = baseline + sign * 500
+    contact = baseline + sign * 499
+    readings = [ceiling, contact] if ceiling_first else [contact, ceiling]
+    head = FakeHead([baseline, baseline, *readings])
+    with pytest.raises(OperationError, match="force ceiling exceeded"):
+        await guarded_grasp(head, Calibrated(), robot_id="robot-01", health=healthy)
+    assert head.commands == ["grip 64", "grip 60"]
+
+
+@pytest.mark.parametrize("sign", [-1, 1])
+async def test_one_below_ceiling_is_tactile_only(monkeypatch, sign):
+    async def instant(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.grasp_feedback.asyncio.sleep", instant)
+
+    class Calibrated(Settings):
+        grip_force_sign = sign
+
+    head = FakeHead([1000, 1000, 1000 + sign * 499, 1000 + sign * 499])
+    result = await guarded_grasp(head, Calibrated(), robot_id="robot-01", health=healthy)
+    assert result["contact_delta_raw"] == 499
+    assert result["physical_acceptance_pass"] is False
+    assert head.commands == ["grip 64"]
