@@ -116,3 +116,27 @@ def test_private_config_failed_replace_preserves_previous_settings(tmp_path, mon
     output = capsys.readouterr()
     assert SYNTHETIC_TOKEN not in output.out + output.err
     assert "y" * 40 not in output.out + output.err
+
+
+@pytest.mark.parametrize("insecure", ["permissions", "symlink", "duplicate"])
+def test_private_config_rejects_insecure_input_credentials(tmp_path, monkeypatch, capsys, insecure):
+    configure(tmp_path, monkeypatch)
+    board = tmp_path / BOARD
+    template(board)
+    path = tmp_path / "missing.env"
+    if insecure == "symlink":
+        other = tmp_path / "other.env"
+        other.write_text(f"EXP037_TEST_TOKEN={SYNTHETIC_TOKEN}\n")
+        other.chmod(0o600)
+        path.symlink_to(other)
+    else:
+        path.write_text(f"EXP037_TEST_TOKEN={SYNTHETIC_TOKEN}\n")
+        path.chmod(0o644 if insecure == "permissions" else 0o600)
+        if insecure == "duplicate":
+            with path.open("a") as stream:
+                stream.write(f"EXP037_TEST_TOKEN={SYNTHETIC_TOKEN}\n")
+    with pytest.raises(SystemExit) as error:
+        private.main()
+    assert error.value.code == 2
+    assert not (board / "config.private.json").exists()
+    assert SYNTHETIC_TOKEN not in capsys.readouterr().err

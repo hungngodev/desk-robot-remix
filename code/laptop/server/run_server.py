@@ -5,12 +5,17 @@ import json
 import os
 import re
 import runpy
+import sys
 import tomllib
 from pathlib import Path
 
 import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
+
+# Standalone launcher uses Xiaozhi's interpreter, not the Mac package venv.
+sys.path.insert(0, str(ROOT / "laptop/src"))
+from desk_robot.private_files import read_private_env, read_private_text  # noqa: E402
 
 
 def fleet_device_and_voice_maps(robots: list[dict]) -> tuple[dict, dict]:
@@ -50,10 +55,9 @@ def verified_xiaozhi_auth_config(path: Path) -> None:
     Check the effective local config before any server or pet is registered.
     """
     try:
-        with path.open("r", encoding="utf-8") as stream:
-            config = yaml.safe_load(stream)
-    except (OSError, UnicodeError, yaml.YAMLError) as exc:
-        raise ValueError("Cannot verify private Xiaozhi authentication config") from exc
+        config = yaml.safe_load(read_private_text(path))
+    except (OSError, UnicodeError, yaml.YAMLError):
+        raise ValueError("Cannot verify private Xiaozhi authentication config") from None
     if not isinstance(config, dict) or config.get("read_config_from_api") is not False:
         raise ValueError("Fleet Xiaozhi must use verified local server config")
     server = config.get("server")
@@ -67,7 +71,7 @@ def verified_xiaozhi_auth_config(path: Path) -> None:
     if auth.get("allowed_devices") != []:
         raise ValueError("Fleet Xiaozhi must disable device auth whitelist")
     key = server.get("auth_key")
-    if (not isinstance(key, str) or len(key.strip()) < 16
+    if (not isinstance(key, str) or len(key.strip()) < 32
             or key == "LOCAL_RANDOM_SECRET"):
         raise ValueError("Set a private non-placeholder Xiaozhi auth_key")
 
@@ -78,14 +82,13 @@ def main():
     args = p.parse_args()
     with args.config.open("rb") as source:
         config = tomllib.load(source)
-    for line in (ROOT / "config/local.env").read_text().splitlines():
-        if line and not line.startswith("#"):
-            key, value = line.split("=", 1)
-            os.environ.setdefault(key, value)
     try:
+        credentials = read_private_env(ROOT / "config/local.env")
         mapping, voices = fleet_device_and_voice_maps(config["robots"])
-    except (KeyError, TypeError, ValueError) as exc:
+    except (OSError, KeyError, TypeError, ValueError) as exc:
         p.error(str(exc))
+    for key, value in credentials.items():
+        os.environ.setdefault(key, value)
     os.environ["DESK_ROBOT_DEVICE_MAP"] = json.dumps(mapping)
     os.environ["DESK_ROBOT_NATIVE_VOICE_MAP"] = json.dumps(voices)
     server = ROOT / "laptop/server/build/xiaozhi/main/xiaozhi-server"
@@ -101,8 +104,6 @@ def main():
         )
     except ValueError as exc:
         p.error(str(exc))
-    import sys
-
     sys.path.insert(0, str(server))
     os.chdir(server)
     runpy.run_path(str(server / "app.py"), run_name="__main__")

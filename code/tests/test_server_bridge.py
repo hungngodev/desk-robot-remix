@@ -2845,6 +2845,7 @@ def test_native_fleet_launcher_requires_real_token_auth_not_device_whitelist(tmp
 
     def verify(settings):
         path.write_text(settings)
+        path.chmod(0o600)
         runner.verified_xiaozhi_auth_config(path)
 
     valid = template.replace(
@@ -2860,9 +2861,20 @@ def test_native_fleet_launcher_requires_real_token_auth_not_device_whitelist(tmp
         (valid.replace("read_config_from_api: false", "read_config_from_api: true", 1), "local server"),
         (valid.replace("auth_key: " + ("x" * 40), "auth_key: LOCAL_RANDOM_SECRET", 1), "auth_key"),
         (valid.replace("auth_key: " + ("x" * 40), "auth_key: short", 1), "auth_key"),
+        (valid.replace("auth_key: " + ("x" * 40), "auth_key: " + "x" * 31, 1), "auth_key"),
     ):
         with pytest.raises(ValueError, match=reason):
             verify(insecure)
+
+    verify(valid)
+    path.chmod(0o644)
+    with pytest.raises(ValueError, match="owner-only"):
+        runner.verified_xiaozhi_auth_config(path)
+    path.chmod(0o600)
+    alias = path.with_name("alias.yaml")
+    alias.symlink_to(path)
+    with pytest.raises(ValueError, match="Cannot verify"):
+        runner.verified_xiaozhi_auth_config(alias)
 
     # Malformed or missing local configuration cannot start a private server.
     path.write_text("not: [valid")

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import re
-import stat
 import time
 import tomllib
 from collections.abc import Mapping
@@ -12,6 +11,8 @@ from typing import Annotated, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, model_validator
+
+from .private_files import read_private_env as read_private_env
 
 CredentialEnvName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
 
@@ -328,42 +329,6 @@ class Settings(BaseModel):
             if robot.id == robot_id:
                 return robot
         raise KeyError(robot_id)
-
-
-def read_private_env(path: Path) -> dict[str, str]:
-    """Read a private credential file atomically, without following a leaf symlink."""
-    try:
-        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
-    except FileNotFoundError:
-        return {}  # Environment-only startup remains supported.
-    try:
-        info = os.fstat(fd)
-        if not stat.S_ISREG(info.st_mode):
-            raise ValueError("Credentials must be a regular file")
-        if info.st_uid != os.geteuid() or info.st_mode & 0o077:
-            raise ValueError("Credentials must be owner-only (chmod 600)")
-        with os.fdopen(fd, "rb", closefd=False) as stream:
-            raw = stream.read(65537)
-    finally:
-        os.close(fd)
-    if len(raw) > 65536:
-        raise ValueError("Credential file is too large")
-    try:
-        content = raw.decode("utf-8")
-    except UnicodeDecodeError:
-        raise ValueError("Credentials must be UTF-8") from None
-    values: dict[str, str] = {}
-    for line in content.splitlines():
-        if not line.strip() or line.lstrip().startswith("#"):
-            continue
-        key, sep, value = line.partition("=")
-        if (
-            not sep or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key)
-            or not value.strip() or "\x00" in value or key in values
-        ):
-            raise ValueError("Credential file contains a malformed or duplicate entry")
-        values[key] = value
-    return values
 
 
 def secret(name: str) -> str:
