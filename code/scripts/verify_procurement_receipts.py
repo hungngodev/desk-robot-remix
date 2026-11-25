@@ -26,7 +26,7 @@ from urllib.parse import urlsplit
 import verify_playbook_receipts
 from procurement_release import (
     CONDITIONAL_ROOM_PER_STATION,
-    FIRST_ROBOT_ROOM_GATE,
+    FIRST_ROBOT_ROOM_GATE,  # noqa: F401 (public verifier constant)
     FLEET_ONLY_SYSTEM_GATES,
     PART_GATES,
     SUPPLEMENTAL_DECISIONS,
