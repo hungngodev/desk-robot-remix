@@ -40,17 +40,26 @@ void esp_camera_fb_return(camera_fb_t* frame) {
 }
 bool encoder_ok = true;
 bool encoder_framing_ok = true;
+bool encoder_partial_failure = false;
+bool encoder_null_output = false;
+int encoder_calls = 0;
 bool image_to_jpeg(uint8_t* src, size_t size, uint16_t width, uint16_t height,
                    int format, int quality, uint8_t** out, size_t* len) {
     assert(!CameraLockAvailable());
     assert(size == 8 && width == 2 && height == 2);
     assert(format == V4L2_PIX_FMT_RGB565 && quality == 80);
-    if (!encoder_ok) return false;
+    ++encoder_calls;
+    if (encoder_null_output) {
+        *len = 5;
+        *out = nullptr;
+        return true;
+    }
+    if (!encoder_ok && !encoder_partial_failure) return false;
     *len = 5;
     *out = static_cast<uint8_t*>(malloc(*len));
     const uint8_t bytes[] = {0xff, 0xd8, src[0], 0xff, static_cast<uint8_t>(encoder_framing_ok ? 0xd9 : 0)};
     std::copy(bytes, bytes + 5, *out);
-    return true;
+    return encoder_ok;
 }
 class Esp32Camera {
 public:
@@ -109,13 +118,20 @@ int main() {
     camera.capture_ok = true;
     encoder_ok = false;
     assert(!capture());
+    encoder_partial_failure = true;
+    assert(!capture());  // The encoder may allocate before reporting failure.
+    encoder_partial_failure = false;
     encoder_ok = true;
+    encoder_null_output = true;
+    assert(!capture());
+    encoder_null_output = false;
     encoder_framing_ok = false;
     assert(!capture());
     encoder_framing_ok = true;
     assert(capture());
     camera.frame.format = PIXFORMAT_OTHER;
     assert(!capture());
+    const int before_native = encoder_calls;
     camera.frame.format = PIXFORMAT_JPEG;
     camera.frame.buf = nullptr;
     assert(!capture());
@@ -132,4 +148,6 @@ int main() {
     assert(!capture());
     camera.frame_available = false;
     assert(!capture());
+    assert(encoder_calls == before_native);  // Native JPEG never enters RGB encoding.
+    assert((*first)[2] == 1 && (*second)[2] == 2);
 }
