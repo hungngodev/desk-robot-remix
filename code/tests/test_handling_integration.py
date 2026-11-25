@@ -1,8 +1,11 @@
 """One real WROOM MPU6050 frame path through Mac pet and private memory."""
 import asyncio
+import math
 from itertools import count
 from pathlib import Path
 from types import SimpleNamespace
+
+import pytest
 
 from desk_robot.config import load_settings
 from desk_robot.conversation import Conversation
@@ -35,12 +38,14 @@ class NoneVision:
         raise AssertionError("No camera image was manufactured for an IMU event")
 
 
-async def test_qualified_real_wroom_imu_tilt_reaches_only_own_memory(tmp_path):
+@pytest.mark.parametrize("threshold", [25, 38, 75])
+async def test_qualified_real_wroom_imu_slow_lift_reaches_only_own_memory(tmp_path, threshold):
     settings = load_settings(
         Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml"
     )
     settings.mode = "hardware"
     settings.robots[0].handling_interactions_qualified = True
+    settings.robots[0].handling_tilt_threshold_deg = threshold
     memory = MemoryStore(tmp_path, [robot.id for robot in settings.robots])
     conversation = Conversation(settings, NoneChat(), SimulatedSpeaker(), memory=memory)
     pet = PetController(settings, {}, conversation, memory, NoneVision())
@@ -71,10 +76,22 @@ async def test_qualified_real_wroom_imu_tilt_reaches_only_own_memory(tmp_path):
             await pet._observe_imu("robot-01", 8, frame)
         # Duplicate HTTP observations of one hardware conversion are ignored.
         assert memory.count("robot-01") == 0
-        for _ in range(2):
-            frame = status(acc=(12551, 0, 10531))
-            await pet._observe_imu("robot-01", 8, frame)
-            await pet._observe_imu("robot-01", 8, frame)
+        # A 20 deg/s slow rotation at the 50ms conversion cadence.
+        # Acceleration remains near 1g, below the independent shake gate.
+        def tilt_frame(degrees):
+            radians = math.radians(degrees)
+            acc = (round(16384 * math.sin(radians)), 0, round(16384 * math.cos(radians)))
+            return status(acc=acc, gyro=(0, 2620, 0))
+
+        for degrees in range(1, threshold):
+            await pet._observe_imu("robot-01", 8, tilt_frame(degrees))
+            assert memory.count("robot-01") == 0
+        # Avoid quantization ambiguity at the exact configured angle.
+        frame = tilt_frame(threshold + 1)
+        await pet._observe_imu("robot-01", 8, frame)
+        await pet._observe_imu("robot-01", 8, frame)
+        assert memory.count("robot-01") == 0
+        await pet._observe_imu("robot-01", 8, tilt_frame(threshold + 2))
         records = memory.recent("robot-01")
         assert [r.kind for r in records] == ["handling_tilt"]
         assert records[0].source_robot == "robot-01"
@@ -84,7 +101,7 @@ async def test_qualified_real_wroom_imu_tilt_reaches_only_own_memory(tmp_path):
         assert all(memory.count(r.id) == 0 for r in settings.robots[1:])
         # Repeated same pose cannot create more memory events.
         for _ in range(6):
-            await pet._observe_imu("robot-01", 8, status(acc=(12551, 0, 10531)))
+            await pet._observe_imu("robot-01", 8, tilt_frame(threshold + 2))
         assert memory.count("robot-01") == 1
         state.enabled = False
         for _ in range(4):
