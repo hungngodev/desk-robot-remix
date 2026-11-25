@@ -8149,6 +8149,13 @@ async def test_tactile_reply_fences_admitted_camera_context(
             return "That sounds interesting."
 
     class DelayedSpeaker(PassiveBudgetSimulatedSpeaker):
+        def __init__(self):
+            super().__init__()
+            self.interrupted = []
+
+        async def interrupt(self, robot):
+            self.interrupted.append(robot.id)
+
         async def say(self, robot, text, *, permission_check=None):
             if stage == "tts":
                 entered.set()
@@ -8180,6 +8187,8 @@ async def test_tactile_reply_fences_admitted_camera_context(
         assert memory.count("robot-01") == expected
         if not expected:
             assert pet._group_last_spoken == float("-inf")
+            if stage == "tts":
+                assert speaker.interrupted == ["robot-01"]
         else:
             assert state.last_error is None
     finally:

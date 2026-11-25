@@ -1489,7 +1489,8 @@ async def test_group_consent_revoked_during_memory_persist_never_publishes_turn(
     speaker = SimulatedSpeaker()
     conversation = Conversation(settings, SimulatedChat(), speaker)
 
-    async def delayed_persist(robot, text, peers):
+    async def delayed_persist(robot, text, peers, *, private_context_current):
+        assert private_context_current()
         entered.set()
         await release.wait()
 

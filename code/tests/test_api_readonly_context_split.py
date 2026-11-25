@@ -801,7 +801,7 @@ def test_plan_readonly_selects_status_and_interaction_tools_when_camera_disabled
 
 
 def test_voice_context_excludes_camera_and_visual_look_when_camera_disabled(settings):
-    """Voice context retains memory and physical cues but strips all visual evidence."""
+    """Voice context retains current memory and physical cues with camera off."""
     import time
 
     from desk_robot.api_memory_routes import register_voice_context_route
@@ -846,7 +846,9 @@ def test_voice_context_excludes_camera_and_visual_look_when_camera_disabled(sett
         assert "PRIVATE CAMERA DESCRIPTION" not in str(payload)
         tool_kinds = [c.get("kind") for c in payload["recent_tool_interpretations"]]
         assert "visual_look" not in tool_kinds
-        assert "memory_recall" in tool_kinds
+        # String-only recall cues cannot prove the recalled entry is retained.
+        assert "memory_recall" not in tool_kinds
+        assert "Private non-visual recall note" not in str(payload)
         timeline_kinds = [c.get("kind") for c in payload["current_interaction_timeline"]]
         assert "visual_look" not in timeline_kinds
         assert all(item.get("channel") != "camera" for item in payload["current_interaction_timeline"])
