@@ -2045,9 +2045,15 @@ bool LineReceiver::feed(char byte, std::uint32_t now_ms, BodyControl& control,
   // The uint32 elapsed comparison also works across millis() rollover.
   if (frame_started_ && now_ms - last_byte_ms_ >= kWatchdogMs)
     frame_timed_out_ = true;
+  // A trickle of bytes must not preserve an old command indefinitely.
+  // Bound the total time from the first byte, including a delayed LF.
+  if (frame_started_ && now_ms - frame_started_ms_ >= kWatchdogMs)
+    frame_age_expired_ = true;
   if (byte == '\n') {
     if (frame_timed_out_) {
       std::snprintf(reply, capacity, "ERR input interbyte_timeout");
+    } else if (frame_age_expired_) {
+      std::snprintf(reply, capacity, "ERR input frame_timeout");
     } else if (overlong_) {
       std::snprintf(reply, capacity, "ERR input line_too_long");
     } else if (invalid_) {
@@ -2062,8 +2068,10 @@ bool LineReceiver::feed(char byte, std::uint32_t now_ms, BodyControl& control,
     overlong_ = false;
     frame_started_ = false;
     frame_timed_out_ = false;
+    frame_age_expired_ = false;
     return true;
   }
+  if (!frame_started_) frame_started_ms_ = now_ms;
   frame_started_ = true;
   last_byte_ms_ = now_ms;
   if (saw_cr_) invalid_ = true;  // CR is allowed only immediately before LF.

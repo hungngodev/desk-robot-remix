@@ -339,6 +339,31 @@ void serial_idle_frame_timeout() {
         "OK arm");
 }
 
+void serial_total_frame_timeout() {
+  for (const std::uint32_t start : {100U, UINT32_MAX - 250U}) {
+    BodyControl body;
+    LineReceiver remote;
+    LineReceiver local_usb(true);
+    // Every adjacent gap is below the idle limit, but the whole command
+    // crosses it. No stale ARM or privileged local REARM may execute.
+    CHECK(frame(body, remote, "a", start).empty());
+    CHECK(frame(body, remote, "r", start + 300U).empty());
+    CHECK(frame(body, remote, "m\n", start + 500U)[0] ==
+          "ERR input frame_timeout");
+    CHECK(!body.state().armed && !body.state().servos_attached);
+    CHECK(frame(body, local_usb, "re", start + 501U).empty());
+    CHECK(frame(body, local_usb, "ar", start + 801U).empty());
+    CHECK(frame(body, local_usb, "m\r", start + 1000U).empty());
+    CHECK(frame(body, local_usb, "\n", start + 1001U)[0] ==
+          "ERR input frame_timeout");
+    CHECK(!body.state().armed && !body.state().servos_attached);
+    // Discard through the newline, not the next independent valid command.
+    CHECK(frame(body, remote, "ar", start + 1002U).empty());
+    CHECK(frame(body, remote, "m\n", start + 1501U)[0] == "OK arm");
+    CHECK(frame(body, remote, "disarm\n", start + 1501U)[0] == "OK disarm");
+  }
+}
+
 void independent_receivers() {
   BodyControl body;
   LineReceiver usb;
@@ -787,6 +812,7 @@ int main(int argc, char** argv) {
       {"malformed_atomicity", malformed_atomicity},
       {"overlong_frame_recovery", overlong_frame_recovery}, {"framing", framing},
       {"serial_idle_frame_timeout", serial_idle_frame_timeout},
+      {"serial_total_frame_timeout", serial_total_frame_timeout},
       {"independent_receivers", independent_receivers}, {"status_honesty", status_honesty},
       {"guarded_head_timeout_cannot_rearm_from_reconnected_uart",
        guarded_head_timeout_cannot_rearm_from_reconnected_uart},
