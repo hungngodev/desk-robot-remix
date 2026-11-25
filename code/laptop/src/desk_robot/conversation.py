@@ -15,6 +15,7 @@ import httpx
 
 from .brain_context import _memory_label, active_job_timeline, compose_brain_context
 from .config import RobotConfig, Settings, quiet_hours_active, secret
+from .conversation_consent import GroupContextConsent
 from .memory import MemoryStore, MemoryWriteSealed
 from .streamed_ollama import ollama_speech_segments
 
@@ -837,40 +838,17 @@ class Conversation:
         robots = [self.settings.robot(i) for i in robot_ids]
         # Historical context and peer sharing are independently opt-in.
         # Check their original permissions even AFTER slow memory/model work.
-        sharing_at_start = (
-            self.settings.mode == "hardware"
-            and self.settings.fleet_text_sharing_enabled
+        consent = GroupContextConsent.capture(
+            self.settings, has_multimodal=self.multimodal is not None,
         )
-        private_at_start = (
-            sharing_at_start and self.settings.voice_memory_tools_enabled
-        )
-        visual_at_start = (
-            self.settings.mode == "hardware"
-            and self.multimodal is not None
-            and self.settings.voice_vision_tools_enabled
-            and self.settings.fleet_text_sharing_enabled
-        )
+        sharing_at_start = consent.sharing_generation is not None
         memory_context_at_start = self.memory is not None and (
-            self.settings.mode != "hardware" or private_at_start
+            self.settings.mode != "hardware" or consent.memory_generation is not None
         )
         memory_generation = {
             robot.id: self._private_memory_generation.get(robot.id, 0)
             for robot in robots
         }
-        # Source permission epochs survive a rapid OFF/ON during slow model
-        # generation. Current booleans alone cannot revive old context.
-        sharing_consent_generation = self.settings.fleet_sharing_consent_generation
-        private_consent_generation = self.settings.voice_memory_consent_generation
-        visual_consent_generation = (
-            self.settings.camera_consent_generation if visual_at_start else None
-        )
-        room_consent_generation = None
-        # Remember only whether an actual room observation entered a group
-        # model prompt. Revoking that station source must fence later speech.
-        room_context_used = False
-        # A later turn may opt into camera evidence after group startup.
-        # Track source admission, not only the initial permission snapshot.
-        visual_context_used = False
 
         def private_memory_current() -> bool:
             return not memory_context_at_start or all(
@@ -883,23 +861,7 @@ class Conversation:
                 loop.time() < deadline
                 and (origin != "autonomous_social"
                      or not quiet_hours_active(self.settings.pet_quiet_hours))
-                and (not sharing_at_start
-                 or (self.settings.fleet_text_sharing_enabled
-                     and self.settings.fleet_sharing_consent_generation
-                        == sharing_consent_generation))
-                and (not private_at_start
-                     or (self.settings.voice_memory_tools_enabled
-                         and self.settings.voice_memory_consent_generation
-                            == private_consent_generation))
-                and (not (visual_at_start or visual_context_used)
-                     or (self.settings.voice_vision_tools_enabled
-                         and self.settings.camera_consent_generation
-                            == visual_consent_generation))
-                and (not room_context_used
-                     or (self.settings.room_station_context_enabled
-                         and self.settings.room_station_consent_generation
-                            == room_consent_generation))
-                and private_memory_current()
+                and not consent.revoked(private_memory_current=private_memory_current())
                 and (permission_check is None or permission_check())
             )
 
@@ -1000,8 +962,6 @@ class Conversation:
                 )
 
             def live_cues(robot_id: str) -> str:
-                nonlocal room_context_used, visual_context_used
-                nonlocal visual_consent_generation, room_consent_generation
                 # Reuse the existing per-pet Mac timeline, not a second
                 # camera, microphone or sensor event owner. This snapshot
                 # may change between turns in the same group conversation.
@@ -1063,11 +1023,7 @@ class Conversation:
                             if (self.settings.mode == "hardware"
                                     and any(not independent_nonvisual(item)
                                             for item in raw)):
-                                if not visual_context_used and not visual_at_start:
-                                    visual_consent_generation = (
-                                        self.settings.camera_consent_generation
-                                    )
-                                visual_context_used = True
+                                consent.admit_camera()
                         else:
                             timeline = [
                                 item for item in raw if independent_nonvisual(item)
@@ -1081,11 +1037,7 @@ class Conversation:
                             item.get("channel") == "room_station"
                             for item in timeline
                         ):
-                            if not room_context_used:
-                                room_consent_generation = (
-                                    self.settings.room_station_consent_generation
-                                )
-                            room_context_used = True
+                            consent.admit_room()
                 timeline.extend(activity)
                 # A completed recall from a DIFFERENT human turn is not
                 # permission to discuss private facts in an unrelated group
@@ -1351,27 +1303,8 @@ class Conversation:
                     if record is not None and record["epoch"] == epoch:
                         record["status"] = outcome
                         record["updated_at"] = time.monotonic()
-                        revoked = (
-                            (memory_context_at_start and any(
-                                self._private_memory_generation.get(peer.id, 0)
-                                != memory_generation[peer.id] for peer in robots
-                            ))
-                            or (sharing_at_start
-                                and (not self.settings.fleet_text_sharing_enabled
-                                     or self.settings.fleet_sharing_consent_generation
-                                        != sharing_consent_generation))
-                            or (private_at_start
-                                and (not self.settings.voice_memory_tools_enabled
-                                     or self.settings.voice_memory_consent_generation
-                                        != private_consent_generation))
-                            or ((visual_at_start or visual_context_used)
-                                and (not self.settings.voice_vision_tools_enabled
-                                     or self.settings.camera_consent_generation
-                                        != visual_consent_generation))
-                            or (room_context_used
-                                and (not self.settings.room_station_context_enabled
-                                     or self.settings.room_station_consent_generation
-                                        != room_consent_generation))
+                        revoked = consent.revoked(
+                            private_memory_current=private_memory_current(),
                         )
                         if revoked:
                             record["topic"] = ""

@@ -2014,6 +2014,9 @@ async def test_group_room_station_revoke_prevents_speech_and_stale_reuse(setting
     assert revoking_chat.prompts and "ROOM PRIVATE" in revoking_chat.prompts[0]
     assert speaker.spoken == []
     assert conversation.active is None
+    assert conversation.histories == {}
+    for robot_id in ("robot-01", "robot-02"):
+        assert conversation.group_activity_timeline(robot_id)[0]["topic"] == ""
 
     class SubsequentChat(SimulatedChat):
         def __init__(self):
