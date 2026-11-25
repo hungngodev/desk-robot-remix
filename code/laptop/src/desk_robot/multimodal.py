@@ -1037,7 +1037,7 @@ class CameraFrameHub:
     def discard_video(self, robot_id: str) -> None:
         """Drop failed camera evidence without releasing a live human VAD turn."""
         self._check(robot_id)
-        self._generation[robot_id] += 1
+        self._generation[robot_id] = self._generation.get(robot_id, 0) + 1
         self.frames[robot_id].clear()
         self.discard_visual_tools(robot_id)
         # An image/voice-monitor outage invalidates camera interpretations,

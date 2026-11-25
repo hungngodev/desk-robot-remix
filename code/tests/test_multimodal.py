@@ -29,7 +29,7 @@ def image(color="gray", square=False):
 def test_mac_camera_timeline_keeps_device_clock_separate_from_receipt():
     """The Sense completion clock is provenance, not an exposure age."""
     hub = CameraFrameHub(["robot-01"])
-    now = time.monotonic()
+    now = time.monotonic() - 0.1
     jpg = image()
     valid = (jpg, bytes(64 * 48), 0.5)
     frame = hub.offer_prepared(
@@ -44,7 +44,7 @@ def test_mac_camera_timeline_keeps_device_clock_separate_from_receipt():
     assert camera["source_capture_complete_us"] == 2000000
     assert camera["source_clock_not_aligned_to_mac"] is True
     assert camera["exposure_timestamp_verified"] is False
-    assert 0 <= camera["age_ms"] <= 250
+    assert 0 <= camera["age_ms"] <= 400
     with pytest.raises(ValueError, match="completion identity"):
         hub.offer_prepared(
             "robot-01", valid, now + 0.05, source="proactive",

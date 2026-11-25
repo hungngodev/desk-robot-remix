@@ -140,7 +140,7 @@ def test_late_optional_mux_detection_reaches_active_tof_safety_owner():
         "tof.note_optional_mux_present();"
     )
     assert discovery in setup
-    assert setup.index("accessories.begin(Wire)") < setup.index(discovery)
+    assert setup.index("accessories.begin(Wire,") < setup.index(discovery)
 
 
 def test_cliff_fault_reaches_motor_outputs_before_other_i2c_work():
@@ -333,7 +333,7 @@ def test_nec_telemetry_uses_exact_existing_wroom_xiao_mac_owners():
 
     assert 'const bool ir = std::strcmp(command, "ir") == 0;' in body
     assert 'e.same_code ? "true" : "false"' in body
-    assert 'set_terminal_ir(terminal_ir.evidence(millis()))' in main
+    assert 'control.set_terminal_ir(terminal_ir.evidence(ir_assessed_at_ms), ir_assessed_at_ms);' in main
     assert 'DESK_ROBOT_ENABLE_TERMINAL_IR' in main
     full = profile.split("[env:esp32_full]", 1)[1].split("[env:esp32_stepper]", 1)[0]
     stage = profile.split("[env:esp32_stepper]", 1)[1]

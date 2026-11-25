@@ -117,7 +117,7 @@ def test_raw_contact_inhibition_precedes_optional_event_debounce():
         (
             "poll_touch",
             "const bool active = sample_raw_touch(now_ms);",
-            "if (now_ms - touch_last_sample_ms < 25) return;",
+            "if (touch_debounce.poll(active, now_ms)) {",
         ),
         (
             "poll_optional",

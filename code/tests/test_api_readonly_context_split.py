@@ -1102,9 +1102,13 @@ def test_spatial_navigation_invalid_json_values_never_submit(settings, body):
         content=body,
         headers=headers,
     )
-    assert response.status_code == 422
-    assert response.json()["detail"]
-    assert all("input" not in error for error in response.json()["detail"])
+    if any(tok in body for tok in ("NaN", "Infinity", r"\ud800")):
+        assert response.status_code == 400
+        assert response.json() == {"detail": "Unsafe JSON input"}
+    else:
+        assert response.status_code == 422
+        assert response.json()["detail"]
+        assert all("input" not in error for error in response.json()["detail"])
 
 
 def test_spatial_navigation_accepts_integer_cell_and_heading_boundaries():

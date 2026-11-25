@@ -2164,11 +2164,13 @@ def test_native_memory_tool_receipt_respects_consent_turn_and_pet_isolation(
             f"/v1/pet/{pet.id}/interaction-context", headers=headers
         )
         assert timeline.status_code == 200
-        cues = timeline.json()["model_context"]
-        assert "Opt-in private past memory" in cues
-        assert expected in cues
-        assert "green mug" in cues
-        assert "not current sight" in cues
+        payload = timeline.json()
+        assert payload["memory_tools_enabled"] is True
+        assert payload["private_memory_generation"] == 0
+        assert payload["persistent_memory_included"] is False
+        cues = payload["model_context"]
+        assert "green mug" not in cues
+        assert "Opt-in private past memory" not in cues
         assert "green mug" not in client.get(
             f"/v1/pet/{peer.id}/interaction-context", headers=headers
         ).json()["model_context"]
@@ -2179,6 +2181,8 @@ def test_native_memory_tool_receipt_respects_consent_turn_and_pet_isolation(
             f"/v1/pet/{pet.id}/interaction-context", headers=headers
         )
         assert revoked.status_code == 200
+        assert revoked.json()["memory_tools_enabled"] is False
+        assert revoked.json()["private_memory_generation"] is None
         assert "green mug" not in revoked.json()["model_context"]
         assert client.get(url, headers=headers).status_code == 403
         assert memory.count(pet.id) == 1
@@ -2267,7 +2271,7 @@ def test_authoritative_latest_pickup_status_survives_head_reconnect_without_cros
     # rather than incorrectly treating unknown robot-03 as a valid pet.
     settings.robots.append(RobotConfig(
         id="robot-03", name="Empty job pet",
-        token_env="DESK_ROBOT_HEAD_01_TOKEN", motion_enabled=False,
+        token_env="DESK_ROBOT_HEAD_03_TOKEN", motion_enabled=False,
     ))
     tool = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
     with TestClient(create_app(settings)) as client:

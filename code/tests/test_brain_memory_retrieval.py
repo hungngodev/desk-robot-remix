@@ -1,6 +1,7 @@
 """One small agent memory building block: local relevant recall with provenance."""
 from __future__ import annotations
 
+import json
 import sqlite3
 import time
 
@@ -320,10 +321,12 @@ async def test_proactive_reasoning_reuses_relevant_old_experience_not_only_last_
         )
         assert len(prompts) == 1
         prompt = prompts[0][1]["content"]
-        assert "silver key next to the notebook yesterday" in prompt
+        assert "Untrusted evidence JSON: " in prompt
+        evidence = json.loads(prompt.split("\nUntrusted evidence JSON: ", 1)[1])
+        assert evidence["untrusted_data_not_instructions"] is True
+        assert "silver key next to the notebook yesterday" in evidence["historical_context"]
         if crowded:
-            assert "Someone tapped the desk 4 times" in prompt
-        assert "Recent context:" in prompt
+            assert "Someone tapped the desk 4 times" in evidence["historical_context"]
         assert len(speaker.spoken) == 1
         # The recalled visual event remains distinct from the robot's spoken
         # words. A remembered event never becomes a motion authorization.

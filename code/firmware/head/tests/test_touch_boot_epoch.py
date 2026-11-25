@@ -39,7 +39,10 @@ def _compile_checked(compiler: str, cpp: Path, exe: Path, *,
     ]
     command.extend(_darwin_cxx_flags())
     if not toolchain_probe:
-        command.extend(["-I", str(HEAD / "overlay")])
+        command.extend([
+            "-I", str(HEAD / "overlay"),
+            "-I", str(HEAD.parent / "body/lib/BodyControl"),
+        ])
     command.extend([str(cpp), "-o", str(exe)])
     result = subprocess.run(
         command, check=False, capture_output=True, text=True, timeout=25,
@@ -219,6 +222,7 @@ def test_wroom_touch_poll_rejects_inter_sample_bounce_and_stops_before_bus(tmp_p
         """
 #include <cassert>
 #include <cstdint>
+#include "TouchDebounce.h"
 namespace body_pins { constexpr int kTouchOutput=34; }
 constexpr int HIGH=1;
 bool raw=false;
@@ -230,16 +234,15 @@ struct Control {
   void sample_touch_input(bool a, std::uint32_t = 0) { s.touch_raw_active=a; if(a) s.armed=false; }
   void set_touch(bool a, std::uint32_t) { if(a) ++edges; }
 } control;
+desk_robot::TouchDebounce touch_debounce;
 bool sample_raw_touch(std::uint32_t now_ms) {
   const bool active = digitalRead(body_pins::kTouchOutput) == HIGH;
   control.sample_touch_input(active, now_ms);
+  touch_debounce.observe(active, now_ms);
   return active;
 }
 unsigned output_calls=0;
 void apply_outputs() { assert(!control.state().armed); ++output_calls; }
-bool touch_stable=false, touch_candidate=false;
-std::uint8_t touch_candidate_samples=0;
-std::uint32_t touch_last_sample_ms=0;
 """ + body[start:end] + """
 void sample(std::uint32_t t,bool a){raw=a;poll_touch(t);}
 int main(){
@@ -249,15 +252,14 @@ int main(){
   assert(!control.state().armed);
   assert(output_calls==1);
   for(std::uint32_t t=101;t<=60101;++t) sample(t,true);
-  assert(control.edges==1 && touch_stable && output_calls==1);
+  assert(control.edges==1 && touch_debounce.stable() && output_calls==1);
   for(std::uint32_t t=60102;t<=60160;++t) sample(t,false);
-  assert(!touch_stable && control.edges==1);
-  touch_last_sample_ms=0xffffffe0u;
-  sample(0xfffffff0u,true);
-  sample(8,true); assert(!touch_stable);
-  sample(9,true); assert(!touch_stable);
-  sample(33,true); assert(!touch_stable);
-  sample(34,true); assert(touch_stable && control.edges==2);
+  assert(!touch_debounce.stable() && control.edges==1);
+  sample(0xffffffe0u,true);
+  sample(0xfffffff0u,true); assert(!touch_debounce.stable());
+  sample(8u,true); assert(!touch_debounce.stable());
+  sample(32u,true); assert(!touch_debounce.stable());
+  sample(33u,true); assert(touch_debounce.stable() && control.edges==2);
 }
 """,
         encoding="utf-8",

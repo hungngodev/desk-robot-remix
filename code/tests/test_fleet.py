@@ -139,7 +139,7 @@ async def test_invalid_group_topic_does_not_claim_active_owner(fleet, topic):
     assert len(await conversation.run(IDS, "Play again", 1)) == 1
 
 
-async def test_group_budget_includes_context_preparation(fleet, monkeypatch):
+async def test_group_budget_includes_context_preparation(fleet, monkeypatch, tmp_path):
     from desk_robot import conversation as conversation_module
 
     monkeypatch.setattr(conversation_module, "_GROUP_ACTIVITY_TIMEOUT_S", 0.05)
@@ -149,7 +149,9 @@ async def test_group_budget_includes_context_preparation(fleet, monkeypatch):
 
     monkeypatch.setattr(asyncio, "to_thread", blocked_read)
     speaker = SimulatedSpeaker()
-    conversation = Conversation(fleet, SimulatedChat(), speaker)
+    conversation = Conversation(
+        fleet, SimulatedChat(), speaker, memory=MemoryStore(tmp_path, IDS),
+    )
     with pytest.raises(TimeoutError):
         await asyncio.wait_for(conversation.run(IDS, "Tell a story"), timeout=1)
     assert conversation.active is None
@@ -158,7 +160,7 @@ async def test_group_budget_includes_context_preparation(fleet, monkeypatch):
                for i in IDS)
 
 
-async def test_group_budget_is_not_renewed_after_context_setup(fleet, monkeypatch):
+async def test_group_budget_is_not_renewed_after_context_setup(fleet, monkeypatch, tmp_path):
     from desk_robot import conversation as conversation_module
 
     budget = 0.5
@@ -172,15 +174,17 @@ async def test_group_budget_is_not_renewed_after_context_setup(fleet, monkeypatc
         deadlines.append(deadline)
         return original_timeout_at(deadline)
 
-    async def delayed_read(func, robot):
+    async def delayed_read(func, *args, **kwargs):
         prep_starts.append(loop.time())
         await asyncio.sleep(0.03)
-        return func(robot)
+        return func(*args, **kwargs)
 
     monkeypatch.setattr(asyncio, "timeout_at", capture_timeout_at)
     monkeypatch.setattr(asyncio, "to_thread", delayed_read)
     speaker = SimulatedSpeaker()
-    conversation = Conversation(fleet, SimulatedChat(), speaker)
+    conversation = Conversation(
+        fleet, SimulatedChat(), speaker, memory=MemoryStore(tmp_path, IDS),
+    )
     async with conversation.session_lock:
         started = loop.time()
         with pytest.raises(TimeoutError):

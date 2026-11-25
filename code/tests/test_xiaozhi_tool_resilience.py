@@ -1429,7 +1429,12 @@ async def test_tool_transport_failure_cannot_request_speech_for_obsolete_turn(
         )
 
     monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
-    result = await bridge_tools.call(bridge_tools.registered_head, route)
+    payload = (
+        {"question": "what is on the desk?"} if route == "look"
+        else {"target": "key"} if route == "pickup"
+        else None
+    )
+    result = await bridge_tools.call(bridge_tools.registered_head, route, payload)
     response = bridge_tools.voice_turn_response(result)
     assert len(calls) == 1
     assert result["retried"] is False
