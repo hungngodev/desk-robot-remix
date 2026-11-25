@@ -117,3 +117,60 @@ async def test_pose_http_age_excludes_wait_for_transport_lock(settings, tokens, 
         assert receipt.request_started_at == pytest.approx(100.6)
         assert receipt.received_at == pytest.approx(100.61)
         assert head.pose_fence.current(now) is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ("cancel", "disconnect", "unsupported"))
+async def test_failed_pose_read_retires_continuity_and_rejects_replay(
+    settings, tokens, failure,
+):
+    robot = settings.robots[0]
+    entered = asyncio.Event()
+    count = 0
+
+    async def handler(request):
+        nonlocal count
+        assert request.headers["Authorization"] == "Bearer " + tokens[robot.token_env]
+        if request.url.path == "/api/status":
+            return httpx.Response(200, json={"robot_id": robot.id, "armed": False})
+        assert request.method == "GET" and request.url.path == "/api/pose"
+        count += 1
+        if count == 3:
+            if failure == "cancel":
+                entered.set()
+                await asyncio.Event().wait()
+            if failure == "disconnect":
+                raise httpx.ConnectError("offline", request=request)
+            return httpx.Response(501)
+        seq = min(count, 2)
+        return httpx.Response(200, json={
+            "robot_id": robot.id, "v": 1, "body_boot": 4, "origin": 1,
+            "seq": seq, "sample_us": seq * 100_000, "x_mm": 10, "y_mm": -20,
+            "yaw_mrad": 10, "quality": "valid", "head_boot": 8,
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(robot, client)
+        await head.pose_status()
+        receipt = await head.pose_status()
+        assert head.pose_fence.current(receipt.received_at) is receipt
+        if failure == "cancel":
+            task = asyncio.create_task(head.pose_status())
+            try:
+                await asyncio.wait_for(entered.wait(), 1)
+            finally:
+                task.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+        else:
+            error = PoseUnsupported if failure == "unsupported" else HeadError
+            with pytest.raises(error):
+                await head.pose_status()
+        assert head.pose_fence.current(receipt.received_at) is None
+        assert head.pose_fence.needs_reanchor
+        assert not head.pose_fence.owns_continuous_receipt(receipt)
+        assert (await asyncio.wait_for(head.status(), 1))["armed"] is False
+        with pytest.raises(HeadError, match="sequence"):
+            await head.pose_status()
+        assert head.pose_fence.current(receipt.received_at) is None
+    assert count == 4
