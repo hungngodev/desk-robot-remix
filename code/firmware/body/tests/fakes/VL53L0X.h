@@ -20,7 +20,16 @@ class VL53L0X {
   bool init(bool = true) {
     if (!bus_ || !bus_->connected(0x29)) return false;
     bus_->tof_init_timeouts.push_back(timeout_ms_);
-    return !fail_init();
+    // Pololu 1.3.1 rejects a non-0xEE model ID before calibration.
+    // SPAD discovery and reference phase calibration return false on expiry,
+    // without setting the range-read timeoutOccurred() flag.
+    if (fail_init() || (bus_->ranges & bus_->tof_wrong_model_lanes)) return false;
+    if (bus_->ranges & (bus_->tof_spad_timeout_lanes | bus_->tof_phase_timeout_lanes)) {
+      if (timeout_ms_ != 0)
+        fake_arduino_millis() += static_cast<std::uint32_t>(timeout_ms_) + 1U;
+      return false;
+    }
+    return true;
   }
   bool timeoutOccurred() {
     const bool timed_out = fail_timeout();

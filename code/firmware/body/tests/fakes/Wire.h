@@ -104,6 +104,11 @@ class TwoWire {
   std::uint8_t hold_sda_on_range_mask = 0; // one-shot downstream hang on STOP
   std::uint16_t tof_register = 0;
   unsigned tof_samples = 0;
+  // Bit masks are scoped to range mux lanes, never the accessory 0x29.
+  std::uint8_t tof_missing_lanes = 0;
+  std::uint8_t tof_wrong_model_lanes = 0;
+  std::uint8_t tof_spad_timeout_lanes = 0;
+  std::uint8_t tof_phase_timeout_lanes = 0;
   bool tof_ready = true;
   std::uint8_t tof_interrupt_error_bits = 0;
   bool hold_sda_after_tof_result = false;
@@ -206,7 +211,8 @@ class TwoWire {
     if (addr == 0x70) return true;
     if (addr == 0x71) return optional_mux_installed;
     if (addr == 0x29)
-      return (ranges != 0 && extras == 0 && (ranges & (ranges - 1U)) == 0) ||
+      return (ranges != 0 && extras == 0 && (ranges & (ranges - 1U)) == 0 &&
+              (ranges & tof_missing_lanes) == 0) ||
              (ranges == 0 && extras == 1 && cap_uses_0x29 && cap_connected);
     if (ranges == 0 && extras == 0 && has_upstream_imu_addr(addr)) return true;
     if (ranges != 0 || extras == 0) return false;

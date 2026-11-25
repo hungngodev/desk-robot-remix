@@ -921,6 +921,57 @@ int main() {
       }
     }
     {
+      // Per-lane faults must not be hidden by a healthy shared mux or by
+      // successful initialization of the preceding lanes.
+      const auto saved_clock = fake_arduino_millis();
+      for (std::uint8_t lane = 0; lane < (DESK_ROBOT_EXTRA_RANGERS ? 8U : 5U); ++lane) {
+        const auto mask = static_cast<std::uint8_t>(1U << lane);
+        for (auto fault : {&TwoWire::tof_missing_lanes, &TwoWire::tof_wrong_model_lanes,
+                           &TwoWire::tof_spad_timeout_lanes, &TwoWire::tof_phase_timeout_lanes}) {
+          Wire = TwoWire{};
+          fake_i2c_lines() = FakeI2cLines{};
+          fake_arduino_millis() = 0;
+          Wire.*fault = mask;
+          desk_robot::TofBus bus;
+          CHECK(!bus.begin(21, 22, -1));
+          CHECK(!bus.ready());
+          const bool missing = fault == &TwoWire::tof_missing_lanes;
+          CHECK(Wire.tof_init_timeouts.size() == static_cast<unsigned>(lane) + (missing ? 0U : 1U));
+          const bool calibration_timeout = fault == &TwoWire::tof_spad_timeout_lanes ||
+                                           fault == &TwoWire::tof_phase_timeout_lanes;
+          CHECK(fake_arduino_millis() == (calibration_timeout ? 81U : 0U));
+          desk_robot::CliffGuard guard;
+          CHECK(guard.configure(calibration()));
+          bus.poll(guard, 100);
+          CHECK(Wire.tof_samples == 0);
+          CHECK(!guard.evaluate(100));
+          CHECK(!guard.try_rearm(100));
+          for (std::uint8_t critical = 0; critical < 5; ++critical)
+            CHECK(!guard.diagnostic(critical, 100).present);
+        }
+        // A device that disappears AFTER a successful start must fault on
+        // its next scheduled register transaction, not publish cached range.
+        Wire = TwoWire{};
+        fake_i2c_lines() = FakeI2cLines{};
+        fake_arduino_millis() = 0;
+        desk_robot::TofBus bus;
+        desk_robot::CliffGuard guard;
+        ready(bus, guard);
+        Wire.tof_missing_lanes = mask;
+        for (std::uint32_t now = 60; now < 80 && guard.fault() == desk_robot::CliffFault::None; ++now) {
+          const auto before = Wire.tof_samples;
+          bus.poll(guard, now);
+          if (guard.fault() != desk_robot::CliffFault::None)
+            CHECK(Wire.tof_samples == before);
+        }
+        faulted(guard);
+        CHECK(!guard.try_rearm(80));
+      }
+      Wire = TwoWire{};
+      fake_i2c_lines() = FakeI2cLines{};
+      fake_arduino_millis() = saved_clock;
+    }
+    {
       // A WROOM-only restart need not clear the mux control registers.
       // Start with either retained lane, not the fake's default zero masks.
       for (const bool accessory_retained : {false, true}) {
