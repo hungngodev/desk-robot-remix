@@ -24,8 +24,11 @@ struct BmeCompletedSample {
   }
   void invalidate() { valid = false; }
 
-  bool fresh(std::uint32_t now_ms, std::uint32_t max_age_ms) const {
-    return valid && now_ms - sample_ms <= max_age_ms;
+  // Periodic reporting permanently retires an expired conversion until
+  // publish() receives a newly completed sample.
+  bool fresh(std::uint32_t now_ms, std::uint32_t max_age_ms) {
+    if (valid && now_ms - sample_ms > max_age_ms) invalidate();
+    return valid;
   }
 };
 }  // namespace desk_robot_room

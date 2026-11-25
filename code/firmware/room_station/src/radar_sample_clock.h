@@ -17,10 +17,11 @@ class RadarSampleClock {
   }
 
   bool has_sample() const { return has_sample_; }
-  // The Mac rejects sample ages over its sensor-specific bound. Unsigned
-  // subtraction handles uint32 millis() rollover without a new epoch.
-  bool fresh(uint32_t now_ms, uint32_t max_age_ms) const {
-    return has_sample_ && now_ms - sample_ms_ <= max_age_ms;
+  // Called by the periodic report loop. Retire an expired conversion so
+  // a full millis() cycle cannot resurrect it; only observe() can renew it.
+  bool fresh(uint32_t now_ms, uint32_t max_age_ms) {
+    if (has_sample_ && now_ms - sample_ms_ > max_age_ms) has_sample_ = false;
+    return has_sample_;
   }
   uint32_t sample_ms() const { return sample_ms_; }
 

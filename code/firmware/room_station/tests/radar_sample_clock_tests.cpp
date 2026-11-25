@@ -25,6 +25,20 @@ bool feed(desk_robot_room::RadarDataFrameGate& gate,
 }  // namespace
 
 int main() {
+  // Simulate a full millis cycle with periodic reports but no new packet.
+  // Once stale, the old sample must never become fresh at the same raw clock.
+  desk_robot_room::RadarSampleClock expired;
+  expired.observe(true, true, 1000U);
+  assert(expired.fresh(4000U, 3000U));
+  assert(!expired.fresh(4001U, 3000U));
+  for (uint64_t elapsed = 5000; elapsed < (1ULL << 32); elapsed += 1000) {
+    assert(!expired.fresh(static_cast<uint32_t>(1000U + elapsed), 3000U));
+  }
+  expired.observe(false, true, 1001U);
+  assert(!expired.fresh(1001U, 3000U));
+  expired.observe(true, true, 1002U);
+  assert(expired.fresh(1002U, 3000U));
+
   desk_robot_room::RadarSampleClock clock;
   desk_robot_room::RadarDataFrameGate gate;
   assert(!clock.has_sample());

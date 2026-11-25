@@ -15,6 +15,12 @@ int main() {
     CHECK(sample.pressure_pa == 101325.0f);
     CHECK(sample.gas_ohms == 78291U);
     CHECK(sample.sample_ms == 1000U);
+    // No completed conversion for a full millis cycle: periodic reports
+    // must not make expired cached values valid again after clock wrap.
+    for (std::uint64_t elapsed = 5000; elapsed < (1ULL << 32); elapsed += 1000) {
+      CHECK(!sample.fresh(static_cast<std::uint32_t>(1000U + elapsed), 3000U));
+    }
+    CHECK(!sample.fresh(1001U, 3000U));
     sample.publish(20.0f, 40.0f, 101010.0f, 64101U, 0xfffffff0U);
     CHECK(sample.fresh(0x00000010U, 3000U)); // millis wrap
     CHECK(!sample.fresh(0x00000bb8U, 3000U));
