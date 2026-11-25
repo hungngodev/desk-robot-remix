@@ -473,6 +473,18 @@ def _qualified_trial_gate(gate: str, measurement: dict) -> bool:
                 or values["distinct_pack_acquisition_sequences"]
                 > measurement["sample_count"]):
             return False
+    if gate == "battery_pack_ntc_to_charger_ts_thermal_fault_trial":
+        values = {item["name"]: item["value"] for item in observations}
+        fault_count = sum(values[name] for name in (
+            "ts_open_suspends_charge_trials", "ts_short_suspends_charge_trials",
+            "cold_ntc_suspends_charge_trials", "hot_ntc_suspends_charge_trials",
+        ))
+        phase_count = fault_count + values["normal_ntc_resume_trials"]
+        # Separate fault and recovery trials cannot share a sample count,
+        # and each claimed fault trial needs independent current evidence.
+        if (phase_count > measurement["sample_count"]
+                or values["independent_ammeter_fault_direction_checks"] < fault_count):
+            return False
     return True
 
 

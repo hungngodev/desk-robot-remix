@@ -1517,3 +1517,28 @@ def test_purchase_audit_rejects_symlink_even_with_matching_contents_and_review()
     errors = release.audit_release({"parts": {"imu": {gate: row}}}, SHA, altered)
     assert any("immutable scoped record absent or mismatched" in error
                and f"part:imu.{gate}" in error for error in errors)
+
+
+@pytest.mark.parametrize("phase", [
+    "ts_open_suspends_charge_trials", "ts_short_suspends_charge_trials",
+    "cold_ntc_suspends_charge_trials", "hot_ntc_suspends_charge_trials",
+    "normal_ntc_resume_trials",
+])
+def test_ntc_receipt_rejects_overstated_phase_count(phase):
+    gate = "battery_pack_ntc_to_charger_ts_thermal_fault_trial"
+    measurement = measurement_for_gate("system", gate)
+    row = next(item for item in measurement["quantities"] if item["name"] == phase)
+    row["value"] = 2
+    assert not release._qualified_trial_gate(gate, measurement)
+
+
+def test_ntc_receipt_repeated_fault_requires_independent_current_check():
+    gate = "battery_pack_ntc_to_charger_ts_thermal_fault_trial"
+    measurement = measurement_for_gate("system", gate)
+    quantities = {item["name"]: item for item in measurement["quantities"]}
+    assert release._qualified_trial_gate(gate, measurement)
+    measurement["sample_count"] = 6
+    quantities["ts_open_suspends_charge_trials"]["value"] = 2
+    assert not release._qualified_trial_gate(gate, measurement)
+    quantities["independent_ammeter_fault_direction_checks"]["value"] = 5
+    assert release._qualified_trial_gate(gate, measurement)
