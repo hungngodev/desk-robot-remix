@@ -35,7 +35,8 @@ inline std::size_t pn532_encode(
 
 inline bool pn532_ack(const std::uint8_t* frame, std::size_t n) {
   static const std::uint8_t kAck[7] = {1, 0, 0, 0xff, 0, 0xff, 0};
-  if (!frame || n < sizeof(kAck)) return false;
+  // The ACK transaction requests exactly seven bytes, unlike response reads.
+  if (!frame || n != sizeof(kAck)) return false;
   for (std::size_t i = 0; i < sizeof(kAck); ++i)
     if (frame[i] != kAck[i]) return false;
   return true;

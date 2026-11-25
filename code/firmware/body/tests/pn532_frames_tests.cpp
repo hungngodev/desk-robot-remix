@@ -83,6 +83,26 @@ static void check_frame_boundaries() {
     }
   }
   CHECK(desk_robot::pn532_ack(ack.data(), ack.size()));
+  auto padded_ack = ack;
+  for (std::size_t n = ack.size() + 1; n <= desk_robot::kPn532MaxWire; ++n) {
+    padded_ack.resize(n, 0);
+    CHECK(!desk_robot::pn532_ack(padded_ack.data(), padded_ack.size()));
+  }
+}
+
+static void check_unsupported_frames() {
+  const std::vector<std::uint8_t> extended = {
+      1, 0, 0, 0xff, 0xff, 0xff, 0, 3, 0xfd, 0xd5, 0x4b, 0, 0xe0, 0
+  };
+  const std::vector<std::uint8_t> nack = {1, 0, 0, 0xff, 0xff, 0, 0};
+  CHECK(!desk_robot::pn532_ack(nack.data(), nack.size()));
+  for (std::size_t n = 0; n <= extended.size(); ++n) {
+    const std::vector<std::uint8_t> wire(extended.begin(), extended.begin() + n);
+    const std::uint8_t* payload = extended.data();
+    std::size_t size = extended.size();
+    CHECK(!desk_robot::pn532_response(wire.data(), wire.size(), 0x4a, payload, size));
+    CHECK(payload == nullptr && size == 0);
+  }
 }
 
 static void check_tag_boundaries() {
@@ -178,6 +198,7 @@ static void check_encoder_boundaries() {
 int main() {
   try {
     check_frame_boundaries();
+    check_unsupported_frames();
     check_tag_boundaries();
     check_encoder_boundaries();
     check_ats_and_wire_limit();
