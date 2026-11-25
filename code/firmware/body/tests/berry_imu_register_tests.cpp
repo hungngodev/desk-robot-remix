@@ -142,6 +142,55 @@ int main() {
     CHECK(direct.reading().low_g_status_valid && !direct.reading().low_g_irq);
     CHECK(direct.reading().low_g_event_seq == 1U);
 
+    // The fake must not leak stale RX bytes after a failed acquisition.
+    TwoWire fault_wire;
+    fault_wire.registers[0x3b] = 0x40;
+    fault_wire.beginTransmission(0x68);
+    CHECK(fault_wire.write(0x3b) == 1);
+    CHECK(fault_wire.endTransmission(false) == 0);
+    CHECK(fault_wire.requestFrom(0x68, 14) == 14);
+    CHECK(fault_wire.available() == 14);
+    fault_wire.reject_read_reg = 0x3b;
+    fault_wire.beginTransmission(0x68);
+    CHECK(fault_wire.write(0x3b) == 1);
+    CHECK(fault_wire.endTransmission(false) == 0);
+    CHECK(fault_wire.requestFrom(0x68, 14) == 0);
+    CHECK(fault_wire.available() == 0 && fault_wire.read() == -1);
+    fault_wire.reject_read_reg = -1;
+    fault_wire.partial_read_reg = 0x3b;
+    fault_wire.beginTransmission(0x68);
+    CHECK(fault_wire.write(0x3b) == 1);
+    CHECK(fault_wire.endTransmission(false) == 0);
+    CHECK(fault_wire.requestFrom(0x68, 14) == 13);
+    for (int i = 0; i < 13; ++i) CHECK(fault_wire.read() >= 0);
+    CHECK(fault_wire.read() == -1);
+    CHECK(fault_wire.requestFrom(0x68, 14) == 0);
+    fault_wire.next_stop_status = 5;
+    fault_wire.beginTransmission(0x68);
+    CHECK(fault_wire.write(0x1d) == 1 && fault_wire.write(150) == 1);
+    CHECK(fault_wire.endTransmission(true) == 5);
+    CHECK(fault_wire.writes.empty() && fault_wire.registers[0x1d] == 0);
+
+    TwoWire timeout_wire;
+    timeout_wire.next_stop_status = 5;
+    BerryImu timeout_imu;
+    CHECK(!timeout_imu.begin(timeout_wire, BerryModel::Mpu6050, 0x68, 0));
+    CHECK(!timeout_imu.configured());
+    CHECK(timeout_wire.writes.empty());
+    CHECK(timeout_imu.begin(timeout_wire, BerryModel::Mpu6050, 0x68, 0));
+    timeout_imu.poll(100);
+    CHECK(timeout_imu.fresh(100));
+    timeout_wire.partial_read_reg = 0x3b;
+    timeout_wire.registers[0x3b] = 0x40;
+    timeout_imu.poll(150);
+    CHECK(!timeout_imu.fresh(150));
+    CHECK(timeout_imu.reading().at_ms == 100);
+    CHECK(timeout_imu.reading().accel[0] == 0);
+    timeout_wire.partial_read_reg = -1;
+    timeout_imu.poll(200);
+    CHECK(timeout_imu.fresh(200));
+    CHECK(timeout_imu.reading().accel[0] == 16384);
+
     TwoWire bad_readback;
     bad_readback.reject_read_reg = 0x1d;
     BerryImu unverified_ff;
