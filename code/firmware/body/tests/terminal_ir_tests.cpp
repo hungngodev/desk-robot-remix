@@ -86,8 +86,38 @@ static void check_envelope_and_noise() {
   CHECK(desk_robot::decode_nec(frame, 34, code) && code == expected);
 }
 
+static void check_atomic_receiver_batch() {
+  constexpr std::uint32_t good = 0xcb34ed12U, foreign = 0xcb34ec13U;
+  const bool both[2] = {true, true};
+  const bool left_only[2] = {true, false};
+  const bool right_only[2] = {false, true};
+  const std::uint32_t good_pair[2] = {good, good};
+  for (unsigned side = 0; side != 2; ++side) {
+    for (std::uint32_t start : {100U, 0xfffffff0U}) {
+      desk_robot::DualIrEvidence evidence;
+      evidence.accept_batch(good_pair, both, start, 10);
+      CHECK(evidence.assess(start + 10).same_code);
+      std::uint32_t codes[2] = {good, good};
+      codes[side] = foreign;
+      evidence.accept_batch(codes, both, start + 25, 10);
+      auto r = evidence.assess(start + 35);
+      CHECK(!r.left_fresh && !r.right_fresh && !r.same_code);
+      CHECK(r.left_seq == 1 && r.right_seq == 1);
+      CHECK(!r.motor_authorized && !r.charging_authorized);
+      evidence.accept_batch(good_pair, left_only, start + 50, 10);
+      CHECK(!evidence.assess(start + 60).same_code);
+      evidence.accept_batch(good_pair, right_only, start + 75, 10);
+      CHECK(evidence.assess(start + 85).same_code);
+      evidence.accept_batch(good_pair, both, start + 75, 10);
+      r = evidence.assess(start + 85);
+      CHECK(!r.left_fresh && !r.right_fresh && r.left_seq == 2 && r.right_seq == 2);
+    }
+  }
+}
+
 int main() {
   try {
+    check_atomic_receiver_batch();
     check_envelope_and_noise();
     desk_robot::IrMarkSpace frame[34]{};
     make_frame(frame, 0x12, 0x34);

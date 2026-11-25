@@ -124,13 +124,13 @@ class DualIrEvidence {
     }
   }
   // Called only after an actual valid independent RMT frame for that side.
-  void accept(unsigned side, std::uint32_t code, std::uint32_t now_ms,
+  bool accept(unsigned side, std::uint32_t code, std::uint32_t now_ms,
               std::uint32_t receipt_window_ms = 0) {
     // An impossible receiver index is a corrupt observation, not a reason
     // to keep a previously valid paired docking bearing alive.
     if (side > 1 || receipt_window_ms > 100U) {
       invalidate();
-      return;
+      return false;
     }
     const auto address = static_cast<std::uint8_t>(code);
     const auto command = static_cast<std::uint8_t>(code >> 16);
@@ -142,7 +142,7 @@ class DualIrEvidence {
       // An unrelated or corrupt observation revokes the old pair.
       // Keeping an older valid side would allow stale bearing reuse.
       invalidate();
-      return;
+      return false;
     }
     IrSideEvidence& s = sides_[side];
     // Reject duplicate or regressed receive times even if a future caller
@@ -150,7 +150,7 @@ class DualIrEvidence {
     const std::uint32_t elapsed = now_ms - s.at_ms;
     if (s.seq != 0U && (elapsed == 0U || elapsed >= 0x80000000U)) {
       invalidate();
-      return;
+      return false;
     }
     s.code = code;
     s.at_ms = now_ms;
@@ -158,6 +158,20 @@ class DualIrEvidence {
     s.valid = true;
     ++s.seq;
     if (s.seq == 0) ++s.seq;
+    return true;
+  }
+  // Commit both receiver candidates together or revoke both. A rejected
+  // candidate must not let the opposite side repopulate a quarantined batch.
+  void accept_batch(const std::uint32_t (&codes)[2], const bool (&valid)[2],
+                    std::uint32_t now_ms, std::uint32_t receipt_window_ms) {
+    DualIrEvidence next = *this;
+    for (unsigned side = 0; side != 2; ++side) {
+      if (valid[side] && !next.accept(side, codes[side], now_ms, receipt_window_ms)) {
+        invalidate();
+        return;
+      }
+    }
+    *this = next;
   }
   IrPairEvidence assess(std::uint32_t now_ms) const {
     IrPairEvidence out{};

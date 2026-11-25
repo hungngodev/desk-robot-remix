@@ -111,10 +111,7 @@ void TerminalIr::poll(std::uint32_t now_ms) {
     readings_.invalidate();
     return;
   }
-  for (unsigned side = 0; side != 2; ++side) {
-    if (candidate_valid[side])
-      readings_.accept(side, candidate_code[side], earliest_ms, receipt_window_ms);
-  }
+  readings_.accept_batch(candidate_code, candidate_valid, earliest_ms, receipt_window_ms);
 }
 } // namespace desk_robot
 #endif
