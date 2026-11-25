@@ -24,11 +24,24 @@ CONFIG = {
 }
 
 
+def unique_object(pairs: list[tuple[str, object]]) -> dict:
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("Invalid asset JSON: duplicate field")
+        result[key] = value
+    return result
+
+
 def verify(root: Path, read_entries: Callable) -> int:
     """Fail on wrong profile, missing/corrupt resources or incorrect merged bytes."""
-    config = set((root / "sdkconfig").read_text(encoding="utf-8").splitlines())
-    if missing := CONFIG - config:
-        raise ValueError(f"Unexpected Sense CI configuration: missing {sorted(missing)}")
+    config = (root / "sdkconfig").read_text(encoding="utf-8").splitlines()
+    for expected in sorted(CONFIG):
+        key = expected.split("=", 1)[0]
+        matches = [line for line in config if line.startswith(key + "=")
+                   or line == f"# {key} is not set"]
+        if matches != [expected]:
+            raise ValueError(f"Unexpected Sense CI configuration: {key}")
     assets = root / "build/generated_assets.bin"
     if not 12 <= assets.stat().st_size <= ASSETS_LIMIT:
         raise ValueError("Asset image is empty, truncated or exceeds 2 MiB")
@@ -38,8 +51,9 @@ def verify(root: Path, read_entries: Callable) -> int:
     entries = read_entries(assets)
     if "index.json" not in entries:
         raise ValueError("Missing asset index.json")
-    index = json.loads(entries["index.json"][0])
-    if not isinstance(index, dict) or index.get("version") != 1:
+    index = json.loads(entries["index.json"][0], object_pairs_hook=unique_object)
+    if (not isinstance(index, dict) or type(index.get("version")) is not int
+            or index["version"] != 1):
         raise ValueError("Invalid asset index version")
     if index.get("text_font") != FONT or FONT not in entries:
         raise ValueError("Required Sense common font missing from asset index or image")
@@ -47,10 +61,13 @@ def verify(root: Path, read_entries: Callable) -> int:
     font = (font_root / "cbin" / FONT).read_bytes()
     if not font or entries[FONT][0] != font:
         raise ValueError("Packed font differs from locked component resource")
-    bundle = json.loads((font_root / "manifest.json").read_text(encoding="utf-8"))["bundle_id"]
-    if not isinstance(bundle, str) or not bundle or index.get("text_font_meta") != {
-        "charset": "common", "size": 14, "bpp": 1, "bundle": bundle,
-    }:
+    manifest = json.loads((font_root / "manifest.json").read_text(encoding="utf-8"),
+                          object_pairs_hook=unique_object)
+    bundle = manifest.get("bundle_id") if isinstance(manifest, dict) else None
+    meta = index.get("text_font_meta")
+    if (not isinstance(bundle, str) or not bundle or not isinstance(meta, dict)
+            or type(meta.get("size")) is not int or type(meta.get("bpp")) is not int
+            or meta != {"charset": "common", "size": 14, "bpp": 1, "bundle": bundle}):
         raise ValueError("Packed font metadata differs from Sense component resource")
     if "srmodels" in index or "multinet_model" in index or "srmodels.bin" in entries:
         raise ValueError("Disabled wake-word image contains stale speech models")
@@ -68,7 +85,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("root", type=Path, help="Prepared Xiaozhi Sense build checkout")
     args = parser.parse_args()
-    reader = runpy.run_path(str(args.root / "scripts/build_default_assets.py"))["read_assets_entries"]
+    upstream = runpy.run_path(str(args.root / "scripts/build_default_assets.py"))
+    reader = upstream["read_assets_entries"]
     print(f"Verified {verify(args.root, reader)} asset bytes in merged Sense CI image")
 
 
