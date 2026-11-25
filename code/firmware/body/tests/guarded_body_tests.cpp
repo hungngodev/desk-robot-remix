@@ -2328,6 +2328,55 @@ static void optional_sensor_inputs_never_arm_or_forge_boot_events() {
   CHECK(disabled.find("\"extras\":{\"mask\":0") != std::string::npos);
 }
 
+// A cliff/bumper/CPU fault cannot be cleared at a voltage too low to arm.
+static void low_voltage_cannot_clear_unrelated_recovery_latches() {
+  using desk_robot::BodyProfile;
+  for (const auto profile : {BodyProfile::StepperGuarded, BodyProfile::DcGuarded}) {
+    for (bool required : {false, true}) {
+      desk_robot::CliffGuard guard;
+      CHECK(guard.configure(config()));
+      fresh(guard, 100);
+      desk_robot::BodyControl body(profile, &guard);
+      body.require_fuel_monitor(required);
+      desk_robot::AccessoryReadings readings{};
+      auto& fuel = readings.gauge;
+      fuel.fuel_present = fuel.fuel_valid = true;
+      fuel.fuel_sample_seq = 1;
+      fuel.fuel_at_ms = 100;
+      fuel.cell_mv = 3350;
+      body.set_accessories(readings, 100);
+      CHECK(send(body, "rearm", 100, true) == "OK rearm");
+      CHECK(send(body, "arm", 100) == "OK arm");
+      CHECK(send(body, "drive 30 30 250", 100).find("OK drive") == 0);
+      guard.sample(0, 80, true, 101);
+      body.tick(101);
+      body.sample_bumper_input(true);
+      body.sample_bumper_input(false);
+      body.motor_watchdog_trip();
+      fresh(guard, 102);
+      fuel.fuel_sample_seq = 2;
+      fuel.fuel_at_ms = 102;
+      fuel.cell_mv = 3250;
+      body.set_accessories(readings, 102);
+      CHECK(send(body, "rearm", 102, true) == "ERR rearm battery_unsafe_or_stale");
+      CHECK(!guard.evaluate(102) && !body.state().armed);
+      CHECK(body.state().left == 0 && body.state().right == 0);
+      fuel.fuel_sample_seq = 3;
+      fuel.fuel_at_ms = 103;
+      fuel.cell_mv = 3350;
+      body.set_accessories(readings, 103);
+      CHECK(send(body, "arm", 103) != "OK arm");
+      CHECK(send(body, "drive 30 30 250", 103) == "ERR drive disarmed");
+      CHECK(send(body, "rearm", 103) == "ERR rearm local_only");
+      CHECK(send(body, "rearm", 103, true) == "OK rearm");
+      CHECK(!body.state().armed && body.state().servos_attached);
+      CHECK(send(body, "arm", 103) == "OK arm");
+      CHECK(body.state().left == 0 && body.state().right == 0);
+      CHECK(body.drive_remaining(103) == 0);
+    }
+  }
+}
+
 static void battery_readiness_matches_stricter_arm_voltage() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -2340,17 +2389,23 @@ static void battery_readiness_matches_stricter_arm_voltage() {
   readings.gauge.fuel_at_ms = 100;
   readings.gauge.cell_mv = 3250;
   body.set_accessories(readings, 100);
-  CHECK(send(body, "rearm", 100, true) == "OK rearm");
+  CHECK(send(body, "rearm", 100, true) == "ERR rearm battery_unsafe_or_stale");
+  CHECK(!guard.evaluate(100));
+  CHECK(!body.state().armed);
+  // Raising voltage does not retroactively authorize recovery.
+  CHECK(send(body, "arm", 100) == "ERR arm safety_interlock");
   CHECK(send(body, "status", 100).find("\"ready\":false") !=
         std::string::npos);
-  CHECK(send(body, "status", 100).find("\"fault\":\"battery_low\"") !=
+  CHECK(send(body, "status", 100).find("\"fault\":\"missing_sample\"") !=
         std::string::npos);
-  CHECK(send(body, "arm", 100) == "ERR arm battery_low");
 
   readings.gauge.fuel_sample_seq = 2;
   readings.gauge.fuel_at_ms = 101;
   readings.gauge.cell_mv = 3350;
   body.set_accessories(readings, 101);
+  CHECK(send(body, "arm", 101) == "ERR arm safety_interlock");
+  CHECK(send(body, "rearm", 101) == "ERR rearm local_only");
+  CHECK(send(body, "rearm", 101, true) == "OK rearm");
   CHECK(send(body, "status", 101).find("\"ready\":true") !=
         std::string::npos);
   CHECK(send(body, "arm", 101) == "OK arm");
@@ -3281,6 +3336,7 @@ int main() {
     accessory_reconnect_does_not_invent_petting_events();
     optional_sensor_inputs_never_arm_or_forge_boot_events();
     battery_readiness_matches_stricter_arm_voltage();
+    low_voltage_cannot_clear_unrelated_recovery_latches();
     battery_undervoltage_rejects_arm_and_stops_motion();
     optional_gauge_low_latch_requires_trusted_recovery();
     invalid_fuel_identity_cannot_rearm_from_cached_conversion();

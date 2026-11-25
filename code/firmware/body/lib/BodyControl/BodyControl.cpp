@@ -1811,6 +1811,14 @@ void BodyControl::execute(const char* line, std::size_t length,
         return;
       }
     }
+    // Recovery is not a future arm preapproval. Even above the 3200 mV
+    // emergency trip, a known cell below the 3300 mV arm floor must not
+    // clear an unrelated cliff/bumper/watchdog latch for later remote ARM.
+    if (state_.accessories.gauge.fuel_valid &&
+        state_.accessories.gauge.cell_mv < 3300U) {
+      std::snprintf(reply, capacity, "ERR rearm battery_unsafe_or_stale");
+      return;
+    }
     if (!guarded_motion_profile() || guard_ == nullptr ||
         !guard_->try_rearm(now_ms)) {
       std::snprintf(reply, capacity, "ERR rearm safety_interlock");
