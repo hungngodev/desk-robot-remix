@@ -335,7 +335,7 @@ def main() -> None:
     path = parser.parse_args().file
     if not path.is_file() or path.stat().st_size > 200000:
         raise ValueError("Missing or oversized physical audio trial log")
-    records = parse_trial_jsonl(path.read_text())
+    records = parse_trial_jsonl(path.read_text(encoding="utf-8"))
     print(json.dumps(evaluate(records), indent=2))
 
 

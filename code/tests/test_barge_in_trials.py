@@ -542,11 +542,18 @@ def test_correct_intent_cannot_be_claimed_if_utterance_start_was_lost():
 
 
 @pytest.mark.parametrize("echoes", [0, 1])
-def test_cli_reports_gate_without_claiming_physical_attestation(tmp_path, echoes):
+def test_cli_reports_gate_without_claiming_physical_attestation(tmp_path, echoes, monkeypatch):
     rows = both_distances()
     rows[-2]["self_interruptions"] = echoes
+    for row in rows:
+        row["audio_config_id"] = "bàn thử"
+    # Exercise actual UTF-8 JSONL under a non-UTF-8 process locale.
+    monkeypatch.setenv("LC_ALL", "C")
+    monkeypatch.setenv("PYTHONUTF8", "0")
+    monkeypatch.setenv("PYTHONCOERCECLOCALE", "0")
     path = tmp_path / "trials.jsonl"
-    path.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+    path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows),
+                    encoding="utf-8")
     checker = Path(__file__).resolve().parents[1] / "scripts/check_barge_in_trials.py"
     completed = subprocess.run(
         [sys.executable, str(checker), str(path)],
@@ -555,6 +562,7 @@ def test_cli_reports_gate_without_claiming_physical_attestation(tmp_path, echoes
     report = json.loads(completed.stdout)
     assert report["meets_proposed_gate"] is (echoes == 0)
     assert report["records_are_operator_supplied_not_independently_attested"] is True
+    assert report["audio_config_id"] == "bàn thử"
 
 
 @pytest.mark.parametrize("base", [2**53, 2**54, 2**62])
