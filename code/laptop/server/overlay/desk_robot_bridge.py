@@ -730,10 +730,20 @@ async def interrupt_for_user_voice(conn, have_voice: bool) -> bool:
     # The human VAD event and Mac sender-generation abort must survive a
     # stalled physical STOP, not disappear behind a head WebSocket timeout.
     record_human_voice(conn, "group")
-    await asyncio.wait_for(conn.websocket.send(json.dumps({
-        "type": "tts", "state": "stop", "session_id": conn.session_id,
-        "flush": True,
-    })), timeout=0.4)
+    try:
+        native = _native_adapter()
+    except ModuleNotFoundError:
+        native = None
+    urgent = getattr(native, "send_external_urgent_stop", None)
+    if callable(urgent):
+        # An admitted Mac Opus send must finish BEFORE the urgent flush.
+        # Reuse the same device lock as normal VAD and operator STOP.
+        await urgent(conn)
+    else:
+        await asyncio.wait_for(conn.websocket.send(json.dumps({
+            "type": "tts", "state": "stop", "session_id": conn.session_id,
+            "flush": True,
+        })), timeout=0.4)
     return True
 
 

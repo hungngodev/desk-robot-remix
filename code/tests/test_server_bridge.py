@@ -3629,3 +3629,78 @@ async def test_peer_vad_permanently_invalidates_coordinated_grant(
     }))
     assert delivered == ["fresh peer line"]
     await handlers["/session"](body_request({"device_ids": ids, "enabled": False}))
+
+
+async def test_group_barge_orders_stop_after_inflight_opus(bridge, monkeypatch):
+    """Group VAD must flush through the same physical device send owner."""
+    current = conn("mac-01")
+    current.session_id = "group-head"
+    current.client_listen_mode = "realtime"
+    bridge.register(current)
+    bridge.lease_ids = frozenset({current.device_id})
+    bridge.lease_until = time.monotonic() + 15
+    bridge.active_device_id = current.device_id
+    device_lock = asyncio.Lock()
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    stop_attempted = asyncio.Event()
+    sent = []
+
+    class Socket:
+        async def send(self, payload):
+            if isinstance(payload, bytes):
+                entered.set()
+                await release.wait()
+            else:
+                stop_attempted.set()
+            sent.append(payload)
+
+    current.websocket = Socket()
+
+    async def send_opus():
+        async with device_lock:
+            await current.websocket.send(b"opus")
+
+    async def urgent(owner):
+        assert owner is current
+        stop_attempted.set()
+        async with device_lock:
+            await owner.websocket.send(json.dumps({
+                "type": "tts", "state": "stop", "flush": True,
+                "session_id": owner.session_id,
+            }))
+
+    async def peer_preempt(_):
+        pass
+
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: SimpleNamespace(
+        send_external_urgent_stop=urgent,
+        preempt_others_for_human=peer_preempt,
+    ))
+    await bridge.speaker_lock.acquire()
+    sending = asyncio.create_task(send_opus())
+    barge = None
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        assert not await bridge.interrupt_for_user_voice(current, True)
+        barge = asyncio.create_task(bridge.interrupt_for_user_voice(current, True))
+        await asyncio.wait_for(stop_attempted.wait(), timeout=1)
+        release.set()
+        assert await asyncio.wait_for(barge, timeout=1)
+        await asyncio.wait_for(sending, timeout=1)
+        assert current.client_abort
+        assert bridge.voice_event_history[-1]["kind"] == "group"
+        assert sent[0] == b"opus"
+        assert json.loads(sent[1]) == {
+            "type": "tts", "state": "stop", "flush": True,
+            "session_id": current.session_id,
+        }
+        assert len(sent) == 2
+    finally:
+        release.set()
+        if barge is not None:
+            await asyncio.gather(barge, return_exceptions=True)
+        await asyncio.gather(sending, return_exceptions=True)
+        bridge.speaker_lock.release()
+        if bridge.lease_cleanup_task is not None:
+            await bridge.lease_cleanup_task
