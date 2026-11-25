@@ -21,7 +21,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <algorithm>
-#include <algorithm>
+#include <cstdint>
 #include <atomic>
 #include <mutex>
 #include <string_view>
@@ -68,6 +68,33 @@ private:
     bool click_ready_ = false;
 };
 
+// Publish a complete WROOM observation, never independently sampled flags.
+struct BodyFaceStatus {
+    bool valid = false;
+    bool fault = true;
+    bool dock_lockout = false;
+    uint64_t at_ms = 0;
+
+    bool Fresh(uint64_t now_ms) const {
+        return valid && now_ms >= at_ms && now_ms - at_ms <= 1200U;
+    }
+};
+
+class BodyFaceState {
+public:
+    void Publish(BodyFaceStatus status) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        status_ = status;
+    }
+    BodyFaceStatus Read() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return status_;
+    }
+private:
+    std::mutex mutex_;
+    BodyFaceStatus status_{};
+};
+
 class DeskRobotSenseBoard : public WifiBoard {
 private:
     i2c_master_bus_handle_t display_i2c_bus_ = nullptr;
@@ -82,9 +109,7 @@ private:
     desk_robot::Bridge* body_bridge_ = nullptr;  // existing single UART owner
     // A 350 ms UART timeout cannot block the OLED animation task.
     // Keep one actual bridge UART owner; only read-only polling moves tasks.
-    std::atomic<bool> body_fault_active_{true};
-    std::atomic<bool> body_dock_lockout_active_{false};
-    std::atomic<uint32_t> body_last_valid_ms_{0};
+    BodyFaceState body_face_state_;
     TaskHandle_t face_task_ = nullptr;
     TaskHandle_t body_poll_task_ = nullptr;
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
@@ -130,20 +155,15 @@ private:
             // Blocking WROOM reads remain off the local OLED scheduler.
             const auto body = board->body_bridge_->PollInteraction();
             if (body.valid) {
-                const uint32_t at_ms =
-                    static_cast<uint32_t>(esp_timer_get_time() / 1000);
-                board->body_fault_active_.store(body.fault, std::memory_order_release);
-                board->body_dock_lockout_active_.store(
-                    body.dock_lockout, std::memory_order_release);
-                board->body_last_valid_ms_.store(at_ms, std::memory_order_release);
+                const uint64_t at_ms =
+                    static_cast<uint64_t>(esp_timer_get_time() / 1000);
+                board->body_face_state_.Publish({true, body.fault, body.dock_lockout, at_ms});
                 // WROOM/CAP touch counters remain available to the Mac's
                 // unified sensor timeline. They must not force a local
                 // happy face or nod before the contextual mood owner decides.
             } else {
                 // A timeout or malformed status cannot leave healthy eyes.
-                board->body_fault_active_.store(true, std::memory_order_release);
-                board->body_dock_lockout_active_.store(false, std::memory_order_release);
-                board->body_last_valid_ms_.store(0, std::memory_order_release);
+                board->body_face_state_.Publish({});
             }
             vTaskDelay(pdMS_TO_TICKS(300));
         }
@@ -169,19 +189,16 @@ private:
         uint32_t model_mood_started_ms = 0;
         while (true) {
             const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
-            const uint32_t valid_at =
-                board->body_last_valid_ms_.load(std::memory_order_acquire);
+            // Copy under a short independent lock, never held across UART or OLED I/O.
+            const auto body = board->body_face_state_.Read();
+            const uint64_t body_now_ms =
+                static_cast<uint64_t>(esp_timer_get_time() / 1000);
+            const bool body_fresh = body.Fresh(body_now_ms);
             // A stalled polling task cannot preserve an old healthy report.
-            const bool body_unhealthy =
-                valid_at == 0 || now_ms - valid_at > 1200U ||
-                board->body_fault_active_.load(std::memory_order_acquire);
+            const bool body_unhealthy = !body_fresh || body.fault;
             // A dock-contact fault is still a mandatory local motor STOP.
-            // This only distinguishes its factual OLED label while the
-            // authenticated WROOM status is fresh. Never call it charging.
-            const bool dock_lockout =
-                body_unhealthy && valid_at != 0 &&
-                now_ms - valid_at <= 1200U &&
-                board->body_dock_lockout_active_.load(std::memory_order_acquire);
+            // Distinguish only a fresh, coherent WROOM contact report.
+            const bool dock_lockout = body_fresh && body_unhealthy && body.dock_lockout;
             // Touch is a physical observation, not an unconditional mood.
             // The Mac may request a transient face cue through the existing
             // consented cosmetic route; WROOM independently owns local STOP.

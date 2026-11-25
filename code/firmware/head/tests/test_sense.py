@@ -287,10 +287,10 @@ int main() {
         self.assertNotIn('pending_face_touches_', source)
         self.assertNotIn('Event(EventType::kTouched)', source)
         self.assertIn('TakeCosmeticMoodCue()', source)
-        self.assertIn('body_fault_active_', source)
+        self.assertIn('BodyFaceState body_face_state_;', source)
         self.assertIn('bool last_rendered_fault = false;', source)
         self.assertIn('static void BodyPollTask(void* context)', source)
-        self.assertIn('board->body_fault_active_.store(true, std::memory_order_release);', source)
+        self.assertIn('board->body_face_state_.Publish({});', source)
         self.assertIn('board->display_->SetStatus("Body safety stop");', source)
         self.assertNotIn('body_unhealthy ? "sad" :', source)
         self.assertIn('Event(EventType::kPersonDetected)', source)
@@ -345,9 +345,9 @@ int main() {
         assert 'bool dock_lockout = false;' in header
         assert 'BodyDockLockoutObserved(' in protocol
         assert 'observation.dock_lockout = BodyDockLockoutObserved(' in bridge
-        assert 'board->body_dock_lockout_active_.store(false,' in source
-        assert 'body_unhealthy && valid_at != 0 &&' in source
-        assert 'now_ms - valid_at <= 1200U &&' in source
+        assert 'board->body_face_state_.Publish({});' in source
+        assert 'body_fresh && body_unhealthy && body.dock_lockout' in source
+        assert 'now_ms - at_ms <= 1200U' in source
         assert 'dock_lockout != last_rendered_dock_lockout' in source
         assert 'board->display_->SetStatus("Dock lock: motors off");' in source
         assert 'board->display_->SetStatus("Body safety stop");' in source
@@ -439,8 +439,8 @@ int main() {
                 "eye_animator_.Seed(pet_seed);",
             ):
                 self.assertLess(startup.index(prerequisite), startup.index(task))
-        self.assertIn("std::atomic<bool> body_fault_active_{true};", source)
-        self.assertIn("std::atomic<uint32_t> body_last_valid_ms_{0};", source)
+        self.assertIn("bool fault = true;", source)
+        self.assertIn("uint64_t at_ms = 0;", source)
 
     def test_latched_body_fault_remains_visible_during_continuous_listening(self):
         """Xiaozhi may overwrite OLED status without an idle transition."""
@@ -467,9 +467,9 @@ int main() {
         self.assertIn('body_bridge_->PollInteraction()', poll)
         self.assertNotIn('body_bridge_->PollInteraction()', face)
         self.assertNotIn('uart_', face)
-        self.assertIn('body_last_valid_ms_.store(', poll)
-        self.assertIn('body_last_valid_ms_.load(', face)
-        self.assertIn('now_ms - valid_at > 1200U', face)
+        self.assertIn('body_face_state_.Publish(', poll)
+        self.assertIn('body_face_state_.Read()', face)
+        self.assertIn('!body_fresh || body.fault', face)
         self.assertNotIn('pending_face_touches_', face)
         self.assertNotIn('Event(EventType::kTouched)', face)
         self.assertIn('TakeCosmeticMoodCue()', face)
@@ -2305,3 +2305,59 @@ int main() {
             "-I", str(root), "-I", str(HEAD / "overlay"), str(cpp), "-o", str(binary),
         ], check=True, capture_output=True, text=True, env=native_cpp_env())
         subprocess.run([str(binary)], check=True, capture_output=True, text=True)
+
+
+def test_body_face_snapshot_is_coherent_and_expires_across_clock_rollover():
+    """Compile the actual board helper, not an independent implementation."""
+    compiler = shutil.which("g++") or shutil.which("clang++")
+    if not compiler:
+        raise unittest.SkipTest("Native C++ compiler unavailable")
+    board = (HEAD / "sense/desk_robot_sense.cc").read_text()
+    helper = "struct BodyFaceStatus {" + board.split(
+        "struct BodyFaceStatus {", 1
+    )[1].split("class DeskRobotSenseBoard", 1)[0]
+    with tempfile.TemporaryDirectory() as tmp:
+        source = Path(tmp) / "body_face_state.cpp"
+        binary = Path(tmp) / "body_face_state"
+        source.write_text(
+            "#include <cassert>\n#include <cstdint>\n#include <mutex>\n"
+            "#include <atomic>\n#include <thread>\n" + helper + r"""
+int main() {
+    BodyFaceState state;
+    assert(!state.Read().Fresh(0));
+    state.Publish({true, false, false, 0});
+    assert(state.Read().Fresh(1200));
+    assert(!state.Read().Fresh(1201));
+    const uint64_t boundary = 1ULL << 32;
+    state.Publish({true, true, true, boundary - 10});
+    assert(state.Read().Fresh(boundary + 10));
+    assert(!state.Read().Fresh(boundary + 1191));
+    assert(!state.Read().Fresh(boundary - 11));
+    state.Publish({});
+    assert(!state.Read().Fresh(boundary));
+    std::atomic<bool> done{false};
+    std::thread writer([&] {
+        for (uint64_t i = 1; i <= 100000; ++i) {
+            const bool fault = i % 2 == 0;
+            state.Publish({true, fault, fault, i});
+        }
+        done.store(true);
+    });
+    do {
+        const auto sample = state.Read();
+        if (sample.valid) {
+            assert(sample.fault == (sample.at_ms % 2 == 0));
+            assert(sample.fault == sample.dock_lockout);
+        }
+    } while (!done.load());
+    writer.join();
+}
+"""
+        )
+        subprocess.run(
+            [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-pthread",
+             "-fsanitize=address,undefined", "-fno-pie", "-no-pie",
+             str(source), "-o", str(binary)],
+            check=True, capture_output=True, text=True, env=native_cpp_env(),
+        )
+        subprocess.run([str(binary)], check=True, timeout=30, env=native_cpp_env())
