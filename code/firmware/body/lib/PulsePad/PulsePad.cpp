@@ -1,4 +1,5 @@
 #include "PulsePad.h"
+#include "../../include/MuxWrite.h"
 #ifndef DESK_ROBOT_MAX30102_FIFO_IR_FIRST
 #define DESK_ROBOT_MAX30102_FIFO_IR_FIRST 0
 #endif
@@ -16,13 +17,9 @@ constexpr std::uint8_t kMax30102 = 0x57;
 constexpr std::uint8_t kAmbientOverflow = 0x20;
 }
 bool PulsePad::select_mux(std::uint8_t address, std::uint8_t mask) {
-  wire_->beginTransmission(address);
-  const bool wrote = wire_->write(mask) == 1;
-  // Always finish a partial transfer; an ACK alone does not prove the
-  // 0x70/0x71 multiplexer selected the requested channel.
-  const bool acknowledged = wire_->endTransmission(true) == 0;
-  if (address == kExtraMux && acknowledged) mux_present_ = true;
-  if (!wrote || !acknowledged) return false;
+  const auto result = write_mux_mask(*wire_, address, mask);
+  if (address == kExtraMux && result.acknowledged) mux_present_ = true;
+  if (!result.ok()) return false;
   if (wire_->requestFrom(address, static_cast<std::size_t>(1), true) != 1 ||
       wire_->available() < 1) return false;
   return wire_->read() == mask;

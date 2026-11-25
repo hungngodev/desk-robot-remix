@@ -1,4 +1,5 @@
 #include "TofBus.h"
+#include "../../include/MuxWrite.h"
 #include "BerryImu.h"
 
 #if (defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER) || \
@@ -14,10 +15,7 @@ bool TofBus::quiesce_optional_mux() {
   // A fitted optional bus must not keep a lane selected while the local
   // guard reads the 0x70 floor mux. Verify the CONTROL REGISTER, not just
   // ACK: a stuck mux could expose a different sensor at the shared 0x29.
-  wire_.beginTransmission(kOptionalMuxAddress);
-  const bool wrote = wire_.write(static_cast<std::uint8_t>(0)) == 1;
-  const bool acknowledged = wire_.endTransmission(true) == 0;
-  if (!wrote || !acknowledged || !bus_idle()) return false;
+  if (!write_mux_mask(wire_, kOptionalMuxAddress, 0).ok() || !bus_idle()) return false;
   if (wire_.requestFrom(kOptionalMuxAddress, static_cast<size_t>(1), true) != 1 ||
       wire_.available() < 1) return false;
   return wire_.read() == 0 && bus_idle();
@@ -25,10 +23,7 @@ bool TofBus::quiesce_optional_mux() {
 
 bool TofBus::quiesce_range_mux() {
   if (!physical_bus_accessible()) return false;
-  wire_.beginTransmission(kMuxAddress);
-  const bool disconnected = wire_.write(static_cast<std::uint8_t>(0)) == 1;
-  const bool acknowledged = wire_.endTransmission(true) == 0;
-  return disconnected && acknowledged && bus_idle() &&
+  return write_mux_mask(wire_, kMuxAddress, 0).ok() && bus_idle() &&
          wire_.requestFrom(kMuxAddress, static_cast<size_t>(1), true) == 1 &&
          wire_.available() >= 1 && wire_.read() == 0 && bus_idle();
 }
@@ -36,13 +31,11 @@ bool TofBus::quiesce_range_mux() {
 bool TofBus::select(std::uint8_t channel) {
   if (channel >= kRangeCount || !quiesce_optional_mux()) return false;
   const auto expected = static_cast<std::uint8_t>(1U << channel);
-  wire_.beginTransmission(kMuxAddress);
-  const bool wrote = wire_.write(expected) == 1;
-  const bool acknowledged = wire_.endTransmission(true) == 0;
+  const auto result = write_mux_mask(wire_, kMuxAddress, expected);
   // The STOP activates the new downstream lane. A hung sensor can
   // pull SDA/SCL low here even though the mux write itself ACKed. Do not
   // start another potentially blocking readback transaction on held lines.
-  if (!wrote || !acknowledged || !bus_idle()) return false;
+  if (!result.ok() || !bus_idle()) return false;
   // TCA9548A SCPS207H, section 7.5.4: one-byte control register readback.
   // The explicit STOP above activates the selected channel before reading.
   // A wrong/multiple channel must never be accepted as a cliff measurement.

@@ -1,4 +1,5 @@
 #include "AccessorySensors.h"
+#include "../../include/MuxWrite.h"
 #ifndef DESK_ROBOT_PACK_SHUNT_MOHM
 #define DESK_ROBOT_PACK_SHUNT_MOHM 0
 #endif
@@ -18,10 +19,8 @@ bool AccessorySensors::bus_available() {
 }
 bool AccessorySensors::mux(std::uint8_t address, std::uint8_t mask) {
   if (!bus_available()) return false;
-  wire_->beginTransmission(address);
-  const bool wrote = wire_->write(mask) == 1;
-  const bool acknowledged = wire_->endTransmission(true) == 0;
-  return bus_available() && wrote && acknowledged; // Always release failed partial writes.
+  const auto result = write_mux_mask(*wire_, address, mask);
+  return bus_available() && result.ok();
 }
 bool AccessorySensors::verified_mux(std::uint8_t address, std::uint8_t mask) {
   // TI TCA9548A SCPS207H: a write ACK is not a verified channel change.

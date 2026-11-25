@@ -5,8 +5,48 @@
 #include "AccessorySensors.h"
 #include "PulsePad.h"
 #include "ExpansionTouch.h"
+#include "../include/MuxWrite.h"
 TwoWire Wire;
 #define CHECK(x) do { if (!(x)) throw std::runtime_error(#x); } while (false)
+struct MuxWriteProbe {
+  unsigned begins = 0, writes = 0, ends = 0;
+  std::uint8_t address = 0, mask = 0;
+  bool stop = false;
+  unsigned write_count = 1, status = 0;
+  void beginTransmission(std::uint8_t value) { ++begins; address = value; }
+  unsigned write(std::uint8_t value) { ++writes; mask = value; return write_count; }
+  unsigned endTransmission(bool value) { ++ends; stop = value; return status; }
+};
+static void check_mux_write_boundary() {
+  for (unsigned address = 0x70; address <= 0x71; ++address) {
+    for (unsigned mask = 0; mask <= 0xff; ++mask) {
+      MuxWriteProbe wire;
+      unsigned bits = 0;
+      for (unsigned lane = 0; lane < 8; ++lane) bits += (mask >> lane) & 1U;
+      const bool allowed = bits <= 1;
+      const auto result = desk_robot::write_mux_mask(
+          wire, static_cast<std::uint8_t>(address), static_cast<std::uint8_t>(mask));
+      CHECK(result.ok() == allowed);
+      CHECK(wire.begins == unsigned(allowed));
+      CHECK(wire.writes == unsigned(allowed));
+      CHECK(wire.ends == unsigned(allowed));
+      if (allowed) CHECK(wire.stop && wire.address == address && wire.mask == mask);
+    }
+    for (unsigned count : {0U, 1U, 2U}) {
+      for (unsigned status : {0U, 2U, 4U, 5U}) {
+        MuxWriteProbe wire;
+        wire.write_count = count;
+        wire.status = status;
+        const auto result = desk_robot::write_mux_mask(
+            wire, static_cast<std::uint8_t>(address), 0x80);
+        CHECK(result.wrote == (count == 1));
+        CHECK(result.acknowledged == (status == 0));
+        CHECK(result.ok() == (count == 1 && status == 0));
+        CHECK(wire.begins == 1 && wire.writes == 1 && wire.ends == 1 && wire.stop);
+      }
+    }
+  }
+}
 static void check_jaw_adc_rail_isolation() {
   for (const auto rail : {0x7fffU, 0x8000U}) {
     TwoWire wire;
@@ -86,6 +126,7 @@ static void check_ads_start_provenance() {
 }
 int main() {
   try {
+    check_mux_write_boundary();
     check_jaw_adc_rail_isolation();
     check_ads_start_provenance();
     desk_robot::AccessorySensors accessories;

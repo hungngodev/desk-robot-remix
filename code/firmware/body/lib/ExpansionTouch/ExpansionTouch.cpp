@@ -1,15 +1,12 @@
 #include "ExpansionTouch.h"
+#include "../../include/MuxWrite.h"
 
 #if (defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER) || \
     (defined(DESK_ROBOT_FULL_SENSORS) && DESK_ROBOT_FULL_SENSORS)
 namespace desk_robot {
 bool ExpansionTouch::mux(std::uint8_t address, std::uint8_t mask) {
   if (wire_ == nullptr) return false;
-  wire_->beginTransmission(address);
-  const bool wrote = wire_->write(mask) == 1;
-  // Complete the attempted transfer even when write() fails.
-  const bool acknowledged = wire_->endTransmission(true) == 0;
-  if (!wrote || !acknowledged) return false;
+  if (!write_mux_mask(*wire_, address, mask).ok()) return false;
   // A TCA9548A may ACK while a channel is stuck selected. Verify its
   // control register after STOP before exposing optional sensors to the
   // same physical bus as safety-critical 0x29 ranging.
