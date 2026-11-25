@@ -1041,3 +1041,36 @@ def test_f036_first_unit_anchoring_split_and_reanchor_replay(tmp_path):
     assert spatial.state("robot-01").grid.anchored is True
     assert spatial.state("robot-01").origin_id == "12"
     assert spatial.state("robot-01").map_to_odom == new_map_to_odom
+
+
+async def test_hardware_navigation_rejects_pose_expired_during_health_io(
+    settings, tmp_path, monkeypatch,
+):
+    """A fresh body health response must not renew older localization evidence."""
+    from desk_robot.spatial_frames import PlanarTransform
+
+    head = _HardwarePoseHead("robot-01", x_mm=40, y_mm=40, yaw_mrad=0)
+    transform = PlanarTransform("map", "odom", 0.0, 0.0, 0.0)
+    rt = await _setup_hardware_pose_runtime(settings, tmp_path, head, transform)
+    health = rt.coordinator._assert_armed_health
+
+    async def delayed_health(robot_id, **kwargs):
+        body = await health(robot_id, **kwargs)
+        if head.pose_seq == 3:
+            # The third sample is the first edge's verified pose. Keep the
+            # map, camera and body verdict valid while its 250 ms age expires.
+            await asyncio.sleep(0.27)
+        return body
+
+    monkeypatch.setattr(rt.coordinator, "_assert_armed_health", delayed_health)
+    try:
+        await rt.coordinator.operator_arm("robot-01")
+        job = rt.coordinator.navigate("robot-01", goal=(3, 2))
+        await asyncio.wait_for(rt.coordinator.tasks[job.id], timeout=5)
+        assert job.state == "failed"
+        assert "pose receipt expired" in (job.error or "")
+        assert not any(c.startswith("drive ") for c in head.commands)
+        assert "halt" in head.commands
+        assert not rt.spatial.state("robot-01").grid.anchored
+    finally:
+        await rt.close()

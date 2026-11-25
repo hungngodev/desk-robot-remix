@@ -2056,6 +2056,11 @@ class Coordinator:
                 job.robot_id, require_front_clearance=start_cell != goal_cell,
             )
             _check_step_authority(start_cell, goal_cell)
+            if self.settings.mode == "hardware" and (
+                st_pose.pose_fence.current(time.monotonic()) is not receipt
+            ):
+                spatial.invalidate_robot(job.robot_id, reason="pose_receipt_expired")
+                raise OperationError("Navigation halted: pose receipt expired")
             if self.voice_blocks_motion() is not None:
                 raise OperationError("Navigation halted: voice preempted motion")
 
