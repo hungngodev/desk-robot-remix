@@ -189,6 +189,46 @@ int main() {
       CHECK(config() == 0 && transfer.ads_config_high == 0xd3);
     }
     {
+      // A successful result must not hide expiry of the previous clearance
+      // during a stretched I2C transfer. Test both sides of the deadline and
+      // millis rollover using the real scheduler, bus driver and guard.
+      const auto saved_clock = fake_arduino_millis();
+      for (const std::uint32_t base : {0U, 0xffffff80U}) {
+        for (const std::uint32_t delay_ms : {4U, 5U, 10U}) {
+          Wire = TwoWire{};
+          fake_i2c_lines() = FakeI2cLines{};
+          desk_robot::TofBus bus;
+          desk_robot::CliffGuard guard;
+          CHECK(guard.configure(calibration()));
+          CHECK(bus.begin(21, 22, -1));
+          for (std::uint32_t i = 0; i < 5; ++i) {
+            fake_arduino_millis() = base + 20U * i;
+            bus.poll(guard, millis());
+          }
+          CHECK(guard.try_rearm(base + 100U));
+#if DESK_ROBOT_EXTRA_RANGERS
+          fake_arduino_millis() = base + 100U;
+          bus.poll(guard, millis());
+          CHECK(bus.last_channel() == 5);
+#endif
+          fake_arduino_millis() = base + 195U;
+          CHECK(guard.evaluate(millis()));
+          Wire.next_tof_result_delay_ms = delay_ms;
+          const auto errors = bus.errors();
+          bus.poll(guard, millis());
+          CHECK(bus.last_channel() == 0);
+          CHECK(bus.errors() == errors);
+          CHECK(Wire.next_tof_result_delay_ms == 0);
+          CHECK(millis() == base + 195U + delay_ms);
+          CHECK(guard.diagnostic(0, millis()).age_ms == delay_ms);
+          CHECK(guard.evaluate(millis()) == (delay_ms < 5U));
+          CHECK(guard.fault() == (delay_ms < 5U ? desk_robot::CliffFault::None :
+                                                  desk_robot::CliffFault::StaleSample));
+        }
+      }
+      fake_arduino_millis() = saved_clock;
+    }
+    {
       // A timeout, NACK or partial read cannot authorize a new optical sample.
       for (int failure = 0; failure < 4; ++failure) {
         Wire = TwoWire{};

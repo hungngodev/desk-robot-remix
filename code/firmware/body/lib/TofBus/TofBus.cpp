@@ -360,6 +360,7 @@ TofOpticalDiagnostic TofBus::optical_diagnostic(
 }
 
 void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
+  const auto poll_started_ms = static_cast<std::uint32_t>(millis());
   // Retire expired evidence while polling, so a full millis revolution
   // cannot make a cached conversion fresh again. Only acquisition renews it.
   for (auto& sample : extra_) {
@@ -464,6 +465,12 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
   optics.at_ms = now_ms;
   new_optical_channel_ = channel;
   if (channel < kFloorAndFrontCount) {
+    // The scan-start timestamp conservatively dates the new reading, but
+    // must not conceal expiry of the old reading during synchronous I2C.
+    // Assess the previous clearance at actual elapsed completion time
+    // before replacing it. Unsigned elapsed arithmetic handles rollover.
+    const auto elapsed_ms = static_cast<std::uint32_t>(millis()) - poll_started_ms;
+    guard.evaluate(now_ms + elapsed_ms);
     guard.sample(channel, distance, accepted, now_ms);
   } else {
     auto& sample = extra_[channel - kFloorAndFrontCount];

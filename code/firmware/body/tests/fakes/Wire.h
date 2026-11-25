@@ -150,6 +150,8 @@ class TwoWire {
   bool repeated_start_pending = false;
   int next_stop_timeout_address = -1;
   int next_read_timeout_address = -1;
+  // One-shot elapsed time for a successful ToF result transfer.
+  std::uint32_t next_tof_result_delay_ms = 0;
   int next_short_read_address = -1;
   std::size_t next_short_read_request = 0;
   std::size_t next_short_read_count = 0;
@@ -362,6 +364,11 @@ class TwoWire {
           applyTransmission() != 0) return 0;
     }
     if (!connected(addr)) return 0;
+    if (addr == 0x29 && ranges != 0 && extras == 0 && count == 12 &&
+        register_address == 0x14) {
+      fake_arduino_millis() += next_tof_result_delay_ms;
+      next_tof_result_delay_ms = 0;
+    }
     if (addr == 0x48 && extras == 4 &&
         register_address == fail_ads_read_register) {
       ++rejected_ads_reads;
