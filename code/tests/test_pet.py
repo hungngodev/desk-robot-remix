@@ -1582,6 +1582,39 @@ async def test_local_wroom_fault_transition_cancels_mac_motion_authority(fleet, 
 
 
 
+@pytest.mark.parametrize("fault", ["floor_out_of_range", "touch_active"])
+async def test_retired_safety_observer_cannot_consume_current_fault(
+    fleet, tmp_path, fault,
+):
+    stopped = []
+
+    async def local_stop(robot_id):
+        stopped.append(robot_id)
+
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(), on_local_fault=local_stop,
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 5
+    status = {"safety": {"required": True, "ready": False, "fault": fault, "sensor": 2}}
+    try:
+        await pet._observe_body_safety("robot-01", 5, {
+            "safety": {"required": True, "ready": True, "fault": "none"},
+        })
+        await pet._observe_body_safety("robot-01", 4, status)
+        assert state.last_safety_fault == "none"
+        assert stopped == []
+        await pet._observe_body_safety("robot-01", 5, status)
+        await pet._observe_body_safety("robot-01", 5, status)
+        assert stopped == ["robot-01"]
+        assert state.safety_fault_events == (0 if fault == "touch_active" else 1)
+    finally:
+        state.enabled = False
+        await pet.close()
+
+
 async def test_human_touch_stops_mac_without_false_latched_fault_memory(
     fleet, tmp_path,
 ):

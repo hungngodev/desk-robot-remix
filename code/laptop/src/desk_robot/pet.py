@@ -1643,6 +1643,10 @@ class PetController:
         ):
             return
         state = self.states[robot_id]
+        # A delayed response from a retired observer must not consume the
+        # current generation's first real fault transition.
+        if not state.enabled or state.generation != generation:
+            return
         previous = state.last_safety_fault
         state.last_safety_fault = fault
         # Normal human head-touch doubles as the WROOM's immediate physical
