@@ -3516,6 +3516,119 @@ static void guarded_startup_never_attaches_unmeasured_jaw_pwm() {
   }
 }
 
+
+static void combined_cliff_attitude_watchdog_and_uart_backpressure() {
+  using desk_robot::BodyProfile;
+  for (const auto profile : {BodyProfile::StepperGuarded, BodyProfile::DcGuarded}) {
+    for (const std::uint32_t start : {100U, 0xffffffd0U}) {
+      for (const bool watchdog_first : {false, true}) {
+        desk_robot::CliffGuard guard;
+        CHECK(guard.configure(config()));
+        fresh(guard, start - 50U);
+        desk_robot::BodyControl body(profile, &guard);
+        body.require_imu_for_motion(true);
+        body.require_imu_attitude_guard(true);
+        body.set_imu_identity(4, 0x68, 0);
+        CHECK(body.configure_imu_attitude_limits({{0, 0, 16384}, 800, 12000, 20000}));
+        desk_robot::BerryReading imu{};
+        imu.model = desk_robot::BerryModel::Mpu6050;
+        imu.valid = imu.low_g_status_valid = true;
+        imu.accel[2] = 16384;
+        imu.at_ms = start - 50U;
+        body.set_imu(imu);
+        imu.at_ms = start;
+        body.set_imu(imu);
+        fresh(guard, start);
+        CHECK(send(body, "rearm", start, true) == "OK rearm");
+        CHECK(send(body, "arm", start) == "OK arm");
+        const char drive[] = "drive 40 40 250";
+        char ack[desk_robot::kReplyCapacity]{};
+        body.execute(drive, sizeof(drive) - 1, start, ack, sizeof(ack));
+        CHECK(std::string(ack) == "OK drive left=40 right=40 ms=250");
+        CHECK(body.state().left == 40 && body.drive_remaining(start) == 250);
+
+        // Fill both transmit queues using real query replies from both command
+        // authorities; no bytes are drained while the independent trips occur.
+        desk_robot::ReplyTxQueue<2 * (desk_robot::kReplyCapacity + 2)> head_tx, usb_tx;
+        desk_robot::LineReceiver head, usb(true);
+        char reply[desk_robot::kReplyCapacity]{};
+        for (int i = 0; i < 16; ++i) {
+          for (char c : std::string("status\n"))
+            head.feed(c, start + 1U, body, reply, sizeof(reply));
+          head_tx.enqueue_line(reply);
+          for (char c : std::string("status\n"))
+            usb.feed(c, start + 1U, body, reply, sizeof(reply));
+          usb_tx.enqueue_line(reply);
+        }
+        CHECK(head_tx.dropped() > 0 && usb_tx.dropped() > 0);
+        CHECK(body.state().armed && body.state().left == 40);
+
+        imu.accel[0] = 14000;
+        imu.accel[2] = 8000;
+        imu.at_ms = start + 50U;
+        body.set_imu(imu);
+        fresh(guard, start + 50U);
+        body.tick(start + 50U);
+        CHECK(body.state().armed); // one impulse alone must not trip attitude
+        const auto trip = start + 100U;
+        guard.sample(2, 80, true, trip);
+        if (watchdog_first) body.motor_watchdog_trip();
+        imu.at_ms = trip;
+        body.set_imu(imu);
+        if (!watchdog_first) body.motor_watchdog_trip();
+        body.tick(trip);
+        body.veto_unapplied_motion_ack(ack, sizeof(ack));
+        CHECK(std::string(ack) == "ERR drive safety_interlock");
+        CHECK(guard.fault() == desk_robot::CliffFault::FloorOutOfRange);
+        CHECK(guard.fault_sensor() == 2);
+        CHECK(!body.state().armed && body.state().left == 0 &&
+              body.state().right == 0 && body.drive_remaining(trip) == 0);
+        CHECK(body.state().servos_attached);
+        CHECK(body.state().lift_target == body.state().lift &&
+              body.state().grip_target == body.state().grip);
+
+        // Restoring the IMU first must not clear the still unsafe cliff.
+        CHECK(send(body, "rearm", trip, true) == "ERR rearm imu_attitude_not_upright");
+        imu.accel[0] = 0;
+        imu.accel[2] = 16384;
+        for (const std::uint32_t delta : {150U, 200U}) {
+          const auto now = start + delta;
+          imu.at_ms = now;
+          body.set_imu(imu);
+          for (std::uint8_t lane = 0; lane < 5; ++lane)
+            guard.sample(lane, lane == 2 ? 80 : lane < 4 ? 50 : 200, true, now);
+          CHECK(send(body, "rearm", now, true) ==
+                (delta == 150U ? "ERR rearm imu_attitude_not_upright" :
+                                 "ERR rearm safety_interlock"));
+          CHECK(guard.fault() == desk_robot::CliffFault::FloorOutOfRange);
+          CHECK(!body.state().armed && body.drive_remaining(now) == 0);
+        }
+
+        const auto recovery = start + 201U;
+        fresh(guard, recovery);
+        body.sample_touch_input(true, recovery);
+        CHECK(send(body, "rearm", recovery, true) == "ERR rearm touch_active");
+        body.sample_touch_input(false, recovery + 1U);
+        for (char c : std::string("rearm\n"))
+          head.feed(c, recovery + 1U, body, reply, sizeof(reply));
+        CHECK(std::string(reply) == "ERR rearm local_only");
+        CHECK(head_tx.enqueue_priority_line(send(body, "stop", recovery + 1U).c_str()));
+        CHECK(usb_tx.enqueue_priority_line(send(body, "halt", recovery + 1U).c_str()));
+        CHECK(send(body, "arm", recovery + 1U) == "ERR arm imu_attitude_latched");
+        CHECK(send(body, "keepalive", recovery + 1U) == "ERR keepalive disarmed");
+        CHECK(send(body, drive, recovery + 1U) == "ERR drive disarmed");
+        CHECK(guard.fault() == desk_robot::CliffFault::FloorOutOfRange);
+        for (char c : std::string("rearm\n"))
+          usb.feed(c, recovery + 1U, body, reply, sizeof(reply));
+        CHECK(std::string(reply) == "OK rearm");
+        CHECK(!body.state().armed && body.drive_remaining(recovery + 1U) == 0);
+        CHECK(send(body, "arm", recovery + 1U) == "OK arm");
+        CHECK(body.state().left == 0 && body.state().right == 0);
+      }
+    }
+  }
+}
+
 int main() {
   try {
     desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded);
@@ -3557,6 +3670,7 @@ int main() {
     output_fault_vetoes_all_motion_acknowledgments();
     jaw_expiry_during_output_vetoes_accepted_target();
     stale_range_veto_survives_saturated_uart();
+    combined_cliff_attitude_watchdog_and_uart_backpressure();
     raw_bumper_trip_preempts_debounce_and_preserves_payload();
     raw_bumper_bounce_resets_both_edge_classifiers();
     accessory_reconnect_does_not_invent_petting_events();
