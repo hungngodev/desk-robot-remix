@@ -22,6 +22,64 @@ job for one commit is not evidence that newer commits or an actual robot pass.
 Never close a physical safety or buying gate from synthetic tests,
 documentation improvements or a historical all green CI run.
 
+## November 24, 2026 PR #17 software burn-down, CI repair, and Guide 90 wiring checkpoint
+
+This update resolves software CI drift, cross-layer runtime gaps, and
+documentation discrepancies identified across PR #17 review threads and the
+`DRR-001`..`DRR-192` task ledger, while preserving every physical and
+purchasing fail-closed default (`motion_enabled=false`,
+`autonomous_low_battery_dock_enabled=false`, `spatial_navigation_qualified=false`,
+`object_detector_qualified=false`, `charging_verified=false`, and all
+`*_qualified` hardware flags `false`):
+
+- **CI and contract repairs:** Added regression coverage in
+  `code/firmware/head/tests/test_overlay.py` verifying
+  `scripts/p3_tools/p3_gui_player.py` journal recovery alongside peer fix
+  `e9892088`; synced
+  `code/tests/test_pet.py` (`test_optical_paw_requires_fresh_fifo_edges_and_measured_threshold`)
+  with `aux.py`'s stale-pulse isolation (`age=400` normalizes `pulse.valid=false`
+  while preserving independent telemetry); scoped `code/tests/test_first_unit_owned_station.py`
+  to the `Missing for one complete core` quantity table after the sourcing-risk
+  table addition in `docs/hardware/parts.md`; updated
+  `code/tests/test_integration_contracts.py` (`TofBus::quiesce_optional_mux`) to
+  match `return wire_.read() == 0 && bus_idle();`; rewrote
+  `code/firmware/head/tests/test_pinned_power_startup.py` for clean relative
+  upstream fixture imports; and added `bme_completed_sample_tests.cpp` to the
+  `Sanitizers` job in `.github/workflows/host-verification.yml`.
+- **Cross-layer safety and media fixes:** Made `stop_pet_and_audio` /
+  `/v1/robots/{id}/stop` concurrent-safe (`api.py`, `controller.py`,
+  `runtime.py`), enforced human-voice admission gating and FIFO voice
+  deferral, added USB disconnect epoch invalidation and sample age bounds for
+  `room_station` (`room_station.py`, `multimodal.py`, `runtime.py`), wired
+  qualified low-battery auto-dock and dual-seat charge inhibition
+  (`config.py`, `pet.py`, `controller.py`, `runtime.py`), extracted board
+  geometry validation in `calibrate_dock_camera.py` (with rendered distorted-JPEG
+  round-trip tests in `test_calibrate_dock_camera.py`), and exercised real
+  short/partial PCM tail handling across `desk_robot_bridge.py` and upstream
+  `pcm_to_data_stream` (`test_server_bridge.py`).
+- **Guide 90 spatial integration & `t.0` continuity:** Added
+  `SpatialRuntime` (`code/laptop/src/desk_robot/spatial_runtime.py`), wired
+  `Runtime.spatial` into `Coordinator.navigate()` and `PetController._notify_sensor()`,
+  exposed `/v1/robots/{id}/spatial/grid`, `/v1/robots/{id}/spatial/memory`, and
+  `/v1/robots/{id}/navigate` (`api_spatial_pose.py`, `api.py`), and added
+  session-habituation & active-navigation continuity to `brain_context.py`.
+- **Additional regression & doc closures:** Added `ina226_shunt_uv_from_raw` and
+  fake-I2C `0x7FFF`/`0x8000` saturation tests (`pack_current_tests.cpp`,
+  `optional_i2c_io_tests.cpp`), pre-watchdog `low_g_irq` origin invalidation
+  (`pose_read_only_tests.cpp`), identical-angle fresh sequence test
+  (`wheel_angle_capture_tests.cpp`), jaw `max_delta_adc - 1` boundary test
+  (`guarded_body_tests.cpp`), legacy pre-spatial SQLite migration test
+  (`test_spatial_memory.py`), clarified fleet-vs-first-unit checklist scope in
+  `docs/hardware/one-robot-inventory-and-shopping.md`, and synchronized
+  `F023`/`F037`/`G029` status notes in `agents/coverage.md`.
+- **Exact-HEAD boundary:** Local software checks (Body C++ ASan/UBSan 47/47,
+  Room Station C++ ASan/UBSan 7/7, PlatformIO profiles, Ruff, doc/manifest
+  verifiers, and host pytest where `cv2`/`OpenSCAD` are skipped on macOS) must
+  be paired with the pushed PR #17 GitHub Actions `Host verification` run (where
+  Ubuntu installs `opencv-python-headless` and `openscad`). Physical A1–A12
+  assembly measurements, cutoff proof, acoustic timing, real grasp, dock charge,
+  and cart release remain **HOLD**.
+
 ## November 23, 2026 Guide 90 first-unit integration checkpoint
 
 This is an **exact-source checkpoint**, not an all-green claim for a moving

@@ -5,7 +5,9 @@ A manual one-robot table drifted away from the accepted hardware plan, so it is
 retired as a cart rather than allowed to become a third source of truth.
 
 The only static builder-facing lists are the two sections in
-[complete-shopping-checklist.md](complete-shopping-checklist.md):
+[complete-shopping-checklist.md](complete-shopping-checklist.md)
+(**fleet-level** five-pet / five-dock / one-shared-station snapshot — do **not**
+treat those quantities as a single-robot cart):
 
 1. reported owned or ordered, still unverified
 2. remaining components or unqualified roles

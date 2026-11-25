@@ -251,3 +251,11 @@ origin, equal head boot, no intervening movement or pickup, and measured
 source-to-optical latency bounds. Never treat an uncalibrated bracket as
 navigation authorization. Actual optical lag and audio/camera coexistence
 require physical measurement and remain unqualified.
+
+### Spatial navigation, recall, and voice-deferred routes
+
+- `GET /v1/robots/{robot_id}/spatial/grid` (tool/operator bearer): read-only `SpatialGrid` summary (origin/epoch, anchor status, cell counts, expiry); always returns `navigation_authorized=false`, `motor_authorized=false`, `charging_authorized=false`, `physical_acceptance_pass=false`.
+- `GET /v1/robots/{robot_id}/spatial/memory?object_key=<key>` (tool/operator bearer): read-only `SpatialMemory` recall respecting `voice_memory_tools_enabled` consent in `hardware` mode; distinguishes `pending_localization`, `historical`, `stale`, `invalid_origin`, and `unknown`.
+- `POST /v1/robots/{robot_id}/navigate` (operator bearer, `202`): bounded route or object-search execution via `Coordinator.navigate()`. Requires `motion_enabled=true`, `spatial_navigation_qualified=true` (both `false` by default), anchored/current `SpatialGrid`, valid preflight, and live `PoseFence` + WROOM status revalidation before every drive pulse. Halts on pickup (`handling_tilt`), WROOM fault, voice barge-in, replayed/mismatched pose, or unanchored cells.
+- `?defer_on_voice=true` on `/move`, `/explore`, `/pickup`, and `/navigate`: enqueues one bounded deferred motion request while human speech is active, consuming and retiring any pre-speech permit and re-running fresh hardware preflight after `speech_end`. Any `STOP`, voice monitor outage, fault, dock seating contact, or revoked consent discards the queued entry without driving.
+- Fail-closed `RobotConfig` flags defaulting to `false`: `autonomous_low_battery_dock_enabled`, `spatial_navigation_qualified`, and `object_detector_qualified`.
