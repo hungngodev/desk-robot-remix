@@ -1321,6 +1321,27 @@ def test_active_coordinator_job_is_not_a_sensor_reaction_or_action_permit():
     assert active_job_timeline(jobs, "robot-03") == []
 
 
+def test_active_job_uses_the_validated_state_snapshot():
+    class ChangingState:
+        robot_id = "robot-01"
+        kind = "pickup"
+
+        def __init__(self) -> None:
+            self.reads = 0
+
+        @property
+        def state(self) -> str:
+            self.reads += 1
+            return "running" if self.reads == 1 else "succeeded"
+
+    job = ChangingState()
+    activity = active_job_timeline([job], "robot-01")
+    assert activity[0]["status"] == "running"
+    assert job.reads == 1
+    assert activity[0]["physical_action_verified"] is False
+    assert activity[0]["motor_authorized"] is False
+
+
 def test_running_job_survives_multimodal_burst_but_not_safety_priority():
     active = active_job_timeline([
         SimpleNamespace(robot_id="robot-01", kind="pickup", state="queued"),

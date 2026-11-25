@@ -94,7 +94,7 @@ def memory_provenance_label(entry: Memory) -> str:
 _memory_label = memory_provenance_label
 
 
-def active_job_timeline(jobs: Iterable[object], robot_id: str) -> list[dict]:
+def active_job_timeline(jobs: Iterable[object], robot_id: str) -> list[dict[str, object]]:
     """Read one live Coordinator job without copying its untrusted task text.
 
     The Coordinator owns the actual job; this is only conversational evidence.
@@ -112,7 +112,7 @@ def active_job_timeline(jobs: Iterable[object], robot_id: str) -> list[dict]:
             kind = "unclassified"
         return [{
             "channel": "mac_activity", "kind": "coordinator_job",
-            "job_type": kind, "status": job.state,
+            "job_type": kind, "status": state,
             "source": "mac_coordinator_active_job",
             "physical_action_verified": False, "motor_authorized": False,
         }]
@@ -187,7 +187,7 @@ def compose_brain_context(
     # Repeating the same cue crowds out touch, completed tool context and
     # conversational continuity. Keep the latest per kind, then budget
     # independent modalities rather than truncating a large camera list.
-    cue_parts: list[tuple[int, str, str | None, bool]] = []
+    cue_parts: list[tuple[float, str, str | None, bool]] = []
     seen_cues: set[tuple[str, str]] = set()
     heard_count = 0
     heard_requests: list[str] = []
