@@ -529,8 +529,21 @@ bool BodyControl::configure_wheel_pose(
   return true;
 }
 
+// A front obstacle stops travel without disproving floor contact. Any lost
+// floor support, including a floor fault masked by an earlier front latch,
+// breaks the wheel-to-desk continuity needed for a local odometry origin.
+static bool floor_supports_pose(const CliffGuard* guard, std::uint32_t now_ms) {
+  if (!guard || guard->fault_sensor() < kFloorSensorCount ||
+      guard->fault() == CliffFault::BusFailure ||
+      guard->fault() == CliffFault::InvalidChannel) return false;
+  for (std::uint8_t lane = 0; lane < kFloorSensorCount; ++lane)
+    if (!guard->diagnostic(lane, now_ms).valid) return false;
+  return true;
+}
+
 bool BodyControl::start_local_pose_origin(std::uint32_t now_ms) {
   if (!wheel_pose_configured_ || !wheel_pairs_.ready_for_origin() ||
+      (guarded_motion_profile() && !floor_supports_pose(guard_, now_ms)) ||
       state_.armed || state_.servos_attached ||
       state_.touch_raw_active || state_.bumper_raw ||
       imu_low_g_latched_ || imu_attitude_latched_ ||
@@ -596,6 +609,9 @@ void BodyControl::set_accessories(const AccessoryReadings& readings,
       }
     }
   }
+  if (wheel_pose_configured_ && guarded_motion_profile() &&
+      !floor_supports_pose(guard_, now_ms))
+    invalidate_pose_continuity();
   const auto& force = readings.force;
   const bool belly_valid = (force.valid_mask & 1U) != 0U ||
       (force.valid_mask == 0U && force.valid);
@@ -994,6 +1010,8 @@ void BodyControl::tick(std::uint32_t now_ms) {
   }
   if (guarded_motion_profile() &&
       (guard_ == nullptr || !guard_->evaluate(now_ms))) {
+    if (wheel_pose_configured_ && !floor_supports_pose(guard_, now_ms))
+      invalidate_pose_continuity();
     stop_motion();
     state_.armed = false;
     // A floor/bus fault must not deliberately release a held payload.

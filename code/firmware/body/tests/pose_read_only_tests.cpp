@@ -1,3 +1,4 @@
+#include <initializer_list>
 #include "BodyControl.h"
 
 #include <cstdint>
@@ -581,6 +582,109 @@ void verify_pickup_low_g_invalidates_valid_origin_before_watchdog() {
   body.set_accessories(angles, 482); // cached pre-pickup packet cannot restore origin
   check(body.wheel_pose_state().origin == 0);
 }
+void verify_slow_lift_invalidates_origin_without_low_g() {
+  for (const bool prior_front : {false, true}) {
+    desk_robot::CliffGuard guard;
+    desk_robot::CliffConfig cfg{};
+    cfg.calibrated = true;
+    cfg.freshness_ms = 200;
+    cfg.front_obstacle_mm = 100;
+    cfg.front_max_mm = 1300;
+    for (auto& f : cfg.floor) f = {30, 70};
+    check(guard.configure(cfg));
+    const auto sweep = [&guard](std::uint32_t at, std::uint16_t floor) {
+      for (std::uint8_t lane = 0; lane < desk_robot::kFloorSensorCount; ++lane)
+        guard.sample(lane, floor, true, at);
+      guard.sample(4, 300, true, at);
+    };
+    sweep(100, 45);
+    check(guard.try_rearm(100));
+    desk_robot::BodyControl body(desk_robot::BodyProfile::StepperGuarded, &guard);
+    desk_robot::LineReceiver receiver;
+    desk_robot::LineReceiver usb(true);
+    body.set_boot_epoch(602);
+    body.require_imu_for_motion(true);
+    body.set_imu_identity(4, 0x68, 0);
+    desk_robot::ImuYawCapture::Calibration yaw{};
+    yaw.axis = 2; yaw.sign = 1;
+    yaw.max_rate_raw = 500; yaw.bias_uncertainty_raw = 20;
+    yaw.scale_error_ppm = 20000;
+    yaw.accel_norm_min_raw = 12000; yaw.accel_norm_max_raw = 20000;
+    yaw.temp_min_raw = -1000; yaw.temp_max_raw = 1000;
+    yaw.max_gap_ms = 200; yaw.max_age_ms = 150;
+    yaw.max_yaw_error_urad = 500000;
+    check(body.configure_imu_yaw_capture(yaw));
+    check(body.configure_wheel_angle_capture(4000, 4000, 200, 150));
+    check(body.configure_wheel_pair_skew(25));
+    desk_robot::WheelPoseIntegrator::Calibration geom{};
+    geom.left_nm_per_count = geom.right_nm_per_count = 100000;
+    geom.left_forward_sign = 1; geom.right_forward_sign = -1;
+    geom.track_width_mm = 100; geom.max_pair_step_mm = 25;
+    geom.max_pair_skew_ms = 25; geom.max_imu_skew_ms = 50;
+    geom.max_age_ms = 200; geom.wheel_error_ppm = 10000;
+    geom.imu_alignment_error_urad = 1000;
+    geom.max_wheel_gyro_residual_urad = 50000;
+    geom.max_xy_error_mm = 30; geom.max_yaw_error_urad = 500000;
+    geom.stationary_gyro_step_urad = 500; geom.stationary_pairs_required = 3;
+    check(body.configure_wheel_pose(geom));
+
+    desk_robot::BerryReading imu{};
+    imu.model = desk_robot::BerryModel::Mpu6050;
+    imu.valid = imu.low_g_status_valid = true;
+    imu.accel[2] = 16384;
+    imu.temperature_raw = 100;
+    desk_robot::AccessoryReadings angles{};
+    for (unsigned i = 1; i <= 2; ++i) {
+      angles.angle[i].present = angles.angle[i].valid = true;
+      angles.angle[i].magnet_status = 0x20;
+      angles.angle[i].angle = 100;
+    }
+    for (std::uint32_t seq = 1; seq <= 4; ++seq) {
+      const auto at = seq * 100U;
+      imu.at_ms = at + 5;
+      body.set_imu(imu);
+      angles.angle[1].at_ms = at;
+      angles.angle[2].at_ms = at + 10;
+      angles.angle[1].sample_seq = angles.angle[2].sample_seq = seq;
+      sweep(at + 10, 45);
+      body.set_accessories(angles, at + 10);
+    }
+    check(body.start_local_pose_origin(410));
+    check(request(body, receiver, "arm\r\n", 420, 420000) == "OK arm");
+    check(request(body, receiver, "drive 20 20 250\r\n", 430, 430000).find("OK drive") == 0);
+    sweep(450, 60);
+    body.tick(450);
+    check(body.state().armed && body.wheel_pose_state().origin == 1);
+    if (prior_front) {
+      guard.sample(4, 80, true, 455);
+      body.tick(455);
+      check(!body.state().armed && body.wheel_pose_state().origin == 1);
+    }
+    // Slow, level pickup can retain 1 g acceleration and never trigger low-g.
+    sweep(460, 71);
+    body.tick(460);
+    check(!body.state().armed && body.state().left == 0 && body.state().right == 0);
+    check(guard.fault() == (prior_front ? desk_robot::CliffFault::FrontObstacle
+                                      : desk_robot::CliffFault::FloorOutOfRange));
+    check(body.wheel_pose_state().origin == 0 && !body.wheel_pair_receipt().valid);
+    imu.at_ms = 465;
+    body.set_imu(imu);
+    angles.angle[1].at_ms = 465;
+    angles.angle[2].at_ms = 470;
+    angles.angle[1].sample_seq = angles.angle[2].sample_seq = 5;
+    body.set_accessories(angles, 470);
+    check(!body.wheel_pair_receipt().valid);
+    check(!body.wheel_angle_capture(false).continuous() &&
+          !body.wheel_angle_capture(true).continuous());
+    sweep(480, 45);
+    check(!body.start_local_pose_origin(480));
+    check(request(body, receiver, "rearm\r\n", 480, 480000) == "ERR rearm local_only");
+    check(request(body, usb, "rearm\r\n", 480, 480000) == "OK rearm");
+    check(request(body, receiver, "arm\r\n", 481, 481000) == "OK arm");
+    check(body.state().left == 0 && body.state().right == 0 &&
+          body.wheel_pose_state().origin == 0);
+  }
+}
 }  // namespace
 
 int main() {
@@ -593,5 +697,6 @@ int main() {
   verify_imu_yaw_never_promotes_pose();
   verify_qualified_pose_is_never_implicit_navigation();
   verify_pickup_low_g_invalidates_valid_origin_before_watchdog();
+  verify_slow_lift_invalidates_origin_without_low_g();
   return 0;
 }
