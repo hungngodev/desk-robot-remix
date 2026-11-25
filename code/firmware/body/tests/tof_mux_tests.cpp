@@ -44,8 +44,105 @@ static void faulted(desk_robot::CliffGuard& guard) {
     CHECK(!guard.diagnostic(lane, 60).present);
 }
 
+// Independent elapsed-time oracle over all lane dropout combinations.
+// A scheduled poll is not evidence when the sensor has no ready conversion.
+static void dropout_matrix_and_partial_mux_recovery() {
+  const auto saved_clock = fake_arduino_millis();
+  for (const std::uint32_t base : {0U, 0xffffff80U}) {
+    for (unsigned mask = 0; mask < 256U; ++mask) {
+      Wire = TwoWire{};
+      fake_i2c_lines() = FakeI2cLines{};
+      fake_arduino_millis() = base;
+      desk_robot::TofBus bus;
+      desk_robot::CliffGuard guard;
+      CHECK(guard.configure(calibration()));
+      CHECK(bus.begin(21, 22, -1));
+      const std::uint8_t order[] = {0, 1, 2, 3, 4, 5, 0, 1, 2,
+                                   3, 4, 6, 0, 1, 2, 3, 4, 7};
+      unsigned phase = 0;
+      std::uint32_t last[8]{};
+      const auto poll = [&](std::uint32_t now, unsigned absent) {
+        const auto lane = order[phase++ % 18];
+        const bool ready = (absent & (1U << lane)) == 0;
+        fake_arduino_millis() = now;
+        Wire.tof_ready = ready;
+        const auto conversions = Wire.tof_samples;
+        const auto errors = bus.errors();
+        bus.poll(guard, now);
+        CHECK(bus.last_channel() == lane);
+        CHECK(bus.errors() == errors);
+        CHECK(Wire.tof_samples == conversions + (ready ? 1U : 0U));
+        CHECK(bus.new_optical_channel() == (ready ? lane : 255));
+        CHECK(bus.new_extra_channel() == (ready && lane >= 5 ? lane - 5 : 255));
+        if (ready) last[lane] = now;
+      };
+      for (unsigned step = 0; step < 18; ++step)
+        poll(base + 5U * step, 0);
+      CHECK(guard.try_rearm(base + 90U));
+      std::uint8_t first_stale = desk_robot::kNoFaultSensor;
+      for (unsigned step = 0; step < 90; ++step) {
+        const auto now = base + 90U + 5U * step;
+        if (first_stale == desk_robot::kNoFaultSensor) {
+          for (std::uint8_t lane = 0; lane < 5; ++lane) {
+            if (now - last[lane] >= 200U) {
+              first_stale = lane;
+              break;
+            }
+          }
+        }
+        poll(now, mask);
+        CHECK(guard.evaluate(now) == (first_stale == desk_robot::kNoFaultSensor));
+        if (first_stale != desk_robot::kNoFaultSensor) {
+          CHECK(guard.fault() == desk_robot::CliffFault::StaleSample);
+          CHECK(guard.fault_sensor() == first_stale);
+          CHECK(!guard.try_rearm(now));
+        }
+        for (std::uint8_t lane = 0; lane < 8; ++lane) {
+          const auto raw = bus.optical_diagnostic(lane, now);
+          const auto age = now - last[lane];
+          CHECK(raw.present && raw.age_ms == age);
+          CHECK(raw.valid == (lane < 5 ? age < 200U : age <= 350U));
+          if (lane >= 5) {
+            const auto extra = bus.extra_diagnostic(lane - 5, now);
+            CHECK(extra.present && extra.age_ms == age);
+            CHECK(extra.valid == (age <= 350U));
+          }
+        }
+      }
+      CHECK((first_stale != desk_robot::kNoFaultSensor) == ((mask & 31U) != 0));
+      // Inject a shared mux failure after the independent lane dropouts.
+      // The prior fault, if any, remains first; all cached evidence is revoked.
+      const auto fault_time = base + 540U;
+      const auto errors = bus.errors();
+      fake_arduino_millis() = fault_time;
+      Wire.tof_ready = true;
+      if ((mask & 1U) != 0) Wire.next_stop_timeout_address = 0x70;
+      else Wire.next_read_timeout_address = 0x70;
+      bus.poll(guard, fault_time);
+      CHECK(bus.last_channel() == order[phase++ % 18]);
+      CHECK(bus.errors() == errors + 1);
+      CHECK(bus.new_optical_channel() == 255 && bus.new_extra_channel() == 255);
+      CHECK(guard.fault() == (first_stale == desk_robot::kNoFaultSensor
+          ? desk_robot::CliffFault::BusFailure : desk_robot::CliffFault::StaleSample));
+      for (std::uint8_t lane = 0; lane < 8; ++lane) {
+        CHECK(!bus.optical_diagnostic(lane, fault_time).valid);
+        if (lane < 5) CHECK(!guard.diagnostic(lane, fault_time).present);
+        else CHECK(!bus.extra_diagnostic(lane - 5, fault_time).valid);
+      }
+      CHECK(!guard.try_rearm(fault_time));
+      for (unsigned step = 1; step <= 18; ++step)
+        poll(fault_time + 5U * step, 0);
+      CHECK(!guard.evaluate(fault_time + 90U));
+      CHECK(guard.try_rearm(fault_time + 90U));
+      CHECK(guard.evaluate(fault_time + 90U));
+    }
+  }
+  fake_arduino_millis() = saved_clock;
+}
+
 int main() {
   try {
+    dropout_matrix_and_partial_mux_recovery();
     {
       // A later verified close must not erase a transient overlap,
       // regardless of which mux was enabled last.
