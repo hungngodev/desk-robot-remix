@@ -88,12 +88,13 @@ def binary_stl_triangles(path: Path) -> int:
     return triangles
 
 
-def mesh_bounds_mm(path: Path) -> dict:
+def mesh_bounds_mm(path: Path, *, rounded: bool = True) -> dict:
     """Read actual exported STL bounds in millimeters, never assumed CAD size.
 
     STL has no native unit metadata: millimeters are the declared OpenSCAD
     export convention. A bounding box is a print-layout aid, NOT component
     fit, internal clearance, mechanical assembly or strength certification.
+    Use unrounded dimensions for geometric comparisons; rounding is for display.
     """
     blob = path.read_bytes()
     triangles = binary_stl_triangles(path)
@@ -112,9 +113,9 @@ def mesh_bounds_mm(path: Path) -> dict:
     if any(not isfinite(v) or v <= 0 for v in dimensions):
         raise ValueError(f"Degenerate STL bounds: {path.name}")
     return {
-        "minimum_mm": [round(v, 3) for v in lows],
-        "maximum_mm": [round(v, 3) for v in highs],
-        "dimensions_mm": [round(v, 3) for v in dimensions],
+        "minimum_mm": [round(v, 3) for v in lows] if rounded else lows,
+        "maximum_mm": [round(v, 3) for v in highs] if rounded else highs,
+        "dimensions_mm": [round(v, 3) for v in dimensions] if rounded else dimensions,
     }
 
 
@@ -233,8 +234,9 @@ def reference_body_footprint_screen(root: Path, output: Path) -> dict:
         result["axis_aligned_packaging_possible"] = None
         result["flat_tray_any_yaw_impossible"] = None
         return result
-    body = mesh_bounds_mm(chassis)["dimensions_mm"][:2]
-    tray = mesh_bounds_mm(candidate)["dimensions_mm"][:2]
+    # Rounded report dimensions can reverse near-boundary comparisons.
+    body = mesh_bounds_mm(chassis, rounded=False)["dimensions_mm"][:2]
+    tray = mesh_bounds_mm(candidate, rounded=False)["dimensions_mm"][:2]
     fits = ((tray[0] <= body[0] and tray[1] <= body[1])
             or (tray[0] <= body[1] and tray[1] <= body[0]))
     # The longest actual XY extent connects two mesh vertices at least
@@ -245,8 +247,8 @@ def reference_body_footprint_screen(root: Path, output: Path) -> dict:
     flat_yaw_impossible = max(tray) > outer_diagonal
     result.update({
         "chassis_original_mesh_sha256": sha256(chassis.read_bytes()).hexdigest(),
-        "reference_chassis_xy_mm": body,
-        "candidate_tray_xy_mm": tray,
+        "reference_chassis_xy_mm": [round(v, 3) for v in body],
+        "candidate_tray_xy_mm": [round(v, 3) for v in tray],
         "chassis_outer_xy_diagonal_mm": round(outer_diagonal, 3),
         "flat_tray_any_yaw_impossible": flat_yaw_impossible,
         "axis_aligned_packaging_possible": fits,

@@ -1020,6 +1020,18 @@ def test_flat_tray_diagonal_bound_distinguishes_rotation_from_impossibility(tmp_
     assert possible_on_axes["flat_tray_any_yaw_impossible"] is False
     assert possible_on_axes["physical_interior_fit_verified"] is False
 
+    # Rounding the source bounds to three decimals before comparing can
+    # incorrectly exclude a yaw or admit an oversized axis-aligned tray.
+    chassis.write_bytes(scaled_tetra(3.0004, 4.0004))
+    candidate.write_bytes(scaled_tetra(5.0005, 1))
+    near_diagonal = source.reference_body_footprint_screen(root, candidate.parents[1])
+    assert near_diagonal["flat_tray_any_yaw_impossible"] is False
+    assert near_diagonal["axis_aligned_packaging_possible"] is False
+    candidate.write_bytes(scaled_tetra(3.00049, 4))
+    near_axis = source.reference_body_footprint_screen(root, candidate.parents[1])
+    assert near_axis["axis_aligned_packaging_possible"] is False
+    assert near_axis["physical_interior_fit_verified"] is False
+
 
 def test_protected_pack_audit_tracks_active_fit_coupon_dimensions():
     """The buying audit must not keep the retired 68 mm battery tray claim."""
