@@ -184,3 +184,103 @@ def test_cancelled_request_retains_reservation_order(
             release.set()
         assert later_entered.is_set()
         assert store.get_episode("robot-01", "event_a").summary == "final request"
+
+
+@pytest.mark.parametrize("operation", ["core_put", "episode_patch"])
+def test_cancelled_mutation_finishes_and_invalidates_private_context(
+    settings, tokens, tmp_path, monkeypatch, operation,
+):
+    """A disconnected caller cannot abandon an admitted privacy edit."""
+    settings.memory_dir = tmp_path
+    headers = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
+    robot_id = "robot-01"
+    peer_id = "robot-02"
+    committed, release, invalidated = Event(), Event(), Event()
+
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        store = runtime.memory
+        conversation = runtime.conversation
+        assert store.set_core_fact(robot_id, "favorite_game", "chess")
+        assert store.set_core_fact(peer_id, "favorite_game", "puzzles")
+        if operation == "core_put":
+            method = "PUT"
+            url = f"/v1/pet/{robot_id}/core-memory/favorite_game"
+            payload = {"value": "checkers"}
+            mutate_name = "set_core_fact"
+        else:
+            assert store.remember(
+                robot_id, "event_a", "Original key",
+                kind="key", source_robot=robot_id, witnessed=True,
+            )
+            method = "PATCH"
+            url = f"/v1/pet/{robot_id}/memories/event_a"
+            payload = {"summary": "Corrected key"}
+            mutate_name = "correct_episode"
+
+        original_mutate = getattr(store, mutate_name)
+        original_invalidate = conversation.invalidate_private_memory
+        baseline = dict(conversation._private_memory_generation)
+
+        def observed_mutate(*args, **kwargs):
+            changed = original_mutate(*args, **kwargs)
+            if args[0] == robot_id:
+                committed.set()
+                if not release.wait(timeout=8):
+                    raise TimeoutError("Test did not release committed mutation")
+            return changed
+
+        def observed_invalidate(target):
+            original_invalidate(target)
+            if target == robot_id:
+                invalidated.set()
+
+        monkeypatch.setattr(store, mutate_name, observed_mutate)
+        monkeypatch.setattr(conversation, "invalidate_private_memory", observed_invalidate)
+
+        async def scenario():
+            transport = httpx.ASGITransport(app=client.app)
+            async with httpx.AsyncClient(
+                transport=transport, base_url="http://testserver",
+            ) as api:
+                first = asyncio.create_task(api.request(
+                    method, url, headers=headers, json=payload,
+                ))
+                try:
+                    assert await asyncio.to_thread(committed.wait, 3)
+                    first.cancel()
+                    with pytest.raises(asyncio.CancelledError):
+                        await first
+                    assert not invalidated.is_set()
+                    peer = await asyncio.wait_for(api.put(
+                        f"/v1/pet/{peer_id}/core-memory/favorite_game",
+                        headers=headers, json={"value": "go"},
+                    ), timeout=3)
+                    assert peer.status_code == 200, peer.text
+                finally:
+                    release.set()
+                assert await asyncio.to_thread(invalidated.wait, 3), (
+                    "Committed edit lost prompt invalidation when its caller cancelled"
+                )
+                followup = await asyncio.wait_for(api.put(
+                    f"/v1/pet/{robot_id}/core-memory/favorite_color",
+                    headers=headers, json={"value": "blue"},
+                ), timeout=3)
+                assert followup.status_code == 200, followup.text
+
+        try:
+            client.portal.call(scenario)
+        finally:
+            release.set()
+        assert conversation._private_memory_generation == {
+            robot_id: baseline[robot_id] + 2,
+            peer_id: baseline[peer_id] + 1,
+        }
+        assert store.core_facts(peer_id)[0].value == "go"
+        facts = {fact.slot: fact.value for fact in store.core_facts(robot_id)}
+        assert facts["favorite_color"] == "blue"
+        if operation == "core_put":
+            assert facts["favorite_game"] == "checkers"
+        else:
+            assert store.get_episode(robot_id, "event_a").summary == "Corrected key"
+            assert facts["favorite_game"] == "chess"
