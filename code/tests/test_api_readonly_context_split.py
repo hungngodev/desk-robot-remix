@@ -270,6 +270,23 @@ def test_native_activity_context_only_reflects_live_same_robot_coordinator_work(
     assert _active_robot_activity(jobs, "pet-one") == ""
 
 
+
+@pytest.mark.parametrize("state", ["queued", "running"])
+def test_native_activity_context_includes_navigation(state):
+    job = SimpleNamespace(
+        id="e" * 32, robot_id="pet-one", kind="navigate", state=state,
+    )
+    jobs = {job.id: job}
+    assert _active_robot_activity(jobs, "pet-one") == (
+        f"Mac coordinator navigate job {job.id[:12]} is {state}; "
+        "physical progress and outcome unverified"
+    )
+    assert _active_robot_activity(jobs, "pet-two") == ""
+    for terminal in ("succeeded", "failed", "cancelled"):
+        job.state = terminal
+        assert _active_robot_activity(jobs, "pet-one") == ""
+
+
 def test_native_startup_context_rejects_live_consent_revoke_during_memory_read(settings):
     """Revoking live consent during native SQLite retrieval cannot leak facts."""
     from desk_robot.api_native_omni_routes import register_native_omni_routes

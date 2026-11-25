@@ -35,7 +35,7 @@ def _active_robot_activity(jobs: object, robot_id: str) -> str:
         kind, state = getattr(job, "kind", None), getattr(job, "state", None)
         job_id = getattr(job, "id", None)
         if (type(kind) is not str
-                or kind not in {"manual", "exploration", "dock_approach", "pickup"}
+                or kind not in {"manual", "exploration", "dock_approach", "navigate", "pickup"}
                 or type(state) is not str
                 or state not in {"queued", "running"}):
             continue
