@@ -404,6 +404,12 @@ class MemoryStore:
         # introduced after boot must not redirect subsequent private reads.
         if any(part.is_symlink() for part in (self.root, *self.root.parents)):
             raise ValueError("Memory root ancestry must not contain symlinks")
+        # The root can lose its private permission boundary after startup.
+        # Refuse access before SQLite opens or creates any database sidecar.
+        root_info = self.root.lstat()
+        if (not stat.S_ISDIR(root_info.st_mode)
+                or root_info.st_uid != os.geteuid() or root_info.st_mode & 0o077):
+            raise PermissionError("Robot memory root must remain an owner-only directory")
         path = self.root / (robot_id + ".sqlite3")
         # A renamed fleet identity must not inherit an old pet's private
         # database on a case-insensitive Mac volume. Directory entries retain

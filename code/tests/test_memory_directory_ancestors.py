@@ -69,3 +69,20 @@ def test_regular_memory_root_remains_private_and_functional(tmp_path):
     assert store.count("robot-02") == 0
     assert os.stat(root).st_mode & 0o077 == 0
     assert os.stat(root / "robot-01.sqlite3").st_mode & 0o077 == 0
+
+
+@pytest.mark.parametrize("mode", [0o755, 0o777])
+def test_existing_memory_rejects_relaxed_root_permissions(tmp_path, mode):
+    root = tmp_path / "memory"
+    store = MemoryStore(root, ["robot-01", "robot-02"])
+    assert store.count("robot-01") == 0
+    root.chmod(mode)
+    try:
+        for robot in ("robot-01", "robot-02"):
+            with pytest.raises(PermissionError, match="memory root"):
+                store.count(robot)
+        assert root.stat().st_mode & 0o777 == mode
+    finally:
+        root.chmod(0o700)
+    assert store.count("robot-01") == 0
+    assert store.count("robot-02") == 0
