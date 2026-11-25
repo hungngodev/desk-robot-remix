@@ -9771,3 +9771,113 @@ async def test_pet_status_public_type_contract(fleet, tmp_path):
         assert pet.status(ids[1])["manual_quiet"] is False
     finally:
         await pet.close()
+
+
+async def test_song_stream_survives_cliff_cancellation_of_key_pickup(fleet, tmp_path):
+    """Host scenario: lyric transmission, not acoustic singing or physical grasp."""
+    from desk_robot.attention import AttentionLedger
+    from desk_robot.controller import Coordinator
+    from desk_robot.simulator import SimulatedHead, SimulationVision
+
+    robot_id = "robot-01"
+    fleet.robot(robot_id).motor_backend = "stepper_28byj48"
+    first_line_sent = asyncio.Event()
+    drive_started = asyncio.Event()
+    travel_line_sent = asyncio.Event()
+    finish_song = asyncio.Event()
+    release_drive = asyncio.Event()
+
+    class CliffHead(SimulatedHead):
+        async def command(self, command):
+            reply = await super().command(command)
+            if command.startswith("drive ") and not drive_started.is_set():
+                drive_started.set()
+                # Hold the ACK, not the bounded simulated drive permit.
+                await release_drive.wait()
+            return reply
+
+    class SongChat(GroundedChat):
+        async def stream_reply(self, history):
+            self.prompts.append(history)
+            if len(self.prompts) != 1:
+                yield "We can leave the key where it is."
+                return
+            yield "La la, a little song."
+            first_line_sent.set()
+            await drive_started.wait()
+            yield "La la, moving carefully."
+            travel_line_sent.set()
+            await finish_song.wait()
+            yield "La la, safe and still."
+
+    head = CliffHead(robot_id)
+    speaker = SimulatedSpeaker()
+    ids = [robot.id for robot in fleet.robots]
+    memory = MemoryStore(tmp_path, ids)
+    coordinator = Coordinator(fleet, {robot_id: head}, SimulationVision())
+    conversation = Conversation(fleet, SongChat(), speaker, memory=memory)
+    attention = AttentionLedger(ids)
+    conversation.attention = attention
+    conversation.coordinator_jobs = coordinator.jobs
+    pet = PetController(
+        fleet, {robot_id: head}, conversation, memory, KeyScene(),
+        on_local_fault=coordinator.stop,
+    )
+    pet.attention = attention
+    state = pet.states[robot_id]
+    state.enabled, state.generation = True, 1
+    await pet._observe_body_safety(robot_id, 1, {
+        "safety": {"required": True, "ready": True, "fault": "none"},
+    })
+    song = asyncio.create_task(conversation.run(
+        [robot_id, "robot-02"], "Sing while approaching the flat key", utterances=2,
+    ))
+    try:
+        await asyncio.wait_for(first_line_sent.wait(), 5)
+        await coordinator.operator_arm(robot_id)
+        job = coordinator.pickup(robot_id, "key")
+        await asyncio.wait_for(travel_line_sent.wait(), 5)
+        assert job.state == "running"
+        assert (robot_id, "La la, moving carefully.") in speaker.spoken
+
+        fault = {
+            "robot_id": robot_id, "armed": False,
+            "motor": {"m0": 0, "m1": 0},
+            "safety": {"required": True, "ready": False,
+                       "fault": "floor_out_of_range", "sensor": 0},
+        }
+        head.replay_body_status(fault)
+        fault_boundary = len(head.commands)
+        await pet._observe_body_safety(robot_id, 1, await head.status())
+        assert job.state == "cancelled", job.error
+        assert robot_id not in coordinator.permits
+        assert head.commands[-1] == "halt"
+        assert not (await head.status())["armed"]
+        assert (await head.status())["safety"]["fault"] == "floor_out_of_range"
+        assert not song.done()
+        assert conversation.active is song
+        cue = attention.timeline(robot_id, time.monotonic())[0]["content"]
+        assert "Sing while approaching the flat key" in cue
+        assert "floor_out_of_range" in cue
+        assert "playback unverified" in cue
+        assert state.safety_fault_events == 1
+        assert any(item.kind == "safety_fault" for item in memory.recent(robot_id))
+
+        finish_song.set()
+        transcript = await asyncio.wait_for(song, 5)
+        assert (robot_id, "La la, safe and still.") in speaker.spoken
+        assert transcript[0]["text"].endswith("La la, safe and still.")
+        assert not any(command.split()[0] in {"arm", "drive", "grip", "lift"}
+                       for command in head.commands[fault_boundary:])
+        # A red rectangle does not establish key thickness or a successful grasp.
+        assert job.result is None
+        assert not head.gripped and not head.lifted
+    finally:
+        finish_song.set()
+        release_drive.set()
+        if not song.done():
+            song.cancel()
+        await asyncio.gather(song, return_exceptions=True)
+        state.enabled = False
+        await coordinator.close()
+        await pet.close()
