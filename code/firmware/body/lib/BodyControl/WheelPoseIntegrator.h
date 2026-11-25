@@ -124,13 +124,17 @@ class WheelPoseIntegrator {
         abs64(right_nm) > static_cast<std::uint64_t>(bound_nm))
       return reject();
 
+    // The latest IMU conversion alone can miss rotation between wheel pairs.
+    const bool gyro_stationary = !have_source_ ||
+        abs64(normalize(e.imu_yaw_urad - last_imu_yaw_urad_)) <=
+            limits_.stationary_gyro_step_urad;
     if (!have_source_) {
       wheel_segment_ = w.segment;
       imu_segment_ = e.imu_segment;
       have_source_ = true;
     }
     if (state_.origin == 0) {
-      if (left_nm == 0 && right_nm == 0 &&
+      if (left_nm == 0 && right_nm == 0 && gyro_stationary &&
           abs64(e.imu_step_urad) <= limits_.stationary_gyro_step_urad) {
         if (stationary_streak_ < limits_.stationary_pairs_required)
           ++stationary_streak_;
@@ -214,7 +218,7 @@ class WheelPoseIntegrator {
   // not a verified global map location or motor arming permission.
   bool start_origin(std::uint32_t now_ms) {
     if (!stationary_origin_ready() ||
-        now_ms - last_sample_ms_ > limits_.max_age_ms ||
+        !sources_fresh(now_ms) ||
         next_origin_ == 0 || next_origin_ == 0xffffffffU)
       return false;
     if (static_cast<std::uint64_t>(latest_imu_error_urad_) +
@@ -237,7 +241,7 @@ class WheelPoseIntegrator {
   }
 
   void expire(std::uint32_t now_ms) {
-    if (have_source_ && now_ms - last_sample_ms_ > limits_.max_age_ms)
+    if (have_source_ && !sources_fresh(now_ms))
       invalidate();
   }
   void invalidate() {
@@ -253,8 +257,13 @@ class WheelPoseIntegrator {
   bool configured() const { return configured_; }
 
  private:
+  bool sources_fresh(std::uint32_t now_ms) const {
+    return now_ms - last_sample_ms_ <= limits_.max_age_ms &&
+           now_ms - last_imu_ms_ <= limits_.max_age_ms;
+  }
   static std::uint64_t abs64(std::int64_t value) {
-    return static_cast<std::uint64_t>(value < 0 ? -value : value);
+    const auto bits = static_cast<std::uint64_t>(value);
+    return value < 0 ? 0ULL - bits : bits;
   }
   static std::uint32_t skew(std::uint32_t a, std::uint32_t b) {
     const std::uint32_t ab = a - b, ba = b - a;

@@ -1,6 +1,7 @@
 #include "WheelPoseIntegrator.h"
 #include <stdexcept>
 #include <cstdint>
+#include <limits>
 
 using desk_robot::WheelPoseIntegrator;
 static void check(bool ok) {
@@ -130,7 +131,49 @@ static void refuse_skew_stale_and_replay() {
   auto old = observed(4, 400);
   check(!pose.observe(old, 1000)); // too old despite recent response
 }
+static void refuse_rotation_and_expired_imu_origin() {
+  WheelPoseIntegrator rotation;
+  check(rotation.configure(calibration()));
+  // The IMU may have converted repeatedly between paired wheel samples.
+  // A zero latest step does not prove zero cumulative rotation.
+  for (std::uint32_t i = 1; i <= 3; ++i)
+    check(rotation.observe(observed(i, i * 100, 0, 0, i * 2000), i * 100 + 10));
+  check(!rotation.stationary_origin_ready());
+  check(!rotation.start_origin(310));
+  for (std::uint32_t i = 4; i <= 6; ++i)
+    check(rotation.observe(observed(i, i * 100, 0, 0, 6000), i * 100 + 10));
+  check(rotation.start_origin(610));
+
+  WheelPoseIntegrator extreme;
+  check(extreme.configure(calibration()));
+  for (std::uint32_t i = 1; i <= 3; ++i) {
+    auto e = observed(i, i * 100);
+    e.imu_step_urad = std::numeric_limits<std::int64_t>::min();
+    check(extreme.observe(e, i * 100 + 10));
+  }
+  check(!extreme.stationary_origin_ready());
+
+  // Exercise both ordinary acquisition clocks and millis rollover.
+  for (std::uint32_t base : {0U, 0xfffffec0U}) {
+    WheelPoseIntegrator pose;
+    check(pose.configure(calibration()));
+    for (std::uint32_t i = 1; i <= 3; ++i) {
+      auto e = observed(i, base + i * 100);
+      e.imu_at_ms = e.wheel.left_ms - 20;
+      check(pose.observe(e, e.wheel.right_ms));
+    }
+    check(pose.stationary_origin_ready());
+    auto stale = pose;
+    check(!stale.start_origin(base + 481));
+    check(pose.start_origin(base + 480)); // exact oldest-source age limit
+    pose.expire(base + 480);
+    check(pose.state().origin == 1);
+    pose.expire(base + 481);
+    check(pose.state().origin == 0);
+  }
+}
 int main() {
+  refuse_rotation_and_expired_imu_origin();
   refuse_unqualified_and_reanchor();
   refuse_skew_stale_and_replay();
 }
