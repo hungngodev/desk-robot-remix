@@ -130,7 +130,39 @@ static void rejected_conversion_replay_and_register_width() {
   }
 }
 
+// Combine the 49.7-day millis wrap, sequence wrap, reverse rotation,
+// fresh stationary readings and cached observations in one trajectory.
+static void stress_rollover_reverse_and_stall() {
+  WheelAngleCapture wheel;
+  check(wheel.configure(4000, 100, 60));
+  std::uint32_t at = 0xfffffff0U, seq = 0xfffffffeU;
+  int raw = 2;
+  std::int64_t expected = 0;
+  check(wheel.observe(angle(raw, seq, at), at) == Result::Baseline);
+  for (unsigned i = 0; i < 100000; ++i) {
+    at += 16U;
+    seq = seq == 0xffffffffU ? 1U : seq + 1U;
+    const int step = i % 3 == 0 ? -17 : i % 3 == 1 ? 0 : 11;
+    raw = (raw + step + 4096) % 4096;
+    expected += step;
+    const auto sample = angle(raw, seq, at);
+    check(wheel.observe(sample, at) == Result::Delta);
+    check(wheel.last_delta() == step && wheel.angular_counts() == expected);
+    check(wheel.segment() == 1);
+    check(wheel.observe(sample, at + 1) == Result::Duplicate);
+    check(wheel.last_delta() == 0 && wheel.angular_counts() == expected);
+  }
+  const auto cached = angle(raw, seq, at);
+  check(wheel.observe(cached, at + 60) == Result::Duplicate);
+  check(wheel.observe(cached, at + 61) == Result::Invalid);
+  check(!wheel.continuous() && wheel.angular_counts() == 0);
+  check(wheel.observe(cached, at + 61) == Result::Invalid);
+  check(wheel.observe(angle(raw, seq + 1, at + 62), at + 62) == Result::Baseline);
+  check(wheel.segment() == 2 && wheel.angular_counts() == 0);
+}
+
 int main() {
+  stress_rollover_reverse_and_stall();
   rejected_conversion_replay_and_register_width();
   replay_and_reverse();
   gaps_and_magnets();
