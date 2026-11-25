@@ -53,3 +53,39 @@
 // SPI pins7/8 are reused by audio: leave the SD slot EMPTY and never initialize it.
 #define SD_CARD_CS_GPIO GPIO_NUM_21
 // Reserve native USB19/20, debug UART43/44, strapping3, flash/PSRAM26..37.
+
+// Reserve the optional heart even when its driver is disabled. J3 isolation
+// and external LED power/logic remain independent physical qualification gates.
+#define RGB_HEART_GPIO GPIO_NUM_9
+
+static_assert([] {
+    constexpr int pins[] = {
+        AUDIO_PDM_MIC_GPIO_SCK, AUDIO_PDM_MIC_GPIO_DIN,
+        AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT,
+        BOOT_BUTTON_GPIO, DISPLAY_SDA_PIN, DISPLAY_SCL_PIN,
+        CAMERA_PIN_D0, CAMERA_PIN_D1, CAMERA_PIN_D2, CAMERA_PIN_D3,
+        CAMERA_PIN_D4, CAMERA_PIN_D5, CAMERA_PIN_D6, CAMERA_PIN_D7,
+        CAMERA_PIN_XCLK, CAMERA_PIN_PCLK, CAMERA_PIN_VSYNC, CAMERA_PIN_HREF,
+        CAMERA_PIN_SIOD, CAMERA_PIN_SIOC, ROBOT_UART_TX, ROBOT_UART_RX,
+        SD_CARD_CS_GPIO, RGB_HEART_GPIO,
+    };
+    for (unsigned i = 0; i < sizeof(pins) / sizeof(pins[0]); ++i) {
+        const int pin = pins[i];
+        if (pin < 0 || pin > 48 || pin == 3 || pin == 19 || pin == 20 ||
+            (pin >= 22 && pin <= 37) || (pin >= 43 && pin <= 46)) {
+            return false;
+        }
+        for (unsigned j = 0; j < i; ++j) {
+            if (pin == pins[j]) return false;
+        }
+    }
+    return true;
+}(), "Sense peripheral GPIO collision or reserved GPIO");
+static_assert(CAMERA_PIN_PWDN == GPIO_NUM_NC && CAMERA_PIN_RESET == GPIO_NUM_NC,
+              "Unused head pins must remain disconnected");
+static_assert(ROBOT_UART_TX == GPIO_NUM_2 && ROBOT_UART_RX == GPIO_NUM_1,
+              "Body UART mapping must match the installed bridge");
+static_assert(BOOT_BUTTON_GPIO == GPIO_NUM_0 && SD_CARD_CS_GPIO == GPIO_NUM_21 &&
+              RGB_HEART_GPIO == GPIO_NUM_9, "Sense fixed board pin mapping");
+static_assert(CAMERA_SCCB_I2C_PORT == I2C_NUM_0 && DISPLAY_I2C_PORT == I2C_NUM_1,
+              "Keep camera and OLED on separate I2C controllers");

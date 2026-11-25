@@ -1,4 +1,4 @@
-"""Compile real secondary head pin headers, including rejected mutations."""
+"""Compile real head pin headers, including rejected mutations."""
 
 import subprocess
 from pathlib import Path
@@ -8,7 +8,7 @@ import pytest
 HEAD = Path(__file__).resolve().parents[1]
 
 
-@pytest.mark.parametrize("variant", ["waveshare", "modular"])
+@pytest.mark.parametrize("variant", ["waveshare", "modular", "sense"])
 def test_secondary_gpio_contract(tmp_path, variant):
     driver = tmp_path / "driver"
     driver.mkdir()
@@ -48,7 +48,8 @@ def test_secondary_gpio_contract(tmp_path, variant):
 
     result = compile_header(original)
     assert result.returncode == 0, result.stderr
-    display = "GPIO_NUM_1" if variant == "waveshare" else "GPIO_NUM_38"
+    display = {"waveshare": "GPIO_NUM_1", "modular": "GPIO_NUM_38",
+               "sense": "GPIO_NUM_5"}[variant]
     uart = "GPIO_NUM_43" if variant == "waveshare" else "GPIO_NUM_2"
     display_port = "I2C_NUM_0" if variant == "waveshare" else "I2C_NUM_1"
     wrong_port = "I2C_NUM_1" if variant == "waveshare" else "I2C_NUM_0"
@@ -60,6 +61,17 @@ def test_secondary_gpio_contract(tmp_path, variant):
          else "ROBOT_UART_TX GPIO_NUM_45", "Body UART mapping"),
         (f"DISPLAY_I2C_PORT {display_port}", f"DISPLAY_I2C_PORT {wrong_port}", "separate"),
     ]
+    if variant == "sense":
+        mutations += [
+            ("DISPLAY_SDA_PIN GPIO_NUM_5", "DISPLAY_SDA_PIN GPIO_NUM_9", "GPIO collision"),
+            ("RGB_HEART_GPIO GPIO_NUM_9", "RGB_HEART_GPIO GPIO_NUM_41", "GPIO collision"),
+            ("SD_CARD_CS_GPIO GPIO_NUM_21", "SD_CARD_CS_GPIO GPIO_NUM_8", "GPIO collision"),
+            ("DISPLAY_SDA_PIN GPIO_NUM_5", "DISPLAY_SDA_PIN GPIO_NUM_22", "reserved GPIO"),
+            ("DISPLAY_SDA_PIN GPIO_NUM_5", "DISPLAY_SDA_PIN GPIO_NUM_46", "reserved GPIO"),
+            ("BOOT_BUTTON_GPIO GPIO_NUM_0", "BOOT_BUTTON_GPIO GPIO_NUM_9", "GPIO collision"),
+        ]
+        board_source = (HEAD / variant / "desk_robot_sense.cc").read_text()
+        assert "SingleLed heart(RGB_HEART_GPIO)" in board_source
     for before, after, diagnostic in mutations:
         assert original.count(before) == 1
         result = compile_header(original.replace(before, after))

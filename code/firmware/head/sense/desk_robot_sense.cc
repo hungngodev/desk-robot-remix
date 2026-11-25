@@ -610,7 +610,7 @@ public:
         // Espressif led_strip driver. This GPIO is NEVER enabled by default:
         // shipped Sense SD J3 isolation and the external 3.3V to 5V
         // WS2812 logic buffer/power path must be qualified separately.
-        static SingleLed heart(GPIO_NUM_9);
+        static SingleLed heart(RGB_HEART_GPIO);
         return &heart;
 #else
         return WifiBoard::GetLed();
