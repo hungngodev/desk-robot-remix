@@ -6,6 +6,8 @@ The existing authenticated HttpHead/PoseFence own the source validation.
 
 from __future__ import annotations
 
+import asyncio
+import sqlite3
 import time
 from typing import Annotated
 
@@ -123,10 +125,44 @@ def register_spatial_pose_route(
             not settings.voice_memory_tools_enabled
         ):
             raise HTTPException(403, "Spatial object memory recall requires memory consent")
+        owner = _spatial_owner()
+        runtime = getattr(app.state, "runtime", None)
+        conversation = getattr(runtime, "conversation", None)
+        revisions = getattr(conversation, "_private_memory_generation", None)
+        revision = revisions.get(robot_id) if isinstance(revisions, dict) else None
+        if type(revision) is not int or not 0 <= revision < 2**63:
+            raise HTTPException(409, "Private memory revision unavailable")
+        state = owner.state(robot_id)
+        origin = (state.epoch, state.body_boot, state.origin_id)
+        mode = getattr(settings, "mode", None)
+        grant = getattr(settings, "voice_memory_consent_generation", None)
         try:
-            return _spatial_owner().recall_memory(robot_id, object_key)
+            # SQLite may wait on a writer. Do not stall STOP or other robot
+            # requests on the event loop while reading private evidence.
+            result = await asyncio.to_thread(owner.recall_memory, robot_id, object_key)
         except ValueError as exc:
-            raise HTTPException(400, str(exc)) from exc
+            raise HTTPException(400, "Invalid spatial memory query") from exc
+        except (sqlite3.Error, OSError) as exc:
+            raise HTTPException(503, "Spatial memory unavailable") from exc
+        if (getattr(settings, "mode", None) != mode
+                or getattr(settings, "voice_memory_consent_generation", None) != grant
+                or (mode == "hardware" and not settings.voice_memory_tools_enabled)):
+            raise HTTPException(403, "Spatial memory consent changed during read")
+        current_runtime = getattr(app.state, "runtime", None)
+        current_conversation = getattr(current_runtime, "conversation", None)
+        current_revisions = getattr(current_conversation, "_private_memory_generation", None)
+        if (current_runtime is not runtime or current_conversation is not conversation
+                or not isinstance(current_revisions, dict)
+                or type(current_revisions.get(robot_id)) is not int
+                or current_revisions[robot_id] != revision):
+            raise HTTPException(409, "Private memory changed during read")
+        if (_spatial_owner() is not owner or owner.state(robot_id) is not state
+                or (state.epoch, state.body_boot, state.origin_id) != origin):
+            raise HTTPException(409, "Spatial origin changed during read")
+        if (not isinstance(result, dict) or result.get("robot_id") != robot_id
+                or result.get("object_key") != object_key):
+            raise HTTPException(503, "Spatial memory identity mismatch")
+        return result
 
     @app.post("/v1/robots/{robot_id}/navigate",
               dependencies=[Depends(operator)], status_code=202)

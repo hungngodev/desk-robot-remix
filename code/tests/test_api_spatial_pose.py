@@ -1,10 +1,14 @@
 """Mac API to authenticated Sense to WROOM pose read-only contract replay."""
 
+import sqlite3
 from types import SimpleNamespace
 
 import httpx
+import pytest
 from desk_robot.api import create_app
+from desk_robot.api_spatial_pose import register_spatial_pose_route
 from desk_robot.transport import HttpHead
+from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 
@@ -207,3 +211,64 @@ def test_readonly_pose_missing_head_adapter_fails_closed(settings, tokens):
         assert result.json() == {"detail": "Pose head unavailable"}
     assert requests == []
     assert commands == []
+
+
+@pytest.mark.parametrize(
+    ("failure", "status"),
+    [
+        (None, 200),
+        ("sqlite", 503),
+        ("disk", 503),
+        ("consent", 403),
+        ("forget", 409),
+        ("origin", 409),
+        ("foreign", 503),
+        ("query", 400),
+    ],
+)
+def test_spatial_memory_read_fences_and_safe_errors(failure, status):
+    app = FastAPI()
+    settings = SimpleNamespace(
+        mode="hardware", voice_memory_tools_enabled=True,
+        voice_memory_consent_generation=1,
+    )
+    state = SimpleNamespace(epoch=1, body_boot=7, origin_id="odom-1")
+    conversation = SimpleNamespace(_private_memory_generation={"robot-01": 0})
+
+    def recall(robot_id, object_key):
+        if failure == "sqlite":
+            raise sqlite3.OperationalError("database locked at /private/robot-01.db")
+        if failure == "disk":
+            raise OSError("private database path")
+        if failure == "query":
+            raise ValueError("private database path")
+        if failure == "consent":
+            settings.voice_memory_consent_generation += 1
+        if failure == "forget":
+            conversation._private_memory_generation[robot_id] += 1
+        if failure == "origin":
+            state.epoch += 1
+        return {
+            "robot_id": "robot-02" if failure == "foreign" else robot_id,
+            "object_key": object_key,
+            "status": "unknown",
+            "navigation_authorized": False,
+        }
+
+    owner = SimpleNamespace(state=lambda _: state, recall_memory=recall)
+    app.state.runtime = SimpleNamespace(spatial=owner, conversation=conversation)
+    register_spatial_pose_route(
+        app,
+        operator=lambda: None,
+        coordinator=lambda: SimpleNamespace(robot=lambda _: None),
+        settings=settings,
+    )
+    with TestClient(app) as client:
+        response = client.get("/v1/robots/robot-01/spatial/memory?object_key=key")
+    assert response.status_code == status
+    assert "private database path" not in response.text
+    assert "/private/" not in response.text
+    if status == 200:
+        assert response.json()["navigation_authorized"] is False
+    else:
+        assert "object_key" not in response.json()
