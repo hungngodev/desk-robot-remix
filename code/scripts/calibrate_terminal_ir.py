@@ -311,8 +311,13 @@ async def capture(base_url: str, token: str, robot_id: str,
             response = await client.get(f"/v1/robots/{robot_id}/dock/ir")
             received_at = time.monotonic()
             response.raise_for_status()
-            reading = validate_ir(response.json(), robot_id,
-                                  expected_dock_id=expected_dock_id)
+            # Apply the same strict parser as saved JSONL before validating
+            # live evidence: duplicate fields must not overwrite prior facts.
+            payload = response.json(
+                object_pairs_hook=_unique_trial_fields,
+                parse_constant=_reject_nonfinite_trial_json,
+            )
+            reading = validate_ir(payload, robot_id, expected_dock_id=expected_dock_id)
             roundtrip_ms = (received_at - request_started) * 1000.0
             if (not math.isfinite(roundtrip_ms) or roundtrip_ms < 0
                     or any(

@@ -568,3 +568,32 @@ def test_reflection_control_requires_negative_observations(count, clear):
     assert result["multipath_rejection_physically_verified"] is False
     assert result["physical_acceptance_pass"] is False
     assert result["charging_authorized"] is False
+
+
+@pytest.mark.parametrize(("extra", "message"), [
+    ('"motor_authorized": true, ', "Duplicate terminal IR trial JSON field"),
+    ('"robot_id": "robot-02", ', "Duplicate terminal IR trial JSON field"),
+    ('"unexpected": NaN, ', "Nonfinite terminal IR trial JSON constant"),
+    ('"unexpected": {"x": 1, "x": 2}, ', "Duplicate terminal IR trial JSON field"),
+])
+async def test_capture_rejects_ambiguous_live_json(monkeypatch, extra, message):
+    monkeypatch.setattr(cal.asyncio, "sleep", fast_sleep)
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        sample = position_records()[0]["ir"]
+        raw = "{" + extra + json.dumps(sample)[1:]
+        return httpx.Response(200, content=raw.encode())
+
+    actual = httpx.AsyncClient
+
+    def create_client(*args, **kwargs):
+        return actual(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(cal.httpx, "AsyncClient", create_client)
+    with pytest.raises(ValueError, match=message):
+        await cal.capture(
+            "http://localhost:8765", "S" * 40, "robot-01", "left", 20, .05,
+        )
+    assert len(calls) == 1
