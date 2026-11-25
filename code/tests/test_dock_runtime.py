@@ -1031,3 +1031,35 @@ async def test_selected_dock_frame_accepts_none_return_from_exception_based_veri
 
     receipt = (b"\xff\xd8\xff\xd9", dock_runtime.time.monotonic(), (1, 1, 1), 1)
     await dock_runtime.verify_selected_dock_frame(Verifier(), receipt)
+
+
+@pytest.mark.parametrize("completed_at,expired", [(100.19, False), (100.21, True)])
+async def test_selected_dock_frame_preserves_original_deadline(
+    monkeypatch, completed_at, expired,
+):
+    """Successful verification cannot renew the JPEG receipt lifetime."""
+    now = 100.15
+    monkeypatch.setattr(dock_runtime, "time", SimpleNamespace(monotonic=lambda: now))
+    receipt = (b"\xff\xd8\xff\xd9", 100.0, (1, 1, 1), 1)
+    real_bounded = dock_runtime._bounded_head_reply
+    budgets = []
+    verified = []
+
+    async def record_budget(coro, *, seconds, timeout_message):
+        budgets.append(seconds)
+        return await real_bounded(coro, seconds=seconds, timeout_message=timeout_message)
+
+    class Verifier:
+        async def dock_receipt_current(self, observation):
+            nonlocal now
+            verified.append(observation)
+            now = completed_at
+
+    monkeypatch.setattr(dock_runtime, "_bounded_head_reply", record_budget)
+    if expired:
+        with pytest.raises(ValueError, match="Invalid or stale dock camera receipt"):
+            await dock_runtime.verify_selected_dock_frame(Verifier(), receipt)
+    else:
+        await dock_runtime.verify_selected_dock_frame(Verifier(), receipt)
+    assert budgets == [pytest.approx(0.05)]
+    assert verified == [receipt]
