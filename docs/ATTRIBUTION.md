@@ -77,10 +77,13 @@ assets are copied here. [Research and archive audit](research/2026-11-03-fetch-a
 ## Realtime conversation references — 2026-11-03
 
 - [RIO XIAO ESP32-S3 Gemini Live assistant](https://github.com/mk14ray/RIO-XIAO-ESP32-S3-Gemini-Live-Voice-Assistant/tree/b911305e48ce6a1b75fe6c07fc02f86ad7bfeb0a),
-  MIT: unchanged pinned reference in ignored `upstream/rio-sense-reference`,
-  including its full LICENSE. AEC, reference timing and interruption handling
-  are inspected integration candidates; no RIO firmware is incorporated or
-  redistributed by this change. [Inspected-file hashes](hardware/reuse-sources.json).
+  MIT, copyright 2026 Mritunjay Kumar Ray. The playback-reference ring and
+  three-tap resampling pattern from pinned `aec.cpp` are adapted in
+  [`sense_reference_codec.cc`](../code/firmware/head/sense/sense_reference_codec.cc),
+  which retains the upstream MIT notice. The independent RIO AEC/NS/VAD engine,
+  residual speech gate and Gemini transport are not incorporated. Xiaozhi's
+  existing ESP-SR AFE remains the sole DSP owner. The ignored reference checkout
+  is not an installed firmware dependency. [Inspected-file hashes](hardware/reuse-sources.json).
 - [Google Gemini cookbook](https://github.com/google-gemini/cookbook) and
   [robotics streaming guidance](https://ai.google.dev/gemini-api/docs/robotics-streaming):
   source references for interruption handling and idle-frame observations. The
