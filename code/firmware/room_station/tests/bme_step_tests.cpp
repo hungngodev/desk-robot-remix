@@ -1,6 +1,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <limits>
 #include "bme_completed_sample.h"
 
 using std::isfinite;
@@ -91,7 +92,7 @@ int main() {
   assert(bme_completed.fresh(2200, kBmeStaleMs) && bme_completed.sample_ms == 2000);
   assert(bme_completed.temperature_c == 21 && bme_completed.humidity_pct == 42);
   assert(bme_completed.pressure_pa == 102000 && bme_completed.gas_ohms == 67890);
-  for (int fault = 0; fault < 9; ++fault) {
+  for (int fault = 0; fault < 14; ++fault) {
     reset(); step(1000); step(1200); assert(bme_completed.valid);
     if (fault == 0) bme.start_ok = false;
     step(2000);
@@ -103,6 +104,11 @@ int main() {
     if (fault == 6) bme.next_pressure = 29999;
     if (fault == 7) bme.next_pressure = 125001;
     if (fault == 8) bme.remaining = -1;
+    if (fault == 9) bme.next_humidity = -0.01f;
+    if (fault == 10) bme.next_humidity = 100.01f;
+    if (fault == 11) bme.next_humidity = std::numeric_limits<float>::quiet_NaN();
+    if (fault == 12) bme.next_temp = std::numeric_limits<float>::infinity();
+    if (fault == 13) bme.next_temp = 125.01f;
     step(2200); assert(!bme_completed.valid && !bme_started && !bme_pending);
   }
   // A conversion started 200 ticks before wrap would return zero and
@@ -126,4 +132,31 @@ int main() {
   assert(!bme_completed.fresh(UINT32_MAX - 2199U, kBmeStaleMs));
   step(1U); step(201U);
   assert(bme_completed.valid && bme_completed.sample_ms == 1U);
+  // Exact rollover guard boundary: pending work is still collected,
+  // but no new conversion may start at the first forbidden tick.
+  reset(); bme.model_driver_clock = true;
+  step(UINT32_MAX - 5001U);
+  assert(bme_pending && bme.starts == 1);
+  step(UINT32_MAX - 4801U);
+  assert(bme_completed.valid && !bme_pending);
+  reset(); bme.model_driver_clock = true;
+  step(UINT32_MAX - 5000U);
+  assert(bme_started && !bme_pending && bme.starts == 0);
+  step(UINT32_MAX); step(0U);
+  assert(bme_started && !bme_pending && bme.starts == 0);
+  step(1U); step(201U);
+  assert(bme_completed.valid && bme_completed.sample_ms == 1U);
+  // Exactly the age limit is valid, including the inclusive sensor bounds.
+  reset(); bme.next_temp = -40; bme.next_humidity = 0;
+  bme.next_pressure = 30000; bme.next_gas = 1;
+  step(1000); step(4000);
+  assert(bme_completed.fresh(4000, kBmeStaleMs));
+  assert(bme_completed.temperature_c == -40 && bme_completed.humidity_pct == 0);
+  assert(bme_completed.pressure_pa == 30000 && bme_completed.gas_ohms == 1);
+  reset(); bme.next_temp = 125; bme.next_humidity = 100;
+  bme.next_pressure = 125000; bme.next_gas = 1000000000U;
+  step(1000); step(1200);
+  assert(bme_completed.fresh(1200, kBmeStaleMs));
+  assert(bme_completed.temperature_c == 125 && bme_completed.humidity_pct == 100);
+  assert(bme_completed.pressure_pa == 125000 && bme_completed.gas_ohms == 1000000000U);
 }
