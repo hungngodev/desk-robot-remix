@@ -56,7 +56,9 @@ class TofBus {
   bool ready() const { return initialized_; }
   // Other synchronous Wire clients must never run while recovery owns GPIOs
   // or when Wire initialization failed. No motion authorization follows.
-  bool bus_accessible() const { return wire_started_ && pins_restored_ && bus_idle(); }
+  bool bus_accessible() const {
+    return !recovery_quarantine_ && physical_bus_accessible();
+  }
   void observe_shared_bus_fault(CliffGuard& guard);
   // The optional 0x71 mux can NACK our first startup probe and then be
   // independently recognized by a later touch or accessory driver. Once
@@ -119,6 +121,7 @@ class TofBus {
   bool pins_restored_ = true;
   bool recovery_pending_ = false;
   bool recovery_attempted_ = false;
+  bool recovery_quarantine_ = false;
   std::uint32_t last_recovery_ms_ = 0;
   bool optional_mux_present_ = false; // second 8-lane interaction bus if fitted
   std::uint32_t bus_errors_ = 0;
@@ -130,6 +133,9 @@ class TofBus {
   bool read_register(std::uint8_t reg, std::uint8_t* dest, std::uint8_t bytes);
   bool write_byte(std::uint8_t reg, std::uint8_t value);
   bool bus_idle() const;
+  bool physical_bus_accessible() const {
+    return wire_started_ && pins_restored_ && bus_idle();
+  }
   bool recover_bus();
   void failed(CliffGuard& guard);
 };

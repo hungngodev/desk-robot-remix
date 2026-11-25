@@ -978,12 +978,55 @@ int main() {
       CHECK(!lines.unsafe_high && digitalRead(21) == HIGH &&
             digitalRead(22) == HIGH);
       CHECK(lines.restore_calls == 1 && Wire.tof_samples == samples);
-      CHECK(Wire.transactions == transactions);
+      CHECK(Wire.transactions == transactions + 4);
+      CHECK(Wire.ranges == 0 && Wire.extras == 0 && bus.bus_accessible());
       CHECK(bus.new_optical_channel() == 255 && bus.new_extra_channel() == 255);
       CHECK(!guard.try_rearm(61));
       for (std::uint32_t at = 62; at < 68; ++at) bus.poll(guard, at);
       CHECK(!guard.evaluate(70)); // recovery is not automatic rearm
       CHECK(guard.try_rearm(70)); // fresh complete sweep + local operator
+      fake_i2c_lines() = FakeI2cLines{};
+    }
+    {
+      // Line release alone cannot admit a sibling I2C client. A failed
+      // mux readback remains quarantined, including through a retry delay.
+      for (unsigned fault = 0; fault < 3; ++fault) {
+        Wire = TwoWire{};
+        fake_i2c_lines() = FakeI2cLines{};
+        desk_robot::TofBus bus;
+        desk_robot::CliffGuard guard;
+        ready(bus, guard);
+        auto& lines = fake_i2c_lines();
+        Wire.ranges = fault == 0 ? 0 : 1;
+        Wire.extras = fault == 0 ? 1 : 0;
+        Wire.optional_mux_stuck = fault == 0;
+        Wire.range_mux_stuck = fault == 1;
+        lines.sda_stuck = true;
+        lines.release_after_pulses = 9;
+        const auto samples = Wire.tof_samples;
+        bus.poll(guard, 0xfffffff0U);
+        faulted(guard);
+        if (fault == 2) lines.sda_stuck = false;
+        CHECK(!bus.bus_accessible());
+        bus.poll(guard, 0xfffffff1U);
+        CHECK(Wire.tof_samples == samples);
+        CHECK(lines.clear_pulses == (fault == 2 ? 0U : 9U));
+        if (fault < 2) {
+          CHECK(!bus.bus_accessible());
+          CHECK(digitalRead(21) == HIGH && digitalRead(22) == HIGH);
+          CHECK(bus.probe_imu().family == 0);
+          const auto transactions = Wire.transactions;
+          bus.poll(guard, 0x54U); // 99 ms, including rollover
+          CHECK(!bus.bus_accessible() && Wire.transactions == transactions);
+          Wire.optional_mux_stuck = Wire.range_mux_stuck = false;
+          bus.poll(guard, 0x55U); // 100 ms
+        }
+        CHECK(bus.bus_accessible());
+        CHECK(Wire.ranges == 0 && Wire.extras == 0);
+        CHECK(Wire.tof_samples == samples);
+        CHECK(bus.new_optical_channel() == 255 && bus.new_extra_channel() == 255);
+        CHECK(!guard.try_rearm(0x55U));
+      }
       fake_i2c_lines() = FakeI2cLines{};
     }
     {
@@ -1103,7 +1146,8 @@ int main() {
       faulted(guard);
       bus.poll(guard, 61);
       CHECK(lines.clear_pulses == 9 && lines.stops == 1);
-      CHECK(Wire.transactions - transactions == 3);
+      CHECK(Wire.transactions - transactions == 7);
+      CHECK(Wire.ranges == 0 && Wire.extras == 0 && bus.bus_accessible());
       for (std::uint32_t at = 62; at < 67; ++at) bus.poll(guard, at);
       CHECK(!guard.evaluate(70));
       CHECK(guard.try_rearm(70));

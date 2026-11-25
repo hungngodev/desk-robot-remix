@@ -9,7 +9,7 @@
 namespace desk_robot {
 
 bool TofBus::quiesce_optional_mux() {
-  if (!bus_accessible()) return false;
+  if (!physical_bus_accessible()) return false;
   if (!optional_mux_present_) return true;
   // A fitted optional bus must not keep a lane selected while the local
   // guard reads the 0x70 floor mux. Verify the CONTROL REGISTER, not just
@@ -24,7 +24,7 @@ bool TofBus::quiesce_optional_mux() {
 }
 
 bool TofBus::quiesce_range_mux() {
-  if (!bus_accessible()) return false;
+  if (!physical_bus_accessible()) return false;
   wire_.beginTransmission(kMuxAddress);
   const bool disconnected = wire_.write(static_cast<std::uint8_t>(0)) == 1;
   const bool acknowledged = wire_.endTransmission(true) == 0;
@@ -80,6 +80,7 @@ bool TofBus::write_byte(std::uint8_t reg, std::uint8_t value) {
 void TofBus::failed(CliffGuard& guard) {
   ++bus_errors_;
   recovery_pending_ = true;
+  if (!physical_bus_accessible()) recovery_quarantine_ = true;
   // A sibling transaction can fault after poll() published a conversion.
   // Revoke its acquisition notifications along with the stored validity.
   new_extra_channel_ = 255;
@@ -97,7 +98,10 @@ void TofBus::failed(CliffGuard& guard) {
 void TofBus::observe_shared_bus_fault(CliffGuard& guard) {
   // A sibling client may hold a line after the current floor scan. Retire
   // evidence immediately, but leave actual GPIO recovery to a later poll.
-  if (!bus_accessible() && !recovery_pending_) failed(guard);
+  if (!physical_bus_accessible()) {
+    if (!recovery_pending_) failed(guard);
+    else recovery_quarantine_ = true;
+  }
 }
 
 // The pinned ESP-IDF driver already attempts a nine-clock clear on some
@@ -185,6 +189,7 @@ bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   pins_restored_ = true;
   recovery_pending_ = false;
   recovery_attempted_ = false;
+  recovery_quarantine_ = false;
   scan_.reset();
   new_extra_channel_ = 255;
   new_optical_channel_ = 255;
@@ -244,6 +249,7 @@ ImuIdentity TofBus::probe_imu() {
   // This probe does not initialize or read movement sensors. We reuse Wire
   // already initialized by begin(), so there is no second I2C controller.
   ImuIdentity result{};
+  if (!bus_accessible()) return result;
   // TCA9548A may have left a downstream branch selected. Disconnect it for
   // the upstream IMU read, without changing the active ToF measurement plan.
   if (!quiesce_optional_mux()) return ImuIdentity{};
@@ -384,20 +390,26 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
   // Detect a held line before a transaction can block. On first
   // detection return with the guard fault latched, without additional
   // recovery work before the body loop can apply its safety stop.
-  if (!pins_restored_ || !bus_idle()) {
+  if (recovery_quarantine_ || !physical_bus_accessible()) {
     if (!recovery_pending_) {
       failed(guard);
       return;
     }
+    recovery_quarantine_ = true;
     // Do not hammer a permanently shorted bus. Unsigned elapsed time is
     // rollover-safe; a successful recovery never supplies a range sample.
     if (recovery_attempted_ && now_ms - last_recovery_ms_ < 100U) return;
     recovery_attempted_ = true;
     last_recovery_ms_ = now_ms;
-    if (!recover_bus()) {
+    // A released line is not proof of mux isolation. Keep sibling Wire
+    // clients quarantined until both fitted muxes read back as closed.
+    // If the slave released on its own, skip the GPIO clock takeover.
+    if ((!physical_bus_accessible() && !recover_bus()) ||
+        !quiesce_optional_mux() || !quiesce_range_mux()) {
       failed(guard);
       return;
     }
+    recovery_quarantine_ = false;
     recovery_pending_ = false;
     recovery_attempted_ = false;
     return;
