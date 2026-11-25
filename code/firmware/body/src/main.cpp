@@ -449,23 +449,14 @@ void process_input(HardwareSerial& stream, desk_robot::LineReceiver& receiver,
 #if DESK_ROBOT_FULL_SENSORS
     // The contact can open between command validation and output application.
     // Do not acknowledge a motion/recovery decision that this new sample vetoed.
-    if (completed && control.state().bumper_raw) {
-      if (strcmp(reply, "OK arm") == 0)
-        snprintf(reply, sizeof(reply), "ERR arm bumper_active");
-      else if (strncmp(reply, "OK drive ", 9) == 0)
-        snprintf(reply, sizeof(reply), "ERR drive bumper_active");
-      else if (strcmp(reply, "OK rearm") == 0)
-        snprintf(reply, sizeof(reply), "ERR rearm bumper_active");
-    }
+    if (completed && control.state().bumper_raw)
+      desk_robot::veto_motion_ack(reply, sizeof(reply), desk_robot::MotionAckVeto::BumperActive);
 #endif
 #if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
     // A deadline can also expire while processing the command itself.
-    if (completed && motor_heartbeat.missed_deadline()) {
-      if (strcmp(reply, "OK arm") == 0)
-        snprintf(reply, sizeof(reply), "ERR arm motor_watchdog_latched");
-      else if (strncmp(reply, "OK drive ", 9) == 0)
-        snprintf(reply, sizeof(reply), "ERR drive motor_watchdog_latched");
-    }
+    if (completed && motor_heartbeat.missed_deadline())
+      desk_robot::veto_motion_ack(reply, sizeof(reply),
+                                 desk_robot::MotionAckVeto::MotorWatchdogLatched);
 #endif
     if (completed) {
       // STOP/HALT already took effect before acknowledgement. Keep the

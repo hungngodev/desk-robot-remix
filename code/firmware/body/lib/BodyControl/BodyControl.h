@@ -103,6 +103,10 @@ struct State {
 
 enum class BodyProfile { DcPwm, StepperGuarded, DcGuarded };
 
+// Rewrite only accepted actuator/recovery replies vetoed during output application.
+enum class MotionAckVeto { BumperActive, MotorWatchdogLatched };
+void veto_motion_ack(char* reply, std::size_t capacity, MotionAckVeto fault);
+
 class BodyControl {
  public:
   explicit BodyControl(BodyProfile profile = BodyProfile::DcPwm,

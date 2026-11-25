@@ -77,7 +77,7 @@ def test_nc_bumper_is_sampled_before_bus_commands_and_motor_outputs():
         "receiver.feed("
     )
     assert command.index("apply_outputs();  // apply accepted") < command.index(
-        '"ERR drive bumper_active"'
+        "desk_robot::MotionAckVeto::BumperActive"
     ) < command.index("replies.enqueue_line(reply)")
     loop = body.split("void loop() {", 1)[1]
     assert loop.index("if (sample_raw_bumper()) apply_outputs();") < loop.index("tof.poll(")

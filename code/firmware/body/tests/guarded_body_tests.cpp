@@ -1,3 +1,4 @@
+#include <cstdio>
 #include "BodyControl.h"
 #include "CliffGuard.h"
 #include "StepperDrive.h"
@@ -2161,6 +2162,34 @@ static void optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract() {
 }
 
 
+void output_fault_vetoes_all_motion_acknowledgments() {
+  using desk_robot::MotionAckVeto;
+  const char* acks[] = {"OK arm", "OK rearm", "OK keepalive",
+                       "OK drive 20 20 100", "OK lift 90", "OK grip 90"};
+  const char* commands[] = {"arm", "rearm", "keepalive", "drive", "lift", "grip"};
+  for (auto fault : {MotionAckVeto::BumperActive, MotionAckVeto::MotorWatchdogLatched}) {
+    const std::string reason = fault == MotionAckVeto::BumperActive ?
+        "bumper_active" : "motor_watchdog_latched";
+    for (std::size_t i = 0; i < 6; ++i) {
+      char reply[128]{};
+      std::snprintf(reply, sizeof(reply), "%s", acks[i]);
+      desk_robot::veto_motion_ack(reply, sizeof(reply), fault);
+      CHECK(std::string(reply) == std::string("ERR ") + commands[i] + " " + reason);
+    }
+    for (const char* ack : {"OK stop", "OK halt", "OK disarm", "OK ping",
+                            "ERR drive disarmed", "{\"armed\":false}"}) {
+      char reply[128]{};
+      std::snprintf(reply, sizeof(reply), "%s", ack);
+      desk_robot::veto_motion_ack(reply, sizeof(reply), fault);
+      CHECK(std::string(reply) == ack);
+    }
+    char incomplete[] = {'O', 'K'};
+    desk_robot::veto_motion_ack(incomplete, sizeof(incomplete), fault);
+    CHECK(incomplete[0] == 'O' && incomplete[1] == 'K');
+    desk_robot::veto_motion_ack(nullptr, 0, fault);
+  }
+}
+
 static void raw_bumper_trip_preempts_debounce_and_preserves_payload() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -3218,6 +3247,7 @@ int main() {
     jaw_force_ceiling_is_local_and_direction_aware();
     optional_nfc_and_fresh_ambient_fit_existing_bounded_aux_contract();
     dual_ir_evidence_never_authorizes_body_motion_or_charging();
+    output_fault_vetoes_all_motion_acknowledgments();
     raw_bumper_trip_preempts_debounce_and_preserves_payload();
     raw_bumper_bounce_resets_both_edge_classifiers();
     accessory_reconnect_does_not_invent_petting_events();

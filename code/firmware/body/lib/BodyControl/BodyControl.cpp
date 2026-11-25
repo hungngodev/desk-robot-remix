@@ -60,6 +60,22 @@ void move_toward(int& current, int target, std::uint32_t steps) {
 
 }  // namespace
 
+void veto_motion_ack(char* reply, std::size_t capacity, MotionAckVeto fault) {
+  if (reply == nullptr || capacity == 0 ||
+      std::memchr(reply, '\0', capacity) == nullptr) return;
+  const char* command = nullptr;
+  if (std::strcmp(reply, "OK arm") == 0) command = "arm";
+  else if (std::strcmp(reply, "OK rearm") == 0) command = "rearm";
+  else if (std::strcmp(reply, "OK keepalive") == 0) command = "keepalive";
+  else if (std::strncmp(reply, "OK drive ", 9) == 0) command = "drive";
+  else if (std::strncmp(reply, "OK lift ", 8) == 0) command = "lift";
+  else if (std::strncmp(reply, "OK grip ", 8) == 0) command = "grip";
+  if (command == nullptr) return;
+  const char* reason = fault == MotionAckVeto::BumperActive ?
+      "bumper_active" : "motor_watchdog_latched";
+  std::snprintf(reply, capacity, "ERR %s %s", command, reason);
+}
+
 bool BodyControl::configure_lift_travel_limits(const LiftTravelLimits& limits) {
   // Limit selection is a boot-time physical measurement, not a UART or
   // model command. Never adjust a live attached servo's safety envelope.
