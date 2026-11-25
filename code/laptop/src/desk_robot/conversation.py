@@ -659,9 +659,13 @@ class Conversation:
         )
 
     async def _persist_spoken_turn(
-        self, speaker: RobotConfig, text: str, participants: list[RobotConfig]
+        self, speaker: RobotConfig, text: str, participants: list[RobotConfig],
+        *, private_context_current: Callable[[], bool] | None = None,
     ) -> None:
-        if self.memory is None:
+        def private_current() -> bool:
+            return private_context_current is None or private_context_current()
+
+        if self.memory is None or not private_current():
             return
         event_id = uuid.uuid4().hex
         sharing_grant = self.settings.fleet_sharing_consent_generation
@@ -674,6 +678,8 @@ class Conversation:
                 # words. Each pet may still retain its own sent speech.
                 continue
             def persist_with_consent_cleanup(peer=peer) -> None:
+                if not private_current():
+                    return
                 if (peer.id != speaker.id
                         and self.settings.mode == "hardware"
                         and (not self.settings.fleet_text_sharing_enabled
@@ -689,15 +695,18 @@ class Conversation:
                     witnessed=(peer.id == speaker.id),
                     confidence=1.0,
                 )
-                if (inserted and peer.id != speaker.id
+                if inserted and (
+                    not private_current()
+                    or (peer.id != speaker.id
                         and self.settings.mode == "hardware"
                         and (not self.settings.fleet_text_sharing_enabled
                              or self.settings.fleet_sharing_consent_generation
-                                != sharing_grant)):
-                    # The worker must own its compensating delete. Cancelling
-                    # asyncio.to_thread does NOT cancel a SQLite thread, so
-                    # coroutine-side cleanup could otherwise be skipped.
-                    # Never retract the speaker's own transmitted words.
+                                != sharing_grant))
+                ):
+                    # An operator edit retires any still-pending derivative
+                    # of that private prompt, even the speaker's own copy.
+                    # Sharing revocation alone retracts only peer copies.
+                    # The worker owns cleanup even if its await was cancelled.
                     self.memory.forget_episode(peer.id, event_id)
 
             record = self._group_activity.get(peer.id)
@@ -812,6 +821,12 @@ class Conversation:
         # Track source admission, not only the initial permission snapshot.
         visual_context_used = False
 
+        def private_memory_current() -> bool:
+            return not memory_context_at_start or all(
+                self._private_memory_generation.get(robot.id, 0)
+                == memory_generation[robot.id] for robot in robots
+            )
+
         def consent_still_valid() -> bool:
             return (
                 loop.time() < deadline
@@ -833,10 +848,7 @@ class Conversation:
                      or (self.settings.room_station_context_enabled
                          and self.settings.room_station_consent_generation
                             == room_consent_generation))
-                and (not memory_context_at_start or all(
-                    self._private_memory_generation.get(robot.id, 0)
-                    == memory_generation[robot.id] for robot in robots
-                ))
+                and private_memory_current()
                 and (permission_check is None or permission_check())
             )
 
@@ -1175,7 +1187,10 @@ class Conversation:
                                 robots if self.settings.mode != "hardware"
                                 or sharing_at_start else [robot]
                             )
-                            await self._persist_spoken_turn(robot, text, recipients)
+                            await self._persist_spoken_turn(
+                                robot, text, recipients,
+                                private_context_current=private_memory_current,
+                            )
                             # SQLite writes yield to other tasks. Revocation
                             # during persistence must not publish a completed
                             # turn or authorize another peer response.
@@ -1228,8 +1243,11 @@ class Conversation:
                                     await _bounded_speaker_abort(interrupt, current_robot)
                                 except BaseException:
                                     pass
-                        if current_robot is not None and completed_segments:
-                            # An interrupted song still has real transmitted
+                        if (current_robot is not None and completed_segments
+                                and private_memory_current()):
+                            # An operator correction/deletion retires the
+                            # private prompt, including its partial derivative.
+                            # An ordinary interrupted song still has real transmitted
                             # words. Keep that first-person context in the
                             # EXISTING RAM hub; never claim physical playback
                             # or copy the fragment into a peer's context.
@@ -1255,6 +1273,7 @@ class Conversation:
                                     self._persist_spoken_turn(
                                         current_robot, partial[:300],
                                         [current_robot],
+                                        private_context_current=private_memory_current,
                                     ),
                                     timeout=2.0,
                                 )

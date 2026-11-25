@@ -1,5 +1,6 @@
 import asyncio
 import json
+import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -887,3 +888,90 @@ async def test_fleet_monitor_callback_failure_cannot_skip_stop_or_restore_health
     await runtime._on_voice_monitor_ready(True)
     assert runtime.pet.voice_monitor_ready
     assert runtime._voice_turn_generations is None
+
+
+async def test_private_delete_during_five_pet_stream_does_not_recreate_deleted_text(
+    fleet, tmp_path,
+):
+    memory = MemoryStore(tmp_path, IDS)
+    private_text = "Ultraviolet pineapple"
+    assert memory.remember(
+        IDS[0], "private_note", private_text,
+        kind="scene", source_robot=IDS[0], witnessed=True,
+    )
+    waiting = asyncio.Event()
+
+    class InterruptedChat:
+        async def stream_reply(self, history):
+            assert private_text in str(history)
+            yield private_text
+            waiting.set()
+            await asyncio.Event().wait()
+
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, InterruptedChat(), speaker, memory=memory)
+    task = asyncio.create_task(conversation.run(IDS, "Discuss fruit"))
+    await asyncio.wait_for(waiting.wait(), timeout=2)
+    assert len(speaker.spoken) == 1
+    assert memory.forget_episode(IDS[0], "private_note")
+    conversation.invalidate_private_memory(IDS[0])
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert conversation.active is None
+    assert not conversation.session_lock.locked()
+    assert not conversation.speaker_lock.locked()
+    assert all(not memory.search(robot, "ultraviolet") for robot in IDS)
+    assert all(private_text not in str(h) for h in conversation.histories.values())
+    conversation.chat = SimulatedChat()
+    assert len(await conversation.run(IDS, "Try again", 1)) == 1
+
+
+async def test_five_pet_private_edit_retracts_late_sqlite_speech_write(
+    fleet, tmp_path, monkeypatch,
+):
+    memory = MemoryStore(tmp_path, IDS)
+    private_text = "Ultraviolet pineapple"
+    assert memory.remember(
+        IDS[0], "private_note", private_text,
+        kind="scene", source_robot=IDS[0], witnessed=True,
+    )
+    writing, release, cleaned = threading.Event(), threading.Event(), threading.Event()
+    original_remember = memory.remember
+    original_forget = memory.forget_episode
+
+    def delayed_remember(robot_id, event_id, summary, **kwargs):
+        if kwargs.get("kind") == "own_utterance":
+            writing.set()
+            if not release.wait(timeout=5):
+                raise RuntimeError("Test did not release SQLite worker")
+        return original_remember(robot_id, event_id, summary, **kwargs)
+
+    def observed_forget(robot_id, event_id, **kwargs):
+        removed = original_forget(robot_id, event_id, **kwargs)
+        if event_id != "private_note" and removed:
+            cleaned.set()
+        return removed
+
+    class PrivateChat:
+        async def reply(self, history):
+            assert private_text in str(history)
+            return private_text
+
+    monkeypatch.setattr(memory, "remember", delayed_remember)
+    monkeypatch.setattr(memory, "forget_episode", observed_forget)
+    conversation = Conversation(fleet, PrivateChat(), SimulatedSpeaker(), memory=memory)
+    task = asyncio.create_task(conversation.run(IDS, "Discuss fruit"))
+    try:
+        assert await asyncio.to_thread(writing.wait, 2)
+        assert memory.forget_episode(IDS[0], "private_note")
+        conversation.invalidate_private_memory(IDS[0])
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        release.set()
+    assert await asyncio.to_thread(cleaned.wait, 2)
+    assert conversation.active is None
+    assert not conversation.session_lock.locked()
+    assert not conversation.speaker_lock.locked()
+    assert all(not memory.search(robot, "ultraviolet") for robot in IDS)
