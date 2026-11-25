@@ -31,6 +31,7 @@ from procurement_release import (
     PART_GATES,
     SUPPLEMENTAL_DECISIONS,
     SYSTEM_GATES,
+    first_robot_room_receipt_gate,
 )
 from verify_playbook_receipts import (
     REPO,
@@ -125,15 +126,8 @@ def required_receipts(evidence: dict, *, first_robot: bool = False,
         yield "system", gate, evidence.get("system", {}).get(gate)
     if first_robot:
         system = evidence.get("system", {})
-        first = system.get(FIRST_ROBOT_ROOM_GATE)
-        fleet_gate = "room_pod_usb_serial_and_five_pet_observers"
-        # An actually verified fleet observation is stronger than the first
-        # observer trial. Retain its original scope/gate in the signed record.
-        # An explicit first-unit claim is never silently ignored when invalid.
-        if first is None and fleet_gate in system:
-            yield "system", fleet_gate, system[fleet_gate]
-        else:
-            yield "system", FIRST_ROBOT_ROOM_GATE, first
+        gate = first_robot_room_receipt_gate(system)
+        yield "system", gate, system.get(gate)
     for ident in SUPPLEMENTAL_DECISIONS:
         if ident in deferred_optional_ids:
             # Generator already verified this optional parent is not selected.

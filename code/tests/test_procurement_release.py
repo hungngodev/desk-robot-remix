@@ -2546,3 +2546,16 @@ def test_dock_kit_and_station_aliases_require_exact_parent_binding():
     assert any("station alias" in e for e in mod.linked_parent_checkout_failures(
         report, evidence
     ))
+
+
+@pytest.mark.parametrize("invalid_first", [None, False, {}, {"result": "fail"}])
+def test_explicit_invalid_first_observer_cannot_fall_back_to_fleet(invalid_first):
+    plan = fixture()
+    passed = {"result": "pass", "evidence_url": "https://example.org/trial",
+              "tested_on": "test-only", "reviewer": "fixture"}
+    system = {"room_pod_usb_serial_and_five_pet_observers": passed}
+    fallback = mod.generate(plan, {"system": system})
+    assert mod.FIRST_ROBOT_ROOM_GATE not in fallback["missing_first_robot_system_evidence"]
+    system[mod.FIRST_ROBOT_ROOM_GATE] = invalid_first
+    blocked = mod.generate(plan, {"system": system})
+    assert mod.FIRST_ROBOT_ROOM_GATE in blocked["missing_first_robot_system_evidence"]

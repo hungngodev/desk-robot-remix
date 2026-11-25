@@ -85,6 +85,16 @@ FLEET_ONLY_SYSTEM_GATES = frozenset({
     "room_pod_usb_serial_and_five_pet_observers",
 })
 FIRST_ROBOT_ROOM_GATE = "room_pod_usb_serial_and_first_pet_observer"
+FLEET_ROOM_GATE = "room_pod_usb_serial_and_five_pet_observers"
+
+
+def first_robot_room_receipt_gate(system: dict) -> str:
+    """Prefer an explicit first-unit claim; otherwise use stronger fleet evidence."""
+    if FIRST_ROBOT_ROOM_GATE not in system and FLEET_ROOM_GATE in system:
+        return FLEET_ROOM_GATE
+    return FIRST_ROBOT_ROOM_GATE
+
+
 PART_GATES = (
     "exact_carrier_schematic", "measured_3v3_bus_and_pullups",
     "power_load_record", "firmware_and_source_reference",
@@ -755,9 +765,8 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
     # A qualified five-robot observer trial is stronger evidence for the
     # single observer, but an independently tested first observer suffices
     # before the remaining four robots have been built.
-    if not (_receipt(system_evidence.get(FIRST_ROBOT_ROOM_GATE)) or
-            _receipt(system_evidence.get(
-                "room_pod_usb_serial_and_five_pet_observers"))):
+    observer_gate = first_robot_room_receipt_gate(system_evidence)
+    if not _receipt(system_evidence.get(observer_gate)):
         first_robot_missing_system.append(FIRST_ROBOT_ROOM_GATE)
     approved = (
         not missing_system

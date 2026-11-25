@@ -1542,3 +1542,19 @@ def test_ntc_receipt_repeated_fault_requires_independent_current_check():
     assert not release._qualified_trial_gate(gate, measurement)
     quantities["independent_ammeter_fault_direction_checks"]["value"] = 5
     assert release._qualified_trial_gate(gate, measurement)
+
+
+@pytest.mark.parametrize("invalid_first", [None, False, {}, {"result": "fail"}])
+def test_explicit_invalid_first_observer_keeps_original_receipt_scope(invalid_first):
+    fleet_gate = "room_pod_usb_serial_and_five_pet_observers"
+    first_gate = release.FIRST_ROBOT_ROOM_GATE
+    system = {fleet_gate: receipt("system", fleet_gate), first_gate: invalid_first}
+    claims = dict(
+        (gate, claim) for scope, gate, claim in release.required_receipts(
+            {"system": system}, first_robot=True,
+        ) if scope == "system"
+    )
+    assert fleet_gate not in claims
+    assert claims[first_gate] is invalid_first
+    errors = release.audit_release({"system": system}, SHA, lookup, first_robot=True)
+    assert any(first_gate in error for error in errors)
