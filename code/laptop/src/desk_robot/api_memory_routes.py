@@ -305,6 +305,8 @@ def register_voice_context_route(
         if not settings.voice_memory_tools_enabled:
             raise HTTPException(403, "Opt in to voice memory retrieval first")
         memory_consent_generation = settings.voice_memory_consent_generation
+        sharing_at_start = settings.fleet_text_sharing_enabled
+        sharing_generation = settings.fleet_sharing_consent_generation
         # Capture the current voice turn BEFORE off-thread SQLite lookups.
         # A completed older lookup must not become a new turn's memory cue.
         owner = requested_tool_context(request, robot_id)
@@ -372,6 +374,25 @@ def register_voice_context_route(
         if (not settings.voice_memory_tools_enabled
                 or settings.voice_memory_consent_generation != memory_consent_generation):
             raise HTTPException(403, "Voice memory consent revoked during read")
+        # Local private recall is not consent to disclose another pet's
+        # retained stories. A new grant cannot authorize an old read.
+        if settings.fleet_sharing_consent_generation != sharing_generation:
+            raise HTTPException(403, "Fleet sharing consent revoked during memory read")
+        if not (sharing_at_start and settings.fleet_text_sharing_enabled):
+            records = [
+                entry for entry in records
+                if entry.witnessed is True and entry.source_robot == robot_id
+            ]
+            # Older string-only recall receipts do not distinguish local
+            # facts from peer copies; never bypass the fresh SQLite filter.
+            tool_cues = [
+                item for item in tool_cues if item.get("kind") != "memory_recall"
+            ]
+            timeline = [
+                item for item in timeline
+                if not (item.get("channel") == "tool"
+                        and item.get("kind") == "memory_recall")
+            ]
         # Camera consent revoked or toggled during either SQLite read.
         # Discard cues collected under the previous live vision permit.
         camera_gen_now = getattr(settings, "camera_consent_generation", None)

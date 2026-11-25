@@ -536,6 +536,7 @@ def test_voice_context_samples_volatile_cues_after_final_sqlite_read(
     from fastapi.testclient import TestClient
 
     settings.voice_memory_tools_enabled = True
+    settings.fleet_text_sharing_enabled = True
     settings.voice_vision_tools_enabled = True
     started = time.monotonic()
     clock = [started]

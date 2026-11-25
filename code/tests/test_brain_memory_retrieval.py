@@ -643,3 +643,77 @@ def test_live_context_refuses_unowned_private_revision_and_cached_recall(
             assert "PRIVATE_STALE_DETAIL" in restored.json()["model_context"]
         finally:
             runtime.multimodal = original
+
+
+
+@pytest.mark.parametrize("query", [None, "silver key"])
+def test_voice_recall_requires_independent_peer_sharing_consent(
+    settings, tokens, tmp_path, query,
+):
+    """A previously shared story cannot bypass local recall permission."""
+    settings.memory_dir = tmp_path
+    settings.voice_memory_tools_enabled = True
+    settings.fleet_text_sharing_enabled = True
+    headers = {"Authorization": f"Bearer {tokens['DESK_ROBOT_TOOL_TOKEN']}"}
+    params = {} if query is None else {"query": query}
+    url = "/v1/pet/robot-02/voice-context"
+    with TestClient(create_app(settings)) as client:
+        runtime = client.app.state.runtime
+        memory = runtime.memory
+        assert memory.remember(
+            "robot-02", "peer_silver_key", "Peer silver key secret",
+            kind="key", source_robot="robot-01", witnessed=False,
+        )
+        assert memory.remember(
+            "robot-02", "own_silver_key", "Own silver key observation",
+            kind="key", source_robot="robot-02", witnessed=True,
+        )
+        allowed = client.get(url, headers=headers, params=params)
+        assert allowed.status_code == 200
+        assert {item["source_robot"] for item in allowed.json()["memories"]} == {
+            "robot-01", "robot-02",
+        }
+        runtime.multimodal.hub.remember_tool(
+            "robot-02", "memory_recall", "Peer silver key secret", time.monotonic(),
+        )
+        settings.fleet_text_sharing_enabled = False
+        denied = client.get(url, headers=headers, params=params)
+        assert denied.status_code == 200
+        assert "Peer silver key secret" not in denied.text
+        assert "Own silver key observation" in denied.text
+        assert all(item["witnessed"] for item in denied.json()["memories"])
+        # The operator retains the ability to inspect and explicitly forget
+        # stored historical text; revocation blocks model-facing disclosure.
+        assert memory.count("robot-02") == 2
+
+
+@pytest.mark.parametrize("regrant", [False, True])
+@pytest.mark.parametrize("query", [None, "silver key"])
+def test_voice_recall_rejects_peer_consent_revoked_during_sqlite_read(
+    settings, tokens, tmp_path, monkeypatch, regrant, query,
+):
+    settings.memory_dir = tmp_path
+    settings.voice_memory_tools_enabled = True
+    settings.fleet_text_sharing_enabled = True
+    headers = {"Authorization": f"Bearer {tokens['DESK_ROBOT_TOOL_TOKEN']}"}
+    with TestClient(create_app(settings)) as client:
+        memory = client.app.state.runtime.memory
+        assert memory.remember(
+            "robot-02", "peer_silver_key", "Peer silver key secret",
+            kind="key", source_robot="robot-01", witnessed=False,
+        )
+        original = memory.core_facts
+
+        def revoke_during_read(robot_id, *, limit):
+            settings.fleet_text_sharing_enabled = False
+            if regrant:
+                settings.fleet_text_sharing_enabled = True
+            return original(robot_id, limit=limit)
+
+        monkeypatch.setattr(memory, "core_facts", revoke_during_read)
+        result = client.get(
+            "/v1/pet/robot-02/voice-context", headers=headers,
+            params={} if query is None else {"query": query},
+        )
+        assert result.status_code == 403
+        assert "Peer silver key secret" not in result.text

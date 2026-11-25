@@ -794,6 +794,7 @@ def test_voice_context_excludes_camera_and_visual_look_when_camera_disabled(sett
 
     settings.mode = "hardware"
     settings.voice_memory_tools_enabled = True
+    settings.fleet_text_sharing_enabled = True
     settings.voice_vision_tools_enabled = False
     hub = CameraFrameHub(["robot-01"])
     now = time.monotonic()
