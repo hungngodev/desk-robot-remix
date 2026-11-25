@@ -44,6 +44,20 @@ protector MOSFET trip specification, input transient/ESD clamp, dock
 contact hot-short and reversal protection, 5V regulator EN and its UVLO,
 switch fuse, connector mating/polarity, battery tray isolation and strain
 relief, NTC network and chamber sweep, vehicle current measurements.
+**DRX-554 charge-temperature gate:** the project permits cell charging only
+within 0 to 45 C (or the narrower cell manufacturer range). TI SLUS810N
+section 9.3.6 specifies a nominal 0 to 50 C window for 103AT-2 and states
+that its illustrated external resistors cannot narrow the window. A connected
+NTC alone is therefore insufficient. CHG can stay low during TS suspension.
+See https://www.ti.com/lit/ds/symlink/bq24075.pdf (pp. 29–30).
+Require a reviewed independent hardware inhibit design with worst-case trip
+limits, hysteresis, tolerance, and sensor open/short behavior; keep CE inactive
+and dock contacts unpowered pending qualification. `guaranteed_charge_window_c`
+in the paper preflight is a declared worst-case interval, not a measurement
+or charge permission. Confirm using a reviewed battery simulator and resistance
+fault fixture, not by charging a real cell outside its rated range. No new
+GPIO, thermistor model, comparator circuit or charger SKU is selected here.
+
 This document is deliberately not misrepresented as complete Gerber or
 production release evidence.
 

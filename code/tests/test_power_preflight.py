@@ -1125,6 +1125,7 @@ def plausible_hypothetical_one_cell_stack():
         docked_sys_v=5.5,
         charge_temperature_sensor_connected=True,
         charger_ts_fixed_resistor_removed=True, dock_motors_disarmed=True,
+        guaranteed_charge_window_c=(0, 45),  # hypothetical worst-case bounds
     )
 
 
@@ -1155,6 +1156,32 @@ def test_complete_one_cell_stack_proves_only_math_not_battery_safety():
     assert result["qualified_1s_dock_safe_to_buy"] is False
     assert result["battery_and_harness"]["candidate_physically_qualified"] is False
     assert result["docked"]["charger_and_load_sharing_verified"] is False
+
+
+@pytest.mark.parametrize("window, expected", [
+    (None, False), ((0, 50), False), ((0, 45.01), False),
+    ((-0.01, 45), False), ((0, 45), True), ((2, 43), True),
+])
+def test_stack_requires_guaranteed_hardware_charge_window(window, expected):
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg["guaranteed_charge_window_c"] = window
+    result = one_stack(**cfg)
+    assert result["checks"]["charger_ts_is_connected_to_actual_pack_ntc"] is True
+    assert result["checks"]["hardware_charge_window_within_0_to_45_c_on_paper"] is expected
+    assert result["all_power_stages_compatible_on_paper"] is expected
+    assert result["all_power_stages_physically_verified"] is False
+    assert result["qualified_1s_dock_safe_to_buy"] is False
+
+
+@pytest.mark.parametrize("window", [
+    (True, 45), (0, float("nan")), (0, float("inf")), ("0", 45),
+    (45, 0), (20, 20), (0,), "0,45", (0, 10 ** 1000),
+])
+def test_stack_rejects_invalid_hardware_charge_window(window):
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg["guaranteed_charge_window_c"] = window
+    with pytest.raises(ValueError, match="guaranteed charge window"):
+        one_stack(**cfg)
 
 
 def test_stack_rejects_wrong_regulator_only_rated_at_five_volts():

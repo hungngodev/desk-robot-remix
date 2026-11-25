@@ -380,12 +380,16 @@ def screen_one_cell_power_stack(
     charger_variant: str | None = None,
     boost_efficiency_low_cell: float = 0.85,
     boost_efficiency_docked: float = 0.85,
+    guaranteed_charge_window_c: tuple[float, float] | None = None,
 ) -> dict:
     """Join existing 1S equations into ONE real purchase architecture screen.
 
     Do not misuse a 3A-at-5V regulator label as 3A-at-3V proof; require
     derated data at the worst battery voltage. Source references include TI
     BQ2407x Rev N and exact candidate regulator datasheets and load graphs.
+    guaranteed_charge_window_c is the reviewed worst-case permitted charge
+    interval (including trip tolerance and hysteresis), not a nominal NTC
+    rating or live temperature. None means the interval is unknown.
     A returned paper pass is NEVER PCB, thermal, protection or dock approval.
     """
     if any(type(v) is not bool for v in (
@@ -402,6 +406,17 @@ def screen_one_cell_power_stack(
             raise ValueError("BQ2407x dock charger input limit must be finite amperes")
         if charger_input_limit_a > 1.5:
             raise ValueError("BQ2407x maximum dock charger input is not above 1.5A")
+    if guaranteed_charge_window_c is not None:
+        if (not isinstance(guaranteed_charge_window_c, (tuple, list))
+                or len(guaranteed_charge_window_c) != 2
+                or not all(_finite_number(v) for v in guaranteed_charge_window_c)
+                or guaranteed_charge_window_c[0] >= guaranteed_charge_window_c[1]):
+            raise ValueError("Require ordered finite guaranteed charge window in Celsius")
+    # TI SLUS810N 9.3.6: standard 103AT-2 TS is nominally 0..50 C;
+    # the illustrated resistor network can widen, not narrow, that window.
+    charge_window_compatible = (guaranteed_charge_window_c is not None
+                                and 0 <= guaranteed_charge_window_c[0]
+                                and guaranteed_charge_window_c[1] <= 45)
     # Source of truth: do not silently add a new third power-supply formula.
     undocked = size_5v_supply(
         active_peak_5v_a, active_sustained_5v_a,
@@ -455,6 +470,7 @@ def screen_one_cell_power_stack(
         "charger_ts_is_connected_to_actual_pack_ntc": (
             charge_temperature_sensor_connected and
             charger_ts_fixed_resistor_removed),
+        "hardware_charge_window_within_0_to_45_c_on_paper": charge_window_compatible,
         "physical_motor_commands_inhibited_on_dock": dock_motors_disarmed,
     }
     return {
@@ -468,6 +484,7 @@ def screen_one_cell_power_stack(
         "manufacturer_derated_at_3v_boost_amperes_supplied": (
             boost_output_at_3v_continuous_a),
         "checks": gates,
+        "guaranteed_charge_window_c": guaranteed_charge_window_c,
         "all_power_stages_compatible_on_paper": all(gates.values()),
         "all_power_stages_physically_verified": False,
         "qualified_1s_dock_safe_to_buy": False,
