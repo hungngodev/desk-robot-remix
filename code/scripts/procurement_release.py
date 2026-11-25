@@ -2791,9 +2791,9 @@ def main() -> int:
                         help="Operator-recorded measured qualification JSON, if any")
     releases = parser.add_mutually_exclusive_group()
     releases.add_argument("--require-release", action="store_true",
-                          help="Fail closed unless full fleet physical evidence verifies")
+                          help="Verify fleet release; requires json, csv, or markdown")
     releases.add_argument("--require-first-robot", action="store_true",
-                          help="Fail closed unless one complete robot and dock verify")
+                          help="Verify first robot release; requires a first-robot format")
     parser.add_argument("--format", choices=(
         "json", "csv", "markdown", "first-robot-json", "first-robot-markdown",
         "pilot-samples-json", "pilot-samples-markdown",
@@ -2802,6 +2802,14 @@ def main() -> int:
         "landed-cost-json", "landed-cost-markdown"
     ), default="json", help="Project the canonical ledger without buying permits")
     args = parser.parse_args()
+    if args.require_first_robot and args.format not in (
+        "first-robot-json", "first-robot-markdown"
+    ):
+        parser.error("First robot release may only print a first robot view")
+    if args.require_release and args.format not in (
+        "json", "csv", "markdown"
+    ):
+        parser.error("Fleet release may only print a full fleet view")
     try:
         plan = _load_cli_json(args.plan, "plan")
         evidence = (_load_cli_json(args.evidence, "evidence")
@@ -2810,7 +2818,10 @@ def main() -> int:
         parser.error(str(exc))
     if not isinstance(evidence, dict):
         parser.error("Evidence must be a JSON object")
-    report = generate(plan, evidence)
+    try:
+        report = generate(plan, evidence)
+    except ValueError as exc:
+        parser.error(str(exc))
     provided_costs = evidence.get("costs")
     requested_scope = (provided_costs.get("scope", "first_robot")
                        if isinstance(provided_costs, dict) else "first_robot")
@@ -2824,14 +2835,6 @@ def main() -> int:
             or pricing_scope not in {"first_robot", "fleet", "evaluation"}):
         parser.error("Unknown cost quote scope")
     cost = cost_quote(report, evidence, pricing_scope)
-    if args.require_first_robot and args.format not in (
-        "first-robot-json", "first-robot-markdown"
-    ):
-        parser.error("First robot release may only print a first robot view")
-    if args.require_release and args.format not in (
-        "json", "csv", "markdown"
-    ):
-        parser.error("Fleet release may only print a full fleet view")
     if args.require_release or args.require_first_robot:
         # The pure projection intentionally accepts synthetic unit-test
         # receipts. A REAL purchase command must verify immutable, scoped

@@ -208,3 +208,44 @@ def test_nonobject_evidence_is_rejected_without_traceback(tmp_path, evidence):
     assert result.stdout == ""
     assert "Evidence must be a JSON object" in result.stderr
     assert "Traceback" not in result.stderr
+
+@pytest.mark.parametrize("invalid_plan, message", [
+    ([], "Missing hardware plan"),
+    ({"target_robots": 5, "parts": []}, "Missing part ledger"),
+])
+def test_invalid_plan_schema_reports_cli_error(tmp_path, invalid_plan, message):
+    path = tmp_path / "invalid-plan.json"
+    path.write_text(json.dumps(invalid_plan), encoding="utf-8")
+    result = run_cost("--plan", str(path))
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert message in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_invalid_parts_evidence_reports_cli_error(tmp_path):
+    path = tmp_path / "invalid-parts.json"
+    path.write_text(json.dumps({"parts": []}), encoding="utf-8")
+    result = run_cost("--evidence", str(path))
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "Invalid parts evidence" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+@pytest.mark.parametrize("flag, fmt, message", [
+    ("--require-first-robot", "json", "First robot release"),
+    ("--require-first-robot", "pilot-samples-json", "First robot release"),
+    ("--require-first-robot", "pilot-cart-markdown", "First robot release"),
+    ("--require-release", "first-robot-json", "Fleet release"),
+    ("--require-release", "pilot-landed-cost-json", "Fleet release"),
+    ("--require-release", "landed-cost-markdown", "Fleet release"),
+])
+def test_incompatible_release_format_is_rejected_before_input_io(
+    tmp_path, flag, fmt, message,
+):
+    result = run_cost("--plan", str(tmp_path / "absent.json"), flag, "--format", fmt)
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert message in result.stderr
+    assert "Traceback" not in result.stderr
