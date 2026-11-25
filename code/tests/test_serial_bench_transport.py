@@ -155,8 +155,14 @@ def test_failed_transaction_does_not_publish_success_receipt(monkeypatch):
     assert receipt == {}
 
 
-@pytest.mark.parametrize("command", ["drive 10 10", "drive 10 10 100"])
-def test_valid_drive_duration_is_resolved_before_actuation(monkeypatch, capsys, command):
+@pytest.mark.parametrize("command, drive_ack", [
+    ("drive 10 10", b"OK drive left=10 right=10 ms=250\n"),
+    ("drive 10 10 100", b"OK drive left=10 right=10 ms=100\n"),
+])
+@pytest.mark.parametrize("failure", ["none", "no_local_rearm", "rearm_error", "motion_timeout"])
+def test_valid_drive_duration_is_resolved_before_actuation(
+    monkeypatch, capsys, command, drive_ack, failure,
+):
     status = {
         "backend": "stepper_28byj48", "armed": False,
         "touch": {"active": False}, "safety": {"ready": False},
@@ -185,10 +191,19 @@ def test_valid_drive_duration_is_resolved_before_actuation(monkeypatch, capsys, 
             current = self.writes[-1].decode("ascii").rstrip("\n")
             if current == "status":
                 return json.dumps(status).encode("ascii") + b"\n"
-            if current == "rearm":
-                return b"OK rearm\n"
-            ack = transact.__globals__["expected_ack"](current)
-            return ack.encode("ascii") + b"\n"
+            # Independent wire fixtures from BodyControl.cpp, not the host
+            # function being tested. Unknown writes must fail the test.
+            if current == "rearm" and failure == "rearm_error":
+                return b"ERR rearm safety_interlock\n"
+            if current == command and failure == "motion_timeout":
+                return b""
+            return {
+                "rearm": b"OK rearm\n",
+                "arm": b"OK arm\n",
+                command: drive_ack,
+                "keepalive": b"OK keepalive\n",
+                "halt": b"OK halt\n",
+            }[current]
 
     port = CommandPort([])
     monkeypatch.setitem(
@@ -198,9 +213,29 @@ def test_valid_drive_duration_is_resolved_before_actuation(monkeypatch, capsys, 
     monkeypatch.setitem(
         transact.__globals__, "serial", SimpleNamespace(Serial=lambda *a, **kw: port),
     )
-    monkeypatch.setattr(sys, "argv", [
-        "serial_bench.py", "--port", "fake", "--command", command, "--local-rearm",
-    ])
+    argv = ["serial_bench.py", "--port", "fake", "--command", command]
+    if failure != "no_local_rearm":
+        argv.append("--local-rearm")
+    monkeypatch.setattr(sys, "argv", argv)
+    if failure == "no_local_rearm":
+        with pytest.raises(RuntimeError, match="Refusing implicit safety recovery"):
+            transact.__globals__["main"]()
+        assert port.writes == [b"status\n"]
+        return
+    if failure == "rearm_error":
+        with pytest.raises(RuntimeError, match="ERR rearm safety_interlock"):
+            transact.__globals__["main"]()
+        assert port.writes == [b"status\n", b"rearm\n", b"halt\n"]
+        return
+    if failure == "motion_timeout":
+        with pytest.raises(TimeoutError, match="Uncertain USB response"):
+            transact.__globals__["main"]()
+        assert port.writes == [
+            b"status\n", b"rearm\n", b"arm\n",
+            (command + "\n").encode("ascii"), b"halt\n",
+        ]
+        assert "halt acknowledged" not in capsys.readouterr().out
+        return
     transact.__globals__["main"]()
     assert port.writes[:4] == [
         b"status\n", b"rearm\n", b"arm\n", (command + "\n").encode("ascii"),
@@ -227,3 +262,21 @@ def test_valid_ack_remains_supported(monkeypatch, command):
     clock(monkeypatch, port)
     assert transact(port, command) == f"OK {command}"
     assert port.writes == [f"{command}\n".encode()]
+
+
+@pytest.mark.parametrize("command, reply", [
+    ("drive 10 10", b"OK drive left=10 right=10 ms=100\n"),
+    ("drive 10 10 100", b"OK drive left=9 right=10 ms=100\n"),
+    ("drive 10 10 100", b"OK drive left=10 right=9 ms=100\n"),
+    ("drive 10 10 100", b"OK drive\n"),
+    ("lift 95", b"OK lift angle=96\n"),
+    ("grip 95", b"OK grip angle=94\n"),
+])
+def test_wrong_motion_ack_is_not_success(monkeypatch, command, reply):
+    port = FakePort([reply])
+    clock(monkeypatch, port)
+    receipt = {}
+    with pytest.raises(TimeoutError, match="Uncertain USB response"):
+        transact(port, command, receipt=receipt)
+    assert port.writes == [(command + "\n").encode("ascii")]
+    assert receipt == {}
