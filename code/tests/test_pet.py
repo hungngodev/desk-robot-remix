@@ -268,8 +268,44 @@ def test_proactive_frame_gate_reuses_motion_filter_to_ignore_global_exposure():
     assert gate.observe(exposed) is None
     assert gate.observe(exposed) is None
     assert gate.observe(changed) is None
-    assert gate.observe(changed) == initial
+    assert gate.observe(changed) == exposed
     assert gate.observe(changed) is None
+
+
+@pytest.mark.parametrize("predecoded", [False, True])
+def test_visual_change_gate_recovers_uniform_dark_to_bright_baseline(predecoded):
+    gate = VisualChangeGate()
+
+    def observe(frame):
+        if predecoded:
+            return gate.observe_reduced(frame, gate._reduced(frame))
+        return gate.observe(frame)
+
+    ramp = [jpeg((value, value, value)) for value in (0, 10, 40, 80, 160)]
+    for frame in ramp:
+        assert observe(frame) is None
+    photo = Image.new("RGB", (128, 96), (160, 160, 160))
+    ImageDraw.Draw(photo).rectangle((40, 30, 78, 68), fill=(20, 20, 20))
+    out = BytesIO()
+    photo.save(out, "JPEG", quality=92)
+    changed = out.getvalue()
+    assert observe(changed) is None
+    assert observe(changed) == ramp[-1]
+    assert observe(changed) is None
+
+
+def test_visual_change_gate_preserves_textured_baseline_on_light_change():
+    gate = VisualChangeGate()
+    frames = []
+    for background, patch in ((100, 60), (150, 110)):
+        photo = Image.new("RGB", (128, 96), (background,) * 3)
+        ImageDraw.Draw(photo).rectangle((40, 30, 78, 68), fill=(patch,) * 3)
+        out = BytesIO()
+        photo.save(out, "JPEG", quality=92)
+        frames.append(out.getvalue())
+    assert gate.observe(frames[0]) is None
+    assert gate.observe(frames[1]) is None
+    assert gate._baseline == frames[0]
 
 
 async def test_local_ollama_scene_is_two_frame_and_refuses_uncertain_claims():

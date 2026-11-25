@@ -215,6 +215,14 @@ class VisualChangeGate:
         changed = change_fraction(self._pixel_baseline, current, threshold=18)
         if changed < self.min_changed_fraction:
             self._hits = 0
+            # Uniform luminance ramps contain no spatial detail to preserve.
+            # Refresh that baseline so the next real change is not compared
+            # against the original dark exposure. Keep textured baselines
+            # fixed to retain sensitivity to accumulated small changes.
+            if (current != self._pixel_baseline
+                    and self._pixel_baseline.count(self._pixel_baseline[0]) == len(current)
+                    and current.count(current[0]) == len(current)):
+                self._pixel_baseline, self._baseline = current, jpeg
             return None
         self._hits += 1
         if self._hits < self.confirmations:
