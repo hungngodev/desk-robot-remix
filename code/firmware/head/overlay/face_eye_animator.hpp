@@ -14,6 +14,23 @@ struct EyeFrame {
     int8_t y = 0;
 };
 
+namespace face_eye_detail {
+// Integer smoothstep (3t^2 - 2t^3), rounded to the nearest pixel.
+// A zero duration completes immediately; widen before scaling elapsed time.
+inline int8_t EaseAxis(int8_t from, int8_t to, uint32_t elapsed,
+                       uint32_t duration) noexcept {
+    if (elapsed >= duration) return to;
+    constexpr uint32_t scale = 256U;
+    const uint32_t t = static_cast<uint32_t>(
+        static_cast<uint64_t>(elapsed) * scale / duration);
+    const uint32_t weight = (t * t * (3U * scale - 2U * t) + 32768U) / 65536U;
+    const int delta = static_cast<int>(to) - from;
+    const uint32_t distance = static_cast<uint32_t>(delta < 0 ? -delta : delta);
+    const int step = static_cast<int>((distance * weight + scale / 2U) / scale);
+    return static_cast<int8_t>(from + (delta < 0 ? -step : step));
+}
+}  // namespace face_eye_detail
+
 class FaceEyeAnimator {
 public:
     // The same pet identity seed used by Stackchan also offsets idle blink
@@ -23,6 +40,7 @@ public:
 
     EyeFrame Step(uint32_t now_ms, stackchan::behavior::Motion motion, bool allowed) {
         using stackchan::behavior::Motion;
+        using face_eye_detail::EaseAxis;
         if (!allowed) {
             // A transient voice/reconnect or fault gate cancels the current
             // gesture, but must not restart the idle blink clock indefinitely.
@@ -93,20 +111,6 @@ public:
     }
 
 private:
-    // Integer smoothstep (3t^2 - 2t^3), rounded to the nearest pixel.
-    // Only the 200/300 ms phases call this helper; clamp before multiplying.
-    static int8_t EaseAxis(int8_t from, int8_t to, uint32_t elapsed,
-                           uint32_t duration) noexcept {
-        if (elapsed >= duration) return to;
-        constexpr uint32_t scale = 256U;
-        const uint32_t t = elapsed * scale / duration;
-        const uint32_t weight = (t * t * (3U * scale - 2U * t) + 32768U) / 65536U;
-        const int delta = static_cast<int>(to) - from;
-        const uint32_t distance = static_cast<uint32_t>(delta < 0 ? -delta : delta);
-        const int step = static_cast<int>((distance * weight + scale / 2U) / scale);
-        return static_cast<int8_t>(from + (delta < 0 ? -step : step));
-    }
-
     uint32_t seed_ = 0;
     bool started_ = false;
     bool blink_active_ = false;
