@@ -12,7 +12,6 @@
 #include "face_eye_display.hpp"
 #include "led/single_led.h"
 #include "sdkconfig.h"
-#include "assets/lang_config.h"
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
 #include <wifi_manager.h>
 #endif
@@ -201,22 +200,11 @@ private:
     static void FaceTask(void* context) {
         auto* board = static_cast<DeskRobotSenseBoard*>(context);
         using namespace stackchan::behavior;
-        bool last_rendered_fault = false;
-        bool last_rendered_dock_lockout = false;
-        // Xiaozhi may rewrite OLED status while a safety fault remains
-        // latched. Periodically restore the factual local fault overlay,
-        // but never flood the shared I2C display every 100 ms.
-        uint32_t last_fault_status_refresh_ms = 0;
-#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
-#ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
+#if defined(CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED) && defined(CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED)
         uint32_t last_bench_failure_epoch = 0;
 #endif
-        bool last_mic_privacy_overlay = false;
-        uint32_t last_mic_privacy_refresh_ms = 0;
-#endif
-        auto last_device_state = kDeviceStateIdle;
         bool last_face_available = false;
-        bool last_idle_face_fault = false;
+        bool last_priority_active = false;
         bool model_mood_active = false;
         uint32_t model_mood_started_ms = 0;
         while (true) {
@@ -306,83 +294,25 @@ private:
             const auto requested_mood = board->body_bridge_ ?
                 board->body_bridge_->TakeCosmeticMoodCue() :
                 desk_robot::CosmeticMood::kNone;
-            if (body_unhealthy || !face_available) model_mood_active = false;
-            // Gate upstream virtual SetEmotion calls on the same LVGL lock.
-            if (board->local_eye_display_ != nullptr)
-                board->local_eye_display_->SetBodyFault(body_unhealthy);
-            if (board->display_ != nullptr) {
-                // A new physical WROOM fault cannot leave yesterday's happy
-                // emotion visible until speech finishes. Neutralize it
-                // immediately; the bounded refresh below also repairs
-                // subsequent upstream emotion writes.
-                if (body_unhealthy && !last_idle_face_fault)
-                    board->display_->SetEmotion("neutral");
-                // WROOM faults are factual local OLED status even while
-                // Xiaozhi is speaking. Never wait for the speech floor to
-                // become idle to show a newly observed safety fault.
-                // Xiaozhi can rewrite both status and emotion during speech.
-                // Restore both on state changes and every 750 ms while
-                // faulted, without a 100 ms redraw loop.
-                // No mandatory warning speech or motor authority follows.
-                if (body_unhealthy &&
-                    (!last_rendered_fault || device_state != last_device_state ||
-                     dock_lockout != last_rendered_dock_lockout ||
-                     now_ms - last_fault_status_refresh_ms >= 750U)) {
-                    if (last_idle_face_fault)
-                        board->display_->SetEmotion("neutral");
-                    if (dock_lockout)
-                        board->display_->SetStatus("Dock lock: motors off");
-                    else
-                        board->display_->SetStatus("Body safety stop");
-                    last_fault_status_refresh_ms = now_ms;
-                    last_rendered_fault = true;
-                    last_rendered_dock_lockout = dock_lockout;
-                } else if (last_rendered_fault && !body_unhealthy) {
-                    last_rendered_dock_lockout = false;
-                    // Restore the pinned Xiaozhi localized speaking/listening
-                    // status promptly. Continuous listening may never go idle.
-                    if (device_state == kDeviceStateSpeaking) {
-                        board->display_->SetStatus(Lang::Strings::SPEAKING);
-                        last_rendered_fault = false;
-                    } else if (device_state == kDeviceStateListening) {
-                        board->display_->SetStatus(Lang::Strings::LISTENING);
-                        last_rendered_fault = false;
-                    } else if (idle) {
-                        board->display_->SetStatus("");
-                        last_rendered_fault = false;
-                    }
-                    // Unknown states defer clear until a known status owner.
-                }
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
-                // Upstream Xiaozhi's top-bar mute icon tracks SPEAKER volume,
-                // not the physical BOOT microphone privacy state. Render a
-                // separate silent status from the actual consent latch.
-                // Never let it overwrite an independent WROOM safety stop.
-                const bool mic_privacy_on = board->audio_operator_muted_.load(
-                    std::memory_order_acquire);
-                if (!body_unhealthy && mic_privacy_on &&
-                    (!last_mic_privacy_overlay || last_idle_face_fault ||
-                     now_ms - last_mic_privacy_refresh_ms >= 750U)) {
-                    board->display_->SetStatus("Mic privacy ON");
-                    last_mic_privacy_refresh_ms = now_ms;
-                } else if (!body_unhealthy && !mic_privacy_on &&
-                           last_mic_privacy_overlay) {
-                    // BOOT manual unmute restores Xiaozhi's current status.
-                    if (device_state == kDeviceStateSpeaking)
-                        board->display_->SetStatus(Lang::Strings::SPEAKING);
-                    else if (device_state == kDeviceStateListening)
-                        board->display_->SetStatus(Lang::Strings::LISTENING);
-                    else if (idle)
-                        board->display_->SetStatus("");
-                }
-                last_mic_privacy_overlay = mic_privacy_on;
+            const bool mic_privacy_on = board->audio_operator_muted_.load(
+                std::memory_order_acquire);
+#else
+            const bool mic_privacy_on = false;
 #endif
-            }
+            const auto local_status = desk_robot::SelectFaceStatus(
+                body_unhealthy, dock_lockout, mic_privacy_on);
+            const bool priority_active = local_status != desk_robot::FaceStatus::kNormal;
+            if (priority_active || !face_available) model_mood_active = false;
+            // This owns the status label and neutral face under the LVGL lock.
+            // Upstream clock, notifications and voice cannot replace it.
+            if (board->local_eye_display_ != nullptr)
+                board->local_eye_display_->SetLocalStatus(local_status);
             if (face_available && board->display_ != nullptr) {
                 // Only the Mac's CURRENT context decision may request a
                 // transient mood. The local idle HSM takes over afterward.
                 // These bytes never reach WROOM, motors, Opus or microphones.
-                if (body_unhealthy) {
+                if (priority_active) {
                     // Keep a nonemotional neutral safety face instead of
                     // prescribing sadness for every independent WROOM fault.
                     // The factual STOP status above remains visible, and
@@ -394,7 +324,7 @@ private:
                     model_mood_started_ms = now_ms;
                 } else if (!model_mood_active ||
                            now_ms - model_mood_started_ms >= 1600U) {
-                    if (last_idle_face_fault || model_mood_active ||
+                    if (last_priority_active || model_mood_active ||
                         !last_face_available || action.set_mood)
                         board->display_->SetEmotion(
                             MoodName(board->face_behavior_.mood()));
@@ -407,13 +337,11 @@ private:
             if (board->local_eye_display_ != nullptr) {
                 const auto eyes = board->eye_animator_.Step(
                     now_ms, action.motion,
-                    face_available && !body_unhealthy && !model_mood_active);
+                    face_available && !priority_active && !model_mood_active);
                 board->local_eye_display_->ShowEyes(eyes);
             }
-            // Update fault history even while the voice floor owns the OLED.
-            // Otherwise speaking can trigger a 100 ms neutral redraw flood.
-            last_idle_face_fault = body_unhealthy;
-            last_device_state = device_state;
+            // Restore the current HSM mood after either local priority clears.
+            last_priority_active = priority_active;
             last_face_available = face_available;
             vTaskDelay(pdMS_TO_TICKS(100));
         }
@@ -659,8 +587,7 @@ public:
             xTaskCreate(FaceTask, "stackchan_idle_face", 4096, this, 1, &face_task_) != pdPASS) {
             face_task_ = nullptr;
             ESP_LOGE("SenseBoard", "Face task unavailable; automatic listening retry unavailable");
-            local_eye_display_->SetBodyFault(true);
-            display_->SetStatus("Face task unavailable");
+            local_eye_display_->SetLocalStatus(desk_robot::FaceStatus::kFaceUnavailable);
         }
         if (!body_poll_task_ &&
             xTaskCreate(BodyPollTask, "sense_body_poll", 4096, this, 1, &body_poll_task_) != pdPASS) {

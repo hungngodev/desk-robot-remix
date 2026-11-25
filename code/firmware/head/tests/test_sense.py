@@ -289,14 +289,10 @@ int main() {
         self.assertNotIn('Event(EventType::kTouched)', source)
         self.assertIn('TakeCosmeticMoodCue()', source)
         self.assertIn('BodyFaceState body_face_state_;', source)
-        self.assertIn('bool last_rendered_fault = false;', source)
+        self.assertIn('bool last_priority_active = false;', source)
         self.assertIn('static void BodyPollTask(void* context)', source)
         self.assertIn('board->body_face_state_.Publish({});', source)
-        self.assertIn('board->display_->SetStatus("Body safety stop");', source)
-        self.assertNotIn('body_unhealthy ? "sad" :', source)
-        self.assertIn('Event(EventType::kPersonDetected)', source)
-        self.assertIn('last_device_state = device_state;', source)
-        self.assertIn('board->display_->SetStatus("Body safety stop");', source)
+        self.assertIn('board->local_eye_display_->SetLocalStatus(local_status);', source)
         self.assertNotIn('body_unhealthy ? "sad" :', source)
         self.assertIn('Event(EventType::kPersonDetected)', source)
         bridge = (board / 'robot_bridge.cc').read_text()
@@ -349,14 +345,15 @@ int main() {
         assert 'board->body_face_state_.Publish({});' in source
         assert 'body_fresh && body_unhealthy && body.dock_lockout' in source
         assert 'now_ms - at_ms <= 1200U' in source
-        assert 'dock_lockout != last_rendered_dock_lockout' in source
-        assert 'board->display_->SetStatus("Dock lock: motors off");' in source
-        assert 'board->display_->SetStatus("Body safety stop");' in source
-        assert 'if (body_unhealthy || !face_available)' in source
-        assert 'if (body_unhealthy)' in source
-        assert 'charging' not in source.split(
-            'board->display_->SetStatus("Dock lock: motors off");', 1,
-        )[0].split('if (body_unhealthy &&', 1)[-1].lower()
+        renderer = (HEAD / "overlay/face_eye_display.hpp").read_text()
+        assert "body_unhealthy, dock_lockout, mic_privacy_on" in source
+        assert 'case FaceStatus::kDockLock: status = "Dock lock: motors off";' in renderer
+        assert 'case FaceStatus::kBodyFault: status = "Body safety stop";' in renderer
+        assert "charging" not in renderer.split("case FaceStatus::kDockLock:", 1)[1].split(
+            "break;", 1
+        )[0].lower()
+        assert "if (priority_active || !face_available)" in source
+        assert "if (priority_active)" in source
 
     def test_boot_mute_while_speaking_closes_pinned_xiaozhi_channel(self):
         """The BOOT privacy action must close the active speaker session."""
@@ -448,12 +445,9 @@ int main() {
         source = (HEAD / "sense/desk_robot_sense.cc").read_text()
         face = source.split("static void FaceTask(void* context)", 1)[1]
         face = face.split("void InitializeDisplay()", 1)[0]
-        self.assertIn("uint32_t last_fault_status_refresh_ms = 0;", face)
-        self.assertIn("now_ms - last_fault_status_refresh_ms >= 750U", face)
-        self.assertIn("last_fault_status_refresh_ms = now_ms;", face)
-        self.assertIn('board->display_->SetStatus("Body safety stop");', face)
-        self.assertIn("if (body_unhealthy &&", face)
-        self.assertIn("else if (last_rendered_fault && !body_unhealthy)", face)
+        self.assertIn("body_unhealthy, dock_lockout, mic_privacy_on", face)
+        self.assertIn("board->local_eye_display_->SetLocalStatus(local_status);", face)
+        self.assertNotIn("last_fault_status_refresh_ms", face)
         # The OLED task must not turn an informational safety cue into
         # speaker traffic, motion, or another blocking body UART poll.
         self.assertNotIn("body_bridge_->PollInteraction()", face)
@@ -476,11 +470,12 @@ int main() {
         self.assertIn('TakeCosmeticMoodCue()', face)
         # A body fault now shows a factual status and neutral OLED mood.
         # Model-selected moods are considered only on the healthy branch.
-        self.assertIn('if (body_unhealthy) {', face)
-        self.assertIn('board->display_->SetEmotion("neutral");', face)
+        self.assertIn('if (priority_active) {', face)
+        renderer = (HEAD / "overlay/face_eye_display.hpp").read_text()
+        self.assertIn('OledDisplay::SetEmotion("neutral");', renderer)
         self.assertIn('else if (requested_mood != desk_robot::CosmeticMood::kNone)', face)
         self.assertLess(
-            face.index('if (body_unhealthy) {'),
+            face.index('if (priority_active) {'),
             face.index('else if (requested_mood != desk_robot::CosmeticMood::kNone)'),
         )
         self.assertIn('vTaskDelay(pdMS_TO_TICKS(100));', face)
@@ -812,13 +807,12 @@ int main() {
         assert "face_available = idle || device_state == kDeviceStateListening;" in face
         assert "const bool face_available = idle;" in face
         assert "if (face_available && board->display_ != nullptr)" in face
-        assert "if (body_unhealthy || !face_available) model_mood_active = false;" in face
+        assert "if (priority_active || !face_available) model_mood_active = false;" in face
         # Avoid an every-100ms LVGL write in an unending listening state.
         assert "last_face_available = face_available;" in face
         assert "!last_face_available || action.set_mood" in face
         # Moods are visual only. Xiaozhi's status and safety own the label.
-        assert "Lang::Strings::LISTENING" in face
-        assert "board->display_->SetStatus(\"Body safety stop\");" in face
+        assert "board->local_eye_display_->SetLocalStatus(local_status);" in face
         assert "head.command(" not in face
         assert "speaker.say(" not in face
 
@@ -828,15 +822,13 @@ int main() {
         face = source.split("static void FaceTask(void* context)", 1)[1].split(
             "void InitializeDisplay()", 1
         )[0]
-        neutral = face.index("if (body_unhealthy && !last_idle_face_fault)")
+        renderer = (HEAD / "overlay/face_eye_display.hpp").read_text()
+        neutral = face.index("board->local_eye_display_->SetLocalStatus(local_status);")
         available = face.index("if (face_available && board->display_ != nullptr)")
         assert neutral < available
-        assert 'board->display_->SetEmotion("neutral");' in face[neutral:available]
-        # This cursor advances irrespective of speaking/listening state.
-        assert face.index("last_idle_face_fault = body_unhealthy;") > available
-        assert face.count("last_idle_face_fault = body_unhealthy;") == 1
-        assert "last_fault_status_refresh_ms = now_ms;" in face
-        assert "board->display_->SetStatus(\"Body safety stop\");" in face
+        assert 'OledDisplay::SetEmotion("neutral");' in renderer
+        assert face.index("last_priority_active = priority_active;") > available
+        assert face.count("last_priority_active = priority_active;") == 1
 
     def test_sense_server_audio_close_rejoins_only_same_consentful_xiaozhi_channel(self):
         """WiFi may stay connected after WebSocket closes; BOOT still wins."""
@@ -872,24 +864,13 @@ int main() {
         face = board.split("static void FaceTask(void* context)", 1)[1].split(
             "void InitializeDisplay()", 1,
         )[0]
-        status = face.index('SetStatus("Body safety stop")')
+        status = face.index("board->local_eye_display_->SetLocalStatus(local_status);")
         idle_mood = face.index("if (face_available && board->display_ != nullptr)")
         self.assertLess(status, idle_mood)
-        # A WROOM fault must remain visible even if Xiaozhi rewrites
-        # the display while speaking or listening continuously.
-        self.assertIn("now_ms - last_fault_status_refresh_ms >= 750U", face)
-        self.assertIn("last_fault_status_refresh_ms = now_ms;", face)
-        self.assertIn("board->display_->SetStatus(\"Body safety stop\");", face)
-        # Continuous listening may never go idle. Restore Xiaozhi's
-        # localized speaking/listening status on recovery, not a blank label.
-        self.assertIn("else if (last_rendered_fault && !body_unhealthy)", face)
-        self.assertIn("Lang::Strings::SPEAKING", face)
-        self.assertIn("Lang::Strings::LISTENING", face)
-        self.assertIn("else if (idle)", face)
-        self.assertIn("last_rendered_fault = false;", face)
+        renderer = (HEAD / "overlay/face_eye_display.hpp").read_text()
+        self.assertIn('OledDisplay::SetEmotion("neutral");', renderer)
+        self.assertIn("OledDisplay::SetStatus(normal_status_->c_str());", renderer)
         self.assertIn("const Action action = board->face_behavior_.update(obs);", face)
-        # The emergency neutral face is immediate, even while speaking.
-        self.assertLess(face.index('board->display_->SetEmotion("neutral");'), idle_mood)
         # A model mood is still permitted only through the healthy face owner.
         self.assertGreater(
             face.index("board->display_->SetEmotion(CosmeticMoodName(requested_mood))"),
@@ -1533,8 +1514,8 @@ def test_authenticated_mac_person_face_cue_is_cosmetic_only():
     assert 'cosmetic_mood_.offer(' in bridge
     assert 'CosmeticMoodName(requested_mood)' in board
     assert 'now_ms - model_mood_started_ms >= 1600U' in board
-    assert 'body_unhealthy || !face_available' in board
-    assert 'board->display_->SetStatus("Body safety stop");' in board
+    assert 'priority_active || !face_available' in board
+    assert 'board->local_eye_display_->SetLocalStatus(local_status);' in board
     assert 'Event(EventType::kPersonDetected)' in board
     assert 'body_unhealthy ? "sad" :' not in board
     assert 'person_cue_active ? "surprised" :' not in board
@@ -1547,25 +1528,21 @@ def test_sense_fault_face_overrides_idle_moods_and_recovers_once():
     face = board.split("static void FaceTask(void* context)", 1)[1].split(
         "void InitializeDisplay()", 1
     )[0]
-    assert 'if (body_unhealthy) {' in face
-    fault = face.split('if (body_unhealthy) {', 2)[-1].split(
+    assert 'if (priority_active) {' in face
+    fault = face.split('if (priority_active) {', 2)[-1].split(
         '} else if (requested_mood', 1
     )[0]
     # Motor safety is factual; a fault must not force scripted sadness.
     assert 'SetEmotion("sad")' not in fault
-    refresh = face.split("if (body_unhealthy &&\n", 1)[1].split(
-        "} else if (last_rendered_fault", 1
-    )[0]
-    assert "device_state != last_device_state" in refresh
-    assert "now_ms - last_fault_status_refresh_ms >= 750U" in refresh
-    assert 'if (last_idle_face_fault)\n                        ' in refresh
-    assert 'board->display_->SetEmotion("neutral");' in refresh
+    renderer = (HEAD / "overlay/face_eye_display.hpp").read_text()
+    assert "if (!lock || status == local_status_) return;" in renderer
+    assert 'OledDisplay::SetEmotion("neutral");' in renderer
     assert 'model_mood_active = false;' in fault
     # Recovery must force a neutral/local HSM face refresh even if its
     # idle picker emitted no new mood. No 100 ms continuous OLED spam.
-    assert 'if (last_idle_face_fault || model_mood_active ||' in face
-    assert 'last_idle_face_fault = body_unhealthy;' in face
-    assert 'SetStatus("Body safety stop")' in face
+    assert 'if (last_priority_active || model_mood_active ||' in face
+    assert 'last_priority_active = priority_active;' in face
+    assert "board->local_eye_display_->SetLocalStatus(local_status);" in face
 
 
 
@@ -1575,21 +1552,15 @@ def test_boot_microphone_privacy_has_own_local_oled_status():
     face = board.split("static void FaceTask(void* context)", 1)[1].split(
         "void InitializeDisplay()", 1
     )[0]
+    renderer = (HEAD / "overlay/face_eye_display.hpp").read_text()
     assert 'audio_operator_muted_.load(' in face
-    assert 'SetStatus("Mic privacy ON")' in face
-    assert '!body_unhealthy && mic_privacy_on' in face
-    assert '!body_unhealthy && !mic_privacy_on' in face
-    assert 'last_idle_face_fault ||' in face
-    assert 'now_ms - last_mic_privacy_refresh_ms >= 750U' in face
-    assert 'last_mic_privacy_overlay = mic_privacy_on;' in face
-    assert face.index('SetStatus("Body safety stop")') < face.index(
-        'SetStatus("Mic privacy ON")'
-    )
-    assert 'SetStatus(Lang::Strings::SPEAKING)' in face
-    assert 'SetStatus(Lang::Strings::LISTENING)' in face
-    assert 'app.ToggleChatState();' not in face.split(
-        'const bool mic_privacy_on = ', 1
-    )[1].split('last_mic_privacy_overlay = mic_privacy_on;', 1)[0]
+    assert 'body_unhealthy, dock_lockout, mic_privacy_on' in face
+    assert 'case FaceStatus::kMicPrivacy: status = "Mic privacy ON";' in renderer
+    assert "face_available && !priority_active && !model_mood_active" in face
+    assert "app.ToggleChatState();" not in face.split(
+        "const bool mic_privacy_on = ", 1
+    )[1]
+
 
 
 def test_playback_reference_clock_native_cpp_regression():
@@ -1688,7 +1659,7 @@ def test_sense_face_discards_person_cues_received_during_body_fault():
     assert "person_cue_until_ms" not in face
     assert 'person_cue_active ? "surprised"' not in face
     # A local status fault stays factual and never becomes a motor command.
-    assert 'board->display_->SetStatus("Body safety stop");' in face
+    assert 'board->local_eye_display_->SetLocalStatus(local_status);' in face
     assert "Transact(event" not in (HEAD / "overlay/robot_bridge.cc").read_text()
 
 def test_body_status_is_async_and_urgent_stop_preempts_uart_telemetry():
@@ -2128,7 +2099,7 @@ def test_sense_hsm_gaze_and_blink_reach_local_locked_oled_without_motor_motion()
     assert "const Action action = board->face_behavior_.update(obs);" in face
     assert "board->eye_animator_.Step(" in face
     assert "now_ms, action.motion," in face
-    assert "face_available && !body_unhealthy && !model_mood_active" in face
+    assert "face_available && !priority_active && !model_mood_active" in face
     assert "board->local_eye_display_->ShowEyes(eyes);" in face
     assert face.index("board->local_eye_display_->ShowEyes(eyes);") > face.index(
         "board->display_->SetEmotion(CosmeticMoodName(requested_mood))"
@@ -2366,7 +2337,7 @@ def test_camera_stream_never_spends_sequence_on_invalid_provenance_headers():
 def test_local_eye_display_arbitrates_faults_subtitles_and_malformed_coordinates():
     """Compile the actual renderer against a recursive-lock LVGL test double."""
     source = (HEAD / "sense/desk_robot_sense.cc").read_text()
-    assert "board->local_eye_display_->SetBodyFault(body_unhealthy);" in source
+    assert "board->local_eye_display_->SetLocalStatus(local_status);" in source
     compiler = shutil.which("g++") or shutil.which("c++")
     if compiler is None:
         raise unittest.SkipTest("Native C++ compiler unavailable")
@@ -2382,8 +2353,10 @@ struct lv_obj_t {
     int x = 0, y = 0, w = 0, h = 0;
     lv_obj_t* parent = nullptr;
     std::vector<lv_obj_t*> children;
+    std::string text;
 };
 inline lv_obj_t screen;
+inline const char* lv_label_get_text(lv_obj_t* n) { return n->text.c_str(); }
 inline lv_obj_t* lv_screen_active() { return &screen; }
 inline lv_obj_t* lv_obj_create(lv_obj_t* parent) {
     assert(lock_depth > 0);
@@ -2438,6 +2411,8 @@ public:
     }
     virtual void SetupUI() {
         DisplayLockGuard lock(this);
+        status_label_ = &status_storage_;
+        status_label_->text = "Initializing";
         if (!low_battery_popup_) {
             low_battery_popup_ = lv_obj_create(&screen);
             lv_obj_set_size(low_battery_popup_, 115, 24);
@@ -2446,6 +2421,27 @@ public:
     }
     int width() const { return 128; }
     int height() const { return 64; }
+    virtual void SetStatus(const char* value) {
+        DisplayLockGuard lock(this);
+        if (!status_label_) return;
+        ++status_writes;
+        status_label_->text = value;
+        status_label_->hidden = false;
+        notification.clear();
+    }
+    virtual void ShowNotification(const char* value, int = 3000) {
+        DisplayLockGuard lock(this);
+        if (!status_label_) return;
+        status_label_->hidden = true;
+        notification = value;
+    }
+    virtual void ShowNotification(const std::string& value, int duration = 3000) {
+        ShowNotification(value.c_str(), duration);
+    }
+    std::string Status() const { return status_label_->text; }
+    bool StatusVisible() const { return !status_label_->hidden; }
+    int status_writes = 0;
+    std::string notification;
     virtual bool SetEmotion(const char* value) {
         DisplayLockGuard lock(this);
         emotion = value;
@@ -2465,6 +2461,8 @@ public:
     lv_obj_t* BatteryPopup() const { return low_battery_popup_; }
     std::string emotion, subtitle;
 protected:
+    lv_obj_t status_storage_;
+    lv_obj_t* status_label_ = nullptr;
     lv_obj_t* low_battery_popup_ = nullptr;
 };
 """
@@ -2472,6 +2470,26 @@ protected:
 #include "face_eye_display.hpp"
 #include <cassert>
 int main() {
+    using desk_robot::FaceStatus;
+    using desk_robot::SelectFaceStatus;
+    for (bool fault : {false, true}) {
+        for (bool dock : {false, true}) {
+            for (bool privacy : {false, true}) {
+                assert(SelectFaceStatus(fault, dock, privacy) ==
+                    (fault ? (dock ? FaceStatus::kDockLock : FaceStatus::kBodyFault)
+                           : (privacy ? FaceStatus::kMicPrivacy : FaceStatus::kNormal)));
+            }
+        }
+    }
+    {
+        desk_robot::LocalEyeDisplay early;
+        early.SetLocalStatus(FaceStatus::kFaceUnavailable);
+        early.SetStatus("Connecting");
+        early.SetupUI();
+        assert(early.Status() == "Face task unavailable");
+        early.SetLocalStatus(FaceStatus::kNormal);
+        assert(early.Status() == "Connecting");
+    }
     desk_robot::LocalEyeDisplay display;
     OledDisplay* upstream = &display;
     display.SetupUI();
@@ -2493,15 +2511,42 @@ int main() {
     display.ShowEyes({true, false, 3, 0});
     assert(!layer->hidden && pupil->x == 7);
     assert(upstream->SetEmotion("happy"));
-    display.SetBodyFault(true);
+    upstream->SetStatus("Speaking");
+    upstream->ShowNotification("Earlier notification");
+    assert(!display.StatusVisible());
+    display.SetLocalStatus(FaceStatus::kBodyFault);
     assert(layer->hidden && display.emotion == "neutral");
+    assert(display.StatusVisible() && display.Status() == "Body safety stop");
+    const int fault_writes = display.status_writes;
+    for (int i = 0; i < 12; ++i) {
+        upstream->SetStatus("Listening");
+        upstream->ShowNotification("Volume changed");
+        upstream->ShowNotification(std::string("Network event"));
+        display.SetLocalStatus(FaceStatus::kBodyFault);
+        display.ShowEyes({true, true, 0, 0});
+        assert(display.StatusVisible() && display.Status() == "Body safety stop");
+        assert(display.notification.empty() && layer->hidden);
+        assert(display.status_writes == fault_writes);
+    }
     assert(!upstream->SetEmotion("happy"));
     assert(!upstream->SetEmotion(nullptr));
     assert(display.emotion == "neutral");
     display.ShowEyes({true, false, 3, 0});
     assert(layer->hidden);
     upstream->SetChatMessage("user", "new");
-    display.SetBodyFault(false);
+    display.SetLocalStatus(SelectFaceStatus(true, true, true));
+    assert(display.Status() == "Dock lock: motors off");
+    display.SetLocalStatus(SelectFaceStatus(false, false, true));
+    assert(display.Status() == "Mic privacy ON");
+    upstream->SetStatus("12:34");
+    upstream->ShowNotification("Ignore while muted");
+    assert(!upstream->SetEmotion("happy"));
+    display.ShowEyes({true, true, 0, 0});
+    assert(display.StatusVisible() && display.Status() == "Mic privacy ON" && layer->hidden);
+    display.SetLocalStatus(FaceStatus::kNormal);
+    assert(display.StatusVisible() && display.Status() == "12:34");
+    upstream->ShowNotification("Normal again");
+    assert(!display.StatusVisible() && display.notification == "Normal again");
     display.ShowEyes({true, false, 3, 0});
     assert(layer->hidden);
     upstream->SetChatMessage("user", nullptr);
@@ -2768,6 +2813,7 @@ int xTaskCreate(void (*)(void*), const char* name, int, void* context,
 struct WifiBoard { virtual void StartNetwork() {} };
 struct AudioCodec {};
 namespace desk_robot {
+enum class FaceStatus { kFaceUnavailable };
 struct Bridge {
     Bridge(void*, AudioCodec*) {}
     void Start() { ++starts; }
@@ -2781,8 +2827,10 @@ struct Face {
 struct Display {
     int statuses = 0;
     bool fault = false;
-    void SetBodyFault(bool value) { fault = value; }
-    void SetStatus(const char*) { ++statuses; }
+    void SetLocalStatus(desk_robot::FaceStatus value) {
+        fault = value == desk_robot::FaceStatus::kFaceUnavailable;
+        ++statuses;
+    }
 };
 struct BodyFaceStatus {};
 struct BodyFaceState {

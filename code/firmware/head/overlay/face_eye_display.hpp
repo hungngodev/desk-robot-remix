@@ -1,7 +1,7 @@
 #pragma once
 
 #include <algorithm>
-#include <atomic>
+#include <optional>
 #include <cstring>
 #include <string>
 
@@ -9,9 +9,17 @@
 #include "face_eye_animator.hpp"
 
 // Short eye gestures cover only Xiaozhi's 32-pixel emotion slot.
-// All display mutations share Xiaozhi's LVGL lock; safety status, subtitles,
-// microphone and speaker remain upstream-owned. No actuator API is reachable.
+// All display mutations share Xiaozhi's LVGL lock. Local safety/privacy status
+// owns the status label until cleared; upstream still owns audio and subtitles.
+// No actuator API is reachable.
 namespace desk_robot {
+enum class FaceStatus { kNormal, kBodyFault, kDockLock, kMicPrivacy, kFaceUnavailable };
+
+constexpr FaceStatus SelectFaceStatus(bool body_fault, bool dock_lockout, bool mic_privacy) {
+    if (body_fault) return dock_lockout ? FaceStatus::kDockLock : FaceStatus::kBodyFault;
+    return mic_privacy ? FaceStatus::kMicPrivacy : FaceStatus::kNormal;
+}
+
 class LocalEyeDisplay final : public OledDisplay {
 public:
     using OledDisplay::OledDisplay;
@@ -19,7 +27,12 @@ public:
     void SetupUI() override {
         OledDisplay::SetupUI();
         DisplayLockGuard lock(this);
-        if (!lock || eye_layer_ || width() != 128 || height() != 64) return;
+        if (!lock) return;
+        if (local_status_ != FaceStatus::kNormal) {
+            RememberNormalStatusLocked();
+            ApplyPriorityLocked();
+        }
+        if (eye_layer_ || width() != 128 || height() != 64) return;
         eye_layer_ = lv_obj_create(lv_screen_active());
         lv_obj_set_size(eye_layer_, 32, 48);
         // Xiaozhi's 128x64 idle emotion cell is 32px wide, centered in
@@ -55,24 +68,50 @@ public:
         if (low_battery_popup_) lv_obj_move_foreground(low_battery_popup_);
     }
 
-    // The pinned esp_lvgl_port 2.9.x lock is recursive. Hold the existing
-    // lock across arbitration and base display calls so a concurrent voice
-    // emotion cannot slip through after a fault has been observed.
-    void SetBodyFault(bool active) {
-        if (body_fault_.load(std::memory_order_acquire) == active) return;
+    // The pinned esp_lvgl_port 2.9.x lock is recursive. The priority change
+    // and every upstream write are serialized by that same lock, not repaired
+    // by a periodic status refresh. Keep the latest real upstream status for
+    // recovery (including clock, connection and localized voice states).
+    void SetLocalStatus(FaceStatus status) {
         DisplayLockGuard lock(this);
-        if (!lock) return;  // FaceTask retries the transition on its next tick.
-        body_fault_.store(active, std::memory_order_release);
-        if (active) {
-            RenderEyesLocked({});
-            OledDisplay::SetEmotion("neutral");
+        if (!lock || status == local_status_) return;
+        if (local_status_ == FaceStatus::kNormal) RememberNormalStatusLocked();
+        local_status_ = status;
+        if (status == FaceStatus::kNormal) {
+            if (normal_status_ && status_label_)
+                OledDisplay::SetStatus(normal_status_->c_str());
+            normal_status_.reset();
+        } else {
+            ApplyPriorityLocked();
         }
+    }
+
+    void SetStatus(const char* status) override {
+        if (!status) return;
+        DisplayLockGuard lock(this);
+        if (!lock) return;
+        if (local_status_ != FaceStatus::kNormal) {
+            normal_status_ = status;
+            return;
+        }
+        OledDisplay::SetStatus(status);
+    }
+
+    void ShowNotification(const char* notification, int duration_ms = 3000) override {
+        if (!notification) return;
+        DisplayLockGuard lock(this);
+        if (!lock || local_status_ != FaceStatus::kNormal) return;
+        OledDisplay::ShowNotification(notification, duration_ms);
+    }
+
+    void ShowNotification(const std::string& notification, int duration_ms = 3000) override {
+        ShowNotification(notification.c_str(), duration_ms);
     }
 
     bool SetEmotion(const char* emotion) override {
         if (!emotion) return false;
         DisplayLockGuard lock(this);
-        if (!lock || (body_fault_.load(std::memory_order_acquire) &&
+        if (!lock || (local_status_ != FaceStatus::kNormal &&
                       std::strcmp(emotion, "neutral") != 0)) return false;
         return OledDisplay::SetEmotion(emotion);
     }
@@ -99,7 +138,7 @@ public:
     void ShowEyes(const EyeFrame& frame) {
         DisplayLockGuard lock(this);
         if (!lock) return;
-        RenderEyesLocked(body_fault_.load(std::memory_order_acquire) || !subtitle_.empty()
+        RenderEyesLocked(local_status_ != FaceStatus::kNormal || !subtitle_.empty()
                              ? EyeFrame{} : frame);
     }
 
@@ -109,6 +148,27 @@ public:
     }
 
 private:
+    void RememberNormalStatusLocked() {
+        if (!normal_status_ && status_label_)
+            normal_status_ = lv_label_get_text(status_label_);
+    }
+
+    void ApplyPriorityLocked() {
+        RenderEyesLocked({});
+        // The base emotion label is initialized together with the status UI.
+        if (!status_label_) return;
+        OledDisplay::SetEmotion("neutral");
+        const char* status = "";
+        switch (local_status_) {
+            case FaceStatus::kBodyFault: status = "Body safety stop"; break;
+            case FaceStatus::kDockLock: status = "Dock lock: motors off"; break;
+            case FaceStatus::kMicPrivacy: status = "Mic privacy ON"; break;
+            case FaceStatus::kFaceUnavailable: status = "Face task unavailable"; break;
+            case FaceStatus::kNormal: return;
+        }
+        OledDisplay::SetStatus(status);
+    }
+
     static std::string NormalizeSubtitle(const char* content) {
         std::string text = content ? content : "";
         std::replace(text.begin(), text.end(), '\n', ' ');
@@ -147,7 +207,8 @@ private:
     lv_obj_t* pupil_[2] = {nullptr, nullptr};
     EyeFrame last_{};
     bool frame_known_ = false;
-    std::atomic<bool> body_fault_{false};
+    FaceStatus local_status_ = FaceStatus::kNormal;
+    std::optional<std::string> normal_status_;
     std::string subtitle_;
 };
 }  // namespace desk_robot
