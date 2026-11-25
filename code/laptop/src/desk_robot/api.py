@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from .api_ingress import APIIngress, authorized_token, token_matches
 from .api_memory_routes import (
     CoreMemoryRequest as CoreMemoryRequest,
 )
@@ -127,15 +128,17 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             await app.state.runtime.close()
 
     app = FastAPI(title="Desk robot controls", version="0.1.0", lifespan=lifespan)
+    app.add_middleware(
+        APIIngress, tokens=lambda: (app.state.operator_token, app.state.tool_token),
+    )
     consumed_tool_receipts: dict[str, float] = {}
 
     async def authorize(credentials: HTTPAuthorizationCredentials | None = Depends(security)):
         if (
             credentials is None
             or not credentials.credentials.isascii()
-            or not any(
-                secrets.compare_digest(credentials.credentials, token)
-                for token in (app.state.operator_token, app.state.tool_token)
+            or not authorized_token(
+                credentials.credentials, app.state.operator_token, app.state.tool_token,
             )
         ):
             raise HTTPException(401, "A valid private token is required")
@@ -144,7 +147,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         if (
             credentials is None
             or not credentials.credentials.isascii()
-            or not secrets.compare_digest(credentials.credentials, app.state.operator_token)
+            or not token_matches(credentials.credentials, app.state.operator_token)
         ):
             raise HTTPException(403, "Only the operator can enable movement")
 
