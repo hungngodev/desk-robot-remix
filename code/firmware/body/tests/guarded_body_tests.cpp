@@ -1,4 +1,5 @@
 #include <cstdio>
+#include <cmath>
 #include "BodyControl.h"
 #include "TouchDebounce.h"
 #include "CliffGuard.h"
@@ -3531,6 +3532,68 @@ static void eight_lane_optical_words_are_read_only_and_expire() {
   CHECK(!body.state().armed); // diagnostic cannot grant any motor authority
 }
 
+static void mpu_slow_lift_stops_before_drive_lease_expires() {
+  using desk_robot::BodyProfile;
+  for (const auto profile : {BodyProfile::StepperGuarded, BodyProfile::DcGuarded}) {
+    desk_robot::CliffGuard guard;
+    CHECK(guard.configure(config()));
+    desk_robot::BodyControl body(profile, &guard);
+    body.require_imu_for_motion(true);
+    body.require_imu_attitude_guard(true);
+    body.set_imu_identity(4, 0x68, 0);
+    CHECK(body.configure_imu_attitude_limits({{0, 0, 16384}, 800, 12000, 20000}));
+    desk_robot::BerryReading imu{};
+    imu.model = desk_robot::BerryModel::Mpu6050;
+    imu.valid = imu.low_g_status_valid = true;
+    imu.accel[2] = 16384;
+    imu.at_ms = 50;
+    body.set_imu(imu);
+    imu.at_ms = 100;
+    body.set_imu(imu);
+    fresh(guard, 100);
+    CHECK(send(body, "rearm", 100, true) == "OK rearm");
+    CHECK(send(body, "arm", 100) == "OK arm");
+    CHECK(send(body, "drive 40 40 250", 100).find("OK drive") == 0);
+
+    // 20 degrees/s, near 1 g throughout, no free-fall IRQ.
+    // Refresh safe drive leases so expiry cannot masquerade as an IMU stop.
+    for (int degrees = 1; degrees <= 38; ++degrees) {
+      const double rad = degrees * 3.14159265358979323846 / 180.0;
+      imu.accel[0] = static_cast<std::int16_t>(std::lround(16384 * std::sin(rad)));
+      imu.accel[2] = static_cast<std::int16_t>(std::lround(16384 * std::cos(rad)));
+      imu.gyro[1] = 2620;
+      imu.at_ms = 100U + 50U * static_cast<std::uint32_t>(degrees);
+      fresh(guard, imu.at_ms);
+      body.set_imu(imu);
+      if (degrees < 38) {
+        CHECK(body.state().armed && body.state().left == 40);
+        body.set_imu(imu); // identical cached sample is not a second conversion
+        body.tick(imu.at_ms);
+        CHECK(body.state().armed && body.state().left == 40);
+        if (degrees % 4 == 0)
+          CHECK(send(body, "drive 40 40 250", imu.at_ms).find("OK drive") == 0);
+      }
+    }
+    CHECK(!body.state().armed && body.state().left == 0 && body.state().right == 0);
+    CHECK(body.drive_remaining(imu.at_ms) == 0);
+    CHECK(send(body, "arm", imu.at_ms) == "ERR arm imu_attitude_latched");
+    CHECK(send(body, "drive 40 40 250", imu.at_ms) == "ERR drive disarmed");
+
+    imu.accel[0] = 0;
+    imu.accel[2] = 16384;
+    imu.gyro[1] = 0;
+    for (int i = 0; i < 2; ++i) {
+      imu.at_ms += 50;
+      fresh(guard, imu.at_ms);
+      body.set_imu(imu);
+    }
+    CHECK(send(body, "arm", imu.at_ms) == "ERR arm imu_attitude_latched");
+    CHECK(send(body, "rearm", imu.at_ms) == "ERR rearm local_only");
+    CHECK(send(body, "rearm", imu.at_ms, true) == "OK rearm");
+    CHECK(!body.state().armed && body.state().left == 0 && body.state().right == 0);
+  }
+}
+
 static void mpu_static_attitude_fails_closed_and_needs_usb_recovery() {
   desk_robot::CliffGuard guard;
   CHECK(guard.configure(config()));
@@ -3998,6 +4061,7 @@ int main() {
     zero_acceleration_mpu_does_not_authorize_motion();
     mpu_native_low_g_irq_vetoes_local_wheels();
     mpu_static_attitude_fails_closed_and_needs_usb_recovery();
+    mpu_slow_lift_stops_before_drive_lease_expires();
     guarded_startup_never_attaches_unmeasured_jaw_pwm();
     full_profile_lift_requires_measured_startup_and_travel();
     guarded_lift_never_replays_missed_servo_steps_in_one_pwm_write();
