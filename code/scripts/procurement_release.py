@@ -16,6 +16,7 @@ import math
 import sys
 from collections.abc import Iterable
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -828,17 +829,40 @@ def public_purchase_view(report: dict, *, live_receipts_verified: bool = False) 
 
 
 
+def _read_exact_bom() -> dict:
+    """Keep numeric BOM tokens exact before applying USD validation."""
+    data = json.loads(
+        (PLAN.parent / "bom.json").read_text(encoding="utf-8"),
+        parse_float=Decimal,
+        parse_constant=_reject_json_constant,
+        object_pairs_hook=_unique_json_object,
+    )
+    if not isinstance(data, dict):
+        raise ValueError("BOM must be an object")
+    return data
+
+
+def _historical_usd_cents(value: int | float | Decimal, label: str) -> int:
+    """Convert legacy numeric constants at the boundary, never round money."""
+    if type(value) not in (int, float, Decimal):
+        raise ValueError(f"{label}: expected numeric USD")
+    amount = cents(str(value) if type(value) is float else value, label)
+    if amount > 10_000_000:
+        raise ValueError(f"{label}: exceeds historical USD bound")
+    return amount
+
+
 def _documented_prior_spend_baseline() -> dict:
     """Known paid receipt is a floor, never a completed historical register."""
-    reference = _load_cli_json(PLAN.parent / "bom.json", "confirmed paid reference")
+    reference = _read_exact_bom()
     if not isinstance(reference, dict) or reference.get("currency") != "USD":
         raise ValueError("Confirmed prior payment reference is missing or invalid")
     payment = reference.get("paid_reconciliation")
     if not isinstance(payment, dict):
         raise ValueError("Confirmed Sense payment reconciliation is missing")
-    sense_cents = cents(str(payment.get("payment_total_usd")), "Sense payment")
+    sense_cents = cents(payment.get("payment_total_usd"), "Sense payment")
     baseline_cents = cents(
-        str(reference.get("reported_already_purchased_usd")), "prior paid floor",
+        reference.get("reported_already_purchased_usd"), "prior paid floor",
     )
     if sense_cents < 1 or baseline_cents < sense_cents:
         raise ValueError("Documented prior spend cannot omit paid Sense purchase")
@@ -1152,24 +1176,23 @@ def _historical_pilot_budget(sample_subtotal_usd: float) -> dict:
     The historical BOM is only a budget reference. It is NOT proof of an
     invoice, delivered price, qualified part, or permission to order.
     """
-    reference = json.loads((PLAN.parent / "bom.json").read_text(encoding="utf-8"))
-    cap = reference.get("cap_usd")
-    paid = reference.get("reported_already_purchased_usd")
-    if (reference.get("currency") != "USD"
-            or any(type(amount) not in (int, float)
-                   or not 0 <= amount <= 100000
-                   or round(amount, 2) != amount
-                   for amount in (cap, paid, sample_subtotal_usd))
-            or cap == 0):
-        raise ValueError("Invalid historical first-unit pilot budget reference")
-    combined = round(paid + sample_subtotal_usd, 2)
+    try:
+        reference = _read_exact_bom()
+        cap = _historical_usd_cents(reference.get("cap_usd"), "cap")
+        paid = _historical_usd_cents(
+            reference.get("reported_already_purchased_usd"), "paid"
+        )
+        subtotal = _historical_usd_cents(sample_subtotal_usd, "sample subtotal")
+        if reference.get("currency") != "USD" or cap == 0:
+            raise ValueError("expected a positive USD cap")
+    except (OSError, ValueError) as exc:
+        raise ValueError("Invalid historical first-unit pilot budget reference") from exc
+    combined = paid + subtotal
     return {
-        "first_unit_cap_usd": float(cap),
-        "reported_prior_spend_usd": float(paid),
-        "historical_combined_before_tax_shipping_usd": combined,
-        "historical_over_cap_before_tax_shipping_usd": round(
-            max(0.0, combined - cap), 2
-        ),
+        "first_unit_cap_usd": cap / 100,
+        "reported_prior_spend_usd": paid / 100,
+        "historical_combined_before_tax_shipping_usd": combined / 100,
+        "historical_over_cap_before_tax_shipping_usd": max(0, combined - cap) / 100,
         "current_landed_total_verified": False,
         "historical_over_cap_is_hypothetical": True,
         "all_previous_project_spend_reconciled": False,
@@ -1252,11 +1275,14 @@ def first_robot_pilot_samples(report: dict) -> dict:
                 if ident == "dock_ir_emitter_channels" else []
             ),
         })
-    subtotal = round(sum(
-        x["pilot_sample_quantity"] * x["historical_unit_quote_usd"]
+    subtotal_cents = sum(
+        x["pilot_sample_quantity"] * _historical_usd_cents(
+            x["historical_unit_quote_usd"], "sample unit quote"
+        )
         for x in decisions if x["pilot_sample_quantity"]
         and x["historical_unit_quote_usd"] is not None
-    ), 2)
+    )
+    subtotal = subtotal_cents / 100
     return {
         "purpose": "First robot bench samples, not five robot release",
         "pilot_sample_count": sum(x["pilot_sample_quantity"] for x in decisions),
@@ -1352,8 +1378,10 @@ def pilot_supplier_cart(report: dict) -> dict:
             "supplier_quote_only_reason": role["supplier_quote_only_reason"],
             "purchase_actionable_from_pilot_listing": False,
             "historical_unit_quote_usd": quote,
-            "historical_line_quote_usd": round(qty * quote, 2)
-            if quote is not None else None,
+            "historical_line_quote_usd": (
+                qty * _historical_usd_cents(quote, "sample unit quote") / 100
+                if quote is not None else None
+            ),
             "sample_is_complete_functional_channel":
                 role["sample_is_complete_functional_channel"],
             "missing_for_functional_channel":
@@ -1363,11 +1391,17 @@ def pilot_supplier_cart(report: dict) -> dict:
         x["checkout_seller_candidate"].casefold(), x["sku"]
     ))
     qty_sum = sum(x["quantity"] for x in items)
-    known_subtotal = round(sum(x["historical_line_quote_usd"]
-                               for x in items
-                               if x["historical_line_quote_usd"] is not None), 2)
+    known_subtotal_cents = sum(
+        x["quantity"] * _historical_usd_cents(
+            x["historical_unit_quote_usd"], "sample unit quote"
+        )
+        for x in items if x["historical_unit_quote_usd"] is not None
+    )
+    known_subtotal = known_subtotal_cents / 100
     if qty_sum != pilot["pilot_sample_count"] or (
-            known_subtotal != pilot["pilot_historical_quoted_subtotal_usd"]):
+            known_subtotal_cents != _historical_usd_cents(
+                pilot["pilot_historical_quoted_subtotal_usd"], "pilot subtotal"
+            )):
         raise ValueError("Supplier cart differs from single authoritative plan")
     return {
         "source": "first_robot_pilot_samples",

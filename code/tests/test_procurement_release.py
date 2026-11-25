@@ -2578,3 +2578,35 @@ def test_deferred_station_with_explicit_incomplete_room_receipts_is_held(parent,
     decisions = {row["id"]: row for row in report["supplemental_decisions"]}
     assert decisions[linked]["disposition"] == "deferred_optional"
     assert mod.conditional_station_decision_ids({parent, "room_controller"}) == {linked}
+
+
+@pytest.mark.parametrize("paid_token", [
+    "13.6700000000000001", "0.000000000000000000000000000000001",
+    "49.999999999999999999",
+])
+def test_historical_pilot_rejects_binary_float_hidden_subcent(
+    tmp_path, monkeypatch, paid_token,
+):
+    monkeypatch.setattr(mod, "PLAN", tmp_path / "full-feature-plan.json")
+    (tmp_path / "bom.json").write_text(
+        '{"currency":"USD","cap_usd":50,"reported_already_purchased_usd":'
+        + paid_token + ',"paid_reconciliation":{"payment_total_usd":13.67}}',
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="Invalid historical first-unit"):
+        mod._historical_pilot_budget(40.41)
+    with pytest.raises(ValueError):
+        mod._documented_prior_spend_baseline()
+
+
+def test_historical_pilot_exact_cents_preserve_budget_output(tmp_path, monkeypatch):
+    monkeypatch.setattr(mod, "PLAN", tmp_path / "full-feature-plan.json")
+    (tmp_path / "bom.json").write_text(
+        '{"currency":"USD","cap_usd":50.00,"reported_already_purchased_usd":'
+        '13.6700,"paid_reconciliation":{"payment_total_usd":13.6700}}',
+        encoding="utf-8",
+    )
+    out = mod._historical_pilot_budget(36.34)
+    assert out["historical_combined_before_tax_shipping_usd"] == 50.01
+    assert out["historical_over_cap_before_tax_shipping_usd"] == 0.01
+    assert mod._documented_prior_spend_baseline()["known_paid_cents"] == 1367
