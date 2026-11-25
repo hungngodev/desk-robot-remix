@@ -509,8 +509,20 @@ class Conversation:
             if self.settings.mode == "hardware":
                 self.speaker_stop_unconfirmed = True
             return
+        # A permission failure can start STOP before any task.cancel().
+        # A later pause/VAD must join that bounded cleanup, not cancel it
+        # and falsely turn an otherwise valid receipt into an uncertain STOP.
+        abort = asyncio.create_task(_bounded_speaker_abort(interrupt, robot))
+        cancellation = None
         try:
-            receipt = await _bounded_speaker_abort(interrupt, robot)
+            while not abort.done():
+                try:
+                    await asyncio.shield(abort)
+                except asyncio.CancelledError as exc:
+                    if abort.cancelled():
+                        raise
+                    cancellation = exc
+            receipt = abort.result()
             if getattr(self.speaker, "supports_head_drain_receipt", False) is True:
                 drain_gen = getattr(self, "_speaker_drain_generation", {})
                 _validate_head_drain_receipt(
@@ -522,6 +534,9 @@ class Conversation:
             if self.settings.mode == "hardware":
                 self.speaker_stop_unconfirmed = True
             raise
+        # Preserve caller cancellation after verifying the actual STOP.
+        if cancellation is not None:
+            raise cancellation
 
     async def recover_speaker_stop(self) -> None:
         """Explicit recovery requires new STOP receipts from every real head."""

@@ -8527,6 +8527,93 @@ async def test_tactile_reply_fences_admitted_camera_context(
 
 
 
+@pytest.mark.parametrize("stop_result", ["confirmed", "failed", "stale"])
+async def test_pet_pause_joins_inflight_permission_revocation_stop(
+    fleet, tmp_path, stop_result,
+):
+    """Pause must not cancel the already-started decoder cleanup."""
+    fleet.mode = "hardware"
+    robot = fleet.robot("robot-01")
+    entered, resume, stopping, release = (asyncio.Event() for _ in range(4))
+
+    class DelayedStopSpeaker(PassiveBudgetSimulatedSpeaker):
+        supports_head_drain_receipt = True
+
+        def __init__(self):
+            super().__init__()
+            self.interrupted = []
+
+        async def say(self, robot, text, *, permission_check=None):
+            entered.set()
+            await resume.wait()
+            await super().say(robot, text, permission_check=permission_check)
+
+        async def interrupt(self, robot):
+            self.interrupted.append(robot.id)
+            stopping.set()
+            await release.wait()
+            if stop_result == "failed":
+                raise RuntimeError("Synthetic STOP transport failure")
+            return {
+                "device_id": robot.device_id,
+                "interrupted": True,
+                "head_flush_requested": True,
+                "head_flush_acknowledged": True,
+                "head_queue_drained": True,
+                "queued_pcm_samples": 0,
+                "flush_generation": 0 if stop_result == "stale" else 1,
+            }
+
+    speaker = DelayedStopSpeaker()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), speaker, memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    pet.states[robot.id].enabled = True
+    allowed = True
+    task = asyncio.create_task(conversation.say_proactive(
+        robot, "That sounds interesting.",
+        permission_check=lambda: allowed, deliberate=True,
+    ))
+    pet._speech_task = task
+    pet._speech_participants = frozenset({robot.id})
+    pause_task = None
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        allowed = False
+        resume.set()
+        await asyncio.wait_for(stopping.wait(), timeout=1)
+        assert not task.cancelling()
+        pause_task = asyncio.create_task(pet.pause(robot.id))
+        done, _ = await asyncio.wait({pause_task}, timeout=0.05)
+        assert not done, "Pause must join the in-flight STOP"
+        assert conversation.session_lock.locked()
+        release.set()
+        if stop_result == "confirmed":
+            await asyncio.wait_for(pause_task, timeout=1)
+            assert not conversation.speaker_stop_unconfirmed
+        else:
+            with pytest.raises(RuntimeError, match="Pet decoder STOP unconfirmed"):
+                await asyncio.wait_for(pause_task, timeout=1)
+            assert conversation.speaker_stop_unconfirmed
+        with pytest.raises(RuntimeError, match="Simulated speech permission revoked"):
+            await task
+        assert speaker.interrupted == [robot.id]
+        assert speaker.spoken == []
+        assert not pet.states[robot.id].enabled
+    finally:
+        resume.set()
+        release.set()
+        await asyncio.gather(
+            task, *([pause_task] if pause_task is not None else []),
+            return_exceptions=True,
+        )
+        if conversation.speaker_stop_unconfirmed:
+            with pytest.raises(RuntimeError, match="One or more pet observers did not stop"):
+                await pet.close()
+        else:
+            await pet.close()
+
+
 @pytest.mark.parametrize(("window", "initial", "during", "resumed"), [
     (None, None, None, None),
     (["22:00", "07:00"], "06:59", None, "07:00"),
