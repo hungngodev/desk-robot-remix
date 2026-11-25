@@ -645,6 +645,33 @@ int main() {
             '&bytes_read, portMAX_DELAY) != ESP_OK', reader,
         )
 
+    def test_sense_pdm_tx_clock_is_explicit_and_checked_before_init(self):
+        """Inspect the effective pinned codec, not just the board rate macro."""
+        overlay.apply(self.root, "sense")
+        path = "main/audio/codecs/no_audio_codec.cc"
+        codec = (self.root / path).read_text()
+        tx = codec.split("i2s_std_config_t tx_std_cfg = {", 1)[1].split(
+            "ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &tx_std_cfg));", 1
+        )[0]
+        assert ".sample_rate_hz = (uint32_t)output_sample_rate_" in tx
+        assert ".mclk = I2S_GPIO_UNUSED" in tx
+        assert "tx_std_cfg.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT;" in tx
+        for check in (
+            "tx_std_cfg.clk_cfg.sample_rate_hz == 32000",
+            "tx_std_cfg.clk_cfg.mclk_multiple == I2S_MCLK_MULTIPLE_256",
+            "tx_std_cfg.slot_cfg.data_bit_width == I2S_DATA_BIT_WIDTH_32BIT",
+            "tx_std_cfg.slot_cfg.ws_width == 32",
+            "tx_std_cfg.slot_cfg.slot_mode == I2S_SLOT_MODE_MONO",
+            "tx_std_cfg.slot_cfg.bit_shift",
+        ):
+            assert check in tx
+        assert "? ESP_OK : ESP_ERR_INVALID_ARG" in tx
+        assert tx.index("#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3") < tx.index(
+            "tx_std_cfg.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT;"
+        )
+        overlay.remove(self.root)
+        assert (self.root / path).read_bytes() == self.original[path]
+
     def test_invalid_32khz_opus_offer_does_not_destroy_decoder(self):
         """The 32 kHz DAC clock is not an Opus decode rate (source gate)."""
         overlay.apply(self.root, 'sense')

@@ -561,6 +561,26 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
             "        tx_handle_, buffer, samples * sizeof(int32_t),\n"
             "        &bytes_written, pdMS_TO_TICKS(120));",
         )
+        # Lock the actual PDM codec TX framing, not the Opus transport rate.
+        # Keep mono DMA samples and the pinned 32-bit I2S wire format.
+        codec_source = replace_once(
+            codec_source,
+            "    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &tx_std_cfg));",
+            '''#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
+    // Two 32-bit wire slots: LRCLK 32 kHz, BCLK 2.048 MHz.
+    // The 256x internal MCLK is 8.192 MHz (not routed to a GPIO).
+    tx_std_cfg.slot_cfg.slot_bit_width = I2S_SLOT_BIT_WIDTH_32BIT;
+    ESP_ERROR_CHECK(
+        (tx_std_cfg.clk_cfg.sample_rate_hz == 32000 &&
+         tx_std_cfg.clk_cfg.mclk_multiple == I2S_MCLK_MULTIPLE_256 &&
+         tx_std_cfg.slot_cfg.data_bit_width == I2S_DATA_BIT_WIDTH_32BIT &&
+         tx_std_cfg.slot_cfg.ws_width == 32 &&
+         tx_std_cfg.slot_cfg.slot_mode == I2S_SLOT_MODE_MONO &&
+         tx_std_cfg.slot_cfg.bit_shift)
+            ? ESP_OK : ESP_ERR_INVALID_ARG);
+#endif
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &tx_std_cfg));''',
+        )
         files[path] = codec_source.encode()
 
         # Preserve upstream notification progress semantics. Add a separate
