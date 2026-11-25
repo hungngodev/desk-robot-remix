@@ -1005,7 +1005,7 @@ int main() {
       const auto& current = recovery.readings().nfc;
       if (recovery_wire.nfc_corrupt_scan_acks == 1 && !saw_bad_ack) {
         CHECK(!current.valid && !current.present);
-        CHECK(current.tag_visible && current.tag_token == initial.tag_token);
+        CHECK(!current.tag_visible && current.tag_token == 0U && current.uid_length == 0U);
         CHECK(current.tag_events == initial.tag_events);
         CHECK(current.scan_seq == initial.scan_seq);
         saw_bad_ack = true;
@@ -1032,11 +1032,14 @@ int main() {
     CHECK(recovered.tag_events == initial.tag_events + 1U);
     CHECK(recovery_wire.ranges == 0 && recovery_wire.extras == 0);
     // An in-flight PN532 ScanResponse interrupted by shared-bus invalidation or
-    // dock GPIO failure must never consume the stale response frame on recovery.
-    for (bool dock_nack : {false, true}) {
+    // dock GPIO failure or contact transition must not consume the stale response.
+    enum class NfcBoundary { BusFault, DockNack, DockEntry, DockRemoval };
+    for (auto boundary : {NfcBoundary::BusFault, NfcBoundary::DockNack,
+                          NfcBoundary::DockEntry, NfcBoundary::DockRemoval}) {
       TwoWire inflight_wire;
       inflight_wire.nfc_connected = true;
       inflight_wire.nfc_tag_present = true;
+      inflight_wire.dock_gpioA = boundary == NfcBoundary::DockRemoval ? 0x0d : 0x0c;
       desk_robot::AccessorySensors inflight;
       CHECK(inflight.begin(inflight_wire));
       std::uint32_t ms = 0;
@@ -1055,16 +1058,21 @@ int main() {
       CHECK(armed_scan_response);
       const auto pre_fault_seq = inflight.readings().nfc.scan_seq;
       const auto pre_fault_scans = inflight_wire.nfc_scans;
-      if (dock_nack) {
-        ms += 12;
-        inflight_wire.fail_dock_gpio = true;
-        for (int step = 0; step < 7; ++step, ms += 12) inflight.poll(ms);
-        CHECK(!inflight.readings().dock.valid);
-      } else {
-        ms += 12;
+      ms += 12;
+      if (boundary == NfcBoundary::BusFault) {
         inflight.invalidate_bus();
+      } else {
+        inflight_wire.fail_dock_gpio = boundary == NfcBoundary::DockNack;
+        if (boundary == NfcBoundary::DockEntry) inflight_wire.dock_gpioA = 0x0d;
+        if (boundary == NfcBoundary::DockRemoval) inflight_wire.dock_gpioA = 0x0c;
+        for (int step = 0; step < 7; ++step, ms += 12) inflight.poll(ms);
+        CHECK(inflight.readings().dock.valid == (boundary != NfcBoundary::DockNack));
       }
       CHECK(!inflight.readings().nfc.valid);
+      CHECK(!inflight.readings().nfc.tag_visible);
+      CHECK(inflight.readings().nfc.tag_token == 0U);
+      CHECK(inflight.readings().nfc.uid_length == 0U);
+      CHECK(inflight.readings().nfc.tag_events == baseline.tag_events);
       CHECK(inflight.readings().nfc.scan_seq == pre_fault_seq);
       // Restore the bus; leave nfc_phase == 2 in Wire. If the phase were not
       // reset, the first lane-5 recovery slot would accept that stale frame.

@@ -537,6 +537,8 @@ void AccessorySensors::power(std::uint32_t now_ms) {
 void AccessorySensors::dock_status(std::uint32_t now_ms) {
   auto& dock = data_.dock;
   if (!dock.present) return;
+  const bool had_contact = dock.left_seated || dock.right_seated ||
+                           dock.input_good || dock.charge_indicated;
   std::uint8_t bits = 0;
   dock.valid = read(0x20, 0x12, &bits, 1);
   if (!dock.valid) return;
@@ -547,6 +549,11 @@ void AccessorySensors::dock_status(std::uint32_t now_ms) {
   // Do not mask a CHG-low/PGOOD-high contradiction; BodyControl must
   // see it and latch contact safety, while Mac reports a charger fault.
   dock.charge_indicated = dock_chg_asserted(bits);
+  const bool has_contact = dock.left_seated || dock.right_seated ||
+                           dock.input_good || dock.charge_indicated;
+  // A contact transition invalidates any scan begun in the prior session.
+  // Keep dock GPIO acquisition authoritative and restart only optional NFC.
+  if (had_contact != has_contact) reset_nfc_protocol(now_ms);
   dock.at_ms = now_ms;
   dock.sample_seq = next_nonzero_sensor_sequence(dock.sample_seq); // fresh GPIOA read
 }

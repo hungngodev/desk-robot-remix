@@ -166,11 +166,14 @@ struct NfcRaw {
   std::uint32_t scan_seq = 0;   // completed independent PN532 scans
   std::uint32_t at_ms = 0;
 
-  // A failed PN532 transaction invalidates the public observation, not the
-  // last confirmed presentation. The next valid scan of the same tag must
-  // not invent an arrival; only a completed absent scan may clear identity.
+  // Discard live UID provenance on a failed transaction or dock boundary.
+  // A private historical baseline only suppresses duplicate arrivals; it
+  // cannot be exposed as a current tag without a complete validated scan.
   void transport_failed() {
     present = valid = false;
+    tag_visible = false;
+    tag_token = 0;
+    uid_length = 0;
   }
   void completed_scan(bool visible, std::uint32_t token,
                       std::uint8_t uid_len, std::uint32_t now_ms) {
@@ -178,7 +181,7 @@ struct NfcRaw {
     at_ms = now_ms;
     scan_seq = next_nonzero_sensor_sequence(scan_seq);
     if (visible) {
-      if (!tag_visible || tag_token != token)
+      if (!last_confirmed_visible_ || last_confirmed_token_ != token)
         tag_events = next_nonzero_sensor_sequence(tag_events);
       tag_visible = true;
       tag_token = token;
@@ -188,7 +191,13 @@ struct NfcRaw {
       tag_token = 0;
       uid_length = 0;
     }
+    last_confirmed_visible_ = visible;
+    last_confirmed_token_ = visible ? token : 0U;
   }
+
+ private:
+  bool last_confirmed_visible_ = false;
+  std::uint32_t last_confirmed_token_ = 0;
 };
 struct AccessoryReadings {
   AngleRaw angle[3]{}; // index 0 nose, 1 left track, 2 right track

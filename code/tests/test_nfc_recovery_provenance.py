@@ -36,9 +36,10 @@ int main() {
 
   // PN532 rejects an ACK or transport read while A stays on the antenna.
   sample.transport_failed();
-  if (sample.valid || sample.present || !sample.tag_visible ||
-      sample.tag_token != a || sample.tag_events != 1 ||
+  if (sample.valid || sample.present || sample.tag_visible ||
+      sample.tag_token != 0 || sample.uid_length != 0 || sample.tag_events != 1 ||
       sample.scan_seq != 1 || sample.at_ms != 100) return 2;
+  sample.transport_failed();
   sample.completed_scan(true, a, 4, 200);
   if (!sample.valid || sample.tag_events != 1 ||
       sample.scan_seq != 2 || sample.at_ms != 200) return 3;
@@ -85,7 +86,7 @@ int main() {
 
 
 def test_nfc_runtime_uses_the_provenance_helper_after_bad_ack():
-    """The real firmware poller must use the tested helper, not reset the UID."""
+    """The poller must invalidate live evidence without inventing an arrival."""
     source = (ACCESSORIES / "AccessorySensors.cpp").read_text()
     poll = source.split("void AccessorySensors::nfc_poll(", 1)[1].split(
         "void AccessorySensors::", 1
