@@ -173,12 +173,11 @@ private:
             const uint32_t failure_epoch = app.GetSenseAudioFailureEpoch();
             // Initial launch or a proved channel closure/open failure ONLY.
             // A healthy intentional Idle transition must not force a new
-            // session. One 5s retry ceiling also prevents a 100ms storm.
+            // session. Space every attempt by at least 5s, including WiFi flaps.
             const bool failed_since_attempt =
                 failure_epoch != board->last_audio_failure_epoch_seen_;
-            if (!board->continuous_audio_started_ ||
-                    (failed_since_attempt &&
-                     now_ms - board->last_audio_listen_attempt_ms_ >= 5000U)) {
+            if ((!board->continuous_audio_started_ || failed_since_attempt) &&
+                    now_ms - board->last_audio_listen_attempt_ms_ >= 5000U) {
                 if (!board->audio_operator_touched_.load()
                         && wifi_connected && now_ms >= 10000
                         && device_state == kDeviceStateIdle

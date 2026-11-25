@@ -117,7 +117,7 @@ class SenseOverlayTests(unittest.TestCase):
         assert "std::atomic<uint32_t> sense_audio_failure_epoch_{0};" in header
         assert "const uint32_t failure_epoch = app.GetSenseAudioFailureEpoch();" in face
         assert "failure_epoch != board->last_audio_failure_epoch_seen_" in face
-        assert "failed_since_attempt &&" in face
+        assert "(!board->continuous_audio_started_ || failed_since_attempt) &&" in face
         assert "now_ms - board->last_audio_listen_attempt_ms_ >= 5000U" in face
         assert "board->last_audio_failure_epoch_seen_ = failure_epoch;" in face
         assert "!board->audio_operator_touched_.load()" in face
@@ -261,7 +261,7 @@ int main() {
         self.assertIn('board->continuous_audio_started_ = false;', source)
         self.assertIn('&& wifi_connected && now_ms >= 10000', source)
         self.assertLess(
-            source.index('if (!board->continuous_audio_started_'),
+            source.index('if ((!board->continuous_audio_started_'),
             source.index('app.ToggleChatState();  // existing Xiaozhi realtime listen'),
         )
         self.assertIn('audio_operator_touched_.store(true, std::memory_order_release);', source)
@@ -834,6 +834,12 @@ int main() {
             "void InitializeDisplay()", 1,
         )[0]
         self.assertIn("last_audio_listen_attempt_ms_ = 0;", board)
+        # Both initial/reconnect and failure paths must share the throttle.
+        self.assertIn(
+            "if ((!board->continuous_audio_started_ || failed_since_attempt) &&\n"
+            "                    now_ms - board->last_audio_listen_attempt_ms_ >= 5000U)",
+            face,
+        )
         self.assertIn(
             "now_ms - board->last_audio_listen_attempt_ms_ >= 5000U", face,
         )
