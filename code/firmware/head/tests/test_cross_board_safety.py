@@ -16,7 +16,11 @@ def test_head_parser_and_wroom_leases(tmp_path: Path) -> None:
     binary = tmp_path / "cross_board_safety"
     args = [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror"]
     if sys.platform.startswith("linux"):
-        args += ["-fsanitize=address,undefined", "-fno-omit-frame-pointer", "-no-pie"]
+        # UBSan is recoverable by default; a printed runtime error must fail pytest.
+        args += [
+            "-fsanitize=address,undefined", "-fno-sanitize-recover=all",
+            "-fno-omit-frame-pointer", "-no-pie",
+        ]
     args += ["-I", str(HEAD / "overlay")]
     for directory in (
         "BodyControl", "CliffGuard", "BerryImu", "PulsePad", "AccessorySensors", "TerminalIr"
