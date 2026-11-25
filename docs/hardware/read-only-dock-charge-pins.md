@@ -27,7 +27,7 @@ prove correct mating, polarity, or electrical independence.
 | --- | --- |
 | Empty dock, including startup/reset or loss of controller power | Off |
 | Partial bump, left switch alone, or right switch alone | Off |
-| One switch stuck, open wire, shorted wire, or contradictory seat evidence | Off unless an independently reviewed circuit can positively prove safe mating without that failed channel; no such circuit is qualified today |
+| One switch stuck, open wire, shorted wire, or contradictory seat evidence | Off; do not bypass a failed seat channel |
 | Both switches apparently seated, but polarity, contact coverage or protection not established | Off |
 | Full correctly polarized seating and independently validated hardware interlock | Eligible for separate current-limited electrical acceptance only; still off in the current unqualified build |
 | Removal, intermittent seating, or dock supply loss/recovery | Off; no software-only reenable |
