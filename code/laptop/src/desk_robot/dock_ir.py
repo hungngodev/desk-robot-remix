@@ -23,18 +23,9 @@ def dock_beacon_code(dock_id: int) -> int:
 # An agreed nonzero code is not sufficient evidence of a known dock.
 _KNOWN_DOCK_CODES = frozenset(dock_beacon_code(i) for i in range(1, 6))
 
-def validate_ir(data: dict, robot_id: str, *,
-                expected_dock_id: int | None = None,
-                elapsed_ms: float = 0.0) -> dict:
-    if expected_dock_id is not None:
-        expected_code = dock_beacon_code(expected_dock_id)
-    else:
-        expected_code = None
-    # The WROOM age is measured when its report is assembled, not when the
-    # Mac receives it. Include all subsequent transport/decision latency.
-    # Invalid elapsed time never creates a fresher beacon.
-    if type(elapsed_ms) not in (int, float) or not 0 <= elapsed_ms <= 1e9:
-        raise ValueError("Invalid NEC elapsed request age")
+
+def _validate_receipt_fields(data: dict, robot_id: str, elapsed_ms: float) -> None:
+    """Check robot identity, types, authority and per-receiver freshness."""
     if not isinstance(data, dict) or data.get("robot_id") != robot_id:
         raise ValueError("Wrong or missing NEC receiver robot identity")
     for key in ("left_valid", "right_valid", "match"):
@@ -53,6 +44,10 @@ def validate_ir(data: dict, robot_id: str, *,
             or data[f"{side}_age_ms"] + elapsed_ms > 200
         ):
             raise ValueError(f"Fresh NEC {side} needs a real hardware frame")
+
+
+def _validate_match(data: dict, expected_code: int | None) -> None:
+    """Check aggregate beacon identity and receiver agreement."""
     if data["match"]:
         if (not data["left_valid"] or not data["right_valid"]
                 or data["code"] == 0):
@@ -70,6 +65,10 @@ def validate_ir(data: dict, robot_id: str, *,
         # A valid code from robot-04's dock is not robot-01's dock.
         # Never let calibration or an observer silently accept a foreign dock.
         raise ValueError("Foreign NEC dock beacon: expected assigned dock")
+
+
+def _validate_receiver_codes(data: dict, expected_code: int | None) -> None:
+    """Validate optional per-receiver identities after the common receipt gates."""
     side_keys = ("left_code", "right_code")
     if any(key in data for key in side_keys):
         for side in ("left", "right"):
@@ -82,4 +81,21 @@ def validate_ir(data: dict, robot_id: str, *,
                 raise ValueError("Foreign NEC dock beacon: expected assigned dock")
         if data["match"] and any(data[key] != data["code"] for key in side_keys):
             raise ValueError("Matched NEC beacon disagrees with receiver identity")
+
+
+def validate_ir(data: dict, robot_id: str, *,
+                expected_dock_id: int | None = None,
+                elapsed_ms: float = 0.0) -> dict:
+    if expected_dock_id is not None:
+        expected_code = dock_beacon_code(expected_dock_id)
+    else:
+        expected_code = None
+    # The WROOM age is measured when its report is assembled, not when the
+    # Mac receives it. Include all subsequent transport/decision latency.
+    # Invalid elapsed time never creates a fresher beacon.
+    if type(elapsed_ms) not in (int, float) or not 0 <= elapsed_ms <= 1e9:
+        raise ValueError("Invalid NEC elapsed request age")
+    _validate_receipt_fields(data, robot_id, elapsed_ms)
+    _validate_match(data, expected_code)
+    _validate_receiver_codes(data, expected_code)
     return data
