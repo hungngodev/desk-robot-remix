@@ -41,6 +41,7 @@ struct BenchPcmTransfer {
 };
 #endif
 JsonPtr Parse(const std::string& value) {
+    if (!JsonWireBounded(value)) return JsonPtr(nullptr, cJSON_Delete);
     return JsonPtr(cJSON_ParseWithLengthOpts(value.c_str(), value.size() + 1, nullptr, true), cJSON_Delete);
 }
 std::string Encode(cJSON* value) {
@@ -574,8 +575,8 @@ BodyInteraction Bridge::PollInteraction() {
 bool Bridge::Authorize(httpd_req_t* req) {
     const size_t length = httpd_req_get_hdr_value_len(req, "Authorization");
     if (!enabled_ || length == 0 || length > 160) return false;
-    std::vector<char> header(length + 1);
-    if (httpd_req_get_hdr_value_str(req, "Authorization", header.data(), header.size()) != ESP_OK) return false;
+    char header[161] = {};
+    if (httpd_req_get_hdr_value_str(req, "Authorization", header, sizeof(header)) != ESP_OK) return false;
     const std::string expected = std::string("Bearer ") + CONFIG_DESK_ROBOT_TOKEN;
     unsigned diff = static_cast<unsigned>(length ^ expected.size());
     for (size_t i = 0; i < expected.size(); ++i) diff |= static_cast<unsigned char>(expected[i]) ^
@@ -600,6 +601,12 @@ esp_err_t Bridge::Json(httpd_req_t* req, int status, const std::string& body) {
     httpd_resp_set_status(req, status_text);
     httpd_resp_set_type(req, "application/json");
     httpd_resp_set_hdr(req, "Cache-Control", "no-store");
+    // Do not let HTTPD drain an unauthenticated, possibly unbounded body.
+    if (status == 401) {
+        httpd_resp_set_hdr(req, "Connection", "close");
+        (void)httpd_resp_send(req, body.data(), body.size());
+        return ESP_FAIL;
+    }
     return httpd_resp_send(req, body.data(), body.size());
 }
 
@@ -814,6 +821,34 @@ void Bridge::BenchPcmTask(void* context) {
 
 esp_err_t Bridge::Handle(httpd_req_t* req) {
     if (!Authorize(req)) return Json(req, 401, Envelope(false, "unauthorized"));
+    const auto reject = [&](int status, const char* reason) {
+        httpd_resp_set_hdr(req, "Connection", "close");
+        (void)Json(req, status, Envelope(false, reason));
+        return ESP_FAIL; // HTTPD closes instead of draining unread request data.
+    };
+    // ESP-IDF httpd_req_recv does not support chunked request bodies.
+    // Check the original decimal header as well as HTTPD's size_t result:
+    // older ESP-IDF parsers can narrow a 64-bit Content-Length on ESP32.
+    char transfer_encoding[1] = {};
+    if (httpd_req_get_hdr_value_str(req, "Transfer-Encoding", transfer_encoding,
+                                    sizeof(transfer_encoding)) != ESP_ERR_NOT_FOUND)
+        return reject(400, "transfer encoding unsupported");
+    char content_length[24] = {};
+    const auto length_status = httpd_req_get_hdr_value_str(
+        req, "Content-Length", content_length, sizeof(content_length));
+    const auto length_bytes = httpd_req_get_hdr_value_len(req, "Content-Length");
+    if (length_status == ESP_ERR_NOT_FOUND) {
+        if (req->content_len != 0) return reject(400, "missing content length");
+    } else if (length_status != ESP_OK || length_bytes >= sizeof(content_length) ||
+               !ContentLengthMatches(std::string_view(content_length, length_bytes),
+                                     req->content_len)) {
+        return reject(400, "invalid content length");
+    }
+    if (req->content_len > kMaxBody) return reject(413, "invalid body length");
+    const bool json_route = req->method == HTTP_POST &&
+        (strcmp(req->uri, "/api/command") == 0 || strcmp(req->uri, "/api/face") == 0);
+    if (!json_route && req->content_len != 0)
+        return reject(400, "request body not permitted");
 
 #if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3) && defined(CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED)
     // A capture generation is only unique within a head boot. Check both
@@ -1055,21 +1090,30 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         }
         return ESP_OK;
     }
-    if (req->content_len == 0 || req->content_len > kMaxBody) {
-        httpd_resp_set_hdr(req, "Connection", "close");
-        Json(req, req->content_len > kMaxBody ? 413 : 400, Envelope(false, "invalid body length"));
-        return ESP_FAIL;
-    }
+    // The URI matcher may dispatch a path with a query suffix. Never let an
+    // unmatched face/GET URI fall through to the operator command handler.
+    if (!json_route) return reject(400, "unsupported route");
+    if (req->content_len == 0) return reject(400, "invalid body length");
     char content_type[40] = {};
-    if (httpd_req_get_hdr_value_str(req, "Content-Type", content_type, sizeof(content_type)) != ESP_OK ||
-        (strcmp(content_type, "application/json") != 0 && strcmp(content_type, "application/json; charset=utf-8") != 0))
-        return Json(req, 415, Envelope(false, "application/json required"));
+    const auto type_bytes = httpd_req_get_hdr_value_len(req, "Content-Type");
+    if (type_bytes >= sizeof(content_type) ||
+        httpd_req_get_hdr_value_str(req, "Content-Type", content_type, sizeof(content_type)) != ESP_OK)
+        return reject(415, "application/json required");
+    const std::string_view type(content_type, type_bytes);
+    if (type != "application/json" && type != "application/json; charset=utf-8")
+        return reject(415, "application/json required");
     std::string body(req->content_len, '\0');
     size_t got = 0;
+    const auto deadline = esp_timer_get_time() + 2'000'000;
     while (got < body.size()) {
-        int n = httpd_req_recv(req, body.data() + got, body.size() - got);
-        if (n <= 0) return Json(req, 400, Envelope(false, "incomplete request body"));
-        got += n;
+        if (esp_timer_get_time() >= deadline)
+            return reject(400, "request body deadline exceeded");
+        const int n = httpd_req_recv(req, body.data() + got, body.size() - got);
+        if (n <= 0 || static_cast<size_t>(n) > body.size() - got)
+            return reject(400, "incomplete request body");
+        if (esp_timer_get_time() >= deadline)
+            return reject(400, "request body deadline exceeded");
+        got += static_cast<size_t>(n);
     }
     if (body.find('\0') != std::string::npos || body.find("\\u0000") != std::string::npos) return Json(req, 400, Envelope(false, "embedded null"));
     auto json = Parse(body);

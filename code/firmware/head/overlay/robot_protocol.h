@@ -11,6 +11,37 @@
 #include <vector>
 
 namespace desk_robot {
+inline bool ContentLengthMatches(std::string_view field, std::size_t parsed) {
+    if (field.empty()) return false;
+    for (char c : field) if (c < '0' || c > '9') return false;
+    std::size_t declared = 0;
+    const auto [end, ec] = std::from_chars(field.data(), field.data() + field.size(), declared);
+    return ec == std::errc{} && end == field.data() + field.size() && declared == parsed;
+}
+
+inline bool JsonWireBounded(std::string_view value) {
+    // Bound parser recursion before allocating any cJSON nodes. Quoted braces
+    // are data, not nesting; the parser still validates complete JSON syntax.
+    unsigned depth = 0;
+    bool quoted = false;
+    bool escaped = false;
+    for (char c : value) {
+        if (c == '\0') return false;
+        if (quoted) {
+            if (escaped) escaped = false;
+            else if (c == '\\') escaped = true;
+            else if (c == '"') quoted = false;
+        } else if (c == '"') quoted = true;
+        else if (c == '{' || c == '[') {
+            if (++depth > 12) return false;
+        } else if (c == '}' || c == ']') {
+            if (depth == 0) return false;
+            --depth;
+        }
+    }
+    return !quoted && depth == 0 && value.find("\\u0000") == std::string_view::npos;
+}
+
 // Validate bytes BEFORE publishing a source identity or JPEG success receipt.
 // These are the same bounded native JPEG framing requirements on both routes.
 inline bool CompleteJpeg(const std::uint8_t* data, std::size_t size) {

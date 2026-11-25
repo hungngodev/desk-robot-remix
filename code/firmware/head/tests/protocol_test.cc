@@ -1,9 +1,38 @@
 #include <cassert>
+#include <limits>
 #include <string>
 #include "robot_protocol.h"
 #include "real_touch_edges.h"
 using namespace desk_robot;
 int main() {
+    assert(ContentLengthMatches("0", 0));
+    assert(ContentLengthMatches("0160", 160));
+    assert(ContentLengthMatches("160", 160));
+    assert(!ContentLengthMatches("", 0));
+    assert(!ContentLengthMatches("160", 159));
+    assert(!ContentLengthMatches("4294967296", 0));
+    assert(!ContentLengthMatches("4294967456", 160));
+    assert(!ContentLengthMatches("18446744073709551616", 0));
+    assert(ContentLengthMatches(std::to_string(std::numeric_limits<std::size_t>::max()),
+                                std::numeric_limits<std::size_t>::max()));
+    for (const auto field : {"-1", "+1", " 1", "1 ", "1,1", "1\t", "1x"})
+        assert(!ContentLengthMatches(field, 1));
+    assert(!ContentLengthMatches(std::string_view("1\0", 2), 1));
+    assert(JsonWireBounded(R"({"command":"stop"})"));
+    assert(JsonWireBounded(R"({"event":"[{{{\"}}}}"})"));
+    assert(JsonWireBounded(std::string(12, '[') + std::string(12, ']')));
+    assert(!JsonWireBounded(std::string(13, '[') + std::string(13, ']')));
+    assert(!JsonWireBounded(R"({"command":"stop\u0000"})"));
+    assert(!JsonWireBounded(std::string_view("{}\0", 3)));
+    assert(!JsonWireBounded("}"));
+    assert(!JsonWireBounded("{\""));
+    for (unsigned seed = 0; seed < 100000; ++seed) {
+        auto field = std::to_string(seed);
+        assert(ContentLengthMatches(field, seed));
+        assert(!ContentLengthMatches(field, seed + 1));
+        assert(!ContentLengthMatches(field + ",0", seed));
+    }
+
     std::uint8_t jpeg[] = {0xff, 0xd8, 0x11, 0x22, 0xff, 0xd9};
     assert(CompleteJpeg(jpeg, sizeof(jpeg)));
     assert(!CompleteJpeg(nullptr, sizeof(jpeg)));
