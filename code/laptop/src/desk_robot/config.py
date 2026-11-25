@@ -15,7 +15,10 @@ from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, mode
 from .private_files import read_private_env as read_private_env
 
 CredentialEnvName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
-LocalClockTime = Annotated[str, Field(strict=True, pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")]
+LocalClockTime = Annotated[
+    str, Field(strict=True, min_length=5, max_length=5,
+               pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$"),
+]
 
 
 def quiet_hours_active(schedule: tuple[str, str] | None) -> bool:

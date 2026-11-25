@@ -1160,6 +1160,7 @@ class Conversation:
                                             "Group conversation consent revoked"
                                         )
                                     await say_group(robot, text)
+                                    completed_segments.append(text)
                                     record["sent_segments"] += 1
                                     record["updated_at"] = time.monotonic()
                                     record_sent_attention(robot.id, text)

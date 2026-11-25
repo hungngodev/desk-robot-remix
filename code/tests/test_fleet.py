@@ -160,17 +160,19 @@ async def test_group_budget_includes_context_preparation(fleet, monkeypatch):
 async def test_group_budget_is_not_renewed_after_context_setup(fleet, monkeypatch):
     from desk_robot import conversation as conversation_module
 
-    budget = 0.15
+    budget = 0.5
     monkeypatch.setattr(conversation_module, "_GROUP_ACTIVITY_TIMEOUT_S", budget)
     loop = asyncio.get_running_loop()
     original_timeout_at = asyncio.timeout_at
     deadlines = []
+    prep_starts = []
 
     def capture_timeout_at(deadline):
         deadlines.append(deadline)
         return original_timeout_at(deadline)
 
     async def delayed_read(func, robot):
+        prep_starts.append(loop.time())
         await asyncio.sleep(0.03)
         return func(robot)
 
@@ -181,11 +183,37 @@ async def test_group_budget_is_not_renewed_after_context_setup(fleet, monkeypatc
     async with conversation.session_lock:
         started = loop.time()
         with pytest.raises(TimeoutError):
-            await asyncio.wait_for(conversation.run(IDS, "Play peekaboo"), timeout=1)
+            await asyncio.wait_for(conversation.run(IDS, "Play peekaboo"), timeout=2)
     assert len(deadlines) == 1
-    assert started + budget <= deadlines[0] < started + budget + 0.03
+    assert prep_starts
+    assert started + budget <= deadlines[0] <= min(prep_starts) + budget
     assert conversation.active is None
     assert not speaker.spoken
+
+
+
+async def test_nonstream_revocation_after_send_retains_private_receipt(fleet, tmp_path):
+    memory = MemoryStore(tmp_path, IDS)
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, SimulatedChat(), speaker, memory=memory)
+    allowed = True
+
+    def sent(robot_id):
+        nonlocal allowed
+        assert robot_id == IDS[0]
+        allowed = False
+
+    with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
+        await conversation.run(
+            IDS, "Invite a peer to play", origin="autonomous_social",
+            permission_check=lambda: allowed, segment_sent=sent,
+        )
+    assert len(speaker.spoken) == 1
+    assert memory.count(IDS[0]) == 1
+    assert all(memory.count(robot_id) == 0 for robot_id in IDS[1:])
+    assert "playback unverified" in str(memory.recent(IDS[0]))
+    assert conversation.active is None
+    assert len(await conversation.run(IDS, "Try again", 1)) == 1
 
 
 async def test_five_cancellation_and_repeated_stop_finish_session_cleanup(fleet):
