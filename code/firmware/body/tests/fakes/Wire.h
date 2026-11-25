@@ -364,11 +364,6 @@ class TwoWire {
           applyTransmission() != 0) return 0;
     }
     if (!connected(addr)) return 0;
-    if (addr == 0x29 && ranges != 0 && extras == 0 && count == 12 &&
-        register_address == 0x14) {
-      fake_arduino_millis() += next_tof_result_delay_ms;
-      next_tof_result_delay_ms = 0;
-    }
     if (addr == 0x48 && extras == 4 &&
         register_address == fail_ads_read_register) {
       ++rejected_ads_reads;
@@ -414,6 +409,9 @@ class TwoWire {
             (tof_ready ? 0x07 : 0) | tof_interrupt_error_bits)};
         // A missing conversion must NOT manufacture freshness.
       } else if (tof_register == 0x14 && count == 12) {
+        // Delay only the actual ToF result read, not the generic register pointer.
+        fake_arduino_millis() += next_tof_result_delay_ms;
+        next_tof_result_delay_ms = 0;
         inbound.assign(12, 0);
         inbound[0] = static_cast<std::uint8_t>(tof_raw_status << 3);
         inbound[6] = static_cast<std::uint8_t>(tof_ambient_97 >> 8);
