@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 #define CHECK(condition) do { \
@@ -164,6 +165,25 @@ static void huge_idle_gaps_are_bounded() {
   CHECK(clock.silence_frames(12000000, 16384) == 0);
 }
 
+static void timestamp_and_cap_extremes_do_not_overflow() {
+  constexpr auto lo = std::numeric_limits<std::int64_t>::min();
+  constexpr auto hi = std::numeric_limits<std::int64_t>::max();
+  constexpr auto cap = std::numeric_limits<std::uint64_t>::max();
+  PlaybackReferenceClock clock;
+  CHECK(clock.silence_frames(lo, cap) == 0);
+  CHECK(clock.silence_frames(hi, cap) ==
+        (cap / 1000000U) * 16000U + (cap % 1000000U) * 16000U / 1000000U);
+  CHECK(clock.future_reference_frames(0, cap) ==
+        (static_cast<std::uint64_t>(hi) / 1000000U) * 16000U +
+        ((static_cast<std::uint64_t>(hi) % 1000000U) * 16000U + 999999U) /
+            1000000U);
+  clock.accepted_output_frames(1);
+  CHECK(clock.represented_end_us() == hi);
+  clock.reset();
+  CHECK(clock.silence_frames(lo, 16384) == 0);
+  CHECK(clock.silence_frames(hi, 16384) == 16384);
+}
+
 int main() {
   try {
     for (int cadence_ms : {10, 20, 30, 60}) {
@@ -174,6 +194,7 @@ int main() {
     queued_output_is_not_premature_microphone_reference();
     late_opus_chunk_accounts_for_real_gap_once();
     huge_idle_gaps_are_bounded();
+    timestamp_and_cap_extremes_do_not_overflow();
     zero_timestamp_is_valid_clock_origin();
     irregular_idle_cadence_retains_fractional_reference_samples();
     short_i2s_writes_preserve_submicrosecond_playback_time();

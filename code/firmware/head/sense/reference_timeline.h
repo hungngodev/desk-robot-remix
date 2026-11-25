@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <limits>
 
 // Small pure timing core reused by the Sense AEC codec and its native host
 // regression. This is sample accounting, not physical speaker playback
@@ -22,19 +23,16 @@ class PlaybackReferenceClock {
       return 0;
     }
     if (now_us <= end_us_) return 0;
-    const auto elapsed_us = static_cast<std::uint64_t>(now_us - end_us_);
-    // Keep the fractional sample phase between irregular PDM reads. Rounding
-    // each 10.007 ms read independently would lose fractional frames on
-    // every callback, accumulating false AEC drift over a long conversation.
-    // Huge unattended gaps are bounded: do not multiply unbounded uptime.
-    const auto available_us = (max_frames / kReferenceRate + 1U) * 1000000U;
-    if (elapsed_us > available_us) {
-      end_us_ = now_us;
-      silence_remainder_ = 0;
-      return max_frames;
-    }
-    const auto numerator = elapsed_us * kReferenceRate + silence_remainder_;
-    const auto frames = numerator / 1000000U;
+    // Ordered signed timestamps can span the full uint64_t range. Subtract
+    // in unsigned space, then split whole seconds before multiplying.
+    const auto elapsed_us = static_cast<std::uint64_t>(now_us) -
+        static_cast<std::uint64_t>(end_us_);
+    // Keep the fractional sample phase between irregular PDM reads without
+    // overflowing either the elapsed-time product or a caller-supplied cap.
+    const auto numerator = (elapsed_us % 1000000U) * kReferenceRate +
+        silence_remainder_;
+    const auto frames = (elapsed_us / 1000000U) * kReferenceRate +
+        numerator / 1000000U;
     end_us_ = now_us;
     silence_remainder_ = numerator % 1000000U;
     if (frames > max_frames) {
@@ -51,7 +49,13 @@ class PlaybackReferenceClock {
       // rather than truncating every 32 kHz frame to 31 microseconds.
       const auto numerator = static_cast<std::uint64_t>(samples) * 1000000U
           + output_remainder_;
-      end_us_ += static_cast<std::int64_t>(numerator / kOutputRate);
+      const auto duration = static_cast<std::int64_t>(numerator / kOutputRate);
+      if (end_us_ > std::numeric_limits<std::int64_t>::max() - duration) {
+        end_us_ = std::numeric_limits<std::int64_t>::max();
+        output_remainder_ = 0;
+        return;
+      }
+      end_us_ += duration;
       output_remainder_ = numerator % kOutputRate;
     }
   }
@@ -65,10 +69,10 @@ class PlaybackReferenceClock {
     if (end_us_ <= now_us) return 0;
     if (now_us < 0) return cap;
     const auto ahead_us = static_cast<std::uint64_t>(end_us_ - now_us);
-    const auto bounded_us = (cap / kReferenceRate + 1U) * 1000000U;
-    if (ahead_us > bounded_us) return cap;
-    // Round up: never expose a queued PCM sample as already played.
-    return std::min(cap, (ahead_us * kReferenceRate + 999999U) / 1000000U);
+    // Round up: never expose a queued PCM sample as already played. Split
+    // the duration so even INT64_MAX and UINT64_MAX caps are safe.
+    return std::min(cap, (ahead_us / 1000000U) * kReferenceRate +
+        ((ahead_us % 1000000U) * kReferenceRate + 999999U) / 1000000U);
   }
 
   void reset() {
