@@ -1132,11 +1132,12 @@ async def test_unknown_robot_does_not_poison_future_conversation(settings):
     assert len(await c.run(["robot-01", "robot-02"], "hello", 1)) == 1
 
 
-async def test_five_pet_memory_context_does_not_block_live_voice_loop(settings):
+async def test_five_pet_memory_context_does_not_block_live_voice_loop(settings, tmp_path):
     import threading
 
     speaker = SimulatedSpeaker()
-    c = Conversation(settings, SimulatedChat(), speaker)
+    memory = MemoryStore(tmp_path, [robot.id for robot in settings.robots])
+    c = Conversation(settings, SimulatedChat(), speaker, memory=memory)
     entered = threading.Event()
     release = threading.Event()
     original = c._persona_with_memory
@@ -1160,8 +1161,9 @@ async def test_five_pet_memory_context_does_not_block_live_voice_loop(settings):
         release.set()
 
 
-async def test_memory_context_error_releases_fleet_owner(settings):
-    c = Conversation(settings, SimulatedChat(), SimulatedSpeaker())
+async def test_memory_context_error_releases_fleet_owner(settings, tmp_path):
+    memory = MemoryStore(tmp_path, [robot.id for robot in settings.robots])
+    c = Conversation(settings, SimulatedChat(), SimulatedSpeaker(), memory=memory)
     original = c._persona_with_memory
 
     def failed_sqlite_context(_robot):
@@ -1481,8 +1483,14 @@ def test_conversation_turns_valid_fleet_bounds_unchanged():
     assert conversation_turns(["robot-01", "robot-02", "robot-03", "robot-04"]) == 8
 
 
-async def test_group_consent_revoked_during_memory_persist_never_publishes_turn(settings):
+async def test_group_consent_revoked_during_memory_persist_never_publishes_turn(
+    settings, monkeypatch,
+):
     """A SQLite await cannot turn a revoked utterance into a completed peer turn."""
+    async def unexpected_worker(*args, **kwargs):
+        raise AssertionError("Group without a memory store must not schedule SQLite workers")
+
+    monkeypatch.setattr(asyncio, "to_thread", unexpected_worker)
     entered = asyncio.Event()
     release = asyncio.Event()
     allowed = True
@@ -1499,13 +1507,25 @@ async def test_group_consent_revoked_during_memory_persist_never_publishes_turn(
         ["robot-01", "robot-02"], "Discuss a toy", 2,
         permission_check=lambda: allowed,
     ))
+    barrier = asyncio.create_task(entered.wait())
     try:
-        await asyncio.wait_for(entered.wait(), timeout=1)
+        done, _ = await asyncio.wait(
+            {barrier, task}, timeout=1, return_when=asyncio.FIRST_COMPLETED,
+        )
+        if task in done:
+            await task  # Surface an early exception, rather than a misleading timeout.
+            pytest.fail("Conversation completed before the persistence barrier")
+        assert barrier in done, "Conversation did not reach the persistence barrier"
         allowed = False
+        release.set()
+        with pytest.raises(RuntimeError, match="consent revoked"):
+            await asyncio.wait_for(task, timeout=1)
     finally:
         release.set()
-    with pytest.raises(RuntimeError, match="consent revoked"):
-        await asyncio.wait_for(task, timeout=1)
+        for pending in (barrier, task):
+            if not pending.done():
+                pending.cancel()
+        await asyncio.gather(barrier, task, return_exceptions=True)
     assert len(speaker.spoken) == 1
     assert conversation.active is None
     assert not conversation.session_lock.locked()

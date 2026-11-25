@@ -920,9 +920,9 @@ class Conversation:
             # contention cannot block urgent Xiaozhi VAD and speaker abort on
             # the Mac event loop. The active lease is already held so another
             # social request cannot overtake this pending conversation.
-            if self.settings.mode == "hardware" and not private_at_start:
-                # A later grant belongs to a new session, not an already
-                # admitted private-memory prompt or its revision fence.
+            if not memory_context_at_start:
+                # No SQLite work is needed without an admitted memory store.
+                # A later grant belongs to a new session, not this prompt.
                 personas = [robot.persona for robot in robots]
             else:
                 personas = await asyncio.wait_for(
