@@ -1622,7 +1622,6 @@ void BodyControl::execute(const char* line, std::size_t length,
         dc_fault_latched_ ? "dc_driver_fault_latched" :
         dc_driver_fault_bad(now_ms) ? "dc_driver_fault_unavailable" :
         motor_watchdog_latched_ ? "motor_watchdog_latched" :
-        command_timeout_latched_ ? "command_timeout_latched" :
         motor_cutoff_unqualified_ ? "motor_cutoff_unqualified" :
         guarded_motion_profile() && !cliff_ready ?
             guard_ == nullptr ? "missing_guard" :
@@ -1666,6 +1665,7 @@ void BodyControl::execute(const char* line, std::size_t length,
             !lift_limits_configured_ ? "lift_limits_unqualified" :
         guarded_motion_profile() && grip_feedback_required_ &&
             !jaw_limits_configured_ ? "jaw_limits_unqualified" :
+        command_timeout_latched_ ? "command_timeout_latched" :
         !guarded_motion_profile() ? "not_required" : "none";
     const int written = std::snprintf(
         reply, capacity,
@@ -1901,10 +1901,6 @@ void BodyControl::execute(const char* line, std::size_t length,
       std::snprintf(reply, capacity, "ERR arm motor_watchdog_latched");
       return;
     }
-    if (command_timeout_latched_) {
-      std::snprintf(reply, capacity, "ERR arm command_timeout_latched");
-      return;
-    }
     if (dc_fault_latched_ || dc_driver_fault_bad(now_ms)) {
       std::snprintf(reply, capacity, "ERR arm dc_driver_fault_interlock");
       return;
@@ -1946,6 +1942,11 @@ void BodyControl::execute(const char* line, std::size_t length,
     if (state_.accessories.gauge.fuel_valid &&
         state_.accessories.gauge.cell_mv < 3300U) {
       std::snprintf(reply, capacity, "ERR arm battery_low");
+      return;
+    }
+    // Preserve the physical interlock diagnostic when faults coincide.
+    if (command_timeout_latched_) {
+      std::snprintf(reply, capacity, "ERR arm command_timeout_latched");
       return;
     }
     // Explicit re-arm also clears earlier targets; it never resumes old motion.
