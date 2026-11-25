@@ -240,7 +240,7 @@ class Coordinator:
             not isinstance(ages, list) or len(ages) != 5
             or not isinstance(readings, list) or len(readings) != 5
             or any(type(age) is not int or not 0 <= age < 200 for age in ages)
-            or any(type(mm) is not int or not 1 <= mm <= 1300 for mm in readings)
+            or any(type(mm) is not int or not 30 <= mm <= 1300 for mm in readings)
         ):
             raise OperationError("Hardware preflight: stale or malformed ranging telemetry")
         _require_safe_fuel_sample(
@@ -951,7 +951,7 @@ class Coordinator:
             or len(ranges["mm"]) != 5
             or not isinstance(ranges.get("age_ms"), list)
             or len(ranges["age_ms"]) != 5
-            or any(type(n) is not int or not 1 <= n <= 1300 for n in ranges["mm"])
+            or any(type(n) is not int or not 30 <= n <= 1300 for n in ranges["mm"])
             or any(type(age) is not int or not 0 <= age <= 150
                    for age in ranges["age_ms"])
             or (require_front_clearance and ranges["mm"][4] <= 250)

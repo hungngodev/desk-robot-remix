@@ -398,6 +398,30 @@ async def test_hardware_enable_fails_closed_on_unqualified_body_status(
         await coordinator.close()
 
 
+@pytest.mark.parametrize("lane", range(5))
+@pytest.mark.parametrize("distance", [1, 29, 1301, 8190])
+async def test_hardware_range_bounds_reject_contradictory_valid_masks(
+    settings, lane, distance,
+):
+    settings.mode = "hardware"
+    head = HardwareStatusHead("robot-01")
+    head.body_status["power"] = {
+        "fuel_valid": True, "cell_mv": 3800, "soc_centi": 7000,
+    }
+    head.body_status["ranges"]["mm"][lane] = distance
+    coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())
+    try:
+        with pytest.raises(OperationError, match="stale or malformed ranging"):
+            await coordinator.operator_arm("robot-01")
+        assert "robot-01" not in coordinator.permits
+        assert not head.commands
+        head.body_status["armed"] = True
+        with pytest.raises(OperationError, match="local sensor or corridor"):
+            await coordinator._assert_armed_health("robot-01")
+    finally:
+        await coordinator.close()
+
+
 @pytest.mark.parametrize("power", [
     {"fuel_valid": True, "cell_mv": "0", "soc_centi": None},
     {"fuel_valid": True, "cell_mv": True, "soc_centi": 7000},
