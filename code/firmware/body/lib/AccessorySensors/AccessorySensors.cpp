@@ -156,8 +156,15 @@ bool AccessorySensors::begin(TwoWire& wire, bool (*bus_accessible)()) {
   nfc_stage_ = NfcStage::Disabled;
   nfc_phase_at_ms_ = nfc_last_scan_at_ms_ = 0;
   if (!mux_present_ || !bus_available()) return false;
+  // A missing peripheral is optional; unverified mux isolation is not.
+  const auto select_startup = [this](std::uint8_t lane) {
+    if (select(lane)) return true;
+    close();
+    return false;
+  };
   // Validate APDS9960 manufacturer ID before enabling low-level proximity.
-  if (select(1)) {
+  if (!select_startup(1)) return false;
+  {
     std::uint8_t id = 0;
     // SparkFun defaults, adjusted without the blocking readGesture loop.
     // The device must report a recognized ID before enabling optical LEDs.
@@ -179,9 +186,11 @@ bool AccessorySensors::begin(TwoWire& wire, bool (*bus_accessible)()) {
   }
   if (!close()) return false;
   // Probe only. No unverified output pin or high-power peripheral is enabled.
-  if (select(2)) data_.force.present = probe(0x48);
+  if (!select_startup(2)) return false;
+  data_.force.present = probe(0x48);
   if (!close()) return false;
-  if (select(3)) {
+  if (!select_startup(3)) return false;
+  {
     data_.climate.present = probe(0x44);
     // User-owned BMP280 may be strapped to either 0x76 or 0x77.
     // Reject BME280 0x60 and random ACKs; keep SHT41 independent.
@@ -202,7 +211,8 @@ bool AccessorySensors::begin(TwoWire& wire, bool (*bus_accessible)()) {
     }
   }
   if (!close()) return false;
-  if (select(4)) {
+  if (!select_startup(4)) return false;
+  {
     std::uint16_t manufacturer = 0;
     data_.gauge.monitor_present =
         read16(0x40, 0xFE, manufacturer) && manufacturer == 0x5449;
@@ -221,7 +231,8 @@ bool AccessorySensors::begin(TwoWire& wire, bool (*bus_accessible)()) {
   // GPA3: charger CHG open drain, LOW when chip indicates charging.
   // This is not a charge enable. A broken switch alone cannot declare a
   // charging battery. Never connect raw 5V pad voltage to a 3.3V input.
-  if (select(5)) {
+  if (!select_startup(5)) return false;
+  {
     data_.dock.present = probe(0x20) &&
         write8(0x20, 0x00, 0xFF) &&  // all GPIOA inputs
         write8(0x20, 0x0C, 0x0F);    // 3.3V pullups GPA0..3
@@ -254,7 +265,8 @@ bool AccessorySensors::begin(TwoWire& wire, bool (*bus_accessible)()) {
   if (!close()) return false;
   for (std::uint8_t i = 0; i < 3; ++i) {
     const std::uint8_t lane = i == 0 ? 1 : i == 1 ? 6 : 7;
-    if (select(lane)) data_.angle[i].present = probe(0x36);
+    if (!select_startup(lane)) return false;
+    data_.angle[i].present = probe(0x36);
     if (!close()) return false;
   }
   return true;

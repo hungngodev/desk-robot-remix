@@ -21,6 +21,31 @@ int main() {
                 << " outbound_bytes=" << Wire.outbound.size() << '\n';
     }
     CHECK(accessories_initialized);
+    // Even an apparently disconnected range mux needs a verified zero.
+    // Startup must not report success after silently skipping every lane.
+    for (int fault = 0; fault < 4; ++fault) {
+      TwoWire isolation_wire;
+      isolation_wire.range_mux_write_nack = fault == 0;
+      isolation_wire.range_mux_read_nack = fault == 1;
+      isolation_wire.range_mux_bad_readback = fault == 2;
+      isolation_wire.range_mux_stuck = fault == 3;
+      isolation_wire.ranges = fault == 3 ? 1 : 0;
+      desk_robot::AccessorySensors isolation;
+      CHECK(!isolation.begin(isolation_wire));
+      CHECK(isolation.mux_present());
+      CHECK(!isolation.readings().dock.present);
+      CHECK(!isolation.readings().force.present);
+      CHECK(isolation_wire.extras == 0);
+      CHECK(!isolation_wire.unsafe_parallel_mux);
+      // Removing the fault permits a fresh verified initialization.
+      isolation_wire.range_mux_write_nack = false;
+      isolation_wire.range_mux_read_nack = false;
+      isolation_wire.range_mux_bad_readback = false;
+      isolation_wire.range_mux_stuck = false;
+      CHECK(isolation.begin(isolation_wire));
+      CHECK(isolation_wire.ranges == 0 && isolation_wire.extras == 0);
+      CHECK(!isolation_wire.unsafe_parallel_mux);
+    }
     {
       // A STOP on the range mux can ACK and then expose a held SDA.
       // The accessory client must yield immediately, not spend another
