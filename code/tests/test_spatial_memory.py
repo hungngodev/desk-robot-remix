@@ -377,3 +377,43 @@ def test_forgotten_spatial_episode_cannot_replay_after_wal_restart(tmp_path):
         "robot-01", "flat_key", now=when + 200_000,
     )
     assert sighting is not None and sighting.status == "stale"
+
+
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        ("x_mm", "bad"),
+        ("x_mm", float("inf")),
+        ("x_mm", 1_000_001),
+        ("y_mm", 0.5),
+        ("yaw_mrad", 3143),
+        ("uncertainty_mm", 0),
+        ("origin_id", "../../bad"),
+        ("pose_seq", 0),
+        ("pose_sample_us", "broken"),
+        ("body_boot", -1),
+        ("calibration_id", b"\xff"),
+        ("camera_complete_us", "garbage"),
+        pytest.param("camera_complete_us", "1" * 5000, id="oversized-camera-clock"),
+    ],
+)
+def test_corrupt_persisted_spatial_row_is_not_reported(tmp_path, column, value):
+    db = MemoryStore(tmp_path / "private", ["robot-01", "robot-02"])
+    spatial = SpatialMemory(db)
+    when = time.time() - 1
+    for robot in ("robot-01", "robot-02"):
+        remember(db, robot, "seen1", when)
+        assert spatial.attach(robot, "seen1", evidence(when))
+    with db._connect("robot-01") as conn:
+        conn.execute(
+            f"UPDATE spatial_observations SET {column}=? WHERE event_id=?",
+            (value, "seen1"),
+        )
+        if column == "camera_complete_us":
+            conn.execute(
+                "UPDATE camera_provenance SET device_complete_us=? WHERE event_id=?",
+                (value, "seen1"),
+            )
+    assert spatial.last_seen("robot-01", "flat_key", now=when + 2) is None
+    peer = spatial.last_seen("robot-02", "flat_key", now=when + 2)
+    assert peer is not None and peer.evidence == evidence(when)

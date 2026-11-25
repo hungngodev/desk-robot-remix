@@ -210,6 +210,13 @@ class SpatialMemory:
         (event_id, obj, observed, boot, origin, pose_seq, pose_time,
          camera_boot, camera_seq, complete, calibration, x, y, yaw, uncertainty,
          frame, anchor) = row
+        # SQLite affinities are not strict types. Never decode malformed
+        # durable receipt IDs or expose invalid coordinates from a legacy row.
+        if (type(event_id) is not str or not _TOKEN.fullmatch(event_id)
+                or type(complete) is not str or not 1 <= len(complete) <= 19
+                or not complete.isascii() or not complete.isdigit()
+                or complete.startswith("0")):
+            return None
         evidence = SpatialEvidence(
             object_key=obj, observed_at=observed, body_boot=boot,
             origin_id=origin, pose_seq=pose_seq, pose_sample_us=pose_time,
@@ -218,6 +225,11 @@ class SpatialMemory:
             x_mm=x, y_mm=y, yaw_mrad=yaw, uncertainty_mm=uncertainty,
             frame=frame, anchor_id=anchor,
         )
+        try:
+            _validate(evidence)
+        except ValueError:
+            # Fail closed rather than inventing an older location.
+            return None
         elapsed = now - observed
         if current_origin is not None and current_origin != (boot, origin):
             status = "invalid_origin"
