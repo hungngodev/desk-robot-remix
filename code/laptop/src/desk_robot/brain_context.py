@@ -292,6 +292,10 @@ def compose_brain_context(
         phrase = ""
         if channel == "sensor" and isinstance(kind, str):
             if kind == "safety_fault":
+                # Validate before deduplication: a newer stale or foreign cue
+                # must not shadow an older fresh WROOM fault.
+                if not _fresh_valid_safety_fault(item):
+                    continue
                 # An actual WROOM fault transition outranks idle VLM/memory
                 # context, but is NOT evidence of a measured desk drop, a
                 # physical motor halt, or a license to auto-rearm the body.

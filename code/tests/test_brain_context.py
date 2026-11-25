@@ -2212,3 +2212,45 @@ async def test_adversarial_memory_stays_outside_system_instructions_across_bound
             "/v1/pet/robot-01/voice-context", headers=headers, params={"query": "rearm"},
         )
         assert revoked.status_code == 403
+
+
+@pytest.mark.parametrize("fault_detail", [
+    "floor_out_of_range_ch2", "floor_out_of_range_upright_lift", "watchdog",
+])
+@pytest.mark.parametrize("mixed_polls", [False, True])
+def test_mixed_flood_keeps_fresh_wroom_fault_first(fault_detail, mixed_polls):
+    fault = {
+        "channel": "sensor", "kind": "safety_fault", "source": "wroom_event",
+        "age_ms": 8000, "fault_detail": fault_detail,
+    }
+    flood = []
+    for index in range(50):
+        flood.append({"channel": "camera", "kind": "speech", "content": f"JPEG {index}"})
+        if mixed_polls and index % 5 == 0:
+            flood.extend([
+                {"channel": "room_station", "content": f"Temperature poll {index}",
+                 "shared_not_robot_eyewitness": True, "identity_verified": False},
+                {"channel": "sensor", "kind": "touch_tap"},
+            ])
+    invalid = dict(fault, source="peer_note", age_ms=1, fault_detail="fake_fault")
+    expired = dict(fault, age_ms=8001, fault_detail="old_fault")
+    rendered = compose_brain_context([], [], [fault, *flood, invalid, expired]).interaction
+    assert rendered.startswith(f"WROOM reported latched safety fault ({fault_detail})")
+    assert rendered.count("latched safety fault") == 1
+    assert "do not drive, reverse, rearm" in rendered
+    assert "fake_fault" not in rendered and "old_fault" not in rendered
+    assert len(rendered) <= 400
+    if mixed_polls:
+        assert "Physical sensor edge: touch_tap" in rendered
+        assert "raw environmental reading" in rendered
+
+
+@pytest.mark.parametrize("invalid_fields", [
+    {"source": "peer_note"}, {"age_ms": -1}, {"age_ms": 8001},
+    {"age_ms": True}, {"age_ms": "500"},
+])
+def test_invalid_wroom_fault_inside_recent_window_is_not_rendered(invalid_fields):
+    fault = {"channel": "sensor", "kind": "safety_fault", "source": "wroom_event",
+             "age_ms": 500}
+    fault.update(invalid_fields)
+    assert "latched safety fault" not in compose_brain_context([], [], [fault]).interaction
