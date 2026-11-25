@@ -7,7 +7,7 @@ The existing authenticated HttpHead/PoseFence own the source validation.
 from __future__ import annotations
 
 import time
-from typing import Literal
+from typing import Annotated
 
 import httpx
 from fastapi import Depends, FastAPI, HTTPException, Query
@@ -17,13 +17,19 @@ from .spatial_pose import PoseFence, PoseReceipt
 from .transport import HeadError
 
 
+# SpatialGrid admits at most 64 cells per axis. Reject coercions before
+# submitting or deferring any job; the planner still checks the actual grid.
+GridCoordinate = Annotated[int, Field(strict=True, ge=0, le=63)]
+GridHeading = Annotated[int, Field(strict=True, ge=0, le=3)]
+
+
 class NavigateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     label: str | None = Field(default=None, min_length=1, max_length=64)
-    goal: tuple[int, int] | None = None
-    goal_heading: int | None = Field(default=None, ge=0, le=3)
-    start: tuple[int, int] = (0, 0)
-    heading: Literal[0, 1, 2, 3] = 0
+    goal: tuple[GridCoordinate, GridCoordinate] | None = None
+    goal_heading: GridHeading | None = None
+    start: tuple[GridCoordinate, GridCoordinate] = (0, 0)
+    heading: GridHeading = 0
 
 
 def register_spatial_pose_route(

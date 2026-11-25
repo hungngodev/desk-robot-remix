@@ -1061,3 +1061,56 @@ def test_native_activity_context_skips_unhashable_job_metadata(kind, state):
     assert "pickup" in result and good.id[:12] in result
     assert "physical progress and outcome unverified" in result
     assert _active_robot_activity({"bad": bad}, "pet-one") == ""
+
+
+@pytest.mark.parametrize("body", [
+    '{"goal":[true,2]}',
+    '{"goal":[1.0,"2"]}',
+    '{"goal":[100000000000000000000000000000,2]}',
+    '{"goal":[NaN,2]}',
+    '{"goal":[Infinity,2]}',
+    '{"goal":[0,-Infinity]}',
+    '{"start":[-1,0]}',
+    '{"goal":[64,0]}',
+    '{"heading":true}',
+    '{"heading":4}',
+    '{"goal_heading":true}',
+    '{"label":"\ud800"}',
+    '{"\ud800":1}',
+])
+def test_spatial_navigation_invalid_json_values_never_submit(settings, body):
+    from fastapi.testclient import TestClient
+
+    def unexpected(*args, **kwargs):
+        pytest.fail("Invalid navigation request reached the coordinator")
+
+    runtime = SimpleNamespace(coordinator=SimpleNamespace(
+        robot=unexpected, navigate=unexpected, defer_motion=unexpected,
+    ))
+    app = create_app(settings, runtime=runtime)
+    app.state.runtime = runtime
+    app.state.operator_token = "operator-test-token"
+    app.state.tool_token = "tool-test-token"
+    headers = {
+        "Authorization": "Bearer operator-test-token",
+        "Content-Type": "application/json",
+    }
+    response = TestClient(app).post(
+        "/v1/robots/robot-01/navigate?defer_on_voice=true",
+        content=body,
+        headers=headers,
+    )
+    assert response.status_code == 422
+    assert response.json()["detail"]
+    assert all("input" not in error for error in response.json()["detail"])
+
+
+def test_spatial_navigation_accepts_integer_cell_and_heading_boundaries():
+    from desk_robot.api_spatial_pose import NavigateRequest
+
+    request = NavigateRequest(start=(0, 63), goal=(63, 0), heading=3, goal_heading=0)
+    assert request.start == (0, 63)
+    assert request.goal == (63, 0)
+    assert request.heading == 3
+    assert request.goal_heading == 0
+

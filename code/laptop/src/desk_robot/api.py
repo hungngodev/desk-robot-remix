@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -151,6 +152,27 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
             or not token_matches(credentials.credentials, app.state.operator_token)
         ):
             raise HTTPException(403, "Only the operator can enable movement")
+
+    @app.exception_handler(RequestValidationError)
+    async def invalid_request(request, exc):
+        # FastAPI's default errors echo rejected inputs. Nonfinite numbers
+        # and escaped Unicode surrogates then crash JSONResponse itself.
+        # Keep useful field diagnostics without serializing rejected values.
+        def safe(value: str) -> str:
+            return value.encode("utf-8", "backslashreplace").decode("utf-8")
+
+        errors = [
+            {
+                "type": error["type"],
+                "loc": [
+                    safe(value) if isinstance(value, str) else value
+                    for value in error["loc"]
+                ],
+                "msg": safe(error["msg"]),
+            }
+            for error in exc.errors()
+        ]
+        return JSONResponse(status_code=422, content={"detail": errors})
 
     @app.exception_handler(OperationError)
     async def operation_error(request, exc):
