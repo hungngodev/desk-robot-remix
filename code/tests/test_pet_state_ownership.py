@@ -9,9 +9,9 @@ from desk_robot.config import load_settings
 from desk_robot.conversation import Conversation
 from desk_robot.memory import MemoryStore
 from desk_robot.pet import (
+    _VISUAL_INITIATIVE_MIN_CONFIDENCE,
     PetController,
     _initiative_evidence,
-    _VISUAL_INITIATIVE_MIN_CONFIDENCE,
 )
 from desk_robot.simulator import SimulatedChat, SimulatedScene, SimulatedSpeaker
 from desk_robot.vision import SceneChange
@@ -69,13 +69,24 @@ async def test_default_controller_and_pet_state_are_independent(tmp_path):
         assert first._activity_rng is not second._activity_rng
         first_state, sibling = list(first.states.values())[:2]
         peer_state = next(iter(second.states.values()))
-        first_state.camera_habituation[("key", "key appeared")] = 1.0
+        assert first_state.camera_habituation.record(("key", "key appeared"), 1.0)
+        assert first_state.camera_habituation.record(("key", "key appeared"), 2.0)
+        assert first_state.session_habituation.record("key", 1.0)
+        assert first_state.session_habituation.record("key", 2.0)
         first_state.retired_touch_boot_ids.add(1)
-        first_state.session_event_counts["key"] = 1
+        assert first_state.camera_habituation.recent_repeats(2.0) == {
+            ("key", "key appeared"): 2
+        }
+        assert first_state.session_habituation.recent_repeats(2.0) == {"key": 2}
         for state in (sibling, peer_state):
-            assert not state.camera_habituation
+            assert state.camera_habituation is not first_state.camera_habituation
+            assert not state.camera_habituation.recent_repeats(2.0)
+            assert not state.camera_habituation.refresh_if_repeated(
+                ("key", "key appeared"), 2.0
+            )
+            assert state.session_habituation is not first_state.session_habituation
+            assert not state.session_habituation.recent_repeats(2.0)
             assert not state.retired_touch_boot_ids
-            assert not state.session_event_counts
             assert state.gate is not first_state.gate
             assert state.handling_gate is not first_state.handling_gate
             assert state.dock_guard is not first_state.dock_guard

@@ -1,7 +1,6 @@
 import math
 
 import pytest
-
 from desk_robot.habituation import HabituationWindow
 
 

@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include "reference_decimator.h"
 #include "reference_timeline.h"
 #include "sense_speaker_activity.hpp"
 #include <cmath>
@@ -104,8 +105,7 @@ public:
     uint32_t speaker_frames_accepted_ = 0, short_output_writes_ = 0;
     uint32_t stale_publish_discards_ = 0;
     bool reference_integrity_failed_ = false;
-    int16_t filter_last1_ = 0, filter_last2_ = 0, last_filtered_ = 0;
-    float phase_ = 0.0f;
+    desk_robot::ReferenceDecimator reference_decimator_{};
     std::array<int16_t, 16384> ring{};
     size_t n = 0;
     void FillSilenceLocked(int64_t now_us) { reference_clock_.silence_frames(now_us, 0); }
@@ -154,23 +154,23 @@ int main() {
     written = 0;
     err = 0;
     SenseReferenceCodec sense;
-    std::fill_n(pcm, 16, -32768);
+    std::fill_n(pcm, 64, -32768);
     change_volume = &sense;
-    CHECK(sense.Write(pcm, 16) == 16);
+    CHECK(sense.Write(pcm, 64) == 64);
     CHECK(first_sample == INT32_MIN);
     CHECK(sense.output_volume() == 10);
-    CHECK(sense.n == 8);
-    CHECK(sense.ring[7] == -32768);
+    CHECK(sense.n == 32);
+    CHECK(sense.ring[31] == -32768);
     change_volume = nullptr;
-    CHECK(sense.Write(pcm, 16) == 16);
-    CHECK(sense.n == 16);
-    CHECK(sense.ring[15] == -328);
+    CHECK(sense.Write(pcm, 64) == 64);
+    CHECK(sense.n == 64);
+    CHECK(sense.ring[63] == -328);
     sense.SetOutputVolume(100);
     change_volume = &sense;
     change_before = true;
-    CHECK(sense.Write(pcm, 16) == 16);
-    CHECK(sense.n == 24);
-    CHECK(sense.ring[23] == -328);
+    CHECK(sense.Write(pcm, 64) == 64);
+    CHECK(sense.n == 96);
+    CHECK(sense.ring[95] == -328);
     CHECK(!sense.reference_integrity_failed_);
     std::cout << "PASS actual accepted PCM gain across mid-write volume change\n";
 }
