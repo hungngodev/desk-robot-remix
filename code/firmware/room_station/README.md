@@ -144,7 +144,16 @@ After checking the actual Feather PCB and safe sensor voltage domains, run
 the read-only collector from the `code` directory against the physically
 connected USB port. It uses the same serial line, sensor value and replay
 decoder as the Mac, opens one device epoch, and never sends a motor or charger
-command:
+command.
+
+The running Mac runtime and this standalone collector both acquire the same
+pySerial exclusive port lock. Before the bench capture, safely stop the
+Mac runtime and wait for its room USB reader to close; do not run a serial
+monitor on that port at the same time. A port-in-use failure is not a reason
+to open a second station or bypass the lock. After the collector exits,
+restart the normal Mac runtime against the same verified Feather port.
+For the fleet trial, verify the same fresh shared observation in each of
+the five pets' consented contexts, not five concurrent serial readers.
 
 ```bash
 cd code
