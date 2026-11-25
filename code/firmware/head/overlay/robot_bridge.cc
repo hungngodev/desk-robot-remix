@@ -409,6 +409,9 @@ void Bridge::Start() {
     config.max_uri_handlers = 15;
     config.recv_wait_timeout = 2;
     config.send_wait_timeout = 2;
+    // ESP-IDF excludes active asynchronous requests from LRU eviction.
+    // Reclaim inactive keep-alive sessions instead of refusing new control clients.
+    config.lru_purge_enable = true;
     if (httpd_start(&server_, &config) != ESP_OK) {
         ESP_LOGE(kTag, "HTTP API failed to start");
         return;
