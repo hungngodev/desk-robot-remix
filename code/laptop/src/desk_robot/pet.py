@@ -2728,7 +2728,7 @@ class PetController:
         self._event_kinds[event_key] = now
         relevant_cooldown = (
             min(self.speech_cooldown, self.interaction_cooldown)
-            if change.kind in _DIRECT_INTERACTION_KINDS
+            if not camera_derived and change.kind in _DIRECT_INTERACTION_KINDS
             else self.speech_cooldown
         )
         if (

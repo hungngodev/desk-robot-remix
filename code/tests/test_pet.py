@@ -4082,6 +4082,14 @@ async def test_deliberate_touch_can_reply_after_passive_speech_cooldown(fleet, t
         )
         assert pet._speech_task is None
         assert state.last_initiative_suppression == "quiet_voice_or_group_budget"
+        # A visual adapter's sensor-like label cannot grant deliberate priority.
+        for kind in ("key", "touch_tap", "paw_contact"):
+            pet._consider_speech(
+                "robot-01", SceneChange(kind, "Camera model interpretation", 1.0),
+                9, camera_derived=True,
+            )
+            assert pet._speech_task is None
+            assert state.last_initiative_suppression == "quiet_voice_or_group_budget"
         # An intentional touch is a different, more responsive interaction.
         pet._consider_speech(
             "robot-01", SceneChange(
