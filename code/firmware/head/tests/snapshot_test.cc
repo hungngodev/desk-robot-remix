@@ -7,6 +7,7 @@
 #include <expected>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 enum { PIXFORMAT_RGB565, PIXFORMAT_JPEG, PIXFORMAT_OTHER, V4L2_PIX_FMT_RGB565 };
@@ -19,14 +20,29 @@ struct Frame {
 };
 using camera_fb_t = Frame;
 int returned_frames = 0;
+std::recursive_mutex* shared_camera_mutex = nullptr;
+
+// A recursive mutex can be acquired again by its owner, so probing it on
+// the capture thread would conceal an accidentally retained lock.
+bool CameraLockAvailable() {
+    bool available = false;
+    std::thread other([&] {
+        available = shared_camera_mutex->try_lock();
+        if (available) shared_camera_mutex->unlock();
+    });
+    other.join();
+    return available;
+}
 void esp_camera_fb_return(camera_fb_t* frame) {
     assert(frame != nullptr);
+    assert(!CameraLockAvailable());
     ++returned_frames;
 }
 bool encoder_ok = true;
 bool encoder_framing_ok = true;
 bool image_to_jpeg(uint8_t* src, size_t size, uint16_t width, uint16_t height,
                    int format, int quality, uint8_t** out, size_t* len) {
+    assert(!CameraLockAvailable());
     assert(size == 8 && width == 2 && height == 2);
     assert(format == V4L2_PIX_FMT_RGB565 && quality == 80);
     if (!encoder_ok) return false;
@@ -73,10 +89,12 @@ public:
 
 int main() {
     Esp32Camera camera;
+    shared_camera_mutex = &camera.AccessMutex();
     const auto capture = [&camera]() {
         const int before = returned_frames;
         const bool available = camera.frame_available;
         auto result = camera.SnapshotJpeg();
+        assert(CameraLockAvailable());
         assert(camera.current_fb_ == nullptr);
         assert(returned_frames == before + (available ? 1 : 0));
         return result;
@@ -99,6 +117,11 @@ int main() {
     camera.frame.format = PIXFORMAT_OTHER;
     assert(!capture());
     camera.frame.format = PIXFORMAT_JPEG;
+    camera.frame.buf = nullptr;
+    assert(!capture());
+    camera.frame.buf = camera.pixels;
+    camera.frame.len = 0;
+    assert(!capture());
     camera.frame.len = 3;
     assert(!capture());
     camera.frame.len = 512 * 1024 + 1;
