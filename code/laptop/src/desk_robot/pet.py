@@ -20,6 +20,7 @@ import time
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import Awaitable, Callable, Protocol
 
 from .aux import _aux_boot_epoch, _fresh_aux_acquisition, validate_aux
@@ -67,14 +68,14 @@ class SceneComparator(Protocol):
 # ACM's Sensible Agent and ProAct, not a port of their trained models.
 # Fast, cheap evidence gating happens before a long VLM/LLM or audible reply.
 # These are testable candidate cutoffs, NOT physically learned engagement.
-_VISUAL_INITIATIVE_MIN_CONFIDENCE = {
+_VISUAL_INITIATIVE_MIN_CONFIDENCE = MappingProxyType({
     "person": 0.88,
     "hand": 0.86,
     "key": 0.80,
     "candy": 0.80,
     "object": 0.92,
     "scene": 0.95,
-}
+})
 
 _SOCIAL_EVENT_KINDS = frozenset({
     "key", "candy", "object", "hand_wave", "petting_zone", "nfc_tag",
@@ -264,6 +265,7 @@ class PetController:
         touch_interval: float = 0.15,
         activity_min_interval: float | None = None,
         activity_max_interval: float | None = None,
+        activity_rng: random.Random | None = None,
         on_local_fault: Callable[[str], Awaitable[object]] | None = None,
         on_low_battery_dock: (
             Callable[[str, bool], Awaitable[object] | object] | None
@@ -306,6 +308,8 @@ class PetController:
         self.max_observation_age = max_observation_age
         self.activity_min_interval = float(activity_min_interval)
         self.activity_max_interval = float(activity_max_interval)
+        # The fleet clock owns its RNG rather than consuming process-wide state.
+        self._activity_rng = random.Random() if activity_rng is None else activity_rng
         # Direct voluntary contact deserves a faster reply than a passive
         # camera remark, but still shares the one fleet audio budget.
         self.interaction_cooldown = interaction_cooldown
@@ -2727,7 +2731,7 @@ class PetController:
     async def _activity_loop(self) -> None:
         """One fleet policy clock; every wake is allowed to choose silence."""
         while not self._closed:
-            delay = random.uniform(
+            delay = self._activity_rng.uniform(
                 self.activity_min_interval, self.activity_max_interval
             )
             if getattr(self.settings, "pet_quiet_hours", None) is None:
