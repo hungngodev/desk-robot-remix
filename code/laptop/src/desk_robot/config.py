@@ -4,12 +4,24 @@ import os
 import time
 import tomllib
 from collections.abc import Mapping
+from ipaddress import ip_address
 from pathlib import Path
 from typing import Annotated, Literal
+from urllib.parse import urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, StrictBool, model_validator
 
 CredentialEnvName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
+
+
+def _head_host(url: str) -> str:
+    host = (urlparse(url).hostname or "").rstrip(".").casefold()
+    try:
+        address = ip_address(host)
+    except ValueError:
+        return host
+    # IPv4-mapped IPv6 is another spelling of the same physical address.
+    return str(getattr(address, "ipv4_mapped", None) or address)
 
 
 def _require_boolean_assignment(model: BaseModel, name: str, value: object) -> None:
@@ -71,8 +83,6 @@ class RobotConfig(BaseModel):
 
     @model_validator(mode="after")
     def local_http(self):
-        from urllib.parse import urlparse
-
         if not self.name.strip():
             raise ValueError("Robot name cannot be blank")
         if self.dock_turn_sign == 0 or self.dock_forward_sign == 0:
@@ -183,6 +193,21 @@ class Settings(BaseModel):
         # volume. Reject case variants before initializing any fleet services.
         if not ids or len({robot_id.casefold() for robot_id in ids}) != len(ids):
             raise ValueError("At least one robot and unique robot IDs are required")
+        credential_names = [
+            self.coordinator_token_env,
+            self.tools_token_env,
+            self.speech_bridge_token_env,
+            *(r.token_env for r in self.robots),
+        ]
+        if len(set(credential_names)) != len(credential_names):
+            raise ValueError("Fleet requires unique credential environment names")
+        if self.mode == "hardware":
+            hosts = [_head_host(r.head_url) for r in self.robots]
+            if len(set(hosts)) != len(hosts):
+                raise ValueError("Hardware fleet requires unique head hosts")
+            voices = [r.voice.strip().casefold() for r in self.robots]
+            if not all(voices) or len(set(voices)) != len(voices):
+                raise ValueError("Hardware fleet requires nonblank unique voices")
         device_ids = [r.device_id for r in self.robots if r.device_id]
         if len(set(device_ids)) != len(device_ids):
             raise ValueError("device_id must uniquely identify a robot")
@@ -301,8 +326,8 @@ class Settings(BaseModel):
 
 def secret(name: str) -> str:
     value = os.environ.get(name, "").strip()
-    if len(value) < 24 or value.lower() in ("changeme", "your-token-here"):
-        raise ValueError(f"Set {name} to a unique token of at least 24 characters")
+    if len(value) < 32 or value.lower() in ("changeme", "your-token-here"):
+        raise ValueError(f"Set {name} to a unique token of at least 32 characters")
     return value
 
 

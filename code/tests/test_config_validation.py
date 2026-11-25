@@ -1,7 +1,7 @@
 from pathlib import Path
 
 import pytest
-from desk_robot.config import RobotConfig, Settings, load_settings
+from desk_robot.config import RobotConfig, Settings, load_settings, secret
 
 
 def _robot():
@@ -114,3 +114,83 @@ def test_required_robot_values_reject_malformed_input(field, value):
 def test_global_credential_env_names_are_identifiers(field):
     with pytest.raises(ValueError, match=field):
         Settings.model_validate({"robots": [_robot()], field: "BAD TOKEN"})
+
+
+def _hardware_pair():
+    return [
+        {**_robot(), "head_url": "http://head-one.local:8081", "voice": "af_heart"},
+        {"id": "robot-02", "name": "Dot", "token_env": "HEAD_TWO",
+         "head_url": "http://head-two.local:8081", "voice": "am_adam"},
+    ]
+
+
+@pytest.mark.parametrize("alias", [
+    "http://HEAD-ONE.local.:8081/", "https://head-one.local:443",
+])
+def test_hardware_head_host_cannot_be_shared(alias):
+    robots = _hardware_pair()
+    robots[1]["head_url"] = alias
+    with pytest.raises(ValueError, match="unique head hosts"):
+        Settings(robots=robots)
+
+
+def test_hardware_ipv6_head_alias_cannot_be_shared():
+    robots = _hardware_pair()
+    robots[0]["head_url"] = "http://[fd00::1]:8081"
+    robots[1]["head_url"] = "http://[fd00:0:0:0:0:0:0:1]:8081"
+    with pytest.raises(ValueError, match="unique head hosts"):
+        Settings(robots=robots)
+
+
+def test_hardware_voices_are_distinct():
+    robots = _hardware_pair()
+    robots[1]["voice"] = robots[0]["voice"]
+    with pytest.raises(ValueError, match="unique voices"):
+        Settings(robots=robots)
+
+
+def test_simulation_can_share_mock_hosts_and_voices():
+    robots = _hardware_pair()
+    robots[1]["head_url"] = robots[0]["head_url"]
+    robots[1]["voice"] = robots[0]["voice"]
+    assert len(Settings(mode="simulation", robots=robots).robots) == 2
+
+
+@pytest.mark.parametrize("mode", ["hardware", "simulation"])
+@pytest.mark.parametrize("alias", ["HEAD_TOKEN", "DESK_ROBOT_API_TOKEN",
+                                   "DESK_ROBOT_TOOL_TOKEN", "DESK_ROBOT_SPEECH_TOKEN"])
+def test_robot_token_env_cannot_alias_another_principal(mode, alias):
+    robots = _hardware_pair()
+    robots[1]["token_env"] = alias
+    with pytest.raises(ValueError, match="unique credential environment names"):
+        Settings(mode=mode, robots=robots)
+
+
+def test_operator_and_tool_token_env_cannot_alias():
+    with pytest.raises(ValueError, match="unique credential environment names"):
+        Settings(robots=_hardware_pair(), tools_token_env="DESK_ROBOT_API_TOKEN")
+
+
+@pytest.mark.parametrize("value", [None, "", "x" * 24, "x" * 31])
+def test_secret_requires_at_least_32_characters(monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv("HEAD_TOKEN", raising=False)
+    else:
+        monkeypatch.setenv("HEAD_TOKEN", value)
+    with pytest.raises(ValueError, match="at least 32 characters"):
+        secret("HEAD_TOKEN")
+
+
+def test_secret_accepts_32_character_boundary(monkeypatch):
+    value = "0123456789abcdef" * 2
+    monkeypatch.setenv("HEAD_TOKEN", value)
+    assert secret("HEAD_TOKEN") == value
+
+
+def test_hardware_omitted_defaults_remain_disarmed():
+    settings = Settings(robots=_hardware_pair())
+    assert settings.mode == "hardware"
+    assert all(not r.motion_enabled and r.motor_backend is None for r in settings.robots)
+    assert all(not r.dock_motion_qualified for r in settings.robots)
+    assert not settings.voice_vision_tools_enabled
+    assert not settings.fleet_text_sharing_enabled
