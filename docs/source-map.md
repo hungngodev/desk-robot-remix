@@ -154,7 +154,7 @@ is a separate historical objective, not a robot dependency.
 | `F011` | Servo bank 30-minute grading and grades A–X | REQUIRED METHOD | Count and inspect nominal MG90S, measure range, stall/heat/fit/grip; reject failed units before mounted prints |
 | `F012` | Gripper fork as scoop; bow on keys, candy wrappers | REQUIRED | Existing Bluino/SMARS lift + 2 positional servos, key/candy strategies, real 8/10 each trials |
 | `F013` | Gripper current signatures and sensing ladder | RESERVE NOW | Optional INA219 shunt, contact switch, FSR, camera verification, stall/force readouts; do not call current signature proven grip |
-| `F014` | Four corner downward ToFs, one forward, mux | REQUIRED | Concealed views and measured stop geometry; VL6180X obsolete so qualify updated short-range part before fleet commitment |
+| `F014` | Eight VL53L0X ToFs on TCA9548A 0x70 | REQUIRED | Four downward corners, one forward guard and three read-only side/rear directions; GY-530 carrier and measured stop geometry still unqualified |
 | `F015` | Continuous ToF polling and 40ms proposed scan | MEASURE | Bounded mux selection/status/timestamp, quality and freshness; no unmeasured 40ms guarantee |
 | `F016` | Cliff classifier and fail-closed behavior | REQUIRED | No blind reverse, sensor degradation drive or auto-resume, local USB recovery only and operator arming |
 | `F017` | Owned head touch + boot calibration | REQUIRED | AT42QT1010 through shell, tap/hold patterns, false activation, touch during motion pauses |
@@ -220,12 +220,12 @@ is a separate historical objective, not a robot dependency.
 
 | ID | Idea or requirement | Design status | Day-zero reservation, constraint, or proof required |
 | --- | --- | --- | --- |
-| `S001` | VL6180X four downward | REQUIRED ROLE, PART RESEARCH | ST obsolete; qualify supported part and correct 4-corner geometry |
+| `S001` | Four downward VL53L0X GY-530 (historically VL6180X) | REQUIRED ROLE | Obsolete VL6180X is not selected; qualify exact GY-530 carrier and four-corner geometry before motion or bulk purchase |
 | `S002` | VL53L0X forward | REQUIRED | Separate obstacle view; 0x29 on mux, no all-side coverage |
 | `S003` | VL53L1X alternative | COMPARISON | Different near-range constraints; not universal fix |
 | `S004` | VL53L4CD short-range replacement | REJECT PREMIUM PURCHASE | Former alternative only; user selected generic VL53L0X; do not order or resurrect the expensive carrier |
-| `S005` | TCA9548A I2C switch | REQUIRED | Four floor + forward on channels 0–4, channels 5–7 reserved; bus health |
-| `S006` | TCRT5000 reflectance | ALTERNATIVE EXPERIMENT | ~millimeter height, surface sensitive; not equivalent drop-in 4-corner ToF |
+| `S005` | TCA9548A I2C switch | REQUIRED | 0x70 channels 0–3 floor, 4 forward, 5–7 read-only left/right/rear; eight isolated 0x29 devices, separate 0x71 accessories; no two-sensor XSHUT substitution |
+| `S006` | TCRT5000 reflectance | ALTERNATIVE EXPERIMENT | ~millimeter height, surface sensitive; no movement authority and no two-sensor replacement for the selected four-corner ToF |
 | `S007` | Pololu QTR reflectance | ALTERNATIVE EXPERIMENT | Low-mounted calibrated floor alternative, not automatic replacement |
 | `S008` | AT42QT1010 cap touch | REQUIRED | Owned breakout; body GPIO34; check shield/touch through case |
 | `S009` | Copper tape capacitive petting | REFERENCE | Use only with known capacitance electronics and ESD handling |
@@ -541,7 +541,7 @@ This table is extracted from the **actual uploaded HTML structure**, rather than
 | 8 | `project-roadmap` | Topics and original navigation | Current | [View](PLAN.md) |
 | 9 | `topic6-power` | Power topology and sequencing | Proposed, qualification open | [View](hardware/wiring.md) |
 | 10 | `topic4-drive-gripper` | Steppers, lift, grip and trials | Required, physical tests open | [View](PLAN.md) |
-| 11 | `topic1-cliff` | Four floor and front ToF | Required roles, part unresolved | [View](hardware/wiring.md) |
+| 11 | `topic1-cliff` | Four floor and front ToF | Required roles, VL53L0X selected; physical carrier and geometry unqualified | [View](hardware/wiring.md) |
 | 12 | `topic2-touch` | Owned touch and IMU plus experiments | Required reactions and optional parts | [View](hardware/interaction-sensors.md) |
 | 13 | `topic3-audio` | Full duplex speech and interruption | Required, physical AEC open | [View](guides/audio-barge-in.md) |
 | 14 | `topic5-head-face` | Head geometry and expression | Required, physical fit open | [View](product-definition.md) |
@@ -588,8 +588,9 @@ changes. Reviewed first-party source boundaries were compared before code reuse:
    job cannot carry on after the WROOM disarms locally.
 2. Rechecked Pololu's [VL53L4CD Arduino ULD-derived source](https://github.com/pololu/vl53l4cd-arduino/blob/master/src/VL53L4CD.cpp).
    Confirmed the active-low GPIO status, raw range status 9, nonzero SPAD and
-   checked interrupt clear. Retained the selected VL53L4CD and mux adapter,
-   not obsolete VL53L0X imports. Rechecked the paired identity detection in
+   checked interrupt clear. At that historical November 10 checkpoint the
+   VL53L4CD and mux adapter were retained; the November 16 selection superseded
+   that choice with VL53L0X. Do not use this historical driver as buying or wiring guidance. Rechecked the paired identity detection in
    [OzzMaker's BerryIMU Arduino source](https://github.com/ozzmaker/BerryIMU/blob/master/arduino-BerryIMU/IMU.cpp).
    Refuse ambiguous WHO_AM_I combinations and unsupported LSM6DSV320X.
 3. Compared the actual vendored MIT
