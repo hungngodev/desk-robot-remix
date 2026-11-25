@@ -14,6 +14,12 @@ from desk_robot_bridge import connections, robot_for_device
 from plugins_func.register import Action, ActionResponse, ToolType, register_function
 
 
+# HTTPX timeouts bound individual network operations, not total elapsed time.
+# Keep these existing route budgets for optional tools; STOP/pickup keep
+# their separate physical acknowledgment and job ownership semantics.
+_READONLY_TIMEOUTS = {"look": 50, "plan-readonly": 4}
+
+
 def _receipt_message(
     robot_id: str,
     device_id: str,
@@ -225,8 +231,11 @@ async def call(conn, route, payload=None):
         )
 
     try:
-        if readonly and callable(observe_turn):
-            signal = observe_turn(conn.device_id)
+        if readonly:
+            signal = (
+                observe_turn(conn.device_id) if callable(observe_turn)
+                else asyncio.Event()
+            )
             # A turn already invalidated before scheduling must not start
             # even a read-only Mac request or fresh camera capture.
             if signal.is_set():
@@ -246,6 +255,7 @@ async def call(conn, route, payload=None):
             try:
                 done, _ = await asyncio.wait(
                     {request_task, turn_task},
+                    timeout=_READONLY_TIMEOUTS.get(route, 5),
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 # The HTTP task can finish in the same event-loop turn as
@@ -256,6 +266,8 @@ async def call(conn, route, payload=None):
                         "error": "Robot tool result superseded by new speech or reconnect",
                         "retried": False,
                     }
+                if request_task not in done:
+                    raise asyncio.TimeoutError
                 response = request_task.result()
             finally:
                 turn_task.cancel()
@@ -272,7 +284,7 @@ async def call(conn, route, payload=None):
                     )
         else:
             response = await request_mac()
-    except (httpx.TransportError, httpx.TimeoutException):
+    except (httpx.TransportError, asyncio.TimeoutError):
         # The Mac may be offline while a real human is still speaking to
         # Xiaozhi. No retry, no stale substitute response, no raw LAN/token
         # diagnostics in the text returned to the language model.

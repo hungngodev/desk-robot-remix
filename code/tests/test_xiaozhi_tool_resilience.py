@@ -1579,3 +1579,44 @@ async def test_shared_tool_rejects_whole_plan_with_malformed_payload(
     assert result == {
         "error": "Invalid read-only Mac intent plan", "retried": False,
     }
+
+
+
+@pytest.mark.parametrize("with_turn_observer", [False, True])
+async def test_readonly_tool_total_deadline_cancels_http_without_retry(
+    bridge_tools, monkeypatch, with_turn_observer,
+):
+    import asyncio
+
+    entered, cancelled = asyncio.Event(), asyncio.Event()
+    if with_turn_observer:
+        signal = asyncio.Event()
+        bridge_tools.bridge.tool_turn_cancel_event = lambda device: signal
+    original = httpx.AsyncClient
+    requests = []
+
+    async def handler(request):
+        requests.append(request)
+        entered.set()
+        try:
+            # MockTransport intentionally does not enforce HTTPX network
+            # timeouts. Only the shared total deadline can end this call.
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(bridge_tools.httpx, "AsyncClient", client_factory)
+    monkeypatch.setattr(bridge_tools, "_READONLY_TIMEOUTS", {"status": 0.02})
+    result = await asyncio.wait_for(
+        bridge_tools.call(bridge_tools.registered_head, "status"),
+        timeout=1,
+    )
+    assert entered.is_set()
+    assert cancelled.is_set()
+    assert len(requests) == 1
+    assert result == {
+        "error": "Robot Mac connection unavailable", "retried": False,
+    }
