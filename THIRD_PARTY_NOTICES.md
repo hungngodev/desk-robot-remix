@@ -9,7 +9,9 @@ fonts, or other assets.
 - [VerdureBuddyRover MIT](docs/licenses/VerdureBuddyRover-MIT.txt).
 - [Xiaozhi device MIT](docs/licenses/xiaozhi-esp32-MIT.txt).
 - [Xiaozhi server MIT](docs/licenses/xiaozhi-esp32-server-MIT.txt).
-- [Stackchan-agent MIT notice in adapted HSM](code/firmware/head/overlay/stackchan_behavior.hpp).
+- Stackchan-agent: [MIT license](docs/licenses/Stackchan-agent-MIT.txt),
+  [pinned upstream Behavior.hpp](https://github.com/botamochi6277/stackchan-agent/blob/bfb98fb8bdb4f8ecc4b7c1c4f9bc90ee5227e613/include/Behavior.hpp)
+  and [adapted HSM with retained notice](code/firmware/head/overlay/stackchan_behavior.hpp).
 - [Body firmware notices](code/firmware/body/THIRD_PARTY_NOTICES.md), including
   [Seeed PN532 BSD-3-Clause](docs/licenses/Seeed-PN532-BSD-3-Clause.txt).
 - [Original CAD source records](docs/cad/originals/) and
