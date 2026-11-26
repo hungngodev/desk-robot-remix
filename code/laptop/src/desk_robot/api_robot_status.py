@@ -7,7 +7,9 @@ from __future__ import annotations
 
 import math
 
+import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 
 from .aux import _aux_boot_epoch, _fresh_aux_acquisition
 from .config import Settings
@@ -23,6 +25,54 @@ def _json_safe_telemetry(value: object) -> object:
     if isinstance(value, (list, tuple)):
         return [_json_safe_telemetry(v) for v in value]
     return value
+
+
+def _failed_status_components(exc: HeadError | TimeoutError, robot_id: str) -> tuple[str, str]:
+    """Use the authenticated bridge's exact error envelope, not exception text."""
+    cause = exc.__cause__
+    if isinstance(cause, (httpx.ConnectError, httpx.ConnectTimeout)):
+        return "unreachable", "unconfirmed"
+    if isinstance(cause, httpx.HTTPStatusError):
+        try:
+            packet = cause.response.json()
+        except ValueError:
+            packet = None
+        if (isinstance(packet, dict) and packet.get("robot_id") == robot_id
+                and packet.get("ok") is False):
+            if (cause.response.status_code == 504
+                    and packet.get("reply") == "body ACK timeout; command outcome uncertain"):
+                return "responded", "serial_timeout"
+            if cause.response.status_code == 503:
+                return "responded", "unavailable"
+    return "unconfirmed", "unconfirmed"
+
+
+def _room_status(settings: Settings, request: Request) -> str:
+    if not getattr(settings, "room_station_enabled", False):
+        return "disabled"
+    runtime = getattr(request.app.state, "runtime", None)
+    feed = getattr(runtime, "room_feed", None)
+    if feed is None:
+        return "not_started"
+    error = getattr(feed, "last_error", None)
+    if isinstance(error, str) and error.startswith("Room observation callback failed:"):
+        return "callback_error"
+    if error:
+        return "unavailable"
+    # A cleared error or a historical frame count is not a fresh USB receipt.
+    return "unverified"
+
+
+def _status_health(settings: Settings, request: Request, head: str, body: str) -> dict:
+    room = _room_status(settings, request)
+    return {
+        "head": head,
+        "body": body,
+        "room_station": room,
+        "state": ("degraded" if body not in ("status_received", "simulated")
+                  or room not in ("disabled", "unverified") else "reported"),
+        "physical_acceptance_pass": False,
+    }
 
 
 def register_robot_status_routes(
@@ -74,26 +124,44 @@ def register_robot_status_routes(
 
     @app.get("/v1/robots/{robot_id}/status", dependencies=[Depends(authorize)])
     async def status(robot_id: str, request: Request):
-        head = telemetry_head(robot_id)
+        owner = coordinator()
+        owner.robot(robot_id)
         context = requested_tool_context(request, robot_id)
         require_current_voice_tool(request, robot_id, context)
+        head = owner.heads.get(robot_id)
         getter = getattr(head, "status", None)
         if not callable(getter):
-            raise HTTPException(503, "Status adapter unavailable")
-        data = await getter()
+            detail = "Telemetry head unavailable" if head is None else "Status adapter unavailable"
+            health = _status_health(settings, request, "adapter_unavailable", "unconfirmed")
+            return JSONResponse(
+                {"robot_id": robot_id, "detail": detail, "health": health}, status_code=503,
+            )
+        try:
+            data = await getter()
+        except (HeadError, TimeoutError) as exc:
+            require_current_voice_tool(request, robot_id, context)
+            head_state, body_state = _failed_status_components(exc, robot_id)
+            return JSONResponse({
+                "robot_id": robot_id, "error": "Robot status unavailable",
+                "health": _status_health(settings, request, head_state, body_state),
+            }, status_code=503)
         require_current_voice_tool(request, robot_id, context)
         if not isinstance(data, dict) or data.get("robot_id") != robot_id:
             raise HeadError("Head status robot identity mismatch")
-        if isinstance(data, dict):
-            safety = data.get("safety")
-            safety = safety if isinstance(safety, dict) else {}
-            summary = (
-                f"backend={str(data.get('backend', 'unknown'))[:24]}, "
-                f"armed={data.get('armed')}, "
-                f"safety_fault={str(safety.get('fault', 'unknown'))[:40]}"
-            )
-            remember_tool_context(context, robot_id, "robot_status", summary)
-        return data
+        safety = data.get("safety")
+        safety = safety if isinstance(safety, dict) else {}
+        summary = (
+            f"backend={str(data.get('backend', 'unknown'))[:24]}, "
+            f"armed={data.get('armed')}, "
+            f"safety_fault={str(safety.get('fault', 'unknown'))[:40]}"
+        )
+        remember_tool_context(context, robot_id, "robot_status", summary)
+        simulated = settings.mode == "simulation"
+        health = _status_health(
+            settings, request, "simulated" if simulated else "responded",
+            "simulated" if simulated else "status_received",
+        )
+        return {**data, "health": health}
 
     @app.get("/v1/robots/{robot_id}/aux", dependencies=[Depends(authorize)])
     async def aux(robot_id: str, request: Request):
