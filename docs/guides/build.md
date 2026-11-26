@@ -172,9 +172,17 @@ export PLATFORMIO_CORE_DIR="$PWD/../.tools/platformio"
 ../.tools/body-pio-venv/bin/pio run -d firmware/body -e esp32_full
 ```
 
-The platform is pinned to espressif32 6.9.0 (Arduino 2.0.17). Its generic
-`esp32dev` profile compiled for the WROOM development board, but the actual
-board's flash/reset/USB interface still needs confirmation.
+The platform is pinned to espressif32 6.9.0 (Arduino 2.0.17). All body
+profiles inherit the exact PlatformIO framework package
+`3.20017.241212+sha.dcc1105b` and Xtensa compiler `8.4.0+2021r2-patch5`.
+Dock and room station likewise pin their framework and compiler packages in
+shared `[env]` sections. `code/toolchain-lock.json` records those resolved
+versions from [CI run 45768389395](https://github.com/hungngodev/desk-robot-remix/actions/runs/45768389395).
+The host lock test checks all declared profiles, including lab variants. This
+locks the listed packages, not every transitive build input.
+
+The generic `esp32dev` profile compiled for the WROOM development board, but
+the actual board's flash/reset/USB interface still needs confirmation.
 
 A guarded logic-only upload is a prerequisite for sensor calibration, not a
 movement release. First verify board identity, logic supply, common ground,
