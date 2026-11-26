@@ -173,6 +173,48 @@ def _valid_release_evidence(record):
     return True
 
 
+def _missing_procedure_paths(row, root):
+    """Resolve explicit owners and code-relative command paths in the checkout."""
+    owners = re.findall(
+        r"(?<![\w./-])(?:code|docs)/[\w./-]+"
+        r"|(?<![\w./-])[\w.-]+\.(?:py|md|json|h|hpp|cpp|cc|ini|scad|sh|txt)\b",
+        row["source_owner"],
+    )
+    targets = re.findall(
+        r"(?<![\w./-])(?:tests|scripts|firmware|laptop|config)/[\w./-]+",
+        row["verification_command"],
+    )
+    missing = []
+    for relative in owners + [f"code/{target}" for target in targets]:
+        path = root / relative
+        if not (path.is_file() if path.suffix else path.is_dir()):
+            missing.append(relative)
+    return missing
+
+
+@pytest.mark.parametrize(("owner", "command", "expected"), [
+    ("docs/missing.md", "cd code && git rev-parse HEAD", ["docs/missing.md"]),
+    ("missing.py", "cd code && git rev-parse HEAD", ["missing.py"]),
+    ("AGENTS.md", "cd code && python scripts/missing.py", ["code/scripts/missing.py"]),
+    ("AGENTS.md", "cd code && cmake -S firmware/missing -B /tmp/body-build",
+     ["code/firmware/missing"]),
+    ("AGENTS.md", "cd code && pytest tests/missing.py", ["code/tests/missing.py"]),
+    ("code/firmware/body and docs/PLAN.md", "cd code && python scripts/verify_system.py", []),
+    ("PR #17 metadata", "cd code && git diff origin/codex/initial-remix...HEAD", []),
+    ("AGENTS.md", "cd code && cmake -S firmware/body -B /tmp/body-build", []),
+    ("code/tests/fake.py", "cd code && git rev-parse HEAD", ["code/tests/fake.py"]),
+])
+def test_procedure_path_references_reject_stale_paths(tmp_path, owner, command, expected):
+    for relative in ("AGENTS.md", "docs/PLAN.md", "code/scripts/verify_system.py"):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    (tmp_path / "code/firmware/body").mkdir(parents=True)
+    (tmp_path / "code/tests/fake.py").mkdir(parents=True)
+    row = {"source_owner": owner, "verification_command": command}
+    assert _missing_procedure_paths(row, tmp_path) == expected
+
+
 def test_all_96_playbook_procedures_have_distinct_source_and_verification_owners():
     ledger = _load_ledger()
     assert ledger["schema_version"] == 2
@@ -196,9 +238,9 @@ def test_all_96_playbook_procedures_have_distinct_source_and_verification_owners
         # A command that merely prints usage or collects tests can never
         # qualify any of these 96 required engineering procedures.
         assert not re.search(r"--(?:help|version|collect-only)\b|&& true\b", command)
-        # Every referenced pytest target must exist in this exact checkout.
-        for relative in re.findall(r"tests/[A-Za-z0-9_./-]+\.py", command):
-            assert (ROOT / "code" / relative).is_file(), (row["id"], relative)
+        # Source owners, scripts, tests and firmware paths must all resolve.
+        missing = _missing_procedure_paths(row, ROOT)
+        assert not missing, (row["id"], missing)
         assert row.get("verification_method") in (None, "manual_review")
         if row["id"] in MANUAL_REVIEW_PROCEDURE_IDS:
             assert row["verification_method"] == "manual_review"
