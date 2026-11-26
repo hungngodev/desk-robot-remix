@@ -45,6 +45,12 @@ inline const char* ina226_fault_name(Ina226Fault fault) {
 inline unsigned ina226_bus_mv(std::uint16_t raw) {
   return static_cast<unsigned>((static_cast<std::uint32_t>(raw) * 5U) / 4U);
 }
+inline bool ina226_bus_mv_from_raw(std::uint16_t raw, unsigned& out_mv) {
+  // TI INA226 register 0x02: D15 is always zero; do not refresh on corruption.
+  if ((raw & 0x8000U) != 0U) return false;
+  out_mv = ina226_bus_mv(raw);
+  return true;
+}
 inline int ina226_shunt_uv(std::int16_t raw) {
   return static_cast<int>(raw) * 5 / 2;
 }

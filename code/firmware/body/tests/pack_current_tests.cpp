@@ -39,6 +39,18 @@ int main() {
   CHECK(!fuel_above_recovery_floor(3349, 500));
   CHECK(!fuel_above_recovery_floor(3350, 499));
   CHECK(fuel_above_recovery_floor(3350, 500));
+  // INA226 register 0x02: 1.25 mV/LSB, reserved high bit always zero.
+  // An impossible raw word must preserve the previous output.
+  for (std::uint32_t code = 0; code <= 0xffffU; ++code) {
+    unsigned mv = 123456U;
+    const bool valid = desk_robot::ina226_bus_mv_from_raw(
+        static_cast<std::uint16_t>(code), mv);
+    if (code >= 0x8000U) {
+      CHECK(!valid && mv == 123456U);
+    } else {
+      CHECK(valid && mv == code * 1250U / 1000U);
+    }
+  }
   int ma = 999;
   CHECK(ina226_shunt_uv(static_cast<std::int16_t>(0)) == 0);
   CHECK(ina226_shunt_uv(static_cast<std::int16_t>(16)) == 40);
