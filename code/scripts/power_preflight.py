@@ -212,7 +212,8 @@ def screen_bq2407x_output_path(
     Manufacturer Rev N: BQ24074 OUT=4.3..4.5V, BQ24075 OUT=5.4..5.6V
     when the input is sufficient for voltage regulation. On battery supply
     OUT follows the Li-ion cell, with no guaranteed fixed 5V rail. The
-    conservative 3.0V lower bound is a design target, not a tested UVLO.
+    conservative 3.0V cell target is not the loaded converter input.
+    Use the effective input minimum including cutoff and restart behavior.
     A passing range check NEVER qualifies a real charger, pack or boost.
     """
     if charger_variant not in ("BQ24074", "BQ24075"):
@@ -232,15 +233,20 @@ def screen_bq2407x_output_path(
     # alone is NOT proof that its output remains fixed at five volts.
     topology_suitable = (charger_variant == "BQ24074" or
                          regulator_topology == "buck_boost")
+    # TI SLUS810N section 8.5 specifies up to 100 mV BAT-to-OUT
+    # dropout at 1 A and VBAT > 3 V. Reserve this illustrative headroom
+    # for the paper screen; do not extrapolate it to a hot board or stalls.
+    dropout_screen_input_v = 2.9
     return {
         "charger_ic": charger_variant,
         "docked_output_max_v": docked_output_max_v,
         "conservative_low_cell_design_v": 3.0,
+        "battery_path_dropout_screen_input_v": dropout_screen_input_v,
         "regulator_topology": regulator_topology,
         "topology_supports_regulating_5v_both_modes": topology_suitable,
         "regulator_covers_charger_output_on_paper": (
             not bypasses_5v_regulator and topology_suitable
-            and regulator_min_input_v <= 3.0
+            and regulator_min_input_v <= dropout_screen_input_v
             and regulator_max_input_v >= docked_output_max_v
         ),
         "fixed_5v_direct_output_prohibited": True,

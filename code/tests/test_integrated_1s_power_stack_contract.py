@@ -3,7 +3,10 @@
 This contract checks real source identity. It does not verify physical copper,
 fuse performance, assembly, PCM trip thresholds or charge authorization.
 """
+import runpy
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 SRC = ROOT / "code"
@@ -33,6 +36,8 @@ def test_single_mathematical_owner_joins_all_five_power_domains():
         "test_stack_does_not_ignore_actual_ntc_jumper_and_connector",
         "test_stack_will_not_count_1_5a_bq24075_twice",
         "test_stack_requires_disarmed_motors_and_actual_pack_volume",
+        "test_known_undersized_rating_rejects_pack_even_when_other_ratings_missing",
+        "test_integrated_stack_respects_charger_bat_and_out_operating_limit",
     ):
         assert case in tests
 
@@ -142,3 +147,22 @@ def test_full_body_power_monitor_and_cutoff_are_wired_to_compiled_profiles():
     assert "motor_cutoff_unqualified" in wiring
     assert "physically qualified" in wiring
 
+
+@pytest.mark.parametrize("variant", ["BQ24074", "BQ24075"])
+@pytest.mark.parametrize("effective_min_v, expected", [
+    (2.8, True), (2.9, True), (2.901, False), (3.0, False), (3.4, False),
+])
+def test_bq2407x_output_path_reserves_battery_dropout_headroom(
+    variant, effective_min_v, expected
+):
+    # Pololu #2873 has a 3 V cutoff and 3.4 V restart threshold.
+    # Its raw 2 V operating rating is not its effective minimum.
+    screen = runpy.run_path(str(SRC / "scripts/power_preflight.py"))[
+        "screen_bq2407x_output_path"
+    ]
+    result = screen(
+        variant, regulator_min_input_v=effective_min_v,
+        regulator_max_input_v=16, regulator_topology="buck_boost",
+    )
+    assert result["regulator_covers_charger_output_on_paper"] is expected
+    assert result["charger_and_5v_rail_physically_qualified"] is False
