@@ -17,6 +17,7 @@ def test_doctor_only_requests_live_media_when_requested(
     settings = SimpleNamespace(
         mode="hardware", coordinator_token_env="OPERATOR", tools_token_env="TOOLS",
         robots=[SimpleNamespace(id="pet", motion_enabled=False, calibration=None)],
+        room_station_enabled=False,
     )
     calls = []
 

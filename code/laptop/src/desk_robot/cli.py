@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import shutil
+import sqlite3
 import stat
 from pathlib import Path
 
@@ -15,6 +16,7 @@ import httpx
 from .config import RobotConfig, Settings, load_settings, read_private_env, secret
 from .conversation import conversation_turns
 from .runtime import Runtime
+from .serial_device import require_local_serial_device
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -355,6 +357,25 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _doctor_room_station(settings: Settings) -> dict[str, str]:
+    if not settings.room_station_enabled:
+        return {"status": "disabled"}
+    port = settings.room_station_port
+    try:
+        if port is None:
+            raise ValueError("Room station port is not configured")
+        require_local_serial_device(port)
+    except ValueError:
+        return {
+            "status": "device_unavailable",
+            "next_action": (
+                "Connect the room station by USB and set room_station_port to its direct "
+                "/dev/ device, or disable the optional station and rerun doctor."
+            ),
+        }
+    return {"status": "device_present_not_verified"}
+
+
 def _doctor_report(args: argparse.Namespace, settings: Settings) -> dict[str, object]:
     result: dict[str, object] = {
         "mode": settings.mode,
@@ -362,6 +383,7 @@ def _doctor_report(args: argparse.Namespace, settings: Settings) -> dict[str, ob
         "ollama_installed": shutil.which("ollama") is not None,
         "ffmpeg_installed": shutil.which("ffmpeg") is not None,
         "physical_test_status": "not run",
+        "room_station": _doctor_room_station(settings),
         "credentials_present": all(
             os.environ.get(n)
             for n in (settings.coordinator_token_env, settings.tools_token_env)
@@ -433,6 +455,9 @@ def main() -> None:
                 print(json.dumps(result, indent=2))
                 p.exit(1)
         p.exit(1, f"{exc}\n")
+    except sqlite3.Error:
+        p.exit(1, "Private memory database unavailable. Check memory_dir permissions, "
+               "free space and database integrity; preserve existing memory files.\n")
     except (ValueError, OSError, httpx.HTTPError) as exc:
         p.exit(1, f"{exc}\n")
 
