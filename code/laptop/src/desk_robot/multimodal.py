@@ -1663,11 +1663,14 @@ class MultimodalOrchestrator:
         self._last_sensor_request[robot_id] = now
         self._metrics[robot_id]["sensor_bursts"] += 1
         self._sensor_tasks[robot_id] = asyncio.create_task(
-            self._sensor_frame(robot_id, requested_at=stamp, trigger_kind=kind)
+            self._sensor_frame(
+                robot_id, requested_at=stamp, trigger_kind=kind,
+                camera_grant=getattr(self.settings, "camera_consent_generation", None),
+            )
         )
 
     async def _sensor_frame(self, robot_id: str, *, requested_at: float,
-                            trigger_kind: str) -> None:
+                            trigger_kind: str, camera_grant: int | None) -> None:
         """Confirm a triggered scene using at most two fresh device frames.
 
         A single capture populates context but cannot confirm that an object
@@ -1679,6 +1682,10 @@ class MultimodalOrchestrator:
             for index in range(2):
                 if index:
                     await asyncio.sleep(0.45)
+                # A new grant cannot authorize the original sensor edge.
+                if (getattr(self.settings, "mode", "hardware") == "hardware"
+                        and not self._camera_grant_valid(robot_id, camera_grant)):
+                    return
                 question = self._look_tasks.get(robot_id)
                 if (self._closed or self._any_human_active(
                     time.monotonic()
@@ -1931,6 +1938,7 @@ class MultimodalOrchestrator:
         self, robot_id: str, *, source: str,
     ) -> tuple[bytes, float, tuple[int, int, int] | None]:
         """One real device read until its task exits, even after a timeout."""
+        camera_grant = getattr(self.settings, "camera_consent_generation", None)
         previous = self._head_snapshot_tasks.get(robot_id)
         if previous is not None:
             if not previous.done() and source in ("speech", "voice_question"):
@@ -1945,7 +1953,12 @@ class MultimodalOrchestrator:
             if not previous.done():
                 raise RuntimeError("Previous XIAO camera snapshot still in flight")
             self._head_snapshot_tasks.pop(robot_id, None)
+
         async def read_snapshot():
+            # The child can start after the parent last checked consent.
+            if (getattr(self.settings, "mode", "hardware") == "hardware"
+                    and not self._camera_grant_valid(robot_id, camera_grant)):
+                raise RuntimeError("Camera consent revoked before device capture")
             head = self.heads[robot_id]
             receipt = getattr(head, "snapshot_receipt", None)
             if callable(receipt):

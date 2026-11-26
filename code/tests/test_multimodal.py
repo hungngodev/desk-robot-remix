@@ -4298,3 +4298,57 @@ def test_scene_score_preserves_threshold_and_clipping():
     assert _score_scene_change(bytes([10, 20]), bytes([26, 35]), 1, 0, 16) == 1
     assert _score_scene_change(bytes([250]), bytes([255]), 2, 0, 16) == 1
     assert _score_scene_change(bytes([250]), bytes([255]), 2, 0, 16, clamp=True) == 0
+
+
+@pytest.mark.parametrize("stage", ["queued", "followup"])
+async def test_sensor_burst_cannot_adopt_new_camera_grant(settings, stage):
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    rid = settings.robots[0].id
+    head = Head()
+    visual = MultimodalOrchestrator(
+        settings, {rid: head}, Vision(), asyncio.Lock(),
+    )
+    try:
+        visual.sensor_event(rid, "touch_tap")
+        task = visual._sensor_tasks[rid]
+        if stage == "followup":
+            async with asyncio.timeout(2):
+                while not visual.hub.frames[rid]:
+                    await asyncio.sleep(0.01)
+        grant = settings.camera_consent_generation
+        settings.voice_vision_tools_enabled = False
+        settings.voice_vision_tools_enabled = True
+        assert settings.camera_consent_generation != grant
+        await asyncio.wait_for(task, timeout=2)
+        assert head.captures == (1 if stage == "followup" else 0)
+        assert not visual.hub.frames[rid]
+    finally:
+        await visual.close()
+
+
+@pytest.mark.parametrize("regrant", [False, True])
+@pytest.mark.parametrize("source", ["sensor", "proactive", "speech", "voice_question"])
+async def test_deferred_snapshot_task_rechecks_original_grant(settings, source, regrant):
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    rid = settings.robots[0].id
+    head = Head()
+    visual = MultimodalOrchestrator(
+        settings, {rid: head}, Vision(), asyncio.Lock(),
+    )
+    task = asyncio.create_task(visual._head_snapshot(rid, source=source))
+    try:
+        # Parent has scheduled the physical reader but it has not started.
+        await asyncio.sleep(0)
+        assert rid in visual._head_snapshot_tasks
+        assert head.captures == 0
+        settings.voice_vision_tools_enabled = False
+        if regrant:
+            settings.voice_vision_tools_enabled = True
+        with pytest.raises(RuntimeError, match="Camera consent revoked"):
+            await asyncio.wait_for(task, timeout=2)
+        assert head.captures == 0
+        assert not visual.hub.frames[rid]
+    finally:
+        await visual.close()
