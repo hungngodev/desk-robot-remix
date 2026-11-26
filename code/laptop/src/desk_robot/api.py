@@ -685,12 +685,12 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         job = matches[-1]
         loss = any(event.startswith("object_lost:") for event in job.events)
         hold_note = (
-            "fresh jaw contact below threshold; hold unverified; no automatic retry; "
+            "object_lost: fresh jaw contact low; hold unverified; no retry; "
             if loss else ""
         )
         remember_tool_context(
             owner, robot_id, "pickup_status",
-            f"pickup job {job.id[:24]} state={job.state}; {hold_note}"
+            f"{hold_note}pickup job {job.id[:24]} state={job.state}; "
             "physical grasp requires separate trial evidence",
         )
         return {"available": True, **job.data()}

@@ -2325,9 +2325,9 @@ async def test_motion_disabled_before_manual_dispatch(settings, stage):
         resume.set()
         await c.close()
 
-@pytest.mark.parametrize("release_frozen", [False, True])
+@pytest.mark.parametrize("release_frozen,dropped", [(False, False), (True, False), (False, True)])
 async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(
-    settings, tmp_path, release_frozen,
+    settings, tmp_path, release_frozen, dropped,
 ):
     """Replay real Mac grasp code with synthetic WROOM and live-frame receipts."""
     import json
@@ -2387,7 +2387,9 @@ async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(
             "robot_id": head.id,
             "force": {
                 "jaw_valid": True, "calibrated": False,
-                "adc": [0, 350 if head.gripped else 100],
+                "adc": [0, 350 if head.gripped and not (
+                    dropped and lift_command in head.commands
+                ) else 100],
                 "jaw_seq": seq, "jaw_age_ms": 0, "boot_id": 1,
             },
         }
@@ -2447,7 +2449,11 @@ async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(
         await asyncio.wait_for(halt_pending.wait(), timeout=10)
         # Verified placement and jaw opening alone cannot release ownership:
         # the terminal HALT receipt is still in flight.
-        assert not head.gripped
+        if dropped:
+            assert head.commands.count(open_command) == 1
+            assert any(event.startswith("object_lost:") for event in job.events)
+        else:
+            assert not head.gripped
         assert c._fleet_motion_owner == job.id and job.result is None
         assert not any(cmd.startswith("drive ") for cmd in head.commands[contact_command_count:])
         with pytest.raises(OperationError, match="one moving pet"):
@@ -2455,7 +2461,15 @@ async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(
         assert peer.commands == []
         allow_halt.set()
         await c.tasks[job.id]
-        if release_frozen:
+        if dropped:
+            assert job.state == "failed"
+            assert job.result is None
+            assert "object_lost:" in job.error
+            assert head.commands.count(open_command) == 1
+            assert head.commands.count(lift_command) == 1
+            lift_index = head.commands.index(lift_command)
+            assert not any(cmd.startswith("grip ") for cmd in head.commands[lift_index:])
+        elif release_frozen:
             assert job.state == "failed"
             assert job.result is None
             assert head.commands.count(lift_command) == 1

@@ -1019,8 +1019,9 @@ def test_power_tool_does_not_write_old_sensor_receipt_into_new_human_turn(
         assert hub.recent_tool_context(robot, __import__("time").monotonic()) == []
 
 
+@pytest.mark.parametrize("lost", [False, True])
 def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
-    settings, tokens, monkeypatch,
+    settings, tokens, monkeypatch, lost,
 ):
     import time
     from types import SimpleNamespace
@@ -1040,11 +1041,14 @@ def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
                 "armed": False, "safety": {"fault": "none"},
             }
 
+    job_id = "pickup123" * 4
+    state = "failed" if lost else "running"
     job = SimpleNamespace(
-        id="pickup123", robot_id=ids[0], kind="pickup", state="running",
+        id=job_id, robot_id=ids[0], kind="pickup", state=state,
+        events=["object_lost: jaw contact below threshold; hold unverified"] if lost else [],
         data=lambda: {
-            "id": "pickup123", "robot_id": ids[0],
-            "kind": "pickup", "state": "running",
+            "id": job_id, "robot_id": ids[0],
+            "kind": "pickup", "state": state,
             "physical_grasp_verified": False,
         },
     )
@@ -1052,7 +1056,7 @@ def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
     coord = SimpleNamespace(
         robot=lambda rid: settings.robot(rid),
         heads={ids[0]: head},
-        jobs={"pickup123": job},
+        jobs={job_id: job},
     )
     runtime = SimpleNamespace(
         coordinator=coord,
@@ -1082,7 +1086,7 @@ def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
             settings, tokens, ids[0], job_url, 0, monkeypatch,
         ))
         assert result.status_code == 200
-        assert result.json()["state"] == "running"
+        assert result.json()["state"] == state
         cues = hub.recent_tool_context(ids[0], time.monotonic())
         assert {x["kind"] for x in cues} == {"robot_status", "pickup_status"}
         assert all(x["motor_authorized"] is False for x in cues)
@@ -1090,6 +1094,8 @@ def test_xiaozhi_readonly_status_and_job_receipts_share_live_context_only(
             [], [], hub.interaction_timeline(ids[0], time.monotonic())
         )
         assert "Recent head telemetry" in context.interaction
+        loss_phrase = "object_lost: fresh jaw contact low; hold unverified; no retry;"
+        assert (loss_phrase in context.interaction) is lost
         hub.tool_history[ids[0]].clear()
         head.reported_id = ids[1]
         assert client.get(status_url, headers=_signed_tool_headers(
