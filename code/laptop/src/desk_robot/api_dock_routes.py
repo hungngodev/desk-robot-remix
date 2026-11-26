@@ -60,6 +60,10 @@ def register_dock_routes(
             raise HTTPException(403, "Camera consent revoked during dock observation")
         if settings.camera_consent_generation != camera_grant:
             raise HTTPException(409, "Camera grant changed during dock observation")
+        # A runtime consent denial must never become a successful diagnostic.
+        if result is None or result.get("source") == "camera_consent_revoked":
+            raise HTTPException(403, "Camera consent revoked during dock observation")
+        # Other HOLD results are read-only diagnostic data, not motion success.
         return result
 
     @app.get("/v1/robots/{robot_id}/dock/ir",
