@@ -21,6 +21,7 @@ import re
 import time
 import uuid
 from collections import deque
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 
 import aiohttp
@@ -2656,12 +2657,17 @@ class NativeOmniSession:
         events = await self._invalidate_head_first(force_flush=True)
         await self._cancel_remote(events)
 
-    async def _cancel_workers(self) -> None:
-        """Do not block physical decoder STOP behind ignored cancellations."""
+    def _request_worker_cancellation(self) -> list[asyncio.Task]:
         workers = [*self._tasks, *self._pending_cancels]
         for task in workers:
             if not task.done():
                 task.cancel()
+        return workers
+
+    async def _cancel_workers(self, workers: list[asyncio.Task] | None = None) -> None:
+        """Bound worker cleanup independently of the physical decoder STOP."""
+        if workers is None:
+            workers = self._request_worker_cancellation()
         if not workers:
             return
         done, pending = await asyncio.wait(
@@ -2681,158 +2687,173 @@ class NativeOmniSession:
                 )
 
     async def run(self) -> None:
-        global _output_owner, _output_owner_unverified
         self._run_entered = True
+        stack = AsyncExitStack()
         try:
             if self.closed:
                 return  # Failed before startup; still run lease/registry cleanup.
             await self._retire_legacy_audio()
-            async with aiohttp.ClientSession() as http:
-                await self._load_private_persona(http)
-                if not self._mac_context_verified:
-                    raise RuntimeError(
-                        "Current Mac permission required for native live media"
-                    )
-                async with http.ws_connect(
-                    self.url, heartbeat=20, max_msg_size=2_000_000,
-                    timeout=8,
-                ) as ws:
-                    self._socket = ws
-                    await self._send(self.wire.session_update())
-                    greeting = await ws.receive_json(timeout=8)
-                    verify_native_server(greeting, self.wire.model)
-                    self.wire.handle_event(greeting)
-                    self.connected = True
-                    _terminal_errors.pop(self.device, None)
-                    _retry_after.pop(self.device, None)
-                    self._tasks = [
-                        asyncio.create_task(self._send_mic()),
-                        asyncio.create_task(self._receive_model()),
-                        asyncio.create_task(self._play()),
-                        asyncio.create_task(self._camera_stream(http)),
-                    ]
-                    if (self._live_transcript_enabled
-                            or self._transcript_memory_enabled):
-                        self._tasks.append(asyncio.create_task(
-                            self._persist_heard(http)
-                        ))
-                    if self._live_transcript_enabled:
-                        self._tasks.append(asyncio.create_task(
-                            self._persist_spoken(http)
-                        ))
-                        self._tasks.append(asyncio.create_task(
-                            self._refresh_live_context(http)
-                        ))
-                        self._tasks.append(asyncio.create_task(
-                            self._readonly_tool_worker()
-                        ))
-                    done, _pending = await asyncio.wait(
-                        self._tasks, return_when=asyncio.FIRST_COMPLETED
-                    )
-                    for task in done:
-                        exc = task.exception() if not task.cancelled() else None
-                        if exc:
-                            raise exc
-                    raise RuntimeError("Native realtime worker exited unexpectedly")
+            http = await stack.enter_async_context(aiohttp.ClientSession())
+            await self._load_private_persona(http)
+            if not self._mac_context_verified:
+                raise RuntimeError(
+                    "Current Mac permission required for native live media"
+                )
+            ws = await stack.enter_async_context(http.ws_connect(
+                self.url, heartbeat=20, max_msg_size=2_000_000,
+                timeout=8,
+            ))
+            self._socket = ws
+            await self._send(self.wire.session_update())
+            greeting = await ws.receive_json(timeout=8)
+            verify_native_server(greeting, self.wire.model)
+            self.wire.handle_event(greeting)
+            self.connected = True
+            _terminal_errors.pop(self.device, None)
+            _retry_after.pop(self.device, None)
+            self._tasks = [
+                asyncio.create_task(self._send_mic()),
+                asyncio.create_task(self._receive_model()),
+                asyncio.create_task(self._play()),
+                asyncio.create_task(self._camera_stream(http)),
+            ]
+            if (self._live_transcript_enabled
+                    or self._transcript_memory_enabled):
+                self._tasks.append(asyncio.create_task(
+                    self._persist_heard(http)
+                ))
+            if self._live_transcript_enabled:
+                self._tasks.append(asyncio.create_task(
+                    self._persist_spoken(http)
+                ))
+                self._tasks.append(asyncio.create_task(
+                    self._refresh_live_context(http)
+                ))
+                self._tasks.append(asyncio.create_task(
+                    self._readonly_tool_worker()
+                ))
+            done, _pending = await asyncio.wait(
+                self._tasks, return_when=asyncio.FIRST_COMPLETED
+            )
+            for task in done:
+                exc = task.exception() if not task.cancelled() else None
+                if exc:
+                    raise exc
+            raise RuntimeError("Native realtime worker exited unexpectedly")
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             self.last_error = f"{type(exc).__name__}: {str(exc)[:115]}"
         finally:
-            self.connected = False
-            self.closed = True
-            self._generation += 1
-            await self._cancel_workers()
-            # This native session can exit while Mac proactive speech owns
-            # the SAME authenticated decoder. Native teardown must not call
-            # that Mac speech a failed STOP or take over its separate lease.
-            # end_external_speech owns the eventual STOP result.
-            external_mac_owns_decoder = (
-                _external_speaker_owner == self.device
-                and _external_speaker_connection is self.conn
-            )
-            stop_confirmed = (
-                not self.conn.client_is_speaking
-                and _output_owner_unverified != self.device
-            )
-            cancelled_during_stop = False
             try:
-                if (self.conn.client_is_speaking
-                        and not external_mac_owns_decoder):
-                    # Bound BOTH the physical send-lock wait and STOP. A Mac
-                    # voice may claim this decoder while native shutdown is
-                    # awaiting that lock, so recheck its current ownership.
-                    async def stop_native_shutdown():
-                        nonlocal external_mac_owns_decoder, stop_confirmed
-                        async with self._device_send_lock:
-                            import desk_robot_bridge as bridge
-                            if (_external_speaker_owner == self.device
-                                    and _external_speaker_connection is self.conn):
-                                external_mac_owns_decoder = True
-                                return
-                            if bridge.connections.get(self.device) is not self.conn:
-                                raise RuntimeError("Old head cannot confirm native STOP")
-                            if not self.conn.client_is_speaking:
-                                stop_confirmed = (
-                                    _output_owner_unverified != self.device
-                                )
-                                return
-                            await asyncio.wait_for(
-                                self.conn.websocket.send(json.dumps({
-                                    "type": "tts", "state": "stop",
-                                    "session_id": self.conn.session_id,
-                                    "flush": True,
-                                })), timeout=0.4,
+                await self._shutdown()
+            finally:
+                # Remote WebSocket close must never delay local STOP or lease release.
+                try:
+                    await stack.aclose()
+                except Exception as exc:
+                    self.last_error = self.last_error or f"Model close failed: {type(exc).__name__}"
+
+    async def _shutdown(self) -> None:
+        global _output_owner, _output_owner_unverified
+        self.connected = False
+        self.closed = True
+        self._mac_context_verified = False
+        self._generation += 1
+        self._clear_obsolete_tool_turn()
+        workers = self._request_worker_cancellation()
+        # This native session can exit while Mac proactive speech owns
+        # the SAME authenticated decoder. Native teardown must not call
+        # that Mac speech a failed STOP or take over its separate lease.
+        # end_external_speech owns the eventual STOP result.
+        external_mac_owns_decoder = (
+            _external_speaker_owner == self.device
+            and _external_speaker_connection is self.conn
+        )
+        stop_confirmed = (
+            not self.conn.client_is_speaking
+            and _output_owner_unverified != self.device
+        )
+        cancelled_during_stop = False
+        try:
+            if (self.conn.client_is_speaking
+                    and not external_mac_owns_decoder):
+                # Bound BOTH the physical send-lock wait and STOP. A Mac
+                # voice may claim this decoder while native shutdown is
+                # awaiting that lock, so recheck its current ownership.
+                async def stop_native_shutdown():
+                    nonlocal external_mac_owns_decoder, stop_confirmed
+                    async with self._device_send_lock:
+                        import desk_robot_bridge as bridge
+                        if (_external_speaker_owner == self.device
+                                and _external_speaker_connection is self.conn):
+                            external_mac_owns_decoder = True
+                            return
+                        if bridge.connections.get(self.device) is not self.conn:
+                            raise RuntimeError("Old head cannot confirm native STOP")
+                        if not self.conn.client_is_speaking:
+                            stop_confirmed = (
+                                _output_owner_unverified != self.device
                             )
-                            if bridge.connections.get(self.device) is not self.conn:
-                                raise RuntimeError("Head replaced during native STOP")
-                            if (_external_speaker_owner == self.device
-                                    and _external_speaker_connection is self.conn):
-                                # Mac acquired its lease while this STOP was
-                                # transmitting. Its own START follows this
-                                # device lock, and only Mac may end that lease.
-                                external_mac_owns_decoder = True
-                                return
-                            self.conn.client_is_speaking = False
-                            stop_confirmed = True
-                    await asyncio.wait_for(stop_native_shutdown(), timeout=0.55)
-            except asyncio.CancelledError:
-                # A second cancellation during teardown is not a physical
-                # STOP. Record the uncertain lease before propagating it.
-                stop_confirmed = False
-                cancelled_during_stop = True
-            except Exception:
-                # A failed WebSocket STOP is not a physical decoder reset.
-                # Preserve the fleet owner lease until reconnect/explicit
-                # preemption, rather than letting another robot overlap it.
-                stop_confirmed = False
-            if _sessions.get(self.device) is self:
-                _sessions.pop(self.device, None)
-                _terminal_errors[self.device] = (
-                    self.last_error or "Native model session ended without clean shutdown"
-                )[:140]
-                _retry_after[self.device] = time.monotonic() + 15.0
-            async with _output_owner_lock:
-                if external_mac_owns_decoder:
-                    # A Mac lease might finish while this task is waiting.
-                    # Neither completion nor failure belongs to native
-                    # cleanup. Preserve the Mac STOP outcome as reported by
-                    # end_external_speech, including an unverified failure.
-                    pass
-                elif stop_confirmed:
-                    if _output_owner == self.device:
-                        _output_owner = None
-                    if _output_owner_unverified == self.device:
-                        _output_owner_unverified = None
-                elif _output_owner_unverified in (None, self.device):
-                    # A native startup can fail to flush legacy head PCM
-                    # BEFORE claim_speaker ever assigned a lease. Keep the
-                    # unknown decoder state blocking every other pet too.
-                    if _output_owner is None:
-                        _output_owner = self.device
-                    _output_owner_unverified = self.device
-            if cancelled_during_stop:
-                raise asyncio.CancelledError
+                            return
+                        await asyncio.wait_for(
+                            self.conn.websocket.send(json.dumps({
+                                "type": "tts", "state": "stop",
+                                "session_id": self.conn.session_id,
+                                "flush": True,
+                            })), timeout=0.4,
+                        )
+                        if bridge.connections.get(self.device) is not self.conn:
+                            raise RuntimeError("Head replaced during native STOP")
+                        if (_external_speaker_owner == self.device
+                                and _external_speaker_connection is self.conn):
+                            # Mac acquired its lease while this STOP was
+                            # transmitting. Its own START follows this
+                            # device lock, and only Mac may end that lease.
+                            external_mac_owns_decoder = True
+                            return
+                        self.conn.client_is_speaking = False
+                        stop_confirmed = True
+                await asyncio.wait_for(stop_native_shutdown(), timeout=0.55)
+        except asyncio.CancelledError:
+            # A second cancellation during teardown is not a physical
+            # STOP. Record the uncertain lease before propagating it.
+            stop_confirmed = False
+            cancelled_during_stop = True
+        except Exception:
+            # A failed WebSocket STOP is not a physical decoder reset.
+            # Preserve the fleet owner lease until reconnect/explicit
+            # preemption, rather than letting another robot overlap it.
+            stop_confirmed = False
+        if _sessions.get(self.device) is self:
+            _sessions.pop(self.device, None)
+            _terminal_errors[self.device] = (
+                self.last_error or "Native model session ended without clean shutdown"
+            )[:140]
+            _retry_after[self.device] = time.monotonic() + 15.0
+        async with _output_owner_lock:
+            if external_mac_owns_decoder:
+                # A Mac lease might finish while this task is waiting.
+                # Neither completion nor failure belongs to native
+                # cleanup. Preserve the Mac STOP outcome as reported by
+                # end_external_speech, including an unverified failure.
+                pass
+            elif stop_confirmed:
+                if _output_owner == self.device:
+                    _output_owner = None
+                if _output_owner_unverified == self.device:
+                    _output_owner_unverified = None
+            elif _output_owner_unverified in (None, self.device):
+                # A native startup can fail to flush legacy head PCM
+                # BEFORE claim_speaker ever assigned a lease. Keep the
+                # unknown decoder state blocking every other pet too.
+                if _output_owner is None:
+                    _output_owner = self.device
+                _output_owner_unverified = self.device
+        # No cancellation-resistant model/tool worker can hold the acoustic floor.
+        await self._cancel_workers(workers)
+        if cancelled_during_stop:
+            raise asyncio.CancelledError
 
 
 # A native session and its Mac proactive speaker must serialize bytes and

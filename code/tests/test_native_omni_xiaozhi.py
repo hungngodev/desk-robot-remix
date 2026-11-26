@@ -7422,6 +7422,119 @@ async def test_human_fleet_failed_head_flush_keeps_audio_owner_blocked(native):
 
 
 @pytest.mark.parametrize("stop_delivered", [False, True])
+async def test_native_model_crash_reconciles_floor_before_worker_and_socket_cleanup(
+    native, monkeypatch, stop_delivered,
+):
+    """A failed model cannot hold tool authority or delay the head STOP."""
+    module, bridge = native
+    conn, packets = connection()
+    bridge.connections[conn.device_id] = conn
+    conn.client_is_speaking = True
+
+    async def send(packet):
+        if not stop_delivered:
+            raise OSError("Head disconnected")
+        packets.append(packet)
+
+    conn.websocket.send = send
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session._tool_speech_turn = (0, 0)
+    session._live_transcript_enabled = False
+    session._transcript_memory_enabled = False
+    module._output_owner = conn.device_id
+    module._sessions[conn.device_id] = session
+    monkeypatch.setattr(module, "_NATIVE_WORKER_CANCEL_TIMEOUT_S", 5.0)
+    worker_started = asyncio.Event()
+    worker_cancelled = asyncio.Event()
+    worker_release = asyncio.Event()
+    drain_entered = asyncio.Event()
+    close_entered = asyncio.Event()
+    close_release = asyncio.Event()
+
+    async def noop(*_):
+        pass
+
+    async def idle(*_):
+        await asyncio.Event().wait()
+
+    async def blocked_worker():
+        worker_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            worker_cancelled.set()
+            await worker_release.wait()
+
+    async def crash():
+        await worker_started.wait()
+        raise ConnectionError("Model connection lost")
+
+    class FakeSocket:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            close_entered.set()
+            await close_release.wait()
+
+        async def receive_json(self, **_):
+            return healthy_session()
+
+    class FakeHTTP:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_):
+            pass
+
+        def ws_connect(self, *_args, **_kwargs):
+            return FakeSocket()
+
+    monkeypatch.setattr(module.aiohttp, "ClientSession", FakeHTTP)
+    session._retire_legacy_audio = noop
+    session._load_private_persona = noop
+    session._send = noop
+    session._send_mic = blocked_worker
+    session._receive_model = crash
+    session._play = idle
+    session._camera_stream = idle
+    original_drain = session._cancel_workers
+
+    async def observe_drain(*args):
+        drain_entered.set()
+        await original_drain(*args)
+
+    session._cancel_workers = observe_drain
+    task = asyncio.create_task(session.run())
+    try:
+        await asyncio.wait_for(drain_entered.wait(), 1)
+        await asyncio.wait_for(worker_cancelled.wait(), 1)
+        assert not close_entered.is_set()
+        assert not session._mac_context_verified
+        assert session._tool_speech_turn is None
+        assert session.closed and not session.connected
+        assert module._output_owner == (None if stop_delivered else conn.device_id)
+        assert module._output_owner_unverified == (
+            None if stop_delivered else conn.device_id
+        )
+        assert conn.client_is_speaking is not stop_delivered
+        if stop_delivered:
+            assert json.loads(packets[-1])["state"] == "stop"
+        else:
+            assert not packets
+        worker_release.set()
+        await asyncio.wait_for(close_entered.wait(), 1)
+        assert not task.done()
+    finally:
+        worker_release.set()
+        close_release.set()
+        await asyncio.wait_for(task, 2)
+
+
+@pytest.mark.parametrize("stop_delivered", [False, True])
 async def test_native_shutdown_preserves_speaker_lease_until_head_stop_sent(
     native, stop_delivered,
 ):
