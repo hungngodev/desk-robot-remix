@@ -108,12 +108,9 @@ class FloorProjectionCalibration:
                 import numpy as np
             except ImportError as exc:
                 raise ProjectionError("OpenCV vision extra required for lens undistortion") from exc
-            mat = np.array([
-                [self.lens.fx, 0, self.lens.cx],
-                [0, self.lens.fy, self.lens.cy],
-                [0, 0, 1],
-            ], dtype=np.float64)
-            distortion = np.array(self.lens.distortion_coeffs, dtype=np.float64)
+            matrix, coefficients = self.lens.opencv_parameters()
+            mat = np.array(matrix, dtype=np.float64)
+            distortion = np.array(coefficients, dtype=np.float64)
             try:
                 points = cv2.undistortPoints(
                     np.array([[[u, v]]], dtype=np.float64), mat, distortion,

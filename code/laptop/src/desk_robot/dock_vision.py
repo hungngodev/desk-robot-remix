@@ -116,6 +116,22 @@ class DockCameraCalibration:
                     or not -20 <= self.mount_yaw_deg <= 20):
                 raise ValueError("Camera mount offset or yaw outside measured limits")
 
+    def opencv_parameters(
+        self,
+    ) -> tuple[tuple[tuple[float, float, float], ...], tuple[float, ...]]:
+        """Shared pinhole matrix and distortion in OpenCV coefficient order.
+
+        Legacy dock observations may use zero distortion; floor projection
+        still requires explicitly measured coefficients before calling this.
+        """
+        matrix = (
+            (self.fx, 0.0, self.cx),
+            (0.0, self.fy, self.cy),
+            (0.0, 0.0, 1.0),
+        )
+        coefficients = self.distortion_coeffs
+        return matrix, coefficients if coefficients is not None else (0.0,) * 5
+
     def chassis_lateral_mm(self, pose: DockPose) -> float:
         """Transform the AprilTag camera x/z into the drive centerline.
 
@@ -267,17 +283,9 @@ def detect_apriltag(
         [-side, side, 0], [side, side, 0],
         [side, -side, 0], [-side, -side, 0],
     ], dtype=np.float64)
-    intrinsics = np.array([
-        [calibration.fx, 0, calibration.cx],
-        [0, calibration.fy, calibration.cy],
-        [0, 0, 1],
-    ], dtype=np.float64)
-    # Legacy unqualified observations retain zero distortion; measured optics
-    # can be supplied without introducing a second detector or motion owner.
-    distortion = np.asarray(
-        calibration.distortion_coeffs if calibration.distortion_coeffs is not None
-        else (0.0,) * 5, dtype=np.float64,
-    ).reshape(-1, 1)
+    matrix, coefficients = calibration.opencv_parameters()
+    intrinsics = np.array(matrix, dtype=np.float64)
+    distortion = np.asarray(coefficients, dtype=np.float64).reshape(-1, 1)
     # OpenCV #30402: IPPE's rotation-vector conversion can return a flipped
     # high-error pose for a front-facing planar tag near 180 degrees. Retry
     # once with OpenCV's planar iterative solver only when the reprojection
