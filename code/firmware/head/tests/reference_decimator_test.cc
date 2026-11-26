@@ -1,4 +1,5 @@
 #include "reference_decimator.h"
+#include <array>
 #include <cassert>
 #include <cmath>
 #include <cstdio>
@@ -43,17 +44,23 @@ int main() {
               worst_alias, 20.0 * std::log10(worst_alias));
   ReferenceDecimator d;
   int16_t y = 0;
-  // Magnitude-only tests cannot detect a shifted FIR. Exercise both input
-  // phases after the ring wraps; the center is 31 input samples after impulse.
+  // Golden impulse response at -32768: Q15 coefficients are directly
+  // observable without rounding ambiguity. Both phases cover all 63 taps,
+  // including sidelobes, and verify zero before and after the response.
+  constexpr std::array<int16_t, 32> half_response{
+      -1,-15,-21,1,34,19,-43,-57,34,106,9,-151,-96,163,221,-111,
+      -362,-35,475,291,-497,-649,350,1078,64,-1519,-908,1906,2698,
+      -2170,-10158,-14080};
   for (int impulse : {128, 129}) {
     d.Reset();
     for (int i = 0; i < 256; ++i) {
-      const bool emitted = d.Push(i == impulse ? 16384 : 0, y);
+      const bool emitted = d.Push(i == impulse ? -32768 : 0, y);
       assert(emitted == (i % 2 == 0));
       if (!emitted) continue;
-      if (i == impulse + 31) assert(y == 7040);
-      else if (i == impulse + 30 || i == impulse + 32) assert(y == 5079);
-      else assert(std::abs(static_cast<int>(y)) < 5079);
+      const int delay = i - impulse;
+      const int16_t expected = delay < 0 || delay > 62 ? 0 :
+          half_response[std::min(delay, 62 - delay)];
+      assert(y == expected);
     }
   }
   d.Reset();
