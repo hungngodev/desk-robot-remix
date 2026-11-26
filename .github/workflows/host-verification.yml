@@ -117,6 +117,8 @@ jobs:
       - name: Restore pinned Xiaozhi server fixture
         working-directory: code
         run: |
+          mkdir -p upstream
+          mkdir upstream/xiaozhi-esp32-server
           git init upstream/xiaozhi-esp32-server
           git -C upstream/xiaozhi-esp32-server remote add origin https://github.com/xinnan-tech/xiaozhi-esp32-server.git
           git -C upstream/xiaozhi-esp32-server fetch --depth=1 origin d9c2e8c5d92627b670dec57d72a07a4226a410a3
@@ -175,6 +177,7 @@ jobs:
             tests/test_server_bridge.py::test_pinned_upstream_connection_initializes_per_device_native_tts \
             tests/test_server_bridge.py::test_actual_pinned_xiaozhi_tts_initializer_selects_each_registered_voice \
             tests/test_ci_python_imports.py \
+            tests/test_ci_upstream_fixture.py \
             tests/test_ci_lane_concurrency.py
 
   python-and-head-host:
@@ -240,6 +243,8 @@ jobs:
       - name: Restore pinned Xiaozhi server fixture
         working-directory: code
         run: |
+          mkdir -p upstream
+          mkdir upstream/xiaozhi-esp32-server
           git init upstream/xiaozhi-esp32-server
           git -C upstream/xiaozhi-esp32-server remote add origin https://github.com/xinnan-tech/xiaozhi-esp32-server.git
           git -C upstream/xiaozhi-esp32-server fetch --depth=1 origin d9c2e8c5d92627b670dec57d72a07a4226a410a3
@@ -248,6 +253,8 @@ jobs:
       - name: Restore pinned Xiaozhi device firmware fixture
         working-directory: code
         run: |
+          mkdir -p upstream
+          mkdir upstream/xiaozhi-esp32
           git init upstream/xiaozhi-esp32
           git -C upstream/xiaozhi-esp32 remote add origin https://github.com/78/xiaozhi-esp32.git
           git -C upstream/xiaozhi-esp32 fetch --depth=1 origin c435f99a88066029ec2dbd2d758c8cc9d051565b
@@ -403,6 +410,8 @@ jobs:
         working-directory: code
         shell: bash
         run: |
+          mkdir -p upstream
+          mkdir upstream/xiaozhi-esp32
           git init upstream/xiaozhi-esp32
           git -C upstream/xiaozhi-esp32 remote add origin https://github.com/78/xiaozhi-esp32.git
           git -C upstream/xiaozhi-esp32 fetch --depth=1 origin c435f99a88066029ec2dbd2d758c8cc9d051565b
