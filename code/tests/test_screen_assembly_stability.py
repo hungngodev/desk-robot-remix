@@ -294,3 +294,27 @@ def test_tiny_fixed_mass_change_cannot_hide_behind_absolute_tolerance():
         power["mass_g"] = 1e-12 if pose["name"] == "key_grasp_extended" else 1e-9
     with pytest.raises(ValueError, match="Fixed assembly role 'power_stack' mass changed"):
         load().screen(record)
+
+
+@pytest.mark.parametrize("height", [0, -1])
+def test_positive_mass_requires_center_above_support_plane(height):
+    record = complete()
+    for pose in record["poses"]:
+        for part in pose["components"]:
+            if part["mass_g"] > 0:
+                part["com_mm"][2] = height
+    with pytest.raises(ValueError, match="above the support plane"):
+        load().screen(record)
+
+
+def test_zero_mass_payload_may_use_origin_but_loaded_payload_may_not():
+    record = complete()
+    empty = next(p for p in record["poses"] if p["name"] == "stowed_empty")
+    payload = next(p for p in empty["components"] if p["id"] == "payload")
+    payload["com_mm"] = [0, 0, 0]
+    assert load().screen(record)["necessary_stability_on_paper"]
+    loaded = next(p for p in record["poses"] if p["name"] == "key_grasp_extended")
+    payload = next(p for p in loaded["components"] if p["id"] == "payload")
+    payload["com_mm"] = [0, 0, 0]
+    with pytest.raises(ValueError, match="above the support plane"):
+        load().screen(record)

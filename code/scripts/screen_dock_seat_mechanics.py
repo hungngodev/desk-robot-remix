@@ -31,6 +31,26 @@ NUMERICS = ("seat_pair_spacing_mm",) + tuple(
 )
 
 
+def _scad_assignments(text: str, name: str) -> list[str]:
+    """Read active assignments, ignoring comments and quoted strings."""
+    active = re.sub(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*[\s\S]*?\*/', ' ', text)
+    return re.findall(rf"(?<![\w$]){re.escape(name)}\s*=(?!=)\s*([^;]*);", active)
+
+
+def _literal_datum(text: str, name: str, kind: str) -> float:
+    matches = _scad_assignments(text, name)
+    if len(matches) != 1 or not re.fullmatch(r"\d+(?:\.\d+)?", matches[0].strip()):
+        raise ValueError(f"Missing or ambiguous {kind} CAD datum: {name}")
+    return float(matches[0])
+
+
+def _require_derived_datums(text: str, expected: dict[str, str], kind: str) -> None:
+    for name, expression in expected.items():
+        matches = _scad_assignments(text, name)
+        if len(matches) != 1 or re.sub(r"\s+", "", matches[0]) != expression:
+            raise ValueError(f"Missing or changed {kind} CAD expression: {name}")
+
+
 def dock_constants(source: Path = CAD) -> dict:
     raw = source.read_bytes()
     text = raw.decode("utf-8")
@@ -49,12 +69,16 @@ def dock_constants(source: Path = CAD) -> dict:
     )
     values = {}
     for name in names:
-        # Count assignments before validating the literal so a later
-        # indented or expression-valued override cannot go unnoticed.
-        matches = re.findall(rf"^[ \t]*{name}\s*=\s*([^;]+);", text, re.M)
-        if len(matches) != 1 or not re.fullmatch(r"\d+(?:\.\d+)?", matches[0].strip()):
-            raise ValueError("Missing or ambiguous dock CAD datum: " + name)
-        values[name] = float(matches[0])
+        values[name] = _literal_datum(text, name, "dock")
+    _require_derived_datums(text, {
+        "tag_paper_side_mm": "tag_black_side_mm+2*tag_white_margin_each_mm",
+        "tag_pocket_side_mm": "tag_paper_side_mm+2*tag_paper_slack_each_mm",
+        "channel_mm": "track_outer_width_mm+2*side_clearance_each_mm",
+        "inner_wall_x": "guide_wall_mm+wall_outside_margin_mm",
+        "outside_width_mm": "channel_mm+2*inner_wall_x",
+        "backstop_front_y_mm": "base_length_mm-backstop_thickness_mm",
+        "backstop_brace_front_y_mm": "backstop_front_y_mm-backstop_brace_depth_mm",
+    }, "dock")
     if not all(math.isfinite(v) and 0 < v < 1000 for v in values.values()):
         raise ValueError("Invalid dock CAD dimensions")
     # Keep this paper screen aligned with the printable geometry's assert
@@ -164,13 +188,13 @@ def contact_constants(source: Path = CONTACT_CAD) -> dict:
         "minimum_pocket_floor_mm", "minimum_side_wall_mm",
         "minimum_bridge_mm",
     ):
-        matches = re.findall(
-            rf"^\s*{name}\s*=\s*(\d+(?:\.\d+)?)\s*;",
-            text, re.M,
-        )
-        if len(matches) != 1:
-            raise ValueError("Missing or ambiguous contact CAD datum: " + name)
-        values[name] = float(matches[0])
+        values[name] = _literal_datum(text, name, "contact")
+    _require_derived_datums(text, {
+        "contact_radius_mm": "(contact_outer_d_mm+fit_xy)/2",
+        "bolt_radius_mm": "m3_clearance/2",
+        "bolt_center_x_mm": "contact_carrier_l/2-5",
+        "contact_center_x_mm": "contact_centers_mm/2",
+    }, "contact")
     if not all(math.isfinite(v) and 0 < v <= 500 for v in values.values()):
         raise ValueError("Invalid unpowered contact carrier dimensions")
     if not values["contact_outer_d_mm"] < values["contact_centers_mm"] < (

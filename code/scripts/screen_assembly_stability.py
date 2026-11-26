@@ -102,6 +102,11 @@ def blank_template() -> dict:
     }
 
 
+def _require_positive_height(mass: float, center: tuple[float, ...]) -> None:
+    if mass > 0 and center[2] <= 0:
+        raise ValueError("Positive-mass component center must be above the support plane")
+
+
 def screen(measurement: object) -> dict:
     if not isinstance(measurement, dict) or set(measurement) != {
         "units", "coordinate_frame",
@@ -157,7 +162,9 @@ def screen(measurement: object) -> dict:
                 raise ValueError("Component mass must be a measured finite gram value")
             if role != "payload" and mass <= 0:
                 raise ValueError("Mandatory robot component cannot disappear")
-            masses[role] = (float(mass), _point(part["com_mm"], dimension=3))
+            center = _point(part["com_mm"], dimension=3)
+            _require_positive_height(mass, center)
+            masses[role] = (float(mass), center)
         if not ROLES.issubset(masses):
             raise ValueError("Missing body, power, head, gripper, sensors or payload")
 

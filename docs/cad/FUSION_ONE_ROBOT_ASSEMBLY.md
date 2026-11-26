@@ -342,7 +342,9 @@ Require `necessary_stability_on_paper` to be true, not merely exit status
 zero. A negative result is a stop before loaded or moving trials.
 
 The input body frame is X forward, Y left, Z upward, with millimeters
-and grams. The tool computes a DISTINCT convex support footprint per pose,
+and grams. Z=0 is the support plane; every positive-mass component center
+must be above it. Zero X/Y coordinates and zero-mass empty payloads remain
+valid. The tool computes a DISTINCT convex support footprint per pose,
 weighted source center of mass and worst signed distance to its own boundary
 under the supplied maximum positive and negative tilts. Simultaneous
 roll and pitch use a conservative coupled gravity-line envelope that bounds

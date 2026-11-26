@@ -490,3 +490,45 @@ def test_screen_accepts_valid_nondefault_funnel_run(tmp_path, flare_run, coupon_
     assert result["source_only_layout_possible"]
     assert not result["physical_dock_seating_qualified"]
     assert not result["charging_authorized"]
+
+
+@pytest.mark.parametrize("parser,source_name,datum,original", [
+    ("dock_constants", "CAD", "guide_height_mm", "guide_height_mm = 12;"),
+    ("contact_constants", "CONTACT_CAD", "contact_carrier_h", "contact_carrier_h = 9;"),
+])
+@pytest.mark.parametrize("variant", ["missing", "zero", "commented", "override"])
+def test_missing_zero_or_shadowed_cad_literal_rejected(
+    tmp_path, parser, source_name, datum, original, variant,
+):
+    tool = load()
+    raw = getattr(tool, source_name).read_text(encoding="utf-8")
+    assert raw.count(original) == 1
+    replacement = {
+        "missing": "",
+        "zero": f"{datum} = 0;",
+        "commented": f"/*\n{original}\n*/",
+        "override": f"{original} {datum} = 9 - 9;",
+    }[variant]
+    changed = tmp_path / "invalid.scad"
+    changed.write_text(raw.replace(original, replacement), encoding="utf-8")
+    with pytest.raises(ValueError):
+        getattr(tool, parser)(changed)
+
+
+@pytest.mark.parametrize("parser,source_name,original,replacement", [
+    ("dock_constants", "CAD", "channel_mm = track_outer_width_mm + 2 * side_clearance_each_mm;",
+     "channel_mm = 0;"),
+    ("contact_constants", "CONTACT_CAD", "contact_radius_mm = (contact_outer_d_mm + fit_xy) / 2;",
+     "contact_radius_mm = 0;"),
+])
+def test_changed_derived_geometry_is_not_silently_recomputed(
+    tmp_path, parser, source_name, original, replacement,
+):
+    tool = load()
+    raw = getattr(tool, source_name).read_text(encoding="utf-8")
+    assert raw.count(original) == 1
+    changed = tmp_path / "changed.scad"
+    changed.write_text(raw.replace(original, replacement), encoding="utf-8")
+    with pytest.raises(ValueError, match="Missing or changed"):
+        getattr(tool, parser)(changed)
+
