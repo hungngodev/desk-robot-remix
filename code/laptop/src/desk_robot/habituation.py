@@ -6,26 +6,18 @@ This is a candidate software policy, not a learned sensory or safety model.
 """
 from __future__ import annotations
 
-import math
 from typing import Generic, Hashable, TypeVar
 
+from .sensor_event_contract import is_finite_number
+
 K = TypeVar("K", bound=Hashable)
-
-
-def _finite_time(value: float) -> bool:
-    if type(value) not in (int, float):
-        return False
-    try:
-        return math.isfinite(value)
-    except OverflowError:
-        return False
 
 
 class HabituationWindow(Generic[K]):
     """One owner, one monotonic time domain, no I/O or motor authority."""
 
     def __init__(self, window_s: float = 900.0, capacity: int = 64) -> None:
-        if not _finite_time(window_s) or window_s <= 0:
+        if not is_finite_number(window_s) or window_s <= 0:
             raise ValueError("habituation window must be finite and positive")
         if type(capacity) is not int or capacity <= 0:
             raise ValueError("habituation capacity must be a positive integer")
@@ -45,7 +37,7 @@ class HabituationWindow(Generic[K]):
 
     def record(self, key: K, now: float) -> bool:
         """Record an admitted observation; reject invalid or regressing time."""
-        if not _finite_time(now):
+        if not is_finite_number(now):
             return False
         previous = self._entries.get(key)
         if previous is not None and now < previous[0]:
@@ -61,7 +53,7 @@ class HabituationWindow(Generic[K]):
 
     def refresh_if_repeated(self, key: K, now: float) -> bool:
         """Suppress a repeat, without admitting a new stimulus prematurely."""
-        if not _finite_time(now):
+        if not is_finite_number(now):
             return True  # Invalid time cannot justify optional initiative.
         previous = self._entries.get(key)
         if previous is None:
@@ -76,7 +68,7 @@ class HabituationWindow(Generic[K]):
 
     def recent_repeats(self, now: float) -> dict[K, int]:
         """Current burst counts, not lifetime frequencies or verified actions."""
-        if not _finite_time(now):
+        if not is_finite_number(now):
             return {}
         return {
             key: count for key, (seen, count) in self._entries.items()

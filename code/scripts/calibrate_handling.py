@@ -19,14 +19,7 @@ from desk_robot.handling import (
     trial_low_g_counter,
 )
 
-
-def _finite(value: object) -> bool:
-    if type(value) not in (int, float):
-        return False
-    try:
-        return math.isfinite(value)
-    except OverflowError:
-        return False
+from desk_robot.sensor_event_contract import is_finite_number
 
 
 def _unique_handling_trial_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -72,7 +65,7 @@ def analyze(records: list[dict]) -> dict:
                 or record["label"] not in groups):
             raise ValueError("Use upright, tilted or shaking measured labels")
         observed = record.get("time_monotonic_s")
-        if not _finite(observed) or observed < 0:
+        if not is_finite_number(observed) or observed < 0:
             raise ValueError("Require monotonic physical acquisition time")
         body = record.get("body")
         # Legacy operator logs may omit transport timing; newer captures

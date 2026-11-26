@@ -7,6 +7,8 @@ pet controller has already accepted. No third audio, VLM or motor owner.
 """
 from __future__ import annotations
 
+import math
+
 PHYSICAL_INITIATIVE_KINDS = frozenset({
     "touch", "touch_tap", "touch_double", "touch_hold", "petting_zone",
     "squeeze", "hand_wave", "nose_twist", "nearby_object", "battery_low",
@@ -25,3 +27,13 @@ TRIGGERS = PHYSICAL_INITIATIVE_KINDS | {"human_voice", "safety_fault", "stable_p
 
 assert DIRECT_INTERACTION_KINDS <= PHYSICAL_INITIATIVE_KINDS
 assert PHYSICAL_INITIATIVE_KINDS <= TRIGGERS
+
+
+def is_finite_number(value: object) -> bool:
+    """Accept only native int/float values representable as finite floats."""
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
