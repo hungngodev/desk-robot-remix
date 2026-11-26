@@ -696,6 +696,42 @@ int main() {
         overlay.remove(self.root)
         assert (self.root / path).read_bytes() == self.original[path]
 
+    def test_snapshot_overlay_matches_canonical_source_across_s3_variants(self):
+        """Check the emitted firmware, not just the installer source spelling."""
+        snapshot = (HEAD / "modular_snapshot.inc").read_bytes()
+        bounds = (HEAD / "overlay/camera_frame_bounds.hpp").read_bytes()
+        for board, macro in (
+            ("modular", "MODULAR_S3"),
+            ("sense", "SENSE_S3"),
+            ("waveshare", "WAVESHARE_S3_CAM"),
+        ):
+            with self.subTest(board=board):
+                files = overlay.planned_files(self.root, board)
+                guard = f"#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_{macro}".encode()
+                source = files["main/boards/common/esp32_camera.cc"]
+                header = files["main/boards/common/esp32_camera.h"]
+                expected = b"\n" + guard + b"\n" + snapshot + b"\n#endif\n"
+                self.assertTrue(source.endswith(expected), "Generated snapshot drift")
+                self.assertEqual(source.count(b"Esp32Camera::SnapshotJpeg()"), 1)
+                self.assertIn(
+                    guard + b"\n    std::expected<std::vector<uint8_t>, std::string> "
+                    b"SnapshotJpeg() override;\n#endif", header,
+                )
+                common_bounds = "main/boards/common/desk_robot_camera_frame_bounds.hpp"
+                self.assertEqual(files[common_bounds], bounds)
+                self.assertEqual(
+                    source.count(b'#include "desk_robot_camera_frame_bounds.hpp"'), 1,
+                )
+                board_dir = overlay.BOARDS[board]
+                for name in ("camera_frame_bounds.hpp", "robot_bridge.h", "robot_protocol.h"):
+                    self.assertEqual(files[f"{board_dir}/{name}"],
+                                     (HEAD / "overlay" / name).read_bytes())
+                bridge = (HEAD / "overlay/robot_bridge.cc").read_bytes()
+                if board == "waveshare":
+                    bridge = bridge.replace(b"uart_set_pin(kUart, 2, 1,",
+                                            b"uart_set_pin(kUart, 43, 44,")
+                self.assertEqual(files[f"{board_dir}/robot_bridge.cc"], bridge)
+
     def test_decoder_integrity_shared_across_s3_variants(self):
         """The alternate S3 heads must retain the same decoder safety gate."""
         path = "main/audio/audio_service.cc"
