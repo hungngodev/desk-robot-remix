@@ -191,7 +191,9 @@ def evaluate(model: str, demand: dict, *, tray_mm=None,
         # that an unspecified protection circuit supports the required load.
         peak_ok = False if cell_ceiling is not None and cell_ceiling < peak else None
     continuous = src["continuous_a"]
-    if peak_ok is False or (continuous is not None and continuous < cont):
+    protected = src.get("pcm") is True
+    current_below_budget = peak_ok is False or (continuous is not None and continuous < cont)
+    if not protected or current_below_budget:
         pack_ok = False
     elif peak_ok is True and continuous is not None:
         pack_ok = True
@@ -215,7 +217,9 @@ def evaluate(model: str, demand: dict, *, tray_mm=None,
         reasons.append("pack_max_discharge_below_peak_budget")
     if continuous is None:
         reasons.append("manufacturer_continuous_discharge_rating_missing")
-    if pack_ok is False:
+    if not protected:
+        reasons.append("pack_protection_missing_or_unconfirmed")
+    if current_below_budget:
         reasons.append("pack_current_rating_below_load_budget")
     if conn is None or lead is None:
         reasons.append("exact_connector_or_lead_ampacity_missing")
@@ -235,7 +239,7 @@ def evaluate(model: str, demand: dict, *, tray_mm=None,
                 "physical_power_and_fit_trials_not_executed"]
     return {
         "model": model, "vendor_source": src["source"],
-        "protected": src["pcm"], "ntc": src["ntc"],
+        "protected": protected, "ntc": src["ntc"],
         "connector_variant": src["connector"],
         "published_terminal_roles": dict(terminal_roles) if terminal_roles else None,
         "physical_harness_wiring_verified": False,

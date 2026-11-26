@@ -281,3 +281,48 @@ def test_thor_bare_envelope_can_disprove_but_never_prove_complete_fit(tray, expe
         "protected_pack_does_not_fit_existing_cavity" in report["blocking_reasons"]
     ) == (expected is False)
     assert report["complete_power_path_safe_to_buy"] is False
+
+
+@pytest.mark.parametrize("pcm", [False, None, 1, "missing"])
+def test_pack_without_confirmed_protection_cannot_pass_current_screen(pcm, monkeypatch):
+    screen = module("screen_vendor_battery_harness")
+    model = "NX-MGL00850-1S2P"
+    pack = dict(screen._PACKS[model])
+    demand = {"minimum_rated_cell_and_boost_input_a": 2.55,
+              "minimum_continuous_cell_input_a": 1.5}
+    assert screen.evaluate(model, demand, tray_mm=(90, 46, 25))[
+        "pack_current_enough_on_paper"
+    ] is True
+    if pcm == "missing":
+        pack.pop("pcm")
+    else:
+        pack["pcm"] = pcm
+    monkeypatch.setitem(screen._PACKS, model, pack)
+    report = screen.evaluate(model, demand, tray_mm=(90, 46, 25))
+    assert report["pack_peak_within_published_max_on_paper"] is True
+    assert report["pack_current_enough_on_paper"] is False
+    assert report["protected"] is False
+    assert "pack_protection_missing_or_unconfirmed" in report["blocking_reasons"]
+    assert "pack_current_rating_below_load_budget" not in report["blocking_reasons"]
+    assert report["complete_power_path_safe_to_buy"] is False
+
+
+@pytest.mark.parametrize(("peak", "continuous", "expected"), [
+    (2.55, 1.5, True),
+    (2.549, 1.5, False),
+    (2.55, 1.499, False),
+])
+def test_pack_discharge_boundaries_use_amperes_not_nominal_capacity(
+    peak, continuous, expected, monkeypatch,
+):
+    screen = module("screen_vendor_battery_harness")
+    model = "NX-MGL00850-1S2P"
+    pack = {**screen._PACKS[model], "max_discharge_a": peak, "continuous_a": continuous}
+    monkeypatch.setitem(screen._PACKS, model, pack)
+    report = screen.evaluate(
+        model, {"minimum_rated_cell_and_boost_input_a": 2.55,
+                "minimum_continuous_cell_input_a": 1.5}, tray_mm=(90, 46, 25),
+    )
+    assert report["pack_current_enough_on_paper"] is expected
+    assert ("pack_current_rating_below_load_budget" in report["blocking_reasons"]) is not expected
+    assert report["complete_power_path_safe_to_buy"] is False
