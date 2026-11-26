@@ -210,13 +210,25 @@ async def observe_actual_dock(
         # head snapshot that suppresses coroutine cancellation indefinitely.
         # Read-only dock diagnostics should see the same current MJPEG
         # receipt as a guarded approach, not a near-one-second-old frame.
-        capture_dock = getattr(head, "snapshot_for_dock", head.snapshot)
+        async def capture_current_dock_frame():
+            # The bounded reply starts in a child task on a later loop turn.
+            if consent_denied():
+                raise PermissionError("Camera consent revoked")
+            capture_dock = getattr(head, "snapshot_for_dock", head.snapshot)
+            return await capture_dock()
+
         observation = await _bounded_head_reply(
-            capture_dock(), seconds=3.0,
+            capture_current_dock_frame(), seconds=3.0,
             timeout_message="Dock diagnostic camera snapshot timeout",
         )
     except (OSError, ConnectionError, TimeoutError, RuntimeError, ValueError) as exc:
-        return _hold(robot.id, reason=f"Dock camera unavailable: {type(exc).__name__}", source="head_snapshot_failed")
+        if consent_denied():
+            return _hold(robot.id, reason="Camera consent revoked",
+                         source="camera_consent_revoked")
+        return _hold(
+            robot.id, reason=f"Dock camera unavailable: {type(exc).__name__}",
+            source="head_snapshot_failed",
+        )
     if consent_denied():
         return _hold(robot.id, reason="Camera consent revoked",
                      source="camera_consent_revoked")

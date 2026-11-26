@@ -97,3 +97,49 @@ async def test_revoked_snapshot_does_not_reach_identity_or_detector(
     assert result["source"] == "camera_consent_revoked"
     assert result["pose"] is None
     assert observed == []
+
+
+@pytest.mark.parametrize("regrant", [False, True])
+@pytest.mark.parametrize("live_adapter", [False, True])
+async def test_revocation_before_scheduled_capture_never_calls_head(
+    settings, monkeypatch, regrant, live_adapter,
+):
+    settings.voice_vision_tools_enabled = True
+    old_grant = settings.camera_consent_generation
+    calls = []
+
+    def grant_valid():
+        return (settings.voice_vision_tools_enabled
+                and settings.camera_consent_generation == old_grant)
+
+    class Head:
+        async def snapshot(self):
+            calls.append("snapshot")
+            return b"\xff\xd8\xff\xd9"
+
+    class LiveHead(Head):
+        async def snapshot_for_dock(self):
+            calls.append("live")
+            return b"\xff\xd8\xff\xd9"
+
+    original = dock_runtime._bounded_head_reply
+
+    async def revoke_before_dispatch(coro, **kwargs):
+        settings.voice_vision_tools_enabled = False
+        if regrant:
+            settings.voice_vision_tools_enabled = True
+        return await original(coro, **kwargs)
+
+    monkeypatch.setattr(dock_runtime, "_bounded_head_reply", revoke_before_dispatch)
+    monkeypatch.setattr(
+        dock_runtime, "load_real_dock_calibration",
+        lambda path, **owner: (SimpleNamespace(camera_sensor_pid="OV5640"), 200),
+    )
+    result = await dock_runtime.observe_actual_dock(
+        LiveHead() if live_adapter else Head(),
+        SimpleNamespace(id="robot-01", dock_calibration=None),
+        consent_valid=grant_valid,
+    )
+    assert result["source"] == "camera_consent_revoked"
+    assert result["pose"] is None
+    assert calls == []
