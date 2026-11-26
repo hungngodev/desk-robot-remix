@@ -65,3 +65,20 @@ def test_obsolete_epoch_does_not_freeze_cosmetic_cues(last_cue, last_attempt):
         10.5, last_cue_at=reservation.at, last_attempt_at=reservation.at,
         cooldown_s=4.0, retry_s=1.0,
     ) is None
+
+
+def test_model_mood_requires_native_string():
+    class NonNativeMood(str):
+        pass
+
+    assert model_mood_event(NonNativeMood("happy")) is None
+
+
+def test_failed_cue_rolls_back_only_its_own_reservation_to_finite_time():
+    reservation = reserve_face_cue(
+        100.0, last_cue_at=90.0, last_attempt_at=95.0,
+        cooldown_s=4.0, retry_s=1.0,
+    )
+    assert reservation is not None
+    assert reservation.settled_cue_at(100.0, acknowledged=False) == 90.0
+    assert reservation.settled_cue_at(98.0, acknowledged=False) == 98.0
