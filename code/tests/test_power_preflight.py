@@ -1128,6 +1128,8 @@ def plausible_hypothetical_one_cell_stack():
         guaranteed_charge_window_c=(0, 45),  # hypothetical worst-case bounds
         ts_open_inhibit_on_paper=True, ts_short_inhibit_on_paper=True,
         pack_path_fuse_derated_hold_a=8,
+        pack_shunt_milliohm=5, pack_shunt_rated_w=2, pack_shunt_derated_w=1,
+        charger_pgood_routed_on_paper=True,
     )
 
 
@@ -1439,3 +1441,94 @@ def test_pcm_trip_must_exceed_reserved_peak(trip, expected):
     assert result["current_sufficient_on_paper"] is expected
     assert result["candidate_usable_on_paper"] is expected
     assert result["candidate_physically_qualified"] is False
+
+
+@pytest.mark.parametrize("field", [
+    "pack_shunt_milliohm", "pack_shunt_rated_w", "pack_shunt_derated_w",
+    "charger_pgood_routed_on_paper",
+])
+def test_stack_missing_shunt_or_pgood_evidence_fails_closed(field):
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg.pop(field)
+    result = one_stack(**cfg)
+    assert result["all_power_stages_compatible_on_paper"] is False
+    assert result["qualified_1s_dock_safe_to_buy"] is False
+
+
+@pytest.mark.parametrize("field, value, gate", [
+    ("pack_shunt_milliohm", 4.99, "pack_shunt_matches_firmware_and_thermal_rating"),
+    ("pack_shunt_rated_w", 1.999, "pack_shunt_matches_firmware_and_thermal_rating"),
+    ("charger_pgood_routed_on_paper", False, "charger_pgood_routed_on_paper"),
+    ("charger_thermal_input_a", 0.7, "docked_idle_plus_cell_charge_in_same_1_5a_budget"),
+    ("boost_regulator_min_input_v", 3.4, "charger_out_to_regulated_5v_covers_3v_cell_and_dock"),
+])
+def test_stack_rejects_underrated_parts_and_absent_pgood(field, value, gate):
+    cfg = plausible_hypothetical_one_cell_stack()
+    # Pololu #2873: effective startup minimum is 3.4V, not raw 2V operation.
+    cfg[field] = value
+    result = one_stack(**cfg)
+    assert result["checks"][gate] is False
+    assert result["all_power_stages_compatible_on_paper"] is False
+    assert result["all_power_stages_physically_verified"] is False
+
+
+@pytest.mark.parametrize("derated_w, expected", [(0.07311487, False), (0.07311488, True)])
+def test_stack_shunt_dissipation_uses_reserved_discharge_peak(derated_w, expected):
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg.update(active_peak_5v_a=1.5, pack_shunt_derated_w=derated_w)
+    result = one_stack(**cfg)
+    # 3.824A squared times 0.005 ohm = 0.07311488W.
+    assert result["minimum_1s_peak_a_including_margin"] == 3.824
+    assert result["checks"]["pack_shunt_matches_firmware_and_thermal_rating"] is expected
+    assert result["all_power_stages_compatible_on_paper"] is expected
+
+
+@pytest.mark.parametrize("derated_w, expected", [(0.00719999, False), (0.0072, True)])
+def test_stack_shunt_dissipation_also_covers_reserved_charge_peak(derated_w, expected):
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg.update(active_peak_5v_a=0.1, active_sustained_5v_a=0.1,
+               dock_idle_5v_a=0.1, charge_request_a=1.0, pack_charge_max_a=1.3,
+               pack_shunt_derated_w=derated_w)
+    result = one_stack(**cfg)
+    assert result["docked"]["minimum_protected_pack_charge_rating_a"] == 1.2
+    assert result["checks"]["pack_shunt_matches_firmware_and_thermal_rating"] is expected
+    assert result["all_power_stages_compatible_on_paper"] is expected
+
+
+@pytest.mark.parametrize("effective_min_v, expected", [(2.88088, True), (2.880881, False)])
+def test_stack_regulator_reserves_shunt_drop_in_addition_to_charger_dropout(
+    effective_min_v, expected
+):
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg.update(active_peak_5v_a=1.5, boost_regulator_min_input_v=effective_min_v)
+    result = one_stack(**cfg)
+    # 2.9V minus 3.824A times 0.005 ohm = 2.88088V.
+    assert result["voltage_path"]["regulator_covers_charger_output_on_paper"] is True
+    assert result["checks"]["regulator_covers_pack_shunt_drop"] is expected
+    assert result["all_power_stages_compatible_on_paper"] is expected
+
+
+@pytest.mark.parametrize("field", [
+    "pack_shunt_milliohm", "pack_shunt_rated_w", "pack_shunt_derated_w",
+])
+@pytest.mark.parametrize("bad", [0, -1, True, "2", float("nan"), float("inf")])
+def test_stack_rejects_invalid_shunt_ratings(field, bad):
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg[field] = bad
+    with pytest.raises(ValueError, match="Pack shunt ratings"):
+        one_stack(**cfg)
+
+
+def test_stack_rejects_impossible_shunt_derating():
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg["pack_shunt_derated_w"] = 2.001
+    with pytest.raises(ValueError, match="derated power"):
+        one_stack(**cfg)
+
+
+@pytest.mark.parametrize("bad", [None, 1, 0, "true", [], {}])
+def test_stack_pgood_evidence_requires_explicit_boolean(bad):
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg["charger_pgood_routed_on_paper"] = bad
+    with pytest.raises(ValueError, match="PGOOD routing evidence"):
+        one_stack(**cfg)

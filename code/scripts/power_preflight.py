@@ -379,6 +379,37 @@ def _ts_fault_inhibit_checks(open_inhibit: bool, short_inhibit: bool) -> dict[st
     }
 
 
+def _pack_shunt_checks(
+    *, milliohm: float | None, rated_w: float | None, derated_w: float | None,
+    discharge_peak_a: float, charge_peak_a: float,
+    dropout_input_v: float, regulator_min_input_v: float,
+) -> dict[str, bool]:
+    """Screen the canonical 5mOhm, >=2W Kelvin shunt, not physical heating."""
+    ratings = (milliohm, rated_w, derated_w)
+    if any(v is not None and (not _finite_number(v) or v <= 0) for v in ratings):
+        raise ValueError("Pack shunt ratings must be positive and finite")
+    if rated_w is not None and derated_w is not None and derated_w > rated_w:
+        raise ValueError("Pack shunt derated power cannot exceed rated power")
+    resistance = Decimal("0.005")
+    discharge = Decimal(str(discharge_peak_a))
+    peak = max(discharge, Decimal(str(charge_peak_a)))
+    # The WROOM/INA226 conversion is fixed at 5mOhm. The canonical wiring
+    # requires a 2W or larger Kelvin part, plus real board thermal derating.
+    shunt_matches = milliohm == 5
+    thermal_ok = (
+        shunt_matches and rated_w is not None and rated_w >= 2
+        and derated_w is not None and Decimal(str(derated_w)) >= peak**2 * resistance
+    )
+    # Reserve the shunt's drop in addition to the existing illustrative
+    # BAT-to-OUT dropout. Neither bound qualifies loaded rails or restarts.
+    input_after_shunt = Decimal(str(dropout_input_v)) - discharge * resistance
+    return {
+        "pack_shunt_matches_firmware_and_thermal_rating": thermal_ok,
+        "regulator_covers_pack_shunt_drop": (
+            shunt_matches and Decimal(str(regulator_min_input_v)) <= input_after_shunt),
+    }
+
+
 def screen_one_cell_power_stack(
     *,
     active_peak_5v_a: float,
@@ -413,6 +444,10 @@ def screen_one_cell_power_stack(
     ts_open_inhibit_on_paper: bool = False,
     ts_short_inhibit_on_paper: bool = False,
     pack_path_fuse_derated_hold_a: float | None = None,
+    pack_shunt_milliohm: float | None = None,
+    pack_shunt_rated_w: float | None = None,
+    pack_shunt_derated_w: float | None = None,
+    charger_pgood_routed_on_paper: bool = False,
 ) -> dict:
     """Join existing 1S equations into ONE real purchase architecture screen.
 
@@ -425,6 +460,10 @@ def screen_one_cell_power_stack(
     The two TS fault flags require independent source-reviewed protection for
     the exact circuit; an unknown or missing flag fails the paper screen.
     The pack fuse rating is its derated hold current in the shared 1S path.
+    Shunt inputs describe the exact Kelvin part and its derated board power.
+    PGOOD evidence means the reviewed open-drain pin reaches the read-only
+    MCP23017 input through a compatible 3.3V pullup, not that charging is proven.
+    Missing evidence fails the integrated paper screen.
     A returned paper pass is NEVER PCB, thermal, protection or dock approval.
     """
     if any(type(v) is not bool for v in (
@@ -432,6 +471,8 @@ def screen_one_cell_power_stack(
             charger_ts_fixed_resistor_removed,
             dock_motors_disarmed)):
         raise ValueError("Real TS and motor-disarm modes must be explicit booleans")
+    if type(charger_pgood_routed_on_paper) is not bool:
+        raise ValueError("Charger PGOOD routing evidence must be an explicit boolean")
     if not isinstance(pack_mm, (tuple, list)) or len(pack_mm) != 3 or (
             not isinstance(tray_mm, (tuple, list)) or len(tray_mm) != 3):
         raise ValueError("Require exact assembled pack and tray 3D envelopes")
@@ -493,7 +534,17 @@ def screen_one_cell_power_stack(
     # recommended maximum are 4.5 A; 5 A is an absolute stress limit.
     # The entire undocked converter input flows through this charger path.
     charger_path_max_a = 4.5
+    shunt_checks = _pack_shunt_checks(
+        milliohm=pack_shunt_milliohm, rated_w=pack_shunt_rated_w,
+        derated_w=pack_shunt_derated_w,
+        discharge_peak_a=undocked["minimum_rated_cell_and_boost_input_a"],
+        charge_peak_a=docked["minimum_protected_pack_charge_rating_a"],
+        dropout_input_v=vpath["battery_path_dropout_screen_input_v"],
+        regulator_min_input_v=boost_regulator_min_input_v,
+    )
     gates = {
+        **shunt_checks,
+        "charger_pgood_routed_on_paper": charger_pgood_routed_on_paper,
         "pack_path_fuse_covers_peak": _pack_fuse_covers_peak(
             pack_path_fuse_derated_hold_a,
             undocked["minimum_rated_cell_and_boost_input_a"]),
