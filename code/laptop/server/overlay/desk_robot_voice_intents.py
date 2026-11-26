@@ -556,8 +556,13 @@ def _ground_look(result: dict) -> dict | None:
     if (result.get("source") != "authenticated_xiao_camera_and_local_vlm"
             or not isinstance(answer, str) or not answer.strip()):
         return None
+    interpretation = " ".join(answer.split())
+    if interpretation == "I can't tell from my camera right now.":
+        # A completed abstention is not an object observation. Preserve it
+        # as an unavailable visual result even for a single-route question.
+        return {"source": "local_camera_model_guess", "route": "look", "available": False}
     return {"source": "local_camera_model_guess",
-            "interpretation_not_proof": " ".join(answer.split())[:350]}
+            "interpretation_not_proof": interpretation[:350]}
 
 
 def _ground_aux_status(result: dict) -> dict | None:

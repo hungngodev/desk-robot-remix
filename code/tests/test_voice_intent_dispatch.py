@@ -72,3 +72,25 @@ def test_dispatch_rejects_non_utf8_question(intents, question):
 def test_dispatch_preserves_valid_unicode(intents):
     question = "Look at the cà phê cup"
     assert intents.native_readonly_request(question) == ("look", {"question": question})
+
+
+@pytest.mark.parametrize("answer", [
+    "I can't tell from my camera right now.",
+    "  I can't tell from my camera\nright now.  ",
+])
+def test_visual_abstention_is_an_explicit_unavailable_receipt(intents, answer):
+    result = {"source": "authenticated_xiao_camera_and_local_vlm", "answer": answer}
+    assert intents.native_grounded_fact("look", result) == {
+        "source": "local_camera_model_guess", "route": "look", "available": False,
+    }
+
+
+def test_visible_answer_remains_an_unverified_interpretation(intents):
+    result = {
+        "source": "authenticated_xiao_camera_and_local_vlm",
+        "answer": "  A blue mug might be visible.  ",
+    }
+    assert intents.native_grounded_fact("look", result) == {
+        "source": "local_camera_model_guess",
+        "interpretation_not_proof": "A blue mug might be visible.",
+    }
