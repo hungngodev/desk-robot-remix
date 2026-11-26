@@ -26,7 +26,7 @@ engineering decision. The follow-up photo identifies an owned Adafruit
 | Photographed BerryIMU (optional compatible alternative) | 0 required | Same upstream I2C only if MPU6050 removed | Preserve V1/V2/V3 support; never join two unqualified IMUs or assume this photographed chip revision |
 | Diffused RGB pixel + logic buffer/passives | 0 required;1 optional | Candidate SenseD10/GPIO9; qualified5V pixel, proper3.3-to-5V buffer | Optional mood/turn-taking glow. SD stays disabled/empty. Do not use body GPIO4 for the mux reset: it is reserved by project policy and
 the TCA9548A RESET must be pulled high to 3.3 V |
-| Mechanical bumper switch | 0 required;1 optional | BodyGPIO35 with external3.3V pullup | Useful cheap collision reflex after a small mount; not a substitute for floor sensors |
+| Normally closed mechanical bumper switches | 2 selected | Series loop to WROOM GPIO35 with external 3.3 V pullup | Required local continuity/stop evidence in full profiles; not a substitute for floor sensors |
 
 BerryIMU remains an optional spare with accelerometer and gyro support;
 it is not the selected source for the required handling IMU.
@@ -46,8 +46,9 @@ six-axis substitution.
 GPIO34/35/36/39 are input-only with no internal pullups. Keep one owner for body
 I2C and bounded reads; IMU processing must not delay the floor/stop path. The IMU
 addresses must be checked against mux0x70 and ToF0x29 before final allocation.
-The optional BMP280 can conflict with a BerryIMU pressure sensor at0x77; leave
-the redundant sensor disconnected unless that address collision is resolved.
+The selected BMP280 belongs on accessory mux `0x71` lane 3 at 0x76 or 0x77.
+Keep the selected MPU6050 upstream; a legacy BerryIMU spare with an upstream
+pressure chip must not be fitted if its address collides with the BMP280.
 Anonymous breakouts must have
 verified supply, pullups and logic levels; an IC specification is not proof of
 board-level5V tolerance. No BerryIMU envelope has been measured for this build.
@@ -77,12 +78,38 @@ No new GPIO, power switch or purchase is authorized by this description.
 A visible laser supplies no additional sensing and the fixed head cannot aim it
 independently; the first build uses eyes/audio and optional diffused light.
 
+## Selected expansion sensor roles
+
+The [full feature plan](full-feature-plan.json) selects one of each role below per
+robot; runtime opt-in and physical qualification are separate from selected
+quantities. The [63-role ownership matrix](full-63-role-source-ownership.json)
+records source owners and host tests, not successful execution or purchase
+approval. The WROOM owns both I2C muxes: eight VL53L0X lanes remain on `0x70`;
+accessory mux `0x71` is isolated and quiesced before critical range reads.
+See [canonical wiring](wiring.md) for all eight accessory lanes.
+
+| Role ID | 0x71 lane | 7-bit address | Source state | Implemented / deferred boundary |
+| --- | ---: | --- | --- | --- |
+| `max30102` | 0 | 0x57 | `optical_raw_source` | CAP1188 shares lane 0; raw red/IR paw contact only, no BPM, SpO2 or identity. FIFO orientation, baffle, carrier and thresholds unqualified. |
+| `apds9960` | 1 | 0x39 | `optional_gesture_source` | AS5600 nose shares lane 1; proximity and bounded gesture FIFO only. Color/lux acquisition and calibrated light sensing are deferred. |
+| `sht41` | 3 | 0x44 | `environment_driver_source` | CRC-checked temperature/humidity; physical placement and breath thresholds unqualified. |
+| `bmp280` | 3 | 0x76 / 0x77 | `environment_driver_source` | Chip ID 0x58 and factory compensation; pressure/temperature only, not humidity or altitude. Verify carrier and trim. |
+| `mcp23017` | 5 | 0x20 | `dock_gpio_haptic_source` | Required fresh GPIOA dock interlock in full profiles. GPIOB0/B1 optional reed/PIR, GPB3 guarded DC fault input; GPB2 haptic edge only in opt-in lab builds. No charge enable. |
+| `pn532` | 5 | 0x24 | `read_only_nfc_source` | Optional bounded SAM/tag polling after dock GPIOA; toy token only, no authentication. IRQ/reset driving deferred; carrier wake/stretch and bus recovery unqualified. |
+
+Lane 2 remains ADS1115 force (0x48); lane 4 remains INA226 (0x40) and
+MAX17048 (0x36); lanes 6 and 7 remain isolated AS5600 wheel encoders (0x36).
+Optional peripheral failure must never bypass local dock or cliff evidence.
+Do not allocate a second sensor for APDS color/light, a second IMU, or a
+second NFC reader just to expose a deferred function. All physical carrier,
+pullup, timing, optical, mounting and cost gates remain HOLD.
+
 ## Behavior contract
 
 | Event | Reaction | Guard |
 | --- | --- | --- |
 | Head pat, stationary | Happy eyes/short sound, brief interaction state | Debounce/coalesce; no movement implicitly authorized |
-| Touch during exploration | Body disarms drive locally on the debounced rising edge, holds last servo output and then reports the touch | Touch is not an automatic rearm/resume command; no arm while pressed |
+| Touch during exploration | Body disarms drive locally on the first raw sampled HIGH, before gesture debounce, holds last servo output and then reports the touch | Touch is not an automatic rearm/resume command; no arm while pressed |
 | Double tap, stationary | Invite conversation or show attention | Respect active speech, quiet settings and cooldown |
 | Deliberate long touch | WROOM hold event enters Mac pet quiet mode, cancelling its active spontaneous reply | Never authorize motors or clear faults through this gesture; physical response still unqualified |
 | Gentle tilt/rotation | Eyes lean/look curious; short sound if appropriate | Excessive tilt suppresses drive; thresholds are calibrated on actual hardware |
@@ -155,7 +182,8 @@ counts alone. Follow [no-motion jaw calibration](../guides/jaw-calibration-helpe
 and retain the WROOM force and travel qualification gates.
 Battery-aware behavior requires the selected power module's qualified status or
 a real monitor; no mood meter or raw assumed voltage means remaining capacity.
-All of these stay optional until their small mount/pin/cost benefit is established.
+The later ideas remain optional; selected FSR, reed, power-monitor and other
+roles in the full feature plan are not removed by deferring their runtime use.
 Do not add an ultrasonic sensor, second camera or extra controller solely to
 produce another reaction already possible with the existing camera/mic/ToFs.
 
@@ -340,9 +368,8 @@ sensor inputs cannot invent an event. This does not establish physical
 accuracy, installed pin voltage, or reliable detached/held handling.
 
 Both the AT42QT1010's HIGH-on-touch hardware output and MPU6050's WHO_AM_I
-are reviewed against vendor data. The optional BMP280 requires a different
-Bosch compensated pressure/temperature sensor library and a mux lane rather
-than silently reusing the six-axis MPU registers. No additional body sensor
+are reviewed against vendor data. The selected BMP280 already has a dedicated Bosch compensation implementation
+on accessory mux lane 3; it does not reuse six-axis MPU registers. No additional body sensor
 board was purchased or claimed functional.
 
 
