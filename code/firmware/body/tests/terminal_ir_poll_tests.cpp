@@ -4,6 +4,7 @@
 #include <deque>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 
 #define CHECK(x) do { if (!(x)) throw std::runtime_error(#x); } while (false)
 namespace {
@@ -22,11 +23,11 @@ Queue queues[2];
 std::uint32_t now = 0, receive_cost = 0;
 int failed_start = -1;
 constexpr std::uint32_t kCode = 0xcb34ed12U;
-Packet packet(bool corrupt = false) {
+Packet packet(bool corrupt = false, std::uint32_t code = kCode) {
   Packet p{};
   p.symbols[0] = {9000, 0, 4500, 1};
   for (unsigned bit = 0; bit != 32; ++bit)
-    p.symbols[bit + 1] = {560, 0, (kCode & (1U << bit)) ? 1690U : 560U, 1};
+    p.symbols[bit + 1] = {560, 0, (code & (1U << bit)) ? 1690U : 560U, 1};
   p.symbols[33] = {560, 0, 0, 0};
   if (corrupt) p.symbols[5].level0 = 1;
   return p;
@@ -38,10 +39,10 @@ Packet mixed_packet(bool noise) {
   p.bytes = sizeof(rmt_item32_t);
   return p;
 }
-void push(unsigned side, unsigned count = 1) {
-  for (unsigned i = 0; i < count; ++i) queues[side].pending.push_back(packet());
+void push(unsigned side, unsigned count = 1, std::uint32_t code = kCode) {
+  for (unsigned i = 0; i < count; ++i) queues[side].pending.push_back(packet(false, code));
 }
-void pair() { push(0); push(1); }
+void pair(std::uint32_t code = kCode) { push(0, 1, code); push(1, 1, code); }
 void poll(desk_robot::TerminalIr& ir, std::uint32_t at) {
   now = at;
   ir.poll(at);
@@ -130,6 +131,43 @@ void check_receipt_window_pair(unsigned first_side, unsigned separation) {
   CHECK(!result.motor_authorized && !result.charging_authorized);
   CHECK(!ir.begin(36, 36));
 }
+// Emit the portable evidence fields for the Mac cross-layer host regression.
+// The Python consumer supplies only the outer robot identity and qualification.
+void emit_receipt(const desk_robot::IrPairEvidence& e) {
+  std::cout << e.left_fresh << ' ' << e.right_fresh << ' ' << e.same_code << ' '
+            << e.left_seq << ' ' << e.right_seq << ' '
+            << e.left_age_ms << ' ' << e.right_age_ms << ' '
+            << e.code << ' ' << e.left_code << ' ' << e.right_code << ' '
+            << e.motor_authorized << ' ' << e.charging_authorized << '\n';
+}
+void emit_mac_receipts(std::uint32_t code, unsigned side) {
+  reset_fixture();
+  desk_robot::TerminalIr ir;
+  CHECK(ir.begin(36, 39));
+  poll(ir, 100);
+  pair(code); poll(ir, 125);
+  emit_receipt(ir.evidence(now));
+  emit_receipt(desk_robot::age_ir_snapshot(ir.evidence(now), 175));
+  emit_receipt(desk_robot::age_ir_snapshot(ir.evidence(now), 176));
+  // An actual two-symbol NEC repeat cannot refresh either side's evidence.
+  Packet repeat{};
+  repeat.symbols[0] = {9000, 0, 2250, 1};
+  repeat.symbols[1] = {560, 0, 0, 0};
+  repeat.bytes = 2 * sizeof(rmt_item32_t);
+  queues[side].pending.push_back(repeat);
+  push(1 - side, 1, code); poll(ir, 150);
+  emit_receipt(ir.evidence(now));
+  pair(code); poll(ir, 175);
+  emit_receipt(ir.evidence(now));
+  // The eight-packet budget cannot prove the queue empty, even at exactly eight.
+  push(side, 8, code); push(1 - side, 1, code); poll(ir, 200);
+  emit_receipt(ir.evidence(now));
+  pair(code); poll(ir, 225);
+  emit_receipt(ir.evidence(now));
+  pair(code); poll(ir, 250);
+  emit_receipt(ir.evidence(now));
+  CHECK(!ir.begin(36, 36));
+}
 } // namespace
 
 std::uint32_t millis() { return now; }
@@ -177,8 +215,16 @@ void vRingbufferReturnItem(RingbufHandle_t ring, void* item) {
   }
 }
 
-int main() {
+int main(int argc, char** argv) {
   try {
+    if (argc == 2 && std::string(argv[1]) == "--emit-mac-receipts") {
+      for (auto code : {0xce31ed12U, 0xcd32ed12U, 0xcc33ed12U,
+                        0xcb34ed12U, 0xca35ed12U}) {
+        emit_mac_receipts(code, 0);
+        emit_mac_receipts(code, 1);
+      }
+      return EXIT_SUCCESS;
+    }
     reset_fixture();
     desk_robot::TerminalIr ir;
     CHECK(ir.begin(36, 39));
