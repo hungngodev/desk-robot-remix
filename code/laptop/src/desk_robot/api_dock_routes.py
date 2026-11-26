@@ -1,6 +1,8 @@
 """Dock observations and operator motion admission for the Mac API."""
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import Depends, FastAPI, HTTPException
 
 from .api_lifecycle import require_runtime_ready
@@ -32,10 +34,28 @@ def register_dock_routes(
                 and settings.camera_consent_generation == camera_grant
             )
 
-        result = await observe_actual_dock(
+        loop = asyncio.get_running_loop()
+        request_task = asyncio.current_task()
+        observation = asyncio.create_task(observe_actual_dock(
             coordinator().heads[robot_id], robot,
             consent_valid=original_camera_grant_valid,
-        )
+        ))
+
+        def revoke_observation(_settings: Settings) -> None:
+            # Settings can be updated by an operator on another thread.
+            loop.call_soon_threadsafe(observation.cancel)
+
+        settings.register_camera_revocation(revoke_observation)
+        try:
+            result = await observation
+        except asyncio.CancelledError:
+            # Do not turn unrelated client or server cancellation into a
+            # consent response. Only the revoked observation is retired here.
+            if original_camera_grant_valid() or (
+                request_task is not None and request_task.cancelling()
+            ):
+                raise
+            result = None
         if not settings.voice_vision_tools_enabled:
             raise HTTPException(403, "Camera consent revoked during dock observation")
         if settings.camera_consent_generation != camera_grant:

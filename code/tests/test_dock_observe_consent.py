@@ -1,5 +1,6 @@
 """Dock visual pose disclosure requires the original operator camera grant."""
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -143,3 +144,40 @@ async def test_revocation_before_scheduled_capture_never_calls_head(
     assert result["source"] == "camera_consent_revoked"
     assert result["pose"] is None
     assert calls == []
+
+
+@pytest.mark.parametrize(("regrant", "status"), [(False, 403), (True, 409)])
+def test_revoking_consent_cancels_running_observation(
+    settings, tokens, monkeypatch, regrant, status,
+):
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    robot_id = settings.robots[0].id
+    cancelled = []
+
+    async def observe(head, robot, *, consent_valid=None):
+        assert consent_valid is not None and consent_valid()
+        settings.voice_vision_tools_enabled = False
+        if regrant:
+            settings.voice_vision_tools_enabled = True
+        try:
+            await asyncio.wait_for(asyncio.Event().wait(), timeout=0.5)
+        except asyncio.CancelledError:
+            cancelled.append(robot.id)
+            raise
+
+    async def noop():
+        pass
+
+    monkeypatch.setattr("desk_robot.api_dock_routes.observe_actual_dock", observe)
+    coordinator = SimpleNamespace(
+        robot=lambda robot: settings.robot(robot),
+        heads={robot_id: object()},
+    )
+    runtime = SimpleNamespace(coordinator=coordinator, start=noop, close=noop)
+    tool = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        response = client.get(f"/v1/robots/{robot_id}/dock/observe", headers=tool)
+    assert response.status_code == status
+    assert cancelled == [robot_id]
+    assert "pose" not in response.text
