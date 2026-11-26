@@ -111,3 +111,23 @@ def test_optics_rejects_self_claimed_alternate_qualification():
     data["optics"].update(sensor_model="VL53L4CD", qualified=True, evidence="claimed")
     with pytest.raises(ValueError, match="Unexpected optical diagnostic fields"):
         validate_optics(data, "robot-01")
+
+
+@pytest.mark.parametrize("failure_mask", range(256))
+def test_all_lane_error_masks_preserve_optical_provenance(failure_mask):
+    data = sample()
+    optics = data["optics"]
+    optics.update(
+        ambient_97=list(range(8)),
+        signal_97=list(range(32, 40)),
+        age_ms=[199] * 5 + [350] * 3,
+        present_mask=255,
+        valid_mask=255 ^ failure_mask,
+    )
+    result = validate_optics(data, "robot-01")["optics"]
+    assert result["present_mask"] == 255
+    assert result["valid_mask"] == 255 ^ failure_mask
+    for field in ("ambient_97", "signal_97", "age_ms"):
+        assert result[field] == tuple(optics[field])
+    assert result["motor_authorized"] is False
+    assert result["physical_qualified"] is False
