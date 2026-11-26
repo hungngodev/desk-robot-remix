@@ -12,7 +12,6 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from desk_robot.api import create_app
-from desk_robot.config import load_settings
 from desk_robot.conversation import Conversation, KokoroHeadSpeaker
 from desk_robot.memory import CameraProvenance, MemoryStore
 from desk_robot.multimodal import CameraFrameHub
@@ -27,11 +26,6 @@ def jpeg(color: str) -> bytes:
     out = BytesIO()
     Image.new("RGB", (128, 96), color).save(out, "JPEG")
     return out.getvalue()
-
-
-@pytest.fixture
-def fleet():
-    return load_settings(Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml")
 
 
 WHITE = jpeg("white")
