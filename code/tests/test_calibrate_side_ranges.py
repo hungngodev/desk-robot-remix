@@ -279,3 +279,96 @@ def test_calibration_retains_operator_tags_without_certifying_them():
     legacy = module().analyze(samples(), "robot-01")
     assert legacy["capture_provenance"] is None
     assert legacy["physical_acceptance_pass"] is False
+
+
+@pytest.mark.parametrize("distance", [29, 1301, 8190, 65535, float("nan"), float("inf")])
+def test_selected_lane_rejects_invalid_distance_despite_valid_mask(distance):
+    rows = samples()
+    rows[0]["side_ranges"]["mm"][0] = distance
+    with pytest.raises(ValueError, match="Invalid"):
+        module().analyze(rows, "robot-01")
+
+
+@pytest.mark.parametrize("field,value", [
+    ("mm", float("nan")), ("mm", float("inf")), ("mm", True), ("mm", 65536),
+    ("age_ms", -1), ("age_ms", float("nan")), ("age_ms", 0x100000000),
+    ("sample_ms", True), ("sample_ms", -1), ("sample_ms", 0x100000000),
+])
+def test_calibration_rejects_malformed_unselected_wire_lane(field, value):
+    rows = samples()
+    rows[0]["side_ranges"][field][1] = value
+    with pytest.raises(ValueError, match="Invalid"):
+        module().analyze(rows, "robot-01")
+
+
+@pytest.mark.parametrize("sentinel", [8190, 65535])
+def test_calibration_keeps_valid_selected_lane_with_unavailable_other_lane(sentinel):
+    rows = samples()
+    side = rows[0]["side_ranges"]
+    side["mm"][1] = sentinel
+    side["age_ms"][1] = 0xffffffff
+    side["valid_mask"] = 5
+    assert module().analyze(rows, "robot-01")["samples_total"] == 120
+
+
+def test_calibration_accepts_upper_distance_and_age_boundary():
+    rows = samples()
+    rows[0]["side_ranges"]["age_ms"][0] = 350
+    rows[20]["side_ranges"]["mm"][0] = 1300
+    assert module().analyze(rows, "robot-01")["samples_total"] == 120
+    rows[0]["side_ranges"]["age_ms"][0] = 351
+    with pytest.raises(ValueError, match="Invalid"):
+        module().analyze(rows, "robot-01")
+
+
+def test_runtime_hysteresis_age_and_epoch_boundaries():
+    from desk_robot.side_ranging import SideRangeEvents
+
+    tracker = SideRangeEvents()
+    now = 0.0
+
+    def observe(distance, stamp, *, age=350, boot=73):
+        nonlocal now
+        now += 0.1
+        side = record("left", "near", 1, distance)["side_ranges"]
+        side.update(age_ms=[age] * 3, sample_ms=[stamp] * 3, boot_id=boot)
+        return tracker.observe(
+            {"side_ranges": side, "imu": {"boot_id": boot}},
+            now=now, near_mm=170, require_hardware_identity=True,
+        )
+
+    assert observe(230, 0xffffffc4) == []
+    assert observe(170, 0) == []  # 60 ms across uint32 wrap
+    assert observe(170, 59) == []  # not an independent vote yet
+    assert observe(170, 60) == [("left", 170)]
+    assert observe(229, 120) == []
+    assert observe(229, 180) == []
+    assert observe(170, 240) == []
+    assert observe(170, 300) == []  # deadband did not rearm
+    assert observe(230, 360) == []
+    assert observe(230, 420) == []
+    assert observe(170, 480) == []
+    assert observe(170, 540, age=351) == []  # stale vote resets baseline
+    assert observe(170, 600) == []
+    assert observe(230, 660, boot=74) == []
+    assert observe(170, 720, boot=73) == []  # retired epoch
+    assert observe(170, 720, boot=74) == []
+    assert observe(170, 780, boot=74) == [("left", 170)]
+
+
+@pytest.mark.parametrize("distance", [float("nan"), float("inf"), float("-inf")])
+def test_runtime_nonfinite_distance_clears_votes(distance):
+    from desk_robot.side_ranging import SideRangeEvents
+
+    tracker = SideRangeEvents()
+
+    def observe(value, stamp):
+        side = record("left", "near", 1, value)["side_ranges"]
+        side["sample_ms"] = [stamp] * 3
+        return tracker.observe({"side_ranges": side}, now=stamp / 1000, near_mm=170)
+
+    assert observe(600, 100) == []
+    assert observe(100, 200) == []
+    assert observe(distance, 300) == []
+    assert observe(100, 400) == []
+    assert observe(100, 500) == []  # no false arrival from a discarded vote

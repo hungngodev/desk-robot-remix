@@ -115,13 +115,12 @@ def analyze(rows: list[dict], robot_id: str) -> dict:
                 or not 0 <= valid <= 7 or not 0 <= present <= 7
                 or (valid & ~present) or not valid & (1 << channel)
                 or data.get("motion_certified") is not False
-                or type(mm[channel]) is not int
+                or any(type(d) is not int or not 0 <= d <= 0xffff for d in mm)
                 or not 30 <= mm[channel] <= 1300
-                or type(age[channel]) is not int
+                or any(type(a) is not int or not 0 <= a <= 0xffffffff for a in age)
                 or not 0 <= age[channel] <= 350
                 or not isinstance(stamps, list) or len(stamps) != 3
-                or type(stamps[channel]) is not int
-                or not 0 <= stamps[channel] <= 0xffffffff
+                or any(type(t) is not int or not 0 <= t <= 0xffffffff for t in stamps)
                 or type(boot_id) is not int
                 or not 1 <= boot_id <= 0xffffffff):
             raise ValueError("Invalid, stale, absent or forged real side sample")
