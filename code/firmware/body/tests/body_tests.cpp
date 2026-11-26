@@ -448,6 +448,38 @@ void overlong_frame_recovery() {
   CHECK(!body.state().armed);
 }
 
+void serial_fragmented_boundaries() {
+  BodyControl body;
+  LineReceiver receiver;
+  std::uint32_t now = 0;
+  const auto expect_frame = [&](const std::string& bytes, const char* expected) {
+    char reply[desk_robot::kReplyCapacity] = "pending";
+    for (std::size_t i = 0; i < bytes.size(); ++i) {
+      const bool completed = receiver.feed(bytes[i], now++, body, reply, sizeof(reply));
+      CHECK(completed == (i + 1 == bytes.size()));
+      if (!completed) CHECK(std::strcmp(reply, "pending") == 0);
+    }
+    CHECK(std::strcmp(reply, expected) == 0);
+    CHECK(!body.state().armed);
+  };
+  const auto max_line = "ping" + std::string(desk_robot::kMaxLineLength - 4, ' ');
+  // Reuse the same receiver throughout: every LF must clear all framing state.
+  expect_frame(max_line + "\r\n", "OK ping");
+  expect_frame(max_line + " \r\n", "ERR input line_too_long");
+  expect_frame("ping\n", "OK ping");
+  expect_frame(max_line + "\n", "OK ping");
+  expect_frame(std::string(2 * desk_robot::kMaxLineLength, ' ') + "ping\n",
+               "ERR input line_too_long");
+  expect_frame("\r\n", "ERR input empty");
+  expect_frame("ping\r\n", "OK ping");
+  expect_frame(std::string("pi\0ng\n", 6), "ERR input invalid_ascii");
+  expect_frame(std::string("ping\0\r\n", 7), "ERR input invalid_ascii");
+  expect_frame("ping\n", "OK ping");
+  expect_frame("ping\r\r\n", "ERR input invalid_ascii");
+  expect_frame("\n", "ERR input empty");
+  expect_frame("ping\r\n", "OK ping");
+}
+
 void framing() {
   BodyControl body;
   LineReceiver receiver;
@@ -463,6 +495,7 @@ void framing() {
     CHECK(!body.state().armed);
   }
   CHECK(frame(body, receiver, "arm\nstop\nstatus\n", 0).size() == 3);
+  serial_fragmented_boundaries();
 }
 
 void serial_idle_frame_timeout() {
