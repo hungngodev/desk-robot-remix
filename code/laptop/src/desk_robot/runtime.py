@@ -1022,5 +1022,9 @@ class Runtime:
             await step("Camera orchestration", camera.close, 3.0)
         await step("Conversation", self.conversation.stop, 3.0)
         await step("Mac HTTP client", self.client.aclose, 3.0)
+        # Audio STOP must never wait on SQLite. Drain only at runtime
+        # shutdown, after speech and the optional memory producers stop.
+        from .memory_worker import optional_memory_writer
+        await step("Optional memory writes", optional_memory_writer.drain, 4.0)
         if errors:
             raise errors[0]
