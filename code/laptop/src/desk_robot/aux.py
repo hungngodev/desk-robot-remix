@@ -197,6 +197,7 @@ def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
 
     if (not is_uint(proximity.get("raw"), 255)
             or not _bool(proximity.get("valid"))
+            or ("saturated" in proximity and not _bool(proximity["saturated"]))
             or not is_uint(proximity.get("gesture"), 4)
             or not is_uint(proximity.get("gesture_events"), 0xffffffff)
             or ("boot_id" in proximity and not is_uint(proximity["boot_id"], 0xffffffff))
@@ -273,5 +274,8 @@ def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
     if pulse["valid"] and (
         pulse["age_ms"] > 250 or pulse["red"] == 262143 or pulse["ir"] == 262143
     ):
-        return {**data, "pulse": {**pulse, "valid": False}}
+        data = {**data, "pulse": {**pulse, "valid": False}}
+    # Older firmware lacks the flag, so independently reject the raw rail.
+    if proximity["raw"] == 255 or proximity.get("saturated") is True:
+        data = {**data, "proximity": {**proximity, "valid": False, "saturated": True}}
     return data

@@ -1455,7 +1455,7 @@ void BodyControl::execute(const char* line, std::size_t length,
     const bool monitor_fresh = a.gauge.monitor_valid &&
                                a.gauge.monitor_sample_seq != 0U &&
                                now_ms - a.gauge.monitor_at_ms < 500U;
-    const bool proximity_fresh = a.proximity.valid &&
+    const bool proximity_fresh = a.proximity.valid && !a.proximity.saturated() &&
                                  now_ms - a.proximity.at_ms < 350U;
     const bool dock_fresh = a.dock.present && a.dock.valid &&
                             now_ms - a.dock.at_ms < 500U;
@@ -1483,7 +1483,7 @@ void BodyControl::execute(const char* line, std::size_t length,
         "\"monitor_valid\":%s,"
         "\"pack_ma\":%d,\"pack_valid\":%s,\"pack_seq\":%lu,"
         "\"pack_age_ms\":%lu,\"current_calibrated\":false},"
-        "\"proximity\":{\"raw\":%u,\"valid\":%s,\"gesture\":%u,\"gesture_events\":%lu,\"boot_id\":%lu,\"physically_qualified\":false},"
+        "\"proximity\":{\"raw\":%u,\"valid\":%s,\"saturated\":%s,\"gesture\":%u,\"gesture_events\":%lu,\"boot_id\":%lu,\"physically_qualified\":false},"
         "\"dock\":{\"present\":%s,\"valid\":%s,\"left_seated\":%s,\"right_seated\":%s,"
         "\"input_good\":%s,\"charge_indicated\":%s,\"seq\":%lu,\"age_ms\":%lu,"
         "\"charging_verified\":false},\"nfc\":{\"v\":%s,\"t\":%lu,\"e\":%lu,\"s\":%lu}}",
@@ -1550,6 +1550,7 @@ void BodyControl::execute(const char* line, std::size_t length,
             now_ms - a.gauge.monitor_at_ms : 0U),
         static_cast<unsigned>(a.proximity.raw),
         proximity_fresh ? "true" : "false",
+        a.proximity.saturated() ? "true" : "false",
         static_cast<unsigned>(a.proximity.gesture_direction),
         static_cast<unsigned long>(a.proximity.gesture_events),
         static_cast<unsigned long>(boot_epoch_),

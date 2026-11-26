@@ -493,3 +493,27 @@ def test_ina226_nonrail_shunt_bounds_match_signed_asymmetric_limits(
     else:
         with pytest.raises(ValueError, match="INA226"):
             validate_aux(data, "robot-01")
+
+
+@pytest.mark.parametrize("raw, saturated", [(254, False), (255, True)])
+def test_apds_proximity_adc_rail_is_not_live_evidence(raw, saturated):
+    data = sample()
+    data["proximity"]["raw"] = raw
+    original = copy.deepcopy(data)
+    result = validate_aux(data, "robot-01")
+    assert result["proximity"]["valid"] is not saturated
+    assert result["proximity"].get("saturated", False) is saturated
+    assert data == original
+
+
+def test_apds_flag_and_pulse_clipping_are_independently_invalidated():
+    data = sample()
+    data["pulse"]["ir"] = 262143
+    data["proximity"]["saturated"] = True
+    result = validate_aux(data, "robot-01")
+    assert result["pulse"]["valid"] is False
+    assert result["proximity"]["valid"] is False
+    assert result["proximity"]["saturated"] is True
+    data["proximity"]["saturated"] = 1
+    with pytest.raises(ValueError, match="APDS9960"):
+        validate_aux(data, "robot-01")

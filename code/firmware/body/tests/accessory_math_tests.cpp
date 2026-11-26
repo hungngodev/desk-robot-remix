@@ -1,4 +1,5 @@
 #include "AccessoryReadings.h"
+#include "ApdsOpticalQualityTests.h"
 #include "Bmp280Math.h"
 #include "GestureDecoder.h"
 #include <cfenv>

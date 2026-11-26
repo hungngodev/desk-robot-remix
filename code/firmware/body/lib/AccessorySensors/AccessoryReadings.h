@@ -1,5 +1,6 @@
 #pragma once
 #include <cstdint>
+#include "ApdsOpticalQuality.h"
 namespace desk_robot {
 // Fixed-point manufacturer register math. No sensor fusion, no medical data.
 inline std::uint8_t sensirion_crc(const std::uint8_t* bytes, unsigned count) {
@@ -121,6 +122,7 @@ struct GaugeRaw {
 struct ProximityRaw {
   bool present = false, valid = false;
   std::uint8_t raw = 0;
+  bool saturated() const { return apds_proximity_saturated(raw); }
   std::uint32_t at_ms = 0;
   std::uint8_t gesture_direction = 0; // decoded candidate; not physically qualified
   std::uint32_t gesture_events = 0;

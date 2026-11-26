@@ -339,8 +339,14 @@ void AccessorySensors::gesture_proximity(std::uint32_t now_ms) {
     p.valid = read(0x39, 0x9C, &raw, 1);
     if (p.valid) {
       p.raw = raw;
-      p.at_ms = now_ms;
-      gesture_fifo(now_ms);
+      // Full-scale proximity cannot resolve distance or establish a new event.
+      if (p.saturated()) {
+        p.valid = false;
+        gesture_.invalidate();
+      } else {
+        p.at_ms = now_ms;
+        gesture_fifo(now_ms);
+      }
     } else {
       gesture_.invalidate();
     }
