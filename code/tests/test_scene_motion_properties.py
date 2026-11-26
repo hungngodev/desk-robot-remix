@@ -30,3 +30,22 @@ def test_uniform_exposure_and_localized_signed_delta(threshold, offset):
     assert mask[16:32] == bytes([2]) * 16
     assert not any(mask[32:])
     assert change_fraction(baseline, bytes(changed), threshold=threshold) == 32 / len(mask)
+
+
+@pytest.mark.parametrize("threshold", [float("nan"), float("inf"), -float("inf"), 0, -1, 256,
+                                      True, 16.0])
+def test_invalid_threshold_rejected(threshold):
+    baseline = bytes([100]) * (64 * 48)
+    with pytest.raises(ValueError, match="threshold"):
+        scene_change_mask(baseline, baseline, threshold=threshold)
+    with pytest.raises(ValueError, match="threshold"):
+        change_fraction(baseline, baseline, threshold=threshold)
+
+
+@pytest.mark.parametrize("threshold", [1, 255])
+def test_threshold_endpoints_preserve_signed_residuals(threshold):
+    baseline = bytes(64 * 48)
+    changed = bytes([255]) + baseline[1:]
+    mask = scene_change_mask(baseline, changed, threshold=threshold)
+    assert mask == bytes([1]) + baseline[1:]
+    assert change_fraction(baseline, changed, threshold=threshold) == 1 / len(mask)

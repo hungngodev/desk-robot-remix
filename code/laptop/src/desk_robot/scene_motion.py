@@ -42,6 +42,8 @@ def _scene_change_mask(a: bytes, b: bytes, gain: float, offset: float,
 
 def scene_change_mask(a: bytes, b: bytes, *, threshold: int = 16) -> bytes:
     """Ignore broad lighting shifts while retaining signed localized changes."""
+    if type(threshold) is not int or not 1 <= threshold <= 255:
+        raise ValueError("Scene change threshold must be an integer in [1, 255]")
     if len(a) != len(b) or len(a) != 64 * 48:
         raise ValueError("Frame fingerprints have incompatible dimensions")
     count = len(a)
