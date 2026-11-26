@@ -898,6 +898,46 @@ int main() {
       }
     }
     {
+      // Status 11 alone is not sufficient: a weak return with plausible
+      // geometry must invalidate the exact lane even under bright ambient.
+      const std::uint8_t order[] = {5, 0, 1, 2, 3, 4, 6, 0, 1, 2, 3, 4, 7};
+      for (std::uint8_t target = 0; target < 8; ++target) {
+        for (std::uint16_t signal : {0U, 31U, 32U, 33U, 256U}) {
+          Wire = TwoWire{};
+          desk_robot::TofBus bus;
+          desk_robot::CliffGuard guard;
+          ready(bus, guard);
+          std::uint32_t now = 60;
+          for (const auto lane : order) {
+            if (lane == target) break;
+            bus.poll(guard, now++);
+          }
+          CHECK(guard.evaluate(now));
+          Wire.tof_raw_status = 11;
+          Wire.tof_signal_97 = signal;
+          Wire.tof_ambient_97 = 0x4567;
+          bus.poll(guard, now);
+          CHECK(bus.last_channel() == target);
+          const bool accepted = signal >= 32U;
+          const auto raw = bus.optical_diagnostic(target, now);
+          CHECK(raw.present && raw.signal_97 == signal && raw.ambient_97 == 0x4567);
+          CHECK(raw.valid == accepted);
+          if (target < 5) {
+            CHECK(guard.diagnostic(target, now).valid == accepted);
+            CHECK(guard.evaluate(now) == accepted);
+            CHECK(guard.try_rearm(now) == accepted);
+            if (!accepted) {
+              CHECK(guard.fault() == desk_robot::CliffFault::InvalidSample);
+              CHECK(guard.fault_sensor() == target);
+            }
+          } else {
+            CHECK(bus.extra_diagnostic(target - 5, now).valid == accepted);
+            CHECK(guard.evaluate(now)); // read-only lane cannot stop or arm
+          }
+        }
+      }
+    }
+    {
       Wire = TwoWire{};
       desk_robot::TofBus bus;
       desk_robot::CliffGuard guard;

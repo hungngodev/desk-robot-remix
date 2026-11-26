@@ -1,4 +1,5 @@
 #include "TofBus.h"
+#include "TofResult.h"
 #include "../../include/MuxWrite.h"
 #include "BerryImu.h"
 
@@ -454,26 +455,16 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
     failed(guard);
     return;
   }
-  // ST API's internal raw device status 11 indicates good ranging.
-  // Never mistake bad reflectance/no target (e.g. 8190 mm) for desk floor.
-  const bool valid = ((result[0] & 0x78U) >> 3) == 11U;
-  const auto distance = static_cast<std::uint16_t>(
-      (static_cast<std::uint16_t>(result[10]) << 8) | result[11]);
-  // The inexpensive L0X's practical minimum is roughly 30mm. Never
-  // authorize motion on extrapolated 1mm "measurements" near the lens.
-  const bool accepted = valid && distance >= 30 && distance <= 1300;
-  // ST's RESULT_RANGE_STATUS block places ambient in bytes 6..7, signal
-  // in 8..9 as 9.7 Mcps, and range mm in 10..11. Verified against the
-  // independent DCC-EX MIT VL53L0X implementation; do not apply a guessed
-  // SNR threshold or override the chip's calibrated range-status 11 policy.
-  // Read-only raw quality comes from the very same transaction as mm.
+  // A plausible distance with a weak return is not clearance. Decode the
+  // complete result using ST's register layout and the pinned driver limit.
+  const auto decoded = decode_tof_result(result);
+  const auto distance = decoded.distance_mm;
+  const bool accepted = decoded.accepted;
   auto& optics = optical_[channel];
   optics.present = true;
   optics.valid = accepted;
-  optics.ambient_97 = static_cast<std::uint16_t>(
-      (static_cast<std::uint16_t>(result[6]) << 8) | result[7]);
-  optics.signal_97 = static_cast<std::uint16_t>(
-      (static_cast<std::uint16_t>(result[8]) << 8) | result[9]);
+  optics.ambient_97 = decoded.ambient_97;
+  optics.signal_97 = decoded.signal_97;
   optics.at_ms = now_ms;
   new_optical_channel_ = channel;
   if (channel < kFloorAndFrontCount) {

@@ -442,10 +442,11 @@ class TwoWire {
         next_tof_result_delay_ms = 0;
         inbound.assign(12, 0);
         inbound[0] = static_cast<std::uint8_t>(tof_raw_status << 3);
-        inbound[6] = static_cast<std::uint8_t>(tof_ambient_97 >> 8);
-        inbound[7] = static_cast<std::uint8_t>(tof_ambient_97);
-        inbound[8] = static_cast<std::uint8_t>(tof_signal_97 >> 8);
-        inbound[9] = static_cast<std::uint8_t>(tof_signal_97);
+        // ST API register order, independent of the production decoder.
+        inbound[6] = static_cast<std::uint8_t>(tof_signal_97 >> 8);
+        inbound[7] = static_cast<std::uint8_t>(tof_signal_97);
+        inbound[8] = static_cast<std::uint8_t>(tof_ambient_97 >> 8);
+        inbound[9] = static_cast<std::uint8_t>(tof_ambient_97);
         // A lane-specific value follows the physical mux mask, not the
         // scheduler's expected channel. Zero preserves the legacy defaults.
         unsigned lane_mm = 0;
