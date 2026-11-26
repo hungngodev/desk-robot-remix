@@ -553,3 +553,26 @@ def test_a5_rejects_finite_measurements_outside_mechanism_envelope(field, extrem
     rows[0][field] = extreme_value
     with pytest.raises(ValueError, match=f"Out-of-envelope physical measurement: {field}"):
         check_trials.summarize(rows, "robot-01")
+
+
+@pytest.mark.parametrize("field", ["mass_g", "lift_mm", "hold_seconds"])
+@pytest.mark.parametrize("invalid", [True, False, float("nan"), float("inf"), -0.1])
+def test_a5_rejects_typed_invalid_measurements(field, invalid):
+    rows = trial_rows()
+    # Use a failed attempt: malformed measurements cannot fill the denominator.
+    rows[8][field] = invalid
+    with pytest.raises(ValueError, match=field):
+        check_trials.summarize(rows, "robot-01")
+
+
+def test_a5_rejects_absent_assembly_key():
+    rows = trial_rows()
+    del rows[8]["assembly_id"]
+    with pytest.raises(ValueError, match="physical assembly_id"):
+        check_trials.summarize(rows, "robot-01")
+
+
+def test_a5_accepts_real_numeric_measurements():
+    rows = trial_rows()
+    rows[0].update(mass_g=4.3, lift_mm=11, hold_seconds=4)
+    assert check_trials.summarize(rows, "robot-01")["physical_acceptance_pass"]

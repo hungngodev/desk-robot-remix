@@ -30,7 +30,10 @@ _PLACEHOLDER_PATTERNS = (
 def _finite_measurement(row, field, *, positive=False, max_value=None):
     """A physical measurement is finite, nonnegative, and within protocol bounds."""
     try:
-        value = float(row[field])
+        raw = row[field]
+        if isinstance(raw, bool):
+            raise ValueError("Boolean is not a physical measurement")
+        value = float(raw)
     except (KeyError, TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"Invalid physical measurement: {field}") from exc
     if not math.isfinite(value) or value < 0 or (positive and value == 0):
