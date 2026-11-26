@@ -455,6 +455,51 @@ static void check_address_scoped_wire_faults() {
   CHECK(wire.endTransmission(true) == 0 && wire.cap_interrupt_clears == 1);
 }
 
+// A second disconnect during recovery must restart identity validation;
+// neither the missing chip nor a foreign replacement is a release sample.
+static void check_cap_interrupted_recovery() {
+  for (bool preferred : {false, true}) {
+    TwoWire wire;
+    wire.cap_uses_0x29 = preferred;
+    desk_robot::ExpansionTouch touch;
+    CHECK(touch.begin(wire));
+    std::uint8_t zones = 0;
+    CHECK(touch.poll(100, zones) && zones == 0xA5);
+    const auto clears = wire.cap_interrupt_clears;
+    auto unavailable = [&](std::uint32_t now) {
+      CHECK(!touch.poll(now, zones) && !touch.verified());
+      CHECK(zones == 0xA5 && wire.cap_interrupt_clears == clears);
+      CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+    };
+    wire.cap_connected = false;
+    wire.cap_touch_bits = 0;
+    for (std::uint32_t now : {180U, 430U, 680U}) {
+      unavailable(now);
+      const auto transfers = wire.transactions;
+      unavailable(now + 249U);
+      CHECK(wire.transactions == transfers);
+    }
+    wire.cap_connected = true;
+    unavailable(930);
+    unavailable(1180);
+    wire.cap_connected = false;
+    unavailable(1430);
+    wire.cap_connected = true;
+    wire.cap_manufacturer_id = 0xFF;
+    unavailable(1680);
+    wire.cap_manufacturer_id = 0x5D;
+    for (unsigned step = 0; step < 6; ++step)
+      unavailable(1930 + step * 250);
+    CHECK(!touch.poll(3430, zones) && touch.verified() && zones == 0xA5);
+    CHECK(wire.cap_interrupt_clears == clears);
+    wire.cap_touch_bits = 0xA5;
+    CHECK(touch.poll(3510, zones) && zones == 0xA5);
+    wire.cap_touch_bits = 0;
+    CHECK(touch.poll(3590, zones) && zones == 0);
+    CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+  }
+}
+
 // A failed CAP1188 interrupt clear or read must not publish a false release.
 static void check_cap_transport_faults() {
   for (bool preferred : {false, true}) {
@@ -506,6 +551,7 @@ int main() {
   try {
     check_address_scoped_wire_faults();
     check_cap_transport_faults();
+    check_cap_interrupted_recovery();
     check_sht_crc_provenance();
     check_mux_write_boundary();
     check_empty_accessory_mux();
