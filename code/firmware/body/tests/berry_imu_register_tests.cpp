@@ -11,6 +11,62 @@ static TwoWire mpu_fixture() {
   wire.registers[0x3f] = 0x40; // accel Z = 1g; zero gyro is legitimate
   return wire;
 }
+static TwoWire berry_fixture(desk_robot::BerryModel model) {
+  using desk_robot::BerryModel;
+  TwoWire wire;
+  wire.registers[0x0f] = model == BerryModel::V1Lsm9ds0 ? 0xd4 :
+                        model == BerryModel::V2Lsm9ds1 ? 0x68 : 0x6a;
+  wire.extra_registers[0x0f] = model == BerryModel::V1Lsm9ds0 ? 0x49 : 0x3d;
+  return wire;
+}
+
+static void check_identity_reinitialization() {
+  using desk_robot::BerryImu;
+  using desk_robot::BerryModel;
+  for (const auto model : {BerryModel::Mpu6050, BerryModel::V1Lsm9ds0,
+                           BerryModel::V2Lsm9ds1, BerryModel::V3Lsm6dsl}) {
+    const bool mpu = model == BerryModel::Mpu6050;
+    const int reg = mpu ? 0x75 : 0x0f;
+    for (const std::uint8_t address : {mpu ? 0x68 : 0x6a, mpu ? 0x69 : 0x6b}) {
+      const std::uint8_t extra = mpu ? 0 : 0x1d;
+      for (const bool auxiliary : {false, true}) {
+        if (mpu && auxiliary) continue;
+        for (const int fault : {0, 1, 2, 3, 4}) {
+          auto wire = berry_fixture(model);
+          if (mpu) {
+            wire.registers[0x75] = 0x68;
+            wire.registers[0x3f] = 0x40;
+          }
+          BerryImu imu;
+          CHECK(imu.begin(wire, model, address, extra));
+          imu.poll(100);
+          CHECK(imu.fresh(100));
+          wire.writes.clear();
+          auto& bank = auxiliary ? wire.extra_registers : wire.registers;
+          const auto identity = bank[reg];
+          if (fault == 0) bank[reg] = 0;
+          else if (fault == 1) bank[reg] = 0xff;
+          else if (fault == 2) bank[reg] = 0x73;
+          else if (fault == 3) wire.partial_read_reg = reg;
+          else wire.set_connected(auxiliary ? extra : address, false);
+          CHECK(!imu.begin(wire, model, address, extra));
+          CHECK(wire.writes.empty() && !imu.configured());
+          CHECK(!imu.reading().valid && imu.reading().at_ms == 0);
+          imu.poll(150);
+          CHECK(!imu.fresh(150) && wire.writes.empty());
+          bank[reg] = identity;
+          wire.partial_read_reg = -1;
+          wire.set_connected(auxiliary ? extra : address, true);
+          CHECK(imu.begin(wire, model, address, extra));
+          CHECK(!imu.fresh(150));
+          imu.poll(200);
+          CHECK(imu.fresh(200) && imu.reading().at_ms == 200);
+        }
+      }
+    }
+  }
+}
+
 static void check_mpu_ghost_reads() {
   using desk_robot::BerryImu;
   using desk_robot::BerryModel;
@@ -65,7 +121,7 @@ static void check_lsm9ds0_bdu_reinitialization() {
   // An ACK or a previous good sample is not evidence of current setup.
   for (const int reg : {0x20, 0x23}) {
     for (const int fault : {0, 1, 2}) {
-      TwoWire wire;
+      auto wire = berry_fixture(BerryModel::V1Lsm9ds0);
       BerryImu imu;
       CHECK(imu.begin(wire, BerryModel::V1Lsm9ds0, 0x6b, 0x1d));
       wire.extra_registers[0xa8] = 0x12;
@@ -140,6 +196,7 @@ static void check_wire_disconnect() {
 
 int main() {
   try {
+    check_identity_reinitialization();
     check_wire_disconnect();
     check_mpu_ghost_reads();
     check_lsm9ds0_bdu_reinitialization();
@@ -200,19 +257,19 @@ int main() {
       const std::uint8_t gyro_reg = v1 ? 0xa8 : (v3 ? 0x22 : 0x98);
       const std::uint8_t accel_reg = v3 ? 0x28 : 0xa8;
       const int config_reg = v1 ? 0x23 : (v3 ? 0x12 : 0x22);
-      TwoWire ignored;
+      auto ignored = berry_fixture(model);
       ignored.ignore_write_reg = config_reg;
       BerryImu candidate;
       CHECK(!candidate.begin(ignored, model, 0x6b, 0x1d));
       CHECK(!candidate.configured());
       candidate.poll(100);
       CHECK(!candidate.fresh(100));
-      TwoWire unreadable;
+      auto unreadable = berry_fixture(model);
       unreadable.reject_read_reg = config_reg;
       CHECK(!candidate.begin(unreadable, model, 0x6b, 0x1d));
       CHECK(!candidate.configured());
 
-      TwoWire sample_wire;
+      auto sample_wire = berry_fixture(model);
       CHECK(candidate.begin(sample_wire, model, 0x6b, 0x1d));
       auto& accel_bank = v1 ? sample_wire.extra_registers : sample_wire.registers;
       // Distinct signed rails and asymmetric words expose swaps and sign errors.
@@ -239,7 +296,7 @@ int main() {
       CHECK(candidate.fresh(200) && r.at_ms == 200U);
     }
 
-    TwoWire wire;
+    auto wire = berry_fixture(BerryModel::V1Lsm9ds0);
     BerryImu imu;
     CHECK(imu.begin(wire, BerryModel::V1Lsm9ds0, 0x6b, 0x1d));
     CHECK(imu.configured());
@@ -252,7 +309,7 @@ int main() {
     CHECK(!wire.wrote(0x6b, 0x23, 0x00)); // reject torn sample config
 
     // A failed configuration transaction must not enable telemetry.
-    TwoWire failed_wire;
+    auto failed_wire = berry_fixture(BerryModel::V1Lsm9ds0);
     failed_wire.reject_writes = true;
     BerryImu failed;
     CHECK(!failed.begin(failed_wire, BerryModel::V1Lsm9ds0,

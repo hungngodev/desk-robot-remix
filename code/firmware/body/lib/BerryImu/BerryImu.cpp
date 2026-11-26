@@ -77,6 +77,15 @@ bool BerryImu::begin(TwoWire& wire, BerryModel model,
              (extra_address != 0x1c && extra_address != 0x1d && extra_address != 0x1e)) {
     return false;
   }
+  // Revalidate both selected Berry identities before any configuration write.
+  // The earlier ToF probe is discovery, not a guarantee the devices remain
+  // present. Reuse its classifier and do not scan or select mux channels.
+  if (model != BerryModel::Mpu6050) {
+    std::uint8_t gyro_who = 0, extra_who = 0;
+    if (!read_bytes(gyro_address, 0x0f, &gyro_who, 1) ||
+        !read_bytes(extra_address, 0x0f, &extra_who, 1) ||
+        identify(gyro_who, extra_who) != model) return false;
+  }
   reading_.model = model;
   gyro_address_ = gyro_address;
   extra_address_ = extra_address;
