@@ -593,6 +593,80 @@ async def test_five_bridge_devices_muted_and_speech_serialized(bridge, monkeypat
     assert all(connection.client_abort for connection in bridge.connections.values())
 
 
+@pytest.mark.parametrize("busy_state", ["speaking", "calling", "text", "audio"])
+async def test_single_pet_grant_waits_for_unselected_peer(bridge, monkeypatch, busy_state):
+    ids, handlers = fleet_handlers(bridge, monkeypatch)
+    peer = bridge.connections[ids[-1]]
+    if busy_state == "speaking":
+        peer.client_is_speaking = True
+    elif busy_state == "calling":
+        peer.calling = True
+    elif busy_state == "text":
+        peer.tts.tts_text_queue.put("pending")
+    else:
+        peer.tts.tts_audio_queue.put(b"pending")
+    session = handlers["/session"]
+    with pytest.raises(RuntimeError, match="Wait for the current robot speech"):
+        await session(body_request({"device_ids": [ids[0]], "enabled": True}))
+    assert not bridge.lease_ids and bridge.lease_token is None
+    # The floor is available again only after the peer finishes.
+    peer.client_is_speaking = peer.calling = False
+    for queue in (peer.tts.tts_text_queue, peer.tts.tts_audio_queue):
+        if not queue.empty():
+            queue.get_nowait()
+    grant = await session(body_request({"device_ids": [ids[0]], "enabled": True}))
+    assert json.loads(grant.text)["device_ids"] == [ids[0]]
+    await session(body_request({"device_ids": [ids[0]], "enabled": False}))
+
+
+async def test_simultaneous_reactive_grants_admit_only_one_pet(bridge, monkeypatch):
+    ids, handlers = fleet_handlers(bridge, monkeypatch)
+    session = handlers["/session"]
+    requests = [
+        {"device_ids": [device], "enabled": True, "lease_id": secrets.token_hex(16)}
+        for device in ids[:2]
+    ]
+    ready = asyncio.Event()
+
+    async def claim(body):
+        await ready.wait()
+        return await session(body_request(body))
+
+    contenders = [asyncio.create_task(claim(body)) for body in requests]
+    ready.set()
+    results = await asyncio.gather(*contenders, return_exceptions=True)
+    winners = [index for index, result in enumerate(results)
+               if not isinstance(result, BaseException)]
+    assert len(winners) == 1
+    winner = winners[0]
+    loser = 1 - winner
+    assert isinstance(results[loser], RuntimeError)
+    assert bridge.lease_ids == frozenset({ids[winner]})
+    assert bridge.lease_token == requests[winner]["lease_id"]
+    assert json.loads(results[winner].text)["lease_id"] == bridge.lease_token
+
+    spoken = []
+
+    async def transmit(connection, text, frames):
+        spoken.append(connection.device_id)
+
+    monkeypatch.setattr(bridge, "wav_audio", lambda encoded: b"RIFF")
+    monkeypatch.setattr(bridge, "encode_opus", lambda audio: [b"opus"])
+    monkeypatch.setattr(bridge, "transmit", transmit)
+    with pytest.raises(RuntimeError, match="No active matching coordinated session"):
+        await handlers["/speak"](body_request({
+            "device_id": ids[loser], "text": "peer", "wav_base64": "",
+            "lease_id": requests[loser]["lease_id"],
+        }))
+    receipt = await handlers["/speak"](body_request({
+        "device_id": ids[winner], "text": "winner", "wav_base64": "",
+        "lease_id": requests[winner]["lease_id"],
+    }))
+    assert spoken == [ids[winner]]
+    assert json.loads(receipt.text)["physical_playback_verified"] is False
+    await session(body_request({"device_ids": [ids[winner]], "enabled": False}))
+
+
 async def test_passive_session_fails_closed_and_echoes_budget_capability(
     bridge, monkeypatch,
 ):

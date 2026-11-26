@@ -1004,11 +1004,16 @@ def create_app():
                 conn = connections.get(device)
                 if conn is None or conn.tts is None:
                     raise RuntimeError("Selected robot is offline or audio is not ready")
+            # A single-pet grant still shares the room's acoustic floor.
+            for conn in connections.values():
+                tts = getattr(conn, "tts", None)
                 if (
                     conn.client_is_speaking
                     or conn.calling
-                    or not conn.tts.tts_text_queue.empty()
-                    or not conn.tts.tts_audio_queue.empty()
+                    or (tts is not None and (
+                        not tts.tts_text_queue.empty()
+                        or not tts.tts_audio_queue.empty()
+                    ))
                 ):
                     raise RuntimeError("Wait for the current robot speech to finish")
             lease_ids, lease_until = selected, time.monotonic() + 305
