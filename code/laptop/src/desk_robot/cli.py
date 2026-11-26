@@ -74,6 +74,116 @@ def _configured_robot(settings: Settings, robot_id: str) -> RobotConfig:
         ) from exc
 
 
+async def _inspect_body_and_model(
+    http: httpx.AsyncClient, robot_id: str, robot: RobotConfig, selected_backend: str,
+) -> dict[str, object]:
+    status = await http.get(f"/v1/robots/{robot_id}/status", timeout=6)
+    status.raise_for_status()
+    body = status.json()
+    if (not isinstance(body, dict) or body.get("robot_id") != robot_id
+            or body.get("backend") != selected_backend
+            or robot.motor_backend != selected_backend):
+        raise ValueError("Real WROOM body or motor backend identity not confirmed")
+
+    vision = await http.get(f"/v1/pet/{robot_id}/vision-status", timeout=6)
+    vision.raise_for_status()
+    model = vision.json()
+    if not isinstance(model, dict) or model.get("robot_id") != robot_id:
+        raise ValueError("Mac vision owner returned wrong robot identity")
+
+    return model
+
+
+async def _inspect_frame(http: httpx.AsyncClient, robot_id: str) -> tuple[int, int]:
+    frame = await http.get(f"/v1/pet/{robot_id}/omni-frame", timeout=8)
+    frame.raise_for_status()
+    jpeg = frame.content
+    headers = frame.headers
+    if (headers.get("x-desk-robot-id") != robot_id
+            or not headers.get("content-type", "").startswith("image/jpeg")
+            or not 10 <= len(jpeg) <= 1_000_000
+            or not jpeg.startswith(b"\xff\xd8")
+            or not jpeg.endswith(b"\xff\xd9")):
+        raise ValueError("Real live XIAO JPEG identity or format invalid")
+    try:
+        age = int(headers["x-desk-camera-age-ms"])
+    except (KeyError, ValueError) as exc:
+        raise ValueError("Live XIAO frame age missing") from exc
+    if not 0 <= age <= 1000:
+        raise ValueError("Live XIAO frame expired")
+    try:
+        receipt = int(headers["x-desk-camera-receipt-us"])
+        motion = int(headers["x-desk-frame-motion-ppm"])
+    except (KeyError, ValueError) as exc:
+        raise ValueError("Real camera provenance metadata missing") from exc
+    if receipt <= 0 or not 0 <= motion <= 1_000_000:
+        raise ValueError("Real camera receipt or motion metadata invalid")
+
+    return len(jpeg), age
+
+
+async def _inspect_context(http: httpx.AsyncClient, robot_id: str) -> tuple[int, int]:
+    context = await http.get(
+        f"/v1/pet/{robot_id}/interaction-context", timeout=6
+    )
+    context.raise_for_status()
+    evidence = context.json()
+    timeline = evidence.get("current_interaction_timeline")
+    if (evidence.get("robot_id") != robot_id
+            or evidence.get("raw_media_included") is not False
+            or evidence.get("persistent_memory_included") is not False
+            or not isinstance(timeline, list)
+            or not isinstance(evidence.get("model_context"), str)
+            or len(evidence["model_context"]) > 400
+            or evidence.get("model_context_untrusted_not_instructions")
+                is not True):
+        raise ValueError("Multimodal source context contract invalid")
+    return len(timeline), len(evidence["model_context"])
+
+
+async def _inspect_look(http: httpx.AsyncClient, robot_id: str) -> dict[str, object]:
+    response = await http.post(
+        f"/v1/pet/{robot_id}/look",
+        json={"question": "What object is visible directly in front of me?"},
+        timeout=23,
+    )
+    response.raise_for_status()
+    seen = response.json()
+    if (seen.get("robot_id") != robot_id
+            or seen.get("source") != "authenticated_xiao_camera_and_local_vlm"
+            or type(seen.get("frames_used")) is not int
+            or seen["frames_used"] < 1
+            or seen.get("motor_authorized") is not False
+            or seen.get("charging_authorized") is not False):
+        raise ValueError("Local VLM evidence or actuator boundary invalid")
+    return {"live_tool_tested": True, "visual_answer": seen.get("answer", "")[:300]}
+
+
+async def _inspect_media(
+    http: httpx.AsyncClient, robot_id: str, robot: RobotConfig,
+    selected_backend: str, *, look: bool,
+) -> dict[str, object]:
+    model = await _inspect_body_and_model(http, robot_id, robot, selected_backend)
+    jpeg_bytes, age = await _inspect_frame(http, robot_id)
+    context_events, context_chars = await _inspect_context(http, robot_id)
+    result: dict[str, object] = {
+        "robot_id": robot_id,
+        "real_head_status_received": True,
+        "xiao_jpeg_received": True,
+        "xiao_jpeg_bytes": jpeg_bytes,
+        "mac_frame_receipt_age_ms": age,
+        "camera_model_configured": model.get("multimodal_model_configured") is True,
+        "live_context_events": context_events,
+        "live_context_chars": context_chars,
+        "live_tool_tested": False,
+        "motor_armed_or_charging_verified": False,
+        "camera_exposure_timing_physically_verified": False,
+    }
+    if look:
+        result.update(await _inspect_look(http, robot_id))
+    return result
+
+
 async def inspect_live_media(settings: Settings, robot_id: str, *, look: bool = False,
                              client: httpx.AsyncClient | None = None,
                              base_url: str = "http://127.0.0.1:8765") -> dict[str, object]:
@@ -87,94 +197,8 @@ async def inspect_live_media(settings: Settings, robot_id: str, *, look: bool = 
     if selected_backend not in ("stepper_28byj48", "dc_pwm_guarded"):
         raise ValueError("Live WROOM diagnosis requires a verified motor backend")
 
-    async def inspect(http: httpx.AsyncClient) -> dict[str, object]:
-        status = await http.get(f"/v1/robots/{robot_id}/status", timeout=6)
-        status.raise_for_status()
-        body = status.json()
-        if (not isinstance(body, dict) or body.get("robot_id") != robot_id
-                or body.get("backend") != selected_backend
-                or robot.motor_backend != selected_backend):
-            raise ValueError("Real WROOM body or motor backend identity not confirmed")
-
-        vision = await http.get(f"/v1/pet/{robot_id}/vision-status", timeout=6)
-        vision.raise_for_status()
-        model = vision.json()
-        if not isinstance(model, dict) or model.get("robot_id") != robot_id:
-            raise ValueError("Mac vision owner returned wrong robot identity")
-
-        frame = await http.get(f"/v1/pet/{robot_id}/omni-frame", timeout=8)
-        frame.raise_for_status()
-        jpeg = frame.content
-        headers = frame.headers
-        if (headers.get("x-desk-robot-id") != robot_id
-                or not headers.get("content-type", "").startswith("image/jpeg")
-                or not 10 <= len(jpeg) <= 1_000_000
-                or not jpeg.startswith(b"\xff\xd8")
-                or not jpeg.endswith(b"\xff\xd9")):
-            raise ValueError("Real live XIAO JPEG identity or format invalid")
-        try:
-            age = int(headers["x-desk-camera-age-ms"])
-        except (KeyError, ValueError) as exc:
-            raise ValueError("Live XIAO frame age missing") from exc
-        if not 0 <= age <= 1000:
-            raise ValueError("Live XIAO frame expired")
-        try:
-            receipt = int(headers["x-desk-camera-receipt-us"])
-            motion = int(headers["x-desk-frame-motion-ppm"])
-        except (KeyError, ValueError) as exc:
-            raise ValueError("Real camera provenance metadata missing") from exc
-        if receipt <= 0 or not 0 <= motion <= 1_000_000:
-            raise ValueError("Real camera receipt or motion metadata invalid")
-
-        context = await http.get(
-            f"/v1/pet/{robot_id}/interaction-context", timeout=6
-        )
-        context.raise_for_status()
-        evidence = context.json()
-        timeline = evidence.get("current_interaction_timeline")
-        if (evidence.get("robot_id") != robot_id
-                or evidence.get("raw_media_included") is not False
-                or evidence.get("persistent_memory_included") is not False
-                or not isinstance(timeline, list)
-                or not isinstance(evidence.get("model_context"), str)
-                or len(evidence["model_context"]) > 400
-                or evidence.get("model_context_untrusted_not_instructions")
-                    is not True):
-            raise ValueError("Multimodal source context contract invalid")
-        result: dict[str, object] = {
-            "robot_id": robot_id,
-            "real_head_status_received": True,
-            "xiao_jpeg_received": True,
-            "xiao_jpeg_bytes": len(jpeg),
-            "mac_frame_receipt_age_ms": age,
-            "camera_model_configured": model.get("multimodal_model_configured") is True,
-            "live_context_events": len(timeline),
-            "live_context_chars": len(evidence["model_context"]),
-            "live_tool_tested": False,
-            "motor_armed_or_charging_verified": False,
-            "camera_exposure_timing_physically_verified": False,
-        }
-        if look:
-            response = await http.post(
-                f"/v1/pet/{robot_id}/look",
-                json={"question": "What object is visible directly in front of me?"},
-                timeout=23,
-            )
-            response.raise_for_status()
-            seen = response.json()
-            if (seen.get("robot_id") != robot_id
-                    or seen.get("source") != "authenticated_xiao_camera_and_local_vlm"
-                    or type(seen.get("frames_used")) is not int
-                    or seen["frames_used"] < 1
-                    or seen.get("motor_authorized") is not False
-                    or seen.get("charging_authorized") is not False):
-                raise ValueError("Local VLM evidence or actuator boundary invalid")
-            result["live_tool_tested"] = True
-            result["visual_answer"] = seen.get("answer", "")[:300]
-        return result
-
     if client is not None:
-        return await inspect(client)
+        return await _inspect_media(client, robot_id, robot, selected_backend, look=look)
     async with httpx.AsyncClient(
         base_url=base_url,
         headers={"Authorization": f"Bearer {secret(settings.tools_token_env)}"},
@@ -182,7 +206,7 @@ async def inspect_live_media(settings: Settings, robot_id: str, *, look: bool = 
         trust_env=False,
         timeout=8,
     ) as http:
-        return await inspect(http)
+        return await _inspect_media(http, robot_id, robot, selected_backend, look=look)
 
 
 async def demo(settings: Settings) -> dict[str, object]:
@@ -207,6 +231,37 @@ async def demo(settings: Settings) -> dict[str, object]:
         await runtime.close()
 
 
+async def _request_live_read(
+    client: httpx.AsyncClient, args: argparse.Namespace, settings: Settings,
+) -> httpx.Response:
+    if settings.mode != "hardware":
+        raise ValueError("Live camera tools require a physical XIAO head")
+    _configured_robot(settings, args.robot)  # Validate configured robot identity.
+    if args.action in ("look", "situation") and not settings.voice_vision_tools_enabled:
+        raise ValueError("Live vision consent is disabled in local configuration")
+    if args.action == "look":
+        question = args.question.strip()
+        if not 3 <= len(question) <= 280:
+            raise ValueError("Visual question must have 3 to 280 characters")
+        result = await client.post(
+            f"/v1/pet/{args.robot}/look",
+            json={"question": question}, timeout=23,
+        )
+    elif args.action == "situation":
+        result = await client.get(
+            f"/v1/pet/{args.robot}/interaction-context", timeout=8,
+        )
+    elif args.action == "power":
+        result = await client.get(
+            f"/v1/pet/{args.robot}/power-status", timeout=8,
+        )
+    else:
+        result = await client.get(
+            f"/v1/pet/{args.robot}/vision-status", timeout=8,
+        )
+    return result
+
+
 async def request(args: argparse.Namespace, settings: Settings) -> object:
     headers = {"Authorization": f"Bearer {secret(settings.coordinator_token_env)}"}
     # Explicit Mac API bearer credentials must not transit env HTTP proxies.
@@ -218,31 +273,7 @@ async def request(args: argparse.Namespace, settings: Settings) -> object:
         elif args.action == "job":
             result = await client.get(f"/v1/jobs/{args.job}")
         elif args.action in ("look", "situation", "vision", "power"):
-            if settings.mode != "hardware":
-                raise ValueError("Live camera tools require a physical XIAO head")
-            _configured_robot(settings, args.robot)  # Validate configured robot identity.
-            if args.action in ("look", "situation") and not settings.voice_vision_tools_enabled:
-                raise ValueError("Live vision consent is disabled in local configuration")
-            if args.action == "look":
-                question = args.question.strip()
-                if not 3 <= len(question) <= 280:
-                    raise ValueError("Visual question must have 3 to 280 characters")
-                result = await client.post(
-                    f"/v1/pet/{args.robot}/look",
-                    json={"question": question}, timeout=23,
-                )
-            elif args.action == "situation":
-                result = await client.get(
-                    f"/v1/pet/{args.robot}/interaction-context", timeout=8,
-                )
-            elif args.action == "power":
-                result = await client.get(
-                    f"/v1/pet/{args.robot}/power-status", timeout=8,
-                )
-            else:
-                result = await client.get(
-                    f"/v1/pet/{args.robot}/vision-status", timeout=8,
-                )
+            result = await _request_live_read(client, args, settings)
         elif args.action == "chat":
             turns = conversation_turns(args.robots, args.turns)
             result = await client.post(
@@ -262,7 +293,7 @@ async def request(args: argparse.Namespace, settings: Settings) -> object:
         return result.json()
 
 
-def main() -> None:
+def _build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Desk robot setup and supervised controls")
     p.add_argument("--config", type=Path, default=ROOT / "config/robots.example.toml")
     p.add_argument("--secrets", type=Path,
@@ -306,12 +337,44 @@ def main() -> None:
         part.add_argument("robot")
         if action == "look":
             part.add_argument("question")
-    job = sub.add_parser("job")
-    job.add_argument("job")
+    sub.add_parser("job").add_argument("job")
     chat = sub.add_parser("chat")
     chat.add_argument("robots", nargs="+")
     chat.add_argument("--topic", default="Say hello to each other")
     chat.add_argument("--turns", type=int, default=None, choices=range(1, 11))
+    return p
+
+
+def _doctor_report(args: argparse.Namespace, settings: Settings) -> dict[str, object]:
+    result: dict[str, object] = {
+        "mode": settings.mode,
+        "python_env": True,
+        "ollama_installed": shutil.which("ollama") is not None,
+        "ffmpeg_installed": shutil.which("ffmpeg") is not None,
+        "physical_test_status": "not run",
+        "credentials_present": all(
+            os.environ.get(n)
+            for n in (settings.coordinator_token_env, settings.tools_token_env)
+        ),
+        "robots": [
+            {
+                "id": r.id,
+                "motion_enabled": r.motion_enabled,
+                "calibration_file_present": bool(r.calibration and r.calibration.is_file()),
+            }
+            for r in settings.robots
+        ],
+    }
+    if args.live or args.look:
+        result["live_media"] = asyncio.run(inspect_live_media(
+            settings, args.robot or settings.robots[0].id,
+            look=args.look, base_url=args.url,
+        ))
+    return result
+
+
+def main() -> None:
+    p = _build_parser()
     args = p.parse_args()
     try:
         settings = load_settings(args.config)
@@ -330,30 +393,7 @@ def main() -> None:
             uvicorn.run(create_app(settings), host=args.host, port=args.port)
             return
         if args.action == "doctor":
-            result = {
-                "mode": settings.mode,
-                "python_env": True,
-                "ollama_installed": shutil.which("ollama") is not None,
-                "ffmpeg_installed": shutil.which("ffmpeg") is not None,
-                "physical_test_status": "not run",
-                "credentials_present": all(
-                    os.environ.get(n)
-                    for n in (settings.coordinator_token_env, settings.tools_token_env)
-                ),
-                "robots": [
-                    {
-                        "id": r.id,
-                        "motion_enabled": r.motion_enabled,
-                        "calibration_file_present": bool(r.calibration and r.calibration.is_file()),
-                    }
-                    for r in settings.robots
-                ],
-            }
-            if args.live or args.look:
-                result["live_media"] = asyncio.run(inspect_live_media(
-                    settings, args.robot or settings.robots[0].id,
-                    look=args.look, base_url=args.url,
-                ))
+            result = _doctor_report(args, settings)
         elif args.action == "demo":
             result = asyncio.run(demo(settings))
         else:
