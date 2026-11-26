@@ -134,6 +134,7 @@ def status(device: str) -> dict:
                 "continuous_av_input_receiving": False,
                 "native_quiet_pcm_frames_forwarded": 0,
                 "native_model_listen_decisions": 0,
+                 "voice_stage_latency_ms": {},
                 "native_monitor_lost": None,
                 "native_speaker_stop_unverified": (
                     _output_owner_unverified == device
@@ -211,6 +212,8 @@ def status(device: str) -> dict:
         "tool_results_ingested_by_native_duplex_kv": False,
         "transcript_memory_enabled": s._transcript_memory_enabled,
         "model_pcm_chunks_received": s.model_chunks,
+        # Latest observed local spans, not acoustic or model-internal timings.
+        "voice_stage_latency_ms": dict(s._voice_timing.samples),
         "model_opus_packets_sent_to_head": s.head_packets,
         "last_error": s.last_error,
     }
@@ -232,6 +235,41 @@ class HeadPlaybackContext:
     session_id: str
     generation: int
     turn: int
+
+
+class _VoiceStageTiming:
+    """Bounded local timing samples, not a trace of audible playback."""
+
+    def __init__(self) -> None:
+        self.samples: dict[str, int] = {}
+        self.intent_at: float | None = None
+        self.native_started: tuple[str, int, float] | None = None
+        self.pcm_ready: tuple[str, int, float, str] | None = None
+
+    def record(self, stage: str, started: float, finished: float) -> None:
+        elapsed = (finished - started) * 1000
+        if 0 <= elapsed < float("inf"):
+            self.samples[stage] = round(elapsed)
+
+    def intent(self, committed_at_us: int, now: float) -> None:
+        if self.intent_at is None and 0 < committed_at_us <= now * 1_000_000:
+            self.intent_at = now
+            self.record("vad_commit_started_to_intent_ms", committed_at_us / 1_000_000, now)
+
+    def native_pcm(self, response_id: str, generation: int, now: float) -> None:
+        started = self.native_started
+        if started is None or started[:2] != (response_id, generation):
+            return
+        self.native_started = None
+        self.record("native_response_created_to_pcm_ms", started[2], now)
+        self.pcm_ready = (response_id, generation, now, "native")
+
+    def first_opus(self, response_id: str, generation: int, now: float) -> None:
+        ready = self.pcm_ready
+        if ready is None or ready[:2] != (response_id, generation):
+            return
+        self.pcm_ready = None
+        self.record(f"{ready[3]}_pcm_to_first_opus_send_return_ms", ready[2], now)
 
 
 class NativeOmniSession:
@@ -273,6 +311,7 @@ class NativeOmniSession:
         self._last_mic_received_at: float | None = None
         self._last_mic_forwarded_at: float | None = None
         self.model_chunks = 0
+        self._voice_timing = _VoiceStageTiming()
         self.head_packets = 0
         self.latest_jpeg: bytes | None = None
         self.latest_frame_time = 0.0
@@ -1030,6 +1069,7 @@ class NativeOmniSession:
 
     def _clear_obsolete_tool_turn(self) -> None:
         """Forget superseded turn work without changing committed dialogue."""
+        self._voice_timing = _VoiceStageTiming()
         self._readonly_requests.clear()
         self._discard_queued_readonly()
         self._readonly_capacity_exceeded = None
@@ -1319,6 +1359,7 @@ class NativeOmniSession:
                 )},
             ],
         }
+        model_started = time.monotonic()
         try:
             async with http.post(
                 endpoint, json=payload, timeout=aiohttp.ClientTimeout(total=24),
@@ -1333,6 +1374,7 @@ class NativeOmniSession:
                 pcm, generated_text = await read_tool_completion(
                     response.content.iter_chunked(64 * 1024)
                 )
+                pcm_ready_at = time.monotonic()
             if (not self._tool_head_current() or self.closed or not self.connected
                     or self._tool_speech_turn != (epoch, request_turn)):
                 return
@@ -1351,6 +1393,11 @@ class NativeOmniSession:
                 return
             response_id = "tool_" + uuid.uuid4().hex
             self._tool_audio_response_id = response_id
+            timing = self._voice_timing
+            if timing.intent_at is not None:
+                timing.record("intent_to_tool_model_request_ms", timing.intent_at, model_started)
+            timing.record("tool_model_request_to_pcm_ms", model_started, pcm_ready_at)
+            timing.pcm_ready = (response_id, epoch, pcm_ready_at, "tool")
             # Keep the user's preceding real question even when the model
             # returns valid audio but omits a text choice. Never fabricate
             # a spoken transcript from a WAV payload.
@@ -2156,7 +2203,15 @@ class NativeOmniSession:
                 if terminal == terminal_response:
                     continue
                 terminal_response = terminal
+            previous_response = self.wire.response_id
             pcm = self.wire.handle_event(event)
+            if (kind == "response.created" and self.wire.response_id is not None
+                    and self.wire.response_id != previous_response
+                    and self._tool_speech_turn is None):
+                self._voice_timing.native_started = (
+                    self.wire.response_id, self._generation, time.monotonic(),
+                )
+                self._voice_timing.pcm_ready = None
             if kind == "response.listen" and self.wire.model_listen_current(event):
                 # Only current native model silence counts. A reordered old
                 # listen decision must not describe this human/camera turn.
@@ -2193,6 +2248,9 @@ class NativeOmniSession:
                         self._last_human_transcript = " ".join(raw_heard.split())[:180]
                     self._accept_heard_transcript(event)
                     if self._queue_readonly_tool(event):
+                        self._voice_timing.intent(
+                            self._accepted_audio_committed_at_us, time.monotonic(),
+                        )
                         clause = " ".join(str(event.get("transcript", "")).split())
                         if self._tool_question and clause and (
                                 clause.casefold() not in self._tool_question.casefold()):
@@ -2219,6 +2277,10 @@ class NativeOmniSession:
                 self.model_chunks += 1
                 try:
                     self.outgoing.put_nowait((pcm.response_id, pcm.pcm24k))
+                    if self._voice_timing.native_started is not None:
+                        self._voice_timing.native_pcm(
+                            pcm.response_id, self._generation, time.monotonic(),
+                        )
                 except asyncio.QueueFull as exc:
                     raise RuntimeError("Model audio too fast for XIAO speaker") from exc
             elif (kind == "response.done"
@@ -2333,6 +2395,10 @@ class NativeOmniSession:
                         delivered = await self._send_device_opus(
                             encoder.encode(tail, FRAME_SAMPLES), generation
                         )
+                        if delivered and not sent_audio and generation == self._generation:
+                            self._voice_timing.first_opus(
+                                response_id, generation, time.monotonic(),
+                            )
                         sent_audio = delivered or sent_audio
                         fully_sent = fully_sent and delivered
                     stop_sent = await self._send_device_state("stop", generation)
@@ -2415,6 +2481,8 @@ class NativeOmniSession:
                 delivered = await self._send_device_opus(
                     encoder.encode(frame, FRAME_SAMPLES), generation
                 )
+                if delivered and not sent_audio and generation == self._generation:
+                    self._voice_timing.first_opus(response_id, generation, time.monotonic())
                 sent_audio = sent_audio or delivered
                 fully_sent = fully_sent and delivered
                 if not delivered:

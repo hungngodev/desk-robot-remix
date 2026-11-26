@@ -10141,3 +10141,57 @@ async def test_explicit_native_barge_flushes_even_when_host_flag_is_idle(native,
             "session_id": conn.session_id,
         }]
     assert session._generation == 1
+
+
+def test_voice_stage_timing_is_bounded_and_rejects_stale_responses(native):
+    module, _bridge = native
+    timing = module._VoiceStageTiming()
+    timing.intent(1_000_000, 1.25)
+    timing.intent(1_000_000, 2.0)
+    assert timing.samples == {"vad_commit_started_to_intent_ms": 250}
+
+    timing.native_started = ("response", 4, 2.0)
+    timing.native_pcm("obsolete", 4, 2.5)
+    timing.native_pcm("response", 3, 2.5)
+    assert timing.pcm_ready is None
+    timing.native_pcm("response", 4, 2.5)
+    timing.native_pcm("response", 4, 2.75)
+    timing.first_opus("response", 3, 3.0)
+    assert "native_pcm_to_first_opus_send_return_ms" not in timing.samples
+    timing.first_opus("response", 4, 3.0)
+    timing.first_opus("response", 4, 4.0)
+    assert timing.samples == {
+        "vad_commit_started_to_intent_ms": 250,
+        "native_response_created_to_pcm_ms": 500,
+        "native_pcm_to_first_opus_send_return_ms": 500,
+    }
+
+
+def test_voice_stage_timing_ignores_invalid_clock_samples(native):
+    module, _bridge = native
+    timing = module._VoiceStageTiming()
+    timing.intent(2_000_000, 1.0)
+    timing.record("invalid", 2.0, 1.0)
+    timing.record("invalid", 0.0, float("inf"))
+    timing.record("invalid", 0.0, float("nan"))
+    assert timing.intent_at is None
+    assert timing.samples == {}
+
+
+def test_voice_stage_status_resets_on_obsolete_turn(native):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections[conn.device_id] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8000/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="x" * 32,
+    )
+    module._sessions[conn.device_id] = session
+    session._voice_timing.intent(1_000_000, 1.25)
+    diagnostic = module.status(conn.device_id)
+    assert diagnostic["voice_stage_latency_ms"] == {"vad_commit_started_to_intent_ms": 250}
+    assert diagnostic["head_audio_playback_acknowledged"] is False
+    diagnostic["voice_stage_latency_ms"].clear()
+    assert session._voice_timing.samples
+    session._clear_obsolete_tool_turn()
+    assert module.status(conn.device_id)["voice_stage_latency_ms"] == {}
