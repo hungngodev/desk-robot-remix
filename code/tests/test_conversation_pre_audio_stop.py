@@ -41,6 +41,8 @@ async def test_five_talkers_cannot_overtake_unsettled_pre_audio_stop(monkeypatch
     conversation = Conversation.__new__(Conversation)
     conversation.speaker = Speaker()
     conversation.settings = SimpleNamespace(mode="simulation", pet_quiet_hours=None)
+    conversation._active = None
+    conversation._active_changed = asyncio.Event()
     conversation.active = None
     conversation.speaker_stop_unconfirmed = False
     conversation.session_lock = asyncio.Lock()

@@ -47,7 +47,10 @@ async def test_power_status_no_impossible_voltage_enters_current_human_turn(cell
         "headers": [(b"x-desk-robot-tool-receipt", b"1")],
     })
     register_readonly_context_routes(
-        app, SimpleNamespace(mode="hardware"), authorize=lambda: None,
+        app, SimpleNamespace(
+            mode="hardware",
+            robot=lambda robot_id: SimpleNamespace(id=robot_id),
+        ), authorize=lambda: None,
         coordinator=lambda: coordinator,
         requested_tool_context=lambda request, robot_id: owner,
         remember_tool_context=lambda owner, robot_id, kind, summary:

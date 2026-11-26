@@ -1135,7 +1135,7 @@ class PetController:
         """
         received_at = time.monotonic() if received_at is None else received_at
         states = getattr(self, "states", None)
-        state = states.get(robot_id) if isinstance(states, dict) else None
+        state = states.get(robot_id) if isinstance(states, Mapping) else None
         habituation = getattr(state, "session_habituation", None)
         if isinstance(habituation, HabituationWindow):
             # Context only: rejection or decay never blocks sensor delivery.

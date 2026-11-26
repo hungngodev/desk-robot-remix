@@ -133,7 +133,7 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
 
         class FakeHead:
             async def command(self, command):
-                return {"ok": True}
+                return {"ok": True, "robot_id": "robot-01", "reply": f"OK {command.split()[0]}"}
 
         coordinator = _coordinator(FakeHead())
         coordinator.jobs = {"job-01": Job("job-01", "robot-01", "pickup")}

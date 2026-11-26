@@ -7,6 +7,7 @@ import json
 import logging
 import secrets
 import time
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from typing import Literal
 
@@ -386,7 +387,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         """
         pet = getattr(app.state.runtime, "pet", None)
         states = getattr(pet, "states", None)
-        state = states.get(robot_id) if isinstance(states, dict) else None
+        state = states.get(robot_id) if isinstance(states, Mapping) else None
         ready = (settings.mode != "hardware"
                  or getattr(pet, "voice_monitor_ready", False) is True)
         if state is None:

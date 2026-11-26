@@ -204,3 +204,50 @@ async def test_restart_waits_for_retired_speech_owner(tmp_path, monkeypatch, soc
         release.set()
         await asyncio.wait_for(task, timeout=1)
         await pet.close()
+
+
+async def test_native_pet_speech_policy_reads_immutable_pet_states_mapping(
+    tmp_path, monkeypatch,
+):
+    """API policy helper must inspect MappingProxyType pet.states, not only dict."""
+    from types import SimpleNamespace
+
+    from desk_robot.api import create_app
+    from desk_robot.multimodal import CameraFrameHub
+    from fastapi.testclient import TestClient
+
+    settings = load_settings(
+        Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml"
+    )
+    monkeypatch.setenv(
+        settings.coordinator_token_env, "test-operator-token-at-least-32-characters"
+    )
+    monkeypatch.setenv(
+        settings.tools_token_env, "test-tools-token-at-least-32-characters-01"
+    )
+    pet = _controller(tmp_path)
+    first_id = settings.robots[0].id
+    pet.states[first_id].enabled = True
+    pet.states[first_id].quiet = False
+    runtime = SimpleNamespace(
+        settings=settings,
+        pet=pet,
+        coordinator=SimpleNamespace(jobs={}),
+        conversation=SimpleNamespace(_private_memory_generation={first_id: 0}),
+        multimodal=SimpleNamespace(hub=CameraFrameHub([r.id for r in settings.robots])),
+        attention=None,
+        close=lambda: asyncio.sleep(0),
+    )
+    app = create_app(settings, runtime)
+    try:
+        with TestClient(app) as client:
+            res = client.get(
+                f"/v1/pet/{first_id}/interaction-context",
+                headers={"Authorization": "Bearer test-tools-token-at-least-32-characters-01"},
+            )
+        assert res.status_code == 200
+        body = res.json()
+        assert body["pet_autonomy_enabled"] is True
+        assert body["pet_quiet"] is False
+    finally:
+        await pet.close()

@@ -577,7 +577,7 @@ def test_hardware_pet_autostart_needs_real_local_vision_and_camera_consent(setti
     with pytest.raises(ValueError, match="mapped Xiaozhi device_id"):
         Settings.model_validate(fields)
     fields["robots"][0]["device_id"] = " "
-    with pytest.raises(ValueError, match="mapped Xiaozhi device_id"):
+    with pytest.raises(ValueError, match=r"mapped Xiaozhi device_id|String should match pattern"):
         Settings.model_validate(fields)
     fields["robots"][0]["device_id"] = "live-01"
     fields["vision_model"] = " "
@@ -2102,7 +2102,8 @@ async def test_background_context_preserves_speaker_floor(settings, tmp_path, fl
             kind="fictional_dream", source_robot=ids[0], witnessed=True,
         )
         await asyncio.sleep(0)
-        assert hub.shared_room is observation
+        assert hub.shared_room == observation
+        assert hub.shared_room is not observation
         assert runtime.room_context_failures == 0
         assert memory.get_episode(ids[0], "dream785").kind == "fictional_dream"
         assert memory.get_episode(ids[1], "dream785") is None

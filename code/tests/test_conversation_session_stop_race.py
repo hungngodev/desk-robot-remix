@@ -27,6 +27,8 @@ class PausedGrantSpeaker:
 def conversation_with(speaker):
     conversation = Conversation.__new__(Conversation)
     conversation.speaker = speaker
+    conversation._active = None
+    conversation._active_changed = asyncio.Event()
     conversation.speaker_stop_unconfirmed = False
     return conversation
 

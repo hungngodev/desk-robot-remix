@@ -1608,7 +1608,8 @@ async def test_independent_touch_poll_silences_pet_while_camera_vlm_is_blocked(
             lambda: any(m.kind == "touch_hold" for m in memory.recent("robot-01"))
         )
         scene.release.set()
-        await wait_for(lambda: pet.status("robot-01")["camera_change_events"] == 2)
+        await wait_for(lambda: pet.status("robot-01")["stale_camera_events_dropped"] == 1)
+        assert pet.status("robot-01")["camera_change_events"] == 1
         await asyncio.sleep(.02)
         assert not speaker.spoken
         await pet.pause("robot-01")
@@ -5369,7 +5370,7 @@ async def test_shared_room_revoke_cannot_reuse_cached_room_fact_in_proactive_spe
             return "I noticed the room has changed."
 
     memory = MemoryStore(tmp_path, ids)
-    speaker = SimulatedSpeaker()
+    speaker = PassiveBudgetSimulatedSpeaker()
     pet = PetController(
         fleet, {}, Conversation(
             fleet, RevokingChat(), speaker, memory=memory,
@@ -5442,7 +5443,7 @@ async def test_proactive_model_regrant_cannot_speak_old_media_context(
             return "That recent observation sounds interesting."
 
     memory = MemoryStore(tmp_path, ids)
-    speaker = SimulatedSpeaker()
+    speaker = PassiveBudgetSimulatedSpeaker()
     pet = PetController(
         fleet, {}, Conversation(
             fleet, DelayedChat(), speaker, memory=memory,
@@ -5504,7 +5505,7 @@ async def test_proactive_physical_sensor_rechecks_live_consent_after_model_await
             return "I can talk about the private object"
 
     memory = MemoryStore(tmp_path, ids)
-    speaker = SimulatedSpeaker()
+    speaker = PassiveBudgetSimulatedSpeaker()
     pet = PetController(
         fleet, {}, Conversation(fleet, Chat(), speaker, memory=memory),
         memory, KeyScene(),
@@ -6607,7 +6608,7 @@ async def test_proactive_silent_model_mood_is_cosmetic_and_fenced(fleet):
         mode="hardware", robot=lambda robot_id: robot,
     )
     pet.heads = {robot.id: head}
-    pet.states = {robot.id: PetState(enabled=True, generation=3)}
+    pet._states = {robot.id: PetState(enabled=True, generation=3)}
     pet.conversation = SimpleNamespace(chat=Chat())
     pet.max_observation_age = 5.0
     pet._closed = False
@@ -6649,7 +6650,7 @@ async def test_failed_or_cancelled_face_post_does_not_consume_mood_cooldown(flee
     pet = object.__new__(PetController)
     pet.settings = SimpleNamespace(mode="hardware")
     pet.heads = {robot.id: head}
-    pet.states = {robot.id: PetState(enabled=True, generation=1)}
+    pet._states = {robot.id: PetState(enabled=True, generation=1)}
     state = pet.states[robot.id]
 
     await pet._cue_decided_face(robot.id, "thinking", lambda: True)
@@ -6706,7 +6707,7 @@ async def test_model_face_receipt_after_permission_revocation_restores_cooldown(
     pet = object.__new__(PetController)
     pet.settings = SimpleNamespace(mode="hardware")
     pet.heads = {robot.id: head}
-    pet.states = {robot.id: PetState(enabled=True, generation=3)}
+    pet._states = {robot.id: PetState(enabled=True, generation=3)}
     state = pet.states[robot.id]
     grant = {"allowed": True}
     task = asyncio.create_task(
@@ -8301,7 +8302,7 @@ async def test_person_face_failed_or_cancelled_head_ack_retries_without_stale_cu
         mode="hardware", voice_vision_tools_enabled=True,
     )
     pet.heads = {robot.id: head}
-    pet.states = {robot.id: PetState(enabled=True, generation=1)}
+    pet._states = {robot.id: PetState(enabled=True, generation=1)}
     pet._closed = False
     pet._vision_preemption_epoch = 4
     pet.multimodal = None
@@ -8365,7 +8366,7 @@ async def test_person_face_delayed_head_receipt_cannot_reuse_old_camera_grant(
     pet = object.__new__(PetController)
     pet.settings = fleet
     pet.heads = {robot.id: head}
-    pet.states = {robot.id: PetState(enabled=True, generation=17)}
+    pet._states = {robot.id: PetState(enabled=True, generation=17)}
     pet._closed = False
     pet._vision_preemption_epoch = 8
     pet.multimodal = None
@@ -8422,7 +8423,7 @@ async def test_person_face_cue_requires_current_camera_generation(
     pet = object.__new__(PetController)
     pet.settings = fleet
     pet.heads = {robot.id: head}
-    pet.states = {robot.id: PetState(enabled=True, generation=17)}
+    pet._states = {robot.id: PetState(enabled=True, generation=17)}
     pet._closed = False
     pet._vision_preemption_epoch = 8
     hub = SimpleNamespace(
@@ -8485,7 +8486,7 @@ async def test_person_face_cue_needs_fresh_credible_live_source(fleet, tmp_path)
         robots=[fleet.robots[0]],
     )
     pet.heads = {fleet.robots[0].id: head}
-    pet.states = {fleet.robots[0].id: __import__(
+    pet._states = {fleet.robots[0].id: __import__(
         "desk_robot.pet", fromlist=["PetState"]
     ).PetState(enabled=True, generation=3)}
     pet._closed = False
@@ -8541,7 +8542,7 @@ def test_direct_visual_change_gate_rejects_oversized_jpeg_header_before_decode()
 @pytest.mark.parametrize("frame", [b"", b"not-a-jpeg", b"\x89PNG"])
 def test_direct_visual_change_gate_rejects_invalid_image_transport(frame):
     gate = VisualChangeGate()
-    with pytest.raises(ValueError, match="Camera JPEG size invalid"):
+    with pytest.raises(ValueError, match="Bounded JPEG scene evidence required"):
         gate.observe(frame)
     assert gate._baseline is None
 
@@ -10120,8 +10121,9 @@ async def test_privacy_mode_optional_transmission_dedup_across_cooldown_with_ide
         assert speaker.spoken == [("robot-01", "Whoa, another cliff edge near me!")]
 
         # Simulate explicit local rearm, not an automatic Mac safety clear.
+        fake_now[0] += 0.1
         await pet._observe_body_safety("robot-01", 31, clear_body)
-        fake_now[0] += elapsed
+        fake_now[0] += elapsed - 0.1
         await pet._observe_body_safety("robot-01", 31, fault_body)
         # Repeated polling of the same latched episode is not another arrival.
         await pet._observe_body_safety("robot-01", 31, fault_body)
@@ -10164,7 +10166,9 @@ async def test_privacy_mode_optional_transmission_dedup_across_cooldown_with_ide
         assert state.safety_fault_events == 2
 
         # Only a separately reported local clear starts a new fault episode.
+        fake_now[0] += 0.1
         await pet._observe_body_safety("robot-01", 31, clear_body)
+        fake_now[0] += 0.1
         await pet._observe_body_safety("robot-01", 31, fault_body)
         assert stopped == ["robot-01", "robot-01", "robot-01"]
         assert state.safety_fault_events == 3
