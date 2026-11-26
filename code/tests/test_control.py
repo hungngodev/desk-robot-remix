@@ -2489,7 +2489,7 @@ async def test_pickup_fails_when_command_ack_is_lost(settings, phase):
         job = c.pickup("robot-01", "key")
         await c.tasks[job.id]
         assert job.state == "failed"
-        assert "Unmatched pickup command ACK" in job.error
+        assert "Unmatched or failed command ACK" in job.error
         assert job.result is None
         assert head.commands[-1] == "halt"
     finally:

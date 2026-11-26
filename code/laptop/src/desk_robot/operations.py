@@ -44,8 +44,12 @@ async def dispatch_job_command(
         at_dispatch()
         reply = await head.command(command)
     check()
-    if not command_ack_matches(reply, robot_id, expected):
-        raise OperationError("Unmatched or failed command ACK; movement not retried")
+    return _require_command_receipt(reply, robot_id, expected)
+
+
+def _require_command_receipt(reply: dict, robot_id: str, expected: str) -> dict:
+    if type(reply) is not dict or not command_ack_matches(reply, robot_id, expected):
+        raise OperationError(f"Unmatched or failed command ACK: {expected}; movement not retried")
     return reply
 
 
@@ -72,6 +76,15 @@ async def _bounded_head_reply(coro: Awaitable[_T], *, seconds: float,
             task.add_done_callback(
                 lambda done: None if done.cancelled() else done.exception()
             )
+
+
+async def _bounded_pulse_stop(head, robot_id: str) -> dict:
+    """Require an exact STOP receipt before another supervised pulse."""
+    receipt = await _bounded_head_reply(
+        head.command("stop"), seconds=1.0,
+        timeout_message="WROOM pulse STOP transport acknowledgement unconfirmed",
+    )
+    return _require_command_receipt(receipt, robot_id, expected_ack("stop"))
 
 
 class OperationError(RuntimeError):

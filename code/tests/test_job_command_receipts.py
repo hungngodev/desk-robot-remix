@@ -6,7 +6,7 @@ import asyncio
 import pytest
 
 from desk_robot.command_framing import expected_ack
-from desk_robot.operations import OperationError, dispatch_job_command
+from desk_robot.operations import OperationError, _bounded_pulse_stop, dispatch_job_command
 
 
 class ReplyHead:
@@ -66,4 +66,24 @@ def test_revoked_authority_rejects_even_matching_late_receipt():
 
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(dispatch_job_command(head, "arm", check, robot_id="robot-01"))
+    assert head.calls == 1
+
+
+@pytest.mark.parametrize("reply", [
+    None, {}, {"ok": True, "robot_id": "robot-01", "reply": "queued"},
+    {"ok": True, "robot_id": "robot-02", "reply": "OK stop"},
+    {"ok": False, "robot_id": "robot-01", "reply": "OK stop"},
+    {"ok": True, "robot_id": "robot-01", "reply": "OK halt"},
+])
+def test_unconfirmed_pulse_stop_cannot_continue(reply):
+    head = ReplyHead(reply, supports_dispatch_check=False)
+    with pytest.raises(OperationError, match="command ACK"):
+        asyncio.run(_bounded_pulse_stop(head, "robot-01"))
+    assert head.calls == 1
+
+
+def test_matching_pulse_stop_is_only_a_command_receipt():
+    reply = {"ok": True, "robot_id": "robot-01", "reply": "OK stop"}
+    head = ReplyHead(reply, supports_dispatch_check=False)
+    assert asyncio.run(_bounded_pulse_stop(head, "robot-01")) == reply
     assert head.calls == 1

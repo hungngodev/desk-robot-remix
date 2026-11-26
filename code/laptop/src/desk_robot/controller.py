@@ -31,6 +31,7 @@ from .object_targets import ObjectTarget
 from .operations import (
     OperationError,
     _bounded_head_reply,
+    _bounded_pulse_stop,
     dispatch_job_command,
     require_active_operation,
 )
@@ -52,14 +53,6 @@ async def _bounded_body_stop(head: Head, robot_id: str) -> dict:
     if not command_ack_matches(receipt, robot_id, expected_ack("halt")):
         raise HeadError("WROOM STOP acknowledgement missing, failed or mismatched")
     return receipt
-
-
-async def _bounded_pulse_stop(head: Head) -> dict:
-    """Short supervised drive pulse; the same authorized job may continue."""
-    return await _bounded_head_reply(
-        head.command("stop"), seconds=1.0,
-        timeout_message="WROOM pulse STOP transport acknowledgement unconfirmed",
-    )
 
 
 def _require_safe_fuel_sample(
@@ -1263,7 +1256,7 @@ class Coordinator:
             require_camera_grant()
             await self._motion_command(job, "drive 20 20 100")
             await asyncio.sleep(0.12)
-            await _bounded_pulse_stop(head)
+            await _bounded_pulse_stop(head, job.robot_id)
             steps += 1
             if len(job.events) >= 96:
                 job.events.pop(0)
@@ -1615,7 +1608,7 @@ class Coordinator:
             # Terminal HALT belongs to the parent; a retired pulse must not
             # send an additional STOP into a successor's operation.
             self._require_job_motion(job)
-            await _bounded_pulse_stop(head)
+            await _bounded_pulse_stop(head, job.robot_id)
             self._require_job_motion(job)
             await asyncio.sleep(0.05)
             self._require_job_motion(job)
@@ -1755,17 +1748,11 @@ class Coordinator:
             nonlocal last_live_frame_at
             last_live_frame_at = max(last_live_frame_at, time.monotonic())
 
-        def require_ack(reply: object, command: str) -> None:
-            if (type(reply) is not dict
-                    or not command_ack_matches(reply, job.robot_id, expected_ack(command))):
-                raise OperationError(f"Unmatched pickup command ACK: {command}")
-
         async def send_command(command: str) -> None:
-            reply = await _bounded_head_reply(
+            await _bounded_head_reply(
                 self._motion_command(job, command), seconds=2.5,
                 timeout_message="Pickup command acknowledgement timed out",
             )
-            require_ack(reply, command)
 
         def require_fresh_observation() -> None:
             if self.settings.mode == "hardware":
@@ -1808,7 +1795,7 @@ class Coordinator:
             self._require_camera_motion_grant(camera_grant)
             await send_command(command)  # exactly once: an uncertain ACK is a failure
             await asyncio.sleep(0.12)
-            require_ack(await _bounded_pulse_stop(head), "stop")
+            await _bounded_pulse_stop(head, job.robot_id)
             fence_observation()
             await self._assert_armed_health(job.robot_id)
         if initial is None:
@@ -1842,7 +1829,7 @@ class Coordinator:
         await asyncio.sleep(c.servo_settle_seconds)
         # Image evidence: same category moves upward into measured raised-jaw region and remains
         # there in two fresh frames while wheels are stopped. A servo ACK alone never passes.
-        require_ack(await _bounded_pulse_stop(head), "stop")
+        await _bounded_pulse_stop(head, job.robot_id)
         fence_observation()
         a, b, x, y = c.lifted_roi_px
         observed = []
@@ -2269,7 +2256,7 @@ class Coordinator:
                         cmd = _turn_once(desired_heading)
                         await self._motion_command(job, cmd)
                         await asyncio.sleep(0.05)
-                        await _bounded_pulse_stop(head)
+                        await _bounded_pulse_stop(head, job.robot_id)
                         cur_heading = desired_heading
                         await self._assert_armed_health(
                             job.robot_id, require_front_clearance=True
@@ -2288,7 +2275,7 @@ class Coordinator:
                         job, f"drive {20 * forward_sign} {20 * forward_sign} 100"
                     )
                     await asyncio.sleep(0.05)
-                    await _bounded_pulse_stop(head)
+                    await _bounded_pulse_stop(head, job.robot_id)
                     job.events.append(f"nav step {next_cell} heading={cur_heading}")
                     prev_cell = next_cell
 
