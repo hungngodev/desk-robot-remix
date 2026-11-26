@@ -1359,3 +1359,92 @@ async def test_hold_receipt_cannot_restore_retired_motion_epoch(advance_epoch):
         assert tactile["grasped"] is True
         assert tactile["jaw_seq"] == 12
     assert head.commands == []
+
+
+@pytest.mark.parametrize("sign", [-1, 1])
+@pytest.mark.parametrize("delta,error", [
+    (-120, "contradictory or excessive"), (-119, "object_lost"),
+    (119, "object_lost"), (120, None), (121, None),
+    (499, None), (500, "contradictory or excessive"),
+])
+async def test_hold_signed_contact_threshold_boundaries(sign, delta, error):
+    from desk_robot.grasp_feedback import verify_grasp_hold
+
+    class Calibrated(Settings):
+        grip_force_sign = sign
+
+    tactile = {"grasped": True, "jaw_seq": 11, "boot_id": 5103,
+               "baseline_raw": 1000, "contact_delta_raw": 140}
+    head = FakeHead([(1000 + sign * delta, 12)])
+    if error is None:
+        await verify_grasp_hold(head, Calibrated(), tactile, robot_id="robot-01")
+        assert tactile["grasped"] is True
+        assert tactile["jaw_seq"] == 12
+        assert tactile["contact_delta_raw"] == delta
+    else:
+        with pytest.raises(OperationError, match=error):
+            await verify_grasp_hold(head, Calibrated(), tactile, robot_id="robot-01")
+        assert tactile["grasped"] is False
+        assert tactile["jaw_seq"] == 11
+        assert tactile["contact_delta_raw"] == 140
+    assert head.commands == []
+
+
+@pytest.mark.parametrize("elapsed,accepted", [(0.124, True), (0.125, False), (0.126, False)])
+async def test_hold_adc_round_trip_consumes_remaining_freshness(monkeypatch, elapsed, accepted):
+    from types import SimpleNamespace
+
+    import desk_robot.grasp_feedback as feedback
+
+    clock = 100.0
+    monkeypatch.setattr(feedback, "time", SimpleNamespace(monotonic=lambda: clock))
+
+    class AgingHead(FakeHead):
+        async def aux_status(self):
+            nonlocal clock
+            frame = await super().aux_status()
+            frame["force"]["jaw_age_ms"] = 375
+            clock += elapsed
+            return frame
+
+    head = AgingHead([(240, 12)])
+    tactile = {"grasped": True, "jaw_seq": 11, "boot_id": 5103,
+               "baseline_raw": 100, "contact_delta_raw": 150}
+    if accepted:
+        await feedback.verify_grasp_hold(head, Settings(), tactile, robot_id="robot-01")
+        assert tactile["grasped"] is True
+        assert tactile["jaw_seq"] == 12
+        assert tactile["contact_delta_raw"] == 140
+    else:
+        with pytest.raises(OperationError, match="fresh jaw hold evidence required"):
+            await feedback.verify_grasp_hold(head, Settings(), tactile, robot_id="robot-01")
+        assert tactile["grasped"] is False
+        assert tactile["jaw_seq"] == 11
+        assert tactile["contact_delta_raw"] == 150
+    assert head.commands == []
+
+
+@pytest.mark.parametrize("rail,sign", [(-32768, -1), (32767, 1)])
+@pytest.mark.parametrize("clipped", [False, True])
+async def test_hold_rejects_adc_rail_even_at_plausible_contact_delta(rail, sign, clipped):
+    from desk_robot.grasp_feedback import verify_grasp_hold
+
+    class Calibrated(Settings):
+        grip_force_sign = sign
+
+    baseline = rail - sign * 140
+    tactile = {"grasped": True, "jaw_seq": 11, "boot_id": 5103,
+               "baseline_raw": baseline, "contact_delta_raw": 150}
+    head = FakeHead([(rail if clipped else rail - sign, 12)])
+    if clipped:
+        with pytest.raises(OperationError, match="fresh jaw hold evidence required"):
+            await verify_grasp_hold(head, Calibrated(), tactile, robot_id="robot-01")
+        assert tactile["grasped"] is False
+        assert tactile["jaw_seq"] == 11
+        assert tactile["contact_delta_raw"] == 150
+    else:
+        await verify_grasp_hold(head, Calibrated(), tactile, robot_id="robot-01")
+        assert tactile["grasped"] is True
+        assert tactile["jaw_seq"] == 12
+        assert tactile["contact_delta_raw"] == 139
+    assert head.commands == []
