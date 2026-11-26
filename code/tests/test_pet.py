@@ -10397,3 +10397,58 @@ async def test_deferred_speech_waits_on_owner_transition_without_polling(
         conversation.active = None
         state.enabled = False
         await pet.close()
+
+@pytest.mark.parametrize("human_robot", [None, "robot-01", "robot-02"])
+@pytest.mark.parametrize("gesture", ["tap", "hold"])
+async def test_firmware_touch_preserves_human_floor(fleet, tmp_path, human_robot, gesture):
+    """Counted WROOM gestures must not replace an active human turn."""
+    frame = {"count": 0, "tap_count": 0, "double_count": 0, "hold_count": 0}
+
+    async def read_status():
+        return {"touch": dict(frame)}
+
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(fleet, GroundedChat(), speaker, memory=memory)
+    pet = PetController(
+        fleet, {"robot-01": SimpleNamespace(status=read_status)},
+        conversation, memory, KeyScene(), speech_cooldown=0, interaction_cooldown=0,
+    )
+    hub = CameraFrameHub([robot.id for robot in fleet.robots])
+    pet.multimodal = SimpleNamespace(hub=hub)
+    pet.set_voice_monitor_ready(True)
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 1
+    floor = None
+    try:
+        await pet._touch_from_body("robot-01", 1)
+        if human_robot is not None:
+            hub.notify(human_robot, "human_voice", time.monotonic())
+            floor = asyncio.create_task(asyncio.Event().wait())
+            conversation.active = floor
+        frame["count"] = 1
+        frame[f"{gesture}_count"] = 1
+        await pet._touch_from_body("robot-01", 1)
+        await pet._touch_from_body("robot-01", 1)  # duplicate counter
+        assert [row.kind for row in memory.recent("robot-01")] == [f"touch_{gesture}"]
+        assert state.quiet is (gesture == "hold")
+        if human_robot is not None:
+            assert hub.user_active(human_robot, time.monotonic())
+            assert conversation.active is floor and not floor.done()
+            assert state.deferred_speech_candidate is None
+            assert pet._speech_task is None
+            assert not pet._admitted_event_kinds
+            assert speaker.spoken == []
+        elif gesture == "tap":
+            await wait_for(lambda: state.spoken == 1)
+            assert len(speaker.spoken) == 1
+        else:
+            assert pet._speech_task is None
+            assert speaker.spoken == []
+    finally:
+        if floor is not None:
+            floor.cancel()
+            await asyncio.gather(floor, return_exceptions=True)
+            conversation.active = None
+        state.enabled = False
+        await pet.close()
