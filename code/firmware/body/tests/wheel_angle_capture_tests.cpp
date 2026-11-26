@@ -291,7 +291,34 @@ static void paired_delta_bounds_and_asymmetric_timeout() {
   }
 }
 
+// A detected magnet alone is insufficient: reject weak/strong flags and
+// every other status byte that does not match the qualified 0x20 reading.
+static void exhaustive_magnet_status_and_replay() {
+  for (unsigned status = 0; status <= 255; ++status) {
+    WheelAngleCapture wheel;
+    check(wheel.configure(4000, 100, 60));
+    check(wheel.observe(angle(10, 1, 100), 100) == Result::Baseline);
+    check(wheel.observe(angle(11, 2, 110), 110) == Result::Delta);
+    auto sample = angle(12, 3, 120);
+    sample.magnet_status = static_cast<std::uint8_t>(status);
+    if (status == 0x20U) {
+      check(wheel.observe(sample, 120) == Result::Delta);
+      check(wheel.angular_counts() == 2);
+    } else {
+      check(wheel.observe(sample, 120) == Result::Invalid);
+      check(!wheel.continuous() && wheel.angular_counts() == 0);
+      check(wheel.last_delta() == 0);
+      // Correcting the status on the same acquisition is not fresh evidence.
+      sample.magnet_status = 0x20;
+      check(wheel.observe(sample, 121) == Result::Invalid);
+      check(wheel.observe(angle(12, 4, 130), 130) == Result::Baseline);
+      check(wheel.segment() == 2 && wheel.angular_counts() == 0);
+    }
+  }
+}
+
 int main() {
+  exhaustive_magnet_status_and_replay();
   paired_delta_bounds_and_asymmetric_timeout();
   reject_zero_elapsed_new_sequence();
   exact_wrap_and_half_turn_boundaries();
