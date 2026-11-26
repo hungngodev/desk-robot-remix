@@ -438,6 +438,15 @@ def _validation_diagnostic(error: ValidationError) -> str:
     return "Invalid configuration: " + "; ".join(issues)
 
 
+def _resolve_config_path(path: Path) -> Path:
+    # Filesystem errors can contain private filenames or symlink targets.
+    try:
+        return path.resolve()
+    except (OSError, RuntimeError, ValueError):
+        pass
+    raise ConfigurationError("Cannot resolve configuration path")
+
+
 def load_settings(
     path: str | Path, *, overrides: Mapping[str, object] | None = None,
 ) -> Settings:
@@ -446,14 +455,18 @@ def load_settings(
     Overrides replace entire top-level values, including the robot list.
     They come from the trusted local caller, never environment or remote data.
     """
-    path = Path(path).resolve()
+    path = _resolve_config_path(Path(path))
     try:
         with path.open("rb") as stream:
             data = tomllib.load(stream)
     except (tomllib.TOMLDecodeError, UnicodeDecodeError):
-        data = None
-    if data is None:
-        raise ConfigurationError("Cannot read configuration: invalid TOML or UTF-8")
+        diagnostic = "invalid TOML or UTF-8"
+    except (OSError, ValueError):
+        diagnostic = "file unavailable"
+    else:
+        diagnostic = None
+    if diagnostic is not None:
+        raise ConfigurationError(f"Cannot read configuration: {diagnostic}")
     if overrides is not None:
         data.update(overrides)
     try:
@@ -466,14 +479,14 @@ def load_settings(
         raise ConfigurationError(diagnostic)
     for robot in settings.robots:
         if robot.calibration and not robot.calibration.is_absolute():
-            robot.calibration = (path.parent / robot.calibration).resolve()
+            robot.calibration = _resolve_config_path(path.parent / robot.calibration)
     for robot in settings.robots:
         if robot.dock_calibration and not robot.dock_calibration.is_absolute():
-            robot.dock_calibration = (path.parent / robot.dock_calibration).resolve()
+            robot.dock_calibration = _resolve_config_path(path.parent / robot.dock_calibration)
     if settings.vision_weights and not settings.vision_weights.is_absolute():
-        settings.vision_weights = (path.parent / settings.vision_weights).resolve()
+        settings.vision_weights = _resolve_config_path(path.parent / settings.vision_weights)
     if not settings.trials_file.is_absolute():
-        settings.trials_file = (path.parent / settings.trials_file).resolve()
+        settings.trials_file = _resolve_config_path(path.parent / settings.trials_file)
     if not settings.memory_dir.is_absolute():
         # Keep lexical ancestors visible to MemoryStore's private-path guard.
         # resolve() would erase a symlink in the configured directory chain.
