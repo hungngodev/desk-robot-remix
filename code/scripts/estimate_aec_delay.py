@@ -327,6 +327,11 @@ def main() -> None:
         if len(reference) >= 4 * 16000:
             report["esp_idf_delay_setting_applicable"] = False
             report["esp_idf_delay_setting_ms"] = None
+    # A stable slope can still exceed the existing hardware review threshold.
+    # Keep the measured delay diagnostic but do not recommend a fixed setting.
+    if report.get("clock_drift_needs_hardware_review"):
+        report["esp_idf_delay_setting_applicable"] = False
+        report["esp_idf_delay_setting_ms"] = None
     report["capture_report_pcm_matched"] = args.capture_report is not None
     print(json.dumps(report, indent=2))
 
