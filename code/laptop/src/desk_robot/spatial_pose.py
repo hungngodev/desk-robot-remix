@@ -247,6 +247,12 @@ class PoseFence:
         """True only for an actual accepted receipt in the current continuity."""
         return self._continuous and any(item is receipt for item in self._receipts)
 
+    def receipt_source_lag_s(self, receipt: PoseReceipt) -> float | None:
+        """Relative source lag of an owned receipt, without changing continuity."""
+        if not self.owns_continuous_receipt(receipt):
+            return None
+        return max(0.0, self._relative_lag_s(receipt))
+
     def continuous_receipts_between(
         self, before: PoseReceipt, after: PoseReceipt,
     ) -> tuple[PoseReceipt, ...]:

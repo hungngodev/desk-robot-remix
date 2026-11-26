@@ -137,6 +137,10 @@ def validate_stationary_bracket(
     receipts = fence.continuous_receipts_between(before, after)
     if not receipts:
         raise BracketError("Bracket poses lack current authenticated continuity")
+    for receipt in receipts:
+        lag = fence.receipt_source_lag_s(receipt)
+        if lag is None or lag > max_body_lag_s:
+            raise BracketError("Bracket pose source freshness exceeds measured body lag")
     try:
         last = odom_base_transform(after)
         stationary = all(odom_base_transform(item) == last for item in receipts)
