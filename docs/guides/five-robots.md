@@ -235,6 +235,12 @@ operator lease, never model-authorized arming.
 Exact owned board/bank counts and five-unit delivered costs are unresolved. Use
 [the quantity sheet](../hardware/fleet-components.csv) and
 [inventory](../hardware/fleet-inventory.json); buy multiples after one passes.
+The strict first-unit and fleet procurement release paths both require the
+`first_robot_a12_sound_lighting_acceptance` scoped physical receipt. Record
+the first robot’s installed sound and lighting options, applicable measured
+A12 trials, or the reviewed disabled-feature disposition. Fleet integration
+and observer receipts cannot replace this first-unit decision. See
+[acceptance A12](../records/verification.md#canonical-product-tests-a1a12-not-negotiable).
 
 ## Planned initiative, not only replies
 

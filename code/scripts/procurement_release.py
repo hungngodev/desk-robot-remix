@@ -74,6 +74,8 @@ SYSTEM_GATES = (
     # Existing optional RGB/haptic source and disabled room soil firmware
     # must not quietly count as a finished five-pet purchase.
     "rgb_and_haptic_real_device_effects_and_power",
+    # A12 is a first-unit acceptance decision, not a fleet-only trial.
+    "first_robot_a12_sound_lighting_acceptance",
     # The MCP23017 can hold GPIOB2 high across an I2C stall. A documented
     # one-shot circuit is NOT proof until the real motor is seen to shut off.
     "haptic_hc123_one_shot_stuck_i2c_and_motor_thermal_trial",

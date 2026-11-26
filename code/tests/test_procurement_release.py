@@ -922,6 +922,14 @@ def test_full_feature_scope_cannot_be_deleted_for_release():
 
     synthetic_released = mod.generate(selected, evidence_for(selected))
     assert synthetic_released["order_released"]
+    # Fleet-specific receipts must not substitute for the first robot A12 record.
+    without_a12 = evidence_for(selected)
+    without_a12["system"].pop("first_robot_a12_sound_lighting_acceptance")
+    a12_hold = mod.generate(selected, without_a12)
+    assert not a12_hold["order_released"]
+    assert "first_robot_a12_sound_lighting_acceptance" in a12_hold[
+        "missing_system_evidence"]
+    assert not mod.first_robot_projection(a12_hold)["purchase_approved"]
     # The single-unit projection was previously permanently HOLD even when
     # all physical source receipts were synthetically present. Reuse the
     # original full evidence contract rather than inventing a second one.

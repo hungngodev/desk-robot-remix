@@ -1724,3 +1724,18 @@ def test_purchase_release_requires_explicit_sha256(digest_kind):
     ) is (digest_kind == "valid")
     errors = release.audit_release({"parts": {"imu": {gate: row}}}, SHA, source)
     assert any(f"part:imu.{gate}:" in error for error in errors) is (digest_kind != "valid")
+
+@pytest.mark.parametrize("first_robot", [True, False])
+def test_a12_receipt_required_in_both_release_scopes(first_robot):
+    gate = "first_robot_a12_sound_lighting_acceptance"
+    # Every other system receipt, including the fleet-only claims, is present.
+    evidence = {"system": {name: object() for name in release.SYSTEM_GATES if name != gate}}
+    receipts = {(scope, name): value for scope, name, value in release.required_receipts(
+        evidence, first_robot=first_robot,
+    )}
+    assert receipts["system", gate] is None
+    signed = object()
+    evidence["system"][gate] = signed
+    assert ("system", gate, signed) in list(release.required_receipts(
+        evidence, first_robot=first_robot,
+    ))
