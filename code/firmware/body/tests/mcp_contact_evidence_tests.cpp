@@ -79,6 +79,42 @@ void three_independent_gpio_conversions_emit_exactly_one_event() {
   CHECK(body.state().reed_events == 1U && body.state().pir_events == 1U);
 }
 
+void independent_contact_bounce_requires_three_consecutive_conversions() {
+  McpContactEvidence evidence;
+  std::uint32_t seq = 0, now = 0;
+  const auto sample = [&](bool reed, bool pir, bool want_reed, bool want_pir) {
+    CHECK(evidence.observe(reading(++seq, now, reed, pir), now));
+    CHECK(evidence.reed_closed() == want_reed);
+    CHECK(evidence.pir_active() == want_pir);
+    now += 84U;
+  };
+  sample(false, false, false, false);
+  // Two real high conversions are still insufficient, even when repeated.
+  for (int i = 0; i < 3; ++i) {
+    sample(true, true, false, false);
+    sample(true, true, false, false);
+    sample(false, false, false, false);
+  }
+  // Alternating channels must never contribute to each other's streak.
+  sample(true, false, false, false);
+  sample(false, true, false, false);
+  sample(true, false, false, false);
+  sample(false, true, false, false);
+  // A real reed closure qualifies while the PIR continues to bounce.
+  sample(true, true, false, false);
+  sample(true, false, false, false);
+  sample(true, true, true, false);
+  // Two low conversions cannot clear the stable reed level. The PIR can
+  // qualify independently during that release bounce.
+  sample(false, true, true, false);
+  sample(false, true, true, true);
+  sample(true, false, true, true);
+  // A genuine release clears each level only on its third conversion.
+  sample(false, false, true, true);
+  sample(false, false, true, false);
+  sample(false, false, false, false);
+}
+
 void stale_replay_and_conflicting_cache_rebaseline() {
   BodyControl body;
   McpContactEvidence evidence;
@@ -150,10 +186,11 @@ int main() {
   try {
     duplicate_cached_gpio_never_fabricates_rising_event();
     three_independent_gpio_conversions_emit_exactly_one_event();
+    independent_contact_bounce_requires_three_consecutive_conversions();
     stale_replay_and_conflicting_cache_rebaseline();
     acquisition_gaps_cannot_fabricate_edges();
     genuine_uint32_wrap_and_bumper_are_preserved();
-    std::cout << "five MCP GPIOB acquisition provenance tests passed\n";
+    std::cout << "six MCP GPIOB acquisition provenance tests passed\n";
     return 0;
   } catch (const std::exception& exc) {
     std::cerr << "FAIL " << exc.what() << '\n';
