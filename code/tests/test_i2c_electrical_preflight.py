@@ -425,3 +425,30 @@ def test_fixed_clock_contract():
 def test_clock_drift_rejected(body, head, clients, match):
     with pytest.raises(ValueError, match=match):
         tool.validate_clock_sources(body, head, clients)
+
+
+@pytest.mark.parametrize("line", ["sda", "scl"])
+@pytest.mark.parametrize("high_owner", [0, 1])
+@pytest.mark.parametrize("offset, passes", [(-0.0000000000005, False),
+                                            (0, True), (0.0000000000005, True)])
+def test_mixed_rail_sink_budget_before_rounding(line, high_owner, offset, passes):
+    segments = segment(upstream_pullups=(2900, 2900), downstream_pullups=(2900,))
+    # At the tolerance endpoints, each low-rail resistor still contributes
+    # 1 mA at the nominal floor; each high-rail 2950 ohm resistor does too.
+    low = segments[1 - high_owner][line]
+    high = segments[high_owner][line]
+    low["pullup_v"] = 3.25
+    high["pullup_v"] = 3.35
+    high["pullup_ohms"] = [2950] * len(high["pullup_ohms"])
+    high["pullup_ohms"][-1] += offset
+    report = tool.screen_selected_segment(*segments)
+    result = report["lines"][line]
+    assert result["estimated_sink_ma"] == 3.0
+    assert result["upstream_only_estimated_sink_ma"] == 2.0
+    assert result["upstream_only_paper_pass"]
+    assert result["sink_budget_pass"] is passes
+    assert result["paper_electrical_pass"] is passes
+    other = "scl" if line == "sda" else "sda"
+    assert report["lines"][other]["paper_electrical_pass"]
+    assert report["selected_branch_paper_pass"] is passes
+    assert not report["qualified_hardware"]
