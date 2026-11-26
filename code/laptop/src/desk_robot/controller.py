@@ -434,6 +434,8 @@ class Coordinator:
             and not self.tasks[jid].done()
         }))
         if not active:
+            if self._stop_confirmations.blocked():
+                raise OperationError("Voice preemption of roaming: WROOM STOP unconfirmed")
             return ()
         for job in self.jobs.values():
             if job.robot_id in active and job.kind == "exploration":
@@ -452,6 +454,8 @@ class Coordinator:
             raise OperationError(
                 "Voice preemption of roaming: WROOM STOP unconfirmed"
             ) from errors[0]
+        if self._stop_confirmations.blocked():
+            raise OperationError("Voice preemption of roaming: WROOM STOP unconfirmed")
         return active
 
     async def close(self):

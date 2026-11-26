@@ -22,6 +22,31 @@ def _coordinator(head):
 
 
 class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
+    async def test_voice_recovery_keeps_failed_idle_stop_latched(self):
+        from desk_robot.operations import OperationError
+
+        coordinator = _coordinator(object())
+        with patch(
+            "desk_robot.controller._bounded_body_stop",
+            side_effect=RuntimeError("USB STOP failed"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "USB STOP failed"):
+                await coordinator.stop("robot-01")
+
+        # No active roaming remains, but a successful audio retry cannot
+        # establish the missing body receipt or reopen the acoustic floor.
+        for _ in range(2):
+            with self.assertRaisesRegex(OperationError, "WROOM STOP unconfirmed"):
+                await coordinator.stop_active_exploration()
+
+        with patch(
+            "desk_robot.controller._bounded_body_stop",
+            return_value={"ok": True, "reply": "OK halt", "robot_id": "robot-01"},
+        ):
+            await coordinator.stop("robot-01")
+        self.assertEqual(await coordinator.stop_active_exploration(), ())
+
+
     async def test_terminal_stop_halts_body_but_short_pulse_preserves_arm(self):
         from desk_robot.controller import _bounded_pulse_stop
         from desk_robot.simulator import SimulatedHead
