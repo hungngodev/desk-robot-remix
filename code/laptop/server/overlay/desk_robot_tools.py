@@ -117,6 +117,9 @@ async def call(conn, route, payload=None):
         return {"error": "Unsupported robot tool route", "retried": False}
     if not _valid_tool_payload(route, payload):
         return {"error": "Invalid robot tool arguments", "retried": False}
+    # Validate raw schema lengths before normalization, including legacy calls.
+    if route in {"look", "voice-context"} and payload and "question" in payload:
+        payload = {**payload, "question": payload["question"].strip()}
     robot = robot_for_device(conn.device_id)
     token = os.environ.get("DESK_ROBOT_TOOL_TOKEN", "")
     receipt_token = os.environ.get("DESK_ROBOT_SPEECH_TOKEN", "")
@@ -430,10 +433,8 @@ def description(name, text, properties=None, required=None):
     ),
     ToolType.IOT_CTL,
 )
-async def desk_robot_pickup(conn, target):
-    if not isinstance(target, str) or target not in {"key", "candy"}:
-        return ActionResponse(Action.REQLLM, result={"error": "Target must be key or candy"})
-    result = await call(conn, "pickup", {"target": target})
+async def desk_robot_pickup(conn, /, target=None, **unexpected):
+    result = await call(conn, "pickup", {"target": target, **unexpected})
     # The Mac Coordinator owns job identities and progress. A WebSocket
     # connection may vanish while the accepted job continues.
     return voice_turn_response(result)
@@ -444,8 +445,8 @@ async def desk_robot_pickup(conn, target):
     description("desk_robot_stop", "Cancel this robot's job and stop movement."),
     ToolType.IOT_CTL,
 )
-async def desk_robot_stop(conn):
-    return voice_turn_response(await call(conn, "stop"))
+async def desk_robot_stop(conn, /, **unexpected):
+    return voice_turn_response(await call(conn, "stop", unexpected))
 
 
 @register_function(
@@ -457,8 +458,8 @@ async def desk_robot_stop(conn):
     ),
     ToolType.IOT_CTL,
 )
-async def desk_robot_job(conn):
-    return voice_turn_response(await call(conn, "latest-pickup"))
+async def desk_robot_job(conn, /, **unexpected):
+    return voice_turn_response(await call(conn, "latest-pickup", unexpected))
 
 @register_function(
     "desk_robot_memories",
@@ -475,14 +476,8 @@ async def desk_robot_job(conn):
     ),
     ToolType.IOT_CTL,
 )
-async def desk_robot_memories(conn, question=""):
-    if not isinstance(question, str) or len(question) > 240:
-        return ActionResponse(
-            Action.REQLLM, result={"error": "Memory question must be short"}
-        )
-    data = await call(
-        conn, "voice-context", {"question": question.strip()}
-    )
+async def desk_robot_memories(conn, /, question="", **unexpected):
+    data = await call(conn, "voice-context", {"question": question, **unexpected})
     return voice_turn_response(data)
 
 
@@ -500,10 +495,8 @@ async def desk_robot_memories(conn, question=""):
     ),
     ToolType.IOT_CTL,
 )
-async def desk_robot_situation(conn):
-    return voice_turn_response(
-        await call(conn, "interaction-context")
-    )
+async def desk_robot_situation(conn, /, **unexpected):
+    return voice_turn_response(await call(conn, "interaction-context", unexpected))
 
 
 @register_function(
@@ -522,10 +515,6 @@ async def desk_robot_situation(conn):
     ),
     ToolType.IOT_CTL,
 )
-async def desk_robot_look(conn, question):
-    if not isinstance(question, str) or not 3 <= len(question.strip()) <= 280:
-        return ActionResponse(
-            Action.REQLLM, result={"error": "Ask a short specific visual question"}
-        )
-    result = await call(conn, "look", {"question": question.strip()})
+async def desk_robot_look(conn, /, question=None, **unexpected):
+    result = await call(conn, "look", {"question": question, **unexpected})
     return voice_turn_response(result)

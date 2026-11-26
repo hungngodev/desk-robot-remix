@@ -61,3 +61,59 @@ async def test_tool_receipt_requires_finite_json(tools, monkeypatch, route, payl
         assert result == json.loads(body)
     else:
         assert result == {"error": "Malformed robot Mac tool response", "retried": False}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("name,arguments", [
+    ("pickup", {}),
+    ("pickup", {"target": None}),
+    ("pickup", {"target": 1}),
+    ("pickup", {"target": "key", "unexpected": True}),
+    ("look", {}),
+    ("look", {"question": float("nan")}),
+    ("look", {"question": " " * 280 + "key"}),
+    ("look", {"question": "key\x00"}),
+    ("look", {"question": "key", "unexpected": True}),
+    ("memories", {"question": float("inf")}),
+    ("memories", {"question": "key", "unexpected": True}),
+    ("stop", {"unexpected": True}),
+    ("job", {"unexpected": True}),
+    ("situation", {"unexpected": True}),
+    ("stop", {"conn": "not the registered connection"}),
+])
+async def test_registered_handlers_reject_invalid_arguments(tools, monkeypatch, name, arguments):
+    module, head = tools
+
+    def forbidden_http(*args, **kwargs):
+        pytest.fail("Invalid tool arguments reached HTTP")
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", forbidden_http)
+    result = await getattr(module, "desk_robot_" + name)(head, **arguments)
+    assert result.action == module.Action.REQLLM
+    assert result.result == {"error": "Invalid robot tool arguments", "retried": False}
+
+
+@pytest.mark.asyncio
+async def test_valid_visual_question_is_trimmed_after_schema_validation(tools, monkeypatch):
+    module, head = tools
+    original = httpx.AsyncClient
+    receipt = {
+        "robot_id": "robot-01",
+        "source": "authenticated_xiao_camera_and_local_vlm",
+        "frames_used": 1,
+        "answer": "A key may be visible",
+        "motor_authorized": False,
+        "charging_authorized": False,
+    }
+
+    def handler(request):
+        assert json.loads(request.content) == {"question": "Where is the key?"}
+        return httpx.Response(200, json=receipt)
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", client_factory)
+    result = await module.desk_robot_look(head, question="  Where is the key?  ")
+    assert result.action == module.Action.REQLLM
+    assert result.result == receipt
