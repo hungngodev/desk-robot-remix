@@ -571,13 +571,15 @@ def test_detector_frame_capture_freshness_boundary(age_us, expected):
     ) == expected
 
 
-@pytest.mark.parametrize("changed", ["frame", "owner"])
-def test_detector_map_epoch_fence_independent_of_other_identities(changed):
+@pytest.mark.parametrize("changed", ["frame", "owner", None])
+@pytest.mark.parametrize("field, stale", [("epoch", 7), ("calibration_id", "cal-4")])
+def test_detector_map_calibration_fence_independent_of_other_identities(changed, field, stale):
     query, owner, frame = fixtures()
     if changed == "frame":
-        frame = replace(frame, epoch=query.epoch - 1)
-    else:
-        owner = replace(owner, epoch=query.epoch - 1)
+        frame = replace(frame, **{field: stale})
+    elif changed == "owner":
+        owner = replace(owner, **{field: stale})
+    expected = "camera_or_map_changed" if changed else None
     assert _frame_valid(
         frame, query, owner, now_us=1_000_000, fresh_us=250_000,
-    ) == "camera_or_map_changed"
+    ) == expected
