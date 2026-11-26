@@ -58,9 +58,13 @@ def _check_original_assets(directory, manifest):
             continue
         assert name not in registered, f"Duplicate CAD registration: {name}"
         registered[name] = entry
+    assert not directory.is_symlink(), f"CAD symlink alias: {directory}"
+    paths = list(directory.rglob("*"))
+    for path in paths:
+        assert not path.is_symlink(), f"CAD symlink alias: {path}"
     actual = {
         path.relative_to(directory).as_posix()
-        for path in directory.rglob("*")
+        for path in paths
         if path.is_file() and path.suffix.lower() in CAD_SUFFIXES
     }
     assert actual == registered.keys(), f"CAD inventory mismatch: {directory}"
@@ -161,6 +165,34 @@ def test_original_cad_inventory_rejects_drift(tmp_path, fault):
         entry["bytes"] += 1
     with pytest.raises(AssertionError):
         _check_original_assets(tmp_path, {"files": entries})
+
+
+@pytest.mark.parametrize("alias", ["asset", "directory", "dangling", "root"])
+def test_original_cad_inventory_rejects_symlink_aliases(tmp_path, alias):
+    directory = tmp_path / "originals"
+    directory.mkdir()
+    data = b"cube(1);\n"
+    asset = directory / "model.scad"
+    asset.write_bytes(data)
+    entry = {"file": asset.name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+    manifest = {"files": [entry]}
+    _check_original_assets(directory, manifest)
+    if alias == "asset":
+        target = tmp_path / asset.name
+        asset.rename(target)
+        asset.symlink_to(target)
+    elif alias == "directory":
+        target = tmp_path / "external"
+        target.mkdir()
+        (directory / "external").symlink_to(target, target_is_directory=True)
+    elif alias == "dangling":
+        (directory / "missing.stl").symlink_to(tmp_path / "missing.stl")
+    else:
+        target = tmp_path / "external"
+        directory.rename(target)
+        directory.symlink_to(target, target_is_directory=True)
+    with pytest.raises(AssertionError, match="CAD symlink alias"):
+        _check_original_assets(directory, manifest)
 
 
 def test_original_cad_license_rejects_relabeling():
