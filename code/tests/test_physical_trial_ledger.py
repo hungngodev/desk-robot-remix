@@ -120,3 +120,31 @@ def test_external_fixture_cannot_bind_physical_manifest(tmp_path):
     )
     assert result.returncode != 0
     assert "Nonphysical trial provenance: notes" in result.stderr
+
+
+def test_real_repository_canonical_ledger_validates_with_historical_scope():
+    check_spec = importlib.util.spec_from_file_location(
+        "check_trials", SCRIPT.parent / "check_trials.py",
+    )
+    assert check_spec is not None and check_spec.loader is not None
+    check_trials = importlib.util.module_from_spec(check_spec)
+    check_spec.loader.exec_module(check_trials)
+    ledger.validate_canonical_ledger(SCRIPT.parents[2], check_trials.summarize)
+
+
+@pytest.mark.parametrize(("patch", "match"), [
+    ({"evidence_scope": "historical_snapshot", "current_head_verified": True},
+     "Canonical physical summary disagrees with CSV: current_head_verified"),
+    ({"evidence_scope": "historical_snapshot", "current_head_verified": 0},
+     "Canonical physical summary disagrees with CSV: current_head_verified"),
+    ({"evidence_scope": "live_head", "current_head_verified": False},
+     "Canonical physical summary disagrees with CSV: evidence_scope"),
+    ({"evidence_scope": "historical_snapshot"},
+     "Canonical physical summary archive metadata mismatch"),
+    ({"current_head_verified": False},
+     "Canonical physical summary archive metadata mismatch"),
+])
+def test_archive_metadata_must_remain_both_and_non_claiming(tmp_path, patch, match):
+    write_ledger(tmp_path, patch=patch)
+    with pytest.raises(ValueError, match=match):
+        ledger.validate_canonical_ledger(tmp_path, zero_score)

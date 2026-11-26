@@ -213,6 +213,18 @@ def test_ci_builds_complete_station_not_just_sensor_disabled_stub():
     assert "not a continuous 3.3 V budget" in note
     assert "greater than 200 mA" in note
     assert "run the exact fitted" in note
+    assert (
+        "uvx --from platformio==6.1.18 pio run -d code/firmware/room_station "
+        "-e feather_nrf52840_room_bench -t upload --upload-port <CONFIRMED_PORT>"
+    ) in note
+    assert (
+        "uvx --from platformio==6.1.18 pio run -d code/firmware/room_station "
+        "-e feather_nrf52840_room_full -t upload --upload-port <CONFIRMED_PORT>"
+    ) in note
+    assert "DFU/UF2 bootloader readiness; keep EXP-033 bootloader HOLD intact" in note
+    assert "STOP immediately on upload/bootloader error" in note
+    assert "Observe post-boot firmware" in note
+    assert "USB CDC enumeration before any sensor reads" in note
 
 def test_scd40_readiness_failure_invalidates_cached_measurement_in_runtime():
     # The pure-C++ helper test is insufficient if the real Feather producer

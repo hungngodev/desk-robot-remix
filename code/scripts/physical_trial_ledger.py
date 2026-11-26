@@ -40,6 +40,12 @@ def unique_object(pairs):
     return result
 
 
+_ARCHIVE_METADATA = {
+    "evidence_scope": "historical_snapshot",
+    "current_head_verified": False,
+}
+
+
 def validate_canonical_ledger(root: Path, summarize):
     records = root / "docs/records"
     with (records / "physical-trials.csv").open(newline="", encoding="utf-8") as stream:
@@ -61,9 +67,14 @@ def validate_canonical_ledger(root: Path, summarize):
             raise ValueError("Canonical physical trial contains placeholder identities")
     expected["physical_trial_count"] = sum(row["robot_id"] == "robot-01" for row in rows)
     required = {"robot_id", "categories", "physical_acceptance_pass", "physical_trial_count"}
-    if not required <= summary.keys() or not summary.keys() <= expected.keys():
+    present_archive = summary.keys() & _ARCHIVE_METADATA.keys()
+    if present_archive not in (set(), _ARCHIVE_METADATA.keys()):
+        raise ValueError("Canonical physical summary archive metadata mismatch")
+    allowed = expected.keys() | _ARCHIVE_METADATA.keys()
+    if not required <= summary.keys() or not summary.keys() <= allowed:
         raise ValueError("Canonical physical summary schema mismatch")
     for key, value in summary.items():
+        expected_value = _ARCHIVE_METADATA[key] if key in _ARCHIVE_METADATA else expected[key]
         # JSON comparison distinguishes booleans, integers and floating-point values.
-        if json.dumps(value, sort_keys=True) != json.dumps(expected[key], sort_keys=True):
+        if json.dumps(value, sort_keys=True) != json.dumps(expected_value, sort_keys=True):
             raise ValueError(f"Canonical physical summary disagrees with CSV: {key}")

@@ -2861,14 +2861,36 @@ int main() {
     OledDisplay* upstream = &display;
     display.SetupUI();
     auto* popup = display.BatteryPopup();
-    auto* layer = screen.children.at(screen.children[0] == popup ? 1 : 0);
+    assert(screen.children.size() == 2 && screen.children.back() == popup);
+    auto* layer = screen.children.at(0);
+    assert(layer != popup);
     assert(layer->x == 48 && layer->y == 16 && layer->w == 32 && layer->h == 48);
     assert(layer->children.size() == 3);
     auto* pupil = layer->children.at(0)->children.at(0);
     auto* mouth = layer->children.at(2);
     assert(layer->hidden && mouth->hidden);
+    {
+        DisplayLockGuard lock(&display);
+        lv_obj_remove_flag(popup, LV_OBJ_FLAG_HIDDEN);
+    }
     display.ShowEyes({true, false, -127, 127});
-    assert(!layer->hidden && pupil->x == 1 && pupil->y == 8 && mouth->hidden);
+    assert(!popup->hidden && !layer->hidden && pupil->x == 1 && pupil->y == 8 && mouth->hidden);
+    assert(screen.children.size() == 2 && screen.children.back() == popup);
+    Framebuffer composite{};
+    for (const auto* child : screen.children) {
+        if (child->hidden) continue;
+        const unsigned char tag = child == popup ? 2 : 1;
+        for (int row = child->y; row < child->y + child->h; ++row)
+            for (int col = child->x; col < child->x + child->w; ++col)
+                composite[static_cast<size_t>(row) * 128 + col] = tag;
+    }
+    for (int row = 16; row < 24; ++row)
+        for (int col = 48; col < 80; ++col)
+            assert(composite[static_cast<size_t>(row) * 128 + col] == 2);
+    {
+        DisplayLockGuard lock(&display);
+        lv_obj_add_flag(popup, LV_OBJ_FLAG_HIDDEN);
+    }
     for (uint8_t height : {1, 3, 5, 7, 255}) {
         display.ShowEyes({true, false, 0, 0, 14, height});
         assert(!layer->hidden && !mouth->hidden);
