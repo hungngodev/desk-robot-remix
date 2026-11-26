@@ -70,3 +70,29 @@ def test_drive_duration_matches_ack(command, duration):
 def test_drive_duration_rejects_other_operations_and_invalid_pulses(command):
     with pytest.raises(ValueError):
         drive_duration_ms(command)
+
+
+class _TextAdapter(str):
+    """A typed adapter is not a plain wire string."""
+
+
+class _ReceiptAdapter(dict):
+    """A custom mapping is not a decoded JSON receipt."""
+
+
+@pytest.mark.parametrize("command", [_TextAdapter("halt"), _TextAdapter("drive 0 0 1")])
+def test_command_requires_plain_wire_string(command):
+    with pytest.raises(ValueError, match="Invalid command"):
+        validate_command(command)
+
+
+@pytest.mark.parametrize(
+    "receipt",
+    [
+        _ReceiptAdapter(ok=True, robot_id="r1", reply="OK halt"),
+        {"ok": True, "robot_id": _TextAdapter("r1"), "reply": "OK halt"},
+        {"ok": True, "robot_id": "r1", "reply": _TextAdapter("OK halt")},
+    ],
+)
+def test_ack_requires_plain_decoded_receipt_types(receipt):
+    assert not command_ack_matches(receipt, "r1", "OK halt")

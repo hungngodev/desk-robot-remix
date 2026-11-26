@@ -14,7 +14,7 @@ def _drive_duration_ms(args: list[str]) -> int:
 
 def validate_command(command: str) -> str:
     if (
-        not isinstance(command, str)
+        type(command) is not str
         or len(command) > 95
         or not re.fullmatch(r"[a-z0-9 -]+", command)
     ):
@@ -59,8 +59,10 @@ def expected_ack(command: str) -> str:
 def command_ack_matches(data: object, robot_id: str, expected: str) -> bool:
     """Match a decoded receipt exactly; an ACK is not physical stop evidence."""
     return (
-        isinstance(data, dict)
+        type(data) is dict
         and data.get("ok") is True
+        and type(data.get("robot_id")) is str
         and data.get("robot_id") == robot_id
+        and type(data.get("reply")) is str
         and data.get("reply") == expected
     )
