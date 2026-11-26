@@ -2034,3 +2034,93 @@ async def test_deferred_motion_discards_on_stop_or_monitor_outage(settings, tmp_
         assert req2.job_id is None
     finally:
         await runtime.close()
+
+
+@pytest.mark.parametrize("floor", ["silent", "human", "tool"])
+async def test_background_context_preserves_speaker_floor(settings, tmp_path, floor):
+    """Room and fictional memory writes must not acquire or revoke speech authority."""
+    import json
+
+    from desk_robot.memory import MemoryStore
+    from desk_robot.multimodal import CameraFrameHub
+    from desk_robot.room_station import RoomStationDecoder
+
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.room_station_context_enabled = True
+    for index, robot in enumerate(settings.robots, start=1):
+        robot.device_id = f"head-{index:02d}"
+    ids = [robot.id for robot in settings.robots]
+    memory = MemoryStore(tmp_path, ids)
+    speaker = _FailingStopSpeaker()
+    speaker.fail_stop = False
+    conversation = Conversation(settings, SimulatedChat(), speaker, memory=memory)
+    runtime = _runtime_for_speaker_failure(settings, conversation, SimpleNamespace())
+    configure_room_dispatch(runtime)
+    runtime.room_context_failures = 0
+    runtime._room_connection_epoch = 0
+    hub = CameraFrameHub(ids, room_settings=settings)
+    runtime.multimodal = SimpleNamespace(hub=hub)
+    now = time.monotonic()
+    group = None
+    try:
+        if floor == "human":
+            hub.notify(ids[0], "human_voice", now)
+        elif floor == "tool":
+            # Model a completed tool cue alongside an occupied real Mac speech lease.
+            hub.remember_tool(ids[0], "robot_status", "Status received", now)
+            group = asyncio.create_task(conversation.run(ids[:2], "Read the status", 1))
+            await asyncio.wait_for(speaker.send_started.wait(), timeout=1)
+            assert conversation.session_lock.locked()
+            assert conversation.speaker_lock.locked()
+
+        voice_before = dict(hub.voice_until)
+        quiet_before = dict(hub.quiet_until)
+        urgent_before = dict(hub.urgent)
+        events_before = {key: tuple(value) for key, value in hub.event_history.items()}
+        tools_before = {key: tuple(value) for key, value in hub.tool_history.items()}
+        active_before = conversation.active
+        generation_before = conversation.stop_generation
+        session_before = conversation.session_lock.locked()
+        speaker_before = conversation.speaker_lock.locked()
+        busy_before = hub.spontaneous_floor_busy(now)
+
+        payload = {
+            "v": 1, "station": "room-pod-01", "seq": 1, "at_ms": 1000,
+            "readings": {
+                "scd40": {"valid": True, "sample_ms": 1000, "co2_ppm": 900,
+                          "temp_c": 25.0, "humidity_pct": 45.0},
+                "bme688": {"valid": False}, "ld2410c": {"valid": False},
+                "soil": {"valid": False}, "amg8833": {"valid": False},
+            },
+        }
+        observation = RoomStationDecoder().accept(json.dumps(payload), now=now)
+        runtime._queue_room_observation(asyncio.get_running_loop(), observation)
+        # Exercise the storage boundary for a background fictional memory.
+        assert await asyncio.to_thread(
+            memory.remember, ids[0], "dream785", "An imagined room adventure",
+            kind="fictional_dream", source_robot=ids[0], witnessed=True,
+        )
+        await asyncio.sleep(0)
+        assert hub.shared_room is observation
+        assert runtime.room_context_failures == 0
+        assert memory.get_episode(ids[0], "dream785").kind == "fictional_dream"
+        assert memory.get_episode(ids[1], "dream785") is None
+        assert hub.voice_until == voice_before
+        assert hub.quiet_until == quiet_before
+        assert hub.urgent == urgent_before
+        assert {key: tuple(value) for key, value in hub.event_history.items()} == events_before
+        assert {key: tuple(value) for key, value in hub.tool_history.items()} == tools_before
+        assert hub.spontaneous_floor_busy(now) is busy_before
+        assert conversation.active is active_before
+        assert conversation.stop_generation == generation_before
+        assert conversation.session_lock.locked() is session_before
+        assert conversation.speaker_lock.locked() is speaker_before
+        assert not speaker.interruptions
+        assert not speaker.spoken
+        if group is not None:
+            assert not group.done() and not group.cancelling()
+    finally:
+        if group is not None:
+            group.cancel()
+            await asyncio.gather(group, return_exceptions=True)
