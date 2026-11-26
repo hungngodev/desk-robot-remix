@@ -1,3 +1,32 @@
+## 25 November 2026: Current module ownership for native omni and sensor initiative (DRX-864)
+
+Canonical PR #17, branch `impl/mac-hardware-safety-preflight-2026-11-10`. Source ownership checked at
+`5dda86cc76bca84db2c8b0fbc4fc7b3a992c185e`; historical entries below describe older snapshots, not current
+symbol locations. Use this routing index before editing the former monoliths.
+
+| Current source owner (relative to repository root) | Responsibility and callers | Focused regression |
+| --- | --- | --- |
+| [realtime_omni_protocol.py](../../code/laptop/src/desk_robot/realtime_omni_protocol.py) | `OmniDuplexWire`, `I2sTransmissionPrefix`, model greeting and coordinator URL validation. Native adapter imports the host module or the deployed `desk_robot_omni_wire.py` copy. | [test_realtime_omni_protocol.py](../../code/tests/test_realtime_omni_protocol.py) |
+| [desk_robot_omni_http_protocol.py](../../code/laptop/server/overlay/desk_robot_omni_http_protocol.py) | Pure native backend URL, chat completion endpoint, bounded streamed response and decoded tool completion helpers. `desk_robot_native_omni.py` imports these; do not recreate HTTP parsing inside the session owner. | [test_native_omni_xiaozhi.py](../../code/tests/test_native_omni_xiaozhi.py) (integration entry point) |
+| [habituation.py](../../code/laptop/src/desk_robot/habituation.py) | `HabituationWindow`: bounded per-owner sliding inactivity window, repeat refresh, epoch and reset. `PetState` owns separate camera and session instances; this is volatile optional initiative/context, not a safety gate or durable memory. | [test_habituation.py](../../code/tests/test_habituation.py), [test_pet.py](../../code/tests/test_pet.py) |
+| [sensor_event_contract.py](../../code/laptop/src/desk_robot/sensor_event_contract.py) | Shared `PHYSICAL_INITIATIVE_KINDS`, `DIRECT_INTERACTION_KINDS`, `TRIGGERS`, exact numeric validators and typed `ProactiveToolData` / `ProactiveToolReceipt`. `pet.py` and `multimodal.py` consume the same registry; habituation uses the finite-number validator. | [test_sensor_event_contract.py](../../code/tests/test_sensor_event_contract.py), [test_multimodal.py](../../code/tests/test_multimodal.py) |
+
+Deployment boundary: [install_overlay.py](../../code/laptop/server/install_overlay.py)
+copies the host realtime protocol under the deployed wire name and copies the
+HTTP protocol helper into the existing pinned Xiaozhi server. The
+[native adapter](../../code/laptop/server/overlay/desk_robot_native_omni.py)
+still owns session orchestration, not a second audio pipeline. Keep the
+existing authenticated Xiaozhi tool and speech ownership; optional native
+model support does not establish live tool-result or audible playback proof.
+
+The shared event registry labels evidence and camera scheduling causes;
+it grants neither movement nor permission to speak. Human VAD and safety
+faults may request corroborating camera work but do not belong to unsolicited
+physical initiative. WROOM retains independent STOP/latch authority. This
+navigation correction changes no runtime behavior, procedure status,
+physical qualification, or commercial HOLD. Recheck exact-SHA CI rather
+than inheriting historical green claims.
+
 ## 21 November 2026: Single-dock provenance binding in terminal IR calibration
 
 PR #17 only. Shared implementation branch `impl/mac-hardware-safety-preflight-2026-11-10`.
