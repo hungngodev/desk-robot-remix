@@ -51,9 +51,35 @@ def _require_derived_datums(text: str, expected: dict[str, str], kind: str) -> N
             raise ValueError(f"Missing or changed {kind} CAD expression: {name}")
 
 
+def _require_dock_layout_primitives(text: str) -> None:
+    """Reject changes to the source geometry the paper model assumes."""
+    active = re.sub(r'"(?:\\.|[^"\\])*"|//[^\n]*|/\*[\s\S]*?\*/', ' ', text)
+    compact = re.sub(r"\s+", "", active)
+    primitives = {
+        "rail profile": (
+            "linear_extrude(height=guide_height_mm)polygon(points=["
+            "[inner_wall_x-guide_wall_mm-entry_flare_each_mm,0],"
+            "[inner_wall_x-entry_flare_each_mm,0],"
+            "[inner_wall_x,entry_flare_run_mm],[inner_wall_x,guide_run_mm],"
+            "[inner_wall_x-guide_wall_mm,guide_run_mm],"
+            "[inner_wall_x-guide_wall_mm,entry_flare_run_mm]]);"
+        ),
+        "IR coupon aperture": (
+            "for(x=[outside_width_mm/2-ir_pair_spacing_mm/2,"
+            "outside_width_mm/2+ir_pair_spacing_mm/2])"
+            "translate([x,ir_coupon_height_mm/2,-0.1])"
+            "cylinder(h=ir_coupon_thickness_mm+0.2,d=ir_probe_bore_d_mm);"
+        ),
+    }
+    for name, primitive in primitives.items():
+        if compact.count(primitive) != 1:
+            raise ValueError(f"Missing or changed dock CAD primitive: {name}")
+
+
 def dock_constants(source: Path = CAD) -> dict:
     raw = source.read_bytes()
     text = raw.decode("utf-8")
+    _require_dock_layout_primitives(text)
     names = (
         "track_outer_width_mm", "side_clearance_each_mm",
         "guide_wall_mm", "wall_outside_margin_mm",
@@ -144,6 +170,10 @@ def dock_constants(source: Path = CAD) -> dict:
                 floor + values["backstop_height_mm"]):
         raise ValueError("Dock tag pocket exceeds printable CAD clearance")
     return {
+        "entry_flare_half_angle_deg": math.degrees(math.atan2(
+            values["entry_flare_each_mm"], values["entry_flare_run_mm"]
+        )),
+        "ir_coupon_center_y_mm": values["ir_coupon_height_mm"] / 2,
         "backstop_width_mm": width,
         "dock_base_length_mm": values["base_length_mm"],
         "backstop_front_y_mm": (
