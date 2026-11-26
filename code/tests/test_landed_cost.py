@@ -996,3 +996,13 @@ def test_exact_landed_cost_ignores_ambient_decimal_precision():
     assert result["errors"] == []
     assert result["payable_now_cents"] == 1713
     assert result["prototype_cumulative_cents"] == 2963
+
+
+@pytest.mark.parametrize("discount,expected", [(174, 1), (175, 0)])
+def test_landed_total_exact_discount_boundary(discount, expected):
+    """A fully offset seller total is valid arithmetic, not purchase approval."""
+    assert mod.landed_total_cents(
+        150, shipping=20, tax=3, duties=2, discount=discount,
+    ) == expected
+    with pytest.raises(ValueError, match="discount exceeds seller total"):
+        mod.landed_total_cents(150, shipping=20, tax=3, duties=2, discount=176)
