@@ -7,7 +7,6 @@ from desk_robot.initiative_policy import (
     quiet_voice_reason,
 )
 
-
 _BOOLEAN_TRIPLES = tuple(itertools.product((False, True), repeat=3))
 
 
