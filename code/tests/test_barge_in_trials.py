@@ -635,3 +635,56 @@ def test_i2s_cutoff_requires_both_distances():
     assert report["distance_results"]["50cm"]["meets_120ms_i2s_cutoff"] is True
     assert report["distance_results"]["100cm"]["max_onset_to_i2s_stop_ms"] is None
     assert report["meets_120ms_i2s_cutoff"] is False
+
+
+@pytest.fixture(scope="module")
+def aec_estimator():
+    return runpy.run_path(str(
+        Path(__file__).resolve().parents[1] / "scripts/estimate_aec_delay.py"
+    ))
+
+
+@pytest.fixture(params=[200, 700], ids=["stepper-like", "n20-like"])
+def synthetic_motor_fan(request):
+    """Idealized harmonic interference, not recorded motor or human audio."""
+    import numpy as np
+
+    time = np.arange(32000) / 16000
+    motor = sum(
+        0.08 / harmonic * np.sin(2 * np.pi * request.param * harmonic * time)
+        for harmonic in range(1, 5)
+    )
+    fan = sum(
+        0.025 / harmonic * np.sin(2 * np.pi * 120 * harmonic * time + 0.4)
+        for harmonic in range(1, 4)
+    )
+    return motor + fan
+
+
+def test_harmonic_motor_fan_cannot_establish_aec_delay(aec_estimator, synthetic_motor_fan):
+    import numpy as np
+
+    # Even strongly correlated periodic interference has multiple plausible lags.
+    delayed = np.roll(synthetic_motor_fan, 320)
+    with pytest.raises(ValueError, match="Ambiguous acoustic delay"):
+        aec_estimator["estimate_delay"](synthetic_motor_fan, delayed)
+
+
+def test_weak_broadband_reference_survives_motor_fan_noise(aec_estimator, synthetic_motor_fan):
+    import numpy as np
+
+    # Broadband calibration stimulus, deliberately quieter than the interference.
+    # This tests delay estimation, not speech recognition or runtime VAD.
+    rng = np.random.default_rng(817)
+    reference = aec_estimator["resample_reference"](
+        rng.uniform(-0.06, 0.06, 64000), 32000,
+    )
+    lag = 320
+    mic = synthetic_motor_fan.copy()
+    mic[lag:] += reference[:-lag]
+    assert np.std(reference) < np.std(synthetic_motor_fan)
+    report = aec_estimator["estimate_delay"](reference, mic)
+    assert report["sample_lag"] == lag
+    assert report["reference_delay_ms"] == 20
+    assert report["aec_physically_verified"] is False
+    assert report["natural_barge_in_verified"] is False
