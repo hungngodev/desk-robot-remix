@@ -21,6 +21,7 @@ public:
     using OledDisplay::OledDisplay;
 
     void SetupUI() override {
+        using namespace face_eye_geometry;
         OledDisplay::SetupUI();
         DisplayLockGuard lock(this);
         if (!lock) return;
@@ -28,31 +29,31 @@ public:
             RememberNormalStatusLocked();
             ApplyPriorityLocked();
         }
-        if (eye_layer_ || width() != 128 || height() != 64) return;
+        if (eye_layer_ || width() != kPanelWidth || height() != kPanelHeight) return;
         eye_layer_ = lv_obj_create(lv_screen_active());
-        lv_obj_set_size(eye_layer_, 32, 48);
+        lv_obj_set_size(eye_layer_, kSlotWidth, kSlotHeight);
         // Xiaozhi's 128x64 idle emotion cell is 32px wide, centered in
         // the content row. Cover that cell without obscuring its top 16px
         // network/voice status bar or allocating another display surface.
-        lv_obj_align(eye_layer_, LV_ALIGN_TOP_MID, 0, 16);
+        lv_obj_align(eye_layer_, LV_ALIGN_TOP_MID, 0, kStatusHeight);
         lv_obj_set_style_radius(eye_layer_, 0, 0);
         lv_obj_set_style_pad_all(eye_layer_, 0, 0);
         lv_obj_set_style_border_width(eye_layer_, 0, 0);
         lv_obj_set_style_bg_color(eye_layer_, lv_color_white(), 0);
         lv_obj_set_style_bg_opa(eye_layer_, LV_OPA_COVER, 0);
         lv_obj_set_scrollbar_mode(eye_layer_, LV_SCROLLBAR_MODE_OFF);
-        for (int i = 0; i < 2; ++i) {
+        for (int i = 0; i < kEyeCount; ++i) {
             eye_[i] = lv_obj_create(eye_layer_);
-            lv_obj_set_size(eye_[i], 11, 14);
-            lv_obj_set_pos(eye_[i], 3 + i * 15, 17);
+            lv_obj_set_size(eye_[i], kEyeWidth, kOpenHeight);
+            lv_obj_set_pos(eye_[i], EyeX(i), EyeY(kOpenHeight));
             lv_obj_set_style_radius(eye_[i], LV_RADIUS_CIRCLE, 0);
             lv_obj_set_style_pad_all(eye_[i], 0, 0);
             lv_obj_set_style_border_width(eye_[i], 0, 0);
             lv_obj_set_style_bg_color(eye_[i], lv_color_black(), 0);
             lv_obj_set_style_bg_opa(eye_[i], LV_OPA_COVER, 0);
             pupil_[i] = lv_obj_create(eye_[i]);
-            lv_obj_set_size(pupil_[i], 3, 4);
-            lv_obj_set_pos(pupil_[i], 4, 5);
+            lv_obj_set_size(pupil_[i], kPupilWidth, kPupilHeight);
+            lv_obj_set_pos(pupil_[i], PupilX(0), PupilY(kOpenHeight, 0));
             lv_obj_set_style_radius(pupil_[i], LV_RADIUS_CIRCLE, 0);
             lv_obj_set_style_pad_all(pupil_[i], 0, 0);
             lv_obj_set_style_border_width(pupil_[i], 0, 0);
@@ -185,28 +186,26 @@ private:
     }
 
     void RenderEyesLocked(EyeFrame frame) {
+        using namespace face_eye_geometry;
         if (!eye_layer_) return;
         if (!frame.visible) frame = {};
-        frame.x = std::clamp<int>(frame.x, -3, 3);
-        frame.y = std::clamp<int>(frame.y, -3, 3);
-        frame.lid_height = std::clamp<int>(frame.lid_height, 2, 14);
+        frame.x = std::clamp<int>(frame.x, -kGazeExtent, kGazeExtent);
+        frame.y = std::clamp<int>(frame.y, -kGazeExtent, kGazeExtent);
+        frame.lid_height = std::clamp<int>(frame.lid_height, kClosedHeight, kOpenHeight);
         if (frame_known_ && frame.visible == last_.visible &&
             frame.closed == last_.closed && frame.x == last_.x &&
             frame.y == last_.y && frame.lid_height == last_.lid_height) return;
         if (!frame.visible) {
             lv_obj_add_flag(eye_layer_, LV_OBJ_FLAG_HIDDEN);
         } else {
-            for (int i = 0; i < 2; ++i) {
-                const int height = frame.closed ? 2 : frame.lid_height;
-                lv_obj_set_size(eye_[i], 11, height);
-                lv_obj_set_pos(eye_[i], 3 + i * 15, 24 - height / 2);
-                if (height < 6) {
+            for (int i = 0; i < kEyeCount; ++i) {
+                const int height = frame.closed ? kClosedHeight : frame.lid_height;
+                lv_obj_set_size(eye_[i], kEyeWidth, height);
+                lv_obj_set_pos(eye_[i], EyeX(i), EyeY(height));
+                if (height < kPupilMinEyeHeight) {
                     lv_obj_add_flag(pupil_[i], LV_OBJ_FLAG_HIDDEN);
                 } else {
-                    if (height == 14)
-                        lv_obj_set_pos(pupil_[i], 4 + frame.x, 5 + frame.y);
-                    else
-                        lv_obj_set_pos(pupil_[i], 4 + frame.x, (height - 4) / 2);
+                    lv_obj_set_pos(pupil_[i], PupilX(frame.x), PupilY(height, frame.y));
                     lv_obj_remove_flag(pupil_[i], LV_OBJ_FLAG_HIDDEN);
                 }
             }
@@ -217,8 +216,8 @@ private:
     }
 
     lv_obj_t* eye_layer_ = nullptr;
-    lv_obj_t* eye_[2] = {nullptr, nullptr};
-    lv_obj_t* pupil_[2] = {nullptr, nullptr};
+    lv_obj_t* eye_[face_eye_geometry::kEyeCount] = {};
+    lv_obj_t* pupil_[face_eye_geometry::kEyeCount] = {};
     FaceIdlePower idle_power_;
     EyeFrame last_{};
     bool frame_known_ = false;

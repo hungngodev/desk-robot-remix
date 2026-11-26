@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include "stackchan_behavior.hpp"
+#include "face_eye_geometry.hpp"
 
 // Small original, nonactuating OLED expression policy. Xiaozhi owns the status
 // and transcript; Stackchan owns optional idle gaze. Pixels render only under
@@ -12,7 +13,7 @@ struct EyeFrame {
     bool closed = false;
     int8_t x = 0;
     int8_t y = 0;
-    uint8_t lid_height = 14;
+    uint8_t lid_height = face_eye_geometry::kOpenHeight;
 };
 
 namespace face_eye_detail {
@@ -42,6 +43,7 @@ public:
                   bool priority_or_rest = false) {
         using stackchan::behavior::Motion;
         using face_eye_detail::EaseAxis;
+        using namespace face_eye_geometry;
         if (priority_or_rest) started_ = false;
         if (!allowed || priority_or_rest) {
             // Transient voice/reconnect gates cancel a gesture without starving
@@ -68,15 +70,17 @@ public:
         frame.closed = blinking && ((blink_phase >= 100U && blink_phase < 250U) ||
             (double_blink_ && blink_phase >= 600U && blink_phase < 750U));
         switch (gaze_) {
-            case Motion::kLookLeft: frame.x = -3; break;
-            case Motion::kLookRight: frame.x = 3; break;
-            case Motion::kLookUp: frame.y = -3; break;
-            case Motion::kLookDown: frame.y = 3; break;
+            case Motion::kLookLeft: frame.x = -kGazeExtent; break;
+            case Motion::kLookRight: frame.x = kGazeExtent; break;
+            case Motion::kLookUp: frame.y = -kGazeExtent; break;
+            case Motion::kLookDown: frame.y = kGazeExtent; break;
             case Motion::kNod:
-                frame.y = gaze_age <= 350U ? 3 : EaseAxis(3, -2, gaze_age - 350U, 200U);
+                frame.y = gaze_age <= 350U ? kGazeExtent :
+                    EaseAxis(kGazeExtent, kNodReturn, gaze_age - 350U, 200U);
                 break;
             case Motion::kShake:
-                frame.x = gaze_age <= 350U ? -3 : EaseAxis(-3, 3, gaze_age - 350U, 200U);
+                frame.x = gaze_age <= 350U ? -kGazeExtent :
+                    EaseAxis(-kGazeExtent, kGazeExtent, gaze_age - 350U, 200U);
                 break;
             default: break;
         }
