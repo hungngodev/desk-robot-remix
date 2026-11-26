@@ -75,12 +75,27 @@ def _check_original_license(manifest, expected, attribution):
     assert manifest["author"] == author
     assert manifest["license"] == license_id
     assert source in manifest["source_url"]
-    lines = attribution.splitlines()
-    sections = ["\n".join(lines[i : i + 6]) for i, line in enumerate(lines) if source in line]
     assert any(
-        author in section and _license_token(license_id) in _license_token(section)
-        for section in sections
+        source in record
+        and author in record
+        and _license_token(license_id) in _license_token(record)
+        for record in _attribution_records(attribution)
     ), f"Missing attribution for {source}: {license_id}"
+
+
+def _attribution_records(attribution):
+    """Read one Markdown table row or bullet, never borrow a neighbor's terms."""
+    bullet = []
+    for line in attribution.splitlines():
+        if bullet and (not line.strip() or not line.startswith("  ")):
+            yield "\n".join(bullet)
+            bullet = []
+        if line.startswith("|"):
+            yield line
+        elif line.startswith("- ") or bullet:
+            bullet.append(line)
+    if bullet:
+        yield "\n".join(bullet)
 
 
 def _license_token(value):
@@ -131,10 +146,23 @@ def test_original_cad_license_rejects_relabeling():
     expected = ORIGINAL_SOURCES["smars"]
     author, license_id, source = expected
     manifest = {"author": author, "license": license_id, "source_url": source}
-    attribution = f"{author} {source} {license_id}"
+    attribution = f"| {source} | {author} | {license_id} |"
     _check_original_license(manifest, expected, attribution)
     with pytest.raises(AssertionError):
         _check_original_license(manifest, expected, attribution.replace(license_id, "MIT"))
     manifest["license"] = "MIT"
     with pytest.raises(AssertionError):
+        _check_original_license(manifest, expected, attribution)
+
+
+@pytest.mark.parametrize("style", ["table", "bullet"])
+def test_original_cad_attribution_cannot_borrow_neighbor_license(style):
+    expected = ORIGINAL_SOURCES["smars"]
+    author, license_id, source = expected
+    manifest = {"author": author, "license": license_id, "source_url": source}
+    if style == "table":
+        attribution = f"| {source} | {author} | MIT |\n| neighbor | {author} | {license_id} |"
+    else:
+        attribution = f"- {source}\n  {author}: MIT\n- neighbor\n  {author}: {license_id}"
+    with pytest.raises(AssertionError, match="Missing attribution"):
         _check_original_license(manifest, expected, attribution)
