@@ -2,7 +2,6 @@
 
 import httpx
 import pytest
-
 from desk_robot.cli import _inspect_context, _inspect_look
 
 
