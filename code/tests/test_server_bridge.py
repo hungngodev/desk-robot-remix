@@ -2929,12 +2929,51 @@ def test_pinned_upstream_connection_initializes_per_device_native_tts():
     compile(patched, "native_xiaozhi_connection.py", "exec")
 
 
-def test_actual_pinned_xiaozhi_tts_initializer_selects_each_registered_voice(
+def _load_pinned_tts_definition(path, name, namespace):
+    """Execute upstream definitions without booting unrelated server services."""
+    import ast
+
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    node = next(item for item in tree.body if getattr(item, "name", None) == name)
+    exec(compile(ast.Module(body=[node], type_ignores=[]), str(path), "exec"), namespace)
+    return namespace[name]
+
+
+def _pinned_tts_factory(upstream, monkeypatch, post):
+    import importlib
+    import os
+
+    class AudioBase:
+        def __init__(self, config, delete_audio_file):
+            self.tts_timeout = float(config["tts_timeout"])
+            self.delete_audio_file = delete_audio_file
+
+    provider = types.ModuleType("core.providers.tts.custom")
+    provider.__dict__.update(
+        TTSProviderBase=AudioBase, requests=SimpleNamespace(post=post),
+    )
+    _load_pinned_tts_definition(
+        upstream / "core/providers/tts/custom.py", "TTSProvider", provider.__dict__,
+    )
+    monkeypatch.setitem(sys.modules, provider.__name__, provider)
+    monkeypatch.chdir(upstream)
+    create_instance = _load_pinned_tts_definition(
+        upstream / "core/utils/tts.py", "create_instance",
+        {"os": os, "sys": sys, "importlib": importlib},
+    )
+    return _load_pinned_tts_definition(
+        upstream / "core/utils/modules_initialize.py", "initialize_tts",
+        {"tts": SimpleNamespace(create_instance=create_instance)},
+    )
+
+
+async def test_actual_pinned_xiaozhi_tts_initializer_selects_each_registered_voice(
     bridge, monkeypatch,
 ):
-    """Execute the patched real upstream method with its actual call ordering."""
+    """Execute the real patched hook, factory, provider selection and HTTP payload."""
     import ast
-    from types import SimpleNamespace
+
+    import yaml
 
     monkeypatch.setenv(
         "DESK_ROBOT_NATIVE_VOICE_MAP",
@@ -2945,50 +2984,56 @@ def test_actual_pinned_xiaozhi_tts_initializer_selects_each_registered_voice(
     )
     installer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(installer)
-    source = installer.files(
-        ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server"
-    )["core/connection.py"]
-    tree = ast.parse(source)
+    upstream = ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server"
+    source = installer.files(upstream)["core/connection.py"]
     connection = next(
-        cls for cls in tree.body
+        cls for cls in ast.parse(source).body
         if isinstance(cls, ast.ClassDef) and cls.name == "ConnectionHandler"
     )
     method = next(
         member for member in connection.body
-        if isinstance(member, ast.FunctionDef)
-        and member.name == "_initialize_tts"
+        if isinstance(member, ast.FunctionDef) and member.name == "_initialize_tts"
     )
+    sent = []
 
-    seen = []
+    def post(url, *, json, headers, timeout):
+        sent.append((url, dict(json), headers, timeout))
+        return SimpleNamespace(status_code=200, content=b"audio")
 
-    def original_pinned_factory(config):
-        # The original provider chooses the voice from its TTS params.
-        voice = config["TTS"]["CustomTTS"]["params"]["voice"]
-        seen.append(voice)
-        return voice
+    def unexpected_default(*_args, **_kwargs):
+        pytest.fail("Registered Kokoro head fell back to DefaultTTS")
 
     namespace = {
-        "initialize_tts": original_pinned_factory,
-        "DefaultTTS": lambda *args, **kwargs: None,
+        "initialize_tts": _pinned_tts_factory(upstream, monkeypatch, post),
+        "DefaultTTS": unexpected_default,
     }
-    isolated = ast.Module(body=[method], type_ignores=[])
-    exec(compile(isolated, "pinned_native_tts_hook.py", "exec"), namespace)
+    exec(compile(ast.Module(body=[method], type_ignores=[]), str(upstream), "exec"), namespace)
     initialize = namespace["_initialize_tts"]
-    common = {
-        "selected_module": {"TTS": "CustomTTS"},
-        "TTS": {"CustomTTS": {
-            "type": "custom", "params": {"voice": "af_heart", "model": "kokoro"},
-        }},
-    }
+    common = yaml.safe_load((ROOT / "config/xiaozhi.local.example.yaml").read_text())
+    params = common["TTS"]["CustomTTS"]["params"]
+    params["voice"] = "af_default"  # Neither assigned voice may inherit the global default.
     pip = SimpleNamespace(device_id="mac-01", config=common, need_bind=False)
     dot = SimpleNamespace(device_id="mac-02", config=common, need_bind=False)
     bridge.register(pip)
     bridge.register(dot)
-    assert initialize(pip) == "af_heart"
-    assert initialize(dot) == "am_adam"
-    assert initialize(pip) == "af_heart"
-    assert seen == ["af_heart", "am_adam", "af_heart"]
-    assert common["TTS"]["CustomTTS"]["params"]["voice"] == "af_heart"
+    first, second, repeated = initialize(pip), initialize(dot), initialize(pip)
+    assert first is not second and first is not repeated
+    for provider, voice, utterance in (
+        (first, "af_heart", "first"), (second, "am_adam", "second"),
+        (repeated, "af_heart", "third"), (first, "af_heart", "again"),
+    ):
+        assert await provider.text_to_speak(utterance, None) == b"audio"
+        assert sent[-1] == (
+            "http://127.0.0.1:8880/v1/audio/speech",
+            dict(params, voice=voice, input=utterance), {}, provider.tts_timeout,
+        )
+    assert len(sent) == 4
+    assert params["voice"] == "af_default"
+    assert params["input"] == "{prompt_text}"
+    bridge.unregister(dot)
+    with pytest.raises(RuntimeError, match="current registered"):
+        initialize(dot)
+    assert len(sent) == 4
 
 
 def test_native_fleet_launcher_requires_real_token_auth_not_device_whitelist(tmp_path):
