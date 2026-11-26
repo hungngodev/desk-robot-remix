@@ -77,43 +77,116 @@ def _status_health(settings: Settings, request: Request, head: str, body: str) -
     }
 
 
-def register_robot_status_routes(
-    app: FastAPI, settings: Settings, *, authorize, coordinator,
-    requested_tool_context, remember_tool_context, current_tool_context,
-) -> None:
-    # Only accepted human-tool receipts advance this in-process cursor.
-    # Dashboard polling still exposes historical raw diagnostics without
-    # consuming a newly acquired sample's conversational provenance.
-    last_aux_context_seq: dict[tuple[str, str], tuple[int, int]] = {}
-    active_aux_boot: dict[str, int] = {}
-    retired_aux_boots: dict[str, set[int]] = {}
-
-    def require_current_voice_tool(request: Request, robot_id: str, owner) -> None:
-        """Do not return an old head HTTP result to a newer spoken turn.
-
-        Only the canonical Xiaozhi tool marker demands this stricter
-        response fence. Unmarked operator/dashboard reads stay read-only,
-        and the existing sensor acquisition cursor remains independent.
-        """
-        if request.headers.get("x-desk-robot-tool-receipt") != "1":
-            return
+def _require_current_voice_tool(request: Request, robot_id: str, owner, current_tool_context) -> None:
+    """Fence canonical voice tool reads without restricting dashboard polling."""
+    if request.headers.get("x-desk-robot-tool-receipt") == "1":
         current_tool_context(
             owner, robot_id, "Voice telemetry tool turn superseded during read"
         )
 
-    def telemetry_head(robot_id: str):
-        require_configured_robot(settings, robot_id)
-        owner = coordinator()
-        owner.robot(robot_id)
-        head = owner.heads.get(robot_id)
-        if head is None:
-            raise HTTPException(503, "Telemetry head unavailable")
-        return head
 
-    def previous_seq(key: tuple[str, str], boot: int) -> int | None:
-        cursor = last_aux_context_seq.get(key)
+def _require_telemetry_identity(data, robot_id: str, message: str) -> None:
+    if not isinstance(data, dict) or data.get("robot_id") != robot_id:
+        raise HeadError(message)
+
+
+def _status_summary(data: dict) -> str:
+    safety = data.get("safety")
+    safety = safety if isinstance(safety, dict) else {}
+    return (
+        f"backend={str(data.get('backend', 'unknown'))[:24]}, "
+        f"armed={data.get('armed')}, "
+        f"safety_fault={str(safety.get('fault', 'unknown'))[:40]}"
+    )
+
+
+def _climate_cue(reading, previous_seq, elapsed_ms):
+    if not _fresh_aux_acquisition(
+        reading, previous_seq=previous_seq, max_age_ms=1000, elapsed_ms=elapsed_ms,
+    ):
+        return None
+    if not (type(reading.get("temp_centi")) is int
+            and -4500 <= reading["temp_centi"] <= 13000
+            and type(reading.get("rh_centi")) is int
+            and 0 <= reading["rh_centi"] <= 10000):
+        return None
+    return (
+        f"SHT41 local temp_centi={reading['temp_centi']}, "
+        f"humidity_centi={reading['rh_centi']}, "
+        f"seq={reading['seq']}, age_ms={reading['age_ms']}"
+    )
+
+
+def _bmp_cue(reading, previous_seq, elapsed_ms):
+    if not _fresh_aux_acquisition(
+        reading, previous_seq=previous_seq, max_age_ms=2000, elapsed_ms=elapsed_ms,
+    ):
+        return None
+    if not (reading.get("present") is True
+            and type(reading.get("chip_id")) is int
+            and reading["chip_id"] == 0x58
+            and type(reading.get("temp_centi")) is int
+            and -4000 <= reading["temp_centi"] <= 8500
+            and type(reading.get("pressure_pa")) is int
+            and 30000 <= reading["pressure_pa"] <= 120000):
+        return None
+    return (
+        f"BMP280 local pressure_pa={reading['pressure_pa']}, "
+        f"seq={reading['seq']}, age_ms={reading['age_ms']}"
+    )
+
+
+def _power_diagnostics(data: dict) -> dict:
+    power = data.get("power")
+    if isinstance(power, dict) and "monitor_fault" in power:
+        # Diagnostic only; do not inject a historical fault into speech context.
+        warning = ina226_monitor_warning(power)
+        return {**data, "power": {**power, "monitor_warning": warning}}
+    return data
+
+
+class _AuxReceiptCursor:
+    def __init__(self) -> None:
+        # Dashboard polling never consumes an acquisition's conversational provenance.
+        self.last_aux_context_seq: dict[tuple[str, str], tuple[int, int]] = {}
+        self.active_aux_boot: dict[str, int] = {}
+        self.retired_aux_boots: dict[str, set[int]] = {}
+
+    def previous_seq(self, key: tuple[str, str], boot: int) -> int | None:
+        cursor = self.last_aux_context_seq.get(key)
         return cursor[1] if cursor is not None and cursor[0] == boot else None
 
+    def remember(self, owner, robot_id: str, data: dict, elapsed_ms: float,
+                 remember_tool_context) -> None:
+        # Only an authenticated, explicit tool request may publish sensor receipts.
+        boot = _aux_boot_epoch(data)
+        if owner is None or boot is None or boot in self.retired_aux_boots.get(robot_id, set()):
+            return
+        cues = []
+        pending_seq: dict[tuple[str, str], tuple[int, int]] = {}
+        for sensor, make_cue in (("climate", _climate_cue), ("bmp280", _bmp_cue)):
+            reading = data.get(sensor)
+            key = (robot_id, sensor)
+            cue = make_cue(reading, self.previous_seq(key, boot), elapsed_ms)
+            if cue is not None:
+                pending_seq[key] = (boot, reading["seq"])
+                cues.append(cue)
+        if not cues:
+            return
+        admitted = remember_tool_context(
+            owner, robot_id, "sensor_telemetry",
+            "; ".join(cues)[:180] + "; raw local probe, not calibrated",
+        )
+        # Advance all source cursors only after admission; no await separates commit.
+        if admitted is True:
+            prior_boot = self.active_aux_boot.get(robot_id)
+            if prior_boot is not None and prior_boot != boot:
+                self.retired_aux_boots.setdefault(robot_id, set()).add(prior_boot)
+            self.active_aux_boot[robot_id] = boot
+            self.last_aux_context_seq.update(pending_seq)
+
+
+def _register_inventory_route(app, settings, authorize) -> None:
     @app.get("/v1/robots", dependencies=[Depends(authorize)])
     async def robots():
         return {
@@ -125,13 +198,16 @@ def register_robot_status_routes(
             ],
         }
 
+
+def _register_status_route(app, settings, authorize, coordinator,
+                           requested_tool_context, remember_tool_context, current_tool_context) -> None:
     @app.get("/v1/robots/{robot_id}/status", dependencies=[Depends(authorize)])
     async def status(robot_id: str, request: Request):
         require_configured_robot(settings, robot_id)
         owner = coordinator()
         owner.robot(robot_id)
         context = requested_tool_context(request, robot_id)
-        require_current_voice_tool(request, robot_id, context)
+        _require_current_voice_tool(request, robot_id, context, current_tool_context)
         head = owner.heads.get(robot_id)
         getter = getattr(head, "status", None)
         if not callable(getter):
@@ -143,23 +219,15 @@ def register_robot_status_routes(
         try:
             data = await getter()
         except (HeadError, TimeoutError) as exc:
-            require_current_voice_tool(request, robot_id, context)
+            _require_current_voice_tool(request, robot_id, context, current_tool_context)
             head_state, body_state = _failed_status_components(exc, robot_id)
             return JSONResponse({
                 "robot_id": robot_id, "error": "Robot status unavailable",
                 "health": _status_health(settings, request, head_state, body_state),
             }, status_code=503)
-        require_current_voice_tool(request, robot_id, context)
-        if not isinstance(data, dict) or data.get("robot_id") != robot_id:
-            raise HeadError("Head status robot identity mismatch")
-        safety = data.get("safety")
-        safety = safety if isinstance(safety, dict) else {}
-        summary = (
-            f"backend={str(data.get('backend', 'unknown'))[:24]}, "
-            f"armed={data.get('armed')}, "
-            f"safety_fault={str(safety.get('fault', 'unknown'))[:40]}"
-        )
-        remember_tool_context(context, robot_id, "robot_status", summary)
+        _require_current_voice_tool(request, robot_id, context, current_tool_context)
+        _require_telemetry_identity(data, robot_id, "Head status robot identity mismatch")
+        remember_tool_context(context, robot_id, "robot_status", _status_summary(data))
         simulated = settings.mode == "simulation"
         health = _status_health(
             settings, request, "simulated" if simulated else "responded",
@@ -167,13 +235,22 @@ def register_robot_status_routes(
         )
         return {**data, "health": health}
 
+
+def _register_aux_route(app, settings, authorize, coordinator,
+                        requested_tool_context, remember_tool_context, current_tool_context) -> None:
+    cursor = _AuxReceiptCursor()
+
     @app.get("/v1/robots/{robot_id}/aux", dependencies=[Depends(authorize)])
     async def aux(robot_id: str, request: Request):
-        head = telemetry_head(robot_id)
+        require_configured_robot(settings, robot_id)
+        fleet = coordinator()
+        fleet.robot(robot_id)
+        head = fleet.heads.get(robot_id)
+        if head is None:
+            raise HTTPException(503, "Telemetry head unavailable")
         # Bind the requesting human turn before slow physical telemetry.
-        # A new VAD epoch must not inherit the older tool's receipt.
         owner = requested_tool_context(request, robot_id)
-        require_current_voice_tool(request, robot_id, owner)
+        _require_current_voice_tool(request, robot_id, owner, current_tool_context)
         getter = getattr(head, "aux_status", None)
         if not callable(getter):
             return {"robot_id": robot_id, "available": False,
@@ -181,72 +258,27 @@ def register_robot_status_routes(
         started_ns = monotonic_ns()
         data = await getter()
         elapsed_ms = (monotonic_ns() - started_ns) / 1_000_000
-        require_current_voice_tool(request, robot_id, owner)
-        if not isinstance(data, dict) or data.get("robot_id") != robot_id:
-            raise HeadError("Auxiliary telemetry robot identity mismatch")
-        power = data.get("power")
-        if isinstance(power, dict) and "monitor_fault" in power:
-            # Validate adapter diagnostics before admitting any tool receipt.
-            try:
-                warning = ina226_monitor_warning(power)
-            except ValueError as exc:
-                return JSONResponse({"error": str(exc)}, status_code=503)
-            # Diagnostic only; do not inject a historical fault into speech context.
-            data = {**data, "power": {**power, "monitor_warning": warning}}
-        # Only an authenticated, explicit head tool request may add a short
-        # physical sensor receipt to the shared multimodal brain timeline.
-        # Dashboard polling and failed/invalid measurements never inject it.
-        boot = _aux_boot_epoch(data)
-        if (owner is not None and boot is not None
-                and boot not in retired_aux_boots.get(robot_id, set())):
-            cues = []
-            pending_seq: dict[tuple[str, str], tuple[int, int]] = {}
-            climate = data.get("climate")
-            climate_key = (robot_id, "climate")
-            if (_fresh_aux_acquisition(
-                    climate, previous_seq=previous_seq(climate_key, boot),
-                    max_age_ms=1000, elapsed_ms=elapsed_ms,
-                )
-                and type(climate.get("temp_centi")) is int
-                and -4500 <= climate["temp_centi"] <= 13000
-                and type(climate.get("rh_centi")) is int
-                and 0 <= climate["rh_centi"] <= 10000):
-                pending_seq[climate_key] = (boot, climate["seq"])
-                cues.append(
-                    f"SHT41 local temp_centi={climate['temp_centi']}, "
-                    f"humidity_centi={climate['rh_centi']}, "
-                    f"seq={climate['seq']}, age_ms={climate['age_ms']}"
-                )
-            bmp = data.get("bmp280")
-            bmp_key = (robot_id, "bmp280")
-            if (_fresh_aux_acquisition(
-                    bmp, previous_seq=previous_seq(bmp_key, boot),
-                    max_age_ms=2000, elapsed_ms=elapsed_ms,
-                )
-                and bmp.get("present") is True
-                and type(bmp.get("chip_id")) is int
-                and bmp["chip_id"] == 0x58
-                and type(bmp.get("temp_centi")) is int
-                and -4000 <= bmp["temp_centi"] <= 8500
-                and type(bmp.get("pressure_pa")) is int
-                and 30000 <= bmp["pressure_pa"] <= 120000):
-                pending_seq[bmp_key] = (boot, bmp["seq"])
-                cues.append(
-                    f"BMP280 local pressure_pa={bmp['pressure_pa']}, "
-                    f"seq={bmp['seq']}, age_ms={bmp['age_ms']}"
-                )
-            if cues:
-                admitted = remember_tool_context(
-                    owner, robot_id, "sensor_telemetry",
-                    "; ".join(cues)[:180] + "; raw local probe, not calibrated",
-                )
-                # Accept all source cursors only after the current human turn
-                # admitted this combined receipt. No await separates commit.
-                if admitted is True:
-                    prior_boot = active_aux_boot.get(robot_id)
-                    if prior_boot is not None and prior_boot != boot:
-                        retired_aux_boots.setdefault(robot_id, set()).add(prior_boot)
-                    active_aux_boot[robot_id] = boot
-                    last_aux_context_seq.update(pending_seq)
+        _require_current_voice_tool(request, robot_id, owner, current_tool_context)
+        _require_telemetry_identity(data, robot_id, "Auxiliary telemetry robot identity mismatch")
+        # Validate adapter diagnostics before admitting any tool receipt.
+        try:
+            data = _power_diagnostics(data)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=503)
+        cursor.remember(owner, robot_id, data, elapsed_ms, remember_tool_context)
         return _json_safe_telemetry(data)
 
+
+def register_robot_status_routes(
+    app: FastAPI, settings: Settings, *, authorize, coordinator,
+    requested_tool_context, remember_tool_context, current_tool_context,
+) -> None:
+    _register_inventory_route(app, settings, authorize)
+    _register_status_route(
+        app, settings, authorize, coordinator,
+        requested_tool_context, remember_tool_context, current_tool_context,
+    )
+    _register_aux_route(
+        app, settings, authorize, coordinator,
+        requested_tool_context, remember_tool_context, current_tool_context,
+    )
