@@ -16,12 +16,39 @@ BODY = Path(__file__).resolve().parents[1] / "firmware/body"
 
 PROBE = r'''
 #include "lib/TofBus/TofResult.h"
+#include "lib/TofBus/RangeScanOrder.h"
 #include "lib/BodyControl/RangeSampleClock.h"
 #include "lib/CliffGuard/CliffGuard.h"
 #include <iostream>
 
+// Admission is a scheduler heuristic; it is not a physical latency bound.
+static bool check_scan_admission() {
+  using desk_robot::RangeScanOrder;
+  for (std::uint32_t start : {0U, 0xfffffff0U}) {
+    for (unsigned elapsed : {99U, 100U}) {
+      RangeScanOrder scan(true);
+      for (unsigned lane = 0; lane < 5; ++lane) {
+        if (scan.next(start + lane) != lane) return false;
+      }
+      if (scan.next(start + elapsed) != (elapsed < 100U ? 5U : 0U)) return false;
+    }
+    for (unsigned expiry = 30; expiry <= 200; ++expiry) {
+      for (unsigned elapsed : {expiry / 2U - 1U, expiry / 2U}) {
+        RangeScanOrder scan(true);
+        for (unsigned lane = 0; lane < 5; ++lane) {
+          if (scan.next(start + lane, expiry) != lane) return false;
+        }
+        if (scan.next(start + elapsed, expiry) != (elapsed < expiry / 2U ? 5U : 0U))
+          return false;
+      }
+    }
+  }
+  return true;
+}
+
 int main() {
   using namespace desk_robot;
+  if (!check_scan_admission()) return 4;
   for (unsigned mm : {0U, 29U, 30U, 31U, 1299U, 1300U, 1301U, 8190U, 65535U}) {
     CliffConfig config{};
     config.calibrated = true;

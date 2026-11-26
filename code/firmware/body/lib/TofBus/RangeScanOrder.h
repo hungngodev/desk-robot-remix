@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include "../../include/TofWireLimits.h"
 
 namespace desk_robot {
 
@@ -10,7 +11,8 @@ class RangeScanOrder {
  public:
   explicit RangeScanOrder(bool full_eight) : full_eight_(full_eight) {}
 
-  std::uint8_t next(std::uint32_t now_ms = 0, std::uint32_t freshness_ms = 200) {
+  std::uint8_t next(std::uint32_t now_ms = 0,
+                    std::uint32_t freshness_ms = kTofCriticalExpiryMs) {
     if (critical_index_ == 0) sweep_started_ms_ = now_ms;
     if (critical_index_ < 5) return critical_index_++;
     critical_index_ = 0;
