@@ -75,7 +75,14 @@ def main():
         address = ipaddress.ip_address(args.server_ip)
     except ValueError:
         p.error("Use the Mac's reachable LAN IPv4 address")
-    if address.version != 4 or address.is_loopback or address.is_unspecified:
+    if (
+        address.version != 4
+        or address.is_loopback
+        or address.is_unspecified
+        or address.is_multicast
+        or address.is_reserved
+        or address in ipaddress.IPv4Network("0.0.0.0/8")
+    ):
         p.error("Use the Mac's reachable LAN IPv4 address")
     data = yaml.safe_load((ROOT / "config/xiaozhi.local.example.yaml").read_text())
     data["server"]["websocket"] = f"ws://{address}:8000/xiaozhi/v1/"
