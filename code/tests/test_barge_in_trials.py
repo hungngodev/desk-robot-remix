@@ -707,3 +707,41 @@ def test_reference_resampler_preserves_causal_even_phase(
     source[impulse] = -1.0
     result = aec_estimator["resample_reference"](source, 32000)
     np.testing.assert_array_equal(result * 32768, expected)
+
+
+@pytest.mark.parametrize("token", ["NaN", "Infinity", "-Infinity", "1e309", "-1e309"])
+def test_jsonl_rejects_nonfinite_numbers_even_in_nested_diagnostics(token):
+    rows = both_distances()
+    lines = [json.dumps(row) for row in rows]
+    lines[0] = lines[0][:-1] + ', "diagnostics": {"latency": [' + token + ']}}'
+    with pytest.raises(ValueError, match="JSON trial number"):
+        parse_trial_jsonl("\n".join(lines))
+
+
+@pytest.mark.parametrize("field", [
+    "human_onset_ms", "vad_arrival_ms", "abort_dispatch_ms",
+    "head_queue_clear_ms", "i2s_stop_ms", "audible_stop_ms",
+    "speaker_distance_cm", "room_noise_db_a",
+])
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf"), -float("inf"), []])
+def test_all_human_measurements_require_finite_scalars(field, invalid):
+    rows = both_distances()
+    rows[0][field] = invalid
+    with pytest.raises(ValueError, match="Missing or invalid measured"):
+        evaluate(rows)
+
+
+@pytest.mark.parametrize("field", [
+    "robot_speech_seconds_by_minute", "robot_speech_volumes_observed",
+])
+def test_empty_echo_measurement_arrays_cannot_pass(field):
+    rows = both_distances()
+    rows[-2][field] = []
+    with pytest.raises(ValueError, match="robot|Robot"):
+        evaluate(rows)
+
+
+@pytest.mark.parametrize("records", [[], [[]], [None]])
+def test_empty_or_nonobject_acoustic_records_cannot_pass(records):
+    with pytest.raises(ValueError, match="Trial log|20 human trials"):
+        evaluate(records)
