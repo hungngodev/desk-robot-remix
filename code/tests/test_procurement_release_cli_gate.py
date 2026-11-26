@@ -209,6 +209,26 @@ def test_purchasing_release_rechecks_live_pr_after_receipts_before_output(
     assert release.main() == 0
     assert "synthetic cart" in capsys.readouterr().out
 
+
+    # All independent receipt/CI checks succeed, but the $50 cap does not.
+    # This must fail before the renderer can emit even a partial cart.
+    monkeypatch.setattr(
+        release, "cost_quote",
+        lambda *_: {"calculation_complete_not_physical_approval": True,
+                    "within_prototype_cap": False, "awaiting_arrival_roles": [],
+                    "prior_paid_orders_cents": 1367},
+    )
+    assert release.main() == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "actual landed quotation, budget or received stock" in captured.err
+    monkeypatch.setattr(
+        release, "cost_quote",
+        lambda *_: {"calculation_complete_not_physical_approval": True,
+                    "within_prototype_cap": True, "awaiting_arrival_roles": [],
+                    "prior_paid_orders_cents": 1367},
+    )
+
     revisions = iter(["a" * 40, None])
 
     def offline_after_initial_receipt_check():
@@ -382,3 +402,47 @@ def test_paid_spend_review_documented_at_builder_entrypoint():
     assert "allow_nan=False" in doc
     assert "A digest or self-attestation alone cannot prove" in doc
     assert "private operator storage" in doc
+
+def test_all_procurement_formats_from_unrelated_working_directory(tmp_path):
+    """Every preview is a clean, standalone CLI document, not a release."""
+    import csv
+    import json
+
+    formats = (
+        "json", "csv", "markdown", "first-robot-json", "first-robot-markdown",
+        "pilot-samples-json", "pilot-samples-markdown",
+        "pilot-cart-json", "pilot-cart-markdown",
+        "pilot-landed-cost-json", "pilot-landed-cost-markdown",
+        "landed-cost-json", "landed-cost-markdown",
+    )
+    for fmt in formats:
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), "--format", fmt],
+            cwd=tmp_path, text=True, capture_output=True,
+            check=False, timeout=20,
+        )
+        assert result.returncode == 0, (fmt, result.stderr)
+        assert result.stderr == "", fmt
+        assert result.stdout.strip(), fmt
+        if fmt.endswith("json"):
+            assert isinstance(json.loads(result.stdout), dict), fmt
+        elif fmt == "csv":
+            rows = list(csv.reader(result.stdout.splitlines()))
+            assert rows[0][:3] == ["scope", "part_id", "component"]
+            assert len(rows) > 1
+            assert all(len(row) == len(rows[0]) for row in rows[1:])
+        else:
+            assert result.stdout.startswith("# "), fmt
+
+    for flag, fmt in (
+        ("--require-release", "markdown"),
+        ("--require-first-robot", "first-robot-markdown"),
+    ):
+        result = subprocess.run(
+            [sys.executable, str(SCRIPT), flag, "--format", fmt],
+            cwd=tmp_path, text=True, capture_output=True,
+            check=False, timeout=20,
+        )
+        assert result.returncode == 2, (flag, result.stderr)
+        assert result.stdout == "", flag
+        assert "HOLD" in result.stderr, flag
