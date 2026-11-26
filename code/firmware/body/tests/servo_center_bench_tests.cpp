@@ -3,6 +3,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <limits>
 
 using Gate = desk_robot::ServoCenterBenchGate;
 
@@ -97,7 +98,40 @@ static void test_live_loop() {
   assert(Serial.blocking_prints == 0);
 }
 
+static void test_extreme_pulse_requests() {
+  using namespace body_pins;
+  const int low = std::numeric_limits<int>::min();
+  const int high = std::numeric_limits<int>::max();
+  const int requests[] = {low, -1, 0, 999, 1000, 1500, 2000, 2001, 5000, high};
+  const unsigned expected[] = {3276, 3276, 3276, 3276, 3276,
+                               4915, 6553, 6553, 6553, 6553};
+  for (unsigned i = 0; i < sizeof(requests) / sizeof(requests[0]); ++i) {
+    assert(servo_duty_for_microseconds(requests[i], kServoMinUs, kServoMaxUs) ==
+           expected[i]);
+  }
+  assert(servo_duty_for_degrees(low, kServoMinUs, kServoMaxUs) == 3276U);
+  assert(servo_duty_for_degrees(-1, kServoMinUs, kServoMaxUs) == 3276U);
+  assert(servo_duty_for_degrees(0, kServoMinUs, kServoMaxUs) == 3276U);
+  assert(servo_duty_for_degrees(180, kServoMinUs, kServoMaxUs) == 6553U);
+  assert(servo_duty_for_degrees(5000, kServoMinUs, kServoMaxUs) == 6553U);
+  assert(servo_duty_for_degrees(high, kServoMinUs, kServoMaxUs) == 6553U);
+  assert(servo_duty_for_degrees(high, low, high) == 0U);
+  assert(servo_duty_for_microseconds(1500, 2000, 1000) == 0U);
+  assert(servo_duty_for_microseconds(1500, 1000, 1000) == 0U);
+  assert(servo_duty_for_microseconds(1500, 0, 2000) == 0U);
+  assert(servo_duty_for_microseconds(1500, 1000, 20000) == 0U);
+  assert(servo_duty_for_microseconds(1500, 1000, high) == 0U);
+  unsigned previous = 3276U;
+  for (int degrees = 0; degrees <= 180; ++degrees) {
+    const unsigned duty = servo_duty_for_degrees(degrees, kServoMinUs, kServoMaxUs);
+    assert(duty >= previous && duty <= 6553U);
+    assert(duty - previous <= 20U);
+    previous = duty;
+  }
+}
+
 int main() {
+  test_extreme_pulse_requests();
   // Production and hornless bench share the nominal 50 Hz duty mapping.
   // These are commanded values, never fitted horn travel evidence.
   static_assert(body_pins::servo_duty_for_degrees(
