@@ -2914,3 +2914,45 @@ async def test_blocked_speak_enforces_revocation_stop_and_lease_release(
             payload.get("text") == "Fresh successor remark"
             for route, payload in calls if route == "/speak"
         )
+
+
+async def test_group_camera_revoked_during_late_timeline_read_blocks_model(settings):
+    """Admission after the hub read must fence newly revoked camera evidence."""
+    settings.mode = "hardware"
+    settings.fleet_text_sharing_enabled = True
+    settings.voice_vision_tools_enabled = False
+    reads = []
+
+    class Hub:
+        def interaction_timeline(self, robot_id, now, *, limit):
+            reads.append((robot_id, limit))
+            if robot_id == "robot-01":
+                return []
+            settings.voice_vision_tools_enabled = False
+            return [{"channel": "camera", "kind": "proactive"}]
+
+    class Chat:
+        def __init__(self):
+            self.calls = 0
+
+        async def reply(self, history):
+            self.calls += 1
+            assert self.calls == 1
+            settings.voice_vision_tools_enabled = True
+            return "First pet spoke without camera context."
+
+    chat = Chat()
+    speaker = SimulatedSpeaker()
+    conversation = Conversation(settings, chat, speaker)
+    conversation.multimodal = SimpleNamespace(hub=Hub())
+
+    with pytest.raises(RuntimeError, match="Group conversation consent revoked"):
+        await conversation.run(["robot-01", "robot-02"], "Discuss surroundings", 2)
+
+    assert reads == [("robot-01", 16), ("robot-02", 10)]
+    assert chat.calls == 1
+    assert speaker.spoken == [
+        ("robot-01", "First pet spoke without camera context."),
+    ]
+    assert conversation.active is None
+    assert conversation.histories == {}

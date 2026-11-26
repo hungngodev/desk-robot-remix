@@ -898,6 +898,77 @@ class Conversation:
                 # never authority to abort an otherwise valid group dialogue.
                 record_failure(exc)
 
+    @staticmethod
+    def _group_independent_nonvisual(item: dict) -> bool:
+        # WROOM and shared room observations are independent of camera consent.
+        return (
+            (item.get("channel") == "sensor"
+             and item.get("source") in {"wroom_event", "wroom_sensed_event"})
+            or (item.get("channel") == "sensor_history"
+                and item.get("source") == "wroom_event_history")
+            or (item.get("channel") == "room_station"
+                and item.get("shared_not_robot_eyewitness") is True)
+        )
+
+    def _group_media_timeline(
+        self, robot_id: str, remaining: int, consent: GroupContextConsent,
+    ) -> list[dict]:
+        if self.multimodal is None or not remaining:
+            return []
+        live_media_allowed = (
+            self.settings.mode != "hardware" or self.settings.voice_vision_tools_enabled
+        )
+        read_timeline = getattr(
+            getattr(self.multimodal, "hub", None), "interaction_timeline", None,
+        )
+        # Optional context failure must not strand the speaker lease.
+        try:
+            raw = (
+                read_timeline(
+                    robot_id, time.monotonic(),
+                    limit=remaining if live_media_allowed else 16,
+                ) if callable(read_timeline) else []
+            )
+        except Exception:
+            raw = []
+        if live_media_allowed:
+            timeline = raw
+            # Record admission even if consent changes during the hub read.
+            if (self.settings.mode == "hardware"
+                    and any(not self._group_independent_nonvisual(item) for item in raw)):
+                consent.admit_camera()
+        else:
+            # Keep the hub's reserved fault; the composer owns the text budget.
+            timeline = [item for item in raw if self._group_independent_nonvisual(item)]
+        if not self.settings.room_station_context_enabled:
+            timeline = [item for item in timeline if item.get("channel") != "room_station"]
+        elif any(item.get("channel") == "room_station" for item in timeline):
+            consent.admit_room()
+        return timeline
+
+    def _group_live_cues(
+        self, robot_id: str, consent: GroupContextConsent, *, sharing_at_start: bool,
+    ) -> str:
+        # This snapshot changes between turns; no new evidence owner is needed.
+        if (not self.settings.fleet_text_sharing_enabled
+                or (self.settings.mode == "hardware" and not sharing_at_start)):
+            return ""
+        # Operator-owned physical activity is not camera evidence or motion authority.
+        jobs = self.coordinator_jobs
+        activity = (
+            active_job_timeline(jobs.values(), robot_id) if isinstance(jobs, dict) else []
+        )
+        timeline = self._group_media_timeline(robot_id, max(0, 10 - len(activity)), consent)
+        timeline.extend(activity)
+        # The group owner has no verified turn-bound receipt for orphaned recalls.
+        # Topic-specific SQLite retrieval is the dedicated memory evidence path.
+        timeline = [
+            item for item in timeline
+            if not (item.get("channel") == "tool" and item.get("kind") == "memory_recall")
+        ]
+        timeline = consent.filter_live_transcripts(timeline, now=time.monotonic())
+        return compose_brain_context([], [], timeline).interaction
+
     async def run(
         self, robot_ids: list[str], topic: str, utterances: int | None = None,
         *, permission_check: Callable[[], bool] | None = None,
@@ -1061,100 +1132,6 @@ class Conversation:
                     timeout=min(5.0, max(0.0, deadline - loop.time())),
                 )
 
-            def live_cues(robot_id: str) -> str:
-                # Reuse the existing per-pet Mac timeline, not a second
-                # camera, microphone or sensor event owner. This snapshot
-                # may change between turns in the same group conversation.
-                if (not self.settings.fleet_text_sharing_enabled
-                        or (self.settings.mode == "hardware" and not sharing_at_start)):
-                    return ""
-                # Operator-owned physical activity is not camera evidence.
-                # Preserve it even when vision consent is disabled, without
-                # enabling camera or sensor history through that consent gate.
-                # A job never authorizes movement or certifies completion.
-                jobs = self.coordinator_jobs
-                activity = (
-                    active_job_timeline(jobs.values(), robot_id)
-                    if isinstance(jobs, dict) else []
-                )
-                timeline = []
-                if self.multimodal is not None:
-                    remaining = max(0, 10 - len(activity))
-                    if remaining:
-                        live_media_allowed = (
-                            self.settings.mode != "hardware"
-                            or self.settings.voice_vision_tools_enabled
-                        )
-                        read_timeline = getattr(
-                            getattr(self.multimodal, "hub", None),
-                            "interaction_timeline", None,
-                        )
-                        # Optional context failure may not mask a newer
-                        # human interruption or strand the speaker lease.
-                        try:
-                            raw = (
-                                read_timeline(
-                                    robot_id, time.monotonic(),
-                                    limit=remaining if live_media_allowed else 16,
-                                ) if callable(read_timeline) else []
-                            )
-                        except Exception:
-                            raw = []
-                        # WROOM and shared room observations remain available
-                        # independently of camera consent. Only material that
-                        # the camera-off branch would withhold needs a visual
-                        # revocation fence on later model/speaker completion.
-                        def independent_nonvisual(item: dict) -> bool:
-                            return (
-                                (item.get("channel") == "sensor"
-                                 and item.get("source") in {
-                                     "wroom_event", "wroom_sensed_event",
-                                 })
-                                or (item.get("channel") == "sensor_history"
-                                    and item.get("source") == "wroom_event_history")
-                                or (item.get("channel") == "room_station"
-                                    and item.get("shared_not_robot_eyewitness") is True)
-                            )
-
-                        if live_media_allowed:
-                            timeline = raw
-                            # Record admission, even if consent changes during
-                            # the hub read, but not for independent WROOM cues.
-                            if (self.settings.mode == "hardware"
-                                    and any(not independent_nonvisual(item)
-                                            for item in raw)):
-                                consent.admit_camera()
-                        else:
-                            timeline = [
-                                item for item in raw if independent_nonvisual(item)
-                            ]
-                            # Keep the hub's reserved fault through privacy
-                            # filtering; the composer owns the text budget.
-                        if not self.settings.room_station_context_enabled:
-                            timeline = [
-                                item for item in timeline
-                                if item.get("channel") != "room_station"
-                            ]
-                        elif any(
-                            item.get("channel") == "room_station"
-                            for item in timeline
-                        ):
-                            consent.admit_room()
-                timeline.extend(activity)
-                # A completed recall from a DIFFERENT human turn is not
-                # permission to discuss private facts in an unrelated group
-                # conversation. The group owner has no verified turn-bound
-                # recall receipt, so never import the hub's orphaned result.
-                # Consented, topic-relevant SQLite retrieval above is the
-                # dedicated memory evidence path for this group session.
-                timeline = [
-                    item for item in timeline
-                    if not (item.get("channel") == "tool"
-                            and item.get("kind") == "memory_recall")
-                ]
-                timeline = consent.filter_live_transcripts(timeline, now=time.monotonic())
-                return compose_brain_context([], [], timeline).interaction
-
             def topic_prompt() -> str:
                 # The operator's actual topic is NOT a container for recalled
                 # SQLite text. Untrusted observations belong only in the
@@ -1233,7 +1210,9 @@ class Conversation:
                                 # expired sensor or VLM snapshot. Repeat live
                                 # context only as temporary task data.
                                 turn_history = list(self.histories[robot.id])
-                                latest_cues = live_cues(robot.id)
+                                latest_cues = self._group_live_cues(
+                                    robot.id, consent, sharing_at_start=sharing_at_start,
+                                )
                                 if not consent_still_valid():
                                     raise RuntimeError("Group conversation consent revoked")
                                 if latest_cues:
