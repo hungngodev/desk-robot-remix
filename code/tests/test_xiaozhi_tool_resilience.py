@@ -172,10 +172,13 @@ async def test_legacy_and_native_shared_tool_bridge_rejects_wrong_pet_receipt(
         bridge_tools.registered_head, "status"
     )
     assert len(seen) == 1
-    assert result == {
+    expected = {
         "error": "Robot Mac tool identity or authority invalid",
         "retried": False,
     }
+    if unsafe.get("robot_id") != "robot-01":
+        expected["error_code"] = "robot_identity_mismatch"
+    assert result == expected
     assert "other pet" not in str(result)
 
 
@@ -846,7 +849,7 @@ async def test_voice_cancel_does_not_abort_required_robot_stop_request(
         assert request.url.path == "/v1/robots/robot-01/stop"
         entered.set()
         await release.wait()
-        return httpx.Response(200, json={"stopped": True})
+        return httpx.Response(200, json={"robot_id": "robot-01", "stopped": True})
 
     def client_factory(*args, **kwargs):
         return original(*args, transport=httpx.MockTransport(handler), **kwargs)
@@ -860,7 +863,9 @@ async def test_voice_cancel_does_not_abort_required_robot_stop_request(
     await asyncio.sleep(0)
     assert not task.done()
     release.set()
-    assert await asyncio.wait_for(task, timeout=1) == {"stopped": True}
+    assert await asyncio.wait_for(task, timeout=1) == {
+        "robot_id": "robot-01", "stopped": True,
+    }
 
 
 async def test_xiaozhi_situation_tool_gets_only_current_pets_ephemeral_cues(
@@ -1121,6 +1126,7 @@ async def test_native_aux_sensor_tool_rejects_foreign_robot_result(
     )
     assert result == {
         "error": "Robot Mac tool identity or authority invalid",
+        "error_code": "robot_identity_mismatch",
         "retried": False,
     }
 

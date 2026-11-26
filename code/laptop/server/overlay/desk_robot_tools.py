@@ -316,10 +316,9 @@ async def call(conn, route, payload=None):
             "error": "Robot tool result superseded by new speech or reconnect",
             "retried": False,
         }
-    # An accepted pickup/STOP is NOT undone by newer speech. Preserve
-    # the authenticated Mac job receipt for the next turn, but never send
-    # the old response back to the speaking model.
-    if turn_superseded and response.status_code >= 400:
+    # An accepted pickup/STOP is NOT undone by newer speech. The Mac owns
+    # the job receipt; never expose its old payload to a newer voice turn.
+    if turn_superseded:
         return {"_desk_robot_turn_superseded": True}
     if response.status_code >= 400:
         return {
@@ -332,19 +331,19 @@ async def call(conn, route, payload=None):
         # Never forward nonfinite values, even nested in otherwise valid receipts.
         json.dumps(result, allow_nan=False)
     except (ValueError, TypeError, RecursionError):
-        return ({"_desk_robot_turn_superseded": True} if turn_superseded
-                else {"error": "Malformed robot Mac tool response", "retried": False})
+        return {"error": "Malformed robot Mac tool response", "retried": False}
     if not isinstance(result, dict):
-        return ({"_desk_robot_turn_superseded": True} if turn_superseded
-                else {"error": "Unexpected robot Mac tool response", "retried": False})
-    if turn_superseded:
-        return {**result, "_desk_robot_turn_superseded": True}
-    # Both native duplex and legacy Xiaozhi function calling use this same
-    # bridge. Reject cross-pet or unidentified read-only results HERE; a
-    # separate native worker check is not enough for legacy model replies.
-    if readonly and (result.get("robot_id") != robot
-                     or ("motor_authorized" in result
-                         and result["motor_authorized"] is not False)
+        return {"error": "Unexpected robot Mac tool response", "retried": False}
+    # Every Mac tool receipt, including STOP and pickup, belongs to the
+    # authenticated device's robot. Never forward a missing or foreign ID.
+    if result.get("robot_id") != robot:
+        return {
+            "error": "Robot Mac tool identity or authority invalid",
+            "error_code": "robot_identity_mismatch",
+            "retried": False,
+        }
+    if readonly and (("motor_authorized" in result
+                      and result["motor_authorized"] is not False)
                      or ("charging_authorized" in result
                          and result["charging_authorized"] is not False)):
         return {"error": "Robot Mac tool identity or authority invalid",

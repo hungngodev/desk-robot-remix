@@ -117,3 +117,53 @@ async def test_valid_visual_question_is_trimmed_after_schema_validation(tools, m
     result = await module.desk_robot_look(head, question="  Where is the key?  ")
     assert result.action == module.Action.REQLLM
     assert result.result == receipt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route,payload,path", [
+    ("stop", None, "/v1/robots/robot-01/stop"),
+    ("pickup", {"target": "key"}, "/v1/robots/robot-01/pickup"),
+    ("status", None, "/v1/robots/robot-01/status"),
+    ("voice-context", None, "/v1/pet/robot-01/voice-context"),
+])
+@pytest.mark.parametrize("identity", [None, "robot-02", 1, "robot-01"])
+@pytest.mark.parametrize("superseded", [False, True])
+async def test_tool_receipt_is_bound_to_current_robot(
+    tools, monkeypatch, route, payload, path, identity, superseded,
+):
+    module, head = tools
+    original = httpx.AsyncClient
+    receipt = {"id": "private-job", "state": "queued"}
+    if identity is not None:
+        receipt["robot_id"] = identity
+    calls = []
+
+    def handler(request):
+        calls.append(request.url.path)
+        if superseded:
+            module.bridge.voice_turn_generation[head.device_id] += 1
+        return httpx.Response(200, json=receipt)
+
+    def client_factory(*args, **kwargs):
+        return original(*args, transport=httpx.MockTransport(handler), **kwargs)
+
+    monkeypatch.setattr(module.httpx, "AsyncClient", client_factory)
+    result = await module.call(head, route, payload)
+    assert calls == [path]
+    if superseded:
+        if route in {"stop", "pickup"}:
+            assert result == {"_desk_robot_turn_superseded": True}
+        else:
+            assert result == {
+                "error": "Robot tool result superseded by new speech or reconnect",
+                "retried": False,
+            }
+        assert module.voice_turn_response(result).action == module.Action.NONE
+    elif identity == "robot-01":
+        assert result == receipt
+    else:
+        assert result == {
+            "error": "Robot Mac tool identity or authority invalid",
+            "error_code": "robot_identity_mismatch",
+            "retried": False,
+        }
