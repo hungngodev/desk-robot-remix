@@ -1927,7 +1927,9 @@ class MultimodalOrchestrator:
         future.add_done_callback(finished)
         return await asyncio.wrap_future(future)
 
-    async def _head_snapshot(self, robot_id: str, *, source: str) -> bytes:
+    async def _head_snapshot(
+        self, robot_id: str, *, source: str,
+    ) -> tuple[bytes, float, tuple[int, int, int] | None]:
         """One real device read until its task exits, even after a timeout."""
         previous = self._head_snapshot_tasks.get(robot_id)
         if previous is not None:
@@ -1943,7 +1945,16 @@ class MultimodalOrchestrator:
             if not previous.done():
                 raise RuntimeError("Previous XIAO camera snapshot still in flight")
             self._head_snapshot_tasks.pop(robot_id, None)
-        task = asyncio.create_task(self.heads[robot_id].snapshot())
+        async def read_snapshot():
+            head = self.heads[robot_id]
+            receipt = getattr(head, "snapshot_receipt", None)
+            if callable(receipt):
+                return await receipt()
+            # Legacy adapters have no authenticated device clock.
+            jpeg = await head.snapshot()
+            return jpeg, time.monotonic(), None
+
+        task = asyncio.create_task(read_snapshot())
         self._head_snapshot_tasks[robot_id] = task
         # Observe late adapter failures; obsolete frames are never published.
         task.add_done_callback(
@@ -2026,10 +2037,11 @@ class MultimodalOrchestrator:
             try:
                 if source == "proactive" and self._any_human_active(time.monotonic()):
                     raise RuntimeError("Human speech preempts autonomous camera")
-                jpeg = await self._head_snapshot(robot_id, source=source)
+                jpeg, received, source_identity = await self._head_snapshot(
+                    robot_id, source=source
+                )
                 if self._closed:
                     raise RuntimeError("Multimodal orchestrator closed")
-                received = time.monotonic()
                 prepared = await self._prepare_bounded(
                     jpeg, priority=source in ("speech", "voice_question")
                 )
@@ -2064,10 +2076,28 @@ class MultimodalOrchestrator:
                 if not _frame_is_fresh(received, time.monotonic(), 1.0):
                     raise RuntimeError("Camera snapshot expired during preprocessing")
                 self._sync_camera_boot(robot_id)
-                evidence = self.hub.offer_prepared(
-                    robot_id, prepared, received, source=source,
-                    generation=generation, trigger_kind=trigger_kind,
-                )
+                current_identity = getattr(self.heads[robot_id], "_last_camera", None)
+                if (source_identity is not None and current_identity is not None
+                        and source_identity[0] != current_identity[0]):
+                    raise RuntimeError("Camera snapshot belongs to a retired boot")
+                if generation != self.hub._generation[robot_id]:
+                    raise RuntimeError("Old camera generation discarded")
+                if (source in ("speech", "voice_question")
+                        and received < self._voice_turn_at[robot_id]):
+                    raise RuntimeError("Camera snapshot predates current human turn")
+                # The continuous reader may have admitted this exact frame
+                # during preprocessing. Reuse it without relabeling its source.
+                recent = self.hub.frames[robot_id]
+                if (source_identity is not None and recent
+                        and recent[-1].received_at == received
+                        and recent[-1].source_identity == source_identity):
+                    evidence = recent[-1]
+                else:
+                    evidence = self.hub.offer_prepared(
+                        robot_id, prepared, received, source=source,
+                        generation=generation, trigger_kind=trigger_kind,
+                        source_identity=source_identity,
+                    )
                 metrics["camera_successes"] += 1
                 metrics["camera_latency_last_ms"] = round(
                     (time.monotonic() - started) * 1000

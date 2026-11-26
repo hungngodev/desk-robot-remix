@@ -684,17 +684,24 @@ class HttpHead:
             include_stream_receipt=True, include_stream_identity=True,
         )
 
+    async def snapshot_receipt(self) -> tuple[bytes, float, tuple[int, int, int] | None]:
+        """Return JPEG, original Mac receipt, and unaligned Sense completion identity."""
+        return await self.snapshot(include_camera_receipt=True)
+
     async def snapshot(
         self, *, max_stream_age_seconds: float = 1.0,
         require_live_stream: bool = False,
         include_stream_receipt: bool = False,
         include_stream_identity: bool = False,
+        include_camera_receipt: bool = False,
     ) -> bytes | tuple:
         if (type(max_stream_age_seconds) not in (int, float)
                 or not 0 < max_stream_age_seconds <= 1.0
                 or type(require_live_stream) is not bool
                 or type(include_stream_receipt) is not bool
                 or type(include_stream_identity) is not bool
+                or type(include_camera_receipt) is not bool
+                or (include_camera_receipt and include_stream_receipt)
                 or (include_stream_identity and not include_stream_receipt)
                 or (include_stream_receipt and not require_live_stream)):
             raise ValueError("Invalid camera stream receipt age limit")
@@ -718,6 +725,11 @@ class HttpHead:
                             if not self._stream_connected:
                                 raise HeadError("Camera stream lost during snapshot")
                             self._snapshot_version = self._stream_version
+                            if include_camera_receipt:
+                                return (
+                                    self._stream_latest, self._stream_received_at,
+                                    self._last_camera,
+                                )
                             if include_stream_receipt:
                                 # The selected JPEG, boot, sequence, and
                                 # stream generation are one immutable receipt.
@@ -736,6 +748,8 @@ class HttpHead:
                 raise HeadError("Continuous XIAO camera stream is not connected")
             generation = self._stream_generation
             response = await self._request("GET", "/api/camera.jpg")
+            received = time.monotonic()
+            identity = None
             # The still request may have started before streaming was
             # enabled. Never relabel a new stream's cached JPEG with its
             # standalone completion metadata, even after a failed reconnect.
@@ -774,5 +788,8 @@ class HttpHead:
                         or not 1 <= sequence <= 0xffffffff
                         or not 1 <= completed <= _MAX_CAMERA_COMPLETE_US):
                     raise HeadError("Camera completion metadata out of bounds")
-                self._accept_camera_identity((boot, sequence, completed))
+                identity = (boot, sequence, completed)
+                self._accept_camera_identity(identity)
+            if include_camera_receipt:
+                return response.content, received, identity
             return response.content

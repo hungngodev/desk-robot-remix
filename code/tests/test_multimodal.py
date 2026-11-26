@@ -17,6 +17,7 @@ from desk_robot.multimodal import (
     _validate_prepared_raster,
     change_fraction,
 )
+from desk_robot.transport import HttpHead
 from desk_robot.vision import OllamaScene, VisualChangeGate
 from PIL import Image, ImageDraw
 
@@ -171,6 +172,38 @@ async def test_synthetic_camera_observer_keeps_simulation_without_weakening_hard
         assert not hw.hub.frames["robot-01"]
     finally:
         await hw.close()
+
+
+@pytest.mark.parametrize("already_selected", [False, True])
+async def test_snapshot_keeps_original_stream_receipt_and_device_clock(already_selected):
+    async with httpx.AsyncClient() as client:
+        head = HttpHead(SimpleNamespace(id="robot-01"), client)
+        received = time.monotonic() - 0.4
+        identity = (71, 4, 1234567)
+        head._stream_connected = True
+        head._stream_latest = image(square=True)
+        head._stream_received_at = received
+        head._stream_version = 1
+        head._last_camera = identity
+        service = MultimodalOrchestrator(
+            config(), {"robot-01": head, "robot-02": Head()},
+            Vision(), asyncio.Lock(),
+        )
+        try:
+            if already_selected:
+                service._sync_camera_boot("robot-01")
+                service.hub.offer_prepared(
+                    "robot-01", _prepare(head._stream_latest), received,
+                    source="proactive", source_identity=identity,
+                )
+            frame = await service.capture("robot-01", source="voice_question")
+            assert frame.received_at == received
+            assert frame.source_identity == identity
+            assert len(service.hub.frames["robot-01"]) == 1
+            assert frame.source == ("proactive" if already_selected else "voice_question")
+            assert time.monotonic() - frame.received_at >= 0.4
+        finally:
+            await service.close()
 
 
 async def test_authenticated_stream_propagates_device_clock_without_snapshot():
