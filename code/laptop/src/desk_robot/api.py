@@ -322,18 +322,19 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         if receipt_id in consumed_tool_receipts:
             return None
         consumed_tool_receipts[receipt_id] = now + _TOOL_RECEIPT_REPLAY_TTL_S
-        return visual, epochs[robot_id], generation, listener, listener_epoch
+        return visual, epochs[robot_id], generation, listener, listener_epoch, robot_id
 
     def current_tool_context(owner, robot_id: str, message: str) -> None:
         """Reject a completed tool result if EITHER independent turn moved."""
         runtime_owner = app.state.runtime
-        if not isinstance(owner, tuple) or len(owner) != 5:
+        if not isinstance(owner, tuple) or len(owner) != 6:
             raise HTTPException(409, message)
-        visual, mac_epoch, source_generation, listener, listener_epoch = owner
+        visual, mac_epoch, source_generation, listener, listener_epoch, owner_robot_id = owner
         epochs = getattr(visual, "_turn_epoch", None)
         source_generations = getattr(runtime_owner, "_voice_turn_generations", None)
         if (
-            getattr(runtime_owner, "multimodal", None) is not visual
+            owner_robot_id != robot_id
+            or getattr(runtime_owner, "multimodal", None) is not visual
             or not isinstance(epochs, dict)
             or type(mac_epoch) is not int
             or epochs.get(robot_id) != mac_epoch

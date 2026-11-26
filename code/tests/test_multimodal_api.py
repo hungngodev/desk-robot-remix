@@ -3421,3 +3421,58 @@ def test_signed_status_result_drops_when_source_changes_during_head_await(
             assert result.status_code == 409
             assert "superseded" in result.json()["detail"]
     assert not hub.tool_history[robot]
+
+
+def test_signed_tool_receipt_owner_cannot_be_reused_for_peer(settings, tokens, monkeypatch):
+    """Equal Mac and Xiaozhi epochs do not make two robots interchangeable."""
+    from types import SimpleNamespace
+
+    from desk_robot import api
+    from desk_robot.multimodal import CameraFrameHub
+    from fastapi import HTTPException
+
+    settings.mode = "hardware"
+    robot, peer = (entry.id for entry in settings.robots[:2])
+    hub = CameraFrameHub([robot, peer])
+    visual = SimpleNamespace(hub=hub, _turn_epoch={robot: 7, peer: 7})
+    captured = {}
+    register = api.register_robot_status_routes
+
+    def capture_routes(*args, **kwargs):
+        captured.update(kwargs)
+        return register(*args, **kwargs)
+
+    async def noop():
+        pass
+
+    monkeypatch.setattr(api, "register_robot_status_routes", capture_routes)
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(robot=settings.robot, heads={}),
+        multimodal=visual, _voice_turn_generations={robot: 41, peer: 41},
+        voice_events=SimpleNamespace(monitor_ready=True, _event_generation=2),
+        pet=SimpleNamespace(voice_monitor_ready=True),
+        start=noop, close=noop,
+    )
+    with TestClient(create_app(settings, runtime=runtime)):
+        path = f"/v1/robots/{robot}/status"
+        headers = _signed_tool_headers(settings, tokens, robot, path, 41, monkeypatch)
+        request = SimpleNamespace(
+            headers={key.lower(): value for key, value in headers.items()},
+            method="GET", url=SimpleNamespace(path=path),
+        )
+        owner = captured["requested_tool_context"](request, robot)
+        assert owner is not None
+        current = captured["current_tool_context"]
+        remember = captured["remember_tool_context"]
+        current(owner, robot, "superseded")
+        with pytest.raises(HTTPException) as foreign:
+            current(owner, peer, "superseded")
+        assert foreign.value.status_code == 409
+        with pytest.raises(HTTPException) as foreign:
+            remember(owner, peer, "robot_status", "private robot status")
+        assert foreign.value.status_code == 409
+        assert not hub.tool_history[peer]
+        assert not hub.tool_history[robot]
+        assert remember(owner, robot, "robot_status", "private robot status")
+        assert len(hub.tool_history[robot]) == 1
+        assert not hub.tool_history[peer]
