@@ -4419,6 +4419,7 @@ async def test_unverified_voice_monitor_cannot_launch_spontaneous_speech(
             "robot-01", SceneChange("key", "A real key appeared", 0.98), 9
         )
         assert state.last_initiative_suppression == "voice_monitor_unavailable"
+        assert state.last_initiative_gate_reason == "voice_monitor_unavailable"
         assert speaker.spoken == []
         assert chat.prompts == []
         assert pet._speech_task is None
@@ -9829,6 +9830,7 @@ async def test_deferred_touch_coalesces_busy_floor_and_enforces_expiry_vetoes(
             "robot-01", 1, "touch_tap", "First gentle tap", received_at=time.monotonic(),
         )
         assert state.last_initiative_suppression == "deferred_floor_busy"
+        assert state.last_initiative_gate_reason == "deferred_floor_busy"
         assert state.deferred_speech_candidate is not None
         assert speaker.spoken == []
         # Repeated taps coalesce to a single candidate without replay.
@@ -10291,6 +10293,7 @@ async def test_pet_initiative_windows_stay_bounded_during_one_thousand_candidate
         )
         assert pet._admitted_event_kinds == before
         assert state.last_initiative_suppression == "initiative_window_capacity"
+        assert state.last_initiative_gate_reason == "initiative_window_capacity"
         assert pet._speech_task is None
     finally:
         state.enabled = False

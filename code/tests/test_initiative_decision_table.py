@@ -1,7 +1,11 @@
 import itertools
 
 import pytest
-from desk_robot.initiative_policy import first_initiative_veto, quiet_voice_reason
+from desk_robot.initiative_policy import (
+    event_budget_reason,
+    first_initiative_veto,
+    quiet_voice_reason,
+)
 
 
 @pytest.mark.parametrize("local,scheduled,human", itertools.product((False, True), repeat=3))
@@ -40,3 +44,21 @@ def test_first_initiative_veto_evaluates_only_until_first_blocker(first, second,
     assert calls == [name for name, _ in rules][:
         3 if expected is None else [name for name, _ in rules].index(expected) + 1
     ]
+
+
+@pytest.mark.parametrize(
+    ("event_age", "fleet_age", "expected"),
+    [
+        (2.99, 11.99, "duplicate_event_cooldown"),
+        (2.99, 12.0, "duplicate_event_cooldown"),
+        (3.0, 11.99, "fleet_speech_cooldown"),
+        (3.0, 12.0, None),
+        (-1.0, 11.99, "fleet_speech_cooldown"),
+        (3.0, -1.0, None),
+    ],
+)
+def test_event_budget_reason_precedence_and_boundaries(event_age, fleet_age, expected):
+    assert event_budget_reason(
+        now=100.0, previous_event_at=100.0 - event_age,
+        fleet_spoken_at=100.0 - fleet_age, event_window=3.0, speech_interval=12.0,
+    ) == expected

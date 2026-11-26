@@ -37,6 +37,7 @@ from .habituation import HabituationWindow
 from .handling import HandlingGate
 from .initiative_policy import (
     cooldown_pending,
+    event_budget_reason,
     event_cooldown,
     event_identity,
     event_window_has_capacity,
@@ -277,6 +278,13 @@ class PetState:
     task: asyncio.Task[None] | None = field(default=None, repr=False)
     touch_task: asyncio.Task[None] | None = field(default=None, repr=False)
     gate: VisualChangeGate = field(default_factory=VisualChangeGate, repr=False)
+
+
+    def suppress_initiative(self, reason: str, *, legacy_reason: str | None = None) -> None:
+        """Record one rejected candidate; preserve the established status contract."""
+        self.suppressed += 1
+        self.last_initiative_gate_reason = reason
+        self.last_initiative_suppression = legacy_reason or reason
 
 
 class PetController:
@@ -2951,14 +2959,12 @@ class PetController:
                     and (not self.settings.voice_vision_tools_enabled
                          or self.settings.camera_consent_generation
                              != admitted_camera_grant))):
-            state.suppressed += 1
-            state.last_initiative_suppression = "pet_disabled_or_generation_changed"
+            state.suppress_initiative("pet_disabled_or_generation_changed")
             return
         if camera_derived and not self._camera_generation_current(
             robot_id, camera_generation,
         ):
-            state.suppressed += 1
-            state.last_initiative_suppression = "camera_source_replaced"
+            state.suppress_initiative("camera_source_replaced")
             return
         # Physical events, like camera receipts, may wait for SQLite or
         # peer fanout. Never let persistence renew the initiative lifetime.
@@ -2969,17 +2975,14 @@ class PetController:
             latest_human_turn=getattr(self.multimodal, "latest_fleet_human_turn_at", None),
         )
         if veto is not None:
-            state.suppressed += 1
-            state.last_initiative_suppression = veto
+            state.suppress_initiative(veto)
             return
         if not _initiative_evidence(change):
-            state.suppressed += 1
             state.low_value_speech_candidates += 1
-            state.last_initiative_suppression = "insufficient_grounded_context"
+            state.suppress_initiative("insufficient_grounded_context")
             return
         if not self.voice_monitor_ready:
-            state.suppressed += 1
-            state.last_initiative_suppression = "voice_monitor_unavailable"
+            state.suppress_initiative("voice_monitor_unavailable")
             return
         event_key, description_key = event_identity(
             robot_id=robot_id, kind=change.kind, description=change.description,
@@ -3004,8 +3007,7 @@ class PetController:
             state.camera_habituation.begin_epoch(epoch)
             habituation_key = (change.kind, description_key)
             if state.camera_habituation.refresh_if_repeated(habituation_key, now):
-                state.suppressed += 1
-                state.last_initiative_suppression = "repeated_camera_scene"
+                state.suppress_initiative("repeated_camera_scene")
                 return
         direct_interaction = change.kind in _DIRECT_INTERACTION_KINDS
         passive_floor = (
@@ -3024,31 +3026,24 @@ class PetController:
             local_quiet=state.quiet, scheduled_quiet=scheduled_quiet,
             human_active=lambda: self._human_active_in_fleet(now),
         )
-        state.last_initiative_gate_reason = quiet_reason or first_initiative_veto(
-            ("duplicate_event_cooldown", lambda: cooldown_pending(
-                now=now, last=previous, interval=self.group_window,
-            )),
-            ("fleet_speech_cooldown", lambda: cooldown_pending(
-                now=now, last=self._group_last_spoken, interval=relevant_cooldown,
-            )),
+        budget_reason = quiet_reason or event_budget_reason(
+            now=now, previous_event_at=previous, fleet_spoken_at=self._group_last_spoken,
+            event_window=self.group_window, speech_interval=relevant_cooldown,
         )
-        if state.last_initiative_gate_reason is not None:
+        if budget_reason is not None:
             if quiet_reason is not None:
                 self._clear_deferred_speech(state)
-            state.suppressed += 1
-            state.last_initiative_suppression = "quiet_voice_or_group_budget"
+            state.suppress_initiative(budget_reason, legacy_reason="quiet_voice_or_group_budget")
             return
         if not admission_capacity:
-            state.suppressed += 1
-            state.last_initiative_suppression = "initiative_window_capacity"
+            state.suppress_initiative("initiative_window_capacity")
             return
         active = self.conversation.active
         if (
             (active is not None and not active.done())
             or (self._speech_task is not None and not self._speech_task.done())
         ):
-            state.suppressed += 1
-            state.last_initiative_suppression = "deferred_floor_busy"
+            state.suppress_initiative("deferred_floor_busy")
             # Independent observation producers can finish persistence out
             # of order. Coalesce by receipt time, not coroutine completion.
             pending = state.deferred_speech_candidate

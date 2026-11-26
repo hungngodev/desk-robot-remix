@@ -52,6 +52,21 @@ def cooldown_pending(*, now: float, last: float, interval: float) -> bool:
     return 0 <= now - last < interval
 
 
+def event_budget_reason(
+    *, now: float, previous_event_at: float, fleet_spoken_at: float,
+    event_window: float, speech_interval: float,
+) -> str | None:
+    """Distinguish same-event deduplication from the shared speech floor."""
+    return first_initiative_veto(
+        ("duplicate_event_cooldown", lambda: cooldown_pending(
+            now=now, last=previous_event_at, interval=event_window,
+        )),
+        ("fleet_speech_cooldown", lambda: cooldown_pending(
+            now=now, last=fleet_spoken_at, interval=speech_interval,
+        )),
+    )
+
+
 def event_cooldown(
     *, camera_derived: bool, direct_interaction: bool,
     speech_interval: float, interaction_interval: float,
