@@ -136,8 +136,8 @@ def test_late_optional_mux_detection_reaches_active_tof_safety_owner():
     assert required in setup
     assert setup.index(required) < setup.index("tof.begin(")
     discovery = (
-        "if(cap1188.present()||paw_pulse.mux_present()||accessories.mux_present())"
-        "tof.note_optional_mux_present();"
+        "if(cap1188.present()||#ifDESK_ROBOT_ENABLE_PAW_RAWpaw_pulse.mux_present()||"
+        "#endifaccessories.mux_present())tof.note_optional_mux_present();"
     )
     assert discovery in setup
     assert setup.index("accessories.begin(Wire,") < setup.index(discovery)
