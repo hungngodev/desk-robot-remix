@@ -177,9 +177,9 @@ def image_size(jpeg: bytes) -> tuple[int, int]:
 class VisualChangeGate:
     """Cheap bounded camera change filter before a local VLM, not object recognition.
 
-    Uses the two most recent sufficiently different frames for a one-time
-    visual-semantic comparison. Thresholds are candidates; camera movement,
-    lighting and subtle small-object change require measured calibration.
+    Uses persistent localized changes for a one-time visual-semantic comparison.
+    Thresholds are candidates; camera movement, lighting and subtle small-object
+    change require measured calibration.
     """
 
     def __init__(self, *, min_changed_fraction: float = 0.008, confirmations: int = 2):
@@ -194,6 +194,7 @@ class VisualChangeGate:
         self.confirmations = confirmations
         self._baseline: bytes | None = None
         self._pixel_baseline: bytes | None = None
+        self._candidate_mask: bytes | None = None
         self._hits = 0
 
     def reset(self) -> None:
@@ -204,6 +205,7 @@ class VisualChangeGate:
         """
         self._baseline = None
         self._pixel_baseline = None
+        self._candidate_mask = None
         self._hits = 0
 
     @staticmethod
@@ -240,10 +242,12 @@ class VisualChangeGate:
         # Reuse the existing low-cost Frigate-style motion score. Global
         # exposure/lighting drift does not justify another expensive VLM
         # comparison for every camera in a five-pet fleet.
-        from .multimodal import change_fraction
-        changed = change_fraction(self._pixel_baseline, current, threshold=18)
-        if changed < self.min_changed_fraction:
+        from .multimodal import scene_change_mask
+        mask = scene_change_mask(self._pixel_baseline, current, threshold=18)
+        changed = len(mask) - mask.count(0)
+        if changed / len(mask) < self.min_changed_fraction:
             self._hits = 0
+            self._candidate_mask = None
             # Uniform luminance ramps contain no spatial detail to preserve.
             # Refresh that baseline so the next real change is not compared
             # against the original dark exposure. Keep textured baselines
@@ -253,12 +257,25 @@ class VisualChangeGate:
                     and current.count(current[0]) == len(current)):
                 self._pixel_baseline, self._baseline = current, jpeg
             return None
+        if not self._consistent_candidate(mask, changed):
+            self._hits = 0
+        self._candidate_mask = mask
         self._hits += 1
         if self._hits < self.confirmations:
             return None
         baseline = self._baseline
         self._pixel_baseline, self._baseline, self._hits = current, jpeg, 0
+        self._candidate_mask = None
         return baseline
+
+    def _consistent_candidate(self, mask: bytes, changed: int) -> bool:
+        """Require half the smaller changed region to persist with the same sign."""
+        previous = self._candidate_mask
+        if previous is None:
+            return False
+        overlap = sum(old != 0 and old == new for old, new in zip(previous, mask, strict=True))
+        previous_changed = len(previous) - previous.count(0)
+        return 2 * overlap >= min(previous_changed, changed)
 
 
 class _InsufficientSceneDetail(ValueError):

@@ -149,33 +149,28 @@ def _lighting_transform(a: bytes, b: bytes) -> tuple[float, float, bool]:
     return gain, (sum_b - gain * sum_a) / count, fitted
 
 
-def _score_scene_change(a: bytes, b: bytes, gain: float, offset: float,
-                        threshold: int, *, clamp: bool = False) -> int:
-    if clamp:
-        return sum(
-            1 for x, y in zip(a, b, strict=True)
-            if abs(y - min(255, max(0, gain * x + offset))) >= threshold
-        )
-    return sum(
-        1 for x, y in zip(a, b, strict=True)
-        if abs(y - (gain * x + offset)) >= threshold
+def _scene_change_mask(a: bytes, b: bytes, gain: float, offset: float,
+                       threshold: int, *, clamp: bool = False) -> bytes:
+    """Encode significant residual direction: 0 unchanged, 1 brighter, 2 darker."""
+    residuals = (
+        y - (min(255, max(0, gain * x + offset)) if clamp else gain * x + offset)
+        for x, y in zip(a, b, strict=True)
     )
+    return bytes(1 if delta >= threshold else 2 if delta <= -threshold else 0
+                 for delta in residuals)
 
 
-def change_fraction(a: bytes, b: bytes, *, threshold: int = 16) -> float:
-    """Ignore broad lighting shifts before detecting localized motion.
-
-    This cheap gate is not calibrated optical flow or object tracking.
-    """
+def scene_change_mask(a: bytes, b: bytes, *, threshold: int = 16) -> bytes:
+    """Ignore broad lighting shifts while retaining signed localized changes."""
     if len(a) != len(b) or len(a) != 64 * 48:
         raise ValueError("Frame fingerprints have incompatible dimensions")
     count = len(a)
     gain, offset, _ = _lighting_transform(a, b)
-    changed = _score_scene_change(a, b, gain, offset, threshold)
-    if not changed or not any(
+    changed = _scene_change_mask(a, b, gain, offset, threshold)
+    if changed.count(0) == count or not any(
         (y <= 8 or y >= 247) and x != y for x, y in zip(a, b, strict=True)
     ):
-        return changed / count
+        return changed
     # Newly clipped highlights/shadows bias an ordinary affine fit. Refit
     # only when at least half the corresponding samples remain measurable.
     # Score ALL pixels, including saturated ones, against the clamped model;
@@ -185,13 +180,19 @@ def change_fraction(a: bytes, b: bytes, *, threshold: int = 16) -> float:
         if 8 < x < 247 and 8 < y < 247
     ]
     if len(pairs) < count // 2:
-        return changed / count
+        return changed
     valid_a, valid_b = map(bytes, zip(*pairs, strict=True))
     gain, offset, fitted = _lighting_transform(valid_a, valid_b)
     if not fitted:
-        return changed / count
-    clipped_changed = _score_scene_change(a, b, gain, offset, threshold, clamp=True)
-    return min(changed, clipped_changed) / count
+        return changed
+    clipped = _scene_change_mask(a, b, gain, offset, threshold, clamp=True)
+    return clipped if clipped.count(0) > changed.count(0) else changed
+
+
+def change_fraction(a: bytes, b: bytes, *, threshold: int = 16) -> float:
+    """Cheap exposure-compensated motion score, not calibrated optical flow."""
+    mask = scene_change_mask(a, b, threshold=threshold)
+    return (len(mask) - mask.count(0)) / len(mask)
 
 
 @dataclass(frozen=True)
