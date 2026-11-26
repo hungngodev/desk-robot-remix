@@ -986,7 +986,7 @@ def first_robot_projection(report: dict) -> dict:
                 "verified_power_component_order_units": copy.deepcopy(
                     part.get("verified_power_component_order_units")
                 ),
-                "reference_only": part.get("reference_only"),
+                "reference_only": copy.deepcopy(part.get("reference_only")),
                 "selected_carrier": part.get("selected_carrier"),
                 "power_reference": copy.deepcopy(part.get("power_reference")),
                 "verified_checkout_quotes": copy.deepcopy(

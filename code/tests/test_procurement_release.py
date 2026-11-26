@@ -1771,6 +1771,64 @@ def test_pilot_supplier_rows_never_mutate_canonical_fleet_source_references():
     assert mod.PILOT_SAMPLE_PRODUCTS["i2c_mux"][2] == "COM-05-067"
 
 
+def test_first_robot_reference_is_detached_from_fleet_report():
+    """A first-unit consumer cannot rewrite the canonical fleet source."""
+    import copy
+    import json
+
+    report = mod.generate(json.loads(mod.PLAN.read_text(encoding="utf-8")))
+    baseline = copy.deepcopy(report)
+    fleet_csv = mod.render_csv(report)
+    first = mod.first_robot_projection(report)
+    row = next(item for item in first["roles"] if item["id"] == "i2c_mux")
+    row["reference_only"].update(
+        sku="COM-05-067", url="https://electropeak.com/pilot-only"
+    )
+    assert report == baseline
+    assert mod.render_csv(report) == fleet_csv
+
+
+def test_pilot_catalog_changes_leave_canonical_release_views_unchanged(monkeypatch):
+    """Exercise actual release rendering rather than only dictionary shapes."""
+    import copy
+    import json
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    report = mod.generate(plan)
+    baseline = copy.deepcopy(report)
+    canonical_sources = dict(mod.SOURCE_REFERENCES)
+    pilot_before = mod.first_robot_pilot_samples(report)
+    expected_views = (
+        mod.render_csv(report),
+        mod.render_markdown(report),
+        mod.render_first_robot_markdown(report),
+        mod.first_robot_projection(report),
+    )
+    for ident, source in mod.PILOT_SAMPLE_PRODUCTS.items():
+        monkeypatch.setitem(
+            mod.PILOT_SAMPLE_PRODUCTS, ident,
+            (source[0], source[1], f"DRX693-{ident}",
+             f"{source[3]}/drx693-probe", source[4], source[5]),
+        )
+    pilot_after = mod.first_robot_pilot_samples(report)
+    active = {row["id"] for row in pilot_before["roles"] if row["pilot_sample_quantity"]}
+    assert active
+    for row in pilot_after["roles"]:
+        if row["id"] in active:
+            assert row["source_sku"] == f"DRX693-{row['id']}"
+            assert row["source_url"].endswith("/drx693-probe")
+    assert report == baseline
+    assert mod.SOURCE_REFERENCES == canonical_sources
+    regenerated = mod.generate(plan)
+    assert regenerated == baseline
+    assert (
+        mod.render_csv(regenerated),
+        mod.render_markdown(regenerated),
+        mod.render_first_robot_markdown(regenerated),
+        mod.first_robot_projection(regenerated),
+    ) == expected_views
+
+
 def test_known_supplier_conflicts_are_quote_only_in_both_pilot_views():
     import json
 
