@@ -252,6 +252,7 @@ body_add_test(guarded_body_integration guarded_body_tests)
 foreach(scenario
     attitude_norm_root_boundaries
     disarmed_boot arm_clears_old_motion drive_limits drive_duration
+    overlapping_drive_replaces_pending_pulse
     keepalive_does_not_extend_drive invalid_does_not_renew
     queries_do_not_renew smooth_servos keepalive_extends_servo_lease
     stop_freezes_servos explicit_disarm_detaches watchdog_holds_servos
