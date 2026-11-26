@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from .initiative_policy import cooldown_pending
+
 _MODEL_MOODS = frozenset({"neutral", "happy", "thinking", "surprised"})
 
 
@@ -30,6 +32,7 @@ def reserve_face_cue(
     cooldown_s: float, retry_s: float,
 ) -> FaceCueReservation | None:
     """Reserve both budgets; failed sends still consume the attempt budget."""
-    if now - last_cue_at < cooldown_s or now - last_attempt_at < retry_s:
+    if (cooldown_pending(now=now, last=last_cue_at, interval=cooldown_s)
+            or cooldown_pending(now=now, last=last_attempt_at, interval=retry_s)):
         return None
     return FaceCueReservation(at=now, previous_cue_at=last_cue_at)

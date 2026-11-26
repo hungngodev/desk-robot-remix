@@ -50,3 +50,18 @@ def test_settlement_preserves_ack_and_newer_reservation() -> None:
         100.5, last_cue_at=reservation.previous_cue_at, last_attempt_at=reservation.at,
         cooldown_s=4.0, retry_s=1.0,
     ) is None
+
+
+@pytest.mark.parametrize(("last_cue", "last_attempt"), [
+    (1000.0, float("-inf")), (float("-inf"), 1000.0), (1000.0, 1000.0),
+])
+def test_obsolete_epoch_does_not_freeze_cosmetic_cues(last_cue, last_attempt):
+    reservation = reserve_face_cue(
+        10.0, last_cue_at=last_cue, last_attempt_at=last_attempt,
+        cooldown_s=4.0, retry_s=1.0,
+    )
+    assert reservation is not None
+    assert reserve_face_cue(
+        10.5, last_cue_at=reservation.at, last_attempt_at=reservation.at,
+        cooldown_s=4.0, retry_s=1.0,
+    ) is None
