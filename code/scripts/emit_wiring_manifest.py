@@ -290,6 +290,10 @@ def _verify_sense_gpio(sense_pins: dict, head: str) -> None:
     for symbol, expected in fixed.items():
         if _head_pin(head, symbol) != expected:
             raise ValueError(f"Stock Sense pin changed: {symbol}")
+    for symbol in ("AUDIO_AMP_SD_MODE_GPIO", "CAMERA_PIN_PWDN", "CAMERA_PIN_RESET"):
+        definitions = re.findall(rf"(?m)^[ \t]*#[ \t]*define[ \t]+{symbol}\b([^\n]*)", head)
+        if [definition.strip() for definition in definitions] != ["GPIO_NUM_NC"]:
+            raise ValueError(f"Sense control pin must remain disconnected: {symbol}")
     camera_symbols = (
         *(f"CAMERA_PIN_D{i}" for i in range(8)),
         "CAMERA_PIN_XCLK", "CAMERA_PIN_PCLK", "CAMERA_PIN_VSYNC",

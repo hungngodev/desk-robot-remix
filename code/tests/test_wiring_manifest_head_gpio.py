@@ -59,3 +59,20 @@ def test_head_commented_pin_cannot_prove_firmware_agreement(pins_and_source):
     head = head.replace("#define RGB_HEART_GPIO GPIO_NUM_9", "// #define RGB_HEART_GPIO GPIO_NUM_9")
     with pytest.raises(ValueError, match="Missing or duplicate firmware pin: RGB_HEART_GPIO"):
         manifest._verify_sense_gpio(pins, head)
+
+
+@pytest.mark.parametrize("symbol", [
+    "AUDIO_AMP_SD_MODE_GPIO", "CAMERA_PIN_PWDN", "CAMERA_PIN_RESET",
+])
+@pytest.mark.parametrize("replacement", ["allocated", "missing", "duplicate"])
+def test_disconnected_head_control_pins(pins_and_source, symbol, replacement):
+    pins, head = pins_and_source
+    original = f"#define {symbol} GPIO_NUM_NC"
+    changed = {
+        "allocated": f"#define {symbol} GPIO_NUM_4",
+        "missing": f"// {original}",
+        "duplicate": f"{original}\n#define {symbol} GPIO_NUM_4",
+    }[replacement]
+    assert original in head
+    with pytest.raises(ValueError, match=f"Sense control pin must remain disconnected: {symbol}"):
+        manifest._verify_sense_gpio(pins, head.replace(original, changed))
