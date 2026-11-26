@@ -11,12 +11,12 @@ The existing measured camera calibration JSON supports these additional fields, 
     "grip_force_sign": 1,
     "grip_step_deg": 4
 
-With no measured thresholds, real hardware pickup is intentionally blocked. The user only needs to read the raw ADS1115 channel 1 values at open jaw and with a representative object, then record first contact threshold, ceiling and polarity. These are relative ADC values, not calibrated Newtons. No premature physical grasp success is claimed.
+With no measured thresholds, real hardware pickup is intentionally blocked. Use the [jaw calibration helper](jaw-calibration-helper.md) to collect unloaded, representative contact and operator-approved upper-pressure samples. The Mac schema accepts contact deltas of 50 to 20000, ceilings of 100 to 30000 strictly above contact, polarity of +1 or -1, and steps of 1 to 4 degrees. These are validation bounds, not recommended physical thresholds. Separately qualify the mounted WROOM baseline, polarity, endpoints and exclusive closing ceiling; a Mac JSON candidate does not configure firmware. These are relative ADC values, not calibrated Newtons. No premature physical grasp success is claimed.
 
 
 ## Distinct ADC sample protection
 
-Actual WROOM ADS1115 channel one conversions now carry a monotonic jaw_sample_seq counter into the read-only aux JSON field jaw_seq. Mac force guided grasp requires a new sequence number for the second unloaded baseline and for each post movement contact confirmation. Repeated HTTP polling of one sensor frame can no longer fabricate two physical contacts. Sensor driver and Mac validation reject stale, missing or malformed sequence numbers. The jaw closes more slowly at approximately 180ms between commands so the multiplexed ADS1115 has time to produce a new conversion. This is still not a measured grip strength in Newtons.
+Actual WROOM ADS1115 channel one conversions now carry a monotonic jaw_sample_seq counter into the read-only aux JSON field jaw_seq. Mac force guided grasp requires a new sequence number for the second unloaded baseline and for each post movement contact confirmation. Repeated HTTP polling of one sensor frame can no longer fabricate two physical contacts. Sensor driver and Mac validation reject stale, missing or malformed sequence numbers. The Mac waits 180 ms after a closing command, then polls for a distinct same-boot conversion within a 450 ms deadline (75 ms poll interval, at most six attempts). Nominal multiplexed acquisition can take about 336 ms; 180 ms alone does not authorize another pulse. Contact confirmation uses two distinct readings at the same commanded angle, with a 150 ms no-motion dwell and another health check. A sample aged 500 ms or more, including transport delay, is not fresh. At the calibrated ceiling or above, closure fails; contact is accepted only below that ceiling. This is still not a measured grip strength in Newtons.
 
 ## Hold evidence after contact
 
