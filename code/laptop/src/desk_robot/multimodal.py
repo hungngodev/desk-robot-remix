@@ -29,8 +29,8 @@ if TYPE_CHECKING:
 from .config import quiet_hours_active
 from .operations import _bounded_head_reply
 from .room_station import ROOM_OBSERVATION_SOURCE, STATION, RoomObservation, fresh_room_summary
-from .scene_motion import change_fraction
 from .scene_motion import _scene_change_mask as _scene_change_mask
+from .scene_motion import change_fraction
 from .scene_motion import scene_change_mask as scene_change_mask
 from .sensor_event_contract import DIRECT_INTERACTION_KINDS, TRIGGERS  # public names
 from .vision import OllamaScene
@@ -1495,7 +1495,7 @@ class MultimodalOrchestrator:
                             prepared = await self._prepare_bounded(
                                 jpeg, priority=source == "speech",
                                 robot_id=robot_id, received=received,
-                                admit=lambda: (
+                                admit=lambda generation=generation, turn=turn, received=received: (
                                     self._camera_grant_valid(robot_id, camera_grant)
                                     and generation == self.hub._generation[robot_id]
                                     and turn == self._turn_epoch[robot_id]

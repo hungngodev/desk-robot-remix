@@ -4,7 +4,6 @@ import ast
 from pathlib import Path
 
 import pytest
-
 from desk_robot.scene_motion import change_fraction, scene_change_mask
 
 

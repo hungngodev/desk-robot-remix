@@ -3,7 +3,6 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-
 from desk_robot.grasp_feedback import guarded_grasp, verify_grasp_hold
 from desk_robot.operations import OperationError
 

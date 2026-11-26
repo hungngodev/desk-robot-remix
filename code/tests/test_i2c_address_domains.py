@@ -61,7 +61,7 @@ def _address_rows():
 
 
 def _assert_unique(rows):
-    for bus, mux, lane, address in rows:
+    for _bus, mux, lane, address in rows:
         assert type(address) is int and 0x08 <= address <= 0x77
         assert (mux is None and lane is None) or (mux in (0x70, 0x71) and 0 <= lane < 8)
     duplicates = {row: count for row, count in Counter(rows).items() if count > 1}
