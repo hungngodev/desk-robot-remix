@@ -13,7 +13,17 @@ import wave
 from pathlib import Path
 
 
-def capture(bind, peer, port, samplerate, channels, duration, output, *, consent=False):
+def capture(
+    bind: str | ipaddress.IPv4Address,
+    peer: str | ipaddress.IPv4Address,
+    port: int,
+    samplerate: int,
+    channels: int,
+    duration: float,
+    output: str | Path,
+    *,
+    consent: bool = False,
+) -> int:
     if consent is not True:
         raise ValueError("explicit private raw audio consent required")
     bind = ipaddress.IPv4Address(bind)
@@ -21,8 +31,16 @@ def capture(bind, peer, port, samplerate, channels, duration, output, *, consent
     if not bind.is_loopback or not peer.is_loopback:
         raise ValueError("legacy UDP capture requires loopback bind and peer addresses")
     bind, peer = str(bind), str(peer)
-    if not (1 <= port <= 65535 and 8000 <= samplerate <= 48000
-            and channels in (1, 2) and 0 < duration <= 300):
+    if not (
+        type(port) is int
+        and type(samplerate) is int
+        and type(channels) is int
+        and type(duration) in (int, float)
+        and 1 <= port <= 65535
+        and 8000 <= samplerate <= 48000
+        and channels in (1, 2)
+        and 0 < duration <= 300
+    ):
         raise ValueError("invalid capture limits")
     frame_bytes = channels * 2
     remaining = int(samplerate * duration) * frame_bytes

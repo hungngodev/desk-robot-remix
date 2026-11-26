@@ -48,7 +48,9 @@ def test_alignment_and_bounds_real_udp(tmp_path):
     sender = threading.Thread(target=send)
     sender.start()
     try:
-        assert server.capture("127.0.0.1", "127.0.0.1", target, 8000, 1, .1, output, consent=True) == 800
+        assert server.capture(
+            "127.0.0.1", "127.0.0.1", target, 8000, 1, .1, output, consent=True
+        ) == 800
     finally:
         sender.join()
     with wave.open(str(output)) as wav:
@@ -59,7 +61,9 @@ def test_alignment_and_bounds_real_udp(tmp_path):
 @pytest.mark.parametrize("duration", [0, -1, float("nan"), float("inf"), 301])
 def test_invalid_duration(tmp_path, duration):
     with pytest.raises(ValueError):
-        server.capture("127.0.0.1", "127.0.0.1", port(), 8000, 1, duration, tmp_path / "x", consent=True)
+        server.capture(
+            "127.0.0.1", "127.0.0.1", port(), 8000, 1, duration, tmp_path / "x", consent=True
+        )
 
 
 def test_wrong_peer_and_symlink(tmp_path):
@@ -77,7 +81,9 @@ def test_wrong_peer_and_symlink(tmp_path):
     sender.start()
     try:
         with pytest.raises(ValueError, match="no valid PCM"):
-            server.capture("127.0.0.1", "127.0.0.2", target, 8000, 1, .1, output, consent=True)
+            server.capture(
+                "127.0.0.1", "127.0.0.2", target, 8000, 1, .1, output, consent=True
+            )
     finally:
         sender.join()
     link = tmp_path / "link.wav"
@@ -113,3 +119,34 @@ def test_consent_required_before_socket(tmp_path, monkeypatch, kwargs):
     with pytest.raises(ValueError, match="consent"):
         server.capture("127.0.0.1", "127.0.0.1", 8000, 8000, 1, .1, output, **kwargs)
     assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    "field, value",
+    [("port", True), ("port", 8000.0), ("samplerate", 8000.0),
+     ("channels", True), ("channels", 1.0), ("duration", True),
+     ("duration", "0.1")],
+)
+def test_capture_rejects_invalid_numeric_types_before_io(tmp_path, monkeypatch, field, value):
+    def unexpected_socket(*args, **kwargs):
+        pytest.fail("socket opened before numeric validation")
+
+    monkeypatch.setattr(server.socket, "socket", unexpected_socket)
+    output = tmp_path / "record.wav"
+    args = dict(bind="127.0.0.1", peer="127.0.0.1", port=8000,
+                samplerate=8000, channels=1, duration=.1, output=output, consent=True)
+    args[field] = value
+    with pytest.raises(ValueError, match="invalid capture limits"):
+        server.capture(**args)
+    assert not output.exists()
+
+
+def test_socket_released_when_output_creation_fails(tmp_path):
+    output = tmp_path / "record.wav"
+    output.write_bytes(b"existing")
+    target = port()
+    with pytest.raises(FileExistsError):
+        server.capture("127.0.0.1", "127.0.0.1", target, 8000, 1, .1, output, consent=True)
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
+        receiver.bind(("127.0.0.1", target))
+    assert output.read_bytes() == b"existing"
