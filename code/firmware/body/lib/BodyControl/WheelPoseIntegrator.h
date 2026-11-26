@@ -159,15 +159,15 @@ class WheelPoseIntegrator {
       const std::uint32_t heading_error_urad =
           e.imu_error_urad + limits_.imu_alignment_error_urad;
       const std::int64_t traveled_nm = (left_nm + right_nm) / 2;
-      const std::int64_t midpoint_yaw =
-          normalize(heading_urad_ + gyro_delta / 2);
-      // Bounded one-pair midpoint integration, not motor open-loop steps.
-      // Max travel per pair and source skew are separately checked above.
-      const double mid_rad = static_cast<double>(midpoint_yaw) / 1000000.0;
-      const double dx_real = static_cast<double>(traveled_nm) *
-                             std::cos(mid_rad);
-      const double dy_real = static_cast<double>(traveled_nm) *
-                             std::sin(mid_rad);
+      // Exact constant-curvature arc using measured gyro heading. The sinc
+      // form avoids subtracting nearly equal trig values at tiny turns.
+      const double half_turn = static_cast<double>(gyro_delta) / 2000000.0;
+      const double mid_rad = static_cast<double>(heading_urad_) / 1000000.0 +
+                             half_turn;
+      const double sinc = half_turn == 0.0 ? 1.0 : std::sin(half_turn) / half_turn;
+      const double chord_nm = static_cast<double>(traveled_nm) * sinc;
+      const double dx_real = chord_nm * std::cos(mid_rad);
+      const double dy_real = chord_nm * std::sin(mid_rad);
       if (!std::isfinite(dx_real) || !std::isfinite(dy_real))
         return reject();
       const std::int64_t new_x = x_nm_ + std::llround(dx_real);
@@ -182,7 +182,7 @@ class WheelPoseIntegrator {
           (avg_abs_nm * limits_.wheel_error_ppm + 999999ULL) / 1000000ULL;
       const std::uint64_t heading_error_nm =
           (abs64(traveled_nm) * heading_error_urad + 999999ULL) / 1000000ULL;
-      // Zero translation has no midpoint rounding error. Keep measured
+      // Zero translation has no projection rounding error. Keep measured
       // wheel and heading uncertainty, including gyro drift, independent.
       const std::uint64_t error_increment_nm =
           wheel_error_nm + heading_error_nm +

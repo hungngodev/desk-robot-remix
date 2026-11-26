@@ -535,7 +535,112 @@ static void signed_residual_boundaries_retire_pose() {
   }
 }
 
+static void exact_arc_and_reverse() {
+  for (int turn : {-1, 1}) {
+    for (int travel : {-1, 1}) {
+      auto c = calibration();
+      c.left_nm_per_count = c.right_nm_per_count = 1000000;
+      c.track_width_mm = 20;
+      c.max_pair_step_mm = 100;
+      WheelPoseIntegrator pose;
+      check(pose.configure(c));
+      for (std::uint32_t i = 1; i <= 3; ++i)
+        check(pose.observe(observed(i, i * 100), i * 100 + 10));
+      check(pose.start_origin(310));
+      const int left = travel * 40 - turn * 20;
+      const int right = -(travel * 40 + turn * 20);
+      check(pose.observe(observed(4, 400, left, right, turn * 2000000LL), 410));
+      // Signed radius 20 mm, angle 2 rad: x=18.1859, y=28.3229 mm.
+      check(pose.state().x_mm == travel * 18);
+      check(pose.state().y_mm == travel * turn * 28);
+      check(pose.state().yaw_mrad == turn * 2000);
+      check(pose.state().origin == 1);
+      check(pose.observe(observed(5, 500, -left, -right, 0), 510));
+      check(pose.state().x_mm == 0 && pose.state().y_mm == 0);
+      check(pose.state().yaw_mrad == 0 && pose.state().origin == 1);
+    }
+  }
+}
+
+static void tiny_signed_turns_accumulate() {
+  for (int turn : {-1, 1}) {
+    auto c = calibration();
+    c.left_nm_per_count = turn > 0 ? 999999 : 1000000;
+    c.right_nm_per_count = turn > 0 ? 1000000 : 999999;
+    c.track_width_mm = 20;
+    c.wheel_error_ppm = 1;
+    c.imu_alignment_error_urad = 1;
+    WheelPoseIntegrator pose;
+    check(pose.configure(c));
+    for (std::uint32_t i = 1; i <= 3; ++i)
+      check(pose.observe(observed(i, i * 100), i * 100 + 10));
+    check(pose.start_origin(310));
+    for (std::uint32_t i = 4; i <= 2148; ++i) {
+      auto e = observed(i, i * 100, 20, -20,
+                        turn * static_cast<std::int64_t>(i - 3));
+      e.imu_error_urad = 0;
+      check(pose.observe(e, i * 100 + 10));
+    }
+    // 2145 arcs of 19.99999 mm and 1 urad each. Analytic endpoint
+    // is (42899.94565, +/-46.01021) mm; truncating half-urad gives 45.
+    check(pose.state().x_mm == 42899);
+    check(pose.state().y_mm == turn * 46);
+    check(pose.state().yaw_mrad == turn * 2 && pose.state().origin == 1);
+  }
+}
+
+static void large_straight_pose_retires_at_coordinate_bound() {
+  for (int travel : {-1, 1}) {
+    auto c = calibration();
+    c.left_nm_per_count = c.right_nm_per_count = 1000000;
+    c.max_pair_step_mm = 100;
+    c.wheel_error_ppm = 1;
+    c.imu_alignment_error_urad = 1;
+    WheelPoseIntegrator pose;
+    check(pose.configure(c));
+    for (std::uint32_t i = 1; i <= 3; ++i)
+      check(pose.observe(observed(i, i * 100), i * 100 + 10));
+    check(pose.start_origin(310));
+    for (std::uint32_t i = 4; i <= 10004; ++i) {
+      auto e = observed(i, i * 100, travel * 100, -travel * 100);
+      e.imu_error_urad = 0;
+      check(pose.observe(e, i * 100 + 10) == (i < 10004));
+      if (i < 10004) {
+        check(pose.state().x_mm == travel * static_cast<int>(i - 3) * 100);
+        check(pose.state().y_mm == 0 && pose.state().yaw_mrad == 0);
+        check(pose.state().origin == 1);
+      }
+    }
+    check(pose.state().origin == 0);
+    check(pose.state().quality == WheelPoseIntegrator::Quality::Unavailable);
+  }
+}
+
+static void pivot_then_straight_at_new_heading() {
+  for (int turn : {-1, 1}) {
+    auto c = calibration();
+    c.left_nm_per_count = c.right_nm_per_count = 1000000;
+    c.track_width_mm = 20;
+    WheelPoseIntegrator pose;
+    check(pose.configure(c));
+    for (std::uint32_t i = 1; i <= 3; ++i)
+      check(pose.observe(observed(i, i * 100), i * 100 + 10));
+    check(pose.start_origin(310));
+    check(pose.observe(observed(4, 400, -10 * turn, -10 * turn,
+                                 turn * 1000000LL), 410));
+    check(pose.state().x_mm == 0 && pose.state().y_mm == 0);
+    check(pose.state().yaw_mrad == turn * 1000);
+    check(pose.observe(observed(5, 500, 20, -20, turn * 1000000LL), 510));
+    check(pose.state().x_mm == 10 && pose.state().y_mm == turn * 16);
+    check(pose.state().origin == 1);
+  }
+}
+
 int main() {
+  exact_arc_and_reverse();
+  tiny_signed_turns_accumulate();
+  large_straight_pose_retires_at_coordinate_bound();
+  pivot_then_straight_at_new_heading();
   signed_residual_boundaries_retire_pose();
   asymmetric_motion_requires_gyro_agreement();
   expired_origin_cannot_be_refreshed_by_late_pair();
