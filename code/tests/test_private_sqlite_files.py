@@ -62,3 +62,44 @@ def test_private_sqlite_accepts_regular_private_files_and_legacy_main(tmp_path):
     for suffix in ("-journal", "-wal", "-shm"):
         (tmp_path / (path.name + suffix)).touch(mode=0o600)
     validate_private_sqlite_files(path)
+
+
+@pytest.mark.parametrize("second_state", ["missing", "vanishing", "replacement_ok", "replacement_hardlink"])
+def test_private_sqlite_handles_transiently_unlinking_journal_sidecar(
+    tmp_path, monkeypatch, second_state,
+):
+    path = tmp_path / "pet_a.sqlite3"
+    path.touch(mode=0o600)
+    journal = tmp_path / "pet_a.sqlite3-journal"
+    journal.touch(mode=0o600)
+    real_stat = os.stat
+    calls = 0
+
+    def flaky_stat(target, *args, **kwargs):
+        nonlocal calls
+        follow = kwargs.get("follow_symlinks", True)
+        if not follow and os.fspath(target) == os.fspath(journal):
+            st = real_stat(target, *args, **kwargs)
+            calls += 1
+            fields = list(st)
+            if calls == 1:
+                fields[3] = 0  # st_nlink == 0 mid-unlink
+                return os.stat_result(fields)
+            if second_state == "missing":
+                raise FileNotFoundError(target)
+            if second_state == "vanishing":
+                fields[3] = 0
+                return os.stat_result(fields)
+            if second_state == "replacement_hardlink":
+                fields[3] = 2
+                return os.stat_result(fields)
+            return st
+        return real_stat(target, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", flaky_stat)
+    if second_state == "replacement_hardlink":
+        with pytest.raises(ValueError, match="linked or nonregular memory sidecar"):
+            validate_private_sqlite_files(path)
+    else:
+        validate_private_sqlite_files(path)
+    assert calls == 2

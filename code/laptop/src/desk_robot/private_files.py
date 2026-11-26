@@ -111,6 +111,16 @@ def validate_private_sqlite_files(path: Path) -> None:
             info = candidate.lstat()
         except FileNotFoundError:
             continue
+        if name != path.name and stat.S_ISREG(info.st_mode) and info.st_nlink == 0:
+            # Concurrent SQLite rollback-journal unlink can transiently expose
+            # st_nlink == 0 under lockless RCU lstat() on Linux. Re-stat once and
+            # treat an unlinked regular sidecar as gone while rejecting replacements.
+            try:
+                info = candidate.lstat()
+            except FileNotFoundError:
+                continue
+            if stat.S_ISREG(info.st_mode) and info.st_nlink == 0:
+                continue
         if name == path.name:
             if stat.S_ISLNK(info.st_mode):
                 raise ValueError("Refusing symlinked memory database")
