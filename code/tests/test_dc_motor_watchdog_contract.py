@@ -242,13 +242,15 @@ def test_watchdog_halt_clears_both_dc_motor_pairs_and_retains_servo_hold():
     assert "for (int channel : body_pins::kMotorChannels) ledcWrite(channel, 0);" in zero
     assert "ledcWrite(forward_channel, 0);" in pair
     assert "ledcWrite(reverse_channel, percent < 0 ? duty : 0);" in pair
+    assert "applied_left = left_duty_ramp.update(now_us, state.left, state.armed);" in outputs
+    assert "applied_right = right_duty_ramp.update(now_us, state.right, state.armed);" in outputs
     assert (
         "write_motor_pair(body_pins::kMotorChannels[0], "
-        "body_pins::kMotorChannels[1], state.left);"
+        "body_pins::kMotorChannels[1], applied_left);"
     ) in outputs
     assert (
         "write_motor_pair(body_pins::kMotorChannels[2], "
-        "body_pins::kMotorChannels[3], state.right);"
+        "body_pins::kMotorChannels[3], applied_right);"
     ) in outputs
 
 

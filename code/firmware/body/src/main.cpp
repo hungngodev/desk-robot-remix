@@ -53,6 +53,7 @@
 #include "CliffGuard.h"
 #include "BerryImu.h"
 #include "StepperDrive.h"
+#include "DcDutyRamp.h"
 #include "TofBus.h"
 #include "RangeTelemetry.h"
 #include "ExpansionTouch.h"
@@ -244,6 +245,8 @@ int applied_lift = -1;
 int applied_grip = -1;
 #endif
 #if !DESK_ROBOT_STEPPER && DESK_ROBOT_FULL_SENSORS && DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED
+desk_robot::DcDutyRamp left_duty_ramp;
+desk_robot::DcDutyRamp right_duty_ramp;
 int applied_left = 0;
 int applied_right = 0;
 #endif
@@ -344,6 +347,12 @@ void apply_outputs() {
   if (!pwm_ready) {
     control.force_disarm();
     zero_motor_pwm();
+#if !DESK_ROBOT_STEPPER && DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED
+    left_duty_ramp.reset();
+    right_duty_ramp.reset();
+    applied_left = 0;
+    applied_right = 0;
+#endif
     return;
   }
   const auto& state = control.state();
@@ -373,12 +382,16 @@ void apply_outputs() {
       (applied_right > 0 && state.right < 0) ||
       (applied_right < 0 && state.right > 0)) {
     zero_motor_pwm();
-    delayMicroseconds(100);  // short dead-time before reversing polarity
+    // Both wheels coast before a polarity change. Restart the duty ramp
+    // rather than applying the opposite PWM after a blocking delay.
+    left_duty_ramp.reset();
+    right_duty_ramp.reset();
   }
-  write_motor_pair(body_pins::kMotorChannels[0], body_pins::kMotorChannels[1], state.left);
-  write_motor_pair(body_pins::kMotorChannels[2], body_pins::kMotorChannels[3], state.right);
-  applied_left = state.left;
-  applied_right = state.right;
+  const auto now_us = micros();
+  applied_left = left_duty_ramp.update(now_us, state.left, state.armed);
+  applied_right = right_duty_ramp.update(now_us, state.right, state.armed);
+  write_motor_pair(body_pins::kMotorChannels[0], body_pins::kMotorChannels[1], applied_left);
+  write_motor_pair(body_pins::kMotorChannels[2], body_pins::kMotorChannels[3], applied_right);
 #endif
 #endif
   if (state.servos_attached && !servo_attached) {
