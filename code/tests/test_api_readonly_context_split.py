@@ -1283,3 +1283,200 @@ def test_readonly_inspection_preserves_active_navigation(settings, monkeypatch):
     assert grid.to_route_snapshot(now_us=now) == snapshot
     assert vars(grid) == grid_before
     assert job.data() == job_before and coordinator._fleet_motion_owner == job.id
+
+
+@pytest.mark.parametrize("transcript, expected", [
+    ("Check your battery status", ["power-status"]),
+    ("Check your battery and check your safety status", ["status", "power-status"]),
+    ("Please look at my desk, check your battery and temperature",
+     ["power-status", "aux-status", "look"]),
+    ("What do you remember about my battery?", ["voice-context"]),
+    ("Did you finish picking up the key?", ["latest-pickup"]),
+    ("What just happened?", ["interaction-context"]),
+    ("Check your safety status", ["status"]),
+    ("I showed a photo, and check your battery", ["power-status"]),
+    ("I watched the film What Happened yesterday", []),
+    ("I picked up a key yesterday and now the story is done", []),
+    ("How many days until my exam?", []),
+    ("I remember my battery", []),
+])
+def test_readonly_intent_helpers_preserve_explicit_request_policy(transcript, expected):
+    from copy import deepcopy
+
+    from desk_robot.api_readonly_planner import _request_intents, _select_routes
+
+    proposals = [{"route": route} for route in (
+        "status", "power-status", "aux-status", "look", "voice-context",
+        "latest-pickup", "interaction-context", "navigate",
+    )]
+    before = deepcopy(proposals)
+    recall_only, intents = _request_intents(transcript)
+    intents_before = intents.copy()
+    assert _select_routes(
+        proposals, recall_only, intents, camera_enabled=True, memory_allowed=True,
+    ) == expected
+    assert proposals == before and intents == intents_before
+
+
+def test_readonly_selection_preserves_scan_capacity_allowlist_and_consent():
+    from desk_robot.api_readonly_planner import _request_intents, _select_routes
+
+    recall_only, intents = _request_intents(
+        "Look at my desk and check battery and temperature and check safety status",
+    )
+    # Even a future classifier mistake must not authorize a mutating route.
+    intents["navigate"] = True
+    proposals = [None, {"route": []}, {"route": "navigate"}, {"route": "look"},
+                 {"route": "look"}, {"route": "power-status"},
+                 {"route": "aux-status"}, {"route": "status"}]
+    assert _select_routes(
+        proposals, recall_only, intents, camera_enabled=True, memory_allowed=True,
+    ) == ["look", "power-status", "aux-status"]
+    assert _select_routes(
+        proposals, recall_only, intents, camera_enabled=False, memory_allowed=True,
+    ) == ["power-status", "aux-status", "status"]
+    assert _select_routes(
+        [None] * 8 + [{"route": "status"}], recall_only, intents,
+        camera_enabled=True, memory_allowed=True,
+    ) == []
+    assert _select_routes(
+        {"route": "status"}, recall_only, intents, camera_enabled=True, memory_allowed=True,
+    ) == []
+    recall_only, intents = _request_intents("What do you remember about our chats?")
+    assert _select_routes(
+        [{"route": "voice-context"}], recall_only, intents,
+        camera_enabled=True, memory_allowed=False,
+    ) == []
+
+
+@pytest.mark.parametrize("camera_enabled, room_enabled", [
+    (False, False), (False, True), (True, False), (True, True),
+])
+def test_readonly_timeline_filter_keeps_independent_sources_without_mutation(
+    camera_enabled, room_enabled,
+):
+    from copy import deepcopy
+
+    from desk_robot.api_readonly_planner import _filter_timeline
+
+    timeline = [
+        {"channel": "sensor", "kind": "safety_fault"},
+        {"channel": "camera", "kind": "frame"},
+        {"channel": "sensor", "kind": "camera_face"},
+        {"channel": "tool", "kind": "visual_look"},
+        {"channel": "tool", "kind": "memory_recall"},
+        {"channel": "room_station", "kind": "climate"},
+        {"channel": "human_transcript", "kind": "old", "source_at": 9.0},
+        {"channel": "human_transcript", "kind": "current", "source_at": 10.5},
+        {"channel": "human_transcript", "kind": "future", "source_at": 12.0},
+        {"channel": "sensor", "kind": "touch_tap"},
+    ]
+    before = deepcopy(timeline)
+    filtered = _filter_timeline(
+        timeline, now=11.0, camera_enabled=camera_enabled,
+        consent_started_at=10.0, room_enabled=room_enabled,
+    )
+    expected = ["safety_fault"]
+    if camera_enabled:
+        expected.extend(["frame", "camera_face", "visual_look"])
+    if room_enabled:
+        expected.append("climate")
+    if camera_enabled:
+        expected.append("current")
+    expected.append("touch_tap")
+    assert [entry["kind"] for entry in filtered] == expected
+    assert timeline == before
+    assert filtered is not timeline
+
+
+@pytest.mark.parametrize("change, expected_status", [
+    ("none", 200), ("turn", 409), ("camera", 409), ("memory", 409),
+    ("camera_off", 403), ("memory_off", 403), ("receipt", 409),
+])
+def test_readonly_endpoint_rechecks_authority_after_model_await(change, expected_status):
+    import json
+
+    from desk_robot.api_readonly_planner import register_readonly_planner_routes
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    settings = SimpleNamespace(
+        robot=lambda robot_id: robot_id, mode="hardware",
+        voice_vision_tools_enabled=True, camera_consent_started_at=0.0,
+        camera_consent_generation=1, voice_memory_tools_enabled=True,
+        voice_memory_consent_generation=1, room_station_context_enabled=False,
+        room_station_consent_generation=1,
+    )
+    robot_id = "robot-01"
+    calls = []
+    owner = [1]
+    visual = SimpleNamespace(
+        _turn_epoch={robot_id: 1},
+        hub=SimpleNamespace(interaction_timeline=lambda *args, **kwargs: []),
+    )
+
+    class Planner:
+        async def readonly_tool_plan(self, history):
+            calls.append(history)
+            if change == "turn":
+                visual._turn_epoch[robot_id] += 1
+            elif change == "camera":
+                settings.camera_consent_generation += 1
+            elif change == "memory":
+                settings.voice_memory_consent_generation += 1
+            elif change == "camera_off":
+                settings.voice_vision_tools_enabled = False
+            elif change == "memory_off":
+                settings.voice_memory_tools_enabled = False
+            elif change == "receipt":
+                owner[0] += 1
+            return json.dumps({"tools": [{"route": "look"}, {"route": "voice-context"}]})
+
+    def current_owner(receipt, robot_id, message):
+        if receipt != owner[0]:
+            raise HTTPException(409, message)
+
+    app = FastAPI()
+    app.state.runtime = SimpleNamespace(
+        multimodal=visual, conversation=SimpleNamespace(chat=Planner()),
+    )
+    register_readonly_planner_routes(
+        app, settings, authorize=lambda: None,
+        requested_tool_context=lambda *args: owner[0], current_tool_context=current_owner,
+    )
+    transcript = "Look at my desk and what do you remember about our earlier conversation?"
+    response = TestClient(app).post(
+        f"/v1/pet/{robot_id}/plan-readonly", json={"transcript": transcript},
+        headers={"x-desk-robot-tool-receipt": "1"},
+    )
+    assert len(calls) == 1
+    assert response.status_code == expected_status
+    if expected_status == 200:
+        assert response.json() == {
+            "robot_id": robot_id,
+            "tools": [{"route": route, "payload": {"question": transcript}}
+                      for route in ("look", "voice-context")],
+            "source": "existing_mac_ollama_readonly_route_selection",
+            "untrusted_model_selection": True,
+            "model_can_arm_motors": False,
+            "motor_authorized": False,
+            "charging_authorized": False,
+        }
+    else:
+        assert "tools" not in response.json()
+
+
+def test_readonly_model_failure_is_empty_but_cancellation_propagates():
+    import asyncio
+
+    from desk_robot.api_readonly_planner import _model_choices
+
+    async def malformed(_history):
+        return "not JSON"
+
+    async def cancelled(_history):
+        raise asyncio.CancelledError
+
+    assert asyncio.run(_model_choices(malformed, "Check safety", "")) is None
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(_model_choices(cancelled, "Check safety", ""))
