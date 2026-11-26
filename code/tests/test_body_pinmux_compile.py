@@ -1,5 +1,6 @@
 """Compile the WROOM pin contract and reject deliberately corrupted allocations."""
 import configparser
+import re
 import shlex
 import shutil
 import subprocess
@@ -126,3 +127,31 @@ def test_motor_pwm_mutations_fail(old, new, diagnostic):
     assert result.returncode != 0
     assert "static assertion failed" in result.stderr
     assert diagnostic in result.stderr
+
+
+@pytest.mark.parametrize("relative_path,expected", [
+    ("src/main.cpp", [
+        "body_pins::kMotorChannels[i],body_pins::kMotorFrequency,body_pins::kMotorResolution",
+        "channel,body_pins::kServoFrequency,body_pins::kServoResolution",
+    ]),
+    ("src/servo_center_bench.cpp", [
+        "body_pins::kServoChannels[0],body_pins::kServoFrequency,body_pins::kServoResolution",
+        "body_pins::kServoChannels[1],body_pins::kServoFrequency,body_pins::kServoResolution",
+    ]),
+    ("lib/TerminalIr/TerminalIr.cpp", []),
+])
+def test_pwm_setup_call_sites_preserve_timer_ownership(relative_path, expected):
+    # Pin assertions alone cannot detect an extra runtime timer configuration.
+    source = (HEADER.parent.parent / relative_path).read_text(encoding="utf-8")
+    source = re.sub(r"//[^\n]*|/\*.*?\*/", "", source, flags=re.DOTALL)
+    calls = re.findall(r"\b(ledc\w+|analogWrite\w*|tone|noTone)\s*\(", source)
+    assert set(calls) <= {"ledcSetup", "ledcWrite", "ledcAttachPin", "ledcDetachPin"}
+    configurations = re.findall(r"\bledcSetup\s*\(([^()]*)\)", source)
+    assert calls.count("ledcSetup") == len(configurations)
+    assert sorted(re.sub(r"\s+", "", args) for args in configurations) == sorted(expected)
+    if relative_path == "src/main.cpp":
+        assert re.search(r"for\s*\(int channel\s*:\s*body_pins::kServoChannels\)", source)
+    if relative_path.startswith("lib/TerminalIr/"):
+        assert not calls
+        assert re.search(r"\.rmt_mode\s*=\s*RMT_MODE_RX\s*;", source)
+        assert re.search(r"\brmt_rx_start\s*\(", source)
