@@ -10625,3 +10625,66 @@ async def test_expired_camera_auto_fanout_preserves_only_eyewitness(
         assert all(not memory.core_facts(r.id) for r in fleet.robots)
     finally:
         await pet.close()
+
+
+@pytest.mark.parametrize("command", ["arm", "keepalive", "drive 20 20 100"])
+async def test_motion_toggle_fences_queued_command_without_pausing_pet(
+    fleet, tmp_path, command,
+):
+    from desk_robot.controller import Coordinator, Job, OperationError
+    from desk_robot.simulator import SimulationVision
+
+    class QueuedHead:
+        supports_dispatch_check = True
+
+        def __init__(self):
+            self.entered = asyncio.Event()
+            self.release = asyncio.Event()
+            self.sent = []
+
+        async def command(self, cmd, *, dispatch_check):
+            self.entered.set()
+            await self.release.wait()
+            dispatch_check()
+            self.sent.append(cmd)
+            raise AssertionError("Revoked command reached transport")
+
+    robot_id = "robot-01"
+    robot = fleet.robot(robot_id)
+    robot.motion_enabled = True
+    head = QueuedHead()
+    coordinator = Coordinator(fleet, {robot_id: head}, SimulationVision())
+    job = Job("motion-toggle", robot_id, "exploration", state="running", _motion_epoch=0)
+    coordinator.jobs[job.id] = job
+    coordinator._fleet_motion_owner = job.id
+    camera, speaker = ChangingCamera(), SimulatedSpeaker()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    pet = PetController(
+        fleet, {robot_id: camera},
+        Conversation(fleet, GroundedChat(), speaker, memory=memory),
+        memory, KeyScene(), interval=.01, speech_cooldown=120,
+    )
+    pending = asyncio.create_task(coordinator._motion_command(job, command))
+    try:
+        await asyncio.wait_for(head.entered.wait(), 1)
+        robot.motion_enabled = False
+        head.release.set()
+        with pytest.raises(OperationError, match="motion_enabled=false"):
+            await pending
+        with pytest.raises(OperationError, match="motion_enabled=false"):
+            await coordinator._motion_command(job, "keepalive")
+        with pytest.raises(OperationError, match="motion_enabled=true"):
+            coordinator.explore(robot_id)
+
+        # Motion permission is not the pet's independent observation/voice grant.
+        pet.start(robot_id)
+        await wait_for(lambda: pet.status(robot_id)["spontaneous_speech_turns"] == 1)
+        assert pet.status(robot_id)["enabled"]
+        assert len(speaker.spoken) == 1
+        assert not robot.motion_enabled
+        assert head.sent == []
+    finally:
+        head.release.set()
+        pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
+        await pet.close()

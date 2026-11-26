@@ -804,6 +804,10 @@ class Coordinator:
             or self._fleet_motion_owner != job.id
         ):
             raise asyncio.CancelledError
+        # An admitted job must recheck the operator toggle at the actual
+        # transport boundary, including ARM and KEEPALIVE queued behind I/O.
+        if job._motion_epoch is not None and not self.robot(job.robot_id).motion_enabled:
+            raise OperationError("motion_enabled=false; no movement sent")
         # Private phase helpers are also exercised directly in host tests.
         require_active_operation(job.state if job.id in self.jobs else "running")
 
