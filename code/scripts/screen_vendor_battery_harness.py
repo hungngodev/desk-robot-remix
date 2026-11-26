@@ -131,8 +131,31 @@ def cad_tray_mm(source: Path = _TRAY_CAD) -> tuple[float, float, float]:
     return tuple(sizes)
 
 
+def _selected_connector_match(src, expected_connector, expected_terminal_roles, reasons):
+    """Compare exact published identity and pin roles, never certify physical polarity."""
+    if expected_connector is None and expected_terminal_roles is None:
+        return None
+    if (not isinstance(expected_connector, str) or not expected_connector.strip()
+            or not isinstance(expected_terminal_roles, dict) or not expected_terminal_roles
+            or not all(isinstance(k, str) and k and isinstance(v, str) and v
+                       for k, v in expected_terminal_roles.items())):
+        raise ValueError("Provide exact selected connector and terminal role mapping together")
+    matches = src["connector"] == expected_connector
+    if not matches:
+        reasons.append("selected_connector_variant_mismatch")
+    roles = src.get("terminal_roles")
+    if not roles:
+        return False if not matches else None
+    if dict(roles) != expected_terminal_roles:
+        reasons.append("selected_connector_terminal_roles_mismatch")
+        return False
+    return matches
+
+
 def evaluate(model: str, demand: dict, *, tray_mm=None,
-             wire_relief_mm=8.0, clearance_mm=1.0) -> dict:
+             wire_relief_mm=8.0, clearance_mm=1.0,
+             expected_connector: str | None = None,
+             expected_terminal_roles: dict[str, str] | None = None) -> dict:
     if model not in _PACKS:
         raise ValueError("Unknown sourced protected pack model")
     src = _PACKS[model]
@@ -227,8 +250,11 @@ def evaluate(model: str, demand: dict, *, tray_mm=None,
         reasons.append("exact_connector_or_lead_ampacity_insufficient")
     # These are published assignments, not continuity or polarity measurements.
     terminal_roles = src.get("terminal_roles")
-    if terminal_roles is None:
+    if not terminal_roles:
         reasons.append("manufacturer_terminal_pinout_missing")
+    connector_match = _selected_connector_match(
+        src, expected_connector, expected_terminal_roles, reasons,
+    )
     reasons.append("physical_harness_wiring_not_verified")
     if src["ntc"] != "10k":
         reasons.append("pack_ntc_10k_not_fitted_in_exact_variant")
@@ -242,6 +268,7 @@ def evaluate(model: str, demand: dict, *, tray_mm=None,
         "protected": protected, "ntc": src["ntc"],
         "connector_variant": src["connector"],
         "published_terminal_roles": dict(terminal_roles) if terminal_roles else None,
+        "connector_matches_selected_harness_on_paper": connector_match,
         "physical_harness_wiring_verified": False,
         "assembled_pack_mm": None if bare_only else src["size_mm"],
         "bare_pack_mm": src["size_mm"] if bare_only else None,
@@ -262,6 +289,8 @@ def main():
     parser.add_argument("--tray-length-mm", type=float)
     parser.add_argument("--tray-width-mm", type=float)
     parser.add_argument("--tray-height-mm", type=float)
+    parser.add_argument("--expected-connector")
+    parser.add_argument("--expected-terminal-roles", type=json.loads)
     args = parser.parse_args()
     sizing = runpy.run_path(
         str(Path(__file__).with_name("power_preflight.py")))
@@ -278,8 +307,11 @@ def main():
     print(json.dumps({
         "load_source": "hypothetical until operator measured",
         "sizing": demand,
-        "candidates": [evaluate(name, demand, tray_mm=tray)
-                       for name in _PACKS],
+        "candidates": [evaluate(
+            name, demand, tray_mm=tray,
+            expected_connector=args.expected_connector,
+            expected_terminal_roles=args.expected_terminal_roles,
+        ) for name in _PACKS],
     }, indent=2))
 
 

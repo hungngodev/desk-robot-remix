@@ -326,3 +326,73 @@ def test_pack_discharge_boundaries_use_amperes_not_nominal_capacity(
     assert report["pack_current_enough_on_paper"] is expected
     assert ("pack_current_rating_below_load_budget" in report["blocking_reasons"]) is not expected
     assert report["complete_power_path_safe_to_buy"] is False
+
+
+@pytest.mark.parametrize(("connector", "roles", "expected", "reason"), [
+    ("JST-PH-3", {"pin_1": "negative", "pin_2": "ntc", "pin_3": "positive"},
+     True, None),
+    ("JST-SHR-3", {"pin_1": "negative", "pin_2": "ntc", "pin_3": "positive"},
+     False, "selected_connector_variant_mismatch"),
+    ("JST-PH-3", {"pin_1": "positive", "pin_2": "ntc", "pin_3": "negative"},
+     False, "selected_connector_terminal_roles_mismatch"),
+    ("JST-PH-3", None, None, "manufacturer_terminal_pinout_missing"),
+    ("JST-SHR-3", None, False, "selected_connector_variant_mismatch"),
+])
+def test_selected_harness_requires_exact_connector_and_published_polarity(
+    connector, roles, expected, reason, monkeypatch,
+):
+    screen = module("screen_vendor_battery_harness")
+    model = "NX-MGL00850-1S2P"
+    pack = {**screen._PACKS[model], "connector": connector,
+            "terminal_roles": tuple(roles.items()) if roles else None}
+    monkeypatch.setitem(screen._PACKS, model, pack)
+    demand = {"minimum_rated_cell_and_boost_input_a": 2.55,
+              "minimum_continuous_cell_input_a": 1.5}
+    report = screen.evaluate(
+        model, demand, tray_mm=(90, 46, 25), expected_connector="JST-PH-3",
+        expected_terminal_roles={"pin_1": "negative", "pin_2": "ntc", "pin_3": "positive"},
+    )
+    assert report["connector_matches_selected_harness_on_paper"] is expected
+    if reason:
+        assert reason in report["blocking_reasons"]
+    assert report["physical_harness_wiring_verified"] is False
+    assert report["complete_power_path_safe_to_buy"] is False
+    assert screen.evaluate(model, demand, tray_mm=(90, 46, 25))[
+        "connector_matches_selected_harness_on_paper"
+    ] is None
+
+
+def test_selected_harness_partial_specification_is_rejected():
+    screen = module("screen_vendor_battery_harness")
+    with pytest.raises(ValueError, match="exact selected connector"):
+        screen.evaluate(
+            "NX-MGL00850-1S2P",
+            {"minimum_rated_cell_and_boost_input_a": 2.55,
+             "minimum_continuous_cell_input_a": 1.5},
+            tray_mm=(90, 46, 25), expected_connector="JST-PH-3",
+        )
+
+
+def test_cli_propagates_exact_selected_harness(monkeypatch, capsys):
+    import json
+    import sys
+
+    screen = module("screen_vendor_battery_harness")
+    demand = {"minimum_rated_cell_and_boost_input_a": 2.55,
+              "minimum_continuous_cell_input_a": 1.5}
+    monkeypatch.setattr(screen, "cad_tray_mm", lambda: (90, 46, 25), raising=False)
+    monkeypatch.setattr(screen.runpy, "run_path", lambda _: {
+        "size_5v_supply": lambda *_: demand,
+    })
+    monkeypatch.setattr(sys, "argv", [
+        "screen_vendor_battery_harness.py", "--peak-5v-a", "1",
+        "--continuous-5v-a", "0.6", "--expected-connector", "JST-PH-3",
+        "--expected-terminal-roles",
+        '{"pin_1":"negative","pin_2":"ntc","pin_3":"positive"}',
+    ])
+    screen.main()
+    reports = json.loads(capsys.readouterr().out)["candidates"]
+    assert reports
+    assert all(r["connector_matches_selected_harness_on_paper"] is False for r in reports)
+    assert all("selected_connector_variant_mismatch" in r["blocking_reasons"] for r in reports)
+    assert not any(r["complete_power_path_safe_to_buy"] for r in reports)
