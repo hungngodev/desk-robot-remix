@@ -46,3 +46,8 @@ def test_existing_ordinary_parent_reference(tmp_path):
     child = tmp_path / "config"
     child.mkdir()
     validate_private_directory_ancestry(child / ".." / "memory")
+
+
+@pytest.mark.parametrize("length,expected", [(1, True), (39, True), (40, True), (41, False)])
+def test_robot_id_length_boundary(length, expected):
+    assert is_private_robot_id("a" * length) is expected
