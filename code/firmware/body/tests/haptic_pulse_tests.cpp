@@ -75,7 +75,39 @@ static void check_stalled_high(std::uint32_t start) {
   }
 }
 
+// A software fault or failed LOW acknowledgment must discard the active
+// scheduler state. The bus owner still owes a verified physical LOW retry.
+static void check_active_fault(std::uint32_t start) {
+  using Action = HapticPulse::Action;
+  for (bool failed_low : {false, true}) {
+    HapticPulse h;
+    h.configure(true);
+    CHECK(h.request(start));
+    CHECK(h.next(start, true) == Action::TurnOn);
+    h.completed(Action::TurnOn, true, start);
+    CHECK(h.active());
+    if (failed_low) {
+      CHECK(h.next(start + 1U, false) == Action::TurnOff);
+      h.completed(Action::TurnOff, false, start + 1U);
+    } else {
+      h.fault();
+    }
+    CHECK(!h.active() && !h.ready());
+    CHECK(!h.request(start + 1500U));
+    CHECK(h.next(start + 1501U, true) == Action::None);
+    // A later successful LOW retry is not permission to start again.
+    h.completed(Action::TurnOff, true, start + 1502U);
+    CHECK(!h.active() && !h.ready());
+    CHECK(!h.request(start + 3000U));
+    h.configure(true);
+    CHECK(h.next(start + 3001U, true) == Action::None);
+    CHECK(h.request(start + 3002U));
+  }
+}
+
 int main() try {
+ check_active_fault(100U);
+ check_active_fault(0xfffffffeU);
  check_stalled_high(100U);
  check_stalled_high(0xffffff80U);
  check_timing_boundaries(100U);
