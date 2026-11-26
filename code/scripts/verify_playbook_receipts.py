@@ -599,6 +599,27 @@ def valid_physical_signoff(receipt: object) -> bool:
     return True
 
 
+def _procedure_policy_error(row: dict, identifier: int, gate: str) -> str | None:
+    """Validate the procedure definition independently of its receipt state."""
+    evidence_class = row.get("evidence_class")
+    if type(evidence_class) is not str or evidence_class not in {"source", "mixed", "physical"}:
+        return "missing evidence class"
+    if identifier in PHYSICAL_PROCEDURE_IDS and evidence_class != "physical":
+        return "physical evidence class is compulsory"
+    if identifier in MIXED_PROCEDURE_IDS and evidence_class == "source":
+        return "mixed evidence class cannot be downgraded"
+    if evidence_class == "physical" and gate == "TESTED":
+        return "physical task cannot be source-only TESTED"
+    if not valid_procedure_command(identifier, row.get("verification_command")):
+        return "executable command receipt mismatch"
+    method = row.get("verification_method")
+    if method not in (None, "manual_review"):
+        return "unsupported verification method"
+    if identifier in MANUAL_REVIEW_PROCEDURE_IDS and method != "manual_review":
+        return "manual review evidence is compulsory"
+    return None
+
+
 def audit(ledger: dict, lookup=github_json) -> list[str]:
     """Return failures, never turn network errors into a success receipt."""
     if type(ledger) is not dict:
@@ -620,28 +641,15 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
         if type(gate) is not str or gate not in states:
             errors.append(f"procedure {identifier}: unknown gate {gate!r}")
             continue
+        policy_error = _procedure_policy_error(row, identifier, gate)
+        if policy_error is not None:
+            errors.append(f"procedure {identifier}: {policy_error}")
+            continue
         if gate == "OPEN":
-            continue
-        evidence_class = row.get("evidence_class")
-        if type(evidence_class) is not str or evidence_class not in {
-            "source", "mixed", "physical",
-        }:
-            errors.append(f"procedure {identifier}: missing evidence class")
-            continue
-        if identifier in PHYSICAL_PROCEDURE_IDS and evidence_class != "physical":
-            errors.append(f"procedure {identifier}: physical evidence class is compulsory")
-            continue
-        if identifier in MIXED_PROCEDURE_IDS and evidence_class == "source":
-            errors.append(f"procedure {identifier}: mixed evidence class cannot be downgraded")
-            continue
-        if evidence_class == "physical" and row.get("gate") == "TESTED":
-            errors.append(f"procedure {identifier}: physical task cannot be source-only TESTED")
             continue
         command = row.get("verification_command")
         receipt = row.get("executed_test_receipt")
-        if (not valid_procedure_command(identifier, command)
-                or not isinstance(receipt, dict)
-                or receipt.get("command") != command):
+        if not isinstance(receipt, dict) or receipt.get("command") != command:
             errors.append(f"procedure {identifier}: executable command receipt mismatch")
             continue
         sha = row.get("last_verified_sha")
@@ -653,13 +661,6 @@ def audit(ledger: dict, lookup=github_json) -> list[str]:
             errors.append(f"procedure {identifier}: invalid source receipt")
             continue
         method = row.get("verification_method")
-        if method not in (None, "manual_review"):
-            errors.append(f"procedure {identifier}: unsupported verification method")
-            continue
-        if (type(identifier) is int and identifier in MANUAL_REVIEW_PROCEDURE_IDS
-                and method != "manual_review"):
-            errors.append(f"procedure {identifier}: manual review evidence is compulsory")
-            continue
         # A physical pass must be accepted by an authorized GitHub reviewer,
         # even when its verification method is an executable test command.
         # Operator and device strings alone are not acceptance authority.

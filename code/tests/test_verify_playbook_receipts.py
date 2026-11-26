@@ -1197,3 +1197,37 @@ def test_procedure_59_requires_manual_review_approval_and_remains_open():
     )
     assert verify.audit(full_ledger_with({**no_method, "verification_method": "manual_review"}), lookup_59) == []
 
+@pytest.mark.parametrize("identifier", range(1, 97))
+def test_open_procedure_definition_is_checked_without_network(identifier):
+    for field, value, diagnostic in (
+        ("evidence_class", [], "missing evidence class"),
+        ("verification_command", "cd code && true", "executable command receipt mismatch"),
+        ("verification_method", "unknown", "unsupported verification method"),
+    ):
+        ledger = full_ledger_with()
+        row = ledger["procedures"][identifier - 1]
+        row.update(gate="OPEN", **{field: value})
+        errors = verify.audit(ledger, lambda _: pytest.fail("OPEN row made network request"))
+        assert f"procedure {identifier}: {diagnostic}" in errors
+
+
+@pytest.mark.parametrize("identifier", sorted(verify.PHYSICAL_PROCEDURE_IDS
+                                              | verify.MIXED_PROCEDURE_IDS))
+def test_open_procedure_cannot_downgrade_evidence_class(identifier):
+    ledger = full_ledger_with()
+    row = ledger["procedures"][identifier - 1]
+    row.update(gate="OPEN", evidence_class="source")
+    errors = verify.audit(ledger, lambda _: pytest.fail("OPEN row made network request"))
+    diagnostic = ("physical evidence class is compulsory"
+                  if identifier in verify.PHYSICAL_PROCEDURE_IDS
+                  else "mixed evidence class cannot be downgraded")
+    assert f"procedure {identifier}: {diagnostic}" in errors
+
+
+@pytest.mark.parametrize("identifier", sorted(verify.MANUAL_REVIEW_PROCEDURE_IDS))
+def test_open_procedure_cannot_remove_mandatory_review(identifier):
+    ledger = full_ledger_with()
+    ledger["procedures"][identifier - 1].update(gate="OPEN", verification_method=None)
+    errors = verify.audit(ledger, lambda _: pytest.fail("OPEN row made network request"))
+    assert f"procedure {identifier}: manual review evidence is compulsory" in errors
+
