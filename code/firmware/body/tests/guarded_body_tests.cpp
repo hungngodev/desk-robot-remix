@@ -3163,29 +3163,45 @@ static void battery_cutoff_and_recovery_boundaries() {
       CHECK(body.drive_remaining(101) == 0);
       CHECK(send(body, "arm", 101) == "ERR arm battery_low_latched");
 
+      // Independent, fresh conversions alternate +/-40 mV around cutoff.
+      // Even attempted local recovery and a new drive cannot resume motion.
+      fuel.soc_centi = 5000;
+      for (std::uint32_t now = 102; now < 118; ++now) {
+        fresh(guard, now);
+        fuel.cell_mv = (now % 2U == 0U) ? 3340U : 3260U;
+        ++fuel.fuel_sample_seq;
+        fuel.fuel_at_ms = now;
+        body.set_accessories(readings, now);
+        CHECK(send(body, "rearm", now, true) == "ERR rearm battery_unsafe_or_stale");
+        CHECK(send(body, "arm", now) == "ERR arm battery_low_latched");
+        CHECK(send(body, "drive 30 30 150", now).find("ERR") == 0);
+        CHECK(!body.state().armed && body.state().left == 0 &&
+              body.state().right == 0 && body.drive_remaining(now) == 0);
+      }
+
       fuel.cell_mv = 3349;
       fuel.soc_centi = 500;
       ++fuel.fuel_sample_seq;
-      fuel.fuel_at_ms = 102;
-      body.set_accessories(readings, 102);
-      CHECK(send(body, "rearm", 102, true) == "ERR rearm battery_unsafe_or_stale");
+      fuel.fuel_at_ms = 118;
+      body.set_accessories(readings, 118);
+      CHECK(send(body, "rearm", 118, true) == "ERR rearm battery_unsafe_or_stale");
       fuel.cell_mv = 3350;
       fuel.soc_centi = 499;
       ++fuel.fuel_sample_seq;
-      fuel.fuel_at_ms = 103;
-      body.set_accessories(readings, 103);
-      CHECK(send(body, "rearm", 103, true) == "ERR rearm battery_unsafe_or_stale");
+      fuel.fuel_at_ms = 119;
+      body.set_accessories(readings, 119);
+      CHECK(send(body, "rearm", 119, true) == "ERR rearm battery_unsafe_or_stale");
       fuel.soc_centi = 500;
       ++fuel.fuel_sample_seq;
-      fuel.fuel_at_ms = 104;
-      body.set_accessories(readings, 104);
-      CHECK(send(body, "arm", 104) == "ERR arm battery_low_latched");
-      CHECK(send(body, "rearm", 104) == "ERR rearm local_only");
-      CHECK(send(body, "rearm", 104, true) == "OK rearm");
+      fuel.fuel_at_ms = 120;
+      body.set_accessories(readings, 120);
+      CHECK(send(body, "arm", 120) == "ERR arm battery_low_latched");
+      CHECK(send(body, "rearm", 120) == "ERR rearm local_only");
+      CHECK(send(body, "rearm", 120, true) == "OK rearm");
       CHECK(!body.state().armed && body.state().left == 0 &&
             body.state().right == 0);
-      CHECK(send(body, "arm", 104) == "OK arm");
-      CHECK(body.drive_remaining(104) == 0);
+      CHECK(send(body, "arm", 120) == "OK arm");
+      CHECK(body.drive_remaining(120) == 0);
     }
   }
 }

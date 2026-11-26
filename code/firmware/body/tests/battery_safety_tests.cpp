@@ -22,5 +22,11 @@ int main() {
       fuel_above_recovery_floor(4501U, 5000U) ||
       fuel_above_recovery_floor(3800U, 10001U) ||
       fuel_above_recovery_floor(invalid, invalid)) return 4;
+  // Every integer in the +/-40 mV noise band stays below recovery.
+  // Healthy SOC cannot compensate for an unsafe cell voltage.
+  for (unsigned mv = 3260U; mv <= 3340U; ++mv) {
+    if (fuel_below_motor_floor(mv, 5000U) != (mv < 3300U) ||
+        fuel_above_recovery_floor(mv, 5000U)) return 5;
+  }
   return 0;
 }
