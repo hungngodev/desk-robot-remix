@@ -3,7 +3,10 @@
 These are source contracts, not proof of nSLEEP voltage, rail current or
 mechanical payload retention. No sensor supply switch is assumed.
 """
+import re
 from pathlib import Path
+
+import pytest
 
 BODY = Path(__file__).resolve().parents[1] / "firmware/body"
 
@@ -50,8 +53,9 @@ def test_idle_keeps_safety_sensor_acquisition_and_servo_detach_separate():
     loop = main.split("void loop() {", 1)[1]
     for poll in (
         "tof.poll(cliff_guard, scan_ms);",
-        "if (tof.bus_accessible()) berry_imu.poll(millis());",
-        "if (tof.bus_accessible()) accessories.poll(millis());",
+        "if (tof.clients_accessible()) berry_imu.poll(millis());",
+        "if (tof.clients_accessible() && !accessories.poll(millis()))",
+        "tof.note_shared_mux_fault(cliff_guard);",
         "control.set_accessories(accessories.readings(), millis());",
     ):
         assert poll in loop
@@ -72,3 +76,36 @@ def test_idle_wake_requires_local_rearm_to_clear_missed_heartbeat():
     # The other reset is in setup(), after the output has been driven LOW.
     assert main.count("motor_heartbeat.reset();") == 2
     assert "motor_heartbeat.reset();" not in main.split("void loop() {", 1)[1]
+
+
+_I2C_POLL = re.compile(r"\b(tof|berry_imu|accessories|cap1188|paw_pulse)\s*\.\s*poll\s*\(")
+
+
+def _assert_i2c_loop_ownership(source: str) -> None:
+    # Source contract: comments must not satisfy or violate ownership.
+    source = re.sub(r"/\*.*?\*/|//[^\n]*", "", source, flags=re.S)
+    before, loop = source.split("void loop() {", 1)
+    assert not _I2C_POLL.search(before), "I2C poll outside control loop"
+    assert sorted(_I2C_POLL.findall(loop)) == [
+        "accessories", "berry_imu", "cap1188", "paw_pulse", "tof",
+    ]
+    handler = before.split("void process_input(", 1)[1].split("void setup()", 1)[0]
+    assert not re.search(r"\bWire\s*\.", handler), "direct I2C in UART handler"
+
+
+def test_uart_diagnostics_leave_i2c_polling_to_control_loop():
+    _assert_i2c_loop_ownership((BODY / "src/main.cpp").read_text())
+
+
+@pytest.mark.parametrize("injected", [
+    "tof.poll(cliff_guard, millis());",
+    "accessories.poll(millis());",
+    "cap1188 . poll(millis(), zones);",
+    "Wire.beginTransmission(0x71);",
+])
+def test_i2c_ownership_guard_detects_uart_poll_mutations(injected: str):
+    main = (BODY / "src/main.cpp").read_text()
+    assert "receiver.feed(" in main
+    mutant = main.replace("receiver.feed(", injected + "\n    receiver.feed(", 1)
+    with pytest.raises(AssertionError, match="I2C"):
+        _assert_i2c_loop_ownership(mutant)
