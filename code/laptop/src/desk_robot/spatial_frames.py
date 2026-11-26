@@ -29,8 +29,15 @@ def _bounded(value: object, maximum: float) -> bool:
     return type(value) in (int, float) and -maximum <= value <= maximum
 
 
-def _yaw(angle: float) -> float:
+def wrap_yaw_rad(angle: float) -> float:
+    """Wrap a finite angle to [-pi, pi], preserving remainder endpoint semantics."""
     return math.remainder(angle, math.tau)
+
+
+def rotate_xy(x: float, y: float, yaw_rad: float) -> tuple[float, float]:
+    """Rotate prevalidated coordinates counterclockwise; callers bound the result."""
+    c, s = math.cos(yaw_rad), math.sin(yaw_rad)
+    return c * x - s * y, s * x + c * y
 
 
 @dataclass(frozen=True)
@@ -56,9 +63,9 @@ class PlanarTransform:
         """Transform a point expressed in child coordinates into parent."""
         if not _bounded(x_mm, _MAX_MM) or not _bounded(y_mm, _MAX_MM):
             raise FrameError("Invalid planar point")
-        c, s = math.cos(self.yaw_rad), math.sin(self.yaw_rad)
-        x = self.x_mm + c * x_mm - s * y_mm
-        y = self.y_mm + s * x_mm + c * y_mm
+        dx, dy = rotate_xy(x_mm, y_mm, self.yaw_rad)
+        x = self.x_mm + dx
+        y = self.y_mm + dy
         if not _bounded(x, _MAX_MM) or not _bounded(y, _MAX_MM):
             raise FrameError("Transformed point outside coordinate bounds")
         return x, y
@@ -68,7 +75,7 @@ class PlanarTransform:
         if type(other) is not PlanarTransform or self.child != other.parent:
             raise FrameError("Incompatible transform frames")
         x, y = self.point(other.x_mm, other.y_mm)
-        yaw = _yaw(self.yaw_rad + other.yaw_rad)
+        yaw = wrap_yaw_rad(self.yaw_rad + other.yaw_rad)
         if self.parent == other.child:
             # A cycle is admissible only when it closes to numerical identity.
             if max(abs(x), abs(y), abs(yaw)) > 1e-8:
@@ -77,13 +84,9 @@ class PlanarTransform:
         return PlanarTransform(self.parent, other.child, x, y, yaw)
 
     def inverse(self) -> PlanarTransform:
-        c, s = math.cos(self.yaw_rad), math.sin(self.yaw_rad)
-        return PlanarTransform(
-            self.child, self.parent,
-            -c * self.x_mm - s * self.y_mm,
-            s * self.x_mm - c * self.y_mm,
-            _yaw(-self.yaw_rad),
-        )
+        yaw = wrap_yaw_rad(-self.yaw_rad)
+        x, y = rotate_xy(-self.x_mm, -self.y_mm, yaw)
+        return PlanarTransform(self.child, self.parent, x, y, yaw)
 
 
 def odom_base_transform(receipt: PoseReceipt) -> PlanarTransform:
@@ -97,7 +100,7 @@ def odom_base_transform(receipt: PoseReceipt) -> PlanarTransform:
             or not -3142 <= receipt.yaw_mrad <= 3142):
         raise FrameError("Valid identified odometry receipt required")
     return PlanarTransform(
-        "odom", "base_link", receipt.x_mm, receipt.y_mm, _yaw(receipt.yaw_rad),
+        "odom", "base_link", receipt.x_mm, receipt.y_mm, wrap_yaw_rad(receipt.yaw_rad),
     )
 
 

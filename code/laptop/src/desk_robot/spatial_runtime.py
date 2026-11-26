@@ -24,7 +24,7 @@ from .object_targets import (
     resolve_object_target,
 )
 from .route_planner import GridSnapshot, RouteRequest, RouteResult, SafetyEnvelope, plan_route
-from .spatial_frames import FrameError, PlanarTransform, odom_base_transform
+from .spatial_frames import FrameError, PlanarTransform, odom_base_transform, wrap_yaw_rad
 from .spatial_grid import CELL_MM, GridEvidenceError, RangeCellBatch, SpatialGrid
 from .spatial_memory import SpatialEvidence, SpatialMemory, SpatialSighting
 from .spatial_pose import PoseError, PoseFence, PoseReceipt
@@ -220,7 +220,7 @@ class SpatialRuntime:
         if not (0 <= cell_x < state.grid.width and 0 <= cell_y < state.grid.height):
             raise PoseError("Localized pose outside anchored spatial grid")
         heading = round(map_base.yaw_rad / (math.pi / 2)) % 4
-        if abs(math.remainder(map_base.yaw_rad - heading * (math.pi / 2), math.tau)) > yaw_tolerance_rad:
+        if abs(wrap_yaw_rad(map_base.yaw_rad - heading * (math.pi / 2))) > yaw_tolerance_rad:
             raise PoseError("Localized heading diverges from lattice orientation")
         return (cell_x, cell_y), heading
 

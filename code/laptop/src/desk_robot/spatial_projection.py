@@ -12,6 +12,7 @@ import math
 from dataclasses import dataclass
 
 from .dock_vision import DockCameraCalibration, _finite_number
+from .spatial_frames import rotate_xy
 
 
 class ProjectionError(ValueError):
@@ -150,10 +151,9 @@ class FloorProjectionCalibration:
             raise ProjectionError("Pixel ray grazes floor or points above horizon")
         distance_scale = self.camera_height_mm / -ray_z
         yaw = math.radians(self.lens.mount_yaw_deg)
-        x = (self.camera_forward_offset_mm
-             + distance_scale * (math.cos(yaw) * ray_x + math.sin(yaw) * ray_y))
-        y = (-self.lens.mount_lateral_offset_mm
-             + distance_scale * (-math.sin(yaw) * ray_x + math.cos(yaw) * ray_y))
+        forward, left = rotate_xy(ray_x, ray_y, -yaw)
+        x = self.camera_forward_offset_mm + distance_scale * forward
+        y = -self.lens.mount_lateral_offset_mm + distance_scale * left
         if (not math.isfinite(x) or not math.isfinite(y)
                 or not self.valid_forward_mm[0] <= x <= self.valid_forward_mm[1]
                 or not self.valid_lateral_mm[0] <= y <= self.valid_lateral_mm[1]):

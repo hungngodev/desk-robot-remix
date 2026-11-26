@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from .spatial_frames import rotate_xy
 from .vision import _check_camera_jpeg
 
 
@@ -142,8 +143,9 @@ class DockCameraCalibration:
         if self.mount_lateral_offset_mm is None or self.mount_yaw_deg is None:
             raise ValueError("Dock chassis camera mounting geometry unmeasured")
         yaw = math.radians(self.mount_yaw_deg)
-        lateral = (self.mount_lateral_offset_mm
-                   + pose.x_mm * math.cos(yaw) + pose.z_mm * math.sin(yaw))
+        # Camera x is right-positive and z is forward; base y is left-positive.
+        _, left = rotate_xy(pose.z_mm, -pose.x_mm, -yaw)
+        lateral = self.mount_lateral_offset_mm - left
         # Individually finite native pose values can overflow when transformed.
         # Never pass an infinite chassis offset into a docking alignment gate.
         if not math.isfinite(lateral):
