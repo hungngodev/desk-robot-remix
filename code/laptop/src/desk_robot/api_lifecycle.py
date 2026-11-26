@@ -1,7 +1,10 @@
 """Mac lifecycle admission; never a physical preflight or motion permit."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import HTTPException, Request
@@ -19,7 +22,7 @@ def runtime_ready(state: State) -> bool:
 
 
 @asynccontextmanager
-async def runtime_lifespan(state: State):
+async def runtime_lifespan(state: State) -> AsyncIterator[None]:
     """Preserve the initiating failure while reporting unconfirmed cleanup."""
     state.runtime_started = False
     primary: BaseException | None = None

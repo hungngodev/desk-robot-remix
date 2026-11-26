@@ -10,7 +10,7 @@ SOURCE = Path(__file__).resolve().parents[1] / "laptop" / "src" / "desk_robot"
 
 def _assert_parameterized(annotation: ast.expr, location: str) -> None:
     generic_names = {"dict", "list", "tuple", "set", "frozenset", "Callable", "Awaitable",
-                     "Task", "ndarray", "NDArray"}
+                     "Task", "ndarray", "NDArray", "AsyncIterator"}
     nodes = list(ast.walk(annotation))
     parameterized = {node.value for node in nodes if isinstance(node, ast.Subscript)}
     for node in nodes:
@@ -22,9 +22,18 @@ def _assert_parameterized(annotation: ast.expr, location: str) -> None:
         )
 
 
-@pytest.mark.parametrize("module", ["cli", "calibration", "aux", "live_turns", "live_voice_events"])
+@pytest.mark.parametrize(
+    "module", ["cli", "calibration", "aux", "live_turns", "live_voice_events", "api_lifecycle"],
+)
 def test_host_api_signature_annotations(module: str) -> None:
     tree = ast.parse((SOURCE / f"{module}.py").read_text(encoding="utf-8"))
+    if module == "api_lifecycle":
+        assert any(
+            isinstance(node, ast.ImportFrom)
+            and node.module == "__future__"
+            and any(alias.name == "annotations" for alias in node.names)
+            for node in tree.body
+        ), f"{module} missing future annotations"
     functions = [
         node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
     ]
