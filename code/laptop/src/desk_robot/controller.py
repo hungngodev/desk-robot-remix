@@ -101,6 +101,14 @@ def _require_fresh_auto_dock_fuel(
         raise OperationError("Autonomous dock requires fresh low battery evidence")
 
 
+class _DockIrQueueExpired(Exception):
+    pass
+
+
+class _DockCameraQueueExpired(Exception):
+    pass
+
+
 @dataclass
 class Job:
     id: str
@@ -1323,6 +1331,45 @@ class Coordinator:
             ),
         )
 
+    def _dock_dispatch_checks(
+        self, job: Job, head: Head, *, camera_grant: int | None,
+        expected_dock: int | None, observation: object, reading: object,
+        ir_request_at: float,
+    ) -> tuple[Callable[[], None], Callable[[], None]]:
+        """Bind both checks to one approach attempt, even if an adapter retains them."""
+        def verify_before_post() -> None:
+            self._require_camera_motion_grant(camera_grant)
+            try:
+                unpack_dock_frame(observation)
+            except ValueError as exc:
+                raise _DockCameraQueueExpired(str(exc)) from exc
+            if expected_dock is not None:
+                try:
+                    validate_ir(
+                        reading, job.robot_id, expected_dock_id=expected_dock,
+                        elapsed_ms=(time.monotonic() - ir_request_at) * 1000,
+                    )
+                except ValueError as exc:
+                    raise _DockIrQueueExpired(str(exc)) from exc
+            if self.dock_inhibited(job.robot_id):
+                raise OperationError(
+                    "Dock approach refused: robot is seated or powered on dock"
+                )
+
+        def verify_at_dispatch() -> None:
+            verify_before_post()
+            # A same-PID reconnect can retire the selected stream inside a command lock.
+            verify_now = getattr(head, "dock_receipt_current_now", None)
+            if not callable(verify_now):
+                raise OperationError("Dock dispatch camera source verifier unavailable")
+            try:
+                if verify_now(observation) is not None:
+                    raise ValueError("Dock dispatch camera source verification denied")
+            except Exception as exc:
+                raise OperationError("Dock JPEG source changed at guarded dispatch") from exc
+
+        return verify_before_post, verify_at_dispatch
+
     async def _dock_approach(
         self, job: Job, camera, target_mm: float,
         turn_sign: int, forward_sign: int,
@@ -1530,46 +1577,10 @@ class Coordinator:
             # Seat or charger evidence may arrive during any preceding await,
             # AND camera/IR/consent/seat freshness may expire while queued
             # behind HttpHead.lock or HttpHead.command_lock.
-            class _DockIrQueueExpired(Exception):
-                pass
-
-            class _DockCameraQueueExpired(Exception):
-                pass
-
-            def _verify_before_post(
-                reading=reading, ir_request_at=ir_request_at,
-                observation=observation,
-            ) -> None:
-                self._require_camera_motion_grant(camera_grant)
-                try:
-                    unpack_dock_frame(observation)
-                except ValueError as exc:
-                    raise _DockCameraQueueExpired(str(exc)) from exc
-                if expected_dock is not None:
-                    try:
-                        validate_ir(
-                            reading, job.robot_id, expected_dock_id=expected_dock,
-                            elapsed_ms=(time.monotonic() - ir_request_at) * 1000,
-                        )
-                    except ValueError as exc:
-                        raise _DockIrQueueExpired(str(exc)) from exc
-                if self.dock_inhibited(job.robot_id):
-                    raise OperationError(
-                        "Dock approach refused: robot is seated or powered on dock"
-                    )
-
-            def _verify_at_dispatch(observation=observation) -> None:
-                _verify_before_post()
-                # A same-PID reconnect can retire the selected camera stream
-                # inside either command lock even while the JPEG is still fresh.
-                verify_now = getattr(head, "dock_receipt_current_now", None)
-                if not callable(verify_now):
-                    raise OperationError("Dock dispatch camera source verifier unavailable")
-                try:
-                    if verify_now(observation) is not None:
-                        raise ValueError("Dock dispatch camera source verification denied")
-                except Exception as exc:
-                    raise OperationError("Dock JPEG source changed at guarded dispatch") from exc
+            _verify_before_post, _verify_at_dispatch = self._dock_dispatch_checks(
+                job, head, camera_grant=camera_grant, expected_dock=expected_dock,
+                observation=observation, reading=reading, ir_request_at=ir_request_at,
+            )
 
             try:
                 _verify_before_post()
