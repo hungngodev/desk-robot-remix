@@ -72,6 +72,7 @@ bool TofBus::write_byte(std::uint8_t reg, std::uint8_t value) {
 
 void TofBus::failed(CliffGuard& guard) {
   ++bus_errors_;
+  scan_.restart_critical();
   recovery_pending_ = true;
   if (!physical_bus_accessible()) recovery_quarantine_ = true;
   // A sibling transaction can fault after poll() published a conversion.
@@ -411,9 +412,11 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
   // the lines. Normal checked mux selection is still required below.
   recovery_pending_ = false;
   recovery_attempted_ = false;
-  // Five mandatory floor/front reads always precede one extra side/rear
-  // read, preserving the local guard cadence even on the full eight profile.
-  const std::uint8_t channel = scan_.next();
+  // Five mandatory floor/front opportunities precede any optional read.
+  // Defer optional work after a slow sweep; the guard still enforces actual
+  // sample freshness independently of the scheduler's admission heuristic.
+  const auto freshness_ms = guard.configured() ? guard.configuration().freshness_ms : 200U;
+  const std::uint8_t channel = scan_.next(now_ms, freshness_ms);
   next_channel_ = channel;
   if (!select(channel)) {
     failed(guard);
