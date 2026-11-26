@@ -1,11 +1,12 @@
-# Firmware foundation — implemented 2026-11-03
+# Firmware foundation — historical milestone and current source contract
 
 Run commands from the repository’s `code/` folder.
 
-The project now has a compiled XIAO ESP32S3 Sense head target with Xiaozhi
-ESP-SR AFE device AEC and a playback-reference codec, and a compiled
-28BYJ-48/ULN2003 body with eight VL53L0X I2C ranges (five safety-critical,
-three side/rear read-only), local safety fault latch,
+The November 3, 2026 build record covers the Sense head and historical
+`esp32dev` / `esp32_stepper` body profiles, not the current full configuration.
+Current source includes the XIAO ESP32S3 Sense head with Xiaozhi ESP-SR AFE
+and playback reference, and the 28BYJ-48/ULN2003 full body with eight
+VL53L0X I2C ranges (five safety-critical, three side/rear read-only), local safety fault latch,
 touch gestures, bounded stepper control and source-first OLED idle behavior.
 These are **software milestones**. No board has been flashed or physically
 qualified; no real edge, power, audio interruption, touch-through-case,
@@ -35,6 +36,9 @@ route](build.md) for prerequisites and logic-only upload.
 
 `esp32_full` is the default eight-VL53L0X profile, with motor power
 intentionally disabled until its independent cutoff is physically qualified.
+The separate `esp32_dc_full` profile also defaults to an unqualified hardware
+cutoff; its DRV8833 inputs remain LOW/LOW (coast, not active braking).
+The independent CPU-stall cutoff still requires physical qualification.
 The five-channel `esp32_stepper` bench profile uses the eight phase pins in
 [BodyPins.h](../../code/firmware/body/include/BodyPins.h), two positional servo signals
 and existing 115200 UART. `esp32dev` explicitly preserves the earlier DC/DRV8833
@@ -42,13 +46,18 @@ profile with its different four-wire motor allocation, but is actuator inert:
 no successful ARM, wheel or servo actuation. Never connect a binary to the
 other profile's motor wiring. No upload command was run.
 
-`StepperDrive` uses half steps, signed requests clamped to40%, acceleration and
-reversal through zero. Its unqualified scheduling ceiling is160 half-steps/s,
+`StepperDrive` uses half steps, signed requests clamped to 40%, acceleration and
+reversal through zero. Its unqualified scheduling ceiling is 160 half-steps/s,
 not measured speed or torque. A stopped/disabled output clears coils immediately
 and preserves the phase index. Delayed calls never emit a catch-up burst. Coil-off
 means coast, not qualified braking; loaded stopping and temperature still need tests.
-Drive remains bounded to 250 ms and communication loss to 500 ms. Keepalives do not
+The drive pulse remains bounded to 250 ms (`kMaxDriveMs`). Guarded active
+wheels have a stricter 200 ms host-silence timeout (`kActiveWheelHostTimeoutMs`);
+the idle arm/servo control watchdog remains 500 ms (`kWatchdogMs`). These
+are software limits, not measured physical stopping times. Keepalives do not
 extend a drive pulse. Step timing never uses blocking multi-step calls.
+See [BodyControl.cpp](../../code/firmware/body/lib/BodyControl/BodyControl.cpp)
+and [BodyControl.h](../../code/firmware/body/lib/BodyControl/BodyControl.h).
 
 ## Sensor policy and recovery
 
@@ -100,7 +109,7 @@ python3 firmware/head/install_overlay.py --board sense --upstream upstream/xiaoz
 bash scripts/build_head.sh --board sense
 ```
 
-The isolated Sense build uses8MB flash/PSRAM, existing PDM input, camera,
+The isolated Sense build uses 8 MB flash and 8 MB PSRAM, existing PDM input, camera,
 SSD1306 and I²S output drivers, and the authenticated bridge. Actual camera
 revision, mic/audio, display address/orientation, UART and fit need bench tests.
 The generic verification binary has empty credentials and disabled wake word;
@@ -122,16 +131,20 @@ not silently substituted by fake idle motion.
 
 ## Evidence and next gates
 
-[Verification record](../records/reports/firmware-foundation-2026-11-03.json) stores
-commands, counts, build hashes/sizes and limits. Body tests cover fault injection,
+[Historical verification record](../records/reports/firmware-foundation-2026-11-03.json)
+stores November 3 commands, counts, build hashes/sizes and limits. It explicitly
+has `current_head_verified: false`; current firmware requires its own exact-SHA
+CI evidence. The [archived November 4 inventory](../hardware/archive/fleet-inventory-before-photo-audit-2026-11-04.json)
+is historical ownership evidence, not a current component selection or purchase release. Body tests cover fault injection,
 both UART receivers, local recovery authority, gripper hold, drive expiry,
 rollover, phase sequencing and no catch-up. Head tests cover installation/drift,
 pin collisions, board separation, private identity and protocol/snapshot behavior.
 Compilation is not evidence of physical peripheral or mechanical performance.
 
 Keep the $50 delivered cap, actual inventory gaps and small-remix constraint.
-Qualify real sensing/power/geometry before roaming, then add stationary original
-face animation and the Mac pet scheduler. Repeat one validated core for five.
+Qualify real sensing/power/geometry before roaming; the existing stationary
+face animation and Mac pet scheduler still require physical interaction trials.
+Repeat one validated core for five.
 
 ## Installed MPU6050 and optional peer text sharing
 
