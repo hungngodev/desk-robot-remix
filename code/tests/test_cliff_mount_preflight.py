@@ -558,3 +558,50 @@ def test_source_contract_rejects_other_driver(monkeypatch, tmp_path, model, old)
     monkeypatch.setattr(tool, "TOF_HEADER", header)
     with pytest.raises(ValueError, match="VL53L0X driver identity changed"):
         tool.verify_source_contract()
+
+
+@pytest.mark.parametrize("updates", [
+    {"measured_p95_stopping_distance_mm": 0, "measured_worst_stopping_distance_mm": 0},
+    {"remaining_vision_or_sensor_latency_ms": 0},
+])
+def test_straight_cliff_preflight_rejects_zero_stop_evidence(updates):
+    with pytest.raises(ValueError):
+        evaluate(chassis_mount_above_desk_mm=20, **updates)
+
+
+@pytest.mark.parametrize("updates", [
+    {"detection_latency_ms": 0},
+    {"measured_worst_braking_mm": 0},
+    {"support_points_mm": []},
+    {"floor_sensor_points_mm": []},
+])
+def test_planar_cliff_preflight_rejects_unmeasured_stop_evidence(updates):
+    with pytest.raises(ValueError):
+        planar(**updates)
+
+
+@pytest.mark.parametrize("records", [[], tool.floor_mount_template()])
+def test_unmeasured_floor_mounts_stay_on_hold(records):
+    result = tool.screen_floor_mounts(records)
+    assert not result["all_floor_mounts_possible_on_paper"]
+    assert not result["live_sensor_detection_verified"]
+    assert not result["fully_safe_cliff_operation_proven"]
+
+
+def test_synthetic_feasible_mounts_never_certify_physical_trials():
+    straight = evaluate(chassis_mount_above_desk_mm=20,
+                        measured_p95_stopping_distance_mm=0)
+    assert straight["candidate_geometry_possible_on_paper"]
+    assert not straight["actual_dark_glossy_surface_and_edge_trials"]
+    assert not straight["sensor_mount_and_optical_alignment_physically_verified"]
+    assert not straight["downward_optical_axis_reorientation_physically_verified"]
+    assert not straight["40_sensor_fleet_purchase_approved"]
+    turning = planar()
+    assert turning["necessary_planar_coverage_on_paper"]
+    assert not turning["actual_surface_and_motor_faults_verified"]
+    assert not turning["mounted_axis_physically_verified"]
+    assert not turning["fully_safe_cliff_operation_proven"]
+    floor = tool.screen_floor_mounts(floor_mount_records())
+    assert floor["all_floor_mounts_possible_on_paper"]
+    assert not floor["live_sensor_detection_verified"]
+    assert not floor["fully_safe_cliff_operation_proven"]

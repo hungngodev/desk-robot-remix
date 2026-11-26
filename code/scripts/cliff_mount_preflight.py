@@ -112,9 +112,10 @@ def evaluate(*, chassis_mount_above_desk_mm: float | None = None,
     worst_supplied = measured_worst_stopping_distance_mm is not None
     if worst_supplied and (
             not _finite_real(measured_worst_stopping_distance_mm)
+            or measured_worst_stopping_distance_mm <= 0
             or measured_worst_stopping_distance_mm <
             measured_p95_stopping_distance_mm):
-        raise ValueError("Worst observed stop must be finite and at least p95")
+        raise ValueError("Worst observed stop must be positive, finite and at least p95")
     if (height_input < 0
             or (measured_lens_above_desk_mm is not None and height_input == 0)
             # The forward cone extremity must intersect the floor. A beam
@@ -122,7 +123,7 @@ def evaluate(*, chassis_mount_above_desk_mm: float | None = None,
             or not 0 <= optical_tilt_deg < 90 - ST_SYSTEM_FOV_DEG / 2
             or leading_wheel_behind_sensor_mm <= 0
             or measured_p95_stopping_distance_mm < 0
-            or remaining_vision_or_sensor_latency_ms < 0
+            or remaining_vision_or_sensor_latency_ms <= 0
             or measured_travel_speed_mm_s <= 0
             or engineering_margin_mm < 0):
         raise ValueError("Invalid cliff sensor clearance or stopping envelope")
@@ -223,7 +224,7 @@ def screen_planar_cliff_coverage(
         raise ValueError("Motion, geometry and qualification inputs must be finite")
     if (track_width_mm <= 0 or chassis_mount_above_desk_mm < 0
             or not 0 <= optical_tilt_deg < 90 - ST_SYSTEM_FOV_DEG / 2
-            or detection_latency_ms < 0 or measured_worst_braking_mm < 0
+            or detection_latency_ms <= 0 or measured_worst_braking_mm <= 0
             or engineering_margin_mm < 0
             or qualified_lateral_sensor_coverage_mm < 0):
         raise ValueError("Invalid differential drive dimensions or stop budget")
