@@ -358,3 +358,39 @@ async def test_capture_rejects_native_low_g_event_between_phases():
             previous_sample=0, previous_boot=1,
             previous_imu={"low_g_valid": True, "low_g_irq": False, "low_g_seq": 2},
         )
+
+@pytest.mark.parametrize("axis", ["acc", "gyro"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+async def test_capture_rejects_nonfinite_axes(axis, value):
+    class InvalidAxisClient(FakeClient):
+        async def get(self, url, *, headers, timeout):
+            response = await super().get(url, headers=headers, timeout=timeout)
+            response.data["imu"][axis][0] = value
+            return response
+
+    with pytest.raises(ValueError, match="Nonfinite WROOM status JSON constant"):
+        await read(InvalidAxisClient(), count=1)
+
+
+async def test_capture_rejects_reversed_host_receipts(monkeypatch):
+    from types import SimpleNamespace
+
+    ticks = iter((100.0, 100.05, 99.9, 99.95))
+    monkeypatch.setitem(
+        capture_phase.__globals__, "time",
+        SimpleNamespace(monotonic=lambda: next(ticks)),
+    )
+    with pytest.raises(RuntimeError, match="Nonmonotonic source receipt"):
+        await read(FakeClient())
+
+
+def test_interrupted_trial_write_removes_partial_file(tmp_path, monkeypatch):
+    output = tmp_path / "handling.jsonl"
+
+    def interrupt(_fd):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(os, "fsync", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        save_private_trial_rows(output, [{"label": "upright"}])
+    assert not output.exists()

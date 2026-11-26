@@ -331,3 +331,39 @@ def test_native_trial_allows_unchanged_counter_without_qualification():
     report = analyze(native_trial_rows())
     assert report["thresholds_physically_qualified"] is False
     assert report["motor_authorization"] is False
+
+@pytest.mark.parametrize("payload, message", [
+    (b'{"label":"upright"}', "Incomplete"),
+    (b'{"label":"upright"}\n\n', "Blank"),
+    (b'[]\n', "must be an object"),
+    (b'', "Incomplete"),
+    (b' ' * 300001, "Oversized"),
+    (b'{"label":"upright"}\n{"label":', "Incomplete"),
+])
+def test_corrupt_capture(tmp_path, payload, message):
+    source = tmp_path / "trial.jsonl"
+    source.write_bytes(payload)
+    with pytest.raises(ValueError, match=message):
+        load_trial_rows(source)
+
+
+def test_valid_capture_crlf(tmp_path):
+    source = tmp_path / "trial.jsonl"
+    source.write_bytes(b'{"label":"upright"}\r\n{"label":"tilted"}\r\n')
+    assert load_trial_rows(source) == [{"label": "upright"}, {"label": "tilted"}]
+
+
+def test_complete_sample_counts_do_not_excuse_unterminated_capture(tmp_path):
+    source = tmp_path / "trial.jsonl"
+    source.write_text("\n".join(json.dumps(row) for row in trials()), encoding="utf-8")
+    with pytest.raises(ValueError, match="Incomplete"):
+        load_trial_rows(source)
+
+
+@pytest.mark.parametrize("axis", ["acc", "gyro"])
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
+def test_handling_calibration_rejects_nonfinite_axes(axis, value):
+    rows = trials()
+    rows[8]["body"]["imu"][axis][0] = value
+    with pytest.raises(ValueError, match="fresh stationary WROOM"):
+        analyze(rows)

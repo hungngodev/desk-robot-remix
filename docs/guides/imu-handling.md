@@ -131,3 +131,7 @@ its failure conditions. Its JSON always reports
 `code/laptop/src/desk_robot/handling.py` is the small new read-only classifier. `code/laptop/src/desk_robot/pet.py` connects it to the real head status, provenance memory, existing group speech lease and camera hub. `code/laptop/src/desk_robot/multimodal.py` accepts the two kinds as selected frame triggers. `code/tests/test_handling.py` checks the pure raw scaling, fresh status rules, hysteresis, timing, startup posture and inert behavior by default. `code/tests/test_handling_integration.py` checks the real pet to memory/trigger route with a simulated WROOM payload, no robot body or audio hardware. Neither file is a real board test.
 
 **Reused references:** [xioTechnologies Fusion, MIT](https://github.com/xioTechnologies/Fusion), [jrowberg i2cdevlib MPU6050 registers](https://github.com/jrowberg/i2cdevlib), [InvenSense MPU6000/6050 specification](https://jensd.dk/edu/space/cansat/gy80gy87gy88gy91/datasheet/MPU6050.pdf). We reuse actual firmware register/scales and conservative measurement concepts rather than transcribing unrelated full fusion state machines.
+
+Trial files are bounded to 300,000 bytes and must contain one JSON object per
+line, including a terminating newline for the final record. Blank records,
+unterminated captures and malformed JSON are rejected rather than skipped.

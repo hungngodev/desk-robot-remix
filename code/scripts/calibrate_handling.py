@@ -36,15 +36,25 @@ def _reject_nonfinite_handling_json(token: str) -> None:
 
 
 def load_trial_rows(path: Path) -> list[dict]:
-    """Keep actual recorded sample and boot provenance unambiguous."""
-    return [
-        json.loads(
+    """Read a bounded, complete JSONL capture without discarding corrupt rows."""
+    with path.open("rb") as stream:
+        payload = stream.read(300001)
+    if len(payload) > 300000:
+        raise ValueError("Oversized handling trial log")
+    if not payload or not payload.endswith(b"\n"):
+        raise ValueError("Incomplete handling trial log")
+    records = []
+    for row in payload.decode("utf-8").split("\n")[:-1]:
+        if not row.strip():
+            raise ValueError("Blank handling trial record")
+        record = json.loads(
             row, object_pairs_hook=_unique_handling_trial_fields,
             parse_constant=_reject_nonfinite_handling_json,
         )
-        for row in path.read_text(encoding="utf-8").splitlines()
-        if row.strip()
-    ]
+        if not isinstance(record, dict):
+            raise ValueError("Handling trial record must be an object")
+        records.append(record)
+    return records
 
 
 def analyze(records: list[dict]) -> dict:
