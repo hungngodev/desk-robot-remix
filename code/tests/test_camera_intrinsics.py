@@ -3,10 +3,9 @@ from dataclasses import replace
 from io import BytesIO
 
 import pytest
-from PIL import Image
-
 from desk_robot.dock_vision import DockCameraCalibration, detect_apriltag
 from desk_robot.spatial_projection import FloorProjectionCalibration
+from PIL import Image
 
 
 @pytest.mark.parametrize("count", [4, 5, 8, 12, 14])
