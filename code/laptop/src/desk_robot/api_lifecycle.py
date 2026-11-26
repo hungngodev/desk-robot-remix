@@ -1,5 +1,6 @@
 """Mac lifecycle admission; never a physical preflight or motion permit."""
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -35,7 +36,7 @@ async def runtime_lifespan(state: State):
         state.runtime_started = False
         try:
             await state.runtime.close()
-        except Exception as error:
+        except (Exception, asyncio.CancelledError) as error:
             if primary is None:
                 raise
             primary.add_note(f"Runtime shutdown also failed: {type(error).__name__}")
