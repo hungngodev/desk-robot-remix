@@ -56,6 +56,36 @@ def addressed_to_other_pet(
     )
 
 
+def withdraws_readonly_request(
+    transcript: object, *, robot_name: str | None = None,
+    fleet_names: tuple[str, ...] = (),
+) -> bool:
+    """Recognize explicit pauses/withdrawals, never grant physical authority."""
+    if (not isinstance(transcript, str) or not 1 <= len(transcript) <= 2400
+            or "\x00" in transcript):
+        return False
+    spoken = _addressed_request_text(
+        transcript, robot_name=robot_name, fleet_names=fleet_names,
+    )
+    if spoken is None:
+        return False
+    spoken = spoken.strip(" ?!.,;")
+    polite = re.sub(r"^(?:(?:can|could|would|will) you (?:please )?|please )", "", spoken)
+    # Only an explicit final correction withdraws an earlier compound read.
+    # Mere mentions of stop signs, quotations or waiting are ordinary data.
+    if re.search(
+        r"(?:^|[,.!?;]\s*|\s+(?:and|actually)\s+)"
+        r"(?:actually\s+)?(?:never\s*mind|cancel that|forget it)(?:[, ]+please)?$",
+        polite,
+    ):
+        return True
+    return re.fullmatch(
+        r"(?:stop(?: (?:talking|speaking|singing|moving))?|hush|shush|be quiet|"
+        r"wait(?: a (?:second|minute|moment))?|hold on)(?:[, ]+please)?",
+        polite,
+    ) is not None
+
+
 def _advice_only_request(text: str, *, robot_name: str | None = None,
                          fleet_names: tuple[str, ...] = ()) -> bool:
     """Keep how-to advice in natural conversation, not sensor/tool routing."""
@@ -315,7 +345,9 @@ def native_readonly_request(
     spoken = _addressed_request_text(
         text, robot_name=robot_name, fleet_names=fleet_names,
     )
-    if spoken is None:
+    if spoken is None or withdraws_readonly_request(
+        text, robot_name=robot_name, fleet_names=fleet_names,
+    ):
         return None
     spoken = spoken.strip(" ?!.,")
     spoken = re.sub(r"^please\s+", "", spoken)
@@ -352,6 +384,10 @@ def native_readonly_requests_with_capacity(
             or addressed_to_other_pet(
                 transcript, robot_name=robot_name, fleet_names=fleet_names,
             )):
+        return (), False
+    if withdraws_readonly_request(
+        transcript, robot_name=robot_name, fleet_names=fleet_names,
+    ):
         return (), False
     truncated_requested_read = False
     if len(transcript) > 280:

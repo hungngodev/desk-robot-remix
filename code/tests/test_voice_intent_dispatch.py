@@ -94,3 +94,41 @@ def test_visible_answer_remains_an_unverified_interpretation(intents):
         "source": "local_camera_model_guess",
         "interpretation_not_proof": "A blue mug might be visible.",
     }
+
+
+@pytest.mark.parametrize("spoken", [
+    "Stop", "Please hush", "Could you stop talking?", "Wait a second",
+    "Hold on, please", "Never mind", "Check your battery, never mind",
+    "Look at the mug and check the battery. Actually, never mind",
+    "Check your battery actually never mind", "Check your battery and cancel that",
+    "Where is that one? Never mind.", "Hey Pip, please stop speaking",
+])
+def test_explicit_withdrawal_does_not_dispatch_readonly_tools(intents, spoken):
+    kwargs = {"robot_name": "Pip", "fleet_names": ("Pip", "Dot")}
+    assert intents.withdraws_readonly_request(spoken, **kwargs)
+    assert intents.native_readonly_request(spoken, **kwargs) is None
+    assert intents.native_readonly_requests_with_capacity(spoken, **kwargs) == ((), False)
+
+
+@pytest.mark.parametrize("spoken", [
+    "Look at the stop sign", "Do you remember when I said stop?",
+    "Do you remember the movie Never Mind?", "What does hush mean?",
+    "Wait, check your battery", "Come here", "Stop talking and check your battery",
+    'Look at the word "never mind"', "Hey Dot, stop", None, "stop\x00",
+])
+def test_ordinary_mentions_are_not_explicit_withdrawals(intents, spoken):
+    kwargs = {"robot_name": "Pip", "fleet_names": ("Pip", "Dot")}
+    assert not intents.withdraws_readonly_request(spoken, **kwargs)
+
+
+def test_stop_mentions_preserve_explicit_observation_and_memory(intents):
+    visual = "Look at the stop sign"
+    memory = "Do you remember when I said stop?"
+    assert intents.native_readonly_request(visual) == ("look", {"question": visual})
+    assert intents.native_readonly_request(memory) == (
+        "voice-context", {"question": memory},
+    )
+    assert intents.native_readonly_requests("Stop talking and check your battery") == (
+        ("power-status", {}),
+    )
+    assert intents.native_readonly_requests("Come here") == ()

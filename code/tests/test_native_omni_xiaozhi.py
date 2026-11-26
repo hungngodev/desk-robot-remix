@@ -10373,3 +10373,29 @@ async def test_native_model_disconnect_fences_playback_before_supervisor(native,
         if not player.cancelling():
             player.cancel()
         await asyncio.gather(player, model, return_exceptions=True)
+
+
+@pytest.mark.parametrize("spoken", [
+    "Could you check your battery, never mind",
+    "Look at the desk and check the battery. Never mind.",
+    "Where is that one? Never mind.",
+    "Please hush",
+    "Wait a second",
+])
+def test_native_withdrawal_cannot_fall_through_to_readonly_planner(native, spoken):
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session._live_transcript_enabled = True
+    session._tool_dialogue.append((
+        module.time.monotonic(), "Look at the mug on my desk", "",
+    ))
+    assert not session._queue_readonly_tool({
+        "item_id": "withdrawn_read", "transcript": spoken,
+    })
+    assert session._readonly_queue.empty()
+    assert session._readonly_requests == set()

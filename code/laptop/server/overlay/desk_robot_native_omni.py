@@ -45,6 +45,7 @@ from desk_robot_voice_intents import (
     native_readonly_requests_with_capacity,
     pack_grounded_facts,
     prompt_data_json,
+    withdraws_readonly_request,
 )
 from desk_robot_voice_intents import (
     native_readonly_requests as native_readonly_requests,
@@ -1466,6 +1467,12 @@ class NativeOmniSession:
                          transcript, robot_name=self._robot_name,
                          fleet_names=self._fleet_pet_names,
                      ))):
+            return False
+        # A withdrawn turn must not fall through to visual anaphora or the planner.
+        if withdraws_readonly_request(
+            transcript, robot_name=self._robot_name,
+            fleet_names=self._fleet_pet_names,
+        ):
             return False
         requests, over_capacity = native_readonly_requests_with_capacity(
             transcript, robot_name=self._robot_name,
