@@ -1892,12 +1892,18 @@ async def test_interrupt_while_opus_encoding_cannot_resurrect_obsolete_tts(
     )
 
 
-async def test_live_stream_interrupt_fences_remaining_opus_packets(bridge, monkeypatch):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["mac_interrupt", "operator_stop", "group_vad"])
+async def test_live_stream_interrupt_fences_remaining_opus_packets(bridge, monkeypatch, reason):
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: None)
     sent = []
     cleared = []
+    first_packet = asyncio.Event()
+    release_first = asyncio.Event()
     connection = conn("mac-01")
     bridge.register(connection)
     connection.conn_from_mqtt_gateway = False
+    connection.client_listen_mode = "realtime"
     connection.session_id = "session"
     connection.last_activity_time = 0
     connection.clearSpeakStatus = lambda: cleared.append(True)
@@ -1905,9 +1911,11 @@ async def test_live_stream_interrupt_fences_remaining_opus_packets(bridge, monke
     class Socket:
         async def send(self, frame):
             sent.append(frame)
+            if frame == b"first":
+                first_packet.set()
+                await release_first.wait()
 
     connection.websocket = Socket()
-    bridge.register(connection)
     bridge.lease_ids = frozenset({"mac-01"})
     bridge.lease_until = time.monotonic() + 20
 
@@ -1922,23 +1930,41 @@ async def test_live_stream_interrupt_fences_remaining_opus_packets(bridge, monke
         route.resource.canonical: route.handler
         for route in bridge.create_app().router.routes()
     }
-    task = asyncio.create_task(
-        bridge.transmit(connection, "old reply", [b"first", b"second", b"third"])
-    )
-    async with asyncio.timeout(2):
-        while b"first" not in sent:
-            await asyncio.sleep(.001)
-    response = await handlers["/interrupt"](
-        body_request({"device_id": "mac-01"})
-    )
-    assert response.status == 200
-    with pytest.raises(RuntimeError, match="interrupted"):
-        await task
-    assert b"second" not in sent and b"third" not in sent
-    assert any(
-        isinstance(frame, str) and '"flush": true' in frame for frame in sent
-    )
-    assert cleared == [True]
+
+    async def transmit_owned():
+        async with bridge.speaker_lock:
+            await bridge.transmit(connection, "old reply", [b"first", b"second", b"third"])
+
+    task = asyncio.create_task(transmit_owned())
+    try:
+        await asyncio.wait_for(first_packet.wait(), timeout=2)
+        assert not task.done()
+        if reason == "group_vad":
+            assert not await bridge.interrupt_for_user_voice(connection, True)
+            assert await bridge.interrupt_for_user_voice(connection, True)
+            assert bridge.voice_event_history[-1]["kind"] == "group"
+        else:
+            payload = {"device_id": "mac-01"}
+            if reason == "operator_stop":
+                payload["revoke_initiative"] = True
+            response = await handlers["/interrupt"](body_request(payload))
+            assert response.status == 200
+        release_first.set()
+        with pytest.raises(RuntimeError, match="interrupted"):
+            await asyncio.wait_for(task, timeout=2)
+        assert [frame for frame in sent if isinstance(frame, bytes)] == [b"first"]
+        assert any(
+            isinstance(frame, str) and '"flush": true' in frame for frame in sent
+        )
+        assert cleared == [True]
+    finally:
+        release_first.set()
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        if bridge.lease_cleanup_task is not None:
+            await asyncio.wait_for(bridge.lease_cleanup_task, timeout=2)
+
 
 async def test_real_xiaozhi_voice_events_are_authenticated_replayable_metadata(bridge):
     one = conn("mac-01")
