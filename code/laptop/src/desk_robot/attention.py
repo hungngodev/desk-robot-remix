@@ -284,6 +284,7 @@ class AttentionLedger:
             return False
         if (state.sensor_edges and state.sensor_edges[-1][0] == kind
                 and state.sensor_edges[-1][2] == state.generation
+                and state.sensor_details.get(kind) == detail
                 and at - state.sensor_edges[-1][1] < 2.0):
             # Suppress duplicate callbacks during the same short physical
             # interaction, not every subsequent authentic touch of that kind.

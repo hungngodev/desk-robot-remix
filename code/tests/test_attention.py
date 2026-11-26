@@ -925,3 +925,75 @@ def test_hub_asr_consent_uses_exact_source_time_not_rounded_age():
         {"channel": "sensor", "kind": "safety_fault"},
         now=now, enabled=False, consent_started_at=now,
     )
+
+
+def test_simulated_day_attention_preserves_distinct_fault_causes(monkeypatch):
+    """Replay a day of attention receipts, not physical motion or playback."""
+    monkeypatch.setattr("desk_robot.attention.time.monotonic", lambda: 1000.0)
+    ledger = AttentionLedger(["pet", "peer"])
+    pet = "pet"
+    # 1. Boot with no invented context.
+    assert ledger.timeline(pet, 1) == []
+    # 2. Greet.
+    chat = ledger.begin_topic(pet, "Morning chat", 2)
+    # 3. Record transmitted text, not audible playback.
+    assert ledger.sent(pet, "Good morning", 3)
+    assert "playback unverified" in ledger.timeline(pet, 3)[0]["content"]
+    # 4. Complete chat.
+    assert ledger.finish_topic(pet, chat, 4, interrupted=False)
+    # 5. Begin song.
+    song = ledger.begin_topic(pet, "Sing a song", 5)
+    # 6. Transmit a verse.
+    assert ledger.sent(pet, "First verse", 6)
+    # 7. Human interrupts with a key request.
+    ledger.human_started(pet, 7)
+    key_id = "omni_" + "a" * 12 + "_" + "b" * 20
+    assert ledger.heard(pet, key_id, "Find my key", 8, consent_generation=1)
+    # 8. Late song and completion cannot own the next task.
+    assert not ledger.sent(pet, "Old verse", 6.5)
+    assert ledger.finish_topic(pet, song, 9, interrupted=True)
+    fetch = ledger.begin_topic(pet, "Find the key", 10)
+    assert not ledger.finish_topic(pet, song, 11, interrupted=False)
+    ledger.human_ended(pet, 11)
+    # 9. Cliff report during key task.
+    assert ledger.sensor(pet, "safety_fault", 12, detail="floor_out_of_range_ch0")
+    # 10. Exact duplicate within the debounce window is rejected.
+    assert not ledger.sensor(pet, "safety_fault", 12.25, detail="floor_out_of_range_ch0")
+    # 11. A distinct later report after a brief recovery is not a duplicate.
+    # This is receipt replay; the ledger cannot grant that recovery or motion.
+    lift = "floor_out_of_range_upright_lift"
+    assert ledger.sensor(pet, "safety_fault", 13, detail=lift)
+    cue = ledger.timeline(pet, 13)[0]
+    assert "possible lift, not confirmed" in cue["content"]
+    assert "historical, not current telemetry" in cue["content"]
+    assert cue["motor_authorized"] is False
+    assert cue["physical_action_verified"] is False
+    # 12. Replayed older cause and duplicate lift must not replace it.
+    assert not ledger.sensor(pet, "safety_fault", 12.75, detail="floor_out_of_range_ch0")
+    assert not ledger.sensor(pet, "safety_fault", 13.25, detail=lift)
+    # 13. Interrupt task on the reported halt.
+    assert ledger.finish_topic(pet, fetch, 14, interrupted=True)
+    # 14. Pickup conversation, with the original question as uncertain history.
+    ledger.human_started(pet, 15)
+    cue = ledger.timeline(pet, 15, live_consent_generation=1)[0]["content"]
+    assert "Earlier ASR (uncertain context): Find my key" in cue
+    assert "possible lift, not confirmed" in cue
+    # 15. Ask a joke; no compulsory sensor-generated speech.
+    joke_id = "omni_" + "c" * 12 + "_" + "d" * 20
+    assert ledger.heard(pet, joke_id, "Funny ride?", 16, consent_generation=1)
+    assert not ledger.heard(pet, key_id, "Old key request", 17, consent_generation=1)
+    # 16. Putdown report is context, never an arm receipt.
+    assert ledger.sensor(pet, "stable_putdown", 18)
+    ledger.human_ended(pet, 19)
+    assert ledger.timeline(pet, 19)[0]["motor_authorized"] is False
+    # 17. Dock topic does not authenticate charging.
+    dock = ledger.begin_topic(pet, "Return to dock", 20)
+    assert ledger.timeline(pet, 20)[0]["physical_action_verified"] is False
+    # 18. Complete dialogue, not physical docking.
+    assert ledger.finish_topic(pet, dock, 21, interrupted=False)
+    # 19. Consent revocation and peer isolation.
+    cue = ledger.timeline(pet, 22, live_consent_enabled=False)[0]["content"]
+    assert "Funny ride?" not in cue and "Find my key" not in cue
+    assert ledger.timeline("peer", 22) == []
+    # 20. Sleep/idle expiry clears bounded historical attention.
+    assert ledger.timeline(pet, 200) == []
