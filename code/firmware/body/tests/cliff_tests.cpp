@@ -150,6 +150,30 @@ void invalid_configuration() {
   CHECK(!guard.try_rearm(10));
 }
 
+void calibration_accepts_exact_wire_limits() {
+  auto value = config();
+  for (auto& floor : value.floor) floor = {30U, 1300U};
+  value.front_obstacle_mm = 30U;
+  value.front_max_mm = 1300U;
+  CliffGuard guard;
+  CHECK(guard.configure(value));
+  for (std::uint8_t lane = 0; lane < desk_robot::kCliffSensorCount; ++lane)
+    guard.sample(lane, 1300U, true, 100U);
+  CHECK(guard.try_rearm(100U));
+  CHECK(guard.evaluate(100U));
+  for (std::uint8_t lane = 0; lane < desk_robot::kCliffSensorCount; ++lane) {
+    const auto now = 101U + 2U * lane;
+    guard.sample(lane, 1301U, true, now);
+    const auto expected = lane < desk_robot::kFloorSensorCount
+        ? CliffFault::FloorOutOfRange : CliffFault::FrontOutOfRange;
+    CHECK(guard.fault() == expected && guard.fault_sensor() == lane);
+    CHECK(!guard.diagnostic(lane, now).valid);
+    guard.sample(lane, 1300U, true, now + 1U);
+    CHECK(!guard.evaluate(now + 1U));
+    CHECK(guard.try_rearm(now + 1U));
+  }
+}
+
 void each_floor_sensor_latches() {
   for (std::uint8_t sensor = 0; sensor < desk_robot::kFloorSensorCount; ++sensor) {
     for (std::uint16_t distance : {29, 61}) {
@@ -742,6 +766,7 @@ int main(int argc, char** argv) {
   const std::vector<Test> tests = {
       {"boot_and_configuration", boot_and_configuration},
       {"invalid_configuration", invalid_configuration},
+      {"calibration_accepts_exact_wire_limits", calibration_accepts_exact_wire_limits},
       {"each_floor_sensor_latches", each_floor_sensor_latches},
       {"asymmetric_corner_transient_fault_is_immediately_sticky",
        asymmetric_corner_transient_fault_is_immediately_sticky},

@@ -303,8 +303,27 @@ static void explicit_error_mask_matrix() {
   fake_arduino_millis() = saved_clock;
 }
 
+static void raw_range_word_acceptance_is_exact() {
+  // Exhaust the 16-bit wire domain, including both edges and the 8190
+  // no-return word. Keep the expected interval independent of production.
+  for (std::uint32_t mm = 0; mm <= 65535U; ++mm) {
+    std::uint8_t raw[12]{};
+    raw[0] = 11U << 3;
+    raw[7] = 32U;
+    raw[8] = 0x45U;
+    raw[9] = 0x67U;
+    raw[10] = static_cast<std::uint8_t>(mm >> 8);
+    raw[11] = static_cast<std::uint8_t>(mm & 0xffU);
+    const auto decoded = desk_robot::decode_tof_result(raw);
+    CHECK(decoded.distance_mm == mm);
+    CHECK(decoded.signal_97 == 32U && decoded.ambient_97 == 0x4567U);
+    CHECK(decoded.accepted == (mm >= 30U && mm <= 1300U));
+  }
+}
+
 int main() {
   try {
+    raw_range_word_acceptance_is_exact();
     fast_floor_lane_swap();
     check_shared_mux_recovery();
     dropout_matrix_and_partial_mux_recovery();
