@@ -63,6 +63,9 @@ def test_all_five_generated_tags_decode_together(generator):
     for dock_id, marker_id in mapping.items():
         svg = ElementTree.fromstring(generator.build_svg(dock_id, marker_id))
         assert svg.attrib["width"] == svg.attrib["height"] == "70mm"
+        description = svg.findtext("{*}desc") or ""
+        assert f"AprilTag 36h11 marker {marker_id} for dock {dock_id};" in description
+        assert "black side 60 mm; white quiet margin 5 mm each side;" in description
         for rect in svg.findall("{*}rect")[1:]:
             attrs = rect.attrib
             x = (dock_id - 1) * 740 + 20 + round(float(attrs["x"]) * 10)
@@ -74,7 +77,12 @@ def test_all_five_generated_tags_decode_together(generator):
     corners, ids, _ = cv2.aruco.ArucoDetector(dictionary).detectMarkers(canvas)
     assert ids is not None
     assert len(corners) == len(mapping) == 5
-    assert sorted(ids.ravel().tolist()) == sorted(mapping.values())
+    # The set of IDs alone cannot detect tags swapped between physical docks.
+    decoded = {
+        int(np.mean(quad[0, :, 0]) // 740) + 1: int(marker_id)
+        for quad, marker_id in zip(corners, ids.ravel(), strict=True)
+    }
+    assert decoded == mapping
 
 
 @pytest.mark.parametrize("inactive", [
@@ -95,3 +103,21 @@ def test_inactive_cad_examples_do_not_override_dimension(generator, tmp_path):
                     '/* tag_black_side_mm = 50; */\n'
                     'echo("tag_black_side_mm = 40;");\n')
     assert generator.read_dock_geometry(scad)["black_mm"] == 60
+
+
+@pytest.mark.parametrize("before, after", [
+    ("tag_black_side_mm + 2 * tag_white_margin_each_mm", "tag_black_side_mm"),
+    ("tag_paper_side_mm + 2 * tag_paper_slack_each_mm", "tag_paper_side_mm - 2"),
+    ("tag_paper_side_mm + 2 * tag_paper_slack_each_mm", "69"),
+    ("tag_paper_side_mm + 2 * tag_paper_slack_each_mm;",
+     "tag_paper_side_mm + 2 * tag_paper_slack_each_mm;\ntag_pocket_side_mm = 69;"),
+])
+def test_derived_cad_dimension_drift_blocks_print(generator, tmp_path, before, after):
+    scad = tmp_path / "dock.scad"
+    original = generator.SCAD.read_text()
+    assert original.count(before) == 1
+    scad.write_text(original.replace(before, after), encoding="utf-8")
+    output = tmp_path / "dock.svg"
+    with pytest.raises(ValueError, match="Dock marker dimension"):
+        generator.save_or_verify(output, 1, 12, scad=scad)
+    assert not output.exists()

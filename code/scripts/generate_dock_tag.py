@@ -96,20 +96,31 @@ def read_dock_geometry(path: Path = SCAD) -> dict:
         lambda match: '""' if match[0].startswith('"') else " ",
         data.decode("utf-8"),
     )
+
+    def assignment_tail(name: str) -> str:
+        # Count every assignment, including expressions and indented overrides.
+        assignments = list(re.finditer(rf"\b{re.escape(name)}\s*=(?!=)", source))
+        if len(assignments) != 1:
+            raise ValueError("Dock marker dimension missing or ambiguous: " + name)
+        return source[assignments[0].end():]
+
     values = {}
     for name in (
         "tag_black_side_mm", "tag_white_margin_each_mm",
         "tag_paper_slack_each_mm",
     ):
-        # Count every assignment before parsing its value. An expression or
-        # indented override must not hide behind an earlier numeric literal.
-        assignments = list(re.finditer(rf"\b{re.escape(name)}\s*=(?!=)", source))
-        if len(assignments) != 1:
-            raise ValueError("Dock marker dimension missing or ambiguous: " + name)
-        literal = re.match(r"\s*(\d+(?:\.\d+)?)\s*;", source[assignments[0].end():])
+        literal = re.match(r"\s*(\d+(?:\.\d+)?)\s*;", assignment_tail(name))
         if literal is None:
             raise ValueError("Dock marker dimension must be a numeric literal: " + name)
         values[name] = float(literal[1])
+    # CAD derives these dimensions separately from the three literal inputs.
+    # Reject formula drift rather than silently reporting a different pocket.
+    for name, expression in (
+        ("tag_paper_side_mm", r"tag_black_side_mm\s*\+\s*2\s*\*\s*tag_white_margin_each_mm"),
+        ("tag_pocket_side_mm", r"tag_paper_side_mm\s*\+\s*2\s*\*\s*tag_paper_slack_each_mm"),
+    ):
+        if re.match(rf"\s*{expression}\s*;", assignment_tail(name)) is None:
+            raise ValueError("Dock marker dimension formula differs from print geometry: " + name)
     black = values["tag_black_side_mm"]
     margin = values["tag_white_margin_each_mm"]
     slack = values["tag_paper_slack_each_mm"]
