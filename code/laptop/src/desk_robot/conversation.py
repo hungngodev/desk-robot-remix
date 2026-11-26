@@ -628,7 +628,12 @@ class Conversation:
                             receipt,
                             drain_gen.get(robot.id, 0),
                         )
-            except BaseException as exc:
+            except asyncio.CancelledError as exc:
+                # A cancelled child is not a caller cancellation or a STOP receipt.
+                if asyncio.current_task().cancelling():
+                    raise
+                raise RuntimeError("Xiaozhi speaker recovery STOP unconfirmed") from exc
+            except Exception as exc:
                 raise RuntimeError("Xiaozhi speaker recovery STOP unconfirmed") from exc
             if self._has_unsettled_speaker_abort():
                 raise RuntimeError("Xiaozhi speaker recovery STOP unconfirmed")

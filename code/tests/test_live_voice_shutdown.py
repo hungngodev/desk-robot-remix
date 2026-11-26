@@ -1,8 +1,10 @@
 """Shutdown must retain ownership of real voice callback tasks."""
 import asyncio
+from types import SimpleNamespace
 
 import httpx
 import pytest
+from desk_robot.conversation import Conversation
 from desk_robot.live_voice_events import VoiceEventListener
 
 
@@ -92,3 +94,54 @@ async def test_monitor_shutdown_joins_cancellation_resistant_callback(owner):
             )
         assert runner.cancelled()
         assert finished.is_set()
+
+@pytest.mark.parametrize("cancel_caller", [True, False])
+def test_stop_recovery_preserves_caller_cancellation(cancel_caller):
+    async def scenario():
+        entered = asyncio.Event()
+        released = asyncio.Event()
+        pending = set()
+
+        async def interrupt(_robot):
+            entered.set()
+            try:
+                if not cancel_caller:
+                    raise asyncio.CancelledError
+                await asyncio.Event().wait()
+            finally:
+                released.set()
+
+        def track(task):
+            pending.add(task)
+            task.add_done_callback(pending.discard)
+
+        owner = SimpleNamespace(
+            speaker_stop_unconfirmed=True,
+            session_lock=asyncio.Lock(),
+            active=None,
+            settings=SimpleNamespace(robots=[SimpleNamespace(id="r", device_id="head")]),
+            speaker=SimpleNamespace(interrupt=interrupt),
+            _unsettled_speaker_aborts=pending,
+            _has_unsettled_speaker_abort=lambda: any(not task.done() for task in pending),
+            _track_speaker_abort=track,
+        )
+        recovery = asyncio.create_task(Conversation.recover_speaker_stop(owner))
+        try:
+            await asyncio.wait_for(entered.wait(), timeout=1)
+            if cancel_caller:
+                recovery.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(recovery, timeout=1)
+            else:
+                with pytest.raises(RuntimeError, match="STOP unconfirmed"):
+                    await asyncio.wait_for(recovery, timeout=1)
+            await asyncio.wait_for(released.wait(), timeout=1)
+            assert recovery.cancelled() is cancel_caller
+            assert owner.speaker_stop_unconfirmed
+            assert not owner.session_lock.locked()
+        finally:
+            if not recovery.done():
+                recovery.cancel()
+            await asyncio.gather(recovery, *pending, return_exceptions=True)
+
+    asyncio.run(scenario())
