@@ -61,8 +61,8 @@ bool ExpansionTouch::configure_step(std::uint8_t step) {
   switch (step) {
     case 0: {
       std::uint8_t product = 0, manufacturer = 0;
-      return read(0xFD, product) && read(0xFE, manufacturer) &&
-             product == 0x50 && manufacturer == 0x5D;
+      return read(0xFD, product) && product == 0x50 &&
+             read(0xFE, manufacturer) && manufacturer == 0x5D;
     }
     case 1: return configure_bits(0x2A, 0x80, 0x00);  // simultaneous touch
     case 2: return configure_bits(0x38, 0x03, 0x01);  // 37.5% noise threshold

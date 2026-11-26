@@ -5,6 +5,7 @@
 #include "AccessorySensors.h"
 #include "PulsePad.h"
 #include "ExpansionTouch.h"
+#include "../lib/BodyControl/TouchDebounce.h"
 #include "../include/MuxWrite.h"
 TwoWire Wire;
 #define CHECK(x) do { if (!(x)) throw std::runtime_error(#x); } while (false)
@@ -58,6 +59,38 @@ static void check_empty_accessory_mux() {
       CHECK(!angle.present && !angle.valid && angle.sample_seq == 0U);
     CHECK(!pulse.sample().present && !pulse.sample().valid && pulse.sample().sample_seq == 0U);
     CHECK(zones == 0x5a);
+  }
+}
+
+// A populated 0x71 mux is not evidence of a populated CAP1188. Reject
+// floating-bus bytes and foreign IDs without retrying an unverified chip.
+static void check_unverified_cap_keeps_gpio_touch_independent() {
+  for (bool preferred : {false, true}) {
+    for (unsigned fault = 0; fault < 4; ++fault) {
+      TwoWire wire;
+      wire.cap_uses_0x29 = preferred;
+      wire.cap_connected = fault != 0;
+      wire.cap_product_id = fault == 1 ? 0xFF : fault == 2 ? 0x00 : 0x50;
+      wire.cap_manufacturer_id = fault == 3 ? 0xFF : 0x5D;
+      desk_robot::ExpansionTouch cap;
+      CHECK(!cap.begin(wire) && cap.present() && !cap.verified());
+      const unsigned expected_reads[] = {0U, 1U, 1U, 2U};
+      CHECK(wire.cap_register_requests == expected_reads[fault]);
+      const auto after_probe = wire.transactions;
+      std::uint8_t zones = 0x5A;
+      desk_robot::TouchDebounce gpio;
+      for (std::uint32_t ms = 0; ms <= 2000; ms += 25) {
+        cap.invalidate_bus();
+        CHECK(!cap.poll(ms, zones) && zones == 0x5A);
+        CHECK(wire.transactions == after_probe);
+        CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+        const bool edge = gpio.poll(ms >= 75 && ms < 150, ms);
+        CHECK(edge == (ms == 125 || ms == 200));
+        CHECK(gpio.stable() == (ms >= 125 && ms < 200));
+      }
+      CHECK(gpio.baseline_ready());
+      CHECK(wire.cap_interrupt_clears == 0U);
+    }
   }
 }
 
@@ -449,6 +482,7 @@ int main() {
     check_sht_crc_provenance();
     check_mux_write_boundary();
     check_empty_accessory_mux();
+    check_unverified_cap_keeps_gpio_touch_independent();
     check_jaw_adc_rail_isolation();
     check_ads_start_provenance();
     check_pulse_pointer_budget();

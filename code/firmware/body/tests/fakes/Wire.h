@@ -92,6 +92,8 @@ class TwoWire {
   bool ignore_cap_config_write = false;
   bool fail_cap_config_write = false;
   unsigned cap_interrupt_clears = 0;
+  std::uint8_t cap_product_id = 0x50;
+  std::uint8_t cap_manufacturer_id = 0x5D;
   bool cap_connected = true;
   bool cap_uses_0x29 = false; // common generic breakout address
   unsigned cap_register_end_calls = 0;
@@ -447,8 +449,8 @@ class TwoWire {
       if (optional_mux_read_nack) return 0;
       inbound = {extras};
     } else if (addr == 0x29 && extras == 1 && cap_uses_0x29) {
-      if (register_address == 0xFD) inbound = {0x50};
-      else if (register_address == 0xFE) inbound = {0x5D};
+      if (register_address == 0xFD) inbound = {cap_product_id};
+      else if (register_address == 0xFE) inbound = {cap_manufacturer_id};
       else if (register_address == 0x03)
         inbound = {static_cast<std::uint8_t>(cap_touch_bits & cap_input_enable)};
       else if (register_address == 0x21) inbound = {cap_input_enable};
@@ -550,8 +552,8 @@ class TwoWire {
                  humidity[0], humidity[1],
                  desk_robot::sensirion_crc(humidity, 2)};
       pending_sht = false;
-    } else if (addr == 0x28 && register_address == 0xFD) inbound = {0x50};
-    else if (addr == 0x28 && register_address == 0xFE) inbound = {0x5D};
+    } else if (addr == 0x28 && register_address == 0xFD) inbound = {cap_product_id};
+    else if (addr == 0x28 && register_address == 0xFE) inbound = {cap_manufacturer_id};
     else if (addr == 0x28 && register_address == 0x03)
       inbound = {static_cast<std::uint8_t>(cap_touch_bits & cap_input_enable)};
     else if (addr == 0x28 && register_address == 0x21) inbound = {cap_input_enable};
