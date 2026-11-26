@@ -37,7 +37,16 @@ from .operations import (
 )
 from .sensor_event_contract import is_valid_fuel_measurement
 from .transport import Head, HeadError
-from .vision import Detection, Vision, image_size
+from .vision import Detection, Vision, validated_camera_sizes
+
+
+async def _motion_image_size(jpeg: bytes, *, max_bytes: int) -> tuple[int, int]:
+    """Validate pixels on the existing bounded native worker, not the motion loop."""
+    (size,) = await _bounded_head_reply(
+        validated_camera_sizes((jpeg,), max_bytes=max_bytes), seconds=2.0,
+        timeout_message="Camera JPEG validation timeout",
+    )
+    return size
 
 
 async def _bounded_body_stop(head: Head, robot_id: str) -> dict:
@@ -1232,11 +1241,19 @@ class Coordinator:
                     or not jpeg.endswith(b"\xff\xd9")):
                 raise OperationError("Exploration camera returned invalid JPEG")
             try:
-                width, height = image_size(jpeg)
+                width, height = await _motion_image_size(jpeg, max_bytes=512000)
             except (OSError, ValueError, SyntaxError) as exc:
                 raise OperationError("Exploration camera returned invalid JPEG") from exc
             if not 80 <= width <= 2048 or not 80 <= height <= 1536:
                 raise OperationError("Exploration camera returned invalid JPEG dimensions")
+            require_camera_grant()
+            if camera_grant is not None and (
+                time.monotonic() - last_live_frame_at > 1.0
+                or self.multimodal is not media
+                or not media.stream_owns_camera(job.robot_id)
+                or not media.status(job.robot_id)["camera_stream_connected"]
+            ):
+                raise OperationError("Exploration camera expired during JPEG validation")
 
         steps = 0
         # This loop persists until a stop, quiet mode, failure, or disconnect.
@@ -1697,8 +1714,16 @@ class Coordinator:
             jpeg_received_at = time.monotonic()
         # A Mac receipt is NOT actual exposure time; a newer physical
         # stream frame is required for every successive grasp observation.
-        if image_size(jpeg) != (c.image_width, c.image_height):
+        try:
+            size = await _motion_image_size(jpeg, max_bytes=4_000_000)
+        except (OSError, ValueError, SyntaxError) as exc:
+            raise OperationError("Pickup camera returned invalid JPEG") from exc
+        if size != (c.image_width, c.image_height):
             raise OperationError("Camera resolution differs from measured calibration")
+        if self.settings.mode == "hardware":
+            self._pickup_live_media(robot_id, camera_grant)
+            if time.monotonic() - jpeg_received_at > 2.0:
+                raise OperationError("Pickup visual evidence expired during JPEG validation")
         async def detect_current() -> list[Detection]:
             # The queued inference may start after the operator opts out.
             if self.settings.mode == "hardware":

@@ -1005,6 +1005,52 @@ async def test_exploration_rejects_valid_jpeg_with_unusable_dimensions(settings)
         await c.close()
 
 
+@pytest.mark.parametrize("operation", ["explore", "pickup"])
+async def test_motion_camera_validation_runs_outside_event_loop(settings, monkeypatch, operation):
+    import threading
+    from io import BytesIO
+
+    from PIL import Image
+
+    from desk_robot import vision
+    from desk_robot.calibration import Calibration
+
+    owner = threading.get_ident()
+    decoder_threads = []
+    original = vision._open_camera_jpeg
+
+    def record_decoder(*args, **kwargs):
+        decoder_threads.append(threading.get_ident())
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(vision, "_open_camera_jpeg", record_decoder)
+    output = BytesIO()
+    Image.new("RGB", (1, 1), "white").save(output, format="JPEG")
+    frame = output.getvalue()
+    c, head = make(settings)
+
+    async def tiny_camera():
+        return frame
+
+    head.snapshot = tiny_camera
+    try:
+        if operation == "explore":
+            await c.operator_arm("robot-01")
+            job = c.explore("robot-01")
+            await asyncio.wait_for(c.tasks[job.id], timeout=4)
+            assert job.state == "failed"
+            assert "invalid JPEG dimensions" in (job.error or "")
+        else:
+            calibration = Calibration.load(settings.robots[0].calibration)
+            with pytest.raises(OperationError, match="resolution differs"):
+                await c._observe("robot-01", "key", calibration)
+        assert decoder_threads
+        assert all(thread != owner for thread in decoder_threads)
+        assert not any(cmd.startswith("drive ") for cmd in head.commands)
+    finally:
+        await c.close()
+
+
 async def test_exploration_stalled_body_health_times_out_before_motion(settings):
     """Persistent exploration cannot wait indefinitely on a hung status adapter."""
     c, head = make(settings)
