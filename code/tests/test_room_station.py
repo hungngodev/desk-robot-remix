@@ -428,7 +428,8 @@ def test_room_hub_rejects_contradictory_authority_without_replacing_context(fiel
     contradictory = replace(evidence, received_at=12.5, **{field: value})
     with pytest.raises(ValueError, match="read-only and anonymous"):
         hub.remember_room(contradictory)
-    assert hub.shared_room is evidence
+    assert hub.shared_room == evidence
+    assert hub.shared_room is not evidence
     for ident in ids:
         timeline = hub.interaction_timeline(ident, now=13.0)
         assert len(timeline) == 1
@@ -463,6 +464,39 @@ def test_shared_room_is_one_short_lived_context_not_robot_memory_or_vision():
     assert hub.shared_room == evidence
     hub.close()
     assert hub.shared_room is None
+
+
+def test_shared_room_snapshot_is_detached_and_origin_is_identical_for_five_pets():
+    ids = [f"robot-0{i}" for i in range(1, 6)]
+    hub = CameraFrameHub(ids)
+    evidence = accept(frame(), now=12.0)
+    hub.remember_room(evidence)
+    expected = hub.interaction_timeline(ids[0], now=13.0)
+    assert len(expected) == 1
+    assert expected[0]["station_id"] == "room-pod-01"
+    assert expected[0]["station_seq"] == 1
+    assert "630 ppm" in expected[0]["content"]
+    assert "24.0 C" in expected[0]["content"]
+    assert "radar detected an echo" in expected[0]["content"]
+
+    # Neither the producer's mutable payload nor an exposed snapshot can
+    # change the evidence another pet receives.
+    evidence.readings["scd40"]["co2_ppm"] = 9999
+    evidence.sensor_ages_ms["scd40"] = 9999
+    snapshot = hub.shared_room
+    snapshot.readings["bme688"]["temp_c"] = 99
+    snapshot.readings["ld2410c"]["presence"] = False
+    snapshot.readings["amg8833"]["pixels_c"][0] = 99
+    first = hub.interaction_timeline(ids[0], now=13.0)
+    first[0]["station_id"] = ids[0]
+    first[0]["physical_action_verified"] = True
+
+    for ident in ids:
+        assert hub.interaction_timeline(ident, now=13.0) == expected
+        assert not hub.event_history[ident]
+        assert not hub.tool_history[ident]
+    assert hub.shared_room.sensor_ages_ms["scd40"] == 0
+    hub.close()
 
 
 def test_room_configuration_requires_explicit_local_port_and_context_consent():

@@ -16,6 +16,7 @@ from collections import deque
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import aclosing
+from copy import deepcopy
 from dataclasses import dataclass
 from io import BytesIO
 from statistics import median
@@ -311,11 +312,16 @@ class CameraFrameHub:
         }
         # One shared, volatile USB measurement; NEVER copied to any pet memory
         # or treated as an eyewitness, VAD, tool receipt or motor permit.
-        self.shared_room: RoomObservation | None = None
+        self._shared_room: RoomObservation | None = None
         self._room_settings = room_settings
         self._shared_room_grant: int | None = None
         self._room_connection_epoch: int = 0
         self._shared_room_epoch: int | None = None
+
+    @property
+    def shared_room(self) -> RoomObservation | None:
+        """Return a detached snapshot, never the fleet's mutable nested readings."""
+        return deepcopy(self._shared_room)
 
     def _room_grant(self) -> tuple[bool, int | None]:
         """Keep production USB evidence within its original room opt-in."""
@@ -331,7 +337,7 @@ class CameraFrameHub:
 
     def invalidate_room(self, *, epoch: int | None = None) -> int:
         """Clear cached shared room state on USB disconnect or shutdown."""
-        self.shared_room = None
+        self._shared_room = None
         self._shared_room_grant = None
         self._shared_room_epoch = None
         self._room_connection_epoch = (
@@ -362,10 +368,11 @@ class CameraFrameHub:
         allowed, grant = self._room_grant()
         if not allowed or (grant_generation is not None and grant_generation != grant):
             return  # Never admit a shared observation under a different grant.
-        previous = self.shared_room
+        previous = self._shared_room
         if previous is not None and observation.received_at <= previous.received_at:
             return  # An older asynchronous serial callback cannot regress state.
-        self.shared_room = observation
+        # Frozen dataclasses do not freeze nested sensor dictionaries or arrays.
+        self._shared_room = deepcopy(observation)
         self._shared_room_grant = grant
         self._shared_room_epoch = epoch
 
@@ -827,7 +834,7 @@ class CameraFrameHub:
         if not _finite(now) or type(limit) is not int or not 1 <= limit <= 16:
             raise ValueError("Invalid interaction timeline clock or limit")
         items = []
-        room = self.shared_room
+        room = self._shared_room
         allowed, grant = self._room_grant()
         epoch_ok = getattr(self, "_shared_room_epoch", None) == getattr(
             self, "_room_connection_epoch", 0
@@ -841,6 +848,8 @@ class CameraFrameHub:
                     "kind": "shared_room_raw_measurement",
                     "age_ms": round(1000 * (now - room.received_at)),
                     "source": room.source,
+                    "station_id": room.station_id,
+                    "station_seq": room.seq,
                     "content": content,
                     "shared_not_robot_eyewitness": True,
                     "identity_verified": False,
