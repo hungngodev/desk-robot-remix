@@ -26,6 +26,7 @@ from .tof_optics import validate_optics
 
 # HTTPX timeouts are per I/O phase, not a whole finite response deadline.
 _REQUEST_DEADLINE_SECONDS = 3.0
+BODY_STATUS_PROTOCOL = 2
 
 # Sense emits signed int64 esp_timer_get_time() microseconds in both camera routes.
 _MAX_CAMERA_COMPLETE_US = (1 << 63) - 1
@@ -186,7 +187,7 @@ class HttpHead:
 
     def __init__(
         self, config: RobotConfig, client: httpx.AsyncClient,
-        *, strict_capture: bool = False
+        *, strict_capture: bool = False, require_body_protocol: bool = False,
     ):
         self.config = config
         self.pose_fence = PoseFence(config.id)
@@ -197,6 +198,8 @@ class HttpHead:
         self._command_uncertain = False
         self.capture_lock = asyncio.Lock()
         self.strict_capture = strict_capture
+        self.require_body_protocol = require_body_protocol
+        self._body_protocol_verified = not require_body_protocol
         self._last_camera: tuple[int, int, int] | None = None
         self._retired_camera_boots: set[int] = set()
         self._stream_connected = False
@@ -266,6 +269,8 @@ class HttpHead:
     def _check_command_recovery(self, command: str) -> None:
         if self._command_uncertain and command not in self._RECOVERY_COMMANDS:
             raise HeadError("WROOM command outcome unconfirmed; require acknowledged HALT")
+        if not self._body_protocol_verified and command not in self._RECOVERY_COMMANDS:
+            raise HeadError("WROOM status protocol not verified; motion fenced")
 
     async def command(self, command: str, *, dispatch_check=None) -> dict:
         expected = expected_ack(command)
@@ -315,8 +320,16 @@ class HttpHead:
                 data = _response_object(await self._request("GET", "/api/status"))
                 if data.get("robot_id") != self.config.id:
                     raise HeadError("Status robot identity mismatch")
+                if self.require_body_protocol and (
+                    type(data.get("protocol")) is not int
+                    or data["protocol"] != BODY_STATUS_PROTOCOL
+                ):
+                    raise HeadError("Unsupported WROOM status protocol; motion fenced")
+                self._body_protocol_verified = True
                 return data
             except (HeadError, asyncio.CancelledError):
+                if self.require_body_protocol:
+                    self._body_protocol_verified = False
                 # A lost body read also means queued keepalives cannot prove
                 # continuity. Preserve a newer or already pending HALT.
                 if generation == self._command_generation and not self._command_uncertain:

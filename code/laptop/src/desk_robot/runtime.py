@@ -54,7 +54,10 @@ class Runtime:
             vision, chat, speaker = SimulationVision(), SimulatedChat(), SimulatedSpeaker()
             scene = SimulatedScene()
         else:
-            heads = {r.id: HttpHead(r, self.client, strict_capture=True) for r in settings.robots}
+            heads = {
+                r.id: HttpHead(r, self.client, strict_capture=True, require_body_protocol=True)
+                for r in settings.robots
+            }
             vision = YoloWorldVision(settings.vision_weights)
             chat = OllamaChat(settings, self.client)
             speaker = KokoroHeadSpeaker(settings, self.client)
