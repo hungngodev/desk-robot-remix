@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <limits>
+#include <type_traits>
 
 using desk_robot::WheelPoseIntegrator;
 static void check(bool ok) {
@@ -636,7 +637,122 @@ static void pivot_then_straight_at_new_heading() {
   }
 }
 
+static void paired_step_limit_retires_moving_pose() {
+  using Quality = WheelPoseIntegrator::Quality;
+  // Equal physical travel keeps gyro agreement independent of the step limit.
+  // With 100000 nm/count, 250 counts is exactly the 25 mm calibrated limit.
+  for (int direction : {-1, 1}) {
+    WheelPoseIntegrator pose;
+    check(pose.configure(calibration()));
+    for (std::uint32_t i = 1; i <= 3; ++i)
+      check(pose.observe(observed(i, i * 100), i * 100 + 10));
+    check(pose.start_origin(310));
+    check(pose.observe(observed(4, 400, direction * 250, -direction * 250), 410));
+    check(pose.state().x_mm == direction * 25 && pose.state().origin == 1);
+    const auto excess = observed(5, 500, direction * 251, -direction * 251);
+    check(!pose.observe(excess, 510));
+    check(pose.state().quality == Quality::Unavailable && pose.state().origin == 0);
+    check(pose.state().x_mm == 0 && pose.state().sample_seq == 0);
+    check(!pose.observe(excess, 510));
+    check(!pose.start_origin(510));
+    for (std::uint32_t i = 6; i <= 8; ++i)
+      check(pose.observe(observed(i, i * 100), i * 100 + 10));
+    check(pose.start_origin(810));
+    check(pose.state().origin == 2 && pose.state().x_mm == 0);
+  }
+}
+
+static void shaft_delta_boundary_retires_moving_pose() {
+  // A tiny scale keeps the physical travel bound from masking the raw limit.
+  for (int direction : {-1, 1}) {
+    for (bool left_fault : {false, true}) {
+      auto c = calibration();
+      c.left_nm_per_count = c.right_nm_per_count = 1000;
+      WheelPoseIntegrator pose;
+      check(pose.configure(c));
+      for (std::uint32_t i = 1; i <= 3; ++i)
+        check(pose.observe(observed(i, i * 100), i * 100 + 10));
+      check(pose.start_origin(310));
+      check(pose.observe(observed(4, 400, direction * 2047, -direction * 2047), 410));
+      check(pose.state().x_mm == direction * 2);
+      auto bad = observed(5, 500, direction * 2047, -direction * 2047);
+      if (left_fault) bad.wheel.left_delta = direction * 2048;
+      else bad.wheel.right_delta = -direction * 2048;
+      check(!pose.observe(bad, 510));
+      check(pose.state().quality == WheelPoseIntegrator::Quality::Unavailable);
+      check(pose.state().origin == 0 && !pose.start_origin(510));
+    }
+  }
+}
+
+static void integer_encoder_evidence_contract() {
+  // Nonfinite sensor values cannot enter the fixed-point API. Never cast
+  // NaN to an integer to manufacture a reading: that conversion is undefined.
+  static_assert(std::is_integral_v<decltype(desk_robot::AngleRaw::angle)>);
+  static_assert(std::is_integral_v<decltype(desk_robot::WheelPairCapture::Receipt::left_delta)>);
+  static_assert(std::is_integral_v<decltype(desk_robot::WheelPairCapture::Receipt::right_delta)>);
+  static_assert(std::is_integral_v<decltype(WheelPoseIntegrator::Calibration::left_nm_per_count)>);
+  static_assert(std::is_integral_v<decltype(WheelPoseIntegrator::Calibration::right_nm_per_count)>);
+}
+
+static void zero_elapsed_encoder_retires_paired_pose() {
+  using desk_robot::AngleRaw;
+  using desk_robot::WheelAngleCapture;
+  using desk_robot::WheelPairCapture;
+  using PairResult = WheelPairCapture::Result;
+  for (bool left_fault : {false, true}) {
+    for (std::uint32_t start : {100U, 0xffffffd8U}) {
+      WheelAngleCapture left, right;
+      WheelPairCapture pair;
+      WheelPoseIntegrator pose;
+      check(left.configure(4000, 100, 60));
+      check(right.configure(4000, 100, 60));
+      check(pair.configure(10));
+      check(pose.configure(calibration()));
+      const auto raw = [](std::uint32_t seq, std::uint32_t at) {
+        AngleRaw a{};
+        a.present = a.valid = true;
+        a.angle = 100;
+        a.magnet_status = 0x20;
+        a.sample_seq = seq;
+        a.at_ms = at;
+        return a;
+      };
+      const auto capture = [&](AngleRaw l, AngleRaw r, std::uint32_t now) {
+        const auto lr = left.observe(l, now);
+        const auto rr = right.observe(r, now);
+        return pair.observe(lr, rr, l, r, left.last_delta(), right.last_delta(), now);
+      };
+      check(capture(raw(1, start), raw(1, start), start) == PairResult::Waiting);
+      for (std::uint32_t i = 2; i <= 4; ++i) {
+        auto a = raw(i, start + i * 10);
+        check(capture(a, a, a.at_ms) == PairResult::Paired);
+        auto e = observed(i - 1, a.at_ms);
+        e.wheel = pair.receipt();
+        e.imu_at_ms = a.at_ms;
+        check(pose.observe(e, a.at_ms));
+      }
+      check(pose.start_origin(start + 40));
+      auto stale = raw(5, start + 40);
+      auto fresh = raw(5, start + 45);
+      check(capture(left_fault ? stale : fresh, left_fault ? fresh : stale,
+                    fresh.at_ms) == PairResult::Invalid);
+      check(!pair.receipt().valid && !pair.ready_for_origin());
+      auto e = observed(4, fresh.at_ms);
+      e.wheel = pair.receipt();
+      e.imu_at_ms = fresh.at_ms;
+      check(!pose.observe(e, fresh.at_ms));
+      check(pose.state().quality == WheelPoseIntegrator::Quality::Unavailable);
+      check(pose.state().origin == 0 && !pose.start_origin(fresh.at_ms));
+    }
+  }
+}
+
 int main() {
+  zero_elapsed_encoder_retires_paired_pose();
+  integer_encoder_evidence_contract();
+  paired_step_limit_retires_moving_pose();
+  shaft_delta_boundary_retires_moving_pose();
   exact_arc_and_reverse();
   tiny_signed_turns_accumulate();
   large_straight_pose_retires_at_coordinate_bound();
