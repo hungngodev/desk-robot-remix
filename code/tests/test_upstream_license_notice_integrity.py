@@ -1,6 +1,7 @@
 """Preserve the exact license notices from audited upstream revisions."""
 
 import hashlib
+from configparser import ConfigParser
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ NOTICE_BLOBS = (
     ("xiaozhi-esp32-server-MIT.txt", "579a3d73c800727f6aef79322f126226c2937a49"),
     ("Stackchan-agent-MIT.txt", "ddd1d93f9feb78b639e74d04497bacad1ef5ae7f"),
     ("Seeed-PN532-BSD-3-Clause.txt", "30b56bb278d04d11bf857b9475dc534b32c9135c"),
+    ("ld2410-LGPL-2.1.txt", "8000a6faacf471c537530805ab29523c7732e11a"),
 )
 
 
@@ -28,3 +30,20 @@ def test_upstream_license_notice_integrity(filename: str, expected: str) -> None
     header = f"blob {len(data)}\0".encode()
     actual = hashlib.sha1(header + data, usedforsecurity=False).hexdigest()
     assert actual == expected, f"Upstream license notice drift: {filename}"
+
+
+def test_ld2410_pin_matches_distribution_notice() -> None:
+    root = LICENSES.parents[1]
+    config = ConfigParser(interpolation=None)
+    config.read(root / "code/firmware/room_station/platformio.ini")
+    dependencies = config["env"]["lib_deps"].splitlines()
+    assert [dep for dep in dependencies if "ncmreynolds/ld2410" in dep] == [
+        "https://github.com/ncmreynolds/ld2410.git#v0.2.2"
+    ]
+    notice = (root / "THIRD_PARTY_NOTICES.md").read_text().split(
+        "- Room station mmWave presence library", 1
+    )[1].split("\n- ", 1)[0]
+    assert "`ncmreynolds/ld2410` `v0.2.2`" in notice
+    assert "https://github.com/ncmreynolds/ld2410/blob/v0.2.2/LICENSE" in notice
+    assert "[GNU LGPL-2.1](docs/licenses/ld2410-LGPL-2.1.txt)" in notice
+    assert "Section 6(a)" in notice

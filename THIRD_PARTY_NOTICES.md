@@ -34,10 +34,18 @@ fonts, or other assets.
   The complete text is retained in the body firmware notices above.
 - Room station mmWave presence library (`ncmreynolds/ld2410` `v0.2.2`,
   pinned in `code/firmware/room_station/platformio.ini`): licensed under
-  [GNU LGPL-2.1](https://github.com/ncmreynolds/ld2410/blob/v0.2.2/LICENSE).
-  Before distributing any compiled room-station binary, retain the LGPL-2.1
-  notice, provide complete corresponding source/modifications or object
-  files for user relinking, or replace the library with an MIT/BSD driver.
+  [GNU LGPL-2.1](docs/licenses/ld2410-LGPL-2.1.txt)
+  ([exact upstream license](https://github.com/ncmreynolds/ld2410/blob/v0.2.2/LICENSE)).
+  For statically linked room-station firmware, Section 6(a) is one compliance
+  route: distribute the applicable notices and license, complete corresponding
+  library source including modifications, and application object code and/or
+  source plus the materials needed to relink against a modified library.
+  Distribution terms must permit modification for the recipient's own use
+  and reverse engineering to debug such modifications. Other Section 6 routes
+  require their own verification; a notice or upstream link alone is insufficient.
+  Binary distribution remains on HOLD until the linked dependency inventory,
+  source and relinking package are verified for the chosen distribution method
+  (or a compatible replacement driver is qualified), with legal review as needed.
 - SMARS: [original chassis](docs/cad/originals/smars/source.json),
   [stepper remix](docs/cad/originals/smars-stepper/source.json) and
   [forklift](docs/cad/originals/forklift/source.json) retain recorded
