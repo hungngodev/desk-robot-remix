@@ -21,6 +21,7 @@ from pydantic import (
     model_validator,
 )
 
+from .personality_policy import PersonalityProfile
 from .private_files import read_private_env as read_private_env
 
 CredentialEnvName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
@@ -62,6 +63,7 @@ class RobotConfig(BaseModel):
     id: str = Field(pattern=r"^[a-zA-Z0-9_-]{1,40}$")
     name: str
     persona: str = "You are a friendly desk companion. Keep replies to one short sentence."
+    personality_profile: PersonalityProfile = Field(default="balanced", frozen=True)
     head_url: str = "http://127.0.0.1:8081"
     token_env: CredentialEnvName
     # The bridge uses literal identity matching; only an empty string is unmapped.

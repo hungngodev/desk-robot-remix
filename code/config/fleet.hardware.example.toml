@@ -47,6 +47,7 @@ id = "robot-01"
 # This is ONLY identity filtering; physical charging remains disabled.
 dock_beacon_id = 1
 name = "Pip"
+personality_profile = "curious"
 head_url = "http://192.168.1.101:8081" # REPLACE with verified actual head address
 token_env = "DESK_ROBOT_HEAD_01_TOKEN"
 device_id = "" # REPLACE with real unique Xiaozhi device identity
@@ -77,6 +78,7 @@ id = "robot-02"
 # This is ONLY identity filtering; physical charging remains disabled.
 dock_beacon_id = 2
 name = "Dot"
+personality_profile = "calm"
 head_url = "http://192.168.1.102:8081" # REPLACE with verified actual head address
 token_env = "DESK_ROBOT_HEAD_02_TOKEN"
 device_id = "" # REPLACE with real unique Xiaozhi device identity
@@ -107,6 +109,7 @@ id = "robot-03"
 # This is ONLY identity filtering; physical charging remains disabled.
 dock_beacon_id = 3
 name = "Chip"
+personality_profile = "dramatic"
 head_url = "http://192.168.1.103:8081" # REPLACE with verified actual head address
 token_env = "DESK_ROBOT_HEAD_03_TOKEN"
 device_id = "" # REPLACE with real unique Xiaozhi device identity
@@ -137,6 +140,7 @@ id = "robot-04"
 # This is ONLY identity filtering; physical charging remains disabled.
 dock_beacon_id = 4
 name = "Byte"
+personality_profile = "calm"
 head_url = "http://192.168.1.104:8081" # REPLACE with verified actual head address
 token_env = "DESK_ROBOT_HEAD_04_TOKEN"
 device_id = "" # REPLACE with real unique Xiaozhi device identity
@@ -167,6 +171,7 @@ id = "robot-05"
 # This is ONLY identity filtering; physical charging remains disabled.
 dock_beacon_id = 5
 name = "Bob"
+personality_profile = "balanced"
 head_url = "http://192.168.1.105:8081" # REPLACE with verified actual head address
 token_env = "DESK_ROBOT_HEAD_05_TOKEN"
 device_id = "" # REPLACE with real unique Xiaozhi device identity

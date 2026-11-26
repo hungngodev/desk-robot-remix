@@ -44,6 +44,7 @@ from .initiative_policy import (
 )
 from .memory import CameraProvenance, MemoryStore
 from .operations import _bounded_head_reply
+from .personality_policy import expression_guidance, passive_interval
 from .sensor_event_contract import (
     DIRECT_INTERACTION_KINDS,
     PHYSICAL_INITIATIVE_KINDS,
@@ -2851,7 +2852,8 @@ class PetController:
             not self.voice_monitor_ready
             or self._human_active_in_fleet(now)
             or cooldown_pending(
-                now=now, last=self._group_last_spoken, interval=self.speech_cooldown,
+                now=now, last=self._group_last_spoken,
+                interval=passive_interval(robots[index].personality_profile, self.speech_cooldown),
             )
             or self.conversation.active is not None
             or (self._speech_task is not None and not self._speech_task.done())
@@ -2971,10 +2973,17 @@ class PetController:
                 state.suppressed += 1
                 state.last_initiative_suppression = "repeated_camera_scene"
                 return
+        direct_interaction = change.kind in _DIRECT_INTERACTION_KINDS
+        passive_floor = (
+            self.speech_cooldown if direct_interaction and not camera_derived
+            else passive_interval(
+                self.settings.robot(robot_id).personality_profile, self.speech_cooldown,
+            )
+        )
         relevant_cooldown = event_cooldown(
             camera_derived=camera_derived,
-            direct_interaction=change.kind in _DIRECT_INTERACTION_KINDS,
-            speech_interval=self.speech_cooldown,
+            direct_interaction=direct_interaction,
+            speech_interval=passive_floor,
             interaction_interval=self.interaction_cooldown,
         )
         quiet_veto = quiet_voice_veto(
@@ -3664,7 +3673,8 @@ class PetController:
         if scheduled_activity:
             system_text = (
                 robot.persona
-                + " You are a curious but unobtrusive desktop companion. "
+                + " " + expression_guidance(robot.personality_profile)
+                + " You are an unobtrusive desktop companion. "
                 "This is a scheduled activity reconsideration, not a new "
                 "camera, microphone or sensor observation. Preserve the "
                 "user's ongoing topic and unfinished activities when useful. "
@@ -3687,7 +3697,8 @@ class PetController:
         else:
             system_text = (
                 robot.persona
-                + " You are a curious but unobtrusive desktop companion. "
+                + " " + expression_guidance(robot.personality_profile)
+                + " You are an unobtrusive desktop companion. "
                 "A new sensor or camera event updates the situation; it is not "
                 "itself a request to speak, switch topics, or adopt a "
                 "fixed emotion. Preserve the user's ongoing topic and "
