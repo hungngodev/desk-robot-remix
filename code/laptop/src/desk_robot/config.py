@@ -22,7 +22,7 @@ from pydantic import (
     model_validator,
 )
 
-from .fleet_identity import device_identity_key
+from .fleet_identity import device_identity_key, valid_unique_robot_ids
 from .personality_policy import PersonalityProfile
 from .private_files import read_private_env as read_private_env
 from .serial_device import is_local_serial_path
@@ -244,7 +244,7 @@ class Settings(BaseModel):
         ids = [r.id for r in self.robots]
         # Per-pet SQLite filenames may alias on a case-insensitive Mac APFS
         # volume. Reject case variants before initializing any fleet services.
-        if not ids or len({robot_id.casefold() for robot_id in ids}) != len(ids):
+        if not valid_unique_robot_ids(ids):
             raise ValueError("At least one robot and unique robot IDs are required")
         credential_names = [
             self.coordinator_token_env,

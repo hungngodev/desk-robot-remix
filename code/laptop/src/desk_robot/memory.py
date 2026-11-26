@@ -22,6 +22,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
+from .fleet_identity import valid_unique_robot_ids
 from .private_files import (
     is_private_robot_id,
     validate_private_directory_ancestry,
@@ -187,8 +188,7 @@ class MemoryStore:
         self.robot_ids = frozenset(robot_ids)
         # The Mac's APFS volume may be case insensitive. Different Python
         # identifiers must not silently share one physical SQLite filename.
-        if (len(self.robot_ids) != len(robot_ids)
-                or len({robot.casefold() for robot in robot_ids}) != len(robot_ids)):
+        if not valid_unique_robot_ids(robot_ids):
             raise ValueError("Duplicate robot memory identities are not allowed")
         # An ancestor alias bypasses a check of the final directory alone.
         # Refuse it BEFORE mkdir can create private records in another tree.

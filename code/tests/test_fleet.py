@@ -60,6 +60,40 @@ def test_fleet_rejects_case_aliases_before_private_memory_setup(fleet):
     assert [robot.id for robot in accepted.robots] == IDS
 
 
+@pytest.mark.parametrize("bad_id", ["", " ", " robot-01", "robot-01\t", "NUL", None])
+def test_fleet_rejects_invalid_private_identity(fleet, bad_id):
+    config = fleet.model_dump()
+    config["robots"][1]["id"] = bad_id
+    with pytest.raises(ValueError):
+        type(fleet).model_validate(config)
+
+
+def test_fleet_rejects_missing_robot_identity(fleet):
+    config = fleet.model_dump()
+    del config["robots"][1]["id"]
+    with pytest.raises(ValueError):
+        type(fleet).model_validate(config)
+
+
+def test_fleet_display_labels_do_not_select_private_memory(fleet, tmp_path):
+    config = fleet.model_dump()
+    config["robots"][0]["name"] = IDS[1]
+    config["robots"][1]["name"] = IDS[1]
+    accepted = type(fleet).model_validate(config)
+    assert [robot.id for robot in accepted.robots] == IDS
+    memory = MemoryStore(tmp_path, IDS)
+    for robot_id, note in [(IDS[0], "First pet note"), (IDS[1], "Second pet note")]:
+        assert memory.remember(
+            robot_id, "own_note", note, kind="note", source_robot=robot_id, witnessed=True,
+        )
+    first = memory.get_episode(IDS[0], "own_note")
+    second = memory.get_episode(IDS[1], "own_note")
+    assert first is not None and first.summary == "First pet note"
+    assert second is not None and second.summary == "Second pet note"
+    assert first.source_robot == IDS[0] and second.source_robot == IDS[1]
+    assert memory.count(IDS[2]) == 0
+
+
 async def test_five_round_robin_broadcasts_every_line_to_all_peers(fleet):
     class UniqueChat:
         def __init__(self):
