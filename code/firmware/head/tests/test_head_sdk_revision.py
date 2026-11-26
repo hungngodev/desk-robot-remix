@@ -1,6 +1,7 @@
 """Exercise the real build wrapper against a synthetic local SDK checkout."""
 
 import json
+import shlex
 import shutil
 import subprocess
 import sys
@@ -23,7 +24,9 @@ def head_build(tmp_path):
     shutil.copyfile(CODE / "scripts/build_head.sh", scripts / "build_head.sh")
     build = code / "firmware/head/build/xiaozhi-sense"
     (build / "scripts").mkdir(parents=True)
-    (build / "scripts/build.py").write_text('print("BUILD_RAN")\n')
+    (build / "scripts/build.py").write_text(
+        'import json, sys\nprint("BUILD_RAN")\nprint(json.dumps(sys.argv[1:]))\n'
+    )
     (code / "firmware/head/dependencies.lock").write_text("locked\n")
     tools = tmp_path / ".tools"
     sdk = tools / "esp-idf"
@@ -104,3 +107,29 @@ def test_head_build_rejects_missing_canonical_component_lock(head_build, existin
     (code / "firmware/head/dependencies.lock").unlink()
     assert_rejected(run_build(code), "dependencies.lock")
     assert local.exists() == existing_lock
+
+
+def test_documented_sense_build_modes_forward_exact_arguments(head_build):
+    code, _, _ = head_build
+    readme = (CODE / "firmware/head/sense/README.md").read_text()
+    commands = [
+        shlex.split(line) for line in readme.splitlines()
+        if line.startswith("bash scripts/build_head.sh ")
+    ]
+    assert len(commands) == 2
+    assert commands == [
+        ["bash", "scripts/build_head.sh", "--board", "sense"],
+        ["bash", "scripts/build_head.sh", "--board", "sense", "--private"],
+    ]
+    common = ["desk-robot/desk-robot-sense-s3", "--name", "desk-robot-sense-s3",
+              "--language", "en-US"]
+    expected = [
+        common + ["--wake-word", "disabled"],
+        common + ["--config", "config.private.json", "--wake-word", "hiesp"],
+    ]
+    for command, arguments in zip(commands, expected, strict=True):
+        result = subprocess.run(
+            command, cwd=code, capture_output=True, text=True, timeout=10, check=False,
+        )
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout.splitlines()[-1]) == arguments
