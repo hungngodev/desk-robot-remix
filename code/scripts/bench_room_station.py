@@ -19,6 +19,9 @@ from typing import Callable
 from desk_robot.room_station import SENSORS, STATION, RoomObservation, RoomSerialFeed
 from desk_robot.serial_device import is_local_serial_path
 
+# Twice the nominal maximum one-hour report count, independent of USB rate.
+MAX_CAPTURE_FRAMES = 7200
+
 
 def _git_sha() -> str | None:
     """Stamp an exact source commit only for a verified clean checkout.
@@ -74,8 +77,13 @@ def capture(
     new_sensor_acquisitions = dict.fromkeys(SENSORS, 0)
     reused_sensor_samples = dict.fromkeys(SENSORS, 0)
     last_sensor_sample_ms: dict[str, int] = {}
+    capture_limit_exceeded = False
 
     def observed(item: RoomObservation) -> None:
+        nonlocal capture_limit_exceeded
+        if len(sequence) >= MAX_CAPTURE_FRAMES:
+            capture_limit_exceeded = True
+            raise ValueError("Room station bench frame budget exceeded")
         if (not isinstance(item, RoomObservation) or item.motion_authorized
                 or item.charging_authorized or item.person_identified):
             raise ValueError("Room USB data must never carry action or identity authority")
@@ -133,7 +141,7 @@ def capture(
     try:
         # Use the same decoder, newline and replay fencing as runtime. One
         # connection, no automatic reconnect that could mask USB outages.
-        reader._read_port(lambda: clock() < deadline)
+        reader._read_port(lambda: not capture_limit_exceeded and clock() < deadline)
     except Exception as exc:
         error = type(exc).__name__
 
@@ -183,6 +191,7 @@ def capture(
         # 3,601 receptions with one repeated uint32 ID still have zero gaps.
         and all(((b - a) & 0xffffffff) == 1
                 for a, b in zip(sequence[:-1], sequence[1:], strict=True))
+        and not capture_limit_exceeded
         and reader.rejected == 0
         and reader.callback_failures == 0
         and error is None
@@ -200,6 +209,7 @@ def capture(
         "requested_seconds": seconds,
         "observed_seconds": round(elapsed, 3),
         "accepted_frames": len(sequence),
+        "capture_limit_exceeded": capture_limit_exceeded,
         "rejected_frames": reader.rejected,
         "callback_failures": reader.callback_failures,
         "serial_error_type": error,
@@ -220,6 +230,7 @@ def capture(
         "station_report_cadence_consistent": station_report_cadence_consistent,
         "read_only_usb_sample_captured": (
             bool(sequence) and receive_clock_consistent and error is None
+            and not capture_limit_exceeded
             and reader.callback_failures == 0
         ),
         "device_identity_authenticated": False,

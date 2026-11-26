@@ -666,3 +666,72 @@ def test_room_cli_exit_requires_requested_diagnostic_receipt(
         main()
     assert json.loads(report.read_text()) == result
     assert json.loads(capsys.readouterr().out) == result
+
+
+def test_room_bench_serial_flood_bounds_capture_and_expires_cached_sample(monkeypatch):
+    from types import SimpleNamespace
+
+    import desk_robot.room_station as room
+
+    # Twice the maximum nominal one-hour report count. Exercise the real
+    # capture budget, not a shortened test-only value.
+    budget = 7200
+    now = 0.0
+
+    class FloodPort:
+        writes = 0
+        closed = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            self.closed = True
+
+        def write(self, request):
+            index = self.writes
+            self.writes += 1
+            assert index <= budget, "reader did not stop at capture budget"
+            now_frame = json.loads(_packet(index, 1000 + index))
+            now_frame["readings"]["scd40"]["sample_ms"] = 1000
+            self.lines = iter((
+                b"SYNC_ACK " + request.split()[1] + b"\r\n",
+                b"{bad}\n",
+                b"x" * (room.MAX_FRAME_BYTES + 1),
+                b"discarded suffix\n",
+                json.dumps(now_frame).encode() + b"\n",
+            ))
+            return len(request)
+
+        def read_until(self, delimiter, *, size):
+            nonlocal now
+            assert delimiter == b"\n"
+            assert size == room.MAX_FRAME_BYTES + 1
+            line = next(self.lines)
+            if line.startswith(b'{"v"'):
+                now = (self.writes - 1) / 500
+            return line
+
+    port = FloodPort()
+    monkeypatch.setattr(room, "require_local_serial_device", lambda _: None)
+    monkeypatch.setattr(room, "time", SimpleNamespace(monotonic=lambda: now))
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=lambda *a, **kw: port))
+    report = capture("/dev/cu.flood", seconds=60, clock=lambda: now)
+
+    assert port.closed and port.writes == budget + 1
+    assert report["accepted_frames"] == budget
+    assert report["rejected_frames"] == 2 * (budget + 1)
+    assert report["callback_failures"] == 1
+    assert report["capture_limit_exceeded"] is True
+    assert report["serial_error_type"] is None
+    assert report["last_station_sequence"] == budget - 1
+    assert report["missing_station_sequences"] == 0
+    # A repeated SCD40 conversion expires on the Mac after 8.5 seconds,
+    # even while new report IDs and a slower source clock keep arriving.
+    assert report["valid_sensor_frames"]["scd40"] == 4251
+    assert report["new_sensor_acquisitions"]["scd40"] == 1
+    assert report["reused_sensor_samples"]["scd40"] == 4250
+    assert report["read_only_usb_sample_captured"] is False
+    assert report["one_hour_usb_continuity_screen_pass"] is False
+    assert report["motion_authorized"] is False
+    assert report["charging_verified"] is False
