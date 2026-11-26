@@ -279,6 +279,8 @@ class Coordinator:
             raise OperationError("Coordinator closing")
         if not robot.motion_enabled:
             raise OperationError("motion_enabled=false; no arm sent")
+        if self.dock_inhibited(robot_id):
+            raise OperationError("Robot seated or powered on dock; no permit granted")
         if self._stop_confirmations.blocked(robot_id):
             raise OperationError("WROOM STOP pending or unconfirmed; require acknowledged halt")
         voice_reason = self.voice_blocks_motion()
@@ -1008,6 +1010,8 @@ class Coordinator:
         table[robot_id] = flag
         if not flag:
             return
+        # Clearing dock telemetry must never revive an earlier operator grant.
+        self._retire_permit(robot_id)
         discard = getattr(self, "discard_deferred_motion", None)
         if callable(discard):
             discard(robot_id=robot_id, reason="Robot seated or powered on dock")

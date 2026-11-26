@@ -2555,3 +2555,46 @@ async def test_cancelled_arm_receipt_cannot_start_motion_workers(settings):
         assert not head.armed
     finally:
         await c.close()
+
+
+async def test_dock_inhibition_retires_permit_until_explicit_operator_arm(settings):
+    c, head = make(settings)
+    try:
+        await c.operator_arm("robot-01")
+        epoch = c._permit_epoch["robot-01"]
+        c.set_dock_charge_inhibition("robot-01", True)
+        assert c._permit_epoch["robot-01"] > epoch
+        with pytest.raises(OperationError, match="seated or powered"):
+            await c.operator_arm("robot-01")
+        c.set_dock_charge_inhibition("robot-01", False)
+        with pytest.raises(OperationError, match="permit"):
+            c.manual("robot-01", "drive 20 20 100")
+        assert head.commands == []
+        assert (await c.operator_arm("robot-01"))["operator_permit"] is True
+    finally:
+        await c.close()
+
+
+async def test_dock_inhibition_supersedes_inflight_operator_preflight(settings):
+    c, head = make(settings)
+    started, resume = asyncio.Event(), asyncio.Event()
+
+    async def delayed_preflight(_robot_id):
+        started.set()
+        await resume.wait()
+
+    c._hardware_preflight = delayed_preflight
+    pending = asyncio.create_task(c.operator_arm("robot-01"))
+    try:
+        await asyncio.wait_for(started.wait(), timeout=1)
+        c.set_dock_charge_inhibition("robot-01", True)
+        c.set_dock_charge_inhibition("robot-01", False)
+        resume.set()
+        with pytest.raises(OperationError, match="superseded"):
+            await asyncio.wait_for(pending, timeout=1)
+        assert "robot-01" not in c.permits
+        assert head.commands == []
+    finally:
+        resume.set()
+        await asyncio.gather(pending, return_exceptions=True)
+        await c.close()
