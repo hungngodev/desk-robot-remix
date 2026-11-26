@@ -35,7 +35,7 @@ bool read_thermal_chunk(WireLike& wire, std::uint8_t address,
   const int acknowledged = wire.endTransmission(!wrote);
   if (!wrote || acknowledged != 0) return false;
   if (wire.requestFrom(address, kBytes, true) != kBytes ||
-      wire.available() < kBytes) return false;
+      wire.available() != kBytes) return false;
   std::uint8_t raw[kBytes]{};
   for (std::uint8_t i = 0; i < kBytes; ++i) {
     const int value = wire.read();

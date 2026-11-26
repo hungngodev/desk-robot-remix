@@ -8,7 +8,8 @@
 struct FakeWire {
   std::uint8_t selected = 0;
   std::uint8_t reg = 0;
-  std::array<std::uint8_t, 16> data{};
+  std::array<std::uint8_t, 128> data{};
+  int available_delta = 0;
   int cursor = 0;
   int requests = 0;
   bool write_failure = false;
@@ -33,11 +34,11 @@ struct FakeWire {
     cursor = 0;
     return short_read ? 15 : 16;
   }
-  int available() { return 16 - cursor; }
+  int available() { return 16 - cursor + available_delta; }
   int read() {
     if (invalid_byte && cursor == 7) return -1;
     if (oversized_byte && cursor == 15) return 256;
-    return data[static_cast<std::size_t>(cursor++)];
+    return data[static_cast<std::size_t>(reg - 0x80 + cursor++)];
   }
 };
 
@@ -50,7 +51,10 @@ int main() {
     const unsigned raw = static_cast<unsigned>(quarters) & 0xfffU;
     const auto low = static_cast<std::uint8_t>(raw);
     const auto high = static_cast<std::uint8_t>(raw >> 8);
-    assert(thermal_pixel_quarters(low, high) == quarters);
+    for (unsigned reserved = 0; reserved < 16; ++reserved) {
+      const auto decorated = static_cast<std::uint8_t>(high | (reserved << 4));
+      assert(thermal_pixel_quarters(low, decorated) == quarters);
+    }
     float decoded = 900.0f;
     const bool in_range = quarters >= 0 && quarters <= 320;
     assert(decode_thermal_pixel(low, high, decoded) == in_range);
@@ -72,7 +76,7 @@ int main() {
   assert(!decode_thermal_pixel(0xff, 0x07, c) && c == 80.0f);
 
   FakeWire bus;
-  for (std::size_t i = 0; i < 8; ++i) {
+  for (std::size_t i = 0; i < 64; ++i) {
     bus.data[2 * i] = 0x64;  // each pixel 25 C
     bus.data[2 * i + 1] = 0;
   }
@@ -101,6 +105,12 @@ int main() {
   bus.short_read = true;
   assert(!read_thermal_chunk(bus, 0x69, 0, frame.data(), frame.size()));
   bus.short_read = false;
+  for (int delta : {-1, 1}) {
+    bus.available_delta = delta;
+    assert(!read_thermal_chunk(bus, 0x69, 0, frame.data(), frame.size()));
+    for (float pixel : frame) assert(pixel == 25.0f);
+  }
+  bus.available_delta = 0;
   bus.invalid_byte = true;
   assert(!read_thermal_chunk(bus, 0x69, 0, frame.data(), frame.size()));
   bus.invalid_byte = false;
@@ -121,5 +131,23 @@ int main() {
   for (std::size_t i = 0; i < 7; ++i) assert(frame[i] == 20.0f);
   assert(frame[7] == 80.0f);
   for (std::size_t i = 8; i < 64; ++i) assert(frame[i] == 25.0f);
+  // Distinct register values expose repeated, reordered or byte-swapped pixels.
+  for (std::size_t i = 0; i < frame.size(); ++i) {
+    const unsigned raw = 256U + static_cast<unsigned>(i);
+    bus.data[2 * i] = static_cast<std::uint8_t>(raw);
+    bus.data[2 * i + 1] = static_cast<std::uint8_t>(raw >> 8);
+  }
+  for (std::uint8_t chunk = 0; chunk < 8; ++chunk) {
+    assert(read_thermal_chunk(bus, 0x69, chunk, frame.data() + chunk * 8, 8));
+  }
+  for (std::size_t i = 0; i < frame.size(); ++i)
+    assert(frame[i] == 64.0f + 0.25f * static_cast<float>(i));
+  const auto previous = frame;
+  bus.data[112] = 0x64;
+  bus.data[113] = 0;  // first pixel of last chunk now 25 C
+  bus.data[126] = 0xff;
+  bus.data[127] = 0x0f;  // final pixel -0.25 C: reject entire chunk
+  assert(!read_thermal_chunk(bus, 0x69, 7, frame.data() + 56, 8));
+  assert(frame == previous);
   std::cout << "PASS room thermal 8x16 I2C chunks, bounded AMG8833 pixels, atomic chunk and faults\n";
 }
