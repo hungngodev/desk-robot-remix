@@ -145,9 +145,13 @@ int main() {
 ''')
     executable = tmp_path / "epoch"
     includes = ROOT / "code/firmware/room_station/src"
-    subprocess.run([
+    command = [
         compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
-        "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
-        f"-I{includes}", str(source), "-o", str(executable),
-    ], check=True, capture_output=True, text=True, timeout=30)
+        "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
+        "-fno-omit-frame-pointer", f"-I{includes}",
+    ]
+    if sys.platform.startswith("linux"):
+        command.append("-no-pie")
+    subprocess.run([*command, str(source), "-o", str(executable)],
+                   check=True, capture_output=True, text=True, timeout=30)
     subprocess.run([str(executable)], check=True, capture_output=True, text=True, timeout=15)
