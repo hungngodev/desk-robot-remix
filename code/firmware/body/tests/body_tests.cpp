@@ -2,6 +2,7 @@
 #include "BodyCommandParser.h"
 #include "AttitudeNorm.h"
 #include "CliffGuard.h"
+#include "StoredCliffCalibration.h"
 #include "RangeSampleClock.h"
 
 #include <cstdint>
@@ -50,6 +51,71 @@ static_assert(desk_robot::range_sample_expired(true, true, 200U, 0U),
               "critical expiry at 200 ms");
 static_assert(!desk_robot::range_sample_expired(true, false, 350U, 0U),
               "side freshness includes 350 ms");
+
+void stored_cliff_calibration_v1() {
+  using namespace desk_robot;
+  CliffConfig config{};
+  config.calibrated = true;
+  for (unsigned i = 0; i < kFloorSensorCount; ++i) {
+    config.floor[i].min_mm = 35 + i;
+    config.floor[i].max_mm = 50 + i;
+  }
+  config.front_obstacle_mm = 90;
+  config.front_max_mm = 1200;
+  config.freshness_ms = 100;
+  const auto bytes = encode_stored_calibration(config);
+  // Independently reproduce the previous native v1 record and checksum.
+  struct Legacy {
+    std::uint32_t magic, version;
+    CliffConfig config;
+    std::uint32_t checksum;
+  };
+  Legacy old{};
+  old.magic = 0x434C4635U;
+  old.version = 1;
+  old.config = config;
+  std::uint32_t hash = 2166136261U;
+  auto add = [&hash](std::uint8_t b) { hash = (hash ^ b) * 16777619U; };
+  auto half = [&add](std::uint16_t v) { add(v); add(v >> 8); };
+  add(1);
+  for (auto f : config.floor) { half(f.min_mm); half(f.max_mm); }
+  half(config.front_obstacle_mm);
+  half(config.front_max_mm);
+  for (unsigned i = 0; i < 32; i += 8) add(config.freshness_ms >> i);
+  old.checksum = hash;
+  static_assert(sizeof(old) == 40, "legacy layout");
+  StoredCliffCalibration legacy{};
+  std::memcpy(legacy.data(), &old, legacy.size());
+  for (unsigned i : {9U, 30U, 31U}) legacy[i] = 0xff;
+  CliffConfig decoded{};
+  CHECK(decode_stored_calibration(legacy, decoded));
+  CHECK(encode_stored_calibration(decoded) == bytes);
+  for (unsigned i = 0; i < bytes.size(); ++i) {
+    if (i == 9 || i == 30 || i == 31) continue;
+    auto corrupted = bytes;
+    corrupted[i] ^= 1;
+    CHECK(!decode_stored_calibration(corrupted, decoded));
+    CHECK(encode_stored_calibration(decoded) == bytes);
+  }
+  for (unsigned i = 0; i < 256; ++i) {
+    if (i == 1) continue;
+    auto corrupted = bytes;
+    corrupted[8] = static_cast<std::uint8_t>(i);
+    write_calibration_le(corrupted, 36, 4, stored_calibration_checksum(corrupted));
+    CHECK(!decode_stored_calibration(corrupted, decoded));
+  }
+  CliffGuard guard;
+  CHECK(guard.configure(decoded));
+  CHECK(!guard.try_rearm(0));
+  for (auto age : {0U, 29U, 201U, 0xffffffffU}) {
+    auto invalid = bytes;
+    write_calibration_le(invalid, 32, 4, age);
+    write_calibration_le(invalid, 36, 4, stored_calibration_checksum(invalid));
+    CHECK(decode_stored_calibration(invalid, decoded));
+    CHECK(!guard.configure(decoded));
+    CHECK(!guard.try_rearm(0));
+  }
+}
 
 void range_sample_clock_boundaries() {
   using desk_robot::range_sample_accepts;
@@ -1054,6 +1120,7 @@ void deterministic_stream_stress() {
 int main(int argc, char** argv) {
   using Test = std::pair<const char*, void (*)()>;
   const std::vector<Test> tests = {
+      {"stored_cliff_calibration_v1", stored_cliff_calibration_v1},
       {"range_sample_clock_boundaries", range_sample_clock_boundaries},
       {"attitude_norm_root_boundaries", attitude_norm_root_boundaries},
       {"optional_inputs_preserve_raw_stop_and_event_history",

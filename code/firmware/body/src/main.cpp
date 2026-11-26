@@ -51,6 +51,7 @@
 #endif
 #if DESK_ROBOT_FULL_SENSORS
 #include "CliffGuard.h"
+#include "StoredCliffCalibration.h"
 #include "BerryImu.h"
 #include "StepperDrive.h"
 #include "DcDutyRamp.h"
@@ -165,66 +166,32 @@ void poll_touch(std::uint32_t now_ms) {
 // Nonvolatile calibration is written only by a completed local USB commit.
 // The hardware never resumes movement after reboot, even with valid stored
 // thresholds: CliffGuard starts MissingSample and requires local USB rearm.
-struct StoredCalibration {
-  std::uint32_t magic;
-  std::uint32_t version;
-  desk_robot::CliffConfig config;
-  std::uint32_t checksum;
-};
-constexpr std::uint32_t kCalibrationMagic = 0x434C4635U; // "CLF5"
-constexpr std::uint32_t kCalibrationVersion = 1U;
-
-std::uint32_t calibration_checksum(const desk_robot::CliffConfig& c) {
-  std::uint32_t value = 2166136261U;
-  auto byte = [&value](std::uint8_t n) { value = (value ^ n) * 16777619U; };
-  auto halfword = [&byte](std::uint16_t n) {
-    byte(static_cast<std::uint8_t>(n));
-    byte(static_cast<std::uint8_t>(n >> 8));
-  };
-  byte(c.calibrated ? 1U : 0U);
-  for (const auto& interval : c.floor) {
-    halfword(interval.min_mm);
-    halfword(interval.max_mm);
-  }
-  halfword(c.front_obstacle_mm);
-  halfword(c.front_max_mm);
-  for (unsigned bits = 0; bits < 32; bits += 8) {
-    byte(static_cast<std::uint8_t>(c.freshness_ms >> bits));
-  }
-  return value;
-}
-
 bool load_calibration() {
   Preferences preferences;
   if (!preferences.begin("cliffsafety", true)) return false;
+  desk_robot::StoredCliffCalibration saved{};
   const bool right_length =
-      preferences.getBytesLength("calibration") == sizeof(StoredCalibration);
-  StoredCalibration saved{};
+      preferences.getBytesLength("calibration") == saved.size();
   const size_t read = right_length
-      ? preferences.getBytes("calibration", &saved, sizeof(saved)) : 0;
+      ? preferences.getBytes("calibration", saved.data(), saved.size()) : 0;
   preferences.end();
-  if (read != sizeof(saved) ||
-      saved.magic != kCalibrationMagic ||
-      saved.version != kCalibrationVersion ||
-      !desk_robot::valid_stored_calibrated_flag(saved.config) ||
-      saved.checksum != calibration_checksum(saved.config)) return false;
-  return cliff_guard.configure(saved.config);
+  desk_robot::CliffConfig decoded{};
+  return read == saved.size() &&
+         desk_robot::decode_stored_calibration(saved, decoded) &&
+         cliff_guard.configure(decoded);
 }
 
 bool save_calibration() {
   if (!cliff_guard.configured()) return false;
-  StoredCalibration saved{};
-  saved.magic = kCalibrationMagic;
-  saved.version = kCalibrationVersion;
-  saved.config = cliff_guard.configuration();
-  saved.checksum = calibration_checksum(saved.config);
+  const auto saved = desk_robot::encode_stored_calibration(cliff_guard.configuration());
   Preferences preferences;
   if (!preferences.begin("cliffsafety", false)) return false;
   const size_t written =
-      preferences.putBytes("calibration", &saved, sizeof(saved));
+      preferences.putBytes("calibration", saved.data(), saved.size());
   preferences.end();
-  return written == sizeof(saved);
+  return written == saved.size();
 }
+
 #else
 desk_robot::BodyControl control;
 #endif
