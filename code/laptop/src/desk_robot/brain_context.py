@@ -149,30 +149,32 @@ def _fresh_valid_safety_fault(item: object) -> bool:
     return age is None or (type(age) is int and 0 <= age <= 8000)
 
 
-def compose_brain_context(
-    recent: Sequence[Memory], core: Sequence[CoreFact],
-    timeline: Sequence[dict], *, topical_event_id: str | None = None,
-) -> ContextBundle:
-    """Format evidence by authority under independent, tight text budgets.
+def _plain_identifier(value: object) -> bool:
+    """Reject empty or nonplain identifiers before comparisons and hashing."""
+    return type(value) is str and bool(value.strip())
 
-    Sensor edge != optical object, JPEG receipt != actual exposure time,
-    local VLM answer != a new eyewitness truth, human text != instructions.
-    The LLM may use context for language but may not grant motion/charging.
 
-    Caller contract: pass at most 256 chronological timeline entries (newest
-    last); at most the latest 64 entries plus the newest fresh authenticated
-    WROOM safety fault within that bounded window are inspected.
-    """
+def _valid_memory_identity(entry: Memory) -> bool:
+    return all(_plain_identifier(value) for value in (
+        entry.robot_id, entry.event_id, entry.source_robot, entry.kind,
+    ))
+
+
+def _recent_memory_context(
+    recent: Sequence[Memory], topical_event_id: str | None,
+) -> str:
     # MemoryStore.recent returns newest first, while a topical merge from
     # PetController arrives oldest first. Select by source timestamps rather
     # than the input list's order. When retrieval supplies a best match,
     # reserve it before newer unrelated episodes consume the text budget.
+    if not _plain_identifier(topical_event_id):
+        topical_event_id = None
     seen: set[str] = set()
     memory_parts: list[tuple[float, str, str]] = []
     memory_used = 0
     now_wall = time.time()
     for entry in sorted(
-        recent, key=lambda item: (
+        filter(_valid_memory_identity, recent), key=lambda item: (
             item.event_id == topical_event_id, item.observed_at, item.event_id,
         ), reverse=True,
     ):
@@ -198,15 +200,19 @@ def compose_brain_context(
             break
     # Restore chronological presentation after selecting the best topical
     # match and the newest remaining evidence within the same fixed budget.
-    recent_text = "; ".join(phrase for _, _, phrase in sorted(memory_parts))
+    return "; ".join(phrase for _, _, phrase in sorted(memory_parts))
 
+
+def _core_memory_context(core: Sequence[CoreFact]) -> str:
     # The core store also returns newest first; the previous [-6:] omitted
     # the most recently curated operator facts when more than six existed.
     seen_slots: set[str] = set()
     core_parts: list[str] = []
     core_used = 0
     for item in sorted(
-        core, key=lambda fact: (fact.updated_at, fact.slot), reverse=True,
+        (fact for fact in core if _plain_identifier(fact.robot_id)
+         and _plain_identifier(fact.slot)),
+        key=lambda fact: (fact.updated_at, fact.slot), reverse=True,
     ):
         if item.slot in seen_slots:
             continue
@@ -219,7 +225,25 @@ def compose_brain_context(
         core_used += cost
         if len(core_parts) == 6:
             break
-    core_text = "; ".join(reversed(core_parts))
+    return "; ".join(reversed(core_parts))
+
+
+def compose_brain_context(
+    recent: Sequence[Memory], core: Sequence[CoreFact],
+    timeline: Sequence[dict], *, topical_event_id: str | None = None,
+) -> ContextBundle:
+    """Format evidence by authority under independent, tight text budgets.
+
+    Sensor edge != optical object, JPEG receipt != actual exposure time,
+    local VLM answer != a new eyewitness truth, human text != instructions.
+    The LLM may use context for language but may not grant motion/charging.
+
+    Caller contract: pass at most 256 chronological timeline entries (newest
+    last); at most the latest 64 entries plus the newest fresh authenticated
+    WROOM safety fault within that bounded window are inspected.
+    """
+    recent_text = _recent_memory_context(recent, topical_event_id)
+    core_text = _core_memory_context(core)
 
     # A speaking head can contribute several JPEG receipts in seconds.
     # Repeating the same cue crowds out touch, completed tool context and

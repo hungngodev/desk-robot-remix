@@ -1,6 +1,10 @@
 """Strict timeline identifiers must not discard valid conversational evidence."""
+from dataclasses import replace
+
 import pytest
+
 from desk_robot.brain_context import compose_brain_context
+from desk_robot.memory import CoreFact, Memory
 
 
 class _IdentifierSubclass(str):
@@ -39,3 +43,57 @@ def test_invalid_safety_identity_cannot_displace_valid_older_fault(field):
     ])
     assert "WROOM reported latched safety fault (cliff)" in context.interaction
     assert "fault (invalid)" not in context.interaction
+
+
+@pytest.mark.parametrize("bad", [None, True, 7, [], {}, "", "   "])
+@pytest.mark.parametrize("field", ["robot_id", "event_id", "source_robot", "kind"])
+def test_invalid_episode_identifier_preserves_valid_memory(field, bad):
+    valid = Memory("pet_a", "evt", "pet_a", True, "scene", "valid memory", 100.0, 1.0)
+    malformed = replace(valid, **{field: bad, "summary": "invalid memory", "observed_at": 101.0})
+    result = compose_brain_context([valid, malformed], [], []).recent
+    assert "valid memory" in result
+    assert "invalid memory" not in result
+
+
+@pytest.mark.parametrize("identifier_type", [_IdentifierSubclass, _UnhashableIdentifier])
+@pytest.mark.parametrize("field", ["robot_id", "event_id", "source_robot", "kind"])
+def test_nonplain_episode_identifier_cannot_alias_valid_memory(field, identifier_type):
+    valid = Memory("pet_a", "evt", "pet_a", True, "scene", "valid memory", 100.0, 1.0)
+    malformed = replace(valid, **{
+        field: identifier_type(getattr(valid, field)),
+        "summary": "invalid memory", "observed_at": 101.0,
+    })
+    result = compose_brain_context([valid, malformed], [], []).recent
+    assert "valid memory" in result
+    assert "invalid memory" not in result
+
+
+@pytest.mark.parametrize("bad", [None, True, 7, [], {}, "", "   "])
+@pytest.mark.parametrize("field", ["robot_id", "slot"])
+def test_invalid_core_identifier_preserves_curated_fact(field, bad):
+    valid = CoreFact("pet_a", "nickname", "original", 100.0)
+    malformed = replace(valid, **{field: bad, "value": "invalid", "updated_at": 101.0})
+    result = compose_brain_context([], [valid, malformed], []).core
+    assert result == "nickname: original"
+
+
+@pytest.mark.parametrize("identifier_type", [_IdentifierSubclass, _UnhashableIdentifier])
+@pytest.mark.parametrize("field", ["robot_id", "slot"])
+def test_nonplain_core_identifier_cannot_alias_curated_fact(field, identifier_type):
+    valid = CoreFact("pet_a", "nickname", "original", 100.0)
+    malformed = replace(valid, **{
+        field: identifier_type(getattr(valid, field)), "value": "invalid", "updated_at": 101.0,
+    })
+    assert compose_brain_context([], [valid, malformed], []).core == "nickname: original"
+
+
+@pytest.mark.parametrize("identifier_type", [_IdentifierSubclass, _UnhashableIdentifier])
+def test_nonplain_topical_id_cannot_promote_old_episode(identifier_type):
+    entries = [
+        Memory("pet_a", f"evt{i}", "pet_a", True, "scene", f"episode {i}", 100.0 + i, 1.0)
+        for i in range(7)
+    ]
+    assert "episode 0" in compose_brain_context(entries, [], [], topical_event_id="evt0").recent
+    result = compose_brain_context(entries, [], [], topical_event_id=identifier_type("evt0")).recent
+    assert "episode 0" not in result
+    assert "episode 6" in result
