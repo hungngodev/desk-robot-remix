@@ -17,6 +17,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CAD = ROOT / "docs/cad/remixes/one_robot_adapter_kit.scad"
 TOF = ROOT / "code/firmware/body/lib/TofBus/TofBus.cpp"
+TOF_RESULT = TOF.with_name("TofResult.h")
 # ST DS11555 Rev 6, section 6.1 specifies 25 degree SYSTEM field of view.
 # It is not a point ray. A sliver of floor visible at the rear of this cone
 # may remain a plausible echo after the central ray has crossed the edge.
@@ -54,10 +55,19 @@ def verify_source_contract() -> dict:
     )[0]
     if 'rotate([90,0,0])' not in aperture:
         raise ValueError("ToF source aperture axis changed; update mount model")
-    accepted = re.findall(r"distance\s*>=\s*(\d+)\s*&&\s*distance\s*<=\s*(\d+)", source)
+    if ('#include "TofResult.h"' not in source
+            or "decode_tof_result(result)" not in source
+            or "decoded.accepted" not in source):
+        raise ValueError("VL53L0X firmware decoder changed; update check")
+    decoder = TOF_RESULT.read_text(encoding="utf-8")
+    accepted = re.findall(
+        r"distance\s*>=\s*(\d+)U\s*&&\s*distance\s*<=\s*(\d+)U", decoder,
+    )
     if len(accepted) != 1:
         raise ValueError("VL53L0X firmware source threshold changed")
     min_mm, max_mm = map(int, accepted[0])
+    if not 0 < min_mm <= max_mm <= 65535:
+        raise ValueError("Invalid VL53L0X firmware range")
     return {
         "lens_center_above_adapter_mount_mm": (float(match[0]) + 7.0) / 2.0 + 1.0,
         "firmware_valid_min_mm": min_mm,
@@ -445,7 +455,8 @@ def main():
     parser.add_argument("--measured-worst-stopping-mm", type=float,
                         help="Highest observed loaded stop, never p95 alone")
     parser.add_argument("--latency-ms", type=float)
-    parser.add_argument("--speed-mm-s", type=float)
+    parser.add_argument("--speed-mm-s", type=float,
+                        help="Measured upper loaded travel speed during detection latency")
     args = parser.parse_args()
     scalar = (args.mount_above_desk_mm, args.lens_above_desk_mm, args.tilt_deg,
               args.sensor_ahead_of_wheel_mm, args.measured_worst_stopping_mm,

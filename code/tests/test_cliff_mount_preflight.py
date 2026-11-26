@@ -514,3 +514,37 @@ def test_unsigned_tilt_uses_worst_rearward_azimuth(height, tilt, setback):
     assert evaluate(**args, leading_wheel_behind_sensor_mm=required + 0.001)[
         "candidate_geometry_possible_on_paper"]
     assert not result["40_sensor_fleet_purchase_approved"]
+
+
+def test_source_contract_follows_firmware_decoder(monkeypatch, tmp_path):
+    decoder = tmp_path / "TofResult.h"
+    source = tool.TOF_RESULT.read_text(encoding="utf-8")
+    decoder.write_text(source.replace("distance >= 30U", "distance >= 31U"), encoding="utf-8")
+    monkeypatch.setattr(tool, "TOF_RESULT", decoder)
+    assert tool.verify_source_contract()["firmware_valid_min_mm"] == 31
+    decoder.write_text(source.replace("distance <= 1300U", "distance <= 20U"), encoding="utf-8")
+    with pytest.raises(ValueError, match="Invalid VL53L0X firmware range"):
+        tool.verify_source_contract()
+
+
+def test_source_contract_requires_live_decoder_call(monkeypatch, tmp_path):
+    driver = tmp_path / "TofBus.cpp"
+    source = tool.TOF.read_text(encoding="utf-8")
+    driver.write_text(
+        source.replace("decode_tof_result(result)", "other(result)"), encoding="utf-8",
+    )
+    monkeypatch.setattr(tool, "TOF", driver)
+    with pytest.raises(ValueError, match="VL53L0X firmware decoder changed"):
+        tool.verify_source_contract()
+
+
+@pytest.mark.parametrize("speed, possible", [(219.0, True), (220.0, False)])
+def test_measured_peak_speed_changes_33_5mm_lens_clearance(speed, possible):
+    result = evaluate(chassis_mount_above_desk_mm=None, measured_lens_above_desk_mm=33.5,
+                      measured_travel_speed_mm_s=speed)
+    assert result["rear_floor_return_setback_mm"] == pytest.approx(7.4267712)
+    assert result["required_wheel_behind_sensor_mm"] == pytest.approx(
+        20 + 0.08 * speed + 33.5 * math.tan(math.radians(12.5))
+    )
+    assert result["candidate_geometry_possible_on_paper"] is possible
+    assert not result["40_sensor_fleet_purchase_approved"]
