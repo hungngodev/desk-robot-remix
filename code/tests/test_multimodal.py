@@ -4352,3 +4352,77 @@ async def test_deferred_snapshot_task_rechecks_original_grant(settings, source, 
         assert not visual.hub.frames[rid]
     finally:
         await visual.close()
+
+
+async def test_scheduled_quiet_blocks_optional_capture_but_keeps_sensor_context(monkeypatch):
+    policy = config()
+    policy.pet_quiet_hours = ("22:00", "07:00")
+    clock = time.strptime("23:00", "%H:%M")
+    monkeypatch.setattr(time, "localtime", lambda *args: clock)
+    head = Head()
+    visual = MultimodalOrchestrator(
+        policy, {"robot-01": head, "robot-02": Head()}, Vision(), asyncio.Lock(),
+    )
+    try:
+        visual.sensor_event("robot-01", "touch_tap")
+        visual.sensor_event("robot-01", "safety_fault")
+        assert not visual.sensor_burst_pending("robot-01")
+        assert {"touch_tap", "safety_fault"} <= {
+            event["kind"] for event in visual.hub.recent_events("robot-01", time.monotonic())
+        }
+        for source, trigger in (("proactive", None), ("sensor", "touch_tap")):
+            with pytest.raises(RuntimeError, match="Scheduled quiet"):
+                await visual.capture("robot-01", source=source, trigger_kind=trigger)
+        assert head.captures == 0
+        await visual.capture("robot-01", source="speech")
+        assert head.captures == 1
+    finally:
+        await visual.close()
+
+
+@pytest.mark.parametrize("source", ["sensor", "proactive", "speech", "voice_question"])
+async def test_scheduled_quiet_boundary_at_device_reader(monkeypatch, source):
+    policy = config()
+    policy.pet_quiet_hours = ("22:00", "07:00")
+    clock = [time.strptime("21:59", "%H:%M")]
+    monkeypatch.setattr(time, "localtime", lambda *args: clock[0])
+    head = Head()
+    visual = MultimodalOrchestrator(
+        policy, {"robot-01": head, "robot-02": Head()}, Vision(), asyncio.Lock(),
+    )
+    task = asyncio.create_task(visual._head_snapshot("robot-01", source=source))
+    try:
+        await asyncio.sleep(0)
+        assert head.captures == 0
+        clock[0] = time.strptime("22:00", "%H:%M")
+        if source in ("sensor", "proactive"):
+            with pytest.raises(RuntimeError, match="Scheduled quiet"):
+                await asyncio.wait_for(task, timeout=2)
+            assert head.captures == 0
+        else:
+            await asyncio.wait_for(task, timeout=2)
+            assert head.captures == 1
+    finally:
+        await visual.close()
+
+
+async def test_scheduled_quiet_boundary_retires_sensor_followup(monkeypatch):
+    policy = config()
+    policy.pet_quiet_hours = ("22:00", "07:00")
+    clock = [time.strptime("21:59", "%H:%M")]
+    monkeypatch.setattr(time, "localtime", lambda *args: clock[0])
+    head = Head()
+    visual = MultimodalOrchestrator(
+        policy, {"robot-01": head, "robot-02": Head()}, Vision(), asyncio.Lock(),
+    )
+    try:
+        visual.sensor_event("robot-01", "touch_tap")
+        task = visual._sensor_tasks["robot-01"]
+        async with asyncio.timeout(2):
+            while not visual.hub.frames["robot-01"]:
+                await asyncio.sleep(0.01)
+        clock[0] = time.strptime("22:00", "%H:%M")
+        await asyncio.wait_for(task, timeout=2)
+        assert head.captures == 1
+    finally:
+        await visual.close()

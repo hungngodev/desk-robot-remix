@@ -10078,3 +10078,36 @@ async def test_activity_repeated_background_chooses_silence_without_spending_bud
         assert len(offers) == 1
     finally:
         await pet.close()
+
+
+async def test_scheduled_quiet_blocks_speculative_scene_until_morning(
+    fleet, tmp_path, monkeypatch,
+):
+    payload = fleet.model_dump()
+    payload["pet_quiet_hours"] = ["22:00", "07:00"]
+    fleet = type(fleet).model_validate(payload)
+    clock = [time.strptime("23:30", "%H:%M")]
+    monkeypatch.setattr(time, "localtime", lambda *args: clock[0])
+    camera, scene = ChangingCamera(), KeyScene()
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(
+        fleet, {"robot-01": camera}, conversation, memory, scene, interval=0.01,
+    )
+    state = pet.states["robot-01"]
+    state.enabled = True
+    state.generation = 17
+    task = asyncio.create_task(pet._observe("robot-01", 17))
+    try:
+        await asyncio.sleep(0.05)
+        assert camera.calls == 0
+        assert scene.calls == 0
+        assert state.enabled
+        clock[0] = time.strptime("07:00", "%H:%M")
+        await wait_for(lambda: scene.calls == 1)
+        assert camera.calls >= 4
+    finally:
+        state.enabled = False
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        await pet.close()

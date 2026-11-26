@@ -25,6 +25,7 @@ from PIL import Image, ImageOps
 if TYPE_CHECKING:
     from .config import Settings
     from .transport import Head
+from .config import quiet_hours_active
 from .operations import _bounded_head_reply
 from .room_station import ROOM_OBSERVATION_SOURCE, STATION, RoomObservation, fresh_room_summary
 from .sensor_event_contract import DIRECT_INTERACTION_KINDS, TRIGGERS  # public names
@@ -1268,6 +1269,11 @@ class MultimodalOrchestrator:
         self._camera_consent_last_enabled[robot_id] = enabled
         return enabled and current == origin
 
+    def _scheduled_camera_quiet(self, source: str) -> bool:
+        return source in ("sensor", "proactive") and quiet_hours_active(
+            getattr(self.settings, "pet_quiet_hours", None)
+        )
+
     def stream_owns_camera(self, robot_id: str) -> bool:
         """One live visual worker owns acquisition, including reconnects."""
         self.hub._check(robot_id)
@@ -1500,6 +1506,7 @@ class MultimodalOrchestrator:
                         # accelerate inference or interfere with active human VAD.
                         recent_sensor_edge = (
                             self.hub.urgent[robot_id]
+                            and not self._scheduled_camera_quiet("sensor")
                             and not self._any_human_active(now)
                             and any(
                                 kind != "human_voice"
@@ -1633,6 +1640,8 @@ class MultimodalOrchestrator:
             return
         self.hub.notify(robot_id, kind, stamp, detail=detail)
         self._metrics[robot_id]["sensor_triggers"] += 1
+        if self._scheduled_camera_quiet("sensor"):
+            return  # Preserve the physical event, but do not request a camera burst.
         if self._closed or self._any_human_active(now):
             self._metrics[robot_id]["sensor_deferred_human"] += 1
             return  # any live human voice owns the fleet's camera priority
@@ -1685,6 +1694,8 @@ class MultimodalOrchestrator:
                 # A new grant cannot authorize the original sensor edge.
                 if (getattr(self.settings, "mode", "hardware") == "hardware"
                         and not self._camera_grant_valid(robot_id, camera_grant)):
+                    return
+                if self._scheduled_camera_quiet("sensor"):
                     return
                 question = self._look_tasks.get(robot_id)
                 if (self._closed or self._any_human_active(
@@ -1959,6 +1970,8 @@ class MultimodalOrchestrator:
             if (getattr(self.settings, "mode", "hardware") == "hardware"
                     and not self._camera_grant_valid(robot_id, camera_grant)):
                 raise RuntimeError("Camera consent revoked before device capture")
+            if self._scheduled_camera_quiet(source):
+                raise RuntimeError("Scheduled quiet hours block speculative camera capture")
             head = self.heads[robot_id]
             receipt = getattr(head, "snapshot_receipt", None)
             if callable(receipt):
@@ -2004,6 +2017,8 @@ class MultimodalOrchestrator:
         if (getattr(self.settings, "mode", "hardware") == "hardware"
                 and not self._camera_grant_valid(robot_id, camera_grant)):
             raise RuntimeError("Camera consent revoked for capture")
+        if self._scheduled_camera_quiet(source):
+            raise RuntimeError("Scheduled quiet hours block speculative camera capture")
         if (source == "proactive"
                 and (pending := self._look_tasks.get(robot_id)) is not None
                 and not pending.done()):
@@ -2074,6 +2089,8 @@ class MultimodalOrchestrator:
                     # A short OFF/ON during JPEG I/O or Pillow remains revoked
                     # for this request even when the current boolean is True.
                     raise RuntimeError("Camera consent revoked for capture")
+                if self._scheduled_camera_quiet(source):
+                    raise RuntimeError("Scheduled quiet hours block speculative camera capture")
                 if (self._turn_epoch[robot_id] != turn
                         or self._question_epoch[robot_id] != question):
                     raise RuntimeError(

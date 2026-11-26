@@ -2296,18 +2296,22 @@ class PetController:
             try:
                 hub_generation = self._sync_visual_generation(robot_id)
                 camera_consent_generation = self.settings.camera_consent_generation
+                scheduled_quiet = self._quiet_hours_active()
 
                 def current_camera_grant(
                     admitted_grant: int = camera_consent_generation,
+                    admitted_quiet_epoch: float = state.quiet_changed_at,
                 ) -> bool:
                     return (
-                        self.settings.mode != "hardware"
-                        or (self.settings.voice_vision_tools_enabled
-                            and self.settings.camera_consent_generation
-                            == admitted_grant)
+                        not self._quiet_hours_active()
+                        and state.quiet_changed_at == admitted_quiet_epoch
+                        and (self.settings.mode != "hardware"
+                             or (self.settings.voice_vision_tools_enabled
+                                 and self.settings.camera_consent_generation
+                                 == admitted_grant))
                     )
-                if (self.settings.mode == "hardware"
-                        and not self.settings.voice_vision_tools_enabled):
+                if (scheduled_quiet or (self.settings.mode == "hardware"
+                        and not self.settings.voice_vision_tools_enabled)):
                     state.gate.reset()
                     state.camera_habituation.reset()
                     state.last_scene_frame_at = None
@@ -2331,6 +2335,7 @@ class PetController:
                          getattr(frame, "source_identity", None))
                         for frame in tuple(hub.frames[robot_id])
                         if frame.source in ("sensor", "proactive")
+                        and frame.received_at > state.quiet_changed_at
                         and (state.last_scene_frame_at is None
                              or frame.received_at > state.last_scene_frame_at)
                     ]
@@ -2500,14 +2505,18 @@ class PetController:
                             # Construct the request inside its cancellable owner:
                             # preemption before the first scheduling step must
                             # not leave an unawaited comparison coroutine.
-                            if isinstance(self.scene, OllamaScene):
-                                request = self.scene.compare(
-                                    previous, jpeg, admit=admit_comparison
-                                )
-                            else:
-                                request = self.scene.compare(previous, jpeg)
+                            async def compare_current():
+                                # The actual model child may start a tick later.
+                                if not admit_comparison():
+                                    return None
+                                if isinstance(self.scene, OllamaScene):
+                                    return await self.scene.compare(
+                                        previous, jpeg, admit=admit_comparison
+                                    )
+                                return await self.scene.compare(previous, jpeg)
+
                             return await _bounded_head_reply(
-                                request, seconds=remaining,
+                                compare_current(), seconds=remaining,
                                 timeout_message="Proactive scene comparison expired",
                             )
 
