@@ -246,6 +246,20 @@ the undecorated baseline:
 | Cooling and RF | Keep Sense, WROOM and amplifier cooling paths and their actual Wi-Fi antenna keepouts clear. Compare temperatures and connectivity under the same sustained workload and ambient conditions; a vent visible in CAD is not thermal acceptance. |
 | Retention and sensors | Capture magnets mechanically, insulate conductive decorations, and check accidental reed activation, touch, encoder magnets, mechanical snag and loose-part risk. A flexible cosmetic antenna is passive, not a mains probe or a second radio. |
 
+Use the [OpenSCAD costume keepout guard](remixes/costume_keepouts.scad) as a
+conservative preflight before exporting any modeled costume. In a common
+assembly coordinate frame, supply nonempty swept accessory bounding boxes
+expanded for tolerance, play and deflection, and nonempty measured protected
+boxes for camera, ToF lanes 0 through 7, PDM inlet, speaker, and the Sense,
+WROOM and amplifier cooling paths, in the order returned by `costume_interfaces()`.
+Wrap the accessory geometry in `costume_keepout_guard(swept, keepouts) { ... }`.
+Each box is `[minimum_xyz, maximum_xyz]` in millimeters; protected volumes
+must include the required clearance. Missing inputs, overlap and even contact
+fail the screen. A passing screen only checks the supplied boxes, not whether
+they actually enclose the full geometry, optics or airflow; all physical and
+other mechanical/RF comparisons above remain mandatory. No default measured
+coordinates or release authorization are provided.
+
 Record accessory ID/revision, robot/assembly ID, exact CAD and firmware
 revisions, measured offsets and minimum clearances by interface and pose,
 baseline and installed measurements, trial conditions, results and evidence.
