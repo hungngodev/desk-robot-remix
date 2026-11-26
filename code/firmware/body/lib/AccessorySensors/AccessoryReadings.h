@@ -84,6 +84,19 @@ struct BarometerRaw {
 constexpr std::uint32_t next_nonzero_sensor_sequence(std::uint32_t previous) {
   return previous == 0xffffffffU ? 1U : previous + 1U;
 }
+// Transport or CRC failure invalidates the live sample without advancing
+// its acquisition identity or changing previously measured values.
+inline void sht41_accept_frame(ClimateRaw& sample, const std::uint8_t (&b)[6],
+                               std::uint32_t now_ms, bool transport_valid) {
+  sample.valid = transport_valid && sht41_frame_crc_valid(b);
+  if (!sample.valid) return;
+  const auto t = static_cast<std::uint16_t>((b[0] << 8) | b[1]);
+  const auto h = static_cast<std::uint16_t>((b[3] << 8) | b[4]);
+  sample.temp_centi = sht_temp_centi(t);
+  sample.humidity_centi = sht_humidity_centi(h);
+  sample.at_ms = now_ms;
+  sample.sample_seq = next_nonzero_sensor_sequence(sample.sample_seq);
+}
 // ADS1115 datasheet 8.1.3: OS=1 on read means conversion completed.
 // Also require the configured single-shot mode and selected channel.
 constexpr bool ads1115_completed_for_channel(std::uint16_t config,

@@ -462,15 +462,7 @@ void AccessorySensors::climate(std::uint32_t now_ms) {
     else { const int v = wire_->read(); if (v < 0) c.valid = false;
            else b[i] = static_cast<std::uint8_t>(v); }
   }
-  c.valid = c.valid && sht41_frame_crc_valid(b);
-  if (c.valid) {
-    const auto t = static_cast<std::uint16_t>((b[0] << 8) | b[1]);
-    const auto h = static_cast<std::uint16_t>((b[3] << 8) | b[4]);
-    c.temp_centi = sht_temp_centi(t);
-    c.humidity_centi = sht_humidity_centi(h);
-    c.at_ms = now_ms;
-    c.sample_seq = next_nonzero_sensor_sequence(c.sample_seq);
-  }
+  sht41_accept_frame(c, b, now_ms, c.valid);
   sht_pending_ = false;
 }
 void AccessorySensors::barometer(std::uint32_t now_ms) {

@@ -17,15 +17,34 @@ static void check_accessory_frame_integrity() {
   // Independent known CRC vectors: BE EF -> 92, 00 00 -> 81.
   std::uint8_t frame[6] = {0xbe, 0xef, 0x92, 0, 0, 0x81};
   CHECK(desk_robot::sht41_frame_crc_valid(frame));
+  desk_robot::ClimateRaw sample{};
+  sample.present = true;
+  sample.sample_seq = 0xffffffffU;
+  desk_robot::sht41_accept_frame(sample, frame, 100, true);
+  CHECK(sample.valid && sample.present && sample.sample_seq == 1U);
+  CHECK(sample.at_ms == 100U && sample.temp_centi == 8552);
+  CHECK(sample.humidity_centi == 0);
+  const auto check_invalid = [&sample]() {
+    CHECK(!sample.valid && sample.present);
+    CHECK(sample.sample_seq == 1U && sample.at_ms == 100U);
+    CHECK(sample.temp_centi == 8552 && sample.humidity_centi == 0);
+  };
+  desk_robot::sht41_accept_frame(sample, frame, 200, false);
+  check_invalid();
   for (unsigned byte = 0; byte < 6; ++byte) {
     for (unsigned bit = 0; bit < 8; ++bit) {
       const auto mask = static_cast<std::uint8_t>(1U << bit);
       frame[byte] ^= mask;
       CHECK(!desk_robot::sht41_frame_crc_valid(frame));
+      sample.valid = true; // emulate a successful transport
+      desk_robot::sht41_accept_frame(sample, frame, 200, true);
+      check_invalid();
       frame[byte] ^= mask;
       CHECK(desk_robot::sht41_frame_crc_valid(frame));
     }
   }
+  desk_robot::sht41_accept_frame(sample, frame, 300, true);
+  CHECK(sample.valid && sample.sample_seq == 2U && sample.at_ms == 300U);
   for (unsigned raw = 0; raw <= 0xffffU; ++raw) {
     const auto word = static_cast<std::uint16_t>(raw);
     CHECK(desk_robot::ads1115_force_raw_valid(word) ==
