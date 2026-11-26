@@ -334,3 +334,41 @@ def test_live_range_corner_revokes_previously_safe_route_edge(kind, lane, expect
         expired, route, envelope, start=(8, 7), heading=0, goal=(9, 7),
         now_us=route.valid_until_us,
     )
+
+
+def test_fresh_snapshot_cannot_replan_over_stale_turn_corner():
+    """Refreshing surrounding cells must not renew an unobserved corner."""
+    grid = SpatialGrid("robot-01", 1, "origin-3", "tag-4", "cal-5", 15, 15, epoch=8)
+    grid.anchored = True
+    corner = (10, 8)
+    cells = tuple((x, y) for y in range(15) for x in range(15))
+    now = 2_000_001
+    for sequence, at, observed in (
+        (1, 1_000_000, cells),
+        (2, now, tuple(cell for cell in cells if cell != corner)),
+    ):
+        for lane, kind in ((0, "floor_supported"), (4, "obstacle_clear")):
+            grid.record(RangeCellBatch(
+                "robot-01", 1, "origin-3", 8, "cal-5", lane, sequence,
+                at - 900_000, at, kind, observed, True,
+            ), now_us=at)
+    snapshot = grid.to_route_snapshot(now_us=now)
+    assert snapshot.anchored and snapshot.observed_at_us == now < snapshot.expires_at_us
+    assert grid.state(*corner, now_us=now) == "stale"
+    assert grid.state(9, 7, now_us=now) == grid.state(9, 8, now_us=now) == "safe"
+    request = RouteRequest(
+        "robot-01", "origin-3", 8, "tag-4", "session-2", "turn-8",
+        (9, 7), 0, (9, 8), 2_500_000,
+    )
+    envelope = SafetyEnvelope(3, 2, 2, 32, True)
+    result = plan_route(snapshot, request, envelope, now_us=now)
+    assert result.status == "rejected" and result.reason == "no_safe_route"
+    assert result.cells == () and result.may_execute is False
+    # With the corner genuinely reobserved, the exact same request is viable.
+    for lane, kind in ((0, "floor_supported"), (4, "obstacle_clear")):
+        grid.record(RangeCellBatch(
+            "robot-01", 1, "origin-3", 8, "cal-5", lane, 3,
+            now + 1 - 900_000, now + 1, kind, (corner,), True,
+        ), now_us=now + 1)
+    fresh = plan_route(grid.to_route_snapshot(now_us=now + 1), request, envelope, now_us=now + 1)
+    assert fresh.status == "planned" and fresh.cells == ((9, 7), (9, 8))
