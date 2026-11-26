@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 import uuid
 from collections import deque
@@ -1092,7 +1093,12 @@ class Coordinator:
             return None
         try:
             load_real_dock_calibration(robot.dock_calibration, robot_id=robot_id)
-        except Exception:
+        except (OSError, ValueError) as exc:
+            # Calibration paths and parser messages may contain private data.
+            logging.getLogger(__name__).warning(
+                "Autonomous dock calibration rejected for %s: %s",
+                robot_id, type(exc).__name__,
+            )
             return None
         if any(not task.done() for task in self.tasks.values()):
             return None
