@@ -27,7 +27,6 @@ from landed_cost import (
     evidence_https_url,
     sum_line_cost_cents,
 )
-
 from procurement_policy import adafruit_new_hardware as _ad_fruit_new_hardware
 from procurement_policy import selected_sensor_identity_matches
 
