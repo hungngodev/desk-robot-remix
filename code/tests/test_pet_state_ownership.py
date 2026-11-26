@@ -155,3 +155,52 @@ async def test_registry_and_status_snapshot_resist_caller_mutation(tmp_path):
         assert pet.status(second_id)["enabled"] is False
     finally:
         await pet.close()
+
+
+@pytest.mark.parametrize("social_peer", [False, True])
+async def test_restart_waits_for_retired_speech_owner(tmp_path, monkeypatch, social_peer):
+    """A timed-out speech cancellation cannot overlap a new pet generation."""
+    monkeypatch.setattr("desk_robot.pet._PET_SPEECH_ABORT_TIMEOUT_S", 0.05)
+    pet = _controller(tmp_path)
+    first, second = list(pet.states)[:2]
+    robot_id = second if social_peer else first
+    state = pet.states[robot_id]
+    state.enabled = True
+    pet.heads[robot_id] = object()
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    async def old_speech():
+        entered.set()
+        try:
+            await asyncio.Future()
+        except asyncio.CancelledError:
+            await release.wait()
+
+    async def idle_observer(_robot_id, _generation):
+        await asyncio.Future()
+
+    monkeypatch.setattr(pet, "_observe", idle_observer)
+    task = asyncio.create_task(old_speech())
+    pet._speech_task = task
+    pet._speech_robot = first
+    pet._speech_participants = frozenset({first, second} if social_peer else {first})
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        with pytest.raises(TimeoutError, match="Pet speaker cancellation unconfirmed"):
+            await pet.pause(robot_id)
+        generation = state.generation
+        assert not state.enabled
+        assert not task.done()
+        with pytest.raises(RuntimeError, match="Previous pet task still shutting down"):
+            pet.start(robot_id)
+        assert state.generation == generation
+        assert not state.enabled
+        release.set()
+        await asyncio.wait_for(task, timeout=1)
+        assert pet.start(robot_id)["enabled"]
+        assert state.generation == generation + 1
+    finally:
+        release.set()
+        await asyncio.wait_for(task, timeout=1)
+        await pet.close()

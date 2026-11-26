@@ -545,6 +545,10 @@ class PetController:
             return self.status(robot_id)
         if (
             state.pause_inflight
+            # A timed-out pause may leave a cancellation-resistant speech
+            # owner alive. Do not let it write into a new pet generation.
+            or (self._speech_task is not None and not self._speech_task.done()
+                and robot_id in self._speech_participants)
             or (state.task is not None and not state.task.done())
             or (state.touch_task is not None and not state.touch_task.done())
             or (state.aux_task is not None and not state.aux_task.done())
