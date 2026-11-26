@@ -10,7 +10,8 @@ class FaceMoodMorph {
 public:
     static constexpr uint32_t kDurationMs = 300;
 
-    uint8_t Step(uint32_t now, std::string_view mood, bool allowed) noexcept {
+    uint8_t Step(uint32_t now, std::string_view mood, bool allowed,
+                 bool gesture_visible = false) noexcept {
         const uint8_t next = Aperture(mood);
         if (!allowed || next == 0) {
             known_ = false;
@@ -20,7 +21,7 @@ public:
         if (!known_) {
             known_ = true;
             target_ = next;
-            return 0;
+            return gesture_visible ? target_ : 0;
         }
         if (next != target_) {
             from_ = active_ ? Sample(now) : target_;
@@ -28,10 +29,12 @@ public:
             started_ = now;
             active_ = from_ != target_;
         }
-        if (!active_) return 0;
+        // A steady mood normally belongs to the stock glyph. If a gaze or
+        // blink already owns the slot, keep its eyes at the mood aperture.
+        if (!active_) return gesture_visible ? target_ : 0;
         if (now - started_ >= kDurationMs) {
             active_ = false;
-            return 0;
+            return gesture_visible ? target_ : 0;
         }
         return Sample(now);
     }

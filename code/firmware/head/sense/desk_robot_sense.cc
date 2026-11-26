@@ -390,7 +390,8 @@ private:
                             face_available && !priority_active && !model_mood_active,
                             priority_active || !isAwake(board->face_behavior_.state()));
                         const auto height = mood_morph.Step(
-                            now_ms, local_mood, face_available && !priority_active);
+                            now_ms, local_mood, face_available && !priority_active,
+                            eyes.visible);
                         eyes = desk_robot::BlendMoodAperture(eyes, height);
                         eyes.mouth_height = mouth_animator.Step(speech_level, mouth_allowed);
                         if (eyes.mouth_height != 0) eyes.visible = true;

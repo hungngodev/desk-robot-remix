@@ -18,13 +18,51 @@ def test_repeated_touch_refreshes_mood_without_restarting_nod(tmp_path):
     source = tmp_path / "pat_decay.cc"
     binary = tmp_path / "pat_decay"
     source.write_text(r'''
-#include "stackchan_behavior.hpp"
+#include "face_eye_animator.hpp"
+#include "face_mood_morph.hpp"
 #include <cassert>
 #include <initializer_list>
 using namespace stackchan::behavior;
 
+static void check_eye_decay(uint32_t start) {
+    desk_robot::FaceEyeAnimator eyes;
+    desk_robot::FaceMoodMorph mood;
+    HsmBehavior pet(13);
+    pet.pick_min_ms = pet.pick_max_ms = 15000;
+    auto frame = [&](uint32_t t, bool pat, bool allowed = true) {
+        if (pat) pet.pushEvent(Event(EventType::kTouched));
+        auto action = pet.update({start + t});
+        auto eye = eyes.Step(start + t, action.motion, allowed);
+        auto name = pet.mood() == Mood::kSmile ? "happy" : "neutral";
+        return desk_robot::BlendMoodAperture(
+            eye, mood.Step(start + t, name, allowed, eye.visible));
+    };
+    assert(!frame(0, false).visible);
+    auto first = frame(100, true);
+    assert(first.y == 3 && first.lid_height == 10);
+    auto middle = frame(250, true);
+    assert(middle.y == 3 && middle.lid_height == 9);
+    // The mood transition is over, but the original nod is still in progress.
+    auto squint = frame(400, true);
+    assert(squint.y == 3 && squint.lid_height == 8);
+    auto settle = frame(650, true);
+    assert(settle.y == -2 && settle.lid_height == 8);
+    assert(!frame(1200, true).visible);  // stock happy glyph resumes
+    assert(!frame(1300, true).visible);
+    frame(6300, false);
+    assert(pet.state() == State::kInteracting && pet.mood() == Mood::kSmile);
+    auto decay = frame(6301, false);
+    assert(decay.visible && decay.lid_height == 8);
+    decay = frame(6451, false);
+    assert(decay.visible && decay.lid_height == 9);
+    // A display priority gate cancels both overlays immediately.
+    assert(!frame(6452, false, false).visible);
+    assert(!frame(6453, false).visible);
+}
+
 int main() {
     for (uint32_t start : {0U, 0xffffff00U}) {
+        check_eye_decay(start);
         HsmBehavior pet(13);
         pet.pick_min_ms = pet.pick_max_ms = 15000;
         auto step = [&](uint32_t t) { return pet.update({start + t}); };
