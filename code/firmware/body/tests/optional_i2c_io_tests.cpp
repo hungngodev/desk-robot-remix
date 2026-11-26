@@ -74,8 +74,9 @@ static void check_unverified_cap_keeps_gpio_touch_independent() {
       wire.cap_manufacturer_id = fault == 3 ? 0xFF : 0x5D;
       desk_robot::ExpansionTouch cap;
       CHECK(!cap.begin(wire) && cap.present() && !cap.verified());
-      const unsigned expected_reads[] = {0U, 1U, 1U, 2U};
-      CHECK(wire.cap_register_requests == expected_reads[fault]);
+      // The Arduino-ESP32 fake counts deferred read attempts, including NACKs.
+      const unsigned expected_reads[] = {1U, 1U, 1U, 2U};
+      CHECK(wire.cap_register_requests == expected_reads[fault] + (preferred ? 1U : 0U));
       const auto after_probe = wire.transactions;
       std::uint8_t zones = 0x5A;
       desk_robot::TouchDebounce gpio;
