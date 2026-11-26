@@ -34,15 +34,15 @@ class Calibration(BaseModel):
     work_area_mm: tuple[float, float, float, float]
     grip_ground_mm: tuple[float, float]
     lifted_roi_px: tuple[float, float, float, float]
-    grip_open: int = Field(default=60, ge=60, le=120)
-    grip_closed: int = Field(default=110, ge=60, le=120)
+    grip_open: int = Field(default=60, strict=True, ge=60, le=120)
+    grip_closed: int = Field(default=110, strict=True, ge=60, le=120)
     # Configure measured FSR on ADS1115 channel 1 before a real grip.
-    grip_force_delta_raw: int | None = Field(default=None, ge=50, le=20000)
-    grip_force_limit_raw: int | None = Field(default=None, ge=100, le=30000)
-    grip_force_sign: int = Field(default=1)
+    grip_force_delta_raw: int | None = Field(default=None, strict=True, ge=50, le=20000)
+    grip_force_limit_raw: int | None = Field(default=None, strict=True, ge=100, le=30000)
+    grip_force_sign: int = Field(default=1, strict=True)
     # WROOM permits at most four servo degrees per completed jaw conversion.
     # Do not let the Mac assume a larger physical angle than firmware moved.
-    grip_step_deg: int = Field(default=4, ge=1, le=4)
+    grip_step_deg: int = Field(default=4, strict=True, ge=1, le=4)
     lift_down: int = Field(default=60, ge=60, le=120)
     lift_up: int = Field(default=110, ge=60, le=120)
     alignment_tolerance_mm: float = Field(default=8, gt=0, le=30)
