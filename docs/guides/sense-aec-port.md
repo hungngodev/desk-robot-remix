@@ -235,7 +235,16 @@ store them outside the local protected trial directory.
    audible speaker playback or measured AEC quality.
    The output is private mode 0600 `microphone.wav`,
    `speaker_reference.wav`, and `capture.json`, in a mode 0700
-   directory with no overwrite. Both WAV files are mono 16 kHz PCM16,
+   directory with no overwrite. The CLI checks the destination before START,
+   retains the approved directory identity, and anchors creation and cleanup
+   to a checked directory file descriptor. After writing the files, it makes
+   another authenticated reference-status request before reporting success.
+   A changed robot, boot, privacy epoch, capture generation, muted microphone,
+   reference integrity failure or changed destination identity rejects the
+   trial; the writer attempts to remove the files it created through that
+   same directory descriptor. This is a software privacy check, not a
+   guarantee of secure erasure or physical microphone silence.
+   Both WAV files are mono 16 kHz PCM16,
    including `speaker_reference.wav`: it already contains the codec's filtered
    and decimated reference, not raw 32 kHz speaker PCM. Do not decimate it again.
 4. Read these real source frames with the existing offline estimator:
@@ -265,8 +274,11 @@ store them outside the local protected trial directory.
    Securely delete raw WAVs after analysis.
 
 **A source capture is not A2 physical qualification.** The on-device
-timestamp reports when PCM samples entered the codec reference window;
-it does not prove physical loudspeaker propagation, analog output
+window timestamps are estimates derived from callback completion and sample
+counts, not hardware timestamps for individual PDM samples. The captured
+microphone and digital reference are pre-AFE signals, not the processed AFE
+output; this recording alone cannot measure ERLE or double-talk preservation.
+It does not prove physical loudspeaker propagation, analog output
 drain, zero acoustic echo, or the actual audible silence position after
 barge-in. There is no hardware evidence yet for echo suppression, ERLE,
 double-talk preservation, interruption timing, temperature drift,
