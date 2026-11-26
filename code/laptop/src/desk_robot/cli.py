@@ -130,6 +130,8 @@ async def _inspect_context(http: httpx.AsyncClient, robot_id: str) -> tuple[int,
     )
     context.raise_for_status()
     evidence = context.json()
+    if not isinstance(evidence, dict):
+        raise ValueError("Multimodal source context contract invalid")
     timeline = evidence.get("current_interaction_timeline")
     if (evidence.get("robot_id") != robot_id
             or evidence.get("raw_media_included") is not False
@@ -151,14 +153,16 @@ async def _inspect_look(http: httpx.AsyncClient, robot_id: str) -> dict[str, obj
     )
     response.raise_for_status()
     seen = response.json()
-    if (seen.get("robot_id") != robot_id
+    if (not isinstance(seen, dict)
+            or seen.get("robot_id") != robot_id
             or seen.get("source") != "authenticated_xiao_camera_and_local_vlm"
             or type(seen.get("frames_used")) is not int
             or seen["frames_used"] < 1
             or seen.get("motor_authorized") is not False
-            or seen.get("charging_authorized") is not False):
+            or seen.get("charging_authorized") is not False
+            or not isinstance(seen.get("answer"), str)):
         raise ValueError("Local VLM evidence or actuator boundary invalid")
-    return {"live_tool_tested": True, "visual_answer": seen.get("answer", "")[:300]}
+    return {"live_tool_tested": True, "visual_answer": seen["answer"][:300]}
 
 
 async def _inspect_media(
