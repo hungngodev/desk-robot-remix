@@ -315,12 +315,37 @@ def run_stages(jobs: list[tuple[str, list[str], Path, int]]) -> list[dict]:
     return records
 
 
+def _open_report_parent(parent: Path) -> int:
+    """Open or create real directories without following a symbolic link."""
+    absolute = parent.absolute()
+    if ".." in absolute.parts:
+        raise OSError("Report path must not contain parent traversal")
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    directory = os.open(absolute.anchor, flags)
+    try:
+        for component in absolute.parts[1:]:
+            try:
+                child = os.open(component, flags, dir_fd=directory)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(component, mode=0o700, dir_fd=directory)
+                except FileExistsError:
+                    pass  # Another writer created it; validate by opening it.
+                child = os.open(component, flags, dir_fd=directory)
+            os.close(directory)
+            directory = child
+        return os.dup(directory)
+    finally:
+        os.close(directory)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", choices=["python", "body", "wroom", "sense", "room", "dock", "all"],
                         default="body")
     parser.add_argument("--report", type=Path,
-                        default=Path("verification-result.json"))
+                        default=Path("verification-result.json"),
+                        help="Unused file under real directories (no symlinks or ..)")
     parser.add_argument("--build-dir", type=Path,
                         default=Path(tempfile.gettempdir()) / "desk-robot-body-verify")
     args = parser.parse_args()
@@ -365,17 +390,21 @@ def main() -> int:
         "assembly_ready": False,
     }
     try:
-        args.report.parent.mkdir(parents=True, exist_ok=True)
+        report_dir = _open_report_parent(args.report.parent)
     except OSError as exc:
         parser.exit(1, f"Cannot create verification report directory: {exc}\n")
     try:
-        # Exclusive creation also closes the race after the initial check.
-        with args.report.open("x", encoding="utf-8") as report_file:
+        # Anchor exclusive creation to the validated directory descriptor.
+        fd = os.open(args.report.name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                     0o600, dir_fd=report_dir)
+        with os.fdopen(fd, "w", encoding="utf-8") as report_file:
             report_file.write(json.dumps(receipt, indent=2) + "\n")
     except FileExistsError:
         parser.error("Verification report already exists; choose an unused path")
     except OSError as exc:
         parser.exit(1, f"Cannot write verification report: {exc}\n")
+    finally:
+        os.close(report_dir)
     print("Machine-readable verification: " + str(args.report))
     return 0 if receipt["source_suite_pass"] and clean_same_commit else 1
 
