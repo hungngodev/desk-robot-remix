@@ -1778,6 +1778,7 @@ def test_playback_reference_clock_native_cpp_regression():
         exe = Path(temp) / "reference_timeline_test"
         subprocess.run(
             [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+             *test_overlay.native_cpp_sanitizer_flags(),
              "-I", str(HEAD / "sense"),
              str(HEAD / "tests/reference_timeline_test.cc"),
              "-o", str(exe)],
