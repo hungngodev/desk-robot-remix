@@ -319,9 +319,8 @@ class LiveTurns:
         The adapter must keep model busy until playback is complete. This method
         alone does not mark generation or device playback idle.
         """
-        if (type(epoch) is not int or self._pending_observation is None
-                or not self.is_current(epoch)
-                or epoch != self._pending_observation):
+        # is_current already rejects non-integer epochs and disconnected sessions.
+        if not self.is_current(epoch) or epoch != self._pending_observation:
             return False
         self._pending_observation = None
         return True
