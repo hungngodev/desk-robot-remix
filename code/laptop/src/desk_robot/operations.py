@@ -28,6 +28,9 @@ async def dispatch_job_command(
     if getattr(head, "supports_dispatch_check", False):
         reply = await head.command(command, dispatch_check=at_dispatch)
     else:
+        # Legacy adapters expose no queue boundary; check before handing off.
+        if dispatch_check is not None:
+            dispatch_check()
         reply = await head.command(command)
     check()
     return reply
