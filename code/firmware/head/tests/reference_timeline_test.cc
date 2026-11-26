@@ -256,6 +256,21 @@ static void mute_gaps_and_resets_cross_32_bit_clock_boundaries() {
   }
 }
 
+static void clipped_clock_jump_discards_fractional_silence_debt() {
+  PlaybackReferenceClock clock;
+  constexpr std::int64_t start = 1000000;
+  constexpr std::int64_t jump = start + 1000001;
+  CHECK(clock.silence_frames(start, 16384) == 0);
+  CHECK(clock.silence_frames(jump, 1) == 1);
+  CHECK(clock.represented_end_us() == jump);
+  CHECK(clock.silence_frames(start, 16384) == 0);
+  CHECK(clock.silence_frames(jump, 16384) == 0);
+  // The discarded interval must not contribute even a fractional sample
+  // to the resumed clock. 62 us is below one 16 kHz reference frame.
+  CHECK(clock.silence_frames(jump + 62, 16384) == 0);
+  CHECK(clock.silence_frames(jump + 63, 16384) == 1);
+}
+
 int main() {
   try {
     for (int cadence_ms : {10, 20, 30, 60}) {
@@ -266,6 +281,7 @@ int main() {
     queued_output_is_not_premature_microphone_reference();
     late_opus_chunk_accounts_for_real_gap_once();
     huge_idle_gaps_are_bounded();
+    clipped_clock_jump_discards_fractional_silence_debt();
     mute_gaps_and_resets_cross_32_bit_clock_boundaries();
     timestamp_and_cap_extremes_do_not_overflow();
     zero_timestamp_is_valid_clock_origin();
