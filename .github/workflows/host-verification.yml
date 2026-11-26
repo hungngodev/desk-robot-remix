@@ -448,6 +448,22 @@ jobs:
           python3 ../../verify_sense_ci_assets.py .
           test -f build/partition_table/partition-table.bin
 
+      - name: Verify default Sense audio privacy
+        working-directory: code/firmware/head/build/xiaozhi-sense
+        shell: bash
+        run: |
+          # Check the generated standard image before the private bench rebuild.
+          test -s sdkconfig
+          test -s build/config/sdkconfig.h
+          for flag in CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED; do
+            grep -Fxq "# $flag is not set" sdkconfig
+            if grep -q "^${flag}=" sdkconfig; then
+              echo "::error::Unexpected assignment for $flag in default sdkconfig"
+              exit 1
+            fi
+            awk -v flag="$flag" '$1 == "#define" && $2 == flag && $3 != "0" { bad = 1 } END { exit bad }' build/config/sdkconfig.h
+          done
+
       - name: Prepare private opt-in Sense PCM compiler coverage
         working-directory: code
         shell: bash

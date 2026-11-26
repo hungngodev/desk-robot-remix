@@ -254,3 +254,53 @@ def test_surface_dependency_policy_rejects_removed_extra(path, group, module):
     assert _surface_imports(
         f"import {module}", path=path, local=set(), project=project
     ) == [f"1: {module}"]
+
+
+@pytest.mark.parametrize("flag", [
+    "CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED",
+    "CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED",
+])
+@pytest.mark.parametrize("fault", [
+    "none", "zero_header", "enabled_config", "missing_config", "duplicate_config",
+    "enabled_header", "missing_header",
+])
+def test_default_sense_ci_audio_privacy(tmp_path, flag, fault):
+    workflow = yaml.safe_load(
+        (Path(__file__).resolve().parents[2] / ".github/workflows/host-verification.yml").read_text()
+    )
+    steps = workflow["jobs"]["sense-idf"]["steps"]
+    names = [step.get("name") for step in steps]
+    index = names.index("Verify default Sense audio privacy")
+    assert names.index("Compile real Sense board image with local AEC") < index
+    assert index < names.index("Prepare private opt-in Sense PCM compiler coverage")
+    step = steps[index]
+    assert step["working-directory"] == "code/firmware/head/build/xiaozhi-sense"
+    assert step["shell"] == "bash"
+    flags = (
+        "CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED",
+        "CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED",
+    )
+    config = [f"# {key} is not set" for key in flags]
+    header = ["#define CONFIG_IDF_TARGET_ESP32S3 1"]
+    if fault == "enabled_config":
+        config[flags.index(flag)] = f"{flag}=y"
+    elif fault == "missing_config":
+        config.remove(f"# {flag} is not set")
+    elif fault == "duplicate_config":
+        config.append(f"{flag}=y")
+    elif fault == "enabled_header":
+        header.append(f"#define {flag} 1")
+    elif fault == "zero_header":
+        header.append(f"#define {flag} 0")
+    (tmp_path / "sdkconfig").write_text("\n".join(config) + "\n")
+    if fault != "missing_header":
+        path = tmp_path / "build/config/sdkconfig.h"
+        path.parent.mkdir(parents=True)
+        path.write_text("\n".join(header) + "\n")
+    result = subprocess.run(
+        ["bash", "-e", "-o", "pipefail", "-c", step["run"]],
+        cwd=tmp_path, capture_output=True, text=True, timeout=10,
+    )
+    assert (result.returncode == 0) == (fault in {"none", "zero_header"}), (
+        result.stdout + result.stderr
+    )
