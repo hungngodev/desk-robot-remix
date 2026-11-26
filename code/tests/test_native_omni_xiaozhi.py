@@ -19,6 +19,45 @@ from aiohttp.test_utils import TestServer
 ROOT = Path(__file__).resolve().parents[1]
 
 
+def _observe_playback_drain(queue, monkeypatch):
+    """Signal when a serial consumer returns for work after the last item."""
+    drained = asyncio.Event()
+    original_get = queue.get
+
+    async def get():
+        if queue.empty():
+            drained.set()
+        return await original_get()
+
+    monkeypatch.setattr(queue, "get", get)
+    return drained
+
+
+async def test_playback_drain_waits_for_processing_not_dequeue(monkeypatch):
+    queue = asyncio.Queue()
+    queue.put_nowait("last item")
+    drained = _observe_playback_drain(queue, monkeypatch)
+    dequeued, release = asyncio.Event(), asyncio.Event()
+
+    async def consume():
+        assert await queue.get() == "last item"
+        dequeued.set()
+        await release.wait()
+        await queue.get()
+
+    worker = asyncio.create_task(consume())
+    try:
+        await asyncio.wait_for(dequeued.wait(), timeout=1)
+        assert queue.empty()
+        assert not drained.is_set()
+        release.set()
+        await asyncio.wait_for(drained.wait(), timeout=1)
+    finally:
+        release.set()
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 class _JsonResponseBody:
     """Expose the same chunked body interface as aiohttp's model response."""
 
@@ -1594,12 +1633,10 @@ async def test_native_audio_refused_by_mac_speaker_never_sends_stop_or_records_h
     session.outgoing.put_nowait(("tool_unclaimed", bytes(9600)))
     session.outgoing.put_nowait(("tool_unclaimed", bytes(9600)))
     session.outgoing.put_nowait(("tool_unclaimed", None))
+    drained = _observe_playback_drain(session.outgoing, monkeypatch)
     playback = asyncio.create_task(session._play())
     try:
-        async with asyncio.timeout(1):
-            while not session.outgoing.empty():
-                await asyncio.sleep(.005)
-        await asyncio.sleep(.005)
+        await asyncio.wait_for(drained.wait(), timeout=1)
         assert sent == []  # No native TTS START, STOP or PCM may leak.
         assert conn.client_is_speaking is True
         assert session.native_tool_audio_sent == 0
@@ -1728,14 +1765,12 @@ async def test_native_output_refuses_external_mac_speaker_without_pcm_or_deliver
     ))
     session.outgoing.put_nowait(("tool_refused", bytes(9600)))
     session.outgoing.put_nowait(("tool_refused", None))
+    drained = _observe_playback_drain(session.outgoing, monkeypatch)
     player = None
     try:
         assert await session._send_device_state("start", 0) is False
         player = asyncio.create_task(session._play())
-        async with asyncio.timeout(1):
-            while not session.outgoing.empty():
-                await asyncio.sleep(0.005)
-        await asyncio.sleep(0)
+        await asyncio.wait_for(drained.wait(), timeout=1)
         assert sent == []
         assert session.head_packets == 0
         assert session.native_tool_audio_sent == 0
