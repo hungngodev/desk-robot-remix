@@ -6063,18 +6063,25 @@ async def test_opt_in_sensor_event_invites_one_peer_without_extra_audio_owner(
         # The actual two relay transmissions above must still block B inviting A.
         sent_at = pet._group_last_spoken
         original_start = pet._social_last_started
-        pet._social_last_started = sent_at - 301
+        # Use an exactly representable clock origin for the equality assertion.
+        boundary_at = 1000.0
+        pet._group_last_spoken = boundary_at
+        pet._social_last_started = boundary_at - 301
         pet.states["robot-03"].enabled = False
         for cooldown in (0, 120):
             pet.speech_cooldown = cooldown
-            assert pet._social_peer("robot-02", "hand_wave", sent_at) is None
+            assert pet._social_peer("robot-02", "hand_wave", boundary_at) is None
             assert pet._social_peer(
-                "robot-02", "hand_wave", sent_at + cooldown + 19.9,
+                "robot-02", "hand_wave", boundary_at + cooldown + 19.9,
             ) is None
             assert pet._social_peer(
-                "robot-02", "hand_wave", sent_at + cooldown + 20.1,
+                "robot-02", "hand_wave", boundary_at + cooldown + 20,
+            ) == "robot-01"
+            assert pet._social_peer(
+                "robot-02", "hand_wave", boundary_at + cooldown + 20.1,
             ) == "robot-01"
         pet.speech_cooldown = 0
+        pet._group_last_spoken = sent_at
         pet._social_last_started = original_start
         # Immediate second event cannot manufacture another peer conversation.
         await wait_for(lambda: pet._speech_task is None)

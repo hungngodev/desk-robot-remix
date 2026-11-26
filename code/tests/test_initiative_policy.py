@@ -182,3 +182,32 @@ def test_nonphysical_noncamera_event_does_not_claim_eyewitness():
             robot_id=robot_id, kind="activity", description=" Idle PLAY ",
             camera_derived=False, physical_event=False,
         ) == expected
+
+
+@pytest.mark.parametrize("interval", [3.0, 12.0, 120.0])
+def test_cooldown_exact_monotonic_edges(interval):
+    last = 1000.0
+    expiry = last + interval
+    assert not cooldown_pending(now=math.nextafter(last, -math.inf), last=last, interval=interval)
+    assert cooldown_pending(now=last, last=last, interval=interval)
+    assert cooldown_pending(now=math.nextafter(expiry, -math.inf), last=last, interval=interval)
+    assert not cooldown_pending(now=expiry, last=last, interval=interval)
+    assert not cooldown_pending(now=math.nextafter(expiry, math.inf), last=last, interval=interval)
+
+
+def test_zero_interval_never_consumes_optional_budget():
+    for now in (999.0, 1000.0, 1001.0):
+        assert not cooldown_pending(now=now, last=1000.0, interval=0.0)
+
+
+@pytest.mark.parametrize("interval", [12.0, 120.0])
+@pytest.mark.parametrize("quiet", ["manual", "scheduled", "human"])
+def test_expired_speech_budget_does_not_override_quiet(interval, quiet):
+    assert event_budget_reason(
+        now=1000.0 + interval, previous_event_at=-math.inf,
+        fleet_spoken_at=1000.0, event_window=3.0, speech_interval=interval,
+    ) is None
+    assert quiet_voice_veto(
+        local_quiet=quiet == "manual", scheduled_quiet=quiet == "scheduled",
+        human_active=lambda: quiet == "human",
+    )
