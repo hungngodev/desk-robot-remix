@@ -8,13 +8,15 @@
 // Initialization uses the pinned Adafruit AMG88xx register definitions; bounded 16-byte
 // reads reject invalid data rather than interpreting it as a fresh frame.
 namespace desk_robot_room {
+// Pixel registers are not the thermistor's sign-magnitude, 0.0625 C/LSB format.
+inline int thermal_pixel_quarters(std::uint8_t low, std::uint8_t high) {
+  const unsigned raw = (static_cast<unsigned>(high) << 8 | low) & 0x0fffU;
+  return static_cast<int>(raw) - ((raw & 0x0800U) ? 4096 : 0);
+}
+
 inline bool decode_thermal_pixel(std::uint8_t low, std::uint8_t high,
                                  float& temperature_c) {
-  const std::uint16_t raw = static_cast<std::uint16_t>(
-      (static_cast<std::uint16_t>(high) << 8) | low) & 0x0fffU;
-  std::int16_t quarters = static_cast<std::int16_t>(raw);
-  if ((raw & 0x0800U) != 0U) quarters -= 4096;
-  const float decoded_c = 0.25f * quarters;
+  const float decoded_c = 0.25f * thermal_pixel_quarters(low, high);
   if (decoded_c < 0.0f || decoded_c > 80.0f) return false;
   temperature_c = decoded_c;
   return true;
@@ -35,7 +37,7 @@ bool read_thermal_chunk(WireLike& wire, std::uint8_t address,
   std::uint8_t raw[kBytes]{};
   for (std::uint8_t i = 0; i < kBytes; ++i) {
     const int value = wire.read();
-    if (value < 0) return false;
+    if (value < 0 || value > 255) return false;
     raw[i] = static_cast<std::uint8_t>(value);
   }
   // Stage the whole chunk: a late invalid pixel must not expose partial data.

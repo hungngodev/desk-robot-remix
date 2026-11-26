@@ -15,6 +15,7 @@ struct FakeWire {
   bool nack = false;
   bool short_read = false;
   bool invalid_byte = false;
+  bool oversized_byte = false;
   bool stopped_on_failed_write = false;
 
   void beginTransmission(std::uint8_t address) { selected = address; }
@@ -35,6 +36,7 @@ struct FakeWire {
   int available() { return 16 - cursor; }
   int read() {
     if (invalid_byte && cursor == 7) return -1;
+    if (oversized_byte && cursor == 15) return 256;
     return data[cursor++];
   }
 };
@@ -42,10 +44,26 @@ struct FakeWire {
 int main() {
   using desk_robot_room::decode_thermal_pixel;
   using desk_robot_room::read_thermal_chunk;
+  using desk_robot_room::thermal_pixel_quarters;
+  // Exhaust the register domain independently of the high-gain validity gate.
+  for (int quarters = -2048; quarters <= 2047; ++quarters) {
+    const unsigned raw = static_cast<unsigned>(quarters) & 0xfffU;
+    const auto low = static_cast<std::uint8_t>(raw);
+    const auto high = static_cast<std::uint8_t>(raw >> 8);
+    assert(thermal_pixel_quarters(low, high) == quarters);
+    float decoded = 900.0f;
+    const bool in_range = quarters >= 0 && quarters <= 320;
+    assert(decode_thermal_pixel(low, high, decoded) == in_range);
+    assert(decoded == (in_range ? quarters * 0.25f : 900.0f));
+  }
+  assert(thermal_pixel_quarters(0xd8, 0x0f) == -40);  // -10 C pixel
+  assert(thermal_pixel_quarters(0xa0, 0x08) == -1888);  // -10 C thermistor encoding
   float c = 900.0f;
   assert(decode_thermal_pixel(0x00, 0x00, c) && c == 0.0f);
   assert(decode_thermal_pixel(0x64, 0x00, c) && c == 25.0f);
   assert(decode_thermal_pixel(0x40, 0x01, c) && c == 80.0f);
+  assert(!decode_thermal_pixel(0xd8, 0x0f, c) && c == 80.0f);
+  assert(!decode_thermal_pixel(0xa0, 0x08, c) && c == 80.0f);
   assert(!decode_thermal_pixel(0x41, 0x01, c) && c == 80.0f);
   assert(!decode_thermal_pixel(0xff, 0x0f, c) && c == 80.0f);
   assert(!decode_thermal_pixel(0x60, 0x0f, c) && c == 80.0f);
@@ -83,6 +101,9 @@ int main() {
   bus.invalid_byte = true;
   assert(!read_thermal_chunk(bus, 0x69, 0, frame.data()));
   bus.invalid_byte = false;
+  bus.oversized_byte = true;
+  assert(!read_thermal_chunk(bus, 0x69, 7, frame.data() + 56));
+  bus.oversized_byte = false;
   // Last pixel invalid: the chunk must not partially overwrite old data.
   // Make every preceding pixel distinct from the cached 25 C frame.
   // Otherwise direct writes before a late failure are unobservable.
