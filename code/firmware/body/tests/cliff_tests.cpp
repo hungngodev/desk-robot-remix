@@ -59,9 +59,21 @@ void stored_calibration_flag_rejects_noncanonical_bytes() {
   auto value = config();
   CHECK(desk_robot::valid_stored_calibrated_flag(value));
   for (unsigned raw = 0; raw < 256; ++raw) {
+    CliffGuard guard;
+    CHECK(guard.configure(config()));
+    for (std::uint8_t lane = 0; lane < desk_robot::kCliffSensorCount; ++lane)
+      guard.sample(lane, lane == 4 ? 300 : 45, true, 10);
+    CHECK(guard.try_rearm(10));
     const auto byte = static_cast<unsigned char>(raw);
     std::memcpy(&value.calibrated, &byte, sizeof(byte));
     CHECK(desk_robot::valid_stored_calibrated_flag(value) == (raw == 1));
+    CHECK(guard.configure(value) == (raw == 1));
+    CHECK(guard.configured() == (raw == 1));
+    CHECK(guard.configuration().calibrated == (raw == 1));
+    CHECK(!guard.evaluate(10));
+    CHECK(!guard.try_rearm(10));
+    CHECK(!guard.diagnostic(0, 10).present);
+    if (raw != 1) CHECK(guard.fault() == CliffFault::Unconfigured);
   }
 }
 

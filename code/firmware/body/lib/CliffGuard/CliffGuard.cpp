@@ -8,7 +8,7 @@ bool CliffGuard::valid_config(const CliffConfig& config) noexcept {
   // NVS, so its former 1000 ms ceiling could silently accept a stored
   // policy that the operator command rightly refuses. Actual certified
   // freshness may need to be STRICTER given sensor cadence and wheel speed.
-  if (!config.calibrated || config.freshness_ms < 30U ||
+  if (!valid_stored_calibrated_flag(config) || config.freshness_ms < 30U ||
       config.freshness_ms > 200U || config.front_obstacle_mm < 30 ||
       config.front_max_mm > 1300 ||
       config.front_obstacle_mm >= config.front_max_mm) return false;
@@ -22,8 +22,9 @@ bool CliffGuard::valid_config(const CliffConfig& config) noexcept {
 }
 
 bool CliffGuard::configure(const CliffConfig& config) noexcept {
-  config_ = config;
+  // Reject malformed bool representations before copying or reading them.
   configured_ = valid_config(config);
+  config_ = configured_ ? config : CliffConfig{};
   initial_sweep_pending_rearm_ = true;
   for (auto& sample : samples_) sample = Sample{};
   // Replacing calibration cannot retain a clear/armed state or old readings.
