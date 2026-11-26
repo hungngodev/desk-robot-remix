@@ -30,6 +30,7 @@ HEAD_SINGLE = {
     "amp_lrclk": "AUDIO_I2S_SPK_GPIO_LRCK",
     "amp_din": "AUDIO_I2S_SPK_GPIO_DOUT",
     "head_uart_tx": "ROBOT_UART_TX", "head_uart_rx": "ROBOT_UART_RX",
+    "rgb_data": "RGB_HEART_GPIO",
 }
 
 # The classic ESP32 WROOM32 is not an ESP32-S3. GPIO6..11 are internal flash
@@ -245,6 +246,45 @@ def _verify_gpio_map(owner: str, gpio: dict) -> None:
         raise ValueError(f"Double-booked {owner} GPIO")
 
 
+def _head_pin(source: str, symbol: str) -> int:
+    return _pin(
+        rf"(?m)^[ \t]*#[ \t]*define[ \t]+{symbol}[ \t]+GPIO_NUM_(\d+)[ \t]*$",
+        source, symbol,
+    )
+
+
+def _verify_sense_gpio(sense_pins: dict, head: str) -> None:
+    """Check the fixed Sense board reservations against actual pin macros."""
+    head = _strip_source_comments(head)
+    if any(type(pin) is not int for pin in sense_pins.values()):
+        raise ValueError("Sense GPIO roles require one integer pin each")
+    if set(sense_pins) != set(HEAD_SINGLE):
+        raise ValueError("Unknown or incomplete Sense GPIO roles")
+    for label, symbol in HEAD_SINGLE.items():
+        if _head_pin(head, symbol) != sense_pins[label]:
+            raise ValueError(f"Firmware Sense pin drift: {label}")
+    if not set(sense_pins.values()) <= {1, 2, 4, 5, 6, 7, 8, 9}:
+        raise ValueError("Sense GPIO is not an allocated external header pad")
+    if sense_pins["rgb_data"] != 9:
+        raise ValueError("RGB reservation changed; check SD J3")
+    fixed = {
+        "AUDIO_PDM_MIC_GPIO_SCK": 42, "AUDIO_PDM_MIC_GPIO_DIN": 41,
+        "BOOT_BUTTON_GPIO": 0, "SD_CARD_CS_GPIO": 21,
+    }
+    for symbol, expected in fixed.items():
+        if _head_pin(head, symbol) != expected:
+            raise ValueError(f"Stock Sense pin changed: {symbol}")
+    camera_symbols = (
+        *(f"CAMERA_PIN_D{i}" for i in range(8)),
+        "CAMERA_PIN_XCLK", "CAMERA_PIN_PCLK", "CAMERA_PIN_VSYNC",
+        "CAMERA_PIN_HREF", "CAMERA_PIN_SIOD", "CAMERA_PIN_SIOC",
+    )
+    fixed_head_pins = [_head_pin(head, symbol) for symbol in (*camera_symbols, *fixed)]
+    if (len(fixed_head_pins) != len(set(fixed_head_pins))
+            or set(fixed_head_pins).intersection(sense_pins.values())):
+        raise ValueError("Sense GPIO collides with onboard camera, PDM, boot or SD signal")
+
+
 def verify(plan: dict, body: str, head: str) -> None:
     """Source agreement only. Passing is NEVER electrical acceptance."""
     bus = plan["bus"]
@@ -266,42 +306,11 @@ def verify(plan: dict, body: str, head: str) -> None:
     if set(body_pins) != set(BODY_SINGLE) | {"left_stepper", "right_stepper"}:
         raise ValueError("Unknown or incomplete body GPIO roles")
     _verify_body_profiles(body_pins, body)
-    for label, symbol in HEAD_SINGLE.items():
-        actual = _pin(rf"#define {symbol} GPIO_NUM_(\d+)\b", head, symbol)
-        if actual != bus["sense_gpio"][label]:
-            raise ValueError(f"Firmware Sense pin drift: {label}")
+    _verify_sense_gpio(bus["sense_gpio"], head)
     if bus["body_gpio"]["head_uart_rx"] != 16 or bus["sense_gpio"]["head_uart_tx"] != 2:
         raise ValueError("Unexpected XIAO to WROOM UART link")
     if bus["body_gpio"]["head_uart_tx"] != 17 or bus["sense_gpio"]["head_uart_rx"] != 1:
         raise ValueError("Unexpected WROOM to XIAO UART link")
-    if ("#define AUDIO_PDM_MIC_GPIO_SCK GPIO_NUM_42" not in head
-            or "#define AUDIO_PDM_MIC_GPIO_DIN GPIO_NUM_41" not in head):
-        raise ValueError("Stock XIAO PDM pins changed")
-    # The selected Sense header exposes the eight allocated signal pads.
-    # Native USB, flash/PSRAM, debug UART, strapping and onboard signals
-    # are not spare external harness connections.
-    sense_pins = bus["sense_gpio"]
-    if any(type(pin) is not int for pin in sense_pins.values()):
-        raise ValueError("Sense GPIO roles require one integer pin each")
-    if set(sense_pins) != set(HEAD_SINGLE) | {"rgb_data"}:
-        raise ValueError("Unknown or incomplete Sense GPIO roles")
-    camera_symbols = (
-        *(f"CAMERA_PIN_D{i}" for i in range(8)),
-        "CAMERA_PIN_XCLK", "CAMERA_PIN_PCLK", "CAMERA_PIN_VSYNC",
-        "CAMERA_PIN_HREF", "CAMERA_PIN_SIOD", "CAMERA_PIN_SIOC",
-    )
-    fixed_head_pins = [
-        _pin(rf"#define {symbol} GPIO_NUM_(\d+)\b", head, symbol)
-        for symbol in (*camera_symbols, "AUDIO_PDM_MIC_GPIO_SCK",
-                       "AUDIO_PDM_MIC_GPIO_DIN", "BOOT_BUTTON_GPIO")
-    ]
-    if (len(fixed_head_pins) != len(set(fixed_head_pins))
-            or set(fixed_head_pins).intersection(sense_pins.values())):
-        raise ValueError("Sense GPIO collides with onboard camera, PDM or boot signal")
-    if not set(sense_pins.values()) <= {1, 2, 4, 5, 6, 7, 8, 9}:
-        raise ValueError("Sense GPIO is not an allocated external header pad")
-    if bus["sense_gpio"]["rgb_data"] != 9:
-        raise ValueError("RGB reservation changed; check SD J3")
     # Audio power must track the CURRENT selected 8ohm 2W rectangular speaker,
     # not a retired 1W round part. The 5V MAX98357A output can be 1.8W at
     # 8ohm nominal; this contract is NOT a verified gain/thermal acceptance.
