@@ -1423,3 +1423,19 @@ def test_stack_missing_pack_fuse_rating_fails_closed():
     result = one_stack(**cfg)
     assert result["checks"]["pack_path_fuse_covers_peak"] is False
     assert result["all_power_stages_compatible_on_paper"] is False
+
+
+@pytest.mark.parametrize("trip, expected", [(7.647, False), (7.648, False), (7.649, True)])
+def test_pcm_trip_must_exceed_reserved_peak(trip, expected):
+    demand = tool(3, 1.8)
+    assert demand["minimum_rated_cell_and_boost_input_a"] == 7.648
+    result = pack_screen(
+        demand, pack_length_mm=55, pack_width_mm=30, pack_thickness_mm=10,
+        tray_length_mm=68, tray_width_mm=35, tray_height_mm=14,
+        rated_peak_discharge_a=trip, rated_continuous_discharge_a=5,
+        pcm_overcurrent_trip_a=trip, connector_continuous_a=8,
+        wire_and_crimp_continuous_a=8,
+    )
+    assert result["current_sufficient_on_paper"] is expected
+    assert result["candidate_usable_on_paper"] is expected
+    assert result["candidate_physically_qualified"] is False

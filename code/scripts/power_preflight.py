@@ -61,7 +61,8 @@ def size_5v_supply(
         raise ValueError("Single-cell low voltage must be measured/qualified")
     if not 0.5 <= measured_boost_efficiency <= 0.99 or not 1 <= margin <= 2:
         raise ValueError("Qualified boost efficiency and current margin required")
-    ratings = (boost_max_input_a, boost_continuous_input_a, boost_continuous_output_a, protected_cell_continuous_a)
+    ratings = (boost_max_input_a, boost_continuous_input_a,
+               boost_continuous_output_a, protected_cell_continuous_a)
     for rating in ratings:
         if rating is not None and (not _finite_number(rating) or rating <= 0):
             raise ValueError("Rated board current must be positive and finite")
@@ -176,6 +177,10 @@ def screen_protected_pack(
     peak = Decimal(str(supply["minimum_rated_cell_and_boost_input_a"]))
     continuous = Decimal(str(supply["minimum_continuous_cell_input_a"]))
     current_ok = _ratings_cover(ratings, (peak, continuous, peak))
+    # A protection trip threshold is not a usable current rating. Equality
+    # at the reserved peak can disconnect the whole robot under load.
+    if pcm_overcurrent_trip_a is not None and Decimal(str(pcm_overcurrent_trip_a)) <= peak:
+        current_ok = False
     # A 4A cell can ship with a 0.86A JST harness. Current through the
     # terminated connector and wires is NOT the cell's printed 4A rating.
     # Without a separately published pulse rating, conservatively compare
