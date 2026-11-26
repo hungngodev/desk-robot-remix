@@ -14,6 +14,8 @@ import ipaddress
 import json
 import time
 import wave
+from collections.abc import Callable
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -75,6 +77,40 @@ def read_jpeg(path: Path | None) -> bytes | None:
     return jpeg
 
 
+@asynccontextmanager
+async def _probe_socket(client: aiohttp.ClientSession, url: str, deadline: float,
+                        phase: Callable[[], str]):
+    """Budget communication separately from bounded best-effort socket teardown."""
+    socket = None
+    completed = False
+    try:
+        async with asyncio.timeout(deadline):
+            socket = await client.ws_connect(
+                url, heartbeat=20, max_msg_size=2_000_000,
+                timeout=aiohttp.ClientWSTimeout(ws_close=1.0),
+            )
+            yield socket
+        completed = True
+    except TimeoutError as exc:
+        raise TimeoutError(
+            f"Native duplex timeout during {phase()} (probe budget {deadline:g}s)"
+        ) from exc
+    finally:
+        if socket is not None:
+            if completed:
+                # An application close is optional after a terminal decision.
+                # Never write it into an already stalled or cancelled stream.
+                with suppress(Exception):
+                    async with asyncio.timeout(1.0):
+                        await socket.send_json({"type": "session.close"})
+            # aiohttp's ws_close is a per-read timeout; its close frame write
+            # and repeated non-close messages need an absolute outer bound.
+            # The owning ClientSession releases the transport on exit.
+            with suppress(TimeoutError):
+                async with asyncio.timeout(1.0):
+                    await socket.close()
+
+
 async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                 *, deadline: float,
                 barrier: asyncio.Barrier | None = None,
@@ -113,17 +149,18 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
 
     # A single communication budget covers connection, negotiation, fleet
     # admission, paced input, and the terminal model decision.
-    async with asyncio.timeout(deadline) as budget, aiohttp.ClientSession() as client:
-        async with client.ws_connect(
-            server_url(url), heartbeat=20, max_msg_size=2_000_000,
-            timeout=aiohttp.ClientWSTimeout(ws_close=1.0),
-        ) as socket:
+    phase = "WebSocket connection"
+    async with aiohttp.ClientSession() as client:
+        async with _probe_socket(client, server_url(url), deadline, lambda: phase) as socket:
+            phase = "sending session.update"
             await socket.send_json(wire.session_update())
+            phase = "waiting for session.created"
             greeting = await socket.receive_json(timeout=10)
             verify_native_server(greeting, wire.model)
             wire.handle_event(greeting)
             session_ready_at = time.monotonic()
             if barrier is not None:
+                phase = "fleet session admission"
                 # Hold every authenticated backend session open BEFORE
                 # sending a single audio unit. Serial one-at-a-time probes
                 # cannot qualify a five-pet session admission ceiling.
@@ -132,6 +169,7 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                 )
 
             input_started_at = time.monotonic()
+            phase = "sending paced input audio"
 
             async def reader():
                 nonlocal first_audio_at, model_decision, input_appends_after_first_audio
@@ -224,7 +262,9 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                         await listener
                         break
                 if not listener.done():
+                    phase = "sending input audio commit"
                     await socket.send_json(wire.commit())
+                    phase = "waiting for terminal response (response.done or response.listen)"
                     # Propagate backend errors and interrupted turns promptly.
                     await listener
                 if jpeg is not None and wire.frames_sent == 0:
@@ -235,13 +275,6 @@ async def probe(url: str, model: str, pcm: bytes, jpeg: bytes | None,
                 # Always retrieve a concurrent reader exception, including
                 # when the writer failed or the deadline interrupted input.
                 await asyncio.gather(listener, return_exceptions=True)
-                if not budget.expired():
-                    try:
-                        await asyncio.wait_for(
-                            socket.send_json({"type": "session.close"}), timeout=1.0,
-                        )
-                    except Exception:
-                        pass
 
     results.update({
         "input_duration_ms": wire.input_ms,
