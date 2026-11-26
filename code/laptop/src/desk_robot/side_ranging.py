@@ -135,9 +135,14 @@ class SideRangeEvents:
             # Match TofBus's accepted VL53L0X conversion range. Even a
             # contradictory valid bit cannot make a subminimum range usable.
             if not fresh or not 30 <= distances[i] <= 1300:
-                self.directions[i] = Direction(
-                    previous_sample_ms=track.previous_sample_ms
-                )
+                # A rejected conversion is not a proximity vote, but its
+                # present, same-boot timestamp still fences older readings.
+                previous = track.previous_sample_ms
+                if has_hardware_identity and present & (1 << i):
+                    stamp = sample_times[i]
+                    if previous is None or 0 < (stamp - previous) & 0xffffffff < 0x80000000:
+                        previous = stamp
+                self.directions[i] = Direction(previous_sample_ms=previous)
                 continue
             sample_at = now - ages[i] / 1000.0
             if has_hardware_identity:
