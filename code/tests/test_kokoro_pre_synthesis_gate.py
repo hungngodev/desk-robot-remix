@@ -72,3 +72,43 @@ async def test_current_permission_preserves_normal_synthesis_and_send(settings):
     assert [call[0] for call in calls] == ["kokoro", "bridge"]
     assert calls[1][1] == "/speak"
     assert calls[1][2]["lease_id"] == "owned-test-lease"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("phase", ["synthesis", "transmission"])
+async def test_permission_revoked_at_async_boundary_rejects_stale_speech(settings, phase):
+    robot = settings.robots[0]
+    robot.device_id = "device-test"
+    allowed = True
+    calls = []
+
+    class Client:
+        async def post(self, *args, **kwargs):
+            nonlocal allowed
+            calls.append("kokoro")
+            if phase == "synthesis":
+                allowed = False
+            return SimpleNamespace(content=b"RIFFtest", raise_for_status=lambda: None)
+
+    speaker = KokoroHeadSpeaker(settings, Client())
+
+    async def bridge(route, payload):
+        nonlocal allowed
+        calls.append(route)
+        assert phase == "transmission", "Revoked WAV reached the speech bridge"
+        allowed = False
+        return {
+            "device_id": robot.device_id,
+            "transmitted": True,
+            "physical_playback_verified": False,
+        }
+
+    speaker._bridge = bridge
+    owned = speaker._lease_context.set("owned-test-lease")
+    try:
+        with pytest.raises(RuntimeError, match=f"revoked during {phase}"):
+            await speaker.say(robot, "Stale reply", permission_check=lambda: allowed)
+    finally:
+        speaker._lease_context.reset(owned)
+
+    assert calls == (["kokoro"] if phase == "synthesis" else ["kokoro", "/speak"])
