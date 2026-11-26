@@ -510,7 +510,7 @@ int main() {
         self.assertIn('constexpr int initial_decoder_rate = 24000;', audio)
         self.assertIn('decoder_sample_rate_ = initial_decoder_rate;', audio)
         self.assertIn('esp_ae_rate_cvt_open(&cfg, &output_resampler_);', audio)
-        self.assertIn('Sense speaker resampler unavailable: discarding mismatched PCM', audio)
+        self.assertIn('Speaker resampler unavailable: discarding mismatched PCM', audio)
         self.assertIn('task.pcm.clear();', audio)
         self.assertIn('decoded = !task.pcm.empty();', audio)
         self.assertIn('OPUS_DEC_CFG(initial_decoder_rate, OPUS_FRAME_DURATION_MS)', audio)
@@ -672,6 +672,43 @@ int main() {
         overlay.remove(self.root)
         assert (self.root / path).read_bytes() == self.original[path]
 
+    def test_decoder_integrity_shared_across_s3_variants(self):
+        """The alternate S3 heads must retain the same decoder safety gate."""
+        path = "main/audio/audio_service.cc"
+        sources = {
+            board: overlay.planned_files(self.root, board)[path].decode()
+            for board in ("sense", "modular", "waveshare")
+        }
+        setters = {
+            board: source.split("void AudioService::SetDecodeSampleRate(", 1)[1].split(
+                "void AudioService::PushTaskToEncodeQueue(", 1
+            )[0]
+            for board, source in sources.items()
+        }
+        self.assertEqual(setters["sense"], setters["modular"])
+        self.assertEqual(setters["sense"], setters["waveshare"])
+        for board, source in sources.items():
+            with self.subTest(board=board):
+                setter = setters[board]
+                self.assertNotIn("#ifdef CONFIG_BOARD_TYPE", setter)
+                self.assertLess(setter.index("sample_rate != 48000"),
+                                setter.index("esp_opus_dec_open("))
+                self.assertLess(setter.index("frame_duration != 60"),
+                                setter.index("esp_opus_dec_open("))
+                self.assertLess(setter.index("if (proposed_decoder == nullptr)"),
+                                setter.index("esp_opus_dec_close(previous_decoder)"))
+                gate = (
+                    "if (opus_decoder_ != nullptr &&\n"
+                    "                decoder_sample_rate_ == packet->sample_rate &&\n"
+                    "                decoder_duration_ms_ == packet->frame_duration) {"
+                )
+                worker = source.split("void AudioService::OpusCodecTask()", 1)[1].split(
+                    "void AudioService::SetDecodeSampleRate(", 1
+                )[0]
+                self.assertLess(worker.index(gate), worker.index("esp_opus_dec_decode("))
+                self.assertIn("Speaker resampler unavailable: discarding mismatched PCM", worker)
+                self.assertIn("decoded = !task.pcm.empty();", worker)
+
     def test_invalid_32khz_opus_offer_does_not_destroy_decoder(self):
         """The 32 kHz DAC clock is not an Opus decode rate (source gate)."""
         overlay.apply(self.root, 'sense')
@@ -680,12 +717,12 @@ int main() {
         setter = setter.split('void AudioService::PushTaskToEncodeQueue(', 1)[0]
         self.assertIn('sample_rate != 24000', setter)
         self.assertIn('sample_rate != 48000', setter)
-        self.assertIn('Rejecting unsupported Sense Opus rate', setter)
+        self.assertIn('Rejecting unsupported Opus rate', setter)
         # An invalid frame duration such as 30 ms must be rejected before
         # touching the active decoder, even when its sample rate is valid.
         for duration in (5, 10, 20, 40, 60):
             self.assertIn(f'frame_duration != {duration}', setter)
-        self.assertIn('Rejecting unsupported Sense Opus frame duration', setter)
+        self.assertIn('Rejecting unsupported Opus frame duration', setter)
         self.assertLess(setter.index('frame_duration != 60'),
                         setter.index('esp_opus_dec_open('))
         # Invalid rates are rejected before any replacement is attempted.
@@ -708,7 +745,7 @@ int main() {
         self.assertIn('void* previous_decoder = opus_decoder_;', setter)
         self.assertIn('decoder_duration_ms_ == frame_duration && opus_decoder_ != nullptr',
                       setter)
-        self.assertIn('#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3', setter)
+        self.assertNotIn('#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3', setter)
         # 32 kHz remains the DAC rate; Opus decoder should stay at 24 kHz.
         config = (self.root / overlay.BOARDS['sense'] / 'config.h').read_text()
         self.assertIn('#define AUDIO_OUTPUT_SAMPLE_RATE 32000', config)
@@ -1773,7 +1810,7 @@ def test_max98357a_output_rate_and_aec_reference_contract():
     overlay_source = (HEAD / "install_overlay.py").read_text()
     assert "initial_decoder_rate = 24000" in overlay_source
     assert "esp_ae_rate_cvt_open(&cfg, &output_resampler_)" in overlay_source
-    assert "Sense speaker resampler unavailable" in overlay_source
+    assert "Speaker resampler unavailable" in overlay_source
     # Runtime resampling uses the pinned Xiaozhi decoder, not another audio stack.
     if UPSTREAM.is_dir():
         upstream = (UPSTREAM / "main/audio/audio_service.cc").read_text()

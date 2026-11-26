@@ -35,7 +35,8 @@ class WaveshareOverlayTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
-        names = ["main/Kconfig.projbuild", "main/CMakeLists.txt", "main/mcp_server.cc"]
+        names = ["main/Kconfig.projbuild", "main/CMakeLists.txt", "main/mcp_server.cc",
+                 "main/audio/audio_service.cc"]
         names += [
             f"main/boards/common/{name}"
             for name in (

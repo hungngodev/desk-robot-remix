@@ -795,18 +795,18 @@ class OverlayTests(unittest.TestCase):
             startup.index("esp_ae_rate_cvt_open(&cfg, &output_resampler_)"),
         )
         self.assertIn("output_resampler_ = nullptr;", startup)
-        self.assertIn("Sense speaker resampler unavailable: discarding mismatched PCM", service)
+        self.assertIn("Speaker resampler unavailable: discarding mismatched PCM", service)
         self.assertIn("decoded = !task.pcm.empty();", service)
         decoder = service.split("void AudioService::SetDecodeSampleRate(", 1)[1]
         decoder = decoder.split("void AudioService::PushTaskToEncodeQueue(", 1)[0]
         # Invalid formats cannot close the current decoder. Failed opens
         # retain its handle; successful opens swap under decoder_mutex_.
-        self.assertIn("Rejecting unsupported Sense Opus rate", decoder)
-        self.assertIn("Rejecting unsupported Sense Opus frame duration", decoder)
+        self.assertIn("Rejecting unsupported Opus rate", decoder)
+        self.assertIn("Rejecting unsupported Opus frame duration", decoder)
         self.assertIn("void* proposed_decoder = nullptr;", decoder)
         self.assertIn("void* previous_decoder = opus_decoder_;", decoder)
         self.assertLess(
-            decoder.index("Rejecting unsupported Sense Opus frame duration"),
+            decoder.index("Rejecting unsupported Opus frame duration"),
             decoder.index("esp_opus_dec_open(&opus_dec_cfg"),
         )
         self.assertLess(

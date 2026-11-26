@@ -377,6 +377,134 @@ std::expected<std::vector<uint8_t>, std::string> EspVideo::SnapshotJpeg() {
     return files
 
 
+def patch_decoder_integrity(service: str) -> str:
+    """Apply codec-independent Opus admission and decoder recovery."""
+    # Never play at the wrong speed when the output rate converter
+    # could not be created. The original Xiaozhi code silently forwarded
+    # mismatched PCM to the I2S DAC when output_resampler_ was null.
+    service = replace_once(
+        service,
+        '''                    if (decoder_sample_rate_ != codec_->output_sample_rate() &&
+                        output_resampler_ != nullptr) {''',
+        '''                    if (decoder_sample_rate_ != codec_->output_sample_rate() &&
+                        output_resampler_ == nullptr) {
+                        ESP_LOGE(TAG, "Speaker resampler unavailable: discarding mismatched PCM");
+                        task.pcm.clear();
+                    } else if (decoder_sample_rate_ != codec_->output_sample_rate() &&
+                        output_resampler_ != nullptr) {''',
+    )
+    service = replace_once(
+        service,
+        '''                    decoded = true;
+                } else {
+                    ESP_LOGE(TAG, "Failed to decode audio after resize, error code: %d", ret);''',
+        '''                    decoded = !task.pcm.empty();
+                } else {
+                    ESP_LOGE(TAG, "Failed to decode audio after resize, error code: %d", ret);''',
+    )
+    # Reject a backend's unsupported Opus rate BEFORE closing the live
+    # decoder. 32 kHz is a valid MAX98357A DAC clock but not an Opus
+    # decoder rate; a malformed TTS event must not permanently silence
+    # subsequent conforming 24 kHz replies. The decoder can also be
+    # reopened after a genuine failed open even when the last rate matches.
+    service = replace_once(
+        service,
+        """void AudioService::SetDecodeSampleRate(int sample_rate, int frame_duration) {
+    if (decoder_sample_rate_ == sample_rate && decoder_duration_ms_ == frame_duration) {""",
+        """void AudioService::SetDecodeSampleRate(int sample_rate, int frame_duration) {
+    // Valid Opus PCM decode rates: 8, 12, 16, 24 or 48 kHz. Reject a bad
+    // remote format without closing the functioning device decoder.
+    if (sample_rate != 8000 && sample_rate != 12000 &&
+        sample_rate != 16000 && sample_rate != 24000 &&
+        sample_rate != 48000) {
+        ESP_LOGE(TAG, "Rejecting unsupported Opus rate %d", sample_rate);
+        return;
+    }
+    // The ESP32 decoder API takes whole milliseconds. Reject an invalid
+    // Opus frame duration BEFORE replacing a working decoder.
+    if (frame_duration != 5 && frame_duration != 10 &&
+        frame_duration != 20 && frame_duration != 40 &&
+        frame_duration != 60) {
+        ESP_LOGE(TAG, "Rejecting unsupported Opus frame duration %d", frame_duration);
+        return;
+    }
+    if (decoder_sample_rate_ == sample_rate &&
+        decoder_duration_ms_ == frame_duration && opus_decoder_ != nullptr) {""",
+    )
+    # Preserving an old decoder on a rejected format is not permission
+    # to decode the rejected packet with that decoder.
+    service = replace_once(
+        service,
+        """            SetDecodeSampleRate(packet->sample_rate, packet->frame_duration);
+            bool decoded = false;
+            if (opus_decoder_ != nullptr) {""",
+        """            SetDecodeSampleRate(packet->sample_rate, packet->frame_duration);
+            bool decoded = false;
+            if (opus_decoder_ != nullptr &&
+                decoder_sample_rate_ == packet->sample_rate &&
+                decoder_duration_ms_ == packet->frame_duration) {""",
+    )
+    # Retry the existing converter if its allocation failed at startup
+    # or on the previous rate change, without replacing a healthy decoder.
+    service = replace_once(
+        service,
+        """    if (decoder_sample_rate_ == sample_rate &&
+        decoder_duration_ms_ == frame_duration && opus_decoder_ != nullptr) {
+        return;
+    }""",
+        """    if (decoder_sample_rate_ == sample_rate &&
+        decoder_duration_ms_ == frame_duration && opus_decoder_ != nullptr) {
+        auto codec = Board::GetInstance().GetAudioCodec();
+        if (sample_rate != codec->output_sample_rate() && output_resampler_ == nullptr) {
+            esp_ae_rate_cvt_cfg_t cfg =
+                RATE_CVT_CFG(sample_rate, codec->output_sample_rate(), ESP_AUDIO_MONO);
+            auto resampler_ret = esp_ae_rate_cvt_open(&cfg, &output_resampler_);
+            if (output_resampler_ == nullptr) {
+                ESP_LOGE(TAG, "Failed to recover output resampler, error code: %d", resampler_ret);
+            }
+        }
+        return;
+    }""",
+    )
+    # Replace the pinned upstream's close-then-open decoder transition
+    # in each selected disposable ESP32-S3 overlay. A malformed packet
+    # or failed replacement allocation must not destroy a working decoder.
+    # The decode thread and ResetDecoder use decoder_mutex_ for this swap.
+    service = replace_once(
+        service,
+        """    std::unique_lock<std::mutex> decoder_lock(decoder_mutex_);
+    if (opus_decoder_ != nullptr) {
+        esp_opus_dec_close(opus_decoder_);
+        opus_decoder_ = nullptr;
+    }
+    decoder_lock.unlock();
+    esp_opus_dec_cfg_t opus_dec_cfg = OPUS_DEC_CFG(sample_rate, frame_duration);
+    auto ret = esp_opus_dec_open(&opus_dec_cfg, sizeof(esp_opus_dec_cfg_t), &opus_decoder_);
+    if (opus_decoder_ == nullptr) {
+        ESP_LOGE(TAG, "Failed to create audio decoder, error code: %d", ret);
+        return;
+    }
+    decoder_sample_rate_ = sample_rate;""",
+        """    esp_opus_dec_cfg_t opus_dec_cfg = OPUS_DEC_CFG(sample_rate, frame_duration);
+    void* proposed_decoder = nullptr;
+    auto ret = esp_opus_dec_open(&opus_dec_cfg, sizeof(esp_opus_dec_cfg_t), &proposed_decoder);
+    if (proposed_decoder == nullptr) {
+        ESP_LOGE(TAG, "Failed to create replacement decoder, keeping prior decoder: %d", ret);
+        return;
+    }
+    {
+        std::lock_guard<std::mutex> decoder_lock(decoder_mutex_);
+        void* previous_decoder = opus_decoder_;
+        opus_decoder_ = proposed_decoder;
+        if (previous_decoder != nullptr) {
+            esp_opus_dec_close(previous_decoder);
+        }
+    }
+    decoder_sample_rate_ = sample_rate;""",
+    )
+    return service
+
+
 def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
     """Reuse the bridge/locking overlay, replacing only the selected board adapter."""
     if board not in BOARDS:
@@ -973,131 +1101,7 @@ static bool ParseDeskAudioFrame(int version, const char* data, size_t len,
             "    }\n    esp_opus_enc_config_t opus_enc_cfg = AS_OPUS_ENC_CONFIG();",
             "    }\n#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3\n    // The first packet may use the same Opus rate. Initialize the output\n    // converter NOW so SetDecodeSampleRate's equal-rate fast path cannot\n    // accidentally send 24 kHz PCM to the 32 kHz MAX98357A output.\n    if (opus_decoder_ && decoder_sample_rate_ != codec->output_sample_rate()) {\n        if (output_resampler_ != nullptr) {\n            esp_ae_rate_cvt_close(output_resampler_);\n            output_resampler_ = nullptr;\n        }\n        esp_ae_rate_cvt_cfg_t cfg = RATE_CVT_CFG(\n            decoder_sample_rate_, codec->output_sample_rate(), ESP_AUDIO_MONO);\n        auto resampler_ret = esp_ae_rate_cvt_open(&cfg, &output_resampler_);\n        if (output_resampler_ == nullptr) {\n            ESP_LOGE(TAG, \"Sense Opus output resampler startup failed: %d\",\n                     resampler_ret);\n        }\n    }\n#endif\n    esp_opus_enc_config_t opus_enc_cfg = AS_OPUS_ENC_CONFIG();",
         )
-        # Never play at the wrong speed when the output rate converter
-        # could not be created. The original Xiaozhi code silently forwarded
-        # 24 kHz PCM to the 32 kHz I2S DAC when output_resampler_ was null.
-        service = replace_once(
-            service,
-            '''                    if (decoder_sample_rate_ != codec_->output_sample_rate() &&
-                        output_resampler_ != nullptr) {''',
-            '''                    if (decoder_sample_rate_ != codec_->output_sample_rate() &&
-                        output_resampler_ == nullptr) {
-                        ESP_LOGE(TAG, "Sense speaker resampler unavailable: discarding mismatched PCM");
-                        task.pcm.clear();
-                    } else if (decoder_sample_rate_ != codec_->output_sample_rate() &&
-                        output_resampler_ != nullptr) {''',
-        )
-        service = replace_once(
-            service,
-            '''                    decoded = true;
-                } else {
-                    ESP_LOGE(TAG, "Failed to decode audio after resize, error code: %d", ret);''',
-            '''                    decoded = !task.pcm.empty();
-                } else {
-                    ESP_LOGE(TAG, "Failed to decode audio after resize, error code: %d", ret);''',
-        )
-        # Reject a backend's unsupported Opus rate BEFORE closing the live
-        # decoder. 32 kHz is a valid MAX98357A DAC clock but not an Opus
-        # decoder rate; a malformed TTS event must not permanently silence
-        # subsequent conforming 24 kHz replies. The decoder can also be
-        # reopened after a genuine failed open even when the last rate matches.
-        service = replace_once(
-            service,
-            """void AudioService::SetDecodeSampleRate(int sample_rate, int frame_duration) {
-    if (decoder_sample_rate_ == sample_rate && decoder_duration_ms_ == frame_duration) {""",
-            """void AudioService::SetDecodeSampleRate(int sample_rate, int frame_duration) {
-#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
-    // Valid Opus PCM decode rates: 8, 12, 16, 24 or 48 kHz. Reject a bad
-    // remote format without closing the functioning device decoder.
-    if (sample_rate != 8000 && sample_rate != 12000 &&
-        sample_rate != 16000 && sample_rate != 24000 &&
-        sample_rate != 48000) {
-        ESP_LOGE(TAG, "Rejecting unsupported Sense Opus rate %d", sample_rate);
-        return;
-    }
-    // The ESP32 decoder API takes whole milliseconds. Reject an invalid
-    // Opus frame duration BEFORE replacing a working decoder.
-    if (frame_duration != 5 && frame_duration != 10 &&
-        frame_duration != 20 && frame_duration != 40 &&
-        frame_duration != 60) {
-        ESP_LOGE(TAG, "Rejecting unsupported Sense Opus frame duration %d", frame_duration);
-        return;
-    }
-#endif
-    if (decoder_sample_rate_ == sample_rate &&
-        decoder_duration_ms_ == frame_duration && opus_decoder_ != nullptr) {""",
-        )
-        # Preserving an old decoder on a rejected format is not permission
-        # to decode the rejected packet with that decoder.
-        service = replace_once(
-            service,
-            """            SetDecodeSampleRate(packet->sample_rate, packet->frame_duration);
-            bool decoded = false;
-            if (opus_decoder_ != nullptr) {""",
-            """            SetDecodeSampleRate(packet->sample_rate, packet->frame_duration);
-            bool decoded = false;
-            if (opus_decoder_ != nullptr &&
-                decoder_sample_rate_ == packet->sample_rate &&
-                decoder_duration_ms_ == packet->frame_duration) {""",
-        )
-        # Retry the existing converter if its allocation failed at startup
-        # or on the previous rate change, without replacing a healthy decoder.
-        service = replace_once(
-            service,
-            """    if (decoder_sample_rate_ == sample_rate &&
-        decoder_duration_ms_ == frame_duration && opus_decoder_ != nullptr) {
-        return;
-    }""",
-            """    if (decoder_sample_rate_ == sample_rate &&
-        decoder_duration_ms_ == frame_duration && opus_decoder_ != nullptr) {
-        auto codec = Board::GetInstance().GetAudioCodec();
-        if (sample_rate != codec->output_sample_rate() && output_resampler_ == nullptr) {
-            esp_ae_rate_cvt_cfg_t cfg =
-                RATE_CVT_CFG(sample_rate, codec->output_sample_rate(), ESP_AUDIO_MONO);
-            auto resampler_ret = esp_ae_rate_cvt_open(&cfg, &output_resampler_);
-            if (output_resampler_ == nullptr) {
-                ESP_LOGE(TAG, "Failed to recover output resampler, error code: %d", resampler_ret);
-            }
-        }
-        return;
-    }""",
-        )
-        # Replace the pinned upstream's close-then-open decoder transition
-        # only in the selected disposable Sense overlay. A malformed packet
-        # or failed replacement allocation must not destroy a working decoder.
-        # The decode thread and ResetDecoder use decoder_mutex_ for this swap.
-        service = replace_once(
-            service,
-            """    std::unique_lock<std::mutex> decoder_lock(decoder_mutex_);
-    if (opus_decoder_ != nullptr) {
-        esp_opus_dec_close(opus_decoder_);
-        opus_decoder_ = nullptr;
-    }
-    decoder_lock.unlock();
-    esp_opus_dec_cfg_t opus_dec_cfg = OPUS_DEC_CFG(sample_rate, frame_duration);
-    auto ret = esp_opus_dec_open(&opus_dec_cfg, sizeof(esp_opus_dec_cfg_t), &opus_decoder_);
-    if (opus_decoder_ == nullptr) {
-        ESP_LOGE(TAG, "Failed to create audio decoder, error code: %d", ret);
-        return;
-    }
-    decoder_sample_rate_ = sample_rate;""",
-            """    esp_opus_dec_cfg_t opus_dec_cfg = OPUS_DEC_CFG(sample_rate, frame_duration);
-    void* proposed_decoder = nullptr;
-    auto ret = esp_opus_dec_open(&opus_dec_cfg, sizeof(esp_opus_dec_cfg_t), &proposed_decoder);
-    if (proposed_decoder == nullptr) {
-        ESP_LOGE(TAG, "Failed to create replacement decoder, keeping prior decoder: %d", ret);
-        return;
-    }
-    {
-        std::lock_guard<std::mutex> decoder_lock(decoder_mutex_);
-        void* previous_decoder = opus_decoder_;
-        opus_decoder_ = proposed_decoder;
-        if (previous_decoder != nullptr) {
-            esp_opus_dec_close(previous_decoder);
-        }
-    }
-    decoder_sample_rate_ = sample_rate;""",
-        )
+        service = patch_decoder_integrity(service)
         service = replace_once(
             service,
             "            task.media_position_ms = packet->media_position_ms;",
@@ -1595,6 +1599,9 @@ void Application::HandleStartListeningEvent() {""",
                               "\n    std::lock_guard<std::recursive_mutex> camera_lock(AccessMutex());\n#endif")
     source += "\n" + guard + "\n" + (HERE / "modular_snapshot.inc").read_text() + "\n#endif\n"
     files[path] = source.encode()
+    # Both alternate S3 heads share the same codec-independent decoder fence.
+    path = "main/audio/audio_service.cc"
+    files[path] = patch_decoder_integrity((target / path).read_text()).encode()
     return files
 
 
