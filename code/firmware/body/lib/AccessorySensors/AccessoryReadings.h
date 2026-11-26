@@ -30,6 +30,18 @@ inline unsigned max17048_cell_mv(std::uint16_t raw) {
 inline unsigned max17048_soc_centi(std::uint16_t raw) {
   return static_cast<unsigned>((static_cast<std::uint32_t>(raw) * 100U) / 256U);
 }
+enum class Ina226Fault : std::uint8_t { None, MathOverflow, ShuntSaturated };
+// TI INA226 Mask/Enable (0x06), bit 2: current/power arithmetic overflow.
+constexpr bool ina226_math_overflow(std::uint16_t status) {
+  return (status & 0x0004U) != 0U;
+}
+inline const char* ina226_fault_name(Ina226Fault fault) {
+  switch (fault) {
+    case Ina226Fault::MathOverflow: return "math_overflow";
+    case Ina226Fault::ShuntSaturated: return "shunt_saturated";
+    default: return "none";
+  }
+}
 inline unsigned ina226_bus_mv(std::uint16_t raw) {
   return static_cast<unsigned>((static_cast<std::uint32_t>(raw) * 5U) / 4U);
 }
@@ -125,6 +137,8 @@ struct GaugeRaw {
   // Advance only after two valid MAX17048 register reads, not HTTP replay.
   std::uint32_t fuel_sample_seq = 0;
   bool monitor_present = false, monitor_valid = false;
+  // Last observed conversion fault; only a clean acquisition clears it.
+  Ina226Fault monitor_fault = Ina226Fault::None;
   unsigned bus_mv = 0;
   int shunt_uv = 0;
   // Sign convention only if real pack wiring has charger BAT upstream

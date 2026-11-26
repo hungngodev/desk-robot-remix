@@ -511,16 +511,20 @@ void AccessorySensors::power(std::uint32_t now_ms) {
     const bool status_read = read16(0x40, 0x06, status);
     const bool reprime = monitor_reprime_;
     if (status_read) monitor_reprime_ = false;
-    g.monitor_valid = status_read && !reprime &&
-                      (status & 0x0008U) != 0U &&
+    const bool ready = status_read && !reprime && (status & 0x0008U) != 0U;
+    const bool overflow = ready && ina226_math_overflow(status);
+    if (overflow) g.monitor_fault = Ina226Fault::MathOverflow;
+    g.monitor_valid = ready && !overflow &&
                       read16(0x40, 0x02, bus) &&
                       read16(0x40, 0x01, shunt);
     if (g.monitor_valid) {
       // Saturated signed raw ADC codes are not measurable current.
       // Do not refresh monitor validity or sequence for either rail.
       g.monitor_valid = ina226_shunt_uv_from_raw(shunt, g.shunt_uv);
+      if (!g.monitor_valid) g.monitor_fault = Ina226Fault::ShuntSaturated;
     }
     if (g.monitor_valid) {
+      g.monitor_fault = Ina226Fault::None;
       g.bus_mv = ina226_bus_mv(bus);
       // Only after both actual registers were successfully acquired.
       g.monitor_sample_seq = next_nonzero_sensor_sequence(g.monitor_sample_seq);

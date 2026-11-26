@@ -3,7 +3,7 @@ import copy
 
 import httpx
 import pytest
-from desk_robot.aux import validate_aux
+from desk_robot.aux import ina226_monitor_warning, validate_aux
 from desk_robot.transport import HeadError, HttpHead
 
 
@@ -24,6 +24,35 @@ def sample(robot="robot-01"):
         "proximity": {"raw": 99, "valid": True, "gesture": 1,
                       "gesture_events": 3, "physically_qualified": False},
     }
+
+
+@pytest.mark.parametrize("fault", ["math_overflow", "shunt_saturated"])
+def test_ina226_fault_survives_validation_without_valid_current(fault):
+    data = sample()
+    power = data["power"]
+    power.update(monitor_fault=fault, monitor_valid=False, pack_valid=False,
+                 pack_ma=0, pack_seq=12)
+    assert validate_aux(data, "robot-01")["power"]["monitor_fault"] == fault
+    assert "current unavailable" in ina226_monitor_warning(power)
+    with pytest.raises(ValueError, match="INA226"):
+        validate_aux({**data, "power": {**power, "monitor_valid": True}}, "robot-01")
+    with pytest.raises(ValueError, match="INA226"):
+        validate_aux({**data, "power": {**power, "pack_valid": True}}, "robot-01")
+
+
+@pytest.mark.parametrize("fault", [None, True, 1, [], {}, "unknown"])
+def test_ina226_unknown_fault_is_rejected(fault):
+    data = sample()
+    data["power"].update(monitor_fault=fault, monitor_valid=False)
+    with pytest.raises(ValueError, match="INA226"):
+        validate_aux(data, "robot-01")
+
+
+def test_ina226_warning_does_not_invent_fault_for_legacy_or_clean_sample():
+    power = sample()["power"]
+    assert ina226_monitor_warning(power) is None
+    power["monitor_fault"] = "none"
+    assert ina226_monitor_warning(power) is None
 
 
 def test_pn532_tag_telemetry_rejects_forged_evidence():

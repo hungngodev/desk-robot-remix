@@ -127,6 +127,22 @@ class NoseDialGate:
         )
 
 
+def ina226_monitor_warning(power: dict) -> str | None:
+    """Describe the last observed fault without treating it as a fresh sample."""
+    if "monitor_fault" not in power:
+        return None  # Older firmware cannot distinguish a fault from missing data.
+    fault = power["monitor_fault"]
+    if fault == "none":
+        return None
+    if (fault not in ("math_overflow", "shunt_saturated")
+            or power.get("monitor_valid") is not False
+            or power.get("pack_valid", False) is not False):
+        raise ValueError("Invalid INA226 monitor fault provenance")
+    if fault == "math_overflow":
+        return "Last INA226 conversion reported math overflow; current unavailable."
+    return "Last INA226 shunt reading saturated; current unavailable."
+
+
 def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
     if not isinstance(data, dict) or data.get("robot_id") != robot_id:
         raise ValueError("Aux sensor identity mismatch")
@@ -236,6 +252,7 @@ def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
     # zero to -81917..81915 uV (the signed bounds are asymmetric).
     if power["monitor_valid"] and not -81917 <= power["shunt_uv"] <= 81915:
         raise ValueError("Invalid INA226 saturated shunt source")
+    ina226_monitor_warning(power)
     # Missing sequence is accepted for old read-only firmware, but cannot
     # trigger proactive low-battery speech on the Mac.
     fuel_seq = power.get("fuel_seq")

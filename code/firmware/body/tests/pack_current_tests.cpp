@@ -2,6 +2,7 @@
 #include "../lib/BodyControl/BatterySafety.h"
 #include <cstdlib>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <initializer_list>
 #include <limits>
@@ -20,6 +21,16 @@ using desk_robot::next_nonzero_sensor_sequence;
 } while (false)
 
 int main() {
+  using desk_robot::Ina226Fault;
+  using desk_robot::ina226_fault_name;
+  using desk_robot::ina226_math_overflow;
+  for (unsigned status = 0; status <= 0xffffU; ++status) {
+    CHECK(ina226_math_overflow(static_cast<std::uint16_t>(status)) ==
+          ((status / 4U) % 2U == 1U));
+  }
+  CHECK(std::strcmp(ina226_fault_name(Ina226Fault::None), "none") == 0);
+  CHECK(std::strcmp(ina226_fault_name(Ina226Fault::MathOverflow), "math_overflow") == 0);
+  CHECK(std::strcmp(ina226_fault_name(Ina226Fault::ShuntSaturated), "shunt_saturated") == 0);
   using desk_robot::fuel_below_motor_floor;
   using desk_robot::fuel_above_recovery_floor;
   CHECK(fuel_below_motor_floor(3299, 5000));

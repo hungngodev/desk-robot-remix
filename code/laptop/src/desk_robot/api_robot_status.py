@@ -12,7 +12,7 @@ import httpx
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from .aux import _aux_boot_epoch, _fresh_aux_acquisition
+from .aux import _aux_boot_epoch, _fresh_aux_acquisition, ina226_monitor_warning
 from .config import Settings
 from .transport import HeadError
 
@@ -236,5 +236,9 @@ def register_robot_status_routes(
                         retired_aux_boots.setdefault(robot_id, set()).add(prior_boot)
                     active_aux_boot[robot_id] = boot
                     last_aux_context_seq.update(pending_seq)
+        power = data.get("power")
+        if isinstance(power, dict) and "monitor_fault" in power:
+            # Diagnostic only; do not inject a historical fault into speech context.
+            data = {**data, "power": {**power, "monitor_warning": ina226_monitor_warning(power)}}
         return _json_safe_telemetry(data)
 
