@@ -33,9 +33,13 @@ int main() {
   CHECK(std::strcmp(ina226_fault_name(Ina226Fault::ShuntSaturated), "shunt_saturated") == 0);
   using desk_robot::fuel_below_motor_floor;
   using desk_robot::fuel_above_recovery_floor;
+  // Both independent low readings must latch, not cancel each other.
+  CHECK(fuel_below_motor_floor(3299, 299));
   CHECK(fuel_below_motor_floor(3299, 5000));
   CHECK(fuel_below_motor_floor(3800, 299));
   CHECK(!fuel_below_motor_floor(3300, 300));
+  // Recovery must require both readings, including when both are low.
+  CHECK(!fuel_above_recovery_floor(3349, 499));
   CHECK(!fuel_above_recovery_floor(3349, 500));
   CHECK(!fuel_above_recovery_floor(3350, 499));
   CHECK(fuel_above_recovery_floor(3350, 500));
