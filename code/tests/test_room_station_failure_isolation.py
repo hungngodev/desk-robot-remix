@@ -27,6 +27,7 @@ def test_scd_failure_does_not_hide_healthy_room_sensors(tmp_path, fault):
 #include <sstream>
 #include "bme_completed_sample.h"
 #include "scd_sample_freshness.h"
+#include "sensor_recovery.h"
 #include "radar_sample_clock.h"
 #include "radar_data_frame_gate.h"
 using std::isfinite;
@@ -49,6 +50,7 @@ struct FakeScd {
   }
 } scd;
 desk_robot_room::BmeCompletedSample bme_completed;
+desk_robot_room::SensorRecoverySchedule sensor_recovery;
 desk_robot_room::RadarSampleClock radar_sample_clock;
 desk_robot_room::RadarTargetSample radar_completed;
 struct Telemetry {

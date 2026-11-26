@@ -76,8 +76,10 @@ under `room_pod.power_reference.references` in the canonical hardware plan.
 
 ## Fault recovery and temporal provenance
 
-The station gives each read-only I2C module an independent bounded five-second
-re-probe after startup failure, I2C transport loss, or a stalled acquisition.
+The station gives each read-only I2C module independent retry backoff of 5, 10,
+20, 40, then at most 60 seconds after repeated failures. Only a complete valid
+conversion resets that sensor's retry history; an acknowledged probe alone does
+not. Startup and the first fault after successful sampling can probe immediately.
 It performs at most one peripheral probe per loop pass so healthy UART radar
 and USB telemetry continue running. SCD40 reinitialization sends the documented 0x3F86 stop command through a
 bounded Wire transfer, then starts periodic measurement after the required

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <limits>
 #include "bme_completed_sample.h"
+#include "sensor_recovery.h"
 
 using std::isfinite;
 constexpr uint32_t kReportMs = 1000, kBmeStaleMs = 3000;
@@ -55,6 +56,7 @@ struct Adafruit_BME680 {
 bool bme_started = true, bme_pending = false;
 uint32_t bme_last_start_ms = 0;
 desk_robot_room::BmeCompletedSample bme_completed;
+desk_robot_room::SensorRecoverySchedule sensor_recovery;
 
 #include "bme_step_under_test.h"
 
@@ -63,6 +65,7 @@ void reset() {
   bme = Adafruit_BME680{};
   bme_started = true; bme_pending = false; bme_last_start_ms = 0;
   bme_completed = desk_robot_room::BmeCompletedSample{};
+  sensor_recovery = desk_robot_room::SensorRecoverySchedule{};
 }
 
 int main() {
