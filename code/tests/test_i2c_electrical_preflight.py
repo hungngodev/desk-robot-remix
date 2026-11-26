@@ -469,3 +469,43 @@ def test_uniform_rail_changes_minimum_equivalent_pullup(voltage, passes):
         assert values["sink_budget_pass"] is passes
     assert report["selected_branch_paper_pass"] is passes
     assert not report["qualified_hardware"]
+
+
+@pytest.mark.parametrize("line", ["sda", "scl"])
+@pytest.mark.parametrize("cap_pf, boundary, passes", [
+    (4.066632180819675, 20.0, False),
+    (4.066632180819676, 20.0, True),
+    (214.9994827122951, 300.0, True),
+    (214.99948271229513, 300.0, False),
+])
+def test_selected_rc_boundary_before_rounding(line, cap_pf, boundary, passes):
+    upstream, downstream = segment(cap_up_pf=11, cap_down_pf=80)
+    downstream[line]["cap_pf"] = cap_pf
+    report = tool.screen_selected_segment(upstream, downstream)
+    values = report["lines"][line]
+    assert values["estimated_rise_ns"] == boundary
+    assert values["upstream_only_paper_pass"]
+    assert values["sink_budget_pass"]
+    assert values["paper_electrical_pass"] is passes
+    assert report["selected_branch_paper_pass"] is passes
+    assert not report["qualified_hardware"]
+
+
+@pytest.mark.parametrize("line", ["sda", "scl"])
+@pytest.mark.parametrize("cap_pf, boundary, passes", [
+    (10.044421453879782, 20.0, False),
+    (10.044421453879785, 20.0, True),
+    (150.66632180819673, 300.0, True),
+    (150.66632180819676, 300.0, False),
+])
+def test_upstream_rc_boundary_before_rounding(line, cap_pf, boundary, passes):
+    upstream, downstream = segment(cap_down_pf=40)
+    upstream[line]["cap_pf"] = cap_pf
+    report = tool.screen_selected_segment(upstream, downstream)
+    values = report["lines"][line]
+    assert values["upstream_only_estimated_rise_ns"] == boundary
+    assert 20 < values["estimated_rise_ns"] < 300
+    assert values["upstream_only_sink_budget_pass"]
+    assert values["upstream_only_paper_pass"] is passes
+    assert report["selected_branch_paper_pass"] is passes
+    assert not report["qualified_hardware"]

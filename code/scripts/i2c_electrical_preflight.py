@@ -165,9 +165,9 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
     report = {}
     for line in ("sda", "scl"):
         pullups = []
-        total_pf = 0.0
+        total_pf = Fraction(0)
         upstream_count = 0
-        upstream_pf = 0.0
+        upstream_pf = Fraction(0)
         measured_rises = []
         measured_lows = []
         for label, owner in (("upstream", upstream), ("selected", selected)):
@@ -183,7 +183,7 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
                 raise ValueError(f"{label}.{line}: installed pullups must be listed")
             pullups.extend((_num(v, f"{label}.{line}.pullup_ohms"), power)
                            for v in resistors)
-            total_pf += _num(part.get("cap_pf"), f"{label}.{line}.cap_pf")
+            total_pf += Fraction(str(_num(part.get("cap_pf"), f"{label}.{line}.cap_pf")))
             if label == "upstream":
                 upstream_count = len(pullups)
                 upstream_pf = total_pf
@@ -207,8 +207,15 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
         reciprocal_sum = sum(1.0 / r for r, _ in pullups)
         if not math.isfinite(reciprocal_sum) or reciprocal_sum <= 0:
             raise ValueError(f"{line}: pullup network cannot be evaluated safely")
-        effective = 1.0 / reciprocal_sum
-        rise_ns = 0.8473 * effective * total_pf / 1000
+        conductances = [1 / Fraction(str(r)) for r, _ in pullups]
+        effective_exact = 1 / sum(conductances)
+        rise_exact = Fraction("0.8473") * effective_exact * total_pf / 1000
+        try:
+            effective = float(effective_exact)
+            rise_ns = float(rise_exact)
+            cap_pf = float(total_pf)
+        except OverflowError as exc:
+            raise ValueError(f"{line}: RC calculation overflowed") from exc
         # TI SLVA689A: each pullup contributes (Vpullup - VOL) / R.
         # Retain the nominal floor for measurements below the design target.
         # Compare the decimal measurement values exactly before display rounding.
@@ -226,22 +233,25 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
         except OverflowError as exc:
             raise ValueError(f"{line}: RC calculation overflowed") from exc
         if any(not math.isfinite(value) for value in
-               (total_pf, effective, rise_ns, sink_ma)):
+               (cap_pf, effective, rise_ns, sink_ma)):
             raise ValueError(f"{line}: RC calculation overflowed")
         # Mux power-on/reset deselects every channel; the direct MPU and mux
         # control transactions must work without any downstream pullups.
-        upstream_conductance = sum(1.0 / r for r, _ in pullups[:upstream_count])
-        upstream_rise_ns = (0.8473 * upstream_pf / 1000 / upstream_conductance
-                            if upstream_conductance > 0 else None)
-        if upstream_rise_ns is not None and not math.isfinite(upstream_rise_ns):
+        upstream_conductance = sum(conductances[:upstream_count])
+        upstream_rise_exact = (Fraction("0.8473") * upstream_pf / 1000 / upstream_conductance
+                               if upstream_conductance else None)
+        try:
+            upstream_rise_ns = (float(upstream_rise_exact)
+                                if upstream_rise_exact is not None else None)
+        except OverflowError:
             upstream_rise_ns = None
         upstream_ok = (upstream_rise_ns is not None
-                       and RISE_MIN_NS <= upstream_rise_ns <= RISE_LIMIT_NS
+                       and RISE_MIN_NS <= upstream_rise_exact <= RISE_LIMIT_NS
                        and upstream_sink_budget_pass)
         downstream_present = len(pullups) > upstream_count
         model_ok = (upstream_ok and downstream_present
                     and total_pf <= MAX_CAP_PF
-                    and RISE_MIN_NS <= rise_ns <= RISE_LIMIT_NS
+                    and RISE_MIN_NS <= rise_exact <= RISE_LIMIT_NS
                     and sink_budget_pass
                     and all(RISE_MIN_NS <= v <= RISE_LIMIT_NS for v in measured_rises)
                     and all(v <= LOW_MAX_V for v in measured_lows))
@@ -254,7 +264,7 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
             "upstream_only_paper_pass": upstream_ok,
             "downstream_pullups_present": downstream_present,
             "combined_ohms": round(effective, 3),
-            "combined_cap_pf": round(total_pf, 3),
+            "combined_cap_pf": round(cap_pf, 3),
             "estimated_rise_ns": round(rise_ns, 3),
             "estimated_sink_ma": round(sink_ma, 3),
             "sink_budget_pass": sink_budget_pass,
