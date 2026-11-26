@@ -244,8 +244,58 @@ static void check_short_power_reads() {
     CHECK(sensors.readings().gauge.monitor_sample_seq > before.monitor_sample_seq);
   }
 }
+static void check_sht_crc_provenance() {
+  // The bus-access callback runs immediately after requestFrom(), before
+  // the production poller consumes the six bytes. Corrupt just one CRC.
+  static TwoWire* active = nullptr;
+  static unsigned crc_index = 0;
+  static bool inject = false;
+  for (const unsigned index : {2U, 5U}) {
+    TwoWire wire;
+    active = &wire;
+    crc_index = index;
+    inject = false;
+    desk_robot::AccessorySensors sensors;
+    CHECK(sensors.begin(wire, [] {
+      // Ambient acquisitions must not silently enable any heater command.
+      if (active->extras == 8U && active->current_address == 0x44U &&
+          !active->outbound.empty()) {
+        CHECK(active->outbound.size() == 1U);
+        CHECK(active->outbound[0] == 0xFDU);
+      }
+      if (inject && active->extras == 8U && !active->pending_sht &&
+          active->inbound.size() == 6U && active->pos == 0U) {
+        active->inbound[crc_index] ^= 1U;
+        inject = false;
+      }
+      return true;
+    }));
+    std::uint32_t ms = 0;
+    for (; ms < 1000U && !sensors.readings().climate.valid; ms += 12U)
+      sensors.poll(ms);
+    const auto before = sensors.readings().climate;
+    CHECK(before.valid && before.sample_seq != 0U);
+    inject = true;
+    for (; ms < 2000U && inject; ms += 12U) sensors.poll(ms);
+    CHECK(!inject);
+    const auto rejected = sensors.readings().climate;
+    CHECK(!rejected.valid);
+    CHECK(rejected.sample_seq == before.sample_seq);
+    CHECK(rejected.at_ms == before.at_ms);
+    CHECK(rejected.temp_centi == before.temp_centi);
+    CHECK(rejected.humidity_centi == before.humidity_centi);
+    for (; ms < 3000U && !sensors.readings().climate.valid; ms += 12U)
+      sensors.poll(ms);
+    const auto recovered = sensors.readings().climate;
+    CHECK(recovered.valid && recovered.sample_seq == before.sample_seq + 1U);
+    CHECK(recovered.at_ms > before.at_ms);
+    CHECK(!wire.unsafe_parallel_mux);
+    active = nullptr;
+  }
+}
 int main() {
   try {
+    check_sht_crc_provenance();
     check_mux_write_boundary();
     check_jaw_adc_rail_isolation();
     check_ads_start_provenance();
