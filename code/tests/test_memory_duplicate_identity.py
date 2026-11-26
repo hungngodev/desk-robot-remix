@@ -356,3 +356,61 @@ def test_runtime_memory_open_does_not_recreate_missing_database(tmp_path, direct
     assert store.core_facts("pet_a")[0].value == "Original private game"
     assert store.set_core_fact("pet_a", "favorite_game", "New private game")
     assert store.core_facts("pet_a")[0].value == "New private game"
+
+
+@pytest.mark.parametrize("alias", ["pet_1 ", " pet_1", "pet_1\t", "pet_1\n"])
+def test_whitespace_robot_identity_rejected_without_creating_database(tmp_path, alias):
+    with pytest.raises(ValueError, match="safe nonempty identifier"):
+        MemoryStore(tmp_path, ["pet_1", alias])
+    assert not list(tmp_path.glob("*.sqlite3"))
+
+
+@pytest.mark.parametrize("alias", ["PET_1", "pet_1 ", " pet_1", "pet_1\t", "pet_1\n"])
+def test_live_handles_reject_nonexact_robot_identity(tmp_path, alias):
+    first = MemoryStore(tmp_path, ["pet_1", "pet_2"])
+    second = MemoryStore(tmp_path, ["pet_1", "pet_2"])
+    assert first.set_core_fact("pet_1", "favorite_game", "Private game")
+    with pytest.raises(ValueError, match="Unknown robot memory identity"):
+        second.core_facts(alias)
+    with pytest.raises(ValueError, match="Unknown robot identity"):
+        second.remember(
+            "pet_2", "event", "Invalid provenance", kind="scene",
+            source_robot=alias, witnessed=False,
+        )
+    assert first.core_facts("pet_1")[0].value == "Private game"
+    assert second.count("pet_2") == 0
+    assert sorted(path.name for path in tmp_path.glob("*.sqlite3")) == [
+        "pet_1.sqlite3", "pet_2.sqlite3",
+    ]
+
+
+def test_concurrent_handles_keep_same_event_and_slot_private(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier
+
+    ids = ["pet_1", "pet_2"]
+    first, second = (MemoryStore(tmp_path, ids) for _ in range(2))
+    ready = Barrier(2)
+
+    def write(store, robot):
+        ready.wait(timeout=5)
+        assert store.remember(
+            robot, "same_event", f"Private observation of {robot}",
+            kind="scene", source_robot=robot, witnessed=True,
+        )
+        assert store.set_core_fact(robot, "favorite_game", f"Private game of {robot}")
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        futures = [pool.submit(write, store, robot) for store, robot in zip(
+            (first, second), ids, strict=True,
+        )]
+        for future in futures:
+            future.result(timeout=10)
+
+    for store in (first, second):
+        for robot in ids:
+            assert store.recent(robot)[0].summary == f"Private observation of {robot}"
+            assert store.core_facts(robot)[0].value == f"Private game of {robot}"
+    assert second.forget_episode("pet_1", "same_event")
+    assert first.count("pet_1") == 0
+    assert first.count("pet_2") == 1
