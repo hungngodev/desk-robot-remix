@@ -96,3 +96,18 @@ def test_signal_validity_matches_wroom_minimum(channel, signal):
     result = validate_optics(data, "robot-01")["optics"]
     assert result["signal_97"][channel] == signal
     assert result["valid_mask"] == (1 << channel if signal >= 32 else 0)
+
+@pytest.mark.parametrize("model", ["VL53L4CD", "VL6180X", "TCRT5000"])
+@pytest.mark.parametrize("field", ["sensor_model", "sensor_family", "carrier"])
+def test_optics_rejects_alternate_unqualified_hardware(model, field):
+    data = sample()
+    data["optics"][field] = model
+    with pytest.raises(ValueError, match="Unexpected optical diagnostic fields"):
+        validate_optics(data, "robot-01")
+
+
+def test_optics_rejects_self_claimed_alternate_qualification():
+    data = sample()
+    data["optics"].update(sensor_model="VL53L4CD", qualified=True, evidence="claimed")
+    with pytest.raises(ValueError, match="Unexpected optical diagnostic fields"):
+        validate_optics(data, "robot-01")

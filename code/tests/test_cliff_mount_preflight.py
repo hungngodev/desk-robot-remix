@@ -548,3 +548,13 @@ def test_measured_peak_speed_changes_33_5mm_lens_clearance(speed, possible):
     )
     assert result["candidate_geometry_possible_on_paper"] is possible
     assert not result["40_sensor_fleet_purchase_approved"]
+
+@pytest.mark.parametrize("model", ["VL53L4CD", "VL6180X", "TCRT5000"])
+@pytest.mark.parametrize("old", ["<VL53L0X.h>", "VL53L0X devices_"])
+def test_source_contract_rejects_other_driver(monkeypatch, tmp_path, model, old):
+    header = tmp_path / "TofBus.h"
+    source = tool.TOF_HEADER.read_text(encoding="utf-8")
+    header.write_text(source.replace(old, old.replace("VL53L0X", model)), encoding="utf-8")
+    monkeypatch.setattr(tool, "TOF_HEADER", header)
+    with pytest.raises(ValueError, match="VL53L0X driver identity changed"):
+        tool.verify_source_contract()

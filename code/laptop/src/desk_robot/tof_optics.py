@@ -15,6 +15,13 @@ def validate_optics(data: object, robot_id: str) -> dict:
     optics = data.get("optics")
     if not isinstance(optics, dict):
         raise ValueError("Missing WROOM optical diagnostics")
+    # The existing WROOM wire format carries only VL53L0X Q9.7 words.
+    # Never silently strip a replacement model or self-claimed qualification.
+    if optics.keys() - {
+        "ambient_97", "signal_97", "age_ms", "present_mask", "valid_mask",
+        "physical_qualified", "motor_authorized",
+    }:
+        raise ValueError("Unexpected optical diagnostic fields")
     if (optics.get("motor_authorized") is not False
             or optics.get("physical_qualified") is not False):
         raise ValueError("Optical diagnostics cannot authorize motors or qualification")
