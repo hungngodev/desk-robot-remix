@@ -51,7 +51,7 @@ class GroupContextConsent:
             self.room_generation = self.settings.room_station_consent_generation
 
     def filter_live_transcripts(self, timeline: list[dict], *, now: float) -> list[dict]:
-        """Exclude queued ASR outside the group's current sharing and live grants."""
+        """Exclude expired ASR and evidence outside the group's current grants."""
         settings = self.settings
         if settings.mode != "hardware":
             return timeline
@@ -63,11 +63,13 @@ class GroupContextConsent:
             and settings.voice_vision_tools_enabled
             and settings.camera_consent_generation == self.camera_generation
         )
+        # Match the hub's 30-second visible ASR lifetime at the admission boundary.
+        earliest_source_at = max(settings.camera_consent_started_at, now - 30.0)
         return [
             item for item in timeline
             if live_asr_in_current_grant(
                 item, now=now, enabled=live_relay_allowed,
-                consent_started_at=settings.camera_consent_started_at,
+                consent_started_at=earliest_source_at,
             )
         ]
 
