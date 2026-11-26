@@ -48,7 +48,7 @@ async def test_human_vad_cancels_optional_tool_without_waiting_for_transport(too
     pet = PetController.__new__(PetController)
     pet.conversation = conversation
     pet.heads = {tool_robot: SimpleNamespace(status=slow_read, aux_status=slow_read)}
-    pet.states = {
+    pet._states = {
         rid: SimpleNamespace(deferred_speech_candidate=None, deferred_speech_task=None)
         for rid in robot_ids
     }

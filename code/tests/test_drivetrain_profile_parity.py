@@ -77,9 +77,7 @@ def test_all_environments_classified_and_bench_sources_isolated():
     }
     assert {s[4:] for s in config.sections() if s.startswith("env:")} == expected
     assert config["platformio"]["default_envs"] == "esp32_full"
-    assert set(config["env"]["build_src_filter"].split()) == {
-        "+<*>", "-<vl53l0x_bench.cpp>", "-<servo_center_bench.cpp>",
-    }
+    assert set(config["env"]["build_src_filter"].split()) == {"-<*>", "+<main.cpp>"}
     for name, source in (("servo_center", "servo_center"), ("vl53l0x", "vl53l0x")):
         section = f"env:esp32_{name}_bench"
         assert set(config[section]["build_src_filter"].split()) == {

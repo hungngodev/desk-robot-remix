@@ -46,7 +46,8 @@ static bool check_scan_admission() {
   return true;
 }
 
-// After a failed critical selection, restart at lane 0 and preserve side rotation.
+// After a failed critical selection, prioritize two full critical recovery
+// sweeps without optional lanes, then preserve the paused side rotation.
 static bool check_fault_rotation() {
   desk_robot::RangeScanOrder scan(true);
   for (unsigned lane = 0; lane < 5; ++lane) {
@@ -54,12 +55,20 @@ static bool check_fault_rotation() {
   }
   if (scan.next(60) != 5 || scan.next(61) != 0) return false;
   scan.transport_fault();
-  for (unsigned now = 70; now < 87; ++now) {
+  for (unsigned now = 70; now < 80; ++now) {
     const auto lane = scan.next(now);
-    if (lane == 5 || (now == 86 && lane != 4)) return false;
+    if (lane >= 5) return false;
     scan.transport_succeeded(lane);
   }
-  return scan.next(87) == 5;
+  if (scan.degraded() || scan.next(80) != 6) return false;
+  for (unsigned now = 81; now < 86; ++now) {
+    if (scan.next(now) != now - 81U) return false;
+  }
+  if (scan.next(86) != 7) return false;
+  for (unsigned now = 87; now < 92; ++now) {
+    if (scan.next(now) != now - 87U) return false;
+  }
+  return scan.next(92) == 5;
 }
 
 int main() {

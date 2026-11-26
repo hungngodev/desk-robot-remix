@@ -250,6 +250,8 @@ def test_strict_cli_rejects_mismatched_stock_carrier_under_mocked_audit(
     import sys
     from types import SimpleNamespace
 
+    import physical_trial_ledger
+
     record = evidence()
     record["costs"]["paid_in_flight"] = [{
         "role_key": "robot:imu",
@@ -260,6 +262,9 @@ def test_strict_cli_rejects_mismatched_stock_carrier_under_mocked_audit(
     }]
     evidence_path = tmp_path / "evidence.json"
     evidence_path.write_text(json.dumps(record), encoding="utf-8")
+    monkeypatch.setattr(
+        physical_trial_ledger, "require_recorded_physical_trials", lambda *_a, **_kw: 1,
+    )
     monkeypatch.setitem(
         sys.modules,
         "verify_procurement_receipts",

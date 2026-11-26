@@ -18,7 +18,7 @@ def test_dock_dispatch_checks_keep_attempt_evidence(monkeypatch):
         checked.append(("ir", reading, robot_id, expected_dock_id, elapsed_ms))
 
     monkeypatch.setattr(controller, "unpack_dock_frame", unpack)
-    monkeypatch.setattr(controller, "validate_ir", validate)
+    monkeypatch.setattr(controller, "validate_motion_ir", validate)
     monkeypatch.setattr(controller, "time", SimpleNamespace(monotonic=lambda: 10.0))
     coordinator = SimpleNamespace(
         _require_camera_motion_grant=lambda grant: checked.append(("grant", grant)),

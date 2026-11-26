@@ -114,7 +114,12 @@ def test_purchasing_release_rechecks_live_pr_after_receipts_before_output(
     import sys
 
     monkeypatch.syspath_prepend(str(SCRIPT.parent))
+    import physical_trial_ledger
     import verify_procurement_receipts as verifier
+
+    monkeypatch.setattr(
+        physical_trial_ledger, "require_recorded_physical_trials", lambda *_a, **_kw: 1,
+    )
 
     spec = importlib.util.spec_from_file_location(
         "procurement_cli_race_test", SCRIPT,

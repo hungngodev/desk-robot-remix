@@ -107,8 +107,8 @@ async def test_deferred_low_battery_dock_rechecks_voltage_after_voice(monkeypatc
             _stop_confirmations=SimpleNamespace(blocked=Mock(return_value=False)),
             dock=Mock(return_value=sentinel.dock_job),
         )
-        for name in ("_hardware_preflight", "_retire_permit", "operator_arm",
-                     "request_autonomous_low_battery_dock"):
+        for name in ("_record_local_fault", "_hardware_preflight", "_retire_permit",
+                     "operator_arm", "request_autonomous_low_battery_dock"):
             setattr(coord, name, MethodType(getattr(controller.Coordinator, name), coord))
         assert await coord.request_autonomous_low_battery_dock(robot_id) is None
         head.status.assert_not_awaited()

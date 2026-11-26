@@ -279,7 +279,9 @@ def test_cli_missing_config_is_clean_error(monkeypatch, tmp_path, capsys):
     with pytest.raises(SystemExit) as exc:
         cli.main()
     assert exc.value.code == 1
-    assert str(missing) in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "Cannot read configuration: file unavailable" in err
+    assert str(missing) not in err
 
 
 def test_cli_doctor_uses_custom_url(monkeypatch, tmp_path):

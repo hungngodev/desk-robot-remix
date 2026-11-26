@@ -86,7 +86,12 @@ def test_status_uart_and_usb_bounds_are_consistent_after_petting_telemetry():
     body_cap = int(re.search(r"kReplyCapacity\s*=\s*(\d+)", body).group(1))
     head_cap = int(re.search(r"kMaxReply\s*=\s*(\d+)", bridge).group(1))
     rx_cap = int(re.search(r"uart_driver_install\(kUart,\s*(\d+)", bridge).group(1))
-    usb_cap = int(re.search(r"port\.readline\((\d+)\)", usb).group(1))
+    usb_match = re.search(
+        r"remaining\s*=\s*(\d+)\s*-\s*len\(pending\)\s+fragment\s*=\s*port\.read_until\(b\"\\n\",\s*size=remaining\)",
+        usb,
+    )
+    assert usb_match is not None
+    usb_cap = int(usb_match.group(1))
     assert 0 < body_cap < head_cap < rx_cap
     assert usb_cap == head_cap
 
@@ -128,7 +133,7 @@ def test_low_cost_vl53l0x_is_the_production_cliff_driver():
     probe = (root / "firmware/body/src/vl53l0x_bench.cpp").read_text()
     production = (root / "firmware/body/lib/TofBus/TofBus.cpp").read_text()
     header = (root / "firmware/body/lib/TofBus/TofBus.h").read_text()
-    assert "build_src_filter = +<*> -<vl53l0x_bench.cpp>" in pio
+    assert "build_src_filter = -<*> +<main.cpp>" in pio
     assert "build_src_filter = -<*> +<vl53l0x_bench.cpp>" in pio
     assert pio.count(
         "https://github.com/pololu/vl53l0x-arduino.git#9f3773cb48d4e4e844d689cfc529a06f96d1d264"
