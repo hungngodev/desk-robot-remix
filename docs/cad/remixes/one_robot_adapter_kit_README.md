@@ -46,15 +46,42 @@ purchase or production parts list.
 
 Source [one_robot_adapter_kit.scad](one_robot_adapter_kit.scad) is original CC0 parametric geometry. It can produce **seven** separate provisional parts:
 
-| Part | One robot qty | Use |
+| Exported path (relative to `docs/cad/remixes/`) | One robot qty | Use |
 | --- | --- | --- |
-| head_bridge | 1 | Centered slotted head/body spacer |
-| tof_adjustable | 8 provisional | GY-530 optical aperture and angle reference, NOT a retained PCB mount. The pilot still needs measured clips, fastening and lens offset |
-| oled_bezel | 1 | Provisional 37 x 35 mm SSD1306 display window, M2 bores retaining >=2 mm printable web both outside and beside aperture; PCB mount positions unmeasured |
-| speaker_grille | 1 | Provisional 36 x 32 mm perforated front plate for current 20 x 16 mm Challenge 2 W rectangular speaker. M2 holes require at least 2 mm plastic web to the nominal speaker pocket and outer edge; not a sealed soundbox |
-| fsr_jaw_pocket | 1 | Provisional 34.3 x 34.3 mm FSR402 envelope coupon, 18.65 mm recess, 7.97 mm continuous supported tail channel and relieved rigid rim; jaw attachment, silicone compression and force unqualified |
-| dock_tag_backplate | 1 | AprilTag marker frame |
-| wire_clip | as needed | Provisional 22 x 13 x 4 mm M2 routing and cable tie plate; at least 2 mm plastic between bores and slot, not tested load-rated strain relief |
+| `adapter_stls/head_bridge.stl` | 1 | Centered slotted head/body spacer |
+| `adapter_stls/tof_adjustable.stl` | 8 provisional | GY-530 optical aperture and angle reference, NOT a retained PCB mount. The pilot still needs measured clips, fastening and lens offset |
+| `adapter_stls/oled_bezel.stl` | 1 | Provisional 37 x 35 mm SSD1306 display window, M2 bores retaining >=2 mm printable web both outside and beside aperture; PCB mount positions unmeasured |
+| `adapter_stls/speaker_grille.stl` | 1 | Provisional 36 x 32 mm perforated front plate for current 20 x 16 mm Challenge 2 W rectangular speaker. M2 holes require at least 2 mm plastic web to the nominal speaker pocket and outer edge; not a sealed soundbox |
+| `adapter_stls/fsr_jaw_pocket.stl` | 1 | Provisional 34.3 x 34.3 mm FSR402 envelope coupon, 18.65 mm recess, 7.97 mm continuous supported tail channel and relieved rigid rim; jaw attachment, silicone compression and force unqualified |
+| `adapter_stls/dock_tag_backplate.stl` | 1 | AprilTag marker frame |
+| `adapter_stls/wire_clip.stl` | as needed | Provisional 22 x 13 x 4 mm M2 routing and cable tie plate; at least 2 mm plastic between bores and slot, not tested load-rated strain relief |
+
+### Complete provisional fit-reference inventory
+
+The exporter produces the following 16 additional individual STLs (13 in
+`fit_stls/` and three in `dock_stls/`). Together with the seven adapters above,
+this is the complete 23-file STL inventory. All are provisional; none is
+approved for permanent installation. The combined `mg90s_four_cup_layout`
+SCAD selector is a manual layout only, not an exported STL.
+
+| Exported path (relative to `docs/cad/remixes/`) | Provisional use |
+| --- | --- |
+| `fit_stls/battery_boost_tray.stl` | Protected pack body only |
+| `fit_stls/dock_contact_recess_gauge.stl` | Unpowered dummy contact pocket |
+| `fit_stls/jaw_calibration_coupon.stl` | Jaw calibration reference |
+| `fit_stls/speaker_rect_fit_gauge.stl` | Rectangular speaker pocket |
+| `fit_stls/speaker_rear_chamber_reference.stl` | Unqualified rear chamber reference |
+| `fit_stls/mg90s_fit_015.stl` | 0.15 mm servo fit coupon |
+| `fit_stls/mg90s_fit_030.stl` | 0.30 mm servo fit coupon |
+| `fit_stls/mg90s_fit_045.stl` | 0.45 mm servo fit coupon |
+| `fit_stls/mg90s_fit_060.stl` | 0.60 mm servo fit coupon |
+| `fit_stls/vl53l0x_gy530_fit_gauge.stl` | GY-530 carrier pocket |
+| `fit_stls/vl53l0x_gy530_height_trial_035.stl` | 35 mm nominal PCB rim trial |
+| `fit_stls/vl53l0x_gy530_height_trial_045.stl` | 45 mm nominal PCB rim trial |
+| `fit_stls/vl53l0x_gy530_height_trial_055.stl` | 55 mm nominal PCB rim trial |
+| `dock_stls/dock_passive_fit.stl` | Full passive cradle prototype |
+| `dock_stls/dock_rail_entry_coupon.stl` | Rail entry coupon |
+| `dock_stls/dock_ir_pair_position_coupon.stl` | IR emitter pair position coupon |
 
 Regenerate with `openscad -o head_bridge.stl -D 'part="head_bridge"' one_robot_adapter_kit.scad`, substitute each name. CAD was rendered locally as seven **watertight, single-body** STL meshes with provisional dimensions and packaged for this conversation. These parts are **not** a final fitted assembled robot.
 
@@ -109,6 +136,17 @@ A4 SVG reference pages from the existing OpenSCAD dimensions:
 python3 docs/cad/remixes/print_2d_fit_templates.py --output /tmp/desk-robot-paper
 python3 docs/cad/remixes/print_2d_fit_templates.py --output /tmp/desk-robot-paper --verify
 ```
+
+| Generated A4 filename | Reference |
+| --- | --- |
+| `ranger_reference_A4.svg` | GY-530 carrier |
+| `speaker_reference_A4.svg` | Rectangular speaker |
+| `dock_reference_A4.svg` | Dock backstop |
+| `dock_guide_reference_A4.svg` | Dock rail geometry |
+| `power_reference_A4.svg` | Protected pack body |
+
+These five SVG overlays are separate from the 23 STL candidates and are
+produced by the paper template generator, not the STL exporter.
 
 Print at **100% actual size**, with any fit-to-page scaling turned off, and
 check both the horizontal 100 mm and vertical 25 mm printed rulers. Measure

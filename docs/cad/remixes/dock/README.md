@@ -2,6 +2,20 @@
 
 This is an example **fit tester**, not the final charging dock.
 
+The standard fit-kit exporter generates all three dock STL candidates:
+
+| Exported path (relative to `docs/cad/remixes/`) | Provisional use |
+| --- | --- |
+| `dock_stls/dock_passive_fit.stl` | Full passive cradle prototype |
+| `dock_stls/dock_rail_entry_coupon.stl` | Rail entry coupon |
+| `dock_stls/dock_ir_pair_position_coupon.stl` | IR emitter pair position coupon |
+
+The filenames in the manual OpenSCAD examples below are written to the
+current directory; the standard exporter places them under `dock_stls/`.
+The separate contact recess gauge and AprilTag backplate are listed in the
+[complete print inventory](../one_robot_adapter_kit_README.md). None of
+these prints approves physical fit, autonomous approach, or charging.
+
 From the repository root, render and print the smaller rail entry coupon:
 
 ```sh
