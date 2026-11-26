@@ -26,6 +26,9 @@ lists paginated read-only queries for all four discussion surfaces. Match thread
 roots to inline comment IDs; compare scoped paths and entry points, then recheck
 HEAD before writing. An inventory match or successful query is not an ownership
 claim, manual acceptance receipt, executed test result or physical qualification.
+For DRR-003, treat outdated anchors as location metadata, not defect closure.
+Record scoped root IDs, exact audited SHA, current symbols and separate closure
+states in the [verification ledger](records/verification.md#november-26-drr-003-scoped-inline-thread-reconciliation).
 
 The Mac owns orchestration and private SQLite; Xiaozhi and the XIAO ESP32S3
 Sense retain the single voice/camera path. WROOM32 retains independent latched
@@ -575,7 +578,7 @@ approval or runtime privacy implementation is established by this register.
 | `G007` | One speaker, six voices/characters | EXPANSION SOFTWARE | Style/personality demo, distinct robot identity remains canonical |
 | `G008` | Secret life and Easter eggs | EXPANSION SOFTWARE | Quiet, consent and nonintrusive schedule |
 | `G009` | Desk RPG over weeks | EXPANSION SOFTWARE | Saved game state and bounded peer/user turns |
-| `G010` | Pomodoro focus buddy, alarm and clock | EXPANSION SOFTWARE | Opt-in timers and true Mac wall time, reminders |
+| `G010` | Pomodoro focus buddy, alarm and clock | EXPANSION SOFTWARE; BACKLOG, NOT IMPLEMENTED | Opt-in per-robot timer ownership, monotonic focus deadlines, timezone-aware alarms, cancellation on pause/revoke/quiet, and due versus audible delivery acceptance remain future work. Not a first-unit hardware or purchase prerequisite. |
 | `G011` | Home Assistant and MCP household control | OPT-IN EXPANSION | Tool credentials isolated; no unsafe robotic arm authority |
 | `G012` | PC assistant / desktop activity pet | OPT-IN EXPANSION | User-selected AI job/coding status, clear privacy |
 | `G013` | Claude Desktop Buddy / HachimoDock / Tokpet patterns | RESEARCH | Agent task state mapped to emotions without scraping private work |
@@ -933,7 +936,8 @@ these source paths establishes physical qualification.
 
 The user-photographed BMP280 is **pressure and temperature, not humidity**.
 Bosch's datasheet specifies I2C 0x76/0x77 and register 0xD0 ID 0x58. It is
-assigned to isolated TCA9548A 0x71 lane 3 (`AccessorySensors.cpp:173–192`
+assigned to isolated TCA9548A 0x71 lane 3 (`AccessorySensors::begin` in
+[AccessorySensors.cpp](../code/firmware/body/lib/AccessorySensors/AccessorySensors.cpp)
 implements chip-ID, NVM compensation and conservative rate bounds; physical board
 and electrical qualification remain OPEN, and 0x77 Berry pressure alternates
 stay off the shared bus). Optional MAX30102

@@ -76,3 +76,25 @@ def test_source_discovery_excludes_tests_and_generated_builds(tmp_path: Path) ->
         path.parent.mkdir(parents=True, exist_ok=True)
         path.touch()
     assert _source_paths(tmp_path) == included
+
+def test_review_reconciliation_preserves_evidence_boundaries() -> None:
+    document = (ROOT / "docs/source-map.md").read_text(encoding="utf-8")
+    ledger = (ROOT / "docs/records/verification.md").read_text(encoding="utf-8")
+    heading = "### November 26 DRR-003 scoped inline-thread reconciliation"
+    section = ledger.split(heading, 1)[1].split("\n### ", 1)[0]
+    counts = re.search(
+        r"(\d+) inline threads,\s+(\d+) resolved, (\d+) unresolved, "
+        r"including (\d+) outdated and unresolved",
+        section,
+    )
+    assert counts is not None
+    total, resolved, unresolved, outdated_open = map(int, counts.groups())
+    assert total == resolved + unresolved
+    assert 0 <= outdated_open <= unresolved
+    assert "Outdated is a diff-anchor property, not a closure verdict" in section
+    assert "not its manual acceptance receipt" in section
+    assert "physical and procurement HOLD" in section
+    assert "records/verification.md#november-26-drr-003-scoped-inline-thread-reconciliation" in document
+    row = next(line for line in document.splitlines() if line.startswith("| `G010` |"))
+    assert "EXPANSION SOFTWARE; BACKLOG, NOT IMPLEMENTED" in row
+    assert "due versus audible delivery" in row

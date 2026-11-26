@@ -29,6 +29,27 @@ job for one commit is not evidence that newer commits or an actual robot pass.
 Never close a physical safety or buying gate from synthetic tests,
 documentation improvements or a historical all green CI run.
 
+### November 26 DRR-003 scoped inline-thread reconciliation
+
+Historical connector snapshot at `157721c59012dfcfae954545597df693ab294a74`: 409 inline threads,
+226 resolved, 183 unresolved, including 161 outdated and unresolved.
+Outdated is a diff-anchor property, not a closure verdict. Match the root
+comment database ID and thread ID to the live file and symbol, not a shifted
+line number. Preserve separate source, executed CI, physical and procurement
+evidence; do not resolve a thread solely because its anchor is outdated.
+
+| Root comment ID | Scope | GitHub state at snapshot | Source disposition |
+| --- | --- | --- | --- |
+| [4697836508](https://github.com/hungngodev/desk-robot-remix/pull/17#discussion_r4697836508) | DRX-327 reed/PIR pin allocation | OPEN, outdated | Current source map and wiring match BodyPins.h and AccessorySensors::begin: GPIO36/39 terminal IR; MCP23017 GPIOB0/B1 reed/PIR on 0x71 lane 5. Source match only; physical qualification open. |
+| [4697836519](https://github.com/hungngodev/desk-robot-remix/pull/17#discussion_r4697836519) | DRX-327 BMP280 mux | OPEN, outdated | Current source map and wiring match AccessorySensors::begin, accessory lane 3, chip ID 0x58. Replace obsolete line reference with symbol; physical qualification open. |
+| [4697849356](https://github.com/hungngodev/desk-robot-remix/pull/17#discussion_r4697849356) | DRX-326 CI visibility | OPEN, outdated | Nov 25 historical failures are already recorded above. Exact audited SHA run 45905234852: Mac job 140200284233, body job 140200284598, WROOM job 140200284622 succeeded; Python/head job 140200284667 and Sense job 140200284528 were in progress at observation. No combined pass. |
+| [4711910930](https://github.com/hungngodev/desk-robot-remix/pull/17#discussion_r4711910930) | G010 timer/reminder scope | OPEN, outdated | Expansion backlog, not implemented capability; source-map clarification is not timer implementation or acceptance. |
+
+This is a scoped four-thread source disposition, not reconciliation of all
+183 unresolved threads. Procedure 4 of the [evidence ledger](../reviews/100_page_procedure_trace.json)
+remains OPEN; this snapshot is not its manual acceptance receipt. The $50
+first-unit delivered cap and physical and procurement HOLD remain unchanged.
+
 ### Mac API lifecycle evidence boundary
 
 The `api_lifecycle.runtime_lifespan` host owner preserves startup/serving failures
