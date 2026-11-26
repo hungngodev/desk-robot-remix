@@ -1,6 +1,11 @@
 """CAD builder register must distinguish source files from fitted hardware."""
 
+import hashlib
+import json
+import re
 from pathlib import Path
+
+import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
 CAD = ROOT / "docs/cad"
@@ -14,6 +19,19 @@ CURRENT_SOURCE_LINKS = (
     "remixes/remaining_fit_gauges.scad",
     "remixes/fusion_one_robot_scaffold.py",
 )
+
+# These are recorded upstream terms, not a blanket permission to redistribute
+# a combined assembly. In particular, the stepper remix has an NC-SA ancestor.
+ORIGINAL_SOURCES = {
+    "eva-head": ("Ksirailway-Base", "CC-BY-SA-4.0", "thing:7319190"),
+    "forklift": ("tristomietitoredeituit", "CC-BY-NC-SA-4.0", "thing:3027255"),
+    "gripper": ("bluino", "CC-BY-4.0", "thing:4253681"),
+    "smars": ("tristomietitoredeituit", "CC-BY-NC-SA-4.0", "thing:2662828"),
+    "smars-stepper": ("unclejeff", "CC-BY-4.0", "thing:2778904"),
+    "sparky-head": ("Sparky by Siddhartha Lahiri", "CC-BY-SA-4.0", "slahiri/sparky"),
+    "tiny-engineer-head": ("Krzysztof Jamroz", "CERN-OHL-S-2.0", "jamro/tiny-engineer"),
+}
+CAD_SUFFIXES = {".stl", ".3mf", ".scad"}
 
 
 def test_cad_builder_entrypoint_names_real_current_sources_and_holds_fit():
@@ -29,3 +47,94 @@ def test_cad_builder_entrypoint_names_real_current_sources_and_holds_fit():
     assert "no complete robot\nor powered dock has been assembled" in register
     assert "not**\napproved permanent installation quantities" in register
     assert "protected contact charging before release" in register
+
+
+def _check_original_assets(directory, manifest):
+    entries = manifest["files"] if "files" in manifest else [manifest]
+    registered = {}
+    for entry in entries:
+        name = entry["file"]
+        if Path(name).suffix.lower() not in CAD_SUFFIXES:
+            continue
+        assert name not in registered, f"Duplicate CAD registration: {name}"
+        registered[name] = entry
+    actual = {
+        path.relative_to(directory).as_posix()
+        for path in directory.rglob("*")
+        if path.is_file() and path.suffix.lower() in CAD_SUFFIXES
+    }
+    assert actual == registered.keys(), f"CAD inventory mismatch: {directory}"
+    for name, entry in registered.items():
+        data = (directory / name).read_bytes()
+        assert len(data) == entry["bytes"], f"CAD size mismatch: {name}"
+        assert hashlib.sha256(data).hexdigest() == entry["sha256"], f"CAD hash mismatch: {name}"
+
+
+def _check_original_license(manifest, expected, attribution):
+    author, license_id, source = expected
+    assert manifest["author"] == author
+    assert manifest["license"] == license_id
+    assert source in manifest["source_url"]
+    lines = attribution.splitlines()
+    sections = ["\n".join(lines[i : i + 6]) for i, line in enumerate(lines) if source in line]
+    assert any(
+        author in section and _license_token(license_id) in _license_token(section)
+        for section in sections
+    ), f"Missing attribution for {source}: {license_id}"
+
+
+def _license_token(value):
+    return re.sub(r"[^a-z0-9]", "", value.lower())
+
+
+def test_original_cad_inventory_and_license_provenance():
+    originals = CAD / "originals"
+    attribution = (ROOT / "docs/ATTRIBUTION.md").read_text(encoding="utf-8")
+    assert {p.name for p in originals.iterdir() if p.is_dir()} == ORIGINAL_SOURCES.keys()
+    assert not any(
+        p.is_file() and p.suffix.lower() in CAD_SUFFIXES for p in originals.iterdir()
+    )
+    for directory, expected in ORIGINAL_SOURCES.items():
+        source = originals / directory
+        manifest = json.loads((source / "source.json").read_text(encoding="utf-8"))
+        _check_original_license(manifest, expected, attribution)
+        _check_original_assets(source, manifest)
+        if directory == "smars-stepper":
+            assert manifest["ancestor"]["recorded_license"] == "CC-BY-NC-SA-4.0"
+            assert manifest["ancestor"]["author"] == ORIGINAL_SOURCES["smars"][0]
+            assert "no commercial grant inferred" in attribution
+
+
+@pytest.mark.parametrize("fault", ["unregistered", "missing", "duplicate", "changed", "size"])
+def test_original_cad_inventory_rejects_drift(tmp_path, fault):
+    data = b"cube(1);\n"
+    asset = tmp_path / "model.scad"
+    asset.write_bytes(data)
+    entry = {"file": asset.name, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+    entries = [entry]
+    _check_original_assets(tmp_path, {"files": entries})
+    if fault == "unregistered":
+        (tmp_path / "extra.STL").write_bytes(data)
+    elif fault == "missing":
+        asset.unlink()
+    elif fault == "duplicate":
+        entries.append(entry)
+    elif fault == "changed":
+        asset.write_bytes(data.replace(b"1", b"2"))
+    else:
+        entry["bytes"] += 1
+    with pytest.raises(AssertionError):
+        _check_original_assets(tmp_path, {"files": entries})
+
+
+def test_original_cad_license_rejects_relabeling():
+    expected = ORIGINAL_SOURCES["smars"]
+    author, license_id, source = expected
+    manifest = {"author": author, "license": license_id, "source_url": source}
+    attribution = f"{author} {source} {license_id}"
+    _check_original_license(manifest, expected, attribution)
+    with pytest.raises(AssertionError):
+        _check_original_license(manifest, expected, attribution.replace(license_id, "MIT"))
+    manifest["license"] = "MIT"
+    with pytest.raises(AssertionError):
+        _check_original_license(manifest, expected, attribution)
