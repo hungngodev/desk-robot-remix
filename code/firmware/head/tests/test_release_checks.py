@@ -23,15 +23,21 @@ def test_release_publish_requires_exact_remote_digest(tmp_path, fault):
     source = overlay.harden_release_tooling(path.read_text())
     # Execute the actual patched publish function; isolate only the external API.
     tree = ast.parse(source)
-    publish = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
-                   and node.name == "publish")
+    publish = next(
+        node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "publish"
+    )
     assets = tmp_path / "assets"
     assets.mkdir()
     archive = assets / "v2.5.2_test.zip"
     archive.write_bytes(b"firmware")
     metadata = tmp_path / "metadata"
-    manifest = {"tag": "v2.5.2", "source_sha": "a" * 40, "firmware_count": 1,
-                "board_count": 1, "idf_version": "6.1.0"}
+    manifest = {
+        "tag": "v2.5.2",
+        "source_sha": "a" * 40,
+        "firmware_count": 1,
+        "board_count": 1,
+        "idf_version": "6.1.0",
+    }
     draft = {"id": 42, "draft": True, "target_commitish": manifest["source_sha"]}
 
     def remote(_repo, endpoint, **kwargs):
@@ -39,9 +45,14 @@ def test_release_publish_requires_exact_remote_digest(tmp_path, fault):
             return None
         assert endpoint == "releases/42"
         files = [archive, metadata / "release-manifest.json", metadata / "SHA256SUMS"]
-        entries = [{"name": p.name, "size": p.stat().st_size,
-                    "digest": "sha256:" + hashlib.sha256(p.read_bytes()).hexdigest()}
-                   for p in files]
+        entries = [
+            {
+                "name": p.name,
+                "size": p.stat().st_size,
+                "digest": "sha256:" + hashlib.sha256(p.read_bytes()).hexdigest(),
+            }
+            for p in files
+        ]
         if fault == "missing":
             del entries[0]["digest"]
         elif fault == "null":
@@ -56,9 +67,15 @@ def test_release_publish_requires_exact_remote_digest(tmp_path, fault):
 
     commands = Mock()
     commands.check_output.return_value = '{"body":"changes"}'
-    namespace = {"hashlib": hashlib, "json": json, "subprocess": commands,
-                 "preflight": Mock(return_value=None), "find_release": Mock(return_value=draft),
-                 "verify_assets": Mock(return_value="checksums"), "gh_json": remote}
+    namespace = {
+        "hashlib": hashlib,
+        "json": json,
+        "subprocess": commands,
+        "preflight": Mock(return_value=None),
+        "find_release": Mock(return_value=draft),
+        "verify_assets": Mock(return_value="checksums"),
+        "gh_json": remote,
+    }
     exec(compile(ast.Module(body=[publish], type_ignores=[]), str(path), "exec"), namespace)
     args = ("example/repo", manifest, assets, metadata, "https://example.com/run", True)
     if fault is None:
