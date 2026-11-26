@@ -268,7 +268,8 @@ class DetectorPool:
         if active is not None:
             await asyncio.shield(asyncio.gather(active, return_exceptions=True))
         if self._warming is not None:
-            await asyncio.shield(self._warming)
+            # A cancelled warmup must not bypass retirement of owned children.
+            await asyncio.shield(asyncio.gather(self._warming, return_exceptions=True))
         for process in tuple(self._owned):
             try:
                 await self._retire(process)

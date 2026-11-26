@@ -88,3 +88,32 @@ for line in sys.stdin:
     finally:
         await pool.close()
     assert not pool._owned
+
+
+@pytest.mark.asyncio
+async def test_cancelled_replenishment_does_not_prevent_close():
+    worker = 'import sys; print("ready", flush=True); sys.stdin.read()'
+    pool = DetectorPool((sys.executable, "-u", "-c", worker))
+    camera = DockCameraCalibration(410, 410, 320, 240, 60, 12)
+    await pool.prewarm()
+    children = tuple(pool._ready)
+    failed, spare = children
+    try:
+        await pool._retire(failed)
+        pool._schedule_warm()
+        warming = pool._warming
+        assert warming is not None and not warming.done()
+        warming.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await warming
+        assert pool._owned == {spare} and spare.returncode is None
+        await asyncio.gather(pool.close(), pool.close())
+        assert not pool._owned and not pool._ready
+        assert all(child.returncode is not None for child in children)
+        with pytest.raises(DockDetectorBusy):
+            await pool.detect(b"fresh", camera, captured_at=time.monotonic())
+        assert pool._sequence == 0
+    finally:
+        # Ensure the regression's failing baseline also leaves no child alive.
+        for child in tuple(pool._owned):
+            await pool._retire(child)
