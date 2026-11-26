@@ -447,3 +447,36 @@ def test_recall_preserves_episode_confidence_age_and_origin_per_pet(tmp_path):
             assert result.age_s == age
             assert result.episode_confidence == confidence
             assert result.evidence == original
+
+
+@pytest.mark.parametrize(("column", "value"), [
+    ("mac_received_at", "bad"),
+    ("mac_received_at", float("inf")),
+    ("interpreted_at", "bad"),
+    ("interpreted_at", float("inf")),
+    ("interpreted_at", 0.0),
+    ("interpreted_at", 1e12),
+])
+@pytest.mark.parametrize("already_attached", [False, True])
+def test_invalid_camera_chronology_is_not_spatial_evidence(
+        tmp_path, column, value, already_attached):
+    robots = ["robot-01", "robot-02"]
+    root = tmp_path / "private"
+    db = MemoryStore(root, robots)
+    spatial = SpatialMemory(db)
+    when = time.time() - 1
+    for robot in robots:
+        assert remember(db, robot, "same-event", when)
+    assert spatial.attach(robots[1], "same-event", evidence(when))
+    if already_attached:
+        assert spatial.attach(robots[0], "same-event", evidence(when))
+    with db._connect(robots[0]) as conn:
+        conn.execute(
+            f"UPDATE camera_provenance SET {column}=? WHERE event_id=?",
+            (value, "same-event"),
+        )
+    spatial = SpatialMemory(MemoryStore(root, robots))
+    assert not spatial.attach(robots[0], "same-event", evidence(when))
+    assert spatial.last_seen(robots[0], "flat_key", now=when + 2) is None
+    peer = spatial.last_seen(robots[1], "flat_key", now=when + 2)
+    assert peer is not None and peer.evidence == evidence(when)

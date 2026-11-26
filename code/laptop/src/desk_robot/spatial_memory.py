@@ -110,6 +110,11 @@ class SpatialMemory:
                           COALESCE(e.generation,0), p.mac_received_at
                    FROM memories AS m
                    LEFT JOIN camera_provenance AS p ON p.event_id=m.event_id
+                     AND typeof(p.mac_received_at) IN ('integer','real')
+                     AND typeof(p.interpreted_at) IN ('integer','real')
+                     AND p.mac_received_at >= 0
+                     AND p.mac_received_at <= p.interpreted_at
+                     AND p.interpreted_at < 1e12
                    LEFT JOIN episode_mutations AS e ON e.event_id=m.event_id
                    WHERE m.event_id=? AND m.kind NOT IN (?,?)""",
                 (event_id, *FICTIONAL_MEMORY_KINDS),
@@ -198,6 +203,11 @@ class SpatialMemory:
                    FROM spatial_observations AS s JOIN memories AS m
                    ON s.event_id=m.event_id
                    JOIN camera_provenance AS p ON p.event_id=m.event_id
+                     AND typeof(p.mac_received_at) IN ('integer','real')
+                     AND typeof(p.interpreted_at) IN ('integer','real')
+                     AND p.mac_received_at >= 0
+                     AND p.mac_received_at <= p.interpreted_at
+                     AND p.interpreted_at < 1e12
                    LEFT JOIN episode_mutations AS e ON e.event_id=m.event_id
                    WHERE s.object_key=? AND m.source_robot=? AND m.witnessed=1
                    AND m.kind NOT IN (?,?)
