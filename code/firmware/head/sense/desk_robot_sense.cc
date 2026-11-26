@@ -20,6 +20,7 @@
 #endif
 
 #include <esp_timer.h>
+#include <esp_lvgl_port.h>
 #include <esp_log.h>
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
 #include <esp_event.h>
@@ -108,6 +109,19 @@ constexpr bool AudioListenRetryDue(uint64_t uptime_ms, uint64_t last_attempt_ms)
     return uptime_ms >= 10000U && uptime_ms >= last_attempt_ms &&
            uptime_ms - last_attempt_ms >= 5000U;
 }
+
+// Cosmetic updates must not wait behind the LVGL worker's I2C flush.
+// The pinned port mutex is recursive; nested upstream display calls reuse it.
+class FaceRenderGuard {
+public:
+    FaceRenderGuard() : acquired_(lvgl_port_lock(1)) {}
+    ~FaceRenderGuard() { if (acquired_) lvgl_port_unlock(); }
+    explicit operator bool() const { return acquired_; }
+    FaceRenderGuard(const FaceRenderGuard&) = delete;
+    FaceRenderGuard& operator=(const FaceRenderGuard&) = delete;
+private:
+    bool acquired_;
+};
 
 class DeskRobotSenseBoard : public WifiBoard {
 private:
@@ -307,46 +321,59 @@ private:
                 body_unhealthy, dock_lockout, mic_privacy_on);
             const bool priority_active = local_status != desk_robot::FaceStatus::kNormal;
             if (priority_active || !face_available) model_mood_active = false;
-            // This owns the status label and neutral face under the LVGL lock.
-            // Upstream clock, notifications and voice cannot replace it.
-            if (board->local_eye_display_ != nullptr)
-                board->local_eye_display_->SetLocalStatus(local_status);
-            if (face_available && board->display_ != nullptr) {
-                // Only the Mac's CURRENT context decision may request a
-                // transient mood. The local idle HSM takes over afterward.
-                // These bytes never reach WROOM, motors, Opus or microphones.
-                if (priority_active) {
-                    // Keep a nonemotional neutral safety face instead of
-                    // prescribing sadness for every independent WROOM fault.
-                    // The factual STOP status above remains visible, and
-                    // optional HSM/LLM moods cannot override the safety cue.
+            {
+                FaceRenderGuard render_lock;
+                if (!render_lock) {
+                    // Drop cosmetic work rather than delaying the next audio retry.
+                    // Reconcile the latest status and HSM mood on the next frame.
+                    last_face_available = false;
                     model_mood_active = false;
-                } else if (requested_mood != desk_robot::CosmeticMood::kNone) {
-                    board->display_->SetEmotion(CosmeticMoodName(requested_mood));
-                    model_mood_active = true;
-                    model_mood_started_ms = now_ms;
-                } else if (!model_mood_active ||
-                           now_ms - model_mood_started_ms >= 1600U) {
-                    if (last_priority_active || model_mood_active ||
-                        !last_face_available || action.set_mood)
-                        board->display_->SetEmotion(
-                            MoodName(board->face_behavior_.mood()));
-                    model_mood_active = false;
+                    board->eye_animator_.Step(
+                        now_ms, Motion::kNone, false,
+                        priority_active || !isAwake(board->face_behavior_.state()));
+                } else {
+                    // This owns the status label and neutral face under the LVGL lock.
+                    // Upstream clock, notifications and voice cannot replace it.
+                    if (board->local_eye_display_ != nullptr)
+                        board->local_eye_display_->SetLocalStatus(local_status);
+                    if (face_available && board->display_ != nullptr) {
+                        // Only the Mac's CURRENT context decision may request a
+                        // transient mood. The local idle HSM takes over afterward.
+                        // These bytes never reach WROOM, motors, Opus or microphones.
+                        if (priority_active) {
+                            // Keep a nonemotional neutral safety face instead of
+                            // prescribing sadness for every independent WROOM fault.
+                            // The factual STOP status above remains visible, and
+                            // optional HSM/LLM moods cannot override the safety cue.
+                            model_mood_active = false;
+                        } else if (requested_mood != desk_robot::CosmeticMood::kNone) {
+                            board->display_->SetEmotion(CosmeticMoodName(requested_mood));
+                            model_mood_active = true;
+                            model_mood_started_ms = now_ms;
+                        } else if (!model_mood_active ||
+                                   now_ms - model_mood_started_ms >= 1600U) {
+                            if (last_priority_active || model_mood_active ||
+                                !last_face_available || action.set_mood)
+                                board->display_->SetEmotion(
+                                    MoodName(board->face_behavior_.mood()));
+                            model_mood_active = false;
+                        }
+                    }
+                    // Blink/gaze is a local, nonactuating LVGL overlay confined to
+                    // Xiaozhi's emotion icon slot. Safety, voice, and current Mac
+                    // cosmetic cues always suppress it; stale HSM motion is discarded.
+                    if (board->local_eye_display_ != nullptr) {
+                        const auto eyes = board->eye_animator_.Step(
+                            now_ms, action.motion,
+                            face_available && !priority_active && !model_mood_active,
+                            priority_active || !isAwake(board->face_behavior_.state()));
+                        board->local_eye_display_->ShowEyes(eyes);
+                    }
+                    // Restore the current HSM mood after either local priority clears.
+                    last_priority_active = priority_active;
+                    last_face_available = face_available;
                 }
             }
-            // Blink/gaze is a local, nonactuating LVGL overlay confined to
-            // Xiaozhi's emotion icon slot. Safety, voice, and current Mac
-            // cosmetic cues always suppress it; stale HSM motion is discarded.
-            if (board->local_eye_display_ != nullptr) {
-                const auto eyes = board->eye_animator_.Step(
-                    now_ms, action.motion,
-                    face_available && !priority_active && !model_mood_active,
-                    priority_active || !isAwake(board->face_behavior_.state()));
-                board->local_eye_display_->ShowEyes(eyes);
-            }
-            // Restore the current HSM mood after either local priority clears.
-            last_priority_active = priority_active;
-            last_face_available = face_available;
             vTaskDelay(pdMS_TO_TICKS(100));
         }
     }
@@ -364,6 +391,9 @@ private:
         esp_lcd_panel_io_i2c_config_t io_config = {};
         io_config.dev_addr = 0x3C;
         io_config.scl_speed_hz = 400000;
+        // A full 1024-byte frame needs about 23 ms of wire time at 400 kHz.
+        // Bound each transfer even if SDA/SCL stalls; zero waits indefinitely.
+        io_config.transaction_timeout_ms = 50;
         io_config.control_phase_bytes = 1;
         io_config.dc_bit_offset = 6;
         io_config.lcd_cmd_bits = 8;
