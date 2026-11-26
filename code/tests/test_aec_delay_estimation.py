@@ -584,3 +584,18 @@ def test_low_but_usable_signal_retains_true_delay():
     assert report["sample_lag"] == 1120
     assert report["normalized_correlation"] == pytest.approx(1.0)
     assert not report["aec_physically_verified"]
+
+
+def test_clock_drift_rejects_near_silent_gap_between_primary_windows():
+    rng = np.random.default_rng(1058)
+    reference = rng.choice([-1.0, 1.0], size=160000) / 32768
+    reference[:22666] *= 4096
+    reference[46666:] *= 4096
+    microphone = np.concatenate((np.zeros(1120), reference))[:len(reference)]
+    assert estimate_delay(reference, microphone)["sample_lag"] == 1120
+    for start in (0, 45333, 90666, 136000):
+        assert estimate_delay(
+            reference[start:start + 24000], microphone[start:start + 24000],
+        )["sample_lag"] == 1120
+    with pytest.raises(ValueError, match="not a stable clock drift"):
+        estimate_clock_drift(reference, microphone)

@@ -381,6 +381,10 @@ barge-in without the separate physical trial evidence.
 For recordings of four seconds or longer, failed drift validation suppresses
 the copyable fixed-delay setting even if global correlation finds a peak.
 Long recordings also probe gaps between the four primary drift windows.
+Each channel and each candidate overlap must have mean-centered RMS of at
+least 0.0001 on the normalized PCM scale (about 3.28 PCM16 counts).
+A high correlation in near-silent samples is not usable delay evidence.
+This numerical floor is not a measured microphone noise or VAD threshold.
 These checks cannot detect every brief timing excursion; retain the physical
 AEC and interruption trial requirements.
 
