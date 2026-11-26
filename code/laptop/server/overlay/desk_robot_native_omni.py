@@ -246,6 +246,7 @@ class NativeOmniSession:
         self.conn = conn
         self.device = conn.device_id
         self.robot = _robot_id(conn)
+        self._head_session_id = getattr(conn, "session_id", None)
         # Set only by the authenticated Mac omni-context identity response.
         # Until then, named ASR cannot address this microphone's tools.
         self._robot_name: str | None = None
@@ -1227,7 +1228,7 @@ class NativeOmniSession:
         same-model chat completion is the compatible output path, with one
         shared physical XIAO speaker and all original VAD cancellation fences.
         """
-        if (not facts or self.closed or not self.connected or
+        if (not facts or not self._tool_head_current() or self.closed or not self.connected or
                 self._tool_speech_turn != (epoch, request_turn)
                 or self._tool_answer_started_turn == (epoch, request_turn)):
             return
@@ -1254,7 +1255,8 @@ class NativeOmniSession:
             http, epoch, request_turn, require_private_consent=private_facts,
             expected_private_memory_generation=expected_revision,
         )
-        if self.closed or self._tool_speech_turn != (epoch, request_turn):
+        if (not self._tool_head_current() or self.closed
+                or self._tool_speech_turn != (epoch, request_turn)):
             return
         previous_dialogue = self._tool_dialogue_context(time.monotonic())
         try:
@@ -1322,7 +1324,7 @@ class NativeOmniSession:
                 pcm, generated_text = await read_tool_completion(
                     response.content.iter_chunked(64 * 1024)
                 )
-            if (self.closed or not self.connected
+            if (not self._tool_head_current() or self.closed or not self.connected
                     or self._tool_speech_turn != (epoch, request_turn)):
                 return
             # The 24s model generation may outlive live camera/ASR consent
@@ -1335,7 +1337,7 @@ class NativeOmniSession:
                 require_live_consent=True,
                 expected_private_memory_generation=expected_revision,
             )
-            if (self.closed or not self.connected
+            if (not self._tool_head_current() or self.closed or not self.connected
                     or self._tool_speech_turn != (epoch, request_turn)):
                 return
             response_id = "tool_" + uuid.uuid4().hex
@@ -1349,7 +1351,8 @@ class NativeOmniSession:
                 if 1 <= len(generated_text) <= 280 else "",
             )
             for offset in range(0, len(pcm), 9600):
-                if self._tool_speech_turn != (epoch, request_turn):
+                if (not self._tool_head_current()
+                        or self._tool_speech_turn != (epoch, request_turn)):
                     return
                 await self.outgoing.put((response_id, pcm[offset:offset + 9600]))
             await self.outgoing.put((response_id, None))
@@ -1518,6 +1521,14 @@ class NativeOmniSession:
             self._readonly_seen.add(item)
         return queued
 
+    def _tool_head_current(self) -> bool:
+        return (
+            isinstance(self._head_session_id, str)
+            and bool(self._head_session_id)
+            and getattr(self.conn, "session_id", None) == self._head_session_id
+            and _robot_id(self.conn) == self.robot
+        )
+
     async def _run_readonly_batch(
         self, entries: list[tuple[str, dict, int, int]],
     ) -> list[dict]:
@@ -1543,11 +1554,14 @@ class NativeOmniSession:
                 # Keep this distinct from foreign/malformed HTTP 200 data.
                 return index, route, None, True
             return index, route, result, False
+        epoch, request_turn = entries[0][2:]
+        if (not self._tool_head_current() or self.closed or not self.connected
+                or self._generation != epoch or self._readonly_turn != request_turn):
+            return []
         tasks = [
             asyncio.create_task(invoke(index, route, payload))
             for index, (route, payload, _, _) in enumerate(entries)
         ]
-        epoch, request_turn = entries[0][2:]
         facts: dict[int, dict] = {}
         rejected_routes: dict[int, str] = {}
         try:
@@ -1566,7 +1580,7 @@ class NativeOmniSession:
                 except Exception:
                     self.native_readonly_tools_dropped += 1
                     continue
-                if (self.closed or not self.connected
+                if (not self._tool_head_current() or self.closed or not self.connected
                         or self._generation != epoch
                         or self._readonly_turn != request_turn):
                     continue
@@ -1674,6 +1688,9 @@ class NativeOmniSession:
                     }
             # Reads finish concurrently, but the spoken model should receive
             # facts in the human's requested clause order, not network order.
+            if (not self._tool_head_current() or self.closed or not self.connected
+                    or self._generation != epoch or self._readonly_turn != request_turn):
+                return []
             return [facts[index] for index in sorted(facts)]
         finally:
             for task in tasks:

@@ -9906,3 +9906,72 @@ async def test_native_send_rechecks_closed_under_socket_lock(native):
     with pytest.raises(RuntimeError, match="unavailable"):
         await pending
     send_json.assert_not_called()
+
+
+@pytest.mark.parametrize("invalidate", ["turn", "session", "registration"])
+async def test_native_late_tool_batch_cannot_cross_owner(native, monkeypatch, invalidate):
+    """An already collected sibling cannot escape with a late obsolete receipt."""
+    import types
+
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    session.connected = True
+    slow_started, release = asyncio.Event(), asyncio.Event()
+
+    async def call(current, route, payload):
+        assert current is conn
+        if route == "look":
+            slow_started.set()
+            await release.wait()
+            return {
+                "robot_id": "robot-01",
+                "source": "authenticated_xiao_camera_and_local_vlm",
+                "answer": "Obsolete key observation", "motor_authorized": False,
+            }
+        return {
+            "robot_id": "robot-01",
+            "source": "wroom_aux_fuel_gauge_raw_unqualified",
+            "gauge_available": False, "motor_authorized": False,
+        }
+
+    pkg = types.ModuleType("plugins_func")
+    pkg.__path__ = []
+    funcs = types.ModuleType("plugins_func.functions")
+    funcs.__path__ = []
+    tools = types.ModuleType("plugins_func.functions.desk_robot_tools")
+    tools.call = call
+    for key, value in (
+        ("plugins_func", pkg),
+        ("plugins_func.functions", funcs),
+        ("plugins_func.functions.desk_robot_tools", tools),
+    ):
+        monkeypatch.setitem(sys.modules, key, value)
+
+    pending = asyncio.create_task(session._run_readonly_batch([
+        ("power-status", {}, 0, 0),
+        ("look", {"question": "Look at the desk"}, 0, 0),
+    ]))
+    try:
+        await asyncio.wait_for(slow_started.wait(), timeout=1)
+        await asyncio.wait_for(session._context_wakeup.wait(), timeout=1)
+        assert session.native_readonly_tools_completed == 1
+        if invalidate == "turn":
+            session._readonly_turn += 1
+        elif invalidate == "session":
+            conn.session_id = "replacement-session"
+        else:
+            replacement, _ = connection()
+            bridge.connections["mac-01"] = replacement
+        release.set()
+        assert await asyncio.wait_for(pending, timeout=1) == []
+        assert session.native_readonly_tools_completed == 1
+    finally:
+        release.set()
+        if not pending.done():
+            pending.cancel()
+        await asyncio.gather(pending, return_exceptions=True)
