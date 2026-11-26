@@ -277,6 +277,13 @@ void write_motor_pair(int forward_channel, int reverse_channel, int percent) {
 }
 #elif DESK_ROBOT_STEPPER
 void write_stepper(const int (&pins)[4], std::uint8_t mask) {
+  // Reject every pattern outside the eight half-steps and explicit coast.
+  switch (mask) {
+    case 0: case 1: case 3: case 2: case 6: case 4: case 12: case 8: case 9:
+      break;
+    default:
+      mask = 0;
+  }
   // Remove inactive coils before enabling the next phase. No blocking step call.
   for (int phase = 0; phase < 4; ++phase)
     if ((mask & (1U << phase)) == 0) digitalWrite(pins[phase], LOW);
