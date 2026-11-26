@@ -136,7 +136,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--robot", required=True)
     p.add_argument("--config", type=Path, default=ROOT / "config/fleet.example.toml")
-    p.add_argument("--secrets", type=Path, default=ROOT / "config/local.env")
+    p.add_argument("--secrets", type=Path,
+                   help="Private credentials file (default: local.env beside --config)")
     p.add_argument("--board", choices=["cores3", "modular", "sense", "waveshare"], default="cores3")
     p.add_argument("--aec-delay-ms", type=int, default=90,
                    help="Sense-only measured acoustic reference alignment (0..250ms)")
@@ -166,7 +167,10 @@ def main():
     ):
         p.error("Private PCM calibration requires Sense, continuous mic consent and zero AEC delay")
     try:
-        values = read_private_env(args.secrets)
+        secrets_path = args.secrets
+        if secrets_path is None:
+            secrets_path = args.config.resolve().with_name("local.env")
+        values = read_private_env(secrets_path)
     except (OSError, ValueError) as error:
         p.error(str(error))
     token = os.environ.get(name, values.get(name, ""))

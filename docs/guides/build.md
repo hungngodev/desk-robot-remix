@@ -403,10 +403,13 @@ only `camera_config_t.sccb_i2c_port` is insufficient when SCCB pins are assigned
 the pinned camera driver chooses that bus through Kconfig.
 
 The verification configuration uses an empty bridge token and disabled wake word.
-The Mac CLI defaults to `local.env` beside the selected TOML configuration, regardless
-of the current working directory. Use an explicit `--secrets` path for a shared
-credential file in another directory; pass it before the subcommand for both
-credential creation and subsequent commands.
+The Mac CLI, Xiaozhi `laptop/server/run_server.py` launcher and head
+`firmware/head/private_config.py` all default to `local.env` beside the selected
+TOML configuration, regardless of the current working directory. Use an explicit
+`--secrets` path for a shared credential file in another directory. For the Mac
+CLI, pass it before the subcommand for both credential creation and subsequent
+commands. Relative paths supplied explicitly are relative to the invoking shell;
+repository-owned build assets remain anchored to the source tree.
 
 For private local-server settings, after generating `config/local.env`:
 
