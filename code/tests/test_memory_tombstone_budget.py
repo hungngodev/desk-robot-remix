@@ -2,6 +2,7 @@
 
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from threading import Event
 
 import desk_robot.memory as memory_module
 import pytest
@@ -182,3 +183,81 @@ def test_correction_replay_fences_share_bounded_per_pet_budget(tmp_path, monkeyp
     with pytest.raises(MemoryWriteSealed):
         remember(reopened, pet, "first")
     assert remember(reopened, "robot-02", "first")
+
+
+def test_direct_absent_corrections_do_not_grow_unsealed_mutation_ledger(tmp_path):
+    root = tmp_path / "private"
+    pet = "robot-01"
+    store = MemoryStore(root, [pet])
+    for i in range(30):
+        assert not store.correct_episode(pet, f"absent-{i}", "No such observation")
+
+    with sqlite3.connect(root / f"{pet}.sqlite3") as db:
+        assert db.execute("SELECT COUNT(*) FROM episode_mutations").fetchone() == (0,)
+    assert read_fence(root, pet) == (0, 0)
+
+    # A direct edit must still retire an older pending reservation, even
+    # when the episode is absent at the instant of the newer edit.
+    older = store.reserve_episode_mutation(pet, "pending", "Old correction")
+    assert not store.correct_episode(pet, "pending", "New correction")
+    reopened = MemoryStore(root, [pet])
+    assert remember(reopened, pet, "pending")
+    with pytest.raises(EpisodeMemoryMutationSuperseded):
+        reopened.correct_episode(
+            pet, "pending", "Old correction", mutation_generation=older,
+        )
+    assert reopened.get_episode(pet, "pending").summary == "Original observation pending"
+
+
+def test_forget_status_and_search_across_overlapping_reader_and_restart(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(memory_module, "_MAX_DELETED_EPISODE_IDS", 2)
+    root = tmp_path / "private"
+    pet, peer = "robot-01", "robot-02"
+    event = "concurrent"
+    store = MemoryStore(root, [pet, peer])
+    assert remember(store, pet, event)
+    assert remember(store, peer, event)
+
+    fenced = Event()
+    original = MemoryStore._fence_episode_replay
+
+    def signal_fence(db, event_id):
+        original(db, event_id)
+        fenced.set()
+
+    monkeypatch.setattr(MemoryStore, "_fence_episode_replay", staticmethod(signal_fence))
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with sqlite3.connect(root / f"{pet}.sqlite3") as reader:
+            reader.execute("BEGIN")
+            try:
+                assert reader.execute(
+                    "SELECT summary FROM memories WHERE event_id=?", (event,),
+                ).fetchone() == ("Original observation concurrent",)
+                deleted = pool.submit(store.forget_episode, pet, event)
+                assert fenced.wait(timeout=5)
+            finally:
+                # The already-started read may see its old snapshot. Release
+                # it before awaiting the writer's committed deletion receipt.
+                reader.rollback()
+        assert deleted.result(timeout=5) is True
+
+    for current in (store, MemoryStore(root, [pet, peer])):
+        assert current.get_episode(pet, event) is None
+        assert current.recent(pet) == []
+        assert current.search(pet, "concurrent") == []
+        assert current.count(pet) == 0
+        assert not current.forget_episode(pet, event)
+        assert not remember(current, pet, event)
+        assert read_fence(root, pet) == (1, 0)
+        assert current.get_episode(peer, event) is not None
+        assert len(current.search(peer, "concurrent")) == 1
+
+    assert not store.forget_episode(pet, "unknown")
+    assert read_fence(root, pet) == (2, 1)
+    reopened = MemoryStore(root, [pet, peer])
+    with pytest.raises(MemoryWriteSealed):
+        remember(reopened, pet, event)
+    assert reopened.search(pet, "concurrent") == []
+    assert read_fence(root, peer) == (0, 0)

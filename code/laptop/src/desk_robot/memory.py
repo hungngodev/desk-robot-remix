@@ -1042,10 +1042,19 @@ class MemoryStore:
         clean = summary.strip()
         with self._connect(robot_id) as db:
             db.execute("BEGIN IMMEDIATE")
-            self._require_episode_mutation(db, event_id, mutation_generation)
             current = db.execute(
                 "SELECT summary FROM memories WHERE event_id=?", (event_id,)
             ).fetchone()
+            if (
+                current is None and mutation_generation is None
+                and db.execute(
+                    "SELECT 1 FROM episode_mutations WHERE event_id=?", (event_id,)
+                ).fetchone() is None
+            ):
+                # A direct correction of an unknown episode has no row or
+                # earlier reservation to retire. Do not grow the ledger.
+                return False
+            self._require_episode_mutation(db, event_id, mutation_generation)
             if current is None:
                 return False
             # The corrected row may later be evicted by ordinary retention.
