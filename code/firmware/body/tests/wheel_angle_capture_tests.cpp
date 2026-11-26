@@ -223,7 +223,32 @@ static void paired_wrap_and_invalid_half_turn() {
   }
 }
 
+static void reject_zero_elapsed_new_sequence() {
+  for (std::uint32_t start : {100U, 0xfffffff0U}) {
+    for (bool changed_angle : {false, true}) {
+      WheelAngleCapture wheel;
+      check(wheel.configure(4000, 100, 60));
+      const auto at = start + 16U;
+      check(wheel.observe(angle(100, 1, start), start) == Result::Baseline);
+      check(wheel.observe(angle(110, 2, at), at) == Result::Delta);
+      check(wheel.angular_counts() == 10);
+      // A fresh sequence without a newer acquisition time is not even
+      // stationary evidence. A later request cannot repair that timestamp.
+      const auto invalid = angle(changed_angle ? 111 : 110, 3, at);
+      check(wheel.observe(invalid, at + 1U) == Result::Invalid);
+      check(!wheel.continuous() && wheel.angular_counts() == 0);
+      check(wheel.last_delta() == 0 && wheel.segment() == 1);
+      check(wheel.observe(invalid, at + 2U) == Result::Invalid);
+      check(wheel.observe(angle(120, 4, at + 3U), at + 3U) == Result::Baseline);
+      check(wheel.segment() == 2 && wheel.angular_counts() == 0);
+      check(wheel.observe(angle(120, 5, at + 4U), at + 4U) == Result::Delta);
+      check(wheel.continuous() && wheel.last_delta() == 0);
+    }
+  }
+}
+
 int main() {
+  reject_zero_elapsed_new_sequence();
   exact_wrap_and_half_turn_boundaries();
   paired_wrap_and_invalid_half_turn();
   stress_rollover_reverse_and_stall();
