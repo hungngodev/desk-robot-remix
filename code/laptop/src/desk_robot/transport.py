@@ -226,12 +226,19 @@ class HttpHead:
                     follow_redirects=False,
                     **kwargs,
                 )
+            # Reject a late response after caller cancellation, not just a local timeout.
+            task = asyncio.current_task()
+            if task is not None and task.cancelling():
+                raise asyncio.CancelledError
             # A cancellation-resistant adapter can swallow the timeout signal.
             if deadline.expired():
                 raise TimeoutError("Head request deadline expired")
             response.raise_for_status()
             return response
         except (httpx.HTTPError, ValueError, OSError) as exc:
+            task = asyncio.current_task()
+            if task is not None and task.cancelling():
+                raise asyncio.CancelledError from exc
             raise HeadError(f"{self.config.id}: head request failed; no retry: {exc}") from exc
 
     async def _ordered_command(
