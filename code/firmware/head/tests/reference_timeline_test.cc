@@ -271,6 +271,34 @@ static void clipped_clock_jump_discards_fractional_silence_debt() {
   CHECK(clock.silence_frames(jump + 63, 16384) == 1);
 }
 
+static void signed_origin_pause_and_projection_are_bounded() {
+  constexpr auto lo = std::numeric_limits<std::int64_t>::min();
+  constexpr auto hi = std::numeric_limits<std::int64_t>::max();
+  constexpr auto cap = std::numeric_limits<std::uint64_t>::max();
+  PlaybackReferenceClock clock;
+  CHECK(clock.silence_frames(-100000, 16384) == 0);
+  clock.accepted_output_frames(1920);
+  CHECK(clock.future_reference_frames(-90000, 16384) == 800);
+  CHECK(clock.future_reference_frames(-90000, 10) == 10);
+  CHECK(clock.silence_frames(-40000, 16384) == 0);
+  CHECK(clock.silence_frames(-30000, 16384) == 160);
+  clock.accepted_output_frames(1920);
+  CHECK(clock.future_reference_frames(-10000, 16384) == 640);
+  CHECK(clock.future_reference_frames(0, 16384) == 480);
+  CHECK(clock.silence_frames(40000, 16384) == 160);
+  clock.reset();
+  CHECK(clock.silence_frames(-32, 16384) == 0);
+  clock.accepted_output_frames(1);
+  CHECK(clock.future_reference_frames(-1, 16384) == 1);
+  CHECK(clock.future_reference_frames(0, 16384) == 0);
+  clock.reset();
+  CHECK(clock.silence_frames(hi, cap) == 0);
+  CHECK(clock.future_reference_frames(lo, cap) ==
+        (cap / 1000000U) * 16000U +
+        ((cap % 1000000U) * 16000U + 999999U) / 1000000U);
+  CHECK(clock.future_reference_frames(lo, 16384) == 16384);
+}
+
 int main() {
   try {
     for (int cadence_ms : {10, 20, 30, 60}) {
@@ -284,6 +312,7 @@ int main() {
     clipped_clock_jump_discards_fractional_silence_debt();
     mute_gaps_and_resets_cross_32_bit_clock_boundaries();
     timestamp_and_cap_extremes_do_not_overflow();
+    signed_origin_pause_and_projection_are_bounded();
     zero_timestamp_is_valid_clock_origin();
     irregular_idle_cadence_retains_fractional_reference_samples();
     short_i2s_writes_preserve_submicrosecond_playback_time();

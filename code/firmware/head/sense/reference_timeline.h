@@ -78,8 +78,10 @@ class PlaybackReferenceClock {
                                         std::uint64_t cap) const {
     if (!initialized_ || end_us_ < now_us) return 0;
     if (end_us_ == now_us && output_remainder_ == 0) return 0;
-    if (now_us < 0) return cap;
-    const auto ahead_us = static_cast<std::uint64_t>(end_us_ - now_us);
+    // Ordered timestamps may straddle zero; subtract in unsigned space
+    // just as silence_frames does, without overflowing signed arithmetic.
+    const auto ahead_us = static_cast<std::uint64_t>(end_us_) -
+        static_cast<std::uint64_t>(now_us);
     // Round up: never expose a queued PCM sample as already played. Split
     // the duration so even INT64_MAX and UINT64_MAX caps are safe.
     return std::min(cap, (ahead_us / 1000000U) * kReferenceRate +
