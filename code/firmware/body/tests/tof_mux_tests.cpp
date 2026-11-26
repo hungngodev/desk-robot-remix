@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <initializer_list>
 #include <iostream>
 #include <stdexcept>
 #include "Wire.h"
@@ -6,6 +7,7 @@
 #include "RangeTelemetry.h"
 #include "CliffGuard.h"
 #include "TofResult.h"
+#include "../include/TofTransactions.h"
 
 constexpr desk_robot::TofResult cold_range;
 static_assert(cold_range.signal_97 == 0 && cold_range.ambient_97 == 0 &&
@@ -321,8 +323,70 @@ static void raw_range_word_acceptance_is_exact() {
   }
 }
 
+// A narrow transport probe for the real mux helpers, independent of the
+// larger sensor emulator. It records STOP and readback per fitted address.
+struct MuxWriteProbe {
+  std::uint8_t masks[2]{};
+  unsigned stops[2]{};
+  unsigned reads[2]{};
+  unsigned index = 0;
+  std::uint8_t pending = 0;
+  int next_error = 0;
+  int read_override = -1;
+
+  void beginTransmission(std::uint8_t address) {
+    CHECK(address == 0x70 || address == 0x71);
+    index = address - 0x70;
+  }
+  unsigned write(std::uint8_t mask) { pending = mask; return 1; }
+  int endTransmission(bool stop) {
+    CHECK(stop);
+    ++stops[index];
+    const int error = next_error;
+    next_error = 0;
+    if (!error) masks[index] = pending;
+    return error;
+  }
+  unsigned requestFrom(std::uint8_t address, std::size_t count, bool stop) {
+    CHECK(address == 0x70 + index && count == 1 && stop);
+    ++reads[index];
+    return 1;
+  }
+  int available() const { return 1; }
+  int read() const { return read_override < 0 ? masks[index] : read_override; }
+};
+
+static void checked_dual_mux_deselect_after_transfer_error() {
+  const auto idle = [] { return true; };
+  for (const std::uint8_t address : {0x70, 0x71}) {
+    for (unsigned lane = 0; lane < 8; ++lane) {
+      for (const int error : {2, 5}) { // address NACK, transaction timeout
+        MuxWriteProbe wire;
+        const auto mask = static_cast<std::uint8_t>(1U << lane);
+        CHECK(desk_robot::checked_mux_mask(wire, address, mask, idle));
+        wire.next_error = error;
+        CHECK(!desk_robot::checked_mux_mask(wire, address, 0, idle));
+        CHECK(wire.masks[address - 0x70] == mask);
+        CHECK(wire.reads[address - 0x70] == 1);
+        const auto range_stops = wire.stops[0];
+        const auto accessory_stops = wire.stops[1];
+        const auto range_reads = wire.reads[0];
+        const auto accessory_reads = wire.reads[1];
+        CHECK(desk_robot::checked_mux_mask(wire, 0x71, 0, idle));
+        CHECK(desk_robot::checked_mux_mask(wire, 0x70, 0, idle));
+        CHECK(wire.masks[0] == 0 && wire.masks[1] == 0);
+        CHECK(wire.stops[0] == range_stops + 1 && wire.stops[1] == accessory_stops + 1);
+        CHECK(wire.reads[0] == range_reads + 1 && wire.reads[1] == accessory_reads + 1);
+        wire.read_override = mask;
+        CHECK(!desk_robot::checked_mux_mask(wire, address, 0, idle));
+      }
+    }
+  }
+}
+
 int main() {
   try {
+    checked_dual_mux_deselect_after_transfer_error();
     raw_range_word_acceptance_is_exact();
     fast_floor_lane_swap();
     check_shared_mux_recovery();
