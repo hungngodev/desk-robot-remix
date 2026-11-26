@@ -327,3 +327,26 @@ def test_builder_safety_warnings_are_scoped_and_mutation_sensitive():
     for marker in _DC_MARKERS:
         with pytest.raises(AssertionError):
             _assert_builder_safety_markers(guide, " ".join(dc.split()).replace(marker, "", 1))
+
+
+def test_builder_status_and_stop_use_private_config_from_code(tmp_path, monkeypatch):
+    text = GUIDE.read_text(encoding="utf-8")
+    blocks = re.findall(r"^\x60{3}sh\n(.*?)^\x60{3}\s*$", text, re.M | re.S)
+    block = next(b for b in blocks if "# Read status and issue urgent full STOP" in b)
+    commands = block.split("# Operator-only quiet", 1)[0]
+    code = tmp_path / "code"
+    code.mkdir()
+    stub = tmp_path / "uv"
+    log = tmp_path / "calls"
+    stub.write_text('#!/bin/sh\nprintf "%s\\n" "$*" >> "$LOG"\n')
+    stub.chmod(0o755)
+    monkeypatch.setenv("LOG", str(log))
+    monkeypatch.setenv("PATH", str(tmp_path) + ":/usr/bin:/bin")
+    result = subprocess.run(
+        ["bash", "-c", commands], cwd=code, capture_output=True, text=True, check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert log.read_text().splitlines() == [
+        "run --no-sync desk-robot --config config/local.toml status robot-01",
+        "run --no-sync desk-robot --config config/local.toml stop robot-01",
+    ]
