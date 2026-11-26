@@ -2,9 +2,10 @@
 
 import re
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pytest
+from desk_robot.controller import Coordinator
 from desk_robot.simulator import (
     BODY_ACTIVE_WHEEL_WATCHDOG_MS,
     BODY_IDLE_WATCHDOG_MS,
@@ -39,6 +40,22 @@ def test_validated_duration_and_ack_agree(command, ms):
 def test_duration_helper_rejects_unvalidated_commands(command):
     with pytest.raises(ValueError):
         drive_duration_ms(command)
+
+
+@pytest.mark.parametrize(
+    "command",
+    ["drive 20 20 5000", "drive 20 20 -1", "drive nan 20 250", "drive 20 nan 250"],
+)
+def test_manual_drive_rejects_before_job_submission(command):
+    coordinator = Mock()
+    coordinator.robot.return_value.motion_enabled = True
+    with pytest.raises(ValueError):
+        drive_duration_ms(command)
+    with pytest.raises(ValueError):
+        expected_ack(command)
+    with pytest.raises(ValueError):
+        Coordinator.manual(coordinator, "robot-01", command)
+    coordinator._submit.assert_not_called()
 
 
 @pytest.mark.parametrize(("command", "ms"), [("drive 20 20", 250), ("drive 20 20 1", 1)])

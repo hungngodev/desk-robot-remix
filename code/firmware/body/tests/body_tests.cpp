@@ -313,7 +313,14 @@ void invalid_does_not_renew() {
   BodyControl body;
   send(body, "arm", 0);
   CHECK(send(body, "keepalive extra", 400).find("ERR") == 0);
-  CHECK(send(body, "drive 20 20 251", 499).find("ERR") == 0);
+  for (const char* command : {"drive 20 20 251", "drive 20 20 5000",
+                             "drive 20 20 -1", "drive nan 20 250",
+                             "drive 20 nan 250"}) {
+    CHECK(send(body, command, 499).find("ERR") == 0);
+    CHECK(body.watchdog_remaining(499) == 1);
+    CHECK(body.drive_remaining(499) == 0);
+    CHECK(body.state().left == 0 && body.state().right == 0);
+  }
   body.tick(500);
   CHECK(!body.state().armed);
   CHECK(send(body, "drive 20 20", 500) == "ERR drive disarmed");
