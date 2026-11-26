@@ -266,7 +266,6 @@ class PetState:
     dock_contact_present: bool | None = None
     dock_input_good: bool | None = None
     dock_charge_indicated: bool | None = None
-    dock_charging_verified: bool = False
     session_habituation: HabituationWindow[str] = field(
         default_factory=HabituationWindow, repr=False,
     )
@@ -409,7 +408,7 @@ class PetController:
         """True while read-only dock contact or charger flags inhibit roaming.
 
         Dock pins and CHG indicators NEVER prove battery charge current;
-        dock_charging_verified always remains False here.
+        the public charging_verified status always remains False here.
         """
         state = self.states[robot_id]
         return bool(
@@ -562,7 +561,6 @@ class PetController:
         state.dock_contact_present = None
         state.dock_input_good = None
         state.dock_charge_indicated = None
-        state.dock_charging_verified = False
         state.session_habituation.reset()
         state.camera_habituation.reset()
         state.last_nose_angle = None
@@ -1222,7 +1220,6 @@ class PetController:
                 state.dock_contact_present = None
                 state.dock_input_good = None
                 state.dock_charge_indicated = None
-                state.dock_charging_verified = False
                 state.last_nose_angle = None
                 state.last_force_squeeze = None
                 state.last_near_hand = None
@@ -1486,7 +1483,6 @@ class PetController:
             state.dock_contact_present = None
             state.dock_input_good = None
             state.dock_charge_indicated = None
-        state.dock_charging_verified = False
         now_inhibited = self.is_dock_charging_inhibited(robot_id)
         if (now_inhibited != was_inhibited and state.enabled
                 and state.generation == generation):
