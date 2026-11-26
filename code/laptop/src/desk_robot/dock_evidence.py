@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from time import monotonic
 
 from .aux import validate_aux
+from .operations import bounded_head_reply
 
 _DOCK_READ_TIMEOUT_S = 2.0
 _DOCK_SAMPLE_MAX_AGE_MS = 500
@@ -124,7 +125,6 @@ async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> di
     for index in range(3):
         # Do not let a cancellation-ignoring alternate telemetry adapter
         # freeze the read-only dock evidence request indefinitely.
-        from .controller import _bounded_head_reply
         request_at = monotonic()
         # Individual fresh replies do not establish a continuous observation
         # after a suspended task. Permit the requested gap plus one existing
@@ -133,7 +133,7 @@ async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> di
                 and request_at - previous_received_at
                 > gap + _DOCK_SAMPLE_MAX_AGE_MS / 1000.0):
             return _result(robot_id, "dock_observation_window_expired", False)
-        reply = await _bounded_head_reply(
+        reply = await bounded_head_reply(
             head.aux_status(), seconds=_DOCK_READ_TIMEOUT_S,
             timeout_message="Dock GPIO evidence read timed out",
         )
