@@ -10247,3 +10247,41 @@ def test_proactive_tool_receipt_type_contract():
     ]:
         assert get_type_hints(data[field])[key] == Literal[False]
 
+
+@pytest.mark.parametrize("expire_at", ["queued", "write"])
+async def test_camera_memory_freshness_survives_sqlite_delay(
+    fleet, tmp_path, monkeypatch, expire_at,
+):
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+    )
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    original_remember = memory.remember
+    original_to_thread = asyncio.to_thread
+
+    def expire_after_write(*args, **kwargs):
+        saved = original_remember(*args, **kwargs)
+        if expire_at == "write" and saved:
+            pet.max_observation_age = 0.5
+        return saved
+
+    async def expire_before_worker(func, *args, **kwargs):
+        if expire_at == "queued" and getattr(func, "__name__", "") == "persist_eyewitness":
+            pet.max_observation_age = 0.5
+        return await original_to_thread(func, *args, **kwargs)
+
+    monkeypatch.setattr(memory, "remember", expire_after_write)
+    monkeypatch.setattr(asyncio, "to_thread", expire_before_worker)
+    try:
+        assert pet.max_observation_age > 1
+        assert not await pet._store_observation(
+            "robot-01", SceneChange("key", "A stale camera guess", 0.95),
+            camera_derived=True, camera_received_at=time.monotonic() - 1,
+            camera_source_identity=(7, 102, 6000000),
+        )
+        assert all(memory.count(robot.id) == 0 for robot in fleet.robots)
+    finally:
+        await pet.close()

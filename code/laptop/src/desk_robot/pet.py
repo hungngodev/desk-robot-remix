@@ -809,10 +809,15 @@ class PetController:
                 received_at=observed_at, interpreted_at=interpreted_at,
                 source_identity=camera_source_identity,
             )
+        def camera_receipt_current() -> bool:
+            return (camera_received_at is None
+                    or 0 <= time.monotonic() - camera_received_at
+                    <= self.max_observation_age)
+
         def persist_eyewitness() -> bool:
             # Cancelling an await never cancels the SQLite worker. Retraction
             # must be owned by that worker if visual consent was withdrawn.
-            if not current_visual_epoch():
+            if not current_visual_epoch() or not camera_receipt_current():
                 return False
             inserted = self.memory.remember(
                 robot_id, event_id, change.description,
@@ -821,6 +826,7 @@ class PetController:
                 camera_provenance=camera_provenance,
             )
             if (inserted and (not current_visual_epoch()
+                    or not camera_receipt_current()
                     or (camera_derived and self.settings.mode == "hardware"
                         and not self.settings.voice_vision_tools_enabled))):
                 self.memory.forget_episode(robot_id, event_id)
