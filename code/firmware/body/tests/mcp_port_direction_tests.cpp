@@ -103,10 +103,23 @@ static void check_reset_and_transport_faults() {
   CHECK(!regs.verify(lock) && regs.writes == writes);
 }
 
+static void check_direction_drift_after_verified_reset() {
+  Registers regs;
+  desk_robot::McpPortDirectionLock lock;
+  regs.values[0] = 0xFE;
+  CHECK(!regs.verify(lock) && lock.faulted());
+  for (unsigned bit = 0; bit < 4; ++bit) {
+    regs.values[0] = static_cast<std::uint8_t>(0xFFU ^ (1U << bit));
+    CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
+    CHECK(regs.values[0] == 0xFF);
+  }
+}
+
 int main() {
   try {
     check_every_direction_bit();
     check_reset_and_transport_faults();
+    check_direction_drift_after_verified_reset();
     std::cout << "PASS MCP23017 direction lock and verified reset\n";
   } catch (const std::exception& error) {
     std::cerr << "FAIL " << error.what() << '\n';

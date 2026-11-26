@@ -22,6 +22,14 @@ class McpPortDirectionLock {
       }
       faulted_ = true;
     }
+    // A verified reset is not a permanent electrical guarantee. Recheck
+    // both directions and the inactive latch on every faulted poll.
+    if (reset_verified_) {
+      std::uint8_t a = 0, b = 0, latch = 0xFF;
+      reset_verified_ = read(0x00, a) && a == 0xFF &&
+                        read(0x01, b) && b == 0xFF &&
+                        read(0x15, latch) && latch == 0;
+    }
     if (!reset_verified_) reset_verified_ = reset_outputs(read, write);
     return false;
   }
