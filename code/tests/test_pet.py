@@ -10285,3 +10285,58 @@ async def test_camera_memory_freshness_survives_sqlite_delay(
         assert all(memory.count(robot.id) == 0 for robot in fleet.robots)
     finally:
         await pet.close()
+
+
+@pytest.mark.parametrize("release", ["group", "task", "cancel"])
+async def test_deferred_speech_waits_on_owner_transition_without_polling(
+    fleet, tmp_path, monkeypatch, release,
+):
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(
+        fleet, {}, conversation, memory, KeyScene(), max_observation_age=2,
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation = True, 1
+    state.deferred_speech_candidate = (
+        SceneChange("touch_tap", "Fresh touch", 1.0), 1, False,
+        time.monotonic(), None, None,
+    )
+    considered = []
+    monkeypatch.setattr(
+        pet, "_consider_speech", lambda *args, **kwargs: considered.append(args),
+    )
+    owner = asyncio.create_task(asyncio.Event().wait())
+    conversation.active = owner
+    original_wait = asyncio.wait
+    entered = asyncio.Event()
+
+    async def observe_wait(fs, *, timeout, return_when):
+        assert timeout > 1  # No 50 ms polling interval.
+        entered.set()
+        return await original_wait(fs, timeout=timeout, return_when=return_when)
+
+    monkeypatch.setattr(asyncio, "wait", observe_wait)
+    waiter = state.deferred_speech_task = asyncio.create_task(
+        pet._await_deferred_speech_floor("robot-01", 1)
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        if release == "group":
+            # Group run returns, but the enclosing caller remains active.
+            conversation.active = None
+        elif release == "task":
+            owner.cancel()
+        else:
+            waiter.cancel()
+        await asyncio.wait_for(asyncio.gather(waiter, return_exceptions=True), 1)
+        assert state.deferred_speech_task is None
+        assert bool(considered) == (release != "cancel")
+        assert owner.done() == (release == "task")
+    finally:
+        owner.cancel()
+        waiter.cancel()
+        await asyncio.gather(owner, waiter, return_exceptions=True)
+        conversation.active = None
+        state.enabled = False
+        await pet.close()

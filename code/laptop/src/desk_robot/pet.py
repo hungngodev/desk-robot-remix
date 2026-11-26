@@ -3018,8 +3018,9 @@ class PetController:
             state.suppressed += 1
             state.last_initiative_suppression = "initiative_window_capacity"
             return
+        active = self.conversation.active
         if (
-            self.conversation.active is not None
+            (active is not None and not active.done())
             or (self._speech_task is not None and not self._speech_task.done())
         ):
             state.suppressed += 1
@@ -3077,20 +3078,24 @@ class PetController:
                 remaining = self.max_observation_age - (time.monotonic() - offered_at)
                 if remaining <= 0:
                     break
+                changed = self.conversation.active_changed
                 owners = [
                     owner for owner in (self.conversation.active, self._speech_task)
-                    if owner is not None and (not hasattr(owner, "done") or not owner.done())
+                    if owner is not None and not owner.done()
                 ]
                 if not owners:
                     break
-                futures = [owner for owner in owners if isinstance(owner, asyncio.Future)]
-                if futures:
+                # Group ownership can end before its caller task completes.
+                # Wait for that transition or task completion, not a polling tick.
+                signal = asyncio.create_task(changed.wait())
+                try:
                     await asyncio.wait(
-                        futures, timeout=min(0.05, remaining),
+                        [*owners, signal], timeout=remaining,
                         return_when=asyncio.FIRST_COMPLETED,
                     )
-                else:
-                    await asyncio.sleep(min(0.01, remaining))
+                finally:
+                    signal.cancel()
+                    await asyncio.gather(signal, return_exceptions=True)
         finally:
             if asyncio.current_task() is state.deferred_speech_task:
                 state.deferred_speech_task = None

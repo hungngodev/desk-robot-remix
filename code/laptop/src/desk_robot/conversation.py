@@ -466,7 +466,8 @@ class Conversation:
         self.speaker_lock = asyncio.Lock()
         self.session_lock = asyncio.Lock()  # One owned device-audio session across group and pet.
         self._group_budget = RollingGroupBudget()
-        self.active: asyncio.Task | None = None
+        self._active: asyncio.Task | None = None
+        self._active_changed = asyncio.Event()
         # A STOP also invalidates API admission awaiting pet preemption.
         self.stop_generation = 0
         # A cancelled Python task is not evidence of a stopped Xiaozhi decoder.
@@ -491,6 +492,24 @@ class Conversation:
         }
         self._active_private_memory_ids: frozenset[str] = frozenset()
         self._unsettled_speaker_aborts: set[asyncio.Task] = set()
+
+    @property
+    def active(self) -> asyncio.Task | None:
+        return self._active
+
+    @active.setter
+    def active(self, owner: asyncio.Task | None) -> None:
+        if owner is self._active:
+            return
+        self._active = owner
+        previous = self._active_changed
+        self._active_changed = asyncio.Event()
+        previous.set()
+
+    @property
+    def active_changed(self) -> asyncio.Event:
+        """A generation-specific signal for the next group owner transition."""
+        return self._active_changed
 
     def _track_speaker_abort(self, task: asyncio.Task) -> None:
         aborts = self.__dict__.setdefault("_unsettled_speaker_aborts", set())
