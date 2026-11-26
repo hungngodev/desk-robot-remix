@@ -135,11 +135,11 @@ int main() {
   // Production and hornless bench share the nominal 50 Hz duty mapping.
   // These are commanded values, never fitted horn travel evidence.
   static_assert(body_pins::servo_duty_for_degrees(
-      60, body_pins::kServoMinUs, body_pins::kServoMaxUs) == 4367);
+      60, body_pins::kServoMinUs, body_pins::kServoMaxUs) == 4367, "60-degree nominal duty changed");
   static_assert(body_pins::servo_duty_for_degrees(
-      90, body_pins::kServoMinUs, body_pins::kServoMaxUs) == 4915);
+      90, body_pins::kServoMinUs, body_pins::kServoMaxUs) == 4915, "90-degree nominal duty changed");
   static_assert(body_pins::servo_duty_for_degrees(
-      120, body_pins::kServoMinUs, body_pins::kServoMaxUs) == 5459);
+      120, body_pins::kServoMinUs, body_pins::kServoMaxUs) == 5459, "120-degree nominal duty changed");
   assert(center_duty() == 4915U);
   // Even a continuously refilled USB RX queue leaves each loop iteration
   // bounded so deadline polling cannot be starved by parser throughput.
