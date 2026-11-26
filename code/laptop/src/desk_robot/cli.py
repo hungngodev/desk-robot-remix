@@ -212,7 +212,7 @@ async def inspect_live_media(settings: Settings, robot_id: str, *, look: bool = 
 async def demo(settings: Settings) -> dict[str, object]:
     if settings.mode != "simulation":
         raise ValueError("Demo requires the simulation config; it never talks to physical heads")
-    runtime = Runtime(settings)
+    runtime = await Runtime.create(settings)
     try:
         robot = settings.robots[0].id
         await runtime.coordinator.operator_arm(robot)
