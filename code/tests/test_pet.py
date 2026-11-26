@@ -5925,6 +5925,23 @@ async def test_opt_in_sensor_event_invites_one_peer_without_extra_audio_owner(
         peer_memories = memory.recent("robot-02")
         assert any(m.kind == "nfc_tag" and not m.witnessed
                    and m.source_robot == "robot-01" for m in peer_memories)
+        # Model an exchange long enough to exhaust its start-based interval.
+        # The actual two relay transmissions above must still block B inviting A.
+        sent_at = pet._group_last_spoken
+        original_start = pet._social_last_started
+        pet._social_last_started = sent_at - 301
+        pet.states["robot-03"].enabled = False
+        for cooldown in (0, 120):
+            pet.speech_cooldown = cooldown
+            assert pet._social_peer("robot-02", "hand_wave", sent_at) is None
+            assert pet._social_peer(
+                "robot-02", "hand_wave", sent_at + cooldown + 19.9,
+            ) is None
+            assert pet._social_peer(
+                "robot-02", "hand_wave", sent_at + cooldown + 20.1,
+            ) == "robot-01"
+        pet.speech_cooldown = 0
+        pet._social_last_started = original_start
         # Immediate second event cannot manufacture another peer conversation.
         await wait_for(lambda: pet._speech_task is None)
         pet._consider_speech(

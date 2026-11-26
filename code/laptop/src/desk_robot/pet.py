@@ -2815,7 +2815,10 @@ class PetController:
                 or not self.settings.fleet_text_sharing_enabled
                 or kind not in _SOCIAL_EVENT_KINDS
                 or now - self._social_last_started
-                   < self.settings.fleet_social_min_interval_seconds):
+                   < self.settings.fleet_social_min_interval_seconds
+                # Keep the invitation margin after the most recent actual send,
+                # even if a long exchange exhausted the start-based cooldown.
+                or now - self._group_last_spoken < self.speech_cooldown + 20):
             return None
         candidates = [
             robot.id for robot in self.settings.robots
