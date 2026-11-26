@@ -3,9 +3,11 @@ from __future__ import annotations
 
 import asyncio
 import time
+from types import SimpleNamespace
 
 import pytest
-from desk_robot.controller import Coordinator, Job, OperationError
+from desk_robot import controller as controller_module
+from desk_robot.controller import Coordinator, Job, OperationError, _DockIrQueueExpired
 from desk_robot.dock_ir import dock_beacon_code
 from desk_robot.dock_vision import DockCameraCalibration, DockPose
 from desk_robot.simulator import SimulationVision
@@ -258,3 +260,38 @@ async def test_dock_queued_command_rechecks_ir_seat_and_consent_after_transport_
             await asyncio.gather(task, return_exceptions=True)
         await client.aclose()
         await coordinator.close()
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+@pytest.mark.parametrize("dispatch_elapsed", [0.124, 0.125, 0.126])
+def test_dock_dispatch_rechecks_each_receiver_at_exact_expiry(monkeypatch, side, dispatch_elapsed):
+    clock = [0.124]
+    monkeypatch.setattr(controller_module, "time", SimpleNamespace(monotonic=lambda: clock[0]))
+    observation = (b"jpeg", time.monotonic(), (1234, 1, 1), 1)
+    verified = []
+    head = SimpleNamespace(dock_receipt_current_now=lambda receipt: verified.append(receipt))
+    owner = SimpleNamespace(
+        _require_camera_motion_grant=lambda grant: None,
+        dock_inhibited=lambda robot_id: False,
+    )
+    reading = {
+        "robot_id": "robot-01", "left_valid": True, "right_valid": True,
+        "match": True, "left_seq": 8, "right_seq": 9,
+        "left_age_ms": 0, "right_age_ms": 0, "code": dock_beacon_code(1),
+        "motor_authorized": False, "charging_authorized": False,
+        "physical_qualified": False,
+    }
+    reading[f"{side}_age_ms"] = 75
+    before_post, at_dispatch = Coordinator._dock_dispatch_checks(
+        owner, SimpleNamespace(robot_id="robot-01"), head, camera_grant=None,
+        expected_dock=1, observation=observation, reading=reading, ir_request_at=0.0,
+    )
+    before_post()
+    clock[0] = dispatch_elapsed
+    if dispatch_elapsed == 0.124:
+        at_dispatch()
+        assert verified == [observation]
+    else:
+        with pytest.raises(_DockIrQueueExpired, match="remaining motion budget|Fresh NEC"):
+            at_dispatch()
+        assert verified == []

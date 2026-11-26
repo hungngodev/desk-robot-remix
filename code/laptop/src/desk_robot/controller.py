@@ -15,7 +15,7 @@ from .command_framing import (
     validate_command,
 )
 from .config import Settings
-from .dock_ir import validate_ir
+from .dock_ir import validate_motion_ir
 from .dock_progress import DockApproachProgress
 from .dock_runtime import (
     detect_bounded,
@@ -1422,7 +1422,7 @@ class Coordinator:
                 raise _DockCameraQueueExpired(str(exc)) from exc
             if expected_dock is not None:
                 try:
-                    validate_ir(
+                    validate_motion_ir(
                         reading, job.robot_id, expected_dock_id=expected_dock,
                         elapsed_ms=(time.monotonic() - ir_request_at) * 1000,
                     )
@@ -1573,7 +1573,7 @@ class Coordinator:
                 )
                 self._require_job_motion(job)
                 try:
-                    beacon = validate_ir(
+                    beacon = validate_motion_ir(
                         reading, job.robot_id, expected_dock_id=expected_dock,
                         elapsed_ms=(time.monotonic() - ir_request_at) * 1000,
                     )
@@ -1641,7 +1641,7 @@ class Coordinator:
                 # the beacon read. A valid IR reply can expire during either
                 # wait; never authorize a pulse from that expired sample.
                 try:
-                    validate_ir(
+                    validate_motion_ir(
                         reading, job.robot_id, expected_dock_id=expected_dock,
                         elapsed_ms=(time.monotonic() - ir_request_at) * 1000,
                     )

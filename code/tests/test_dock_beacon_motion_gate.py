@@ -7,6 +7,7 @@ import time
 
 import pytest
 from desk_robot.controller import Coordinator, Job, OperationError
+from desk_robot.dock_ir import dock_beacon_code, validate_ir, validate_motion_ir
 from desk_robot.dock_vision import DockCameraCalibration, DockPose
 from desk_robot.simulator import SimulationVision
 from dock_detector_fixture import mock_dock_detector
@@ -205,3 +206,27 @@ async def test_hardware_dock_rejects_legacy_camera_before_inference_or_motor(
         assert head.verified_receipts == 0
     finally:
         await controller.close()
+
+
+@pytest.mark.parametrize("side", ["left", "right"])
+@pytest.mark.parametrize("elapsed_ms", [124, 125, 126])
+def test_assigned_beacon_requires_remaining_motion_budget(side, elapsed_ms):
+    reading = {
+        "robot_id": "robot-01", "left_valid": True, "right_valid": True,
+        "match": True, "left_seq": 8, "right_seq": 9,
+        "left_age_ms": 0, "right_age_ms": 0, "code": dock_beacon_code(1),
+        "motor_authorized": False, "charging_authorized": False,
+        "physical_qualified": False,
+    }
+    reading[f"{side}_age_ms"] = 75
+    kwargs = {"expected_dock_id": 1, "elapsed_ms": elapsed_ms}
+    if elapsed_ms <= 125:
+        assert validate_ir(reading, "robot-01", **kwargs) == reading
+    else:
+        with pytest.raises(ValueError, match="Fresh NEC"):
+            validate_ir(reading, "robot-01", **kwargs)
+    if elapsed_ms == 124:
+        assert validate_motion_ir(reading, "robot-01", **kwargs) == reading
+    else:
+        with pytest.raises(ValueError, match="remaining motion budget|Fresh NEC"):
+            validate_motion_ir(reading, "robot-01", **kwargs)

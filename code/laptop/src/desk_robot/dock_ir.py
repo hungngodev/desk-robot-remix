@@ -103,3 +103,17 @@ def validate_ir(data: dict, robot_id: str, *,
     _validate_match(data, expected_code)
     _validate_receiver_codes(data, expected_code)
     return data
+
+
+def validate_motion_ir(data: dict, robot_id: str, *,
+                       expected_dock_id: int, elapsed_ms: float) -> dict:
+    """Require positive freshness budget for a new matched-beacon motor pulse."""
+    reading = validate_ir(
+        data, robot_id, expected_dock_id=expected_dock_id, elapsed_ms=elapsed_ms,
+    )
+    if reading["match"] and (
+        max(reading["left_age_ms"], reading["right_age_ms"]) + elapsed_ms
+        >= DOCK_OBSERVATION_MAX_AGE_MS
+    ):
+        raise ValueError("Assigned dock IR has no remaining motion budget")
+    return reading
