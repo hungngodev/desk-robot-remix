@@ -14,9 +14,51 @@ unsigned writes = 0;
 FakeServoSerial Serial;
 #include "../src/servo_center_bench.cpp"
 
+static Gate::InputResult feed_line(Gate& bench, const char* command,
+                                   std::uint32_t now, bool ready) {
+  for (; *command; ++command) {
+    assert(bench.feed(*command, now, ready) == Gate::InputResult::Incomplete);
+  }
+  return bench.feed('\n', now, ready);
+}
+
+static void test_out_of_order_steps() {
+  using Channel = Gate::Channel;
+  using Result = Gate::InputResult;
+  Gate bench;
+  assert(feed_line(bench, "close", 0, true) == Result::Rejected);
+  assert(feed_line(bench, "CLOSE", 0, true) == Result::Rejected);
+  assert(bench.active() == Channel::None);
+  assert(!bench.already_used(Channel::Grip));
+  // Failed PWM setup is not a recoverable USB command or a consumed pulse.
+  assert(feed_line(bench, "CENTER GRIP", 1, false) == Result::Rejected);
+  assert(feed_line(bench, "rearm", 2, false) == Result::Rejected);
+  assert(feed_line(bench, "REARM", 3, false) == Result::Rejected);
+  assert(feed_line(bench, "CENTER LIFT", 4, false) == Result::Rejected);
+  assert(bench.active() == Channel::None);
+  assert(!bench.already_used(Channel::Lift));
+  assert(!bench.already_used(Channel::Grip));
+  // A separate ready fixture can center; rejected commands never extend it.
+  Gate ready;
+  assert(feed_line(ready, "CENTER GRIP", 100, true) == Result::Started);
+  assert(feed_line(ready, "CLOSE", 101, true) == Result::Rejected);
+  assert(feed_line(ready, "REARM", 499, true) == Result::Rejected);
+  assert(ready.active() == Channel::Grip);
+  assert(!ready.should_detach(499));
+  assert(ready.complete(500));
+  assert(feed_line(ready, "REARM", 501, true) == Result::Rejected);
+  assert(feed_line(ready, "CENTER GRIP", 502, true) == Result::Rejected);
+  assert(ready.active() == Channel::None);
+  assert(ready.already_used(Channel::Grip));
+  assert(!ready.already_used(Channel::Lift));
+}
+
 static void test_live_loop() {
   using namespace servo_bench_fake;
   setup();
+  Serial.feed("CLOSE\nREARM\n");
+  loop();
+  assert(attached_pin == -1 && writes == 0);
   Serial.feed("CENTER LIFT\r\n");
   loop();
   assert(attached_pin == body_pins::kLiftServo);
@@ -118,6 +160,7 @@ int main() {
   // Nothing automatically starts after idle or expiry.
   assert(wrapped.active() == Gate::Channel::None);
   assert(!wrapped.should_detach(0x00000400U));
+  test_out_of_order_steps();
   test_live_loop();
   return 0;
 }
