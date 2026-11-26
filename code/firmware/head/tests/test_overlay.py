@@ -700,7 +700,8 @@ class OverlayTests(unittest.TestCase):
             executable = temp / "sense_tx_scratch_test"
             subprocess.run(
                 [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
-                 "-I", str(temp), "-I", str(HEAD / "sense"),
+                 *native_cpp_sanitizer_flags(), "-I", str(temp),
+                 "-I", str(HEAD / "sense"),
                  str(HEAD / "tests/sense_tx_scratch_test.cc"),
                  "-o", str(executable)],
                 check=True, capture_output=True, text=True, env=native_cpp_env(),
