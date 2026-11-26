@@ -1,4 +1,5 @@
 import pytest
+
 from desk_robot.spatial_bracket import BracketError, validate_stationary_bracket
 from desk_robot.spatial_pose import PoseFence
 
