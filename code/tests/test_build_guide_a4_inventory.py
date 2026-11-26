@@ -3,13 +3,28 @@
 import runpy
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 PAPER_SCRIPT = ROOT / "docs/cad/remixes/print_2d_fit_templates.py"
 GUIDE = ROOT / "docs/guides/build.md"
 
 
+def _paper_step(instructions: str) -> str:
+    return instructions.split("3. **Print reversible fit pieces first.**", 1)[1].split(
+        "4. **Assemble and inspect mechanically.**", 1
+    )[0]
+
+
+def _validate_a4_page_inventory(instructions, page_sources):
+    step = _paper_step(instructions)
+    for page in page_sources:
+        marker = f"`{page}_reference_A4.svg`"
+        assert step.count(marker) == 1, marker
+
+
 def _validate_a4_scaling_prohibition(instructions: str) -> None:
-    normalized = " ".join(instructions.split())
+    normalized = " ".join(_paper_step(instructions).split())
     if (
         "Print **all five** source-derived A4 SVGs at **100% / actual size**:" not in normalized
         or "Never fit-to-page." not in normalized
@@ -27,8 +42,7 @@ def test_builder_instructions_cover_all_provisional_a4_paper_pages():
         "ranger", "speaker", "dock", "dock_guide", "power",
     }
     instructions = GUIDE.read_text(encoding="utf-8")
-    for page in page_sources:
-        assert f"`{page}_reference_A4.svg`" in instructions
+    _validate_a4_page_inventory(instructions, page_sources)
     _validate_a4_scaling_prohibition(instructions)
     assert "**100% / actual size**" in instructions
     assert "100 mm, 50 mm and 25 mm scales" in instructions
@@ -37,8 +51,6 @@ def test_builder_instructions_cover_all_provisional_a4_paper_pages():
 
 
 def test_a4_print_guard_rejects_fit_to_page_or_missing_stop():
-    import pytest
-
     instructions = GUIDE.read_text(encoding="utf-8")
     for old, new in (
         ("Never fit-to-page.", "Always fit-to-page."),
@@ -47,3 +59,13 @@ def test_a4_print_guard_rejects_fit_to_page_or_missing_stop():
     ):
         with pytest.raises(ValueError):
             _validate_a4_scaling_prohibition(instructions.replace(old, new, 1))
+
+
+def test_a4_inventory_rejects_misplaced_page_mentions():
+    instructions = GUIDE.read_text(encoding="utf-8")
+    page_sources = runpy.run_path(str(PAPER_SCRIPT))["SOURCES"]
+    for page in page_sources:
+        marker = f"`{page}_reference_A4.svg`"
+        mutant = instructions.replace(marker, "", 1) + "\n" + marker
+        with pytest.raises(AssertionError):
+            _validate_a4_page_inventory(mutant, page_sources)
