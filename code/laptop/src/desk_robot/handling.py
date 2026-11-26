@@ -179,11 +179,13 @@ class HandlingGate:
 
     def observe(
         self, body: dict, now: float, *, qualified: bool,
+        calibrated: bool = False,
         tilt_threshold_deg: float = 38.0,
         shake_delta_mg: int = 550,
         request_elapsed_ms: float = 0.0,
     ) -> tuple[str, ...]:
         if (type(qualified) is not bool
+                or type(calibrated) is not bool
                 or type(now) not in (int, float)
                 or not -1e15 <= now <= 1e15
                 or not math.isfinite(now)
@@ -193,7 +195,8 @@ class HandlingGate:
                 or not 25 <= tilt_threshold_deg <= 75
                 or not math.isfinite(tilt_threshold_deg)):
             raise ValueError("Physically qualified MPU6050 thresholds required")
-        if not qualified:
+        if not qualified or not calibrated:
+            # Heuristic thresholds remain provisional until operator attestation.
             # Revoking qualification clears pose, never trusted source identity.
             # Otherwise an old conversion can seed calibration when reenabled.
             previous = (self.last_boot_id, self.last_sample_ms, self.last_native_low_g)

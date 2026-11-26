@@ -211,6 +211,7 @@ def analyze(records: list[dict]) -> dict:
         "normal_accel_deviation_max_mg": round(upper),
         "positive_shake_deviation_min_mg": round(lower),
         "physical_measurements_operator_supplied_not_attested": True,
+        "calibrated": False,  # Candidate fit is not independent physical attestation.
         "thresholds_physically_qualified": False,
         "motor_authorization": False,
     }

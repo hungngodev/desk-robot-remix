@@ -14,7 +14,7 @@ The new `code/laptop/src/desk_robot/handling.py` consumes those exact values and
 2. The same WROOM firmware separately samples MPU6050 raw six-axis values. No new `Wire.begin()`, mux lane, busy-wait or GPIO is needed.
 3. The XIAO head forwards the existing body status. The Mac's dedicated touch/status task (approximately every 150ms) calls `PetController._observe_imu()` **after** checking WROOM local safety faults.
 4. The Mac demands `family == 4`, `gyro_id == 0x68`, actual source `valid == true`, signed 16-bit integer axis arrays, a nonzero uint32 `boot_id`, a uint32 `sample_ms`, and both commanded wheels at zero with `drive_ms == 0`. The freshness budget is 200 ms total: `age_ms + request_elapsed_ms <= 200`, including the caller-supplied request duration. The canonical `motor.m0/m1` fields take precedence; the decoder also accepts legacy flat `left/right` when the nested motor value is absent or null, and rejects conflicting representations when the nested object is present. These are command-state checks, not independent proof that the wheels or chassis are physically stationary.
-5. Unless `handling_interactions_qualified == true`, no event or memory is emitted. After explicit opt-in, eight consecutive distinct quiet conversions with acceleration magnitude between 0.91 and 1.09 g and raw gyro magnitude at most 7 degrees/s establish a relative gravity reference and a local zero-rate gyro bias estimate. The operator must place the robot upright; the decoder cannot independently certify that physical pose. An unstable eight-sample gyro mean rejects calibration rather than averaging real movement into zero. Continuous motion or any stale/disconnected source resets that reference.
+5. Unless both `handling_interactions_qualified` and `handling_thresholds_calibrated` are true, no event or memory is emitted. After explicit opt-in, eight consecutive distinct quiet conversions with acceleration magnitude between 0.91 and 1.09 g and raw gyro magnitude at most 7 degrees/s establish a relative gravity reference and a local zero-rate gyro bias estimate. The operator must place the robot upright; the decoder cannot independently certify that physical pose. An unstable eight-sample gyro mean rejects calibration rather than averaging real movement into zero. Continuous motion or any stale/disconnected source resets that reference.
 6. Two subsequent sustained samples outside a chosen orientation angle generate a single `handling_tilt` edge. Returning within half that angle clears the event latch. This is a *relative pose change*, not a calibrated absolute axis/roll and not proof that someone picked it up.
 7. Two bursts where acceleration deviates from 1g together with marked gyro rotation generate one `handling_shake` event with a three-second rate limit. The gyro gate is essential: a bump or sensor noise alone must not be called a shake.
 8. `PetController` records an honestly attributed first-hand sensor observation, optionally suggests a short spontaneous reaction when the existing pet speaker lease permits, and triggers the **same** camera frame scheduler through `handling_tilt` or `handling_shake`. That is the intended sensor + camera + speech fusion. No camera image or memory can operate the motors.
@@ -23,10 +23,11 @@ The new `code/laptop/src/desk_robot/handling.py` consumes those exact values and
 
 Before opting in, use the original firmware's read-only USB status and verify the actual labelled MPU6050 breakout, level shifter/pullups (3.3V bus), board orientation, wiring security and stable 1g resting magnitude. Do not assume the photo of a BerryIMU uses MPU6050 sensitivity.
 
-In the real private `code/config/local.toml` under the specific `[[robots]]` after actual physical qualification:
+The following provisional defaults are safe to leave in the private `code/config/local.toml` under the specific `[[robots]]`; they do not enable handling events:
 
 ```toml
-handling_interactions_qualified = true
+handling_interactions_qualified = false
+handling_thresholds_calibrated = false
 handling_tilt_threshold_deg = 38
 handling_shake_delta_mg = 550
 ```
@@ -108,11 +109,13 @@ together with observed class separation, **not** a physical certificate.
 Only after independently confirming the ten-repeat acceptance trials, hot/cold
 gyro offset behavior, mounting axes, false reactions, sensor timing and lack
 of motor authority may the operator copy those candidate knobs into the
-private local configuration and set `handling_interactions_qualified=true`.
+private local configuration and set both `handling_thresholds_calibrated=true`
+and `handling_interactions_qualified=true`. The separate calibration flag is
+an operator attestation, never inferred from the numerical defaults or JSON fit.
 
 The automated tests of this checker use synthetic frames exclusively to prove
 its failure conditions. Its JSON always reports
-`thresholds_physically_qualified=false` and
+`calibrated=false`, `thresholds_physically_qualified=false` and
 `motor_authorization=false` even if supplied samples separate perfectly.
 
 ## Acceptance checklist

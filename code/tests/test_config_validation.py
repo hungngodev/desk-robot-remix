@@ -267,6 +267,7 @@ def test_settings_numeric_limits_do_not_coerce_invalid_values(field, value):
     ("dock_beacon_id", True), ("dock_beacon_id", 6),
     ("dock_forward_sign", True), ("dock_turn_sign", 0),
     ("battery_low_percent", "20"), ("handling_tilt_threshold_deg", 76),
+    ("handling_thresholds_calibrated", "true"), ("handling_thresholds_calibrated", 1),
     ("side_near_threshold_mm", 1001),
 ])
 def test_robot_numeric_limits_do_not_coerce_invalid_values(field, value):

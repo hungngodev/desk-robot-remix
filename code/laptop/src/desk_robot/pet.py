@@ -1768,6 +1768,7 @@ class PetController:
                 self.settings.mode == "hardware"
                 and robot.handling_interactions_qualified
             ),
+            calibrated=robot.handling_thresholds_calibrated,
             tilt_threshold_deg=robot.handling_tilt_threshold_deg,
             shake_delta_mg=robot.handling_shake_delta_mg,
             request_elapsed_ms=request_elapsed_ms,

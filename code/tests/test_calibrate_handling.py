@@ -67,6 +67,7 @@ def test_stationary_biased_gyro_and_separated_handling_events():
         "upright": 8, "tilted": 4, "shaking": 4,
     }
     assert report["physical_measurements_operator_supplied_not_attested"]
+    assert report["calibrated"] is False
     assert report["thresholds_physically_qualified"] is False
     assert report["motor_authorization"] is False
 

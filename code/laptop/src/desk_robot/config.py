@@ -90,6 +90,8 @@ class RobotConfig(BaseModel):
     bmp280_pressure_change_pa: int | None = Field(default=None, strict=True, ge=100, le=5000)
     gesture_interactions_qualified: StrictBool = False  # measured hardware gate
     handling_interactions_qualified: StrictBool = False  # measured MPU6050 mount and stationary baseline
+    # Defaults are provisional; this separate attestation requires mounted-unit trials.
+    handling_thresholds_calibrated: StrictBool = False
     handling_tilt_threshold_deg: int = Field(default=38, strict=True, ge=25, le=75)
     handling_shake_delta_mg: int = Field(default=550, strict=True, ge=300, le=1400)
     side_near_threshold_mm: int | None = Field(default=None, strict=True, ge=35, le=1000)

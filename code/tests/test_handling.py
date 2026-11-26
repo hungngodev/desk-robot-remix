@@ -64,7 +64,7 @@ def qualified(gate, body, now, *, new_sample=True):
     if new_sample:
         body["imu"]["sample_ms"] = int(round(now * 1000)) & 0xffffffff
     return gate.observe(
-        body, now, qualified=True,
+        body, now, qualified=True, calibrated=True,
         tilt_threshold_deg=38, shake_delta_mg=550,
     )
 
@@ -94,7 +94,7 @@ def test_mpu_identity_mismatch_cannot_seed_handling_calibration():
         frame = sample()
         frame["imu"]["gyro_id"] = wrong
         assert raw_mpu6050(frame) is None
-        assert gate.observe(frame, 100.0, qualified=True) == ()
+        assert gate.observe(frame, 100.0, qualified=True, calibrated=True) == ()
         assert gate.reference is None and gate.startup_samples == []
     # A correctly identified, fresh acquisition can begin qualification.
     assert qualified(gate, sample(sample_ms=2), 100.2, new_sample=False) == ()
@@ -107,6 +107,38 @@ def test_imu_disabled_by_default_never_creates_unqualified_event():
         assert gate.observe(sample(acc=(16000, 0, 0)), 100 + i * .15,
                             qualified=False) == ()
     assert gate.reference is None
+
+
+@pytest.mark.parametrize("kwargs", [{}, {"calibrated": False}])
+def test_provisional_thresholds_never_seed_pose_or_emit_events(kwargs):
+    gate = HandlingGate()
+    for i in range(8):
+        assert gate.observe(
+            sample(sample_ms=1000 + i), 100 + i * .15, qualified=True, **kwargs,
+        ) == ()
+    for i in range(2):
+        assert gate.observe(
+            sample(acc=(12551, 0, 10531), sample_ms=1010 + i),
+            102 + i * .15, qualified=True, **kwargs,
+        ) == ()
+    assert gate.reference is None
+    assert gate.startup_samples == []
+
+
+def test_calibration_attestation_revocation_preserves_acquisition_fence():
+    gate = HandlingGate()
+    calibrated(gate)
+    previous = (gate.last_boot_id, gate.last_sample_ms, gate.last_shake)
+    assert gate.observe(sample(), 102.0, qualified=True, calibrated=False) == ()
+    assert gate.reference is None
+    assert gate.gyro_bias_dps is None
+    assert (gate.last_boot_id, gate.last_sample_ms, gate.last_shake) == previous
+
+
+@pytest.mark.parametrize("value", [1, "true", None])
+def test_calibration_attestation_requires_real_boolean(value):
+    with pytest.raises(ValueError, match="Physically qualified"):
+        HandlingGate().observe(sample(), 100.0, qualified=True, calibrated=value)
 
 
 def test_imu_requires_eight_still_upright_baseline_reads():
@@ -1253,9 +1285,13 @@ def test_stale_delivered_imu_cannot_confirm_handling_tilt():
     gate = HandlingGate()
     calibrated(gate)
     first = canonical_wroom_sample(acc=(12551, 0, 10531), sample_ms=101200)
-    assert gate.observe(first, 101.2, qualified=True, request_elapsed_ms=10) == ()
+    assert gate.observe(
+        first, 101.2, qualified=True, calibrated=True, request_elapsed_ms=10,
+    ) == ()
     late = canonical_wroom_sample(acc=(12551, 0, 10531), sample_ms=101400, age=180)
-    assert gate.observe(late, 101.4, qualified=True, request_elapsed_ms=30) == ()
+    assert gate.observe(
+        late, 101.4, qualified=True, calibrated=True, request_elapsed_ms=30,
+    ) == ()
     assert gate.reference is None
 
 

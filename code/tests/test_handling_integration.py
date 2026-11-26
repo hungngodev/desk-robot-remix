@@ -44,6 +44,7 @@ async def test_qualified_real_wroom_imu_slow_lift_reaches_only_own_memory(tmp_pa
     )
     settings.mode = "hardware"
     settings.robots[0].handling_interactions_qualified = True
+    settings.robots[0].handling_thresholds_calibrated = True
     settings.robots[0].handling_tilt_threshold_deg = threshold
     memory = MemoryStore(tmp_path, [robot.id for robot in settings.robots])
     conversation = Conversation(settings, NoneChat(), SimulatedSpeaker(), memory=memory)
@@ -111,13 +112,16 @@ async def test_qualified_real_wroom_imu_slow_lift_reaches_only_own_memory(tmp_pa
 
 
 async def test_unqualified_imu_never_creates_physical_fact_or_camera_trigger(tmp_path):
-    async def run_sequence(qualified: bool):
+    async def run_sequence(qualified: bool, calibrated: bool = False):
         settings = load_settings(
             Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml"
         )
         settings.mode = "hardware"
         settings.robots[0].handling_interactions_qualified = qualified
-        memory = MemoryStore(tmp_path / f"q_{qualified}", [robot.id for robot in settings.robots])
+        settings.robots[0].handling_thresholds_calibrated = calibrated
+        memory = MemoryStore(
+            tmp_path / f"q_{qualified}_{calibrated}", [robot.id for robot in settings.robots]
+        )
         conversation = Conversation(settings, NoneChat(), SimulatedSpeaker(), memory=memory)
         pet = PetController(settings, {}, conversation, memory, NoneVision())
         seen = []
@@ -159,7 +163,9 @@ async def test_unqualified_imu_never_creates_physical_fact_or_camera_trigger(tmp
     assert seen_unq == []
     assert motor_unq is False
 
-    ref_q, events_q, mem_q, seen_q, motor_q = await run_sequence(True)
+    # Interaction opt-in alone cannot promote the default thresholds.
+    assert await run_sequence(True) == (None, 0, 0, [], False)
+    ref_q, events_q, mem_q, seen_q, motor_q = await run_sequence(True, True)
     assert ref_q is not None
     assert events_q == 1
     assert mem_q == 1
@@ -172,6 +178,7 @@ async def test_body_poll_counts_transport_age_before_handling_memory(tmp_path):
     )
     settings.mode = "hardware"
     settings.robots[0].handling_interactions_qualified = True
+    settings.robots[0].handling_thresholds_calibrated = True
     memory = MemoryStore(tmp_path, [robot.id for robot in settings.robots])
     conversation = Conversation(settings, NoneChat(), SimulatedSpeaker(), memory=memory)
     frame = status()
@@ -238,6 +245,7 @@ async def test_drx062_fault_handling_discrimination_in_active_dialogue_without_m
     settings.mode = "hardware"
     settings.voice_memory_tools_enabled = False
     settings.robots[0].handling_interactions_qualified = True
+    settings.robots[0].handling_thresholds_calibrated = True
     memory = MemoryStore(tmp_path, [r.id for r in settings.robots])
     speaker = SimulatedSpeaker()
     conversation = Conversation(settings, NoneChat(), speaker, memory=memory)
