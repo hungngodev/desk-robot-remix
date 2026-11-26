@@ -306,3 +306,67 @@ def test_dock_assembly_requires_independent_seating_and_ir_measurements():
         assert required_term in sheet, required_term
     assert "two electrically independent fail-closed seat switches" in guide
     assert "decoded IR are not seat" in guide
+
+
+def test_full_dock_mesh_taper_and_stop_planes(tmp_path):
+    """Measure the passive rail angle and both actual stop-face planes."""
+    import math
+    import shutil
+    import struct
+    import subprocess
+
+    executable = shutil.which("openscad")
+    if executable is None:
+        pytest.skip("OpenSCAD not installed")
+    source = SOURCE.read_text(encoding="utf-8")
+
+    def value(name):
+        match = re.search(rf"^{name}\s*=\s*([0-9.]+)\s*;", source, re.M)
+        assert match is not None, name
+        return float(match.group(1))
+
+    output = tmp_path / "full_dock.stl"
+    subprocess.run(
+        [executable, "--export-format", "binstl", "-o", str(output), str(SOURCE)],
+        check=True, capture_output=True, text=True, timeout=180,
+    )
+    data = output.read_bytes()
+    count = struct.unpack_from("<I", data, 80)[0]
+    assert count > 0 and len(data) == 84 + 50 * count
+    faces = [
+        tuple(struct.unpack_from("<fff", data, 84 + 50 * i + 12 + 12 * j)
+              for j in range(3)) for i in range(count)
+    ]
+    floor = value("base_thickness_mm")
+    run = value("entry_flare_run_mm")
+    flare = value("entry_flare_each_mm")
+    widths = []
+    for y in (0, run):
+        xs = sorted({round(x, 4) for face in faces for x, yy, z in face
+                     if abs(yy - y) < 0.001 and z > floor + 0.001})
+        assert len(xs) == 4
+        widths.append(xs[2] - xs[1])
+    measured_angle = math.degrees(math.atan2((widths[0] - widths[1]) / 2, run))
+    assert measured_angle == pytest.approx(math.degrees(math.atan2(flare, run)), abs=0.01)
+    width = value("track_outer_width_mm") + 2 * (
+        value("side_clearance_each_mm") + value("guide_wall_mm")
+        + value("wall_outside_margin_mm")
+    )
+    stop = value("base_length_mm") - value("backstop_thickness_mm")
+    brace = stop - value("backstop_brace_depth_mm")
+    brace_height = value("backstop_brace_height_mm")
+    paper = value("tag_black_side_mm") + 2 * (
+        value("tag_white_margin_each_mm") + value("tag_paper_slack_each_mm")
+    )
+    # Project triangles on each front plane onto X/Z. The low brace is the
+    # first nominal obstruction; the higher wall has a tag pocket cutout.
+    for plane, expected_area in (
+        (brace, width * brace_height),
+        (stop, width * (value("backstop_height_mm") - brace_height) - paper**2),
+    ):
+        area = 0.0
+        for a, b, c in faces:
+            if all(abs(p[1] - plane) < 0.001 for p in (a, b, c)):
+                area += abs((b[0] - a[0]) * (c[2] - a[2])
+                            - (c[0] - a[0]) * (b[2] - a[2])) / 2
+        assert area == pytest.approx(expected_area, abs=0.1), plane
