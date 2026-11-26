@@ -2825,9 +2825,15 @@ class PetController:
         ):
             state.last_activity_decision = "defer"
             return
-        # Advance only on admission. Otherwise a fixed activity interval
-        # dividing the 120-second cooldown can always select the same pet.
+        # Advance on an admitted consideration, including deliberate silence.
+        # A busy floor must not consume rotation; a quiet choice should.
         self._activity_round = (index + 1) % len(robots)
+        if (state.session_habituation.recent_repeats(now)
+                or state.camera_habituation.recent_repeats(now)):
+            state.activity_silences += 1
+            state.last_activity_decision = "silence"
+            state.last_initiative_suppression = "repetitive_background"
+            return
         state.last_activity_decision = "consider"
         change = SceneChange(
             _ACTIVITY_RECONSIDERATION_KIND,
@@ -3639,8 +3645,9 @@ class PetController:
             user_text = (
                 "Scheduled activity reconsideration. There is no new sensor "
                 "or camera observation. "
-                "Choose whether existing context makes a brief unsolicited "
-                "response relevant right now. Otherwise choose silence. "
+                "Choose silence unless existing context gives a specific "
+                "reason to interrupt now. An elapsed cooldown or static "
+                "background is not a reason to speak. "
                 "Never phrase this policy tick as something you just saw, "
                 "heard, touched or physically completed."
             )

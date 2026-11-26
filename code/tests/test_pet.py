@@ -9928,3 +9928,49 @@ async def test_song_stream_survives_cliff_cancellation_of_key_pickup(fleet, tmp_
         state.enabled = False
         await coordinator.close()
         await pet.close()
+
+
+@pytest.mark.parametrize("source", ["session", "camera"])
+async def test_activity_repeated_background_chooses_silence_without_spending_budget(
+    fleet, tmp_path, source,
+):
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {}, Conversation(fleet, GroundedChat(), speaker, memory=memory),
+        memory, KeyScene(),
+    )
+    robot_id = fleet.robots[0].id
+    state = pet.states[robot_id]
+    state.enabled = True
+    now = time.monotonic()
+    if source == "session":
+        state.session_habituation.record("routine", now)
+        state.session_habituation.record("routine", now)
+    else:
+        state.camera_habituation.record(("scene", "routine"), now)
+        state.camera_habituation.record(("scene", "routine"), now)
+    previous_cooldown = pet._group_last_spoken
+    offers = []
+
+    async def record_offer(*args, **kwargs):
+        offers.append(args)
+
+    pet._speak = record_offer
+    try:
+        pet._reconsider_activity()
+        assert pet._speech_task is None
+        assert state.last_activity_decision == "silence"
+        assert state.activity_silences == 1
+        assert state.last_initiative_suppression == "repetitive_background"
+        assert pet._group_last_spoken == previous_cooldown
+        assert not speaker.spoken
+        assert not offers
+
+        state.session_habituation.reset()
+        state.camera_habituation.reset()
+        pet._reconsider_activity()
+        await pet._speech_task
+        assert len(offers) == 1
+    finally:
+        await pet.close()
