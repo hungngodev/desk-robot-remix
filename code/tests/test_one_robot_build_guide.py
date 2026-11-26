@@ -223,14 +223,16 @@ def test_documented_procurement_views_execute_without_release_authority():
         for marker in expected[argv[6]]:
             assert marker in result.stdout
         if argv[6] == "pilot-cart-markdown":
-            _assert_pilot_sku_rows(result.stdout)
+            source_rows = _pilot_quote_contract()
+            _assert_pilot_sku_rows(result.stdout, source_rows)
             for sku in sorted(_PILOT_SKUS):
                 mutant = "\n".join(
                     line for line in result.stdout.splitlines()
                     if not (line.startswith("|") and f"| {sku} |" in line)
                 )
                 with pytest.raises(AssertionError):
-                    _assert_pilot_sku_rows(mutant + "\n" + sku)
+                    _assert_pilot_sku_rows(mutant + "\n" + sku, source_rows)
+            _assert_pilot_quote_mutations(result.stdout, source_rows)
     assert seen == set(expected)
 
 
@@ -241,19 +243,50 @@ _PILOT_SKUS = {
 }
 
 
-def _assert_pilot_sku_rows(markdown):
+def _pilot_quote_contract():
+    import ast
+
+    source = (ROOT / "code/scripts/procurement_release.py").read_text(encoding="utf-8")
+    tables = [
+        node.value for node in ast.parse(source).body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "PILOT_SAMPLE_PRODUCTS"
+                for target in node.targets)
+    ]
+    assert len(tables) == 1
+    expected = {
+        item[2]: (str(item[4]), item[3]) for item in ast.literal_eval(tables[0]).values()
+    }
+    assert set(expected) == _PILOT_SKUS
+    return expected
+
+
+def _assert_pilot_sku_rows(markdown, expected):
     header = "| Candidate checkout seller | Brand or manufacturer | SKU |"
     lines = markdown.splitlines()
-    start = next(i for i, line in enumerate(lines) if line.startswith(header))
-    rows = []
-    for line in lines[start + 2:]:
+    starts = [i for i, line in enumerate(lines) if line.startswith(header)]
+    assert len(starts) == 1, "Missing or duplicate pilot table header"
+    rows = {}
+    for line in lines[starts[0] + 2:]:
         if not line.startswith("|"):
             break
         cells = [cell.strip() for cell in line.strip("|").split("|")]
         assert len(cells) == 9, line
-        rows.append(cells[2])
-    assert len(rows) == len(_PILOT_SKUS), rows
-    assert set(rows) == _PILOT_SKUS, rows
+        assert cells[2] not in rows, cells[2]
+        rows[cells[2]] = (cells[4], cells[6])
+    assert rows == expected
+
+
+def _assert_pilot_quote_mutations(markdown, expected):
+    lines = markdown.splitlines()
+    row = next(line for line in lines if "| COM-05-067 |" in line)
+    cells = [cell.strip() for cell in row.strip("|").split("|")]
+    for column, invalid in ((4, "1"), (6, "https://example.invalid/wrong-board")):
+        mutated = cells.copy()
+        mutated[column] = invalid
+        mutant = markdown.replace(row, "| " + " | ".join(mutated) + " |", 1)
+        with pytest.raises(AssertionError):
+            _assert_pilot_sku_rows(mutant, expected)
 
 
 _SAFETY_MARKERS = (
