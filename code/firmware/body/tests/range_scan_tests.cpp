@@ -70,7 +70,7 @@ static void check_transport_recovery() {
         scan.transport_succeeded(lane);
         CHECK(scan.degraded());
       }
-      if (full_eight) scan.transport_succeeded(scan.next());
+      // Optional lanes are not scheduled during recovery.
       for (unsigned lane = 0; lane < failure_lane; ++lane) {
         CHECK(scan.next() == lane);
         scan.transport_succeeded(lane);
@@ -96,12 +96,41 @@ static void check_transport_recovery() {
           scan.transport_succeeded(lane);
           CHECK(scan.degraded() == (sweep == 0 || lane < 4));
         }
-        if (full_eight) scan.transport_succeeded(scan.next());
+        if (full_eight && sweep == 1) CHECK(scan.next() == 5);
       }
       scan.transport_fault();
       CHECK(scan.degraded());
       scan.reset();
       CHECK(!scan.degraded());
+    }
+  }
+}
+
+// Exercise every optional rotation and every fault phase, including a slow
+// second recovery sweep at the exact half-window boundary across rollover.
+static void check_recovery_budget_and_rotation() {
+  for (std::uint32_t base : {0U, 0xfffffff0U}) {
+    for (unsigned phase = 0; phase < 18; ++phase) {
+      for (bool slow : {false, true}) {
+        desk_robot::RangeScanOrder scan(true);
+        for (unsigned i = 0; i < phase; ++i) scan.next(base);
+        scan.transport_fault();
+        for (unsigned sweep = 0; sweep < 2; ++sweep) {
+          for (unsigned lane = 0; lane < 5; ++lane) {
+            const auto now = base + sweep * 100U + lane * (slow ? 20U : 1U);
+            CHECK(scan.next(now, 200U) == lane);
+            scan.transport_succeeded(lane);
+            CHECK(scan.degraded() == (sweep == 0 || lane < 4));
+          }
+        }
+        const auto boundary = base + (slow ? 200U : 105U);
+        if (slow) {
+          for (unsigned lane = 0; lane < 5; ++lane)
+            CHECK(scan.next(boundary + lane, 200U) == lane);
+        }
+        const auto optional_at = boundary + (slow ? 5U : 0U);
+        CHECK(scan.next(optional_at, 200U) == 5U + (phase / 6U) % 3U);
+      }
     }
   }
 }
@@ -140,6 +169,7 @@ int main() {
     check_slow_sweeps();
     check_fault_restart();
     check_transport_recovery();
+    check_recovery_budget_and_rotation();
     check_raw_range_word_domain();
     std::cout << "PASS all 5 critical ToF channels sampled before one optional direction\n";
     return 0;

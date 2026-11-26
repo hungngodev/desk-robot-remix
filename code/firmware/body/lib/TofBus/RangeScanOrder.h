@@ -18,7 +18,9 @@ class RangeScanOrder {
     critical_index_ = 0;
     // Reserve at least half the freshness window for the next critical sweep.
     // This is an admission heuristic, not a bound on future I2C latency.
-    if (!full_eight_ || now_ms - sweep_started_ms_ >= freshness_ms / 2U) {
+    // Do not spend a poll on a side lane until both critical transport
+    // recovery sweeps have completed. Keep the optional rotation unchanged.
+    if (!full_eight_ || degraded_ || now_ms - sweep_started_ms_ >= freshness_ms / 2U) {
       sweep_started_ms_ = now_ms;
       return critical_index_++;
     }

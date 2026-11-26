@@ -180,11 +180,17 @@ static void dropout_matrix_and_partial_mux_recovery() {
       // critical sweep at lane zero without advancing the optional rotation.
       CHECK(phase % 6 == 1U);
       --phase;
-      for (unsigned step = 1; step <= 18; ++step)
+      // During the first recovery sweep the usual optional slot is skipped.
+      for (unsigned step = 1; step <= 5; ++step)
         poll(fault_time + 5U * step, 0);
-      CHECK(!guard.evaluate(fault_time + 90U));
-      CHECK(guard.try_rearm(fault_time + 90U));
-      CHECK(guard.evaluate(fault_time + 90U));
+      CHECK(bus.degraded());
+      phase -= 5;
+      for (unsigned step = 6; step <= 23; ++step)
+        poll(fault_time + 5U * step, 0);
+      CHECK(!bus.degraded());
+      CHECK(!guard.evaluate(fault_time + 115U));
+      CHECK(guard.try_rearm(fault_time + 115U));
+      CHECK(guard.evaluate(fault_time + 115U));
     }
   }
   fake_arduino_millis() = saved_clock;
@@ -911,15 +917,16 @@ int main() {
       // Already acquired side 5 before the bus fault, then polled critical 0
       // at failure. It must wait through side 6 and side 7 before returning
       // to a NEW side 5 read. No cached value may become valid meanwhile.
-      // Fault restart repeats critical lane 0; lane 4 is due at 86.
-      for (std::uint32_t at = 70; at <= 86; ++at) {
+      // Two critical recovery sweeps precede side 6; lane 4 is due at 91.
+      for (std::uint32_t at = 70; at <= 91; ++at) {
         bus.poll(guard, at);
         CHECK(!bus.extra_diagnostic(0, at).valid);
+        if (at <= 79) CHECK(bus.last_channel() == (at - 70U) % 5U);
       }
       CHECK(bus.last_channel() == 4);
-      bus.poll(guard, 87);  // first independent side 5 conversion
+      bus.poll(guard, 92);  // first independent side 5 conversion
       CHECK(bus.last_channel() == 5 && bus.new_extra_channel() == 0);
-      CHECK(bus.extra_diagnostic(0, 87).valid);
+      CHECK(bus.extra_diagnostic(0, 92).valid);
     }
     {
       // The 0x71 touch mux NACKed at the very start of ToF init. Later
