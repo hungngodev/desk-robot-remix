@@ -21,7 +21,12 @@ from .grasp_feedback import await_commanded_jaw_target, guarded_grasp
 from .motion_authority import StopConfirmationTracker
 from .object_search import ObjectSearchResult, summarize_search_observation
 from .object_targets import ObjectTarget
-from .operations import OperationError, _bounded_head_reply, require_active_operation
+from .operations import (
+    OperationError,
+    _bounded_head_reply,
+    dispatch_job_command,
+    require_active_operation,
+)
 from .transport import Head, HeadError, drive_duration_ms, expected_ack, validate_command
 from .vision import Detection, Vision, image_size
 
@@ -96,9 +101,12 @@ class Job:
     result: dict | None = None
     error: str | None = None
     events: list[str] = field(default_factory=list)
+    _motion_epoch: int | None = field(default=None, repr=False)
 
     def data(self):
-        return asdict(self)
+        data = asdict(self)
+        data.pop("_motion_epoch")
+        return data
 
 
 @dataclass
@@ -730,8 +738,8 @@ class Coordinator:
                     del self.jobs[jid]
                     del self.tasks[jid]
                     break
-        self._retire_permit(robot_id)  # consume once, even if ACK/job later fails
-        job = Job(uuid.uuid4().hex, robot_id, kind)
+        epoch = self._retire_permit(robot_id)  # consume once, even if ACK/job later fails
+        job = Job(uuid.uuid4().hex, robot_id, kind, _motion_epoch=epoch)
         # Claim synchronously, before the task is even scheduled. No queued
         # second body can slip in between per-robot task starts.
         self._fleet_motion_owner = job.id
@@ -739,9 +747,31 @@ class Coordinator:
         self.tasks[job.id] = asyncio.create_task(self._run(job, work))
         return job
 
-    async def _keepalive(self, robot_id: str, acknowledged: asyncio.Event):
+    def _require_job_motion(self, job: Job) -> None:
+        parent = self.tasks.get(job.id)
+        if self.closed or (parent is not None and parent.cancelling()):
+            raise asyncio.CancelledError
+        if job._motion_epoch is not None and (
+            self._permit_epoch[job.robot_id] != job._motion_epoch
+            or self._fleet_motion_owner != job.id
+        ):
+            raise asyncio.CancelledError
+        # Private phase helpers are also exercised directly in host tests.
+        require_active_operation(job.state if job.id in self.jobs else "running")
+
+    async def _motion_command(
+        self, job: Job, command: str, *, dispatch_check: Callable[[], None] | None = None,
+    ) -> dict:
+        def check() -> None:
+            self._require_job_motion(job)
+            if dispatch_check is not None:
+                dispatch_check()
+
+        return await dispatch_job_command(self.heads[job.robot_id], command, check)
+
+    async def _keepalive(self, job: Job, acknowledged: asyncio.Event):
         while True:
-            await self.heads[robot_id].command("keepalive")
+            await self._motion_command(job, "keepalive")
             acknowledged.set()
             await asyncio.sleep(0.1)
 
@@ -770,16 +800,14 @@ class Coordinator:
                 # sample can expire after the operator granted the permit.
                 # Recheck the real body immediately before requesting arm.
                 await self._hardware_preflight(job.robot_id)
-                require_active_operation(job.state)
+                self._require_job_motion(job)
                 if not self.robot(job.robot_id).motion_enabled:
                     raise OperationError("motion_enabled=false; no arm sent")
                 voice_reason = self.voice_blocks_motion()
                 if voice_reason is not None:
                     raise OperationError(voice_reason)
-                await self.heads[job.robot_id].command(
-                    "arm"
-                )  # only after consuming operator permit
-                require_active_operation(job.state)
+                await self._motion_command(job, "arm")  # consumed operator permit
+                self._require_job_motion(job)
                 # A changed configuration while ARM is in flight cannot
                 # authorize subsequent actuator commands. HALT in finally.
                 if not self.robot(job.robot_id).motion_enabled:
@@ -788,7 +816,7 @@ class Coordinator:
                 if voice_reason is not None:
                     raise OperationError(voice_reason)
                 acknowledged = asyncio.Event()
-                keeper = asyncio.create_task(self._keepalive(job.robot_id, acknowledged))
+                keeper = asyncio.create_task(self._keepalive(job, acknowledged))
                 watchdog = asyncio.create_task(self._watch_keepalive(acknowledged))
                 operation = asyncio.create_task(work(job))
                 # A parent task can finish or be cancelled again while one
@@ -811,7 +839,7 @@ class Coordinator:
                         await keeper
                         raise OperationError("Keepalive ended unexpectedly")
                     operation_result = await operation
-                    require_active_operation(job.state)
+                    self._require_job_motion(job)
                     operation_finished = True
             except asyncio.CancelledError:
                 # An operator STOP can already have failed at the transport.
@@ -824,6 +852,10 @@ class Coordinator:
                 job.state = "failed"
                 job.error = str(exc) or type(exc).__name__
             finally:
+                # Fence children before cancellation or any awaited terminal HALT.
+                if (job._motion_epoch is not None
+                        and self._permit_epoch[job.robot_id] == job._motion_epoch):
+                    self._retire_permit(job.robot_id)
                 for task in (operation, keeper, watchdog):
                     if task is not None and not task.done():
                         task.cancel()
@@ -892,7 +924,7 @@ class Coordinator:
             )
 
         async def work(job):
-            result = await self.heads[robot_id].command(command)
+            result = await self._motion_command(job, command)
             if op == "drive":
                 duration_ms = drive_duration_ms(command)
                 await asyncio.sleep(duration_ms / 1000)
@@ -1193,7 +1225,7 @@ class Coordinator:
             # is suspended, before the separate asynchronous STOP task runs.
             require_motion_authority()
             require_camera_grant()
-            await head.command("drive 20 20 100")
+            await self._motion_command(job, "drive 20 20 100")
             await asyncio.sleep(0.12)
             await _bounded_pulse_stop(head)
             steps += 1
@@ -1501,9 +1533,10 @@ class Coordinator:
             try:
                 _verify_before_post()
                 if getattr(head, "supports_dispatch_check", False):
-                    await head.command(command, dispatch_check=_verify_at_dispatch)
+                    # Preserve dock-specific checks at the actual POST boundary.
+                    await self._motion_command(job, command, dispatch_check=_verify_at_dispatch)
                 else:
-                    await head.command(command)
+                    await self._motion_command(job, command)
             except _DockCameraQueueExpired:
                 return {
                     "phase": "hold",
@@ -1659,7 +1692,7 @@ class Coordinator:
 
         async def send_command(command: str) -> None:
             reply = await _bounded_head_reply(
-                head.command(command), seconds=2.5,
+                self._motion_command(job, command), seconds=2.5,
                 timeout_message="Pickup command acknowledgement timed out",
             )
             require_ack(reply, command)
@@ -1723,6 +1756,7 @@ class Coordinator:
             self._require_camera_motion_grant(camera_grant)
             tactile = await guarded_grasp(
                 head, c, robot_id=job.robot_id, health=grasp_health,
+                send_command=lambda command: self._motion_command(job, command),
             )
             job.events.append(
                 f"tactile contact delta={tactile['contact_delta_raw']} "
@@ -2163,7 +2197,7 @@ class Coordinator:
                         raise OperationError("Navigation halted: non-adjacent route cell")
                     if desired_heading != cur_heading:
                         cmd = _turn_once(desired_heading)
-                        await head.command(cmd)
+                        await self._motion_command(job, cmd)
                         await asyncio.sleep(0.05)
                         await _bounded_pulse_stop(head)
                         cur_heading = desired_heading
@@ -2180,7 +2214,9 @@ class Coordinator:
                                 "physical_acceptance_pass": False,
                             }
                         await _verify_step_authority(prev_cell, next_cell)
-                    await head.command(f"drive {20 * forward_sign} {20 * forward_sign} 100")
+                    await self._motion_command(
+                        job, f"drive {20 * forward_sign} {20 * forward_sign} 100"
+                    )
                     await asyncio.sleep(0.05)
                     await _bounded_pulse_stop(head)
                     job.events.append(f"nav step {next_cell} heading={cur_heading}")

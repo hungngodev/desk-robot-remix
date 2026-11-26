@@ -110,7 +110,9 @@ def _fresh_jaw_sequence(new: int, previous: int) -> bool:
 async def guarded_grasp(
     head: "Head", calibration: "Calibration",
     *, robot_id: str, health: Callable[[], Awaitable[dict]],
+    send_command: Callable[[str], Awaitable[dict]] | None = None,
 ) -> dict:
+    send = head.command if send_command is None else send_command
     threshold = calibration.grip_force_delta_raw
     ceiling = calibration.grip_force_limit_raw
     if threshold is None or ceiling is None:
@@ -258,7 +260,7 @@ async def guarded_grasp(
                 raise OperationError("Jaw ADC evidence expired before closing dispatch")
             motion_attempted = True
             reply = await _bounded_head_reply(
-                head.command(f"grip {angle}"), seconds=_GRIP_COMMAND_TIMEOUT_S,
+                send(f"grip {angle}"), seconds=_GRIP_COMMAND_TIMEOUT_S,
                 timeout_message="Gripper servo command unconfirmed",
             )
             # A missing receipt is an uncertain pulse, not a successful close.
@@ -322,7 +324,7 @@ async def guarded_grasp(
         try:
             await confirmed_health()
             reply = await _bounded_head_reply(
-                head.command(f"grip {calibration.grip_open}"),
+                send(f"grip {calibration.grip_open}"),
                 seconds=_GRIP_COMMAND_TIMEOUT_S,
                 timeout_message="Gripper relief command unconfirmed",
             )

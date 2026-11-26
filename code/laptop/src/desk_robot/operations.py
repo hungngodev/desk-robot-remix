@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Awaitable, TypeVar
+from typing import Awaitable, Callable, TypeVar
 
 _T = TypeVar("_T")
 
@@ -12,6 +12,17 @@ def require_active_operation(state: str) -> None:
     task = asyncio.current_task()
     if state != "running" or (task is not None and task.cancelling()):
         raise asyncio.CancelledError
+
+
+async def dispatch_job_command(head, command: str, check: Callable[[], None]) -> dict:
+    """Recheck host authority before enqueue, at supported dispatch, and after ACK."""
+    check()
+    if getattr(head, "supports_dispatch_check", False):
+        reply = await head.command(command, dispatch_check=check)
+    else:
+        reply = await head.command(command)
+    check()
+    return reply
 
 
 async def _bounded_head_reply(coro: Awaitable[_T], *, seconds: float,
