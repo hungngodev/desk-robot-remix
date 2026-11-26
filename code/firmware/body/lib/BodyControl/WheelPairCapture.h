@@ -52,6 +52,11 @@ class WheelPairCapture {
     const bool right_base = right_result == WheelAngleCapture::Result::Baseline;
     const bool left_new = left_result == WheelAngleCapture::Result::Delta;
     const bool right_new = right_result == WheelAngleCapture::Result::Delta;
+    // Never publish an ambiguous half-turn or an out-of-range shaft delta,
+    // even if a caller mistakenly labels it as a completed conversion.
+    if ((left_new && (left_delta < -2047 || left_delta > 2047)) ||
+        (right_new && (right_delta < -2047 || right_delta > 2047)))
+      return invalidate();
     if ((left_base || right_base) && (synchronized_ || left_new || right_new))
       return invalidate();
     if (left_base) { baseline_[0] = true; baseline_ms_[0] = left.at_ms; }

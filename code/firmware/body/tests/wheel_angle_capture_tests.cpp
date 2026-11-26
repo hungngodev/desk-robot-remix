@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <initializer_list>
+#include <limits>
 #include <stdexcept>
 
 using desk_robot::AngleRaw;
@@ -247,7 +248,51 @@ static void reject_zero_elapsed_new_sequence() {
   }
 }
 
+static void paired_delta_bounds_and_asymmetric_timeout() {
+  using desk_robot::WheelPairCapture;
+  using PairResult = WheelPairCapture::Result;
+  for (bool fault_left : {false, true}) {
+    for (int bad : {std::numeric_limits<int>::min(), -2048, 2048,
+                    std::numeric_limits<int>::max()}) {
+      WheelPairCapture pair;
+      check(pair.configure(10));
+      auto base = angle(4095, 0xfffffffeU, 0xfffffff0U);
+      check(pair.observe(Result::Baseline, Result::Baseline, base, base, 0, 0,
+                         base.at_ms) == PairResult::Waiting);
+      auto next = angle(0, 0xffffffffU, 0U);
+      check(pair.observe(Result::Delta, Result::Delta, next, next,
+                         fault_left ? bad : 1, fault_left ? 1 : bad,
+                         next.at_ms) == PairResult::Invalid);
+      check(!pair.receipt().valid && !pair.ready_for_origin());
+    }
+    WheelPairCapture pair;
+    check(pair.configure(10));
+    auto base = angle(4095, 0xfffffffeU, 0xffffffe0U);
+    check(pair.observe(Result::Baseline, Result::Baseline, base, base, 0, 0,
+                       base.at_ms) == PairResult::Waiting);
+    auto next = angle(0, 0xffffffffU, 0xfffffff0U);
+    // A fresh zero delta is evidence of no shaft rotation, not a missing sample.
+    check(pair.observe(Result::Delta, Result::Delta, next, next,
+                       fault_left ? 0 : 1, fault_left ? 1 : 0,
+                       next.at_ms) == PairResult::Paired);
+    check(pair.ready_for_origin());
+    auto fresh = angle(1, 1, 0xfffffffaU);
+    check(pair.observe(fault_left ? Result::Duplicate : Result::Delta,
+                       fault_left ? Result::Delta : Result::Duplicate,
+                       fault_left ? next : fresh, fault_left ? fresh : next,
+                       fault_left ? 0 : 1, fault_left ? 1 : 0,
+                       fresh.at_ms) == PairResult::Waiting);
+    check(!pair.ready_for_origin());
+    check(pair.observe(Result::Duplicate, Result::Duplicate, fresh, fresh, 0, 0,
+                       4U) == PairResult::Waiting);
+    check(pair.observe(Result::Duplicate, Result::Duplicate, fresh, fresh, 0, 0,
+                       5U) == PairResult::Invalid);
+    check(!pair.receipt().valid && !pair.ready_for_origin());
+  }
+}
+
 int main() {
+  paired_delta_bounds_and_asymmetric_timeout();
   reject_zero_elapsed_new_sequence();
   exact_wrap_and_half_turn_boundaries();
   paired_wrap_and_invalid_half_turn();
