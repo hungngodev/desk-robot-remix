@@ -1257,6 +1257,7 @@ def test_readonly_inspection_preserves_active_navigation(settings, monkeypatch):
 
     client = TestClient(app)
     for _ in range(2):
+        now += 100_000
         plan = client.post(
             f"/v1/pet/{robot_id}/plan-readonly", headers=headers,
             json={"transcript": "Check your safety status"},
