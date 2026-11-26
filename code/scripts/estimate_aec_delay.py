@@ -122,7 +122,7 @@ def estimate_delay(
 ) -> dict:
     """Positive lag is microphone capture after the supplied reference."""
     if (sample_rate != 16000 or type(max_delay_ms) not in (int, float)
-            or not math.isfinite(max_delay_ms) or not 10 <= max_delay_ms <= 400):
+            or not 10 <= max_delay_ms <= 400):
         raise ValueError("Measure 16 kHz capture with finite delay search of 10 to 400 ms")
     if (not isinstance(reference, np.ndarray)
             or not isinstance(microphone, np.ndarray)
@@ -237,7 +237,6 @@ def estimate_clock_drift(
     This is diagnostic only, not verified hardware AEC or barge-in.
     """
     if (sample_rate != 16000 or type(max_delay_ms) not in (int, float)
-            or not math.isfinite(max_delay_ms)
             or not 10 <= max_delay_ms <= 400
             or not isinstance(reference, np.ndarray)
             or not isinstance(microphone, np.ndarray)

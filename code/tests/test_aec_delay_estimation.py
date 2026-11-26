@@ -532,3 +532,11 @@ def test_invalid_wav_header_raises_value_error(tmp_path, header):
     path.write_bytes(header)
     with pytest.raises(ValueError, match="WAV header"):
         source["read_wav"](path)
+
+
+@pytest.mark.parametrize("estimator", [estimate_delay, estimate_clock_drift])
+@pytest.mark.parametrize("value", [10**1000, -(10**1000)], ids=["huge-positive", "huge-negative"])
+def test_delay_window_huge_integer_rejected_without_float_overflow(estimator, value):
+    signal = np.ones(64000)
+    with pytest.raises(ValueError):
+        estimator(signal, signal, max_delay_ms=value)
