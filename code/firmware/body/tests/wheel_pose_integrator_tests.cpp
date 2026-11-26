@@ -259,7 +259,112 @@ static void origin_quality_respects_heading_uncertainty() {
   }
 }
 
+static void refuse_reused_wheel_acquisition() {
+  for (bool left : {false, true}) {
+    for (int fault = 0; fault < 4; ++fault) {
+      WheelPoseIntegrator pose;
+      check(pose.configure(calibration()));
+      for (std::uint32_t i = 1; i <= 3; ++i)
+        check(pose.observe(observed(i, 100 + i * 10), 120 + i * 10));
+      check(pose.start_origin(150));
+      auto e = observed(4, 140);
+      auto& seq = left ? e.wheel.left_seq : e.wheel.right_seq;
+      auto& ms = left ? e.wheel.left_ms : e.wheel.right_ms;
+      if (fault == 0) --seq;
+      if (fault == 1) seq -= 2;
+      if (fault == 2) ms -= 10;
+      if (fault == 3) ms -= 11;
+      e.wheel.skew_ms = e.wheel.left_ms > e.wheel.right_ms
+          ? e.wheel.left_ms - e.wheel.right_ms
+          : e.wheel.right_ms - e.wheel.left_ms;
+      check(!pose.observe(e, 160));
+      check(pose.state().quality == WheelPoseIntegrator::Quality::Unavailable);
+      // A newly numbered pair cannot reuse the last accepted leg after loss.
+      e.wheel.pair_seq = 5;
+      check(!pose.observe(e, 160));
+      for (std::uint32_t i = 6; i <= 8; ++i)
+        check(pose.observe(observed(i, 200 + i * 10), 220 + i * 10));
+      check(pose.start_origin(300));
+      check(pose.state().origin == 2);
+    }
+  }
+  WheelPoseIntegrator wrap;
+  check(wrap.configure(calibration()));
+  auto a = observed(1, 0xfffffff0U);
+  a.wheel.left_seq = a.wheel.right_seq = 0xffffffffU;
+  check(wrap.observe(a, a.wheel.right_ms));
+  auto b = observed(2, 0U);
+  b.wheel.left_seq = b.wheel.right_seq = 1;
+  check(wrap.observe(b, b.wheel.right_ms));
+}
+
+static void unhealthy_magnet_or_cached_wheel_revokes_pose() {
+  using desk_robot::AngleRaw;
+  using desk_robot::WheelAngleCapture;
+  using desk_robot::WheelPairCapture;
+  using PairResult = WheelPairCapture::Result;
+  for (bool left_fault : {false, true}) {
+    for (unsigned fault = 0; fault < 10; ++fault) {
+      if (fault == 4) continue;  // 0x20 is the only healthy magnet state.
+      WheelAngleCapture left, right;
+      WheelPairCapture pair;
+      WheelPoseIntegrator pose;
+      check(left.configure(4000, 100, 50));
+      check(right.configure(4000, 100, 50));
+      check(pair.configure(10));
+      check(pose.configure(calibration()));
+      const auto raw = [](std::uint32_t seq, std::uint32_t ms) {
+        AngleRaw a{};
+        a.present = a.valid = true;
+        a.magnet_status = 0x20;
+        a.angle = 123;
+        a.sample_seq = seq;
+        a.at_ms = ms;
+        return a;
+      };
+      const auto observe = [&](const AngleRaw& l, const AngleRaw& r,
+                               std::uint32_t now) {
+        const auto lr = left.observe(l, now);
+        const auto rr = right.observe(r, now);
+        return pair.observe(lr, rr, l, r, left.last_delta(),
+                            right.last_delta(), now);
+      };
+      check(observe(raw(1, 100), raw(1, 100), 100) == PairResult::Waiting);
+      for (std::uint32_t i = 2; i <= 4; ++i) {
+        const auto a = raw(i, 100 + 10 * i);
+        check(observe(a, a, a.at_ms) == PairResult::Paired);
+        auto e = observed(i - 1, a.at_ms);
+        e.wheel = pair.receipt();
+        e.imu_at_ms = a.at_ms;
+        check(pose.observe(e, a.at_ms));
+      }
+      check(pose.start_origin(140));
+      check(observe(raw(4, 140), raw(4, 140), 141) == PairResult::Waiting);
+      auto good = raw(5, 150);
+      auto bad = good;
+      std::uint32_t now = 150;
+      if (fault < 8) bad.magnet_status = static_cast<std::uint8_t>(fault << 3);
+      if (fault == 8) bad.present = bad.valid = false;
+      if (fault == 9) {
+        bad = raw(4, 140);
+        now = 191;  // 51 ms old, just past the 50 ms capture age.
+        good.at_ms = now;
+      }
+      check(observe(left_fault ? bad : good, left_fault ? good : bad, now) ==
+            PairResult::Invalid);
+      check(!pair.receipt().valid && !pair.ready_for_origin());
+      auto e = observed(4, now);
+      e.wheel = pair.receipt();
+      check(!pose.observe(e, now));
+      check(pose.state().quality == WheelPoseIntegrator::Quality::Unavailable);
+      check(!pose.start_origin(now));
+    }
+  }
+}
+
 int main() {
+  unhealthy_magnet_or_cached_wheel_revokes_pose();
+  refuse_reused_wheel_acquisition();
   origin_quality_respects_heading_uncertainty();
   stationary_pairs_do_not_accumulate_translation_error();
   refuse_future_wheel_acquisition();

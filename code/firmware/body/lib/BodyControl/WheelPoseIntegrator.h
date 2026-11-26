@@ -93,6 +93,11 @@ class WheelPoseIntegrator {
         w.left_seq == 0 || w.right_seq == 0 ||
         (last_pair_seq_ == 0 ? w.pair_seq != 1U
                              : w.pair_seq != last_pair_seq_ + 1U) ||
+        (last_left_seq_ != 0 &&
+         (!advances(w.left_seq, last_left_seq_) ||
+          !advances(w.right_seq, last_right_seq_) ||
+          !advances(w.left_ms, last_left_ms_) ||
+          !advances(w.right_ms, last_right_ms_))) ||
         !e.imu_valid || e.imu_segment == 0 ||
         e.imu_yaw_urad < -3141593LL || e.imu_yaw_urad > 3141593LL ||
         w.skew_ms != skew(w.left_ms, w.right_ms) ||
@@ -205,6 +210,10 @@ class WheelPoseIntegrator {
       state_.sample_ms = earlier;
     }
     last_pair_seq_ = w.pair_seq;
+    last_left_seq_ = w.left_seq;
+    last_right_seq_ = w.right_seq;
+    last_left_ms_ = w.left_ms;
+    last_right_ms_ = w.right_ms;
     last_sample_ms_ = earlier;
     last_imu_ms_ = e.imu_at_ms;
     last_imu_yaw_urad_ = e.imu_yaw_urad;
@@ -263,13 +272,17 @@ class WheelPoseIntegrator {
     stationary_streak_ = 0;
     x_nm_ = y_nm_ = heading_urad_ = 0;
     xy_error_nm_ = 0;
-    // Last pair sequence is kept as the replay fence until body reboot.
+    // Pair and individual wheel acquisition fences survive until body reboot.
   }
   void reset_for_boot() { *this = WheelPoseIntegrator(); }
   const State& state() const { return state_; }
   bool configured() const { return configured_; }
 
  private:
+  static bool advances(std::uint32_t current, std::uint32_t previous) {
+    const auto delta = current - previous;
+    return delta != 0 && delta < 0x80000000U;
+  }
   bool sources_fresh(std::uint32_t now_ms) const {
     return now_ms - last_sample_ms_ <= limits_.max_age_ms &&
            now_ms - last_imu_ms_ <= limits_.max_age_ms;
@@ -295,6 +308,8 @@ class WheelPoseIntegrator {
   std::uint8_t stationary_streak_ = 0;
   std::uint32_t next_origin_ = 1, last_pair_seq_ = 0;
   std::uint32_t last_sample_ms_ = 0, last_imu_ms_ = 0;
+  std::uint32_t last_left_seq_ = 0, last_right_seq_ = 0;
+  std::uint32_t last_left_ms_ = 0, last_right_ms_ = 0;
   std::uint32_t wheel_segment_ = 0, imu_segment_ = 0;
   std::uint32_t latest_imu_error_urad_ = 0;
   std::int64_t last_imu_yaw_urad_ = 0, origin_yaw_urad_ = 0;
