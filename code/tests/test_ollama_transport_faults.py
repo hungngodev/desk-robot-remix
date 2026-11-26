@@ -8,7 +8,6 @@ import httpx
 import pytest
 from desk_robot.streamed_ollama import ollama_speech_segments
 
-
 FAULTS = [
     pytest.param("drop", httpx.RemoteProtocolError, "incomplete", id="dropped-body"),
     pytest.param("malformed", RuntimeError, "Malformed Ollama", id="invalid-ndjson"),

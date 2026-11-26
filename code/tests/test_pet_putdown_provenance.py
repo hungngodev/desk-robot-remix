@@ -4,7 +4,6 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-
 from desk_robot.pet import PetController, PetState
 
 

@@ -165,7 +165,7 @@ def test_shutdown_repeated_cancel_preserves_callback_ownership():
                 except asyncio.CancelledError:
                     second_cancel.set()
                     raise
-                raise OSError("secondary callback failure")
+                raise OSError("secondary callback failure") from None
 
         async def health(_ready):
             pass

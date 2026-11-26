@@ -400,9 +400,11 @@ int main() {
             fake_arduino_millis() = base + 20U * i;
             bus.poll(guard, millis());
           }
-          CHECK(guard.try_rearm(base + 100U));
+          // Optional work is admitted only strictly before half of the
+          // 200ms freshness window. Keep lane 0's original expiry intact.
+          CHECK(guard.try_rearm(base + 99U));
 #if DESK_ROBOT_EXTRA_RANGERS
-          fake_arduino_millis() = base + 100U;
+          fake_arduino_millis() = base + 99U;
           bus.poll(guard, millis());
           CHECK(bus.last_channel() == 5);
 #endif
