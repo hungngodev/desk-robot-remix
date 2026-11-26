@@ -313,6 +313,35 @@ async def test_emergency_stop_reaches_body_before_blocking_job_cleanup(settings)
     assert job.state == "cancelled"
 
 
+async def test_stop_keeps_peer_and_completed_jobs_untouched(settings):
+    c, _ = make(settings)
+
+    async def wait():
+        await asyncio.Event().wait()
+
+    active = asyncio.create_task(wait())
+    peer = asyncio.create_task(wait())
+    completed = asyncio.create_task(asyncio.sleep(0))
+    await completed
+    for jid, rid, state, task in (
+        ("active", "robot-01", "running", active),
+        ("peer", "robot-02", "running", peer),
+        ("completed", "robot-01", "succeeded", completed),
+    ):
+        c.jobs[jid] = Job(jid, rid, "manual", state=state)
+        c.tasks[jid] = task
+    try:
+        assert (await c.stop("robot-01"))["ok"] is True
+        assert active.cancelled()
+        assert c.jobs["active"].state == "cancelled"
+        assert not peer.done()
+        assert c.jobs["peer"].state == "running"
+        assert c.jobs["completed"].state == "succeeded"
+        assert c.jobs["completed"].error is None
+    finally:
+        await c.close()
+
+
 async def test_cancel_running_job_stops_and_ends_keepalive(settings):
     c, head = make(settings)
     try:

@@ -355,18 +355,14 @@ class Coordinator:
             reason="STOP requested; deferred motion discarded",
         )
         self._retire_permit(robot_id)
-        running = [
-            task
-            for jid, task in self.tasks.items()
-            if self.jobs[jid].robot_id == robot_id and not task.done()
-        ]
-        # Revoke the software operation immediately, even if a cancelled
-        # third-party task catches CancelledError and refuses to finish.
-        # The UI must not display "running" during an urgent STOP request.
+        # Capture one set of jobs for cancellation and STOP accounting.
+        # The UI must not display "running" during an urgent STOP request,
+        # even if a cancelled third-party task refuses to finish.
         active_job_ids = [
             jid for jid, task in self.tasks.items()
             if self.jobs[jid].robot_id == robot_id and not task.done()
         ]
+        running = [self.tasks[jid] for jid in active_job_ids]
         for jid in active_job_ids:
             if self.jobs[jid].state in {"queued", "running"}:
                 self.jobs[jid].state = "cancelled"
