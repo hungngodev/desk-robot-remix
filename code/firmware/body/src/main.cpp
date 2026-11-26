@@ -64,6 +64,7 @@
 #include "McpContactEvidence.h"
 #include "TerminalIr.h"
 #include <Preferences.h>
+#include <esp_mac.h>
 #endif
 
 namespace {
@@ -167,9 +168,12 @@ void poll_touch(std::uint32_t now_ms) {
 // The hardware never resumes movement after reboot, even with valid stored
 // thresholds: CliffGuard starts MissingSample and requires local USB rearm.
 bool load_calibration() {
+  desk_robot::CliffCalibrationOwner owner{};
+  if (esp_efuse_mac_get_default(owner.data()) != ESP_OK ||
+      !desk_robot::valid_cliff_calibration_owner(owner)) return false;
   Preferences preferences;
   if (!preferences.begin("cliffsafety", true)) return false;
-  desk_robot::StoredCliffCalibration saved{};
+  desk_robot::BoundStoredCliffCalibration saved{};
   const bool right_length =
       preferences.getBytesLength("calibration") == saved.size();
   const size_t read = right_length
@@ -177,13 +181,16 @@ bool load_calibration() {
   preferences.end();
   desk_robot::CliffConfig decoded{};
   return read == saved.size() &&
-         desk_robot::decode_stored_calibration(saved, decoded) &&
+         desk_robot::decode_bound_calibration(saved, owner, decoded) &&
          cliff_guard.configure(decoded);
 }
 
 bool save_calibration() {
   if (!cliff_guard.configured()) return false;
-  const auto saved = desk_robot::encode_stored_calibration(cliff_guard.configuration());
+  desk_robot::CliffCalibrationOwner owner{};
+  if (esp_efuse_mac_get_default(owner.data()) != ESP_OK ||
+      !desk_robot::valid_cliff_calibration_owner(owner)) return false;
+  const auto saved = desk_robot::encode_bound_calibration(cliff_guard.configuration(), owner);
   Preferences preferences;
   if (!preferences.begin("cliffsafety", false)) return false;
   const size_t written =

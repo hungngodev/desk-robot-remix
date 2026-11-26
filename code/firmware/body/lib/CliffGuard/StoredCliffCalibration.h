@@ -2,6 +2,7 @@
 
 #include "CliffGuard.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -14,7 +15,8 @@ using StoredCliffCalibration = std::array<std::uint8_t, 40>;
 constexpr std::uint32_t kCalibrationMagic = 0x434C4635U;
 constexpr std::uint32_t kCalibrationVersion = 1U;
 
-inline std::uint32_t read_calibration_le(const StoredCliffCalibration& bytes,
+template <std::size_t N>
+inline std::uint32_t read_calibration_le(const std::array<std::uint8_t, N>& bytes,
                                          std::size_t offset, unsigned width) noexcept {
   std::uint32_t value = 0;
   for (unsigned i = 0; i < width; ++i)
@@ -22,7 +24,8 @@ inline std::uint32_t read_calibration_le(const StoredCliffCalibration& bytes,
   return value;
 }
 
-inline void write_calibration_le(StoredCliffCalibration& bytes, std::size_t offset,
+template <std::size_t N>
+inline void write_calibration_le(std::array<std::uint8_t, N>& bytes, std::size_t offset,
                                  unsigned width, std::uint32_t value) noexcept {
   for (unsigned i = 0; i < width; ++i)
     bytes[offset + i] = static_cast<std::uint8_t>(value >> (8U * i));
@@ -74,6 +77,48 @@ inline bool decode_stored_calibration(const StoredCliffCalibration& bytes,
   config = decoded;
   // Applying calibration still requires configure(), fresh samples and local rearm.
   return true;
+}
+
+// The production NVS record wraps the original payload with the factory
+// WROOM eFuse MAC and an outer checksum. Never auto-adopt an unbound v1 blob:
+// its thresholds might have been measured on a different physical unit.
+using CliffCalibrationOwner = std::array<std::uint8_t, 6>;
+constexpr std::size_t kCliffOwnerOffset = StoredCliffCalibration{}.size();
+constexpr std::size_t kCliffOwnerChecksumOffset = kCliffOwnerOffset + CliffCalibrationOwner{}.size();
+using BoundStoredCliffCalibration = std::array<std::uint8_t, kCliffOwnerChecksumOffset + 4>;
+
+inline bool valid_cliff_calibration_owner(const CliffCalibrationOwner& owner) noexcept {
+  return (owner[0] & 1U) == 0 &&
+         std::any_of(owner.begin(), owner.end(), [](std::uint8_t byte) { return byte != 0; });
+}
+
+inline std::uint32_t bound_calibration_checksum(const BoundStoredCliffCalibration& bytes) noexcept {
+  std::uint32_t value = 2166136261U;
+  for (std::size_t i = 0; i < kCliffOwnerChecksumOffset; ++i)
+    value = (value ^ bytes[i]) * 16777619U;
+  return value;
+}
+
+inline BoundStoredCliffCalibration encode_bound_calibration(
+    const CliffConfig& config, const CliffCalibrationOwner& owner) noexcept {
+  BoundStoredCliffCalibration bytes{};
+  const auto payload = encode_stored_calibration(config);
+  std::copy(payload.begin(), payload.end(), bytes.begin());
+  std::copy(owner.begin(), owner.end(), bytes.begin() + kCliffOwnerOffset);
+  write_calibration_le(bytes, kCliffOwnerChecksumOffset, 4, bound_calibration_checksum(bytes));
+  return bytes;
+}
+
+inline bool decode_bound_calibration(const BoundStoredCliffCalibration& bytes,
+                                     const CliffCalibrationOwner& owner,
+                                     CliffConfig& config) noexcept {
+  if (!valid_cliff_calibration_owner(owner) ||
+      !std::equal(owner.begin(), owner.end(), bytes.begin() + kCliffOwnerOffset) ||
+      read_calibration_le(bytes, kCliffOwnerChecksumOffset, 4) !=
+          bound_calibration_checksum(bytes)) return false;
+  StoredCliffCalibration payload{};
+  std::copy_n(bytes.begin(), payload.size(), payload.begin());
+  return decode_stored_calibration(payload, config);
 }
 
 }  // namespace desk_robot

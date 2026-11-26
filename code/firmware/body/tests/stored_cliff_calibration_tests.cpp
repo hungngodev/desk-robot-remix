@@ -105,6 +105,49 @@ void valid_legacy_record_still_requires_rearm() {
     CHECK(guard.evaluate(11U));
   }
 }
+void bound_record_refuses_other_wroom_and_corruption() {
+  constexpr CliffCalibrationOwner unit_a{0x24, 1, 2, 3, 4, 5};
+  constexpr CliffCalibrationOwner unit_b{0x24, 1, 2, 3, 4, 6};
+  constexpr CliffCalibrationOwner no_owner{};
+  const auto good = encode_bound_calibration(measured_config(), unit_a);
+  const auto check_bound_hold = [](const BoundStoredCliffCalibration& bytes,
+                                   const CliffCalibrationOwner& owner) {
+    CliffConfig decoded{};
+    CliffGuard guard;
+    CHECK(!decode_bound_calibration(bytes, owner, decoded));
+    CHECK(!decoded.calibrated);
+    CHECK(!guard.configured());
+    for (std::uint8_t lane = 0; lane < kCliffSensorCount; ++lane)
+      guard.sample(lane, lane == 4 ? 300 : 45, true, 10U);
+    CHECK(!guard.evaluate(10U));
+    CHECK(!guard.try_rearm(10U));
+    CHECK(guard.fault() == CliffFault::Unconfigured);
+  };
+  check_bound_hold(good, unit_b);
+  check_bound_hold(good, no_owner);
+  check_bound_hold(encode_bound_calibration(measured_config(), no_owner), no_owner);
+  for (std::size_t offset = 0; offset < good.size(); ++offset) {
+    for (unsigned bit = 0; bit < 8; ++bit) {
+      auto corrupt = good;
+      corrupt[offset] ^= static_cast<std::uint8_t>(1U << bit);
+      check_bound_hold(corrupt, unit_a);
+    }
+  }
+  BoundStoredCliffCalibration unbound{};
+  const auto legacy = encode_stored_calibration(measured_config());
+  std::copy(legacy.begin(), legacy.end(), unbound.begin());
+  check_bound_hold(unbound, unit_a);
+  CliffConfig decoded{};
+  CHECK(decode_bound_calibration(good, unit_a, decoded));
+  CHECK(encode_bound_calibration(decoded, unit_a) == good);
+  CliffGuard guard;
+  CHECK(guard.configure(decoded));
+  CHECK(!guard.try_rearm(10U));
+  for (std::uint8_t lane = 0; lane < kCliffSensorCount; ++lane)
+    guard.sample(lane, lane == 4 ? 300 : 45, true, 11U);
+  CHECK(!guard.evaluate(11U));
+  CHECK(guard.try_rearm(11U));
+}
 }  // namespace
 
 int main() {
@@ -112,6 +155,7 @@ int main() {
     corrupt_header_and_checksum();
     corrupt_thresholds_with_valid_checksum();
     valid_legacy_record_still_requires_rearm();
+    bound_record_refuses_other_wroom_and_corruption();
   } catch (const std::exception& error) {
     std::cerr << "FAIL " << error.what() << '\n';
     return EXIT_FAILURE;
