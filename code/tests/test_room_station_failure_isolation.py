@@ -14,7 +14,7 @@ SOURCE = Path(__file__).resolve().parents[1] / "firmware/room_station/src"
 def test_scd_failure_does_not_hide_healthy_room_sensors(tmp_path, fault):
     source = (SOURCE / "main.cpp").read_text()
     names = ("scd_step", "scd_observation", "bme_observation", "radar_observation",
-             "soil_observation", "thermal_observation", "report")
+             "soil_observation", "thermal_observation", "report", "loop")
     functions = []
     for name in names:
         start = source.index(f"void {name}(")
@@ -32,7 +32,7 @@ def test_scd_failure_does_not_hide_healthy_room_sensors(tmp_path, fault):
 using std::isfinite;
 #define F(value) value
 #define ROOM_SOIL_FITTED 0
-constexpr uint32_t kScdNoSampleMs = 15000, kScdStaleMs = 8500;
+constexpr uint32_t kScdNoSampleMs = 15000, kScdStaleMs = 8500, kReportMs = 1000;
 constexpr uint32_t kBmeStaleMs = 3000, kRadarStaleMs = 3000, kThermalStaleMs = 3000;
 constexpr unsigned AMG88xx_PIXEL_ARRAY_SIZE = 64;
 uint32_t clock_ms, scd_started_ms, last_scd_ms, sequence, thermal_sample_ms;
@@ -59,9 +59,45 @@ struct Telemetry {
 } telemetry;
 void jsbool(bool value) { telemetry.print(value ? "true" : "false"); }
 void number(float value, int = 2) { telemetry.print(value); }
+int usb_port, watchdog_registers;
+int* NRF_WDT = &watchdog_registers;
+bool room_watchdog_ready = true;
+uint32_t last_report_ms;
+unsigned passes;
 struct UsbTx {
   void queue_report(Telemetry& value) { std::cout << value.output.str(); }
+  void queue_ack(int) {}
+  void step(int) {}
 } usb_tx;
+struct SerialPort {
+  int available() { return 0; }
+  int read() { return -1; }
+} Serial;
+struct EpochSync {
+  bool consume(uint8_t) { return false; }
+  int token() { return 0; }
+} usb_epoch_sync;
+struct Radar {
+  void read() {}
+} radar;
+struct RadarUart {
+  void begin_poll() {}
+  bool take_completed_data_frame() { return true; }
+  desk_robot_room::RadarTargetSample completed_sample() {
+    return {true, false, true, 0, static_cast<uint16_t>(49 + clock_ms / 1000)};
+  }
+} radar_uart;
+struct Watchdog {
+  void completed_pass(int&) { ++passes; }
+} room_watchdog;
+void recover_sensors(uint32_t) {}
+void thermal_step(uint32_t) {}
+void soil_step() {}
+// A healthy completed conversion is supplied by the simulated BME driver.
+void bme_step(uint32_t now) {
+  const unsigned i = now / 1000 - 1;
+  bme_completed.publish(23 + i, 41, 100000, 12345 + i, now);
+}
 """ + "\n".join(functions) + r"""
 int main(int argc, char**) {
   for (unsigned i = 0; i < 7; ++i) {
@@ -70,13 +106,9 @@ int main(int argc, char**) {
       if (argc == 2) scd.readiness_error = 1;
       else scd.measurement_error = 1;
     }
-    // Independent completed BME conversion and radar data packet each pass.
-    bme_completed.publish(23 + i, 41, 100000, 12345 + i, clock_ms);
-    radar_completed = {true, false, true, 0, static_cast<uint16_t>(50 + i)};
-    radar_sample_clock.observe(true, true, clock_ms);
-    scd_step(clock_ms);
-    report(clock_ms);
+    loop();
   }
+  return passes == 7 ? 0 : 1;
 }
 """
     native = tmp_path / "room_failure.cpp"
