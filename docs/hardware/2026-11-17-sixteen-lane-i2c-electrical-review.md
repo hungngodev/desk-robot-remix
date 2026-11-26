@@ -25,6 +25,22 @@ The effective resistance is 1 divided by the sum of reciprocal
 installed resistances. Rise time is approximated by
 0.8473 times equivalent resistance times total capacitance.
 At 3.3 V and 3 mA the minimum equivalent resistance is about 966.7 ohms.
+This is the nominal boundary, not a universal resistor target. The preflight
+accepts each pullup rail from 3.25 to 3.35 V inclusive and sums each
+installed resistor's sink contribution as (max(3.3 V, measured rail V)
+minus 0.4 V) / resistance. A uniform 3.35 V rail therefore requires at
+least 983.3 ohms equivalent (before rounding), and mixed rails must be
+summed individually. A rail below 3.3 V does not reduce the modelled
+sink current. The exact 3 mA limit is checked before display rounding.
+
+Both muxes start with all channels deselected. The upstream pullup
+network alone must meet the 20 to 300 ns rise window and 3 mA sink
+budget, independently of any downstream pullups. Each selected branch
+must also have its own installed pullups on both SDA and SCL. With one
+branch selected, the combined capacitance must not exceed 400 pF and
+the combined rise and sink limits must pass again. A combined RC pass
+cannot compensate for a failing upstream-only network or missing
+branch pullups.
 
 | ILLUSTRATIVE 3.3 V network | Equivalent pullup | Rise at 120 pF | Current at 0.4 V LOW | On-paper result |
 | --- | ---: | ---: | ---: | --- |
