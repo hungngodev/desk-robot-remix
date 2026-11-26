@@ -3,10 +3,14 @@ import math
 
 import pytest
 from desk_robot.initiative_policy import (
+    battery_warning_pending,
+    camera_scene_signature,
     cooldown_pending,
+    event_budget_reason,
     event_cooldown,
     event_identity,
     event_window_has_capacity,
+    quiet_voice_reason,
     quiet_voice_veto,
     receipt_veto,
 )
@@ -114,3 +118,67 @@ def test_event_window_bounds_one_thousand_fresh_candidates_without_evicting_fenc
     assert not event_window_has_capacity(entries, new_key, now=104.99, window=5.0)
     assert event_window_has_capacity(entries, new_key, now=105.0, window=5.0)
     assert not entries
+
+
+@pytest.mark.parametrize(
+    ("elapsed", "pending"),
+    [(-0.01, False), (0.0, True), (119.99, True), (120.0, False)],
+)
+def test_battery_warning_has_its_own_exact_floor(elapsed, pending):
+    assert battery_warning_pending(now=200.0 + elapsed, last=200.0) is pending
+
+
+@pytest.mark.parametrize(
+    ("event_at", "fleet_at", "expected"),
+    [
+        (100.0, 100.0, "duplicate_event_cooldown"),
+        (95.0, 100.0, "fleet_speech_cooldown"),
+        (95.0, 88.0, None),
+        (101.0, 101.0, None),
+    ],
+)
+def test_event_budget_reason_preserves_order_and_boundaries(event_at, fleet_at, expected):
+    assert event_budget_reason(
+        now=100.0, previous_event_at=event_at, fleet_spoken_at=fleet_at,
+        event_window=5.0, speech_interval=12.0,
+    ) == expected
+
+
+@pytest.mark.parametrize(
+    ("local", "scheduled", "human", "expected"),
+    [
+        (True, True, True, "manual_quiet"),
+        (False, True, True, "scheduled_quiet_hours"),
+        (False, False, True, "human_floor_busy"),
+        (False, False, False, None),
+    ],
+)
+def test_quiet_reason_preserves_precedence(local, scheduled, human, expected):
+    def human_active():
+        assert not local and not scheduled, "quiet must short-circuit human-floor access"
+        return human
+
+    assert quiet_voice_reason(
+        local_quiet=local, scheduled_quiet=scheduled, human_active=human_active,
+    ) == expected
+
+
+def test_receipt_without_optional_human_turn_callback():
+    assert receipt_veto(
+        now=100.0, offered_at=100.0, max_age=10.0,
+        quiet_changed_at=100.0, latest_human_turn=None,
+    ) is None
+
+
+def test_single_content_word_preserves_original_signature():
+    assert camera_scene_signature("  A KEY appeared  ") == "a key appeared"
+    assert camera_scene_signature(" THE ") == "the"
+
+
+def test_nonphysical_noncamera_event_does_not_claim_eyewitness():
+    expected = ((None, "activity", "other:idle play"), "idle play")
+    for robot_id in ("pet1", "pet2"):
+        assert event_identity(
+            robot_id=robot_id, kind="activity", description=" Idle PLAY ",
+            camera_derived=False, physical_event=False,
+        ) == expected
