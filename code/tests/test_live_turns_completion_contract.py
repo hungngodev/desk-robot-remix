@@ -1,7 +1,6 @@
 """Exercise the offline LiveTurns adapter contract without a network or device."""
 
 import pytest
-
 from desk_robot.live_turns import LiveTurns
 
 

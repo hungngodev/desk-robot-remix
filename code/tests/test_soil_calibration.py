@@ -1,7 +1,6 @@
 """Measured plant probe calibration, never synthetic sensor truth."""
 
 import pytest
-
 from desk_robot.soil_calibration import SoilCalibration
 
 

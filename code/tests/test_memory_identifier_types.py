@@ -1,7 +1,6 @@
 """Malformed memory identifiers must fail closed without regex TypeError."""
 
 import pytest
-
 from desk_robot.memory import MemoryStore
 
 
