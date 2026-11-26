@@ -151,8 +151,9 @@ static void check_failed_deassert_write() {
   const auto ends = wire.mcp_terminated_transmissions;
   wire.fail_mcp_register_write = true;
   scan(bus, 60, 132);
-  CHECK(wire.failed_mcp_writes >= 2);
-  CHECK(wire.mcp_terminated_transmissions >= ends + 2);
+  // The failed direction pointer prevents any subsequent latch write.
+  CHECK(wire.failed_mcp_writes >= 1);
+  CHECK(wire.mcp_terminated_transmissions >= ends + 1);
   CHECK(!bus.haptic_ready() && !bus.readings().dock.valid);
   CHECK(!bus.request_haptic(133));
   CHECK(wire.mcp_olatb == 0x04); // fake rejected the write; not a motor timer
@@ -227,8 +228,30 @@ static void check_runtime_port_configuration_fault() {
   }
 }
 
+static void check_unverified_direction_blocks_latch() {
+  TwoWire wire;
+  wire.dock_gpioA = 0x0C;
+  desk_robot::AccessorySensors bus;
+  CHECK(bus.begin(wire));
+  CHECK(bus.request_haptic(1));
+  scan(bus, 0, 48);
+  CHECK(wire.mcp_olatb == 0x04 && wire.haptic_rising_edges == 1);
+  wire.fail_mcp_direction_readback = true;
+  scan(bus, 60, 132);
+  CHECK(!bus.readings().dock.valid && !bus.haptic_ready());
+  // The external one-shot owns the physical deadline. Software cannot
+  // write even LOW until it verifies the port configuration again.
+  CHECK(wire.mcp_olatb == 0x04 && !bus.request_haptic(133));
+  wire.fail_mcp_direction_readback = false;
+  scan(bus, 144, 216);
+  CHECK(bus.readings().dock.valid && wire.mcp_olatb == 0);
+  CHECK(wire.haptic_rising_edges == 1 && !bus.haptic_ready());
+  CHECK(!wire.unsafe_parallel_mux);
+}
+
 int main() {
   try {
+    check_unverified_direction_blocks_latch();
     check_runtime_port_configuration_fault();
     check_external_bus_invalidation();
     check_boot_configuration();

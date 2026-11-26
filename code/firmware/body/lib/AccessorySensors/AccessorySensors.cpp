@@ -781,7 +781,8 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
       dock_status(now_ms);
 #if DESK_ROBOT_ENABLE_HAPTIC
       // Short, one-shot, touch-driven feedback only; dock monitor stays first.
-      if (!mcp_ports_.faulted()) haptic_step(now_ms);
+      // Even a LOW retry needs a freshly verified register configuration.
+      if (mcp_ports_.verified()) haptic_step(now_ms);
 #endif
       // Optional NFC work is subordinate to the required dock monitor.
       // Never spend a second bus transaction if mandatory GPIO failed.

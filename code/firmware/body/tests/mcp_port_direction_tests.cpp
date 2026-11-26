@@ -40,11 +40,11 @@ static void check_every_direction_bit() {
           lock.expect_haptic_output();
           regs.values[1] = 0xFB;
         }
-        CHECK(regs.verify(lock));
+        CHECK(regs.verify(lock) && lock.verified());
         CHECK(regs.writes == 0);
         regs.values[port] ^= static_cast<std::uint8_t>(1U << bit);
         regs.values[0x15] = 0x04;
-        CHECK(!regs.verify(lock) && lock.faulted());
+        CHECK(!regs.verify(lock) && lock.faulted() && !lock.verified());
         CHECK(regs.values[0] == 0xFF && regs.values[1] == 0xFF);
         CHECK(regs.values[0x15] == 0 && regs.latch_writes == 1);
         const auto writes = regs.writes;
@@ -67,8 +67,23 @@ static void check_reset_and_transport_faults() {
   missing_optional.fail_read = 0x0D;
   CHECK(missing_optional.verify(dock_only, false));
   CHECK(!missing_optional.verify(dock_only) && !dock_only.faulted());
+  CHECK(!dock_only.verified());
   missing_optional.fail_read = -1;
   CHECK(missing_optional.verify(dock_only));
+
+  // A known unsafe GPA direction cannot be downgraded to a transient
+  // read failure just because the next register is unavailable.
+  Registers mixed;
+  desk_robot::McpPortDirectionLock mixed_lock;
+  CHECK(mixed.verify(mixed_lock) && mixed_lock.verified());
+  mixed.values[0] = 0xFE;
+  mixed.fail_read = 1;
+  CHECK(!mixed.verify(mixed_lock) && mixed_lock.faulted());
+  CHECK(!mixed_lock.verified() && mixed.latch_writes == 0);
+  mixed.fail_read = -1;
+  CHECK(!mixed.verify(mixed_lock) && !mixed_lock.verified());
+  CHECK(mixed.values[0] == 0xFF && mixed.values[1] == 0xFF);
+  CHECK(mixed.latch_writes == 1);
 
   Registers regs;
   desk_robot::McpPortDirectionLock lock;

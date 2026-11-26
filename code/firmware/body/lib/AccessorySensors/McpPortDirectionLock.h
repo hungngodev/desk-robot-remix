@@ -8,15 +8,18 @@ class McpPortDirectionLock {
  public:
   void expect_haptic_output() { expected_b_ = 0xFB; }
   bool faulted() const { return faulted_; }
+  bool verified() const { return verified_; }
 
   template <typename Read, typename Write>
   bool verify(Read read, Write write, bool optional_configured) {
+    verified_ = false;
     if (!faulted_) {
-      std::uint8_t a = 0, b = 0, pull_a = 0, pull_b = 0;
-      if (!read(0x00, a) || !read(0x01, b) || !read(0x0C, pull_a) ||
-          (optional_configured && !read(0x0D, pull_b))) return false;
-      if (a == 0xFF && b == expected_b_ && pull_a == 0x0F &&
-          (!optional_configured || pull_b == 0x01)) return true;
+      const auto result = check_registers(read, optional_configured);
+      if (result == Check::Unavailable) return false;
+      if (result == Check::Verified) {
+        verified_ = true;
+        return true;
+      }
       faulted_ = true;
     }
     if (!reset_verified_) reset_verified_ = reset_outputs(read, write);
@@ -24,6 +27,22 @@ class McpPortDirectionLock {
   }
 
  private:
+  enum class Check { Verified, Unavailable, Mismatch };
+
+  template <typename Read>
+  Check check_registers(Read read, bool optional_configured) const {
+    const std::uint8_t registers[] = {0x00, 0x01, 0x0C, 0x0D};
+    const std::uint8_t expected[] = {0xFF, expected_b_, 0x0F, 0x01};
+    const unsigned count = optional_configured ? 4U : 3U;
+    for (unsigned i = 0; i < count; ++i) {
+      std::uint8_t actual = 0;
+      if (!read(registers[i], actual)) return Check::Unavailable;
+      // Do not let a later read failure hide an already observed mismatch.
+      if (actual != expected[i]) return Check::Mismatch;
+    }
+    return Check::Verified;
+  }
+
   template <typename Read, typename Write>
   static bool reset_outputs(Read read, Write write) {
     // Independently attempt both ports even when the first write fails.
@@ -39,6 +58,7 @@ class McpPortDirectionLock {
   }
 
   std::uint8_t expected_b_ = 0xFF;
+  bool verified_ = false;
   bool faulted_ = false;
   bool reset_verified_ = false;
 };

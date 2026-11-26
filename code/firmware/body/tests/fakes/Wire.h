@@ -64,6 +64,7 @@ class TwoWire {
   std::uint8_t mcp_gppua = 0, mcp_gppub = 0;
   unsigned haptic_rising_edges = 0;
   bool fail_mcp_latch_readback = false;
+  bool fail_mcp_direction_readback = false;
   bool nfc_connected = false;
   bool nfc_tag_present = false;
   // One complete I2C ACK with a broken PN532 checksum, not a tag removal.
@@ -505,8 +506,10 @@ class TwoWire {
       if (fail_mcp_latch_readback) return 0;
       inbound = {mcp_olatb};
     } else if (addr == 0x20 && register_address == 0x00) {
+      if (fail_mcp_direction_readback) return 0;
       inbound = {mcp_iodira};
     } else if (addr == 0x20 && register_address == 0x01) {
+      if (fail_mcp_direction_readback) return 0;
       inbound = {mcp_iodirb};
     } else if (addr == 0x20 && register_address == 0x0C) {
       inbound = {mcp_gppua};
