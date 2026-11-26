@@ -135,8 +135,12 @@ async def test_dock_approach_rejects_turn_without_three_fresh_clear_ranges(
         await controller.close()
 
 
+@pytest.mark.parametrize("ranges, expected_pulses", [
+    ((500, 150), 1),
+    ((500, 500, 500, 500), 3),
+])
 async def test_dock_approach_moves_once_then_holds_before_contacts(
-    settings, monkeypatch,
+    settings, monkeypatch, ranges, expected_pulses,
 ):
     from desk_robot.controller import Job
     from desk_robot.dock_vision import DockCameraCalibration, DockPose
@@ -177,7 +181,7 @@ async def test_dock_approach_moves_once_then_holds_before_contacts(
         fx=410, fy=410, cx=320, cy=240, tag_side_mm=60, marker_id=1,
         mount_lateral_offset_mm=0, mount_yaw_deg=0,
     )
-    distances = iter((500, 150))
+    distances = iter(ranges)
     mock_dock_detector(
         monkeypatch,
         lambda jpeg, cal, *, captured_at: DockPose(
@@ -192,7 +196,13 @@ async def test_dock_approach_moves_once_then_holds_before_contacts(
         assert result["phase"] == "hold"
         assert not result["charging_authorized"]
         assert not result["physical_acceptance_pass"]
-        assert head.commands == ["drive 20 20 100", "stop"]
+        assert head.commands == ["drive 20 20 100", "stop"] * expected_pulses
+        if expected_pulses == 3:
+            assert result["help_requested"] is True
+            assert result["motor_authorized"] is False
+            assert "three pulses" in result["reason"]
+        else:
+            assert not result.get("help_requested", False)
     finally:
         await controller.close()
 

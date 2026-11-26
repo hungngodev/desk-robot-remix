@@ -16,6 +16,7 @@ from .command_framing import (
 )
 from .config import Settings
 from .dock_ir import validate_ir
+from .dock_progress import DockApproachProgress
 from .dock_runtime import (
     detect_bounded,
     load_real_dock_calibration,
@@ -1418,6 +1419,7 @@ class Coordinator:
         head = self.heads[job.robot_id]
         expected_dock = self.robot(job.robot_id).dock_beacon_id
         previous_ir: tuple[int, int] | None = None
+        progress = DockApproachProgress()
 
         async def capture_current_dock_frame() -> object:
             # The bounded reply starts in a child task, after the health await.
@@ -1511,6 +1513,17 @@ class Coordinator:
                 return {
                     "phase": "hold", "reason": decision.reason,
                     "charging_authorized": False, "physical_acceptance_pass": False,
+                }
+            # A fourth forward pulse is not justified when three earlier pulses
+            # failed to establish a new closest marker range. Never back up:
+            # rear clearance is not a qualified movement authority.
+            if decision.phase == "approach" and pose is not None and progress.observe(pose.z_mm):
+                reason = "Dock approach blocked: three pulses without closer marker; help needed"
+                job.events.append(reason)
+                return {
+                    "phase": "hold", "reason": reason, "help_requested": True,
+                    "motor_authorized": False, "charging_authorized": False,
+                    "physical_acceptance_pass": False,
                 }
             # Actual hardware docking requires BOTH independent IR receivers
             # to see the code flashed on THIS pet's assigned station. A valid
