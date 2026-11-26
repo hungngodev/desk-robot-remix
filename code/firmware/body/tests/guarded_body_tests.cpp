@@ -2785,11 +2785,24 @@ static void raw_bumper_trip_preempts_debounce_and_preserves_payload() {
   CHECK(send(body, "arm", 0) == "OK arm");
   CHECK(send(body, "drive 30 30 250", 0).find("OK drive") == 0);
   CHECK(send(body, "grip 110", 0) == "OK grip angle=110");
-  body.tick(20);
+  desk_robot::StepperDrive left_motor, right_motor;
+  for (std::uint32_t ms = 0; ms <= 20; ++ms) {
+    body.tick(ms);
+    left_motor.update(ms * 1000, body.state().left, body.state().armed);
+    right_motor.update(ms * 1000, body.state().right, body.state().armed);
+  }
+  CHECK(left_motor.mask() != 0 && right_motor.mask() != 0);
+  CHECK(left_motor.rate_milli_steps_per_second() > 0);
+  CHECK(right_motor.rate_milli_steps_per_second() > 0);
   const int held_grip = body.state().grip;
   body.sample_bumper_input(true); // first raw GPIO read, before 25 ms classifier
   CHECK(!body.state().armed && body.state().left == 0 &&
         body.state().right == 0);
+  // Same timestamp: the local fault must bypass both acceleration ramps.
+  CHECK(left_motor.update(20000, body.state().left, body.state().armed) == 0);
+  CHECK(right_motor.update(20000, body.state().right, body.state().armed) == 0);
+  CHECK(left_motor.rate_milli_steps_per_second() == 0);
+  CHECK(right_motor.rate_milli_steps_per_second() == 0);
   CHECK(body.state().servos_attached &&
         body.state().grip == held_grip &&
         body.state().grip_target == held_grip);
@@ -2798,6 +2811,11 @@ static void raw_bumper_trip_preempts_debounce_and_preserves_payload() {
   CHECK(send(body, "arm", 21) == "ERR arm bumper_latched");
   body.sample_bumper_input(false);
   CHECK(!body.state().armed); // no automatic travel after the contact clears
+  for (bool local : {false, true}) {
+    CHECK(send(body, "drive 30 30 250", 22, local) == "ERR drive disarmed");
+    CHECK(left_motor.update(22000, body.state().left, body.state().armed) == 0);
+    CHECK(right_motor.update(22000, body.state().right, body.state().armed) == 0);
+  }
   CHECK(send(body, "arm", 22) == "ERR arm bumper_latched");
   CHECK(send(body, "status", 22).find("\"fault\":\"bumper_latched\"") !=
         std::string::npos);
@@ -2807,6 +2825,8 @@ static void raw_bumper_trip_preempts_debounce_and_preserves_payload() {
   CHECK(send(body, "rearm", 22, true) == "OK rearm");
   CHECK(send(body, "arm", 22) == "OK arm");
   CHECK(body.state().left == 0 && body.state().right == 0);
+  CHECK(left_motor.update(22000, body.state().left, body.state().armed) == 0);
+  CHECK(right_motor.update(22000, body.state().right, body.state().armed) == 0);
 
   // The raw local interlock must also work before the first 25 ms
   // classifier sample sets the optional-input mask after boot.
