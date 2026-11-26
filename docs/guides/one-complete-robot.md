@@ -80,12 +80,12 @@ Follow [Mac and firmware interfaces](interfaces.md), [live conversation](live-co
 
 Quiet mode uses the existing operator-only `POST /v1/pet/{robot_id}/quiet` route. Send `{"quiet": true}` to suppress spontaneous pet speech and activity while keeping user-requested interaction available, and send `{"quiet": false}` through the same operator route to leave quiet mode. The tool token is intentionally not authorized to change quiet mode. Entering quiet cancels current pet speech through the same bounded stop path; it does not arm movement, clear a local WROOM fault or qualify an acoustic stop.
 
-`cli.py` does not define a `quiet` subcommand; use the existing CLI for status and full STOP, and `curl` with your private operator token from `local.env` (never echo or commit token values, and replace `robot-01` with your configured ID from `config/local.toml`) for quiet toggling:
+`cli.py` does not define a `quiet` subcommand; use the existing CLI for status and full STOP, and `curl` with your private operator token from `local.env` (never echo or commit token values, and replace `robot-01` with your configured ID from `config/local.toml`) for quiet toggling. Run the following commands from the repository's `code/` directory; issue STOP independently of the status result:
 
 ```sh
 # Read status and issue urgent full STOP (WROOM halt + pet pause + audio stop)
-cd code && uv run --no-sync desk-robot status robot-01
-cd code && uv run --no-sync desk-robot stop robot-01
+uv run --no-sync desk-robot --config config/local.toml status robot-01
+uv run --no-sync desk-robot --config config/local.toml stop robot-01
 
 # Operator-only quiet on / off (load DESK_ROBOT_API_TOKEN in your local shell from code/config/local.env)
 curl -fsS -X POST -H "Authorization: Bearer ${DESK_ROBOT_API_TOKEN:?}" \
@@ -96,7 +96,7 @@ curl -fsS -X POST -H "Authorization: Bearer ${DESK_ROBOT_API_TOKEN:?}" \
   "http://127.0.0.1:8765/v1/pet/robot-01/quiet"
 ```
 
-Distinguish the three interruption paths and failure fallback: (1) **human voice barge-in** preempts the fleet speech floor and obsolete optional perception work, stops active autonomous exploration, and blocks new motion admission while human speech is active; it does not by itself cancel an already authorized manual pickup or dock job, (2) **quiet mode** silences unsolicited initiative/speech while leaving explicit questions enabled, and (3) **full STOP** (`desk-robot stop <robot_id>` or `POST /v1/robots/{robot_id}/stop`) halts WROOM actuators, pauses the pet loop, and flushes head audio. A HTTP response or flush confirms server dispatch, **not** physical acoustic decay; if the status/STOP call fails or times out, treat actuator and audio stop as **unverified** and disconnect motor/battery power before handling.
+Distinguish the three interruption paths and failure fallback: (1) **human voice barge-in** preempts the fleet speech floor and obsolete optional perception work, stops active autonomous exploration, and blocks new motion admission while human speech is active; it does not by itself cancel an already authorized manual pickup or dock job, (2) **quiet mode** silences unsolicited initiative/speech while leaving explicit questions enabled, and (3) **full STOP** (`desk-robot --config config/local.toml stop <robot_id>` or `POST /v1/robots/{robot_id}/stop`) halts WROOM actuators, pauses the pet loop, and flushes head audio. A HTTP response or flush confirms server dispatch, **not** physical acoustic decay; if the status/STOP call fails or times out, treat actuator and audio stop as **unverified** and disconnect motor/battery power before handling.
 
 Do not put personal audio, camera recordings, room occupancy histories, raw conversations or private keys in GitHub. Keep per pet memory isolated. Record software and physical trials separately, with robot identity, board revision, source hash, test fixture, capture clock, expected and actual behavior, failures and safe recovery. STOP, fault, contact loss, reboot and putdown require deliberate explicit safe resume, never automatic rearm.
 
