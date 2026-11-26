@@ -406,3 +406,98 @@ def test_unsafe_viewpoint_is_not_counted_as_observed(first_inspected, remaining)
     assert result["search_exhausted"] is first_inspected
     assert result["remaining_viewpoints"] == remaining
     assert not result["arrived"] and not result["motor_authorized"]
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        ({"may_execute": True}, "unexpected_route_authority"),
+        ({"cells": ()}, "invalid_route_receipt"),
+        ({"cells": ((8, 7),)}, "invalid_route_receipt"),
+        ({"final_heading": True}, "invalid_route_receipt"),
+        ({"final_heading": 1}, "invalid_route_receipt"),
+        ({"robot_id": "other"}, "invalid_route_receipt"),
+        ({"origin_id": "other"}, "invalid_route_receipt"),
+        ({"epoch": 9}, "invalid_route_receipt"),
+        ({"session_id": "other"}, "invalid_route_receipt"),
+        ({"turn_id": "other"}, "invalid_route_receipt"),
+        ({"status": "rejected", "reason": "unsafe_start"}, "unsafe_start"),
+    ],
+)
+def test_search_refuses_invalid_route_receipts_without_trying_next_view(
+    monkeypatch, change, reason,
+):
+    from desk_robot import object_search
+
+    _, _, _, _, _, _, view = fixtures()
+    route = search().route
+    assert route is not None
+    calls = []
+
+    def plan(grid, request, envelope, **kwargs):
+        calls.append(request.goal)
+        return replace(route, **change)
+
+    monkeypatch.setattr(object_search, "plan_route", plan)
+    second = replace(view, viewpoint_id="view-2", cell=(10, 7), priority=1)
+    result = search(candidates=(second, view))
+    assert calls == [view.cell]
+    assert result.status == "rejected" and result.reason == reason
+    assert result.considered == 1 and result.route is None
+    assert not result.may_execute and not result.arrived
+
+
+def test_search_checks_liveness_before_accepting_route_receipt(monkeypatch):
+    from desk_robot import object_search
+
+    route = search().route
+    assert route is not None
+    current = True
+
+    def plan(*args, **kwargs):
+        nonlocal current
+        current = False
+        return replace(route, may_execute=True)
+
+    monkeypatch.setattr(object_search, "plan_route", plan)
+    result = search(is_current=lambda: current)
+    assert result.status == "rejected" and result.reason == "request_invalidated"
+    assert result.considered == 1 and result.route is None
+    assert not result.may_execute and not result.arrived
+
+
+def test_search_validates_all_viewpoints_before_planning(monkeypatch):
+    from desk_robot import object_search
+
+    _, _, _, _, _, target, view = fixtures()
+
+    def unexpected_plan(*args, **kwargs):
+        pytest.fail("invalid candidate must prevent all route planning")
+
+    monkeypatch.setattr(object_search, "plan_route", unexpected_plan)
+    foreign = replace(view, viewpoint_id="view-2", robot_id="other", priority=100)
+    result = search(candidates=(view, foreign), max_viewpoints=1)
+    assert result.reason == "foreign_or_stale_viewpoint" and result.considered == 0
+    result = search(candidates=(view, foreign), target=replace(target, search_hint_mm=None))
+    assert result.reason == "no_same_map_last_seen_hint" and result.considered == 0
+
+
+@pytest.mark.parametrize("bad_owner", [True, False])
+def test_callback_exceptions_preserve_failure_reason_and_order(bad_owner):
+    calls = []
+
+    def owner():
+        calls.append("owner")
+        if bad_owner:
+            raise RuntimeError("owner unavailable")
+        return True
+
+    def clock():
+        calls.append("clock")
+        raise RuntimeError("clock unavailable")
+
+    result = search(is_current=owner, clock_us=clock)
+    assert result.reason == ("request_invalidated" if bad_owner else "invalid_clock")
+    assert calls == (["owner"] if bad_owner else ["owner", "clock"])
+    assert result.considered == 0 and result.route is None
+    assert not result.may_execute and not result.arrived

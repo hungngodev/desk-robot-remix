@@ -104,13 +104,48 @@ def propose_object_search(
     This function cannot dispatch motors, verify object presence or declare
     an arrival. Callers must repeat all owner/geometry checks after any await.
     """
+    invalid = _validate_search_input(
+        grid, route_request, envelope, object_query, live_owner, target, viewpoints,
+        now_us, clock_us, request_is_current, max_viewpoints, max_expansions_per_view,
+    )
+    if invalid is not None:
+        return _refuse(invalid)
+    invalid = _validate_search_request(
+        grid, route_request, object_query, live_owner, target, now_us,
+    )
+    if invalid is not None:
+        return _refuse(invalid)
 
-    def refuse(reason: str, considered: int = 0) -> ObjectSearchResult:
-        return ObjectSearchResult("rejected", reason, considered=considered)
+    clock = _SearchClock(clock_us, request_is_current, now_us)
+    invalid = clock.live(grid, route_request, object_query)
+    if invalid is not None:
+        return _refuse(invalid)
+    if not _has_search_hint(target):
+        return _absent("no_same_map_last_seen_hint")
+    invalid = _validate_viewpoints(viewpoints, object_query)
+    if invalid is not None:
+        return _refuse(invalid)
+    return _search_candidates(
+        grid, route_request, envelope, object_query, _rank_viewpoints(viewpoints),
+        clock, max_viewpoints, max_expansions_per_view,
+    )
 
-    def absent(reason: str, considered: int = 0) -> ObjectSearchResult:
-        return ObjectSearchResult("no_current_sighting", reason, considered=considered)
 
+def _refuse(reason: str, considered: int = 0) -> ObjectSearchResult:
+    return ObjectSearchResult("rejected", reason, considered=considered)
+
+
+def _absent(reason: str, considered: int = 0) -> ObjectSearchResult:
+    return ObjectSearchResult("no_current_sighting", reason, considered=considered)
+
+
+def _validate_search_input(
+    grid: GridSnapshot, route_request: RouteRequest, envelope: SafetyEnvelope,
+    object_query: ObjectQuery, live_owner: ObjectOwner, target: ObjectTarget,
+    viewpoints: tuple[SearchViewpoint, ...], now_us: int,
+    clock_us: Callable[[], int] | None, request_is_current: Callable[[], bool] | None,
+    max_viewpoints: int, max_expansions_per_view: int,
+) -> str | None:
     if (not isinstance(grid, GridSnapshot)
             or not isinstance(route_request, RouteRequest)
             or not isinstance(envelope, SafetyEnvelope)
@@ -131,23 +166,30 @@ def propose_object_search(
                 live_owner.camera_grant))
             or type(live_owner.camera_allowed) is not bool
             or type(live_owner.memory_allowed) is not bool):
-        return refuse("invalid_search_input")
+        return "invalid_search_input"
     if not callable(clock_us) or not callable(request_is_current):
-        return refuse("missing_live_owner")
+        return "missing_live_owner"
+    return None
+
+
+def _validate_search_request(
+    grid: GridSnapshot, route_request: RouteRequest, object_query: ObjectQuery,
+    live_owner: ObjectOwner, target: ObjectTarget, now_us: int,
+) -> str | None:
     if object_query.cancelled or route_request.cancelled:
-        return refuse("cancelled")
+        return "cancelled"
     if ((object_query.robot_id, object_query.session_id, object_query.turn_id) !=
             (live_owner.robot_id, live_owner.session_id, live_owner.turn_id)):
-        return refuse("turn_or_robot_changed")
+        return "turn_or_robot_changed"
     if ((object_query.origin_id, object_query.epoch, object_query.anchor_id,
          object_query.calibration_id, object_query.camera_boot,
          object_query.host_boot_id, object_query.camera_grant) !=
             (live_owner.origin_id, live_owner.epoch, live_owner.anchor_id,
              live_owner.calibration_id, live_owner.camera_boot,
              live_owner.host_boot_id, live_owner.camera_grant)):
-        return refuse("origin_map_or_camera_changed")
+        return "origin_map_or_camera_changed"
     if (live_owner.memory_allowed is not True or live_owner.camera_allowed is not True):
-        return refuse("observation_consent_revoked")
+        return "observation_consent_revoked"
     if ((route_request.robot_id, route_request.origin_id, route_request.epoch,
          route_request.anchor_id, route_request.session_id, route_request.turn_id) !=
             (object_query.robot_id, object_query.origin_id, object_query.epoch,
@@ -157,40 +199,47 @@ def propose_object_search(
                 grid.calibration_id) !=
             (object_query.robot_id, object_query.origin_id, object_query.epoch,
              object_query.anchor_id, object_query.calibration_id)):
-        return refuse("route_or_map_identity_changed")
+        return "route_or_map_identity_changed"
     if (type(object_query.created_us) is not int
             or type(object_query.deadline_us) is not int
             or not 0 <= object_query.created_us <= now_us < object_query.deadline_us):
-        return refuse("deadline_or_clock_invalid")
+        return "deadline_or_clock_invalid"
     if (target.robot_id != object_query.robot_id or target.label != object_query.label
             or target.may_execute is not False or target.arrived is not False):
-        return refuse("target_identity_or_authority_invalid")
+        return "target_identity_or_authority_invalid"
     # A stale ObjectTarget may have the right robot/label and plausible floor
     # hint while belonging to an earlier session, boot, origin or consent.
     # Do not turn that historical result into a new viewpoint proposal.
     if (type(target.request_fence) is not ObjectQuery
             or target.request_fence != object_query):
-        return refuse("target_request_changed")
+        return "target_request_changed"
+    return None
 
-    last_clock_us = now_us
 
-    def read_clock() -> int:
+@dataclass
+class _SearchClock:
+    clock_us: Callable[[], int]
+    request_is_current: Callable[[], bool]
+    last_clock_us: int
+
+    def read_clock(self) -> int:
         # The outer search and every nested route must share one high-water mark.
-        nonlocal last_clock_us
-        current = clock_us()
-        if type(current) is not int or current < last_clock_us:
+        current = self.clock_us()
+        if type(current) is not int or current < self.last_clock_us:
             raise ValueError("Invalid search clock")
-        last_clock_us = current
+        self.last_clock_us = current
         return current
 
-    def live() -> str | None:
+    def live(
+        self, grid: GridSnapshot, route_request: RouteRequest, object_query: ObjectQuery,
+    ) -> str | None:
         try:
-            if request_is_current() is not True:
+            if self.request_is_current() is not True:
                 return "request_invalidated"
         except Exception:
             return "request_invalidated"
         try:
-            current = read_clock()
+            current = self.read_clock()
         except Exception:
             return "invalid_clock"
         if current >= object_query.deadline_us or current >= route_request.deadline_us:
@@ -199,19 +248,21 @@ def propose_object_search(
             return "map_expired"
         return None
 
-    invalid = live()
-    if invalid is not None:
-        return refuse(invalid)
+
+def _has_search_hint(target: ObjectTarget) -> bool:
     # A user report or old memory with no same-map projection must not produce
     # an autonomous search. A fresh confirmed sighting uses the separate
     # target-approach sequence with its own measured physical authorization.
-    if (target.status != "last_seen" or target.source != "camera_seen"
-            or not isinstance(target.search_hint_mm, tuple)
-            or len(target.search_hint_mm) != 2
-            or any(type(v) is not int or not -100_000 <= v <= 100_000
-                   for v in target.search_hint_mm)):
-        return absent("no_same_map_last_seen_hint")
+    return not (target.status != "last_seen" or target.source != "camera_seen"
+                or not isinstance(target.search_hint_mm, tuple)
+                or len(target.search_hint_mm) != 2
+                or any(type(v) is not int or not -100_000 <= v <= 100_000
+                       for v in target.search_hint_mm))
 
+
+def _validate_viewpoints(
+    viewpoints: tuple[SearchViewpoint, ...], object_query: ObjectQuery,
+) -> str | None:
     identifiers: set[str] = set()
     for view in viewpoints:
         if (not isinstance(view, SearchViewpoint)
@@ -226,15 +277,18 @@ def propose_object_search(
                 or type(view.heading) is not int or view.heading not in range(4)
                 or not isinstance(view.cell, tuple) or len(view.cell) != 2
                 or any(type(v) is not int for v in view.cell)):
-            return refuse("invalid_viewpoint")
+            return "invalid_viewpoint"
         identifiers.add(view.viewpoint_id)
         if ((view.robot_id, view.origin_id, view.epoch, view.anchor_id,
              view.calibration_id) !=
                 (object_query.robot_id, object_query.origin_id,
                  object_query.epoch, object_query.anchor_id,
                  object_query.calibration_id)):
-            return refuse("foreign_or_stale_viewpoint")
+            return "foreign_or_stale_viewpoint"
+    return None
 
+
+def _rank_viewpoints(viewpoints: tuple[SearchViewpoint, ...]) -> list[SearchViewpoint]:
     # Different record IDs may represent the same fixed-camera pose.
     seen_poses = {(v.cell, v.heading) for v in viewpoints if v.inspected_in_request}
     candidates = []
@@ -244,53 +298,75 @@ def propose_object_search(
             continue
         seen_poses.add(pose)
         candidates.append(view)
+    return candidates
+
+
+def _route_to_viewpoint(
+    grid: GridSnapshot, route_request: RouteRequest, envelope: SafetyEnvelope,
+    view: SearchViewpoint, clock: _SearchClock, max_expansions_per_view: int,
+) -> RouteResult:
+    return plan_route(
+        grid, RouteRequest(
+            robot_id=route_request.robot_id,
+            origin_id=route_request.origin_id,
+            epoch=route_request.epoch,
+            anchor_id=route_request.anchor_id,
+            session_id=route_request.session_id,
+            turn_id=route_request.turn_id,
+            start=route_request.start,
+            heading=route_request.heading,
+            goal=view.cell,
+            deadline_us=route_request.deadline_us,
+            cancelled=route_request.cancelled,
+            schema_version=route_request.schema_version,
+            goal_heading=view.heading,
+        ), envelope, now_us=clock.last_clock_us,
+        max_expansions=max_expansions_per_view,
+        clock_us=clock.read_clock, request_is_current=clock.request_is_current,
+    )
+
+
+def _valid_route_receipt(
+    proposal: RouteResult, view: SearchViewpoint, object_query: ObjectQuery,
+) -> bool:
+    return not (not proposal.cells or proposal.cells[-1] != view.cell
+                or type(proposal.final_heading) is not int
+                or proposal.final_heading != view.heading
+                or proposal.robot_id != object_query.robot_id
+                or proposal.origin_id != object_query.origin_id
+                or proposal.epoch != object_query.epoch
+                or proposal.session_id != object_query.session_id
+                or proposal.turn_id != object_query.turn_id)
+
+
+def _search_candidates(
+    grid: GridSnapshot, route_request: RouteRequest, envelope: SafetyEnvelope,
+    object_query: ObjectQuery, candidates: list[SearchViewpoint], clock: _SearchClock,
+    max_viewpoints: int, max_expansions_per_view: int,
+) -> ObjectSearchResult:
     considered = 0
     for view in candidates[:max_viewpoints]:
-        invalid = live()
+        invalid = clock.live(grid, route_request, object_query)
         if invalid is not None:
-            return refuse(invalid, considered)
+            return _refuse(invalid, considered)
         considered += 1
-        proposal = plan_route(
-            grid, RouteRequest(
-                robot_id=route_request.robot_id,
-                origin_id=route_request.origin_id,
-                epoch=route_request.epoch,
-                anchor_id=route_request.anchor_id,
-                session_id=route_request.session_id,
-                turn_id=route_request.turn_id,
-                start=route_request.start,
-                heading=route_request.heading,
-                goal=view.cell,
-                deadline_us=route_request.deadline_us,
-                cancelled=route_request.cancelled,
-                schema_version=route_request.schema_version,
-                goal_heading=view.heading,
-            ), envelope, now_us=last_clock_us,
-            max_expansions=max_expansions_per_view,
-            clock_us=read_clock, request_is_current=request_is_current,
+        proposal = _route_to_viewpoint(
+            grid, route_request, envelope, view, clock, max_expansions_per_view,
         )
-        invalid = live()
+        invalid = clock.live(grid, route_request, object_query)
         if invalid is not None:
-            return refuse(invalid, considered)
+            return _refuse(invalid, considered)
         if proposal.may_execute is not False:
-            return refuse("unexpected_route_authority", considered)
+            return _refuse("unexpected_route_authority", considered)
         if proposal.status == "planned":
-            if (not proposal.cells or proposal.cells[-1] != view.cell
-                    or type(proposal.final_heading) is not int
-                    or proposal.final_heading != view.heading
-                    or proposal.robot_id != object_query.robot_id
-                    or proposal.origin_id != object_query.origin_id
-                    or proposal.epoch != object_query.epoch
-                    or proposal.session_id != object_query.session_id
-                    or proposal.turn_id != object_query.turn_id):
-                return refuse("invalid_route_receipt", considered)
+            if not _valid_route_receipt(proposal, view, object_query):
+                return _refuse("invalid_route_receipt", considered)
             return ObjectSearchResult(
                 "viewpoint_proposal", "must_reobserve_target", view.viewpoint_id,
                 proposal, considered, remaining_viewpoints=len(candidates) - 1,
             )
         if proposal.reason not in {"no_safe_route", "unsafe_goal"}:
-            return refuse(proposal.reason, considered)
+            return _refuse(proposal.reason, considered)
     if len(candidates) > max_viewpoints:
-        return absent("search_budget_exhausted", considered)
-    return absent("no_reachable_uninspected_viewpoint", considered)
-
+        return _absent("search_budget_exhausted", considered)
+    return _absent("no_reachable_uninspected_viewpoint", considered)
