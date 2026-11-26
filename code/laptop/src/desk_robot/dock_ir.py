@@ -6,6 +6,8 @@ estimate steering direction or complete the last centimeter of docking.
 """
 from __future__ import annotations
 
+from .dock_timing import DOCK_OBSERVATION_MAX_AGE_MS, dock_age_is_fresh
+
 
 def dock_beacon_code(dock_id: int) -> int:
     """Match the existing Arduino-IRremote classic NEC sender (0x12, 0x30+id).
@@ -41,7 +43,9 @@ def _validate_receipt_fields(data: dict, robot_id: str, elapsed_ms: float) -> No
     for side in ("left", "right"):
         if data[f"{side}_valid"] and (
             data[f"{side}_seq"] == 0
-            or data[f"{side}_age_ms"] + elapsed_ms > 200
+            or not dock_age_is_fresh(
+                data[f"{side}_age_ms"] + elapsed_ms, DOCK_OBSERVATION_MAX_AGE_MS,
+            )
         ):
             raise ValueError(f"Fresh NEC {side} needs a real hardware frame")
 

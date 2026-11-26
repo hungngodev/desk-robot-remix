@@ -13,6 +13,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from .dock_timing import DOCK_OBSERVATION_MAX_AGE_S, dock_age_is_fresh
 from .spatial_frames import rotate_xy
 from .vision import _check_camera_jpeg
 
@@ -346,7 +347,7 @@ def assess_dock(
     pose: DockPose | None, *,
     now: float,
     target_distance_mm: float,
-    max_age_seconds: float = 0.20,
+    max_age_seconds: float = DOCK_OBSERVATION_MAX_AGE_S,
     lateral_tolerance_mm: float = 15.0,
 ) -> DockAssessment:
     """Plan only; never infer docking contact from an AprilTag image.
@@ -368,7 +369,7 @@ def assess_dock(
             "hold", "No identified, calibrated target; IR-only/dead-reckoning fallback unqualified"
         )
     age = now - pose.captured_at
-    if not 0 <= age <= max_age_seconds:
+    if not dock_age_is_fresh(age, max_age_seconds):
         return DockAssessment("hold", "Marker observation stale or from the future")
     if pose.reprojection_error_px > 3:
         return DockAssessment("hold", "Marker geometry untrusted")
