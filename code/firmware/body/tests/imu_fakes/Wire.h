@@ -23,9 +23,10 @@ class TwoWire {
   int partial_read_reg = -1;
   std::uint8_t next_stop_status = 0;
 
-  // Disconnect an addressed device without discarding its register contents.
+  // Devices are absent until explicitly attached by a fixture. Disconnecting
+  // preserves the simulated register contents for recovery tests.
   void set_connected(std::uint8_t address, bool connected) {
-    disconnected_[address] = !connected;
+    connected_[address] = connected;
   }
 
   void beginTransmission(std::uint8_t address) {
@@ -51,7 +52,7 @@ class TwoWire {
       next_stop_status = 0;
       return status;
     }
-    if (disconnected_[address_]) return 2; // address NACK
+    if (!connected_[address_]) return 2; // address NACK
     if (bytes_.size() != 2) return 4;
     writes.push_back({address_, bytes_[0], bytes_[1]});
     if (static_cast<int>(bytes_[0]) != ignore_write_reg)
@@ -70,9 +71,10 @@ class TwoWire {
     const bool pending = read_pending_;
     read_pending_ = false;
     if (!pending || bytes_.size() != 1 || count == 0 ||
-        count > rx_buffer_.size() || disconnected_[address]) return 0;
+        count > rx_buffer_.size() || !connected_[address]) return 0;
     const auto read_register = bytes_[0];
-    if (static_cast<int>(read_register) == reject_read_reg) return 0;
+    if (count > 256U - read_register ||
+        static_cast<int>(read_register) == reject_read_reg) return 0;
     remaining_ = static_cast<int>(read_register) == partial_read_reg
         ? count - 1U : count;
     auto& values = bank(read_address_);
@@ -103,7 +105,7 @@ class TwoWire {
   std::array<std::uint8_t, 256>& bank(std::uint8_t address) {
     return address < 0x20 ? extra_registers : registers;
   }
-  std::array<bool, 256> disconnected_{};
+  std::array<bool, 256> connected_{};
   std::uint8_t address_ = 0;
   std::uint8_t read_address_ = 0;
   std::array<std::uint8_t, 14> rx_buffer_{};

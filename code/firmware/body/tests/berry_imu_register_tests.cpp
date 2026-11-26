@@ -5,15 +5,19 @@
 
 #define CHECK(x) do { if (!(x)) throw std::runtime_error(#x); } while (false)
 
-static TwoWire mpu_fixture() {
+static TwoWire mpu_fixture(std::uint8_t address = 0x68) {
   TwoWire wire;
+  wire.set_connected(address, true);
   wire.registers[0x75] = 0x68;
   wire.registers[0x3f] = 0x40; // accel Z = 1g; zero gyro is legitimate
   return wire;
 }
-static TwoWire berry_fixture(desk_robot::BerryModel model) {
+static TwoWire berry_fixture(desk_robot::BerryModel model,
+                             std::uint8_t gyro = 0x6b, std::uint8_t extra = 0x1d) {
   using desk_robot::BerryModel;
   TwoWire wire;
+  wire.set_connected(gyro, true);
+  wire.set_connected(extra, true);
   wire.registers[0x0f] = model == BerryModel::V1Lsm9ds0 ? 0xd4 :
                         model == BerryModel::V2Lsm9ds1 ? 0x68 : 0x6a;
   wire.extra_registers[0x0f] = model == BerryModel::V1Lsm9ds0 ? 0x49 : 0x3d;
@@ -32,7 +36,7 @@ static void check_identity_reinitialization() {
       for (const bool auxiliary : {false, true}) {
         if (mpu && auxiliary) continue;
         for (const int fault : {0, 1, 2, 3, 4}) {
-          auto wire = berry_fixture(model);
+          auto wire = mpu ? mpu_fixture(address) : berry_fixture(model, address, extra);
           if (mpu) {
             wire.registers[0x75] = 0x68;
             wire.registers[0x3f] = 0x40;
@@ -72,19 +76,19 @@ static void check_mpu_ghost_reads() {
   using desk_robot::BerryModel;
   for (const auto address : {0x68, 0x69}) {
     for (const auto id : {0x00, 0xff, 0x69, 0x70}) {
-      auto wire = mpu_fixture();
+      auto wire = mpu_fixture(address);
       wire.registers[0x75] = static_cast<std::uint8_t>(id);
       BerryImu imu;
       CHECK(!imu.begin(wire, BerryModel::Mpu6050, address, 0));
       CHECK(!imu.configured() && wire.writes.empty());
     }
-    auto missing_id = mpu_fixture();
+    auto missing_id = mpu_fixture(address);
     missing_id.reject_read_reg = 0x75;
     BerryImu missing;
     CHECK(!missing.begin(missing_id, BerryModel::Mpu6050, address, 0));
     CHECK(missing_id.writes.empty());
 
-    auto wire = mpu_fixture();
+    auto wire = mpu_fixture(address);
     BerryImu imu;
     CHECK(imu.begin(wire, BerryModel::Mpu6050, address, 0));
     wire.registers[0x3a] = 0x80;
@@ -155,6 +159,7 @@ static void check_lsm9ds0_bdu_reinitialization() {
 static void check_wire_disconnect() {
   for (const std::uint8_t address : {0x68, 0x69, 0x6b, 0x1d}) {
     TwoWire wire;
+    wire.set_connected(address, true);
     auto& bank = address < 0x20 ? wire.extra_registers : wire.registers;
     const auto select = [&wire, address](std::uint8_t reg) {
       wire.beginTransmission(address);
@@ -183,6 +188,7 @@ static void check_wire_disconnect() {
     CHECK(wire.requestFrom(address, 14) == 0);
     // Disconnecting one address must not disable the entire bus.
     const std::uint8_t other = address == 0x1d ? 0x6b : 0x1d;
+    wire.set_connected(other, true);
     wire.beginTransmission(other);
     CHECK(wire.write(0x21) == 1 && wire.write(0x56) == 1);
     CHECK(wire.endTransmission(true) == 0);
@@ -194,8 +200,47 @@ static void check_wire_disconnect() {
   }
 }
 
+static void check_unconfigured_wire() {
+  TwoWire wire;
+  wire.registers[0x75] = 0x68;
+  wire.registers[0x3f] = 0x40;
+  desk_robot::BerryImu imu;
+  CHECK(!imu.begin(wire, desk_robot::BerryModel::Mpu6050, 0x68, 0));
+  CHECK(!imu.configured() && wire.writes.empty());
+  imu.poll(50);
+  CHECK(!imu.fresh(50));
+  wire.registers[0x3a] = 0x80;
+  const auto select = [&wire](std::uint8_t address, std::uint8_t reg) {
+    wire.beginTransmission(address);
+    CHECK(wire.write(reg) == 1);
+    CHECK(wire.endTransmission(false) == 0);
+  };
+  select(0x68, 0x3a);
+  CHECK(wire.requestFrom(0x68, 1) == 0);
+  CHECK(wire.available() == 0 && wire.read() == -1);
+  CHECK(wire.registers[0x3a] == 0x80);
+  wire.beginTransmission(0x68);
+  CHECK(wire.write(0x3a) == 1 && wire.write(0) == 1);
+  CHECK(wire.endTransmission(true) == 2);
+  CHECK(wire.writes.empty() && wire.registers[0x3a] == 0x80);
+  wire.set_connected(0x68, true);
+  select(0x68, 0x3a);
+  CHECK(wire.requestFrom(0x68, 1) == 1 && wire.read() == 0x80);
+  select(0x68, 0x3a);
+  CHECK(wire.requestFrom(0x68, 1) == 1 && wire.read() == 0);
+  select(0x69, 0x3a);
+  CHECK(wire.requestFrom(0x69, 1) == 0);
+  select(0x68, 0xff);
+  CHECK(wire.requestFrom(0x68, 2) == 0);
+  CHECK(wire.available() == 0 && wire.read() == -1);
+  CHECK(imu.begin(wire, desk_robot::BerryModel::Mpu6050, 0x68, 0));
+  imu.poll(100);
+  CHECK(imu.fresh(100) && imu.reading().accel[2] == 16384);
+}
+
 int main() {
   try {
+    check_unconfigured_wire();
     check_identity_reinitialization();
     check_wire_disconnect();
     check_mpu_ghost_reads();
@@ -205,7 +250,7 @@ int main() {
     // External bus loss must invalidate current IRQ evidence, but preserve
     // the historical counter and edge fence across uint32_t rollover.
     {
-      auto wire = mpu_fixture();
+      auto wire = mpu_fixture(0x69);
       BerryImu imu;
       CHECK(imu.begin(wire, BerryModel::Mpu6050, 0x69, 0));
       wire.registers[0x3a] = 0x80;
@@ -434,6 +479,7 @@ int main() {
     // RX intact; a subsequent matching failed read must clear that RX.
     {
       TwoWire transfer;
+      transfer.set_connected(0x68, true);
       const auto select = [&transfer](std::uint8_t reg) {
         transfer.beginTransmission(0x68);
         CHECK(transfer.write(reg) == 1);
@@ -471,6 +517,7 @@ int main() {
     // requestFrom. Wrong-address reads preserve RX; a matching failure clears it.
     for (unsigned length : {0U, 2U, 3U}) {
       TwoWire transfer;
+      transfer.set_connected(0x68, true);
       transfer.registers[0x3a] = 0x80;
       transfer.beginTransmission(0x68);
       CHECK(transfer.write(0x3b) == 1);
@@ -494,6 +541,7 @@ int main() {
 
     // The fake must not leak stale RX bytes after a failed acquisition.
     TwoWire fault_wire;
+    fault_wire.set_connected(0x68, true);
     fault_wire.registers[0x3b] = 0x40;
     fault_wire.beginTransmission(0x68);
     CHECK(fault_wire.write(0x3b) == 1);
