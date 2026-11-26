@@ -57,6 +57,37 @@ int main() {
         assert(PupilY(std::numeric_limits<int>::min(), d) == 0);
         assert(PupilY(std::numeric_limits<int>::max(), d) == PupilY(kOpenHeight, d));
     }
+    // Check absolute screen coordinates, including the centered slot and status bar.
+    constexpr int slot_x = (kPanelWidth - kSlotWidth) / 2;
+    for (int i : {std::numeric_limits<int>::min(), -1, 0, 1, 2,
+                  std::numeric_limits<int>::max()}) {
+        assert(EyeX(i) == kEyeLeft + std::clamp(i, 0, kEyeCount - 1) * kEyeStride);
+        const int left = slot_x + EyeX(i);
+        assert(left >= slot_x && left + kEyeWidth <= slot_x + kSlotWidth);
+        assert(left >= 0 && left + kEyeWidth <= kPanelWidth);
+        for (int raw : {std::numeric_limits<int>::min(), -1, 0, 2, 6, 14, 255,
+                        std::numeric_limits<int>::max()}) {
+            const int height = std::clamp(raw, kClosedHeight, kOpenHeight);
+            assert(EyeY(raw) == kSlotHeight / 2 - height / 2);
+            const int top = kStatusHeight + EyeY(raw);
+            assert(top >= kStatusHeight && top + height <= kPanelHeight);
+            // The real renderer hides pupils in narrow/closed eyes.
+            if (height < kPupilMinEyeHeight) continue;
+            constexpr float biggest = std::numeric_limits<float>::max();
+            for (float x : {nan, inf, -inf, -biggest, -1.0f, 0.0f, 1.0f, biggest}) {
+                for (float y : {nan, inf, -inf, -biggest, -1.0f, 0.0f, 1.0f, biggest}) {
+                    const int px = left + PupilX(NormalizedGazeOffset(x));
+                    const int py = top + PupilY(raw, NormalizedGazeOffset(y));
+                    assert(px >= left && px + kPupilWidth <= left + kEyeWidth);
+                    assert(py >= top && py + kPupilHeight <= top + height);
+                    assert(px >= 0 && px + kPupilWidth <= kPanelWidth);
+                    assert(py >= kStatusHeight && py + kPupilHeight <= kPanelHeight);
+                }
+            }
+        }
+    }
+    assert(NormalizedGazeOffset(std::numeric_limits<float>::max()) == kGazeExtent);
+    assert(NormalizedGazeOffset(-std::numeric_limits<float>::max()) == -kGazeExtent);
     for (int h = kClosedHeight; h <= kOpenHeight; ++h) {
         assert(EyeY(h) >= 0 && EyeY(h) + h <= kSlotHeight);
         for (int i = 0; i < kEyeCount; ++i) {
@@ -77,7 +108,7 @@ int main() {
     subprocess.run(
         [
             compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
-            "-fsanitize=address,undefined", *pie_flags,
+            "-fsanitize=address,undefined", "-fno-sanitize-recover=all", *pie_flags,
             "-I", str(OVERLAY), str(source), "-o", str(binary),
         ],
         check=True, timeout=60,

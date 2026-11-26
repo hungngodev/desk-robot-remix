@@ -24,8 +24,13 @@ inline constexpr int kPupilMinEyeHeight = 6;
 inline constexpr int8_t kGazeExtent = 3;
 inline constexpr int8_t kNodReturn = -2;
 
-constexpr int EyeX(int index) { return kEyeLeft + index * kEyeStride; }
-constexpr int EyeY(int height) { return kSlotHeight / 2 - height / 2; }
+// Clamp before arithmetic, including callers outside the current renderer.
+constexpr int EyeX(int index) {
+    return kEyeLeft + std::clamp(index, 0, kEyeCount - 1) * kEyeStride;
+}
+constexpr int EyeY(int height) {
+    return kSlotHeight / 2 - std::clamp(height, kClosedHeight, kOpenHeight) / 2;
+}
 // Nonfinite observations have no direction. Saturate finite coordinates before
 // scaling or converting to an integer; keep rounding symmetric about center.
 inline int8_t NormalizedGazeOffset(float coordinate) noexcept {
