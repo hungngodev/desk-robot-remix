@@ -2,6 +2,7 @@
 #include "BodyCommandParser.h"
 #include "AttitudeNorm.h"
 #include "CliffGuard.h"
+#include "RangeSampleClock.h"
 
 #include <cstdint>
 #include <cstdlib>
@@ -38,6 +39,26 @@ std::vector<std::string> frame(BodyControl& body, LineReceiver& receiver,
   for (char byte : bytes)
     if (receiver.feed(byte, now, body, reply, sizeof(reply))) replies.emplace_back(reply);
   return replies;
+}
+
+void range_sample_clock_boundaries() {
+  using desk_robot::range_sample_accepts;
+  using desk_robot::range_sample_expired;
+  for (const auto previous : {0U, 1000U, 0xffffffffU - 100U}) {
+    CHECK(range_sample_accepts(false, previous, previous));
+    CHECK(!range_sample_accepts(true, previous, previous));
+    CHECK(range_sample_accepts(true, previous + 1U, previous));
+    CHECK(range_sample_accepts(true, previous + 0x7fffffffU, previous));
+    CHECK(!range_sample_accepts(true, previous + 0x80000000U, previous));
+    CHECK(!range_sample_accepts(true, previous - 1U, previous));
+    CHECK(!range_sample_expired(false, true, previous + 200U, previous));
+    CHECK(!range_sample_expired(false, false, previous + 351U, previous));
+    CHECK(!range_sample_expired(true, true, previous + 199U, previous));
+    CHECK(range_sample_expired(true, true, previous + 200U, previous));
+    CHECK(range_sample_expired(true, true, previous + 201U, previous));
+    CHECK(!range_sample_expired(true, false, previous + 350U, previous));
+    CHECK(range_sample_expired(true, false, previous + 351U, previous));
+  }
 }
 
 void attitude_norm_root_boundaries() {
@@ -1023,6 +1044,7 @@ void deterministic_stream_stress() {
 int main(int argc, char** argv) {
   using Test = std::pair<const char*, void (*)()>;
   const std::vector<Test> tests = {
+      {"range_sample_clock_boundaries", range_sample_clock_boundaries},
       {"attitude_norm_root_boundaries", attitude_norm_root_boundaries},
       {"optional_inputs_preserve_raw_stop_and_event_history",
        optional_inputs_preserve_raw_stop_and_event_history},

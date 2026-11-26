@@ -4,6 +4,7 @@
 #include "BodyCommandParser.h"
 #include "BodyReplyFormat.h"
 #include "CliffGuard.h"
+#include "RangeSampleClock.h"
 
 #include <cstdio>
 #include <cstring>
@@ -298,15 +299,11 @@ void BodyControl::sample_range_optics(
     std::uint16_t signal_97, bool valid, std::uint32_t now_ms) {
   if (channel >= 8) return;
   auto& sample = state_.optical[channel];
-  if (sample.present) {
-    // A late or duplicate conversion cannot replace the newest raw
-    // observation or regain valid read-only optical provenance. A genuinely
-    // newer measurement restores validity; uint32 millis rollover is safe.
-    const std::uint32_t elapsed = now_ms - sample.at_ms;
-    if (elapsed == 0U || elapsed >= 0x80000000U) {
-      sample.valid = false;
-      return;
-    }
+  // A late or duplicate conversion cannot replace the newest raw
+  // observation or regain valid read-only optical provenance.
+  if (!range_sample_accepts(sample.present, now_ms, sample.at_ms)) {
+    sample.valid = false;
+    return;
   }
   sample.present = true;
   sample.valid = valid;
@@ -328,15 +325,12 @@ void BodyControl::invalidate_range_lane(std::uint8_t channel) {
 void BodyControl::sample_side_range(std::uint8_t index, std::uint16_t mm,
                                     bool valid, std::uint32_t now_ms) {
   if (index >= 3) return;
-  if (state_.side_present[index]) {
-    // These lanes never authorize motion, but a replay must not appear as
-    // current side/rear evidence to the Mac. Preserve the latest raw sample
-    // for diagnosis and require a truly newer conversion to restore valid.
-    const std::uint32_t elapsed = now_ms - state_.side_at_ms[index];
-    if (elapsed == 0U || elapsed >= 0x80000000U) {
-      state_.side_valid[index] = false;
-      return;
-    }
+  // Read-only lanes preserve the last raw observation on replay and
+  // require a newer conversion to restore validity.
+  if (!range_sample_accepts(state_.side_present[index], now_ms,
+                            state_.side_at_ms[index])) {
+    state_.side_valid[index] = false;
+    return;
   }
   state_.side_present[index] = true;
   state_.side_valid[index] = valid;
@@ -983,12 +977,12 @@ void BodyControl::tick(std::uint32_t now_ms) {
   // The raw words and timestamps remain available for inspection.
   for (std::uint8_t lane = 0; lane < 8; ++lane) {
     auto& sample = state_.optical[lane];
-    const auto age = now_ms - sample.at_ms;
-    if (sample.present && (lane < 5 ? age >= 200U : age > 350U))
+    if (range_sample_expired(sample.present, lane < 5, now_ms, sample.at_ms))
       sample.valid = false;
   }
   for (std::uint8_t lane = 0; lane < 3; ++lane) {
-    if (state_.side_present[lane] && now_ms - state_.side_at_ms[lane] > 350U)
+    if (range_sample_expired(state_.side_present[lane], false, now_ms,
+                             state_.side_at_ms[lane]))
       state_.side_valid[lane] = false;
   }
   if (wheel_pose_configured_) wheel_pose_.expire(now_ms);
