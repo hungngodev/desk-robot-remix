@@ -49,6 +49,7 @@ public:
             // Transient voice/reconnect gates cancel a gesture without starving
             // the timer. Safety and sleep instead require a fresh wake interval.
             gaze_ = Motion::kNone;
+            retarget_ = false;
             blink_active_ = false;
             return {};
         }
@@ -58,10 +59,10 @@ public:
             next_blink_ms_ = NextBlinkDelay();
             blink_active_ = false;
         }
+        if (gaze_ != Motion::kNone && now_ms - gaze_at_ms_ >= 1100U)
+            gaze_ = Motion::kNone;
         UpdateGaze(now_ms, motion);
         const uint32_t gaze_age = now_ms - gaze_at_ms_;
-        if (gaze_ != Motion::kNone && gaze_age >= 1100U)
-            gaze_ = Motion::kNone;
         const uint32_t blink_phase = AdvanceBlink(now_ms);
         const bool blinking = blink_active_;
         if (gaze_ == Motion::kNone && !blinking) return {};
@@ -90,10 +91,18 @@ public:
             frame.x = EaseAxis(frame.x, 0, gaze_age - 800U, 300U);
             frame.y = EaseAxis(frame.y, 0, gaze_age - 800U, 300U);
         }
+        if (retarget_ && gaze_ != Motion::kNone && gaze_age < kRetargetMs) {
+            frame.x = EaseAxis(from_x_, frame.x, gaze_age, kRetargetMs);
+            frame.y = EaseAxis(from_y_, frame.y, gaze_age, kRetargetMs);
+        }
+        last_x_ = frame.x;
+        last_y_ = frame.y;
         return frame;
     }
 
 private:
+    static constexpr uint32_t kRetargetMs = 200U;
+
     void UpdateGaze(uint32_t now_ms, stackchan::behavior::Motion motion) {
         using stackchan::behavior::Motion;
         switch (motion) {
@@ -103,11 +112,20 @@ private:
             case Motion::kLookRight:
             case Motion::kNod:
             case Motion::kShake:
+                // Blend from the last displayed gaze when a new gesture
+                // interrupts an existing one. Repeated commands must not
+                // keep restarting the same in-progress transition.
+                if (motion == gaze_ && retarget_ &&
+                    now_ms - gaze_at_ms_ < kRetargetMs) break;
+                retarget_ = gaze_ != Motion::kNone;
+                from_x_ = last_x_;
+                from_y_ = last_y_;
                 gaze_ = motion;
                 gaze_at_ms_ = now_ms;
                 break;
             case Motion::kLookFront:
                 gaze_ = Motion::kNone;
+                retarget_ = false;
                 break;
             default:
                 break;
@@ -140,6 +158,11 @@ private:
     bool started_ = false;
     bool blink_active_ = false;
     bool double_blink_ = false;
+    bool retarget_ = false;
+    int8_t from_x_ = 0;
+    int8_t from_y_ = 0;
+    int8_t last_x_ = 0;
+    int8_t last_y_ = 0;
     uint32_t blink_at_ms_ = 0;
     uint32_t gaze_at_ms_ = 0;
     uint32_t next_blink_ms_ = 0;

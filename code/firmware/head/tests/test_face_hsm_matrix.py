@@ -91,7 +91,30 @@ static void CheckDoubleBlinkCancellation() {
     assert(checked);
 }
 
+static void CheckGazeRetargeting() {
+    for (uint32_t start : {0U, 0xffffff80U}) {
+        FaceEyeAnimator eyes;
+        assert(eyes.Step(start, Motion::kLookRight, true).x == 3);
+        assert(eyes.Step(start + 100U, Motion::kLookLeft, true).x == 3);
+        assert(eyes.Step(start + 200U, Motion::kLookLeft, true).x == 0);
+        assert(eyes.Step(start + 300U, Motion::kNone, true).x == -3);
+        assert(eyes.Step(start + 400U, Motion::kLookUp, true).x == -3);
+        const auto diagonal = eyes.Step(start + 500U, Motion::kNone, true);
+        assert(diagonal.x < 0 && diagonal.x > -3);
+        assert(diagonal.y < 0 && diagonal.y > -3);
+        const auto retarget = eyes.Step(start + 501U, Motion::kLookDown, true);
+        assert(retarget.x == diagonal.x && retarget.y == diagonal.y);
+        assert(!eyes.Step(start + 502U, Motion::kNone, false).visible);
+        assert(!eyes.Step(start + 503U, Motion::kNone, true).visible);
+        assert(eyes.Step(start + 504U, Motion::kLookDown, true).y == 3);
+        assert(!eyes.Step(start + 505U, Motion::kLookFront, true).visible);
+        assert(eyes.Step(start + 506U, Motion::kLookRight, true).x == 3);
+        assert(eyes.Step(start + 1706U, Motion::kLookLeft, true).x == -3);
+    }
+}
+
 int main() {
+    CheckGazeRetargeting();
     CheckBlinkCadence();
     CheckDoubleBlinkCancellation();
     // The real FaceTask samples every 100 ms. Require intermediate pixels,
