@@ -37,6 +37,22 @@ def test_audio_request_window_brackets_reject_disjoint_or_straddling_samples():
     assert bench._camera_window_audio_delta(samples, 1.0, 5.0) == (2, _counters(5))
 
 
+def test_audio_request_window_includes_exact_boundaries_and_rejects_reversed_intervals():
+    samples = [
+        (1.0, 1.25, _counters(10)),
+        (2.0, 2.0, _counters(12)),  # equal clock ticks are valid
+        (3.5, 3.0, _counters(15)),  # reversed request clock is not
+        (4.75, 5.0, _counters(20)),
+    ]
+    assert bench._camera_window_audio_delta(samples, 1.0, 5.0) == (3, _counters(10))
+
+
+def test_audio_request_window_requires_two_distinct_camera_receipt_times():
+    samples = [(2.0, 2.0, _counters(10)), (2.0, 2.0, _counters(20))]
+    for first, last in ((None, 2.0), (2.0, None), (2.0, 2.0), (3.0, 1.0)):
+        assert bench._camera_window_audio_delta(samples, first, last) == (0, None)
+
+
 async def test_pre_camera_codec_activity_cannot_pass_combined_bench():
     class Head:
         def __init__(self):
