@@ -461,6 +461,30 @@ def native_readonly_requests(
 
 
 
+def prompt_data_json(value: object) -> str:
+    """Encode JSON without literal chat-template delimiters in string data."""
+    encoded = json.dumps(value, ensure_ascii=True, allow_nan=False, separators=(",", ":"))
+    escapes = str.maketrans({"<": r"\u003c", ">": r"\u003e", "[": r"\u005b", "]": r"\u005d"})
+    return re.sub(r'"(?:\\.|[^"\\])*"', lambda match: match[0].translate(escapes), encoded)
+
+
+def append_prompt_data(base: str, label: str, data: str, *, limit: int) -> str:
+    """Append a complete JSON string, never slice its encoded representation."""
+    budget = limit - len(base) - len(label)
+    if not data or budget < 2:
+        return base
+    low, high = 0, min(len(data), budget - 2)
+    while low < high:
+        middle = (low + high + 1) // 2
+        if len(prompt_data_json(data[:middle])) <= budget:
+            low = middle
+        else:
+            high = middle - 1
+    if not low:
+        return base
+    return base + label + prompt_data_json(data[:low])
+
+
 def pack_grounded_facts(facts: list[dict], *, limit: int = 1800) -> str:
     """Pack ALL completed tool facts as one valid, bounded JSON value.
 
@@ -511,8 +535,7 @@ def pack_grounded_facts(facts: list[dict], *, limit: int = 1800) -> str:
         raise ValueError("Complete tool facts do not fit the speech context budget")
 
     def encode() -> str:
-        return json.dumps(values, ensure_ascii=True, allow_nan=False,
-                          separators=(",", ":"))
+        return prompt_data_json(values)
 
     result = encode()
     if len(result) <= limit:
