@@ -325,7 +325,10 @@ async def call(conn, route, payload=None):
         }
     try:
         result = response.json()
-    except ValueError:
+        # Python's decoder accepts NaN/Infinity and overflowing exponents.
+        # Never forward nonfinite values, even nested in otherwise valid receipts.
+        json.dumps(result, allow_nan=False)
+    except (ValueError, TypeError, RecursionError):
         return ({"_desk_robot_turn_superseded": True} if turn_superseded
                 else {"error": "Malformed robot Mac tool response", "retried": False})
     if not isinstance(result, dict):
