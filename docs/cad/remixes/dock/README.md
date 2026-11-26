@@ -92,6 +92,14 @@ no emitter electronics, mounting authority, charging contacts or power.
 Its exported source and watertight mesh are checked by the regular
 `export_fit_kit.py` route.
 
+The procurement pilot reference is the bare Vishay **TSAL6200** 5 mm LED,
+not a complete emitter carrier; the 5.5 mm bore is a clearance test only.
+One bench Nano ATmega328P per dock supplies the same NEC signal from D3 to
+both separately aimed, transistor-driven and current-limited channels.
+The two **TSOP38438** receivers belong on the robot behind separate baffles,
+not in these emitter coupon bores. This does not select a final driver,
+receiver carrier or mount and does not release purchasing or physical fit.
+
 
 ## Source checked, print scale accurate AprilTag paper
 

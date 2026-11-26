@@ -3,6 +3,7 @@
 This checks protocol allocation, not IR brightness, 38 kHz on an oscilloscope,
 receiver/baffle aim, charger contacts, or an autonomously docked robot.
 """
+import csv
 import json
 import shutil
 import subprocess
@@ -26,6 +27,43 @@ def test_per_dock_beacon_and_dual_receiver_are_counted():
     assert parts["dock_ir_emitter_channels"]["per_robot"] == 2
     assert "SAME classic NEC frame" in parts["dock_ir_emitter_channels"]["notes"]
     assert not p["qualified_assumptions"] and p["physical_trial_count"] == 0
+
+
+def test_dock_ir_purchase_references_match_cad_and_charging_guide():
+    plan = json.loads(PLAN.read_text())
+    parts = {part["id"]: part for part in plan["parts"]}
+    with (PLAN.parent / "fleet-components.csv").open(newline="") as stream:
+        fleet = {row["part_id"]: row for row in csv.DictReader(stream)}
+    shopping = (PLAN.parent / "complete-shopping-checklist.md").read_text()
+    charging = (PLAN.parent / "charging-design-and-validation.md").read_text()
+    cad = (ROOT / "docs/cad/remixes/dock/README.md").read_text()
+    procurement = (ROOT / "code/scripts/procurement_release.py").read_text()
+
+    for role, quantity in (
+        ("dock_ir_receivers", 2),
+        ("dock_ir_beacon_controller", 1),
+        ("dock_ir_emitter_channels", 2),
+    ):
+        part = parts[role]
+        row = fleet[role]
+        assert part["per_robot"] == quantity == int(row["per_robot"])
+        assert int(row["fleet_total"]) == quantity * plan["target_robots"]
+        assert row["component"] == part["name"]
+        assert row["purchase_approved"] == "NO"
+        assert part["name"] in shopping
+
+    assert "TSOP38438" in parts["dock_ir_receivers"]["name"]
+    for document in (charging, cad, procurement):
+        assert "TSOP38438" in document
+        assert "TSAL6200" in document
+    assert "bare LED" in charging
+    assert "5.5 mm bore is a clearance test only" in cad
+    assert "sample_is_complete_functional_channel" in procurement
+    linked = {item["id"]: item for item in plan["linked_subassemblies"]}
+    drivers = linked["dock_ir_transistor_channels"]
+    assert drivers["parent_role"] == "dock_ir_emitter_channels"
+    assert drivers["fleet_quantity"] == 2 * plan["target_robots"]
+    assert drivers["disposition"] == "unresolved"
 
 
 def test_five_distinct_classic_nec_beacons_match_decoder_contract():
