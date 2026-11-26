@@ -1794,6 +1794,7 @@ def test_reference_decimator_native_cpp_regression(tmp_path):
     executable = tmp_path / "reference_decimator"
     subprocess.run(
         [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+         *test_overlay.native_cpp_sanitizer_flags(),
          "-I", str(HEAD / "sense"),
          str(HEAD / "tests/reference_decimator_test.cc"),
          "-o", str(executable)],
