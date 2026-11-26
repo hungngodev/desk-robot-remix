@@ -59,7 +59,13 @@ class TofBus {
   bool bus_accessible() const {
     return !recovery_quarantine_ && physical_bus_accessible();
   }
+  // GPIO recovery and mux isolation alone do not prove sustained transport
+  // health. Sibling clients wait for two complete critical transport sweeps.
+  bool clients_accessible() const { return bus_accessible() && !scan_.degraded(); }
+  bool degraded() const { return scan_.degraded(); }
   void observe_shared_bus_fault(CliffGuard& guard);
+  // A sibling's checked mux transaction can fail with both lines HIGH.
+  void note_shared_mux_fault(CliffGuard& guard) { failed(guard); }
   // The optional 0x71 mux can NACK our first startup probe and then be
   // independently recognized by a later touch or accessory driver. Once
   // observed, ALWAYS prove 0x71 is disabled before selecting a 0x70 lane:
@@ -119,7 +125,6 @@ class TofBus {
   int scl_pin_ = -1;
   int mux_reset_pin_ = -1;
   bool pins_restored_ = true;
-  bool recovery_pending_ = false;
   bool recovery_attempted_ = false;
   bool recovery_quarantine_ = false;
   std::uint32_t last_recovery_ms_ = 0;

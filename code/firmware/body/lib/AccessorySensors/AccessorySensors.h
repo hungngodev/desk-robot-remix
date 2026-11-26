@@ -21,7 +21,9 @@ class AccessorySensors {
   // The live owner supplies its physical line / pin-matrix availability check.
   // Host protocol-only callers may omit it when no physical GPIO exists.
   bool begin(TwoWire& wire, bool (*bus_accessible)() = nullptr);
-  void poll(std::uint32_t now_ms);
+  // False means a shared mux/bus fault, not an absent optional sensor.
+  // True on a skipped slot is not a fresh acquisition.
+  bool poll(std::uint32_t now_ms);
   const AccessoryReadings& readings() const { return data_; }
   // No bus transaction: invalidate every cached conversion when another
   // shared client detects a held line or detached pin matrix.

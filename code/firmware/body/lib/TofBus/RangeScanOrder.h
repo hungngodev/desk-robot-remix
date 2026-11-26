@@ -29,9 +29,30 @@ class RangeScanOrder {
   // critical lane before any optional read, without resetting its rotation.
   void restart_critical() { critical_index_ = 0; }
 
+  void transport_fault() {
+    restart_critical();
+    degraded_ = true;
+    healthy_mask_ = healthy_sweeps_ = 0;
+  }
+
+  // Two complete critical transport sweeps, not two ACKs or two polls of
+  // one lane. Optional lanes cannot qualify recovery. Optical validity and
+  // explicit motion rearm remain independent in CliffGuard.
+  void transport_succeeded(std::uint8_t channel) {
+    if (!degraded_ || channel >= 5) return;
+    healthy_mask_ |= static_cast<std::uint8_t>(1U << channel);
+    if (healthy_mask_ != 0x1FU) return;
+    healthy_mask_ = 0;
+    if (++healthy_sweeps_ == 2U) degraded_ = false;
+  }
+
+  bool degraded() const { return degraded_; }
+
   void reset() {
     restart_critical();
     extra_index_ = 0;
+    degraded_ = false;
+    healthy_mask_ = healthy_sweeps_ = 0;
   }
 
  private:
@@ -39,6 +60,9 @@ class RangeScanOrder {
   std::uint8_t critical_index_ = 0;
   std::uint8_t extra_index_ = 0;
   std::uint32_t sweep_started_ms_ = 0;
+  bool degraded_ = false;
+  std::uint8_t healthy_mask_ = 0;
+  std::uint8_t healthy_sweeps_ = 0;
 };
 
 }  // namespace desk_robot

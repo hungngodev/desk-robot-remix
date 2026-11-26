@@ -34,6 +34,35 @@ static void ready(desk_robot::TofBus& bus, desk_robot::CliffGuard& guard) {
   CHECK(guard.evaluate(50));
 }
 
+static void check_shared_mux_recovery() {
+  Wire = TwoWire{};
+  fake_i2c_lines() = FakeI2cLines{};
+  desk_robot::TofBus bus;
+  desk_robot::CliffGuard guard;
+  ready(bus, guard);
+  const auto errors = bus.errors();
+  bus.note_shared_mux_fault(guard);
+  CHECK(bus.bus_accessible() && !bus.clients_accessible() && bus.degraded());
+  CHECK(bus.errors() == errors + 1U);
+  CHECK(!guard.try_rearm(60));
+  for (std::uint32_t at = 61; at <= 65; ++at) bus.poll(guard, at);
+  CHECK(bus.degraded() && !bus.clients_accessible());
+  Wire.range_mux_write_nack = true;
+  bus.poll(guard, 66);
+  CHECK(bus.errors() == errors + 2U && bus.degraded());
+  bus.poll(guard, 67);
+  CHECK(bus.errors() == errors + 3U && bus.degraded());
+  Wire.range_mux_write_nack = false;
+  for (std::uint32_t at = 68; at <= 72; ++at) bus.poll(guard, at);
+  CHECK(!bus.clients_accessible());
+  for (std::uint32_t at = 73; at <= 78; ++at) bus.poll(guard, at);
+  CHECK(bus.clients_accessible() && !bus.degraded());
+  CHECK(bus.errors() == errors + 3U);
+  CHECK(!guard.evaluate(78)); // transport recovery never clears the latch
+  CHECK(guard.try_rearm(78));
+  fake_i2c_lines() = FakeI2cLines{};
+}
+
 static void faulted(desk_robot::CliffGuard& guard) {
   CHECK(guard.fault() == desk_robot::CliffFault::BusFailure);
   CHECK(!guard.evaluate(60));
@@ -199,6 +228,7 @@ static void fast_floor_lane_swap() {
 int main() {
   try {
     fast_floor_lane_swap();
+    check_shared_mux_recovery();
     dropout_matrix_and_partial_mux_recovery();
     {
       // A later verified close must not erase a transient overlap,

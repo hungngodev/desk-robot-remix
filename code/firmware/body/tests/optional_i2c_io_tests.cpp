@@ -386,6 +386,19 @@ int main() {
       CHECK(!isolation_wire.unsafe_parallel_mux);
     }
     {
+      // A shared mux NACK must reach the range owner even if both GPIO
+      // lines are high and best-effort close succeeds.
+      TwoWire mux_wire;
+      desk_robot::AccessorySensors mux_bus;
+      CHECK(mux_bus.begin(mux_wire));
+      mux_wire.range_mux_write_nack = true;
+      CHECK(!mux_bus.poll(0));
+      CHECK(mux_bus.poll(1)); // skipped slot is not another fault
+      CHECK(!mux_bus.poll(12));
+      mux_wire.range_mux_write_nack = false;
+      CHECK(mux_bus.poll(24));
+    }
+    {
       // A STOP on the range mux can ACK and then expose a held SDA.
       // The accessory client must yield immediately, not spend another
       // timeout on readback or best-effort close before the safety loop.

@@ -58,6 +58,53 @@ static void check_fault_restart() {
   }
 }
 
+static void check_transport_recovery() {
+  for (bool full_eight : {false, true}) {
+    for (unsigned failure_lane = 0; failure_lane < 5; ++failure_lane) {
+      desk_robot::RangeScanOrder scan(full_eight);
+      CHECK(!scan.degraded());
+      scan.transport_fault();
+      for (unsigned lane = 0; lane < 5; ++lane) {
+        CHECK(scan.next() == lane);
+        scan.transport_succeeded(lane);
+        CHECK(scan.degraded());
+      }
+      if (full_eight) scan.transport_succeeded(scan.next());
+      for (unsigned lane = 0; lane < failure_lane; ++lane) {
+        CHECK(scan.next() == lane);
+        scan.transport_succeeded(lane);
+      }
+      scan.transport_fault();
+      for (unsigned i = 0; i < 20; ++i) {
+        scan.transport_succeeded(0);
+        scan.transport_succeeded(5);
+        CHECK(scan.degraded());
+      }
+      // A persistent NACK cannot be masked by a healthy partial sweep.
+      for (unsigned i = 0; i < 20; ++i) {
+        for (unsigned lane = 0; lane < failure_lane; ++lane) {
+          CHECK(scan.next() == lane);
+          scan.transport_succeeded(lane);
+        }
+        scan.transport_fault();
+        CHECK(scan.degraded());
+      }
+      for (unsigned sweep = 0; sweep < 2; ++sweep) {
+        for (unsigned lane = 0; lane < 5; ++lane) {
+          CHECK(scan.next() == lane);
+          scan.transport_succeeded(lane);
+          CHECK(scan.degraded() == (sweep == 0 || lane < 4));
+        }
+        if (full_eight) scan.transport_succeeded(scan.next());
+      }
+      scan.transport_fault();
+      CHECK(scan.degraded());
+      scan.reset();
+      CHECK(!scan.degraded());
+    }
+  }
+}
+
 int main() {
   try {
     desk_robot::RangeScanOrder five(false);
@@ -75,6 +122,7 @@ int main() {
     check_windows(true);
     check_slow_sweeps();
     check_fault_restart();
+    check_transport_recovery();
     std::cout << "PASS all 5 critical ToF channels sampled before one optional direction\n";
     return 0;
   } catch (const std::exception& e) {

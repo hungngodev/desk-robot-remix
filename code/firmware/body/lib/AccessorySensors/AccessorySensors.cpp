@@ -760,8 +760,8 @@ void AccessorySensors::nfc_poll(std::uint32_t now_ms) {
   }
 }
 
-void AccessorySensors::poll(std::uint32_t now_ms) {
-  if (!mux_present_ || (started_ && now_ms - last_ms_ < 12U)) return;
+bool AccessorySensors::poll(std::uint32_t now_ms) {
+  if (!mux_present_ || (started_ && now_ms - last_ms_ < 12U)) return true;
   started_ = true;
   last_ms_ = now_ms;
   bus_blocked_ = false;
@@ -770,7 +770,7 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
   if (!select(lane)) {
     invalidate_cached();
     close();  // Best effort; TofBus independently verifies quiescence.
-    return;
+    return false;
   }
   switch (lane) {
     case 1: gesture_proximity(now_ms); break;
@@ -801,7 +801,9 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
   if (!close()) {
     // 0x70 ToF owner will also fail closed if this mux cannot quiesce.
     invalidate_cached();
+    return false;
   }
+  return true;
 }
 } // namespace desk_robot
 #endif

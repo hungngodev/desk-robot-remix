@@ -73,8 +73,7 @@ bool TofBus::write_byte(std::uint8_t reg, std::uint8_t value) {
 
 void TofBus::failed(CliffGuard& guard) {
   ++bus_errors_;
-  scan_.restart_critical();
-  recovery_pending_ = true;
+  scan_.transport_fault();
   if (!physical_bus_accessible()) recovery_quarantine_ = true;
   // A sibling transaction can fault after poll() published a conversion.
   // Revoke its acquisition notifications along with the stored validity.
@@ -93,10 +92,7 @@ void TofBus::failed(CliffGuard& guard) {
 void TofBus::observe_shared_bus_fault(CliffGuard& guard) {
   // A sibling client may hold a line after the current floor scan. Retire
   // evidence immediately, but leave actual GPIO recovery to a later poll.
-  if (!physical_bus_accessible()) {
-    if (!recovery_pending_) failed(guard);
-    else recovery_quarantine_ = true;
-  }
+  if (!physical_bus_accessible() && !recovery_quarantine_) failed(guard);
 }
 
 // The pinned ESP-IDF driver already attempts a nine-clock clear on some
@@ -182,7 +178,6 @@ bool TofBus::begin(int sda, int scl, int mux_reset_pin) {
   scl_pin_ = scl;
   mux_reset_pin_ = mux_reset_pin;
   pins_restored_ = true;
-  recovery_pending_ = false;
   recovery_attempted_ = false;
   recovery_quarantine_ = false;
   scan_.reset();
@@ -386,7 +381,7 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
   // detection return with the guard fault latched, without additional
   // recovery work before the body loop can apply its safety stop.
   if (recovery_quarantine_ || !physical_bus_accessible()) {
-    if (!recovery_pending_) {
+    if (!recovery_quarantine_) {
       failed(guard);
       return;
     }
@@ -405,13 +400,11 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
       return;
     }
     recovery_quarantine_ = false;
-    recovery_pending_ = false;
     recovery_attempted_ = false;
     return;
   }
   // The pinned driver or removal of a fault may already have cleared
   // the lines. Normal checked mux selection is still required below.
-  recovery_pending_ = false;
   recovery_attempted_ = false;
   // Five mandatory floor/front opportunities precede any optional read.
   // Defer optional work after a slow sweep; the guard still enforces actual
@@ -443,10 +436,13 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
     }
     // Acknowledge without granting clearance. Failed clear is a bus fault.
     if (!write_byte(0x0B, 0x01) || !bus_idle()) failed(guard);
+    else scan_.transport_succeeded(channel);
     return;
   }
   if ((ready & 0x07U) == 0) {
     // No new conversion: CliffGuard must reject stale floor samples.
+    // The checked status read proves transport only, not optical clearance.
+    scan_.transport_succeeded(channel);
     return;
   }
   std::uint8_t result[kMaxSampleBytes]{};
@@ -455,6 +451,7 @@ void TofBus::poll(CliffGuard& guard, std::uint32_t now_ms) {
     failed(guard);
     return;
   }
+  scan_.transport_succeeded(channel);
   // A plausible distance with a weak return is not clearance. Decode the
   // complete result using ST's register layout and the pinned driver limit.
   const auto decoded = decode_tof_result(result);

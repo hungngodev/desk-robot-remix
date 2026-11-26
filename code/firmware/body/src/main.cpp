@@ -732,7 +732,7 @@ void setup() {
 
 #if DESK_ROBOT_FULL_SENSORS
 void invalidate_shared_bus_if_faulted() {
-  if (tof.bus_accessible()) return;
+  if (tof.clients_accessible()) return;
   // A client after the range scan can hold SDA/SCL. No more I2C work,
   // no cached evidence and no wait for the next scan before stopping.
   tof.observe_shared_bus_fault(cliff_guard);
@@ -778,8 +778,8 @@ void loop() {
   // transaction can block. Preserve holding PWM through apply_outputs().
   if (!cliff_guard.evaluate(millis())) apply_outputs();
   service_safety_checkpoint();
-  if (tof.bus_accessible()) berry_imu.poll(millis());
-  if (!tof.bus_accessible()) {
+  if (tof.clients_accessible()) berry_imu.poll(millis());
+  if (!tof.clients_accessible()) {
     berry_imu.invalidate_bus();
     accessories.invalidate_bus();
   }
@@ -795,7 +795,8 @@ void loop() {
   poll_optional(millis());
   if (control.state().bumper_raw) apply_outputs();
   service_safety_checkpoint();
-  if (tof.bus_accessible()) accessories.poll(millis());
+  if (tof.clients_accessible() && !accessories.poll(millis()))
+    tof.note_shared_mux_fault(cliff_guard);
   invalidate_shared_bus_if_faulted();
   control.set_accessories(accessories.readings(), millis());
   service_safety_checkpoint();
@@ -819,7 +820,7 @@ void loop() {
   static bool cap_next = true;
   if (cap_next) {
     std::uint8_t cap_zones = 0;
-    if (tof.bus_accessible() && cap1188.present()) {
+    if (tof.clients_accessible() && cap1188.present()) {
       if (cap1188.poll(millis(), cap_zones)) control.set_cap(true, cap_zones);
       else if (!cap1188.verified()) control.set_cap(false, 0);
     } else {
@@ -827,8 +828,8 @@ void loop() {
       control.set_cap(false, 0);
     }
   } else {
-    if (tof.bus_accessible()) paw_pulse.poll(millis());
-    if (!tof.bus_accessible()) paw_pulse.invalidate_bus();
+    if (tof.clients_accessible()) paw_pulse.poll(millis());
+    if (!tof.clients_accessible()) paw_pulse.invalidate_bus();
     control.set_paw_pulse(paw_pulse.sample());
   }
   cap_next = !cap_next;
