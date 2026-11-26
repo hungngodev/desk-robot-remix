@@ -8,7 +8,7 @@ _GROUP_WINDOW_S = 300.0
 
 
 def group_utterance_limit(group_size: int) -> int:
-    if not 2 <= group_size <= 5:
+    if type(group_size) is not int or not 2 <= group_size <= 5:
         raise ValueError("Choose two to five distinct robots")
     return max(6, 2 * group_size)
 
