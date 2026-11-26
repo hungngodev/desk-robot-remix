@@ -53,6 +53,7 @@ class AccessorySensors {
   std::uint8_t next_lane_ = 1;
   std::uint32_t last_ms_ = 0;
   bool started_ = false;
+  bool monitor_reprime_ = false; // discard pre-transition INA226 CVRF
 #if DESK_ROBOT_ENABLE_HAPTIC
   HapticPulse haptic_{};
   bool haptic_needs_low_ = false;

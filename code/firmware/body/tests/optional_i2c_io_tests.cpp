@@ -1333,6 +1333,52 @@ int main() {
     CHECK(fuel.fuel_valid);
     CHECK(fuel.fuel_sample_seq > last_good_fuel_seq);
     CHECK(fuel.fuel_at_ms > last_good_fuel_at);
+    // PGOOD changes independently of the seat switches.
+    {
+      TwoWire power_wire;
+      power_wire.dock_gpioA = 0x0d;
+      desk_robot::AccessorySensors power_accessories;
+      CHECK(power_accessories.begin(power_wire));
+      std::uint32_t ms = 0;
+      for (; ms < 600; ms += 12) power_accessories.poll(ms);
+      const auto& power = power_accessories.readings();
+      const auto& gauge = power.gauge;
+      CHECK(power.dock.left_seated && !power.dock.input_good);
+      CHECK(gauge.fuel_valid && gauge.monitor_valid);
+      for (const auto pins : {0x09U, 0x0dU}) {
+        power_wire.dock_gpioA = static_cast<std::uint8_t>(pins);
+        const auto dock_seq = power.dock.sample_seq;
+        auto before = gauge;
+        for (int step = 0; step < 7 && power.dock.sample_seq == dock_seq; ++step) {
+          before = gauge;
+          power_accessories.poll(ms);
+          ms += 12;
+        }
+        CHECK(power.dock.sample_seq != dock_seq);
+        CHECK(power.dock.input_good == (pins == 0x09U));
+        CHECK(power.dock.left_seated);
+        CHECK(before.fuel_valid && before.monitor_valid);
+        CHECK(!gauge.fuel_valid && !gauge.monitor_valid && !gauge.pack_current_valid);
+        CHECK(gauge.fuel_sample_seq == before.fuel_sample_seq);
+        CHECK(gauge.monitor_sample_seq == before.monitor_sample_seq);
+        CHECK(gauge.fuel_at_ms == before.fuel_at_ms);
+        CHECK(gauge.monitor_at_ms == before.monitor_at_ms);
+        // Next lane 4 reads MAX17048 again but drains the possibly old CVRF.
+        for (int step = 0; step < 6; ++step, ms += 12)
+          power_accessories.poll(ms);
+        CHECK(gauge.fuel_valid && gauge.fuel_sample_seq != before.fuel_sample_seq);
+        CHECK(!gauge.monitor_valid && !gauge.pack_current_valid);
+        CHECK(gauge.monitor_sample_seq == before.monitor_sample_seq);
+        CHECK(gauge.monitor_at_ms == before.monitor_at_ms);
+        // A subsequent conversion-ready read renews INA226 identity.
+        for (int step = 0; step < 7; ++step, ms += 12)
+          power_accessories.poll(ms);
+        CHECK(gauge.fuel_valid && gauge.monitor_valid);
+        CHECK(gauge.monitor_sample_seq != before.monitor_sample_seq);
+        CHECK(gauge.monitor_at_ms > before.monitor_at_ms);
+        CHECK(!power_wire.unsafe_parallel_mux);
+      }
+    }
     // A completed AS5600 status + angle read, not a cached register, gets
     // its own identity. A broken optional mux must leave old wheel evidence
     // invalid with its former sequence and timestamp intact.

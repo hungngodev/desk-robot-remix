@@ -505,7 +505,10 @@ void AccessorySensors::power(std::uint32_t now_ms) {
     // TI INA226 SBOS547B: CVRF (Mask/Enable 0x06 bit 3) is
     // cleared on register read. Data registers remain readable between
     // conversions; require a new conversion before renewing provenance.
-    g.monitor_valid = read16(0x40, 0x06, status) &&
+    const bool status_read = read16(0x40, 0x06, status);
+    const bool reprime = monitor_reprime_;
+    if (status_read) monitor_reprime_ = false;
+    g.monitor_valid = status_read && !reprime &&
                       (status & 0x0008U) != 0U &&
                       read16(0x40, 0x02, bus) &&
                       read16(0x40, 0x01, shunt);
@@ -538,6 +541,7 @@ void AccessorySensors::dock_status(std::uint32_t now_ms) {
   if (!dock.present) return;
   const bool had_contact = dock.left_seated || dock.right_seated ||
                            dock.input_good || dock.charge_indicated;
+  const bool had_input = dock.input_good;
   std::uint8_t bits = 0;
   dock.valid = read(0x20, 0x12, &bits, 1);
   if (!dock.valid) return;
@@ -548,6 +552,17 @@ void AccessorySensors::dock_status(std::uint32_t now_ms) {
   // Do not mask a CHG-low/PGOOD-high contradiction; BodyControl must
   // see it and latch contact safety, while Mac reports a charger fault.
   dock.charge_indicated = dock_chg_asserted(bits);
+  if (had_input != dock.input_good) {
+    // Lane 4 may have been sampled immediately before this lane 5 edge.
+    // Keep previous acquisition identities for replay detection, but revoke
+    // their validity until independent power registers are read again.
+    data_.gauge.fuel_valid = false;
+    data_.gauge.monitor_valid = false;
+    data_.gauge.pack_current_valid = false;
+    // CVRF may have latched before the edge. Consume it without publishing
+    // a sample on the next successful Mask/Enable read.
+    monitor_reprime_ = true;
+  }
   const bool has_contact = dock.left_seated || dock.right_seated ||
                            dock.input_good || dock.charge_indicated;
   // A contact transition invalidates any scan begun in the prior session.
