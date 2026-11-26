@@ -40,6 +40,9 @@ def validate_optics(data: object, robot_id: str) -> dict:
         if (valid & (1 << channel)) and (
                 age >= 200 if channel < 5 else age > 350):
             raise ValueError("Stale optical sample marked valid")
+        # Match the pinned WROOM driver minimum: 0.25 Mcps in Q9.7.
+        if valid & (1 << channel) and raw["signal_97"][channel] < 32:
+            raise ValueError("Weak optical sample marked valid")
     return {
         "robot_id": robot_id,
         "optics": {

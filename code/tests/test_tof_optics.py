@@ -77,3 +77,22 @@ def test_absent_optical_lane_cannot_contain_raw_measurement(field, channel):
     data["optics"][field][channel] = 1
     with pytest.raises(ValueError, match="Absent optical lane contains sample data"):
         validate_optics(data, "robot-01")
+
+
+@pytest.mark.parametrize("channel", range(8))
+@pytest.mark.parametrize("signal", [0, 31, 32, 33])
+def test_signal_validity_matches_wroom_minimum(channel, signal):
+    data = sample()
+    optics = data["optics"]
+    for field in ("ambient_97", "signal_97", "age_ms"):
+        optics[field] = [0] * 8
+    optics["present_mask"] = optics["valid_mask"] = 1 << channel
+    optics["ambient_97"][channel] = 65535
+    optics["signal_97"][channel] = signal
+    if signal < 32:
+        with pytest.raises(ValueError, match="Weak optical sample marked valid"):
+            validate_optics(data, "robot-01")
+        optics["valid_mask"] = 0
+    result = validate_optics(data, "robot-01")["optics"]
+    assert result["signal_97"][channel] == signal
+    assert result["valid_mask"] == (1 << channel if signal >= 32 else 0)
