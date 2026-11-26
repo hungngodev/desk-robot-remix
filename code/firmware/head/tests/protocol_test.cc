@@ -1,6 +1,7 @@
 #include <cassert>
 #include <limits>
 #include <string>
+#include <vector>
 #include "robot_protocol.h"
 #include "real_touch_edges.h"
 using namespace desk_robot;
@@ -69,7 +70,21 @@ int main() {
     assert(CompleteJpeg(jpeg, sizeof(jpeg)));
     assert(!CompleteJpeg(nullptr, sizeof(jpeg)));
     assert(!CompleteJpeg(jpeg, 3));
-    assert(!CompleteJpeg(jpeg, 512 * 1024 + 1));
+    // Use fully backed spans on both sides of the framing limit.
+    constexpr std::size_t kJpegLimit = 512 * 1024;
+    std::vector<std::uint8_t> limit_jpeg(kJpegLimit + 1, 0);
+    limit_jpeg[0] = 0xff;
+    limit_jpeg[1] = 0xd8;
+    limit_jpeg[kJpegLimit - 2] = 0xff;
+    limit_jpeg[kJpegLimit - 1] = 0xd9;
+    assert(CompleteJpeg(limit_jpeg.data(), kJpegLimit));
+    limit_jpeg[kJpegLimit - 1] = 0xff;
+    limit_jpeg[kJpegLimit] = 0xd9;
+    assert(!CompleteJpeg(limit_jpeg.data(), kJpegLimit + 1));
+    const std::uint8_t minimum_jpeg[] = {0xff, 0xd8, 0xff, 0xd9};
+    for (std::size_t length = 0; length < sizeof(minimum_jpeg); ++length)
+        assert(!CompleteJpeg(minimum_jpeg, length));
+    assert(CompleteJpeg(minimum_jpeg, sizeof(minimum_jpeg)));
     jpeg[0] = 0x11;
     assert(!CompleteJpeg(jpeg, sizeof(jpeg)));
     jpeg[0] = 0xff;
@@ -293,6 +308,16 @@ int main() {
     assert(!ParseCommand("rearm", true, c));
     assert(!ParseCommand("rearm", false, c));
     assert(!ParseCommand(std::string(96, 'x'), true, c));
+    // A syntactically valid command at the byte limit distinguishes the
+    // length guard from rejection of an unknown verb or invalid argument.
+    const auto command_at_limit = std::string("drive ") + std::string(87, '0') + " 0";
+    assert(command_at_limit.size() == 95);
+    assert(ParseCommand(command_at_limit, true, c));
+    assert(c.wire == command_at_limit && c.args == std::vector<int>({0, 0}));
+    const auto command_over_limit = std::string("drive ") + std::string(88, '0') + " 0";
+    assert(command_over_limit.size() == 96);
+    assert(!ParseCommand(command_over_limit, true, c));
+    assert(c.verb.empty() && c.args.empty() && c.wire.empty());
     // Mutation corpus for the real command parser. Exercise accepted near-misses
     // as well as invalid bytes; uniformly random data rarely reaches a verb.
     const std::string seeds[] = {"drive 100 -100 250", "drive -100 100",
