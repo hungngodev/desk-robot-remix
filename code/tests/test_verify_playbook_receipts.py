@@ -508,7 +508,13 @@ def test_online_audit_refuses_nonexecuting_or_mismatched_playbook_commands():
 def test_online_manual_review_requires_real_matching_pr_comment():
     manually_reviewed = promoted("TESTED")
     row = manually_reviewed["procedures"][0]
-    row.update(id=4, evidence_class="source", verification_method="manual_review")
+    row.update(
+        id=4,
+        evidence_class="source",
+        verification_method="manual_review",
+        verification_command=verify._REVIEW_RECONCILIATION_COMMAND,
+    )
+    row["executed_test_receipt"]["command"] = verify._REVIEW_RECONCILIATION_COMMAND
     sha = row["last_verified_sha"]
     comment_url = (
         "https://github.com/hungngodev/desk-robot-remix/pull/17"
@@ -622,7 +628,13 @@ def test_manual_or_other_branch_success_cannot_qualify_pr17():
 
 def test_manual_review_mentioned_sha_is_not_authorized_acceptance():
     row = promoted("TESTED")["procedures"][0]
-    row.update(id=4, evidence_class="source", verification_method="manual_review")
+    row.update(
+        id=4,
+        evidence_class="source",
+        verification_method="manual_review",
+        verification_command=verify._REVIEW_RECONCILIATION_COMMAND,
+    )
+    row["executed_test_receipt"]["command"] = verify._REVIEW_RECONCILIATION_COMMAND
     url = ("https://github.com/hungngodev/desk-robot-remix/pull/17"
            "#issuecomment-101")
     row["manual_review_receipt"] = {
