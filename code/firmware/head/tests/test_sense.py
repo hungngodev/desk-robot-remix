@@ -2263,6 +2263,7 @@ def test_sense_hsm_gaze_and_blink_reach_local_locked_oled_without_motor_motion()
     assert "board->eye_animator_.Step(" in face
     assert "now_ms, action.motion," in face
     assert "face_available && !priority_active && !model_mood_active" in face
+    assert "priority_active || !isAwake(board->face_behavior_.state())" in face
     assert "board->local_eye_display_->ShowEyes(eyes);" in face
     assert face.index("board->local_eye_display_->ShowEyes(eyes);") > face.index(
         "board->display_->SetEmotion(CosmeticMoodName(requested_mood))"

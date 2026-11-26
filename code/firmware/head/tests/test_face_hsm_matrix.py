@@ -69,19 +69,31 @@ static void CheckBlinkCadence() {
         }
     }
     assert(firsts.size() >= 15);
-    FaceEyeAnimator cancelled;
-    cancelled.Seed(5);
-    for (uint32_t t = 0; t < 6000; t += 100) {
-        if (cancelled.Step(t, Motion::kNone, true).closed) {
+}
+
+static void CheckDoubleBlinkCancellation() {
+    FaceEyeAnimator cancelled, control;
+    cancelled.Seed(13);
+    control.Seed(13);
+    bool checked = false;
+    for (uint32_t t = 0; t <= 6100; t += 100) {
+        const auto first = cancelled.Step(t, Motion::kNone, true);
+        assert(control.Step(t, Motion::kNone, true).closed == first.closed);
+        if (first.closed) {
             assert(!cancelled.Step(t + 1, Motion::kNone, false).visible);
-            assert(!cancelled.Step(t + 500, Motion::kNone, true).closed);
+            assert(!control.Step(t + 300, Motion::kNone, true).closed);
+            assert(control.Step(t + 500, Motion::kNone, true).closed);
+            assert(!cancelled.Step(t + 500, Motion::kNone, true).visible);
+            checked = true;
             break;
         }
     }
+    assert(checked);
 }
 
 int main() {
     CheckBlinkCadence();
+    CheckDoubleBlinkCancellation();
     // The real FaceTask samples every 100 ms. Require intermediate pixels,
     // not merely endpoints that the original abrupt implementation passed.
     for (uint32_t start : {0U, 0xffffff00U}) {

@@ -55,35 +55,11 @@ public:
             next_blink_ms_ = NextBlinkDelay();
             blink_active_ = false;
         }
-        switch (motion) {
-            case Motion::kLookUp:
-            case Motion::kLookDown:
-            case Motion::kLookLeft:
-            case Motion::kLookRight:
-            case Motion::kNod:
-            case Motion::kShake:
-                gaze_ = motion;
-                gaze_at_ms_ = now_ms;
-                break;
-            case Motion::kLookFront:
-                gaze_ = Motion::kNone;
-                break;
-            default:
-                break;
-        }
+        UpdateGaze(now_ms, motion);
         const uint32_t gaze_age = now_ms - gaze_at_ms_;
         if (gaze_ != Motion::kNone && gaze_age >= 1100U)
             gaze_ = Motion::kNone;
-        const uint32_t blink_age = now_ms - blink_at_ms_;
-        if (blink_age >= next_blink_ms_) {
-            blink_at_ms_ = now_ms;
-            next_blink_ms_ = NextBlinkDelay();
-            double_blink_ = (Random() % 8U == 0U);
-            blink_active_ = true;
-        }
-        const uint32_t blink_phase = now_ms - blink_at_ms_;
-        if (blink_active_ && blink_phase >= (double_blink_ ? 850U : 350U))
-            blink_active_ = false;
+        const uint32_t blink_phase = AdvanceBlink(now_ms);
         const bool blinking = blink_active_;
         if (gaze_ == Motion::kNone && !blinking) return {};
         EyeFrame frame;
@@ -113,6 +89,40 @@ public:
     }
 
 private:
+    void UpdateGaze(uint32_t now_ms, stackchan::behavior::Motion motion) {
+        using stackchan::behavior::Motion;
+        switch (motion) {
+            case Motion::kLookUp:
+            case Motion::kLookDown:
+            case Motion::kLookLeft:
+            case Motion::kLookRight:
+            case Motion::kNod:
+            case Motion::kShake:
+                gaze_ = motion;
+                gaze_at_ms_ = now_ms;
+                break;
+            case Motion::kLookFront:
+                gaze_ = Motion::kNone;
+                break;
+            default:
+                break;
+        }
+    }
+
+    uint32_t AdvanceBlink(uint32_t now_ms) {
+        const uint32_t blink_age = now_ms - blink_at_ms_;
+        if (blink_age >= next_blink_ms_) {
+            blink_at_ms_ = now_ms;
+            next_blink_ms_ = NextBlinkDelay();
+            double_blink_ = (Random() % 8U == 0U);
+            blink_active_ = true;
+        }
+        const uint32_t blink_phase = now_ms - blink_at_ms_;
+        if (blink_active_ && blink_phase >= (double_blink_ ? 850U : 350U))
+            blink_active_ = false;
+        return blink_phase;
+    }
+
     uint32_t Random() noexcept {
         rng_ ^= rng_ << 13;
         rng_ ^= rng_ >> 17;
