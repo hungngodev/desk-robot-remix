@@ -32,6 +32,26 @@ int main() {
   CHECK(ina226_shunt_uv(static_cast<std::int16_t>(0)) == 0);
   CHECK(ina226_shunt_uv(static_cast<std::int16_t>(16)) == 40);
   CHECK(ina226_shunt_uv(static_cast<std::int16_t>(-40)) == -100);
+  // The raw-code gate deliberately excludes the two signed endpoints.
+  // Test the arithmetic helper independently, including truncation toward zero.
+  CHECK(ina226_shunt_uv(std::numeric_limits<std::int16_t>::min()) == -81920);
+  CHECK(ina226_shunt_uv(std::numeric_limits<std::int16_t>::max()) == 81917);
+  CHECK(ina226_shunt_uv(-1) == -2);
+  CHECK(ina226_shunt_uv(1) == 2);
+
+  // Reuse output storage across discharge, saturation, zero and charge.
+  int crossing_uv = 0;
+  CHECK(ina226_shunt_uv_from_raw(0xfffeU, crossing_uv) && crossing_uv == -5);
+  CHECK(ina226_pack_current_ma(crossing_uv, 5, ma) && ma == -1);
+  CHECK(!ina226_shunt_uv_from_raw(0x8000U, crossing_uv) && crossing_uv == -5);
+  CHECK(ina226_shunt_uv_from_raw(0xffffU, crossing_uv) && crossing_uv == -2);
+  CHECK(ina226_pack_current_ma(crossing_uv, 5, ma) && ma == 0);
+  CHECK(ina226_shunt_uv_from_raw(0x0000U, crossing_uv) && crossing_uv == 0);
+  CHECK(ina226_shunt_uv_from_raw(0x0001U, crossing_uv) && crossing_uv == 2);
+  CHECK(!ina226_shunt_uv_from_raw(0x7fffU, crossing_uv) && crossing_uv == 2);
+  CHECK(ina226_shunt_uv_from_raw(0x0002U, crossing_uv) && crossing_uv == 5);
+  CHECK(ina226_pack_current_ma(crossing_uv, 5, ma) && ma == 1);
+
   CHECK(ina226_pack_current_ma(40, 5, ma) && ma == 8);
   CHECK(ina226_pack_current_ma(-100, 5, ma) && ma == -20);
   CHECK(ina226_pack_current_ma(0, 5, ma) && ma == 0);
