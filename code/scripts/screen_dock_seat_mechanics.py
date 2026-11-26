@@ -49,10 +49,10 @@ def dock_constants(source: Path = CAD) -> dict:
     )
     values = {}
     for name in names:
-        matches = re.findall(
-            rf"^{name}\s*=\s*(\d+(?:\.\d+)?)\s*;", text, re.M
-        )
-        if len(matches) != 1:
+        # Count assignments before validating the literal so a later
+        # indented or expression-valued override cannot go unnoticed.
+        matches = re.findall(rf"^[ \t]*{name}\s*=\s*([^;]+);", text, re.M)
+        if len(matches) != 1 or not re.fullmatch(r"\d+(?:\.\d+)?", matches[0].strip()):
             raise ValueError("Missing or ambiguous dock CAD datum: " + name)
         values[name] = float(matches[0])
     if not all(math.isfinite(v) and 0 < v < 1000 for v in values.values()):
