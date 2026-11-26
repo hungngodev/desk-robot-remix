@@ -275,8 +275,8 @@ jobs:
           git -C upstream/xiaozhi-esp32 fetch --depth=1 origin c435f99a88066029ec2dbd2d758c8cc9d051565b
           git -C upstream/xiaozhi-esp32 checkout --detach FETCH_HEAD
           test "$(git -C upstream/xiaozhi-esp32 rev-parse HEAD)" = "c435f99a88066029ec2dbd2d758c8cc9d051565b"
-      - name: Install OpenSCAD for real CAD source rendering
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq openscad
+      - name: Install OpenSCAD and cJSON host test dependencies
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq openscad libcjson-dev pkg-config
       - name: Host tests
         working-directory: code
         run: uv run --no-sync pytest -q -ra tests firmware/head/tests
