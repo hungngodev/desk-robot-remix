@@ -53,3 +53,34 @@ def test_status_cli_degraded_json_and_exit(
         assert output.out == ""
         assert output.err
     assert requests == [("GET" if action == "status" else "POST", f"/v1/robots/pet/{action}")]
+
+
+@pytest.mark.parametrize(("error", "expected"), [
+    (httpx.InvalidURL("private-marker"), "Invalid coordinator URL"),
+    (httpx.ReadTimeout(""), "Coordinator request timed out; completion unconfirmed."),
+    (httpx.ConnectError("private-marker"),
+     "Coordinator HTTP request failed; completion unconfirmed."),
+    (httpx.HTTPStatusError("private-marker",
+                           request=httpx.Request("POST", "http://localhost"),
+                           response=httpx.Response(503)),
+     "Coordinator returned HTTP 503; completion unconfirmed."),
+])
+def test_http_failure_is_sanitized_and_not_retried(monkeypatch, capsys, error, expected):
+    calls = []
+
+    async def request(args, settings):
+        calls.append(args.action)
+        raise error
+
+    monkeypatch.setattr(cli, "request", request)
+    monkeypatch.setattr(cli, "load_settings", lambda _: SimpleNamespace())
+    monkeypatch.setattr(cli, "load_env", lambda _: None)
+    monkeypatch.setattr(sys, "argv", ["desk-robot", "stop", "pet"])
+    with pytest.raises(SystemExit) as stopped:
+        cli.main()
+    assert stopped.value.code == 1
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err.strip() == expected
+    assert "private-marker" not in output.err
+    assert calls == ["stop"]

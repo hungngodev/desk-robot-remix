@@ -463,11 +463,17 @@ def main() -> None:
             if _degraded_status(result, args.robot):
                 print(json.dumps(result, indent=2))
                 p.exit(1)
-        p.exit(1, f"{exc}\n")
+        p.exit(1, f"Coordinator returned HTTP {exc.response.status_code}; completion unconfirmed.\n")
+    except httpx.InvalidURL:
+        p.exit(1, "Invalid coordinator URL\n")
+    except httpx.TimeoutException:
+        p.exit(1, "Coordinator request timed out; completion unconfirmed.\n")
+    except httpx.HTTPError:
+        p.exit(1, "Coordinator HTTP request failed; completion unconfirmed.\n")
     except sqlite3.Error:
         p.exit(1, "Private memory database unavailable. Check memory_dir permissions, "
                "free space and database integrity; preserve existing memory files.\n")
-    except (ValueError, OSError, httpx.HTTPError) as exc:
+    except (ValueError, OSError) as exc:
         p.exit(1, f"{exc}\n")
 
 
