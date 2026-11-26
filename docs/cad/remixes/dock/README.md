@@ -218,3 +218,28 @@ It cannot choose electrical contacts, determine polarity, accommodate real
 spring stroke, validate the robot's final approaching path, or energize
 charger rails. The result always marks `physical_contact_mate_verified`
 and `charging_authorized` false regardless of apparent envelope fit.
+
+## Spring contact travel remains a separate physical gate
+
+The nominal rail half-angle is atan2(entry_flare_each_mm, entry_flare_run_mm)
+(about 10.71 degrees for the example). The low brace begins at y=125 mm and
+the high backstop begins at y=133 mm, measured from the entry. These are
+CAD surfaces, not measured robot stop positions or supplier spring limits.
+
+For each of the two charging contacts (separate from the NC seat switches),
+record the exact part and datasheet, installed free protrusion range P_min
+to P_max from the carrier datum, and mating pad gap range G_min to G_max
+along that contact's compression axis. Include printed tolerances, pad
+height, yaw, mounting variation and measured coast after the earliest seat
+switch actuation; do not assume continued drive to the high backstop.
+The worst-case compression interval is P_min - G_max to P_max - G_min.
+Both endpoints must be inside that contact's manufacturer-recommended
+working stroke range, with a measured reserve below the maximum safe travel.
+Record force, return, contact bounce and independent NC switch travel at
+the actual unpowered stop; reject an open contact or a bottomed spring.
+No nominal pogo stroke or force is specified until a contact is selected.
+
+PGOOD is an electrical charger status, not a mechanical contact travel
+specification. Neither a CAD mesh nor this interval calculation proves
+contact current rating, polarity, net battery charge, or release readiness.
+Keep contacts isolated and A12 on HOLD until physical evidence is recorded.

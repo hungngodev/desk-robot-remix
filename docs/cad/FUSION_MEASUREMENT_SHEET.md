@@ -33,6 +33,7 @@ These blank fields are **intentional** and are not permission to guess a fit.
 | Dock track guide clear width | | dock_clear_width |
 | Two independent terminal IR emitter carriers, their lateral separation, lens height, aim and optical overlap | | dock_ir_spacing / ir_left_z / ir_right_z / ir_yaw |
 | Exact two independent seat switch bodies, mount pitch / hole diameter, free and operating positions, normally closed polarity, overtravel and wire clearance | | dock_seat_left / dock_seat_right / dock_seat_body / dock_seat_mount_pitch / dock_seat_hole_d / dock_seat_fp / dock_seat_op / dock_seat_overtravel / dock_seat_wire_clearance |
+| Each charging spring contact independently (not the NC seat switches): exact part/datasheet, compression axis, installed free protrusion and mating gap extrema at measured unpowered stop, working stroke, maximum safe travel/reserve, force and return/bounce | | dock_contact_left / dock_contact_right / dock_contact_stroke / dock_contact_gap / dock_contact_force |
 | AprilTag printed black square size and camera height | | tag_square_mm, tag_center_height |
 | Key and candy actual width and thickness | | object_w / h |
 | Per-pose load-bearing wheel/track/caster/dock-guide contact coordinates in body X forward Y left, measured separately for stowed, extended key, lifted candy, and docked | | poses[].support_contacts_mm |

@@ -308,9 +308,8 @@ def test_dock_assembly_requires_independent_seating_and_ir_measurements():
     assert "decoded IR are not seat" in guide
 
 
-def test_full_dock_mesh_taper_and_stop_planes(tmp_path):
-    """Measure the passive rail angle and both actual stop-face planes."""
-    import math
+def _full_dock_faces(tmp_path):
+    """Read the actual full cradle mesh from the CAD renderer."""
     import shutil
     import struct
     import subprocess
@@ -318,13 +317,6 @@ def test_full_dock_mesh_taper_and_stop_planes(tmp_path):
     executable = shutil.which("openscad")
     if executable is None:
         pytest.skip("OpenSCAD not installed")
-    source = SOURCE.read_text(encoding="utf-8")
-
-    def value(name):
-        match = re.search(rf"^{name}\s*=\s*([0-9.]+)\s*;", source, re.M)
-        assert match is not None, name
-        return float(match.group(1))
-
     output = tmp_path / "full_dock.stl"
     subprocess.run(
         [executable, "--export-format", "binstl", "-o", str(output), str(SOURCE)],
@@ -333,21 +325,56 @@ def test_full_dock_mesh_taper_and_stop_planes(tmp_path):
     data = output.read_bytes()
     count = struct.unpack_from("<I", data, 80)[0]
     assert count > 0 and len(data) == 84 + 50 * count
-    faces = [
+    return [
         tuple(struct.unpack_from("<fff", data, 84 + 50 * i + 12 + 12 * j)
               for j in range(3)) for i in range(count)
     ]
+
+
+def _dock_source_value(name):
+    source = SOURCE.read_text(encoding="utf-8")
+    match = re.search(rf"^{name}\s*=\s*([0-9.]+)\s*;", source, re.M)
+    assert match is not None, name
+    return float(match.group(1))
+
+
+def _stop_face_geometry(faces, plane):
+    """Return projected area and X/Z extent of triangles on a front plane."""
+    vertices = []
+    area = 0.0
+    for a, b, c in faces:
+        if all(abs(p[1] - plane) < 0.001 for p in (a, b, c)):
+            vertices.extend((a, b, c))
+            area += abs((b[0] - a[0]) * (c[2] - a[2])
+                        - (c[0] - a[0]) * (b[2] - a[2])) / 2
+    assert vertices, plane
+    bounds = tuple(
+        bound(p[axis] for p in vertices)
+        for axis in (0, 2) for bound in (min, max)
+    )
+    return area, bounds
+
+
+def test_full_dock_mesh_taper_and_stop_planes(tmp_path):
+    """Measure each passive rail angle and both actual stop-face planes."""
+    import math
+
+    faces = _full_dock_faces(tmp_path)
+    value = _dock_source_value
     floor = value("base_thickness_mm")
     run = value("entry_flare_run_mm")
     flare = value("entry_flare_each_mm")
-    widths = []
+    inner_faces = []
     for y in (0, run):
         xs = sorted({round(x, 4) for face in faces for x, yy, z in face
                      if abs(yy - y) < 0.001 and z > floor + 0.001})
         assert len(xs) == 4
-        widths.append(xs[2] - xs[1])
-    measured_angle = math.degrees(math.atan2((widths[0] - widths[1]) / 2, run))
-    assert measured_angle == pytest.approx(math.degrees(math.atan2(flare, run)), abs=0.01)
+        inner_faces.append((xs[1], xs[2]))
+    entry, straight = inner_faces
+    expected_angle = math.degrees(math.atan2(flare, run))
+    for shift in (straight[0] - entry[0], entry[1] - straight[1]):
+        angle = math.degrees(math.atan2(shift, run))
+        assert angle == pytest.approx(expected_angle, abs=0.01)
     width = value("track_outer_width_mm") + 2 * (
         value("side_clearance_each_mm") + value("guide_wall_mm")
         + value("wall_outside_margin_mm")
@@ -355,18 +382,17 @@ def test_full_dock_mesh_taper_and_stop_planes(tmp_path):
     stop = value("base_length_mm") - value("backstop_thickness_mm")
     brace = stop - value("backstop_brace_depth_mm")
     brace_height = value("backstop_brace_height_mm")
+    wall_height = value("backstop_height_mm")
     paper = value("tag_black_side_mm") + 2 * (
         value("tag_white_margin_each_mm") + value("tag_paper_slack_each_mm")
     )
-    # Project triangles on each front plane onto X/Z. The low brace is the
-    # first nominal obstruction; the higher wall has a tag pocket cutout.
-    for plane, expected_area in (
-        (brace, width * brace_height),
-        (stop, width * (value("backstop_height_mm") - brace_height) - paper**2),
+    # The low brace is the first nominal obstruction; the higher wall has
+    # a tag pocket cutout. Neither is a measured robot seating position.
+    for plane, expected_area, low_z, high_z in (
+        (brace, width * brace_height, floor, floor + brace_height),
+        (stop, width * (wall_height - brace_height) - paper**2,
+         floor + brace_height, floor + wall_height),
     ):
-        area = 0.0
-        for a, b, c in faces:
-            if all(abs(p[1] - plane) < 0.001 for p in (a, b, c)):
-                area += abs((b[0] - a[0]) * (c[2] - a[2])
-                            - (c[0] - a[0]) * (b[2] - a[2])) / 2
+        area, bounds = _stop_face_geometry(faces, plane)
         assert area == pytest.approx(expected_area, abs=0.1), plane
+        assert bounds == pytest.approx((0, width, low_z, high_z), abs=0.01), plane
