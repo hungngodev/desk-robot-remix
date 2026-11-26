@@ -390,7 +390,12 @@ def main() -> None:
 
             from .api import create_app
 
-            uvicorn.run(create_app(settings), host=args.host, port=args.port)
+            # Bound request draining so a stuck API call cannot indefinitely
+            # postpone lifespan cleanup and its independent WROOM STOP attempts.
+            uvicorn.run(
+                create_app(settings), host=args.host, port=args.port,
+                timeout_graceful_shutdown=1,
+            )
             return
         if args.action == "doctor":
             result = _doctor_report(args, settings)
