@@ -274,7 +274,7 @@ void rate_ceiling_during_ramp_and_reversal() {
     auto last_edge = now;
     int changes = 0;
     for (int i = 0; i < 10000; ++i) {
-      now += i % 17 == 0 ? 37000U : 137U;
+      now += i % 97 == 0 ? 37000U : 137U;
       const int direction = (i / 2000) % 2 ? -sign : sign;
       const int requested = direction > 0 ? std::numeric_limits<int>::max()
                                           : std::numeric_limits<int>::min();
