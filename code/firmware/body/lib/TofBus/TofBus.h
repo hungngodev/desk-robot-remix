@@ -23,9 +23,6 @@
 
 namespace desk_robot {
 
-// Only reads WHO_AM_I: no sensor fusion, driver selection or motion authority.
-// The photographed owned BerryIMU is likely V1 but its chip is unverified.
-// 1 = V1 LSM9DS0, 2 = V2 LSM9DS1, 3 = V3 LSM6DSL, 0 = unknown.
 // Exactly the optical quality words ALREADY present in VL53L0X 0x14 result.
 // On wire these are unsigned 9.7 fixed-point Mcps, NOT calibrated SNR.
 // They never relax the immediate local raw range/status CliffGuard gate.
@@ -37,6 +34,9 @@ struct TofOpticalDiagnostic {
   std::uint32_t age_ms = 0;
 };
 
+// WHO_AM_I probe evidence only; no measured motion or qualification.
+// Family values follow BerryModel: 0 unknown, 1 LSM9DS0, 2 LSM9DS1,
+// 3 LSM6DSL, 4 MPU6050 (no auxiliary sensor).
 struct ImuIdentity {
   std::uint8_t family = 0;
   std::uint8_t gyro_id = 0;
