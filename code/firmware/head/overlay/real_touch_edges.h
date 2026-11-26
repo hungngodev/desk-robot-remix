@@ -14,6 +14,7 @@ public:
 
     bool AcceptBoot(std::uint32_t boot_id) {
         boot_accepted_ = false;
+        if (epoch_exhausted_) return false;
         // WROOM initializes its epoch as esp_random() | 1U. Zero is an
         // uninitialized or malformed report, never a new observed boot.
         // Invalidate the edge baseline but preserve the retired epoch fence.
@@ -30,11 +31,15 @@ public:
         if (boot_id == active_boot_) return boot_accepted_ = true;
         for (std::size_t i = 0; i < retired_count_; ++i)
             if (retired_boot_ids_[i] == boot_id) return false;
-        // Bounded UART transport has no legitimate multi-boot replay source.
-        // Retain eight retired generations without dynamic memory.
-        retired_boot_ids_[retired_next_] = active_boot_;
-        retired_next_ = (retired_next_ + 1) % retired_boot_ids_.size();
-        if (retired_count_ < retired_boot_ids_.size()) ++retired_count_;
+        // Never evict a retired epoch: an old reply could then look like
+        // a new boot. Exhaustion requires a new head session; ordinary UART
+        // Reset() must not reopen the expression replay fence.
+        if (retired_count_ == retired_boot_ids_.size()) {
+            epoch_exhausted_ = true;
+            Reset();
+            return false;
+        }
+        retired_boot_ids_[retired_count_++] = active_boot_;
         active_boot_ = boot_id;
         Reset();  // first post-reboot count may already be nonzero
         counter_seen_ = false;
@@ -70,6 +75,6 @@ private:
     std::uint32_t active_boot_ = 0;
     std::array<std::uint32_t, 8> retired_boot_ids_{};
     std::size_t retired_count_ = 0;
-    std::size_t retired_next_ = 0;
+    bool epoch_exhausted_ = false;
 };
 } // namespace desk_robot

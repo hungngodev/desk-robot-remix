@@ -165,6 +165,23 @@ int main() {
       rejected.Observe(501) != 0) return 37;
   if (!rejected.AcceptBoot(92) || rejected.Observe(12) != 0 ||
       rejected.Observe(13) != 1) return 38;
+  desk_robot::RealTouchEdges touch_limit, cap_limit;
+  for (auto* edge : {&touch_limit, &cap_limit}) {
+    for (std::uint32_t boot = 1; boot <= 9; ++boot) {
+      if (!edge->AcceptBoot(boot) || edge->Observe(10) != 0 ||
+          edge->Observe(11) != 1) return 39;
+    }
+    if (edge->AcceptBoot(1) || edge->Observe(12) != 0) return 40;
+    if (!edge->AcceptBoot(9) || edge->Observe(12) != 1) return 41;
+    // Ninth reboot would evict the earliest retired identity in a ring.
+    if (edge->AcceptBoot(10) || edge->Observe(13) != 0) return 42;
+    edge->Reset();
+    if (edge->AcceptBoot(1) || edge->AcceptBoot(9) ||
+        edge->AcceptBoot(10) || edge->Observe(14) != 0) return 43;
+  }
+  desk_robot::RealTouchEdges new_session;
+  if (!new_session.AcceptBoot(10) || new_session.Observe(1) != 0 ||
+      new_session.Observe(2) != 1) return 44;
   return 0;
 }
 """
