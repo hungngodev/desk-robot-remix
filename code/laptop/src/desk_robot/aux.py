@@ -8,7 +8,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from .sensor_event_contract import is_int_in_range, is_uint, is_valid_fuel_measurement
+from .sensor_event_contract import (
+    fuel_sample_is_fresh,
+    is_int_in_range,
+    is_uint,
+    is_valid_fuel_measurement,
+)
 
 
 def _bool(value: object) -> bool:
@@ -222,7 +227,7 @@ def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
     fuel_age = power.get("fuel_age_ms")
     if ("fuel_age_ms" in power and (
         not is_uint(fuel_age, 0xffffffff)
-        or (power["fuel_valid"] and fuel_age >= 500)
+        or (power["fuel_valid"] and not fuel_sample_is_fresh(fuel_age))
     )):
         raise ValueError("Invalid MAX17048 fuel acquisition age")
     # Optional until an inspected 5mOhm Kelvin sensor and matching WROOM

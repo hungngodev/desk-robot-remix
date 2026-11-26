@@ -50,6 +50,22 @@ def is_uint(value: object, upper: int) -> TypeGuard[int]:
     return is_int_in_range(value, 0, upper)
 
 
+
+# Match the WROOM MAX17048 acquisition lifetime, not the motor watchdog.
+FUEL_SAMPLE_MAX_AGE_MS = 500
+
+
+def fuel_sample_is_fresh(age_ms: object, elapsed_ms: object = 0) -> bool:
+    """Charge the full host request time against the wire acquisition lifetime."""
+    return (
+        type(age_ms) is int
+        and 0 <= age_ms < FUEL_SAMPLE_MAX_AGE_MS
+        and type(elapsed_ms) in (int, float)
+        and 0 <= elapsed_ms < FUEL_SAMPLE_MAX_AGE_MS
+        and age_ms + elapsed_ms < FUEL_SAMPLE_MAX_AGE_MS
+    )
+
+
 def is_valid_fuel_measurement(cell_mv: object, soc_centi: object) -> bool:
     """Match the WROOM MAX17048 claimed-valid measurement envelope."""
     return is_int_in_range(cell_mv, 2500, 4500) and is_int_in_range(soc_centi, 0, 10000)

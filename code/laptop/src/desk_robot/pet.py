@@ -56,6 +56,7 @@ from .sensor_event_contract import (
     PHYSICAL_INITIATIVE_KINDS,
     ProactiveToolData,
     ProactiveToolReceipt,
+    fuel_sample_is_fresh,
 )
 from .side_ranging import SideRangeEvents
 from .transport import Head, HeadError
@@ -1509,9 +1510,7 @@ class PetController:
         fuel_age = power.get("fuel_age_ms")
         auto_dock = robot.autonomous_low_battery_dock_enabled
         fresh_fuel = (
-            fuel_boot is not None and type(fuel_age) is int and 0 <= fuel_age < 500
-            and type(request_elapsed_ms) in (int, float) and 0 <= request_elapsed_ms < 500
-            and fuel_age + request_elapsed_ms < 500
+            fuel_boot is not None and fuel_sample_is_fresh(fuel_age, request_elapsed_ms)
         )
         if (power["fuel_valid"] and 2500 <= power["cell_mv"] <= 4500
                 and type(fuel_seq) is int and 0 < fuel_seq <= 0xffffffff

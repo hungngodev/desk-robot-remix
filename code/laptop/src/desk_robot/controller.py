@@ -35,7 +35,7 @@ from .operations import (
     dispatch_job_command,
     require_active_operation,
 )
-from .sensor_event_contract import is_valid_fuel_measurement
+from .sensor_event_contract import fuel_sample_is_fresh, is_valid_fuel_measurement
 from .transport import Head, HeadError
 from .vision import Detection, Vision, validated_camera_sizes
 
@@ -100,10 +100,7 @@ def _require_fresh_auto_dock_fuel(
     if (not isinstance(power, dict) or power.get("fuel_valid") is not True
             or type(power.get("fuel_seq")) is not int
             or not 1 <= power["fuel_seq"] <= 0xffffffff
-            or type(power.get("fuel_age_ms")) is not int
-            or not 0 <= power["fuel_age_ms"] < 500
-            or type(elapsed_ms) not in (int, float) or not 0 <= elapsed_ms < 500
-            or power["fuel_age_ms"] + elapsed_ms >= 500
+            or not fuel_sample_is_fresh(power.get("fuel_age_ms"), elapsed_ms)
             or not is_valid_fuel_measurement(power.get("cell_mv"), power.get("soc_centi"))
             or power["soc_centi"] > max_soc_centi):
         raise OperationError("Autonomous dock requires fresh low battery evidence")
