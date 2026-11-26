@@ -1086,7 +1086,7 @@ class Coordinator:
             return None
         if (
             robot.dock_turn_sign not in (-1, 1)
-            or robot.dock_forward_sign not in (-1, 1)
+            or robot.dock_forward_sign != 1
             or robot.dock_beacon_id is None
             or robot.dock_calibration is None
         ):
@@ -1283,6 +1283,8 @@ class Coordinator:
             raise OperationError("Dock approach requires physically qualified hardware")
         if robot.dock_turn_sign not in (-1, 1) or robot.dock_forward_sign not in (-1, 1):
             raise OperationError("Dock turn and forward motor polarity are not measured")
+        if robot.dock_forward_sign != 1:
+            raise OperationError("Dock reverse direction clearance unqualified")
         try:
             camera, target_mm = load_real_dock_calibration(
                 robot.dock_calibration, robot_id=robot.id,
@@ -1327,6 +1329,8 @@ class Coordinator:
         *, camera_grant: int | None = None,
     ) -> dict:
         """Camera plus fresh assigned dock IR plus local guard; NEVER charge."""
+        if forward_sign != 1:
+            raise OperationError("Dock reverse direction clearance unqualified")
         self._require_camera_motion_grant(camera_grant)
         head = self.heads[job.robot_id]
         expected_dock = self.robot(job.robot_id).dock_beacon_id

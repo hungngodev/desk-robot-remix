@@ -1644,3 +1644,40 @@ def test_auto_dock_fuel_preflight_rejects_stale_or_recovered_evidence(changes, e
         _require_fresh_auto_dock_fuel(
             power | changes, max_soc_centi=2000, elapsed_ms=elapsed,
         )
+
+async def test_dock_reverse_polarity_refused_before_permit_or_head_io(settings):
+    settings.mode = "hardware"
+    robot = settings.robots[0]
+    robot.motion_enabled = True
+    robot.dock_motion_qualified = True
+    robot.dock_turn_sign = 1
+    robot.dock_forward_sign = -1
+    controller, head = make(settings)
+    try:
+        controller.permits[robot.id] = time.monotonic() + 10
+        permit = controller.permits[robot.id]
+        with pytest.raises(OperationError, match="reverse direction clearance"):
+            controller.dock(robot.id)
+        assert controller.permits[robot.id] == permit
+        assert not controller.jobs
+        assert head.commands == []
+    finally:
+        await controller.close()
+
+
+@pytest.mark.parametrize("forward_sign", [-1, 0])
+async def test_dock_internal_reverse_rejected_before_head_io(settings, forward_sign):
+    from desk_robot.controller import Job
+
+    settings.mode = "hardware"
+    controller, head = make(settings)
+    try:
+        with pytest.raises(OperationError, match="reverse direction clearance"):
+            await controller._dock_approach(
+                Job("dock-reverse", "robot-01", "dock_approach"),
+                None, 200, 1, forward_sign,
+            )
+        assert head.commands == []
+    finally:
+        await controller.close()
+
