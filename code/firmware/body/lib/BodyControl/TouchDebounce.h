@@ -8,7 +8,8 @@ namespace desk_robot {
 class TouchDebounce {
  public:
   void observe(bool active, std::uint32_t now_ms) noexcept {
-    if (active == candidate_) return;
+    if (observed_ && active == candidate_) return;
+    observed_ = true;
     candidate_ = active;
     samples_ = 1;
     last_ms_ = now_ms;
@@ -19,7 +20,14 @@ class TouchDebounce {
     if (now_ms - last_ms_ < 25U) return false;
     last_ms_ = now_ms;
     if (samples_ < 3U) ++samples_;
-    if (samples_ < 3U || candidate_ == stable_) return false;
+    if (samples_ < 3U) return false;
+    // A high input at boot is raw STOP evidence, not a witnessed press.
+    // Require a debounced inactive baseline; never time out into a gesture.
+    if (!released_) {
+      if (!candidate_) released_ = true;
+      return false;
+    }
+    if (candidate_ == stable_) return false;
     stable_ = candidate_;
     return true;
   }
@@ -27,6 +35,8 @@ class TouchDebounce {
   bool stable() const noexcept { return stable_; }
 
  private:
+  bool observed_ = false;
+  bool released_ = false;
   bool stable_ = false;
   bool candidate_ = false;
   std::uint8_t samples_ = 0;

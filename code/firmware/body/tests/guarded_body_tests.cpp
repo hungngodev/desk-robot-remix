@@ -986,6 +986,9 @@ static void cap_petting_zones_are_optional_and_never_arm() {
 
 static void raw_touch_observations_restart_gesture_debounce() {
   desk_robot::TouchDebounce touch;
+  CHECK(!touch.poll(false, 0));
+  CHECK(!touch.poll(false, 25));
+  CHECK(!touch.poll(false, 50));
   CHECK(!touch.poll(true, 100));
   CHECK(!touch.poll(true, 125));
   touch.observe(false, 130);  // UART/output safety read between gesture polls
@@ -1003,6 +1006,9 @@ static void raw_touch_observations_restart_gesture_debounce() {
   CHECK(touch.poll(false, 325));
   CHECK(!touch.stable());
   desk_robot::TouchDebounce wrap;
+  CHECK(!wrap.poll(false, 0xffffff80U));
+  CHECK(!wrap.poll(false, 0xffffff99U));
+  CHECK(!wrap.poll(false, 0xffffffb2U));
   CHECK(!wrap.poll(true, 0xfffffff0U));
   CHECK(!wrap.poll(true, 9U));
   CHECK(wrap.poll(true, 34U));

@@ -255,11 +255,11 @@ void apply_outputs() {
 void sample(std::uint32_t t,bool a){sample_ms=t;raw=a;poll_touch(t);}
 int main(){
   // Three 1ms pulses coincident with nominal 25ms sample instants.
-  for(std::uint32_t t=0;t<=100;++t) sample(t,t==25||t==50||t==75);
+  for(std::uint32_t t=0;t<=150;++t) sample(t,t==75||t==100||t==125);
   assert(control.edges==0);
   assert(!control.state().armed);
   assert(output_calls==1);
-  for(std::uint32_t t=101;t<=60101;++t) sample(t,true);
+  for(std::uint32_t t=151;t<=60101;++t) sample(t,true);
   assert(control.edges==1 && touch_debounce.stable() && output_calls==1);
   for(std::uint32_t t=60102;t<=60160;++t) sample(t,false);
   assert(!touch_debounce.stable() && control.edges==1);
@@ -272,6 +272,7 @@ int main(){
   // A stale predecessor must not count as the first gesture sample.
   control=Control{};
   touch_debounce=desk_robot::TouchDebounce{};
+  sample(99900,false); sample(99925,false); sample(99950,false);
   release_during_output=true;
   sample(100000,true);
   assert(!control.state().armed && !control.state().touch_raw_active);
@@ -281,6 +282,21 @@ int main(){
   assert(!touch_debounce.stable() && control.edges==0);
   sample(100075,true);
   assert(touch_debounce.stable() && control.edges==1);
+  // A boot-held high is raw safety evidence but never a gesture. A short
+  // release is not a baseline, even after a minute of stuck-high input.
+  control=Control{};
+  touch_debounce=desk_robot::TouchDebounce{};
+  release_during_output=false;
+  for(std::uint32_t t=0;t<=60000;t+=25) sample(t,true);
+  assert(!control.state().armed && control.state().touch_raw_active);
+  assert(output_calls==3 && control.edges==0 && !touch_debounce.stable());
+  sample(60025,false); sample(60050,false); sample(60074,true);
+  sample(60100,true); sample(60125,true);
+  assert(control.edges==0 && !touch_debounce.stable());
+  sample(60150,false); sample(60175,false); sample(60200,false);
+  assert(control.edges==0 && !control.state().armed);
+  sample(60225,true); sample(60250,true); sample(60275,true);
+  assert(control.edges==1 && touch_debounce.stable());
 }
 """,
         encoding="utf-8",
