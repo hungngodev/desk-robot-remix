@@ -86,3 +86,51 @@ def test_voice_decision_preserves_priority_and_acoustic_gate():
         "AUDIO_I2S_SPK_GPIO_DOUT GPIO_NUM_8",
     ):
         assert f"#define {pin}" in pins
+
+
+def decision_fields(prefix: str) -> tuple[str, str]:
+    fields = decision(prefix).strip("|").split("|")
+    assert len(fields) == 3, prefix
+    return fields[1].strip(), fields[2].strip()
+
+
+def test_recent_range_decisions_keep_selection_frozen_and_lanes_allocated():
+    evidence, action = decision_fields("| D03 ")
+    assert "8 generic VL53L0X (GY-530, `0x29`) on `0x70` lanes 0–7" in evidence
+    assert (
+        "four corner floor roles, one front obstacle, three left/right/rear diagnostics"
+        in evidence
+    )
+    assert "loaded stopping margin remain unqualified" in evidence
+    assert "without reopening sensor selection or evaluating VL53L4CD" in action
+    assert "before live edge motion" in action
+
+    evidence, action = decision_fields("| D04 ")
+    assert "left/right/rear read-only diagnostics on lanes 5–7" in evidence
+    assert "`0x71` accessory lanes 0–7" in evidence
+    assert "Reject Sense 41/42 heartbeat wiring." in action
+    assert "Physical electrical qualification remains HOLD." in action
+
+
+def test_audio_decision_columns_and_acceptance_ledger_agree():
+    evidence, action = decision_fields("| D06 ")
+    assert "32 kHz MAX98357A I2S (BCLK GPIO4, LRCK GPIO7, DOUT GPIO8)" in evidence
+    assert "16 kHz PDM (clock GPIO42, data GPIO41)" in evidence
+    assert "audible stop remain unqualified" in evidence
+    assert "Required gate 19/20 ≤500ms and 18/20 correct new requests" in action
+    assert "zero echo-only interruptions 10min" in action
+
+    evidence, action = decision_fields("| D08 ")
+    assert "sole physical microphone/speaker transport and tool route" in evidence
+    assert "not through a second audio pipe" in evidence
+    assert "Preserve the **single audio/turn owner**" in action
+
+    rows = [
+        line for line in read("docs/records/verification.md").splitlines()
+        if line.startswith("| **A2 Audio/quiet** |")
+    ]
+    assert len(rows) == 1
+    criteria = rows[0].split("|")[2]
+    assert "**At least 19/20** trials visibly/audibly stop TTS in **<=500ms**" in criteria
+    assert "**18/20** recover intelligible *new* request" in criteria
+    assert "**zero false self-interruptions**" in criteria
