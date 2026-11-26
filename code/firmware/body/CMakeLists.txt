@@ -244,6 +244,7 @@ body_add_test(wheel_angle_capture_freshness_and_wrap wheel_angle_capture_tests)
 body_add_test(body_read_only_pose_unavailable_contract pose_read_only_tests)
 body_add_test(guarded_body_integration guarded_body_tests)
 foreach(scenario
+    attitude_norm_root_boundaries
     disarmed_boot arm_clears_old_motion drive_limits drive_duration
     keepalive_does_not_extend_drive invalid_does_not_renew
     queries_do_not_renew smooth_servos keepalive_extends_servo_lease
