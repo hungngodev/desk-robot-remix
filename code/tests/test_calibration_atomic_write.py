@@ -1,6 +1,10 @@
+import json
 import os
 import stat
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from threading import Barrier
 
 import pytest
@@ -108,3 +112,123 @@ def test_concurrent_writers_stage_distinct_complete_files(tmp_path, monkeypatch)
             write.result(timeout=10)
     assert Calibration.load(path) in (first, second)
     assert list(tmp_path.iterdir()) == [path]
+
+
+def _side_cli_args(tmp_path):
+    script = Path(__file__).resolve().parents[1] / "scripts/calibrate_side_ranges.py"
+    source = tmp_path / "side.jsonl"
+    target = tmp_path / "candidate.json"
+    rows = []
+    for channel, side in enumerate(("left", "right", "rear")):
+        for index in range(1, 41):
+            mm = [800] * 3
+            mm[channel] = 100 if index <= 20 else 500
+            rows.append({
+                "robot_id": "robot-01", "direction": side,
+                "label": "near" if index <= 20 else "far", "sample_id": index,
+                "side_ranges": {
+                    "mm": mm, "age_ms": [35] * 3, "sample_ms": [index * 20] * 3,
+                    "boot_id": 73, "present_mask": 7, "valid_mask": 7,
+                    "motion_certified": False,
+                },
+            })
+    source.write_text("".join(json.dumps(row) + "\n" for row in rows), encoding="utf-8")
+    return script, source, target, ["--robot", "robot-01", "--input", str(source)]
+
+
+@pytest.mark.parametrize("bad,diagnostic", [
+    (b'{"broken":', "line 121"),
+    (b'{"x": 1, "x": 2}\n', "Duplicate"),
+    (b'{"x": 1e999}\n', "Nonfinite"),
+    (b'[]\n', "identity"),
+    (b'\xff', "utf-8"),
+    (None, "No such file"),
+])
+@pytest.mark.parametrize("existing", [False, True])
+def test_side_cli_invalid_input_preserves_candidate(tmp_path, bad, diagnostic, existing):
+    script, source, target, args = _side_cli_args(tmp_path)
+    if existing:
+        target.write_bytes(b'{"previous": true}\n')
+    if bad is None:
+        source.unlink()
+    else:
+        with source.open("ab") as stream:
+            stream.write(bad)
+    result = subprocess.run(
+        [sys.executable, str(script), *args, "--output", str(target)],
+        capture_output=True, text=True, timeout=10, check=False,
+    )
+    assert result.returncode == 2
+    assert diagnostic in result.stderr
+    assert "Traceback" not in result.stderr
+    assert not result.stdout
+    if existing:
+        assert target.read_bytes() == b'{"previous": true}\n'
+    else:
+        assert not target.exists()
+    assert not list(tmp_path.glob(".desk-robot-*"))
+
+
+@pytest.mark.parametrize("operation", ["fsync", "replace"])
+@pytest.mark.parametrize("failure,exit_code", [(OSError, 2), (KeyboardInterrupt, 130)])
+@pytest.mark.parametrize("existing", [False, True])
+def test_side_cli_interrupted_publication(tmp_path, monkeypatch, capsys, operation,
+                                          failure, exit_code, existing):
+    import runpy
+
+    script, source, target, args = _side_cli_args(tmp_path)
+    if existing:
+        target.write_bytes(b'{"previous": true}\n')
+
+    def fail(*args):
+        raise failure("injected failure")
+
+    monkeypatch.setattr(os, operation, fail)
+    monkeypatch.setattr(sys, "argv", [str(script), *args, "--output", str(target)])
+    with pytest.raises(SystemExit) as exc:
+        runpy.run_path(str(script), run_name="__main__")
+    assert exc.value.code == exit_code
+    captured = capsys.readouterr()
+    assert not captured.out
+    assert "injected failure" in captured.err or "interrupted" in captured.err
+    if existing:
+        assert target.read_bytes() == b'{"previous": true}\n'
+    else:
+        assert not target.exists()
+    assert source.is_file()
+    assert not list(tmp_path.glob(".desk-robot-*"))
+
+
+def test_side_cli_success_matches_stdout_and_preserves_input(tmp_path):
+    script, source, target, args = _side_cli_args(tmp_path)
+    original = source.read_bytes()
+    target.write_bytes(b'{"previous": true}\n')
+    stdout = subprocess.run(
+        [sys.executable, str(script), *args], capture_output=True, text=True,
+        timeout=10, check=True,
+    )
+    result = subprocess.run(
+        [sys.executable, str(script), *args, "--output", str(target)],
+        capture_output=True, text=True, timeout=10, check=True,
+    )
+    assert not result.stdout and not result.stderr
+    assert target.read_text() == stdout.stdout
+    candidate = json.loads(stdout.stdout)
+    assert candidate["samples_total"] == 120
+    assert candidate["physical_acceptance_pass"] is False
+    assert candidate["no_motion_authority"] is True
+    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+    assert source.read_bytes() == original
+    assert not list(tmp_path.glob(".desk-robot-*"))
+
+    alias = tmp_path / "alias.json"
+    alias.hardlink_to(source)
+    for output in (source, alias):
+        rejected = subprocess.run(
+            [sys.executable, str(script), *args, "--output", str(output)],
+            capture_output=True, text=True, timeout=10, check=False,
+        )
+        assert rejected.returncode == 2
+        assert "must not overwrite" in rejected.stderr
+        assert source.read_bytes() == original
+        assert alias.read_bytes() == original

@@ -6,6 +6,7 @@ and unmodified side_ranges from real GET /v1/robots/{id}/status. A human
 must capture at least 20 distinct near and far sample times per direction.
 The output is a *candidate* threshold, not physical certification or a
 firmware movement calibration. No motors or chargers are ever activated.
+Use --output to publish atomically; shell redirection can truncate an old file.
 """
 from __future__ import annotations
 
@@ -41,15 +42,19 @@ def _finite_side_trial_float(token: str) -> float:
 
 def load_trial_rows(path: Path) -> list[dict]:
     """Preserve raw left/right/rear trial identity before threshold fitting."""
-    return [
-        json.loads(
-            line, object_pairs_hook=_unique_side_trial_fields,
-            parse_constant=_reject_nonfinite_side_trial_json,
-            parse_float=_finite_side_trial_float,
-        )
-        for line in path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    rows = []
+    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not line.strip():
+            continue
+        try:
+            rows.append(json.loads(
+                line, object_pairs_hook=_unique_side_trial_fields,
+                parse_constant=_reject_nonfinite_side_trial_json,
+                parse_float=_finite_side_trial_float,
+            ))
+        except (ValueError, RecursionError) as exc:
+            raise ValueError(f"Side-range trial line {number}: {exc}") from exc
+    return rows
 
 
 def percentile(values: list[int], proportion: float) -> int:
@@ -210,9 +215,29 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--robot", required=True)
     parser.add_argument("--input", required=True, type=Path)
+    parser.add_argument(
+        "--output", type=Path, help="Atomically replace a candidate JSON file (default: stdout)",
+    )
     args = parser.parse_args()
-    rows = load_trial_rows(args.input)
-    print(json.dumps(analyze(rows, args.robot), indent=2))
+    try:
+        rows = load_trial_rows(args.input)
+        contents = json.dumps(analyze(rows, args.robot), indent=2) + "\n"
+        if args.output is None:
+            print(contents, end="")
+        else:
+            if (args.output.resolve() == args.input.resolve()
+                    or (args.output.exists() and args.output.samefile(args.input))):
+                raise ValueError("Candidate output must not overwrite the input trial log")
+            # Keep stdout-only analysis usable without an installed Mac package.
+            from desk_robot.private_files import replace_private_text
+
+            replace_private_text(args.output, contents)
+    except ImportError:
+        parser.error("Install the desk-robot package before using --output")
+    except (OSError, ValueError, RuntimeError) as exc:
+        parser.error(str(exc))
+    except KeyboardInterrupt:
+        parser.exit(130, "Side-range calibration interrupted\n")
 
 
 if __name__ == "__main__":
