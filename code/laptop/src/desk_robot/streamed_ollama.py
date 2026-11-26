@@ -91,17 +91,23 @@ async def ollama_speech_segments(
         except UnicodeEncodeError as exc:
             raise RuntimeError("Ollama streaming content is not valid UTF-8") from exc
         buffered += fragment
+        if packet.get("done") is True:
+            # Hold all remaining speech until EOF validates the terminal frame.
+            # Earlier nonterminal sentences still stream incrementally.
+            done = True
+            continue
         while (piece := _cut(buffered, target)) is not None:
             sentence, buffered = piece
             if sentence:
                 emitted = True
                 yield sentence
-        if packet.get("done") is True:
-            # Consume the HTTP body to EOF so HTTPX can reuse the connection.
-            # Reject any additional nonblank records rather than speaking them.
-            done = True
     if not done:
         raise RuntimeError("Ollama streaming response ended without done marker")
+    while (piece := _cut(buffered, target)) is not None:
+        sentence, buffered = piece
+        if sentence:
+            emitted = True
+            yield sentence
     if buffered.strip():
         yield buffered.strip()
     elif not emitted:
