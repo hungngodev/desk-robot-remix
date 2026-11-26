@@ -67,6 +67,11 @@ def event_budget_reason(
     )
 
 
+def battery_warning_pending(*, now: float, last: float) -> bool:
+    """Minimum per-pet battery speech interval, independent of general speech settings."""
+    return cooldown_pending(now=now, last=last, interval=120.0)
+
+
 def event_cooldown(
     *, camera_derived: bool, direct_interaction: bool,
     speech_interval: float, interaction_interval: float,

@@ -41,6 +41,12 @@ measured battery, range and fault values and completed tool receipts
 must remain attributed physical evidence. Prompt instructions are not
 proof that a generative model will always report the evidence correctly.
 
+Optional battery remarks have a separate 120-second per-robot minimum interval
+between successful transmissions, including across observer restarts. The existing
+fresh-sample confirmation and recovery hysteresis still control battery observations
+and docking; the speech budget does not alter WROOM protection or OLED rendering.
+A direct human battery question is not subject to this unsolicited speech budget.
+
 ## Adapter responsibilities
 
 1. Use one event-loop owner. Marshal off-thread microphone/camera/codec callbacks

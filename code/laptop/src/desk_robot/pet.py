@@ -36,6 +36,7 @@ from .expression_policy import model_mood_event, reserve_face_cue
 from .habituation import HabituationWindow
 from .handling import HandlingGate
 from .initiative_policy import (
+    battery_warning_pending,
     cooldown_pending,
     event_budget_reason,
     event_cooldown,
@@ -235,6 +236,8 @@ class PetState:
     aux_read_task: asyncio.Task | None = field(default=None, repr=False)
     aux_reads: int = 0
     last_battery_low: bool | None = None
+    # Optional speech budget survives observer restarts and fuel recovery.
+    last_battery_warning_at: float = -math.inf
     last_fuel_seq: int | None = None
     low_fuel_streak: int = 0
     recovered_fuel_streak: int = 0
@@ -3029,7 +3032,13 @@ class PetController:
             local_quiet=state.quiet, scheduled_quiet=scheduled_quiet,
             human_active=lambda: self._human_active_in_fleet(now),
         )
-        budget_reason = quiet_reason or event_budget_reason(
+        battery_reason = (
+            "battery_warning_cooldown"
+            if change.kind == "battery_low"
+            and battery_warning_pending(now=now, last=state.last_battery_warning_at)
+            else None
+        )
+        budget_reason = quiet_reason or battery_reason or event_budget_reason(
             now=now, previous_event_at=previous, fleet_spoken_at=self._group_last_spoken,
             event_window=self.group_window, speech_interval=relevant_cooldown,
         )
@@ -4225,6 +4234,10 @@ class PetController:
                 deliberate=(not camera_derived
                             and change.kind in _DIRECT_INTERACTION_KINDS),
             )
+            # A confirmed transmission consumes the battery-only budget even
+            # if a concurrent pause retired the optional observation session.
+            if transmitted and change.kind == "battery_low":
+                state.last_battery_warning_at = time.monotonic()
             if transmitted and state.enabled and not state.quiet and state.generation == generation:
                 now = time.monotonic()
                 self._group_last_spoken = now
