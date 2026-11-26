@@ -1,6 +1,9 @@
 // One-robot MG90S servo pocket fit coupon for original Bluino SMARS gripper.
 // Does not edit or redistribute the original gripper/forklift STLs.
 // DEFAULT DIMENSIONS ARE NOMINAL ONLY. CALIPER-MEASURE YOUR ACTUAL MG90S.
+// These open cups check case fit only, not horn, rack, or wire sweep.
+// Firmware's 60..120 degree command envelope is NOT a fitted travel limit.
+// Measure both installed linkages separately before qualifying servo travel.
 $fn=32;
 part = "mg90s_four_cup_layout";
 case_length_mm = 23.0;

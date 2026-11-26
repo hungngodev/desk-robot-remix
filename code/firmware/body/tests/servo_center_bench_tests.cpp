@@ -56,6 +56,15 @@ static void test_live_loop() {
 }
 
 int main() {
+  // Production and hornless bench share the nominal 50 Hz duty mapping.
+  // These are commanded values, never fitted horn travel evidence.
+  static_assert(body_pins::servo_duty_for_degrees(
+      60, body_pins::kServoMinUs, body_pins::kServoMaxUs) == 4367);
+  static_assert(body_pins::servo_duty_for_degrees(
+      90, body_pins::kServoMinUs, body_pins::kServoMaxUs) == 4915);
+  static_assert(body_pins::servo_duty_for_degrees(
+      120, body_pins::kServoMinUs, body_pins::kServoMaxUs) == 5459);
+  assert(center_duty() == 4915U);
   // Even a continuously refilled USB RX queue leaves each loop iteration
   // bounded so deadline polling cannot be starved by parser throughput.
   assert(Gate::serial_budget(0) == 0U);

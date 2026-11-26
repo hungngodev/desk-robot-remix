@@ -6,6 +6,7 @@
 #include "BodyReplyFormat.h"
 #include "ReplyTxQueue.h"
 #include "BodyPins.h"
+#include "ServoPulse.h"
 #ifndef DESK_ROBOT_FULL_SENSORS
 #define DESK_ROBOT_FULL_SENSORS DESK_ROBOT_STEPPER
 #endif
@@ -295,9 +296,8 @@ void write_stepper(const int (&pins)[4], std::uint8_t mask) {
 
 #if DESK_ROBOT_FULL_SENSORS
 unsigned servo_duty(int degrees) {
-  const unsigned pulse_us = body_pins::kServoMinUs +
-      degrees * (body_pins::kServoMaxUs - body_pins::kServoMinUs) / 180;
-  return pulse_us * 65535UL / 20000UL;
+  return body_pins::servo_duty_for_degrees(
+      degrees, body_pins::kServoMinUs, body_pins::kServoMaxUs);
 }
 #endif
 

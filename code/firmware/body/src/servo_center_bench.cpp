@@ -6,6 +6,7 @@
 #include <Arduino.h>
 
 #include "BodyPins.h"
+#include "ServoPulse.h"
 #include "ReplyTxQueue.h"
 #include "ServoCenterBenchGate.h"
 
@@ -15,9 +16,8 @@ desk_robot::ReplyTxQueue<256> replies;
 bool pwm_ready = false;
 
 unsigned center_duty() {
-  const unsigned pulse_us = body_pins::kServoMinUs +
-      (body_pins::kServoMaxUs - body_pins::kServoMinUs) / 2U;
-  return pulse_us * 65535UL / 20000UL;  // 50 Hz, 16 bit LEDC
+  return body_pins::servo_duty_for_degrees(
+      90, body_pins::kServoMinUs, body_pins::kServoMaxUs);
 }
 
 int servo_pin(desk_robot::ServoCenterBenchGate::Channel ch) {
