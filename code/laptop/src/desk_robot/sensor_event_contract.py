@@ -8,6 +8,7 @@ pet controller has already accepted. No third audio, VLM or motor owner.
 from __future__ import annotations
 
 import math
+from typing import TypeGuard
 
 PHYSICAL_INITIATIVE_KINDS = frozenset({
     "touch", "touch_tap", "touch_double", "touch_hold", "petting_zone",
@@ -37,3 +38,13 @@ def is_finite_number(value: object) -> bool:
         return math.isfinite(value)
     except OverflowError:
         return False
+
+
+def is_int_in_range(value: object, low: int, high: int) -> TypeGuard[int]:
+    """Accept an exact wire integer, excluding booleans and numeric coercion."""
+    return type(value) is int and low <= value <= high
+
+
+def is_uint(value: object, upper: int) -> TypeGuard[int]:
+    """Accept a nonnegative wire integer with an inclusive upper bound."""
+    return is_int_in_range(value, 0, upper)

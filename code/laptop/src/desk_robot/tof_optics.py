@@ -6,9 +6,7 @@ calibration or a source of instructions.
 """
 from __future__ import annotations
 
-
-def _uint(value: object, maximum: int) -> bool:
-    return type(value) is int and 0 <= value <= maximum
+from .sensor_event_contract import is_uint
 
 
 def validate_optics(data: object, robot_id: str) -> dict:
@@ -22,7 +20,7 @@ def validate_optics(data: object, robot_id: str) -> dict:
         raise ValueError("Optical diagnostics cannot authorize motors or qualification")
     present = optics.get("present_mask")
     valid = optics.get("valid_mask")
-    if (not _uint(present, 255) or not _uint(valid, 255)
+    if (not is_uint(present, 255) or not is_uint(valid, 255)
             or valid & ~present):
         raise ValueError("Invalid optical mask provenance")
     raw = {}
@@ -32,7 +30,7 @@ def validate_optics(data: object, robot_id: str) -> dict:
     ):
         values = optics.get(field)
         if (type(values) is not list or len(values) != 8 or
-                any(not _uint(value, max_value) for value in values)):
+                any(not is_uint(value, max_value) for value in values)):
             raise ValueError(f"Missing or invalid eight channel {field}")
         raw[field] = tuple(values)
     for channel, age in enumerate(raw["age_ms"]):

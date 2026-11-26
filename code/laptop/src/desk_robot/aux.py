@@ -5,13 +5,7 @@ calibrated locomotion, or authorization to move motors.
 """
 from __future__ import annotations
 
-
-def _uint(value, upper: int) -> bool:
-    return type(value) is int and 0 <= value <= upper
-
-
-def _sint(value, low: int, high: int) -> bool:
-    return type(value) is int and low <= value <= high
+from .sensor_event_contract import is_int_in_range, is_uint
 
 
 def _bool(value) -> bool:
@@ -71,12 +65,12 @@ def validate_aux(data: dict, robot_id: str) -> dict:
         raise ValueError("Incomplete auxiliary sensor payload")
 
     if (not _bool(pulse.get("present")) or not _bool(pulse.get("valid"))
-            or not _uint(pulse.get("part_id"), 255)
-            or not _uint(pulse.get("red"), 262143)
-            or not _uint(pulse.get("ir"), 262143)
-            or not _uint(pulse.get("age_ms"), 0xffffffff)
+            or not is_uint(pulse.get("part_id"), 255)
+            or not is_uint(pulse.get("red"), 262143)
+            or not is_uint(pulse.get("ir"), 262143)
+            or not is_uint(pulse.get("age_ms"), 0xffffffff)
             or (pulse.get("seq") is not None and (
-                not _uint(pulse["seq"], 0xffffffff)
+                not is_uint(pulse["seq"], 0xffffffff)
                 or (pulse["valid"] and pulse["seq"] == 0)
             ))
             or pulse.get("bpm", "missing") is not None
@@ -88,12 +82,12 @@ def validate_aux(data: dict, robot_id: str) -> dict:
         raise ValueError("Invalid raw MAX30102 paw source")
 
     present, valid = angles.get("present_mask"), angles.get("valid_mask")
-    if (not _uint(present, 7) or not _uint(valid, 7)
+    if (not is_uint(present, 7) or not is_uint(valid, 7)
             or valid & ~present
             or ("wheel_travel_qualified" in angles
                 and angles["wheel_travel_qualified"] is not False)
-            or not _array(angles.get("raw"), 3, lambda n: _uint(n, 4095))
-            or not _array(angles.get("magnet"), 3, lambda n: _uint(n, 0x38))
+            or not _array(angles.get("raw"), 3, lambda n: is_uint(n, 4095))
+            or not _array(angles.get("magnet"), 3, lambda n: is_uint(n, 0x38))
             or any(valid & (1 << i) and angles["magnet"][i] != 0x20
                    for i in range(3))):
         raise ValueError("Invalid AS5600 magnetic angle source")
@@ -104,15 +98,15 @@ def validate_aux(data: dict, robot_id: str) -> dict:
     belly_age = force.get("belly_age_ms")
     jaw_age = force.get("jaw_age_ms")
 
-    if (not _array(force.get("adc"), 2, lambda n: _sint(n, -32768, 32767))
+    if (not _array(force.get("adc"), 2, lambda n: is_int_in_range(n, -32768, 32767))
             or not _bool(force.get("valid"))
             or force.get("calibrated") is not False
-            or not _uint(force.get("jaw_seq"), 0xffffffff)
-            or ("boot_id" in force and not _uint(force["boot_id"], 0xffffffff))
-            or (jaw_age is not None and not _uint(jaw_age, 0xffffffff))
+            or not is_uint(force.get("jaw_seq"), 0xffffffff)
+            or ("boot_id" in force and not is_uint(force["boot_id"], 0xffffffff))
+            or (jaw_age is not None and not is_uint(jaw_age, 0xffffffff))
             or (jaw_valid is not None and not _bool(jaw_valid))
-            or (belly_seq is not None and not _uint(belly_seq, 0xffffffff))
-            or (belly_age is not None and not _uint(belly_age, 0xffffffff))
+            or (belly_seq is not None and not is_uint(belly_seq, 0xffffffff))
+            or (belly_age is not None and not is_uint(belly_age, 0xffffffff))
             or (belly_valid is not None and not _bool(belly_valid))
             # Saturated ADC clipping or staleness invalidates the corresponding channel
             or (jaw_valid is True and (
@@ -136,23 +130,23 @@ def validate_aux(data: dict, robot_id: str) -> dict:
                 force.get("valid") != (jaw_valid and belly_valid)))):
         raise ValueError("Invalid uncalibrated FSR sample")
 
-    if (not _sint(climate.get("temp_centi"), -4500, 13000)
-            or not _uint(climate.get("rh_centi"), 10000)
+    if (not is_int_in_range(climate.get("temp_centi"), -4500, 13000)
+            or not is_uint(climate.get("rh_centi"), 10000)
             or not _bool(climate.get("valid"))
             or (climate.get("seq") is not None and (
-                not _uint(climate["seq"], 0xffffffff)
+                not is_uint(climate["seq"], 0xffffffff)
                 or (climate["valid"] and climate["seq"] == 0)
             ))
             or (climate.get("age_ms") is not None and (
-                not _uint(climate["age_ms"], 0xffffffff)
+                not is_uint(climate["age_ms"], 0xffffffff)
                 or (climate["valid"] and climate["age_ms"] >= 1000)
             ))):
         raise ValueError("Invalid SHT41 climate sample")
 
-    if (not _uint(power.get("cell_mv"), 4500)
-            or not _uint(power.get("soc_centi"), 10000)
-            or not _uint(power.get("bus_mv"), 40959)
-            or not _sint(power.get("shunt_uv"), -81920, 81920)
+    if (not is_uint(power.get("cell_mv"), 4500)
+            or not is_uint(power.get("soc_centi"), 10000)
+            or not is_uint(power.get("bus_mv"), 40959)
+            or not is_int_in_range(power.get("shunt_uv"), -81920, 81920)
             or not _bool(power.get("fuel_valid"))
             or not _bool(power.get("monitor_valid"))
             or power.get("current_calibrated") is not False):
@@ -166,7 +160,7 @@ def validate_aux(data: dict, robot_id: str) -> dict:
     # trigger proactive low-battery speech on the Mac.
     fuel_seq = power.get("fuel_seq")
     if fuel_seq is not None and (
-        not _uint(fuel_seq, 0xffffffff)
+        not is_uint(fuel_seq, 0xffffffff)
         or (power["fuel_valid"] and fuel_seq == 0)
     ):
         raise ValueError("Invalid MAX17048 fuel acquisition provenance")
@@ -174,7 +168,7 @@ def validate_aux(data: dict, robot_id: str) -> dict:
     # model must not infer a new battery observation from a cached number.
     fuel_age = power.get("fuel_age_ms")
     if ("fuel_age_ms" in power and (
-        not _uint(fuel_age, 0xffffffff)
+        not is_uint(fuel_age, 0xffffffff)
         or (power["fuel_valid"] and fuel_age >= 500)
     )):
         raise ValueError("Invalid MAX17048 fuel acquisition age")
@@ -183,13 +177,13 @@ def validate_aux(data: dict, robot_id: str) -> dict:
     # calibrated battery ammeter or charging authorization.
     current_fields = ("pack_ma", "pack_valid", "pack_seq")
     pack_age = power.get("pack_age_ms")
-    if ("pack_age_ms" in power and not _uint(pack_age, 0xffffffff)):
+    if ("pack_age_ms" in power and not is_uint(pack_age, 0xffffffff)):
         raise ValueError("Invalid INA226 pack conversion age")
     if any(key in power for key in current_fields):
         if (not all(key in power for key in current_fields)
-                or not _sint(power["pack_ma"], -16384, 16384)
+                or not is_int_in_range(power["pack_ma"], -16384, 16384)
                 or not _bool(power["pack_valid"])
-                or not _uint(power["pack_seq"], 0xffffffff)
+                or not is_uint(power["pack_seq"], 0xffffffff)
                 or (power["pack_valid"] and (
                     not power["monitor_valid"] or power["pack_seq"] == 0
                     or (pack_age is not None and pack_age >= 500)
@@ -198,11 +192,11 @@ def validate_aux(data: dict, robot_id: str) -> dict:
                 or (not power["pack_valid"] and power["pack_ma"] != 0)):
             raise ValueError("Invalid INA226 pack-line current provenance")
 
-    if (not _uint(proximity.get("raw"), 255)
+    if (not is_uint(proximity.get("raw"), 255)
             or not _bool(proximity.get("valid"))
-            or not _uint(proximity.get("gesture"), 4)
-            or not _uint(proximity.get("gesture_events"), 0xffffffff)
-            or ("boot_id" in proximity and not _uint(proximity["boot_id"], 0xffffffff))
+            or not is_uint(proximity.get("gesture"), 4)
+            or not is_uint(proximity.get("gesture_events"), 0xffffffff)
+            or ("boot_id" in proximity and not is_uint(proximity["boot_id"], 0xffffffff))
             or proximity.get("physically_qualified") is not False):
         raise ValueError("Invalid APDS9960 source")
     # A single WROOM response serializes both sensor groups under the same
@@ -221,16 +215,16 @@ def validate_aux(data: dict, robot_id: str) -> dict:
         if (not isinstance(bmp, dict)
                 or not _bool(bmp.get("present"))
                 or not _bool(bmp.get("valid"))
-                or not _uint(bmp.get("chip_id"), 255)
-                or not _sint(bmp.get("temp_centi"), -4000, 8500)
-                or not _uint(bmp.get("pressure_pa"), 120000)
+                or not is_uint(bmp.get("chip_id"), 255)
+                or not is_int_in_range(bmp.get("temp_centi"), -4000, 8500)
+                or not is_uint(bmp.get("pressure_pa"), 120000)
                 or bmp.get("physically_verified") is not False
                 or (bmp.get("seq") is not None and (
-                    not _uint(bmp["seq"], 0xffffffff)
+                    not is_uint(bmp["seq"], 0xffffffff)
                     or (bmp["valid"] and bmp["seq"] == 0)
                 ))
                 or (bmp.get("age_ms") is not None and (
-                    not _uint(bmp["age_ms"], 0xffffffff)
+                    not is_uint(bmp["age_ms"], 0xffffffff)
                     or (bmp["valid"] and bmp["age_ms"] >= 2000)
                 ))
                 or (bmp["valid"] and (not bmp["present"]
@@ -247,8 +241,8 @@ def validate_aux(data: dict, robot_id: str) -> dict:
                     "input_good", "charge_indicated",
                 ))
                 or dock.get("charging_verified") is not False
-                or not _uint(dock.get("seq"), 0xffffffff)
-                or not _uint(dock.get("age_ms"), 0xffffffff)
+                or not is_uint(dock.get("seq"), 0xffffffff)
+                or not is_uint(dock.get("age_ms"), 0xffffffff)
                 or (dock["valid"] and (
                     not dock["present"] or dock["seq"] == 0
                     or dock["age_ms"] >= 500))
@@ -264,9 +258,9 @@ def validate_aux(data: dict, robot_id: str) -> dict:
     nfc = data.get("nfc")
     if nfc is not None:
         if (not isinstance(nfc, dict) or type(nfc.get("v")) is not bool
-                or not _uint(nfc.get("t"), 0xffffffff)
-                or not _uint(nfc.get("e"), 0xffffffff)
-                or not _uint(nfc.get("s"), 0xffffffff)
+                or not is_uint(nfc.get("t"), 0xffffffff)
+                or not is_uint(nfc.get("e"), 0xffffffff)
+                or not is_uint(nfc.get("s"), 0xffffffff)
                 or (nfc["v"] and nfc["s"] == 0)
                 or (nfc["t"] != 0 and not nfc["v"])):
             raise ValueError("Invalid read only PN532 toy tag evidence")

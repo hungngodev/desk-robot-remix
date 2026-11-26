@@ -18,7 +18,6 @@ from desk_robot.handling import (
     raw_mpu6050,
     trial_low_g_counter,
 )
-
 from desk_robot.sensor_event_contract import is_finite_number
 
 
