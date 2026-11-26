@@ -17,6 +17,9 @@ from pathlib import Path
 
 import numpy as np
 
+# Numerical floor for mean-centered normalized PCM, not a measured noise gate.
+MIN_SIGNAL_RMS = 1e-4
+
 
 def read_wav(path: Path) -> tuple[np.ndarray, int]:
     try:
@@ -145,11 +148,11 @@ def estimate_delay(
     ref = reference.astype(np.float64, copy=False)
     mic = microphone.astype(np.float64, copy=False)
     ref, mic = ref - ref.mean(), mic - mic.mean()
-    ref_energy = float(np.linalg.norm(ref))
-    mic_energy = float(np.linalg.norm(mic))
-    if ref_energy < 0.0001:
+    ref_rms = float(np.linalg.norm(ref)) / math.sqrt(len(ref))
+    mic_rms = float(np.linalg.norm(mic)) / math.sqrt(len(mic))
+    if ref_rms < MIN_SIGNAL_RMS:
         raise ValueError("Speaker reference acoustic signal insufficient")
-    if mic_energy < 0.0001:
+    if mic_rms < MIN_SIGNAL_RMS:
         raise ValueError("Microphone acoustic signal insufficient")
     size = len(ref) + len(mic) - 1
     nfft = 1 << (size - 1).bit_length()
@@ -181,9 +184,11 @@ def estimate_delay(
     mic_sum, mic_variance = overlap_stats(mic, mic_starts, mic_starts + counts)
     covariance = corr[lags % nfft] - ref_sum * mic_sum / counts
     denominator = np.sqrt(ref_variance * mic_variance)
+    # Each candidate needs signal in both overlapping windows, not just the clip.
+    min_energy = counts * MIN_SIGNAL_RMS**2
     strength = np.divide(
         np.abs(covariance), denominator, out=np.zeros_like(denominator),
-        where=(ref_variance >= 1e-8) & (mic_variance >= 1e-8),
+        where=(ref_variance >= min_energy) & (mic_variance >= min_energy),
     )
     strength = np.clip(strength, 0.0, 1.0)
     peak_index = int(np.argmax(strength))

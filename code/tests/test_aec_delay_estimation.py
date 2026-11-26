@@ -540,3 +540,47 @@ def test_delay_window_huge_integer_rejected_without_float_overflow(estimator, va
     signal = np.ones(64000)
     with pytest.raises(ValueError):
         estimator(signal, signal, max_delay_ms=value)
+
+
+@pytest.mark.parametrize("count", [8000, 24000, 64000])
+@pytest.mark.parametrize("quiet_channel", ["reference", "microphone"])
+def test_near_silent_capture_cannot_emit_delay(count, quiet_channel):
+    rng = np.random.default_rng(1057)
+    reference = rng.choice([-1.0, 1.0], size=count) / 32768
+    microphone = np.concatenate((np.zeros(1120), reference))[:count]
+    if quiet_channel == "reference":
+        microphone *= 4096
+    else:
+        reference *= 4096
+    message = ("Speaker reference" if quiet_channel == "reference" else "Microphone")
+    with pytest.raises(ValueError, match=message + " acoustic signal insufficient"):
+        estimate_delay(reference, microphone)
+
+
+def test_near_silent_overlap_cannot_win_over_loud_unrelated_audio():
+    rng = np.random.default_rng(1057)
+    quiet = rng.choice([-1.0, 1.0], size=4000) / 32768
+    reference = np.concatenate((quiet, rng.normal(0, 0.1, 4000)))
+    microphone = np.concatenate((rng.normal(0, 0.1, 4000), quiet))
+    with pytest.raises(ValueError, match="insufficiently correlated"):
+        estimate_delay(reference, microphone)
+
+
+def test_clock_drift_rejects_near_silent_primary_window():
+    rng = np.random.default_rng(1057)
+    reference = rng.choice([-1.0, 1.0], size=64000) / 32768
+    reference[28000:] *= 4096
+    microphone = np.concatenate((np.zeros(1120), reference))[:len(reference)]
+    assert estimate_delay(reference, microphone)["sample_lag"] == 1120
+    with pytest.raises(ValueError, match="Speaker reference acoustic signal insufficient"):
+        estimate_clock_drift(reference, microphone)
+
+
+def test_low_but_usable_signal_retains_true_delay():
+    rng = np.random.default_rng(1057)
+    reference = rng.choice([-1.0, 1.0], size=8000) * (8 / 32768)
+    microphone = np.concatenate((np.zeros(1120), reference))[:len(reference)]
+    report = estimate_delay(reference, microphone)
+    assert report["sample_lag"] == 1120
+    assert report["normalized_correlation"] == pytest.approx(1.0)
+    assert not report["aec_physically_verified"]
