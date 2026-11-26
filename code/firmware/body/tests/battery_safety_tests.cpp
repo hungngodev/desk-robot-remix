@@ -4,6 +4,25 @@
 using desk_robot::fuel_above_recovery_floor;
 using desk_robot::fuel_below_motor_floor;
 
+// Keep the safety predicates and telemetry normalization usable in C++11
+// constant expressions (the firmware stepper profile uses that standard).
+static_assert(!fuel_below_motor_floor(3300U, 300U), "inclusive motor floor");
+static_assert(fuel_below_motor_floor(3299U, 10000U), "voltage veto");
+static_assert(!fuel_above_recovery_floor(3349U, 10000U), "recovery hysteresis");
+static_assert(fuel_above_recovery_floor(3350U, 500U), "inclusive recovery floor");
+static_assert(fuel_below_motor_floor(std::numeric_limits<unsigned>::max(), 500U),
+              "out-of-range voltage must inhibit motion");
+constexpr auto depleted = desk_robot::fuel_telemetry(true, 3000U, 0U);
+static_assert(depleted.valid && depleted.cell_mv == 3000U && depleted.soc_centi == 0U,
+              "zero SOC is valid depleted telemetry");
+constexpr auto stale = desk_robot::fuel_telemetry(false, 4200U, 10000U);
+static_assert(!stale.valid && stale.cell_mv == 0U && stale.soc_centi == 0U,
+              "stale telemetry must clear both numeric fields");
+constexpr auto malformed = desk_robot::fuel_telemetry(
+    true, 4200U, std::numeric_limits<unsigned>::max());
+static_assert(!malformed.valid && malformed.cell_mv == 0U && malformed.soc_centi == 0U,
+              "out-of-range SOC must clear both numeric fields");
+
 int main() {
   if (fuel_below_motor_floor(3300U, 300U) ||
       !fuel_below_motor_floor(3299U, 300U) ||
