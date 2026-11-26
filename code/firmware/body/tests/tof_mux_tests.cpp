@@ -159,6 +159,10 @@ static void dropout_matrix_and_partial_mux_recovery() {
         else CHECK(!bus.extra_diagnostic(lane - 5, fault_time).valid);
       }
       CHECK(!guard.try_rearm(fault_time));
+      // The injected fault consumed lane zero, but failed() restarts the
+      // critical sweep at lane zero without advancing the optional rotation.
+      CHECK(phase % 6 == 1U);
+      --phase;
       for (unsigned step = 1; step <= 18; ++step)
         poll(fault_time + 5U * step, 0);
       CHECK(!guard.evaluate(fault_time + 90U));
