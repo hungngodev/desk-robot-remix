@@ -96,8 +96,51 @@ static void check_lsm9ds0_bdu_reinitialization() {
   }
 }
 
+static void check_wire_disconnect() {
+  for (const std::uint8_t address : {0x68, 0x69, 0x6b, 0x1d}) {
+    TwoWire wire;
+    auto& bank = address < 0x20 ? wire.extra_registers : wire.registers;
+    const auto select = [&wire, address](std::uint8_t reg) {
+      wire.beginTransmission(address);
+      CHECK(wire.write(reg) == 1);
+      CHECK(wire.endTransmission(false) == 0);
+    };
+    const auto write = [&wire, address](std::uint8_t value) {
+      wire.beginTransmission(address);
+      CHECK(wire.write(0x20) == 1 && wire.write(value) == 1);
+      return wire.endTransmission(true);
+    };
+    bank[0x3b] = 0x40;
+    bank[0x3a] = 0x80;
+    CHECK(write(0x12) == 0);
+    select(0x3b);
+    CHECK(wire.requestFrom(address, 14) == 14);
+    CHECK(wire.read() == 0x40 && wire.available() == 13);
+    select(0x3a);
+    wire.set_connected(address, false);
+    CHECK(wire.requestFrom(address, 1) == 0);
+    CHECK(wire.available() == 0 && wire.read() == -1);
+    CHECK(bank[0x3a] == 0x80);
+    CHECK(write(0x34) == 2);
+    CHECK(bank[0x20] == 0x12 && wire.writes.size() == 1);
+    select(0x3b);
+    CHECK(wire.requestFrom(address, 14) == 0);
+    // Disconnecting one address must not disable the entire bus.
+    const std::uint8_t other = address == 0x1d ? 0x6b : 0x1d;
+    wire.beginTransmission(other);
+    CHECK(wire.write(0x21) == 1 && wire.write(0x56) == 1);
+    CHECK(wire.endTransmission(true) == 0);
+    wire.set_connected(address, true);
+    CHECK(wire.requestFrom(address, 14) == 0); // no pending transfer
+    select(0x3b);
+    CHECK(wire.requestFrom(address, 14) == 14 && wire.read() == 0x40);
+    CHECK(write(0x34) == 0 && bank[0x20] == 0x34);
+  }
+}
+
 int main() {
   try {
+    check_wire_disconnect();
     check_mpu_ghost_reads();
     check_lsm9ds0_bdu_reinitialization();
     using desk_robot::BerryImu;
