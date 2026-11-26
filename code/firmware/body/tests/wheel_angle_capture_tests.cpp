@@ -1,6 +1,8 @@
 #include "WheelAngleCapture.h"
+#include "WheelPairCapture.h"
 
 #include <cstdint>
+#include <initializer_list>
 #include <stdexcept>
 
 using desk_robot::AngleRaw;
@@ -161,7 +163,69 @@ static void stress_rollover_reverse_and_stall() {
   check(wheel.segment() == 2 && wheel.angular_counts() == 0);
 }
 
+static void exact_wrap_and_half_turn_boundaries() {
+  for (int direction : {-1, 1}) {
+    WheelAngleCapture wheel;
+    // A 500ms interval can admit 2047 counts, never an ambiguous half turn.
+    check(!wheel.configure(4096, 500, 500));
+    check(wheel.configure(4094, 500, 500));
+    const int start = direction > 0 ? 4090 : 5;
+    const int end = direction > 0 ? 5 : 4090;
+    check(wheel.observe(angle(start, 1, 100), 100) == Result::Baseline);
+    check(wheel.observe(angle(end, 2, 110), 110) == Result::Delta);
+    check(wheel.last_delta() == direction * 11);
+    check(wheel.angular_counts() == direction * 11);
+    const int near_half = (end + direction * 2047 + 4096) % 4096;
+    check(wheel.observe(angle(near_half, 3, 610), 610) == Result::Delta);
+    check(wheel.last_delta() == direction * 2047);
+    check(wheel.angular_counts() == direction * 2058);
+    const int ambiguous = (near_half + 2048) % 4096;
+    const auto rejected = angle(ambiguous, 4, 1110);
+    check(wheel.observe(rejected, 1110) == Result::Invalid);
+    check(!wheel.continuous() && wheel.last_delta() == 0);
+    check(wheel.angular_counts() == 0);
+    check(wheel.observe(rejected, 1111) == Result::Invalid);
+    check(wheel.observe(angle(ambiguous, 5, 1120), 1120) == Result::Baseline);
+    check(wheel.segment() == 2 && wheel.angular_counts() == 0);
+  }
+}
+
+static void paired_wrap_and_invalid_half_turn() {
+  using desk_robot::WheelPairCapture;
+  using PairResult = WheelPairCapture::Result;
+  for (bool fault_left : {false, true}) {
+    WheelAngleCapture left, right;
+    WheelPairCapture pair;
+    check(left.configure(4094, 500, 500));
+    check(right.configure(4094, 500, 500));
+    check(pair.configure(10));
+    const auto observe = [&](AngleRaw l, AngleRaw r) {
+      const auto lr = left.observe(l, l.at_ms);
+      const auto rr = right.observe(r, r.at_ms);
+      return pair.observe(lr, rr, l, r, left.last_delta(), right.last_delta(),
+                          l.at_ms);
+    };
+    check(observe(angle(4090, 1, 100), angle(5, 1, 100)) == PairResult::Waiting);
+    check(observe(angle(5, 2, 110), angle(4090, 2, 110)) == PairResult::Paired);
+    check(pair.receipt().valid && pair.ready_for_origin());
+    check(pair.receipt().left_delta == 11 && pair.receipt().right_delta == -11);
+    check(observe(angle(fault_left ? 2053 : 5, 3, 610),
+                  angle(fault_left ? 4090 : 2042, 3, 610)) == PairResult::Invalid);
+    check(!pair.receipt().valid && !pair.ready_for_origin());
+    // Match BodyControl's invalidation of both captures after a pair fault.
+    left.discard_continuity();
+    right.discard_continuity();
+    check(observe(angle(10, 4, 620), angle(10, 4, 620)) == PairResult::Waiting);
+    check(!pair.ready_for_origin());
+    check(observe(angle(11, 5, 630), angle(9, 5, 630)) == PairResult::Paired);
+    check(pair.receipt().segment == 2 && pair.receipt().pair_seq == 2);
+    check(pair.receipt().left_delta == 1 && pair.receipt().right_delta == -1);
+  }
+}
+
 int main() {
+  exact_wrap_and_half_turn_boundaries();
+  paired_wrap_and_invalid_half_turn();
   stress_rollover_reverse_and_stall();
   rejected_conversion_replay_and_register_width();
   replay_and_reverse();
