@@ -1,4 +1,5 @@
 #include "BodyControl.h"
+#include "BodyReplyFormat.h"
 #include "BodyCommandParser.h"
 #include "AttitudeNorm.h"
 #include "CliffGuard.h"
@@ -1124,7 +1125,45 @@ void guarded_reboot_fault_matrix() {
   }
 }
 
+// Exercise the successful command and status paths as well as a silent UART.
+// Use caller-owned buffers throughout so the test does not need std::string
+// allocations in the steady-state loop. This is not a target heap measurement.
+void deterministic_control_soak() {
+  BodyControl body;
+  char reply[desk_robot::kReplyCapacity]{};
+  for (std::uint32_t elapsed = 0; elapsed < 100000; ++elapsed) {
+    const std::uint32_t now = 0xffffff00U + elapsed;
+    const auto phase = elapsed % 1000U;
+    const auto command = [&](const char* line) {
+      body.execute(line, std::strlen(line), now, reply, sizeof(reply));
+      CHECK(std::memchr(reply, '\0', sizeof(reply)) != nullptr);
+    };
+    if (phase == 0) {
+      command("arm");
+      CHECK(std::strcmp(reply, "OK arm") == 0);
+      command("drive 20 -20 250");
+      CHECK(std::strcmp(reply, "OK drive left=20 right=-20 ms=250") == 0);
+    }
+    body.tick(now);
+    CHECK(body.state().armed == (phase < 500U));
+    CHECK(body.state().left == (phase < 250U ? 20 : 0));
+    CHECK(body.state().right == (phase < 250U ? -20 : 0));
+    if (phase % 10U == 0) {
+      command("status");
+      CHECK(reply[0] == '{');
+      CHECK(reply[std::strlen(reply) - 1] == '}');
+      CHECK(std::strstr(reply, phase < 500U ? "\"armed\":true" :
+                                             "\"armed\":false") != nullptr);
+      // A too-small reply cannot be published as a partial successful frame.
+      CHECK(!desk_robot::format_reply(reply, 8, "OK drive left=%d right=%d ms=%u",
+                                     20, -20, 250U));
+      CHECK(reply[0] == '\0');
+    }
+  }
+}
+
 void deterministic_stream_stress() {
+  deterministic_control_soak();
   exhaustive_malformed_drive();
   guarded_transition_sequences();
   BodyControl body;
