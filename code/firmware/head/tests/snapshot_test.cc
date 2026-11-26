@@ -158,7 +158,8 @@ int main() {
                                std::size_t{512 * 1024 + 1},
                                std::numeric_limits<std::size_t>::max()}) {
         encoder_reported_length = length;
-        assert(!capture());
+        auto bad_length = capture();
+        assert(!bad_length && bad_length.error() == "JPEG encoding failed");
     }
     encoder_reported_length = 5;
     const int before_invalid_rgb = encoder_calls;
@@ -183,7 +184,8 @@ int main() {
     assert(!capture());
     camera.frame.buf = camera.pixels;
     camera.frame.len = 0;
-    assert(!capture());
+    auto empty_native = capture();
+    assert(!empty_native && empty_native.error() == "Fresh camera capture failed");
     camera.frame.len = 3;
     assert(!capture());
     camera.frame.len = 512 * 1024 + 1;
@@ -191,7 +193,9 @@ int main() {
     camera.frame.len = std::numeric_limits<std::size_t>::max();
     assert(!capture());
     camera.frame.len = 4;
-    assert(capture()->size() == 4);
+    const std::vector<uint8_t> expected_native{0xff, 0xd8, 0xff, 0xd9};
+    auto native = capture();
+    assert(native && *native == expected_native);
     camera.native_soi_ok = false;
     assert(!capture());
     camera.native_soi_ok = true;
@@ -205,7 +209,8 @@ int main() {
     assert(!bad_native_soi && bad_native_soi.error() == "Invalid camera JPEG frame");
     camera.native_double_soi = false;
     camera.frame.len = 4;
-    assert(capture()->size() == 4);
+    auto recovered = capture();
+    assert(recovered && *recovered == expected_native);
     camera.frame_available = false;
     assert(!capture());
     assert(encoder_calls == before_native);  // Native JPEG never enters RGB encoding.
