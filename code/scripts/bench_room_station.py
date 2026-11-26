@@ -52,186 +52,190 @@ def _git_sha() -> str | None:
 def _validate_capture_args(port: str, seconds: float) -> None:
     if not is_local_serial_path(port):
         raise ValueError("Explicit /dev/ room station USB port required")
-    # Huge integers can raise OverflowError during math.isfinite().
-    # Treat impossible durations as rejected input, not a crashed bench.
-    try:
-        finite_duration = type(seconds) in (int, float) and math.isfinite(seconds)
-    except OverflowError:
-        finite_duration = False
-    if not finite_duration or not 0.5 <= seconds <= 3600:
+    if not _is_finite_number(seconds) or not 0.5 <= seconds <= 3600:
         raise ValueError("Bounded live station trial must last 0.5 to 3600 seconds")
 
 
-def capture(
-    port: str, *, seconds: float,
-    feed_factory: Callable = RoomSerialFeed,
-    clock: Callable[[], float] = time.monotonic,
-) -> dict:
-    """Take one serial epoch. A timeout or failure never promotes hardware."""
-    _validate_capture_args(port, seconds)
-
-    received_at: list[float] = []
-    sequence: list[int] = []
-    station_ms: list[int] = []
-    sensor_counts = dict.fromkeys(SENSORS, 0)
-    new_sensor_acquisitions = dict.fromkeys(SENSORS, 0)
-    reused_sensor_samples = dict.fromkeys(SENSORS, 0)
-    last_sensor_sample_ms: dict[str, int] = {}
-    capture_limit_exceeded = False
-
-    def observed(item: RoomObservation) -> None:
-        nonlocal capture_limit_exceeded
-        if len(sequence) >= MAX_CAPTURE_FRAMES:
-            capture_limit_exceeded = True
-            raise ValueError("Room station bench frame budget exceeded")
-        if (not isinstance(item, RoomObservation) or item.motion_authorized
-                or item.charging_authorized or item.person_identified):
-            raise ValueError("Room USB data must never carry action or identity authority")
-        if type(item.seq) is not int or not 0 <= item.seq <= 0xffffffff:
-            raise ValueError("Invalid room station bench sequence")
-        if type(item.at_ms) is not int or not 0 <= item.at_ms <= 0xffffffff:
-            raise ValueError("Invalid room station bench source timestamp")
-        try:
-            receipt_clock_valid = (
-                type(item.received_at) in (int, float)
-                and math.isfinite(item.received_at))
-        except OverflowError:
-            receipt_clock_valid = False
-        if not receipt_clock_valid:
-            raise ValueError("Invalid room station bench receive clock")
-        # Stage an entire decoded observation before counting anything.
-        # If an alternate reader supplies an incomplete record, a callback
-        # failure must never be counted as a successful physical USB receipt.
-        if not isinstance(item.readings, dict) or set(item.readings) != set(SENSORS):
-            raise ValueError("Incomplete room station bench sensor record")
-        valid_by_sensor = {}
-        sample_by_sensor = {}
-        for name in SENSORS:
-            reading = item.readings[name]
-            if not isinstance(reading, dict) or type(reading.get("valid")) is not bool:
-                raise ValueError("Invalid room station bench sensor validity")
-            valid_by_sensor[name] = reading["valid"]
-            if reading["valid"]:
-                sample_ms = reading.get("sample_ms")
-                if type(sample_ms) is not int or not 0 <= sample_ms <= 0xffffffff:
-                    raise ValueError("Invalid room sensor acquisition clock")
-                previous = last_sensor_sample_ms.get(name)
-                if previous is not None:
-                    advance = (sample_ms - previous) & 0xffffffff
-                    if advance >= 0x80000000:
-                        raise ValueError("Backwards room sensor acquisition clock")
-                sample_by_sensor[name] = sample_ms
-        received_at.append(item.received_at)
-        sequence.append(item.seq)
-        station_ms.append(item.at_ms)
-        for name, valid in valid_by_sensor.items():
-            if valid:
-                sensor_counts[name] += 1
-                sample_ms = sample_by_sensor[name]
-                if last_sensor_sample_ms.get(name) == sample_ms:
-                    reused_sensor_samples[name] += 1
-                else:
-                    new_sensor_acquisitions[name] += 1
-                    last_sensor_sample_ms[name] = sample_ms
-
-    reader = feed_factory(port, observed)
-    start = clock()
-    deadline = start + seconds
-    error = None
+def _is_finite_number(value: object) -> bool:
     try:
-        # Use the same decoder, newline and replay fencing as runtime. One
-        # connection, no automatic reconnect that could mask USB outages.
-        reader._read_port(lambda: not capture_limit_exceeded and clock() < deadline)
-    except Exception as exc:
-        error = type(exc).__name__
+        return type(value) in (int, float) and math.isfinite(value)
+    except OverflowError:
+        return False
 
-    finished = clock()
-    elapsed = max(0.0, finished - start)
-    gaps = [b - a for a, b in zip(received_at[:-1], received_at[1:], strict=True)]
-    # A station that goes silent after one successful packet has no adjacent
-    # receive gap. Include start and end of the actual trial for continuity.
-    leading = max(0.0, received_at[0] - start) if received_at else None
-    trailing = max(0.0, finished - received_at[-1]) if received_at else None
-    silence_windows = list(gaps)
-    if leading is not None:
-        silence_windows.extend((leading, trailing))
-    elif elapsed > 0:
-        silence_windows.append(elapsed)
-    # Preserve observed station sequence gaps independently of HTTP/USB
-    # receipt cadence. Do not interpret any gap as a motor safety measurement.
+
+def _is_uint32(value: object) -> bool:
+    return type(value) is int and 0 <= value <= 0xffffffff
+
+
+def _validate_observation(item: RoomObservation) -> None:
+    if (not isinstance(item, RoomObservation) or item.motion_authorized
+            or item.charging_authorized or item.person_identified):
+        raise ValueError("Room USB data must never carry action or identity authority")
+    if not _is_uint32(item.seq):
+        raise ValueError("Invalid room station bench sequence")
+    if not _is_uint32(item.at_ms):
+        raise ValueError("Invalid room station bench source timestamp")
+    if not _is_finite_number(item.received_at):
+        raise ValueError("Invalid room station bench receive clock")
+
+
+def _validated_sensor_samples(item: RoomObservation, previous_samples: dict[str, int]) -> dict:
+    # Stage an entire decoded observation before counting anything.
+    if not isinstance(item.readings, dict) or set(item.readings) != set(SENSORS):
+        raise ValueError("Incomplete room station bench sensor record")
+    samples = {}
+    for name in SENSORS:
+        reading = item.readings[name]
+        if not isinstance(reading, dict) or type(reading.get("valid")) is not bool:
+            raise ValueError("Invalid room station bench sensor validity")
+        if not reading["valid"]:
+            continue
+        sample_ms = reading.get("sample_ms")
+        if not _is_uint32(sample_ms):
+            raise ValueError("Invalid room sensor acquisition clock")
+        previous = previous_samples.get(name)
+        if previous is not None and ((sample_ms - previous) & 0xffffffff) >= 0x80000000:
+            raise ValueError("Backwards room sensor acquisition clock")
+        samples[name] = sample_ms
+    return samples
+
+
+class _CaptureFrames:
+    """Bounded, atomically validated observations for one USB epoch."""
+
+    def __init__(self) -> None:
+        self.received_at: list[float] = []
+        self.sequence: list[int] = []
+        self.station_ms: list[int] = []
+        self.sensor_counts = dict.fromkeys(SENSORS, 0)
+        self.new_sensor_acquisitions = dict.fromkeys(SENSORS, 0)
+        self.reused_sensor_samples = dict.fromkeys(SENSORS, 0)
+        self.last_sensor_sample_ms: dict[str, int] = {}
+        self.capture_limit_exceeded = False
+
+    def observe(self, item: RoomObservation) -> None:
+        if len(self.sequence) >= MAX_CAPTURE_FRAMES:
+            self.capture_limit_exceeded = True
+            raise ValueError("Room station bench frame budget exceeded")
+        _validate_observation(item)
+        samples = _validated_sensor_samples(item, self.last_sensor_sample_ms)
+        # No counter or acquisition baseline changes before all sensors validate.
+        self.received_at.append(item.received_at)
+        self.sequence.append(item.seq)
+        self.station_ms.append(item.at_ms)
+        for name, sample_ms in samples.items():
+            self.sensor_counts[name] += 1
+            if self.last_sensor_sample_ms.get(name) == sample_ms:
+                self.reused_sensor_samples[name] += 1
+            else:
+                self.new_sensor_acquisitions[name] += 1
+                self.last_sensor_sample_ms[name] = sample_ms
+
+
+class _ReceiveTiming:
+    """Mac clock chronology and silence, including capture boundaries."""
+
+    def __init__(self, received_at: list[float], start: float, finished: float) -> None:
+        self.elapsed = max(0.0, finished - start)
+        self.gaps = [b - a for a, b in zip(received_at[:-1], received_at[1:], strict=True)]
+        self.leading = max(0.0, received_at[0] - start) if received_at else None
+        self.trailing = max(0.0, finished - received_at[-1]) if received_at else None
+        self.silence_windows = list(self.gaps)
+        if self.leading is not None:
+            self.silence_windows.extend((self.leading, self.trailing))
+        elif self.elapsed > 0:
+            self.silence_windows.append(self.elapsed)
+        self.consistent = (
+            start <= finished
+            and all(start <= at <= finished for at in received_at)
+            and all(b >= a for a, b in
+                    zip(received_at[:-1], received_at[1:], strict=True))
+        )
+
+    def silence_bounded(self) -> bool:
+        return (
+            all(0.0 < gap <= 1.5 for gap in self.gaps)
+            and self.leading is not None and 0.0 <= self.leading <= 1.5
+            and self.trailing is not None and 0.0 <= self.trailing <= 1.5
+        )
+
+
+def _station_metrics(frames: _CaptureFrames) -> tuple[int, bool]:
+    # Sequence gaps and source cadence are independent of Mac receipt timing.
+    # Unsigned differences preserve legitimate millis rollover.
+    sequence = frames.sequence
+    station_ms = frames.station_ms
     missing = sum(max(0, ((b - a) & 0xffffffff) - 1)
                   for a, b in zip(sequence[:-1], sequence[1:], strict=True))
-    # A read-only sample receipt must have capture-window chronology too.
-    # Ordinary short trials previously marked impossible future, earlier, or
-    # reversed receive clocks as captured even when the one-hour gate failed.
-    receive_clock_consistent = (
-        start <= finished
-        and all(start <= at <= finished for at in received_at)
-        and all(b >= a for a, b in
-                zip(received_at[:-1], received_at[1:], strict=True))
-    )
-    # The firmware schedules one report per 1000 source milliseconds.
-    # Receipt cadence alone cannot establish that the station clock advanced
-    # normally. Unsigned differences preserve legitimate millis rollover.
     station_gaps = [(b - a) & 0xffffffff
                     for a, b in zip(station_ms[:-1], station_ms[1:], strict=True)]
-    station_report_cadence_consistent = bool(station_gaps) and all(
-        1000 <= gap <= 1500 for gap in station_gaps
-    )
-    # Diagnostic only: a full one-hour USB continuity trial must contain
-    # at least 3,600 distinct consecutive nominal one-second reports with
-    # bounded Mac receive silence. This cannot qualify radar accuracy,
-    # environmental calibration, power, charger, or any motion authority.
-    one_hour_usb_continuity_screen_pass = (
+    cadence = bool(station_gaps) and all(1000 <= gap <= 1500 for gap in station_gaps)
+    return missing, cadence
+
+
+def _one_hour_continuity_pass(
+    seconds: float, frames: _CaptureFrames, timing: _ReceiveTiming,
+    reader: RoomSerialFeed, error: str | None, missing: int, cadence: bool,
+) -> bool:
+    # Diagnostic only. This cannot qualify sensor accuracy, power or motion.
+    sequence = frames.sequence
+    return (
         seconds == 3600
-        and elapsed >= 3600
+        and timing.elapsed >= 3600
         and len(sequence) >= 3600
         and missing == 0
-        # Sequence gap totals alone cannot reject a duplicated extra report:
-        # 3,601 receptions with one repeated uint32 ID still have zero gaps.
+        # A repeated sequence ID can have zero missing sequences.
         and all(((b - a) & 0xffffffff) == 1
                 for a, b in zip(sequence[:-1], sequence[1:], strict=True))
-        and not capture_limit_exceeded
+        and not frames.capture_limit_exceeded
         and reader.rejected == 0
         and reader.callback_failures == 0
         and error is None
-        and receive_clock_consistent
-        and station_report_cadence_consistent
-        and all(0.0 < gap <= 1.5 for gap in gaps)
-        and leading is not None and 0.0 <= leading <= 1.5
-        and trailing is not None and 0.0 <= trailing <= 1.5
+        and timing.consistent
+        and cadence
+        and timing.silence_bounded()
     )
+
+
+def _milliseconds(value: float | None) -> float | None:
+    return round(value * 1000, 1) if value is not None else None
+
+
+def _capture_report(
+    port: str, seconds: float, frames: _CaptureFrames, timing: _ReceiveTiming,
+    reader: RoomSerialFeed, error: str | None,
+) -> dict:
+    missing, cadence = _station_metrics(frames)
+    continuity = _one_hour_continuity_pass(seconds, frames, timing, reader, error, missing, cadence)
+    sequence = frames.sequence
     return {
         "station": STATION,
         "source_commit": _git_sha(),
         "usb_port": port,
         "captured_at_utc": datetime.now(timezone.utc).isoformat(),
         "requested_seconds": seconds,
-        "observed_seconds": round(elapsed, 3),
+        "observed_seconds": round(timing.elapsed, 3),
         "accepted_frames": len(sequence),
-        "capture_limit_exceeded": capture_limit_exceeded,
+        "capture_limit_exceeded": frames.capture_limit_exceeded,
         "rejected_frames": reader.rejected,
         "callback_failures": reader.callback_failures,
         "serial_error_type": error,
         "first_station_sequence": sequence[0] if sequence else None,
         "last_station_sequence": sequence[-1] if sequence else None,
         "missing_station_sequences": missing,
-        "largest_mac_receive_gap_ms": round(max(gaps) * 1000, 1) if gaps else None,
-        "initial_receive_silence_ms": round(leading * 1000, 1) if leading is not None else None,
-        "trailing_receive_silence_ms": round(trailing * 1000, 1) if trailing is not None else None,
-        "largest_mac_receive_silence_ms": (
-            round(max(silence_windows) * 1000, 1) if silence_windows else None
-        ),
-        "valid_sensor_frames": sensor_counts,
-        "new_sensor_acquisitions": new_sensor_acquisitions,
-        "reused_sensor_samples": reused_sensor_samples,
-        "one_hour_usb_continuity_screen_pass": one_hour_usb_continuity_screen_pass,
-        "receive_clock_consistent": receive_clock_consistent,
-        "station_report_cadence_consistent": station_report_cadence_consistent,
+        "largest_mac_receive_gap_ms": _milliseconds(max(timing.gaps, default=None)),
+        "initial_receive_silence_ms": _milliseconds(timing.leading),
+        "trailing_receive_silence_ms": _milliseconds(timing.trailing),
+        "largest_mac_receive_silence_ms": _milliseconds(max(timing.silence_windows, default=None)),
+        "valid_sensor_frames": frames.sensor_counts,
+        "new_sensor_acquisitions": frames.new_sensor_acquisitions,
+        "reused_sensor_samples": frames.reused_sensor_samples,
+        "one_hour_usb_continuity_screen_pass": continuity,
+        "receive_clock_consistent": timing.consistent,
+        "station_report_cadence_consistent": cadence,
         "read_only_usb_sample_captured": (
-            bool(sequence) and receive_clock_consistent and error is None
-            and not capture_limit_exceeded
-            and reader.callback_failures == 0
+            bool(sequence) and timing.consistent and error is None
+            and not frames.capture_limit_exceeded and reader.callback_failures == 0
         ),
         "device_identity_authenticated": False,
         "sensor_accuracy_physically_qualified": False,
@@ -242,6 +246,27 @@ def capture(
                   "regulator temperature, pack current, wiring and sensor calibration "
                   "with qualified instruments before hardware release."),
     }
+
+
+def capture(
+    port: str, *, seconds: float,
+    feed_factory: Callable = RoomSerialFeed,
+    clock: Callable[[], float] = time.monotonic,
+) -> dict:
+    """Take one serial epoch. A timeout or failure never promotes hardware."""
+    _validate_capture_args(port, seconds)
+    frames = _CaptureFrames()
+    reader = feed_factory(port, frames.observe)
+    start = clock()
+    deadline = start + seconds
+    error = None
+    try:
+        # One connection; no automatic reconnect that could mask USB outages.
+        reader._read_port(lambda: not frames.capture_limit_exceeded and clock() < deadline)
+    except Exception as exc:
+        error = type(exc).__name__
+    timing = _ReceiveTiming(frames.received_at, start, clock())
+    return _capture_report(port, seconds, frames, timing, reader, error)
 
 
 def _private_report_directory_fd(parent: Path) -> int:

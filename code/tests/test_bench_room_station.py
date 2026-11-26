@@ -735,3 +735,60 @@ def test_room_bench_serial_flood_bounds_capture_and_expires_cached_sample(monkey
     assert report["one_hour_usb_continuity_screen_pass"] is False
     assert report["motion_authorized"] is False
     assert report["charging_verified"] is False
+
+@pytest.mark.parametrize(("last_reading", "expected_error"), [
+    ({"valid": 1}, "Invalid room station bench sensor validity"),
+    ({"valid": True}, "Invalid room sensor acquisition clock"),
+    ({"valid": True, "sample_ms": True}, "Invalid room sensor acquisition clock"),
+    ({"valid": True, "sample_ms": 999}, "Backwards room sensor acquisition clock"),
+])
+def test_room_bench_rejected_sensor_record_preserves_previous_acquisitions(
+    last_reading, expected_error,
+):
+    """A late sensor validation failure must not advance earlier sensor clocks."""
+    from desk_robot.room_station import RoomObservation
+
+    def observation(seq, sample_ms, received_at):
+        return RoomObservation(
+            seq=seq, at_ms=seq * 1000, received_at=received_at,
+            readings={name: {"valid": True, "sample_ms": sample_ms} for name in SENSORS},
+            summary="Synthetic USB receipt; not physical evidence",
+        )
+
+    first = observation(1, 1000, 0.1)
+    rejected = observation(2, 2000, 0.2)
+    rejected.readings[SENSORS[-1]] = last_reading
+    recovery = observation(3, 1500, 0.3)
+    errors = []
+
+    class Feed:
+        rejected = 0
+        callback_failures = 0
+
+        def __init__(self, port, on_observation):
+            self.on_observation = on_observation
+
+        def _read_port(self, running):
+            for item in (first, rejected, recovery):
+                try:
+                    self.on_observation(item)
+                except ValueError as exc:
+                    errors.append(str(exc))
+                    self.callback_failures += 1
+
+    ticks = iter((0.0, 1.0))
+    report = capture("/dev/cu.synthetic", seconds=1, feed_factory=Feed,
+                     clock=lambda: next(ticks))
+    assert errors == [expected_error]
+    assert report["accepted_frames"] == 2
+    assert report["callback_failures"] == 1
+    assert report["first_station_sequence"] == 1
+    assert report["last_station_sequence"] == 3
+    assert report["missing_station_sequences"] == 1
+    assert report["valid_sensor_frames"] == dict.fromkeys(SENSORS, 2)
+    assert report["new_sensor_acquisitions"] == dict.fromkeys(SENSORS, 2)
+    assert report["reused_sensor_samples"] == dict.fromkeys(SENSORS, 0)
+    assert report["read_only_usb_sample_captured"] is False
+    assert report["one_hour_usb_continuity_screen_pass"] is False
+    assert report["motion_authorized"] is False
+    assert report["charging_verified"] is False
