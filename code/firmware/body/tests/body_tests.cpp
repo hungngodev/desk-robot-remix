@@ -1,4 +1,5 @@
 #include "BodyControl.h"
+#include "BodyCommandParser.h"
 #include "AttitudeNorm.h"
 #include "CliffGuard.h"
 
@@ -290,6 +291,32 @@ void rollover_timers() {
   CHECK(body.state().armed && body.watchdog_remaining(start + 499U) == 1);
   body.tick(start + 500U);
   CHECK(!body.state().armed && body.state().servos_attached);
+}
+
+void tokenizer_failure_contract() {
+  using desk_robot::body_command::tokenize;
+  char buffer[96]{};
+  char* tokens[5]{};
+  std::size_t count = 99;
+  auto expect_error = [&](const char* line, std::size_t size, const char* expected) {
+    count = 99;
+    const auto* error = tokenize(line, size, buffer, tokens, count);
+    CHECK(error && std::strcmp(error, expected) == 0);
+    CHECK(count == 0);
+  };
+  expect_error(nullptr, 0, "ERR input empty");
+  expect_error(nullptr, 1, "ERR input invalid_buffer");
+  expect_error(nullptr, 96, "ERR input line_too_long");
+  expect_error("a b c d e f", 11, "ERR input trailing_tokens");
+  expect_error("stop\0extra", 10, "ERR input invalid_ascii");
+  expect_error(" \t", 2, "ERR input invalid_ascii");
+  std::string too_long(96, ' ');
+  expect_error(too_long.data(), too_long.size(), "ERR input line_too_long");
+  std::string max_line = "ping" + std::string(91, ' ');
+  CHECK(!tokenize(max_line.data(), max_line.size(), buffer, tokens, count));
+  CHECK(count == 1 && std::strcmp(tokens[0], "ping") == 0);
+  CHECK(!tokenize("a b c d e", 9, buffer, tokens, count));
+  CHECK(count == 5 && std::strcmp(tokens[4], "e") == 0);
 }
 
 void strict_integer_parser() {
@@ -948,6 +975,7 @@ int main(int argc, char** argv) {
       {"explicit_disarm_detaches", explicit_disarm_detaches},
       {"watchdog_holds_servos", watchdog_holds_servos},
       {"rollover_timers", rollover_timers}, {"strict_integer_parser", strict_integer_parser},
+      {"tokenizer_failure_contract", tokenizer_failure_contract},
       {"malformed_atomicity", malformed_atomicity},
       {"overlong_frame_recovery", overlong_frame_recovery}, {"framing", framing},
       {"serial_idle_frame_timeout", serial_idle_frame_timeout},
