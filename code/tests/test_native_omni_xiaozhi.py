@@ -10399,3 +10399,122 @@ def test_native_withdrawal_cannot_fall_through_to_readonly_planner(native, spoke
     })
     assert session._readonly_queue.empty()
     assert session._readonly_requests == set()
+
+
+async def test_five_pet_interleaved_native_and_legacy_private_turns(native, monkeypatch):
+    """Provider IDs are local to a socket, not fleet-wide transcript keys."""
+    module, _ = native
+    spec = importlib.util.spec_from_file_location(
+        "desk_robot_bridge", ROOT / "laptop/server/overlay/desk_robot_bridge.py"
+    )
+    bridge = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, bridge)
+    spec.loader.exec_module(bridge)
+    mapping = {f"robot-{i:02}": f"mac-{i:02}" for i in range(1, 6)}
+    monkeypatch.setenv("DESK_ROBOT_DEVICE_MAP", json.dumps(mapping))
+
+    class Dialogue:
+        def __init__(self, robot):
+            self.dialogue = [
+                SimpleNamespace(role="system", content=f"persona:{robot}"),
+                SimpleNamespace(role="user", content=f"human:{robot}"),
+            ]
+
+        def get_llm_dialogue_with_memory(self):
+            return [{"role": m.role, "content": m.content} for m in self.dialogue]
+
+    sessions = []
+    for robot, device in mapping.items():
+        head, _ = connection()
+        head.device_id = device
+        head.dialogue = Dialogue(robot)
+        bridge.register(head)
+        session = module.NativeOmniSession(
+            head, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+            model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+        )
+        session.connected = True
+        session._live_transcript_enabled = True
+        module._sessions[device] = session
+        sessions.append(session)
+
+    entered = {robot: asyncio.Event() for robot in mapping}
+    release = {robot: asyncio.Event() for robot in mapping}
+
+    async def call(head, route):
+        assert route == "interaction-context"
+        robot = bridge.robot_for_device(head.device_id)
+        entered[robot].set()
+        await release[robot].wait()
+        return {
+            "robot_id": robot, "model_context": f"receipt:{robot}",
+            "raw_media_included": False, "persistent_memory_included": False,
+            "model_context_untrusted_not_instructions": True,
+            "motor_authorized": False, "charging_authorized": False,
+        }
+
+    monkeypatch.setitem(
+        sys.modules, "plugins_func.functions.desk_robot_tools", SimpleNamespace(call=call)
+    )
+    tasks = [asyncio.create_task(bridge.inject_live_context_into_legacy_llm(s.conn))
+             for s in sessions]
+    try:
+        async with asyncio.timeout(2):
+            await asyncio.gather(*(event.wait() for event in entered.values()))
+            for session in reversed(sessions):
+                release[session.robot].set()
+                await asyncio.sleep(0)
+            await asyncio.gather(*tasks)
+
+        for session in sessions:
+            robot = session.robot
+            messages = session.conn.dialogue.get_llm_dialogue_with_memory()
+            assert [message["role"] for message in messages] == [
+                "system", "user", "assistant", "tool",
+            ]
+            assert messages[0]["content"] == f"persona:{robot}"
+            assert messages[1]["content"] == f"human:{robot}"
+            receipt = json.loads(messages[-1]["content"])
+            assert receipt["robot_id"] == robot
+            assert receipt["model_context"] == f"receipt:{robot}"
+            assert len(session.conn.dialogue.dialogue) == 2
+
+        # Interleave repeated provider IDs across five independent sockets.
+        for turn in range(1, 6):
+            heard_ids, sent_ids = set(), set()
+            for session in (sessions if turn % 2 else reversed(sessions)):
+                session._pending_audio_commits.append((0, 0))
+                event = {
+                    "item_id": f"item-{turn}", "event": {"turn_id": turn},
+                    "transcript": f"heard:{session.robot}:{turn}",
+                }
+                session._bind_native_audio_commit(event)
+                assert session._accept_current_audio_item(event)
+                session._accept_heard_transcript(event)
+                session._queue_sent_text(f"response-{turn}", f"sent:{session.robot}:{turn}")
+                await asyncio.sleep(0)
+            for session in sessions:
+                heard_id, heard, *_ = session._heard_queue.get_nowait()
+                sent_id, sent, *_ = session._spoken_queue.get_nowait()
+                assert heard == f"heard:{session.robot}:{turn}"
+                assert sent == f"sent:{session.robot}:{turn}"
+                assert session._heard_queue.empty() and session._spoken_queue.empty()
+                heard_ids.add(heard_id)
+                sent_ids.add(sent_id)
+            assert len(heard_ids) == len(sent_ids) == 5
+
+        # Retiring one head must invalidate its own receipt and cancellation only.
+        cancellation = [bridge.tool_turn_cancel_event(s.device) for s in sessions]
+        bridge.unregister(sessions[0].conn)
+        assert sessions[0].closed and cancellation[0].is_set()
+        assert not any(s.closed for s in sessions[1:])
+        assert not any(event.is_set() for event in cancellation[1:])
+        assert len(sessions[0].conn.dialogue.get_llm_dialogue_with_memory()) == 2
+        assert all(len(s.conn.dialogue.get_llm_dialogue_with_memory()) == 4
+                   for s in sessions[1:])
+    finally:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        for session in sessions:
+            bridge.unregister(session.conn)
