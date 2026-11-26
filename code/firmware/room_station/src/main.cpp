@@ -348,6 +348,7 @@ void scd_step(uint32_t now) {
         scd_temp = t;
         scd_humidity = rh;
         last_scd_ms = millis();
+        sensor_recovery.record_success(desk_robot_room::SensorRecoverySchedule::kScd);
       }
     }
     now = millis();
@@ -429,6 +430,7 @@ void bme_step(uint32_t now) {
     // Upstream scratch may be reset while the next conversion is pending.
     bme_completed.publish(bme.temperature, bme.humidity, bme.pressure,
                           bme.gas_resistance, bme_last_start_ms);
+    sensor_recovery.record_success(desk_robot_room::SensorRecoverySchedule::kBme);
   } else {
     bme_completed.invalidate();
     bme_started = false;
@@ -534,6 +536,7 @@ void thermal_step(uint32_t now) {
     // from the scan start, not the final transfer; this is not exposure time.
     thermal_sample_ms = thermal_started_ms;
     thermal_valid = true;
+    sensor_recovery.record_success(desk_robot_room::SensorRecoverySchedule::kAmg);
     thermal_scan_active = false;
   }
 }
@@ -555,7 +558,7 @@ void thermal_observation(uint32_t now) {
   telemetry.print('}');
 }
 // Retry only one missing I2C peripheral in each main-loop pass. Each
-// attempt is spaced by the same monotonic millis() gate, including rollover.
+// attempt uses an independent bounded backoff, including millis() rollover.
 // Wait phases are split across passes. The pinned Wire core still has
 // synchronous hardware event waits without an I2C transaction timeout.
 bool begin_bme() {

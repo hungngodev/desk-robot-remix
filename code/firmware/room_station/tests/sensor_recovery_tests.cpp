@@ -10,7 +10,6 @@ struct FakeSensor {
   unsigned fresh_frames = 0;
   void probe() { ++attempts; started = connected; }
   void disconnect() { connected = false; started = false; fresh_frames = 0; }
-  void sample() { if (started) ++fresh_frames; }
 };
 
 struct FakeStopWire {
@@ -54,7 +53,12 @@ int main() {
     const bool active[] = {devices[0].started, devices[1].started, devices[2].started};
     const int selected = schedule.next(now, active);
     if (selected >= 0) devices[selected].probe();
-    for (auto& device : devices) device.sample();
+    for (unsigned i = 0; i < Recovery::kCount; ++i) {
+      if (devices[i].started) {
+        ++devices[i].fresh_frames;
+        schedule.record_success(static_cast<Recovery::Sensor>(i));
+      }
+    }
     return selected;
   };
 
@@ -74,27 +78,37 @@ int main() {
   assert(tick(5103) == -1);
   assert(devices[1].fresh_frames == 3);
 
-  // After a midstream disconnect, a cached sample must not become fresh.
+  // SCD and AMG have independently backed off to ten seconds.
+  assert(tick(10100) == -1);
   devices[0].connected = true;
-  assert(tick(10100) == Recovery::kScd);
+  assert(tick(15100) == Recovery::kScd);
   assert(devices[0].started && devices[0].fresh_frames == 1);
-  devices[0].disconnect();
-  assert(devices[0].fresh_frames == 0);
-  devices[0].connected = true;
-  assert(tick(10101) == -1);
-  assert(tick(15100) == Recovery::kAmg);
-  assert(tick(15101) == Recovery::kScd);
-  assert(devices[0].fresh_frames == 1);
-
-  // An independent BME runtime fault cannot stop other sensors.
+  assert(tick(15102) == Recovery::kAmg);
+  // A completed sample reset BME's retry history; an independent fault
+  // can retry immediately, but cannot publish a cached old tuple.
   devices[1].disconnect();
-  assert(tick(15102) == Recovery::kBme);
+  assert(tick(15103) == Recovery::kBme);
   assert(!devices[1].started && devices[1].fresh_frames == 0);
   devices[1].connected = true;
-  assert(tick(15103) == -1);
-  assert(tick(20102) == Recovery::kAmg);
+  assert(tick(20102) == -1);
   assert(tick(20103) == Recovery::kBme);
   assert(devices[1].fresh_frames == 1);
+
+  // An ACK without a complete conversion must not reset the backoff.
+  Recovery bounded;
+  bool only_scd_missing[] = {false, true, true};
+  uint32_t time = 0xfffff000U;
+  assert(bounded.next(time, only_scd_missing) == Recovery::kScd);
+  for (uint32_t interval : {5000U, 10000U, 20000U, 40000U, 60000U,
+                            60000U, 60000U}) {
+    assert(bounded.next(time + interval - 1U, only_scd_missing) == -1);
+    time += interval;
+    assert(bounded.next(time, only_scd_missing) == Recovery::kScd);
+  }
+  bounded.record_success(Recovery::kScd);
+  assert(bounded.next(time, only_scd_missing) == Recovery::kScd);
+  assert(bounded.next(time + 4999U, only_scd_missing) == -1);
+  assert(bounded.next(time + 5000U, only_scd_missing) == Recovery::kScd);
 
   // SCD40's stop/start settle interval must be elapsed, not a sleep.
   assert(!desk_robot_room::scd_stop_settled(1499U, 1000U));

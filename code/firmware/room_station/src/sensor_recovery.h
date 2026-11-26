@@ -26,13 +26,21 @@ bool scd_request_stop(WireLike& wire, uint8_t address) {
 class SensorRecoverySchedule {
  public:
   static constexpr uint32_t kRetryMs = 5000U;
+  static constexpr uint32_t kMaxRetryMs = 60000U;
   enum Sensor : uint8_t { kScd = 0, kBme = 1, kAmg = 2, kCount = 3 };
 
   void record_attempt(Sensor sensor, uint32_t now) {
     const unsigned index = static_cast<unsigned>(sensor);
-    attempted_[index] = true;
+    const uint32_t previous = retry_ms_[index];
+    retry_ms_[index] = previous == 0 ? kRetryMs :
+        (previous >= kMaxRetryMs / 2U ? kMaxRetryMs : previous * 2U);
     last_attempt_ms_[index] = now;
     last_sensor_ = index;
+  }
+
+  // A probe ACK alone is not recovery. Reset only after a complete sample.
+  void record_success(Sensor sensor) {
+    retry_ms_[static_cast<unsigned>(sensor)] = 0;
   }
 
   // At most one due I2C re-probe per loop. Unsigned subtraction tolerates
@@ -41,7 +49,7 @@ class SensorRecoverySchedule {
     for (unsigned offset = 1; offset <= kCount; ++offset) {
       const unsigned index = (last_sensor_ + offset) % kCount;
       if (active[index] ||
-          (attempted_[index] && now - last_attempt_ms_[index] < kRetryMs))
+          (retry_ms_[index] && now - last_attempt_ms_[index] < retry_ms_[index]))
         continue;
       record_attempt(static_cast<Sensor>(index), now);
       return static_cast<int>(index);
@@ -50,7 +58,7 @@ class SensorRecoverySchedule {
   }
 
  private:
-  bool attempted_[kCount] = {};
+  uint32_t retry_ms_[kCount] = {};
   uint32_t last_attempt_ms_[kCount] = {};
   unsigned last_sensor_ = kCount - 1U;
 };
