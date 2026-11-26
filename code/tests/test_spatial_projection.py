@@ -158,3 +158,19 @@ def test_horizon_and_exact_grazing_limit_are_rejected():
         project(boundary, 320, 240)
     accepted = project(replace(boundary, min_downward_ray=downward - 1e-6), 320, 240)
     assert accepted.x_mm == pytest.approx(cal.camera_height_mm / math.tan(pitch))
+
+
+@pytest.mark.parametrize(
+    ("forward", "right", "yaw"), [(23, 11, 15), (-23, -11, -15)],
+)
+def test_signed_camera_mount_translation(forward, right, yaw):
+    # Synthetic optical center at 45 degrees: horizontal reach equals height.
+    cal = calibration()
+    lens = replace(cal.lens, mount_lateral_offset_mm=right, mount_yaw_deg=yaw)
+    cal = replace(
+        cal, lens=lens, camera_height_mm=80, camera_forward_offset_mm=forward,
+        pitch_down_deg=45,
+    )
+    result = project(cal, cal.lens.cx, cal.lens.cy)
+    assert result.x_mm == pytest.approx(forward + 80 * math.cos(math.radians(yaw)))
+    assert result.y_mm == pytest.approx(-right - 80 * math.sin(math.radians(yaw)))

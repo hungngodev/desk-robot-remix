@@ -32,9 +32,9 @@ class ProjectedFloorPoint:
 class FloorProjectionCalibration:
     lens: DockCameraCalibration
     calibration_id: str
-    camera_height_mm: float
-    camera_forward_offset_mm: float
-    pitch_down_deg: float
+    camera_height_mm: float  # Installed optical center above the actual floor (Z up).
+    camera_forward_offset_mm: float  # Signed base_link X: positive ahead of origin.
+    pitch_down_deg: float  # Positive below horizontal, not tilt from vertical.
     valid_pixel_roi: tuple[int, int, int, int]  # left, top, right, bottom
     valid_forward_mm: tuple[float, float]
     valid_lateral_mm: tuple[float, float]

@@ -16,6 +16,8 @@ These blank fields are **intentional** and are not permission to guess a fit.
 | Installed uncompressed silicone stack and adjacent grip plane, recessed rigid rim and compressed pad height at representative contact | | fsr_stack_h_mm / fsr_grip_plane_mm / fsr_rim_relief_mm / compressed_pad_h |
 | Jaw pad flatness, measured clearance to rack/case/horn across combined lift/jaw poses, unloaded and loaded ADC channel 1 baseline/threshold/ceiling | | jaw_pad_flatness / jaw_swept_clearance / jaw_adc_baseline / jaw_adc_contact / jaw_adc_ceiling |
 | XIAO Sense assembled board width, height and camera depth | | sense_w / h / depth |
+| Installed XIAO camera optical center above actual tabletop and signed forward displacement from the odometry base_link origin | | camera_height_mm / camera_forward_offset_mm |
+| Installed XIAO camera lateral displacement (right positive) and yaw (right positive), pitch below horizontal (down positive) | | mount_lateral_offset_mm / mount_yaw_deg / pitch_down_deg |
 | SSD1306 PCB width, height and window active area | | oled_pcb_w / h, oled_screen_w / h |
 | Exact Challenge CS20-02P110-04-1X 20 x 16 x 4.7 mm body, solder pads and gasket dimensions | | speaker_l / speaker_w / speaker_depth / acoustics_1cc |
 | Acoustic cup net volume, compressed gasket thickness, sealed lead feedthrough and interference to camera/mic/OLED | | speaker_air_cc / gasket_h / lead_seal / head_clearance |
@@ -58,6 +60,19 @@ alternative mount is being evaluated. Do not mount both by default.
 | XIAO camera flex and each internal signal cable: part/revision, thickness/width, connector withdrawal envelope, specified static/dynamic bend radius and observed minimum radius | | cable_route_records |
 | Each cable route: minimum free clearance to closed shell, screw tips, head bridge, tracks, rack, jaw, brackets and dock through all allowed motion | | cable_min_clearance_by_pose |
 | Cable restraints: location, protected edge/exit, service loop, verified strain relief and connector retention | | cable_restraint_records |
+
+Record the common body origin used by odometry before transferring any lens
+coordinates. Body +X is forward, +Y left, +Z up. Camera floor projection
+uses `camera_forward_offset_mm = X`, `camera_height_mm` measured above the
+actual tabletop, `mount_lateral_offset_mm = -Y`, and right-positive camera
+yaw (negative body yaw). Camera pitch is down from horizontal; the four
+floor ToF tilts are measured from downward vertical. Record each ToF lens
+center in the same body frame, not the carrier center or aperture rim. For
+cliff clearance use the signed projected lead from the wheel contact to the
+sensor along the direction of travel, not the camera forward offset.
+Do not substitute nominal adapter offsets for installed lens measurements.
+`spatial_bracket.py` validates stationary receipt timing only; the camera
+mount transform is applied in `spatial_projection.py`.
 
 Use Fusion Inspect > Interference on the real populated component envelopes
 and retain a separate measurement record for each lane and cable. Sweep the
