@@ -2321,15 +2321,15 @@ def test_sense_hsm_gaze_and_blink_reach_local_locked_oled_without_motor_motion()
     assert "void SetupUI() override" in renderer
     assert "OledDisplay::SetupUI();" in renderer
     assert "DisplayLockGuard lock(this);" in renderer
-    assert "lv_obj_set_pos(pupil_[i], 4 + frame.x, 5 + frame.y);" in renderer
+    assert "lv_obj_set_pos(pupil_[i], PupilX(frame.x), PupilY(height, frame.y));" in renderer
     # The upstream 128x64 OLED layout centers its 32px emotion cell.
     # Anchoring at x=0 would leave the stock center emotion visible beside
     # the gaze/blink overlay, even though the HSM/animator tests still pass.
-    assert 'lv_obj_set_size(eye_layer_, 32, 48);' in renderer
-    assert 'lv_obj_align(eye_layer_, LV_ALIGN_TOP_MID, 0, 16);' in renderer
+    assert 'lv_obj_set_size(eye_layer_, kSlotWidth, kSlotHeight);' in renderer
+    assert 'lv_obj_align(eye_layer_, LV_ALIGN_TOP_MID, 0, kStatusHeight);' in renderer
     assert 'lv_obj_set_pos(eye_layer_, 0, 16);' not in renderer
-    assert renderer.index('lv_obj_set_size(eye_layer_, 32, 48);') < renderer.index(
-        'lv_obj_align(eye_layer_, LV_ALIGN_TOP_MID, 0, 16);'
+    assert renderer.index('lv_obj_set_size(eye_layer_, kSlotWidth, kSlotHeight);') < renderer.index(
+        'lv_obj_align(eye_layer_, LV_ALIGN_TOP_MID, 0, kStatusHeight);'
     )
     assert not any(word in renderer for word in (
         "command_drive", "MotorDriver", "servo", "uart_write_bytes"
