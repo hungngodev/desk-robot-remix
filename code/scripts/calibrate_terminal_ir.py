@@ -8,11 +8,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import errno
+import fcntl
 import ipaddress
 import json
 import math
 import os
 import re
+import secrets
 import stat
 import time
 from pathlib import Path
@@ -94,32 +97,73 @@ def _private_trial_parent_fd(parent: Path) -> int:
         raise
 
 
+_TRIAL_LOCK = ".terminal-ir-capture.lock"
+
+
+def _check_private_trial_file(fd: int) -> None:
+    target = os.fstat(fd)
+    if not stat.S_ISREG(target.st_mode):
+        raise OSError(errno.EINVAL, "Terminal IR trial output must be a regular file")
+    if (target.st_uid != os.geteuid() or target.st_nlink != 1
+            or stat.S_IMODE(target.st_mode) & 0o077):
+        raise ValueError("Terminal IR trial output must be an owned private regular file")
+
+
+def _read_existing_trial(folder_fd: int, name: str) -> bytes:
+    flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK
+    try:
+        fd = os.open(name, flags, dir_fd=folder_fd)
+    except FileNotFoundError:
+        return b""
+    with os.fdopen(fd, "rb") as existing:
+        _check_private_trial_file(existing.fileno())
+        contents = existing.read()
+    # Do not bury a torn legacy append or malformed evidence in a new capture.
+    _parse_trial_rows(contents.decode("utf-8"))
+    return contents
+
+
+def _replace_trial(folder_fd: int, name: str, contents: bytes) -> None:
+    temporary = f".terminal-ir-{secrets.token_hex(16)}.tmp"
+    fd = os.open(
+        temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+        0o600, dir_fd=folder_fd,
+    )
+    try:
+        with os.fdopen(fd, "wb") as output:
+            output.write(contents)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, name, src_dir_fd=folder_fd, dst_dir_fd=folder_fd)
+        os.fsync(folder_fd)
+    finally:
+        try:
+            os.unlink(temporary, dir_fd=folder_fd)
+        except FileNotFoundError:
+            pass
+
+
 def append_trial_rows(path: Path, rows: list[dict]) -> None:
-    """Append captured JSONL only to one owned private regular file."""
+    """Publish an entire capture batch atomically under a stable writer lock."""
+    if path.name == _TRIAL_LOCK or path.name.startswith(".terminal-ir-"):
+        raise ValueError("Reserved terminal IR trial filename")
+    additions = "".join(
+        json.dumps(row, separators=(",", ":"), allow_nan=False) + "\n" for row in rows
+    ).encode("utf-8")
     descriptor = _private_trial_parent_fd(path.parent)
     try:
-        # NONBLOCK prevents a substituted FIFO from hanging the capture tool.
-        flags = os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK
-        file_descriptor = os.open(path.name, flags, 0o600, dir_fd=descriptor)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK
+        lock_fd = os.open(_TRIAL_LOCK, flags, 0o600, dir_fd=descriptor)
         try:
-            target = os.fstat(file_descriptor)
-            if (not stat.S_ISREG(target.st_mode)
-                    or target.st_uid != os.geteuid()
-                    or target.st_nlink != 1
-                    or stat.S_IMODE(target.st_mode) & 0o077):
-                raise ValueError(
-                    "Terminal IR trial output must be an owned private regular file"
-                )
-            with os.fdopen(file_descriptor, "a", encoding="utf-8") as output:
-                file_descriptor = -1
-                for row in rows:
-                    output.write(json.dumps(row, separators=(",", ":")) + "\n")
+            _check_private_trial_file(lock_fd)
+            # Lock a stable inode, not the evidence inode replaced by rename.
+            fcntl.flock(lock_fd, fcntl.LOCK_EX)
+            existing = _read_existing_trial(descriptor, path.name)
+            _replace_trial(descriptor, path.name, existing + additions)
         finally:
-            if file_descriptor >= 0:
-                os.close(file_descriptor)
+            os.close(lock_fd)
     finally:
         os.close(descriptor)
-
 
 
 def _unique_trial_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -136,16 +180,22 @@ def _reject_nonfinite_trial_json(token: str) -> None:
     raise ValueError("Nonfinite terminal IR trial JSON constant: " + token)
 
 
-def load_trial_rows(path: Path) -> list[dict]:
-    """Parse physical trial JSONL without silently overwriting evidence."""
+def _parse_trial_rows(contents: str) -> list[dict]:
+    if contents and not contents.endswith("\n"):
+        raise ValueError("Incomplete terminal IR trial record")
     return [
         json.loads(
             line, object_pairs_hook=_unique_trial_fields,
             parse_constant=_reject_nonfinite_trial_json,
         )
-        for line in path.read_text(encoding="utf-8").splitlines()
+        for line in contents.splitlines()
         if line.strip()
     ]
+
+
+def load_trial_rows(path: Path) -> list[dict]:
+    """Parse physical trial JSONL without silently overwriting evidence."""
+    return _parse_trial_rows(path.read_text(encoding="utf-8"))
 
 
 def _validate_trial_ir(data: dict, robot_id: str,

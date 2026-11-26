@@ -640,3 +640,45 @@ def test_matched_pair_cannot_hide_different_receiver_identities():
     rows[20]["ir"]["right_code"] = 0xCA35ED12
     with pytest.raises(ValueError, match="disagrees with receiver identity"):
         cal.analyze(rows, "robot-01")
+
+
+def test_terminal_ir_crash_before_replace_preserves_previous_batch(tmp_path):
+    import subprocess
+
+    path = tmp_path / "trial.jsonl"
+    original = [{"label": "left"}]
+    additional = [{"label": "center"}]
+    cal.append_trial_rows(path, original)
+    before = path.read_bytes()
+    child = """
+import importlib.util
+import json
+import os
+import sys
+from pathlib import Path
+spec = importlib.util.spec_from_file_location('terminal_ir', sys.argv[1])
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+os.fsync = lambda fd: os._exit(73)
+module.append_trial_rows(Path(sys.argv[2]), json.loads(sys.argv[3]))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", child, str(Path(cal.__file__)), str(path), json.dumps(additional)],
+        check=False, timeout=10,
+    )
+    assert result.returncode == 73
+    assert path.read_bytes() == before
+    cal.append_trial_rows(path, additional)
+    assert cal.load_trial_rows(path) == original + additional
+
+
+@pytest.mark.parametrize("corrupt", [b'{"label":"left"}', b'{"label":\n'])
+def test_terminal_ir_append_refuses_corrupt_prior_evidence(tmp_path, corrupt):
+    path = tmp_path / "trial.jsonl"
+    path.write_bytes(corrupt)
+    os.chmod(path, 0o600)
+    with pytest.raises(ValueError):
+        cal.load_trial_rows(path)
+    with pytest.raises(ValueError):
+        cal.append_trial_rows(path, [{"label": "center"}])
+    assert path.read_bytes() == corrupt
