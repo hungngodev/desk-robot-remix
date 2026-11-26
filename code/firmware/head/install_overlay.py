@@ -1404,6 +1404,15 @@ void Application::HandleStartListeningEvent() {""",
 #endif
     SetListeningMode(mode);""",
         )
+        # Reuse the pinned server-hello completion callback as positive link evidence.
+        text = replace_once(
+            text,
+            """    protocol_->OnAudioChannelOpened([this, codec, &board]() {""",
+            """    protocol_->OnAudioChannelOpened([this, codec, &board]() {
+#ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
+        sense_audio_link_unavailable_.store(false, std::memory_order_release);
+#endif""",
+        )
         # A server transport failure is independent of WiFi association.
         # Report it from the ONE Xiaozhi audio owner rather than interpreting
         # every ordinary Idle state as a socket loss. No new microphone task.
@@ -1413,8 +1422,10 @@ void Application::HandleStartListeningEvent() {""",
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);""",
             """    protocol_->OnAudioChannelClosed([this, &board]() {
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
-        if (!sense_microphone_privacy_muted_.load(std::memory_order_acquire))
+        if (!sense_microphone_privacy_muted_.load(std::memory_order_acquire)) {
+            sense_audio_link_unavailable_.store(true, std::memory_order_release);
             sense_audio_failure_epoch_.fetch_add(1, std::memory_order_acq_rel);
+        }
 #endif
         board.SetPowerSaveLevel(PowerSaveLevel::LOW_POWER);""",
         )
@@ -1445,8 +1456,10 @@ void Application::HandleStartListeningEvent() {""",
     if (!protocol_->IsAudioChannelOpened()) {
         if (!protocol_->OpenAudioChannel()) {
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
-            if (!sense_microphone_privacy_muted_.load(std::memory_order_acquire))
+            if (!sense_microphone_privacy_muted_.load(std::memory_order_acquire)) {
+                sense_audio_link_unavailable_.store(true, std::memory_order_release);
                 sense_audio_failure_epoch_.fetch_add(1, std::memory_order_acq_rel);
+            }
 #endif""",
         )
         # The pinned application raises WiFi performance before opening audio.
@@ -1492,6 +1505,9 @@ void Application::HandleStartListeningEvent() {""",
     uint32_t GetSenseAudioFailureEpoch() const {
         return sense_audio_failure_epoch_.load(std::memory_order_acquire);
     }
+    bool GetSenseAudioLinkUnavailable() const {
+        return sense_audio_link_unavailable_.load(std::memory_order_acquire);
+    }
 #endif
 
     /**""",
@@ -1504,6 +1520,7 @@ void Application::HandleStartListeningEvent() {""",
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
     std::atomic<bool> sense_microphone_privacy_muted_{false};
     std::atomic<uint32_t> sense_audio_failure_epoch_{0};
+    std::atomic<bool> sense_audio_link_unavailable_{false};
 #endif
     NotifyPlayer notify_player_;""",
         )

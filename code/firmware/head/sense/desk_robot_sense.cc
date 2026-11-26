@@ -269,6 +269,7 @@ private:
                 board->continuous_audio_started_ = false;
             }
             const uint32_t failure_epoch = app.GetSenseAudioFailureEpoch();
+            const bool voice_link_lost = !wifi_connected || app.GetSenseAudioLinkUnavailable();
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
             if (failure_epoch != last_bench_failure_epoch) {
                 last_bench_failure_epoch = failure_epoch;
@@ -292,6 +293,8 @@ private:
                     app.ToggleChatState();  // existing Xiaozhi realtime listen
                 }
             }
+#else
+            const bool voice_link_lost = false;
 #endif
             const bool speaking = device_state == kDeviceStateSpeaking;
             if (speaking && !board->face_was_speaking_) {
@@ -308,7 +311,8 @@ private:
             // A normal wake-only build still reserves its listening UI.
             const bool idle = device_state == kDeviceStateIdle;
 #ifdef CONFIG_DESK_ROBOT_CONTINUOUS_AUDIO_ENABLED
-            const bool face_available = idle || device_state == kDeviceStateListening;
+            bool face_available = idle || device_state == kDeviceStateListening;
+            if (voice_link_lost && !speaking) face_available = true;
 #else
             const bool face_available = idle;
 #endif
@@ -324,8 +328,8 @@ private:
             const bool mic_privacy_on = false;
 #endif
             const auto local_status = desk_robot::SelectFaceStatus(
-                body_unhealthy, dock_lockout, mic_privacy_on);
-            const bool priority_active = local_status != desk_robot::FaceStatus::kNormal;
+                body_unhealthy, dock_lockout, mic_privacy_on, voice_link_lost);
+            const bool priority_active = desk_robot::FaceStatusBlocksExpression(local_status);
             if (priority_active || !face_available) model_mood_active = false;
             {
                 FaceRenderGuard render_lock;
@@ -353,12 +357,13 @@ private:
                             // The factual STOP status above remains visible, and
                             // optional HSM/LLM moods cannot override the safety cue.
                             model_mood_active = false;
-                        } else if (requested_mood != desk_robot::CosmeticMood::kNone) {
+                        } else if (!voice_link_lost &&
+                                   requested_mood != desk_robot::CosmeticMood::kNone) {
                             local_mood = CosmeticMoodName(requested_mood);
                             board->display_->SetEmotion(CosmeticMoodName(requested_mood));
                             model_mood_active = true;
                             model_mood_started_ms = now_ms;
-                        } else if (!model_mood_active ||
+                        } else if (voice_link_lost || !model_mood_active ||
                                    now_ms - model_mood_started_ms >= 1600U) {
                             if (last_priority_active || model_mood_active ||
                                 !last_face_available || action.set_mood) {

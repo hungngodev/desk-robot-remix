@@ -8,18 +8,13 @@
 #include "display/oled_display.h"
 #include "face_eye_animator.hpp"
 #include "face_idle_power.hpp"
+#include "face_presence.hpp"
 
 // Short eye gestures cover only Xiaozhi's 32-pixel emotion slot.
 // All display mutations share Xiaozhi's LVGL lock. Local safety/privacy status
 // owns the status label until cleared; upstream still owns audio and subtitles.
 // No actuator API is reachable.
 namespace desk_robot {
-enum class FaceStatus { kNormal, kBodyFault, kDockLock, kMicPrivacy, kFaceUnavailable };
-
-constexpr FaceStatus SelectFaceStatus(bool body_fault, bool dock_lockout, bool mic_privacy) {
-    if (body_fault) return dock_lockout ? FaceStatus::kDockLock : FaceStatus::kBodyFault;
-    return mic_privacy ? FaceStatus::kMicPrivacy : FaceStatus::kNormal;
-}
 
 class LocalEyeDisplay final : public OledDisplay {
 public:
@@ -112,7 +107,7 @@ public:
     bool SetEmotion(const char* emotion) override {
         if (!emotion) return false;
         DisplayLockGuard lock(this);
-        if (!lock || (local_status_ != FaceStatus::kNormal &&
+        if (!lock || (FaceStatusBlocksExpression(local_status_) &&
                       std::strcmp(emotion, "neutral") != 0)) return false;
         return OledDisplay::SetEmotion(emotion);
     }
@@ -151,7 +146,7 @@ public:
     void ShowEyes(const EyeFrame& frame) {
         DisplayLockGuard lock(this);
         if (!lock) return;
-        RenderEyesLocked(local_status_ != FaceStatus::kNormal || !subtitle_.empty()
+        RenderEyesLocked(FaceStatusBlocksExpression(local_status_) || !subtitle_.empty()
                              ? EyeFrame{} : frame);
     }
 
@@ -167,16 +162,17 @@ private:
     }
 
     void ApplyPriorityLocked() {
-        RenderEyesLocked({});
+        if (FaceStatusBlocksExpression(local_status_)) RenderEyesLocked({});
         // The base emotion label is initialized together with the status UI.
         if (!status_label_) return;
-        OledDisplay::SetEmotion("neutral");
+        if (FaceStatusBlocksExpression(local_status_)) OledDisplay::SetEmotion("neutral");
         const char* status = "";
         switch (local_status_) {
             case FaceStatus::kBodyFault: status = "Body safety stop"; break;
             case FaceStatus::kDockLock: status = "Dock lock: motors off"; break;
             case FaceStatus::kMicPrivacy: status = "Mic privacy ON"; break;
             case FaceStatus::kFaceUnavailable: status = "Face task unavailable"; break;
+            case FaceStatus::kVoiceLinkLost: status = "Voice offline"; break;
             case FaceStatus::kNormal: return;
         }
         OledDisplay::SetStatus(status);

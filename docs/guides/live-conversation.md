@@ -106,3 +106,23 @@ server sent the stop frame; `head_flush_acknowledged=false` and
 `audible_stop_verified=false` remain the truthful status until a real Sense
 microphone, speaker, DMA and room test establishes stop latency and 19/20
 successful natural speech interruptions within 500 ms.
+
+## Local presence when the voice server is unavailable
+
+On the consented continuous-audio Sense build, a WiFi loss, Xiaozhi audio
+channel closure or failed open produces a persistent `Voice offline` OLED
+status. A successful Xiaozhi channel-open callback clears the transport failure
+flag; ordinary quiet/idle alone does not set it. This is a voice-link cue, not
+proof that the Mac itself is powered off or that the motor output is safe.
+The local Stackchan idle face can still animate without Mac mood cues, and the
+panel cannot blank while this status is shown. A fresh WROOM body fault or dock
+lock still takes precedence and suppresses cosmetic expression. Mic privacy
+also takes precedence. WROOM continues to own the existing control lease,
+watchdog and explicit recovery, regardless of the face or audio link.
+
+For physical acceptance, isolate the robot on a restrained bench, disconnect
+the Mac while leaving WiFi associated, then repeat with WiFi unavailable.
+Observe the OLED for at least five minutes, confirm independent local motor
+stop on control loss, confirm no autonomous rearm on reconnection, and confirm
+ordinary connected quiet mode does not show the offline cue. Record the actual
+panel and motor behavior; host simulation does not qualify the physical test.

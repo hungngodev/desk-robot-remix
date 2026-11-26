@@ -117,6 +117,11 @@ class SenseOverlayTests(unittest.TestCase):
         assert "sense_microphone_privacy_muted_.load" in closed
         assert "sense_microphone_privacy_muted_.load" in opener
         assert "GetSenseAudioFailureEpoch() const" in header
+        assert "GetSenseAudioLinkUnavailable() const" in header
+        assert "sense_audio_link_unavailable_.store(true" in closed
+        assert "sense_audio_link_unavailable_.store(true" in opener
+        assert "sense_audio_link_unavailable_.store(false" in application
+        assert "!wifi_connected || app.GetSenseAudioLinkUnavailable()" in face
         assert "std::atomic<uint32_t> sense_audio_failure_epoch_{0};" in header
         assert "const uint32_t failure_epoch = app.GetSenseAudioFailureEpoch();" in face
         assert "failure_epoch != board->last_audio_failure_epoch_seen_" in face
@@ -2822,6 +2827,32 @@ int main() {
     display.ShowEyes({true, true, 0, 0});
     assert(!layer->hidden && pupil->hidden);
     assert(upstream->SetEmotion("happy"));
+    // The voice status is factual and cannot be overwritten by clock or notices.
+    // Local expressions and the panel stay available beyond five offline minutes.
+    display.SetLocalStatus(FaceStatus::kVoiceLinkLost);
+    std::vector<desk_robot::FacePanelMode> offline_modes;
+    for (uint64_t elapsed = 0; elapsed <= 300100; elapsed += 100) {
+        upstream->SetStatus("Connecting");
+        upstream->ShowNotification("Network retry");
+        assert(upstream->SetEmotion("happy"));
+        display.ShowEyes({true, elapsed % 1000 == 0, 0, 0});
+        display.UpdateIdlePower(elapsed, true, true, [&](desk_robot::FacePanelMode mode) {
+            offline_modes.push_back(mode);
+            return true;
+        });
+        assert(!layer->hidden && display.StatusVisible());
+        assert(display.Status() == "Voice offline");
+    }
+    assert(offline_modes.size() == 1 &&
+           offline_modes.back() == desk_robot::FacePanelMode::kAwake);
+    display.SetLocalStatus(SelectFaceStatus(true, false, false, true));
+    display.ShowEyes({true, false, 0, 0});
+    assert(layer->hidden && display.Status() == "Body safety stop");
+    display.SetLocalStatus(SelectFaceStatus(false, false, false, true));
+    display.ShowEyes({true, false, 0, 0});
+    assert(!layer->hidden && display.Status() == "Voice offline");
+    display.SetLocalStatus(FaceStatus::kNormal);
+    assert(display.Status() == "Connecting");
     // The upstream status bar unhides its existing popup; it does not reorder it.
     { DisplayLockGuard lock(&display); lv_obj_remove_flag(popup, LV_OBJ_FLAG_HIDDEN); }
     assert(!layer->hidden && !popup->hidden);
