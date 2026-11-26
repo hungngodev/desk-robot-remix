@@ -29,6 +29,14 @@ def _ratings_cover(ratings, required) -> bool | None:
     return True if all(rating is not None for rating in ratings) else None
 
 
+def _pack_fuse_covers_peak(derated_hold_a: float | None, required_peak_a: float) -> bool:
+    """Conservative no-trip screen, not a short-circuit protection qualification."""
+    if derated_hold_a is not None and (
+            not _finite_number(derated_hold_a) or derated_hold_a <= 0):
+        raise ValueError("Pack fuse derated hold current must be positive and finite")
+    return _ratings_cover((derated_hold_a,), (required_peak_a,)) is True
+
+
 def size_5v_supply(
     measured_peak_5v_a: float,
     measured_continuous_5v_a: float,
@@ -399,6 +407,7 @@ def screen_one_cell_power_stack(
     guaranteed_charge_window_c: tuple[float, float] | None = None,
     ts_open_inhibit_on_paper: bool = False,
     ts_short_inhibit_on_paper: bool = False,
+    pack_path_fuse_derated_hold_a: float | None = None,
 ) -> dict:
     """Join existing 1S equations into ONE real purchase architecture screen.
 
@@ -410,6 +419,7 @@ def screen_one_cell_power_stack(
     rating or live temperature. None means the interval is unknown.
     The two TS fault flags require independent source-reviewed protection for
     the exact circuit; an unknown or missing flag fails the paper screen.
+    The pack fuse rating is its derated hold current in the shared 1S path.
     A returned paper pass is NEVER PCB, thermal, protection or dock approval.
     """
     if any(type(v) is not bool for v in (
@@ -479,6 +489,9 @@ def screen_one_cell_power_stack(
     # The entire undocked converter input flows through this charger path.
     charger_path_max_a = 4.5
     gates = {
+        "pack_path_fuse_covers_peak": _pack_fuse_covers_peak(
+            pack_path_fuse_derated_hold_a,
+            undocked["minimum_rated_cell_and_boost_input_a"]),
         "charger_battery_discharge_path_covers_peak": (
             undocked["minimum_rated_cell_and_boost_input_a"] <= charger_path_max_a),
         "charger_out_to_regulated_5v_covers_3v_cell_and_dock": (
@@ -500,6 +513,7 @@ def screen_one_cell_power_stack(
         "source_of_equations": "existing power_preflight.py",
         "charger_variant": charger_variant,
         "charger_battery_discharge_recommended_max_a": charger_path_max_a,
+        "pack_path_fuse_derated_hold_a": pack_path_fuse_derated_hold_a,
         "minimum_5v_peak_a_including_margin": (
             undocked["minimum_rated_5v_output_a"]),
         "minimum_1s_peak_a_including_margin": (

@@ -98,6 +98,21 @@ can only mean the numbers supplied are mutually consistent. It always
 reports `qualified_1s_dock_safe_to_buy=false` and
 `all_power_stages_physically_verified=false` until independent tests.
 
+For a fuse in the shared 1S pack path, supply
+`pack_path_fuse_derated_hold_a` from the exact manufacturer's hold-current
+rating at the maximum applicable enclosure temperature. Missing or insufficient
+ratings prevent a complete paper pass. The conservative screen compares
+against the margin-inclusive **pack-side peak**, not the 5V load current
+or the fuse trip rating. Include simultaneous wheel stalls, servo loads,
+audio, camera, WiFi and any independent regulator input in the measured
+total demand (use equivalent 5V load if necessary). This is not a fuse
+selection or proof of safe interruption: actual time-current response,
+short-circuit ratings, PCM coordination, voltage drop, converter inrush
+and separately fused branches still require independent design review and
+bench qualification. Manufacturer reference:
+https://www.littelfuse.com/products/fuses-overcurrent-protection/polyswitch-resettable-pptc-devices
+
+
 Published [Pololu #4082 S13V30F5](https://www.pololu.com/product/4082)
 has a correct **2.8V to 22V** VIN window and a real STEP mechanical model,
 but its advertised **3A** is measured near 5V input and is NOT a valid

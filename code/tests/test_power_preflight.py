@@ -1127,6 +1127,7 @@ def plausible_hypothetical_one_cell_stack():
         charger_ts_fixed_resistor_removed=True, dock_motors_disarmed=True,
         guaranteed_charge_window_c=(0, 45),  # hypothetical worst-case bounds
         ts_open_inhibit_on_paper=True, ts_short_inhibit_on_paper=True,
+        pack_path_fuse_derated_hold_a=8,
     )
 
 
@@ -1393,3 +1394,32 @@ def test_integrated_stack_respects_charger_bat_and_out_operating_limit(
     assert result["all_power_stages_compatible_on_paper"] is expected
     assert result["all_power_stages_physically_verified"] is False
     assert result["qualified_1s_dock_safe_to_buy"] is False
+
+@pytest.mark.parametrize("hold_a, expected", [(None, False), (3.823, False), (3.824, True)])
+def test_stack_pack_fuse_covers_combined_low_cell_peak(hold_a, expected):
+    cfg = plausible_hypothetical_one_cell_stack()
+    # Synthetic simultaneous loads, not measured motor or electronics ratings.
+    cfg.update(active_peak_5v_a=1.5, pack_path_fuse_derated_hold_a=hold_a)
+    result = one_stack(**cfg)
+    assert result["minimum_1s_peak_a_including_margin"] == 3.824
+    assert result["checks"]["pack_path_fuse_covers_peak"] is expected
+    assert all(value for key, value in result["checks"].items()
+               if key != "pack_path_fuse_covers_peak")
+    assert result["all_power_stages_compatible_on_paper"] is expected
+    assert result["qualified_1s_dock_safe_to_buy"] is False
+
+
+@pytest.mark.parametrize("bad", [0, -1, True, "4", float("inf"), float("nan")])
+def test_stack_rejects_invalid_pack_fuse_rating(bad):
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg["pack_path_fuse_derated_hold_a"] = bad
+    with pytest.raises(ValueError, match="Pack fuse derated hold current"):
+        one_stack(**cfg)
+
+
+def test_stack_missing_pack_fuse_rating_fails_closed():
+    cfg = plausible_hypothetical_one_cell_stack()
+    cfg.pop("pack_path_fuse_derated_hold_a")
+    result = one_stack(**cfg)
+    assert result["checks"]["pack_path_fuse_covers_peak"] is False
+    assert result["all_power_stages_compatible_on_paper"] is False
