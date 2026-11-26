@@ -1,4 +1,5 @@
 #include "BodyControl.h"
+#include "AttitudeNorm.h"
 #include "CliffGuard.h"
 
 #include <cstdint>
@@ -36,6 +37,26 @@ std::vector<std::string> frame(BodyControl& body, LineReceiver& receiver,
   for (char byte : bytes)
     if (receiver.feed(byte, now, body, reply, sizeof(reply))) replies.emplace_back(reply);
   return replies;
+}
+
+void attitude_norm_root_boundaries() {
+  using desk_robot::attitude_norm_root;
+  CHECK(attitude_norm_root(0) == 0);
+  CHECK(attitude_norm_root(1) == 1);
+  for (const std::uint64_t n : {2ULL, 16384ULL, 32768ULL, 56755ULL, 0xffffffffULL}) {
+    const auto square = n * n;
+    CHECK(attitude_norm_root(square - 1) == n - 1);
+    CHECK(attitude_norm_root(square) == n);
+    CHECK(attitude_norm_root(square + 1) == n);
+  }
+  CHECK(attitude_norm_root(std::numeric_limits<std::uint64_t>::max()) == 0xffffffffU);
+  std::uint64_t sample = 0x123456789abcdef0ULL;
+  for (unsigned i = 0; i < 10000; ++i) {
+    sample = sample * 6364136223846793005ULL + 1;
+    const std::uint64_t root = attitude_norm_root(sample);
+    CHECK(root * root <= sample);
+    CHECK(root == 0xffffffffULL || (root + 1) * (root + 1) > sample);
+  }
 }
 
 void optional_inputs_preserve_raw_stop_and_event_history() {
@@ -904,6 +925,7 @@ void deterministic_stream_stress() {
 int main(int argc, char** argv) {
   using Test = std::pair<const char*, void (*)()>;
   const std::vector<Test> tests = {
+      {"attitude_norm_root_boundaries", attitude_norm_root_boundaries},
       {"optional_inputs_preserve_raw_stop_and_event_history",
        optional_inputs_preserve_raw_stop_and_event_history},
       {"disarmed_boot", disarmed_boot}, {"arm_clears_old_motion", arm_clears_old_motion},

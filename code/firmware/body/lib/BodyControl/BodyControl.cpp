@@ -1,4 +1,5 @@
 #include "BodyControl.h"
+#include "AttitudeNorm.h"
 #include "BatterySafety.h"
 #include "BodyCommandParser.h"
 #include "CliffGuard.h"
@@ -227,26 +228,6 @@ bool BodyControl::configure_imu_attitude_limits(const ImuAttitudeLimits& limits)
   imu_attitude_bad_streak_ = 0;
   imu_attitude_good_streak_ = 0;
   return true;
-}
-
-// Floor integer square root, using the classical base-four bit method.
-// Each accelerometer vector is bounded to three signed 16-bit axes; this
-// preserves deterministic WROOM behavior without floating-point sensor
-// authorization or an intermediate squared-product overflow.
-static std::uint32_t attitude_norm_root(std::uint64_t value) {
-  std::uint64_t root = 0;
-  std::uint64_t bit = static_cast<std::uint64_t>(1) << 62;
-  while (bit > value) bit >>= 2;
-  while (bit != 0) {
-    if (value >= root + bit) {
-      value -= root + bit;
-      root = (root >> 1) + bit;
-    } else {
-      root >>= 1;
-    }
-    bit >>= 2;
-  }
-  return static_cast<std::uint32_t>(root);
 }
 
 bool BodyControl::attitude_sample_unsafe(const BerryReading& reading) const {
