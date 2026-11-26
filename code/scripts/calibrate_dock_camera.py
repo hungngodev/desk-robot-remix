@@ -437,14 +437,17 @@ def main() -> None:
         help="Record the actual XIAO camera PID from the physical module",
     )
     args = parser.parse_args()
-    candidate = calibrate_images(
-        args.images, columns=args.columns, rows=args.rows,
-        square_mm=args.square_mm, tag_side_mm=args.tag_side_mm,
-        marker_id=args.marker_id, target_distance_mm=args.target_distance_mm,
-        camera_sensor_pid=args.camera_sensor_pid,
-        robot_id=args.robot_id, head_device_id=args.head_device_id,
-    )
-    write_private_dock_candidate(args.output, candidate)
+    try:
+        candidate = calibrate_images(
+            args.images, columns=args.columns, rows=args.rows,
+            square_mm=args.square_mm, tag_side_mm=args.tag_side_mm,
+            marker_id=args.marker_id, target_distance_mm=args.target_distance_mm,
+            camera_sensor_pid=args.camera_sensor_pid,
+            robot_id=args.robot_id, head_device_id=args.head_device_id,
+        )
+        write_private_dock_candidate(args.output, candidate)
+    except ValueError as exc:
+        parser.error(str(exc))
     print(json.dumps(candidate, indent=2))
 
 

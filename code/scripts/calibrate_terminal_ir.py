@@ -146,7 +146,8 @@ def _replace_trial(folder_fd: int, name: str, contents: bytes) -> None:
             pass
 
 
-def append_trial_rows(path: Path, rows: list[dict]) -> None:
+def append_trial_rows(path: Path, rows: list[dict], *, robot_id: str | None = None,
+                      expected_dock_id: int | None = None) -> None:
     """Publish an entire capture batch atomically under a stable writer lock."""
     if path.name == _TRIAL_LOCK or path.name.startswith(".terminal-ir-"):
         raise ValueError("Reserved terminal IR trial filename")
@@ -163,6 +164,10 @@ def append_trial_rows(path: Path, rows: list[dict]) -> None:
             # Lock a stable inode, not the evidence inode replaced by rename.
             fcntl.flock(lock_fd, fcntl.LOCK_EX)
             existing = _read_existing_trial(descriptor, path.name)
+            if robot_id is not None:
+                continuity = _TrialContinuity(robot_id, expected_dock_id)
+                for row in _parse_trial_rows((existing + additions).decode("utf-8")):
+                    continuity.observe(row)
             _replace_trial(descriptor, path.name, existing + additions)
         finally:
             os.close(lock_fd)
@@ -219,29 +224,30 @@ def _validate_trial_ir(data: dict, robot_id: str,
     return reading
 
 
-def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
-            expected_dock_id: int | None = None) -> dict:
-    if not robot_id or not 10 <= min_per_position <= 500:
-        raise ValueError("Invalid robot ID or minimum real sample count")
-    data: dict[str, list[dict]] = {name: [] for name in POSITION_LABELS}
-    reflection_valid: list[bool] = []
-    previous: tuple[int, int] | None = None
-    last_at = -1.0
-    observed_dock_code: int | None = None
-    if expected_dock_id is not None:
-        observed_dock_code = dock_beacon_code(expected_dock_id)
-    for row in rows:
+class _TrialContinuity:
+    """Validate partial trial chronology without requiring all positions."""
+
+    def __init__(self, robot_id: str, expected_dock_id: int | None):
+        self.robot_id = robot_id
+        self.expected_dock_id = expected_dock_id
+        self.previous: tuple[int, int] | None = None
+        self.last_at = -1.0
+        self.observed_dock_code = (
+            dock_beacon_code(expected_dock_id) if expected_dock_id is not None else None
+        )
+
+    def observe(self, row: dict) -> tuple[dict, tuple[bool, bool]]:
         _validated_trial_row(row)
         if row.get("label") not in LABELS:
             raise ValueError("Explicitly labeled left/center/right records required")
-        reading = _validate_trial_ir(row.get("ir"), robot_id, expected_dock_id)
+        reading = _validate_trial_ir(row.get("ir"), self.robot_id, self.expected_dock_id)
         codes = (reading.get("left_code", 0), reading.get("right_code", 0), reading["code"])
         for code in codes:
             if code == 0:
                 continue
-            if observed_dock_code is None:
-                observed_dock_code = code
-            elif code != observed_dock_code:
+            if self.observed_dock_code is None:
+                self.observed_dock_code = code
+            elif code != self.observed_dock_code:
                 raise ValueError(
                     "Mixed NEC dock beacons in trial: observations must share one assigned dock"
                 )
@@ -249,33 +255,45 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
         try:
             valid_stamp = (
                 type(stamp) in (int, float) and math.isfinite(stamp)
-                and 0 <= stamp and stamp > last_at
+                and 0 <= stamp and stamp > self.last_at
             )
         except OverflowError:
-            # JSON integers are unbounded; malformed clocks must fail closed.
             valid_stamp = False
         if not valid_stamp:
             raise ValueError("Strictly increasing recorded receive timestamps required")
-        last_at = stamp
         sequences = (reading["left_seq"], reading["right_seq"])
-        if previous is None:
-            advances = (sequences[0] > 0, sequences[1] > 0)
-        else:
-            # Independent RMT receiver counters are not a pairwise clock.
-            # One side advancing cannot refresh the other cached side.
-            # Modulo arithmetic permits true unsigned 32-bit counter wrap.
-            deltas = tuple(
-                (after - before) & 0xffffffff
-                for after, before in zip(sequences, previous, strict=True)
-            )
-            if any(delta >= 0x80000000 for delta in deltas):
-                raise ValueError("Reboot or out-of-order receiver sequences: restart trial")
-            advances = tuple(delta > 0 for delta in deltas)
-            if not any(advances) and any(
-                reading[f"{side}_valid"] for side in ("left", "right")
-            ):
-                raise ValueError("Replayed receiver counter with claimed new optical evidence")
-        previous = sequences
+        advances = _receiver_advances(reading, sequences, self.previous)
+        self.previous = sequences
+        self.last_at = stamp
+        return reading, advances
+
+
+def _receiver_advances(reading: dict, sequences: tuple[int, int],
+                       previous: tuple[int, int] | None) -> tuple[bool, bool]:
+    if previous is None:
+        return sequences[0] > 0, sequences[1] > 0
+    # Independent counters may wrap; one side advancing cannot refresh the other.
+    deltas = tuple(
+        (after - before) & 0xffffffff
+        for after, before in zip(sequences, previous, strict=True)
+    )
+    if any(delta >= 0x80000000 for delta in deltas):
+        raise ValueError("Reboot or out-of-order receiver sequences: restart trial")
+    advances = (deltas[0] > 0, deltas[1] > 0)
+    if not any(advances) and any(reading[f"{side}_valid"] for side in ("left", "right")):
+        raise ValueError("Replayed receiver counter with claimed new optical evidence")
+    return advances
+
+
+def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
+            expected_dock_id: int | None = None) -> dict:
+    if not robot_id or not 10 <= min_per_position <= 500:
+        raise ValueError("Invalid robot ID or minimum real sample count")
+    data: dict[str, list[dict]] = {name: [] for name in POSITION_LABELS}
+    reflection_valid: list[bool] = []
+    continuity = _TrialContinuity(robot_id, expected_dock_id)
+    for row in rows:
+        reading, advances = continuity.observe(row)
         left_new = reading["left_valid"] and advances[0]
         right_new = reading["right_valid"] and advances[1]
         if row["label"] == REFLECTION_LABEL:
@@ -327,10 +345,10 @@ def analyze(rows: list[dict], robot_id: str, *, min_per_position: int = 20,
         if expected_dock_id is not None
         else (
             next(
-                (i for i in range(1, 6) if dock_beacon_code(i) == observed_dock_code),
+                (i for i in range(1, 6) if dock_beacon_code(i) == continuity.observed_dock_code),
                 None,
             )
-            if observed_dock_code is not None
+            if continuity.observed_dock_code is not None
             else None
         )
     )
@@ -373,6 +391,7 @@ async def capture(base_url: str, token: str, robot_id: str,
         raise ValueError("A labeled read-only authenticated trial is required")
     origin = _safe_ir_origin(base_url, robot_id)
     rows = []
+    continuity = _TrialContinuity(robot_id, expected_dock_id)
     async with httpx.AsyncClient(
         base_url=origin,
         headers={"Authorization": f"Bearer {token}"},
@@ -403,11 +422,13 @@ async def capture(base_url: str, token: str, robot_id: str,
                 raise ValueError(
                     "Delayed terminal IR HTTP response exceeds optical freshness budget"
                 )
-            rows.append({
+            row = {
                 "schema_version": TRIAL_SCHEMA_VERSION,
                 "label": label, "received_monotonic": received_at,
                 "ir": reading,
-            })
+            }
+            continuity.observe(row)
+            rows.append(row)
             if i + 1 != count:
                 await asyncio.sleep(interval_s)
     return rows
@@ -431,20 +452,28 @@ def main() -> None:
     if args.dock_id is None:
         parser.error("Terminal IR calibration requires --dock-id 1 through 5")
     if args.input:
-        rows = load_trial_rows(args.input)
-        print(json.dumps(analyze(
-            rows, args.robot, expected_dock_id=args.dock_id,
-        ), indent=2))
+        try:
+            rows = load_trial_rows(args.input)
+            print(json.dumps(analyze(
+                rows, args.robot, expected_dock_id=args.dock_id,
+            ), indent=2))
+        except ValueError as exc:
+            parser.error(str(exc))
         return
     if not args.out or args.label is None:
         parser.error("Supply --input for analysis or --out and --label for real capture")
     # The user must move an UNPOWERED robot to three stationary positions.
     # No motion, camera, battery or charging endpoint is ever requested.
-    rows = asyncio.run(capture(
-        args.api, os.environ.get(args.token_env, ""), args.robot,
-        args.label, args.samples, args.interval, args.dock_id,
-    ))
-    append_trial_rows(args.out, rows)
+    try:
+        rows = asyncio.run(capture(
+            args.api, os.environ.get(args.token_env, ""), args.robot,
+            args.label, args.samples, args.interval, args.dock_id,
+        ))
+        append_trial_rows(
+            args.out, rows, robot_id=args.robot, expected_dock_id=args.dock_id,
+        )
+    except ValueError as exc:
+        parser.error(str(exc))
     print(json.dumps({
         "label": args.label, "records_written": len(rows),
         "output": str(args.out), "physical_acceptance_pass": False,
