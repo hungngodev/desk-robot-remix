@@ -8,6 +8,9 @@ MODEL_SAMPLE_RATE = 24000
 FRAME_SECONDS = 0.060
 FRAME_SAMPLES = 960
 FRAME_BYTES = FRAME_SAMPLES * 2
+# Match the wire protocol's two-second maximum PCM16 model delta.
+MAX_MODEL_CHUNK_BYTES = MODEL_SAMPLE_RATE * 2 * 2
+MAX_RESAMPLED_CHUNK_BYTES = HEAD_SAMPLE_RATE * 2 * 2
 RatecvState = tuple[int, tuple[tuple[int, int], ...]] | None
 Ratecv = Callable[[bytes, int, int, int, int, RatecvState], tuple[bytes, RatecvState]]
 
@@ -25,9 +28,18 @@ class PcmOpusFramer:
         self._resample_state = None
 
     def append(self, pcm24k: bytes) -> None:
-        pcm16k, self._resample_state = self._ratecv(
+        if not pcm24k:
+            return
+        if len(pcm24k) % 2 or len(pcm24k) > MAX_MODEL_CHUNK_BYTES:
+            raise ValueError("Malformed or oversized model PCM chunk")
+        if self.has_frame():
+            raise ValueError("Drain complete Opus frames before appending PCM")
+        pcm16k, next_state = self._ratecv(
             pcm24k, 2, 1, MODEL_SAMPLE_RATE, HEAD_SAMPLE_RATE, self._resample_state
         )
+        if len(pcm16k) % 2 or len(pcm16k) > MAX_RESAMPLED_CHUNK_BYTES:
+            raise ValueError("Malformed or oversized resampled PCM chunk")
+        self._resample_state = next_state
         self._pending.extend(pcm16k)
 
     def has_frame(self) -> bool:
@@ -42,6 +54,8 @@ class PcmOpusFramer:
 
     def padded_tail(self) -> bytes:
         """Return the terminal tail without discarding state before STOP."""
+        if self.has_frame():
+            raise ValueError("Drain complete Opus frames before padding tail")
         return bytes(self._pending).ljust(FRAME_BYTES, b"\0") if self._pending else b""
 
 
