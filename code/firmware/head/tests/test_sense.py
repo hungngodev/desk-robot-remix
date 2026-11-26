@@ -2784,6 +2784,7 @@ protected:
 """
     native = r"""
 #include "face_eye_display.hpp"
+#include "../sense/face_speech_envelope.hpp"
 #include <array>
 #include <cassert>
 #include <thread>
@@ -2952,6 +2953,36 @@ int main() {
         assert(mouth->x >= 0 && mouth->x + mouth->w <= layer->w);
         assert(mouth->y >= 31 && mouth->y + mouth->h <= layer->h);
     }
+    // Drive the actual speech envelope to saturation before a caption arrives.
+    desk_robot::SpeechLevelWindow speech_level;
+    desk_robot::FaceMouthAnimator speech_mouth;
+    desk_robot::EyeFrame peak_frame{true, false, 0, 0, 14, 0};
+    for (int tick = 0; tick < 4; ++tick) {
+        const int64_t now_us = tick * 100000LL;
+        speech_level.Publish(32768ULL * 160, 160, now_us);
+        peak_frame.mouth_height = speech_mouth.Step(speech_level.Read(now_us), true);
+        assert(peak_frame.mouth_height == std::min(3 + tick * 2, 7));
+        display.ShowEyes(peak_frame);
+        assert(!layer->hidden && !mouth->hidden && mouth->h == peak_frame.mouth_height);
+        assert(layer->y + mouth->y + mouth->h <= 59);
+    }
+    upstream->SetChatMessage("assistant", "peak\ncaption");
+    assert(layer->hidden && display.subtitle_text == "peak caption");
+    upstream->RemoveChatMessage("assistant", "stale caption");
+    for (int tick = 4; tick < 8; ++tick) {
+        const int64_t now_us = tick * 100000LL;
+        speech_level.Publish(32768ULL * 160, 160, now_us);
+        peak_frame.mouth_height = speech_mouth.Step(speech_level.Read(now_us), true);
+        assert(peak_frame.mouth_height == 7);
+        display.ShowEyes(peak_frame);
+        Framebuffer subtitle_pixels{};
+        PaintBounds(layer, 0, 0, subtitle_pixels);
+        assert(std::count(subtitle_pixels.begin(), subtitle_pixels.end(), 1) == 0);
+        assert(layer->hidden && display.subtitle_text == "peak caption");
+    }
+    upstream->RemoveChatMessage("assistant", "peak\ncaption");
+    display.ShowEyes(peak_frame);
+    assert(!layer->hidden && !mouth->hidden && mouth->h == 7);
     upstream->SetChatMessage("assistant", "first\nline");
     assert(layer->hidden && display.subtitle_text == "first line");
     display.ShowEyes({true, false, 3, 0, 14, 7});
