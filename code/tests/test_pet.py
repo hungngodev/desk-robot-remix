@@ -10814,3 +10814,29 @@ async def test_repeated_room_radar_echo_is_context_only(
         pet.states[robot_id].enabled = False
         await pet.close()
         hub.close()
+
+async def test_pet_defers_optional_admission_on_regressing_fleet_clock(fleet, tmp_path):
+    robot_id = fleet.robots[0].id
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {}, Conversation(fleet, GroundedChat(), speaker, memory=memory),
+        memory, KeyScene(),
+    )
+    state = pet.states[robot_id]
+    state.enabled, state.generation = True, 1
+    pet.set_voice_monitor_ready(True)
+    pet._group_last_spoken = time.monotonic() + 60.0
+    try:
+        pet._reconsider_activity()
+        assert state.last_initiative_gate_reason == "invalid_fleet_speech_clock"
+        assert state.last_activity_decision == "defer"
+        assert pet._speech_task is None
+        pet._consider_speech(robot_id, SceneChange("touch_tap", "A fresh tap", 1.0), 1)
+        assert state.last_initiative_suppression == "invalid_fleet_speech_clock"
+        assert not pet._event_kinds
+        assert not pet._admitted_event_kinds
+        assert pet._speech_task is None
+        assert not speaker.spoken
+    finally:
+        await pet.close()

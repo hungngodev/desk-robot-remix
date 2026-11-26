@@ -1,21 +1,45 @@
 """Cosmetic and optional initiative policy; never physical evidence or authority."""
 from __future__ import annotations
 
+import math
 from typing import Literal
+
+from .sensor_event_contract import is_finite_number
 
 PersonalityProfile = Literal["balanced", "calm", "curious", "dramatic"]
 
 
 def passive_interval(profile: PersonalityProfile, base: float) -> float:
     """Profiles may extend, but never shorten, the fleet speech floor."""
+    if not is_finite_number(base) or not 0 <= base <= 3600:
+        raise ValueError("Invalid personality base cooldown")
     return base * {"balanced": 1.0, "calm": 1.5, "curious": 1.0, "dramatic": 1.25}[profile]
 
 
+def fleet_speech_elapsed(now: float, last: float) -> float | None:
+    """Return elapsed seconds, +inf for no prior speech, or None for invalid time."""
+    if not is_finite_number(now):
+        return None
+    if last == -math.inf:
+        return math.inf
+    if not is_finite_number(last):
+        return None
+    elapsed = now - last
+    if not is_finite_number(elapsed) or elapsed < 0:
+        return None
+    return elapsed
+
+
 def profile_waits_beyond_fleet_floor(
-    profile: PersonalityProfile, *, elapsed: float, base: float,
+    profile: PersonalityProfile, *, elapsed: float | None, base: float,
 ) -> bool:
-    """Skip a locally ineligible pet only after the common floor has opened."""
-    return base <= elapsed < passive_interval(profile, base)
+    """Defer invalid clocks; otherwise skip only after the common floor opens."""
+    interval = passive_interval(profile, base)
+    if elapsed == math.inf:  # Explicit no-prior-speech sentinel from fleet_speech_elapsed.
+        return False
+    if not is_finite_number(elapsed) or elapsed < 0:
+        return True
+    return base <= elapsed < interval
 
 
 def expression_guidance(profile: PersonalityProfile) -> str:

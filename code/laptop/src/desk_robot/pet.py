@@ -51,6 +51,7 @@ from .observation_policy import camera_receipt_is_current, prepare_camera_receip
 from .operations import bounded_head_reply as _bounded_head_reply
 from .personality_policy import (
     expression_guidance,
+    fleet_speech_elapsed,
     passive_interval,
     profile_waits_beyond_fleet_floor,
 )
@@ -2884,12 +2885,14 @@ class PetController:
             self._reconsider_activity()
 
     def _activity_local_veto(self, robot_id: str, now: float) -> str | None:
+        elapsed = fleet_speech_elapsed(now, self._group_last_spoken)
         return first_initiative_veto(
             ("quiet_mode", lambda: self.is_quiet(robot_id)),
             ("dock_charging_inhibited", lambda: self.is_dock_charging_inhibited(robot_id)),
+            ("invalid_fleet_speech_clock", lambda: elapsed is None),
             ("personality_cooldown", lambda: profile_waits_beyond_fleet_floor(
                 self.settings.robot(robot_id).personality_profile,
-                elapsed=now - self._group_last_spoken, base=self.speech_cooldown,
+                elapsed=elapsed, base=self.speech_cooldown,
             )),
         )
 
@@ -3001,6 +3004,9 @@ class PetController:
         )
         if veto is not None:
             state.suppress_initiative(veto)
+            return
+        if fleet_speech_elapsed(now, self._group_last_spoken) is None:
+            state.suppress_initiative("invalid_fleet_speech_clock")
             return
         if not _initiative_evidence(change):
             state.low_value_speech_candidates += 1
