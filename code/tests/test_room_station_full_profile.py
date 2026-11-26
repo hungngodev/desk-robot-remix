@@ -390,6 +390,7 @@ def test_thermal_transfer_deadline_in_actual_firmware_function(tmp_path):
         "void thermal_observation(", 1
     )[0]
     harness = r"""
+#define ROOM_AMG_FITTED 1
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -1080,6 +1081,7 @@ def test_thermal_report_retires_expired_grid_until_new_scan(tmp_path):
         "void thermal_observation(", 1
     )[1].split("\n}", 1)[0] + "\n}\n"
     harness = r"""
+#define ROOM_AMG_FITTED 1
 #include <cassert>
 #include <cstdint>
 #include <sstream>

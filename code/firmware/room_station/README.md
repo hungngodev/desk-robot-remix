@@ -214,7 +214,8 @@ The report explicitly keeps those physical flags `false`.
    (STOP immediately on upload/bootloader error). Observe post-boot firmware
    banner and USB CDC enumeration before any sensor reads.
 2. Check the actual I2C carrier rails/pullups and address scan, then validate
-   SCD40, BME688 and AMG8833 one module at a time. Add LD2410C at the
+   SCD40 and BME688 one module at a time. For a fitted, consented optional
+   AMG8833 use the explicit bench thermal profile described below. Add LD2410C at the
    exact 256000 baud on UART1 after confirming board supply and logic levels.
 3. Soil remains **OFF** in the safe default `feather_nrf52840_room_bench`, but the full required profile `feather_nrf52840_room_full` now compiles the actual A0 ADC code with `ROOM_SOIL_FITTED=1`. Select the full build ONLY when the installed probe is fed from the 3.3V rail, its AOUT maximum is under 3.3V across its operating conditions, its ground is common and no 5V output reaches A0, and explicitly reflash it with `uvx --from platformio==6.1.18 pio run -d code/firmware/room_station -e feather_nrf52840_room_full -t upload --upload-port <CONFIRMED_PORT>` after stopping on any failed port/upload check.
    Reject saturated and unstable ADC readings; floating A0 can still look
@@ -242,6 +243,18 @@ five-pet purchasing order.
 The Feather nRF52840 Express [official analog pin reference](https://learn.adafruit.com/introducing-the-adafruit-nrf52840-feather/pinouts) uses a nominal 0 to 3.6 V SAADC measurement span with gain one sixth. **The measurement span is not permission to apply 5V to an I/O pin.** Use a 3.3V powered capacitive probe with a verified 0 to 3.3V analog output and common ground, away from water ingress at the PCB head. Once it is connected, use `feather_nrf52840_room_full` and verify dry/wet calibration. No newly purchased Adafruit board is required.
 
 ## AMG8833 source bounds and failure behavior
+
+The optional thermal array is disabled in both standard bench and full builds
+(`ROOM_AMG_FITTED=0`); a connected array is not probed, recovered or sampled,
+and its JSON field remains `valid:false`. Soil selection is independent.
+Only with explicit operator consent and a verified fitted carrier, select
+`feather_nrf52840_room_bench_thermal` (soil off) or
+`feather_nrf52840_room_full_thermal` (soil on). These opt-in builds enable
+acquisition at the Feather, independent of Mac context-sharing settings.
+They do not implement live consent revocation: to stop acquisition, disconnect
+station power immediately and reflash a standard disabled profile before
+resuming. Mac-side filtering alone does not stop the Feather's I2C reads.
+No physical qualification or purchase release is implied.
 
 The selected **AMG8833 high gain** part has a Panasonic-specified **0 to 80 °C measured-object range**, distinct from the AMG8834 low gain -20 to 100 °C variant. The portable `thermal_pixels.h` checks signed two's-complement 0.25 °C pixel values against the selected part's limits. A malformed transfer or any out-of-range pixel rejects that frame; a rejected 16-byte chunk does not partially overwrite the previous chunk. These limits are a conservative validity screen, not a claim of ±0 °C accuracy, successful electrical integration, or physical body-temperature detection. Source: https://industry.panasonic.eu/products/components/sensors/ir-thermophile-array-sensor-grid-eye .
 

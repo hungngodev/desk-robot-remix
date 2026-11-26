@@ -33,6 +33,7 @@ def test_scd_failure_does_not_hide_healthy_room_sensors(tmp_path, fault):
 using std::isfinite;
 #define F(value) value
 #define ROOM_SOIL_FITTED 0
+#define ROOM_AMG_FITTED 0
 constexpr uint32_t kScdNoSampleMs = 15000, kScdStaleMs = 8500, kReportMs = 1000;
 constexpr uint32_t kBmeStaleMs = 3000, kRadarStaleMs = 3000, kThermalStaleMs = 3000;
 constexpr unsigned AMG88xx_PIXEL_ARRAY_SIZE = 64;

@@ -28,6 +28,10 @@
 #define ROOM_SOIL_FITTED 0
 #endif
 
+#ifndef ROOM_AMG_FITTED
+#define ROOM_AMG_FITTED 0
+#endif
+
 namespace {
 // nRF52840 WDT: run during sleep and debugger halt; timeout is
 // (CRV + 1) / 32768 seconds. Feed only after the main loop returns
@@ -506,7 +510,7 @@ void soil_observation(uint32_t now) {
 // 256000-baud UART needs service between transfers; do not block it
 // through eight sensor transactions inside one JSON report.
 void thermal_step(uint32_t now) {
-  if (!amg_started) return;
+  if (!ROOM_AMG_FITTED || !amg_started) return;
   if (!thermal_scan_active) {
     if (thermal_ever_requested && now - thermal_requested_ms < kReportMs)
       return;
@@ -542,7 +546,7 @@ void thermal_step(uint32_t now) {
 }
 void thermal_observation(uint32_t now) {
   // Never read I2C in the report path or stamp cached pixels with now.
-  const bool valid = thermal_valid && now - thermal_sample_ms <= kThermalStaleMs;
+  const bool valid = ROOM_AMG_FITTED && thermal_valid && now - thermal_sample_ms <= kThermalStaleMs;
   // Retire expired grids until a complete new scan, even across clock rollover.
   thermal_valid = valid;
   telemetry.print(F("\"amg8833\":{\"valid\":")); jsbool(valid);
@@ -585,11 +589,14 @@ void recover_sensors(uint32_t now) {
     scd_started_ms = millis();
     return;
   }
-  const bool amg_transaction = amg_recovery.step(Wire, now);
-  if (amg_recovery.take_ready()) amg_started = true;
-  if (amg_transaction) return;
-  const bool active[] = {scd_started || scd_stop_pending,
-                         bme_started, amg_started || amg_recovery.active()};
+  if (ROOM_AMG_FITTED) {
+    const bool amg_transaction = amg_recovery.step(Wire, now);
+    if (amg_recovery.take_ready()) amg_started = true;
+    if (amg_transaction) return;
+  }
+  // Exclude a disabled optional peripheral from retry scheduling entirely.
+  const bool active[] = {scd_started || scd_stop_pending, bme_started,
+                         !ROOM_AMG_FITTED || amg_started || amg_recovery.active()};
   const int sensor = sensor_recovery.next(now, active);
   if (sensor == desk_robot_room::SensorRecoverySchedule::kScd) {
     scd_valid = false;
@@ -606,7 +613,7 @@ void recover_sensors(uint32_t now) {
   } else if (sensor == desk_robot_room::SensorRecoverySchedule::kBme) {
     bme_started = begin_bme();
     if (!bme_started) bme_completed.invalidate();
-  } else if (sensor == desk_robot_room::SensorRecoverySchedule::kAmg) {
+  } else if (ROOM_AMG_FITTED && sensor == desk_robot_room::SensorRecoverySchedule::kAmg) {
     thermal_scan_active = false;
     thermal_valid = false;
     amg_started = false;
