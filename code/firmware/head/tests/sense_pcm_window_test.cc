@@ -124,7 +124,30 @@ static void reference_lap_invalidates_capture() {
   }
 }
 
+static void callback_overlap_boundary() {
+  static std::array<std::int16_t, SensePcmWindow::kFrames * 2> storage;
+  std::array<std::int16_t, 320> mic{}, ref{};
+  mic.fill(1234);
+  ref.fill(-5678);
+  for (std::int64_t overlap : {1999, 2000, 2001}) {
+    storage.fill(3210);
+    SensePcmWindow capture;
+    assert(capture.begin(storage.data(), 1000000));
+    capture.offer(mic.data(), ref.data(), 320, 1020000, true);
+    capture.offer(mic.data(), ref.data(), 320, 1040000 - overlap, true);
+    const bool accepted = overlap <= 2000;
+    assert(capture.failed() == !accepted);
+    assert(capture.frames_received() == (accepted ? 640U : 320U));
+    assert(capture.last_sample_us() == (accepted ? 1040000 - overlap : 1020000));
+    assert(storage[640] == (accepted ? 1234 : 3210));
+    assert(storage[641] == (accepted ? -5678 : 3210));
+    assert(!capture.ready());
+    assert(capture.discard() == storage.data());
+  }
+}
+
 int main() {
+  callback_overlap_boundary();
   reference_lap_invalidates_capture();
   jpeg_burst_phase_recovery();
   static std::array<std::int16_t, SensePcmWindow::kFrames * 2> data{};

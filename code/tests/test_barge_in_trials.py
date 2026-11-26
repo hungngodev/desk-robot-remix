@@ -688,3 +688,22 @@ def test_weak_broadband_reference_survives_motor_fan_noise(aec_estimator, synthe
     assert report["reference_delay_ms"] == 20
     assert report["aec_physically_verified"] is False
     assert report["natural_barge_in_verified"] is False
+
+
+@pytest.mark.parametrize(("impulse", "length", "expected"), [
+    (0, 9, [-1, -21, 34, -43, 34]),
+    (1, 9, [0, -15, 1, 19, -57]),
+    (0, 8, [-1, -21, 34, -43]),
+    (1, 8, [0, -15, 1, 19]),
+])
+def test_reference_resampler_preserves_causal_even_phase(
+    aec_estimator, impulse, length, expected,
+):
+    import numpy as np
+
+    # A negative full-scale impulse exposes Q15 taps exactly, without
+    # deriving the expected reference from the estimator under test.
+    source = np.zeros(length)
+    source[impulse] = -1.0
+    result = aec_estimator["resample_reference"](source, 32000)
+    np.testing.assert_array_equal(result * 32768, expected)
