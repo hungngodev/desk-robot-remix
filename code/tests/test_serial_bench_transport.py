@@ -24,8 +24,8 @@ class FakePort:
         self.writes.append(data)
         return len(data) - int(self.short)
 
-    def readline(self, size):
-        assert size == 1920
+    def read_until(self, expected, *, size):
+        assert expected == b"\n" and 0 < size <= 1920
         self.reads += 1
         self.now += 0.1
         return next(self.fragments, b"")
@@ -186,8 +186,8 @@ def test_valid_drive_duration_is_resolved_before_actuation(
         def sleep(self, seconds):
             self.now += seconds
 
-        def readline(self, size):
-            assert size == 1920
+        def read_until(self, expected, *, size):
+            assert expected == b"\n" and size == 1920
             self.now += 0.1
             current = self.writes[-1].decode("ascii").rstrip("\n")
             if current == "status":

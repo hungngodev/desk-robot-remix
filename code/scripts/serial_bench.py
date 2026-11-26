@@ -262,13 +262,17 @@ def transact_serial(port, command: str, *, receipt: dict | None = None) -> dict 
     deadline = time.monotonic() + 0.5
     pending = bytearray()
     while time.monotonic() < deadline:
-        # pySerial readline can return partial bytes after its read timeout.
-        # Preserve the bounded Sense UART reply cap across those fragments.
-        pending.extend(port.readline(1920))
+        # read_until applies a whole-line timeout, unlike readline's per-read timeout.
+        # Request only the remaining capacity, including the newline.
+        remaining = 1920 - len(pending)
+        fragment = port.read_until(b"\n", size=remaining)
         received_at = time.monotonic()
         if received_at >= deadline:
             break
-        if len(pending) > 1920 or (len(pending) == 1920 and not pending.endswith(b"\n")):
+        if len(fragment) > remaining:
+            raise RuntimeError("USB response exceeds reply capacity")
+        pending.extend(fragment)
+        if len(pending) == 1920 and not pending.endswith(b"\n"):
             raise RuntimeError("USB response exceeds reply capacity")
         if not pending.endswith(b"\n"):
             continue
