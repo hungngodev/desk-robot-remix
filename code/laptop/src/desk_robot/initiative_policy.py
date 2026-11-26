@@ -4,13 +4,15 @@ from __future__ import annotations
 import re
 from collections.abc import Callable
 
+from .observation_policy import receipt_age_is_current
+
 
 def receipt_veto(
     *, now: float, offered_at: float, max_age: float, quiet_changed_at: float,
     latest_human_turn: Callable[[], float] | None,
 ) -> str | None:
     """Persistence and quiet toggles must not renew a receipt's lifetime."""
-    if type(offered_at) not in (int, float) or not 0 <= now - offered_at <= max_age:
+    if not receipt_age_is_current(received_at=offered_at, now=now, max_age=max_age):
         return "event_expired_before_admission"
     if offered_at < quiet_changed_at:
         return "quiet_transition_superseded_event"

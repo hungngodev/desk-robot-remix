@@ -4,8 +4,8 @@ from __future__ import annotations
 import math
 
 
-def camera_receipt_is_current(*, received_at: float, now: float, max_age: float) -> bool:
-    """Reject impossible or expired Mac receipt times before persistence."""
+def receipt_age_is_current(*, received_at: float, now: float, max_age: float) -> bool:
+    """Reject impossible or expired Mac receipt times before admission."""
     if type(received_at) not in (int, float):
         return False
     try:
@@ -14,12 +14,16 @@ def camera_receipt_is_current(*, received_at: float, now: float, max_age: float)
         return False
 
 
+# Preserve the camera-specific call site while sharing the age rule with initiative.
+camera_receipt_is_current = receipt_age_is_current
+
+
 def prepare_camera_receipt(
     *, robot_id: str, event_id: str, wall_now: float, monotonic_now: float,
     received_at: float, max_age: float, source_identity: tuple[int, int, int] | None,
 ) -> tuple[str, float] | None:
     """Calculate replay identity and original wall time before any SQLite write."""
-    if not camera_receipt_is_current(
+    if not receipt_age_is_current(
         received_at=received_at, now=monotonic_now, max_age=max_age,
     ):
         return None
