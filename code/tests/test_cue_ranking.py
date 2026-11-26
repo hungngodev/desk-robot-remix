@@ -72,3 +72,64 @@ def test_old_receipt_cannot_displace_direct_contact():
 def test_equal_timestamp_keeps_original_tie_order():
     items = [cue(1, "camera", "first"), cue(1, "camera", "second")]
     assert kinds(rank_cues(items, limit=1, current_voice_at=0, direct_kinds=DIRECT)) == ["second"]
+
+
+@pytest.mark.parametrize("limit", [3, 20])
+@pytest.mark.parametrize("bad_kind", [[], {"nested": []}, None, 42])
+@pytest.mark.parametrize("channel", ["tool", "sensor"])
+def test_malformed_kind_cannot_displace_admitted_evidence(limit, bad_kind, channel):
+    items = [
+        cue(1, "sensor", "safety_fault"),
+        cue(2, "human_transcript", "asr"),
+        cue(3, "tool", "status"),
+        cue(4, channel, bad_kind),
+    ]
+    original = deepcopy(items)
+    assert kinds(rank_cues(items, limit=limit, current_voice_at=2, direct_kinds=DIRECT)) == [
+        "safety_fault", "asr", "status",
+    ]
+    assert items == original
+
+
+@pytest.mark.parametrize("limit", [2, 10])
+def test_missing_or_malformed_routing_labels_are_not_ranked(limit):
+    items = [
+        cue(1, "sensor", "safety_fault"),
+        cue(2, "human_voice", "vad"),
+        (3, {"channel": "tool"}),
+        (4, {"kind": "status"}),
+        cue(5, ["sensor"], "safety_fault"),
+    ]
+    assert kinds(rank_cues(items, limit=limit, current_voice_at=0, direct_kinds=DIRECT)) == [
+        "safety_fault", "vad",
+    ]
+
+
+def test_equal_timestamp_priority_and_nested_metadata_keep_input_order():
+    items = [
+        cue(1, "camera", "frame"),
+        cue(1, "tool", "status"),
+        cue(1, "sensor", "touch_tap"),
+        cue(1, "human_transcript", "asr"),
+        cue(1, "sensor", "safety_fault"),
+        cue(1, "tool", "status"),
+        cue(1, "human_voice", "vad"),
+    ]
+    items[1][1]["content"] = {"values": [1, {"nested": []}]}
+    items[5][1]["content"] = {"values": [2, {"nested": []}]}
+    original = deepcopy(items)
+    result = rank_cues(items, limit=4, current_voice_at=1, direct_kinds=DIRECT)
+    assert result == [items[i][1] for i in (3, 4, 5, 6)]
+    result = rank_cues(items[::-1], limit=4, current_voice_at=1, direct_kinds=DIRECT)
+    assert result == [items[i][1] for i in (6, 4, 3, 1)]
+    assert items == original
+    assert rank_cues(items, limit=7, current_voice_at=1, direct_kinds=DIRECT) == [
+        entry for _, entry in items
+    ]
+
+
+def test_malformed_kind_does_not_crash_direct_sensor_membership():
+    items = [cue(1, "sensor", "touch_tap"), cue(2, "sensor", []), cue(3, "camera", "frame")]
+    assert kinds(rank_cues(items, limit=1, current_voice_at=0, direct_kinds=DIRECT)) == [
+        "touch_tap",
+    ]

@@ -16,7 +16,14 @@ def rank_cues(
     The caller owns admission, freshness, consent and robot identity. This
     function has no clock or I/O and cannot grant physical or speech authority.
     """
-    ordered = sorted(items, key=lambda item: item[0])
+    # Only routing labels participate in ranking. Never hash payload metadata
+    # or let malformed labels consume the budget, even on the fast path.
+    ordered = sorted(
+        (item for item in items
+         if isinstance(item[1].get("channel"), str)
+         and isinstance(item[1].get("kind"), str)),
+        key=lambda item: item[0],
+    )
     if len(ordered) <= limit:
         return [entry for _, entry in ordered]
     selected = _select_indices(ordered, limit, current_voice_at, direct_kinds)
