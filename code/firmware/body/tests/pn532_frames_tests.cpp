@@ -118,6 +118,19 @@ static void check_tag_boundaries() {
   reject(nullptr, 10);
   const std::uint8_t false_absence[] = {0, 1};
   reject(false_absence, sizeof(false_absence));
+  // A complete, checksum-valid response must still reject unsupported UID
+  // lengths. Truncated UID fixtures alone do not exercise the whitelist.
+  for (std::uint8_t length = 0; length <= 15; ++length) {
+    if (length == 4 || length == 7 || length == 10) continue;
+    std::vector<std::uint8_t> tag = {1, 1, 4, 0, 8, length};
+    tag.resize(6U + length, 0xa5);
+    const auto wire = response(0x4a, tag);
+    const std::uint8_t* payload = nullptr;
+    std::size_t size = 0;
+    CHECK(desk_robot::pn532_response(wire.data(), wire.size(), 0x4a, payload, size));
+    CHECK(size == tag.size());
+    reject(payload, size);
+  }
   for (const std::uint8_t length : {4, 7, 10}) {
     std::vector<std::uint8_t> tag = {1, 1, 4, 0, 8, length};
     for (std::uint8_t i = 0; i < length; ++i) tag.push_back(i + 1);
