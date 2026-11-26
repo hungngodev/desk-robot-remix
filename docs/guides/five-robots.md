@@ -107,6 +107,12 @@ Revoke/regrant during those reads invalidates the outstanding read. The
 shared historical prompt labels the originating pet and includes observation
 age and confidence; a camera classification remains an unverified model guess.
 
+The top-level `memory_dir` setting defaults to `../data/private/memory`,
+relative to the configuration file's directory. With `code/config/local.toml`,
+the default files are `code/data/private/memory/robot-01.sqlite3` through
+`robot-05.sqlite3`. The memory directory must be owner-only; database files
+are protected with mode 0600. Do not rename, swap or directly edit these files
+while the coordinator is running. Use the authenticated operator memory API.
 Each private SQLite database is bound to its persistent robot ID. Renaming or
 swapping already bound databases cannot make one pet inherit another's memories.
 Legacy databases without a binding are migrated under their configured identity;
@@ -205,15 +211,30 @@ Never flash the last robot's private binary onto another unit. No devices have
 been selected or flashed. The separate Sense camera/PDM/SSD1306/8 MB build is available. It must still pass
 actual camera, OLED, microphone, speaker, UART, power and case tests per unit.
 
-After local speech/model setup and individual head audio tests:
+After local speech/model setup and individual head audio tests, explicitly
+set the top-level `fleet_text_sharing_enabled = true` in the private hardware
+configuration before starting the coordinator. Without this consent, the
+hardware conversation endpoint rejects group dialogue with HTTP 409. Automatic
+social initiation is not required for manual chat; it can remain disabled.
+Run the following commands from `code/`:
 
 ```sh
 uv run desk-robot --config config/local.toml serve
 uv run desk-robot --config config/local.toml chat robot-01 robot-02 robot-03 robot-04 robot-05 --topic "Take turns naming an animal without repeating one"
 ```
 
-Run the chat in a second terminal while the coordinator is running. Stop through
-the authenticated `/v1/conversation/stop` endpoint. The group does not drive
+Run the chat in a second terminal while the coordinator is running. The CLI
+posts to `POST /v1/conversation` using the configured operator credential.
+Stop group speech with the authenticated POST endpoint (not the per-robot
+motion-stop CLI command). Supply the operator token from the private environment:
+
+```sh
+curl -X POST http://127.0.0.1:8765/v1/conversation/stop \
+  -H "Authorization: Bearer $DESK_ROBOT_API_TOKEN"
+```
+
+The response `stopped=true` confirms the Mac conversation stop request, not
+measured acoustic silence or a physical motor STOP. The group does not drive
 automatically during conversation. Current movement/pickup still requires its own operator permit and existing
 watchdog/bounded-command path. Planned pet mode uses a separate expiring
 operator lease, never model-authorized arming.
