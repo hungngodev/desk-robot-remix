@@ -453,6 +453,13 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
 
 
     async def test_uart_status_disconnect_fences_queued_control_until_halt(self):
+        await self._assert_status_disconnect_fences_control(raw_os_error=False)
+
+    async def test_raw_os_error_fences_queued_control_until_halt(self):
+        await self._assert_status_disconnect_fences_control(raw_os_error=True)
+
+    async def _assert_status_disconnect_fences_control(self, *, raw_os_error):
+
         import httpx
         from desk_robot.transport import HeadError, HttpHead
 
@@ -466,6 +473,8 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
                 if not online:
                     entered.set()
                     await release.wait()
+                    if raw_os_error:
+                        raise OSError("device disconnected")
                     return httpx.Response(504, json={"ok": False})
                 return httpx.Response(200, json={"robot_id": "robot-01"})
             command = json.loads(request.content)["command"]
@@ -488,8 +497,10 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
                     queued = asyncio.create_task(head.command("keepalive"))
                     await asyncio.sleep(0)
                     release.set()
-                    with self.assertRaises(HeadError):
+                    with self.assertRaises(HeadError) as caught:
                         await asyncio.wait_for(status, timeout=1)
+                    if raw_os_error:
+                        self.assertIsInstance(caught.exception.__cause__, OSError)
                     with self.assertRaisesRegex(HeadError, "superseded"):
                         await asyncio.wait_for(queued, timeout=1)
                     online = True

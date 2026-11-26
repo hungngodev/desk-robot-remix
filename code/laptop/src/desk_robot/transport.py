@@ -228,7 +228,7 @@ class HttpHead:
                 )
             response.raise_for_status()
             return response
-        except (httpx.HTTPError, ValueError, TimeoutError) as exc:
+        except (httpx.HTTPError, ValueError, OSError) as exc:
             raise HeadError(f"{self.config.id}: head request failed; no retry: {exc}") from exc
 
     async def _ordered_command(
