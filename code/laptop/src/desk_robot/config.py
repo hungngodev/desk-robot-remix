@@ -22,6 +22,7 @@ from pydantic import (
     model_validator,
 )
 
+from .fleet_identity import device_identity_key
 from .personality_policy import PersonalityProfile
 from .private_files import read_private_env as read_private_env
 
@@ -261,7 +262,7 @@ class Settings(BaseModel):
             voices = [r.voice.strip().casefold() for r in self.robots]
             if not all(voices) or len(set(voices)) != len(voices):
                 raise ValueError("Hardware fleet requires nonblank unique voices")
-        device_ids = [r.device_id.strip().casefold() for r in self.robots if r.device_id]
+        device_ids = [device_identity_key(r.device_id) for r in self.robots if r.device_id]
         if len(set(device_ids)) != len(device_ids):
             raise ValueError("device_id must uniquely identify a robot")
         docks = [r.dock_beacon_id for r in self.robots if r.dock_beacon_id is not None]
