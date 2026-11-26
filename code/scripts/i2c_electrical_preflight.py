@@ -179,11 +179,15 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
         # TI SLVA689A: each pullup contributes (Vpullup - VOL) / R.
         # Retain the nominal floor for measurements below the design target.
         # Compare the decimal measurement values exactly before display rounding.
-        sink_exact = sum(
+        sink_terms = [
             (Fraction(str(max(VCC, voltage))) - Fraction(str(LOW_MAX_V)))
-            / Fraction(str(r)) for r, voltage in pullups
-        ) * 1000
-        sink_budget_pass = sink_exact <= Fraction(str(SINK_MAX_MA))
+            * 1000 / Fraction(str(r)) for r, voltage in pullups
+        ]
+        sink_exact = sum(sink_terms)
+        upstream_sink_exact = sum(sink_terms[:upstream_count])
+        sink_limit = Fraction(str(SINK_MAX_MA))
+        sink_budget_pass = sink_exact <= sink_limit
+        upstream_sink_budget_pass = upstream_sink_exact <= sink_limit
         try:
             sink_ma = float(sink_exact)
         except OverflowError as exc:
@@ -199,7 +203,8 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
         if upstream_rise_ns is not None and not math.isfinite(upstream_rise_ns):
             upstream_rise_ns = None
         upstream_ok = (upstream_rise_ns is not None
-                       and RISE_MIN_NS <= upstream_rise_ns <= RISE_LIMIT_NS)
+                       and RISE_MIN_NS <= upstream_rise_ns <= RISE_LIMIT_NS
+                       and upstream_sink_budget_pass)
         downstream_present = len(pullups) > upstream_count
         model_ok = (upstream_ok and downstream_present
                     and total_pf <= MAX_CAP_PF
@@ -211,6 +216,8 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
             "installed_pullups": len(pullups),
             "upstream_only_estimated_rise_ns": (
                 round(upstream_rise_ns, 3) if upstream_rise_ns is not None else None),
+            "upstream_only_estimated_sink_ma": round(float(upstream_sink_exact), 3),
+            "upstream_only_sink_budget_pass": upstream_sink_budget_pass,
             "upstream_only_paper_pass": upstream_ok,
             "downstream_pullups_present": downstream_present,
             "combined_ohms": round(effective, 3),

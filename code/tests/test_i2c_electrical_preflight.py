@@ -387,3 +387,19 @@ def test_sink_budget_exact_boundary(line, resistance, passes):
     assert report["lines"][line]["estimated_sink_ma"] == 3.0
     assert report["lines"][line]["sink_budget_pass"] is passes
     assert not report["qualified_hardware"]
+
+
+@pytest.mark.parametrize("line", ["sda", "scl"])
+@pytest.mark.parametrize("upstream_resistor, passes", [
+    (2899.9, False), (2900, True), (2900.1, True),
+])
+def test_upstream_only_sink_budget(line, upstream_resistor, passes):
+    upstream, downstream = segment(
+        upstream_pullups=(2900, 2900, 2900), downstream_pullups=(4700,))
+    upstream[line]["pullup_ohms"][-1] = upstream_resistor
+    report = tool.screen_selected_segment(upstream, downstream)
+    assert report["lines"][line]["upstream_only_paper_pass"] is passes
+    assert report["lines"][line]["upstream_only_sink_budget_pass"] is passes
+    assert report["lines"][line]["upstream_only_estimated_sink_ma"] == 3.0
+    assert not report["selected_branch_paper_pass"]
+    assert not report["qualified_hardware"]
