@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import sqlite3
 import time
 
 from fastapi import Depends, FastAPI, HTTPException, Request
@@ -292,18 +293,21 @@ def register_native_omni_routes(
                         retained_episode = None
                 return added, retained_episode
 
+            storage_completed = False
             try:
                 inserted, episode = await asyncio.to_thread(
                     persist_transcript_with_cleanup
                 )
-            except asyncio.CancelledError:
-                # The HTTP request can be gone while its SQLite worker is
-                # still running. That worker owns durable consent cleanup,
-                # but the current event loop must retract its own transient
-                # ASR receipt rather than leaving an abandoned live cue.
-                if ephemeral:
+                storage_completed = True
+            except sqlite3.Error as exc:
+                # Do not expose database paths or driver diagnostics to clients.
+                raise HTTPException(503, "Native transcript storage unavailable") from exc
+            finally:
+                # Cancellation and storage failures both abandon this live
+                # receipt. The worker retains responsibility for durable
+                # consent cleanup; never retract an older duplicate here.
+                if not storage_completed and ephemeral:
                     visual.hub.discard_heard(robot_id, request.event_id)
-                raise
         # A newly completed ASR can also be in the short-lived Mac timeline
         # before SQLite I/O finishes. Live context consent is separate from
         # durable transcript consent: retract only THIS newly accepted item

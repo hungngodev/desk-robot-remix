@@ -52,6 +52,8 @@ from .runtime import Runtime
 from .transport import HeadError
 
 _PET_SHUTDOWN_TIMEOUT_S = 1.0
+# Bound camera lock acquisition as well as the transport's own I/O deadline.
+_CAMERA_PREVIEW_TIMEOUT_S = 5.0
 _TOOL_RECEIPT_MAX_AGE_US = 5_000_000
 _TOOL_RECEIPT_REPLAY_TTL_S = 10.0
 
@@ -414,7 +416,10 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
         if not callable(snapshot):
             raise HTTPException(503, "Robot camera unavailable")
         return Response(
-            await snapshot(),
+            await _bounded_head_reply(
+                snapshot(), seconds=_CAMERA_PREVIEW_TIMEOUT_S,
+                timeout_message="Robot camera preview deadline exceeded",
+            ),
             media_type="image/jpeg",
             headers={"Cache-Control": "no-store"},
         )

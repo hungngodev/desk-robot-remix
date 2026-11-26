@@ -3476,3 +3476,65 @@ def test_signed_tool_receipt_owner_cannot_be_reused_for_peer(settings, tokens, m
         assert remember(owner, robot, "robot_status", "private robot status")
         assert len(hub.tool_history[robot]) == 1
         assert not hub.tool_history[peer]
+
+
+@pytest.mark.parametrize("failure_method", ["remember", "get_episode"])
+def test_native_asr_storage_error_retracts_new_live_receipt(
+    settings, tokens, tmp_path, monkeypatch, failure_method,
+):
+    """A failed SQLite write or retention read cannot leave abandoned live ASR."""
+    import sqlite3
+    from types import SimpleNamespace
+
+    from desk_robot.memory import MemoryStore
+    from desk_robot.multimodal import CameraFrameHub
+
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    settings.voice_memory_tools_enabled = True
+    settings.voice_transcript_memory_enabled = True
+    ids = [r.id for r in settings.robots]
+    robot = ids[0]
+    memory = MemoryStore(tmp_path / "private", ids)
+    hub = CameraFrameHub(ids)
+    older_id = "omni_" + "a" * 12 + "_" + "b" * 20
+    event_id = "omni_" + "a" * 12 + "_" + "c" * 20
+    assert hub.remember_heard(robot, older_id, "Earlier receipt", time.monotonic())
+    assert hub.remember_heard(ids[1], older_id, "Peer receipt", time.monotonic())
+
+    def broken_storage(*args, **kwargs):
+        raise sqlite3.OperationalError("private database diagnostic")
+
+    monkeypatch.setattr(memory, failure_method, broken_storage)
+
+    async def noop():
+        pass
+
+    runtime = SimpleNamespace(
+        coordinator=SimpleNamespace(robot=settings.robot),
+        memory=memory, multimodal=SimpleNamespace(hub=hub),
+        start=noop, close=noop,
+    )
+    auth = {"Authorization": "Bearer " + tokens["DESK_ROBOT_TOOL_TOKEN"]}
+    with TestClient(create_app(settings, runtime=runtime)) as client:
+        stamp_us = time.monotonic_ns() // 1000
+        response = client.post(
+            f"/v1/pet/{robot}/omni-heard", headers=auth, json={
+                "event_id": event_id,
+                "transcript": "Unfinished receipt",
+                "accepted_at_us": stamp_us,
+                "audio_committed_at_us": stamp_us,
+            },
+        )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Native transcript storage unavailable"}
+    assert [item[0] for item in hub.heard_history[robot]] == [older_id]
+    assert [item[0] for item in hub.heard_history[ids[1]]] == [older_id]
+    assert hub.heard_revoked(robot, event_id)
+    assert not hub.heard_revoked(robot, older_id)
+    assert not hub.heard_revoked(ids[1], event_id)
+    # A successful, consented INSERT is not rolled back merely because its
+    # retention read failed. It must not become an acknowledged live receipt.
+    assert memory.count(robot) == int(failure_method == "get_episode")
+    assert memory.count(ids[1]) == 0
