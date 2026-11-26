@@ -23,9 +23,9 @@ from pydantic import (
 )
 
 from .fleet_identity import device_identity_key
-from .serial_device import is_local_serial_path
 from .personality_policy import PersonalityProfile
 from .private_files import read_private_env as read_private_env
+from .serial_device import is_local_serial_path
 
 CredentialEnvName = Annotated[str, Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
 LocalClockTime = Annotated[
