@@ -2,6 +2,7 @@
 import asyncio
 
 import pytest
+from desk_robot.command_framing import expected_ack
 from desk_robot.operations import dispatch_job_command
 
 
@@ -30,11 +31,13 @@ async def test_dispatch_rejects_revoked_generation(revoke_at):
             if revoke_at == "ack":
                 entered.set()
                 await release.wait()
-            return {"ok": True}
+            return {"ok": True, "robot_id": "robot-01", "reply": expected_ack(command)}
 
     if revoke_at == "before":
         generation += 1
-    task = asyncio.create_task(dispatch_job_command(Head(), "arm", check))
+    task = asyncio.create_task(
+        dispatch_job_command(Head(), "arm", check, robot_id="robot-01")
+    )
     if revoke_at != "before":
         await asyncio.wait_for(entered.wait(), 1)
         generation += 1
@@ -48,12 +51,14 @@ async def test_dispatch_rejects_revoked_generation(revoke_at):
 async def test_dispatch_preserves_legacy_adapter_success():
     class Head:
         async def command(self, command):
-            return {"command": command}
+            return {"ok": True, "robot_id": "robot-01", "reply": expected_ack(command)}
 
     checks = []
-    reply = await dispatch_job_command(Head(), "arm", lambda: checks.append(True))
-    assert reply == {"command": "arm"}
-    assert checks == [True, True]
+    reply = await dispatch_job_command(
+        Head(), "arm", lambda: checks.append(True), robot_id="robot-01",
+    )
+    assert reply == {"ok": True, "robot_id": "robot-01", "reply": "OK arm"}
+    assert checks == [True, True, True]
 
 
 @pytest.mark.asyncio
@@ -125,9 +130,13 @@ async def test_dispatch_only_evidence_is_not_rechecked_after_ack():
             nonlocal valid
             dispatch_check()
             valid = False
-            return {"ok": True}
+            return {"ok": True, "robot_id": "robot-01", "reply": expected_ack(command)}
 
-    reply = await dispatch_job_command(Head(), "drive 20 20 100", lambda: None,
-                                       dispatch_check=evidence)
-    assert reply == {"ok": True}
+    reply = await dispatch_job_command(
+        Head(), "drive 20 20 100", lambda: None,
+        robot_id="robot-01", dispatch_check=evidence,
+    )
+    assert reply == {
+        "ok": True, "robot_id": "robot-01", "reply": "OK drive left=20 right=20 ms=100",
+    }
     assert checks == [True]
