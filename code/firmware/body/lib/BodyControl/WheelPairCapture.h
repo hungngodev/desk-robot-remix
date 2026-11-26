@@ -63,6 +63,11 @@ class WheelPairCapture {
     if (right_base) { baseline_[1] = true; baseline_ms_[1] = right.at_ms; }
     if (!synchronized_) {
       if (left_new || right_new) return invalidate();
+      // Baselines establish the start of each delta interval. Apply the
+      // same acquisition-age bound used for pending deltas, including wrap.
+      for (int i = 0; i < 2; ++i)
+        if (baseline_[i] && now_ms - baseline_ms_[i] > max_skew_ms_)
+          return invalidate();
       if (!baseline_[0] || !baseline_[1]) return Result::Waiting;
       if (skew(baseline_ms_[0], baseline_ms_[1]) > max_skew_ms_)
         return invalidate();

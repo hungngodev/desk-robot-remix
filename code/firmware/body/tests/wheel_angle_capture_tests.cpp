@@ -355,7 +355,66 @@ static void fast_wrap_trajectories() {
   }
 }
 
+static void paired_baseline_freshness_and_recovery() {
+  using desk_robot::WheelPairCapture;
+  using PairResult = WheelPairCapture::Result;
+  for (std::uint32_t start : {100U, 0xfffffff8U}) {
+    for (bool left_first : {false, true}) {
+      WheelAngleCapture left, right;
+      WheelPairCapture pair;
+      check(left.configure(4000, 100, 60));
+      check(right.configure(4000, 100, 60));
+      check(pair.configure(10));
+      const auto observe = [&](AngleRaw first, AngleRaw second,
+                               std::uint32_t now) {
+        const auto l = left_first ? first : second;
+        const auto r = left_first ? second : first;
+        const auto lr = left.observe(l, now);
+        const auto rr = right.observe(r, now);
+        const auto result = pair.observe(lr, rr, l, r, left.last_delta(),
+                                         right.last_delta(), now);
+        if (result == PairResult::Invalid) {
+          left.discard_continuity();
+          right.discard_continuity();
+        }
+        return result;
+      };
+      // Both conversions pass individual freshness, but the older baseline
+      // is outside the measured pairing window when it reaches this caller.
+      check(observe(angle(100, 1, start), angle(100, 1, start + 10U),
+                    start + 11U) == PairResult::Invalid);
+      check(!pair.receipt().valid && !pair.ready_for_origin());
+      auto a = angle(200, 2, start + 20U);
+      auto b = angle(200, 2, start + 30U);
+      check(observe(a, b, start + 30U) == PairResult::Waiting);
+      check(!pair.receipt().valid);
+      a = angle(210, 3, start + 40U);
+      check(observe(a, b, start + 40U) == PairResult::Waiting);
+      b = angle(210, 3, start + 50U);
+      check(observe(a, b, start + 50U) == PairResult::Paired);
+      check(pair.receipt().skew_ms == 10U && pair.receipt().segment == 1U);
+      check(pair.receipt().left_delta == 10 && pair.receipt().right_delta == 10);
+      check(pair.ready_for_origin());
+      a = angle(220, 4, start + 60U);
+      check(observe(a, b, start + 60U) == PairResult::Waiting);
+      check(!pair.ready_for_origin());
+      // A second fresh conversion on one side cannot replace a pending one.
+      a = angle(225, 5, start + 65U);
+      check(observe(a, b, start + 65U) == PairResult::Invalid);
+      check(!pair.receipt().valid && !pair.ready_for_origin());
+      a = angle(300, 6, start + 80U);
+      b = angle(300, 4, start + 80U);
+      check(observe(a, b, start + 80U) == PairResult::Waiting);
+      check(observe(angle(301, 7, start + 90U),
+                    angle(301, 5, start + 90U), start + 90U) == PairResult::Paired);
+      check(pair.receipt().pair_seq == 2U && pair.receipt().segment == 2U);
+      check(pair.receipt().left_delta == 1 && pair.receipt().right_delta == 1);
+    }
+  }
+}
+
 int main() {
+  paired_baseline_freshness_and_recovery();
   fast_wrap_trajectories();
   exhaustive_magnet_status_and_replay();
   paired_delta_bounds_and_asymmetric_timeout();
