@@ -722,17 +722,22 @@ class Runtime:
         # launch another camera HTTP request, inference, or audio owner.
         prepared_epoch = None
         prepared_peers: dict[str, int] = {}
-        if callable(prepare) and kind in ("speech_start", "normal", "group"):
-            prepared_epoch = prepare(robot_id, end_expected=kind == "speech_start")
-            read_epoch = getattr(visual, "prepared_turn_epoch", None)
-            if type(prepared_epoch) is int and callable(read_epoch):
-                # The new turn invalidates every peer's old fallback sampler,
-                # not just the initiating head. Save their new epochs before
-                # awaiting STOP; newer speech edges must fence this restart.
-                now = time.monotonic()
-                for peer in visual.hub.robots:
-                    if peer != robot_id and visual.hub.user_active(peer, now):
-                        prepared_peers[peer] = read_epoch(peer)
+        camera_error: Exception | None = None
+        try:
+            if callable(prepare) and kind in ("speech_start", "normal", "group"):
+                prepared_epoch = prepare(robot_id, end_expected=kind == "speech_start")
+                read_epoch = getattr(visual, "prepared_turn_epoch", None)
+                if type(prepared_epoch) is int and callable(read_epoch):
+                    # The new turn invalidates every peer's old fallback sampler,
+                    # not just the initiating head. Save their new epochs before
+                    # awaiting STOP; newer speech edges must fence this restart.
+                    now = time.monotonic()
+                    for peer in visual.hub.robots:
+                        if peer != robot_id and visual.hub.user_active(peer, now):
+                            prepared_peers[peer] = read_epoch(peer)
+        except Exception as exc:
+            camera_error = exc
+            logging.getLogger(__name__).exception("Camera turn preparation failed")
         # Human speech cancels one shared five-pet speech floor once. The
         # authenticated human camera must still start if audio STOP fails,
         # without treating the unresolved speaker lease as a success.
@@ -759,7 +764,7 @@ class Runtime:
                 )
         if getattr(self, "_closed", False):
             return  # A late STOP completion must not reopen camera workers.
-        if visual is not None:
+        if visual is not None and camera_error is None:
             if callable(prepare):
                 if kind in ("speech_start", "normal", "group"):
                     if type(prepared_epoch) is int:
@@ -778,6 +783,8 @@ class Runtime:
                 visual.voice_interrupted(robot_id)
         if preempt_error is not None:
             raise preempt_error
+        if camera_error is not None:
+            raise camera_error
 
     def _on_service_done(self, label: str, task: asyncio.Task) -> None:
         """An unexpected permanent service exit closes every runtime owner."""
