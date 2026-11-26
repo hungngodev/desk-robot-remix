@@ -6,6 +6,9 @@
 // I2S acceptance is not acoustic playback. A write that returns after STOP
 // cannot qualify a newer AEC capture, nor can a write accepted after the
 // final microphone sample backfill activity in an already completed window.
+// This is a digital capture evidence fence, not a VAD gate. Room echo may
+// outlive the final accepted write; do not infer acoustic silence or suppress
+// human speech based on this class.
 namespace desk_robot {
 class SenseSpeakerActivity {
 public:
