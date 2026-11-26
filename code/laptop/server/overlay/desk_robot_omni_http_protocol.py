@@ -37,6 +37,20 @@ def chat_completion_endpoint(url: str) -> str:
     )
 
 
+def _validate_wav_extent(encoded: bytes) -> None:
+    """Check the bounded RIFF container even beyond the first PCM chunk."""
+    if len(encoded) < 12 or int.from_bytes(encoded[4:8], "little") != len(encoded) - 8:
+        raise ValueError("Incomplete or inconsistent model WAV container")
+    offset = 12
+    while offset < len(encoded):
+        if len(encoded) - offset < 8:
+            raise ValueError("Incomplete model WAV container chunk header")
+        size = int.from_bytes(encoded[offset + 4:offset + 8], "little")
+        offset += 8 + size + (size & 1)
+        if offset > len(encoded):
+            raise ValueError("Incomplete model WAV container chunk payload or padding")
+
+
 def decode_tool_completion(result: object) -> tuple[bytes, str]:
     """Return bounded 24 kHz mono PCM16 and optional model text, not playback."""
     choices = result.get("choices") if isinstance(result, dict) else None
@@ -63,9 +77,7 @@ def decode_tool_completion(result: object) -> tuple[bytes, str]:
     encoded = base64.b64decode(wav_text, validate=True)
     if len(encoded) > 1_200_000:
         raise ValueError("Model audio exceeds duration limit")
-    # wave may stop at the PCM chunk without checking the full RIFF extent.
-    if len(encoded) < 12 or int.from_bytes(encoded[4:8], "little") != len(encoded) - 8:
-        raise ValueError("Incomplete or inconsistent model WAV container")
+    _validate_wav_extent(encoded)
     try:
         with wave.open(BytesIO(encoded), "rb") as wav:
             if (wav.getnchannels() != 1 or wav.getsampwidth() != 2

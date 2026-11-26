@@ -111,3 +111,22 @@ def test_decode_accepts_complete_trailing_metadata(protocol):
     assert protocol.decode_tool_completion({"choices": [_audio(raw)]}) == (pcm, "")
     with pytest.raises(ValueError):
         protocol.decode_tool_completion({"choices": [_audio(raw[:-1])]})
+
+
+@pytest.mark.parametrize("trailing", [
+    b"JUNK",
+    b"JUNK\x04\x00\x00\x00ab",
+    b"JUNK\x01\x00\x00\x00a",
+])
+def test_decode_rejects_incomplete_trailing_chunk(protocol, trailing):
+    raw = _wav(b"\x01\x00" * 240) + trailing
+    raw = raw[:4] + (len(raw) - 8).to_bytes(4, "little") + raw[8:]
+    with pytest.raises(ValueError, match="WAV container"):
+        protocol.decode_tool_completion({"choices": [_audio(raw)]})
+
+
+def test_decode_accepts_padded_odd_metadata_chunk(protocol):
+    pcm = b"\x01\x00" * 240
+    raw = _wav(pcm) + b"JUNK\x01\x00\x00\x00a\x00"
+    raw = raw[:4] + (len(raw) - 8).to_bytes(4, "little") + raw[8:]
+    assert protocol.decode_tool_completion({"choices": [_audio(raw)]}) == (pcm, "")
