@@ -517,3 +517,26 @@ def test_apds_flag_and_pulse_clipping_are_independently_invalidated():
     data["proximity"]["saturated"] = 1
     with pytest.raises(ValueError, match="APDS9960"):
         validate_aux(data, "robot-01")
+
+
+@pytest.mark.parametrize("value", [-1, 0, 2499, 4501, 6001, True, False,
+                                  float("nan"), float("inf"), 3900.0, None])
+def test_claimed_valid_aux_voltage(value):
+    data = sample()
+    data["power"]["cell_mv"] = value
+    with pytest.raises(ValueError, match="battery"):
+        validate_aux(data, "robot-01")
+
+
+@pytest.mark.parametrize("value", [0, 2499])
+def test_invalid_aux_voltage_remains_diagnostic(value):
+    data = sample()
+    data["power"].update(cell_mv=value, fuel_valid=False)
+    assert validate_aux(data, "robot-01")["power"]["fuel_valid"] is False
+
+
+@pytest.mark.parametrize("value", [2500, 4500])
+def test_claimed_valid_aux_voltage_bounds(value):
+    data = sample()
+    data["power"]["cell_mv"] = value
+    assert validate_aux(data, "robot-01")["power"]["fuel_valid"] is True

@@ -8,7 +8,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from .sensor_event_contract import is_int_in_range, is_uint
+from .sensor_event_contract import is_int_in_range, is_uint, is_valid_fuel_measurement
 
 
 def _bool(value: object) -> bool:
@@ -154,6 +154,10 @@ def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
             or not _bool(power.get("monitor_valid"))
             or power.get("current_calibrated") is not False):
         raise ValueError("Invalid uncalibrated battery or shunt source")
+    if power["fuel_valid"] and not is_valid_fuel_measurement(
+        power["cell_mv"], power["soc_centi"],
+    ):
+        raise ValueError("Invalid MAX17048 battery measurement")
     # TI INA226 raw rails 0x7fff and 0x8000 are rejected by the WROOM
     # before conversion. The nonrail codes -32767..32766 truncate toward
     # zero to -81917..81915 uV (the signed bounds are asymmetric).
