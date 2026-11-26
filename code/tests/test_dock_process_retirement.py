@@ -4,7 +4,6 @@ import sys
 import time
 
 import pytest
-
 from desk_robot.dock_process import DetectorPool, DockDetectorBusy
 from desk_robot.dock_vision import DockCameraCalibration
 

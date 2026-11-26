@@ -2,7 +2,6 @@
 from types import SimpleNamespace
 
 import pytest
-
 from desk_robot import grasp_feedback as feedback
 from desk_robot.operations import OperationError
 
