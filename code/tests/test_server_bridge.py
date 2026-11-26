@@ -282,9 +282,16 @@ def test_overlay_targets_pinned_server_and_compiles():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     changes = module.files(ROOT / "upstream/xiaozhi-esp32-server/main/xiaozhi-server")
-    # All three extracted pure modules must ship with the pinned native adapter.
-    # Compilation alone does not resolve their imports.
-    assert len(changes) == 14
+    # Compilation alone does not resolve imports. Inventory the actual source
+    # directory rather than freezing the number of extracted modules.
+    sources = ROOT / "laptop/server/overlay"
+    for path in sources.rglob("*.py"):
+        destination = (
+            "plugins_func/functions/desk_robot_tools.py"
+            if path.name == "desk_robot_tools.py"
+            else path.relative_to(sources).as_posix()
+        )
+        assert changes[destination] == path.read_text()
     assert "desk_robot_omni_audio.py" in changes
     assert "PcmOpusFramer" in changes["desk_robot_omni_audio.py"]
     assert "desk_robot_omni_http_protocol.py" in changes

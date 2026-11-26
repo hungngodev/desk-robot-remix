@@ -249,6 +249,32 @@ def patch_intent_speech_guard(source: str) -> str:
     return source
 
 
+def overlay_sources() -> dict[str, str]:
+    """Ship extracted flat modules while preserving the plugin's discovery path."""
+    overlay = HERE / "overlay"
+    names = {
+        "desk_robot_bridge.py",
+        "desk_robot_native_omni.py",
+        "desk_robot_omni_audio.py",
+        "desk_robot_omni_http_protocol.py",
+        "desk_robot_tools.py",
+        "desk_robot_voice_intents.py",
+    }
+    for path in overlay.rglob("*.py"):
+        if (
+            path.parent != overlay
+            or not path.name.startswith("desk_robot_")
+            or path.name == "desk_robot_omni_wire.py"
+        ):
+            raise ValueError(f"Unexpected server overlay module: {path.relative_to(overlay)}")
+        names.add(path.name)
+    return {
+        (f"plugins_func/functions/{name}" if name == "desk_robot_tools.py" else name):
+        (overlay / name).read_text()
+        for name in sorted(names)
+    }
+
+
 def files(root):
     changes = {}
     path = "core/connection.py"
@@ -336,25 +362,10 @@ def files(root):
         "        await robot_speech_runner.cleanup()\n        # 停止全局GC管理器",
     )
     changes[path] = source
-    changes["desk_robot_bridge.py"] = (HERE / "overlay/desk_robot_bridge.py").read_text()
-    changes["desk_robot_native_omni.py"] = (
-        HERE / "overlay/desk_robot_native_omni.py"
-    ).read_text()
-    changes["desk_robot_omni_audio.py"] = (
-        HERE / "overlay/desk_robot_omni_audio.py"
-    ).read_text()
-    changes["desk_robot_omni_http_protocol.py"] = (
-        HERE / "overlay/desk_robot_omni_http_protocol.py"
-    ).read_text()
-    changes["desk_robot_voice_intents.py"] = (
-        HERE / "overlay/desk_robot_voice_intents.py"
-    ).read_text()
+    changes.update(overlay_sources())
     # Reuse the same vLLM Omni protocol from the Mac package.
     changes["desk_robot_omni_wire.py"] = (
         HERE.parent / "src/desk_robot/realtime_omni_protocol.py"
-    ).read_text()
-    changes["plugins_func/functions/desk_robot_tools.py"] = (
-        HERE / "overlay/desk_robot_tools.py"
     ).read_text()
     path = "core/providers/tools/server_plugins/plugin_executor.py"
     changes[path] = patch_plugin_executor((root / path).read_text())
