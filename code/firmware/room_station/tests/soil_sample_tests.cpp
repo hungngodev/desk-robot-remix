@@ -32,8 +32,8 @@ int main() {
   }
   // Keep neighboring samples inside the noise limit so a missing rail
   // check cannot be masked by the independent burst-spread rejection.
-  for (int rail : {0, 4095}) {
-    const int near = rail == 0 ? 1 : 4094;
+  for (int rail : {-1, 0, 4095, 4096}) {
+    const int near = rail <= 0 ? 1 : 4094;
     for (std::size_t position = 0; position < 3; ++position) {
       FakeAdc adc{near, near, near};
       adc.readings[position] = rail;
