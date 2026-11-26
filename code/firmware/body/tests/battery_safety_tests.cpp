@@ -39,5 +39,36 @@ int main() {
   const auto bad_soc = desk_robot::fuel_telemetry(true, 4200U, 10001U);
   if (bad_voltage.valid || bad_voltage.cell_mv || bad_voltage.soc_centi ||
       bad_soc.valid || bad_soc.cell_mv || bad_soc.soc_centi) return 9;
+  // Cross independent voltage and SOC boundaries, including valid but
+  // depleted telemetry, the hysteresis band and malformed readings.
+  struct Boundary {
+    unsigned value;
+    bool telemetry_valid, motor_safe, recovery_safe;
+  };
+  const Boundary voltages[] = {
+      {0U, false, false, false}, {2499U, false, false, false},
+      {2500U, true, false, false}, {3299U, true, false, false},
+      {3300U, true, true, false}, {3349U, true, true, false},
+      {3350U, true, true, true}, {4500U, true, true, true},
+      {4501U, false, false, false}, {invalid, false, false, false}};
+  const Boundary charges[] = {
+      {0U, true, false, false}, {299U, true, false, false},
+      {300U, true, true, false}, {499U, true, true, false},
+      {500U, true, true, true}, {10000U, true, true, true},
+      {10001U, false, false, false}, {invalid, false, false, false}};
+  for (const auto& voltage : voltages) {
+    for (const auto& charge : charges) {
+      if (fuel_below_motor_floor(voltage.value, charge.value) !=
+          !(voltage.motor_safe && charge.motor_safe)) return 10;
+      if (fuel_above_recovery_floor(voltage.value, charge.value) !=
+          (voltage.recovery_safe && charge.recovery_safe)) return 11;
+      const bool valid = voltage.telemetry_valid && charge.telemetry_valid;
+      const auto sample = desk_robot::fuel_telemetry(true, voltage.value, charge.value);
+      if (sample.valid != valid || sample.cell_mv != (valid ? voltage.value : 0U) ||
+          sample.soc_centi != (valid ? charge.value : 0U)) return 12;
+      const auto stale = desk_robot::fuel_telemetry(false, voltage.value, charge.value);
+      if (stale.valid || stale.cell_mv != 0U || stale.soc_centi != 0U) return 13;
+    }
+  }
   return 0;
 }
