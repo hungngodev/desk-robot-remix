@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from fractions import Fraction
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -177,8 +178,16 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
         rise_ns = 0.8473 * effective * total_pf / 1000
         # TI SLVA689A: each pullup contributes (Vpullup - VOL) / R.
         # Retain the nominal floor for measurements below the design target.
-        sink_ma = sum((max(VCC, voltage) - LOW_MAX_V) / r
-                      for r, voltage in pullups) * 1000
+        # Compare the decimal measurement values exactly before display rounding.
+        sink_exact = sum(
+            (Fraction(str(max(VCC, voltage))) - Fraction(str(LOW_MAX_V)))
+            / Fraction(str(r)) for r, voltage in pullups
+        ) * 1000
+        sink_budget_pass = sink_exact <= Fraction(str(SINK_MAX_MA))
+        try:
+            sink_ma = float(sink_exact)
+        except OverflowError as exc:
+            raise ValueError(f"{line}: RC calculation overflowed") from exc
         if any(not math.isfinite(value) for value in
                (total_pf, effective, rise_ns, sink_ma)):
             raise ValueError(f"{line}: RC calculation overflowed")
@@ -195,7 +204,7 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
         model_ok = (upstream_ok and downstream_present
                     and total_pf <= MAX_CAP_PF
                     and RISE_MIN_NS <= rise_ns <= RISE_LIMIT_NS
-                    and sink_ma <= SINK_MAX_MA
+                    and sink_budget_pass
                     and all(RISE_MIN_NS <= v <= RISE_LIMIT_NS for v in measured_rises)
                     and all(v <= LOW_MAX_V for v in measured_lows))
         report[line] = {
@@ -208,6 +217,7 @@ def screen_selected_segment(upstream: dict, selected: dict) -> dict:
             "combined_cap_pf": round(total_pf, 3),
             "estimated_rise_ns": round(rise_ns, 3),
             "estimated_sink_ma": round(sink_ma, 3),
+            "sink_budget_pass": sink_budget_pass,
             "paper_electrical_pass": model_ok,
             "actual_trace_and_carrier_verified": False,
         }

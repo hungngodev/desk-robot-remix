@@ -368,3 +368,22 @@ def test_inclusive_pullup_voltage_bounds(line, owner, voltage, accepted):
     report = tool.screen_selected_segment(*segments)
     assert report["selected_branch_paper_pass"]
     assert not report["qualified_hardware"]
+
+
+@pytest.mark.parametrize("line", ["sda", "scl"])
+@pytest.mark.parametrize("resistance, passes", [
+    (2899.9999999999995, False),
+    (2899.9, False),
+    (2900.0, True),
+    (2900.0000000000005, True),
+])
+def test_sink_budget_exact_boundary(line, resistance, passes):
+    upstream, downstream = segment(
+        upstream_pullups=(2900, 2900), downstream_pullups=(2900,))
+    downstream[line]["pullup_ohms"] = [resistance]
+    report = tool.screen_selected_segment(upstream, downstream)
+    assert report["lines"][line]["paper_electrical_pass"] is passes
+    assert report["selected_branch_paper_pass"] is passes
+    assert report["lines"][line]["estimated_sink_ma"] == 3.0
+    assert report["lines"][line]["sink_budget_pass"] is passes
+    assert not report["qualified_hardware"]
