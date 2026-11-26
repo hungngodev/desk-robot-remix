@@ -376,6 +376,16 @@ class Runtime:
             None if generations is None else dict(generations)
         )
         if generations is not None:
+            previous = getattr(self, "_last_voice_turn_generations", {})
+            hub = getattr(getattr(self, "multimodal", None), "hub", None)
+            if hub is not None:
+                # A missing or replaced Xiaozhi turn cannot lend its cached
+                # tool/ASR evidence to the next session. Keep peer context,
+                # historical transmitted speech and receipt replay fences.
+                for robot_id, generation in previous.items():
+                    if generations.get(robot_id) != generation:
+                        hub.tool_history[robot_id].clear()
+                        hub.heard_history[robot_id].clear()
             self._last_voice_turn_generations = dict(generations)
 
     def _recovered_voice_starts(self, active: frozenset[str]) -> set[str]:

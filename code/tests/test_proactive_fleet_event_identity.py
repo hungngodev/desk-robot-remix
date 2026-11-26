@@ -378,3 +378,43 @@ async def test_proactive_context_filters_old_peer_stories_without_sharing(
     assert "Secret silver key story" not in context[1].recent
     assert "Own silver key observation" in context[1].recent
     assert all(row.witnessed for row in context[0])
+
+
+@pytest.mark.parametrize("observe_disconnect", [True, False])
+def test_voice_session_replacement_retires_only_its_live_context(observe_disconnect):
+    robot, peer = "robot-01", "robot-02"
+    hub = CameraFrameHub([robot, peer])
+    runtime = Runtime.__new__(Runtime)
+    runtime.multimodal = SimpleNamespace(hub=hub)
+    runtime._on_voice_generations({robot: 7, peer: 4})
+    now = time.monotonic()
+    for rid in (robot, peer):
+        hub.remember_tool(rid, "robot_status", f"Status of {rid}", now)
+        assert hub.remember_heard(rid, f"old_{rid}", "Previous question", now)
+        hub.remember_spoken(rid, "Already transmitted", now)
+    peer_tools = tuple(hub.tool_history[peer])
+    peer_heard = tuple(hub.heard_history[peer])
+    sent = tuple(hub.spoken_history[robot])
+    if observe_disconnect:
+        runtime._on_voice_generations({peer: 4})
+        assert robot not in runtime._voice_turn_generations
+        assert not hub.recent_tool_context(robot, now)
+        assert not hub.heard_history[robot]
+
+    # A reconnect can complete between polls, with no observed absent entry.
+    runtime._on_voice_generations({robot: 8, peer: 4})
+    assert not hub.recent_tool_context(robot, now)
+    assert not hub.heard_history[robot]
+    assert tuple(hub.tool_history[peer]) == peer_tools
+    assert tuple(hub.heard_history[peer]) == peer_heard
+    assert tuple(hub.spoken_history[robot]) == sent
+    assert not hub.remember_heard(robot, f"old_{robot}", "Replay", time.monotonic())
+
+    fresh_at = time.monotonic()
+    hub.remember_tool(robot, "robot_status", "Fresh status", fresh_at)
+    assert hub.remember_heard(robot, "new_session", "New question", fresh_at)
+    runtime._on_voice_generations({robot: 8, peer: 4})
+    assert hub.recent_tool_context(robot, fresh_at)[0]["summary"] == "Fresh status"
+    assert hub.heard_history[robot][0][0] == "new_session"
+    assert not hub.recent_tool_context(robot, fresh_at + 31)
+    assert not hub.recent_tool_context(peer, now + 31)
