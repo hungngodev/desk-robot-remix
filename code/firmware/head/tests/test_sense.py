@@ -3456,7 +3456,7 @@ def test_sense_dma_callbacks_never_log_synchronously():
         "#else", 1
     )[0]
     for section in (callbacks, tx, rx):
-        assert not re.search(r"\\b(?:ESP_LOG\\w*|printf|fprintf|uart_write_bytes)\\s*\\(", section)
+        assert not re.search(r"\b(?:ESP_LOG\w*|printf|fprintf|uart_write_bytes)\s*\(", section)
     assert "if (err != ESP_OK)" in tx
     assert "bytes_written = 0;" in tx
     assert "++short_input_reads_" in callbacks
