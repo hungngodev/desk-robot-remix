@@ -904,3 +904,56 @@ async def test_full_gauge_taper_and_chg_deassertion_never_verify_completion(
         assert report.get("charging_complete", False) is False
         assert report.get("battery_healthy", False) is False
     assert head.commands == []
+
+
+@pytest.mark.parametrize(("pin", "bounce"), [
+    (None, False),
+    ("left_seated", True), ("right_seated", True),
+    ("input_good", True), ("charge_indicated", True),
+    ("left_seated", False), ("right_seated", False),
+    ("input_good", False), ("charge_indicated", False),
+])
+@pytest.mark.parametrize(("currents", "clock_fault"), [
+    ((21, 30, 40), None),
+    ((30, 20, 30), None),
+    ((30, 0, 30), None),
+    ((30, -30, 30), None),
+    ((-30, -30, -30), None),
+    ((30, 30, 30), "replay"),
+    ((30, 30, 30), "missing_age"),
+    ((30, 30, 30), "invalid"),
+])
+async def test_raw_seat_current_agreement_requires_both_independent_evidence_streams(
+    monkeypatch, pin, bounce, currents, clock_fault,
+):
+    """A positive current cannot substitute for stable seat/charger pins, or vice versa."""
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for index, (sample, ma) in enumerate(zip(samples, currents, strict=True), 1):
+        if pin is not None and (not bounce or index == 2):
+            sample["dock"][pin] = False
+        valid = clock_fault != "invalid" or index != 2
+        sample["power"].update(
+            shunt_uv=ma * 5 if valid else 0, pack_ma=ma if valid else 0,
+            pack_valid=valid, monitor_valid=valid,
+            pack_seq=1 if clock_fault == "replay" else index, pack_age_ms=35,
+        )
+        if clock_fault == "missing_age" and index == 2:
+            del sample["power"]["pack_age_ms"]
+    head = FakeHead(samples)
+    result = await observe_dock_evidence(head, "robot-01")
+    expected = pin is None and clock_fault is None and all(ma > 20 for ma in currents)
+    assert result["raw_seat_current_agreement"] is expected
+    assert result["stable_three_samples"] is not bounce
+    if bounce:
+        assert result["state"] == "dock_evidence_changed"
+        assert result["raw_pack_ma"] == []
+        assert result["raw_pack_samples_fresh"] is False
+    for flag in ("physical_contact_verified", "battery_current_measured",
+                 "charger_electrically_qualified", "charging_verified",
+                 "charging_authorized", "motor_authorized"):
+        assert result[flag] is False
+    assert head.commands == []

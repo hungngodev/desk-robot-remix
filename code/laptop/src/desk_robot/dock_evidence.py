@@ -213,6 +213,7 @@ async def observe_dock_evidence(head, robot_id: str, *, gap: float = 0.30) -> di
             result["raw_pack_samples_fresh"] = True
             if all(value > 20 for value in amps):
                 result["raw_pack_direction"] = "into_pack_unqualified"
+                result["raw_seat_current_agreement"] = state == "charger_reports_active"
             elif all(value < -20 for value in amps):
                 result["raw_pack_direction"] = "out_of_pack_unqualified"
                 # TI BQ24075 CHG reports charge *state*, not net pack
@@ -240,6 +241,8 @@ def _result(robot_id: str, state: str, stable: bool) -> dict:
         "battery_current_measured": False,
         "raw_pack_direction": "not_available",
         "raw_pack_samples_fresh": False,
+        # Agreement is only a raw diagnostic, never physical seat or charge proof.
+        "raw_seat_current_agreement": False,
         "charger_indicator_net_discharge_conflict": False,
         "raw_pack_ma": [],
         "charger_electrically_qualified": False,
