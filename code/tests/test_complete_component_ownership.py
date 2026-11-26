@@ -243,3 +243,123 @@ def test_expansion_sensor_doc_rejects_lane_address_and_state_drift():
         assert old in doc
         with pytest.raises(AssertionError):
             _validate_expansion_sensor_rows(doc.replace(old, new), plan, owners)
+
+
+# The archived quote uses descriptions rather than role IDs. Keep an explicit
+# crosswalk: kit rows may cover several roles, and several rows may share one
+# role. Neither case grants additional purchasing authority.
+ARCHIVED_BOM_ROWS = {
+    "Purchased XIAO ESP32S3 Sense camera/PDM microphone bundle "
+    "(physical identity and condition to inspect)": (1, ("xiao_sense",)),
+    "MAX98357 I2S amplifier breakout, ElectroPeak SEN-17-139": (1, ("amp",)),
+    "8 ohm 1 W speaker, 20 mm x 3.75 mm, ElectroPeak SEN-17-105": (1, ("speaker",)),
+    "TCA9548A eight-channel I2C multiplexer breakout": (1, ("i2c_mux",)),
+    "Owned ESP32-WROOM-32 dev board": (1, ("wroom",)),
+    "Owned 0.96 inch four-pin SSD1306 OLED, GME12864-11": (1, ("oled",)),
+    "Owned 5 V 28BYJ-48 stepper motor": (2, ("stepper",)),
+    "Owned ULN2003 stepper driver board": (2, ("uln2003",)),
+    "Reported MG90S positional micro servo, about 10 owned (user estimate)": (2, ("mg90s",)),
+    "Owned filament": (1, ("assembly",)),
+    "Owned DuPont signal wire ribbons": (1, ("assembly",)),
+    "Rated actuator power lead, switch, connectors, fasteners and wiring": (
+        1, ("assembly", "switch_power")),
+    "Bulk and local decoupling components": (1, ("switch_power", "sensor_3v3")),
+    "VL53L0X GY-530 generic downward cliff carriers, exact sample unqualified": (
+        4, ("cliff_obstacle",)),
+    "VL53L0X GY-530 generic forward obstacle carrier, exact sample unqualified": (
+        1, ("cliff_obstacle",)),
+    "VL53L0X GY-530 generic side and rear observation carriers, exact sample unqualified": (
+        3, ("cliff_obstacle",)),
+    "Owned Adafruit AT42QT1010 momentary touch breakout #1374": (1, ("head_touch",)),
+    "User-reported MPU6050 six-axis module for prototype "
+    "(quantity and breakout to verify)": (1, ("imu",)),
+    "Matched rechargeable1S cell/holder charging-protection-5V kit": (1, ("cap_power",)),
+}
+ARCHIVED_OPTIONAL_ROWS = {
+    "One diffused RGB pixel plus level buffer and passives": (1, ("rgb", "logic_level")),
+    "Mechanical bumper switch plus external pullup": (1, ("bumper",)),
+    "Conditional generic MPU6050 GY-521 replacement ONLY if existing MPU6050 "
+    "and BerryIMU both fail testing": (1, ("imu",)),
+}
+
+
+def _validate_archived_bom(bom, owners):
+    assert bom["historical_prototype_only"] is True
+    assert bom["procurement_authority"] is False
+    assert bom["superseded_by"] == "docs/hardware/full-feature-plan.json"
+    for section, expected in (("items", ARCHIVED_BOM_ROWS),
+                              ("optional_items", ARCHIVED_OPTIONAL_ROWS)):
+        rows = bom[section]
+        names = [row["item"] for row in rows]
+        assert len(names) == len(set(names)), section
+        assert set(names) == set(expected), (section, set(names) ^ set(expected))
+        for row in rows:
+            quantity, roles = expected[row["item"]]
+            assert type(row["quantity"]) is int and row["quantity"] == quantity, row["item"]
+            assert set(roles) <= owners["pet_roles"].keys(), (row["item"], roles)
+
+
+def test_archived_bom_rows_have_explicit_owners_without_purchase_authority():
+    _, owners = _sources()
+    bom = json.loads((HARDWARE / "bom.json").read_text())
+    _validate_archived_bom(bom, owners)
+
+
+def test_archived_bom_rejects_unmapped_duplicate_and_unowned_parts():
+    import copy
+
+    import pytest
+
+    _, owners = _sources()
+    bom = json.loads((HARDWARE / "bom.json").read_text())
+    for section in ("items", "optional_items"):
+        for mutation in ("unknown", "duplicate", "missing", "quantity", "boolean"):
+            altered = copy.deepcopy(bom)
+            rows = altered[section]
+            if mutation == "unknown":
+                rows.append({"item": "Unmapped fastener", "quantity": 1})
+            elif mutation == "duplicate":
+                rows.append(rows[0].copy())
+            elif mutation == "missing":
+                rows.pop()
+            elif mutation == "quantity":
+                rows[0]["quantity"] += 1
+            else:
+                rows[0]["quantity"] = True
+            with pytest.raises(AssertionError):
+                _validate_archived_bom(altered, owners)
+    for role in ("assembly", "switch_power", "sensor_3v3"):
+        altered_owners = copy.deepcopy(owners)
+        del altered_owners["pet_roles"][role]
+        with pytest.raises(AssertionError):
+            _validate_archived_bom(bom, altered_owners)
+    altered = dict(bom, procurement_authority=True)
+    with pytest.raises(AssertionError):
+        _validate_archived_bom(altered, owners)
+
+
+def test_current_plan_keeps_passive_kits_and_fleet_counts_separate_from_archive():
+    plan, _ = _sources()
+    assert plan["target_robots"] == 5
+    pet = {part["id"]: part["per_robot"] for part in plan["parts"]}
+    room = {part["id"]: part["quantity_per_room"] for part in plan["room_pod"]["modules"]}
+    # These are design slots, not counts of individual screws or wires.
+    expected = {
+        "assembly": 1, "switch_power": 1, "sensor_3v3": 1, "cap_power": 1,
+        "cliff_obstacle": 8, "i2c_mux": 2, "bumper": 2, "dock_fixture": 1,
+        "as5600": 3, "encoder_magnets": 3, "xiao_sense": 1, "amp": 1,
+        "speaker": 1, "wroom": 1, "oled": 1, "stepper": 2, "uln2003": 2,
+        "mg90s": 2, "head_touch": 1, "imu": 1, "rgb": 1, "logic_level": 1,
+    }
+    assert all(type(pet[role]) is int and pet[role] == qty for role, qty in expected.items())
+    for decision in plan["linked_subassemblies"]:
+        parent = decision["parent_role"]
+        count = decision["fleet_quantity"]
+        assert type(count) is int and count > 0, decision["id"]
+        if parent in room:
+            assert count == room[parent], decision["id"]
+        else:
+            # A dual H bridge replaces two single motor driver boards.
+            per_robot = 1 if decision["id"] == "drv8833_driver_candidate" else pet[parent]
+            assert count == per_robot * plan["target_robots"], decision["id"]
+    assert room["room_controller"] == 1
