@@ -115,6 +115,38 @@ void independent_contact_bounce_requires_three_consecutive_conversions() {
   sample(false, false, false, false);
 }
 
+void rapid_chatter_needs_acquisition_time_on_both_edges() {
+  for (const std::uint32_t start : {0U, 0xfffffff0U}) {
+    McpContactEvidence evidence;
+    std::uint32_t seq = 0;
+    const auto sample = [&](std::uint32_t offset, bool reed, bool pir,
+                            bool want_reed, bool want_pir) {
+      const auto at = start + offset;
+      CHECK(evidence.observe(reading(++seq, at, reed, pir), at));
+      CHECK(evidence.reed_closed() == want_reed);
+      CHECK(evidence.pir_active() == want_pir);
+    };
+    sample(0, false, false, false, false);
+    sample(1, true, true, false, false);
+    sample(2, true, true, false, false);
+    sample(3, true, true, false, false);
+    sample(4, false, false, false, false);
+    sample(10, true, false, false, false);
+    sample(12, true, true, false, false);
+    sample(59, true, true, false, false);
+    sample(60, true, true, true, false);
+    sample(62, true, true, true, true);
+    sample(63, false, false, true, true);
+    sample(64, false, false, true, true);
+    sample(65, false, false, true, true);
+    sample(66, true, true, true, true);
+    sample(70, false, false, true, true);
+    sample(72, false, false, true, true);
+    sample(119, false, false, true, true);
+    sample(120, false, false, false, false);
+  }
+}
+
 void stale_replay_and_conflicting_cache_rebaseline() {
   BodyControl body;
   McpContactEvidence evidence;
@@ -187,10 +219,11 @@ int main() {
     duplicate_cached_gpio_never_fabricates_rising_event();
     three_independent_gpio_conversions_emit_exactly_one_event();
     independent_contact_bounce_requires_three_consecutive_conversions();
+    rapid_chatter_needs_acquisition_time_on_both_edges();
     stale_replay_and_conflicting_cache_rebaseline();
     acquisition_gaps_cannot_fabricate_edges();
     genuine_uint32_wrap_and_bumper_are_preserved();
-    std::cout << "six MCP GPIOB acquisition provenance tests passed\n";
+    std::cout << "seven MCP GPIOB acquisition provenance tests passed\n";
     return 0;
   } catch (const std::exception& exc) {
     std::cerr << "FAIL " << exc.what() << '\n';

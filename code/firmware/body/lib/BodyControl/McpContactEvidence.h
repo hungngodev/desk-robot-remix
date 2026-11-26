@@ -6,7 +6,8 @@
 namespace desk_robot {
 
 // Optional reed/PIR edges must be confirmed by distinct MCP23017 GPIOB
-// conversions, not by repeated 25 ms reads of the same cached conversion.
+// conversions spanning at least 50 ms, not by repeated cached reads or
+// tightly spaced acquisitions during contact chatter.
 // This is cosmetic evidence only; the normally-closed bumper has its own
 // immediate local motor interlock and is intentionally not sampled here.
 class McpContactEvidence {
@@ -49,8 +50,10 @@ class McpContactEvidence {
     last_at_ms_ = sample.at_ms;
     last_reed_ = sample.reed_closed;
     last_pir_ = sample.pir_active;
-    confirm(sample.reed_closed, reed_, reed_candidate_, reed_streak_);
-    confirm(sample.pir_active, pir_, pir_candidate_, pir_streak_);
+    confirm(sample.reed_closed, reed_, reed_candidate_, reed_streak_,
+            reed_since_ms_, sample.at_ms);
+    confirm(sample.pir_active, pir_, pir_candidate_, pir_streak_,
+            pir_since_ms_, sample.at_ms);
     return true;
   }
 
@@ -63,18 +66,23 @@ class McpContactEvidence {
     reed_ = pir_ = reed_candidate_ = pir_candidate_ = false;
     last_reed_ = last_pir_ = false;
     reed_streak_ = pir_streak_ = 0;
+    reed_since_ms_ = pir_since_ms_ = 0;
   }
 
  private:
   static void confirm(bool level, bool& stable, bool& candidate,
-                      std::uint8_t& streak) {
+                      std::uint8_t& streak, std::uint32_t& since_ms,
+                      std::uint32_t at_ms) {
     if (level != candidate) {
       candidate = level;
       streak = 1;
+      since_ms = at_ms;
     } else if (streak < 3) {
       ++streak;
     }
-    if (streak == 3) stable = candidate;
+    // Use source time, not receipt time; unsigned subtraction handles wrap.
+    // Match the existing three-sample, 25 ms spacing touch filter window.
+    if (streak == 3 && at_ms - since_ms >= 50U) stable = candidate;
   }
 
   void baseline(const McpOptionalRaw& sample) {
@@ -84,6 +92,7 @@ class McpContactEvidence {
     last_reed_ = reed_ = reed_candidate_ = sample.reed_closed;
     last_pir_ = pir_ = pir_candidate_ = sample.pir_active;
     reed_streak_ = pir_streak_ = 1;
+    reed_since_ms_ = pir_since_ms_ = sample.at_ms;
   }
 
   bool seen_ = false;
@@ -92,6 +101,7 @@ class McpContactEvidence {
   bool last_reed_ = false, last_pir_ = false;
   std::uint8_t reed_streak_ = 0, pir_streak_ = 0;
   std::uint32_t last_seq_ = 0, last_at_ms_ = 0;
+  std::uint32_t reed_since_ms_ = 0, pir_since_ms_ = 0;
 };
 
 } // namespace desk_robot
