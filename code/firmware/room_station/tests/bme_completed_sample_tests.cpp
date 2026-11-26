@@ -29,6 +29,13 @@ int main() {
     CHECK(!sample.fresh(0x00000010U, 3000U));
     sample.publish(23.0f, 45.0f, 100000.0f, 91231U, 30U);
     CHECK(sample.fresh(31U, 3000U) && sample.sample_ms == 30U);
+    CHECK(sample.temperature_c == 23.0f && sample.humidity_pct == 45.0f);
+    CHECK(sample.pressure_pa == 100000.0f && sample.gas_ohms == 91231U);
+    // A failed new acquisition retires even a still-fresh completed tuple.
+    sample.invalidate();
+    CHECK(!sample.fresh(32U, 3000U));
+    CHECK(sample.sample_ms == 30U && sample.temperature_c == 23.0f);
+    CHECK(sample.humidity_pct == 45.0f && sample.pressure_pa == 100000.0f);
     CHECK(sample.gas_ohms == 91231U);
     std::cout << "PASS BME complete snapshot and pending retention\n";
   } catch (const std::exception& e) {

@@ -15,6 +15,9 @@ struct Adafruit_BME680 {
   bool start_ok = true, end_ok = true, fields = true;
   float temperature = 0, humidity = 0, next_temp = -10, next_humidity = 55;
   uint32_t pressure = 0, gas_resistance = 0, next_pressure = 101000, next_gas = 12345;
+  // Bit 0: temperature, 1: humidity, 2: pressure, 3: gas.
+  unsigned write_mask = 0xf;
+  bool write_on_failure = false;
   unsigned ends = 0;
   bool model_driver_clock = false;
   uint32_t driver_start = 0;
@@ -39,9 +42,11 @@ struct Adafruit_BME680 {
       if (beginReading() == 0) return false;
       driver_start = 0;
     }
-    if (end_ok && fields) {
-      temperature = next_temp; humidity = next_humidity;
-      pressure = next_pressure; gas_resistance = next_gas;
+    if ((end_ok || write_on_failure) && fields) {
+      if (write_mask & 1U) temperature = next_temp;
+      if (write_mask & 2U) humidity = next_humidity;
+      if (write_mask & 4U) pressure = next_pressure;
+      if (write_mask & 8U) gas_resistance = next_gas;
     }
     return end_ok;
   }
@@ -92,6 +97,30 @@ int main() {
   assert(bme_completed.fresh(2200, kBmeStaleMs) && bme_completed.sample_ms == 2000);
   assert(bme_completed.temperature_c == 21 && bme_completed.humidity_pct == 42);
   assert(bme_completed.pressure_pa == 102000 && bme_completed.gas_ohms == 67890);
+  // A partial update must not borrow any field from the last conversion.
+  // Test every proper subset, including temperature without gas and vice versa.
+  for (unsigned mask = 0; mask < 0xf; ++mask) {
+    reset(); step(1000); step(1200);
+    assert(bme_completed.valid);
+    step(2000);
+    bme.write_mask = mask;
+    bme.next_temp = 21; bme.next_humidity = 42;
+    bme.next_pressure = 102000; bme.next_gas = 67890;
+    step(2200);
+    assert(bme.ends == 2 && !bme_pending && !bme_started);
+    assert(!bme_completed.fresh(2200, kBmeStaleMs));
+    assert(bme_completed.sample_ms == 1000);
+    assert(bme_completed.temperature_c == -10 && bme_completed.humidity_pct == 55);
+    assert(bme_completed.pressure_pa == 101000 && bme_completed.gas_ohms == 12345);
+  }
+  // Even plausible scratch values cannot override a failed endReading().
+  reset(); step(1000); step(1200); step(2000);
+  bme.end_ok = false; bme.write_on_failure = true;
+  bme.next_temp = 21; bme.next_gas = 67890;
+  step(2200);
+  assert(bme.temperature == 21 && bme.gas_resistance == 67890);
+  assert(!bme_pending && !bme_started && !bme_completed.fresh(2200, kBmeStaleMs));
+  assert(bme_completed.sample_ms == 1000);
   for (int fault = 0; fault < 14; ++fault) {
     reset(); step(1000); step(1200); assert(bme_completed.valid);
     if (fault == 0) bme.start_ok = false;
