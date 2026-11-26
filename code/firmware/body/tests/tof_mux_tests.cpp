@@ -320,6 +320,59 @@ static void explicit_error_mask_matrix() {
   fake_arduino_millis() = saved_clock;
 }
 
+static void shared_fault_dominates_pending_range_publication() {
+  const auto saved_clock = fake_arduino_millis();
+  Wire = TwoWire{};
+  fake_i2c_lines() = FakeI2cLines{};
+  fake_arduino_millis() = 0;
+  desk_robot::TofBus bus;
+  desk_robot::CliffGuard guard;
+  ready(bus, guard);
+  desk_robot::BodyControl control(desk_robot::BodyProfile::StepperGuarded, &guard);
+  for (std::uint32_t now = 60; now < 78; ++now) {
+    fake_arduino_millis() = now;
+    const auto errors = bus.errors();
+    bus.poll(guard, now);
+    desk_robot::publish_range_telemetry(bus, control, now, bus.errors() != errors);
+  }
+  const auto previous = control.state();
+  for (const auto& raw : previous.optical) CHECK(raw.present && raw.valid);
+  for (const auto valid : previous.side_valid) CHECK(valid);
+
+  // Inject a fault at the publication boundary while a newer side conversion
+  // is pending. Normal TofBus::failed() also clears the notifications.
+  fake_arduino_millis() = 78;
+  bus.poll(guard, 78);
+  CHECK(bus.new_optical_channel() == 5 && bus.new_extra_channel() == 0);
+  CHECK(bus.optical_diagnostic(5, 78).valid && bus.extra_diagnostic(0, 78).valid);
+  guard.bus_fault();
+  desk_robot::publish_range_telemetry(bus, control, 78, true);
+  for (std::uint8_t lane = 0; lane < 8; ++lane) {
+    const auto& raw = control.state().optical[lane];
+    CHECK(raw.present && !raw.valid);
+    CHECK(raw.at_ms == previous.optical[lane].at_ms);
+    CHECK(raw.ambient_97 == previous.optical[lane].ambient_97);
+    CHECK(raw.signal_97 == previous.optical[lane].signal_97);
+  }
+  for (std::uint8_t lane = 0; lane < 3; ++lane) {
+    CHECK(!control.state().side_valid[lane]);
+    CHECK(control.state().side_at_ms[lane] == previous.side_at_ms[lane]);
+    CHECK(control.state().side_mm[lane] == previous.side_mm[lane]);
+  }
+  CHECK(guard.fault() == desk_robot::CliffFault::BusFailure);
+  CHECK(!guard.evaluate(78) && !control.state().armed);
+
+  // A later conversion may restore its own diagnostic, never motor authority.
+  fake_arduino_millis() = 79;
+  bus.poll(guard, 79);
+  CHECK(bus.new_optical_channel() == 0);
+  desk_robot::publish_range_telemetry(bus, control, 79, false);
+  CHECK(control.state().optical[0].valid);
+  CHECK(!control.state().optical[5].valid && !control.state().side_valid[0]);
+  CHECK(!guard.evaluate(79) && !control.state().armed);
+  fake_arduino_millis() = saved_clock;
+}
+
 static void raw_range_word_acceptance_is_exact() {
   // Exhaust the 16-bit wire domain, including both edges and the 8190
   // no-return word. Keep the expected interval independent of production.
@@ -441,6 +494,7 @@ int main() {
     check_shared_mux_recovery();
     dropout_matrix_and_partial_mux_recovery();
     explicit_error_mask_matrix();
+    shared_fault_dominates_pending_range_publication();
     {
       // A later verified close must not erase a transient overlap,
       // regardless of which mux was enabled last.

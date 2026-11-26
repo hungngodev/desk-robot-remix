@@ -15,6 +15,8 @@ inline void publish_range_telemetry(const TofBus& bus, BodyControl& control,
   if (bus_fault) {
     control.invalidate_side_ranges();
     control.invalidate_range_optics();
+    // A fault outranks every acquisition notification from this poll.
+    return;
   }
   const auto rejected = bus.rejected_channel();
   if (rejected < 8) control.invalidate_range_lane(rejected);
