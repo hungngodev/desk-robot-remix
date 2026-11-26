@@ -1314,6 +1314,8 @@ class Coordinator:
         expected_dock = self.robot(job.robot_id).dock_beacon_id
         previous_ir: tuple[int, int] | None = None
         for attempt in range(16):
+            # Every awaited receipt belongs to this motion epoch, not its successor.
+            self._require_job_motion(job)
             if self.dock_inhibited(job.robot_id):
                 raise OperationError("Dock approach refused: robot is seated or powered on dock")
             # Check before vision and AGAIN afterwards: camera and PnP may
@@ -1324,11 +1326,13 @@ class Coordinator:
             # Camera receipt time is NOT equivalent to image exposure time.
             # Local WROOM cliff stop remains mandatory for every short pulse.
             # Real docking reuses a strictly fresh MJPEG frame.
+            self._require_job_motion(job)
             capture_dock = getattr(head, "snapshot_for_dock", head.snapshot)
             observation = await _bounded_head_reply(
                 capture_dock(), seconds=2.0,
                 timeout_message="Camera snapshot timeout",
             )
+            self._require_job_motion(job)
             self._require_camera_motion_grant(camera_grant)
             # Physical steering requires the selected Sense stream boot,
             # frame sequence and camera generation. Compatibility JPEGs
@@ -1361,6 +1365,7 @@ class Coordinator:
                      and len(observation) == 4 else read_identity()), seconds=remaining,
                     timeout_message="Dock camera live sensor identity timeout",
                 )
+                self._require_job_motion(job)
                 if observed_pid != camera.camera_sensor_pid:
                     raise OperationError(
                         "Dock camera sensor PID differs from measured calibration"
@@ -1373,6 +1378,7 @@ class Coordinator:
                     jpeg, camera, captured_at=received_at
                 )
             except TimeoutError:
+                self._require_job_motion(job)
                 return {
                     "phase": "hold", "reason": "Stale AprilTag camera receipt",
                     "charging_authorized": False, "physical_acceptance_pass": False,
@@ -1380,6 +1386,7 @@ class Coordinator:
             # A centered AprilTag in the camera frame is not necessarily
             # centered on the wheel chassis. Apply measured camera yaw and
             # lateral lens offset before choosing a left/right/forward pulse.
+            self._require_job_motion(job)
             aligned = (
                 replace(pose, x_mm=camera.chassis_lateral_mm(pose))
                 if pose is not None else None
@@ -1410,6 +1417,7 @@ class Coordinator:
                     getter(), seconds=1.0,
                     timeout_message="Assigned dock IR status timeout",
                 )
+                self._require_job_motion(job)
                 try:
                     beacon = validate_ir(
                         reading, job.robot_id, expected_dock_id=expected_dock,
@@ -1439,6 +1447,7 @@ class Coordinator:
             body = await self._assert_armed_health(
                 job.robot_id, require_front_clearance=True
             )
+            self._require_job_motion(job)
             if decision.phase == "align":
                 # WROOM accepts only straight forward drive on guarded profiles.
                 # Side/rear observations are context, not swept-footprint proof.
@@ -1471,6 +1480,7 @@ class Coordinator:
                 await verify_selected_dock_frame(head, observation)
             except Exception as exc:
                 raise OperationError("Dock JPEG source changed before drive") from exc
+            self._require_job_motion(job)
             self._require_camera_motion_grant(camera_grant)
             if expected_dock is not None:
                 # WROOM health and the selected camera boot are awaited after
@@ -1554,8 +1564,13 @@ class Coordinator:
                     "physical_acceptance_pass": False,
                 }
             await asyncio.sleep(0.12)
+            # Terminal HALT belongs to the parent; a retired pulse must not
+            # send an additional STOP into a successor's operation.
+            self._require_job_motion(job)
             await _bounded_pulse_stop(head)
+            self._require_job_motion(job)
             await asyncio.sleep(0.05)
+            self._require_job_motion(job)
         return {
             "phase": "hold",
             "reason": "Maximum guarded approach pulses reached",
