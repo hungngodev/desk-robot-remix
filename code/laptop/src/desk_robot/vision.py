@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import threading
 from collections.abc import Iterator
@@ -9,9 +10,35 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Callable, Protocol, TypeGuard
 
 from PIL import Image
+
+
+def valid_visual_text(value: object, min_chars: int, max_chars: int) -> TypeGuard[str]:
+    """Require bounded, encodable text before it crosses a model or speech boundary."""
+    if (type(value) is not str or len(value) > max_chars
+            or not min_chars <= len(value.strip()) <= max_chars):
+        return False
+    try:
+        value.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def _visual_model_reply(response) -> dict | None:
+    """Read only the bounded JSON text envelope; never traverse arbitrary objects."""
+    try:
+        body = response.json()
+        message = body.get("message") if type(body) is dict else None
+        content = message.get("content") if type(message) is dict else None
+        if type(content) is not str or len(content) > 8192:
+            return None
+        value = json.loads(content)
+    except (ValueError, RecursionError):
+        return None
+    return value if type(value) is dict else None
 
 
 @dataclass(frozen=True)
@@ -69,6 +96,8 @@ class YoloWorldVision:
     async def detect(self, jpeg: bytes, label: str) -> list[Detection]:
         if self._closed:
             raise RuntimeError("YOLO detector is closed")
+        if not valid_visual_text(label, 1, 64):
+            raise ValueError("Invalid detector label")
         if not self._inference_slot.acquire(blocking=False):
             raise RuntimeError("YOLO detector still busy")
         try:
@@ -340,7 +369,6 @@ class OllamaScene:
         self, before: bytes, after: bytes, *, admit: Callable[[], bool] | None = None,
     ) -> SceneChange | None:
         import base64
-        import json
 
         # Direct comparisons do not necessarily pass through CameraFrameHub.
         # A valid JPEG header is not a valid scan. Decode before allocating
@@ -384,16 +412,15 @@ class OllamaScene:
             timeout=45,
         )
         response.raise_for_status()
-        body = response.json()
-        value = json.loads(body["message"]["content"])
-        if not isinstance(value, dict) or value.get("notable") is not True:
+        value = _visual_model_reply(response)
+        if value is None or value.get("notable") is not True:
             return None
         kind, summary, confidence = (
             value.get("kind"), value.get("description"), value.get("confidence")
         )
         if type(kind) is not str or kind not in {"person", "hand", "key", "candy", "object", "scene"}:
             return None
-        if not isinstance(summary, str) or not 5 <= len(summary.strip()) <= 180:
+        if not valid_visual_text(summary, 5, 180):
             return None
         if (
             isinstance(confidence, bool) or not isinstance(confidence, (int, float))
@@ -417,11 +444,8 @@ class OllamaScene:
         as scene comparison. An image is evidence, not a tool instruction.
         """
         import base64
-        import json
-        import math
 
-        if (not self.model or not isinstance(question, str)
-                or not 3 <= len(question.strip()) <= 280
+        if (not self.model or not valid_visual_text(question, 3, 280)
                 or not isinstance(jpeg_frames, list)
                 or not 1 <= len(jpeg_frames) <= 2
                 or any(not isinstance(frame, bytes)
@@ -464,15 +488,15 @@ class OllamaScene:
             timeout=45,
         )
         response.raise_for_status()
-        data = json.loads(response.json()["message"]["content"])
-        if not isinstance(data, dict):
+        data = _visual_model_reply(response)
+        if data is None:
             raise ValueError("Invalid visual model answer")
         supported = data.get("visually_supported")
         confidence = data.get("confidence")
         answer = data.get("answer")
         if (type(supported) is not bool or type(confidence) not in (int, float)
                 or not 0 <= confidence <= 1 or not math.isfinite(confidence)
-                or not isinstance(answer, str) or not 1 <= len(answer.strip()) <= 400):
+                or not valid_visual_text(answer, 1, 400)):
             raise ValueError("Unbounded or malformed local vision answer")
         if not supported or confidence < 0.65:
             return "I can't tell from my camera right now."
