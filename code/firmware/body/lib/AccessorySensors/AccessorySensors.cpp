@@ -384,9 +384,10 @@ void AccessorySensors::force(std::uint32_t now_ms) {
   // A completed single-shot ADC register can remain readable indefinitely.
   // After a delayed WROOM loop it describes OLD jaw force, not a new grasp
   // observation. Never stamp it with a current timestamp or fresh sequence.
-  // Keep the channel pending for a newly commanded conversion next visit.
+  // A timeout on either channel retires the shared ADC's force evidence.
+  // Retry the selected channel with a newly commanded conversion next visit.
   if (now_ms - ads_started_ >= 200U) {
-    f.valid_mask &= static_cast<std::uint8_t>(~(1U << ads_channel_));
+    f.valid_mask = 0;
     f.valid = false;
     ads_pending_ = false;
     return;

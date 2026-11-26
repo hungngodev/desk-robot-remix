@@ -2294,11 +2294,30 @@ static void gripper_jaw_consumes_at_most_four_degrees_per_adc_conversion() {
   body.tick(520);
   CHECK(body.state().grip == 103 && body.state().grip_target == 103);
 
-  // A failed jaw conversion freezes the commanded target and retains PWM.
-  r.force.valid = false;
+  // A shared ADC/mux fault must cancel a live target with unused credit,
+  // before the next tick, not merely preserve an already frozen target.
+  r.force.jaw_sample_seq = 5U;
+  r.force.jaw_at_ms = r.force.at_ms = 521U;
   body.set_accessories(r, 521U);
+  CHECK(send(body, "grip 120", 521) == "OK grip angle=120");
   body.tick(540);
-  CHECK(body.state().grip == 103 && body.state().grip_target == 103);
+  const int held = body.state().grip;
+  CHECK(held == 104 && body.state().grip_target == 120);
+  r.force.valid = false;
+  r.force.valid_mask = 0U;
+  body.set_accessories(r, 541U);
+  CHECK(body.state().grip == held && body.state().grip_target == held);
+  CHECK(body.state().servos_attached);
+  CHECK(!body.grip_feedback_fresh(541U));
+
+  // A newer conversion before the next PWM tick cannot restart the target.
+  r.force.valid_mask = 2U;
+  ++r.force.jaw_sample_seq;
+  r.force.jaw_at_ms = r.force.at_ms = 542U;
+  body.set_accessories(r, 542U);
+  CHECK(body.grip_feedback_fresh(542U));
+  body.tick(560);
+  CHECK(body.state().grip == held && body.state().grip_target == held);
   CHECK(body.state().servos_attached);
 }
 

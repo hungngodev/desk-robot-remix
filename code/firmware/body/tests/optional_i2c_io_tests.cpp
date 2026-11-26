@@ -162,6 +162,32 @@ static void check_jaw_adc_rail_isolation() {
     CHECK(!wire.unsafe_parallel_mux);
   }
 }
+static void check_belly_adc_timeout_retires_jaw_evidence() {
+  TwoWire wire;
+  desk_robot::AccessorySensors sensors;
+  CHECK(sensors.begin(wire));
+  for (std::uint32_t ms = 0; ms <= 684; ms += 12) sensors.poll(ms);
+  const auto before = sensors.readings().force;
+  CHECK(before.valid && before.valid_mask == 3U);
+  CHECK(wire.ads_config_high == 0xC3U);
+  wire.ads_conversion_ready = false;
+  for (std::uint32_t ms = 696; ms <= 936; ms += 12) sensors.poll(ms);
+  const auto expired = sensors.readings().force;
+  CHECK(936U - before.jaw_at_ms < 500U);
+  CHECK(!expired.valid && expired.valid_mask == 0U);
+  CHECK(expired.jaw_sample_seq == before.jaw_sample_seq);
+  CHECK(expired.jaw_at_ms == before.jaw_at_ms);
+  wire.ads_conversion_ready = true;
+  for (std::uint32_t ms = 948; ms <= 1104; ms += 12) sensors.poll(ms);
+  const auto belly = sensors.readings().force;
+  CHECK(!belly.valid && belly.valid_mask == 1U);
+  CHECK(belly.jaw_sample_seq == before.jaw_sample_seq);
+  for (std::uint32_t ms = 1116; ms <= 1272; ms += 12) sensors.poll(ms);
+  const auto recovered = sensors.readings().force;
+  CHECK(recovered.valid && recovered.valid_mask == 3U);
+  CHECK(recovered.jaw_sample_seq > before.jaw_sample_seq);
+  CHECK(!wire.unsafe_parallel_mux);
+}
 static void check_ads_start_provenance() {
   TwoWire wire;
   desk_robot::AccessorySensors sensors;
@@ -486,6 +512,7 @@ int main() {
     check_unverified_cap_keeps_gpio_touch_independent();
     check_jaw_adc_rail_isolation();
     check_ads_start_provenance();
+    check_belly_adc_timeout_retires_jaw_evidence();
     check_pulse_pointer_budget();
     check_short_pulse_fifo_reads();
     check_short_cap_status_reads();
@@ -1164,7 +1191,7 @@ int main() {
           jaw_seq_before_pause);
     CHECK(stalled_ads.readings().force.jaw_at_ms ==
           jaw_stamp_before_pause);
-    CHECK((stalled_ads.readings().force.valid_mask & 2U) == 0U);
+    CHECK(stalled_ads.readings().force.valid_mask == 0U);
     CHECK(!stalled_ads.readings().force.valid);
     // Explicitly start another ADC single shot and wait for completion.
     // Old data may become valid ONLY after that later actual conversion.
@@ -1174,7 +1201,10 @@ int main() {
           jaw_seq_before_pause);
     CHECK(stalled_ads.readings().force.jaw_at_ms >
           jaw_stamp_before_pause);
-    CHECK((stalled_ads.readings().force.valid_mask & 2U) != 0U);
+    CHECK(stalled_ads.readings().force.valid_mask == 2U);
+    CHECK(!stalled_ads.readings().force.valid);
+    for (std::uint32_t ms = 1980; ms <= 2136; ms += 12)
+      stalled_ads.poll(ms);
     CHECK(stalled_ads.readings().force.valid);
     // Like the ADS1115 above, an unread SHT41 single-shot result is not a
     // fresh climate observation after a long WROOM scheduling stall. Lane 3
