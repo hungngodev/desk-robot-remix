@@ -5,6 +5,11 @@
 #include "TofBus.h"
 #include "RangeTelemetry.h"
 #include "CliffGuard.h"
+#include "TofResult.h"
+
+constexpr desk_robot::TofResult cold_range;
+static_assert(cold_range.signal_97 == 0 && cold_range.ambient_97 == 0 &&
+              cold_range.distance_mm == 0 && !cold_range.accepted, "Range must start invalid");
 
 TwoWire Wire; // host fake, never a real bus
 #define CHECK(expr) do { if (!(expr)) throw std::runtime_error(#expr); } while (false)

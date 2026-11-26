@@ -103,7 +103,12 @@ class GestureDecoder {
   }
 
  private:
-  struct Quadrants { std::uint8_t up, down, left, right; };
+  struct Quadrants {
+    std::uint8_t up = 0, down = 0, left = 0, right = 0;
+    Quadrants() = default;
+    Quadrants(std::uint8_t u, std::uint8_t d, std::uint8_t l, std::uint8_t r)
+        : up(u), down(d), left(l), right(r) {}
+  };
   static bool opposed(std::uint8_t first_a, std::uint8_t last_a,
                       std::uint8_t first_b, std::uint8_t last_b, int delta) {
     return delta < 0 ? last_a < first_a && last_b > first_b

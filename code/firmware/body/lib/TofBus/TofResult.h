@@ -5,10 +5,14 @@
 namespace desk_robot {
 
 struct TofResult {
-  std::uint16_t signal_97;
-  std::uint16_t ambient_97;
-  std::uint16_t distance_mm;
-  bool accepted;
+  std::uint16_t signal_97 = 0;
+  std::uint16_t ambient_97 = 0;
+  std::uint16_t distance_mm = 0;
+  bool accepted = false;
+  constexpr TofResult() = default;
+  constexpr TofResult(std::uint16_t signal, std::uint16_t ambient = 0,
+                      std::uint16_t distance = 0, bool is_accepted = false)
+      : signal_97(signal), ambient_97(ambient), distance_mm(distance), accepted(is_accepted) {}
 };
 
 namespace detail {

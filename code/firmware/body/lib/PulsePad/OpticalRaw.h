@@ -13,8 +13,11 @@ inline std::uint32_t optical18(const std::uint8_t* bytes) {
 // explicit; the selected PCB must be optically tested before interpreting
 // either channel as a qualified paw measurement.
 struct OpticalChannels {
-  std::uint32_t red;
-  std::uint32_t ir;
+  std::uint32_t red = 0;
+  std::uint32_t ir = 0;
+  constexpr OpticalChannels() = default;
+  constexpr OpticalChannels(std::uint32_t red_raw, std::uint32_t ir_raw = 0)
+      : red(red_raw), ir(ir_raw) {}
 };
 inline OpticalChannels decode_optical_channels(const std::uint8_t* bytes,
                                                bool ir_first) {

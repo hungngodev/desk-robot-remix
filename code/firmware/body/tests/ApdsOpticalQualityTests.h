@@ -1,6 +1,10 @@
 #pragma once
 #include "ApdsOpticalQuality.h"
 
+// Deliberately default-initialize, not value-initialize with braces.
+constexpr desk_robot::ApdsRgbcQuality cold_rgbc;
+static_assert(!cold_rgbc.valid && !cold_rgbc.saturated, "RGB evidence must start invalid");
+
 // These compile-time regressions are included by accessory_math_tests.cpp.
 static_assert(desk_robot::apds_rgbc_quality(1, 0, 65534, 0, 0, 0).valid);
 static_assert(desk_robot::apds_rgbc_quality(1, 0, 65535, 0, 0, 0).saturated);

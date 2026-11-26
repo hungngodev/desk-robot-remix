@@ -10,8 +10,11 @@ constexpr std::uint32_t apds_rgbc_ceiling(std::uint8_t atime) {
   return counts < 65535U ? counts : 65535U;
 }
 struct ApdsRgbcQuality {
-  bool valid;
-  bool saturated;
+  bool valid = false;
+  bool saturated = false;
+  constexpr ApdsRgbcQuality() = default;
+  constexpr ApdsRgbcQuality(bool is_valid, bool is_saturated = false)
+      : valid(is_valid), saturated(is_saturated) {}
 };
 constexpr ApdsRgbcQuality apds_rgbc_quality(
     std::uint8_t status, std::uint8_t atime, std::uint16_t clear,

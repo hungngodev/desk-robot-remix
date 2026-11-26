@@ -1,4 +1,7 @@
 #include "OpticalRaw.h"
+
+constexpr desk_robot::OpticalChannels cold_channels;
+static_assert(cold_channels.red == 0 && cold_channels.ir == 0, "FIFO evidence must start empty");
 #include <iostream>
 #include <stdexcept>
 #define CHECK(x) do { if (!(x)) throw std::runtime_error(#x); } while (false)
