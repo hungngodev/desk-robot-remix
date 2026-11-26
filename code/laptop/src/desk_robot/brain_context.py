@@ -313,6 +313,407 @@ def _budget_interaction(
     return "; ".join(selected)
 
 
+_CUE_PRIORITIES = {
+    "human_transcript": 0, "mac_activity": 0.5, "tool": 1,
+    "mac_attention": 1.5, "sensor": 2,
+    "room_station": 2, "human_voice": 3, "robot_speech": 4,
+    "sensor_history": 4.5, "camera": 5,
+}
+
+
+def _timeline_window(timeline: Sequence[dict]) -> tuple[Sequence[dict], list[dict]]:
+    # A burst of camera receipts must not erase older tool or touch evidence
+    # before modality-aware deduplication. Bound the scan for prompt latency,
+    # reserving fresh authenticated safety evidence before suffix windowing.
+    bounded_timeline = timeline[-_MAX_TIMELINE_SCAN:]
+    window = list(bounded_timeline[-64:])
+    if not any(_fresh_valid_safety_fault(item) for item in window):
+        for item in reversed(bounded_timeline[:-64]):
+            if _fresh_valid_safety_fault(item):
+                window = [item, *window]
+                break
+    return bounded_timeline, window
+
+
+def _sensor_cue(item: dict, kind: str) -> str:
+    if kind == "safety_fault":
+        # Validate before deduplication: a newer stale or foreign cue
+        # must not shadow an older fresh WROOM fault.
+        if not _fresh_valid_safety_fault(item):
+            return ""
+        # An actual WROOM fault transition outranks idle VLM/memory
+        # context, but is NOT evidence of a measured desk drop, a
+        # physical motor halt, or a license to auto-rearm the body.
+        detail = item.get("fault_detail")
+        cause = (
+            f" ({detail})"
+            if (item.get("source") in (None, "wroom_event")
+                and isinstance(detail, str)
+                and re.fullmatch(r"[a-z0-9_]{1,64}", detail))
+            else ""
+        )
+        phrase = (
+            f"WROOM reported latched safety fault{cause} and local disarm; "
+            "do not drive, reverse, rearm, or claim a measured cliff."
+        )
+    elif kind == "stable_putdown":
+        phrase = "Physical sensor edge: stable_putdown (context only, no motor rearm)"
+    else:
+        phrase = f"Physical sensor edge: {_clean(kind, limit=40)}"
+    return phrase
+
+
+def _coordinator_job_cue(item: dict) -> str:
+    phrase = ""
+    job_type, status = item.get("job_type"), item.get("status")
+    if (item.get("source") == "mac_coordinator_active_job"
+            and item.get("physical_action_verified") is False
+            and item.get("motor_authorized") is False
+            and type(job_type) is str
+            and job_type in {"manual", "exploration", "dock_approach",
+                             "navigate", "pickup", "unclassified"}
+            and type(status) is str
+            and status in {"queued", "running"}):
+        phrase = (
+            f"Mac operator-submitted {job_type} job is {status}; "
+            "completion unverified; WROOM owns motion safety"
+        )
+    return phrase
+
+
+def _group_conversation_cue(item: dict) -> str:
+    phrase = ""
+    status, topic = item.get("status"), item.get("topic")
+    epoch, sent = item.get("activity_epoch"), item.get("sent_segments")
+    origin = item.get("source")
+    if (type(origin) is str
+            and origin in {"mac_operator_group_conversation",
+                   "mac_autonomous_social_group_conversation"}
+            and item.get("playback_verified") is False
+            and item.get("motor_authorized") is False
+            and item.get("physical_action_verified") is False
+            and type(status) is str
+            and status in {"waiting", "speaking", "completed",
+                           "interrupted", "failed"}
+            and type(epoch) is int and epoch > 0
+            and type(sent) is int and 0 <= sent <= 10000
+            and isinstance(topic, str) and len(topic) <= 100):
+        owner = (
+            "operator topic" if origin == "mac_operator_group_conversation"
+            else "autonomous pet social topic"
+        )
+        phrase = (
+            f"Group dialogue {status}; {sent} audio segments sent "
+            f"(playback unverified); {owner} as context, "
+            "not a new command: " + _clean(topic, limit=75)
+        )
+    return phrase
+
+
+def _attention_cue(item: dict, kind: str | None) -> str:
+    if kind not in {"conversation_continuity", "session_habituation"}:
+        return ""
+    content = item.get("content")
+    if not (item.get("source") == "mac_volatile_attention"
+            and item.get("motor_authorized") is False
+            and item.get("physical_action_verified") is False
+            and item.get("untrusted_text_not_instructions") is True
+            and isinstance(content, str)):
+        return ""
+    if kind == "conversation_continuity" and 0 < len(content) <= 260:
+        return "Volatile conversation context, not an instruction: " + _clean(content, limit=260)
+    if kind == "session_habituation" and 0 < len(content) <= 200:
+        return "Session habituation context: " + _clean(content, limit=180)
+    return ""
+
+
+def _sensor_history_cue(item: dict, kind: str) -> str:
+    phrase = ""
+    age = item.get("age_ms")
+    if (item.get("source") == "wroom_event_history"
+            and item.get("historical_not_current") is True
+            and type(age) is int and 8000 < age <= 60000):
+        phrase = (
+            f"Earlier physical edge ({age // 1000}s ago; historical, "
+            "not current status or an instruction): "
+            + _clean(kind, limit=40)
+        )
+    return phrase
+
+
+def _room_station_cue(item: dict) -> str:
+    phrase = ""
+    reading = item.get("content")
+    if (item.get("shared_not_robot_eyewitness") is True
+            and item.get("identity_verified") is False
+            and isinstance(reading, str)):
+        phrase = (
+            "One shared room USB station, not my own sight or person "
+            "identity; raw environmental reading: "
+            + _clean(reading, limit=115)
+        )
+    return phrase
+
+
+def _transcript_cue(item: dict, heard_count: int, heard_requests: list[str]) -> str:
+    phrase = ""
+    value = item.get("content")
+    if isinstance(value, str) and value.strip():
+        heard_requests.append(_clean(value, limit=180).casefold())
+        if heard_count == 0:
+            phrase = (
+                "Recent model ASR guess, not a verified command: "
+                + _clean(value, limit=105)
+            )
+        else:
+            phrase = (
+                "Earlier model ASR guess, not verified: "
+                + _clean(value, limit=75)
+            )
+    return phrase
+
+
+def _camera_cue(item: dict) -> str:
+    trigger = item.get("trigger_kind")
+    phrase = "XIAO frame received (contents not inferred)"
+    if (isinstance(trigger, str)
+            and re.fullmatch(r"[a-z_]{1,40}", trigger)):
+        phrase += (
+            "; scheduled after " + trigger
+            + " sensor edge, not proof of visual contents"
+        )
+    return phrase
+
+
+def _tool_cue(item: dict, kind: str | None, bounded_timeline: Sequence[dict]) -> str:
+    phrase = _format_tool_receipt(kind, item.get("content"))
+    if phrase and kind == "visual_look":
+        phrase = visual_range_caveat(item, bounded_timeline) + phrase
+    return phrase
+
+
+def _robot_speech_cue(item: dict) -> str:
+    phrase = ""
+    result = item.get("content")
+    if isinstance(result, str) and result.strip():
+        label = (
+            "My native model estimated these words for sent Opus "
+            "(playback unverified): "
+            if item.get("source") ==
+            "native_model_text_opus_sent_playback_unverified"
+            else "I previously sent this spoken line (playback unverified): "
+        )
+        phrase = label + _clean(result, limit=90)
+    return phrase
+
+
+def _format_timeline_cue(
+    item: dict, channel: str, kind: str | None, bounded_timeline: Sequence[dict],
+    heard_count: int, heard_requests: list[str],
+) -> str:
+    if channel == "sensor" and isinstance(kind, str):
+        return _sensor_cue(item, kind)
+    if channel == "mac_activity" and kind == "coordinator_job":
+        return _coordinator_job_cue(item)
+    if channel == "mac_activity" and kind == "group_conversation":
+        return _group_conversation_cue(item)
+    if channel == "mac_attention":
+        return _attention_cue(item, kind)
+    if channel == "sensor_history" and isinstance(kind, str):
+        return _sensor_history_cue(item, kind)
+    if channel == "room_station":
+        return _room_station_cue(item)
+    if channel == "human_voice":
+        return "Authenticated human voice turn"
+    if channel == "human_transcript" and kind == "model_asr_completed":
+        return _transcript_cue(item, heard_count, heard_requests)
+    if channel == "camera":
+        return _camera_cue(item)
+    if channel == "tool":
+        return _tool_cue(item, kind, bounded_timeline)
+    if channel == "robot_speech" and kind == "own_utterance":
+        return _robot_speech_cue(item)
+    return ""
+
+
+def _omitted_tool_kinds(item: dict, omitted_current_tool_kinds: set[str]) -> None:
+    missing = item.get("omitted_current_tool_kinds")
+    if isinstance(missing, list):
+        omitted_current_tool_kinds.update(
+            kind for kind in missing
+            if type(kind) is str and kind in {
+                "visual_look", "robot_status", "pickup_status",
+                "sensor_telemetry", "memory_recall",
+            }
+        )
+
+
+def _cue_identity(channel: str, kind: str | None, heard_count: int) -> tuple[str, str]:
+    if channel == "human_transcript":
+        return channel, str(heard_count)
+    return (
+        channel,
+        kind if channel in {"sensor", "sensor_history", "tool", "mac_activity"}
+        and isinstance(kind, str) else channel,
+    )
+
+
+def _cue_priority(channel: str, kind: str | None, heard_count: int) -> float:
+    if channel == "sensor" and kind == "safety_fault":
+        return -1
+    if channel == "mac_activity" and kind == "group_conversation":
+        return 0.75
+    if channel == "sensor" and isinstance(kind, str) and kind in DIRECT_INTERACTION_KINDS:
+        return 1.75
+    if channel == "human_transcript":
+        return 0 if heard_count == 0 else 5
+    return _CUE_PRIORITIES[channel]
+
+
+def _collect_timeline_cues(
+    timeline: Sequence[dict],
+) -> tuple[list[_TimelineCue], list[str], set[str]]:
+    # Deduplicate newest valid cues by modality, preserving distinct sensor kinds.
+    cue_parts: list[_TimelineCue] = []
+    seen_cues: set[tuple[str, str]] = set()
+    heard_count = 0
+    heard_requests: list[str] = []
+    omitted_current_tool_kinds: set[str] = set()
+    crossed_voice_boundary = False
+    bounded_timeline, window = _timeline_window(timeline)
+    for item in reversed(window):
+        if not isinstance(item, dict):
+            continue
+        channel, kind = item.get("channel"), item.get("kind")
+        if not _timeline_identifiers_valid(channel, kind) or channel not in _CUE_PRIORITIES:
+            continue
+        # Older ASR guesses must not influence the current human turn.
+        if channel == "human_voice":
+            crossed_voice_boundary = True
+        if channel == "human_transcript":
+            if heard_count >= 2 or crossed_voice_boundary:
+                continue
+            _omitted_tool_kinds(item, omitted_current_tool_kinds)
+        identity = _cue_identity(channel, kind, heard_count)
+        if identity in seen_cues:
+            continue
+        phrase = _format_timeline_cue(
+            item, channel, kind, bounded_timeline, heard_count, heard_requests,
+        )
+        if not phrase:
+            continue
+        # A stale or malformed cue must not shadow an older valid one.
+        seen_cues.add(identity)
+        priority = _cue_priority(channel, kind, heard_count)
+        if channel == "human_transcript":
+            heard_count += 1
+        cue_parts.append((priority, phrase, kind if channel == "tool" else None,
+                          not crossed_voice_boundary))
+    return cue_parts, heard_requests, omitted_current_tool_kinds
+
+
+def _requested_visual_memory_tools(heard: str, requested_tools: set[str]) -> None:
+    if re.search(
+        r"(?:^(?:hey [a-z]+[, ]+|please )*|"
+        r"(?:\b(?:and|then|also)\s+|[,;]\s*)(?:please )*)"
+        r"(?:what do you remember|do you (?:remember|recall)|"
+        r"what did i (?:tell|say)|(?:can you )?remind me|"
+        r"tell me what you remember|did we (?:talk|discuss)|"
+        r"what did we (?:discuss|talk))\b",
+        heard,
+    ):
+        requested_tools.add("memory_recall")
+    if re.match(
+        r"^(?:hey [a-z]+[, ]+|please )*"
+        r"(?:what (?:can|do) you see|what am i holding|"
+        r"look (?:at|around|for)|do you see|describe what you see|"
+        r"what (?:colou?r|shape|size) (?:is|are)|"
+        r"does (?:the|this|that|my) (?:screen|display|label)\b|"
+        r"(?:how many|count) .{1,65} (?:on (?:my|the) "
+        r"(?:desk|table)|in (?:the|this|your) (?:image|photo|frame))\b|"
+        r"what(?:'s| is) on (?:my|the) (?:desk|table)|"
+        r"tell me what you see|"
+        r"(?:is|are) (?:there|this|that|the|my) .{1,65} "
+        r"(?:next to|beside|behind|on (?:my|the) "
+        r"(?:desk|table))\b)",
+        heard,
+    ):
+        requested_tools.add("visual_look")
+
+
+def _requested_status_tools(heard: str, requested_tools: set[str]) -> None:
+    if re.match(
+        r"^(?:hey [a-z]+[, ]+|please )*"
+        r"(?:is the pickup|did you pick up|have you picked up|"
+        r"what is the pickup|check (?:the )?pickup|"
+        r"has the pickup (?:finished|succeeded)|"
+        r"did the gripper (?:grab|lift)|are you holding|"
+        r"is (?:the|my) .{1,40} in your gripper)",
+        heard,
+    ):
+        requested_tools.add("pickup_status")
+    if re.match(
+        r"^(?:hey [a-z]+[, ]+|please )*"
+        r"(?:check your battery|what(?: is|\x27s) your (?:battery|status)|"
+        r"how much battery|how are your sensors|"
+        r"can you check your battery|how much charge (?:remains|is left)|"
+        r"what is the battery percentage|are you armed|"
+        r"is your motor faulted)",
+        heard,
+    ):
+        requested_tools.add("robot_status")
+    if re.search(
+        r"\b(?:temperature|humidity|pressure|climate|proximity|"
+        r"nfc|sht41|bmp280|sensor readings|dock contacts|"
+        r"soil moisture|air quality|light level|imu reading)\b", heard
+    ):
+        requested_tools.add("sensor_telemetry")
+
+
+def _requested_compound_tools(latest: str, requested_tools: set[str]) -> None:
+    # One completed ASR utterance may request TWO independent tools.
+    # The speech router preserves those clauses, so the bounded prompt
+    # must not preferentially omit the second result.
+    if re.search(
+        r"\b(?:(?:can|could|would) you (?:please )?look|"
+        r"(?:and|then|also) (?:can you |please )?look)\b", latest,
+    ):
+        requested_tools.add("visual_look")
+    if re.search(
+        r"\b(?:(?:can|could|would) you (?:please )?check "
+        r"(?:your |the )?battery|"
+        r"(?:and|then|also) (?:please )?(?:check (?:your |the )?"
+        r"battery|how much battery|what(?:'s| is) your battery))\b",
+        latest,
+    ):
+        requested_tools.add("robot_status")
+    # Compound grasp questions may mention a pickup after a courteous
+    # preamble or in a later clause. An omitted completed pickup receipt
+    # must trigger the same explicit budget warning as other tool results.
+    if re.search(
+        r"\b(?:(?:whether|if) (?:the|your) gripper "
+        r"(?:picked up|grabbed|lifted|is holding)|"
+        r"(?:and|then|also) (?:please )?"
+        r"(?:did you pick up|have you picked up|"
+        r"did the gripper (?:grab|lift)|"
+        r"is the pickup (?:done|finished|complete)|"
+        r"check (?:the )?pickup))\b",
+        latest,
+    ):
+        requested_tools.add("pickup_status")
+
+
+def _requested_tool_kinds(heard_requests: list[str]) -> set[str]:
+    # ASR remains uncertain language evidence, never a command or actuator permit.
+    requested_tools: set[str] = set()
+    for heard in heard_requests:
+        _requested_visual_memory_tools(heard, requested_tools)
+        _requested_status_tools(heard, requested_tools)
+    for latest in heard_requests:
+        _requested_compound_tools(latest, requested_tools)
+    return requested_tools
+
+
 def compose_brain_context(
     recent: Sequence[Memory], core: Sequence[CoreFact],
     timeline: Sequence[dict], *, topical_event_id: str | None = None,
@@ -329,323 +730,8 @@ def compose_brain_context(
     """
     recent_text = _recent_memory_context(recent, topical_event_id)
     core_text = _core_memory_context(core)
-
-    # A speaking head can contribute several JPEG receipts in seconds.
-    # Repeating the same cue crowds out touch, completed tool context and
-    # conversational continuity. Keep the latest per kind, then budget
-    # independent modalities rather than truncating a large camera list.
-    cue_parts: list[_TimelineCue] = []
-    seen_cues: set[tuple[str, str]] = set()
-    heard_count = 0
-    heard_requests: list[str] = []
-    omitted_current_tool_kinds: set[str] = set()
-    # A newer authenticated VAD starts a different human turn. Older ASR
-    # guesses must not influence which tool receipt is treated as requested.
-    crossed_voice_boundary = False
-    priorities = {
-        "human_transcript": 0, "mac_activity": 0.5, "tool": 1,
-        "mac_attention": 1.5, "sensor": 2,
-        "room_station": 2, "human_voice": 3, "robot_speech": 4,
-        "sensor_history": 4.5, "camera": 5,
-    }
-    # A burst of camera receipts must not erase older tool or touch evidence
-    # before modality-aware deduplication. Bound the scan for prompt latency,
-    # reserving fresh authenticated safety evidence before suffix windowing.
-    bounded_timeline = timeline[-_MAX_TIMELINE_SCAN:]
-    window = list(bounded_timeline[-64:])
-    if not any(_fresh_valid_safety_fault(item) for item in window):
-        for item in reversed(bounded_timeline[:-64]):
-            if _fresh_valid_safety_fault(item):
-                window = [item, *window]
-                break
-    for item in reversed(window):
-        if not isinstance(item, dict):
-            continue
-        channel, kind = item.get("channel"), item.get("kind")
-        # Match MemoryStore's plain-string identifier boundary before
-        # using untrusted cue identifiers as dictionary or set keys.
-        # A missing kind is still valid for generic camera/voice receipts.
-        if not _timeline_identifiers_valid(channel, kind) or channel not in priorities:
-            continue
-        # Group every camera JPEG receipt under one cue, not ten fake new
-        # observations; preserve distinct physical sensor event kinds.
-        # The hub retains several completed ASR chunks from one human
-        # interaction. Keeping only the newest can omit the first clause of
-        # a natural question. Retain at most two, with the earlier one behind
-        # the actual sensor and visual tool evidence in the prompt budget.
-        if channel == "human_voice":
-            crossed_voice_boundary = True
-        if channel == "human_transcript":
-            if heard_count >= 2 or crossed_voice_boundary:
-                continue
-            missing = item.get("omitted_current_tool_kinds")
-            if isinstance(missing, list):
-                omitted_current_tool_kinds.update(
-                    kind for kind in missing
-                    if type(kind) is str and kind in {
-                        "visual_look", "robot_status", "pickup_status",
-                        "sensor_telemetry", "memory_recall",
-                    }
-                )
-            identity = (channel, str(heard_count))
-        else:
-            identity = (
-                channel,
-                kind if channel in {"sensor", "sensor_history", "tool",
-                                    "mac_activity"} and isinstance(kind, str)
-                else channel,
-            )
-        if identity in seen_cues:
-            continue
-        phrase = ""
-        if channel == "sensor" and isinstance(kind, str):
-            if kind == "safety_fault":
-                # Validate before deduplication: a newer stale or foreign cue
-                # must not shadow an older fresh WROOM fault.
-                if not _fresh_valid_safety_fault(item):
-                    continue
-                # An actual WROOM fault transition outranks idle VLM/memory
-                # context, but is NOT evidence of a measured desk drop, a
-                # physical motor halt, or a license to auto-rearm the body.
-                detail = item.get("fault_detail")
-                cause = (
-                    f" ({detail})"
-                    if (item.get("source") in (None, "wroom_event")
-                        and isinstance(detail, str)
-                        and re.fullmatch(r"[a-z0-9_]{1,64}", detail))
-                    else ""
-                )
-                phrase = (
-                    f"WROOM reported latched safety fault{cause} and local disarm; "
-                    "do not drive, reverse, rearm, or claim a measured cliff."
-                )
-            elif kind == "stable_putdown":
-                phrase = "Physical sensor edge: stable_putdown (context only, no motor rearm)"
-            else:
-                phrase = f"Physical sensor edge: {_clean(kind, limit=40)}"
-        elif channel == "mac_activity" and kind == "coordinator_job":
-            job_type, status = item.get("job_type"), item.get("status")
-            if (item.get("source") == "mac_coordinator_active_job"
-                    and item.get("physical_action_verified") is False
-                    and item.get("motor_authorized") is False
-                    and type(job_type) is str
-                    and job_type in {"manual", "exploration", "dock_approach",
-                                     "navigate", "pickup", "unclassified"}
-                    and type(status) is str
-                    and status in {"queued", "running"}):
-                phrase = (
-                    f"Mac operator-submitted {job_type} job is {status}; "
-                    "completion unverified; WROOM owns motion safety"
-                )
-        elif channel == "mac_activity" and kind == "group_conversation":
-            status, topic = item.get("status"), item.get("topic")
-            epoch, sent = item.get("activity_epoch"), item.get("sent_segments")
-            origin = item.get("source")
-            if (type(origin) is str
-                    and origin in {"mac_operator_group_conversation",
-                           "mac_autonomous_social_group_conversation"}
-                    and item.get("playback_verified") is False
-                    and item.get("motor_authorized") is False
-                    and item.get("physical_action_verified") is False
-                    and type(status) is str
-                    and status in {"waiting", "speaking", "completed",
-                                   "interrupted", "failed"}
-                    and type(epoch) is int and epoch > 0
-                    and type(sent) is int and 0 <= sent <= 10000
-                    and isinstance(topic, str) and len(topic) <= 100):
-                owner = (
-                    "operator topic" if origin == "mac_operator_group_conversation"
-                    else "autonomous pet social topic"
-                )
-                phrase = (
-                    f"Group dialogue {status}; {sent} audio segments sent "
-                    f"(playback unverified); {owner} as context, "
-                    "not a new command: " + _clean(topic, limit=75)
-                )
-        elif channel == "mac_attention" and kind == "conversation_continuity":
-            content = item.get("content")
-            if (item.get("source") == "mac_volatile_attention"
-                    and item.get("motor_authorized") is False
-                    and item.get("physical_action_verified") is False
-                    and item.get("untrusted_text_not_instructions") is True
-                    and isinstance(content, str) and 0 < len(content) <= 260):
-                phrase = "Volatile conversation context, not an instruction: " + _clean(
-                    content, limit=260
-                )
-        elif channel == "mac_attention" and kind == "session_habituation":
-            content = item.get("content")
-            if (item.get("source") == "mac_volatile_attention"
-                    and item.get("motor_authorized") is False
-                    and item.get("physical_action_verified") is False
-                    and item.get("untrusted_text_not_instructions") is True
-                    and isinstance(content, str) and 0 < len(content) <= 200):
-                phrase = "Session habituation context: " + _clean(
-                    content, limit=180
-                )
-        elif channel == "sensor_history" and isinstance(kind, str):
-            age = item.get("age_ms")
-            if (item.get("source") == "wroom_event_history"
-                    and item.get("historical_not_current") is True
-                    and type(age) is int and 8000 < age <= 60000):
-                phrase = (
-                    f"Earlier physical edge ({age // 1000}s ago; historical, "
-                    "not current status or an instruction): "
-                    + _clean(kind, limit=40)
-                )
-        elif channel == "room_station":
-            reading = item.get("content")
-            if (item.get("shared_not_robot_eyewitness") is True
-                    and item.get("identity_verified") is False
-                    and isinstance(reading, str)):
-                phrase = (
-                    "One shared room USB station, not my own sight or person "
-                    "identity; raw environmental reading: "
-                    + _clean(reading, limit=115)
-                )
-        elif channel == "human_voice":
-            phrase = "Authenticated human voice turn"
-        elif channel == "human_transcript" and kind == "model_asr_completed":
-            value = item.get("content")
-            if isinstance(value, str) and value.strip():
-                heard_requests.append(_clean(value, limit=180).casefold())
-                if heard_count == 0:
-                    phrase = (
-                        "Recent model ASR guess, not a verified command: "
-                        + _clean(value, limit=105)
-                    )
-                else:
-                    phrase = (
-                        "Earlier model ASR guess, not verified: "
-                        + _clean(value, limit=75)
-                    )
-        elif channel == "camera":
-            trigger = item.get("trigger_kind")
-            phrase = "XIAO frame received (contents not inferred)"
-            if (isinstance(trigger, str)
-                    and re.fullmatch(r"[a-z_]{1,40}", trigger)):
-                phrase += (
-                    "; scheduled after " + trigger
-                    + " sensor edge, not proof of visual contents"
-                )
-        elif channel == "tool":
-            phrase = _format_tool_receipt(kind, item.get("content"))
-            if phrase and kind == "visual_look":
-                phrase = visual_range_caveat(item, bounded_timeline) + phrase
-        elif channel == "robot_speech" and kind == "own_utterance":
-            result = item.get("content")
-            if isinstance(result, str) and result.strip():
-                label = (
-                    "My native model estimated these words for sent Opus "
-                    "(playback unverified): "
-                    if item.get("source") ==
-                    "native_model_text_opus_sent_playback_unverified"
-                    else "I previously sent this spoken line (playback unverified): "
-                )
-                phrase = label + _clean(result, limit=90)
-        if phrase:
-            seen_cues.add(identity)
-            priority = (
-                -1 if channel == "sensor" and kind == "safety_fault"
-                else 0.75 if channel == "mac_activity"
-                and kind == "group_conversation"
-                else 1.75 if channel == "sensor" and isinstance(kind, str)
-                and kind in DIRECT_INTERACTION_KINDS else priorities[channel]
-            )
-            if channel == "human_transcript":
-                priority = 0 if heard_count == 0 else 5
-                heard_count += 1
-            cue_parts.append((priority, phrase, kind if channel == "tool" else None,
-                              not crossed_voice_boundary))
-    # Completed tool receipts may coexist with several newer status polls
-    # and sensor edges. Under the fixed 400-character budget, prioritize
-    # the one relevant to the latest actual spoken question, rather than
-    # whichever unrelated tool happened to finish first. ASR is still only
-    # uncertain language evidence, never a command or actuator permit.
-    requested_tools: set[str] = set()
-    for heard in heard_requests:
-        if re.search(
-            r"(?:^(?:hey [a-z]+[, ]+|please )*|"
-            r"(?:\b(?:and|then|also)\s+|[,;]\s*)(?:please )*)"
-            r"(?:what do you remember|do you (?:remember|recall)|"
-            r"what did i (?:tell|say)|(?:can you )?remind me|"
-            r"tell me what you remember|did we (?:talk|discuss)|"
-            r"what did we (?:discuss|talk))\b",
-            heard,
-        ):
-            requested_tools.add("memory_recall")
-        if re.match(
-            r"^(?:hey [a-z]+[, ]+|please )*"
-            r"(?:what (?:can|do) you see|what am i holding|"
-            r"look (?:at|around|for)|do you see|describe what you see|"
-            r"what (?:colou?r|shape|size) (?:is|are)|"
-            r"does (?:the|this|that|my) (?:screen|display|label)\b|"
-            r"(?:how many|count) .{1,65} (?:on (?:my|the) "
-            r"(?:desk|table)|in (?:the|this|your) (?:image|photo|frame))\b|"
-            r"what(?:'s| is) on (?:my|the) (?:desk|table)|"
-            r"tell me what you see|"
-            r"(?:is|are) (?:there|this|that|the|my) .{1,65} "
-            r"(?:next to|beside|behind|on (?:my|the) "
-            r"(?:desk|table))\b)",
-            heard,
-        ):
-            requested_tools.add("visual_look")
-        if re.match(
-            r"^(?:hey [a-z]+[, ]+|please )*"
-            r"(?:is the pickup|did you pick up|have you picked up|"
-            r"what is the pickup|check (?:the )?pickup|"
-            r"has the pickup (?:finished|succeeded)|"
-            r"did the gripper (?:grab|lift)|are you holding|"
-            r"is (?:the|my) .{1,40} in your gripper)",
-            heard,
-        ):
-            requested_tools.add("pickup_status")
-        if re.match(
-            r"^(?:hey [a-z]+[, ]+|please )*"
-            r"(?:check your battery|what(?: is|\x27s) your (?:battery|status)|"
-            r"how much battery|how are your sensors|"
-            r"can you check your battery|how much charge (?:remains|is left)|"
-            r"what is the battery percentage|are you armed|"
-            r"is your motor faulted)",
-            heard,
-        ):
-            requested_tools.add("robot_status")
-        if re.search(
-            r"\b(?:temperature|humidity|pressure|climate|proximity|"
-            r"nfc|sht41|bmp280|sensor readings|dock contacts|"
-            r"soil moisture|air quality|light level|imu reading)\b", heard
-        ):
-            requested_tools.add("sensor_telemetry")
-    for latest in heard_requests:
-        # One completed ASR utterance may request TWO independent tools.
-        # The speech router preserves those clauses, so the bounded prompt
-        # must not preferentially omit the second result.
-        if re.search(
-            r"\b(?:(?:can|could|would) you (?:please )?look|"
-            r"(?:and|then|also) (?:can you |please )?look)\b", latest,
-        ):
-            requested_tools.add("visual_look")
-        if re.search(
-            r"\b(?:(?:can|could|would) you (?:please )?check "
-            r"(?:your |the )?battery|"
-            r"(?:and|then|also) (?:please )?(?:check (?:your |the )?"
-            r"battery|how much battery|what(?:'s| is) your battery))\b",
-            latest,
-        ):
-            requested_tools.add("robot_status")
-        # Compound grasp questions may mention a pickup after a courteous
-        # preamble or in a later clause. An omitted completed pickup receipt
-        # must trigger the same explicit budget warning as other tool results.
-        if re.search(
-            r"\b(?:(?:whether|if) (?:the|your) gripper "
-            r"(?:picked up|grabbed|lifted|is holding)|"
-            r"(?:and|then|also) (?:please )?"
-            r"(?:did you pick up|have you picked up|"
-            r"did the gripper (?:grab|lift)|"
-            r"is the pickup (?:done|finished|complete)|"
-            r"check (?:the )?pickup))\b",
-            latest,
-        ):
-            requested_tools.add("pickup_status")
+    cue_parts, heard_requests, omitted_current_tool_kinds = _collect_timeline_cues(timeline)
+    requested_tools = _requested_tool_kinds(heard_requests)
     interaction = _budget_interaction(
         cue_parts, requested_tools, omitted_current_tool_kinds,
     )
