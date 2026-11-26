@@ -102,16 +102,34 @@ async def test_live_doctor_exercises_camera_context_and_readonly_visual_tool():
                for _, path in calls)
 
 
-@pytest.mark.parametrize("fault", ["wrong_head", "old_frame", "raw_context", "invalid_tool"])
-async def test_live_doctor_fails_closed_on_mismatched_real_evidence(fault):
-    transport, _ = simulated_mac(**{fault: True})
+@pytest.mark.parametrize(
+    ("fault", "diagnostic", "requests_allowed"),
+    [
+        ("wrong_head", "motor backend identity", 1),
+        ("old_frame", "frame expired", 3),
+        ("raw_context", "source context contract", 4),
+        ("invalid_tool", "actuator boundary invalid", 5),
+    ],
+)
+async def test_live_doctor_fails_closed_on_mismatched_real_evidence(
+    fault, diagnostic, requests_allowed,
+):
+    transport, calls = simulated_mac(**{fault: True})
     async with httpx.AsyncClient(
         base_url="http://127.0.0.1:8765", transport=transport,
     ) as client:
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=diagnostic):
             await inspect_live_media(
                 configured(), "robot-01", look=True, client=client,
             )
+    expected = [
+        ("GET", "/v1/robots/robot-01/status"),
+        ("GET", "/v1/pet/robot-01/vision-status"),
+        ("GET", "/v1/pet/robot-01/omni-frame"),
+        ("GET", "/v1/pet/robot-01/interaction-context"),
+        ("POST", "/v1/pet/robot-01/look"),
+    ]
+    assert calls == expected[:requests_allowed]
 
 
 async def test_live_doctor_owned_client_ignores_proxy_environment(monkeypatch):
@@ -147,15 +165,18 @@ async def test_live_doctor_owned_client_ignores_proxy_environment(monkeypatch):
     ]
 
 
-async def test_live_doctor_refuses_simulation_and_unconsented_camera():
+@pytest.mark.parametrize(("mode", "consent"), [("simulation", True), ("hardware", False)])
+async def test_live_doctor_refuses_simulation_and_unconsented_camera(mode, consent):
     config = configured()
-    config.mode = "simulation"
-    with pytest.raises(ValueError):
-        await inspect_live_media(config, "robot-01")
-    config.mode = "hardware"
-    config.voice_vision_tools_enabled = False
-    with pytest.raises(ValueError):
-        await inspect_live_media(config, "robot-01")
+    config.mode = mode
+    config.voice_vision_tools_enabled = consent
+    transport, calls = simulated_mac()
+    async with httpx.AsyncClient(
+        base_url="http://127.0.0.1:8765", transport=transport,
+    ) as client:
+        with pytest.raises(ValueError, match="hardware vision consent"):
+            await inspect_live_media(config, "robot-01", look=True, client=client)
+    assert calls == []
 
 
 async def test_real_camera_cli_commands_route_to_existing_mac_authorities(
