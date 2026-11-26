@@ -5,6 +5,8 @@ These checks do not qualify printed dimensions or powered charging.
 import re
 from pathlib import Path
 
+import pytest
+
 SOURCE = (
     Path(__file__).resolve().parents[2]
     / "docs/cad/remixes/dock/dock_passive_fit.scad"
@@ -32,7 +34,8 @@ def test_dock_rail_preserves_selected_straight_channel_and_entry_flare():
     # At y=0 both rail faces shift OUTWARD equally, preserving wall thickness.
     assert "[inner_wall_x - guide_wall_mm - entry_flare_each_mm, 0]" in source
     assert "[inner_wall_x - entry_flare_each_mm, 0]" in source
-    assert abs(value("entry_flare_run_mm") - 37) < 1e-6
+    assert (0 < value("entry_flare_run_mm") < value("entry_coupon_length_mm")
+            < value("guide_run_mm"))
     assert "[inner_wall_x, entry_flare_run_mm]" in source
     assert "[inner_wall_x - guide_wall_mm, entry_flare_run_mm]" in source
     assert (outside - 2 * (inner_x - flare)) > channel
@@ -47,21 +50,30 @@ def test_dock_geometry_remains_explicitly_passive():
     assert "no AprilTag, stop or charging contacts" in source
 
 
-def test_dock_mesh_clearances_with_openscad(tmp_path):
+@pytest.mark.parametrize("flare_run_override", [None, 37.5, 20])
+def test_dock_mesh_clearances_with_openscad(tmp_path, flare_run_override):
     """Measure actual exported triangles, not only matching SCAD expressions."""
     import shutil
     import struct
     import subprocess
 
-    import pytest
-
     openscad = shutil.which("openscad")
     if not openscad:
         pytest.skip("OpenSCAD not installed on this runner")
+    source = SOURCE.read_text()
+    cad = SOURCE
+    if flare_run_override is not None:
+        source, replacements = re.subn(
+            r"^entry_flare_run_mm\s*=\s*[0-9.]+\s*;",
+            f"entry_flare_run_mm = {flare_run_override};", source, flags=re.M,
+        )
+        assert replacements == 1
+        cad = tmp_path / "changed_entry.scad"
+        cad.write_text(source, encoding="utf-8")
     target = tmp_path / "entry.stl"
     subprocess.run(
         [openscad, "--export-format", "binstl", "-o", str(target),
-         "-D", 'part="dock_rail_entry_coupon"', str(SOURCE)],
+         "-D", 'part="dock_rail_entry_coupon"', str(cad)],
         check=True, capture_output=True, text=True, timeout=180,
     )
     data = target.read_bytes()
@@ -76,7 +88,6 @@ def test_dock_mesh_clearances_with_openscad(tmp_path):
     highs = [max(vertex[axis] for vertex in points) for axis in range(3)]
     # Do not lock the fit check to the provisional 96 mm track example.
     # Measured robot widths must be able to change without disabling tests.
-    source = SOURCE.read_text()
     def parameter(name):
         match = re.search(
             r"^" + re.escape(name) + r"\s*=\s*([0-9.]+)\s*;",
@@ -93,6 +104,7 @@ def test_dock_mesh_clearances_with_openscad(tmp_path):
     base = parameter("base_thickness_mm")
     height = parameter("guide_height_mm")
     coupon_length = parameter("entry_coupon_length_mm")
+    flare_run = parameter("entry_flare_run_mm")
     inner_x = wall + margin
     outside = width + 2 * clearance + 2 * inner_x
     assert all(abs(a - b) < 0.01 for a, b in zip(
@@ -105,7 +117,7 @@ def test_dock_mesh_clearances_with_openscad(tmp_path):
     # each wall must have its original thickness and measured clearance.
     for y, left_inner in (
         (0, inner_x - wall - flare),
-        (37, inner_x - wall),
+        (flare_run, inner_x - wall),
     ):
         expected = [
             left_inner,
@@ -132,8 +144,6 @@ def test_real_track_measurement_override_preserves_rail_clearance(tmp_path):
     import struct
     import subprocess
 
-    import pytest
-
     executable = shutil.which("openscad")
     if executable is None:
         pytest.skip("OpenSCAD not installed")
@@ -150,16 +160,34 @@ def test_real_track_measurement_override_preserves_rail_clearance(tmp_path):
         struct.unpack_from("<fff", blob, 84 + i * 50 + 12 + j * 12)
         for i in range(faces) for j in range(3)
     ]
-    assert max(p[0] for p in points) == 142
-    for y, expected in ((0, (1, 6, 136, 141)),
-                        (37, (8, 13, 129, 134))):
+    source = SOURCE.read_text()
+    def value(name):
+        match = re.search(r"^" + re.escape(name) + r"\s*=\s*([0-9.]+)\s*;", source, re.M)
+        assert match is not None, name
+        return float(match.group(1))
+
+    clearance = value("side_clearance_each_mm")
+    wall = value("guide_wall_mm")
+    margin = value("wall_outside_margin_mm")
+    flare = value("entry_flare_each_mm")
+    flare_run = value("entry_flare_run_mm")
+    base = value("base_thickness_mm")
+    channel = 112 + 2 * clearance
+    inner_x = wall + margin
+    outside = channel + 2 * inner_x
+    assert max(p[0] for p in points) == pytest.approx(outside, abs=0.01)
+    for y, left_outer in ((0, margin - flare), (flare_run, margin)):
+        expected = (left_outer, left_outer + wall,
+                    outside - left_outer - wall, outside - left_outer)
         xs = sorted({
             round(x, 3) for x, yy, z in points
-            if abs(yy - y) < .001 and z > 3.001
+            if abs(yy - y) < .001 and z > base + .001
         })
-        assert xs == list(expected)
-    # Measured 112 mm tracks + 2 mm each side gives 116 mm straight opening.
-    assert 129 - 13 == 116
+        assert xs == pytest.approx(expected, abs=0.01)
+        # A wider entry is not the final seated lateral clearance.
+        assert xs[2] - xs[1] == pytest.approx(
+            channel + (2 * flare if y == 0 else 0), abs=0.01,
+        )
 
 
 def test_passive_dock_beacon_pair_coupon_preserves_tag_quiet_zone(tmp_path):
@@ -167,8 +195,6 @@ def test_passive_dock_beacon_pair_coupon_preserves_tag_quiet_zone(tmp_path):
     import shutil
     import struct
     import subprocess
-
-    import pytest
 
     openscad = shutil.which("openscad")
     if openscad is None:

@@ -36,6 +36,14 @@ track_outer_width_mm and side_clearance_each_mm to measured values in
 OpenSCAD or Fusion. A 96 mm example outer track width plus 2 mm
 clearance per side creates a 100 mm final channel and a flared entry.
 
+The nominal straight channel is the track width plus twice the side clearance;
+the entry mouth adds twice the entry flare. With the example values, the
+centered, zero-yaw geometric lateral clearance is 9 mm per side at the
+mouth and 2 mm per side in the straight channel. A 5 mm offset is therefore
+only a candidate entry trial, not a proven seating tolerance. Measure the
+actual printed part and robot, including yaw and stopping travel, before
+claiming repeatable passive capture or seating.
+
 This model has no live battery contacts, charging circuit or automatic
 approach motor permission. The high rear backstop is a convenient
 surface for positioning a printed AprilTag board; mark and measure its
