@@ -1,7 +1,9 @@
 """Exercise documented shell expansion and real CLI parsing without hardware."""
 
 import argparse
+import asyncio
 import importlib.util
+import inspect
 import os
 import re
 import subprocess
@@ -18,7 +20,7 @@ class ParsedCommand(Exception):
     """Stop immediately after the real parser accepts the documented arguments."""
 
 
-def parse_documented_python_command(script: str, argv: list[str], monkeypatch) -> dict:
+def parse_documented_python_command(script: str, argv: list[str], monkeypatch):
     path = ROOT / "code" / script
     spec = importlib.util.spec_from_file_location("_documented_cli", path)
     assert spec is not None and spec.loader is not None
@@ -43,8 +45,11 @@ def parse_documented_python_command(script: str, argv: list[str], monkeypatch) -
                 patch.setattr(module, name, refuse_io)
         patch.setattr(argparse.ArgumentParser, "parse_args", stop_after_parse)
         with pytest.raises(ParsedCommand):
-            module.main()
-    return parsed
+            if inspect.iscoroutinefunction(module.main):
+                asyncio.run(module.main())
+            else:
+                module.main()
+    return module, parsed
 
 
 def shell_block(path: str, needle: str) -> str:
@@ -104,7 +109,9 @@ def test_documented_address_is_one_argument_or_fails_closed(
     assert argv[argv.index(option) + 1] == expected
     script = needle.split()[0]
     assert argv.count(script) == 1
-    parsed = parse_documented_python_command(script, argv[argv.index(script) + 1:], monkeypatch)
+    _, parsed = parse_documented_python_command(
+        script, argv[argv.index(script) + 1:], monkeypatch,
+    )
     assert parsed[option[2:].replace("-", "_")] == expected
     if script == "firmware/head/private_config.py":
         assert parsed["board"] == needle.split()[-1]
@@ -124,3 +131,45 @@ def test_documented_address_is_one_argument_or_fails_closed(
     assert result.returncode != 0
     assert not result.stdout
     assert variable in result.stderr
+
+@pytest.mark.parametrize(
+    ("script", "seconds", "filename"),
+    [
+        ("bench_head_camera.py", 60, "sense-camera-bench-local.json"),
+        ("bench_head_privacy.py", 15, "sense-boot-privacy-local.json"),
+        ("bench_head_audio.py", 60, "sense-aec-reference-local.json"),
+    ],
+)
+def test_documented_sense_bench_cli_and_private_report(
+    tmp_path, monkeypatch, script, seconds, filename,
+):
+    code = tmp_path / "code"
+    code.mkdir()
+    script = f"scripts/{script}"
+    command = shell_block("code/firmware/head/sense/README.md", script)
+    # The real shell expands the documented arguments, but never starts uv.
+    result = subprocess.run(
+        ["bash", "-c", 'set -e\nuv() { printf "%s\\n" "$@"; }\n' + command],
+        cwd=tmp_path, capture_output=True, text=True, check=False, timeout=5,
+    )
+    assert result.returncode == 0, result.stderr
+    argv = result.stdout.splitlines()
+    assert argv[:3] == ["run", "--no-sync", "python"]
+    assert argv[3] == script
+    monkeypatch.chdir(code)
+    module, parsed = parse_documented_python_command(script, argv[4:], monkeypatch)
+    assert parsed["robot"] == "robot-01"
+    assert parsed["config"] == Path("config/local.toml")
+    assert parsed["seconds"] == seconds
+    if script == "scripts/bench_head_camera.py":
+        assert parsed["stream"] is True
+        assert parsed["status_period"] == 0.2
+
+    report = parsed["report"]
+    # Exercise the actual privacy guard, not merely argparse acceptance.
+    module.preflight_private_report(report)
+    assert report == Path("data/private/head-bench") / filename
+    assert report.parent.stat().st_mode & 0o777 == 0o700
+    assert not report.exists()
+    with pytest.raises(ValueError, match="parent traversal"):
+        module.preflight_private_report(Path("../docs/records/reports") / filename)

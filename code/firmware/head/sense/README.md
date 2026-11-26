@@ -62,8 +62,12 @@ cd code
 uv run --no-sync python scripts/bench_head_camera.py \
   --config config/local.toml --robot robot-01 --seconds 60 \
   --stream --status-period 0.2 \
-  --report ../docs/records/reports/sense-camera-bench-local.json
+  --report data/private/head-bench/sense-camera-bench-local.json
 ```
+
+All three Sense bench commands write to the ignored `code/data/private/head-bench/`
+directory (created with mode 0700 if missing). Choose a new report filename for
+repeat trials; existing files and paths containing `..` are rejected.
 
 It makes authenticated GET requests only, records JPEG and body status
 timing without writing any pictures or voice, and rejects stale/replayed
@@ -207,7 +211,7 @@ and the normal authenticated Mac head transport configured, run:
 cd code
 uv run --no-sync python scripts/bench_head_privacy.py \
   --config config/local.toml --robot robot-01 --seconds 15 \
-  --report ../docs/records/reports/sense-boot-privacy-local.json
+  --report data/private/head-bench/sense-boot-privacy-local.json
 ```
 
 The bench first waits for successful microphone reads, then prompts for the
@@ -239,7 +243,7 @@ head transport, run this read only check without capturing microphone audio:
 cd code
 uv run --no-sync python scripts/bench_head_audio.py \
   --config config/local.toml --robot robot-01 --seconds 60 \
-  --report ../docs/records/reports/sense-aec-reference-local.json
+  --report data/private/head-bench/sense-aec-reference-local.json
 ```
 
 The actual `GET /api/audio.reference` receipt includes the Sense boot identity,
@@ -350,8 +354,8 @@ bash scripts/build_head.sh --board sense --private
 ```
 
 Add `--continuous-audio` to the private configuration command only with explicit
-operator consent. For a temporary private AEC capture build, also add
-`--bench-aec-capture --aec-delay-ms 0` and follow the per-capture physical BOOT
+operator consent. For a temporary private AEC capture build, all three flags
+are required: `--continuous-audio --bench-aec-capture --aec-delay-ms 0` and follow the per-capture physical BOOT
 consent procedure in the [AEC guide](../../../../docs/guides/sense-aec-port.md).
 Neither option is implied by `--private`. The default 90 ms reference delay
 is not a measured acoustic calibration.
