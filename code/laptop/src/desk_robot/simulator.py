@@ -10,7 +10,8 @@ from io import BytesIO
 import numpy as np
 from PIL import Image, ImageDraw
 
-from .transport import HeadError, drive_duration_ms, expected_ack, validate_command
+from .command_framing import drive_arguments, expected_ack, validate_command
+from .transport import HeadError
 from .vision import Detection, SceneChange
 
 # Mirror guarded WROOM timing for development only; the body owns real safety.
@@ -160,9 +161,7 @@ class SimulatedHead:
         ):
             self._last_control_ms = now
         if op == "drive":
-            args = command.split()[1:]
-            left, right = map(int, args[:2])
-            duration = drive_duration_ms(command)
+            left, right, duration = drive_arguments(command)
             self._motor = (left, right)
             self._drive_deadline_ms = now + duration
             if left or right:
