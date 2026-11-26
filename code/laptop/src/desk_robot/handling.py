@@ -118,6 +118,25 @@ def mpu6050_temperature_raw(body: dict) -> int | None:
     return value
 
 
+def _gravity_reference(
+    samples: list[tuple[float, float, float]],
+) -> tuple[float, float, float] | None:
+    """Normalize the mean of eight validated stationary accelerometer samples."""
+    x, y, z = (sum(v[i] for v in samples) / 8 for i in range(3))
+    norm = math.hypot(x, y, z)
+    if not 0.91 <= norm <= 1.09:
+        return None
+    return x / norm, y / norm, z / norm
+
+
+def _relative_tilt_degrees(
+    acceleration: tuple[float, ...], reference: tuple[float, float, float], g: float,
+) -> float:
+    """Angle to the unit baseline; caller has already gated gravity magnitude."""
+    dot = sum(a * b for a, b in zip(acceleration, reference, strict=True)) / g
+    return math.degrees(math.acos(max(-1.0, min(1.0, dot))))
+
+
 @dataclass
 class HandlingGate:
     """Relative upright baseline and bounded event edges, not motion authority."""
@@ -451,11 +470,8 @@ class HandlingGate:
             self.startup_samples.append(acceleration)
             self.startup_gyro_samples.append(gyro_axes)
             if len(self.startup_samples) == 8:
-                x, y, z = (
-                    sum(v[i] for v in self.startup_samples) / 8 for i in range(3)
-                )
-                norm = math.hypot(x, y, z)
-                if not 0.91 <= norm <= 1.09:
+                reference = _gravity_reference(self.startup_samples)
+                if reference is None:
                     # Conflicting stationary vectors invalidate calibration,
                     # not the identity of the conversion just consumed.
                     previous = (self.last_boot_id, self.last_sample_ms)
@@ -477,7 +493,7 @@ class HandlingGate:
                     self.startup_samples.clear()
                     self.startup_gyro_samples.clear()
                     return ()
-                self.reference = (x / norm, y / norm, z / norm)
+                self.reference = reference
                 self.gyro_bias_dps = mean_gyro
                 self.startup_samples.clear()
                 self.startup_gyro_samples.clear()
@@ -507,8 +523,7 @@ class HandlingGate:
             self.tilt_hits = 0
             return tuple(events)
 
-        dot = sum(a*b for a, b in zip(acceleration, self.reference, strict=True)) / g
-        angle = math.degrees(math.acos(max(-1.0, min(1.0, dot))))
+        angle = _relative_tilt_degrees(acceleration, self.reference, g)
         tilted = angle >= tilt_threshold_deg
         self.tilt_hits = min(2, self.tilt_hits + 1) if tilted else 0
         if self.tilt_hits >= 2 and not self.tilt_active:
