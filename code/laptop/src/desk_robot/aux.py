@@ -26,6 +26,22 @@ def _array(value: object, length: int, predicate: Callable[[object], bool]) -> b
     )
 
 
+def _valid_angle_acquisition(angles: dict[str, Any]) -> bool:
+    """Check optional AS5600 wire clocks against WROOM's 350 ms lifetime."""
+    if "boot_id" in angles and not is_int_in_range(angles["boot_id"], 1, 0xffffffff):
+        return False
+    if "seq" not in angles and "age_ms" not in angles:
+        return True  # Legacy raw diagnostics have no acquisition clock.
+    seqs, ages = angles.get("seq"), angles.get("age_ms")
+    if (not _array(seqs, 3, lambda n: is_uint(n, 0xffffffff))
+            or not _array(ages, 3, lambda n: is_uint(n, 0xffffffff))):
+        return False
+    return all(
+        not angles["valid_mask"] & (1 << i) or (seqs[i] != 0 and ages[i] < 350)
+        for i in range(3)
+    )
+
+
 def _fresh_aux_acquisition(
     reading: object, *, previous_seq: int | None, max_age_ms: int,
 ) -> bool:
@@ -145,6 +161,8 @@ def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
             or any(valid & (1 << i) and angles["magnet"][i] != 0x20
                    for i in range(3))):
         raise ValueError("Invalid AS5600 magnetic angle source")
+    if not _valid_angle_acquisition(angles):
+        raise ValueError("Invalid AS5600 acquisition provenance")
 
     jaw_valid = force.get("jaw_valid")
     belly_valid = force.get("belly_valid")

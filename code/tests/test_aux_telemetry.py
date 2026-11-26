@@ -540,3 +540,32 @@ def test_claimed_valid_aux_voltage_bounds(value):
     data = sample()
     data["power"]["cell_mv"] = value
     assert validate_aux(data, "robot-01")["power"]["fuel_valid"] is True
+
+@pytest.mark.parametrize("patch", [
+    {"seq": [0, 2, 0]}, {"seq": [True, 2, 0]}, {"seq": [1, 2]},
+    {"seq": [1, float("nan"), 0]}, {"age_ms": [350, 10, 0]},
+    {"age_ms": [349, 350, 0]}, {"age_ms": [float("inf"), 10, 0]},
+    {"age_ms": [349, 10, -1]}, {"age_ms": None}, {"boot_id": 0},
+    {"boot_id": True}, {"boot_id": float("inf")},
+])
+def test_angle_acquisition_rejects_invalid_metadata(patch):
+    data = sample()
+    data["angles"].update({
+        "valid_mask": 3, "magnet": [32, 32, 0],
+        "seq": [1, 2, 0], "age_ms": [349, 10, 0], "boot_id": 7,
+    })
+    data["angles"].update(patch)
+    with pytest.raises(ValueError, match="AS5600"):
+        validate_aux(data, "robot-01")
+
+
+def test_angle_acquisition_accepts_legacy_and_invalid_channel_diagnostics():
+    data = sample()
+    assert validate_aux(data, "robot-01") == data
+    data["angles"].update({
+        "seq": [1, 0, 0], "age_ms": [349, 0xffffffff, 0], "boot_id": 7,
+    })
+    assert validate_aux(data, "robot-01") == data
+    del data["angles"]["age_ms"]
+    with pytest.raises(ValueError, match="AS5600"):
+        validate_aux(data, "robot-01")
