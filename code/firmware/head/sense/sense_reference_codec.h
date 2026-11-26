@@ -153,6 +153,7 @@ private:
     std::mutex bench_mutex_;
     desk_robot::FreshBenchPcmConsent bench_consent_{};
     std::atomic<uint64_t> bench_capture_generation_{0};
+    bool bench_start_pending_ = false;  // reserved across unlocked allocation/wipe
     bool bench_transfer_active_ = false;  // one RAM transfer at a time
     desk_robot::SensePcmWindow bench_window_{};
     desk_robot::SenseSpeakerActivity::Snapshot bench_speaker_at_start_{};

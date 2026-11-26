@@ -421,12 +421,13 @@ void SenseReferenceCodec::GrantBenchPcmConsent() {
 }
 
 bool SenseReferenceCodec::BeginBenchPcmCapture(uint32_t expected_privacy_epoch) {
-    std::lock_guard<std::mutex> lock(bench_mutex_);
+    std::unique_lock<std::mutex> lock(bench_mutex_);
     const auto privacy_changed = [&] {
         return microphone_privacy_muted_.load(std::memory_order_acquire) ||
             microphone_privacy_epoch_.load(std::memory_order_acquire) != expected_privacy_epoch;
     };
-    if (bench_window_.occupied() || bench_transfer_active_ || privacy_changed()) return false;
+    if (bench_start_pending_ || bench_window_.occupied() || bench_transfer_active_ ||
+        privacy_changed()) return false;
     // Consume before allocation or timer setup: failed START must not
     // authorize a second network request without another physical gesture.
     if (!bench_consent_.Take(esp_timer_get_time())) return false;
@@ -437,26 +438,35 @@ bool SenseReferenceCodec::BeginBenchPcmCapture(uint32_t expected_privacy_epoch) 
         args.name = "sense_pcm_bench";
         if (esp_timer_create(&args, &bench_expiry_timer_) != ESP_OK) return false;
     }
-    // Private opt-in build only. Never allocate a large audio buffer
-    // during normal Xiaozhi operation or fall back to internal DMA RAM.
+    // Reserve one START before releasing the realtime PDM owner's mutex.
+    // An abort or privacy change during allocation must not reopen capture.
+    const auto start_generation = bench_capture_generation_.load(std::memory_order_acquire);
+    bench_start_pending_ = true;
+    lock.unlock();
+    // Private opt-in build only; allocate and zero PSRAM outside the lock.
     auto* data = static_cast<int16_t*>(heap_caps_malloc(
         desk_robot::SensePcmWindow::kBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-    if (!data) return false;
-    if (privacy_changed()) {
-        ReleaseBenchPcmCapture(data);
+    if (data) std::fill_n(data, desk_robot::SensePcmWindow::kFrames * 2, 0);
+    lock.lock();
+    const auto release_unpublished = [&](int16_t* unused) {
+        // Keep START reserved until even the secure wipe has finished.
+        lock.unlock();
+        ReleaseBenchPcmCapture(unused);
+        lock.lock();
+        bench_start_pending_ = false;
         return false;
+    };
+    if (!data || privacy_changed() ||
+        start_generation != bench_capture_generation_.load(std::memory_order_acquire)) {
+        return release_unpublished(data);
     }
-    // No stale heap data may be delivered if a partial callback occurs.
-    std::fill_n(data, desk_robot::SensePcmWindow::kFrames * 2, 0);
     const int64_t now = esp_timer_get_time();
     if (!bench_window_.begin(data, now)) {
-        ReleaseBenchPcmCapture(data);
-        return false;
+        return release_unpublished(data);
     }
     (void)esp_timer_stop(bench_expiry_timer_); // harmless if not active
     if (esp_timer_start_once(bench_expiry_timer_, 12'000'000) != ESP_OK) {
-        ReleaseBenchPcmCapture(bench_window_.discard());
-        return false;
+        return release_unpublished(bench_window_.discard());
     }
     bench_started_us_ = now;
     {
@@ -473,11 +483,11 @@ bool SenseReferenceCodec::BeginBenchPcmCapture(uint32_t expected_privacy_epoch) 
             std::lock_guard<std::mutex> reference_lock(reference_mutex_);
             speaker_activity_.EndWindow(bench_speaker_at_start_);
         }
-        ReleaseBenchPcmCapture(bench_window_.discard());
-        return false;
+        return release_unpublished(bench_window_.discard());
     }
     bench_speaker_activity_in_window_ = false;
     bench_capture_generation_.fetch_add(1, std::memory_order_acq_rel);
+    bench_start_pending_ = false;
     return true;
 }
 
