@@ -319,6 +319,7 @@ async def guarded_grasp(
     motion_attempted = False
     previous_target = None
     contact_losses = 0
+    contact_observed_twice = False
     try:
         for angle in grip_angles(
             calibration.grip_open, calibration.grip_closed, calibration.grip_step_deg
@@ -373,6 +374,7 @@ async def guarded_grasp(
                     break
                 if confirmation:
                     # Health or target may change during the final awaited AUX read.
+                    contact_observed_twice = True
                     await confirmed_health(angle, settled=True)
                     if time.monotonic() >= jaw_expires_at:
                         raise OperationError("Jaw ADC evidence expired before contact confirmation")
@@ -384,6 +386,12 @@ async def guarded_grasp(
                     }
         raise GraspLimitation("no confirmed tactile contact within commanded jaw limits")
     except (Exception, asyncio.CancelledError) as failure:
+        # Two in-range conversions indicate a possible held object, even if
+        # the final health receipt was interrupted. Cancellation is not a
+        # release instruction. Leave WROOM HALT/hold authority with the owner.
+        # Propagate cancellation without claiming a successful grasp.
+        if isinstance(failure, asyncio.CancelledError) and contact_observed_twice:
+            raise
         if force_boot_changed or not motion_attempted:
             raise  # No relief across a reboot or before any attempted close.
         # Cancellation also can arrive AFTER a jaw command has moved the servo.
