@@ -133,6 +133,11 @@ class AttentionLedger:
         ]
         state.sensor_edges.clear()
         state.sensor_edges.extend(carry)
+        # Details share the lifetime of their corresponding retained edge.
+        state.sensor_details = {
+            kind: state.sensor_details[kind]
+            for kind, _, _ in carry if kind in state.sensor_details
+        }
         return state.generation
 
     def finish_topic(
@@ -277,6 +282,7 @@ class AttentionLedger:
                 state.sensor_edges[0],
             )
             state.sensor_edges.remove(victim)
+            state.sensor_details.pop(victim[0], None)
         state.sensor_edges.append((kind, at, state.generation))
         if detail is not None:
             state.sensor_details[kind] = detail
