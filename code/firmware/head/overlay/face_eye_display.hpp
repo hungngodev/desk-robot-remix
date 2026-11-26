@@ -1,7 +1,7 @@
 #pragma once
 
 #include <algorithm>
-#include <optional>
+#include <cstdio>
 #include <cstring>
 #include <string>
 
@@ -82,9 +82,9 @@ public:
         if (local_status_ == FaceStatus::kNormal) RememberNormalStatusLocked();
         local_status_ = status;
         if (status == FaceStatus::kNormal) {
-            if (normal_status_ && status_label_)
-                OledDisplay::SetStatus(normal_status_->c_str());
-            normal_status_.reset();
+            if (normal_status_known_ && status_label_)
+                OledDisplay::SetStatus(normal_status_);
+            normal_status_known_ = false;
         } else {
             ApplyPriorityLocked();
         }
@@ -95,7 +95,7 @@ public:
         DisplayLockGuard lock(this);
         if (!lock) return;
         if (local_status_ != FaceStatus::kNormal) {
-            normal_status_ = status;
+            SaveNormalStatusLocked(status);
             return;
         }
         OledDisplay::SetStatus(status);
@@ -126,9 +126,9 @@ public:
     void SetChatMessage(const char* role, const char* content) override {
         DisplayLockGuard lock(this);
         if (!lock) return;
-        subtitle_ = NormalizeSubtitle(content);
-        if (!subtitle_.empty()) RenderEyesLocked({});
-        OledDisplay::SetChatMessage(role, subtitle_.c_str());
+        const char* text = content ? content : "";
+        if (*text) RenderEyesLocked({});
+        OledDisplay::SetChatMessage(role, text);
     }
 
     void RemoveChatMessage(const char* role, const char* content) override {
@@ -136,7 +136,6 @@ public:
         DisplayLockGuard lock(this);
         if (!lock) return;
         OledDisplay::RemoveChatMessage(role, content);
-        if (NormalizeSubtitle(content) == subtitle_) subtitle_.clear();
     }
 
     // Keep actual panel I/O under the existing LVGL lock. A subtitle,
@@ -145,7 +144,7 @@ public:
     void UpdateIdlePower(uint64_t now, bool can_rest, bool sleeping, Apply apply) {
         DisplayLockGuard lock(this);
         if (!lock) return;
-        const bool clear = local_status_ == FaceStatus::kNormal && subtitle_.empty() &&
+        const bool clear = local_status_ == FaceStatus::kNormal && !HasChatMessageLocked() &&
             status_label_ && !lv_obj_has_flag(status_label_, LV_OBJ_FLAG_HIDDEN) &&
             (!low_battery_popup_ || lv_obj_has_flag(low_battery_popup_, LV_OBJ_FLAG_HIDDEN));
         idle_power_.Update(now, can_rest && clear, sleeping, apply);
@@ -154,7 +153,7 @@ public:
     void ShowEyes(const EyeFrame& frame) {
         DisplayLockGuard lock(this);
         if (!lock) return;
-        RenderEyesLocked(FaceStatusBlocksExpression(local_status_) || !subtitle_.empty()
+        RenderEyesLocked(FaceStatusBlocksExpression(local_status_) || HasChatMessageLocked()
                              ? EyeFrame{} : frame);
     }
 
@@ -165,8 +164,19 @@ public:
 
 private:
     void RememberNormalStatusLocked() {
-        if (!normal_status_ && status_label_)
-            normal_status_ = lv_label_get_text(status_label_);
+        if (!normal_status_known_ && status_label_)
+            SaveNormalStatusLocked(lv_label_get_text(status_label_));
+    }
+
+    void SaveNormalStatusLocked(const char* status) {
+        // Status is a short upstream UI label, not a transcript. Never display
+        // a partial (possibly broken UTF-8) status when the bound is exceeded.
+        const int written = std::snprintf(normal_status_, sizeof(normal_status_), "%s", status);
+        if (written < 0 || static_cast<std::size_t>(written) >= sizeof(normal_status_)) {
+            constexpr char fallback[] = "Status unavailable";
+            std::memcpy(normal_status_, fallback, sizeof(fallback));
+        }
+        normal_status_known_ = true;
     }
 
     void ApplyPriorityLocked() {
@@ -184,12 +194,6 @@ private:
             case FaceStatus::kNormal: return;
         }
         OledDisplay::SetStatus(status);
-    }
-
-    static std::string NormalizeSubtitle(const char* content) {
-        std::string text = content ? content : "";
-        std::replace(text.begin(), text.end(), '\n', ' ');
-        return text;
     }
 
     void RenderEyesLocked(EyeFrame frame) {
@@ -241,7 +245,8 @@ private:
     EyeFrame last_{};
     bool frame_known_ = false;
     FaceStatus local_status_ = FaceStatus::kNormal;
-    std::optional<std::string> normal_status_;
-    std::string subtitle_;
+    // A bounded status shadow; Xiaozhi's actual label owns unbounded subtitles.
+    char normal_status_[256] = {};
+    bool normal_status_known_ = false;
 };
 }  // namespace desk_robot

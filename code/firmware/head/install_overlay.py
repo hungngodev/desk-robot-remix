@@ -551,6 +551,23 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
             for path in folder.iterdir():
                 if path.is_file() and path.suffix in (".cc", ".h", ".hpp", ".json", ".md"):
                     files[f"{BOARDS[board]}/{path.name}"] = path.read_bytes()
+        # Query the stock OLED's actual visible subtitle under its existing lock.
+        # Do not duplicate arbitrarily long transcripts in the local eye renderer.
+        path = "main/display/oled_display.h"
+        files[path] = replace_once(
+            (target / path).read_text(),
+            "public:\n    OledDisplay(",
+            """protected:
+    // Call only while holding the existing DisplayLockGuard.
+    bool HasChatMessageLocked() const {
+        return chat_message_label_ &&
+            (!content_right_ || !lv_obj_has_flag(content_right_, LV_OBJ_FLAG_HIDDEN)) &&
+            lv_label_get_text(chat_message_label_)[0] != '\\0';
+    }
+
+public:
+    OledDisplay(""",
+        ).encode()
         # Only Sense has a real playback reference. Permit Xiaozhi's existing
         # ESP-SR AFE device AEC for this exact board, without enabling it for
         # any other profile or modifying the pristine upstream clone.

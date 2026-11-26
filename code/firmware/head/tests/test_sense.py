@@ -40,6 +40,7 @@ class SenseOverlayTests(unittest.TestCase):
         self.root = Path(self.temp.name)
         names = ['main/Kconfig.projbuild', 'main/CMakeLists.txt', 'main/mcp_server.cc',
                  'main/application.cc', 'main/application.h',
+                 'main/display/oled_display.h',
                  'main/audio/audio_codec.cc', 'main/audio/audio_codec.h',
                  'main/audio/audio_service.cc', 'main/audio/audio_service.h',
                  'main/audio/codecs/no_audio_codec.cc',
@@ -77,6 +78,17 @@ class SenseOverlayTests(unittest.TestCase):
         changed = (self.root / path).read_text()
         self.assertIn("SetSenseMicrophonePrivacyMuted", changed)
         self.assertIn("sense_microphone_privacy_muted_", changed)
+        overlay.remove(self.root)
+        self.assertEqual((self.root / path).read_bytes(), original)
+
+    def test_sense_oled_subtitle_accessor_is_reversible(self):
+        path = "main/display/oled_display.h"
+        original = self.original[path]
+        overlay.apply(self.root, "sense")
+        changed = (self.root / path).read_text()
+        self.assertIn("bool HasChatMessageLocked() const", changed)
+        self.assertIn("!lv_obj_has_flag(content_right_, LV_OBJ_FLAG_HIDDEN)", changed)
+        self.assertIn(r"lv_label_get_text(chat_message_label_)[0] != '\0'", changed)
         overlay.remove(self.root)
         self.assertEqual((self.root / path).read_bytes(), original)
 
@@ -949,7 +961,7 @@ int main() {
         self.assertLess(status, idle_mood)
         renderer = (HEAD / "overlay/face_eye_display.hpp").read_text()
         self.assertIn('OledDisplay::SetEmotion("neutral");', renderer)
-        self.assertIn("OledDisplay::SetStatus(normal_status_->c_str());", renderer)
+        self.assertIn("OledDisplay::SetStatus(normal_status_);", renderer)
         self.assertIn("const Action action = board->face_behavior_.update(obs);", face)
         # A model mood is still permitted only through the healthy face owner.
         self.assertGreater(
@@ -2707,18 +2719,32 @@ public:
     }
     virtual void SetChatMessage(const char*, const char* value) {
         DisplayLockGuard lock(this);
+        assert(value);
+        if (!*value) {
+            subtitle_visible_ = false;
+            return;  // pinned 128x64 OLED hides the row but retains its label
+        }
         subtitle_text = value;
         std::replace(subtitle_text.begin(), subtitle_text.end(), '\n', ' ');
+        subtitle_visible_ = true;
     }
     virtual void RemoveChatMessage(const char*, const char* value) {
         DisplayLockGuard lock(this);
         std::string text = value;
         std::replace(text.begin(), text.end(), '\n', ' ');
-        if (text == subtitle_text) subtitle_text.clear();
+        if (text == subtitle_text) {
+            subtitle_text.clear();
+            subtitle_visible_ = false;
+        }
     }
     lv_obj_t* BatteryPopup() const { return low_battery_popup_; }
     std::string emotion_text, subtitle_text;
 protected:
+    bool HasChatMessageLocked() const {
+        assert(lock_depth > 0);
+        return subtitle_visible_ && !subtitle_text.empty();
+    }
+    bool subtitle_visible_ = false;
     lv_obj_t status_storage_;
     lv_obj_t* status_label_ = nullptr;
     lv_obj_t* low_battery_popup_ = nullptr;
@@ -2781,26 +2807,32 @@ int main() {
         resting.UpdateIdlePower(0, true, false, apply);
         resting.UpdateIdlePower(60000, true, false, apply);
         resting.UpdateIdlePower(300000, true, true, apply);
-        assert(modes.size() == 3 && modes.back() == FacePanelMode::kOff);
+        assert(modes.back() == FacePanelMode::kDim);
+        resting.UpdateIdlePower(301000, true, true, apply);
+        assert(modes.size() == 4 && modes.back() == FacePanelMode::kOff);
         resting.SetLocalStatus(FaceStatus::kBodyFault);
-        resting.UpdateIdlePower(300001, true, true, apply);
-        assert(modes.size() == 4 && modes.back() == FacePanelMode::kAwake);
+        resting.UpdateIdlePower(301001, true, true, apply);
+        assert(modes.size() == 5 && modes.back() == FacePanelMode::kAwake);
         resting.SetLocalStatus(FaceStatus::kNormal);
-        resting.UpdateIdlePower(300002, true, true, apply);
-        resting.UpdateIdlePower(360002, true, true, apply);
+        resting.UpdateIdlePower(301002, true, true, apply);
+        resting.UpdateIdlePower(361002, true, true, apply);
+        resting.UpdateIdlePower(362002, true, true, apply);
+        resting.UpdateIdlePower(363002, true, true, apply);
         assert(modes.back() == FacePanelMode::kOff);
         resting.SetChatMessage("user", "wake");
-        resting.UpdateIdlePower(360003, true, true, apply);
+        resting.UpdateIdlePower(363003, true, true, apply);
         assert(modes.back() == FacePanelMode::kAwake);
         resting.SetChatMessage("user", nullptr);
-        resting.UpdateIdlePower(360004, true, true, apply);
-        resting.UpdateIdlePower(420004, true, true, apply);
+        resting.UpdateIdlePower(363004, true, true, apply);
+        resting.UpdateIdlePower(423004, true, true, apply);
+        resting.UpdateIdlePower(424004, true, true, apply);
+        resting.UpdateIdlePower(425004, true, true, apply);
         assert(modes.back() == FacePanelMode::kOff);
         {
             DisplayLockGuard lock(&resting);
             lv_obj_remove_flag(resting.BatteryPopup(), LV_OBJ_FLAG_HIDDEN);
         }
-        resting.UpdateIdlePower(420005, true, true, apply);
+        resting.UpdateIdlePower(425005, true, true, apply);
         assert(modes.back() == FacePanelMode::kAwake);
     }
     desk_robot::LocalEyeDisplay display;
@@ -2832,6 +2864,38 @@ int main() {
     upstream->RemoveChatMessage("assistant", "first\nline");
     display.ShowEyes({true, false, 3, 0});
     assert(!layer->hidden && pupil->x == 7 && mouth->hidden);
+    const std::string long_caption = std::string(1024, 'x') + "\nlast";
+    const std::string stale_caption = std::string(1024, 'x') + "\nold";
+    upstream->SetChatMessage("assistant", long_caption.c_str());
+    assert(layer->hidden && display.subtitle_text == std::string(1024, 'x') + " last");
+    upstream->RemoveChatMessage("assistant", stale_caption.c_str());
+    display.ShowEyes({true, false, 3, 0});
+    assert(layer->hidden);
+    upstream->RemoveChatMessage("assistant", long_caption.c_str());
+    display.ShowEyes({true, false, 3, 0});
+    assert(!layer->hidden);
+    upstream->SetChatMessage("user", long_caption.c_str());
+    upstream->SetChatMessage("user", nullptr);
+    assert(!display.subtitle_text.empty());
+    display.ShowEyes({true, false, 3, 0});
+    assert(!layer->hidden);
+    const std::string fitting_status(255, 's');
+    const std::string overflow_status(256, 't');
+    display.SetLocalStatus(FaceStatus::kBodyFault);
+    upstream->SetStatus(fitting_status.c_str());
+    assert(display.Status() == "Body safety stop");
+    display.SetLocalStatus(FaceStatus::kNormal);
+    assert(display.Status() == fitting_status);
+    display.SetLocalStatus(FaceStatus::kBodyFault);
+    upstream->SetStatus(overflow_status.c_str());
+    assert(display.Status() == "Body safety stop");
+    display.SetLocalStatus(FaceStatus::kNormal);
+    assert(display.Status() == "Status unavailable");
+    display.SetLocalStatus(FaceStatus::kMicPrivacy);
+    upstream->SetStatus(overflow_status.c_str());
+    upstream->SetStatus("12:34");
+    display.SetLocalStatus(FaceStatus::kNormal);
+    assert(display.Status() == "12:34");
     display.ShowEyes({true, false, 0, 0, 14, 7});
     assert(!mouth->hidden);
     assert(upstream->SetEmotion("happy"));

@@ -500,6 +500,7 @@ class OverlayTests(unittest.TestCase):
         # shortcut synthetic codec is installed in the firmware clone.
         paths += [
             "main/application.cc", "main/application.h",
+            "main/display/oled_display.h",
             "main/audio/audio_service.cc", "main/audio/audio_service.h",
             "main/audio/audio_codec.cc", "main/audio/audio_codec.h",
             "main/audio/codecs/no_audio_codec.cc",
