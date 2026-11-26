@@ -1555,10 +1555,29 @@ class NativeOmniSession:
                 # Keep this distinct from foreign/malformed HTTP 200 data.
                 return index, route, None, True
             return index, route, result, False
+        if not entries:
+            return []
         epoch, request_turn = entries[0][2:]
         if (not self._tool_head_current() or self.closed or not self.connected
                 or self._generation != epoch or self._readonly_turn != request_turn):
             return []
+        allowed = {
+            "look", "status", "power-status", "aux-status",
+            "latest-pickup", "interaction-context", "voice-context",
+        }
+        batch_routes = allowed | {"plan-readonly"}
+        # Defense in depth at the last boundary before the shared tool bridge.
+        # A rejected queue item must not become a model-visible observation.
+        accepted = []
+        for entry in entries:
+            route = entry[0]
+            if not isinstance(route, str) or route not in batch_routes:
+                self.native_readonly_tools_dropped += 1
+                continue
+            accepted.append(entry)
+        if not accepted:
+            return []
+        entries = accepted
         tasks = [
             asyncio.create_task(invoke(index, route, payload))
             for index, (route, payload, _, _) in enumerate(entries)
@@ -1621,10 +1640,6 @@ class NativeOmniSession:
                     # re-enter this SAME pinned HTTP executor with new turn
                     # fences. Never present planner guesses as scene facts.
                     intents = result.get("tools")
-                    allowed = {
-                        "look", "status", "power-status", "aux-status",
-                        "latest-pickup", "interaction-context", "voice-context",
-                    }
                     if (not isinstance(intents, list) or len(intents) > 3
                             or result.get("untrusted_model_selection") is not True
                             or result.get("model_can_arm_motors") is not False
