@@ -38,9 +38,11 @@ def rank_cues(
     # or let malformed labels consume the budget, even on the fast path.
     ordered = sorted(
         (item for item in items
-         if _finite_stamp(item[0])
-         and isinstance(item[1].get("channel"), str)
-         and isinstance(item[1].get("kind"), str)),
+         if type(item) is tuple and len(item) == 2
+         and _finite_stamp(item[0])
+         and type(item[1]) is dict
+         and type(item[1].get("channel")) is str
+         and type(item[1].get("kind")) is str),
         key=lambda item: item[0],
     )
     if len(ordered) <= limit:

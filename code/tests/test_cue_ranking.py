@@ -133,3 +133,33 @@ def test_malformed_kind_does_not_crash_direct_sensor_membership():
     assert kinds(rank_cues(items, limit=1, current_voice_at=0, direct_kinds=DIRECT)) == [
         "touch_tap",
     ]
+
+
+@pytest.mark.parametrize("limit", [3, 20])
+def test_malformed_rows_cannot_interrupt_valid_priority_evidence(limit):
+    items = [
+        cue(1, "sensor", "safety_fault"),
+        cue(2, "human_voice", "vad"),
+        cue(3, "tool", "status"),
+        cue(4, "camera", "frame"),
+        None, (), (5,), (6, None), (7, []), (8, {}, "extra"),
+        [9, {"channel": "tool", "kind": "invalid"}],
+        cue(True, "tool", "bool_stamp"),
+        cue(float("nan"), "tool", "nan_stamp"),
+        cue(float("inf"), "tool", "inf_stamp"),
+        cue(float("-inf"), "tool", "negative_inf_stamp"),
+        cue(10**400, "tool", "overflow_stamp"),
+    ]
+    expected = ["safety_fault", "vad", "status", "frame"][:limit]
+    assert kinds(rank_cues(items, limit=limit, current_voice_at=2, direct_kinds=DIRECT)) == expected
+
+
+@pytest.mark.parametrize("limit", [1, 3])
+def test_ranked_nested_metadata_is_detached_across_calls(limit):
+    items = [cue(1, "sensor", "safety_fault"), cue(2, "camera", "frame")]
+    items[0][1]["content"] = {"values": [1, {"nested": []}]}
+    result = rank_cues(items, limit=limit, current_voice_at=0, direct_kinds=DIRECT)
+    result[0]["content"]["values"][1]["nested"].append("changed")
+    assert rank_cues(items, limit=limit, current_voice_at=0, direct_kinds=DIRECT)[0][
+        "content"
+    ] == {"values": [1, {"nested": []}]}
