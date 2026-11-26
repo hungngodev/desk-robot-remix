@@ -146,7 +146,85 @@ static void callback_overlap_boundary() {
   }
 }
 
+// Use an absolute sample clock: rounding each odd callback independently
+// would introduce artificial drift. Check both channel strides and the tail.
+static void capture_stride_boundary(std::uint32_t stride, std::int64_t start) {
+  constexpr std::size_t guard = 8;
+  constexpr std::int16_t sentinel = 12345;
+  static std::array<std::int16_t, SensePcmWindow::kFrames * 2 + 2 * guard> storage;
+  storage.fill(sentinel);
+  auto* data = storage.data() + guard;
+  std::array<std::int16_t, 2048> mic{}, ref{};
+  const auto mic_sample = [](std::uint32_t n) { return n % 3 ? INT16_MIN : INT16_MAX; };
+  const auto ref_sample = [](std::uint32_t n) { return n % 5 ? 23456 : -23456; };
+  SensePcmWindow capture;
+  assert(capture.begin(data, start));
+  const auto duration = [](std::uint32_t n) { return std::int64_t{n} * 125 / 2; };
+  // An odd callback ending one microsecond before its consent boundary
+  // must not leave even one sample behind.
+  mic.fill(INT16_MIN);
+  ref.fill(INT16_MAX);
+  capture.offer(mic.data(), ref.data(), stride, start + duration(stride) - 1, true);
+  assert(!capture.failed() && capture.frames_received() == 0 && data[0] == sentinel);
+  for (std::uint32_t total = 0; total < SensePcmWindow::kFrames; total += stride) {
+    for (std::uint32_t n = 0; n < stride; ++n) {
+      mic[n] = mic_sample(total + n);
+      ref[n] = ref_sample(total + n);
+    }
+    capture.offer(mic.data(), ref.data(), stride, start + duration(total + stride), true);
+    const auto accepted = std::min(total + stride, SensePcmWindow::kFrames);
+    assert(!capture.failed() && capture.frames_received() == accepted);
+    assert(capture.ready() == (accepted == SensePcmWindow::kFrames));
+    assert(data[2 * accepted] == sentinel);
+  }
+  // Terminal callbacks cannot alter the completed window or its timestamp.
+  capture.offer(mic.data(), ref.data(), stride, std::numeric_limits<std::int64_t>::min(), true);
+  const auto result = capture.take();
+  assert(result.interleaved == data && result.frames == SensePcmWindow::kFrames);
+  assert(result.first_sample_us == start && result.last_sample_us == start + 4000000);
+  assert(!capture.occupied());
+  for (std::uint32_t n = 0; n < result.frames; ++n) {
+    assert(data[2 * n] == mic_sample(n));
+    assert(data[2 * n + 1] == ref_sample(n));
+  }
+  for (std::size_t n = 0; n < guard; ++n) {
+    assert(storage[n] == sentinel && storage[storage.size() - 1 - n] == sentinel);
+  }
+}
+
+static void rejected_frame_count_and_clock_boundaries() {
+  constexpr std::int16_t sentinel = 12345;
+  static std::array<std::int16_t, SensePcmWindow::kFrames * 2> storage;
+  std::array<std::int16_t, 3> mic{INT16_MIN, INT16_MAX, -1}, ref{1, -2, 3};
+  constexpr auto clock_max = std::numeric_limits<std::int64_t>::max();
+  constexpr auto clock_min = std::numeric_limits<std::int64_t>::min();
+  for (auto frames : {0U, 2049U, 2148U, std::numeric_limits<std::uint32_t>::max(), 3U}) {
+    for (auto end : {clock_min, clock_max, std::int64_t{128250}}) {
+      if (frames == 3 && end == 128250) continue;
+      storage.fill(sentinel);
+      SensePcmWindow capture;
+      assert(capture.begin(storage.data(), 1));
+      capture.offer(mic.data(), ref.data(), 3, 188, true);
+      assert(!capture.failed() && capture.frames_received() == 3);
+      // Invalid counts must be rejected before reading the short inputs;
+      // a positive but impossibly late clock must also fail closed.
+      capture.offer(mic.data(), ref.data(), frames, end, true);
+      assert(capture.failed() && !capture.ready() && capture.frames_received() == 3);
+      assert(capture.last_sample_us() == 188);
+      assert(capture.take().interleaved == nullptr);
+      assert(std::all_of(storage.begin() + 6, storage.end(),
+                         [](std::int16_t value) { return value == sentinel; }));
+      assert(capture.discard() == storage.data());
+    }
+  }
+}
+
 int main() {
+  for (auto stride : {1U, 3U, 127U, 319U, 1023U, 2047U, 2048U}) {
+    capture_stride_boundary(stride, 1);
+    capture_stride_boundary(stride, std::numeric_limits<std::int64_t>::max() - 4200000);
+  }
+  rejected_frame_count_and_clock_boundaries();
   callback_overlap_boundary();
   reference_lap_invalidates_capture();
   jpeg_burst_phase_recovery();
