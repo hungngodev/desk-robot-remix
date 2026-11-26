@@ -54,6 +54,8 @@ int main() {
                   std::numeric_limits<int>::max()}) {
         assert(PupilX(d) == PupilX(d < 0 ? -3 : 3));
         assert(PupilY(kOpenHeight, d) == PupilY(kOpenHeight, d < 0 ? -3 : 3));
+        assert(PupilY(std::numeric_limits<int>::min(), d) == 0);
+        assert(PupilY(std::numeric_limits<int>::max(), d) == PupilY(kOpenHeight, d));
     }
     for (int h = kClosedHeight; h <= kOpenHeight; ++h) {
         assert(EyeY(h) >= 0 && EyeY(h) + h <= kSlotHeight);
@@ -64,7 +66,9 @@ int main() {
         for (int d = -kGazeExtent; d <= kGazeExtent; ++d) {
             assert(PupilX(d) >= 0 && PupilX(d) + kPupilWidth <= kEyeWidth);
             assert(PupilY(h, d) >= 0 && PupilY(h, d) + kPupilHeight <= h);
-            if (h != kOpenHeight) assert(PupilY(h, d) == (h - kPupilHeight) / 2);
+            if (d < 0) assert(PupilY(h, d) < PupilY(h, 0));
+            if (d > 0) assert(PupilY(h, d) > PupilY(h, 0));
+            assert(PupilY(h, d) + PupilY(h, -d) == 2 * PupilY(h, 0));
         }
     }
 }

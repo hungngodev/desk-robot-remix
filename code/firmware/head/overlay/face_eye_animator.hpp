@@ -16,6 +16,16 @@ struct EyeFrame {
     uint8_t lid_height = face_eye_geometry::kOpenHeight;
 };
 
+// Preserve an active gaze and blink while the independent mood aperture eases.
+// A zero height leaves the stock glyph/gesture decision unchanged.
+inline EyeFrame BlendMoodAperture(EyeFrame frame, uint8_t height) noexcept {
+    if (height != 0) {
+        frame.visible = true;
+        frame.lid_height = height;
+    }
+    return frame;
+}
+
 namespace face_eye_detail {
 // Integer smoothstep (3t^2 - 2t^3), rounded to the nearest pixel.
 // A zero duration completes immediately; widen before scaling elapsed time.

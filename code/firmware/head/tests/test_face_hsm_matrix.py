@@ -19,6 +19,7 @@ def test_face_hsm_preemption_and_timer_matrix(tmp_path):
     binary = tmp_path / "matrix"
     source.write_text(r"""
 #include "face_eye_animator.hpp"
+#include "face_mood_morph.hpp"
 #include <cassert>
 #include <limits>
 #include <initializer_list>
@@ -113,7 +114,35 @@ static void CheckGazeRetargeting() {
     }
 }
 
+static void CheckMoodAndGazeComposition() {
+    using desk_robot::BlendMoodAperture;
+    using desk_robot::FaceMoodMorph;
+    using desk_robot::face_eye_geometry::PupilY;
+    for (uint32_t start : {0U, 0xffffff80U}) {
+        FaceEyeAnimator eyes;
+        FaceMoodMorph mood;
+        assert(mood.Step(start, "happy", true) == 0);
+        auto frame = BlendMoodAperture(eyes.Step(start + 100U, Motion::kLookUp, true),
+                                      mood.Step(start + 100U, "surprised", true));
+        assert(frame.visible && !frame.closed && frame.y == -3 && frame.lid_height == 8);
+        assert(PupilY(frame.lid_height, frame.y) == 0);
+        frame = BlendMoodAperture(eyes.Step(start + 200U, Motion::kNone, true),
+                                  mood.Step(start + 200U, "surprised", true));
+        assert(frame.y == -3 && frame.lid_height > 8 && frame.lid_height < 14);
+        assert(PupilY(frame.lid_height, frame.y) < PupilY(frame.lid_height, 0));
+        const auto blink = BlendMoodAperture({true, true, 2, -2}, frame.lid_height);
+        assert(blink.closed && blink.x == 2 && blink.y == -2);
+        const auto cancelled = BlendMoodAperture(
+            eyes.Step(start + 201U, Motion::kNone, false),
+            mood.Step(start + 201U, "surprised", false));
+        assert(!cancelled.visible);
+        const auto still = BlendMoodAperture({}, 10);
+        assert(still.visible && still.x == 0 && still.y == 0 && still.lid_height == 10);
+    }
+}
+
 int main() {
+    CheckMoodAndGazeComposition();
     CheckGazeRetargeting();
     CheckBlinkCadence();
     CheckDoubleBlinkCancellation();

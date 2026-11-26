@@ -384,7 +384,7 @@ private:
                             priority_active || !isAwake(board->face_behavior_.state()));
                         const auto height = mood_morph.Step(
                             now_ms, local_mood, face_available && !priority_active);
-                        if (height != 0) eyes = {true, false, 0, 0, height};
+                        eyes = desk_robot::BlendMoodAperture(eyes, height);
                         board->local_eye_display_->ShowEyes(eyes);
                         const auto hsm_state = board->face_behavior_.state();
                         const bool sleeping = hsm_state == State::kSleeping;

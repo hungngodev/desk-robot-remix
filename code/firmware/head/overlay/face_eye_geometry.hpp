@@ -40,6 +40,10 @@ constexpr int PupilX(int offset) {
     return (kEyeWidth - kPupilWidth) / 2 + ClampGazeOffset(offset);
 }
 constexpr int PupilY(int height, int offset) {
-    return (height - kPupilHeight) / 2 + (height == kOpenHeight ? ClampGazeOffset(offset) : 0);
+    // Preserve gaze as the lid opens/closes, within the space the pupil has.
+    const int space = std::max(0, std::clamp(height, kClosedHeight, kOpenHeight) - kPupilHeight);
+    const int center = space / 2;
+    const int extent = std::min(center, static_cast<int>(kGazeExtent));
+    return center + std::clamp(offset, -extent, extent);
 }
 }  // namespace desk_robot::face_eye_geometry
