@@ -72,6 +72,12 @@ async def _bounded_head_reply(coro: Awaitable[_T], *, seconds: float,
         done, _ = await asyncio.wait({task}, timeout=seconds)
         if not done:
             raise TimeoutError(timeout_message)
+        # An independently cancelled child may suppress CancelledError and
+        # return a plausible receipt (or translate it to another exception).
+        # Reject that child's outcome, not the parent's cancellation count:
+        # terminal STOP cleanup may run inside a cancelling parent.
+        if isinstance(task, asyncio.Task) and task.cancelling():
+            raise asyncio.CancelledError
         return await task
     finally:
         if not task.done():

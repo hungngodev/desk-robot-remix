@@ -93,3 +93,62 @@ async def test_swallowed_cancellation_cannot_continue_running_operation():
 @pytest.mark.asyncio
 async def test_active_operation_may_continue():
     require_active_operation("running")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("translated_error", [False, True])
+async def test_cancelled_child_cannot_publish_a_late_reply(translated_error):
+    entered = asyncio.Event()
+
+    async def adapter():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            if translated_error:
+                raise RuntimeError("adapter translated cancellation") from None
+            return {"ok": True}
+
+    child = asyncio.create_task(adapter())
+    waiter = asyncio.create_task(
+        _bounded_head_reply(child, seconds=1, timeout_message="timeout")
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        child.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await waiter
+    finally:
+        await asyncio.gather(child, waiter, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_bounded_reply_accepts_uncancelled_future():
+    future = asyncio.get_running_loop().create_future()
+    future.set_result({"ok": True})
+    assert await _bounded_head_reply(future, seconds=1, timeout_message="timeout") == {
+        "ok": True
+    }
+
+
+@pytest.mark.asyncio
+async def test_cancelled_parent_can_await_fresh_cleanup_reply():
+    entered = asyncio.Event()
+
+    async def cleanup():
+        return {"ok": True}
+
+    async def worker():
+        entered.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            assert await _bounded_head_reply(cleanup(), seconds=1, timeout_message="timeout") == {
+                "ok": True
+            }
+
+    task = asyncio.create_task(worker())
+    await asyncio.wait_for(entered.wait(), 1)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
