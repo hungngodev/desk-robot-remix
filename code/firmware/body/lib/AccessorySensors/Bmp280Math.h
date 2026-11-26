@@ -15,7 +15,10 @@ inline std::uint16_t bmp_u16(const std::uint8_t* v) {
   return static_cast<std::uint16_t>(v[0] | (static_cast<unsigned>(v[1]) << 8));
 }
 inline std::int16_t bmp_s16(const std::uint8_t* v) {
-  return static_cast<std::int16_t>(bmp_u16(v));
+  // Decode the two's-complement register without out-of-range signed
+  // narrowing (implementation-defined in C++17).
+  const std::int32_t word = bmp_u16(v);
+  return static_cast<std::int16_t>(word >= 32768 ? word - 65536 : word);
 }
 inline bool bmp280_trim(const std::uint8_t* b, Bmp280Trim& out) {
   if (!b) return false;
@@ -45,6 +48,8 @@ inline bool bmp280_compensate(const Bmp280Trim& d, std::uint32_t raw_t,
                              unsigned& pressure_pa) {
   if (!d.t1 || !d.p1 || raw_t == 0x80000U || raw_p == 0x80000U ||
       raw_t > 0xfffffU || raw_p > 0xfffffU) return false;
+  // Bosch DS001 rev 1.26 section 8.1, not the fixed-point formula.
+  // Keep fine in double to avoid integer overflow for arbitrary trim words.
   const double v1 = (static_cast<double>(raw_t) / 16384.0 -
                      d.t1 / 1024.0) * d.t2;
   const double term = static_cast<double>(raw_t) / 131072.0 - d.t1 / 8192.0;

@@ -6,6 +6,7 @@
 #include <iostream>
 #include <stdexcept>
 #define CHECK(x) do { if (!(x)) throw std::runtime_error(#x); } while (false)
+#include "Bmp280RailTests.h"
 // Verify quantization against exact rational intervals, not a second copy
 // of the production division. All intermediate arithmetic is signed 64-bit.
 static void check_floor(std::int64_t actual, std::int64_t numerator,
@@ -392,6 +393,8 @@ int main() {
     check_accessory_frame_integrity();
     check_simultaneous_gesture_clipping();
     check_register_precision();
+    check_bmp280_register_rails();
+    check_bmp280_mixed_coefficient_rails();
     check_bmp280_boundaries();
     check_bmp280_zero_divisor();
     check_bmp280_trim_registers();
