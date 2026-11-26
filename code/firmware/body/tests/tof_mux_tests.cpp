@@ -399,9 +399,43 @@ static void checked_dual_mux_deselect_after_transfer_error() {
   }
 }
 
+static void checked_mux_staggered_nacks() {
+  const auto idle = [] { return true; };
+  for (unsigned accessory = 0; accessory < 8; ++accessory) {
+    for (unsigned range = 0; range < 8; ++range) {
+      MuxWriteProbe wire;
+      const auto accessory_mask = static_cast<std::uint8_t>(1U << accessory);
+      const auto range_mask = static_cast<std::uint8_t>(1U << range);
+      CHECK(desk_robot::checked_mux_mask(wire, 0x71, accessory_mask, idle));
+      // NACKed closes must not change the retained accessory mask or read it back.
+      for (unsigned attempt = 1; attempt <= 3; ++attempt) {
+        wire.next_error = 2;
+        CHECK(!desk_robot::checked_mux_mask(wire, 0x71, 0, idle));
+        CHECK(wire.masks[0] == 0 && wire.masks[1] == accessory_mask);
+        CHECK(wire.stops[0] == 0 && wire.stops[1] == attempt + 1);
+        CHECK(wire.reads[0] == 0 && wire.reads[1] == 1);
+      }
+      // Restore accessory isolation first, then NACK the range selection.
+      CHECK(desk_robot::checked_mux_mask(wire, 0x71, 0, idle));
+      wire.next_error = 2;
+      CHECK(!desk_robot::checked_mux_mask(wire, 0x70, range_mask, idle));
+      CHECK(wire.masks[0] == 0 && wire.masks[1] == 0);
+      CHECK(wire.stops[0] == 1 && wire.stops[1] == 5);
+      CHECK(wire.reads[0] == 0 && wire.reads[1] == 2);
+      // A subsequent verified selection affects only the range mux.
+      CHECK(desk_robot::checked_mux_mask(wire, 0x71, 0, idle));
+      CHECK(desk_robot::checked_mux_mask(wire, 0x70, range_mask, idle));
+      CHECK(wire.masks[0] == range_mask && wire.masks[1] == 0);
+      CHECK(wire.stops[0] == 2 && wire.stops[1] == 6);
+      CHECK(wire.reads[0] == 1 && wire.reads[1] == 3);
+    }
+  }
+}
+
 int main() {
   try {
     checked_dual_mux_deselect_after_transfer_error();
+    checked_mux_staggered_nacks();
     raw_range_word_acceptance_is_exact();
     fast_floor_lane_swap();
     check_shared_mux_recovery();
