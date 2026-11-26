@@ -408,3 +408,34 @@ def test_grid_clock_inheritance_is_robot_local():
     rebooted = SpatialGrid("robot-01", 8, "odom-new", "tag-new", "cal-new", 4, 3)
     rebooted.inherit_clock_reference(a)
     assert rebooted._clock_reference == {}
+
+
+def test_interleaved_peer_ranges_and_invalidation_preserve_local_map():
+    a = SpatialGrid("robot-01", 7, "odom-1", "tag-1", "cal-1", 4, 3)
+    b = SpatialGrid("robot-02", 7, "odom-1", "tag-2", "cal-1", 4, 3)
+    a.anchored = b.anchored = True
+    floor = RangeCellBatch(
+        "robot-01", 7, "odom-1", 0, "cal-1", 0, 1, 100_000, 1_000_000,
+        "floor_supported", ((1, 1),), True,
+    )
+    b_floor = replace(floor, robot_id="robot-02", sample_us=600_000)
+    a.record(floor, now_us=1_000_000)
+    b.record(b_floor, now_us=1_000_000)
+    a.record(replace(floor, lane=4, kind="obstacle_hit"), now_us=1_000_000)
+    b.record(replace(b_floor, lane=4, kind="obstacle_clear"), now_us=1_000_000)
+    assert a.state(1, 1, now_us=1_000_000) == "occupied"
+    assert b.state(1, 1, now_us=1_000_000) == "safe"
+    before = b.snapshot(now_us=1_000_001)
+    # All metadata except robot identity matches B, including B's source clock.
+    foreign = replace(
+        b_floor, robot_id="robot-01", lane=1, kind="floor_unsafe",
+        sample_us=600_001, received_us=1_000_001,
+    )
+    with pytest.raises(GridEvidenceError, match="Invalid grid source"):
+        b.record(foreign, now_us=1_000_001)
+    a.invalidate_origin(7, "odom-2")
+    assert a.snapshot(now_us=1_000_001).support == ("unknown",) * 12
+    assert not a.anchored
+    assert b.snapshot(now_us=1_000_001) == before
+    assert before.robot_id == "robot-02" and before.anchor_id == "tag-2"
+    assert before.anchored and before.support[5] == "safe"
