@@ -1431,6 +1431,7 @@ void BodyControl::execute(const char* line, std::size_t length,
                             a.gauge.fuel_present && a.gauge.fuel_valid &&
                             a.gauge.fuel_sample_seq != 0U &&
                             now_ms - a.gauge.fuel_at_ms < 500U;
+    const auto fuel = fuel_telemetry(fuel_fresh, a.gauge.cell_mv, a.gauge.soc_centi);
     const bool monitor_fresh = a.gauge.monitor_valid &&
                                a.gauge.monitor_sample_seq != 0U &&
                                now_ms - a.gauge.monitor_at_ms < 500U;
@@ -1515,8 +1516,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(a.barometer.sample_seq),
         static_cast<unsigned long>(a.barometer.present ?
             now_ms - a.barometer.at_ms : 0U),
-        a.gauge.cell_mv, a.gauge.soc_centi, a.gauge.bus_mv,
-        a.gauge.shunt_uv, fuel_fresh ? "true" : "false",
+        fuel.cell_mv, fuel.soc_centi, a.gauge.bus_mv,
+        a.gauge.shunt_uv, fuel.valid ? "true" : "false",
         static_cast<unsigned long>(a.gauge.fuel_sample_seq),
         static_cast<unsigned long>(a.gauge.fuel_sample_seq != 0U ?
             now_ms - a.gauge.fuel_at_ms : 0U),

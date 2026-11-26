@@ -28,5 +28,16 @@ int main() {
     if (fuel_below_motor_floor(mv, 5000U) != (mv < 3300U) ||
         fuel_above_recovery_floor(mv, 5000U)) return 5;
   }
+  const auto full = desk_robot::fuel_telemetry(true, 4200U, 10000U);
+  if (!full.valid || full.cell_mv != 4200U || full.soc_centi != 10000U) return 6;
+  const auto failed = desk_robot::fuel_telemetry(false, full.cell_mv, full.soc_centi);
+  if (failed.valid || failed.cell_mv != 0U || failed.soc_centi != 0U) return 7;
+  const auto empty = desk_robot::fuel_telemetry(true, 3000U, 0U);
+  if (!empty.valid || empty.cell_mv != 3000U || empty.soc_centi != 0U ||
+      !fuel_below_motor_floor(empty.cell_mv, empty.soc_centi)) return 8;
+  const auto bad_voltage = desk_robot::fuel_telemetry(true, 0U, 10000U);
+  const auto bad_soc = desk_robot::fuel_telemetry(true, 4200U, 10001U);
+  if (bad_voltage.valid || bad_voltage.cell_mv || bad_voltage.soc_centi ||
+      bad_soc.valid || bad_soc.cell_mv || bad_soc.soc_centi) return 9;
   return 0;
 }

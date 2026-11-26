@@ -800,8 +800,8 @@ static void independent_pack_sensor_freshness_never_crosses_devices() {
   auto& gauge = readings.gauge;
   gauge.fuel_present = gauge.fuel_valid = true;
   gauge.monitor_present = gauge.monitor_valid = true;
-  gauge.cell_mv = 3720;
-  gauge.soc_centi = 5700;
+  gauge.cell_mv = 4200;
+  gauge.soc_centi = 10000;
   gauge.fuel_sample_seq = 7;
   gauge.monitor_sample_seq = 8;
   gauge.fuel_at_ms = 10;
@@ -810,6 +810,7 @@ static void independent_pack_sensor_freshness_never_crosses_devices() {
   body.set_accessories(readings, 700);
   const auto only_monitor = send(body, "aux", 700);
   CHECK(only_monitor.find("\"fuel_valid\":false") != std::string::npos);
+  CHECK(only_monitor.find("\"cell_mv\":0,\"soc_centi\":0") != std::string::npos);
   CHECK(only_monitor.find("\"monitor_valid\":true") != std::string::npos);
   CHECK(only_monitor.find("\"current_calibrated\":false")
         != std::string::npos);
@@ -821,12 +822,22 @@ static void independent_pack_sensor_freshness_never_crosses_devices() {
   body.set_accessories(readings, 701);
   const auto only_fuel = send(body, "aux", 701);
   CHECK(only_fuel.find("\"fuel_valid\":true") != std::string::npos);
+  CHECK(only_fuel.find("\"cell_mv\":4200,\"soc_centi\":10000") != std::string::npos);
   CHECK(only_fuel.find("\"monitor_valid\":false") != std::string::npos);
 
-  gauge.fuel_sample_seq = 0;
-  gauge.fuel_at_ms = 702;
+  // A failed I2C acquisition retains the previous numeric cache and identity.
+  gauge.fuel_valid = false;
   body.set_accessories(readings, 702);
-  CHECK(send(body, "aux", 702).find("\"fuel_valid\":false")
+  const auto failed = send(body, "aux", 702);
+  CHECK(failed.find("\"fuel_valid\":false") != std::string::npos);
+  CHECK(failed.find("\"cell_mv\":0,\"soc_centi\":0") != std::string::npos);
+  CHECK(failed.find("\"fuel_seq\":9") != std::string::npos);
+
+  gauge.fuel_valid = true;
+  gauge.fuel_sample_seq = 0;
+  gauge.fuel_at_ms = 703;
+  body.set_accessories(readings, 703);
+  CHECK(send(body, "aux", 703).find("\"fuel_valid\":false")
         != std::string::npos);  // A timestamp with no completed read is not fresh.
 }
 

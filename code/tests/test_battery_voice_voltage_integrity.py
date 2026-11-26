@@ -25,13 +25,14 @@ def _check_fake_current_tool_owner(owner, robot_id, message):
 
 
 @pytest.mark.parametrize("cell_mv", [0, 2499, 2500, 3875, 4500, 4501])
-async def test_power_status_no_impossible_voltage_enters_current_human_turn(cell_mv):
+@pytest.mark.parametrize("fuel_valid", [True, False])
+async def test_power_status_no_impossible_voltage_enters_current_human_turn(cell_mv, fuel_valid):
     recorded = []
 
     async def aux_status():
         return {"robot_id": "robot-01", "power": {
-            "fuel_valid": True, "fuel_seq": 7,
-            "cell_mv": cell_mv, "soc_centi": 6275,
+            "fuel_valid": fuel_valid, "fuel_seq": 7,
+            "cell_mv": cell_mv, "soc_centi": 6275 if fuel_valid else 10000,
         }}
 
     coordinator = SimpleNamespace(
@@ -63,6 +64,18 @@ async def test_power_status_no_impossible_voltage_enters_current_human_turn(cell
         if isinstance(route, APIRoute)
         and route.path == "/v1/pet/{robot_id}/power-status"
     )
+    if not fuel_valid:
+        result = await endpoint("robot-01", request)
+        assert result["gauge_available"] is False
+        assert result["reported_cell_mv"] is None
+        assert result["reported_soc_centi"] is None
+        assert result["raw_fuel_acquisition_seq"] is None
+        assert result["charging_verified"] is False
+        assert recorded == [
+            (owner, "robot-01", "robot_status",
+             "WROOM fuel gauge unavailable; no verified charge or battery percentage"),
+        ]
+        return
     if not 2500 <= cell_mv <= 4500:
         with pytest.raises(OperationError, match="Malformed WROOM auxiliary fuel"):
             await endpoint("robot-01", request)
@@ -81,7 +94,8 @@ async def test_power_status_no_impossible_voltage_enters_current_human_turn(cell
 
 
 @pytest.mark.parametrize("cell_mv", [0, 2499, 2500, 3875, 4500, 4501])
-def test_native_both_battery_fact_paths_share_voltage_sanity_range(cell_mv):
+@pytest.mark.parametrize("fuel_valid", [True, False])
+def test_native_both_battery_fact_paths_share_voltage_sanity_range(cell_mv, fuel_valid):
     path = (Path(__file__).resolve().parents[1] / "laptop/server/overlay"
             / "desk_robot_voice_intents.py")
     spec = importlib.util.spec_from_file_location("voice_voltage_test", path)
@@ -91,22 +105,25 @@ def test_native_both_battery_fact_paths_share_voltage_sanity_range(cell_mv):
     accepted = 2500 <= cell_mv <= 4500
     direct = module.native_grounded_fact("power-status", {
         "source": "wroom_aux_fuel_gauge_raw_unqualified",
-        "gauge_available": True, "raw_fuel_acquisition_seq": 7,
-        "reported_soc_centi": 6275, "reported_cell_mv": cell_mv,
+        "gauge_available": fuel_valid, "raw_fuel_acquisition_seq": 7,
+        "reported_soc_centi": 6275 if fuel_valid else 10000, "reported_cell_mv": cell_mv,
     })
-    assert (direct is not None) is accepted
-    if accepted:
+    if not fuel_valid:
+        assert direct == {"source": "wroom_fuel_gauge", "available": False}
+    else:
+        assert (direct is not None) is accepted
+    if fuel_valid and accepted:
         assert direct["cell_mv"] == cell_mv
         assert direct["charging_verified"] is False
     aux = module.native_grounded_fact("aux-status", {
         "climate": {"valid": False},
         "power": {
-            "fuel_valid": True, "fuel_seq": 7,
-            "soc_centi": 6275, "cell_mv": cell_mv,
+            "fuel_valid": fuel_valid, "fuel_seq": 7,
+            "soc_centi": 6275 if fuel_valid else 10000, "cell_mv": cell_mv,
         },
     })
     assert aux is not None
-    assert ("fuel_gauge" in aux) is accepted
-    if accepted:
+    assert ("fuel_gauge" in aux) is (fuel_valid and accepted)
+    if fuel_valid and accepted:
         assert aux["fuel_gauge"]["reported_cell_mv"] == cell_mv
         assert aux["fuel_gauge"]["qualified"] is False

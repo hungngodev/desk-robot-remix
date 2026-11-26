@@ -11,4 +11,19 @@ constexpr bool fuel_above_recovery_floor(unsigned cell_mv, unsigned soc_centi) {
   return cell_mv >= 3350U && cell_mv <= 4500U &&
          soc_centi >= 500U && soc_centi <= 10000U;
 }
+
+struct FuelTelemetry {
+  unsigned cell_mv, soc_centi;
+  bool valid;
+};
+
+// Keep numeric wire fields for old clients, but never publish stale or
+// malformed values as a charge estimate. Zero with valid=false is unknown;
+// zero SOC with valid=true is a real depleted measurement.
+constexpr FuelTelemetry fuel_telemetry(bool fresh, unsigned cell_mv,
+                                       unsigned soc_centi) {
+  if (!fresh || cell_mv < 2500U || cell_mv > 4500U || soc_centi > 10000U)
+    return {0U, 0U, false};
+  return {cell_mv, soc_centi, true};
+}
 }  // namespace desk_robot
