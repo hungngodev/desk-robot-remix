@@ -17,7 +17,7 @@ inline int thermal_pixel_quarters(std::uint8_t low, std::uint8_t high) {
 
 inline bool decode_thermal_pixel(std::uint8_t low, std::uint8_t high,
                                  float& temperature_c) {
-  const float decoded_c = 0.25f * thermal_pixel_quarters(low, high);
+  const float decoded_c = 0.25f * static_cast<float>(thermal_pixel_quarters(low, high));
   if (decoded_c < 0.0f || decoded_c > 80.0f) return false;
   temperature_c = decoded_c;
   return true;

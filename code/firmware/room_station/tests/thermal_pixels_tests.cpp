@@ -54,7 +54,7 @@ int main() {
     float decoded = 900.0f;
     const bool in_range = quarters >= 0 && quarters <= 320;
     assert(decode_thermal_pixel(low, high, decoded) == in_range);
-    assert(decoded == (in_range ? quarters * 0.25f : 900.0f));
+    assert(decoded == (in_range ? static_cast<float>(quarters) * 0.25f : 900.0f));
   }
   assert(thermal_pixel_quarters(0xd8, 0x0f) == -40);  // -10 C pixel
   assert(thermal_pixel_quarters(0xa0, 0x08) == -1888);  // -10 C thermistor encoding
@@ -77,7 +77,7 @@ int main() {
     bus.data[2 * i + 1] = 0;
   }
   std::array<float, 64> frame{};
-  for (int chunk = 0; chunk < 8; ++chunk) {
+  for (std::uint8_t chunk = 0; chunk < 8; ++chunk) {
     assert(read_thermal_chunk(bus, 0x69, chunk, frame.data() + chunk * 8, 8));
     assert(bus.reg == 0x80 + chunk * 16);
     assert(bus.selected == 0x69);

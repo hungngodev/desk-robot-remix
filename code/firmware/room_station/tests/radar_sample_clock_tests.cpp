@@ -186,5 +186,14 @@ int main() {
   assert(feed(gate, engineering));
   assert(gate.completed_sample().presence);
   assert(gate.completed_sample().moving_cm == 30);
+  // Both distance fields retain the full unsigned little-endian range.
+  const uint8_t full_width[] = {
+      0xF4, 0xF3, 0xF2, 0xF1, 13, 0,
+      0x02, 0xAA, 0x03, 0xFF, 0xFF, 50, 0, 0x80, 60, 80, 0, 0x55, 0x00,
+      0xF8, 0xF7, 0xF6, 0xF5,
+  };
+  assert(feed(gate, full_width));
+  assert(gate.completed_sample().moving_cm == UINT16_MAX);
+  assert(gate.completed_sample().stationary_cm == 0x8000U);
   return 0;
 }

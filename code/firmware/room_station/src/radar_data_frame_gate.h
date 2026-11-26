@@ -34,8 +34,7 @@ class RadarDataFrameGate {
         continue;
       }
       if (position_ < 6) break;
-      const uint16_t payload_len = static_cast<uint16_t>(frame_[4]) |
-          (static_cast<uint16_t>(frame_[5]) << 8);
+      const uint16_t payload_len = read_le16(frame_ + 4);
       if ((payload_len != 13 && payload_len < 33) ||
           payload_len > sizeof(frame_) - 10 ||
           (position_ >= 7 && frame_[6] != (payload_len == 13 ? 0x02 : 0x01)) ||
@@ -66,10 +65,8 @@ class RadarDataFrameGate {
         // engineering packets. Distances are little-endian centimeters.
         const uint8_t target = frame_[8];
         completed_.presence = target != 0;
-        completed_.moving_cm = static_cast<uint16_t>(frame_[9]) |
-            (static_cast<uint16_t>(frame_[10]) << 8);
-        completed_.stationary_cm = static_cast<uint16_t>(frame_[12]) |
-            (static_cast<uint16_t>(frame_[13]) << 8);
+        completed_.moving_cm = read_le16(frame_ + 9);
+        completed_.stationary_cm = read_le16(frame_ + 12);
         completed_.moving = (target & 0x01) != 0 &&
             completed_.moving_cm > 0 && frame_[11] > 0;
         completed_.stationary = (target & 0x02) != 0 &&
@@ -85,9 +82,15 @@ class RadarDataFrameGate {
   const RadarTargetSample& completed_sample() const { return completed_; }
 
  private:
+  static uint16_t read_le16(const uint8_t* bytes) {
+    return static_cast<uint16_t>(static_cast<unsigned>(bytes[0]) |
+                                 (static_cast<unsigned>(bytes[1]) << 8));
+  }
+
   RadarTargetSample completed_;
   void discard(uint16_t count) {
-    position_ -= count;
+    // Callers discard only a received prefix or a complete validated frame.
+    position_ = static_cast<uint8_t>(position_ - count);
     memmove(frame_, frame_ + count, position_);
   }
   uint8_t frame_[64] = {};
