@@ -15,6 +15,9 @@ permissions:
 # An explicit rerun uses its run ID as a separate lane group so it can finish
 # even while other workers push, without queueing every intermediate commit.
 # Never combine the lanes into one workflow-level concurrency group.
+# Host Python 3.11 is both the supported minimum and the CI reference minor
+# (latest available patch); keep it aligned with code/toolchain-lock.json and
+# pyproject.toml. Firmware SDK bootstrap environments are separate.
 jobs:
   mac-fast:
     name: Mac conversation and memory regression

@@ -15,6 +15,6 @@
       "commit": "9f3773cb48d4e4e844d689cfc529a06f96d1d264"
     }
   },
-  "python": "3.12.2",
+  "python": "3.11",
   "head_verification_wake_word": "disabled"
 }

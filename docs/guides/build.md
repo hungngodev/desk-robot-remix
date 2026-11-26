@@ -27,6 +27,8 @@ On a clean Mac, first install the Xcode Command Line Tools (`xcode-select --inst
 (cd code && uv sync --extra dev --python 3.11 --locked)
 ```
 
+Python 3.11 is the coordinator's minimum supported version and the host CI reference minor, recorded in `code/toolchain-lock.json` under `python`. The selector intentionally follows available 3.11 patch releases rather than pinning an exact interpreter patch. The Python 3.12 firmware toolchain bootstrap environments described below are separate from the coordinator's locked application environment.
+
 If dependency installation fails, stop this setup stage rather than proceeding with stale generated artifacts. The CAD export and paper template commands below run from the repository root; coordinator and firmware commands run from `code/` unless otherwise stated.
 
 For the Mac coordinator, private configuration, pinned Xiaozhi overlay,
