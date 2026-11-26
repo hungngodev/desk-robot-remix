@@ -195,8 +195,41 @@ static void check_external_bus_invalidation() {
   }
 }
 
+static void check_runtime_port_configuration_fault() {
+  for (unsigned fault = 0; fault < 4; ++fault) {
+    TwoWire wire;
+    wire.dock_gpioA = 0x0C;
+    desk_robot::AccessorySensors bus;
+    CHECK(bus.begin(wire));
+    CHECK(wire.mcp_iodira == 0xFF && wire.mcp_iodirb == 0xFB);
+    CHECK(bus.request_haptic(1));
+    scan(bus, 0, 48);
+    CHECK(wire.mcp_olatb == 0x04 && bus.readings().dock.valid);
+    const auto seq = bus.readings().dock.sample_seq;
+    const auto reads = wire.optional_gpio_reads;
+    if (fault == 0) wire.mcp_iodira = 0xFE;
+    if (fault == 1) wire.mcp_iodirb = 0xF9;
+    if (fault == 2) wire.mcp_gppua = 0;
+    if (fault == 3) wire.mcp_gppub = 0;
+    scan(bus, 60, 132);
+    CHECK(!bus.readings().dock.valid && bus.readings().dock.sample_seq == seq);
+    CHECK(!bus.readings().optional_inputs.valid);
+    CHECK(wire.optional_gpio_reads == reads);
+    CHECK(!bus.haptic_ready() && !bus.request_haptic(133));
+    CHECK(wire.mcp_iodira == 0xFF && wire.mcp_iodirb == 0xFF);
+    CHECK(wire.mcp_olatb == 0 && wire.haptic_rising_edges == 1);
+    // Even restored registers cannot rearm a latched configuration fault.
+    wire.mcp_gppua = 0x0F;
+    wire.mcp_gppub = 0x01;
+    scan(bus, 144, 216);
+    CHECK(!bus.readings().dock.valid && !bus.haptic_ready());
+    CHECK(wire.haptic_rising_edges == 1 && !wire.unsafe_parallel_mux);
+  }
+}
+
 int main() {
   try {
+    check_runtime_port_configuration_fault();
     check_external_bus_invalidation();
     check_boot_configuration();
     check_failed_deassert_write();

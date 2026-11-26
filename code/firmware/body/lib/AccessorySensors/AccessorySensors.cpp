@@ -144,6 +144,7 @@ bool AccessorySensors::begin(TwoWire& wire, bool (*bus_accessible)()) {
     bus_available();
   }
   data_ = AccessoryReadings{};
+  mcp_ports_ = McpPortDirectionLock{};
 #if DESK_ROBOT_ENABLE_HAPTIC
   haptic_.configure(false);
   haptic_needs_low_ = false;
@@ -248,15 +249,18 @@ bool AccessorySensors::begin(TwoWire& wire, bool (*bus_accessible)()) {
     // B0/B1 remain inputs for the reported reed and PIR sensors.
     if (data_.optional_inputs.present) {
       std::uint8_t latch = 0xff, direction = 0xff;
-      const bool configured =
+      const bool direction_written =
           write8(0x20, 0x15, 0x00) &&
-          write8(0x20, 0x01, 0xFB) &&
+          write8(0x20, 0x01, 0xFB);
+      if (direction_written) mcp_ports_.expect_haptic_output();
+      const bool configured = direction_written &&
           read(0x20, 0x15, &latch, 1) && latch == 0x00 &&
           read(0x20, 0x01, &direction, 1) && direction == 0xFB;
       haptic_.configure(configured);
       haptic_needs_low_ = !configured;
     }
 #endif
+    if (data_.dock.present && !verify_mcp_ports()) invalidate_cached();
     // PN532 is truly optional and cannot replace MCP23017 dock interlock.
     // An address ACK only starts a nonblocking SAM protocol verification.
     if (probe(kPn532Address)) nfc_stage_ = NfcStage::StartSam;
@@ -536,9 +540,22 @@ void AccessorySensors::power(std::uint32_t now_ms) {
   // Even valid integer milliamps do NOT certify pack charging, because
   // Kelvin tap routing, shunt tolerance and physical direction are unmeasured.
 }
+bool AccessorySensors::verify_mcp_ports() {
+  return mcp_ports_.verify(
+      [this](std::uint8_t reg, std::uint8_t& value) {
+        return read(0x20, reg, &value, 1);
+      },
+      [this](std::uint8_t reg, std::uint8_t value) {
+        return write8(0x20, reg, value);
+      }, data_.optional_inputs.present);
+}
 void AccessorySensors::dock_status(std::uint32_t now_ms) {
   auto& dock = data_.dock;
   if (!dock.present) return;
+  if (!verify_mcp_ports()) {
+    invalidate_cached();
+    return;
+  }
   const bool had_contact = dock.left_seated || dock.right_seated ||
                            dock.input_good || dock.charge_indicated;
   const bool had_input = dock.input_good;
@@ -764,7 +781,7 @@ void AccessorySensors::poll(std::uint32_t now_ms) {
       dock_status(now_ms);
 #if DESK_ROBOT_ENABLE_HAPTIC
       // Short, one-shot, touch-driven feedback only; dock monitor stays first.
-      haptic_step(now_ms);
+      if (!mcp_ports_.faulted()) haptic_step(now_ms);
 #endif
       // Optional NFC work is subordinate to the required dock monitor.
       // Never spend a second bus transaction if mandatory GPIO failed.

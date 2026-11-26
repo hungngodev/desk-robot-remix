@@ -59,7 +59,9 @@ class TwoWire {
   unsigned optional_gpio_reads = 0;
   std::uint8_t optional_gpioB = 0x01; // reed open, PIR low
   std::uint8_t mcp_olatb = 0;  // BANK=0 OLATB 0x15
+  std::uint8_t mcp_iodira = 0xFF; // BANK=0 IODIRA 0x00
   std::uint8_t mcp_iodirb = 0xFF; // BANK=0 IODIRB 0x01
+  std::uint8_t mcp_gppua = 0, mcp_gppub = 0;
   unsigned haptic_rising_edges = 0;
   bool fail_mcp_latch_readback = false;
   bool nfc_connected = false;
@@ -337,7 +339,10 @@ class TwoWire {
             ++haptic_rising_edges;
           mcp_olatb = outbound[1];
         }
+        if (register_address == 0x00) mcp_iodira = outbound[1];
         if (register_address == 0x01) mcp_iodirb = outbound[1];
+        if (register_address == 0x0C) mcp_gppua = outbound[1];
+        if (register_address == 0x0D) mcp_gppub = outbound[1];
       }
       if (current_address == 0x57 && outbound.size() == 2) {
         if (register_address != ignore_pulse_config_write_reg) {
@@ -499,8 +504,14 @@ class TwoWire {
     } else if (addr == 0x20 && register_address == 0x15) {
       if (fail_mcp_latch_readback) return 0;
       inbound = {mcp_olatb};
+    } else if (addr == 0x20 && register_address == 0x00) {
+      inbound = {mcp_iodira};
     } else if (addr == 0x20 && register_address == 0x01) {
       inbound = {mcp_iodirb};
+    } else if (addr == 0x20 && register_address == 0x0C) {
+      inbound = {mcp_gppua};
+    } else if (addr == 0x20 && register_address == 0x0D) {
+      inbound = {mcp_gppub};
     } else if (addr == 0x44 && pending_sht && count == 6) {
       const std::uint8_t temp[2] = {0x66, 0x66};
       const std::uint8_t humidity[2] = {0x80, 0x00};

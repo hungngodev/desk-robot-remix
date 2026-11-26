@@ -8,6 +8,7 @@
 #include "GestureDecoder.h"
 #include "Pn532Frames.h"
 #include "HapticPulse.h"
+#include "McpPortDirectionLock.h"
 #ifndef DESK_ROBOT_ENABLE_HAPTIC
 #define DESK_ROBOT_ENABLE_HAPTIC 0
 #endif
@@ -94,6 +95,8 @@ class AccessorySensors {
   void climate(std::uint32_t now_ms);
   void barometer(std::uint32_t now_ms);
   void power(std::uint32_t now_ms);
+  McpPortDirectionLock mcp_ports_{};
+  bool verify_mcp_ports();
   void dock_status(std::uint32_t now_ms);
   void optional_gpio(std::uint32_t now_ms); // slow MCP GPIOB0 reed, B1 PIR
   bool nfc_write(std::uint8_t command, const std::uint8_t* body, std::size_t size);

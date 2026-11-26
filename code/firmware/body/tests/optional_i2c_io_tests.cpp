@@ -1668,6 +1668,23 @@ int main() {
     CHECK(partial.dock.valid && partial.dock.sample_seq > dock_before);
     CHECK(partial.dock.sample_seq == partial_accessory_wire.dock_gpio_reads);
     CHECK(partial_accessory_wire.nfc_scans == 0U);
+    // Both direction registers reset to inputs even without haptics;
+    // lost pullups must still revoke the dock sample after an expander reset.
+    TwoWire reset_mcp_wire;
+    desk_robot::AccessorySensors reset_mcp;
+    CHECK(reset_mcp.begin(reset_mcp_wire));
+    for (std::uint32_t ms = 0; ms <= 48; ms += 12) reset_mcp.poll(ms);
+    CHECK(reset_mcp.readings().dock.valid);
+    CHECK(reset_mcp_wire.mcp_iodira == 0xFF && reset_mcp_wire.mcp_iodirb == 0xFF);
+    const auto reset_dock_seq = reset_mcp.readings().dock.sample_seq;
+    reset_mcp_wire.mcp_gppua = reset_mcp_wire.mcp_gppub = 0;
+    for (std::uint32_t ms = 60; ms <= 132; ms += 12) reset_mcp.poll(ms);
+    CHECK(!reset_mcp.readings().dock.valid && !reset_mcp.readings().optional_inputs.valid);
+    CHECK(reset_mcp.readings().dock.sample_seq == reset_dock_seq);
+    reset_mcp_wire.mcp_gppua = 0x0F;
+    reset_mcp_wire.mcp_gppub = 0x01;
+    for (std::uint32_t ms = 144; ms <= 216; ms += 12) reset_mcp.poll(ms);
+    CHECK(!reset_mcp.readings().dock.valid);
     // INA226 saturated signed endpoints (0x7FFF and 0x8000) must invalidate
     // monitor and pack current while preserving previous sequence and timestamp.
     TwoWire shunt_sat_wire;
