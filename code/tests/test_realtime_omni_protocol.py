@@ -115,7 +115,8 @@ def test_proactive_quiet_audio_rearms_after_barge_without_new_human_speech():
     wire = OmniDuplexWire()
     jpeg = b"\xff\xd8" + b"silent-room-video" + b"\xff\xd9"
     wire.interrupt()
-    assert wire._needs_new_input
+    listen = {"type": "response.listen", "epoch": 2}
+    assert not wire.model_listen_current(listen)
     for index in range(10):
         packet = wire.append_audio(
             b"\0" * 3200, speech=False,
@@ -123,9 +124,9 @@ def test_proactive_quiet_audio_rearms_after_barge_without_new_human_speech():
         )
         if index < 9:
             assert "video_frames" not in packet
-            assert wire._needs_new_input
+            assert not wire.model_listen_current(listen)
     assert "video_frames" in packet
-    assert not wire._needs_new_input
+    assert wire.model_listen_current(listen)
     assert wire.frames_sent == 1
     wire.handle_event({
         "type": "response.created",
@@ -669,27 +670,29 @@ def test_superseded_response_identity_cannot_reclaim_same_epoch():
     assert wire.response_id == "third"
 
 
-def test_response_replay_tracking_never_evicts_session_identity(monkeypatch):
+def test_response_replay_tracking_never_evicts_session_identity():
     wire = OmniDuplexWire()
-    monkeypatch.setattr(wire, "MAX_RESPONSES_PER_SESSION", 2)
 
     def created(response_id, epoch=0):
         return {"type": "response.created", "response_id": response_id,
                 "epoch": epoch}
 
-    wire.handle_event(created("one"))
-    wire.handle_event(created("two"))
+    # Fill the actual session budget without replacing a class constant.
+    for index in range(4096):
+        response_id = f"response-{index}"
+        wire.handle_event(created(response_id))
+        assert wire.response_id == response_id
     with pytest.raises(RuntimeError, match="replay window exhausted"):
-        wire.handle_event(created("three"))
-    wire.handle_event(created("one"))
-    assert wire.response_id == "two"
+        wire.handle_event(created("overflow"))
+    wire.handle_event(created("response-0"))
+    assert wire.response_id == "response-4095"
     with pytest.raises(RuntimeError, match="replay window exhausted"):
-        wire.handle_event(created("three", epoch=1))
-    assert wire.response_id == "two"
+        wire.handle_event(created("overflow", epoch=1))
+    assert wire.response_id == "response-4095"
     # A new session, not a new epoch, restores the bounded replay budget.
     fresh = OmniDuplexWire()
-    fresh.handle_event(created("three", epoch=1))
-    assert fresh.response_id == "three"
+    fresh.handle_event(created("overflow", epoch=1))
+    assert fresh.response_id == "overflow"
 
 
 @pytest.mark.parametrize("terminal", ["response.done", "output_audio_buffer.cleared"])
