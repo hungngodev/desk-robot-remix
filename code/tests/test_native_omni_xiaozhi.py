@@ -10316,15 +10316,18 @@ async def test_native_mixed_batch_rejects_stale_entry_before_dispatch(
 
 
 @pytest.mark.parametrize("existing_session", [False, True])
+@pytest.mark.parametrize("expiry_offset", [0.0, 1.0])
 async def test_native_defers_while_expired_mac_lease_still_transmits(
-    native, monkeypatch, existing_session,
+    native, monkeypatch, existing_session, expiry_offset,
 ):
     module, bridge = native
     conn, _ = connection()
     bridge.connections["mac-01"] = conn
     monkeypatch.setenv("DESK_ROBOT_OMNI_ROBOTS", "robot-01")
+    clock = SimpleNamespace(now=100.0)
+    monkeypatch.setattr(module, "time", SimpleNamespace(monotonic=lambda: clock.now))
     bridge.lease_ids = frozenset({"mac-02"})
-    bridge.lease_until = time.monotonic() - 1
+    bridge.lease_until = clock.now - 1
     calls = []
 
     def reject_start(*args, **kwargs):
@@ -10339,6 +10342,19 @@ async def test_native_defers_while_expired_mac_lease_still_transmits(
     async with bridge.speaker_lock:
         assert module.route_audio(conn, b"\0" * 1920, True) is True
         assert calls == []
+        # A renewed lease must survive release of the physical send lock.
+        bridge.lease_until = clock.now + 1
+    assert module.route_audio(conn, b"\0" * 1920, True) is True
+    assert calls == []
+    clock.now = bridge.lease_until - 0.001
+    assert module.route_audio(conn, b"\0" * 1920, True) is True
+    assert calls == []
+    clock.now = bridge.lease_until + expiry_offset
+    # Expiration alone cannot release a lease during decoder STOP.
+    bridge.lease_stopping = True
+    assert module.route_audio(conn, b"\0" * 1920, True) is True
+    assert calls == []
+    bridge.lease_stopping = False
     assert module.route_audio(conn, b"\0" * 1920, True) is True
     assert calls == ["pcm" if existing_session else "start"]
 
