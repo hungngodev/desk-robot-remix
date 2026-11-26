@@ -685,3 +685,42 @@ def test_rejects_one_bad_corner_hidden_by_low_view_rms():
     views[-1][26, 0, 0] += 5.0
     with pytest.raises(ValueError, match="corner reprojection error"):
         fit(views)
+
+
+def test_fitted_radtan_order_preserves_metric_floor_rays():
+    """An inverse/forward round trip alone cannot detect a shared coefficient swap."""
+    from desk_robot.dock_vision import DockCameraCalibration
+    from desk_robot.spatial_projection import FloorProjectionCalibration
+
+    cv2 = pytest.importorskip("cv2")
+    candidate = fit(projected_views(cv2))
+    coefficients = tuple(candidate["distortion_coeffs"])
+    # Independent asymmetric tangential coefficients from projected_views.
+    assert coefficients[2:4] == pytest.approx((0.001, -0.002), abs=0.0001)
+    lens = DockCameraCalibration(
+        fx=candidate["fx"], fy=candidate["fy"], cx=candidate["cx"], cy=candidate["cy"],
+        tag_side_mm=candidate["tag_side_mm"], marker_id=candidate["marker_id"],
+        distortion_coeffs=coefficients, image_width_px=640, image_height_px=480,
+        camera_sensor_pid="OV5640", mount_lateral_offset_mm=0, mount_yaw_deg=0,
+    )
+    # Synthetic mount only; the calibration candidate itself stays unapproved.
+    floor = FloorProjectionCalibration(
+        lens=lens, calibration_id="synthetic-radtan", camera_height_mm=100,
+        camera_forward_offset_mm=0, pitch_down_deg=45,
+        valid_pixel_roi=(0, 0, 640, 480), valid_forward_mm=(0, 1000),
+        valid_lateral_mm=(-1000, 1000), uncertainty_mm=10, measured=True,
+    )
+    k1, k2, p1, p2, k3 = 0.09, -0.04, 0.001, -0.002, 0.008
+    for right, down in ((0.48, 0.26), (-0.46, 0.31), (0.35, -0.18)):
+        r2 = right**2 + down**2
+        radial = 1 + k1*r2 + k2*r2**2 + k3*r2**3
+        xd = right*radial + 2*p1*right*down + p2*(r2 + 2*right**2)
+        yd = down*radial + p1*(r2 + 2*down**2) + 2*p2*right*down
+        point = floor.project(
+            510*xd + 321, 512*yd + 239, image_width=640, image_height=480,
+            camera_sensor_pid="OV5640",
+        )
+        # Analytic intersection at 45 degrees, independent of runtime transforms.
+        assert point.x_mm == pytest.approx(100*(1 - down)/(1 + down), abs=0.05)
+        assert point.y_mm == pytest.approx(-100*2**0.5*right/(1 + down), abs=0.05)
+    assert candidate["physical_acceptance_pass"] is False
