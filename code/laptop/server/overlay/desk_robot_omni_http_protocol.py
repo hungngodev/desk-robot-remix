@@ -22,13 +22,12 @@ def approved_backend_url(url: str) -> str:
             or value.username or value.password or value.fragment
             or value.path != "/v1/realtime" or value.query != "duplex=1"):
         raise ValueError("Use the official realtime /v1/realtime?duplex=1 URL")
-    if value.scheme == "ws":
-        if value.hostname != "localhost":
-            try:
-                if not ipaddress.ip_address(value.hostname).is_loopback:
-                    raise ValueError("Mic traffic over LAN requires wss://")
-            except ValueError as exc:
-                raise ValueError("Mic traffic requires loopback ws or secure wss") from exc
+    if value.scheme == "ws" and value.hostname != "localhost":
+        try:
+            if not ipaddress.ip_address(value.hostname).is_loopback:
+                raise ValueError("Mic traffic over LAN requires wss://")
+        except ValueError as exc:
+            raise ValueError("Mic traffic requires loopback ws or secure wss") from exc
     return url
 
 
