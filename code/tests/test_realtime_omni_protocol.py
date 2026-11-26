@@ -2,7 +2,7 @@
 import base64
 
 import pytest
-from desk_robot.realtime_omni_protocol import I2sTransmissionPrefix, OmniDuplexWire
+from desk_robot.realtime_omni_protocol import I2sTransmissionPrefix, OmniDuplexWire, is_bounded_jpeg
 
 
 def delta(response_id="r1", epoch=0, pcm=None):
@@ -811,3 +811,20 @@ def test_failed_i2s_send_never_accepts_late_receipt_or_retries():
     assert not prefix.accept(120)
     assert not prefix.begin_send()
     assert I2sTransmissionPrefix(started=True).committed_ms == 0
+
+
+@pytest.mark.parametrize(
+    ("payload", "valid"),
+    [
+        (b"\xff\xd8" + b"x" * 6 + b"\xff\xd9", True),
+        (b"\xff\xd8" + b"x" * 5 + b"\xff\xd9", False),
+        (b"\xff\xd8" + b"x" * 999_996 + b"\xff\xd9", True),
+        (b"\xff\xd8" + b"x" * 999_997 + b"\xff\xd9", False),
+        (b"xx" + b"x" * 6 + b"\xff\xd9", False),
+        (b"\xff\xd8" + b"x" * 6 + b"xx", False),
+        (bytearray(b"\xff\xd8" + b"x" * 6 + b"\xff\xd9"), False),
+        (None, False),
+    ],
+)
+def test_shared_jpeg_frame_bounds(payload, valid):
+    assert is_bounded_jpeg(payload) is valid

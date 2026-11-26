@@ -19,6 +19,17 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 DEFAULT_COORDINATOR_URL = "http://127.0.0.1:8765"
+MAX_IMAGE_BYTES = 1_000_000
+
+
+def is_bounded_jpeg(value: object, *, max_bytes: int = MAX_IMAGE_BYTES) -> bool:
+    """Check wire framing and byte bounds, not semantic JPEG decodability."""
+    return (
+        isinstance(value, bytes)
+        and 10 <= len(value) <= max_bytes
+        and value.startswith(b"\xff\xd8")
+        and value.endswith(b"\xff\xd9")
+    )
 
 
 def coordinator_base_url(value: str | None = None) -> str:
@@ -158,7 +169,7 @@ class OmniDuplexWire:
     INPUT_RATE = 16000
     OUTPUT_RATE = 24000
     MAX_INPUT_MS = 1000
-    MAX_IMAGE_BYTES = 1_000_000
+    MAX_IMAGE_BYTES = MAX_IMAGE_BYTES
     MAX_OUTPUT_BYTES = 96_000  # A two-second 24k PCM16 response unit.
     MAX_RESPONSES_PER_SESSION = 4096  # Bound replay state; reconnect on exhaustion.
 
@@ -226,10 +237,7 @@ class OmniDuplexWire:
             raise ValueError("PCM must contain an integral millisecond at 16 kHz")
         duration = len(pcm16) // 32
         if jpeg is not None and (
-            not isinstance(jpeg, bytes)
-            or not 10 <= len(jpeg) <= self.MAX_IMAGE_BYTES
-            or not jpeg.startswith(b"\xff\xd8")
-            or not jpeg.endswith(b"\xff\xd9")
+            not is_bounded_jpeg(jpeg, max_bytes=self.MAX_IMAGE_BYTES)
             or type(camera_age_ms) is not int
             or not 0 <= camera_age_ms <= 1000
             or type(frame_receipt_us) is not int

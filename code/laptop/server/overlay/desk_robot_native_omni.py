@@ -57,6 +57,7 @@ try:
         I2sTransmissionPrefix,
         OmniDuplexWire,
         coordinator_base_url,
+        is_bounded_jpeg,
         verify_native_server,
     )
 except ModuleNotFoundError:
@@ -64,6 +65,7 @@ except ModuleNotFoundError:
         I2sTransmissionPrefix,
         OmniDuplexWire,
         coordinator_base_url,
+        is_bounded_jpeg,
         verify_native_server,
     )
 
@@ -1957,9 +1959,7 @@ class NativeOmniSession:
                                     or len(encoded) > 1_400_000):
                                 raise ValueError("Invalid Mac camera provenance")
                             jpeg = base64.b64decode(encoded, validate=True)
-                            if (not 10 <= len(jpeg) <= 1_000_000
-                                    or not jpeg.startswith(b"\xff\xd8")
-                                    or not jpeg.endswith(b"\xff\xd9")):
+                            if not is_bounded_jpeg(jpeg):
                                 raise ValueError("Invalid actual Mac JPEG")
                             # Read-only image input belongs to the selected
                             # model even if no one is currently talking.
@@ -2043,9 +2043,7 @@ class NativeOmniSession:
                                 and 0 <= int(age) <= 1000
                                 and 0 < int(receipt) < 0x7fffffffffffffff
                                 and 0 <= int(motion) <= 1_000_000
-                                and 10 <= len(raw) <= 1_000_000
-                                and raw.startswith(b"\xff\xd8")
-                                and raw.endswith(b"\xff\xd9")
+                                and is_bounded_jpeg(raw)
                                 and self._user_was_talking
                                 and self._video_turn == turn):
                             now = time.monotonic()
