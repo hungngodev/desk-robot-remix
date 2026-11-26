@@ -1383,24 +1383,26 @@ class MultimodalOrchestrator:
             if supervisor is not None and not supervisor.done():
                 continue
             worker = self._stream_tasks.get(robot_id)
+            grant = getattr(self.settings, "camera_consent_generation", None)
             if self.settings.voice_vision_tools_enabled and (
                 worker is None or worker.done()
             ):
                 self._stream_tasks[robot_id] = asyncio.create_task(
-                    self._consume_stream(robot_id, head)
+                    self._consume_stream(robot_id, head, camera_grant=grant)
                 )
             self._stream_supervisors[robot_id] = asyncio.create_task(
-                self._supervise_stream_grants(robot_id, head)
+                self._supervise_stream_grants(robot_id, head, admitted_grant=grant)
             )
 
-    async def _supervise_stream_grants(self, robot_id: str, head) -> None:
+    async def _supervise_stream_grants(
+        self, robot_id: str, head, *, admitted_grant: int | None,
+    ) -> None:
         """Restart a newly consented stream only after the old MJPEG lease ends.
 
         The observer handles authorization, not images. Rapid OFF/ON still
         revokes the old worker; cancellation-resistant work keeps camera
         ownership until its async generator actually closes.
         """
-        admitted_grant = getattr(self.settings, "camera_consent_generation", None)
         while not self._closed:
             await asyncio.sleep(0.05)
             if self._closed:
@@ -1434,7 +1436,7 @@ class MultimodalOrchestrator:
                         continue
                 self._last_stream_sample[robot_id] = -math.inf
                 self._stream_tasks[robot_id] = asyncio.create_task(
-                    self._consume_stream(robot_id, head)
+                    self._consume_stream(robot_id, head, camera_grant=admitted_grant)
                 )
 
     def _sync_camera_boot(self, robot_id: str) -> None:
@@ -1451,7 +1453,9 @@ class MultimodalOrchestrator:
             self.hub.discard_video(robot_id)
             self._last_stream_sample[robot_id] = -math.inf
 
-    async def _consume_stream(self, robot_id: str, head) -> None:
+    async def _consume_stream(
+        self, robot_id: str, head, *, camera_grant: int | None,
+    ) -> None:
         """Drain continuous JPEGs; drop excess frames instead of queuing them.
 
         Frigate-style cheap frame comparison stays on the Mac. Only selected
@@ -1460,7 +1464,6 @@ class MultimodalOrchestrator:
         """
         failures = 0
         while not self._closed and self.settings.voice_vision_tools_enabled:
-            camera_grant = getattr(self.settings, "camera_consent_generation", None)
             if not self._camera_grant_valid(robot_id, camera_grant):
                 return
             try:
@@ -1846,7 +1849,10 @@ class MultimodalOrchestrator:
             # NEVER await a camera capture in the realtime VAD cancellation
             # callback. Audio playback stops without waiting for JPEG/LLM.
             self._capture_tasks[robot_id] = asyncio.create_task(
-                self._speech_frames(robot_id, self._turn_epoch[robot_id])
+                self._speech_frames(
+                    robot_id, self._turn_epoch[robot_id],
+                    camera_grant=getattr(self.settings, "camera_consent_generation", None),
+                )
             )
 
     def voice_ended(self, robot_id: str) -> None:
@@ -1855,13 +1861,16 @@ class MultimodalOrchestrator:
         if task is not None and not task.done():
             task.cancel()  # Preserve captured visual context for current ASR.
 
-    async def _speech_frames(self, robot_id: str, turn: int) -> None:
+    async def _speech_frames(
+        self, robot_id: str, turn: int, *, camera_grant: int | None,
+    ) -> None:
         try:
             # Keep the 1 FPS visual stream for a genuinely long utterance,
             # but cap unacknowledged camera work if a VAD end is lost. The
             # voice floor itself remains held until explicit end/disconnect.
             for _ in range(60):
                 if (self._closed or turn != self._turn_epoch[robot_id]
+                        or not self._camera_grant_valid(robot_id, camera_grant)
                         or not self.hub.user_active(
                             robot_id, time.monotonic()
                         )):

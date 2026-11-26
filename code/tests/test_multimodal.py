@@ -3192,7 +3192,7 @@ async def test_old_speech_frame_worker_cannot_outlive_new_voice_epoch():
     visual.capture = stubborn_capture
     visual.hub.notify("robot-01", "human_voice", time.monotonic())
     visual._turn_epoch["robot-01"] = 1
-    old = asyncio.create_task(visual._speech_frames("robot-01", 1))
+    old = asyncio.create_task(visual._speech_frames("robot-01", 1, camera_grant=None))
     try:
         await asyncio.wait_for(started.wait(), timeout=1)
         old.cancel()
@@ -4426,3 +4426,63 @@ async def test_scheduled_quiet_boundary_retires_sensor_followup(monkeypatch):
         assert head.captures == 1
     finally:
         await visual.close()
+
+
+async def test_queued_stream_worker_cannot_adopt_new_camera_grant(settings):
+    settings.voice_vision_tools_enabled = True
+    rid = settings.robots[0].id
+
+    class StreamingHead(Head):
+        def __init__(self):
+            super().__init__()
+            self.owners = []
+
+        async def stream_frames(self):
+            self.owners.append(asyncio.current_task())
+            yield image(square=True), time.monotonic()
+            await asyncio.Event().wait()
+
+    head = StreamingHead()
+    service = MultimodalOrchestrator(
+        settings, {rid: head}, Vision(), asyncio.Lock(),
+    )
+    try:
+        service.start_streams()
+        old = service._stream_tasks[rid]
+        settings.voice_vision_tools_enabled = False
+        settings.voice_vision_tools_enabled = True
+        await asyncio.wait_for(old, timeout=2)
+        assert old not in head.owners
+        async with asyncio.timeout(3):
+            while not service.hub.frames[rid]:
+                await asyncio.sleep(0.01)
+        assert head.owners == [service._stream_tasks[rid]]
+        assert service._stream_tasks[rid] is not old
+    finally:
+        await service.close()
+
+
+@pytest.mark.parametrize("stage", ["queued", "followup"])
+async def test_old_vad_camera_sampler_cannot_adopt_new_grant(settings, stage):
+    settings.mode = "hardware"
+    settings.voice_vision_tools_enabled = True
+    rid = settings.robots[0].id
+    head = Head()
+    service = MultimodalOrchestrator(
+        settings, {rid: head}, Vision(), asyncio.Lock(),
+    )
+    try:
+        service.voice_started(rid)
+        task = service._capture_tasks[rid]
+        if stage == "followup":
+            async with asyncio.timeout(2):
+                while not service.hub.frames[rid]:
+                    await asyncio.sleep(0.01)
+        settings.voice_vision_tools_enabled = False
+        settings.voice_vision_tools_enabled = True
+        await asyncio.wait_for(task, timeout=3)
+        assert head.captures == (1 if stage == "followup" else 0)
+        assert not service.hub.frames[rid]
+        assert service.hub.user_active(rid, time.monotonic())
+    finally:
+        await service.close()
