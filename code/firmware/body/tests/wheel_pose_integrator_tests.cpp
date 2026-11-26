@@ -395,7 +395,68 @@ static void signed_heading_wrap_and_projection() {
   }
 }
 
+static void invalid_geometry_cannot_enable_pose() {
+  const auto reject = [](const WheelPoseIntegrator::Calibration& c) {
+    WheelPoseIntegrator pose;
+    check(!pose.configure(c));
+    check(!pose.configured());
+    for (std::uint32_t i = 1; i <= 3; ++i)
+      check(!pose.observe(observed(i, i * 100), i * 100 + 10));
+    check(!pose.stationary_origin_ready());
+    check(!pose.start_origin(310));
+    check(pose.state().origin == 0 &&
+          pose.state().quality == WheelPoseIntegrator::Quality::Unavailable);
+    check(pose.configure(calibration())); // failed configuration is not latched
+  };
+  for (std::int32_t scale : {std::numeric_limits<std::int32_t>::min(),
+                             -1, 0, 1000001}) {
+    auto c = calibration();
+    c.left_nm_per_count = scale;
+    reject(c);
+    c = calibration();
+    c.right_nm_per_count = scale;
+    reject(c);
+  }
+  for (std::uint32_t width : {0U, 19U, 501U,
+                              static_cast<std::uint32_t>(-1),
+                              static_cast<std::uint32_t>(-2147483647 - 1)}) {
+    auto c = calibration();
+    c.track_width_mm = width;
+    reject(c);
+  }
+  for (std::int32_t scale : {1, 1000000}) {
+    auto c = calibration();
+    c.left_nm_per_count = c.right_nm_per_count = scale;
+    WheelPoseIntegrator pose;
+    check(pose.configure(c));
+  }
+}
+
+static void pivot_at_track_width_boundaries() {
+  // Zero center translation is valid; the track width must remain positive.
+  for (std::uint32_t width : {20U, 500U}) {
+    for (int direction : {-1, 1}) {
+      auto c = calibration();
+      c.track_width_mm = width;
+      WheelPoseIntegrator pose;
+      check(pose.configure(c));
+      for (std::uint32_t i = 1; i <= 3; ++i)
+        check(pose.observe(observed(i, i * 100), i * 100 + 10));
+      check(pose.start_origin(310));
+      const std::int64_t yaw = direction * (2000000LL / width);
+      check(pose.observe(observed(4, 400, -10 * direction, -10 * direction,
+                                  yaw), 410));
+      check(pose.state().quality == WheelPoseIntegrator::Quality::Valid);
+      check(pose.state().x_mm == 0 && pose.state().y_mm == 0);
+      check(pose.state().yaw_mrad == yaw / 1000);
+      check(pose.state().origin == 1);
+    }
+  }
+}
+
 int main() {
+  invalid_geometry_cannot_enable_pose();
+  pivot_at_track_width_boundaries();
   signed_heading_wrap_and_projection();
   unhealthy_magnet_or_cached_wheel_revokes_pose();
   refuse_reused_wheel_acquisition();
