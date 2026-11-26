@@ -142,21 +142,32 @@ async def _chunks(*parts):
         yield part
 
 
-@pytest.mark.asyncio
-async def test_read_model_completion_accepts_exact_body_limit(protocol, monkeypatch):
-    pcm = b"\x01\x00" * 240
+def _completion_at_body_limit(pcm):
     body = json.dumps({"choices": [_audio(_wav(pcm))]}).encode("utf-8")
-    monkeypatch.setattr(protocol, "MAX_MODEL_RESPONSE_BYTES", len(body))
+    # JSON permits trailing whitespace. Exercise the real wire budget without
+    # changing implementation constants or inflating the decoded audio.
+    return body.ljust(2_000_000, b" ")
+
+
+@pytest.mark.asyncio
+async def test_read_model_completion_accepts_exact_body_limit(protocol):
+    pcm = b"\x01\x00" * 240
+    body = _completion_at_body_limit(pcm)
+    assert len(body) == 2_000_000
     assert await protocol.read_tool_completion(_chunks(body[:17], body[17:])) == (pcm, "")
 
 
 @pytest.mark.asyncio
-async def test_read_model_completion_stops_at_body_limit(protocol, monkeypatch):
-    monkeypatch.setattr(protocol, "MAX_MODEL_RESPONSE_BYTES", 8)
+@pytest.mark.parametrize("single_chunk", [False, True])
+async def test_read_model_completion_stops_at_body_limit(protocol, single_chunk):
+    body = _completion_at_body_limit(b"\x01\x00" * 240)
 
     async def oversized():
-        yield b"12345678"
-        yield b"9"
+        if single_chunk:
+            yield body + b" "
+        else:
+            yield body
+            yield b" "
         pytest.fail("Body reader continued after exceeding its byte limit")
 
     with pytest.raises(ValueError, match="response limit"):
