@@ -387,8 +387,17 @@ void exhaustive_malformed_drive() {
     CHECK(std::memchr(storage + 1, '\0', 64) != nullptr);
     CHECK(std::string(storage + 1) == std::string("ERR ") + command +
           " response_too_long");
+    std::memset(storage, 'X', sizeof(storage));
+    body.execute(command, std::strlen(command), 1, storage + 1, 1);
+    CHECK(storage[0] == 'X' && storage[1] == '\0' && storage[2] == 'X');
     unchanged();
   }
+  char short_reply[9];
+  std::memset(short_reply, 'X', sizeof(short_reply));
+  body.execute("ping", 4, 1, short_reply, 8);
+  CHECK(std::string(short_reply) == "OK ping" && short_reply[8] == 'X');
+  body.execute("ping", 4, 1, short_reply, 7);
+  CHECK(short_reply[0] == '\0' && short_reply[8] == 'X');
   CHECK(frame(body, receiver, "ping\n", 1).at(0) == "OK ping");
   unchanged();
   body.tick(250);

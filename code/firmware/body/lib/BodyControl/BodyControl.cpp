@@ -2,6 +2,7 @@
 #include "AttitudeNorm.h"
 #include "BatterySafety.h"
 #include "BodyCommandParser.h"
+#include "BodyReplyFormat.h"
 #include "CliffGuard.h"
 
 #include <cstdio>
@@ -111,7 +112,7 @@ void veto_motion_ack(char* reply, std::size_t capacity, MotionAckVeto fault) {
       fault == MotionAckVeto::TouchActive ? "touch_active" :
       fault == MotionAckVeto::MotorWatchdogLatched ? "motor_watchdog_latched" :
       "safety_interlock";
-  std::snprintf(reply, capacity, "ERR %s %s", command, reason);
+  format_reply(reply, capacity, "ERR %s %s", command, reason);
 }
 
 void BodyControl::veto_unapplied_motion_ack(char* reply, std::size_t capacity) const {
@@ -133,7 +134,7 @@ void BodyControl::veto_unapplied_motion_ack(char* reply, std::size_t capacity) c
   const bool grip = std::strncmp(reply, "OK grip ", 8) == 0;
   if (lift || grip) {
     char applied[32]{};
-    std::snprintf(applied, sizeof(applied), "OK %s angle=%d",
+    format_reply(applied, sizeof(applied), "OK %s angle=%d",
                   lift ? "lift" : "grip",
                   lift ? state_.lift_target : state_.grip_target);
     if (std::strcmp(reply, applied) != 0)
@@ -1171,7 +1172,7 @@ void BodyControl::execute(const char* line, std::size_t length,
   char* tokens[5]{};
   std::size_t count = 0;
   if (const char* error = body_command::tokenize(line, length, buffer, tokens, count)) {
-    std::snprintf(reply, capacity, "%s", error);
+    format_reply(reply, capacity, "%s", error);
     return;
   }
   const char* command = tokens[0];
@@ -1198,7 +1199,7 @@ void BodyControl::execute(const char* line, std::size_t length,
   const bool calibration = calfloor || calfront || calfresh || calcommit || calabort;
   if (!(drive || lift || grip || arm || rearm || disarm || stop || keepalive || ping || status || aux || ir || optics || pose || halt || calibration)) {
     // Do not interpolate attacker-controlled input into reply lines.
-    std::snprintf(reply, capacity, "ERR input unknown_command");
+    format_reply(reply, capacity, "ERR input unknown_command");
     return;
   }
   if ((drive && count != 3 && count != 4) ||
@@ -1206,7 +1207,7 @@ void BodyControl::execute(const char* line, std::size_t length,
       (calfront && count != 3) ||
       (calfloor && count != 4) ||
       (!(drive || lift || grip || calfloor || calfront || calfresh) && count != 1)) {
-    std::snprintf(reply, capacity, "ERR %s bad_arguments", command);
+    format_reply(reply, capacity, "ERR %s bad_arguments", command);
     return;
   }
 
@@ -1221,21 +1222,21 @@ void BodyControl::execute(const char* line, std::size_t length,
         sample_us > kMaxJsonExactUs ||
         sample_us <= pose_last_sample_us_ ||
         pose_seq_ == UINT32_MAX) {
-      std::snprintf(reply, capacity, "ERR pose clock_or_sequence_unavailable");
+      format_reply(reply, capacity, "ERR pose clock_or_sequence_unavailable");
       return;
     }
     // A reply that cannot be framed must not consume a source sequence
     // or timestamp: the next complete read can still observe that sample.
     const std::uint32_t next_seq = pose_seq_ + 1U;
-    const int written = std::snprintf(reply, capacity,
+    const bool complete = format_reply(reply, capacity,
         "{\"v\":1,\"body_boot\":%lu,\"origin\":0,\"seq\":%lu,"
         "\"sample_us\":%llu,\"x_mm\":0,\"y_mm\":0,"
         "\"yaw_mrad\":0,\"quality\":\"unavailable\"}",
         static_cast<unsigned long>(boot_epoch_),
         static_cast<unsigned long>(next_seq),
         static_cast<unsigned long long>(sample_us));
-    if (written < 0 || static_cast<std::size_t>(written) >= capacity) {
-      std::snprintf(reply, capacity, "ERR pose reply_capacity");
+    if (!complete) {
+      format_reply(reply, capacity, "ERR pose reply_capacity");
       return;
     }
     pose_seq_ = next_seq;
@@ -1249,41 +1250,41 @@ void BodyControl::execute(const char* line, std::size_t length,
   if (drive) {
     if (!parse_integer(tokens[1], first) || !parse_integer(tokens[2], second) ||
         (count == 4 && !parse_integer(tokens[3], duration))) {
-      std::snprintf(reply, capacity, "ERR drive integer_required");
+      format_reply(reply, capacity, "ERR drive integer_required");
       return;
     }
     if (first < -100 || first > 100 || second < -100 || second > 100 ||
         duration < 1 || duration > static_cast<int>(kMaxDriveMs)) {
-      std::snprintf(reply, capacity, "ERR drive out_of_range");
+      format_reply(reply, capacity, "ERR drive out_of_range");
       return;
     }
   } else if (lift || grip) {
     if (!parse_integer(tokens[1], first)) {
-      std::snprintf(reply, capacity, "ERR %s integer_required", command);
+      format_reply(reply, capacity, "ERR %s integer_required", command);
       return;
     }
     if (first < kServoMinDegrees || first > kServoMaxDegrees) {
-      std::snprintf(reply, capacity, "ERR %s out_of_range", command);
+      format_reply(reply, capacity, "ERR %s out_of_range", command);
       return;
     }
   }
 
   if (calibration) {
     if (!local_safety_rearm || !guarded_motion_profile() || guard_ == nullptr) {
-      std::snprintf(reply, capacity, "ERR calibration local_usb_only");
+      format_reply(reply, capacity, "ERR calibration local_usb_only");
       return;
     }
     // A safety trip disarms wheels but can retain PWM to hold a payload.
     // Calibration must not implicitly release that hold or write flash while
     // an actuator remains energized. Require an explicit disarm first.
     if (state_.armed || state_.servos_attached) {
-      std::snprintf(reply, capacity, "ERR calibration disarm_first");
+      format_reply(reply, capacity, "ERR calibration disarm_first");
       return;
     }
     if (calabort) {
       calibration_stage_ = CliffConfig{};
       calibration_stage_mask_ = 0;
-      std::snprintf(reply, capacity, "OK calabort");
+      format_reply(reply, capacity, "OK calabort");
       return;
     }
     if (calfloor) {
@@ -1293,13 +1294,13 @@ void BodyControl::execute(const char* line, std::size_t length,
           !parse_integer(tokens[3], maximum) ||
           channel < 0 || channel >= kFloorSensorCount ||
           minimum < 30 || maximum < minimum || maximum > 1300) {
-        std::snprintf(reply, capacity, "ERR calfloor channel_0to3_min_max_30to1300");
+        format_reply(reply, capacity, "ERR calfloor channel_0to3_min_max_30to1300");
         return;
       }
       calibration_stage_.floor[channel].min_mm = static_cast<std::uint16_t>(minimum);
       calibration_stage_.floor[channel].max_mm = static_cast<std::uint16_t>(maximum);
       calibration_stage_mask_ |= static_cast<std::uint8_t>(1U << channel);
-      std::snprintf(reply, capacity, "OK calfloor channel=%d", channel);
+      format_reply(reply, capacity, "OK calfloor channel=%d", channel);
       return;
     }
     if (calfront) {
@@ -1307,53 +1308,53 @@ void BodyControl::execute(const char* line, std::size_t length,
       if (!parse_integer(tokens[1], near_mm) ||
           !parse_integer(tokens[2], far_mm) ||
           near_mm < 30 || far_mm <= near_mm || far_mm > 1300) {
-        std::snprintf(reply, capacity, "ERR calfront near_far_30to1300");
+        format_reply(reply, capacity, "ERR calfront near_far_30to1300");
         return;
       }
       calibration_stage_.front_obstacle_mm = static_cast<std::uint16_t>(near_mm);
       calibration_stage_.front_max_mm = static_cast<std::uint16_t>(far_mm);
       calibration_stage_mask_ |= 0x10U;
-      std::snprintf(reply, capacity, "OK calfront");
+      format_reply(reply, capacity, "OK calfront");
       return;
     }
     if (calfresh) {
       int max_age_ms = 0;
       if (!parse_integer(tokens[1], max_age_ms) ||
           max_age_ms < 30 || max_age_ms > 200) {
-        std::snprintf(reply, capacity, "ERR calfresh measured_30to200ms");
+        format_reply(reply, capacity, "ERR calfresh measured_30to200ms");
         return;
       }
       calibration_stage_.freshness_ms = static_cast<std::uint32_t>(max_age_ms);
       calibration_stage_mask_ |= 0x20U;
-      std::snprintf(reply, capacity, "OK calfresh");
+      format_reply(reply, capacity, "OK calfresh");
       return;
     }
     // All four measured floor intervals, front clearance and sample-age
     // policy must be staged before a SINGLE atomic configure. No default
     // sensor geometry is silently adopted or committed by a network command.
     if (calibration_stage_mask_ != 0x3fU) {
-      std::snprintf(reply, capacity, "ERR calcommit incomplete_stage");
+      format_reply(reply, capacity, "ERR calcommit incomplete_stage");
       return;
     }
     calibration_stage_.calibrated = true;
     if (!guard_->configure(calibration_stage_)) {
-      std::snprintf(reply, capacity, "ERR calcommit invalid_intervals");
+      format_reply(reply, capacity, "ERR calcommit invalid_intervals");
       return;
     }
     force_disarm();
     calibration_stage_ = CliffConfig{};
     calibration_stage_mask_ = 0;
-    std::snprintf(reply, capacity, "OK calcommit");
+    format_reply(reply, capacity, "OK calcommit");
     return;
   }
 
   if (ping) {
-    std::snprintf(reply, capacity, "OK ping");
+    format_reply(reply, capacity, "OK ping");
   } else if (ir) {
     const auto e = age_ir_snapshot(state_.terminal_ir, now_ms - terminal_ir_assessed_at_ms_);
     // RMT observation is read-only. A matching IR code is not an estimate
     // of mechanical bearing or proof of a powered/accepted charging dock.
-    const int written = std::snprintf(
+    const bool complete = format_reply(
         reply, capacity,
         "{\"left_valid\":%s,\"right_valid\":%s,\"match\":%s,"
         "\"left_seq\":%lu,\"right_seq\":%lu,"
@@ -1371,8 +1372,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(e.code),
         static_cast<unsigned long>(e.left_code),
         static_cast<unsigned long>(e.right_code));
-    if (written < 0 || static_cast<std::size_t>(written) >= capacity)
-      std::snprintf(reply, capacity, "ERR ir response_too_long");
+    if (!complete)
+      format_reply(reply, capacity, "ERR ir response_too_long");
   } else if (optics) {
     unsigned present_mask = 0, valid_mask = 0;
     std::uint32_t age[8]{};
@@ -1386,7 +1387,7 @@ void BodyControl::execute(const char* line, std::size_t length,
     }
     // Compact source words already read by ToF: never sensor calibration,
     // never a new motor or charging permit. A 512B reply is ample.
-    const int written = std::snprintf(
+    const bool complete = format_reply(
         reply, capacity,
         "{\"optics\":{\"ambient_97\":[%u,%u,%u,%u,%u,%u,%u,%u],"
         "\"signal_97\":[%u,%u,%u,%u,%u,%u,%u,%u],"
@@ -1418,8 +1419,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(age[6]),
         static_cast<unsigned long>(age[7]),
         present_mask, valid_mask);
-    if (written < 0 || static_cast<std::size_t>(written) >= capacity)
-      std::snprintf(reply, capacity, "ERR optics response_too_long");
+    if (!complete)
+      format_reply(reply, capacity, "ERR optics response_too_long");
   } else if (aux) {
     const auto& raw = state_.paw_pulse;
     const auto& a = state_.accessories;
@@ -1462,7 +1463,7 @@ void BodyControl::execute(const char* line, std::size_t length,
                            a.nfc.scan_seq != 0U && now_ms - a.nfc.at_ms < 1500U;
     // Independent bounded read-only telemetry. No synthesized heartbeat,
     // grip force, wheel odometry, current amps or gesture direction.
-    const int written = std::snprintf(
+    const bool complete = format_reply(
         reply, capacity,
         "{\"pulse\":{\"present\":%s,\"valid\":%s,\"part_id\":%u,"
         "\"red\":%lu,\"ir\":%lu,\"age_ms\":%lu,\"seq\":%lu,"
@@ -1564,8 +1565,8 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(nfc_fresh && a.nfc.tag_visible ? a.nfc.tag_token : 0U),
         static_cast<unsigned long>(a.nfc.tag_events),
         static_cast<unsigned long>(a.nfc.scan_seq));
-    if (written < 0 || static_cast<std::size_t>(written) >= capacity)
-      std::snprintf(reply, capacity, "ERR aux response_too_long");
+    if (!complete)
+      format_reply(reply, capacity, "ERR aux response_too_long");
   } else if (status) {
     // Five read-only measurements retain missing/invalid/age information
     // separately. Never use these values to bypass the local cliff latch.
@@ -1685,7 +1686,7 @@ void BodyControl::execute(const char* line, std::size_t length,
             !jaw_limits_configured_ ? "jaw_limits_unqualified" :
         command_timeout_latched_ ? "command_timeout_latched" :
         !guarded_motion_profile() ? "not_required" : "none";
-    const int written = std::snprintf(
+    const bool complete = format_reply(
         reply, capacity,
         "{\"armed\":%s,\"motor\":{\"m0\":%d,\"m1\":%d},"
         "\"servo\":{\"lift\":%d,\"grip\":%d,\"lift_target\":%d,"
@@ -1758,19 +1759,19 @@ void BodyControl::execute(const char* line, std::size_t length,
         static_cast<unsigned long>(ranges[3].age_ms),
         static_cast<unsigned long>(ranges[4].age_ms),
         present_mask, valid_mask);
-    if (written < 0 || static_cast<std::size_t>(written) >= capacity)
-      std::snprintf(reply, capacity, "ERR status response_too_long");
+    if (!complete)
+      format_reply(reply, capacity, "ERR status response_too_long");
   } else if (rearm) {
     // Head/HTTP/MCP jobs may arm only an already-clear body. A new local USB
     // action is required after a fault; an older job permit cannot clear it.
     if (!local_safety_rearm) {
-      std::snprintf(reply, capacity, "ERR rearm local_only");
+      format_reply(reply, capacity, "ERR rearm local_only");
       return;
     }
     stop_motion();
     state_.armed = false;
     if (dc_driver_fault_bad(now_ms)) {
-      std::snprintf(reply, capacity, "ERR rearm dc_driver_fault_unhealthy");
+      format_reply(reply, capacity, "ERR rearm dc_driver_fault_unhealthy");
       return;
     }
     // Local recovery is an explicit SAFE resume decision, not a preapproval
@@ -1778,11 +1779,11 @@ void BodyControl::execute(const char* line, std::size_t length,
     // Otherwise an old USB rearm could clear the cliff latch during pickup,
     // and a later head command could arm immediately after putdown.
     if (dock_power_lockout_) {
-      std::snprintf(reply, capacity, "ERR rearm dock_power_connected");
+      format_reply(reply, capacity, "ERR rearm dock_power_connected");
       return;
     }
     if (dock_telemetry_bad(now_ms)) {
-      std::snprintf(reply, capacity, "ERR rearm dock_gpio_missing_or_stale");
+      format_reply(reply, capacity, "ERR rearm dock_gpio_missing_or_stale");
       return;
     }
     if (dock_monitor_fault_latched_) {
@@ -1795,30 +1796,30 @@ void BodyControl::execute(const char* line, std::size_t length,
       if (!dock_sample_seen_ || dock_last_pins_ != 0U ||
           seq_delta == 0U || seq_delta >= 0x80000000U ||
           time_delta == 0U || time_delta >= 0x80000000U) {
-        std::snprintf(reply, capacity, "ERR rearm dock_monitor_no_new_sample");
+        format_reply(reply, capacity, "ERR rearm dock_monitor_no_new_sample");
         return;
       }
     }
     if (state_.bumper_raw ||
         ((state_.extra_mask & 1U) && state_.bumper_active)) {
-      std::snprintf(reply, capacity, "ERR rearm bumper_active");
+      format_reply(reply, capacity, "ERR rearm bumper_active");
       return;
     }
     if (state_.touch_blocked()) {
-      std::snprintf(reply, capacity, state_.touch_raw_active || state_.touch_active ?
+      format_reply(reply, capacity, state_.touch_raw_active || state_.touch_active ?
                     "ERR rearm touch_active" : "ERR rearm touch_baseline_pending");
       return;
     }
     if (imu_motion_required_ && !imu_fresh(now_ms)) {
-      std::snprintf(reply, capacity, "ERR rearm imu_missing_or_stale");
+      format_reply(reply, capacity, "ERR rearm imu_missing_or_stale");
       return;
     }
     if (imu_attitude_required_ && !attitude_recovery_ready(now_ms)) {
-      std::snprintf(reply, capacity, "ERR rearm imu_attitude_not_upright");
+      format_reply(reply, capacity, "ERR rearm imu_attitude_not_upright");
       return;
     }
     if (fuel_monitor_required_ && !fuel_monitor_fresh(now_ms)) {
-      std::snprintf(reply, capacity, "ERR rearm fuel_monitor_missing_or_stale");
+      format_reply(reply, capacity, "ERR rearm fuel_monitor_missing_or_stale");
       return;
     }
     if (fuel_monitor_fault_latched_) {
@@ -1827,7 +1828,7 @@ void BodyControl::execute(const char* line, std::size_t length,
       const auto time_delta = fuel.fuel_at_ms - fuel_monitor_fault_at_ms_;
       if (seq_delta == 0U || seq_delta >= 0x80000000U ||
           time_delta == 0U || time_delta >= 0x80000000U) {
-        std::snprintf(reply, capacity, "ERR rearm fuel_monitor_no_new_sample");
+        format_reply(reply, capacity, "ERR rearm fuel_monitor_no_new_sample");
         return;
       }
     }
@@ -1842,7 +1843,7 @@ void BodyControl::execute(const char* line, std::size_t length,
           seq_delta == 0U ||
           seq_delta >= 0x80000000U || time_delta == 0U ||
           time_delta >= 0x80000000U) {
-        std::snprintf(reply, capacity, "ERR rearm battery_unsafe_or_stale");
+        format_reply(reply, capacity, "ERR rearm battery_unsafe_or_stale");
         return;
       }
     }
@@ -1851,12 +1852,12 @@ void BodyControl::execute(const char* line, std::size_t length,
     if (state_.accessories.gauge.fuel_valid &&
         fuel_below_motor_floor(state_.accessories.gauge.cell_mv,
                              state_.accessories.gauge.soc_centi)) {
-      std::snprintf(reply, capacity, "ERR rearm battery_unsafe_or_stale");
+      format_reply(reply, capacity, "ERR rearm battery_unsafe_or_stale");
       return;
     }
     if (!guarded_motion_profile() || guard_ == nullptr ||
         !guard_->try_rearm(now_ms)) {
-      std::snprintf(reply, capacity, "ERR rearm safety_interlock");
+      format_reply(reply, capacity, "ERR rearm safety_interlock");
       return;
     }
     dc_fault_latched_ = false;  // local USB only, after fresh HIGH nFAULT
@@ -1869,106 +1870,106 @@ void BodyControl::execute(const char* line, std::size_t length,
     imu_low_g_latched_ = false; // after a truly fresh, clear MPU status
     imu_attitude_latched_ = false; // two upright samples and local USB
     imu_sensor_fault_latched_ = false; // after fresh sensor and USB recovery
-    std::snprintf(reply, capacity, "OK rearm");
+    format_reply(reply, capacity, "OK rearm");
   } else if (arm) {
     if (motor_cutoff_unqualified_) {
-      std::snprintf(reply, capacity, "ERR arm motor_cutoff_unqualified");
+      format_reply(reply, capacity, "ERR arm motor_cutoff_unqualified");
       return;
     }
     if (guarded_motion_profile() && lift_limits_required_ &&
         !lift_limits_configured_) {
-      std::snprintf(reply, capacity, "ERR arm lift_limits_unqualified");
+      format_reply(reply, capacity, "ERR arm lift_limits_unqualified");
       return;
     }
     if (guarded_motion_profile() && grip_feedback_required_ &&
         !jaw_limits_configured_) {
-      std::snprintf(reply, capacity, "ERR arm jaw_limits_unqualified");
+      format_reply(reply, capacity, "ERR arm jaw_limits_unqualified");
       return;
     }
     if (fuel_monitor_fault_latched_) {
-      std::snprintf(reply, capacity, "ERR arm fuel_monitor_latched");
+      format_reply(reply, capacity, "ERR arm fuel_monitor_latched");
       return;
     }
     if (fuel_monitor_required_ && !fuel_monitor_fresh(now_ms)) {
-      std::snprintf(reply, capacity, "ERR arm fuel_monitor_missing_or_stale");
+      format_reply(reply, capacity, "ERR arm fuel_monitor_missing_or_stale");
       return;
     }
     if (battery_fault_latched_) {
-      std::snprintf(reply, capacity, "ERR arm battery_low_latched");
+      format_reply(reply, capacity, "ERR arm battery_low_latched");
       return;
     }
     if (bumper_fault_latched_) {
-      std::snprintf(reply, capacity, "ERR arm bumper_latched");
+      format_reply(reply, capacity, "ERR arm bumper_latched");
       return;
     }
     if (imu_sensor_fault_latched_) {
-      std::snprintf(reply, capacity, "ERR arm imu_sensor_fault_latched");
+      format_reply(reply, capacity, "ERR arm imu_sensor_fault_latched");
       return;
     }
     if (imu_low_g_latched_) {
-      std::snprintf(reply, capacity, "ERR arm imu_low_g_latched");
+      format_reply(reply, capacity, "ERR arm imu_low_g_latched");
       return;
     }
     if (imu_attitude_latched_) {
-      std::snprintf(reply, capacity, "ERR arm imu_attitude_latched");
+      format_reply(reply, capacity, "ERR arm imu_attitude_latched");
       return;
     }
     if (imu_attitude_required_ && !imu_attitude_configured_) {
-      std::snprintf(reply, capacity, "ERR arm imu_attitude_unqualified");
+      format_reply(reply, capacity, "ERR arm imu_attitude_unqualified");
       return;
     }
     if (motor_watchdog_latched_) {
-      std::snprintf(reply, capacity, "ERR arm motor_watchdog_latched");
+      format_reply(reply, capacity, "ERR arm motor_watchdog_latched");
       return;
     }
     if (dc_fault_latched_ || dc_driver_fault_bad(now_ms)) {
-      std::snprintf(reply, capacity, "ERR arm dc_driver_fault_interlock");
+      format_reply(reply, capacity, "ERR arm dc_driver_fault_interlock");
       return;
     }
     if (dock_power_lockout_) {
-      std::snprintf(reply, capacity, "ERR arm dock_power_connected");
+      format_reply(reply, capacity, "ERR arm dock_power_connected");
       return;
     }
     if (dock_monitor_fault_latched_) {
-      std::snprintf(reply, capacity, "ERR arm dock_monitor_latched");
+      format_reply(reply, capacity, "ERR arm dock_monitor_latched");
       return;
     }
     if (dock_telemetry_bad(now_ms)) {
-      std::snprintf(reply, capacity, "ERR arm dock_gpio_missing_or_stale");
+      format_reply(reply, capacity, "ERR arm dock_gpio_missing_or_stale");
       return;
     }
     if (state_.bumper_raw ||
         ((state_.extra_mask & 1U) && state_.bumper_active)) {
-      std::snprintf(reply, capacity, "ERR arm bumper_active");
+      format_reply(reply, capacity, "ERR arm bumper_active");
       return;
     }
     if (state_.touch_blocked()) {
-      std::snprintf(reply, capacity, state_.touch_raw_active || state_.touch_active ?
+      format_reply(reply, capacity, state_.touch_raw_active || state_.touch_active ?
                     "ERR arm touch_active" : "ERR arm touch_baseline_pending");
       return;
     }
     if (guarded_motion_profile() &&
         (guard_ == nullptr || !guard_->evaluate(now_ms))) {
-      std::snprintf(reply, capacity, "ERR arm safety_interlock");
+      format_reply(reply, capacity, "ERR arm safety_interlock");
       return;
     }
     if (imu_motion_required_ && !imu_fresh(now_ms)) {
-      std::snprintf(reply, capacity, "ERR arm imu_missing_or_stale");
+      format_reply(reply, capacity, "ERR arm imu_missing_or_stale");
       return;
     }
     if (imu_attitude_required_ && !attitude_recovery_ready(now_ms)) {
-      std::snprintf(reply, capacity, "ERR arm imu_attitude_not_upright");
+      format_reply(reply, capacity, "ERR arm imu_attitude_not_upright");
       return;
     }
     if (state_.accessories.gauge.fuel_valid &&
         fuel_below_motor_floor(state_.accessories.gauge.cell_mv,
                              state_.accessories.gauge.soc_centi)) {
-      std::snprintf(reply, capacity, "ERR arm battery_low");
+      format_reply(reply, capacity, "ERR arm battery_low");
       return;
     }
     // Preserve the physical interlock diagnostic when faults coincide.
     if (command_timeout_latched_) {
-      std::snprintf(reply, capacity, "ERR arm command_timeout_latched");
+      format_reply(reply, capacity, "ERR arm command_timeout_latched");
       return;
     }
     // Explicit re-arm also clears earlier targets; it never resumes old motion.
@@ -1977,23 +1978,23 @@ void BodyControl::execute(const char* line, std::size_t length,
     state_.servos_attached = true;
     last_control_ms_ = now_ms;
     last_servo_step_ms_ = now_ms;
-    std::snprintf(reply, capacity, "OK arm");
+    format_reply(reply, capacity, "OK arm");
   } else if (disarm) {
     force_disarm();
-    std::snprintf(reply, capacity, "OK disarm");
+    format_reply(reply, capacity, "OK disarm");
   } else if (halt) {
     // Terminal operator/user cancellation: unlike the short-pulse STOP,
     // a late abandoned job must NOT drive on the same armed session.
     // Preserve servo PWM only to avoid deliberately dropping a held key.
     stop_motion();
     state_.armed = false;
-    std::snprintf(reply, capacity, "OK halt");
+    format_reply(reply, capacity, "OK halt");
   } else if (stop) {
     stop_motion();
     if (state_.armed) last_control_ms_ = now_ms;
-    std::snprintf(reply, capacity, "OK stop");
+    format_reply(reply, capacity, "OK stop");
   } else if (!state_.armed) {
-    std::snprintf(reply, capacity, "ERR %s disarmed", command);
+    format_reply(reply, capacity, "ERR %s disarmed", command);
   } else {
     if (drive) {
       // The installed three side/rear ToF lanes are READ-ONLY context, not
@@ -2005,7 +2006,7 @@ void BodyControl::execute(const char* line, std::size_t length,
       if (guarded_motion_profile() &&
           (first < 0 || second < 0 || first != second)) {
         stop_motion();
-        std::snprintf(reply, capacity,
+        format_reply(reply, capacity,
                       "ERR drive directional_clearance_unqualified");
         return;
       }
@@ -2013,43 +2014,43 @@ void BodyControl::execute(const char* line, std::size_t length,
       state_.right = limited_speed(second);
       drive_started_ms_ = now_ms;
       drive_duration_ms_ = static_cast<std::uint32_t>(duration);
-      std::snprintf(reply, capacity, "OK drive left=%d right=%d ms=%d",
+      format_reply(reply, capacity, "OK drive left=%d right=%d ms=%d",
                     state_.left, state_.right, duration);
     } else if (lift || grip) {
       if (lift && lift_limits_required_) {
         if (!lift_limits_configured_) {
-          std::snprintf(reply, capacity, "ERR lift travel_unqualified");
+          format_reply(reply, capacity, "ERR lift travel_unqualified");
           return;
         }
         if (first < lift_limits_.min_deg || first > lift_limits_.max_deg) {
-          std::snprintf(reply, capacity, "ERR lift outside_measured_endstops");
+          format_reply(reply, capacity, "ERR lift outside_measured_endstops");
           return;
         }
       }
       if (grip && grip_feedback_required_ && !grip_feedback_fresh(now_ms)) {
-        std::snprintf(reply, capacity, "ERR grip force_missing_or_stale");
+        format_reply(reply, capacity, "ERR grip force_missing_or_stale");
         return;
       }
       if (grip && grip_feedback_required_) {
         if (!jaw_limits_configured_) {
-          std::snprintf(reply, capacity, "ERR grip local_force_limits_missing");
+          format_reply(reply, capacity, "ERR grip local_force_limits_missing");
           return;
         }
         if (!jaw_target_within_limits(first)) {
-          std::snprintf(reply, capacity, "ERR grip outside_measured_endstops");
+          format_reply(reply, capacity, "ERR grip outside_measured_endstops");
           return;
         }
         if (jaw_target_closes(first) && !jaw_force_allows_closing()) {
-          std::snprintf(reply, capacity, "ERR grip local_force_limit_or_reversal");
+          format_reply(reply, capacity, "ERR grip local_force_limit_or_reversal");
           return;
         }
         // A newly accepted command requires another independent conversion.
         jaw_sample_motion_budget_ = 0;
       }
       (lift ? state_.lift_target : state_.grip_target) = first;
-      std::snprintf(reply, capacity, "OK %s angle=%d", command, first);
+      format_reply(reply, capacity, "OK %s angle=%d", command, first);
     } else {
-      std::snprintf(reply, capacity, "OK keepalive");
+      format_reply(reply, capacity, "OK keepalive");
     }
     // A rejected feedback/endstop/force command is NOT a valid keepalive.
     // Renew the remote control lease only after successful authorization.
@@ -2071,13 +2072,13 @@ bool LineReceiver::feed(char byte, std::uint32_t now_ms, BodyControl& control,
     frame_age_expired_ = true;
   if (byte == '\n') {
     if (frame_timed_out_) {
-      std::snprintf(reply, capacity, "ERR input interbyte_timeout");
+      format_reply(reply, capacity, "ERR input interbyte_timeout");
     } else if (frame_age_expired_) {
-      std::snprintf(reply, capacity, "ERR input frame_timeout");
+      format_reply(reply, capacity, "ERR input frame_timeout");
     } else if (overlong_) {
-      std::snprintf(reply, capacity, "ERR input line_too_long");
+      format_reply(reply, capacity, "ERR input line_too_long");
     } else if (invalid_) {
-      std::snprintf(reply, capacity, "ERR input invalid_ascii");
+      format_reply(reply, capacity, "ERR input invalid_ascii");
     } else {
       control.execute(line_, length_, now_ms, reply, capacity, local_safety_rearm_,
                       sample_us);

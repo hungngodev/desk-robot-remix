@@ -117,7 +117,9 @@ int main() {
   assert(!framed.enqueue_priority_line("OK stop\nOK arm"));
   assert(!framed.enqueue_line(std::string(100000, 'x').c_str()));
   assert(!framed.enqueue_priority_line(std::string(100000, 'x').c_str()));
-  assert(framed.pending() == 0 && framed.dropped() == 6);
+  assert(!framed.enqueue_line(""));
+  assert(!framed.enqueue_priority_line(""));
+  assert(framed.pending() == 0 && framed.dropped() == 8);
   assert(framed.enqueue_line("status"));
   assert(framed.enqueue_priority_line("OK stop"));
   FakeSerial framed_serial;

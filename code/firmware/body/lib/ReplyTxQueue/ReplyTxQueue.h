@@ -116,7 +116,7 @@ class ReplyTxQueue {
                                   std::size_t& length) noexcept {
     for (length = 0; length <= maximum; ++length) {
       const char value = line[length];
-      if (value == '\0') return true;
+      if (value == '\0') return length != 0;
       if (value == '\r' || value == '\n') return false;
     }
     return false;

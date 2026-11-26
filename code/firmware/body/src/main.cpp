@@ -3,6 +3,7 @@
 #include <esp_timer.h>
 
 #include "BodyControl.h"
+#include "BodyReplyFormat.h"
 #include "ReplyTxQueue.h"
 #include "BodyPins.h"
 #ifndef DESK_ROBOT_FULL_SENSORS
@@ -433,12 +434,12 @@ void process_input(HardwareSerial& stream, desk_robot::LineReceiver& receiver,
                                           sizeof(reply), sample_us);
     if (completed && !pwm_ready && strcmp(reply, "OK arm") == 0) {
       control.force_disarm();
-      snprintf(reply, sizeof(reply), "ERR arm pwm_unavailable");
+      desk_robot::format_reply(reply, sizeof(reply), "ERR arm pwm_unavailable");
     }
 #if DESK_ROBOT_STEPPER && !DESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED
     if (completed && strcmp(reply, "OK arm") == 0) {
       control.force_disarm();
-      snprintf(reply, sizeof(reply), "ERR arm stepper_cutoff_unqualified");
+      desk_robot::format_reply(reply, sizeof(reply), "ERR arm stepper_cutoff_unqualified");
     }
 #endif
 #if defined(DESK_ROBOT_ENABLE_DC_WATCHDOG) && DESK_ROBOT_ENABLE_DC_WATCHDOG
@@ -453,7 +454,7 @@ void process_input(HardwareSerial& stream, desk_robot::LineReceiver& receiver,
       // operation on a calibration that would disappear next boot.
       cliff_guard.configure(desk_robot::CliffConfig{});
       control.force_disarm();
-      snprintf(reply, sizeof(reply), "ERR calcommit nvs_write_failed");
+      desk_robot::format_reply(reply, sizeof(reply), "ERR calcommit nvs_write_failed");
     }
 #else
     (void)local_usb;
