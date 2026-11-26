@@ -135,6 +135,14 @@ test passing this checker is never a physical A2 pass.
 
 Use the purchased **XIAO ESP32S3 Sense**, its onboard PDM microphone and included
 camera, and a suitable speaker. The baseline drives a **MAX98357A** over I²S.
+
+The active `code/firmware/head/sense/config.h` pin contract uses onboard PDM
+clock GPIO42 and data GPIO41 at 16 kHz; MAX98357A I2S BCLK GPIO4, LRCK GPIO7
+and DOUT GPIO8 at 32 kHz. The AFE receives interleaved mic/reference PCM16 at
+16 kHz. The initial 24 kHz Opus decoder rate is not the amplifier clock.
+No MCU-controlled SD_MODE or switched amplifier supply is wired (`GPIO_NUM_NC`);
+an I2S stop is not proof of audible silence. See `code/firmware/head/tests/test_sense.py`.
+
 The photographed HiLetgo PAM8403 offers an analog path if a suitable DAC is
 available. See the [parts list](../hardware/parts.md). Check the delivered
 board and sensor before assigning a firmware binary. The rechargeable 1S power
@@ -371,6 +379,11 @@ nearest-integer rounding (ties away from zero), and PCM16 saturation.
 The filter adds 31 input samples (0.969 ms) of group delay. Use actual
 post-volume PCM16 output, not arbitrary floating-point or pre-volume TTS data.
 This does not replace the zero-delay native capture or prove audible output.
+The receipt-checked native capture writes both WAV channels at 16 kHz PCM16,
+so its already-decimated reference bypasses the estimator's 32-to-16 kHz FIR.
+The external 32 kHz input example below is a different, non-receipt workflow.
+The estimator also accepts legacy 24 kHz references for offline diagnostics;
+that does not authorize a 24 kHz MAX98357A clock.
 Use `python code/scripts/estimate_aec_delay.py --speaker
 sense_playback_32k.wav --microphone sense_microphone_16k.wav` with
 private real recordings from the SAME assembly and clock alignment.
@@ -518,7 +531,9 @@ The trial checker now reports `i2s_stops_within_120ms` and
 `max_onset_to_i2s_stop_ms` for each distance, measured from human onset to
 I2S stop using the same rebased trial clock. The separate
 `meets_120ms_i2s_cutoff` result requires all twenty positive elapsed
-cutoffs at each of both covered distances to be no more than 120 ms.
+cutoffs at each of both covered distances to be no more than 120 ms,
+with the full per-distance trial coverage (volumes, positions, loads,
+speakers and adjacent conversation turns) required by the checker.
 An empty distance has a null maximum and cannot pass. A 120 ms codec
 write timeout or WebSocket STOP send is not this measurement. The existing
 500 ms audible stop and utterance retention acceptance gate remains
