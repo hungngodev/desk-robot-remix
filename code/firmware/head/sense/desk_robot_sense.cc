@@ -667,6 +667,7 @@ public:
             ESP_LOGE("SenseBoard", "Face task unavailable; automatic listening retry unavailable");
             local_eye_display_->SetLocalStatus(desk_robot::FaceStatus::kFaceUnavailable);
         }
+        robot_bridge.SetFaceConsumerAvailable(face_task_ != nullptr);
         if (!body_poll_task_ &&
             xTaskCreate(BodyPollTask, "sense_body_poll", 4096, this, 1, &body_poll_task_) != pdPASS) {
             body_poll_task_ = nullptr;

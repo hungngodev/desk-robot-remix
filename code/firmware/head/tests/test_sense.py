@@ -1629,6 +1629,7 @@ def test_face_dispatch_requires_live_sense_consumer():
     end = bridge.index('    auto item = cJSON_GetObjectItemCaseSensitive(json.get(), "command");', start)
     route = bridge[start:end]
     harness = r'''
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -1650,6 +1651,13 @@ struct Cue {
 };
 struct Harness {
     Cue person_cue_, cosmetic_mood_;
+    std::atomic<bool> face_consumer_available_{false};
+    void SetFaceConsumerAvailable(bool available) {
+        face_consumer_available_.store(available, std::memory_order_release);
+    }
+    bool FaceConsumerAvailable() const {
+        return face_consumer_available_.load(std::memory_order_acquire);
+    }
     int dispatch(const char* value) {
         Request request;
         auto* req = &request;
@@ -1660,10 +1668,18 @@ struct Harness {
 };
 int main() {
     Harness bridge;
+    assert(bridge.dispatch("person_detected") == 503);
+    assert(bridge.dispatch("mood:happy") == 503);
+    assert(bridge.person_cue_.count == 0 && bridge.cosmetic_mood_.count == 0);
+    bridge.SetFaceConsumerAvailable(true);
 #ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
     assert(bridge.dispatch("person_detected") == 200);
     assert(bridge.dispatch("mood:happy") == 200);
     assert(bridge.dispatch("not_a_cue") == 400);
+    assert(bridge.person_cue_.count == 1 && bridge.cosmetic_mood_.count == 1);
+    bridge.SetFaceConsumerAvailable(false);
+    assert(bridge.dispatch("person_detected") == 503);
+    assert(bridge.dispatch("mood:happy") == 503);
     assert(bridge.person_cue_.count == 1 && bridge.cosmetic_mood_.count == 1);
 #else
     assert(bridge.dispatch("person_detected") == 503);
@@ -1674,6 +1690,7 @@ int main() {
 '''
     compiler = shutil.which("c++")
     assert compiler is not None, "A native C++ compiler is required"
+    pie_flags = [] if sys.platform == "darwin" else ["-fno-pie", "-no-pie"]
     with tempfile.TemporaryDirectory() as temp:
         source = Path(temp) / "face_profile.cc"
         exe = Path(temp) / "face_profile"
@@ -1681,6 +1698,7 @@ int main() {
         for profile in ("SENSE_S3", "MODULAR_S3", "WAVESHARE_S3_CAM", "CORE_S3"):
             subprocess.run(
                 [compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror",
+                 "-fsanitize=address,undefined", *pie_flags,
                  f"-DCONFIG_BOARD_TYPE_DESK_ROBOT_{profile}=1", str(source), "-o", str(exe)],
                 check=True, env=native_cpp_env(),
             )
@@ -3165,6 +3183,8 @@ enum class FaceStatus { kFaceUnavailable };
 struct Bridge {
     Bridge(void*, AudioCodec*) {}
     void Start() { ++starts; }
+    bool face_available = false;
+    void SetFaceConsumerAvailable(bool available) { face_available = available; }
 };
 }
 struct Face {
@@ -3207,11 +3227,13 @@ int main() {
     board.StartNetwork();
     assert(attempts == 2 && errors == 2 && starts == 1);
     assert(!board.face_task_ && !board.body_poll_task_);
+    assert(!board.body_bridge_->face_available);
     assert(board.screen.fault && board.screen.statuses == 1);
     assert(board.body_face_state_.invalidations == 1);
     fail_face = false;
     board.StartNetwork();
     assert(board.face_task_ && !board.body_poll_task_);
+    assert(board.body_bridge_->face_available);
     assert(attempts == 4 && errors == 3 && starts == 1);
     fail_poll = false;
     board.StartNetwork();

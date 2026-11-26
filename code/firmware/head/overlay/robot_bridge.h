@@ -34,6 +34,13 @@ public:
     BodyInteraction PollInteraction();
     // One cosmetic face cue, consumed ONLY by the local face task.
     // No motor, tool, speech or Xiaozhi conversation authority.
+    // Publish only after a local face task was actually created.
+    void SetFaceConsumerAvailable(bool available) {
+        face_consumer_available_.store(available, std::memory_order_release);
+    }
+    bool FaceConsumerAvailable() const {
+        return face_consumer_available_.load(std::memory_order_acquire);
+    }
     bool TakePersonCue();
     CosmeticMood TakeCosmeticMoodCue();
 
@@ -47,6 +54,7 @@ private:
     bool uart_ready_ = false;
     bool enabled_ = false;
     std::atomic<bool> camera_busy_{false};
+    std::atomic<bool> face_consumer_available_{false};
     TimedPersonCue person_cue_{};
     CosmeticMoodCue cosmetic_mood_{};
     std::uint32_t camera_sequence_ = 0; // camera_busy ensures one producer

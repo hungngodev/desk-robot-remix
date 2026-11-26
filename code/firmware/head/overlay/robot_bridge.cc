@@ -1186,6 +1186,8 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         // Only Sense has a local task consuming these queued cues.
         return Json(req, 503, Envelope(false, "face cue consumer unavailable on this board"));
 #else
+        if (!FaceConsumerAvailable())
+            return Json(req, 503, Envelope(false, "face cue consumer unavailable"));
         // The authenticated Mac can offer a bounded *visual* cue only. A
         // language model, OCR frame or tool response cannot send motor text
         // through this route. Latest event wins; no unbounded HTTP queue.
