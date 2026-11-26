@@ -13,6 +13,7 @@ import re
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import aclosing
 from dataclasses import dataclass
@@ -1225,6 +1226,12 @@ class MultimodalOrchestrator:
         # cancelled during a server event gap, never an arbitrary timer.
         self._reconnect_needs_sampler: set[str] = set()
         self._closed = False
+        self._camera_revocation_callback: Callable[[Settings], None] | None = (
+            self._camera_revoked
+        )
+        subscribe = getattr(settings, "register_camera_revocation", None)
+        if callable(subscribe):
+            subscribe(self._camera_revocation_callback)
 
     def status(self, robot_id: str) -> dict:
         self.hub._check(robot_id)
@@ -1253,6 +1260,13 @@ class MultimodalOrchestrator:
             "physical_vad_video_sync_verified": False,
             "motor_authorized": False,
         }
+
+    def _camera_revoked(self, settings: Settings) -> None:
+        """Purge every pet's queued visual evidence at the operator opt-out."""
+        if self._closed or settings is not self.settings:
+            return
+        for robot_id in self.hub.robots:
+            self._camera_grant_valid(robot_id, self._camera_grants[robot_id])
 
     def _camera_grant_valid(self, robot_id: str, origin: int | None) -> bool:
         """Reject old media grants and invalidate their cached JPEGs once.
@@ -2399,6 +2413,7 @@ class MultimodalOrchestrator:
 
     async def close(self) -> None:
         self._closed = True
+        self._camera_revocation_callback = None
         registries = (
             self._capture_tasks, self._stream_tasks, self._stream_supervisors,
             self._sensor_tasks, self._look_tasks, self._proactive_snapshots,

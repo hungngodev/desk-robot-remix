@@ -5,11 +5,12 @@ import re
 import secrets
 import time
 import tomllib
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from ipaddress import ip_address
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import urlparse
+from weakref import ReferenceType, ref
 
 from pydantic import (
     BaseModel,
@@ -141,6 +142,9 @@ class Settings(BaseModel):
     # Global live camera grant covers every configured pet. Private Pydantic
     # storage never becomes a serializable configuration or model instruction.
     _camera_consent_generation: int = PrivateAttr(default=0)
+    _camera_revocation_listeners: list[ReferenceType[Callable[[Settings], None]]] = PrivateAttr(
+        default_factory=list,
+    )
     _camera_consent_started_at: float = PrivateAttr(default=0.0)
     _voice_memory_consent_generation: int = PrivateAttr(default=0)
     _transcript_consent_generation: int = PrivateAttr(default=0)
@@ -301,6 +305,10 @@ class Settings(BaseModel):
             # Even an immediate re-enable is a NEW grant; old VLM evidence
             # and in-flight plans must never regain the prior authorization.
             self._camera_consent_generation += 1
+            for listener_ref in tuple(self._camera_revocation_listeners):
+                listener = listener_ref()
+                if listener is not None:
+                    listener(self)
         elif name == "voice_vision_tools_enabled" and self.voice_vision_tools_enabled and not was_granted:
             # Sent Opus text has a Mac monotonic timestamp. A late HTTP
             # receipt from the revoked grant cannot enter this new context.
@@ -329,6 +337,13 @@ class Settings(BaseModel):
         if fanout_was_granted and not self.fleet_text_auto_fanout_enabled:
             # Selective-only mode retires an older automatic peer batch.
             self._fleet_auto_fanout_consent_generation += 1
+
+    def register_camera_revocation(self, listener: Callable[[Settings], None]) -> None:
+        """Keep a weak listener; the runtime owns its lifetime."""
+        self._camera_revocation_listeners = [
+            entry for entry in self._camera_revocation_listeners if entry() is not None
+        ]
+        self._camera_revocation_listeners.append(ref(listener))
 
     @property
     def camera_consent_generation(self) -> int:

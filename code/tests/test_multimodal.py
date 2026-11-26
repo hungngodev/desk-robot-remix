@@ -4487,3 +4487,41 @@ async def test_old_vad_camera_sampler_cannot_adopt_new_grant(settings, stage):
         assert service.hub.user_active(rid, time.monotonic())
     finally:
         await service.close()
+
+
+@pytest.mark.parametrize("regrant", [False, True])
+async def test_camera_opt_out_purges_every_hub_without_wait(settings, regrant):
+    """No stream, status read or await may be needed to retire old JPEGs."""
+    settings.voice_vision_tools_enabled = True
+    service = MultimodalOrchestrator(
+        settings, {robot.id: Head() for robot in settings.robots},
+        Vision(), asyncio.Lock(),
+    )
+    try:
+        stamp = time.monotonic()
+        generations = dict(service.hub._generation)
+        grant = settings.camera_consent_generation
+        for rid in service.hub.robots:
+            service.hub.offer(rid, image(square=True), stamp, source="proactive")
+            service.hub.remember_tool(rid, "visual_look", "private image", stamp)
+            service.hub.remember_tool(rid, "robot_status", "body status", stamp)
+
+        copied = settings.model_copy(deep=True)
+        copied.voice_vision_tools_enabled = False
+        assert all(service.hub.frames.values())
+
+        settings.voice_vision_tools_enabled = False
+        if regrant:
+            settings.voice_vision_tools_enabled = True
+        # No call to status/capture or event-loop yield before these assertions.
+        for rid in service.hub.robots:
+            assert not service.hub.frames[rid]
+            assert rid not in service.hub.previous_gray
+            assert service.hub._generation[rid] == generations[rid] + 1
+            assert [entry[0] for entry in service.hub.tool_history[rid]] == [
+                "robot_status"
+            ]
+            assert not service._camera_grant_valid(rid, grant)
+            assert service.hub._generation[rid] == generations[rid] + 1
+    finally:
+        await service.close()
