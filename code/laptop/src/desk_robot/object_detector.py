@@ -128,7 +128,11 @@ def _checked_detection(results: object, label: str, width: int, height: int,
     # Only exact duplicate boxes can coalesce without that association.
     if len({d.box for d in checked}) > 1:
         return "inconclusive_multiple_candidates", None
-    return "camera_seen", best
+    # Normalize only after validation and unique candidate selection. Equal
+    # numeric boxes must not produce order-dependent types or signed zero.
+    x0, y0, x1, y1 = best.box
+    box = (float(x0) + 0.0, float(y0) + 0.0, float(x1), float(y1))
+    return "camera_seen", Detection(best.label, float(best.confidence), box)
 
 
 async def detect_object_frame(
