@@ -275,6 +275,12 @@ class RoomStationDecoder:
             line = line.decode("utf-8", errors="strict")
         if not isinstance(line, str) or not 1 <= len(line.encode("utf-8")) <= MAX_FRAME_BYTES:
             raise ValueError("Invalid station USB line")
+        # Only a single optional LF or CRLF terminator is part of the wire format.
+        # json.loads otherwise accepts embedded tabs, carriage returns and LF
+        # as whitespace, which hides corrupted framing from the caller.
+        line = line.removesuffix("\r\n") if line.endswith("\r\n") else line.removesuffix("\n")
+        if any(ord(char) < 32 or ord(char) == 127 for char in line):
+            raise ValueError("Embedded room station USB control character")
         try:
             payload = json.loads(line, object_pairs_hook=_pairs,
                                  parse_constant=_reject_constant)
@@ -494,7 +500,9 @@ class RoomSerialFeed:
                 except Exception as exc:
                     # Application callback failure is not a USB disconnect.
                     # Keep the decoder replay fence and serial epoch intact.
-                    self.last_error = f"Room observation callback failed: {type(exc).__name__}: {exc}"
+                    self.last_error = (
+                        f"Room observation callback failed: {type(exc).__name__}: {exc}"
+                    )
                     self.callback_failures += 1
                 else:
                     self.received += 1
