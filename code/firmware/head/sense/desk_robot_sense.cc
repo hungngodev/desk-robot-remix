@@ -340,7 +340,8 @@ private:
             if (board->local_eye_display_ != nullptr) {
                 const auto eyes = board->eye_animator_.Step(
                     now_ms, action.motion,
-                    face_available && !priority_active && !model_mood_active);
+                    face_available && !priority_active && !model_mood_active,
+                    priority_active || !isAwake(board->face_behavior_.state()));
                 board->local_eye_display_->ShowEyes(eyes);
             }
             // Restore the current HSM mood after either local priority clears.

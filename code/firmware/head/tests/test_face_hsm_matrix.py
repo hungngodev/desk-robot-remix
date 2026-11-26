@@ -22,9 +22,66 @@ def test_face_hsm_preemption_and_timer_matrix(tmp_path):
 #include <cassert>
 #include <limits>
 #include <initializer_list>
+#include <set>
 using namespace stackchan::behavior;
 using desk_robot::FaceEyeAnimator;
+static void CheckBlinkCadence() {
+    std::set<uint32_t> firsts;
+    for (uint32_t seed = 0; seed < 100; ++seed) {
+        FaceEyeAnimator eyes;
+        eyes.Seed(seed);
+        const uint32_t start = 0xfffffff0U;
+        uint32_t previous = 0, primary = 0;
+        unsigned singles = 0, doubles = 0;
+        bool closed = false;
+        std::set<uint32_t> intervals;
+        for (uint32_t t = 0; t <= 300000; t += 100) {
+            const auto frame = eyes.Step(start + t, Motion::kNone, true);
+            assert(!frame.closed || frame.visible);
+            if (frame.closed && !closed) {
+                const uint32_t gap = t - previous;
+                if (previous && gap == 500U) {
+                    ++doubles;
+                    assert(t - primary == 500U);
+                } else {
+                    if (primary) {
+                        assert(t - primary >= 3000U && t - primary <= 6000U);
+                        intervals.insert(t - primary);
+                    } else {
+                        assert(t >= 3100U && t <= 6100U);
+                        firsts.insert(t);
+                    }
+                    primary = t;
+                    ++singles;
+                }
+                previous = t;
+            }
+            closed = frame.closed;
+        }
+        assert(singles >= 50 && singles <= 100);
+        assert(doubles > 0 && doubles < singles);
+        assert(intervals.size() >= 12);
+        for (uint32_t t = 300100; t < 320000; t += 100) {
+            assert(!eyes.Step(start + t, Motion::kLookDown, true, true).visible);
+        }
+        for (uint32_t t = 320000; t < 323000; t += 100) {
+            assert(!eyes.Step(start + t, Motion::kNone, true).visible);
+        }
+    }
+    assert(firsts.size() >= 15);
+    FaceEyeAnimator cancelled;
+    cancelled.Seed(5);
+    for (uint32_t t = 0; t < 6000; t += 100) {
+        if (cancelled.Step(t, Motion::kNone, true).closed) {
+            assert(!cancelled.Step(t + 1, Motion::kNone, false).visible);
+            assert(!cancelled.Step(t + 500, Motion::kNone, true).closed);
+            break;
+        }
+    }
+}
+
 int main() {
+    CheckBlinkCadence();
     // The real FaceTask samples every 100 ms. Require intermediate pixels,
     // not merely endpoints that the original abrupt implementation passed.
     for (uint32_t start : {0U, 0xffffff00U}) {

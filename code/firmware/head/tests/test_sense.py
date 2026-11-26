@@ -1679,6 +1679,7 @@ def test_boot_microphone_privacy_has_own_local_oled_status():
     assert 'body_unhealthy, dock_lockout, mic_privacy_on' in face
     assert 'case FaceStatus::kMicPrivacy: status = "Mic privacy ON";' in renderer
     assert "face_available && !priority_active && !model_mood_active" in face
+    assert "priority_active || !isAwake(board->face_behavior_.state())" in face
     assert "app.ToggleChatState();" not in face.split(
         "const bool mic_privacy_on = ", 1
     )[1]
@@ -2301,24 +2302,26 @@ int main() {
     auto left = eyes.Step(1000, Motion::kLookLeft, true);
     assert(left.visible && left.x == -3 && !left.closed);
     assert(!eyes.Step(2200, Motion::kNone, true).visible);
-    auto blink = eyes.Step(6000, Motion::kNone, true);
-    assert(blink.visible && !blink.closed);
-    assert(eyes.Step(6150, Motion::kNone, true).closed);
-    assert(!eyes.Step(6400, Motion::kNone, true).visible);
-    assert(!eyes.Step(6450, Motion::kLookRight, false).visible);
-    assert(!eyes.Step(6500, Motion::kNone, true).visible);
-    assert(eyes.Step(6700, Motion::kLookRight, true).x == 3);
-    assert(eyes.Step(6800, Motion::kLookUp, true).y == -3);
-    assert(eyes.Step(6900, Motion::kNod, true).y == 3);
-    assert(eyes.Step(7450, Motion::kNone, true).y == -2);
-    assert(!eyes.Step(8101, Motion::kNone, true).visible);
-    FaceEyeAnimator no_seed, other_pet;
-    other_pet.Seed(500);
-    assert(!no_seed.Step(1000, Motion::kNone, true).visible);
-    assert(!other_pet.Step(1000, Motion::kNone, true).visible);
-    assert(no_seed.Step(6000, Motion::kNone, true).visible);
-    assert(!other_pet.Step(6000, Motion::kNone, true).visible);
-    assert(other_pet.Step(6200, Motion::kNone, true).visible);
+    uint32_t blink_at = 0;
+    for (uint32_t t = 2300; t <= 7000; t += 100) {
+        const auto blink = eyes.Step(t, Motion::kNone, true);
+        if (blink.visible) {
+            assert(!blink.closed);
+            blink_at = t;
+            break;
+        }
+    }
+    assert(blink_at >= 4000 && blink_at <= 7000);
+    assert(eyes.Step(blink_at + 150, Motion::kNone, true).closed);
+    assert(!eyes.Step(blink_at + 900, Motion::kNone, true).visible);
+    FaceEyeAnimator gaze;
+    assert(!gaze.Step(6450, Motion::kLookRight, false).visible);
+    assert(!gaze.Step(6500, Motion::kNone, true).visible);
+    assert(gaze.Step(6700, Motion::kLookRight, true).x == 3);
+    assert(gaze.Step(6800, Motion::kLookUp, true).y == -3);
+    assert(gaze.Step(6900, Motion::kNod, true).y == 3);
+    assert(gaze.Step(7450, Motion::kNone, true).y == -2);
+    assert(!gaze.Step(8101, Motion::kNone, true).visible);
     FaceEyeAnimator rollover;
     assert(rollover.Step(0xfffffff0U, Motion::kLookLeft, true).visible);
     assert(rollover.Step(0x40U, Motion::kNone, true).visible);
@@ -2335,7 +2338,7 @@ int main() {
             assert(!frame.closed || frame.visible);
             was_closed = frame.closed;
         }
-        assert(blinks >= 44 && blinks <= 70);
+        assert(blinks >= 50 && blinks <= 100);
         for (auto motion : {Motion::kLookLeft, Motion::kLookRight, Motion::kLookUp,
                             Motion::kLookDown, Motion::kNod, Motion::kShake}) {
             auto frame = offline.Step(300100U, motion, true);

@@ -287,7 +287,10 @@ The selected local expression stack uses the vendored MIT Stackchan HSM
 `overlay/face_eye_animator.hpp` and `overlay/face_eye_display.hpp`.
 The real Sense `FaceTask` passes `Action.motion` into `FaceEyeAnimator::Step`,
 then updates bounded blinking and gaze pixels inside Xiaozhi's existing
-LVGL emotion slot under `DisplayLockGuard`. The upstream speaking,
+LVGL emotion slot under `DisplayLockGuard`. Primary blinks use a seeded
+3–6 second pseudorandom interval; occasional double blinks have 500 ms
+onset spacing. Safety priority and HSM sleep/low battery cancel the overlay
+and restart the blink interval on recovery. The upstream speaking,
 listening and safety status remains separately owned; WROOM faults suppress
 optional moods, and this face code cannot command a motor. GPL RoboEyes is a
 design reference only and was not imported.
