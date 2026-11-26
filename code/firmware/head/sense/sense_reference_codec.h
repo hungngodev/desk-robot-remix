@@ -170,7 +170,7 @@ private:
     uint32_t microphone_frames_read_ = 0;
     uint32_t speaker_frames_accepted_ = 0;
     // Silence-only reference on startup/reset is expected briefly. Count
-    // missing windows and warn only on prolonged consecutive underflow.
+    // missing windows and latch prolonged underflow for diagnostic polling.
     uint32_t missing_reference_reads_ = 0;
     uint32_t consecutive_missing_reference_reads_ = 0;
     uint32_t reference_overwrite_reads_ = 0;
