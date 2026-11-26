@@ -8,7 +8,12 @@
   "body": {
     "platformio": "6.1.18",
     "espressif32": "6.9.0",
-    "arduino_esp32": "2.0.17"
+    "arduino_esp32": "2.0.17",
+    "vl53l0x_arduino": {
+      "url": "https://github.com/pololu/vl53l0x-arduino.git",
+      "version": "1.3.1",
+      "commit": "9f3773cb48d4e4e844d689cfc529a06f96d1d264"
+    }
   },
   "python": "3.12.2",
   "head_verification_wake_word": "disabled"

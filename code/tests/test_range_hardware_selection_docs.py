@@ -2,6 +2,9 @@
 
 Source consistency is not proof of carrier voltages or range calibration.
 """
+
+import json
+import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -16,7 +19,6 @@ def test_current_range_selection_matches_driver_and_documents():
     historical = (ROOT / "docs/research/2026-11-13-vl53l4cd-carrier-logic-level-gate.md").read_text()
     assert "#include <VL53L0X.h>" in driver
     assert "kRangeCount = 5 + (DESK_ROBOT_EXTRA_RANGERS ? 3 : 0)" in driver
-    assert "vl53l0x-arduino.git#1.3.1" in ini
     assert "-DDESK_ROBOT_EXTRA_RANGERS=1" in ini
     assert "eight generic VL53L0X channels" in original
     assert "Pololu VL53L0X Arduino library" in reuse
@@ -34,3 +36,14 @@ def test_hardware_selection_does_not_authorize_real_motion():
     ini = (ROOT / "code/firmware/body/platformio.ini").read_text()
     assert "-DDESK_ROBOT_STEPPER_HARDWARE_CUTOFF_QUALIFIED=0" in ini
     assert "Three side/rear readings are diagnostics" in ini
+
+
+def test_body_toolchain_and_all_range_driver_pins_match_lock():
+    body = json.loads((ROOT / "code/toolchain-lock.json").read_text())["body"]
+    ini = (ROOT / "code/firmware/body/platformio.ini").read_text()
+    driver = body["vl53l0x_arduino"]
+    assert driver["version"] == "1.3.1"
+    assert re.fullmatch(r"[0-9a-f]{40}", driver["commit"])
+    assert f'platform = espressif32@{body["espressif32"]}' in ini.splitlines()
+    references = [line.strip() for line in ini.splitlines() if "vl53l0x-arduino.git#" in line]
+    assert references == [f'{driver["url"]}#{driver["commit"]}'] * 4
