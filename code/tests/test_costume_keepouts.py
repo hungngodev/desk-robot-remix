@@ -13,12 +13,16 @@ INTERFACES = (
 )
 
 
+def clear_records():
+    return [f'[{name!r}, [[[0,0,0],[1,1,1]]]]' for name in INTERFACES]
+
+
 def render(tmp_path, *, swept="[[[3,0,0],[4,1,1]]]", keepouts=None):
     openscad = shutil.which("openscad")
     if not openscad:
         pytest.skip("OpenSCAD unavailable")
     if keepouts is None:
-        keepouts = [f'[{name!r}, [[[0,0,0],[1,1,1]]]]' for name in INTERFACES]
+        keepouts = clear_records()
     driver = tmp_path / "driver.scad"
     records = ",".join(keepouts).replace("'", '"')
     driver.write_text(
@@ -32,6 +36,12 @@ def render(tmp_path, *, swept="[[[3,0,0],[4,1,1]]]", keepouts=None):
     )
 
 
+def assert_rejected(tmp_path, result, message):
+    assert message in result.stderr
+    output = tmp_path / "result.csg"
+    assert not output.exists() or not output.read_text(encoding="utf-8").strip()
+
+
 def test_clear_costume(tmp_path):
     result = render(tmp_path)
     assert result.returncode == 0, result.stderr
@@ -41,23 +51,46 @@ def test_clear_costume(tmp_path):
 
 @pytest.mark.parametrize("interface", INTERFACES)
 def test_each_interface_rejects_touching_or_overlapping_sweep(tmp_path, interface):
-    records = [f'[{name!r}, [[[0,0,0],[1,1,1]]]]' for name in INTERFACES]
+    records = clear_records()
     records[INTERFACES.index(interface)] = f'[{interface!r}, [[[2,0,0],[3,1,1]]]]'
     result = render(tmp_path, keepouts=records)
-    assert f"Costume occlusion: {interface}" in result.stderr
+    assert_rejected(tmp_path, result, f"Costume occlusion: {interface}")
 
 
 @pytest.mark.parametrize("swept", ["[]", "[[[0,0,0],[0,1,1]]]", "[[[0,0],[1,1,1]]]"])
 def test_invalid_sweep_fails_closed(tmp_path, swept):
     result = render(tmp_path, swept=swept)
-    assert "ERROR: Assertion" in result.stderr
+    assert_rejected(tmp_path, result, "ERROR: Assertion")
 
 
 def test_missing_interface_fails_closed(tmp_path):
     result = render(tmp_path, keepouts=[])
-    assert "Missing or extra costume keepout interfaces" in result.stderr
+    assert_rejected(tmp_path, result, "Missing or extra costume keepout interfaces")
 
 
 def test_multiple_swept_boxes_checked(tmp_path):
     result = render(tmp_path, swept="[[[3,0,0],[4,1,1]],[[0,0,0],[1,1,1]]]")
-    assert "Costume occlusion: camera" in result.stderr
+    assert_rejected(tmp_path, result, "Costume occlusion: camera")
+
+
+@pytest.mark.parametrize("boxes", ["[]", "[[[1,0,0],[0,1,1]]]", "[[[0,0,0],[1,1,undef]]]"])
+def test_missing_or_malformed_protected_volume(tmp_path, boxes):
+    records = clear_records()
+    records[0] = f'["camera", {boxes}]'
+    result = render(tmp_path, keepouts=records)
+    message = "Missing measured boxes" if boxes == "[]" else "Invalid keepout"
+    assert_rejected(tmp_path, result, f"{message}: camera")
+
+
+def test_duplicate_interface_does_not_replace_missing_lane(tmp_path):
+    records = clear_records()
+    records[1] = records[0]
+    result = render(tmp_path, keepouts=records)
+    assert_rejected(tmp_path, result, "Missing or misordered keepout: tof0")
+
+
+def test_multiple_protected_boxes_checked(tmp_path):
+    records = clear_records()
+    records[-1] = '["amp_vent", [[[0,0,0],[1,1,1]], [[3,0,0],[4,1,1]]]]'
+    result = render(tmp_path, keepouts=records)
+    assert_rejected(tmp_path, result, "Costume occlusion: amp_vent")
