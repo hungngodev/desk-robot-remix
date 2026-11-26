@@ -38,38 +38,47 @@ int main() {
     step(start + 59999, true);
     assert(writes.size() == 1 && writes.back() == FacePanelMode::kAwake);
     step(start + 60000, true);
-    assert(writes.size() == 2 && writes.back() == FacePanelMode::kDim);
-    step(start + 300000, true, true);
-    assert(writes.size() == 3 && writes.back() == FacePanelMode::kOff);
-    step(start + 300100, true, true);
+    assert(writes.size() == 2 && writes.back() == FacePanelMode::kSoftDim);
+    step(start + 60999, true, true);
+    assert(writes.size() == 2);
+    step(start + 61000, true, true);
+    assert(writes.size() == 3 && writes.back() == FacePanelMode::kDim);
+    step(start + 61999, true, true);
     assert(writes.size() == 3);
+    step(start + 62000, true, true);
+    assert(writes.size() == 4 && writes.back() == FacePanelMode::kOff);
+    step(start + 62001, true, true);
+    assert(writes.size() == 4);
     // A priority status, transcript, popup or active voice resets idle time.
     succeed = false;
-    step(start + 300200, false, true);
-    assert(writes.size() == 4 && writes.back() == FacePanelMode::kAwake);
-    step(start + 300300, false, true);
-    assert(writes.size() == 4);
-    succeed = true;
-    step(start + 301200, false, true);
+    step(start + 62200, false, true);
     assert(writes.size() == 5 && writes.back() == FacePanelMode::kAwake);
-    step(start + 301300, true, true);
-    step(start + 361299, true, true);
+    step(start + 62300, false, true);
     assert(writes.size() == 5);
-    step(start + 361300, true, true);
-    assert(writes.size() == 6 && writes.back() == FacePanelMode::kOff);
-    step(start + 361400, false);
-    assert(writes.size() == 7 && writes.back() == FacePanelMode::kAwake);
-    // A failed dim attempt may already have changed contrast. Wake must
-    // reapply the awake mode even though it was the previous successful mode.
-    step(start + 362000, true);
-    succeed = false;
-    step(start + 422000, true);
-    assert(writes.size() == 8 && writes.back() == FacePanelMode::kDim);
     succeed = true;
-    step(start + 422001, false);
-    assert(writes.size() == 9 && writes.back() == FacePanelMode::kAwake);
+    step(start + 63200, false, true);
+    assert(writes.size() == 6 && writes.back() == FacePanelMode::kAwake);
+    // A delayed first idle tick cannot skip either visible contrast stage.
+    step(start + 63300, true, true);
+    step(start + 400000, true, true);
+    assert(writes.size() == 7 && writes.back() == FacePanelMode::kSoftDim);
+    step(start + 400999, true, true);
+    assert(writes.size() == 7);
+    succeed = false;
+    step(start + 401000, true, true);
+    assert(writes.size() == 8 && writes.back() == FacePanelMode::kDim);
+    step(start + 402000, true, true);
+    assert(writes.size() == 9 && writes.back() == FacePanelMode::kDim);
+    succeed = true;
+    step(start + 403000, true, true);
+    assert(writes.size() == 10 && writes.back() == FacePanelMode::kDim);
+    step(start + 403999, true, true);
+    assert(writes.size() == 10);
+    // A priority wake overrides even a partially applied dim transaction.
+    step(start + 404000, false);
+    assert(writes.size() == 11 && writes.back() == FacePanelMode::kAwake);
     step(0, true, true);
-    assert(writes.size() == 9);
+    assert(writes.size() == 11);
 }
 """)
     pie_flags = [] if sys.platform == "darwin" else ["-fno-pie", "-no-pie"]

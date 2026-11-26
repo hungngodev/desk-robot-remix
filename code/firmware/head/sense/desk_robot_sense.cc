@@ -411,7 +411,8 @@ private:
             return esp_lcd_panel_disp_on_off(display_panel_, false) == ESP_OK;
         // SSD1306 SETCONTRAST (0x81). Explicit provisional defaults; the
         // actual panel brightness/current still requires bench measurement.
-        const uint8_t contrast = mode == FacePanelMode::kDim ? 0x20 : 0x80;
+        const uint8_t contrast = mode == FacePanelMode::kDim ? 0x20 :
+            (mode == FacePanelMode::kSoftDim ? 0x50 : 0x80);
         const auto contrast_result =
             esp_lcd_panel_io_tx_param(display_panel_io_, 0x81, &contrast, sizeof(contrast));
         // Always attempt wake even when contrast fails; the policy retries.
