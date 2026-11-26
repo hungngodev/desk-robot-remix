@@ -788,6 +788,38 @@ class PetController:
         Return True only for a newly admitted observation; a replay or
         invalidated source must not trigger a new proactive action.
         """
+        current_visual_epoch, camera_receipt_current, camera_permitted = (
+            self._observation_guards(
+                robot_id, camera_derived, camera_generation, camera_consent_generation,
+                preemption_epoch, camera_received_at,
+            )
+        )
+        if not current_visual_epoch() or not camera_permitted():
+            return False
+        receipt = self._prepare_observation_receipt(
+            robot_id, camera_derived, camera_received_at, camera_source_identity,
+        )
+        if receipt is None:
+            return False
+        if not await self._persist_observation_eyewitness(
+            robot_id, change, receipt, current_visual_epoch,
+            camera_receipt_current, camera_permitted,
+        ):
+            return False
+        if (self.settings.fleet_text_sharing_enabled
+                and self.settings.fleet_text_auto_fanout_enabled
+                and current_visual_epoch() and camera_permitted()):
+            return await self._fanout_observation(
+                robot_id, change, receipt, current_visual_epoch,
+                camera_receipt_current, camera_permitted,
+            )
+        return True
+
+    def _observation_guards(
+        self, robot_id: str, camera_derived: bool, camera_generation: int | None,
+        camera_consent_generation: int | None, preemption_epoch: int | None,
+        camera_received_at: float | None,
+    ) -> tuple[Callable[[], bool], Callable[[], bool], Callable[[], bool]]:
         admitted_camera_grant = (
             self.settings.camera_consent_generation
             if camera_consent_generation is None else camera_consent_generation
@@ -808,10 +840,22 @@ class PetController:
                              == admitted_camera_grant)))
             )
 
-        if (not current_visual_epoch()
-                or (camera_derived and self.settings.mode == "hardware"
-                    and not self.settings.voice_vision_tools_enabled)):
-            return False
+        def camera_receipt_current() -> bool:
+            return camera_received_at is None or camera_receipt_is_current(
+                received_at=camera_received_at, now=time.monotonic(),
+                max_age=self.max_observation_age,
+            )
+
+        def camera_permitted() -> bool:
+            return (not camera_derived or self.settings.mode != "hardware"
+                    or self.settings.voice_vision_tools_enabled)
+
+        return current_visual_epoch, camera_receipt_current, camera_permitted
+
+    def _prepare_observation_receipt(
+        self, robot_id: str, camera_derived: bool, camera_received_at: float | None,
+        camera_source_identity: tuple[int, int, int] | None,
+    ) -> tuple[str, float, CameraProvenance | None] | None:
         # Camera evidence retains the original authenticated Mac receive
         # chronology, not the later, variably delayed semantic completion.
         # Device capture-completion ticks cannot be converted to Mac time
@@ -828,17 +872,22 @@ class PetController:
                 max_age=self.max_observation_age, source_identity=camera_source_identity,
             )
             if receipt is None:
-                return False
+                return None
             event_id, observed_at = receipt
             camera_provenance = CameraProvenance(
                 received_at=observed_at, interpreted_at=interpreted_at,
                 source_identity=camera_source_identity,
             )
-        def camera_receipt_current() -> bool:
-            return camera_received_at is None or camera_receipt_is_current(
-                received_at=camera_received_at, now=time.monotonic(),
-                max_age=self.max_observation_age,
-            )
+        return event_id, observed_at, camera_provenance
+
+    async def _persist_observation_eyewitness(
+        self, robot_id: str, change: SceneChange,
+        receipt: tuple[str, float, CameraProvenance | None],
+        current_visual_epoch: Callable[[], bool],
+        camera_receipt_current: Callable[[], bool],
+        camera_permitted: Callable[[], bool],
+    ) -> bool:
+        event_id, observed_at, camera_provenance = receipt
 
         def persist_eyewitness() -> bool:
             # Cancelling an await never cancels the SQLite worker. Retraction
@@ -853,8 +902,7 @@ class PetController:
             )
             if (inserted and (not current_visual_epoch()
                     or not camera_receipt_current()
-                    or (camera_derived and self.settings.mode == "hardware"
-                        and not self.settings.voice_vision_tools_enabled))):
+                    or not camera_permitted())):
                 self.memory.forget_episode(robot_id, event_id)
                 return False
             return inserted
@@ -865,8 +913,7 @@ class PetController:
             # because camera consent changed back before this await resumed.
             return False
         if (not current_visual_epoch()
-                or (camera_derived and self.settings.mode == "hardware"
-                    and not self.settings.voice_vision_tools_enabled)):
+                or not camera_permitted()):
             if inserted:
                 # Permission can change while a SQLite write is in flight.
                 # Retract only this new visual guess, not a physical sensor
@@ -875,113 +922,153 @@ class PetController:
                     self.memory.forget_episode, robot_id, event_id,
                 )
             return False
-        if (self.settings.fleet_text_sharing_enabled
-                and self.settings.fleet_text_auto_fanout_enabled
-                and current_visual_epoch()
-                and (not camera_derived or self.settings.mode != "hardware"
-                     or self.settings.voice_vision_tools_enabled)):
-            # Per-robot SQLite databases are independent. A failed or busy
-            # peer must not erase the eyewitness fact or suppress its reply.
-            sharing_grant = self.settings.fleet_sharing_consent_generation
-            fanout_grant = self.settings.fleet_auto_fanout_consent_generation
-            destinations = [r.id for r in self.settings.robots if r.id != robot_id]
-            relay_tokens = {peer_id: uuid.uuid4().hex for peer_id in destinations}
-            # Captured after the newly inserted eyewitness record is durable.
-            # Operator PATCH/DELETE advances this generation, including a
-            # correction away from and back to the same description.
-            source_revision = await asyncio.to_thread(
-                self.memory.witnessed_episode_revision, robot_id, event_id,
+        return True
+
+    async def _fanout_observation(
+        self, robot_id: str, change: SceneChange,
+        receipt: tuple[str, float, CameraProvenance | None],
+        current_visual_epoch: Callable[[], bool],
+        camera_receipt_current: Callable[[], bool],
+        camera_permitted: Callable[[], bool],
+    ) -> bool:
+        event_id, _, _ = receipt
+        # Per-robot SQLite databases are independent. A failed or busy
+        # peer must not erase the eyewitness fact or suppress its reply.
+        sharing_grant = self.settings.fleet_sharing_consent_generation
+        fanout_grant = self.settings.fleet_auto_fanout_consent_generation
+        destinations = [r.id for r in self.settings.robots if r.id != robot_id]
+        relay_tokens = {peer_id: uuid.uuid4().hex for peer_id in destinations}
+        # Captured after the newly inserted eyewitness record is durable.
+        # Operator PATCH/DELETE advances this generation, including a
+        # correction away from and back to the same description.
+        source_revision = await asyncio.to_thread(
+            self.memory.witnessed_episode_revision, robot_id, event_id,
+        )
+        if source_revision is None or source_revision[0] != change.description:
+            return False
+
+        source_current, permitted = self._observation_fanout_guards(
+            robot_id, event_id, source_revision, sharing_grant, fanout_grant,
+            current_visual_epoch, camera_receipt_current, camera_permitted,
+        )
+        def persist_peer_batch() -> list:
+            return self._persist_observation_peer_batch(
+                robot_id, change, receipt, destinations, relay_tokens,
+                source_current, permitted,
             )
-            if source_revision is None or source_revision[0] != change.description:
-                return False
 
-            def source_current() -> bool:
-                # Invoke only inside a SQLite worker, NEVER the Mac event loop.
-                # The source can be removed or edited without a fleet consent
-                # change. Fail closed on busy/unavailable local SQLite.
-                try:
-                    return (
-                        self.memory.witnessed_episode_revision(robot_id, event_id)
-                        == source_revision
-                    )
-                except (sqlite3.Error, OSError):
-                    return False
+        results = await asyncio.to_thread(persist_peer_batch)
+        return await self._reconcile_observation_peer_batch(
+            robot_id, event_id, destinations, relay_tokens, results,
+            source_current, permitted, current_visual_epoch,
+        )
 
-            def permitted() -> bool:
+    def _observation_fanout_guards(
+        self, robot_id: str, event_id: str, source_revision: tuple[str, int],
+        sharing_grant: int, fanout_grant: int,
+        current_visual_epoch: Callable[[], bool],
+        camera_receipt_current: Callable[[], bool],
+        camera_permitted: Callable[[], bool],
+    ) -> tuple[Callable[[], bool], Callable[[], bool]]:
+        def source_current() -> bool:
+            # Invoke only inside a SQLite worker, NEVER the Mac event loop.
+            # The source can be removed or edited without a fleet consent
+            # change. Fail closed on busy/unavailable local SQLite.
+            try:
                 return (
-                    self.settings.fleet_text_sharing_enabled
-                    and self.settings.fleet_sharing_consent_generation
-                    == sharing_grant
-                    and self.settings.fleet_text_auto_fanout_enabled
-                    and self.settings.fleet_auto_fanout_consent_generation
-                    == fanout_grant
-                    and current_visual_epoch()
-                    and camera_receipt_current()
-                    and (not camera_derived or self.settings.mode != "hardware"
-                         or self.settings.voice_vision_tools_enabled)
+                    self.memory.witnessed_episode_revision(robot_id, event_id)
+                    == source_revision
                 )
-
-            def persist_peer_batch() -> list:
-                # One off-loop worker owns ALL newly inserted copies. If a
-                # peer stalls and the coroutine is cancelled on opt out, a
-                # completed sibling cannot escape the old gather cleanup.
-                results, new_copies = [], []
-                for peer_id in destinations:
-                    if not permitted() or not source_current():
-                        break
-                    try:
-                        inserted = self.memory.remember(
-                            peer_id, event_id, change.description,
-                            kind=change.kind, source_robot=robot_id,
-                            witnessed=False, observed_at=observed_at,
-                            confidence=change.confidence,
-                            camera_provenance=camera_provenance,
-                            relay_token=relay_tokens[peer_id],
-                        )
-                        results.append(inserted)
-                        if inserted:
-                            new_copies.append(peer_id)
-                    except Exception as exc:
-                        # One failed peer must not erase the eyewitness event
-                        # or suppress independent peers.
-                        results.append(exc)
-                if not permitted() or not source_current():
-                    for peer_id in new_copies:
-                        # Only copies from THIS request, not older duplicates.
-                        self.memory.retract_peer_copy(
-                            peer_id, event_id, relay_tokens[peer_id],
-                        )
-                    results = [
-                        item if isinstance(item, BaseException) else False
-                        for item in results
-                    ]
-                return results + [False] * (len(destinations) - len(results))
-
-            results = await asyncio.to_thread(persist_peer_batch)
-            # Reading the source here is offloaded too: the SQLite database
-            # can stall even after the peer worker has completed its check.
-            source_still_current = await asyncio.to_thread(source_current)
-            for peer_id, result in zip(destinations, results, strict=True):
-                if isinstance(result, BaseException):
-                    self.states[robot_id].last_error = (
-                        f"Peer memory {peer_id}: {type(result).__name__}: {str(result)[:80]}"
-                    )
-                elif result is True and (not permitted() or not source_still_current):
-                    # A newly inserted peer copy may finish after the
-                    # operator revokes sharing while SQLite is running.
-                    # The original eyewitness record remains untouched;
-                    # never erase an older idempotent peer memory.
-                    await asyncio.to_thread(
-                        self.memory.retract_peer_copy, peer_id, event_id,
-                        relay_tokens[peer_id],
-                    )
-            # A reconnect during the peer copy loop invalidates the source
-            # eyewitness as well as every newly inserted secondhand copy.
-            if not current_visual_epoch():
-                await asyncio.to_thread(
-                    self.memory.forget_episode, robot_id, event_id
-                )
+            except (sqlite3.Error, OSError):
                 return False
+
+        def permitted() -> bool:
+            return (
+                self.settings.fleet_text_sharing_enabled
+                and self.settings.fleet_sharing_consent_generation
+                == sharing_grant
+                and self.settings.fleet_text_auto_fanout_enabled
+                and self.settings.fleet_auto_fanout_consent_generation
+                == fanout_grant
+                and current_visual_epoch()
+                and camera_receipt_current()
+                and camera_permitted()
+            )
+
+        return source_current, permitted
+
+    def _persist_observation_peer_batch(
+        self, robot_id: str, change: SceneChange,
+        receipt: tuple[str, float, CameraProvenance | None],
+        destinations: list[str], relay_tokens: dict[str, str],
+        source_current: Callable[[], bool], permitted: Callable[[], bool],
+    ) -> list:
+        event_id, observed_at, camera_provenance = receipt
+        # One off-loop worker owns ALL newly inserted copies. If a
+        # peer stalls and the coroutine is cancelled on opt out, a
+        # completed sibling cannot escape the old gather cleanup.
+        results, new_copies = [], []
+        for peer_id in destinations:
+            if not permitted() or not source_current():
+                break
+            try:
+                inserted = self.memory.remember(
+                    peer_id, event_id, change.description,
+                    kind=change.kind, source_robot=robot_id,
+                    witnessed=False, observed_at=observed_at,
+                    confidence=change.confidence,
+                    camera_provenance=camera_provenance,
+                    relay_token=relay_tokens[peer_id],
+                )
+                results.append(inserted)
+                if inserted:
+                    new_copies.append(peer_id)
+            except Exception as exc:
+                # One failed peer must not erase the eyewitness event
+                # or suppress independent peers.
+                results.append(exc)
+        if not permitted() or not source_current():
+            for peer_id in new_copies:
+                # Only copies from THIS request, not older duplicates.
+                self.memory.retract_peer_copy(
+                    peer_id, event_id, relay_tokens[peer_id],
+                )
+            results = [
+                item if isinstance(item, BaseException) else False
+                for item in results
+            ]
+        return results + [False] * (len(destinations) - len(results))
+
+    async def _reconcile_observation_peer_batch(
+        self, robot_id: str, event_id: str, destinations: list[str],
+        relay_tokens: dict[str, str], results: list,
+        source_current: Callable[[], bool], permitted: Callable[[], bool],
+        current_visual_epoch: Callable[[], bool],
+    ) -> bool:
+        # Reading the source here is offloaded too: the SQLite database
+        # can stall even after the peer worker has completed its check.
+        source_still_current = await asyncio.to_thread(source_current)
+        for peer_id, result in zip(destinations, results, strict=True):
+            if isinstance(result, BaseException):
+                self.states[robot_id].last_error = (
+                    f"Peer memory {peer_id}: {type(result).__name__}: {str(result)[:80]}"
+                )
+            elif result is True and (not permitted() or not source_still_current):
+                # A newly inserted peer copy may finish after the
+                # operator revokes sharing while SQLite is running.
+                # The original eyewitness record remains untouched;
+                # never erase an older idempotent peer memory.
+                await asyncio.to_thread(
+                    self.memory.retract_peer_copy, peer_id, event_id,
+                    relay_tokens[peer_id],
+                )
+        # A reconnect during the peer copy loop invalidates the source
+        # eyewitness as well as every newly inserted secondhand copy.
+        if not current_visual_epoch():
+            await asyncio.to_thread(
+                self.memory.forget_episode, robot_id, event_id
+            )
+            return False
         return True
 
     async def share_with_peer(
