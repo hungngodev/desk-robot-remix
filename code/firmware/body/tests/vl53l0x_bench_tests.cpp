@@ -26,7 +26,33 @@ static void assert_safe_harness() {
   }
 }
 
+static void test_fake_wire_transaction_contract() {
+  FakeWire wire;
+  assert(wire.available() == 0 && wire.read() == -1);
+  assert(wire.begin(21, 22, 400000));
+  assert(wire.requestFrom(0x70, 1, true) == 0);
+  wire.beginTransmission(0x71);
+  assert(wire.write(1) == 1);
+  assert(wire.endTransmission(true) != 0);
+  wire.beginTransmission(0x70);
+  assert(wire.write(2) == 1);
+  assert(wire.endTransmission(true) != 0);
+  wire.beginTransmission(0x70);
+  assert(wire.write(1) == 1);
+  assert(wire.endTransmission(false) != 0);
+  wire.beginTransmission(0x70);
+  assert(wire.write(1) == 1);
+  assert(wire.endTransmission(true) == 0);
+  assert(wire.requestFrom(0x71, 1, true) == 0);
+  assert(wire.requestFrom(0x70, 2, true) == 0);
+  assert(wire.requestFrom(0x70, 1, false) == 0);
+  assert(wire.requestFrom(0x70, 1, true) == 1);
+  assert(wire.available() == 1 && wire.read() == 1);
+  assert(wire.available() == 0 && wire.read() == -1);
+}
+
 int main() {
+  test_fake_wire_transaction_contract();
   reset();
   Wire.fail_begin = true;
   setup();
