@@ -629,6 +629,49 @@ def test_unterminated_or_oversized_serial_fragments_never_become_room_frames(mon
 
 
 
+@pytest.mark.parametrize("prefix", [b"\xff", b"\xff" * (MAX_FRAME_BYTES + 1)])
+def test_sync_ack_suffix_cannot_synchronize_truncated_usb_line(monkeypatch, prefix):
+    """Framing must be established before accepting a causal ACK."""
+    import sys
+    from types import SimpleNamespace
+
+    opened = []
+    received = []
+
+    class Port(SynchronizedFakePort):
+        def __init__(self, *args, **kwargs):
+            self.reads = 0
+            opened.append(self)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def readline(self, size):
+            assert size == MAX_FRAME_BYTES + 1
+            if self.reads == 0:
+                self.first_ack = self._read_session_reply()
+            packets = [
+                prefix,
+                self.first_ack,  # suffix of the unterminated corrupt line
+                json.dumps(frame(1, 1000)).encode() + b"\n",
+                self.first_ack,  # independent complete ACK
+                json.dumps(frame(2, 2000)).encode() + b"\n",
+                b"",
+            ]
+            packet = packets[self.reads]
+            self.reads += 1
+            return packet
+
+    monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
+    feed = RoomSerialFeed("/dev/cu.test", lambda observation: received.append(observation.seq))
+    feed._read_port(lambda: not opened or opened[0].reads < 6)
+    assert received == [2]
+    assert feed.received == 1
+
+
 def test_recursive_json_parse_error_does_not_restart_usb_replay_epoch(monkeypatch):
     # Pathological USB JSON must not close the port and reset its replay fence.
     import sys
