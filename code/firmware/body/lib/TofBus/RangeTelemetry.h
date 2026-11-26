@@ -1,5 +1,8 @@
 #pragma once
 
+#if (defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER) || \
+    (defined(DESK_ROBOT_FULL_SENSORS) && DESK_ROBOT_FULL_SENSORS)
+#include <cstdint>
 #include "BodyControl.h"
 #include "TofBus.h"
 
@@ -31,3 +34,4 @@ inline void publish_range_telemetry(const TofBus& bus, BodyControl& control,
 }
 
 }  // namespace desk_robot
+#endif
