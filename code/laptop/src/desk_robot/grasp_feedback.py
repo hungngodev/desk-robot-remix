@@ -41,6 +41,18 @@ _RELIEF_WAIT_S = 6.0
 _RELIEF_POLL_INTERVAL_S = 0.075
 
 
+class GraspLimitation(OperationError):
+    """Observed failure to secure an object, not proof of its thickness."""
+
+    reason = "too_flat_or_slipped"
+
+    def __init__(self, detail: str):
+        super().__init__(
+            f"{self.reason}: {detail}; object may be too flat or may have slipped; "
+            "grasp unverified, no automatic retry"
+        )
+
+
 async def await_commanded_jaw_target(
     health: Callable[[], Awaitable[dict]], target: int,
 ) -> None:
@@ -251,6 +263,7 @@ async def guarded_grasp(
     latest_seq = seq_b
     motion_attempted = False
     previous_target = None
+    contact_losses = 0
     try:
         for angle in grip_angles(
             calibration.grip_open, calibration.grip_closed, calibration.grip_step_deg
@@ -298,6 +311,10 @@ async def guarded_grasp(
                 if raw_delta <= -threshold:
                     raise OperationError("Gripper feedback contradicts calibrated FSR polarity")
                 if raw_delta < threshold:
+                    if confirmation:
+                        contact_losses += 1
+                        if contact_losses >= 2:
+                            raise GraspLimitation("tactile contact lost twice")
                     break
                 if confirmation:
                     # Health or target may change during the final awaited AUX read.
@@ -309,7 +326,7 @@ async def guarded_grasp(
                         "baseline_raw": baseline, "position_measured": False,
                         "force_newtons_measured": False, "physical_acceptance_pass": False,
                     }
-        raise OperationError("Closed jaw limit reached with no tactile contact")
+        raise GraspLimitation("no confirmed tactile contact within commanded jaw limits")
     except (Exception, asyncio.CancelledError) as failure:
         if force_boot_changed or not motion_attempted:
             raise  # No relief across a reboot or before any attempted close.
