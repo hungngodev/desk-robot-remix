@@ -30,7 +30,6 @@
 #include "sense_reference_codec.h"
 
 #include <algorithm>
-#include <cmath>
 #include <esp_timer.h>
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
 #include <esp_heap_caps.h>
@@ -78,13 +77,11 @@ void SenseReferenceCodec::PublishAcceptedLocked(
     // The canonical TX scratch contains the actual converted PCM32 submitted
     // to I2S. Do not recompute volume from a setting that may have changed.
     for (int i = 0; i < samples; ++i) {
-        const int32_t scaled = static_cast<int32_t>(
-            std::clamp(std::lround(static_cast<double>(source[i]) / 65536.0),
-                       -32768L, 32767L));
+        const int16_t scaled = desk_robot::Pcm32ToReferenceSample(source[i]);
         // Filter the actual accepted PCM before reducing its sample rate.
         // One output at most per input, with history and pair phase retained.
         int16_t filtered = 0;
-        if (reference_decimator_.Push(static_cast<int16_t>(scaled), filtered)) {
+        if (reference_decimator_.Push(scaled, filtered)) {
             PushLocked(filtered);
         }
     }

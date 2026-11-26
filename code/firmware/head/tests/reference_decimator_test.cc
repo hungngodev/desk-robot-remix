@@ -7,6 +7,16 @@
 using desk_robot::ReferenceDecimator;
 
 int main() {
+  using desk_robot::Pcm32ToReferenceSample;
+  assert(Pcm32ToReferenceSample(INT32_MAX) == 32767);
+  assert(Pcm32ToReferenceSample(INT32_MIN) == -32768);
+  assert(Pcm32ToReferenceSample(INT32_MAX - 32767) == 32767);
+  assert(Pcm32ToReferenceSample(32767) == 0);
+  assert(Pcm32ToReferenceSample(32768) == 1);
+  assert(Pcm32ToReferenceSample(-32767) == 0);
+  assert(Pcm32ToReferenceSample(-32768) == -1);
+  for (int32_t sample = -32768; sample <= 32767; ++sample)
+    assert(Pcm32ToReferenceSample(sample * 65536) == sample);
   constexpr double pi = 3.14159265358979323846;
   auto gain = [&](double f, double phase) {
     ReferenceDecimator d;
@@ -51,6 +61,20 @@ int main() {
       -1,-15,-21,1,34,19,-43,-57,34,106,9,-151,-96,163,221,-111,
       -362,-35,475,291,-497,-649,350,1078,64,-1519,-908,1906,2698,
       -2170,-10158,-14080};
+  // A matched-sign full-scale window exceeds both PCM16 rails before
+  // clipping. Unlike a DC test, it detects removal of the FIR clamp.
+  for (int polarity : {-1, 1}) {
+    d.Reset();
+    for (int i = 0; i < 63; ++i) {
+      const int tap = half_response[std::min(i, 62 - i)];
+      const int16_t input = (tap * polarity < 0) ? 32767 : -32768;
+      const bool emitted = d.Push(input, y);
+      if (i == 62) {
+        assert(emitted);
+        assert(y == (polarity > 0 ? 32767 : -32768));
+      }
+    }
+  }
   for (int impulse : {128, 129}) {
     d.Reset();
     for (int i = 0; i < 256; ++i) {

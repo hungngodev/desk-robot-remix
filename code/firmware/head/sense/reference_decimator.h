@@ -6,6 +6,15 @@
 #include <algorithm>
 
 namespace desk_robot {
+// Convert accepted signed Q16 PCM32 to PCM16 with ties away from zero.
+// Widen before rounding: INT32_MAX + half a step exceeds int32_t, and
+// rounding full-scale positive PCM can produce 32768 before saturation.
+inline int16_t Pcm32ToReferenceSample(int32_t sample) noexcept {
+  const int64_t wide = sample;
+  const int64_t rounded = (wide + (wide < 0 ? -32768 : 32768)) / 65536;
+  return static_cast<int16_t>(std::clamp<int64_t>(rounded, -32768, 32767));
+}
+
 // Causal, unity-DC-gain, Q15 equiripple FIR, 32 kHz -> 16 kHz.
 // Design: scipy.signal.remez(63, [0,6000,8000,16000], [1,0],
 // weight=[1,10], fs=32000), rounded to Q15 with center adjusted to sum 32768.
