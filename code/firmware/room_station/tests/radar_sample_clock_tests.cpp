@@ -22,9 +22,90 @@ bool feed(desk_robot_room::RadarDataFrameGate& gate,
   }
   return valid;
 }
+
+void check_stream_recovery() {
+  using desk_robot_room::RadarDataFrameGate;
+  using desk_robot_room::RadarSampleClock;
+  // Exercise the largest candidate accepted by the current gate (64 bytes),
+  // not a claim that every LD2410C firmware emits this engineering length.
+  uint8_t maximum[64] = {0xF4, 0xF3, 0xF2, 0xF1, 54, 0,
+                         0x01, 0xAA, 0x02, 0, 0, 0, 77, 0, 50};
+  maximum[17] = maximum[18] = 8;
+  maximum[58] = 0x55;
+  maximum[60] = 0xF8;
+  maximum[61] = 0xF7;
+  maximum[62] = 0xF6;
+  maximum[63] = 0xF5;
+  for (uint16_t payload = 33; payload <= 54; ++payload) {
+    RadarDataFrameGate gate;
+    RadarSampleClock clock;
+    for (uint8_t byte : kBasicFrame) clock.observe(gate.consume(byte), true, 100);
+    maximum[4] = static_cast<uint8_t>(payload);
+    // Truncate at exactly the offset where the successor's tail would
+    // satisfy both candidates. Neither observation should renew freshness.
+    for (std::size_t i = 0; i < payload + 10U - sizeof(kBasicFrame); ++i) {
+      assert(!gate.consume(maximum[i]));
+    }
+    for (uint8_t byte : kBasicFrame) {
+      const bool accepted = gate.consume(byte);
+      assert(!accepted);
+      clock.observe(accepted, true, 200);
+    }
+    assert(clock.sample_ms() == 100);
+    assert(gate.completed_sample().moving_cm == 42);
+    for (std::size_t i = 0; i < sizeof(kBasicFrame); ++i) {
+      const bool accepted = gate.consume(kBasicFrame[i]);
+      assert(accepted == (i + 1 == sizeof(kBasicFrame)));
+      clock.observe(accepted, true, 300);
+    }
+    assert(clock.sample_ms() == 300);
+  }
+  maximum[4] = 54;
+  for (std::size_t split = 1; split < sizeof(maximum); ++split) {
+    RadarDataFrameGate gate;
+    RadarSampleClock clock;
+    for (std::size_t i = 0; i < split; ++i) {
+      assert(!gate.consume(maximum[i]));
+    }
+    for (std::size_t i = split; i < sizeof(maximum); ++i) {
+      const bool accepted = gate.consume(maximum[i]);
+      assert(accepted == (i + 1 == sizeof(maximum)));
+      clock.observe(accepted, true, 100);
+    }
+    assert(clock.sample_ms() == 100);
+    assert(gate.completed_sample().stationary_cm == 77);
+    assert(gate.completed_sample().stationary && !gate.completed_sample().moving);
+  }
+  // Overlapping header prefixes and malformed full-capacity packets cannot
+  // publish a sample or consume the subsequent intact basic report.
+  for (std::size_t bad = 58; bad < sizeof(maximum); ++bad) {
+    RadarDataFrameGate gate;
+    RadarSampleClock clock;
+    for (uint8_t byte : kBasicFrame) clock.observe(gate.consume(byte), true, 100);
+    const uint8_t overlap[] = {0xF4, 0xF3, 0xF4, 0xF3, 0xF2};
+    for (uint8_t byte : overlap) {
+      assert(!gate.consume(byte));
+    }
+    for (std::size_t i = 0; i < sizeof(maximum); ++i) {
+      const bool accepted = gate.consume(i == bad ? maximum[i] ^ 1 : maximum[i]);
+      assert(!accepted);
+      clock.observe(accepted, true, 200);
+    }
+    assert(clock.sample_ms() == 100);
+    assert(gate.completed_sample().moving_cm == 42);
+    assert(!clock.fresh(3101, 3000));
+    for (std::size_t i = 0; i < sizeof(kBasicFrame); ++i) {
+      const bool accepted = gate.consume(kBasicFrame[i]);
+      assert(accepted == (i + 1 == sizeof(kBasicFrame)));
+      clock.observe(accepted, true, 3200);
+    }
+    assert(clock.fresh(3200, 3000) && clock.sample_ms() == 3200);
+  }
+}
 }  // namespace
 
 int main() {
+  check_stream_recovery();
   // A dropped suffix (e.g. UART overflow during an I2C transaction)
   // must not consume the next complete basic packet.
   for (std::size_t cut = 1; cut < sizeof(kBasicFrame); ++cut) {

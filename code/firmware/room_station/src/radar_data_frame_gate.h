@@ -22,7 +22,6 @@ class RadarDataFrameGate {
  public:
   bool consume(uint8_t byte) {
     static constexpr uint8_t kHeader[4] = {0xF4, 0xF3, 0xF2, 0xF1};
-    static constexpr uint8_t kFooter[4] = {0xF8, 0xF7, 0xF6, 0xF5};
     // Retain candidate bytes until validated; on rejection slide by one
     // instead of discarding a possibly intact successor packet.
     frame_[position_++] = byte;
@@ -45,22 +44,12 @@ class RadarDataFrameGate {
       }
       const uint16_t expected_ = payload_len + 10;
       if (position_ < expected_) break;
-      // LD2410C protocol (pinned ld2410 v0.2.2, Table 13) reserves all
-      // target states except 0x00..0x03. Noise must not renew acquisition.
-      // Basic payload is exactly 13 bytes. The pinned driver's engineering
-      // layout has two gate counts, nine energies per target and tail bytes
-      // (at least 33 bytes); additional retained bytes are supported.
-      const bool valid = frame_[8] <= 0x03 &&
-          ((frame_[6] == 0x02 && payload_len == 13) ||
-           (frame_[6] == 0x01 && payload_len >= 33)) &&
-          frame_[7] == 0xAA &&
-          frame_[payload_len + 4] == 0x55 &&
-          frame_[payload_len + 5] == 0x00 &&
-          frame_[expected_ - 4] == kFooter[0] &&
-          frame_[expected_ - 3] == kFooter[1] &&
-          frame_[expected_ - 2] == kFooter[2] &&
-          frame_[expected_ - 1] == kFooter[3];
-      if (valid) {
+      const bool valid = valid_frame(frame_, expected_);
+      // A truncated engineering report can borrow the tail of an intact
+      // successor. If both interpretations share the footer, neither is
+      // trustworthy. Discard both and wait for an unambiguous report.
+      const bool unambiguous = valid && !has_competing_suffix(expected_);
+      if (unambiguous) {
         // LD2410 basic target data occupies the same offsets in basic and
         // engineering packets. Distances are little-endian centimeters.
         const uint8_t target = frame_[8];
@@ -72,7 +61,7 @@ class RadarDataFrameGate {
         completed_.stationary = (target & 0x02) != 0 &&
             completed_.stationary_cm > 0 && frame_[14] > 0;
       }
-      if (valid) accepted = true;
+      if (unambiguous) accepted = true;
       // Keep a possible successor header after a malformed candidate.
       discard(valid ? expected_ : 1);
     }
@@ -85,6 +74,30 @@ class RadarDataFrameGate {
   static uint16_t read_le16(const uint8_t* bytes) {
     return static_cast<uint16_t>(static_cast<unsigned>(bytes[0]) |
                                  (static_cast<unsigned>(bytes[1]) << 8));
+  }
+
+  static bool valid_frame(const uint8_t* bytes, uint16_t size) {
+    static constexpr uint8_t kHeader[] = {0xF4, 0xF3, 0xF2, 0xF1};
+    static constexpr uint8_t kFooter[] = {0xF8, 0xF7, 0xF6, 0xF5};
+    if (size < 23 || memcmp(bytes, kHeader, sizeof(kHeader)) != 0) return false;
+    const uint16_t payload = read_le16(bytes + 4);
+    // Match the pinned decoder's basic and engineering layouts. Reject
+    // reserved target states and validate both tail markers and footer.
+    return payload == size - 10 &&
+        ((bytes[6] == 0x02 && payload == 13) ||
+         (bytes[6] == 0x01 && payload >= 33)) &&
+        bytes[7] == 0xAA && bytes[8] <= 0x03 &&
+        bytes[size - 6] == 0x55 && bytes[size - 5] == 0x00 &&
+        memcmp(bytes + size - 4, kFooter, sizeof(kFooter)) == 0;
+  }
+
+  bool has_competing_suffix(uint16_t size) const {
+    // Every candidate fits the same 64-byte buffer. A basic report is the
+    // shortest possible competing frame (23 bytes).
+    for (uint16_t start = 1; start + 23 <= size; ++start) {
+      if (valid_frame(frame_ + start, size - start)) return true;
+    }
+    return false;
   }
 
   RadarTargetSample completed_;
