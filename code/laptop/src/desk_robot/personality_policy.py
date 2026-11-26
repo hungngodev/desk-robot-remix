@@ -27,7 +27,9 @@ def expression_guidance(profile: PersonalityProfile) -> str:
     }[profile]
     return (
         f"{style} Personality and OLED mood are expressive only. "
-        "Never alter measured battery percentages, ToF ranges, safety faults, "
-        "stop acknowledgments, or tool results to match a mood. "
+        "Never alter reported battery percentages or cell voltage (millivolts), "
+        "ToF ranges, safety faults, stop acknowledgments, or tool results "
+        "to match a mood. Never infer battery state from tiredness, energy "
+        "or personality; preserve the gauge estimate and qualification. "
         "Missing or uncertain evidence stays unknown; safety always takes priority."
     )
