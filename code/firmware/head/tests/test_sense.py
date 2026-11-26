@@ -645,7 +645,8 @@ int main() {
         self.assertIn('#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3', reader)
         self.assertIn('pdMS_TO_TICKS(120)', reader)
         self.assertIn('read_status != ESP_OK', reader)
-        self.assertIn('read_status != ESP_ERR_TIMEOUT', reader)
+        sense_error = reader.split('// All Sense read errors return no samples.', 1)[1]
+        self.assertNotIn('ESP_LOG', sense_error.split('#else', 1)[0])
         self.assertIn('return 0;', reader)
         self.assertIn('portMAX_DELAY', reader)  # Other boards unchanged.
         self.assertNotIn(
@@ -1025,7 +1026,6 @@ int main() {
         )
         self.assertIn("started_generation, accepted, accepted_at_us);", writer)
         self.assertIn("if (stale_publish_discards_ != UINT32_MAX) ++stale_publish_discards_;", writer)
-        self.assertIn("stale_discards = stale_publish_discards_;", writer)
         self.assertIn("stale_write = true;", writer)
         self.assertIn("return stale_write ? 0 : accepted;", writer)
         self.assertIn("reference_integrity_failed_ = true;", writer)
@@ -1035,7 +1035,6 @@ int main() {
             clear.index("speaker_activity_.Reset();"),
             clear.index("reference_.fill(0);"),
         )
-        self.assertIn('physical TX silence unverified', writer)
 
     def test_sense_i2s_override_reuses_bounded_upstream_writer(self):
         """Keep only the pinned codec writer, not a second audio stack."""
@@ -1073,7 +1072,7 @@ int main() {
         )
         self.assertIn("if (short_output_writes_ != UINT32_MAX)", writer)
         self.assertIn("reference_integrity_failed_ = true;", writer)
-        self.assertIn("if (log_short)", writer)
+        self.assertNotIn("ESP_LOG", writer)
         self.assertIn("stale_publish_discards_, short_output_writes_", code)
         clear = code.split("void SenseReferenceCodec::ClearReference()", 1)[1].split(
             "SenseReferenceCodec::ReferenceDiagnostics", 1
@@ -1102,7 +1101,7 @@ int main() {
         self.assertNotIn("std::vector<int16_t>", read)
 
 
-    def test_reference_underflow_diagnostics_are_rate_limited(self):
+    def test_reference_underflow_diagnostics_are_nonblocking(self):
         """Source-level diagnostic coverage, not acoustic qualification."""
         header = (HEAD / "sense/sense_reference_codec.h").read_text()
         code = (HEAD / "sense/sense_reference_codec.cc").read_text()
@@ -1114,8 +1113,8 @@ int main() {
         self.assertIn("++consecutive_missing_reference_reads_;", code)
         self.assertIn("std::fill_n(dest, frames, 0);", code)
         self.assertIn("consecutive_missing_reference_reads_ = 0;", code)
-        self.assertIn("consecutive_missing >= 32", code)
-        self.assertIn("(consecutive_missing - 32U) % 256U == 0U", code)
+        self.assertIn("consecutive_missing_reference_reads_ >= 32", code)
+        self.assertNotIn("ESP_LOG", code)
         # A diagnostic must not unilaterally mark hardware AEC as qualified.
         self.assertNotIn("aec_physically_verified = true", code)
 
@@ -1132,7 +1131,6 @@ int main() {
         )
         self.assertIn("reference_integrity_failed_ = true;", code)
         self.assertIn("++reference_overwrite_reads_;", code)
-        self.assertIn("newly_overwritten = overwrite_count != previous_overwrites;", code)
         self.assertIn("last_reference_read_write_index_ = 0;", code)
         # Cancellation resets session tracking, not lifetime failures.
         clear = code.split("void SenseReferenceCodec::ClearReference()", 1)[1].split(
@@ -3443,4 +3441,26 @@ int main() {
         check=True, capture_output=True, text=True, env=native_cpp_env(),
     )
     subprocess.run([str(binary)], check=True, timeout=30, env=native_cpp_env())
+
+def test_sense_dma_callbacks_never_log_synchronously():
+    """Check the wrapper and Sense-only generated driver error paths."""
+    codec = (HEAD / "sense/sense_reference_codec.cc").read_text()
+    callbacks = codec.split("int SenseReferenceCodec::Read(", 1)[1].split(
+        "void SenseReferenceCodec::ClearReference()", 1
+    )[0]
+    installer = (HEAD / "install_overlay.py").read_text()
+    tx = installer.split("const esp_err_t err = i2s_channel_write(", 1)[1].split(
+        "#else", 1
+    )[0]
+    rx = installer.split("// All Sense read errors return no samples.", 1)[1].split(
+        "#else", 1
+    )[0]
+    for section in (callbacks, tx, rx):
+        assert not re.search(r"\\b(?:ESP_LOG\\w*|printf|fprintf|uart_write_bytes)\\s*\\(", section)
+    assert "if (err != ESP_OK)" in tx
+    assert "bytes_written = 0;" in tx
+    assert "++short_input_reads_" in callbacks
+    assert "++short_output_writes_" in callbacks
+    assert "++stale_publish_discards_" in callbacks
+    assert "return stale_write ? 0 : accepted;" in callbacks
 

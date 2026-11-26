@@ -339,6 +339,11 @@ operator mic/camera consent and a known speech activity trial, then retain
 the actual hardware result. Normal silence can increment some counters;
 evaluate changes across measured trials, not a zero counter alone.
 
+Sense codec read/write callbacks and the Sense-only I2S error branches do not
+synchronously emit console logs. Poll these authenticated counters outside the
+audio tasks instead; a stalled USB or UART log sink must not delay their error
+handling. This does not establish a physical DMA or acoustic latency bound.
+
 This telemetry helps diagnose A2 reference integrity. The optional,
 authenticated four-second PCM capture path is now implemented and described
 below, but a real assembled-head recording, measured acoustic latency,

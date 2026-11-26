@@ -604,15 +604,14 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
         tx_handle_, buffer.data(), samples * sizeof(int32_t),
         &bytes_written, pdMS_TO_TICKS(120));
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Sense speaker I2S write timeout/error (%d), %u bytes uncertain",
-                 static_cast<int>(err), static_cast<unsigned>(bytes_written));
+        // SenseReferenceCodec counts this failure without serial I/O.
         // The driver may have queued a partial frame before its error.
         // Do not publish uncertain PCM as a confirmed AEC reference.
         bytes_written = 0;
     }
     if (bytes_written > static_cast<size_t>(samples) * sizeof(int32_t) ||
         bytes_written % sizeof(int32_t) != 0) {
-        ESP_LOGE(TAG, "Sense I2S reported invalid output byte count");
+        // The wrapper records the rejected write in its integrity counters.
         bytes_written = 0;
     }
 #else
@@ -659,9 +658,8 @@ def planned_files(target: Path, board: str = "cores3") -> dict[str, bytes]:
             codec_source,
             '        ESP_LOGE(TAG, "Read Failed!");\\n        return 0;'.replace('\\n', '\n'),
             '''#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3
-        // A stalled microphone returns no fabricated samples. Repeated
-        // expected timeouts must not flood the realtime task's UART logs.
-        if (read_status != ESP_ERR_TIMEOUT) ESP_LOGE(TAG, "Read Failed!");
+        // All Sense read errors return no samples. The wrapper records
+        // short reads; do not block its realtime task on the log sink.
 #else
         ESP_LOGE(TAG, "Read Failed!");
 #endif

@@ -32,7 +32,6 @@
 #include <algorithm>
 #include <cmath>
 #include <esp_timer.h>
-#include <esp_log.h>
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
 #include <esp_heap_caps.h>
 #include <cstddef>
@@ -205,9 +204,6 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
     // not a hardware exposure or acoustic speaker-playback receipt.
     const int64_t capture_end_us = esp_timer_get_time();
     bool reference_ready = false;
-    uint32_t consecutive_missing = 0;
-    uint32_t overwrite_count = 0;
-    bool newly_overwritten = false;
     {
         std::lock_guard<std::mutex> lock(reference_mutex_);
         // Only successful, complete microphone reads advance actual input
@@ -215,27 +211,11 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
         microphone_frames_read_ += std::min(
             static_cast<uint32_t>(frames), UINT32_MAX - microphone_frames_read_);
         FillSilenceLocked(capture_end_us);
-        const uint32_t previous_overwrites = reference_overwrite_reads_;
         reference_ready = ReadReferenceLocked(
             reference_frame_.data(), frames, capture_end_us);
-        consecutive_missing = consecutive_missing_reference_reads_;
-        overwrite_count = reference_overwrite_reads_;
-        newly_overwritten = overwrite_count != previous_overwrites;
     }
-    // Log outside the codec ring mutex only when the counter ADVANCES.
-    // Persistent failure state must not flood the audio task's logs.
-    if (newly_overwritten &&
-        (overwrite_count == 1 || (overwrite_count % 32U) == 0U)) {
-        ESP_LOGW("SenseAEC", "reference ring overwritten; %u compromised microphone reads; A2 integrity FAILED",
-                 static_cast<unsigned>(overwrite_count));
-    }
-    // Initial silence after boot/reset is normal. Warn only for a
-    // prolonged unavailable reference, at most once per 256 more reads.
-    if (!reference_ready && consecutive_missing >= 32 &&
-        (consecutive_missing - 32U) % 256U == 0U) {
-        ESP_LOGW("SenseAEC", "reference unavailable for %u consecutive microphone reads; AEC alignment unverified",
-                 static_cast<unsigned>(consecutive_missing));
-    }
+    // Integrity counters are exposed by GetReferenceDiagnostics(). Never
+    // synchronously log on the microphone task, even outside the ring lock.
     for (int i = 0; i < frames; ++i) {
         dest[2 * i] = microphone_frame_[i];
         dest[2 * i + 1] = reference_frame_[i];
@@ -319,10 +299,6 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
     // Lock contention must not move an old digital accept into a new MIC window.
     const int64_t accepted_at_us = esp_timer_get_time();
     bool stale_write = false;
-    bool log_stale = false;
-    uint32_t stale_discards = 0;
-    bool log_short = false;
-    uint32_t short_writes = 0;
     {
         std::lock_guard<std::mutex> lock(reference_mutex_);
         // Accepted into I2S does not establish audible playback or DMA
@@ -337,9 +313,7 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
         // speech or a qualified echo reference, even on a clean generation.
         if (accepted != samples) {
             if (short_output_writes_ != UINT32_MAX) ++short_output_writes_;
-            short_writes = short_output_writes_;
             reference_integrity_failed_ = true;
-            log_short = short_writes == 1 || (short_writes % 32U) == 0U;
         }
         speaker_activity_.RecordAccepted(
             started_generation, accepted, accepted_at_us);
@@ -350,19 +324,11 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
             // NOT be relabeled as current-generation echo reference.
             stale_write = true;
             if (stale_publish_discards_ != UINT32_MAX) ++stale_publish_discards_;
-            stale_discards = stale_publish_discards_;
             reference_integrity_failed_ = true;
-            log_stale = stale_discards == 1 || (stale_discards % 32U) == 0;
         }
     }
-    if (log_stale) {
-        ESP_LOGW("SenseAEC", "discarded stale playback reference after cancellation: %u writes; physical TX silence unverified",
-                 static_cast<unsigned>(stale_discards));
-    }
-    if (log_short) {
-        ESP_LOGW("SenseAEC", "incomplete speaker I2S write: %d/%d frames; %u short writes; A2 integrity FAILED",
-                 accepted, samples, static_cast<unsigned>(short_writes));
-    }
+    // The authenticated diagnostic reader observes these sticky counters;
+    // serial console backpressure must not delay the speaker task.
     // An obsolete write cannot extend the current media receipt prefix.
     return stale_write ? 0 : accepted;
 }
