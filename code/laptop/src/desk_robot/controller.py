@@ -674,6 +674,13 @@ class Coordinator:
                 dispatch_epoch = self._permit_epoch[req.robot_id]
                 try:
                     await self._hardware_preflight(req.robot_id)
+                    task = asyncio.current_task()
+                    if task is not None and task.cancelling():
+                        raise asyncio.CancelledError
+                except asyncio.CancelledError:
+                    req.state = "discarded"
+                    req.error = "Deferred motion preflight cancelled; fresh consent required"
+                    raise
                 except Exception as exc:
                     req.state = "failed"
                     req.error = str(exc) or type(exc).__name__
