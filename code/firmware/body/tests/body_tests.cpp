@@ -1135,6 +1135,9 @@ void deterministic_control_soak() {
     const std::uint32_t now = 0xffffff00U + elapsed;
     const auto phase = elapsed % 1000U;
     const auto command = [&](const char* line) {
+      // Poison the prior reply so a missing write or terminator cannot pass
+      // by accidentally reusing bytes from the previous status response.
+      std::memset(reply, 0xa5, sizeof(reply));
       body.execute(line, std::strlen(line), now, reply, sizeof(reply));
       CHECK(std::memchr(reply, '\0', sizeof(reply)) != nullptr);
     };
