@@ -256,7 +256,7 @@ def files(root):
     source = once(
         source,
         "            self.websocket = ws",
-        "            self.websocket = ws\n            import desk_robot_bridge\n            desk_robot_bridge.register(self)",
+        "            self.websocket = ws\n            import desk_robot_bridge\n            await desk_robot_bridge.register_reconnecting(self)",
     )
     source = once(
         source,

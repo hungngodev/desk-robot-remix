@@ -89,6 +89,7 @@ def model_dialogue(*messages):
 def test_device_registry_and_expiring_mute(bridge):
     first, second = conn("mac-01"), conn("mac-02")
     bridge.register(first)
+    bridge.register(second)
     with pytest.raises(RuntimeError, match="Duplicate"):
         bridge.register(conn("mac-01"))
     bridge.lease_ids = frozenset(["mac-01"])
@@ -105,6 +106,74 @@ def test_device_registry_and_expiring_mute(bridge):
     bridge.unregister(first)
     assert not bridge.connections
 
+
+
+
+async def test_reconnect_waits_for_old_transport_and_handler(bridge):
+    old, new = conn("mac-01"), conn("mac-01")
+    old.stop_event = threading.Event()
+    bridge.register(old)
+    cancel = bridge.tool_turn_cancel_event(old.device_id)
+    started, allow_close, closed = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+    async def close():
+        started.set()
+        await allow_close.wait()
+        closed.set()
+
+    old.websocket = SimpleNamespace(close=close)
+    task = asyncio.create_task(bridge.register_reconnecting(new))
+    try:
+        await asyncio.wait_for(started.wait(), 1)
+        assert old.client_abort and old.stop_event.is_set() and cancel.is_set()
+        assert old.device_id not in bridge.connections
+        assert bridge.suppress_message(old, b"stale microphone")
+        assert bridge.suppress_message(old, '{"type":"mcp"}')
+        with pytest.raises(RuntimeError, match="retiring"):
+            bridge.register(new)
+        allow_close.set()
+        await asyncio.wait_for(closed.wait(), 1)
+        await asyncio.sleep(0)
+        assert not task.done()
+        assert old.device_id not in bridge.connections
+        bridge.unregister(old)
+        await asyncio.wait_for(task, 1)
+        assert bridge.connections[old.device_id] is new
+        assert not bridge.tool_turn_cancel_event(new.device_id).is_set()
+        bridge.unregister(old)
+        assert bridge.connections[old.device_id] is new
+        assert bridge.suppress_message(old, b"stale microphone")
+        assert not bridge.suppress_message(new, b"live microphone")
+    finally:
+        allow_close.set()
+        bridge.unregister(old)
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_reconnect_retries_retirement_after_failed_close(bridge):
+    old, new = conn("mac-01"), conn("mac-01")
+    old.stop_event = threading.Event()
+    bridge.register(old)
+    attempts = 0
+
+    async def close():
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise ConnectionError("close unavailable")
+        bridge.unregister(old)
+
+    old.websocket = SimpleNamespace(close=close)
+    with pytest.raises(ConnectionError, match="close unavailable"):
+        await bridge.register_reconnecting(new)
+    assert old.device_id not in bridge.connections
+    assert bridge._retiring_heads[old.device_id].connection is old
+    await bridge.register_reconnecting(new)
+    assert attempts == 2
+    assert bridge.connections[old.device_id] is new
+    assert not bridge._retiring_heads
 
 
 async def test_authenticated_realtime_voice_readiness_is_live_not_invented(bridge):
@@ -263,7 +332,7 @@ def test_overlay_targets_pinned_server_and_compiles():
     assert patched_audio.index("desk_robot_native_omni.route_audio") < patched_audio.index(
         "await conn.asr.receive_audio"
     )
-    assert "desk_robot_bridge.register(self)" in changes["core/connection.py"]
+    assert "await desk_robot_bridge.register_reconnecting(self)" in changes["core/connection.py"]
     assert "desk_robot_bridge.unregister(handler)" in changes["core/websocket_server.py"]
     for path, source in changes.items():
         compile(source, path, "exec")
@@ -2923,7 +2992,7 @@ def test_pinned_upstream_connection_initializes_per_device_native_tts():
     )["core/connection.py"]
     assert "tts = initialize_tts(desk_robot_bridge.native_tts_config(self))" in patched
     assert patched.count("tts = initialize_tts(") == 1
-    assert patched.index("desk_robot_bridge.register(self)") < patched.index(
+    assert patched.index("await desk_robot_bridge.register_reconnecting(self)") < patched.index(
         "native_tts_config(self)"
     )
     compile(patched, "native_xiaozhi_connection.py", "exec")

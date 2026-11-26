@@ -456,7 +456,9 @@ async def inject_live_context_into_legacy_llm(conn) -> None:
 
 def register(conn):
     if conn.device_id in device_map().values():
-        # Reject duplicate identities instead of sending a robot's audio elsewhere.
+        if conn.device_id in _retiring_heads:
+            raise RuntimeError("Previous Xiaozhi head is still retiring")
+        # Synchronous admission never replaces an active identity.
         existing = connections.get(conn.device_id)
         if existing is not None and existing is not conn:
             raise RuntimeError("Duplicate live Xiaozhi device identity")
@@ -465,7 +467,50 @@ def register(conn):
         connections[conn.device_id] = conn
 
 
+@dataclass
+class _RetiringHead:
+    connection: object
+    finished: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+_reconnect_locks: dict[str, asyncio.Lock] = {}
+_retiring_heads: dict[str, _RetiringHead] = {}
+
+
+async def register_reconnecting(conn):
+    """Admit a token-authenticated replacement only after old socket teardown."""
+    device = conn.device_id
+    if device not in device_map().values():
+        return
+    async with _reconnect_locks.setdefault(device, asyncio.Lock()):
+        previous = connections.get(device)
+        if previous is conn:
+            return
+        retiring = _retiring_heads.get(device)
+        if retiring is None and previous is not None:
+            retiring = _RetiringHead(previous)
+            _retiring_heads[device] = retiring
+            previous.client_abort = True
+            previous.stop_event.set()
+            _revoke_connection(previous)
+        if retiring is not None:
+            # Keep the tombstone on timeout, close failure or cancellation.
+            # A subsequent authenticated attempt must finish the same retirement.
+            async with asyncio.timeout(5):
+                await retiring.connection.websocket.close()
+                await retiring.finished.wait()
+            del _retiring_heads[device]
+        register(conn)
+
+
 def unregister(conn):
+    _revoke_connection(conn)
+    retiring = _retiring_heads.get(conn.device_id)
+    if retiring is not None and retiring.connection is conn:
+        retiring.finished.set()
+
+
+def _revoke_connection(conn):
     if connections.get(conn.device_id) is conn:
         # Revoke source authority before attempting optional model teardown.
         connections.pop(conn.device_id, None)
@@ -572,6 +617,9 @@ def was_interrupted_by_human(device_id):
 
 
 def suppress_message(conn, message):
+    if (robot_for_device(conn.device_id) is not None
+            and connections.get(conn.device_id) is not conn):
+        return True  # Retired or not yet admitted: no legacy command or audio routing.
     data = None
     if not isinstance(message, bytes):
         try:
