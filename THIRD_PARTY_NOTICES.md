@@ -17,6 +17,29 @@ fonts, or other assets.
 - [Original CAD source records](docs/cad/originals/) and
   [mechanical remixes](docs/cad/remixes/README.md).
 
+## Revision-specific distribution boundaries
+
+- ESP-SR: the pinned Xiaozhi device manifest selects
+  `espressif/esp-sr ==2.4.7`. The [version-specific ESPRESSIF MIT license](https://components.espressif.com/components/espressif/esp-sr/versions/2.4.7/license)
+  restricts use to Espressif products; it is not unrestricted MIT.
+  Retain the actual component notice with firmware distributions. Review the
+  packaged models and [wake-word trademark restrictions](https://components.espressif.com/components/espressif/esp-sr/versions/2.4.7/readme)
+  separately. The resolved component archive and model inventory have not
+  been independently audited here; do not infer clearance for non-Espressif
+  targets or commercial use of third-party wake words.
+- Pololu VL53L0X: release `1.3.1` resolved to
+  `9f3773cb48d4e4e844d689cfc529a06f96d1d264` at the November 25 audit.
+  Its [exact upstream notice](https://github.com/pololu/vl53l0x-arduino/blob/9f3773cb48d4e4e844d689cfc529a06f96d1d264/LICENSE.txt)
+  contains both Pololu MIT and STMicroelectronics BSD-3-Clause terms.
+  The complete text is retained in the body firmware notices above.
+- SMARS: [original chassis](docs/cad/originals/smars/source.json),
+  [stepper remix](docs/cad/originals/smars-stepper/source.json) and
+  [forklift](docs/cad/originals/forklift/source.json) retain recorded
+  CC BY-NC-SA 4.0 terms or ancestry. These are separate mechanical assets,
+  not MIT firmware; the repository as a whole is **not NC-free**.
+  Commercial release remains on hold until rights are resolved or
+  independently licensed replacement geometry is qualified.
+
 Keep dependency and model notices from the exact distributed revisions.
 Research references are not automatically incorporated dependencies.
 Generated concept layouts retain upstream mesh provenance and are not
