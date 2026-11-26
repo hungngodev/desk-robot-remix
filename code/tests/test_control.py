@@ -2598,3 +2598,96 @@ async def test_dock_inhibition_supersedes_inflight_operator_preflight(settings):
         resume.set()
         await asyncio.gather(pending, return_exceptions=True)
         await c.close()
+
+
+@pytest.mark.parametrize(
+    "bad_receipt", ["negative", "foreign", "pulse", "missing", "integer", "non_object"],
+)
+async def test_five_contenders_hold_fleet_until_matched_terminal_halt(settings, bad_receipt):
+    from desk_robot.transport import HeadError
+
+    settings.robots.extend(
+        settings.robots[0].model_copy(update={
+            "id": f"robot-{index:02d}",
+            "name": f"Pet {index}",
+            "token_env": f"DESK_ROBOT_HEAD_{index:02d}_TOKEN",
+        })
+        for index in range(3, 6)
+    )
+    ids = [robot.id for robot in settings.robots]
+    halt_entered = asyncio.Event()
+    release_halt = asyncio.Event()
+
+    class GatedHead(SimulatedHead):
+        reject_halt = True
+
+        async def command(self, command):
+            if command != "halt" or not self.reject_halt:
+                return await super().command(command)
+            halt_entered.set()
+            await release_halt.wait()
+            receipt = {"ok": True, "robot_id": self.id, "reply": "OK halt"}
+            if bad_receipt == "non_object":
+                return None
+            if bad_receipt == "missing":
+                return {}
+            receipt.update({
+                "negative": {"ok": False},
+                "foreign": {"robot_id": "robot-99"},
+                "pulse": {"reply": "OK stop"},
+                "integer": {"ok": 1},
+            }[bad_receipt])
+            return receipt
+
+    heads = {robot_id: GatedHead(robot_id) for robot_id in ids}
+    c = Coordinator(settings, heads, SimulationVision())
+    launch = asyncio.Event()
+
+    async def request(robot_id):
+        await launch.wait()
+        return c.manual(robot_id, "drive 10 10 100")
+
+    try:
+        await asyncio.gather(*(c.operator_arm(robot_id) for robot_id in ids))
+        contenders = [asyncio.create_task(request(robot_id)) for robot_id in ids]
+        launch.set()
+        results = await asyncio.gather(*contenders, return_exceptions=True)
+        winners = [result for result in results if isinstance(result, Job)]
+        assert len(winners) == 1
+        assert sum(isinstance(result, OperationError) for result in results) == 4
+        owner = winners[0]
+        peers = [robot_id for robot_id in ids if robot_id != owner.robot_id]
+        for robot_id in peers:
+            heads[robot_id].reject_halt = False
+        await asyncio.wait_for(halt_entered.wait(), timeout=0.8)
+        assert c._fleet_motion_owner == owner.id
+        for robot_id in peers:
+            with pytest.raises(OperationError, match="one moving pet"):
+                c.manual(robot_id, "drive 10 10 100")
+            assert heads[robot_id].commands == []
+        release_halt.set()
+        await c.tasks[owner.id]
+        assert owner.state == "failed"
+        assert c._fleet_motion_owner == owner.id
+        with pytest.raises(HeadError, match="mismatched"):
+            await c.stop(owner.robot_id)
+        # Another robot's valid halt cannot release the uncertain owner.
+        await c.stop(peers[0])
+        for robot_id in peers[1:]:
+            with pytest.raises(OperationError, match="one moving pet"):
+                c.manual(robot_id, "drive 10 10 100")
+            assert heads[robot_id].commands == []
+        heads[owner.robot_id].reject_halt = False
+        receipt = await c.stop(owner.robot_id)
+        assert receipt["robot_id"] == owner.robot_id
+        assert receipt["reply"] == "OK halt"
+        assert c._fleet_motion_owner is None
+        assert not heads[owner.robot_id].armed
+        following = c.manual(peers[1], "drive 10 10 100")
+        await c.tasks[following.id]
+        assert following.state == "succeeded"
+    finally:
+        release_halt.set()
+        for head in heads.values():
+            head.reject_halt = False
+        await c.close()

@@ -117,7 +117,7 @@ class StopTransportFailureTests(unittest.IsolatedAsyncioTestCase):
             started.set()
             await asyncio.Event().wait()
 
-        async def stop_receipt(head):
+        async def stop_receipt(head, robot_id):
             # Operator STOP fails; the separate _run finally STOP succeeds.
             stop_receipt.calls += 1
             if stop_receipt.calls == 1:

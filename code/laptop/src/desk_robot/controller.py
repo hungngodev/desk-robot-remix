@@ -31,17 +31,25 @@ from .transport import Head, HeadError, drive_duration_ms, expected_ack, validat
 from .vision import Detection, Vision, image_size
 
 
-async def _bounded_body_stop(head: Head) -> dict:
+async def _bounded_body_stop(head: Head, robot_id: str) -> dict:
     """Terminal user/task STOP must revoke WROOM arming, not just wheel speed.
 
     Use the existing body 'halt': motor targets zero, armed false, servo PWM
     retained for a held object. An HTTP ACK is a command receipt, not a
     physically measured wheel or grasp stop.
     """
-    return await _bounded_head_reply(
+    receipt = await _bounded_head_reply(
         head.command("halt"), seconds=1.0,
         timeout_message="WROOM STOP transport acknowledgement unconfirmed",
     )
+    if (
+        not isinstance(receipt, dict)
+        or receipt.get("ok") is not True
+        or receipt.get("robot_id") != robot_id
+        or receipt.get("reply") != expected_ack("halt")
+    ):
+        raise HeadError("WROOM STOP acknowledgement missing, failed or mismatched")
+    return receipt
 
 
 async def _bounded_pulse_stop(head: Head) -> dict:
@@ -356,7 +364,7 @@ class Coordinator:
         # stop command despite an urgent operator or human request.
         stop_acknowledged = False
         try:
-            acknowledgement = await _bounded_body_stop(self.heads[robot_id])
+            acknowledgement = await _bounded_body_stop(self.heads[robot_id], robot_id)
             stop_acknowledged = True
         except BaseException:
             # A transport failure is not physical evidence of stopped wheels,
@@ -465,7 +473,7 @@ class Coordinator:
         if self.settings.mode == "hardware":
             ids = sorted(self.heads)
             receipts = await asyncio.gather(
-                *(_bounded_body_stop(self.heads[robot_id]) for robot_id in ids),
+                *(_bounded_body_stop(self.heads[robot_id], robot_id) for robot_id in ids),
                 return_exceptions=True,
             )
             for robot_id, result in zip(ids, receipts, strict=True):
@@ -863,7 +871,7 @@ class Coordinator:
                 # or model cleanup. No second actor may treat this as charging.
                 stop_acknowledged = False
                 try:
-                    await _bounded_body_stop(self.heads[job.robot_id])
+                    await _bounded_body_stop(self.heads[job.robot_id], job.robot_id)
                     stop_acknowledged = True
                     job.events.append(
                         "stop acknowledged; servo positions are commanded, not measured"
