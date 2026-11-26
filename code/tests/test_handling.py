@@ -1,5 +1,10 @@
 """Source-grounded MPU6050 handling behavior, not physical calibration proof."""
+import math
+from itertools import permutations, product
+
 import pytest
+
+from desk_robot import handling
 from desk_robot.handling import HandlingGate, mpu6050_temperature_raw, raw_mpu6050
 
 
@@ -1337,3 +1342,72 @@ def test_same_acquisition_conflicting_native_low_g_revokes_pose(
     else:
         assert gate.reference == (0, 0, 1)
 
+
+@pytest.mark.parametrize("magnitude,accepted", [
+    (0.909, False), (0.91, True), (1.0, True), (1.09, True), (1.091, False),
+])
+def test_gravity_reference_magnitude_boundaries(magnitude, accepted):
+    reference = handling._gravity_reference([(magnitude, 0.0, 0.0)] * 8)
+    assert (reference is not None) is accepted
+    if accepted:
+        assert reference == pytest.approx((1.0, 0.0, 0.0))
+    assert handling._gravity_reference([(1.0, 0.0, 0.0), (-1.0, 0.0, 0.0)] * 4) is None
+
+
+@pytest.mark.parametrize("angle", [0, 19, 37.9, 38.1, 90, 179.9, 180])
+@pytest.mark.parametrize("rotation", [0, 23, 90, 137, 270])
+def test_relative_tilt_is_rotation_and_scale_invariant(angle, rotation):
+    theta = math.radians(rotation)
+    delta = math.radians(angle)
+    reference = (math.cos(theta), math.sin(theta), 0.0)
+    for magnitude in (0.75, 1.0, 1.25):
+        acceleration = (
+            magnitude * math.cos(theta + delta), magnitude * math.sin(theta + delta), 0.0,
+        )
+        assert handling._relative_tilt_degrees(
+            acceleration, reference, math.hypot(*acceleration),
+        ) == pytest.approx(angle, abs=2e-6)
+
+
+@pytest.mark.parametrize("axes", list(permutations(range(3))))
+@pytest.mark.parametrize("first_sign,second_sign", list(product((-1, 1), repeat=2)))
+def test_handling_events_invariant_under_proper_axis_remapping(axes, first_sign, second_sign):
+    inversions = sum(axes[i] > axes[j] for i in range(3) for j in range(i + 1, 3))
+    signs = (first_sign, second_sign, (-1) ** inversions * first_sign * second_sign)
+
+    def rotate(vector):
+        return tuple(sign * vector[axis] for sign, axis in zip(signs, axes, strict=True))
+
+    gate = HandlingGate()
+    tick = 0
+
+    def observe(acc, gyro=(80, -40, 60)):
+        nonlocal tick
+        tick += 1
+        return qualified(gate, sample(acc=rotate(acc), gyro=rotate(gyro)), 100 + tick * 0.1)
+
+    # Balanced quantized noise exercises both startup and ongoing stationarity.
+    for i in range(8):
+        sign = (-1) ** i
+        assert observe((120 * sign, -80 * sign, 16384 + 60 * sign),
+                       (80 + 20 * sign, -40, 60 - 10 * sign)) == ()
+    assert gate.reference == pytest.approx(rotate((0, 0, 1)))
+    for i in range(20):
+        sign = (-1) ** i
+        assert observe((300 * sign, 140 * sign, 16384 + 200 * sign),
+                       (80 + 30 * sign, -40, 60)) == ()
+    assert observe((10000, 0, 12979)) == ()  # below the 38 degree boundary
+    assert observe((12551, 0, 10531)) == ()
+    assert observe((12551, 0, 10531)) == ("handling_tilt",)
+    assert observe((12551, 0, 10531)) == ()  # held tilt is not another edge
+    assert observe((0, 0, 16384)) == ()
+    assert observe((12551, 0, 10531)) == ()
+    assert observe((12551, 0, 10531)) == ("handling_tilt",)
+    assert observe((0, 0, 26000), (80, -40, 60)) == ()  # acceleration only
+    assert observe((0, 0, 26000), (80, -40, 60)) == ()
+    assert observe((0, 0, 16384), (16500, 0, 0)) == ()  # gyro only
+    assert observe((0, 0, 16384), (16500, 0, 0)) == ()
+    assert observe((0, 0, 26000), (16500, 0, 0)) == ()
+    assert observe((0, 0, 26000), (16500, 0, 0)) == ("handling_shake",)
+    assert observe((0, 0, 26000), (16500, 0, 0)) == ()  # cooldown
+    assert gate.reference == pytest.approx(rotate((0, 0, 1)))
