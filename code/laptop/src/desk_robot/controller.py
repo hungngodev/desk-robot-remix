@@ -762,12 +762,10 @@ class Coordinator:
     async def _motion_command(
         self, job: Job, command: str, *, dispatch_check: Callable[[], None] | None = None,
     ) -> dict:
-        def check() -> None:
-            self._require_job_motion(job)
-            if dispatch_check is not None:
-                dispatch_check()
-
-        return await dispatch_job_command(self.heads[job.robot_id], command, check)
+        return await dispatch_job_command(
+            self.heads[job.robot_id], command, lambda: self._require_job_motion(job),
+            dispatch_check=dispatch_check,
+        )
 
     async def _keepalive(self, job: Job, acknowledged: asyncio.Event):
         while True:

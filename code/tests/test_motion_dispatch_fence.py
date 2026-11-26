@@ -107,3 +107,27 @@ async def test_coordinator_stop_retires_delayed_manual_dispatch(settings):
     finally:
         release.set()
         await coordinator.close()
+
+
+@pytest.mark.asyncio
+async def test_dispatch_only_evidence_is_not_rechecked_after_ack():
+    valid = True
+    checks = []
+
+    def evidence():
+        assert valid
+        checks.append(True)
+
+    class Head:
+        supports_dispatch_check = True
+
+        async def command(self, command, *, dispatch_check):
+            nonlocal valid
+            dispatch_check()
+            valid = False
+            return {"ok": True}
+
+    reply = await dispatch_job_command(Head(), "drive 20 20 100", lambda: None,
+                                       dispatch_check=evidence)
+    assert reply == {"ok": True}
+    assert checks == [True]

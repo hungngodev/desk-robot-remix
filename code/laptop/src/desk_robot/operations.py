@@ -14,11 +14,19 @@ def require_active_operation(state: str) -> None:
         raise asyncio.CancelledError
 
 
-async def dispatch_job_command(head, command: str, check: Callable[[], None]) -> dict:
+async def dispatch_job_command(
+    head, command: str, check: Callable[[], None], *,
+    dispatch_check: Callable[[], None] | None = None,
+) -> dict:
     """Recheck host authority before enqueue, at supported dispatch, and after ACK."""
+    def at_dispatch() -> None:
+        check()
+        if dispatch_check is not None:
+            dispatch_check()
+
     check()
     if getattr(head, "supports_dispatch_check", False):
-        reply = await head.command(command, dispatch_check=check)
+        reply = await head.command(command, dispatch_check=at_dispatch)
     else:
         reply = await head.command(command)
     check()
