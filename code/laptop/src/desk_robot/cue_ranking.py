@@ -1,10 +1,21 @@
 """Pure selection policy for already admitted multimodal timeline evidence."""
 from __future__ import annotations
 
+import math
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Any
 
 Cue = tuple[float, dict[str, Any]]
+
+
+def _finite_stamp(value: object) -> bool:
+    if type(value) not in (int, float):
+        return False
+    try:
+        return math.isfinite(value)
+    except OverflowError:
+        return False
 
 
 def rank_cues(
@@ -16,18 +27,26 @@ def rank_cues(
     The caller owns admission, freshness, consent and robot identity. This
     function has no clock or I/O and cannot grant physical or speech authority.
     """
+    if type(limit) is not int or limit < 1:
+        raise ValueError("Invalid cue ranking limit")
+    # The hub uses negative infinity before any human voice event.
+    if not _finite_stamp(current_voice_at) and not (
+        type(current_voice_at) is float and current_voice_at == -math.inf
+    ):
+        raise ValueError("Invalid cue ranking voice timestamp")
     # Only routing labels participate in ranking. Never hash payload metadata
     # or let malformed labels consume the budget, even on the fast path.
     ordered = sorted(
         (item for item in items
-         if isinstance(item[1].get("channel"), str)
+         if _finite_stamp(item[0])
+         and isinstance(item[1].get("channel"), str)
          and isinstance(item[1].get("kind"), str)),
         key=lambda item: item[0],
     )
     if len(ordered) <= limit:
-        return [entry for _, entry in ordered]
+        return [deepcopy(entry) for _, entry in ordered]
     selected = _select_indices(ordered, limit, current_voice_at, direct_kinds)
-    entries = [dict(ordered[index][1]) for index in sorted(selected)]
+    entries = [deepcopy(ordered[index][1]) for index in sorted(selected)]
     current_tools = {
         entry["kind"] for stamp, entry in ordered
         if entry["channel"] == "tool" and stamp >= current_voice_at
