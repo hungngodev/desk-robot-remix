@@ -223,6 +223,7 @@ class PetState:
     last_touch_boot_id: int | None = None
     retired_touch_boot_ids: set[int] = field(default_factory=set, repr=False)
     last_safety_fault: str | None = None
+    last_safety_was_possible_lift: bool = False
     last_safety_received_at: float = -math.inf
     last_social_fault_at: float = -math.inf
     safety_fault_events: int = 0
@@ -579,6 +580,7 @@ class PetController:
         state.last_extra_boot_id = None
         state.retired_extra_boot_ids.clear()
         state.last_safety_fault = None  # firmware reboot or poll restart is a baseline
+        state.last_safety_was_possible_lift = False
         state.last_safety_received_at = -math.inf
         state.aux_reads = 0
         state.last_battery_low = None
@@ -1867,6 +1869,9 @@ class PetController:
             return
         state.last_safety_received_at = max(state.last_safety_received_at, received_at)
         state.last_safety_fault = fault
+        previous_possible_lift = state.last_safety_was_possible_lift
+        if previous != fault:
+            state.last_safety_was_possible_lift = False
         if previous != fault and fault not in ("none", "not_required"):
             state.last_social_fault_at = time.monotonic()
         # Normal human head-touch doubles as the WROOM's immediate physical
@@ -1895,7 +1900,7 @@ class PetController:
         ):
             if (fault == "none" and safety["ready"] is True
                     and state.enabled and state.generation == generation
-                    and previous not in (None, "none", "not_required", "touch_active")
+                    and previous == "floor_out_of_range" and previous_possible_lift
                     and state.handling_gate.reference is not None):
                 self._notify_sensor(robot_id, "stable_putdown", received_at=received_at)
             return
@@ -1910,6 +1915,7 @@ class PetController:
                     and state.handling_gate.shake_hits == 0
                     and has_upright_floor_loss(body.get("ranges"), body.get("imu"))):
                 detail = "floor_out_of_range_upright_lift"
+                state.last_safety_was_possible_lift = True
         detail = detail[:64]
         description = (
             f"My WROOM body reported a latched {fault} safety fault{location} "
