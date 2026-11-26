@@ -1,4 +1,6 @@
 {
+  "evidence_scope": "historical_snapshot",
+  "current_head_verified": false,
   "recorded_at": "2026-11-04",
   "scope": "Owned-parts photo identification and canonical inventory/BOM/docs update only",
   "photo_files_hashed": 18,

@@ -1,4 +1,6 @@
 {
+  "evidence_scope": "historical_snapshot",
+  "current_head_verified": false,
   "robot_id": "robot-01",
   "categories": {
     "key": {

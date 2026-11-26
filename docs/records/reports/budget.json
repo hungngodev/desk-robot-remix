@@ -1,4 +1,6 @@
 {
+  "evidence_scope": "historical_snapshot",
+  "current_head_verified": false,
   "parts_estimate_usd": 35.36,
   "quoted_total_usd": null,
   "planning_total_usd": 35.36,

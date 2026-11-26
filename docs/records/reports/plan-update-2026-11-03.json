@@ -1,4 +1,6 @@
 {
+  "evidence_scope": "historical_snapshot",
+  "current_head_verified": false,
   "checked_at": "2026-11-03",
   "scope": "Documentation, inventory/BOM data and unmodified source collection only; no runtime/geometry changes",
   "checks": {
