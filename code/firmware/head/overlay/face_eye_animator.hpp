@@ -12,6 +12,7 @@ struct EyeFrame {
     bool closed = false;
     int8_t x = 0;
     int8_t y = 0;
+    uint8_t lid_height = 14;
 };
 
 namespace face_eye_detail {

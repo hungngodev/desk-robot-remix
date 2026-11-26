@@ -10,6 +10,7 @@
 #include "robot_bridge.h"
 #include "stackchan_behavior.hpp"
 #include "face_eye_display.hpp"
+#include "face_mood_morph.hpp"
 #include "led/single_led.h"
 #include "sdkconfig.h"
 #if CONFIG_USE_AUDIO_DEBUGGER
@@ -223,6 +224,8 @@ private:
         bool last_face_available = false;
         bool last_priority_active = false;
         bool model_mood_active = false;
+        const char* local_mood = "neutral";
+        desk_robot::FaceMoodMorph mood_morph;
         uint32_t model_mood_started_ms = 0;
         while (true) {
             const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
@@ -328,6 +331,7 @@ private:
                     // Reconcile the latest status and HSM mood on the next frame.
                     last_face_available = false;
                     model_mood_active = false;
+                    mood_morph.Step(now_ms, local_mood, false);
                     board->eye_animator_.Step(
                         now_ms, Motion::kNone, false,
                         priority_active || !isAwake(board->face_behavior_.state()));
@@ -347,26 +351,32 @@ private:
                             // optional HSM/LLM moods cannot override the safety cue.
                             model_mood_active = false;
                         } else if (requested_mood != desk_robot::CosmeticMood::kNone) {
+                            local_mood = CosmeticMoodName(requested_mood);
                             board->display_->SetEmotion(CosmeticMoodName(requested_mood));
                             model_mood_active = true;
                             model_mood_started_ms = now_ms;
                         } else if (!model_mood_active ||
                                    now_ms - model_mood_started_ms >= 1600U) {
                             if (last_priority_active || model_mood_active ||
-                                !last_face_available || action.set_mood)
+                                !last_face_available || action.set_mood) {
+                                local_mood = MoodName(board->face_behavior_.mood());
                                 board->display_->SetEmotion(
                                     MoodName(board->face_behavior_.mood()));
+                            }
                             model_mood_active = false;
                         }
                     }
-                    // Blink/gaze is a local, nonactuating LVGL overlay confined to
-                    // Xiaozhi's emotion icon slot. Safety, voice, and current Mac
-                    // cosmetic cues always suppress it; stale HSM motion is discarded.
+                    // Idle gaze yields to Mac cues; the bounded cosmetic mood
+                    // bridge can ease either local or Mac expressions. Safety and
+                    // voice suppress both immediately, without changing stock glyphs.
                     if (board->local_eye_display_ != nullptr) {
-                        const auto eyes = board->eye_animator_.Step(
+                        auto eyes = board->eye_animator_.Step(
                             now_ms, action.motion,
                             face_available && !priority_active && !model_mood_active,
                             priority_active || !isAwake(board->face_behavior_.state()));
+                        const auto height = mood_morph.Step(
+                            now_ms, local_mood, face_available && !priority_active);
+                        if (height != 0) eyes = {true, false, 0, 0, height};
                         board->local_eye_display_->ShowEyes(eyes);
                     }
                     // Restore the current HSM mood after either local priority clears.

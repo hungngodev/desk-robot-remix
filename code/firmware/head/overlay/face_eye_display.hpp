@@ -180,19 +180,24 @@ private:
         if (!frame.visible) frame = {};
         frame.x = std::clamp<int>(frame.x, -3, 3);
         frame.y = std::clamp<int>(frame.y, -3, 3);
+        frame.lid_height = std::clamp<int>(frame.lid_height, 2, 14);
         if (frame_known_ && frame.visible == last_.visible &&
             frame.closed == last_.closed && frame.x == last_.x &&
-            frame.y == last_.y) return;
+            frame.y == last_.y && frame.lid_height == last_.lid_height) return;
         if (!frame.visible) {
             lv_obj_add_flag(eye_layer_, LV_OBJ_FLAG_HIDDEN);
         } else {
             for (int i = 0; i < 2; ++i) {
-                lv_obj_set_size(eye_[i], 11, frame.closed ? 2 : 14);
-                lv_obj_set_pos(eye_[i], 3 + i * 15, frame.closed ? 23 : 17);
-                if (frame.closed) {
+                const int height = frame.closed ? 2 : frame.lid_height;
+                lv_obj_set_size(eye_[i], 11, height);
+                lv_obj_set_pos(eye_[i], 3 + i * 15, 24 - height / 2);
+                if (height < 6) {
                     lv_obj_add_flag(pupil_[i], LV_OBJ_FLAG_HIDDEN);
                 } else {
-                    lv_obj_set_pos(pupil_[i], 4 + frame.x, 5 + frame.y);
+                    if (height == 14)
+                        lv_obj_set_pos(pupil_[i], 4 + frame.x, 5 + frame.y);
+                    else
+                        lv_obj_set_pos(pupil_[i], 4 + frame.x, (height - 4) / 2);
                     lv_obj_remove_flag(pupil_[i], LV_OBJ_FLAG_HIDDEN);
                 }
             }
