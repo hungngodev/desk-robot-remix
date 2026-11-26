@@ -136,10 +136,14 @@ bool PulsePad::poll(std::uint32_t now_ms) {
     recover_configuration();
     return false;
   }
-  std::uint8_t write_pointer = 0, read_pointer = 0, overflow = 0;
-  bool ok = read_reg(0x04, write_pointer) &&
-            read_reg(0x05, overflow) &&
-            read_reg(0x06, read_pointer);
+  // MAX30102 datasheet p. 14: consecutive registers auto-increment.
+  // Read 0x04..0x06 without touching FIFO_DATA (0x07). One combined read
+  // saves 54 SCL clocks (135us at 400kHz) versus three register reads.
+  std::uint8_t pointers[3]{};
+  bool ok = read_bytes(0x04, pointers, sizeof(pointers));
+  const std::uint8_t write_pointer = pointers[0];
+  const std::uint8_t overflow = pointers[1];
+  const std::uint8_t read_pointer = pointers[2];
   // MAX30102 FIFO pointers and overflow counters are five-bit values.
   // Reject corrupt reserved bits rather than masking them into a plausible
   // fresh paw-contact sample. No sensor output is used to authorize motors.

@@ -575,6 +575,9 @@ class TwoWire {
       inbound = {pulse_interrupt_status};
       pulse_interrupt_status = 0; // read-to-clear
     }
+    else if (addr == 0x57 && register_address == 0x04 && count == 3)
+      inbound = {pulse_fifo_write_pointer, pulse_fifo_overflow,
+                 pulse_fifo_read_pointer};
     else if (addr == 0x57 && register_address == 0x04)
       inbound = {pulse_fifo_write_pointer};
     else if (addr == 0x57 && register_address == 0x05)

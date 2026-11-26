@@ -170,6 +170,38 @@ static void check_ads_start_provenance() {
 }
 // Exercise the actual optional driver entry points after a previously valid
 // sample. A short count is not an ACK for a complete physical observation.
+static void check_pulse_pointer_budget() {
+  for (std::size_t count = 0; count < 3; ++count) {
+    TwoWire wire;
+    desk_robot::PulsePad pulse;
+    fake_arduino_millis() = 0U;
+    CHECK(pulse.begin(wire));
+    wire.pulse_fifo_write_pointer = 4;
+    const auto before = wire.transactions;
+    CHECK(pulse.poll(0));
+    // Three verified mux write/read pairs plus pointer, status and FIFO reads.
+    // Each register read counts its pointer write and requestFrom.
+    CHECK(wire.transactions - before == 12U);
+    CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+    const auto accepted = pulse.sample();
+    wire.pulse_fifo_write_pointer = 5;
+    wire.next_short_read_address = 0x57;
+    wire.next_short_read_request = 3;
+    wire.next_short_read_count = count;
+    CHECK(!pulse.poll(60));
+    CHECK(wire.next_short_read_address == -1);
+    CHECK(!pulse.sample().valid);
+    CHECK(pulse.sample().sample_seq == accepted.sample_seq);
+    CHECK(pulse.sample().at_ms == accepted.at_ms);
+    CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+    CHECK(!pulse.poll(120)); // quarantine flush, not a fresh observation
+    CHECK(wire.pulse_fifo_read_pointer == 5U);
+    wire.pulse_fifo_write_pointer = 6;
+    CHECK(pulse.poll(180));
+    CHECK(pulse.sample().sample_seq == accepted.sample_seq + 1U);
+    CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+  }
+}
 static void check_short_pulse_fifo_reads() {
   for (std::size_t count = 0; count < 12; ++count) {
     TwoWire wire;
@@ -419,6 +451,7 @@ int main() {
     check_empty_accessory_mux();
     check_jaw_adc_rail_isolation();
     check_ads_start_provenance();
+    check_pulse_pointer_budget();
     check_short_pulse_fifo_reads();
     check_short_cap_status_reads();
     check_short_climate_reads();
