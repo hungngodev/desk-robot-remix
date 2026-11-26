@@ -295,7 +295,7 @@ def _open_camera_jpeg(frame: bytes, *, max_bytes: int) -> Iterator[Image.Image]:
                     or not 1 <= candidate.height <= 4096):
                 raise ValueError("Camera dimensions invalid")
             yield candidate
-    except Image.DecompressionBombError as exc:
+    except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
         raise ValueError("Camera dimensions invalid") from exc
 
 
