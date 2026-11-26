@@ -56,6 +56,32 @@ void reset_fixture() {
   now = receive_cost = 0;
   failed_start = -1;
 }
+// Individually fresh, matching IDs are not necessarily a paired bearing.
+// Include drain time in the later receiver's uncertainty, on either side.
+void check_receipt_window_pair(unsigned first_side, unsigned separation) {
+  reset_fixture();
+  desk_robot::TerminalIr ir;
+  CHECK(ir.begin(36, 39));
+  poll(ir, 100);
+  push(first_side); poll(ir, 180);
+  const auto first = ir.evidence(now);
+  CHECK(first.left_fresh == (first_side == 0));
+  CHECK(first.right_fresh == (first_side == 1));
+  CHECK(!first.same_code && first.code == 0);
+  receive_cost = 1;
+  push(1 - first_side); poll(ir, 100 + separation - 3);
+  CHECK(now == 100 + separation); // three receives, including empty checks
+  const auto result = ir.evidence(now);
+  CHECK(result.left_fresh && result.right_fresh);
+  CHECK(result.left_code == kCode && result.right_code == kCode);
+  CHECK(result.left_seq == 1 && result.right_seq == 1);
+  CHECK(result.left_age_ms == separation - (first_side == 0 ? 0U : 80U));
+  CHECK(result.right_age_ms == separation - (first_side == 1 ? 0U : 80U));
+  CHECK(result.same_code == (separation == 120));
+  CHECK(result.code == (separation == 120 ? kCode : 0U));
+  CHECK(!result.motor_authorized && !result.charging_authorized);
+  CHECK(!ir.begin(36, 36));
+}
 } // namespace
 
 std::uint32_t millis() { return now; }
@@ -217,6 +243,10 @@ int main() {
     // Tear down before isolating a second receiver history for rollover.
     CHECK(!ir.begin(36, 36));
     CHECK(!queues[0].installed && !queues[1].installed);
+    for (unsigned side = 0; side != 2; ++side) {
+      check_receipt_window_pair(side, 120);
+      check_receipt_window_pair(side, 121);
+    }
     reset_fixture();
     desk_robot::TerminalIr wrap;
     CHECK(wrap.begin(36, 39));
