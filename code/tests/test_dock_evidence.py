@@ -829,3 +829,39 @@ async def test_positive_current_burst_then_zero_crossings_never_verify_charge(
         assert report["motor_authorized"] is False
         assert report.get("charging", False) is False
     assert head.commands == []
+
+
+@pytest.mark.parametrize("seated", [False, True])
+@pytest.mark.parametrize("raw_ma", [None, -30, 0, 30])
+async def test_pgood_alone_never_confirms_pack_charging(monkeypatch, seated, raw_ma):
+    async def fast(_seconds):
+        pass
+
+    monkeypatch.setattr("desk_robot.dock_evidence.asyncio.sleep", fast)
+    samples = fresh_samples()
+    for index, sample in enumerate(samples, 1):
+        sample["dock"].update(
+            left_seated=seated, right_seated=seated,
+            input_good=True, charge_indicated=False,
+        )
+        if raw_ma is not None:
+            sample["power"].update(
+                shunt_uv=raw_ma * 5, pack_ma=raw_ma, pack_valid=True,
+                pack_seq=index, pack_age_ms=35, monitor_valid=True,
+            )
+    head = FakeHead(samples)
+    report = await observe_dock_evidence(head, "robot-01")
+    assert report["state"] == (
+        "input_present_not_charging" if seated else "charger_input_without_seat"
+    )
+    assert report["stable_three_samples"] is True
+    assert report["raw_pack_samples_fresh"] is (raw_ma is not None)
+    assert report["raw_pack_direction"] == {
+        None: "not_available", -30: "out_of_pack_unqualified",
+        0: "indeterminate", 30: "into_pack_unqualified",
+    }[raw_ma]
+    for flag in ("battery_current_measured", "charging_verified",
+                 "charging_authorized", "motor_authorized"):
+        assert report[flag] is False
+    assert report.get("charged", False) is False
+    assert head.commands == []
