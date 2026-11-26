@@ -3924,22 +3924,35 @@ async def test_camera_disabled_at_runtime_start_can_enable_one_stream(settings):
     assert head.closed == 1
 
 
-async def test_native_live_subscriber_does_not_cross_camera_regrant(settings):
+async def test_native_live_subscriber_does_not_cross_camera_regrant(settings, monkeypatch):
     settings.voice_vision_tools_enabled = True
     rid = settings.robots[0].id
     service = MultimodalOrchestrator(
         settings, {rid: Head()}, Vision(), asyncio.Lock(),
     )
+    waiting = asyncio.Event()
+    condition = service._model_frame_conditions[rid]
+    original_wait = condition.wait
+
+    async def signal_wait():
+        waiting.set()
+        return await original_wait()
+
+    monkeypatch.setattr(condition, "wait", signal_wait)
     stream = service.native_live_frames(rid)
     pending = asyncio.create_task(anext(stream))
     try:
-        await asyncio.sleep(0.02)
+        # Revoke only after the subscriber has captured the original grant.
+        await asyncio.wait_for(waiting.wait(), timeout=1)
         settings.voice_vision_tools_enabled = False
         settings.voice_vision_tools_enabled = True
         with pytest.raises(StopAsyncIteration):
             await asyncio.wait_for(pending, timeout=1)
         assert not service.hub.frames[rid]
     finally:
+        if not pending.done():
+            pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
         await stream.aclose()
         await service.close()
 
