@@ -223,6 +223,39 @@ static void fractional_output_end_survives_projection_and_idle_reanchor() {
   }
 }
 
+static void mute_gaps_and_resets_cross_32_bit_clock_boundaries() {
+  constexpr std::int64_t wrap = std::int64_t{1} << 32;
+  constexpr std::uint64_t cap = 16384;
+  for (const auto boundary : {wrap, wrap * 1000}) {
+    PlaybackReferenceClock clock;
+    const auto start = boundary - 10000;
+    CHECK(clock.silence_frames(start, cap) == 0);
+    // Microphone mute suppresses reads, but speaker writes still publish PCM.
+    clock.accepted_output_frames(1920);
+    CHECK(clock.represented_end_us() == boundary + 50000);
+    CHECK(clock.future_reference_frames(boundary + 10000, cap) == 640);
+    CHECK(clock.silence_frames(boundary + 10000, cap) == 0);
+    CHECK(clock.silence_frames(start - 1, cap) == 0);
+    CHECK(clock.represented_end_us() == boundary + 50000);
+    // Unmute after a long idle gap: only the bounded missing interval is added.
+    const auto resume = boundary + 2000000;
+    CHECK(clock.silence_frames(resume, cap) == cap);
+    CHECK(clock.silence_frames(resume, cap) == 0);
+    CHECK(clock.silence_frames(resume + 10000, cap) == 160);
+    // Reset while a fractional output frame is queued; the next epoch must
+    // reanchor at the full source timestamp without inheriting old PCM phase.
+    clock.accepted_output_frames(1);
+    CHECK(clock.future_reference_frames(resume + 10000, cap) == 1);
+    clock.reset();
+    CHECK(clock.future_reference_frames(resume + 10000, cap) == 0);
+    CHECK(clock.silence_frames(resume + 20000, cap) == 0);
+    clock.accepted_output_frames(2);
+    CHECK(clock.represented_end_us() == resume + 20062);
+    CHECK(clock.future_reference_frames(resume + 20062, cap) == 1);
+    CHECK(clock.silence_frames(resume + 20125, cap) == 1);
+  }
+}
+
 int main() {
   try {
     for (int cadence_ms : {10, 20, 30, 60}) {
@@ -233,6 +266,7 @@ int main() {
     queued_output_is_not_premature_microphone_reference();
     late_opus_chunk_accounts_for_real_gap_once();
     huge_idle_gaps_are_bounded();
+    mute_gaps_and_resets_cross_32_bit_clock_boundaries();
     timestamp_and_cap_extremes_do_not_overflow();
     zero_timestamp_is_valid_clock_origin();
     irregular_idle_cadence_retains_fractional_reference_samples();
