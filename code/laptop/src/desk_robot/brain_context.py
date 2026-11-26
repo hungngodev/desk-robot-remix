@@ -250,6 +250,43 @@ def _core_memory_context(core: Sequence[CoreFact]) -> str:
     return "; ".join(reversed(core_parts))
 
 
+_TimelineCue = tuple[float, str, str | None, bool]
+
+
+def _budget_interaction(
+    cue_parts: list[_TimelineCue], requested_tools: set[str],
+    omitted_current_tool_kinds: set[str],
+) -> str:
+    cue_parts.sort(key=lambda candidate: (
+        0.5 if candidate[3] and candidate[2] in requested_tools
+        else candidate[0]
+    ))
+    selected: list[str] = []
+    remaining = 400
+    omitted_requested_receipt = bool(requested_tools & omitted_current_tool_kinds)
+    for _, phrase, tool_kind, current_turn in cue_parts:
+        cost = len(phrase) + (2 if selected else 0)
+        if cost <= remaining:
+            selected.append(phrase)
+            remaining -= cost
+        elif current_turn and tool_kind in requested_tools:
+            # A complex spoken question can exceed the fixed context
+            # budget. Never silently hide a requested completed result and
+            # let the model pretend it answered every part of the question.
+            omitted_requested_receipt = True
+    if omitted_requested_receipt:
+        limitation = (
+            "Some requested tool results did not fit; do not claim a "
+            "complete factual answer."
+        )
+        # Preserve highest priority safety/turn evidence. Retire the
+        # lowest-priority selected cues to make the limitation explicit.
+        while selected and len("; ".join([*selected, limitation])) > 400:
+            selected.pop()
+        selected.append(limitation)
+    return "; ".join(selected)
+
+
 def compose_brain_context(
     recent: Sequence[Memory], core: Sequence[CoreFact],
     timeline: Sequence[dict], *, topical_event_id: str | None = None,
@@ -271,7 +308,7 @@ def compose_brain_context(
     # Repeating the same cue crowds out touch, completed tool context and
     # conversational continuity. Keep the latest per kind, then budget
     # independent modalities rather than truncating a large camera list.
-    cue_parts: list[tuple[float, str, str | None, bool]] = []
+    cue_parts: list[_TimelineCue] = []
     seen_cues: set[tuple[str, str]] = set()
     heard_count = 0
     heard_requests: list[str] = []
@@ -611,34 +648,9 @@ def compose_brain_context(
             latest,
         ):
             requested_tools.add("pickup_status")
-    cue_parts.sort(key=lambda candidate: (
-        0.5 if candidate[3] and candidate[2] in requested_tools
-        else candidate[0]
-    ))
-    selected: list[str] = []
-    remaining = 400
-    omitted_requested_receipt = bool(requested_tools & omitted_current_tool_kinds)
-    for _, phrase, tool_kind, current_turn in cue_parts:
-        cost = len(phrase) + (2 if selected else 0)
-        if cost <= remaining:
-            selected.append(phrase)
-            remaining -= cost
-        elif current_turn and tool_kind in requested_tools:
-            # A complex spoken question can exceed the fixed context
-            # budget. Never silently hide a requested completed result and
-            # let the model pretend it answered every part of the question.
-            omitted_requested_receipt = True
-    if omitted_requested_receipt:
-        limitation = (
-            "Some requested tool results did not fit; do not claim a "
-            "complete factual answer."
-        )
-        # Preserve highest priority safety/turn evidence. Retire the
-        # lowest-priority selected cues to make the limitation explicit.
-        while selected and len("; ".join([*selected, limitation])) > 400:
-            selected.pop()
-        selected.append(limitation)
-    interaction = "; ".join(selected)
+    interaction = _budget_interaction(
+        cue_parts, requested_tools, omitted_current_tool_kinds,
+    )
     return ContextBundle(recent_text, core_text, interaction)
 
 

@@ -147,6 +147,33 @@ def _validate_memory_text(
         raise ValueError(invalid_character_message or message)
 
 
+_SearchRow = tuple[str, str, int, str, str, float, float, float]
+
+
+def _rank_search_rows(
+    robot_id: str, rows: list[_SearchRow], *, now: float, limit: int,
+) -> list[Memory]:
+    ranked: list[tuple[tuple[float, float, float, str], Memory]] = []
+    for event_id, source, witnessed, kind, summary, at, confidence, relevance in rows:
+        witnessed = bool(witnessed) and kind not in PEER_MEMORY_KINDS
+        age_days = max(0.0, now - at) / 86400
+        # BM25 scores are lower for better matches. Quantize tiny
+        # floating noise so confidence, firsthand source and recency
+        # fairly break equal-ranking topical results.
+        rank = (
+            round(-float(relevance), 6),
+            float(confidence) + (0.25 if witnessed else 0)
+            + 0.25 / (1 + age_days / 14),
+            at, event_id,
+        )
+        ranked.append((
+            rank, Memory(robot_id, event_id, source, bool(witnessed),
+                         kind, summary, at, confidence),
+        ))
+    ranked.sort(key=lambda entry: entry[0], reverse=True)
+    return [memory for _, memory in ranked[:limit]]
+
+
 class MemoryStore:
     """One local SQLite database per robot; explicit observed vs told provenance."""
 
@@ -836,26 +863,7 @@ class MemoryStore:
                        WHERE memories_fts MATCH ? LIMIT 250""",
                     (expression,),
                 ).fetchall()
-        now = time.time()
-        ranked = []
-        for event_id, source, witnessed, kind, summary, at, confidence, relevance in rows:
-            witnessed = bool(witnessed) and kind not in PEER_MEMORY_KINDS
-            age_days = max(0.0, now - at) / 86400
-            # BM25 scores are lower for better matches. Quantize tiny
-            # floating noise so confidence, firsthand source and recency
-            # fairly break equal-ranking topical results.
-            rank = (
-                round(-float(relevance), 6),
-                float(confidence) + (0.25 if witnessed else 0)
-                + 0.25 / (1 + age_days / 14),
-                at, event_id,
-            )
-            ranked.append((
-                rank, Memory(robot_id, event_id, source, bool(witnessed),
-                             kind, summary, at, confidence),
-            ))
-        ranked.sort(key=lambda entry: entry[0], reverse=True)
-        return [memory for _, memory in ranked[:limit]]
+        return _rank_search_rows(robot_id, rows, now=time.time(), limit=limit)
 
     def reserve_core_fact_mutation(
         self, robot_id: str, slot: str, value: str | None = None,
