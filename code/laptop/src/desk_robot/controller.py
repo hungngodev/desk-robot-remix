@@ -1514,17 +1514,6 @@ class Coordinator:
                     "phase": "hold", "reason": decision.reason,
                     "charging_authorized": False, "physical_acceptance_pass": False,
                 }
-            # A fourth forward pulse is not justified when three earlier pulses
-            # failed to establish a new closest marker range. Never back up:
-            # rear clearance is not a qualified movement authority.
-            if decision.phase == "approach" and pose is not None and progress.observe(pose.z_mm):
-                reason = "Dock approach blocked: three pulses without closer marker; help needed"
-                job.events.append(reason)
-                return {
-                    "phase": "hold", "reason": reason, "help_requested": True,
-                    "motor_authorized": False, "charging_authorized": False,
-                    "physical_acceptance_pass": False,
-                }
             # Actual hardware docking requires BOTH independent IR receivers
             # to see the code flashed on THIS pet's assigned station. A valid
             # foreign dock NEC frame never justifies a turn/forward pulse.
@@ -1633,6 +1622,20 @@ class Coordinator:
 
             try:
                 _verify_before_post()
+                # A fourth forward pulse is not justified when three earlier pulses
+                # failed to establish a new closest marker range. Never back up:
+                # rear clearance is not a qualified movement authority.
+                if (decision.phase == "approach" and pose is not None
+                        and progress.observe(pose.z_mm)):
+                    reason = (
+                        "Dock approach blocked: three pulses without closer marker; help needed"
+                    )
+                    job.events.append(reason)
+                    return {
+                        "phase": "hold", "reason": reason, "help_requested": True,
+                        "motor_authorized": False, "charging_authorized": False,
+                        "physical_acceptance_pass": False,
+                    }
                 if getattr(head, "supports_dispatch_check", False):
                     # Preserve dock-specific checks at the actual POST boundary.
                     await self._motion_command(job, command, dispatch_check=_verify_at_dispatch)

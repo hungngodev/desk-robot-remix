@@ -153,6 +153,29 @@ The existing XIAO serial parser explicitly permits read-only `ir`; the XIAO auth
 
 The terminal beacon's actual chosen transmitter and receiver carrier, 3.3V bias, ESP32 GPIO36/39 erratum, mechanical baffle, differential bearing geometry and charger remain physically unverified. **The source returns `physical_qualified=false`, `motor_authorized=false`, `charging_authorized=false` on every IR query.** Do not use the new endpoint as an instruction to drive toward live contacts.
 
+### Guarded dock approach stall and operator assistance
+
+A dock approach has at most sixteen short forward pulses overall. The first
+accepted marker range establishes the progress baseline. Three consecutive
+subsequent observations without a new closest marker range end the approach
+before another drive. Each progress observation must pass the existing fresh
+camera source, assigned IR, WROOM health, consent and seat checks first. A
+retired camera stream or a physical fault retains its own failure reason.
+
+The job result exposes `phase=hold`, `help_requested=true`, and
+`motor_authorized=false` for the stalled approach. Its event records that
+operator help is needed; the result is published only after the parent job's
+terminal STOP acknowledgement. This is not a speech-delivery receipt or an
+electrical standby measurement. A fresh operator request remains subject to
+all existing qualification and permit gates. Autonomous low-battery retries
+remain limited by the existing per-robot persisted episode reservation.
+
+No reverse or turning pulse is authorized to retreat from a cradle: the rear
+and side readings have no qualified swept-footprint authority. The observed
+marker range is not an odometry or physical-motion measurement. Actual
+retreat, low-power standby and charging remain subject to physical
+qualification.
+
 ### Independent capture sequence over the existing Sense camera endpoint
 
 Each newly encoded JPEG from `/api/camera.jpg` now reports its Sense boot

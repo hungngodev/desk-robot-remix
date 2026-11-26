@@ -135,12 +135,13 @@ async def test_dock_approach_rejects_turn_without_three_fresh_clear_ranges(
         await controller.close()
 
 
-@pytest.mark.parametrize("ranges, expected_pulses", [
-    ((500, 150), 1),
-    ((500, 500, 500, 500), 3),
+@pytest.mark.parametrize("ranges, expected_pulses, retire_on_fourth", [
+    ((500, 150), 1, False),
+    ((500, 500, 500, 500), 3, False),
+    ((500, 500, 500, 500), 3, True),
 ])
 async def test_dock_approach_moves_once_then_holds_before_contacts(
-    settings, monkeypatch, ranges, expected_pulses,
+    settings, monkeypatch, ranges, expected_pulses, retire_on_fourth,
 ):
     from desk_robot.controller import Job
     from desk_robot.dock_vision import DockCameraCalibration, DockPose
@@ -176,6 +177,18 @@ async def test_dock_approach_moves_once_then_holds_before_contacts(
             self.commands.append(text)
 
     head = GuardedHead()
+    if retire_on_fourth:
+        original_verify = head.dock_receipt_current
+        checked = 0
+
+        async def verify(receipt):
+            nonlocal checked
+            checked += 1
+            if checked == 4:
+                raise ValueError("Fixture stream retired")
+            await original_verify(receipt)
+
+        monkeypatch.setattr(head, "dock_receipt_current", verify)
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
     camera = DockCameraCalibration(
         fx=410, fy=410, cx=320, cy=240, tag_side_mm=60, marker_id=1,
@@ -188,11 +201,15 @@ async def test_dock_approach_moves_once_then_holds_before_contacts(
             0, 0, next(distances), 0.5, captured_at,
         ),
     )
+    job = Job("dock-unit", "robot-01", "dock_approach")
     try:
-        result = await controller._dock_approach(
-            Job("dock-unit", "robot-01", "dock_approach"),
-            camera, 200, 1, 1,
-        )
+        if retire_on_fourth:
+            with pytest.raises(OperationError, match="source changed"):
+                await controller._dock_approach(job, camera, 200, 1, 1)
+            assert head.commands == ["drive 20 20 100", "stop"] * expected_pulses
+            assert not any("help needed" in event for event in job.events)
+            return
+        result = await controller._dock_approach(job, camera, 200, 1, 1)
         assert result["phase"] == "hold"
         assert not result["charging_authorized"]
         assert not result["physical_acceptance_pass"]
