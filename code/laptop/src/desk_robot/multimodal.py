@@ -36,7 +36,12 @@ from .scene_motion import change_fraction
 from .scene_motion import scene_change_mask as scene_change_mask
 from .sensor_event_contract import DIRECT_INTERACTION_KINDS, TRIGGERS  # public names
 from .vision import OllamaScene
-from .vision_admission import FrameAdmissionDropped, LatestFrameAdmission
+from .vision_admission import (
+    FrameAdmissionDropped,
+    LatestFrameAdmission,
+    VisionCallAdmission,
+    vision_lock_until,
+)
 
 # Keep source-ID deduplication longer than the 30s visible ASR context.
 # A saturated identity fence refuses new context rather than evicting live IDs.
@@ -1055,6 +1060,7 @@ class MultimodalOrchestrator:
         # a genuine authenticated human speech or direct visual question.
         self._optional_preprocess_slot = threading.BoundedSemaphore(1)
         self._frame_admission = LatestFrameAdmission()
+        self._model_admission = VisionCallAdmission()
         self._preprocess_futures: set[Future[tuple[bytes, bytes, float]]] = set()
         self._preprocess_pool = ThreadPoolExecutor(
             max_workers=2, thread_name_prefix="desk-jpeg"
@@ -2228,7 +2234,11 @@ class MultimodalOrchestrator:
                 raise RuntimeError("No fresh authenticated camera images available")
             # Camera-only loss preserves the human turn but invalidates its frames.
             camera_generation = self.hub._generation[robot_id]
-            async with self.inference_lock:
+            queue_remaining = (
+                min(frame.received_at for frame in chosen) + _VISUAL_FRAME_MAX_AGE_S
+                - time.monotonic()
+            )
+            async with vision_lock_until(self.inference_lock, queue_remaining):
                 # Higher-priority user turns can arrive while waiting for a
                 # busy five-robot VLM. Never evaluate a stale older question.
                 if not current_turn():
@@ -2279,12 +2289,14 @@ class MultimodalOrchestrator:
                     images = [frame.jpeg for frame in chosen]
                     # The real adapter decodes off-thread. Recheck the exact
                     # request grant at its final model submission boundary.
-                    if isinstance(self.scene, OllamaScene):
-                        request = self.scene.answer(question, images, admit=admit_answer)
-                    else:
-                        request = self.scene.answer(question, images)
+                    def request():
+                        if isinstance(self.scene, OllamaScene):
+                            return self.scene.answer(question, images, admit=admit_answer)
+                        return self.scene.answer(question, images)
+
+                    model_task = self._model_admission.start(request)
                     answer = await _bounded_head_reply(
-                        request,
+                        model_task,
                         seconds=remaining,
                         timeout_message="Live visual analysis timed out",
                     )
@@ -2382,6 +2394,10 @@ class MultimodalOrchestrator:
         for task in tasks:
             if not task.done() and not task.cancelling():
                 task.cancel()
+
+        # Parent look tasks own cancellation of active model calls. Retired
+        # providers already received cancellation; wait without cancelling twice.
+        tasks.update(self._model_admission.active())
 
         # Shut admission before awaiting any worker. Cancelling an asyncio
         # wrapper does not terminate a running native Pillow decode.

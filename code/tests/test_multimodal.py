@@ -4655,3 +4655,68 @@ async def test_optional_fleet_native_admission_retains_human_and_cancellation_bu
         release.set()
         await asyncio.gather(active, *pending, return_exceptions=True)
         await visual.close()
+
+
+async def test_queued_visual_question_expires_while_other_owner_holds_lock(monkeypatch):
+    """Expired queued images must retire even if another VLM owner never exits."""
+    monkeypatch.setattr("desk_robot.multimodal._VISUAL_FRAME_MAX_AGE_S", 0.2)
+    model = Vision()
+    lock = asyncio.Lock()
+    service = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()}, model, lock,
+    )
+    await lock.acquire()
+    try:
+        service.hub.offer("robot-01", image(), time.monotonic(), source="voice_question")
+        with pytest.raises(RuntimeError, match="expired while queued"):
+            await asyncio.wait_for(
+                service.look("robot-01", "What is on my desk?"), timeout=1,
+            )
+        assert lock.locked()
+        assert not service._look_tasks
+        assert model.calls == []
+    finally:
+        lock.release()
+        await service.close()
+
+
+async def test_repeated_stalled_visual_calls_have_bounded_retired_owners():
+    release = asyncio.Event()
+    calls = []
+
+    class StubbornVision:
+        async def answer(self, question, frames):
+            calls.append(question)
+            if release.is_set():
+                return "Current scene"
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                await release.wait()
+                return "Obsolete scene"
+
+    service = MultimodalOrchestrator(
+        config(), {"robot-01": Head(), "robot-02": Head()},
+        StubbornVision(), asyncio.Lock(),
+    )
+    service._vision_timeout_s = 0.02
+    try:
+        for _ in range(2):
+            with pytest.raises(RuntimeError, match="timed out"):
+                await asyncio.wait_for(
+                    service.look("robot-01", "What is on my desk?"), timeout=1,
+                )
+        for _ in range(5):
+            with pytest.raises(RuntimeError, match="capacity occupied"):
+                await service.look("robot-01", "What is on my desk?")
+            assert not service.inference_lock.locked()
+        assert len(calls) == 2
+        assert len(service._model_admission.active()) == 2
+        assert service.hub.recent_tool_context("robot-01", time.monotonic()) == []
+        release.set()
+        await asyncio.wait(service._model_admission.active(), timeout=1)
+        reply = await service.look("robot-01", "What is on my desk?")
+        assert reply["answer"] == "Current scene"
+    finally:
+        release.set()
+        await service.close()

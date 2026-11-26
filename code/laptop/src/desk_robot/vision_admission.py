@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
+from contextlib import asynccontextmanager
+from typing import Any
 
 
 class FrameAdmissionDropped(RuntimeError):
@@ -43,7 +45,9 @@ class LatestFrameAdmission:
                     raise FrameAdmissionDropped("Camera preprocessing superseded by newer frame")
                 remaining = 1.0 - (clock() - received)
                 if self._closed or not admit() or not 0 < remaining <= 1.0:
-                    raise FrameAdmissionDropped("Camera preprocessing admission invalidated or expired")
+                    raise FrameAdmissionDropped(
+                        "Camera preprocessing admission invalidated or expired"
+                    )
                 if next(iter(self._pending)) == robot_id and reserve():
                     return
                 self._changed.clear()
@@ -56,3 +60,44 @@ class LatestFrameAdmission:
             if self._pending.get(robot_id) is ticket:
                 del self._pending[robot_id]
                 self.notify()
+
+
+@asynccontextmanager
+async def vision_lock_until(lock: asyncio.Lock, remaining: float):
+    """Retire queued JPEG references by their oldest frame's deadline."""
+    if remaining <= 0:
+        raise RuntimeError("Camera observation expired while queued")
+    try:
+        async with asyncio.timeout(remaining):
+            await lock.acquire()
+    except TimeoutError as exc:
+        raise RuntimeError("Camera observation expired while queued") from exc
+    try:
+        yield
+    finally:
+        lock.release()
+
+
+class VisionCallAdmission:
+    """One current model call plus at most one cancellation-resistant retiree."""
+
+    def __init__(self) -> None:
+        self._tasks: set[asyncio.Task[str]] = set()
+
+    def active(self) -> set[asyncio.Task[str]]:
+        return {task for task in self._tasks if not task.done()}
+
+    def start(self, request: Callable[[], Coroutine[Any, Any, str]]) -> asyncio.Task[str]:
+        if len(self.active()) >= 2:
+            raise RuntimeError("Visual model capacity occupied by unfinished calls")
+        task = asyncio.create_task(request())
+        self._tasks.add(task)
+        task.add_done_callback(self._retire)
+        return task
+
+    def _retire(self, task: asyncio.Task[str]) -> None:
+        try:
+            if not task.cancelled():
+                task.exception()
+        finally:
+            self._tasks.discard(task)
