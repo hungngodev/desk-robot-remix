@@ -4135,3 +4135,44 @@ async def test_alternate_coordinator_port_routes_tools_and_native_omni_without_8
         assert "/v1/pet/robot-01/interaction-context" in seen_paths
         assert seen_ports and all(p == coordinator.port for p in seen_ports)
         assert 8765 not in seen_ports
+
+
+async def test_peer_reconnect_preserves_active_speaker_lease(bridge, monkeypatch):
+    ids = [f"mac-{index:02}" for index in range(1, 6)]
+    monkeypatch.setenv(
+        "DESK_ROBOT_DEVICE_MAP",
+        json.dumps({f"robot-{index:02}": device for index, device in enumerate(ids, 1)}),
+    )
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: None)
+    for device in ids:
+        bridge.register(SimpleNamespace(device_id=device))
+    first, third = (bridge.connections[ids[index]] for index in (0, 2))
+    bridge.lease_ids = frozenset(ids)
+    bridge.lease_token = "a" * 32
+    bridge.lease_until = time.monotonic() + 30
+    bridge.active_device_id = first.device_id
+    bridge.interrupt_generation[first.device_id] = 7
+    first_tool = bridge.tool_turn_cancel_event(first.device_id)
+    third_tool = bridge.tool_turn_cancel_event(third.device_id)
+    deadline = bridge.lease_until
+
+    async with bridge.speaker_lock:
+        bridge.unregister(third)
+        assert third.device_id not in bridge.connections
+        assert third_tool.is_set()
+        replacement = SimpleNamespace(device_id=third.device_id)
+        bridge.register(replacement)
+        bridge.unregister(third)  # A delayed close from the retired socket.
+        assert bridge.connections[third.device_id] is replacement
+        assert not bridge.tool_turn_cancel_event(third.device_id).is_set()
+        assert bridge.active_device_id == first.device_id
+        assert bridge.lease_token == "a" * 32
+        assert bridge.lease_until == deadline
+        assert bridge.lease_ids == frozenset(ids)
+        assert not bridge.lease_stopping
+        assert bridge.speaker_lock.locked()
+        assert bridge.muted(first.device_id)
+        assert not bridge.coordinated_speech_preempted()
+        assert bridge.interrupt_generation[first.device_id] == 7
+        assert bridge.tool_turn_cancel_event(first.device_id) is first_tool
+        assert not first_tool.is_set()
