@@ -208,6 +208,10 @@ add_executable(guarded_body_tests tests/guarded_body_tests.cpp)
 target_include_directories(guarded_body_tests PRIVATE lib/ReplyTxQueue)
 target_link_libraries(guarded_body_tests PRIVATE body_control stepper_drive)
 target_compile_options(guarded_body_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
+add_executable(body_reply_format_tests tests/body_reply_format_tests.cpp)
+target_include_directories(body_reply_format_tests PRIVATE lib/BodyControl)
+target_compile_features(body_reply_format_tests PRIVATE cxx_std_11)
+target_compile_options(body_reply_format_tests PRIVATE -Wall -Wextra -Wpedantic -Werror)
 get_property(body_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
 if(BODY_SANITIZERS AND CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
   foreach(target IN LISTS body_targets)
@@ -253,6 +257,7 @@ body_add_test(imu_yaw_capture_freshness_and_bias imu_yaw_capture_tests)
 body_add_test(wheel_angle_capture_freshness_and_wrap wheel_angle_capture_tests)
 body_add_test(body_read_only_pose_unavailable_contract pose_read_only_tests)
 body_add_test(guarded_body_integration guarded_body_tests)
+body_add_test(body_reply_format_bounds body_reply_format_tests)
 foreach(scenario
     attitude_norm_root_boundaries
     disarmed_boot arm_clears_old_motion drive_limits drive_duration

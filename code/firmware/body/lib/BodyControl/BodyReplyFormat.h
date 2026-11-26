@@ -15,6 +15,10 @@ inline bool format_reply(char* reply, std::size_t capacity, const char* format, 
 
 inline bool format_reply(char* reply, std::size_t capacity, const char* format, ...) {
   if (reply == nullptr || capacity == 0) return false;
+  if (format == nullptr) {
+    reply[0] = '\0';
+    return false;
+  }
   std::va_list args;
   va_start(args, format);
   const int written = std::vsnprintf(reply, capacity, format, args);
