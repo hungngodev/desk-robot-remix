@@ -84,6 +84,8 @@ def budget(data: object, shipping: object = None, tax: object = None) -> dict[st
     """Report historical planning costs without granting purchase authority."""
     if not isinstance(data, dict) or not isinstance(data.get("items"), list):
         raise ValueError("Historical budget needs an items list")
+    if not data["items"]:
+        raise ValueError("Historical budget needs at least one item")
     if data.get("currency", "USD") != "USD":
         raise ValueError("Historical budget currency must be USD")
     cap = _money(data.get("cap_usd"), label="Budget cap")
