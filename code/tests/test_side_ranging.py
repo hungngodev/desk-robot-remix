@@ -526,3 +526,50 @@ def test_deadband_never_establishes_far_baseline(hardware, reset):
     assert observe(threshold + 60, right=95) == []
     assert observe(threshold, right=95) == []
     assert observe(threshold - 1, right=95) == [("left", threshold - 1)]
+
+
+@pytest.mark.parametrize("lane", range(5))
+@pytest.mark.parametrize("age", [-1, 199, 200, 201, True])
+async def test_critical_lane_age_controls_operator_permit(lane, age):
+    from pathlib import Path
+
+    from desk_robot.config import load_settings
+    from desk_robot.controller import Coordinator, OperationError
+
+    settings = load_settings(
+        Path(__file__).resolve().parents[1] / "config/fleet.simulation.toml"
+    )
+    settings.mode = "hardware"
+    robot = settings.robots[0]
+    robot.motor_backend = "stepper_28byj48"
+    robot.motion_enabled = True
+    ages = [30] * 5
+    ages[lane] = age
+
+    class Head:
+        async def status(self):
+            return {
+                "robot_id": robot.id,
+                "backend": robot.motor_backend,
+                "armed": False,
+                "touch": {"active": False},
+                "safety": {"required": True, "ready": True, "fault": "none"},
+                "imu": {"family": 1, "valid": True, "age_ms": 30,
+                        "acc": [0, 0, 0], "gyro": [0, 0, 0]},
+                "ranges": {"present_mask": 31, "valid_mask": 31,
+                           "mm": [45, 45, 45, 45, 600], "age_ms": ages},
+                "side_ranges": {"present_mask": 7, "valid_mask": 7,
+                                "mm": [600] * 3, "age_ms": [30] * 3,
+                                "motion_certified": False},
+            }
+
+    coordinator = Coordinator(settings, {robot.id: Head()}, None)
+    if type(age) is int and age == 199:
+        receipt = await coordinator.operator_arm(robot.id)
+        assert receipt["operator_permit"] is True
+        assert receipt["physical_armed"] is False
+        assert robot.id in coordinator.permits
+    else:
+        with pytest.raises(OperationError, match="stale or malformed ranging telemetry"):
+            await coordinator.operator_arm(robot.id)
+        assert robot.id not in coordinator.permits
