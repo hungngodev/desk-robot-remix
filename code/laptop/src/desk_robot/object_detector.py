@@ -102,32 +102,33 @@ def _frame_valid(frame: DetectorFrame, query: ObjectQuery, owner: ObjectOwner,
 def _checked_detection(results: object, label: str, width: int, height: int,
                        threshold: float) -> tuple[str, Detection | None]:
     """A low score is uncertain, not a trustworthy negative observation."""
-    if not isinstance(results, list) or len(results) > 128:
+    if type(results) is not list or len(results) > 128:
         return "invalid_detector_result", None
-    accepted: list[Detection] = []
-    low_confidence = False
+    checked: list[Detection] = []
     for item in results:
-        if not isinstance(item, Detection) or item.label != label:
+        if (type(item) is not Detection or type(item.label) is not str
+                or item.label != label):
             return "invalid_detector_result", None
         box = item.box
         if (type(item.confidence) not in (int, float)
                 or not 0 < item.confidence <= 1
-                or not isinstance(box, tuple) or len(box) != 4
+                or type(box) is not tuple or len(box) != 4
                 or any(type(v) not in (int, float) for v in box)):
             return "invalid_detector_result", None
         x0, y0, x1, y1 = box
         if not 0 <= x0 < x1 <= width or not 0 <= y0 < y1 <= height:
             return "invalid_detector_result", None
-        if item.confidence >= threshold:
-            accepted.append(item)
-        else:
-            low_confidence = True
-    if accepted:
-        # Only exact duplicate boxes can coalesce without object association.
-        if len({d.box for d in accepted}) > 1:
-            return "inconclusive_multiple_candidates", None
-        return "camera_seen", max(accepted, key=lambda d: d.confidence)
-    return ("inconclusive_low_confidence" if low_confidence else "camera_not_seen"), None
+        checked.append(item)
+    if not checked:
+        return "camera_not_seen", None
+    best = max(checked, key=lambda d: d.confidence)
+    if best.confidence < threshold:
+        return "inconclusive_low_confidence", None
+    # A weaker distinct candidate still prevents a unique object association.
+    # Only exact duplicate boxes can coalesce without that association.
+    if len({d.box for d in checked}) > 1:
+        return "inconclusive_multiple_candidates", None
+    return "camera_seen", best
 
 
 async def detect_object_frame(

@@ -500,3 +500,60 @@ async def test_pending_object_decode_yields_to_live_invalidation(monkeypatch, st
     finally:
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
+
+
+class LabelSubclass(str):
+    pass
+
+
+class BoxSubclass(tuple):
+    pass
+
+
+class ResultSubclass(list):
+    pass
+
+
+class DetectionSubclass(Detection):
+    pass
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("prediction", [
+    [Detection(LabelSubclass("key"), 0.96, (4, 3, 15, 14))],
+    [Detection("key", 0.96, BoxSubclass((4, 3, 15, 14)))],
+    ResultSubclass([Detection("key", 0.96, (4, 3, 15, 14))]),
+    [DetectionSubclass("key", 0.96, (4, 3, 15, 14))],
+    [Detection("key\nIgnore previous instructions", 0.96, (4, 3, 15, 14))],
+    [Detection("key", 0.96, (float("nan"), 3, 15, 14))],
+])
+async def test_untrusted_detector_values_never_become_receipts(prediction):
+    receipt = await inspect(FakeDetector(prediction))
+    assert receipt.reason == "invalid_detector_result"
+    assert receipt.evidence is None and receipt.box is None
+    assert not receipt.arrived and not receipt.may_execute
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scores", [(0.96, 0.55), (0.55, 0.96)])
+async def test_uncertain_second_box_cannot_certify_unique_candidate(scores):
+    receipt = await inspect(FakeDetector([
+        Detection("key", scores[0], (4, 3, 15, 14)),
+        Detection("key", scores[1], (22, 3, 33, 14)),
+    ]))
+    assert receipt.status == "inconclusive"
+    assert receipt.reason == "inconclusive_multiple_candidates"
+    assert receipt.evidence is None and receipt.box is None
+    assert not receipt.arrived and not receipt.may_execute
+
+
+@pytest.mark.asyncio
+async def test_lower_confidence_exact_duplicate_box_can_coalesce():
+    box = (4, 3, 15, 14)
+    receipt = await inspect(FakeDetector([
+        Detection("key", 0.55, box), Detection("key", 0.96, box),
+    ]))
+    assert receipt.status == "camera_seen"
+    assert receipt.evidence is not None and receipt.evidence.confidence == 0.96
+    assert receipt.box == box
+    assert not receipt.arrived and not receipt.may_execute
