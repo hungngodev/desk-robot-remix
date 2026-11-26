@@ -102,7 +102,7 @@ class LiveTurns:
         frame_interval: float = 1.0,
         frame_max_age: float = 2.0,
         heartbeat_interval: float = 30.0,
-    ):
+    ) -> None:
         for limit in (max_audio_bytes, max_jpeg_bytes):
             if isinstance(limit, bool) or not isinstance(limit, int) or limit <= 0:
                 raise ValueError("Media byte limits must be positive integers")

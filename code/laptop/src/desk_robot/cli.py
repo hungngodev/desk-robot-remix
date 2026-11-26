@@ -19,13 +19,13 @@ from .runtime import Runtime
 ROOT = Path(__file__).resolve().parents[3]
 
 
-def load_env(path: Path):
+def load_env(path: Path) -> None:
     """Read generated KEY=value secrets without executing shell content."""
     for key, value in read_private_env(path).items():
         os.environ.setdefault(key, value)
 
 
-def write_secrets(path: Path, settings, *, add_missing: bool = False) -> int:
+def write_secrets(path: Path, settings: Settings, *, add_missing: bool = False) -> int:
     """Create credentials, or append new fleet identities without rotating any token."""
     names = {
         settings.coordinator_token_env,
@@ -74,9 +74,9 @@ def _configured_robot(settings: Settings, robot_id: str) -> RobotConfig:
         ) from exc
 
 
-async def inspect_live_media(settings, robot_id: str, *, look: bool = False,
+async def inspect_live_media(settings: Settings, robot_id: str, *, look: bool = False,
                              client: httpx.AsyncClient | None = None,
-                             base_url: str = "http://127.0.0.1:8765") -> dict:
+                             base_url: str = "http://127.0.0.1:8765") -> dict[str, object]:
     """Read-only end-to-end Mac/head/vision preflight, with NO actuator permit."""
     if settings.mode != "hardware" or not settings.voice_vision_tools_enabled:
         raise ValueError("Real XIAO camera preflight requires hardware vision consent")
@@ -87,7 +87,7 @@ async def inspect_live_media(settings, robot_id: str, *, look: bool = False,
     if selected_backend not in ("stepper_28byj48", "dc_pwm_guarded"):
         raise ValueError("Live WROOM diagnosis requires a verified motor backend")
 
-    async def inspect(http: httpx.AsyncClient) -> dict:
+    async def inspect(http: httpx.AsyncClient) -> dict[str, object]:
         status = await http.get(f"/v1/robots/{robot_id}/status", timeout=6)
         status.raise_for_status()
         body = status.json()
@@ -141,7 +141,7 @@ async def inspect_live_media(settings, robot_id: str, *, look: bool = False,
                 or evidence.get("model_context_untrusted_not_instructions")
                     is not True):
             raise ValueError("Multimodal source context contract invalid")
-        result = {
+        result: dict[str, object] = {
             "robot_id": robot_id,
             "real_head_status_received": True,
             "xiao_jpeg_received": True,
@@ -185,7 +185,7 @@ async def inspect_live_media(settings, robot_id: str, *, look: bool = False,
         return await inspect(http)
 
 
-async def demo(settings):
+async def demo(settings: Settings) -> dict[str, object]:
     if settings.mode != "simulation":
         raise ValueError("Demo requires the simulation config; it never talks to physical heads")
     runtime = Runtime(settings)
@@ -207,7 +207,7 @@ async def demo(settings):
         await runtime.close()
 
 
-async def request(args, settings):
+async def request(args: argparse.Namespace, settings: Settings) -> object:
     headers = {"Authorization": f"Bearer {secret(settings.coordinator_token_env)}"}
     # Explicit Mac API bearer credentials must not transit env HTTP proxies.
     async with httpx.AsyncClient(
@@ -262,7 +262,7 @@ async def request(args, settings):
         return result.json()
 
 
-def main():
+def main() -> None:
     p = argparse.ArgumentParser(description="Desk robot setup and supervised controls")
     p.add_argument("--config", type=Path, default=ROOT / "config/robots.example.toml")
     p.add_argument("--secrets", type=Path,

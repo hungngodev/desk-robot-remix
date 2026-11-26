@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Self
 
 import numpy as np
+from numpy.typing import NDArray
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
 
@@ -85,7 +86,7 @@ class Calibration(BaseModel):
         self.matrix()  # reject degenerate or inaccurate point pairs immediately
         return self
 
-    def matrix(self) -> np.ndarray:
+    def matrix(self) -> NDArray[np.float64]:
         source = np.array(self.pixel_points, dtype=float)
         target = np.array(self.ground_points_mm, dtype=float)
         if np.linalg.matrix_rank(np.column_stack((source, np.ones(len(source))))) < 3:

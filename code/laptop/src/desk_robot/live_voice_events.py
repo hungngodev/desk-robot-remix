@@ -7,11 +7,14 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from typing import Any
 
 import httpx
 
 
-def _defer_end_for_active_peer(event: dict, events: list[dict], active: list[str]) -> bool:
+def _defer_end_for_active_peer(
+    event: dict[str, Any], events: list[dict[str, Any]], active: list[str],
+) -> bool:
     """Leave the old lease in place until a newer active peer start is handled."""
     return (
         event["kind"] == "speech_end"
@@ -36,7 +39,7 @@ class VoiceEventListener:
         require_snapshot: bool = False,
         on_voice_generations: Callable[[dict[str, int] | None], None] | None = None,
         require_turn_generations: bool = False,
-    ):
+    ) -> None:
         if (not robot_ids or len(token) < 24 or type(require_snapshot) is not bool
                 or type(require_turn_generations) is not bool):
             raise ValueError("Known robot IDs and private speech token required")
@@ -60,15 +63,15 @@ class VoiceEventListener:
         self._stream_abort_pending = False
         # A callback can suppress CancelledError; keep its real task as the
         # ownership token until it finishes instead of launching duplicates.
-        self._global_abort_task: asyncio.Task | None = None
-        self._event_task: asyncio.Task | None = None
+        self._global_abort_task: asyncio.Task[None] | None = None
+        self._event_task: asyncio.Task[None] | None = None
         self._event_sequence: int | None = None
         # Sequence numbers may be reused after an authenticated bridge reset.
         # A completed callback from an old server generation must never be
         # mistaken for a physical interruption ACK in the new generation.
         self._event_generation = 0
         self._event_task_generation: int | None = None
-        self._fallback_abort_tasks: dict[str, asyncio.Task] = {}
+        self._fallback_abort_tasks: dict[str, asyncio.Task[None]] = {}
 
     async def _set_monitor_ready(self, ready: bool) -> None:
         if self.monitor_ready == ready and self._monitor_delivered == ready:
@@ -99,7 +102,7 @@ class VoiceEventListener:
                 task = asyncio.create_task(self.on_global_interrupt(reason))
                 self._global_abort_task = task
 
-                def observe_result(completed: asyncio.Task) -> None:
+                def observe_result(completed: asyncio.Task[None]) -> None:
                     if not completed.cancelled():
                         completed.exception()  # consume a late callback failure
 
@@ -129,7 +132,7 @@ class VoiceEventListener:
                 task = asyncio.create_task(self.on_interrupt(robot_id, reason))
                 self._fallback_abort_tasks[robot_id] = task
 
-                def observe_fallback(completed: asyncio.Task) -> None:
+                def observe_fallback(completed: asyncio.Task[None]) -> None:
                     if not completed.cancelled():
                         completed.exception()
 
@@ -152,7 +155,7 @@ class VoiceEventListener:
         if errors:
             raise errors[0]
 
-    async def _fetch(self, bootstrap: bool = False) -> dict:
+    async def _fetch(self, bootstrap: bool = False) -> dict[str, Any]:
         query = {"after": str(self.cursor if self.cursor is not None else 0)}
         if bootstrap:
             query["bootstrap"] = "1"
@@ -203,14 +206,14 @@ class VoiceEventListener:
             raise ValueError("Active human VAD lacks source turn generation")
         return data
 
-    def _publish_generations(self, data: dict | None) -> None:
+    def _publish_generations(self, data: dict[str, Any] | None) -> None:
         """Atomically fence signed tools before awaiting slow audio callbacks."""
         if self.on_voice_generations is not None:
             self.on_voice_generations(
                 None if data is None else data.get("voice_turn_generations")
             )
 
-    async def _reconcile_snapshot(self, data: dict) -> None:
+    async def _reconcile_snapshot(self, data: dict[str, Any]) -> None:
         # Supported by our pinned bridge; legacy fixtures without this field
         # retain the event-only behavior but cannot certify gap recovery.
         if self.on_speech_snapshot is not None and "active_human_robots" in data:
@@ -224,7 +227,7 @@ class VoiceEventListener:
         self._stream_abort_pending = False
         self._stream_failed = True
 
-    def _validate_event_owner(self, events: list) -> None:
+    def _validate_event_owner(self, events: list[dict[str, Any]]) -> None:
         task = self._event_task
         if task is None:
             return
@@ -378,7 +381,7 @@ class VoiceEventListener:
                 self._event_sequence = seq
                 self._event_task_generation = self._event_generation
 
-                def observe_event_result(completed: asyncio.Task) -> None:
+                def observe_event_result(completed: asyncio.Task[None]) -> None:
                     if not completed.cancelled():
                         completed.exception()
 

@@ -5,14 +5,17 @@ calibrated locomotion, or authorization to move motors.
 """
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 from .sensor_event_contract import is_int_in_range, is_uint
 
 
-def _bool(value) -> bool:
+def _bool(value: object) -> bool:
     return type(value) is bool
 
 
-def _array(value, length: int, predicate) -> bool:
+def _array(value: object, length: int, predicate: Callable[[object], bool]) -> bool:
     return isinstance(value, list) and len(value) == length and all(
         predicate(v) for v in value
     )
@@ -41,7 +44,7 @@ def _fresh_aux_acquisition(
     return 0 < delta < 0x80000000
 
 
-def _aux_boot_epoch(data: dict) -> int | None:
+def _aux_boot_epoch(data: dict[str, Any]) -> int | None:
     """Bind conversational ambient samples to one explicit WROOM boot."""
     force, proximity = data.get("force"), data.get("proximity")
     if not isinstance(force, dict) or not isinstance(proximity, dict):
@@ -53,7 +56,7 @@ def _aux_boot_epoch(data: dict) -> int | None:
     return None
 
 
-def validate_aux(data: dict, robot_id: str) -> dict:
+def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
     if not isinstance(data, dict) or data.get("robot_id") != robot_id:
         raise ValueError("Aux sensor identity mismatch")
     pulse, angles = data.get("pulse"), data.get("angles")
