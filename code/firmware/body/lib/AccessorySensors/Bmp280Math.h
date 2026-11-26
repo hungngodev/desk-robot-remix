@@ -19,6 +19,13 @@ inline std::int16_t bmp_s16(const std::uint8_t* v) {
 }
 inline bool bmp280_trim(const std::uint8_t* b, Bmp280Trim& out) {
   if (!b) return false;
+  // Conservative project NVM policy, not a Bosch guarantee: reject erased
+  // or zero 16-bit words before modifying the previously accepted trim.
+  // Individual zero bytes and other negative signed coefficients are valid.
+  for (unsigned i = 0; i < 24; i += 2) {
+    const auto word = bmp_u16(b + i);
+    if (word == 0U || word == 0xffffU) return false;
+  }
   out.t1 = bmp_u16(b);
   out.t2 = bmp_s16(b + 2);
   out.t3 = bmp_s16(b + 4);
@@ -31,7 +38,7 @@ inline bool bmp280_trim(const std::uint8_t* b, Bmp280Trim& out) {
   out.p7 = bmp_s16(b + 18);
   out.p8 = bmp_s16(b + 20);
   out.p9 = bmp_s16(b + 22);
-  return out.t1 != 0 && out.p1 != 0;
+  return true;
 }
 inline bool bmp280_compensate(const Bmp280Trim& d, std::uint32_t raw_t,
                              std::uint32_t raw_p, int& temp_centi,

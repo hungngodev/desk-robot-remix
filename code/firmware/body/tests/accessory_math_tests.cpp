@@ -205,7 +205,7 @@ static void check_bmp280_zero_divisor() {
   words[0] = 1; words[6] = 0;
   CHECK(!desk_robot::bmp280_trim(words, decoded));
   words[6] = 1;
-  CHECK(desk_robot::bmp280_trim(words, decoded));
+  CHECK(!desk_robot::bmp280_trim(words, decoded));
   // Nonzero P1 is insufficient: these coefficients produce fine=-920576,
   // a=-524288, then a pressure divisor of exactly zero.
   d = {};
@@ -214,11 +214,49 @@ static void check_bmp280_zero_divisor() {
   reject(d, 0, 415148);
 }
 
+static void check_bmp280_trim_registers() {
+  // Bosch example: negative coefficients and individual zero bytes are legal.
+  const std::uint16_t values[] = {27504, 26435, 64536, 36477, 54851, 3024,
+                                  2855, 140, 65529, 15500, 50936, 6000};
+  std::uint8_t words[24]{};
+  for (unsigned i = 0; i < 12; ++i) {
+    words[2 * i] = static_cast<std::uint8_t>(values[i]);
+    words[2 * i + 1] = static_cast<std::uint8_t>(values[i] >> 8);
+  }
+  desk_robot::Bmp280Trim decoded{};
+  CHECK(desk_robot::bmp280_trim(words, decoded));
+  const auto check_preserved = [&decoded]() {
+    CHECK(decoded.t1 == 27504 && decoded.t2 == 26435 && decoded.t3 == -1000);
+    CHECK(decoded.p1 == 36477 && decoded.p2 == -10685 && decoded.p3 == 3024);
+    CHECK(decoded.p4 == 2855 && decoded.p5 == 140 && decoded.p6 == -7);
+    CHECK(decoded.p7 == 15500 && decoded.p8 == -14600 && decoded.p9 == 6000);
+    int t = 0;
+    unsigned p = 0;
+    CHECK(desk_robot::bmp280_compensate(decoded, 519888, 415148, t, p));
+    CHECK(t == 2508 && p >= 100652 && p <= 100654);
+  };
+  check_preserved();
+  CHECK(!desk_robot::bmp280_trim(nullptr, decoded));
+  check_preserved();
+  for (unsigned i = 0; i < 12; ++i) {
+    for (const auto rail : {0U, 255U}) {
+      words[2 * i] = words[2 * i + 1] = static_cast<std::uint8_t>(rail);
+      CHECK(!desk_robot::bmp280_trim(words, decoded));
+      check_preserved();
+    }
+    words[2 * i] = static_cast<std::uint8_t>(values[i]);
+    words[2 * i + 1] = static_cast<std::uint8_t>(values[i] >> 8);
+  }
+  CHECK(desk_robot::bmp280_trim(words, decoded));
+  check_preserved();
+}
+
 int main() {
   try {
     check_register_precision();
     check_bmp280_boundaries();
     check_bmp280_zero_divisor();
+    check_bmp280_trim_registers();
     check_gesture_boundaries();
     check_gesture_session_recovery();
     const std::uint8_t known[2] = {0xBE, 0xEF};
