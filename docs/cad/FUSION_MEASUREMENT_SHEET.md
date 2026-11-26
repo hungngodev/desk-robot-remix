@@ -19,6 +19,7 @@ These blank fields are **intentional** and are not permission to guess a fit.
 | SSD1306 PCB width, height and window active area | | oled_pcb_w / h, oled_screen_w / h |
 | Exact Challenge CS20-02P110-04-1X 20 x 16 x 4.7 mm body, solder pads and gasket dimensions | | speaker_l / speaker_w / speaker_depth / acoustics_1cc |
 | Acoustic cup net volume, compressed gasket thickness, sealed lead feedthrough and interference to camera/mic/OLED | | speaker_air_cc / gasket_h / lead_seal / head_clearance |
+| Installed grille clear area (exclude M2 bores), microphone inlet center/diameter, separate sealed gasket path and speaker-active double talk | | grille_clear_mm2 / mic_port_xy_d / mic_gasket_seal / acoustic_trial |
 | WROOM dev board assembled envelope and USB service clearance | | wroom_w / l / usb_clearance |
 | Protected 1S pack complete body including PCM and NTC exit width / length / height | | pack_body_w / pack_body_l / pack_body_h |
 | Pack connector housing width / length / height, free lead length, wire gauge and minimum safe bend radius | | pack_connector_w / pack_connector_l / pack_connector_h / pack_lead_free_l / pack_lead_awg / pack_lead_bend_r |

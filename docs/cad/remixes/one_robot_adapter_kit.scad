@@ -39,6 +39,8 @@ speaker_h=4.7;
 speaker_grille_border=8;
 speaker_grille_hole_edge=3.5;
 speaker_grille_min_web=2;
+// Nominal source screening only; no acoustic performance claim.
+speaker_grille_aperture_d=2.4;
 // Interlink FSR Integration Guide, figures 6 and 7: body OD 18.3 mm
 // and tail width up to 7.62 mm, NOT the electrical active-area diameter.
 // https://3899023.fs1.hubspotusercontent-na2.net/hubfs/3899023/Integration%20Guides/FSR%20Integration%20Guide%20-%20Interlink%20Electronics.pdf
@@ -185,11 +187,21 @@ module speaker_grille(){
          panel_y/2-speaker_grille_hole_edge-m2_clearance_d/2
          -(speaker_w/2+fit_xy) >= speaker_grille_min_web,
          "Speaker grille hole breaches gasket/pocket printable web");
+  xs=[-7.5,-3.75,0,3.75,7.5];
+  ys=[-5,0,5];
+  r=speaker_grille_aperture_d/2;
+  // Use the speaker body projection, not the flange or M2 fastener holes.
+  open_ratio=len(xs)*len(ys)*PI*r*r/(speaker_l*speaker_w);
+  assert(r>0 && open_ratio>=0.20,
+         "Speaker grille nominal aperture ratio below 20 percent");
+  assert(3.75-2*r>=1.3 && 5-2*r>=1.3,
+         "Speaker grille aperture ligament below 1.3 mm");
+  assert(max(xs)+r<speaker_l/2 && max(ys)+r<speaker_w/2,
+         "Speaker grille aperture breaches speaker body projection");
   difference(){
     translate([0,0,1.5]) cube([panel_x,panel_y,3],center=true);
-    for(x=[-7.5,-3.75,0,3.75,7.5],y=[-5,0,5])
-      if(abs(x)+1.2 < speaker_l/2 && abs(y)+1.2 < speaker_w/2)
-        translate([x,y,1.5]) cylinder(h=6,d=2.4,center=true);
+    for(x=xs,y=ys)
+      translate([x,y,1.5]) cylinder(h=6,d=speaker_grille_aperture_d,center=true);
     for(x=[-panel_x/2+speaker_grille_hole_edge,
             panel_x/2-speaker_grille_hole_edge],
         y=[-panel_y/2+speaker_grille_hole_edge,
