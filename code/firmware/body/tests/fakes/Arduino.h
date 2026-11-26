@@ -59,12 +59,14 @@ inline void digitalWrite(int pin, int value) {
   } else {
     const bool was_low = lines.scl_driven_low;
     lines.scl_driven_low = value == LOW;
-    if (was_low && value == HIGH && !lines.sda_driven_low) {
-      ++lines.clear_attempts;
+    if (was_low && value == HIGH) {
+      if (!lines.sda_driven_low) ++lines.clear_attempts;
       if (lines.hold_scl_after_pulses &&
           lines.clear_pulses >= lines.hold_scl_after_pulses)
         lines.scl_stuck = true;
-      if (lines.scl_stuck) return;
+      // STOP setup is also subject to clock stretching, but is not a
+      // data-clear pulse while the master holds SDA low.
+      if (lines.scl_stuck || lines.sda_driven_low) return;
       ++lines.clear_pulses;
       if (lines.release_after_pulses &&
           lines.clear_pulses >= lines.release_after_pulses)

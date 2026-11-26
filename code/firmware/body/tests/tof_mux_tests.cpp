@@ -497,6 +497,29 @@ int main() {
       lines = FakeI2cLines{};
     }
     {
+      // A slave can hold SCL on the STOP setup edge, not only data clocks.
+      for (unsigned released = 1; released <= 9; ++released) {
+        auto& lines = fake_i2c_lines();
+        lines = FakeI2cLines{};
+        lines.sda_stuck = true;
+        lines.release_after_pulses = released;
+        lines.hold_scl_after_pulses = released;
+        for (unsigned pulse = 0; pulse < released; ++pulse) {
+          digitalWrite(22, LOW);
+          digitalWrite(22, HIGH);
+        }
+        CHECK(digitalRead(21) == HIGH && digitalRead(22) == HIGH);
+        digitalWrite(22, LOW);
+        digitalWrite(21, LOW);
+        digitalWrite(22, HIGH);
+        CHECK(digitalRead(22) == LOW);
+        digitalWrite(21, HIGH);
+        CHECK(lines.stops == 0 && !lines.unsafe_high);
+        CHECK(lines.clear_attempts == released && lines.clear_pulses == released);
+        lines = FakeI2cLines{};
+      }
+    }
+    {
       // Verify the transport fake itself before trusting driver regressions.
       Wire = TwoWire{};
       CHECK(Wire.getTimeOut() == 50);
