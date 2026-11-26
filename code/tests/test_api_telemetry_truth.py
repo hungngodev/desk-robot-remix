@@ -137,3 +137,45 @@ def test_room_status_does_not_overwrite_body_receipt(error, expected):
     assert health["body"] == "status_received"
     assert health["state"] == ("reported" if error is None else "degraded")
     assert health["physical_acceptance_pass"] is False
+
+
+@pytest.mark.parametrize(("fault", "warning"), [
+    ("none", None),
+    ("math_overflow", "Last INA226 conversion reported math overflow; current unavailable."),
+    ("shunt_saturated", "Last INA226 shunt reading saturated; current unavailable."),
+])
+def test_aux_monitor_fault_is_readonly_diagnostic(fault, warning):
+    power = {"monitor_fault": fault, "monitor_valid": False, "pack_valid": False}
+
+    async def aux_status():
+        return {"robot_id": "robot-01", "power": power}
+
+    client, heard = _status_client({"robot-01": SimpleNamespace(aux_status=aux_status)})
+    with client:
+        result = client.get("/v1/robots/robot-01/aux")
+    assert result.status_code == 200
+    assert result.json()["power"] == {**power, "monitor_warning": warning}
+    assert "monitor_warning" not in power
+    assert heard == []
+
+
+@pytest.mark.parametrize("power", [
+    {"monitor_fault": "unknown", "monitor_valid": False},
+    {"monitor_fault": "math_overflow", "monitor_valid": True},
+    {"monitor_fault": "shunt_saturated", "monitor_valid": False, "pack_valid": True},
+])
+def test_invalid_aux_monitor_fault_rejects_before_context_admission(power):
+    async def aux_status():
+        return {
+            "robot_id": "robot-01", "power": power,
+            "force": {"boot_id": 42}, "proximity": {"boot_id": 42},
+            "climate": {"valid": True, "seq": 1, "age_ms": 0,
+                        "temp_centi": 2200, "rh_centi": 4000},
+        }
+
+    client, heard = _status_client({"robot-01": SimpleNamespace(aux_status=aux_status)})
+    with client:
+        result = client.get("/v1/robots/robot-01/aux")
+    assert heard == []
+    assert result.status_code == 503
+    assert result.json() == {"error": "Invalid INA226 monitor fault provenance"}

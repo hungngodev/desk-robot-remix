@@ -181,6 +181,15 @@ def register_robot_status_routes(
         require_current_voice_tool(request, robot_id, owner)
         if not isinstance(data, dict) or data.get("robot_id") != robot_id:
             raise HeadError("Auxiliary telemetry robot identity mismatch")
+        power = data.get("power")
+        if isinstance(power, dict) and "monitor_fault" in power:
+            # Validate adapter diagnostics before admitting any tool receipt.
+            try:
+                warning = ina226_monitor_warning(power)
+            except ValueError as exc:
+                return JSONResponse({"error": str(exc)}, status_code=503)
+            # Diagnostic only; do not inject a historical fault into speech context.
+            data = {**data, "power": {**power, "monitor_warning": warning}}
         # Only an authenticated, explicit head tool request may add a short
         # physical sensor receipt to the shared multimodal brain timeline.
         # Dashboard polling and failed/invalid measurements never inject it.
@@ -236,9 +245,5 @@ def register_robot_status_routes(
                         retired_aux_boots.setdefault(robot_id, set()).add(prior_boot)
                     active_aux_boot[robot_id] = boot
                     last_aux_context_seq.update(pending_seq)
-        power = data.get("power")
-        if isinstance(power, dict) and "monitor_fault" in power:
-            # Diagnostic only; do not inject a historical fault into speech context.
-            data = {**data, "power": {**power, "monitor_warning": ina226_monitor_warning(power)}}
         return _json_safe_telemetry(data)
 
