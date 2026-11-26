@@ -261,3 +261,84 @@ def test_forget_status_and_search_across_overlapping_reader_and_restart(
         remember(reopened, pet, event)
     assert reopened.search(pet, "concurrent") == []
     assert read_fence(root, peer) == (0, 0)
+
+
+def test_forget_rolls_back_cleanup_and_seal_without_touching_four_peers(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(memory_module, "_MAX_DELETED_EPISODE_IDS", 2)
+    root = tmp_path / "private"
+    pets = [f"robot-{number:02d}" for number in range(1, 6)]
+    target = pets[0]
+    event = "shared-event"
+    store = MemoryStore(root, pets)
+
+    def snapshot(pet):
+        with sqlite3.connect(root / f"{pet}.sqlite3") as db:
+            return {
+                "episode": db.execute("SELECT * FROM memories").fetchall(),
+                "camera": db.execute("SELECT * FROM camera_provenance").fetchall(),
+                "spatial": db.execute("SELECT * FROM spatial_observations").fetchall(),
+                "fts": db.execute(
+                    "SELECT rowid FROM memories_fts WHERE memories_fts MATCH 'observation'"
+                ).fetchall(),
+                "fences": db.execute(
+                    "SELECT event_id FROM deleted_episode_ids ORDER BY event_id"
+                ).fetchall(),
+                "seal": db.execute("SELECT * FROM deletion_fence_guard").fetchall(),
+                "mutations": db.execute(
+                    "SELECT * FROM episode_mutations ORDER BY event_id"
+                ).fetchall(),
+            }
+
+    for pet in pets:
+        assert remember(store, pet, event)
+        # Seed the sidecars directly: this test targets the database deletion
+        # transaction, not camera ingestion or the spatial mapping pipeline.
+        with sqlite3.connect(root / f"{pet}.sqlite3") as db:
+            db.execute(
+                "INSERT INTO camera_provenance VALUES (?, 1, 2, 3, 4, '5')", (event,)
+            )
+            db.execute(
+                "INSERT INTO spatial_observations VALUES "
+                "(?, 'key', 1, 2, 'origin', 3, 4, 5, 6, '7', 'cal', "
+                "8, 9, 10, 11, 'odom', NULL)", (event,),
+            )
+    assert not store.forget_episode(target, "previous")
+    assert not store.forget_episode(pets[1], "peer-only")
+    before = {pet: snapshot(pet) for pet in pets}
+
+    # Abort from a sidecar cleanup trigger, after the writer has advanced its
+    # mutation generation and tentatively saturated the replay fence.
+    with sqlite3.connect(root / f"{target}.sqlite3") as db:
+        db.execute(
+            """CREATE TRIGGER injected_cleanup_failure
+               AFTER DELETE ON camera_provenance BEGIN
+                   SELECT RAISE(ABORT, 'injected cleanup failure');
+               END"""
+        )
+    with pytest.raises(sqlite3.IntegrityError, match="injected cleanup failure"):
+        store.forget_episode(target, event)
+    assert {pet: snapshot(pet) for pet in pets} == before
+    assert read_fence(root, target) == (1, 0)
+
+    with sqlite3.connect(root / f"{target}.sqlite3") as db:
+        db.execute("DROP TRIGGER injected_cleanup_failure")
+    assert store.forget_episode(target, event)
+    after = snapshot(target)
+    for table in ("episode", "camera", "spatial", "fts"):
+        assert after[table] == []
+    assert after["fences"] == [("previous",), (event,)]
+    assert after["mutations"] == [("previous", 1), (event, 1)]
+    assert read_fence(root, target) == (2, 1)
+
+    reopened = MemoryStore(root, pets)
+    assert reopened.get_episode(target, event) is None
+    assert not reopened.search(target, "observation")
+    assert snapshot(target) == after
+    for peer in pets[1:]:
+        assert snapshot(peer) == before[peer]
+        assert reopened.get_episode(peer, event) is not None
+        assert remember(reopened, peer, "new-observation")
+    with pytest.raises(MemoryWriteSealed):
+        remember(reopened, target, event)
