@@ -86,6 +86,58 @@ int main() {
   assert(backlog_serial.sent == "OK halt\r\nOK stop\r\n" +
          one + "\r\n" + two + "\r\n");
 
+  // Put CR at the last ring byte and LF at the first. Fill every normal
+  // byte, then reject a new frame without modifying the queued tail.
+  desk_robot::ReplyTxQueue<16> exact;
+  FakeSerial exact_serial;
+  assert(exact.enqueue_line("abc"));
+  exact_serial.free = 16;
+  assert(exact.drain(exact_serial) == 5);
+  assert(exact.enqueue_line("0123456789"));
+  assert(exact.enqueue_line("zz"));
+  assert(exact.pending() == 16);
+  assert(!exact.enqueue_line("x"));
+  assert(exact.pending() == 16 && exact.dropped() == 1);
+  assert(exact.enqueue_priority_line("OK stop"));
+  assert(exact.pending() == 25);
+  exact_serial.free = 0;
+  assert(exact.drain(exact_serial) == 0);
+  assert(exact.pending() == 25);
+  exact_serial.free = 16;
+  assert(exact.drain(exact_serial) == 9);
+  assert(exact_serial.sent == "abc\r\nOK stop\r\n");
+  assert(exact.pending() == 16);
+  // Start the wrapped status and stop just after CR, not after LF.
+  exact_serial.free = 16;
+  assert(exact.drain(exact_serial, 11) == 11);
+  assert(exact_serial.sent == "abc\r\nOK stop\r\n0123456789\r");
+  assert(exact.enqueue_priority_line("OK halt"));
+  assert(exact.enqueue_priority_line("OK stop"));
+  assert(!exact.enqueue_priority_line("OK halt"));
+  assert(exact.pending() == 23 && exact.dropped() == 2);
+  exact_serial.free = 16;
+  assert(exact.drain(exact_serial) == 1); // finish LF before either receipt
+  assert(exact.pending() == 22);
+  exact_serial.per_write = 0;
+  assert(exact.drain(exact_serial) == 0);
+  assert(exact.pending() == 22);
+  exact_serial.per_write = 2;
+  assert(exact.drain(exact_serial) == 2);
+  assert(exact.pending() == 20);
+  assert(!exact.enqueue_priority_line("OK halt")); // partial slot is occupied
+  exact_serial.per_write = 16;
+  exact_serial.free = 16;
+  assert(exact.drain(exact_serial) == 7);
+  assert(exact.pending() == 13);
+  assert(exact.enqueue_priority_line("OK halt")); // reuse freed urgent slot
+  assert(exact.pending() == 22 && exact.dropped() == 3);
+  while (exact.pending()) {
+    exact_serial.free = 16;
+    assert(exact.drain(exact_serial) > 0);
+  }
+  assert(exact_serial.sent == "abc\r\nOK stop\r\n0123456789\r\n"
+                              "OK halt\r\nOK stop\r\nOK halt\r\nzz\r\n");
+
   // Once a JSON line starts, complete it before the priority lane. Never
   // splice "OK halt" into an already transmitted status frame.
   desk_robot::ReplyTxQueue<128> partial;
