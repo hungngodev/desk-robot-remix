@@ -128,3 +128,30 @@ async def test_default_controller_and_pet_state_are_independent(tmp_path):
     finally:
         await first.close()
         await second.close()
+
+
+async def test_registry_and_status_snapshot_resist_caller_mutation(tmp_path):
+    pet = _controller(tmp_path)
+    try:
+        first_id, second_id = list(pet.states)[:2]
+        first = pet.states[first_id]
+        with pytest.raises(TypeError):
+            pet.states[first_id] = pet.states[second_id]
+        with pytest.raises(TypeError):
+            del pet.states[first_id]
+        with pytest.raises(AttributeError):
+            pet.states = {}
+        assert pet.states[first_id] is first
+        first.enabled = True
+        assert pet.states[first_id].enabled
+        assert not pet.states[second_id].enabled
+
+        snapshot = pet.status(first_id)
+        snapshot["enabled"] = False
+        snapshot["robot_id"] = second_id
+        snapshot.clear()
+        assert pet.status(first_id)["enabled"] is True
+        assert pet.status(first_id)["robot_id"] == first_id
+        assert pet.status(second_id)["enabled"] is False
+    finally:
+        await pet.close()

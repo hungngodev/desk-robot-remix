@@ -20,7 +20,7 @@ import uuid
 from collections import deque
 from dataclasses import dataclass, field
 from types import MappingProxyType
-from typing import Awaitable, Callable, Literal, Protocol, TypedDict
+from typing import Awaitable, Callable, Literal, Mapping, Protocol, TypedDict
 
 from .aux import NoseDialGate, _aux_boot_epoch, _fresh_aux_acquisition, validate_aux
 from .brain_context import (
@@ -353,7 +353,9 @@ class PetController:
         self.on_local_fault = on_local_fault  # existing Coordinator.stop, not a new motion authority
         self.on_low_battery_dock = on_low_battery_dock
         self.on_dock_inhibit_changed = on_dock_inhibit_changed
-        self.states: dict[str, PetState] = {robot.id: PetState() for robot in settings.robots}
+        self._states: Mapping[str, PetState] = MappingProxyType({
+            robot.id: PetState() for robot in settings.robots
+        })
         self._scheduled_quiet = quiet_hours_active(getattr(settings, "pet_quiet_hours", None))
         self._vision_lock = asyncio.Lock()
         self._vision_inflight: asyncio.Task[SceneChange | None] | None = None
@@ -391,6 +393,11 @@ class PetController:
         self._proactive_aux_active_boot: dict[str, int] = {}
         self._proactive_aux_retired_boots: dict[str, set[int]] = {}
         self._closed = False
+
+    @property
+    def states(self) -> Mapping[str, PetState]:
+        """Live controller-owned records; the fleet registry cannot be modified."""
+        return self._states
 
     def set_voice_monitor_ready(self, ready: bool) -> None:
         if type(ready) is not bool:
