@@ -431,6 +431,9 @@ def test_all_procurement_formats_from_unrelated_working_directory(tmp_path):
             assert rows[0][:3] == ["scope", "part_id", "component"]
             assert len(rows) > 1
             assert all(len(row) == len(rows[0]) for row in rows[1:])
+        elif fmt == "markdown":
+            assert result.stdout.startswith("> **HISTORICAL SUPPLIER RESEARCH "), fmt
+            assert "\n# " in result.stdout, fmt
         else:
             assert result.stdout.startswith("# "), fmt
 

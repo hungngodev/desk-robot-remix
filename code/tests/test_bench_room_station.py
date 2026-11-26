@@ -617,6 +617,7 @@ def test_room_cli_missing_port_saves_failed_receipt_and_exits_nonzero(
     def absent_port(*args, **kwargs):
         raise OSError("USB port absent")
 
+    monkeypatch.setattr("desk_robot.room_station.require_local_serial_device", lambda _: None)
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=absent_port))
     report = tmp_path / "private" / "station.json"
     monkeypatch.setattr(sys, "argv", [

@@ -396,13 +396,24 @@ def checked_path(root: Path, name: str) -> Path:
     return path
 
 
+def _has_hidden_git_worktree_flags(repo: Path) -> bool:
+    tracked = subprocess.check_output(["git", "ls-files", "-v"], cwd=repo, text=True)
+    return any(
+        line and (line[0].islower() or line[0] == "S")
+        for line in tracked.splitlines()
+    )
+
+
 def verify_upstream(upstream: Path) -> None:
     pin = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=upstream, text=True).strip()
     if pin != PIN:
         raise ValueError("Use the pinned server source from upstream-lock.json")
-    if subprocess.check_output(
-        ["git", "status", "--porcelain", "--untracked-files=no"], cwd=upstream, text=True,
-    ).strip():
+    if (
+        subprocess.check_output(
+            ["git", "status", "--porcelain", "--untracked-files=no"], cwd=upstream, text=True,
+        ).strip()
+        or _has_hidden_git_worktree_flags(upstream)
+    ):
         raise ValueError("Preserve upstream source changes before installing")
 
 

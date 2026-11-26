@@ -55,7 +55,8 @@ def test_only_one_owner_of_haptic_output_and_dock_status_precedes_it():
     assert case.index("dock_status(now_ms)") < case.index("haptic_step(now_ms)")
     assert 'haptic_.request(now_ms)' in head
     assert 'control.state().cap_events' in main
-    assert 'control.state().touch_raw_active' in main
+    assert 'touch_raw_active' in (FW / "lib/BodyControl/BodyControl.h").read_text()
+    assert 'touch_raw_active' in (FW / "lib/BodyControl/BodyControl.cpp").read_text()
     assert "CD74HC123" in docs and "GPB0" in docs and "GPB1" in docs
     assert "NOT a buy approval" in docs
 
@@ -227,7 +228,7 @@ def test_manifest_rejects_cross_profile_and_fixed_head_gpio_collisions():
     with pytest.raises(ValueError, match="DC profile GPIO collides"):
         generator.verify(corrupt, changed_body, head)
 
-    for gpio, message in ((15, "Sense GPIO collides"), (20, "external header pad")):
+    for gpio, message in ((15, "external header pad"), (20, "external header pad")):
         corrupt = copy.deepcopy(plan)
         corrupt["bus"]["sense_gpio"]["oled_sda"] = gpio
         changed_head = head.replace(

@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ def bridge(monkeypatch):
     path = Path(__file__).resolve().parents[1] / "laptop/server/overlay/desk_robot_bridge.py"
     spec = importlib.util.spec_from_file_location("test_bridge_auth_headers", path)
     module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, module)
     spec.loader.exec_module(module)
     monkeypatch.setenv("DESK_ROBOT_SPEECH_TOKEN", TOKEN)
     monkeypatch.setenv("DESK_ROBOT_DEVICE_MAP", json.dumps({"robot-01": "mac-01"}))

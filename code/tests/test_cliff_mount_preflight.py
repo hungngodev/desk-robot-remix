@@ -517,12 +517,12 @@ def test_unsigned_tilt_uses_worst_rearward_azimuth(height, tilt, setback):
 
 
 def test_source_contract_follows_firmware_decoder(monkeypatch, tmp_path):
-    decoder = tmp_path / "TofResult.h"
-    source = tool.TOF_RESULT.read_text(encoding="utf-8")
-    decoder.write_text(source.replace("distance >= 30U", "distance >= 31U"), encoding="utf-8")
-    monkeypatch.setattr(tool, "TOF_RESULT", decoder)
+    limits = tmp_path / "TofWireLimits.h"
+    source = tool.TOF_WIRE_LIMITS.read_text(encoding="utf-8")
+    limits.write_text(source.replace("kTofMinRangeMm = 30U", "kTofMinRangeMm = 31U"), encoding="utf-8")
+    monkeypatch.setattr(tool, "TOF_WIRE_LIMITS", limits)
     assert tool.verify_source_contract()["firmware_valid_min_mm"] == 31
-    decoder.write_text(source.replace("distance <= 1300U", "distance <= 20U"), encoding="utf-8")
+    limits.write_text(source.replace("kTofMaxRangeMm = 1300U", "kTofMaxRangeMm = 20U"), encoding="utf-8")
     with pytest.raises(ValueError, match="Invalid VL53L0X firmware range"):
         tool.verify_source_contract()
 

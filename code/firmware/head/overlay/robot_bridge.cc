@@ -351,6 +351,8 @@ bool AuxValid(cJSON* json) {
         !bounded(get(power, "shunt_uv"), -81920, 81920) ||
         !cJSON_IsBool(get(power, "fuel_valid")) ||
         !cJSON_IsBool(get(power, "monitor_valid")) ||
+        (cJSON_IsTrue(get(power, "monitor_valid")) &&
+         !bounded(get(power, "shunt_uv"), -81917, 81915)) ||
         !cJSON_IsFalse(get(power, "current_calibrated"))) return false;
     // Present only on new head/body builds. Previous versions stay read only.
     if (dock) {

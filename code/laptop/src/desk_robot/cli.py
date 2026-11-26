@@ -358,7 +358,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 
 def _doctor_room_station(settings: Settings) -> dict[str, str]:
-    if not settings.room_station_enabled:
+    if not getattr(settings, "room_station_enabled", False):
         return {"status": "disabled"}
     port = settings.room_station_port
     try:

@@ -130,7 +130,9 @@ def test_low_cost_vl53l0x_is_the_production_cliff_driver():
     header = (root / "firmware/body/lib/TofBus/TofBus.h").read_text()
     assert "build_src_filter = +<*> -<vl53l0x_bench.cpp>" in pio
     assert "build_src_filter = -<*> +<vl53l0x_bench.cpp>" in pio
-    assert pio.count("https://github.com/pololu/vl53l0x-arduino.git#1.3.1") >= 4
+    assert pio.count(
+        "https://github.com/pololu/vl53l0x-arduino.git#9f3773cb48d4e4e844d689cfc529a06f96d1d264"
+    ) >= 4
     assert "vl53l4cd-arduino.git" not in pio
     assert "#include <VL53L0X.h>" in probe
     assert "#include <VL53L0X.h>" in header
@@ -138,7 +140,7 @@ def test_low_cost_vl53l0x_is_the_production_cliff_driver():
     assert "read_register(0x13" in production
     assert "read_register(0x14" in production
     assert "write_byte(0x0B, 0x01)" in production
-    assert "distance >= 30" in production
+    assert "decode_tof_result(result)" in production
     assert "VL53L4CD" not in production
 
 def test_boot_range_diagnostics_name_real_chip_and_guard_coverage():
@@ -213,7 +215,8 @@ def test_superseded_decision_log_cannot_reselect_premium_tof():
     )
     assert "obsolete and not current purchasing selections" in row
     assert "8 generic VL53L0X GY-530 sensors per robot" in row
-    assert "2 TCA9548A multiplexers" in row
+    assert "TCA9548A `0x70` lanes 0–7" in row
+    assert "`0x71` mux" in row
     assert "physical qualification" in row
     assert "selected full source has eight VL53L4CDs" not in row
 
@@ -261,18 +264,22 @@ def test_usb_calibration_and_cliff_guard_match_real_tof_source_valid_range():
     import re
     root = Path(__file__).resolve().parents[1]
     driver = (root / "firmware/body/lib/TofBus/TofBus.cpp").read_text()
+    decoder = (root / "firmware/body/lib/TofBus/TofResult.h").read_text()
+    limits = (root / "firmware/body/include/TofWireLimits.h").read_text()
     controller = (root / "firmware/body/lib/BodyControl/BodyControl.cpp").read_text()
     guard = (root / "firmware/body/lib/CliffGuard/CliffGuard.cpp").read_text()
-    matched = re.search(r"distance\s*>=\s*(\d+)\s*&&\s*distance\s*<=\s*(\d+)",
-                        driver)
-    assert matched is not None
-    accepted_min, accepted_max = map(int, matched.groups())
+    assert "decode_tof_result(result)" in driver
+    assert "tof_range_in_bounds(distance)" in decoder
+    min_m = re.search(r"kTofMinRangeMm\s*=\s*(\d+)U", limits)
+    max_m = re.search(r"kTofMaxRangeMm\s*=\s*(\d+)U", limits)
+    assert min_m is not None and max_m is not None
+    accepted_min, accepted_max = int(min_m.group(1)), int(max_m.group(1))
     assert accepted_min == 30 and accepted_max == 1300
     # Three independently implemented source owners must agree, or CI fails.
-    assert f"floor.min_mm < {accepted_min}" in guard
-    assert f"floor.max_mm > {accepted_max}" in guard
-    assert f"config.front_obstacle_mm < {accepted_min}" in guard
-    assert f"config.front_max_mm > {accepted_max}" in guard
+    assert "tof_range_in_bounds(floor.min_mm)" in guard
+    assert "tof_range_in_bounds(floor.max_mm)" in guard
+    assert "tof_range_in_bounds(config.front_obstacle_mm)" in guard
+    assert "tof_range_in_bounds(config.front_max_mm)" in guard
     assert f"minimum < {accepted_min}" in controller
     assert f"maximum > {accepted_max}" in controller
     assert f"near_mm < {accepted_min}" in controller

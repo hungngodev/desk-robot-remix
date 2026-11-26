@@ -83,8 +83,10 @@ async def test_dock_rechecks_real_body_safety_after_waiting_for_ir(
             }
 
         async def command(self, command):
+            from desk_robot.command_framing import expected_ack
+
             self.commands.append(command)
-            return {"ok": True, "robot_id": "robot-01", "reply": "OK " + command}
+            return {"ok": True, "robot_id": "robot-01", "reply": expected_ack(command)}
 
     head = Head()
     coordinator = Coordinator(settings, {"robot-01": head}, SimulationVision())

@@ -106,6 +106,10 @@ public:
     uint32_t speaker_frames_accepted_ = 0, short_output_writes_ = 0;
     uint32_t stale_publish_discards_ = 0;
     bool reference_integrity_failed_ = false;
+    struct SpeechLevelStub {
+        void Reset() {}
+        void Publish(uint64_t, int, int64_t) {}
+    } speech_level_;
     desk_robot::ReferenceDecimator reference_decimator_{};
     std::array<int16_t, 16384> ring{};
     size_t n = 0;

@@ -74,7 +74,9 @@ def test_room_thread_burst_real_asyncio_loop(monkeypatch, retire):
         else:
             assert [item.seq for item in delivered] == [1000]
             latest = delivered[0]
-            assert fresh_room_summary(latest, now=113) == "Station soil probe raw ADC 1000"
+            assert fresh_room_summary(latest, now=113) == (
+                "Partial room profile (1/5 fresh sensors): Station soil probe raw ADC 1000"
+            )
             assert fresh_room_summary(latest, now=113.001) is None
 
     asyncio.run(scenario())

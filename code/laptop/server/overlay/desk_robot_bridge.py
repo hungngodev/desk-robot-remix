@@ -557,8 +557,27 @@ def _revoke_connection(conn):
             )
 
 
+def _lease_active() -> bool:
+    return bool(lease_ids) and (lease_stopping or time.monotonic() < lease_until)
+
+
+def _peer_playback_active() -> bool:
+    return active_device_id is not None or any(
+        getattr(conn, "client_is_speaking", False)
+        for device, conn in connections.items()
+        if device in lease_ids
+    )
+
+
+def _echo_isolated(device_id: str) -> bool:
+    """Block mic ASR/listen on leased heads and nonparticipants while a lease speaks or stops."""
+    if not _lease_active():
+        return False
+    return device_id in lease_ids or lease_stopping or _peer_playback_active()
+
+
 def muted(device_id):
-    return device_id in lease_ids and time.monotonic() < lease_until
+    return _lease_active() and device_id in lease_ids
 
 
 def duplex_available(conn) -> bool:
@@ -598,7 +617,7 @@ def observe_idle_human_voice(conn, have_voice: bool) -> bool:
                 idle_voice_quiet_frames.pop(device, None)
         return False
     if (connections.get(device) is not conn
-            or muted(device) or lease_stopping
+            or _echo_isolated(device) or lease_stopping
             or getattr(conn, "client_is_speaking", False)
             or getattr(conn, "client_abort", False)
             or getattr(conn, "client_listen_mode", "") not in ("auto", "realtime")):
@@ -648,7 +667,7 @@ def suppress_message(conn, message):
                 if callable(observe):
                     observe(conn, data)
             return True
-    if not muted(conn.device_id):
+    if not _echo_isolated(conn.device_id):
         return False
     if isinstance(message, bytes):
         return not (
@@ -718,7 +737,7 @@ async def interrupt_for_normal_voice(conn, have_voice: bool) -> bool:
     This does not claim unmeasured acoustic double-talk performance.
     """
     device = conn.device_id
-    if connections.get(device) is not conn or muted(device) or lease_stopping:
+    if connections.get(device) is not conn or _echo_isolated(device) or lease_stopping:
         return False  # Stale heads and coordinated sessions cannot interrupt.
     if (getattr(conn, "client_listen_mode", "") != "realtime"
             or not getattr(conn, "client_is_speaking", False)):

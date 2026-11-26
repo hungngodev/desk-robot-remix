@@ -75,7 +75,7 @@ async def test_contact_dwell_requires_settled_target_and_two_fresh_samples(monke
         reason = {
             "unsettled": "commanded closing target not confirmed",
             "expired": "expired before contact dwell",
-            "bump": "no tactile contact",
+            "bump": "no confirmed tactile contact",
             "overforce": "force ceiling exceeded",
         }[fault]
         with pytest.raises(OperationError, match=reason):

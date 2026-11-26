@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 CAD = ROOT / "docs/cad/remixes/one_robot_adapter_kit.scad"
 TOF = ROOT / "code/firmware/body/lib/TofBus/TofBus.cpp"
 TOF_RESULT = TOF.with_name("TofResult.h")
+TOF_WIRE_LIMITS = ROOT / "code/firmware/body/include/TofWireLimits.h"
 TOF_HEADER = TOF.with_suffix(".h")
 # ST DS11555 Rev 6, section 6.1 specifies 25 degree SYSTEM field of view.
 # It is not a point ray. A sliver of floor visible at the rear of this cone
@@ -65,12 +66,14 @@ def verify_source_contract() -> dict:
             or "decoded.accepted" not in source):
         raise ValueError("VL53L0X firmware decoder changed; update check")
     decoder = TOF_RESULT.read_text(encoding="utf-8")
-    accepted = re.findall(
-        r"distance\s*>=\s*(\d+)U\s*&&\s*distance\s*<=\s*(\d+)U", decoder,
-    )
-    if len(accepted) != 1:
+    if "tof_range_in_bounds(distance)" not in decoder:
+        raise ValueError("VL53L0X firmware decoder changed; update check")
+    limits = TOF_WIRE_LIMITS.read_text(encoding="utf-8")
+    min_match = re.findall(r"\bkTofMinRangeMm\s*=\s*(\d+)U\s*;", limits)
+    max_match = re.findall(r"\bkTofMaxRangeMm\s*=\s*(\d+)U\s*;", limits)
+    if len(min_match) != 1 or len(max_match) != 1:
         raise ValueError("VL53L0X firmware source threshold changed")
-    min_mm, max_mm = map(int, accepted[0])
+    min_mm, max_mm = int(min_match[0]), int(max_match[0])
     if not 0 < min_mm <= max_mm <= 65535:
         raise ValueError("Invalid VL53L0X firmware range")
     return {

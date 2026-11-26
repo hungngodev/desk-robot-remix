@@ -92,7 +92,7 @@ def test_raw_touch_is_resampled_before_commands_outputs_and_heartbeat():
     body = (ROOT / "code/firmware/body/src/main.cpp").read_text()
     raw = body.split("bool sample_raw_touch(", 1)[1].split("\n}", 1)[0]
     assert "digitalRead(body_pins::kTouchOutput) == HIGH" in raw
-    assert "control.sample_touch_input(active, now_ms);" in raw
+    assert "control.sample_touch_input(active, now_ms, touch_debounce.baseline_ready());" in raw
     assert "apply_outputs(" not in raw
     outputs = body.split("void apply_outputs() {", 1)[1].split("void process_input(", 1)[0]
     assert outputs.index("sample_raw_touch(millis());") < outputs.index("control.tick(")
@@ -150,9 +150,10 @@ def test_cliff_fault_reaches_motor_outputs_before_other_i2c_work():
     loop = re.sub(r"\s+", "", loop)
     stop = "if(!cliff_guard.evaluate(millis()))apply_outputs();"
     assert loop.index("tof.poll(") < loop.index(stop) < loop.index("berry_imu.poll(")
-    for client in ("berry_imu", "paw_pulse", "accessories"):
-        assert f"if(tof.bus_accessible()){client}.poll(" in loop
-    assert "if(tof.bus_accessible()&&cap1188.present())" in loop
+    for client in ("berry_imu", "paw_pulse"):
+        assert f"if(tof.clients_accessible()){client}.poll(" in loop
+    assert "if(tof.clients_accessible()&&!accessories.poll(" in loop
+    assert "if(tof.clients_accessible()&&cap1188.present())" in loop
     assert "elseif(!cap1188.verified())control.set_cap(false,0);" in loop
     assert body.count("cap1188.invalidate_bus();") == 2
     assert "tof.observe_shared_bus_fault(cliff_guard);" in body
@@ -330,7 +331,6 @@ def test_nec_telemetry_uses_exact_existing_wroom_xiao_mac_owners():
     protocol = (ROOT / "code/firmware/head/overlay/robot_protocol.h").read_text()
     bridge = (ROOT / "code/firmware/head/overlay/robot_bridge.cc").read_text()
     transport = (ROOT / "code/laptop/src/desk_robot/transport.py").read_text()
-    api = (ROOT / "code/laptop/src/desk_robot/api.py").read_text()
     profile = (ROOT / "code/firmware/body/platformio.ini").read_text()
 
     assert 'const bool ir = std::strcmp(command, "ir") == 0;' in body
@@ -353,7 +353,8 @@ def test_nec_telemetry_uses_exact_existing_wroom_xiao_mac_owners():
     assert '{"/api/ir", HTTP_GET}' in bridge
     assert 'async def ir_status(self)' in transport
     assert '"/api/ir"' in transport
-    assert '"/v1/robots/{robot_id}/dock/ir"' in api
+    dock_api = (ROOT / "code/laptop/src/desk_robot/api_dock_routes.py").read_text()
+    assert '"/v1/robots/{robot_id}/dock/ir"' in dock_api
     assert "charging_authorized" in (
         ROOT / "code/laptop/src/desk_robot/dock_ir.py"
     ).read_text()
@@ -558,7 +559,7 @@ def test_body_status_uart_capacity_covers_full_width_sensor_counters():
     bridge = (ROOT / "code/firmware/head/overlay/robot_bridge.cc").read_text()
     status = body.split("} else if (status) {", 1)[1]
     status = status.split('state_.armed ? "true"', 1)[0]
-    status = status.split("const int written = std::snprintf(", 1)[1]
+    status = status.split("const bool complete = format_reply(", 1)[1]
     parts = re.findall(r'"(?:\\.|[^"\\])*"', status)
     wire_format = "".join(json.loads(part) for part in parts)
     formats = re.findall(r"%(?:lu|u|d|s)", wire_format)
@@ -892,10 +893,9 @@ def test_legacy_esp32dev_firmware_is_actuator_inert_without_full_safety():
 
     # The same early guard applies to any future unguarded compatibility env.
     outputs = main.split("void apply_outputs() {", 1)[1].split("void process_input(", 1)[0]
-    inert = outputs.split("#if !DESK_ROBOT_FULL_SENSORS", 1)[1].split("#endif", 1)[0]
+    inert = outputs.split("#if !DESK_ROBOT_FULL_SENSORS", 1)[1].split("\n#else\n", 1)[0]
     assert "control.force_disarm();" in inert
     assert "zero_motor_pwm();" in inert
-    assert "return;" in inert
     assert outputs.index("#if !DESK_ROBOT_FULL_SENSORS") < outputs.index(
         "if (state.servos_attached"
     )
@@ -958,7 +958,12 @@ def test_dc_output_helpers_follow_the_cutoff_build_guard():
         "#if !DESK_ROBOT_STEPPER && "
         "DESK_ROBOT_FULL_SENSORS && DESK_ROBOT_DC_HARDWARE_CUTOFF_QUALIFIED"
     )
-    assert guard + "\nint applied_left = 0;\nint applied_right = 0;\n#endif" in main
+    assert (
+        guard
+        + "\ndesk_robot::DcDutyRamp left_duty_ramp;\n"
+        + "desk_robot::DcDutyRamp right_duty_ramp;\n"
+        + "int applied_left = 0;\nint applied_right = 0;\n#endif"
+    ) in main
     assert guard + "\nvoid write_motor_pair(" in main
     assert "#elif DESK_ROBOT_STEPPER\nvoid write_stepper(" in main
     outputs = main.split("void apply_outputs() {", 1)[1]

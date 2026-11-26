@@ -85,7 +85,10 @@ def test_actual_pin_reassignment_fails_before_releasing_harness():
     with pytest.raises(ValueError, match="pin drift"):
         harness.verify(wrong, body, sense)
     wrong = copy.deepcopy(plan)
-    wrong["bus"]["body_gpio"]["left_stepper"][0] = 4
+    wrong["bus"]["body_gpio"]["left_stepper"][0], wrong["bus"]["body_gpio"]["left_stepper"][1] = (
+        wrong["bus"]["body_gpio"]["left_stepper"][1],
+        wrong["bus"]["body_gpio"]["left_stepper"][0],
+    )
     with pytest.raises(ValueError, match="Stepper phase pin drift"):
         harness.verify(wrong, body, sense)
     with pytest.raises(ValueError, match="Guarded DC motor pin drift"):

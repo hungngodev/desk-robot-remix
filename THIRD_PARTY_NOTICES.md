@@ -32,6 +32,12 @@ fonts, or other assets.
   Its [exact upstream notice](https://github.com/pololu/vl53l0x-arduino/blob/9f3773cb48d4e4e844d689cfc529a06f96d1d264/LICENSE.txt)
   contains both Pololu MIT and STMicroelectronics BSD-3-Clause terms.
   The complete text is retained in the body firmware notices above.
+- Room station mmWave presence library (`ncmreynolds/ld2410` `v0.2.2`,
+  pinned in `code/firmware/room_station/platformio.ini`): licensed under
+  [GNU LGPL-2.1](https://github.com/ncmreynolds/ld2410/blob/v0.2.2/LICENSE).
+  Before distributing any compiled room-station binary, retain the LGPL-2.1
+  notice, provide complete corresponding source/modifications or object
+  files for user relinking, or replace the library with an MIT/BSD driver.
 - SMARS: [original chassis](docs/cad/originals/smars/source.json),
   [stepper remix](docs/cad/originals/smars-stepper/source.json) and
   [forklift](docs/cad/originals/forklift/source.json) retain recorded

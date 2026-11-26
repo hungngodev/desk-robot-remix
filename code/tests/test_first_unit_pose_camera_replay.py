@@ -15,7 +15,7 @@ from desk_robot.api import create_app
 from desk_robot.config import RobotConfig, Settings
 from desk_robot.runtime import Runtime
 from desk_robot.spatial_bracket import BracketError, validate_stationary_bracket
-from desk_robot.transport import HeadError, HttpHead
+from desk_robot.transport import BODY_STATUS_PROTOCOL, HeadError, HttpHead
 from fastapi.testclient import TestClient
 
 JPEG = bytes.fromhex("ffd8696d616765ffd9")
@@ -265,7 +265,9 @@ def test_legacy_pose_normal_runtime_startup_and_restart(tmp_path, tokens, monkey
                 raise httpx.ConnectError("Legacy head disconnected", request=request)
             return httpx.Response(501)
         if request.url.path == "/api/status":
-            return httpx.Response(200, json={"robot_id": robot.id, "armed": False})
+            return httpx.Response(200, json={
+                "robot_id": robot.id, "armed": False, "protocol": BODY_STATUS_PROTOCOL,
+            })
         assert request.url.path == "/api/command" and request.method == "POST"
         assert json.loads(request.content) == {"command": "halt"}
         return httpx.Response(200, json={

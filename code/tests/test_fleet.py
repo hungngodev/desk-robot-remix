@@ -437,6 +437,8 @@ async def test_cli_group_request_uses_dynamic_default(fleet, tokens, monkeypatch
     seen = []
 
     def transport(request):
+        if request.url.path == "/v1/health":
+            return httpx.Response(200, json={"mode": "simulation", "runtime_ready": True})
         seen.append(json.loads(request.content))
         return httpx.Response(200, json={"ok": True})
 
@@ -827,7 +829,7 @@ async def test_fleet_active_peer_samplers_survive_new_voice_generation(
     runtime.conversation = Talk()
     runtime.multimodal = visual
 
-    async def hold_sampler(robot_id, epoch):
+    async def hold_sampler(robot_id, epoch, *, camera_grant=None):
         await asyncio.Event().wait()
 
     monkeypatch.setattr(visual, "_speech_frames", hold_sampler)

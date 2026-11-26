@@ -92,7 +92,7 @@ SOURCE_ATTRIBUTION_GIT_BLOBS = {
     "docs/cad/originals/sparky-head/LICENSE.md":
         "c5e094cdaca8f699374fd8811c18e436d9129667",
     "docs/cad/originals/sparky-head/source.json":
-        "d5ac07640d4c2aa60c779534c6ec74595385bdc1",
+        "ef99f197fa572dbfaf7a111ed5fd89146d44e9aa",
 }
 
 

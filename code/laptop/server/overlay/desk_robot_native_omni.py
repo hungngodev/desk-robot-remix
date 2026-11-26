@@ -74,6 +74,11 @@ except ModuleNotFoundError:
 def _pet_coordinator_url(robot: str, route: str) -> str:
     return f"{coordinator_base_url()}/v1/pet/{robot}/{route}"
 
+
+# Cap buffered 24 kHz PCM16 model deltas (~8 s @ 48 kB/s) independently of the
+# 40-item queue limit, because a single model delta may carry up to 96,000 bytes.
+MAX_OUTGOING_AUDIO_BYTES = 384_000
+
 _sessions: dict[str, "NativeOmniSession"] = {}
 _output_owner: str | None = None
 # A failed final head STOP cannot be erased by reconnecting the same device ID.
@@ -304,6 +309,7 @@ class NativeOmniSession:
         self.outgoing: asyncio.Queue[tuple[str, bytes | None] | None] = (
             asyncio.Queue(maxsize=40)
         )
+        self._outgoing_bytes = 0
         self.started: asyncio.Task | None = None
         self._run_entered = False
         self.connected = False
@@ -1079,8 +1085,7 @@ class NativeOmniSession:
         self._native_output_words.clear()
         self._last_human_transcript = ""
         self._tool_question = ""
-        while not self.outgoing.empty():
-            self.outgoing.get_nowait()
+        self._drain_outgoing()
 
     async def _reserve_tool_speech(self) -> None:
         """FENCE native model audio but preserve this spoken tool request.
@@ -1124,8 +1129,7 @@ class NativeOmniSession:
                 self.native_readonly_tools_dropped += 1
         for entry in queued:
             self._readonly_queue.put_nowait(entry)
-        while not self.outgoing.empty():
-            self.outgoing.get_nowait()
+        self._drain_outgoing()
         events = self.wire.interrupt()
         await flush_head(self)
         self._schedule_remote_cancel(events)
@@ -1409,8 +1413,8 @@ class NativeOmniSession:
                 if (not self._tool_head_current()
                         or self._tool_speech_turn != (epoch, request_turn)):
                     return
-                await self.outgoing.put((response_id, pcm[offset:offset + 9600]))
-            await self.outgoing.put((response_id, None))
+                await self._put_outgoing(response_id, pcm[offset:offset + 9600])
+            await self._put_outgoing(response_id, None)
             self.native_tool_audio_queued += 1
             audio_queued = True
         except asyncio.CancelledError:
@@ -2278,7 +2282,7 @@ class NativeOmniSession:
             if kind == "response.output_audio.delta" and pcm is not None:
                 self.model_chunks += 1
                 try:
-                    self.outgoing.put_nowait((pcm.response_id, pcm.pcm24k))
+                    self._enqueue_outgoing_nowait(pcm.response_id, pcm.pcm24k)
                     if self._voice_timing.native_started is not None:
                         self._voice_timing.native_pcm(
                             pcm.response_id, self._generation, time.monotonic(),
@@ -2291,11 +2295,32 @@ class NativeOmniSession:
                 # indefinitely while its consumer is wedged. Fail the native
                 # session; its existing shutdown owns physical decoder STOP.
                 try:
-                    self.outgoing.put_nowait((event["response_id"], None))
+                    self._enqueue_outgoing_nowait(event["response_id"], None)
                 except asyncio.QueueFull as exc:
                     raise RuntimeError(
                         "Native model output queue full before terminal STOP"
                     ) from exc
+
+    def _drain_outgoing(self) -> None:
+        while not self.outgoing.empty():
+            self.outgoing.get_nowait()
+        self._outgoing_bytes = 0
+
+    def _enqueue_outgoing_nowait(
+        self, response_id: str, chunk24k: bytes | None,
+    ) -> None:
+        payload_bytes = len(chunk24k) if chunk24k is not None else 0
+        if chunk24k is not None and self._outgoing_bytes + payload_bytes > MAX_OUTGOING_AUDIO_BYTES:
+            raise asyncio.QueueFull("Model audio byte queue full")
+        self.outgoing.put_nowait((response_id, chunk24k))
+        self._outgoing_bytes += payload_bytes
+
+    async def _put_outgoing(
+        self, response_id: str, chunk24k: bytes | None,
+    ) -> None:
+        await self.outgoing.put((response_id, chunk24k))
+        if chunk24k is not None:
+            self._outgoing_bytes += len(chunk24k)
 
     def _begin_head_playback(self, response_id: str, generation: int) -> int:
         """Bind one opaque device token to the current model response."""
@@ -2378,13 +2403,11 @@ class NativeOmniSession:
         fully_sent = True  # no refused packet within the completed response
         while not self.closed:
             item = await self.outgoing.get()
-            # A terminal marker MUST belong to the response it closes.
-            # A late native response.done cannot end a newer Mac tool reply.
-            # Ignore untyped legacy markers instead of terminating a random
-            # active speaker or recording false audio-delivery history.
             if item is None:
                 continue
             response_id, chunk24k = item
+            if chunk24k is not None:
+                self._outgoing_bytes = max(0, self._outgoing_bytes - len(chunk24k))
             if chunk24k is None:
                 if response_id == dropped_response_id:
                     dropped_response_id = None

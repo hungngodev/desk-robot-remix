@@ -215,6 +215,7 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
         reference_ready = ReadReferenceLocked(
             reference_frame_.data(), frames, capture_end_us);
     }
+    (void)reference_ready;
     // Integrity counters are exposed by GetReferenceDiagnostics(). Never
     // synchronously log on the microphone task, even outside the ring lock.
     for (int i = 0; i < frames; ++i) {

@@ -50,6 +50,11 @@ void digitalWrite(int, int) {}
 void delayMicroseconds(int) { std::abort(); }
 unsigned servo_duty(int) { std::abort(); }
 unsigned millis() { return 1000; }
+unsigned micros() { return 1000000; }
+struct DcDutyRamp {
+    void reset() {}
+    int update(unsigned, int target, bool armed) { return armed ? target : 0; }
+} left_duty_ramp, right_duty_ramp;
 void sample_raw_bumper() {}
 void sample_raw_touch(unsigned) {}
 struct State {

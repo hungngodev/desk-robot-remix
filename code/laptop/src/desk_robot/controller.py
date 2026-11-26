@@ -150,6 +150,7 @@ class DeferredMotionRequest:
     expires_at: float
     queue_generation: int
     submit_fn: Callable[[], Job] = field(repr=False)
+    robot_generation: int = 0
     consent_check: Callable[[], bool] | None = field(default=None, repr=False)
     state: str = "queued"  # queued, dispatched, discarded, expired, failed
     job_id: str | None = None
@@ -194,6 +195,7 @@ class Coordinator:
         self._deferred_voice_queue: deque[DeferredMotionRequest] = deque()
         self._deferred_requests: dict[str, DeferredMotionRequest] = {}
         self._deferred_voice_generation = 0
+        self._deferred_robot_generation: dict[str, int] = {}
         self._deferred_dispatch_lock: asyncio.Lock | None = None
         self._deferred_dispatch_task: asyncio.Task | None = None
 
@@ -490,7 +492,11 @@ class Coordinator:
         for robot_id in self._permit_epoch:
             self._permit_epoch[robot_id] += 1
         running = [task for task in self.tasks.values() if not task.done()]
-        for task in running:
+        children = [
+            child for group in self._motion_children.values()
+            for child in group if not child.done()
+        ]
+        for task in (*running, *children):
             task.cancel()
         # Every configured hardware body needs a STOP on shutdown, not just
         # active jobs: a previously uncertain command can leave motors armed.
@@ -508,8 +514,11 @@ class Coordinator:
                         if job.robot_id == robot_id and job.state in {"queued", "running"}:
                             job.state = "failed"
                             job.error = "Shutdown STOP unconfirmed; rely on WROOM watchdog"
-        if running:
-            done, pending = await asyncio.wait(running, timeout=2.0)
+        wait_targets = [*running, *children]
+        if dispatch_task is not None and not dispatch_task.done():
+            wait_targets.append(dispatch_task)
+        if wait_targets:
+            done, pending = await asyncio.wait(wait_targets, timeout=2.0)
             for task in done:
                 if not task.cancelled():
                     task.exception()
@@ -535,6 +544,8 @@ class Coordinator:
             self._deferred_requests = {}
         if not hasattr(self, "_deferred_voice_generation"):
             self._deferred_voice_generation = 0
+        if not hasattr(self, "_deferred_robot_generation"):
+            self._deferred_robot_generation = {}
         if getattr(self, "_deferred_dispatch_lock", None) is None:
             self._deferred_dispatch_lock = asyncio.Lock()
 
@@ -577,7 +588,12 @@ class Coordinator:
         self, *, robot_id: str | None = None, reason: str = "Deferred motion discarded",
     ) -> int:
         self._ensure_voice_gate()
-        self._deferred_voice_generation += 1
+        if robot_id is None:
+            self._deferred_voice_generation += 1
+        else:
+            self._deferred_robot_generation[robot_id] = (
+                self._deferred_robot_generation.get(robot_id, 0) + 1
+            )
         kept: deque[DeferredMotionRequest] = deque()
         discarded = 0
         while self._deferred_voice_queue:
@@ -642,6 +658,7 @@ class Coordinator:
             kind=kind,
             expires_at=time.monotonic() + max_wait_seconds,
             queue_generation=self._deferred_voice_generation,
+            robot_generation=self._deferred_robot_generation.get(robot_id, 0),
             submit_fn=submit_fn,
             consent_check=consent_check,
         )
@@ -674,7 +691,7 @@ class Coordinator:
                     not self.robot(req.robot_id).motion_enabled
                     or (
                         self.dock_inhibited(req.robot_id)
-                        and req.kind in {"exploration", "pickup", "navigate"}
+                        and req.kind in {"manual", "exploration", "pickup", "navigate"}
                     )
                     or (req.consent_check is not None and not req.consent_check())
                 ):
@@ -700,12 +717,13 @@ class Coordinator:
                 if (
                     self.closed
                     or req.queue_generation != self._deferred_voice_generation
+                    or req.robot_generation != self._deferred_robot_generation.get(req.robot_id, 0)
                     or self._permit_epoch[req.robot_id] != dispatch_epoch
                     or self._stop_confirmations.blocked(req.robot_id)
                     or not self.robot(req.robot_id).motion_enabled
                     or (
                         self.dock_inhibited(req.robot_id)
-                        and req.kind in {"exploration", "pickup", "navigate"}
+                        and req.kind in {"manual", "exploration", "pickup", "navigate"}
                     )
                     or (req.consent_check is not None and not req.consent_check())
                     or self._fleet_motion_owner is not None
@@ -980,6 +998,8 @@ class Coordinator:
 
     def manual(self, robot_id: str, command: str) -> Job:
         robot = self.robot(robot_id)
+        if self.dock_inhibited(robot_id):
+            raise OperationError("Manual movement refused: robot is seated or powered on dock")
         op = validate_command(command)
         if not robot.motion_enabled or op not in {"drive", "lift", "grip"}:
             raise OperationError(

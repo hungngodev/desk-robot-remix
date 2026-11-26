@@ -188,6 +188,7 @@ struct Application {
     Protocol transport;
     Protocol* protocol_ = &transport;
     std::atomic<bool> sense_microphone_privacy_muted_{false};
+    std::atomic<bool> sense_audio_link_unavailable_{false};
     std::atomic<uint32_t> sense_audio_failure_epoch_{0};
     bool play_popup_on_listening_ = false;
     DeviceState GetDeviceState() const { return state; }
@@ -1491,8 +1492,13 @@ class SenseSelectionTests(unittest.TestCase):
         self.assertIn("read_register(0x13, &ready, 1)", tof)
         self.assertIn("(ready & 0x07U) == 0", tof)
         self.assertIn("read_register(0x14, result, kMaxSampleBytes)", tof)
-        self.assertIn("((result[0] & 0x78U) >> 3) == 11U", tof)
-        self.assertIn("distance >= 30 && distance <= 1300", tof)
+        result_header = (body / "lib/TofBus/TofResult.h").read_text()
+        limits_header = (body / "include/TofWireLimits.h").read_text()
+        self.assertIn("decode_tof_result(result)", tof)
+        self.assertIn("((status & 0x78U) >> 3) == 11U", result_header)
+        self.assertIn("tof_range_in_bounds(distance)", result_header)
+        self.assertIn("constexpr std::uint16_t kTofMinRangeMm = 30U;", limits_header)
+        self.assertIn("constexpr std::uint16_t kTofMaxRangeMm = 1300U;", limits_header)
         self.assertIn("!write_byte(0x0B, 0x01)", tof)
         self.assertNotIn("read_register(0x0031", tof)
         self.assertNotIn("!write_byte(0x0086", tof)
@@ -1922,7 +1928,12 @@ struct SenseReferenceCodec {
     static constexpr uint32_t kSpeakerRate = 32000, kMicRate = 16000;
     std::array<int16_t, kRingSize> reference_{};
     uint64_t write_index_ = 0;
+    bool reference_integrity_failed_ = false;
     desk_robot::PlaybackReferenceClock reference_clock_{};
+    struct SpeechLevelStub {
+        void Reset() {}
+        void Publish(uint64_t, int, int64_t) {}
+    } speech_level_;
     desk_robot::ReferenceDecimator reference_decimator_{};
     void PushLocked(int16_t sample);
     void FillSilenceLocked(int64_t now_us);
@@ -2420,10 +2431,13 @@ int main() {
     assert(!gaze.Step(6450, Motion::kLookRight, false).visible);
     assert(!gaze.Step(6500, Motion::kNone, true).visible);
     assert(gaze.Step(6700, Motion::kLookRight, true).x == 3);
-    assert(gaze.Step(6800, Motion::kLookUp, true).y == -3);
-    assert(gaze.Step(6900, Motion::kNod, true).y == 3);
-    assert(gaze.Step(7450, Motion::kNone, true).y == -2);
-    assert(!gaze.Step(8101, Motion::kNone, true).visible);
+    // Interrupting an active gaze eases over kRetargetMs (200 ms) from prior axis.
+    assert(gaze.Step(6800, Motion::kLookUp, true).y == 0);
+    assert(gaze.Step(7000, Motion::kNone, true).y == -3);
+    assert(gaze.Step(7100, Motion::kNod, true).y == -3);
+    assert(gaze.Step(7300, Motion::kNone, true).y == 3);
+    assert(gaze.Step(7650, Motion::kNone, true).y == -2);
+    assert(!gaze.Step(8301, Motion::kNone, true).visible);
     FaceEyeAnimator rollover;
     assert(rollover.Step(0xfffffff0U, Motion::kLookLeft, true).visible);
     assert(rollover.Step(0x40U, Motion::kNone, true).visible);
@@ -3079,7 +3093,10 @@ def test_body_face_snapshot_is_coherent_and_expires_across_clock_rollover():
         binary = Path(tmp) / "body_face_state"
         source.write_text(
             "#include <cassert>\n#include <cstdint>\n#include <mutex>\n"
-            "#include <atomic>\n#include <thread>\n" + helper + r"""
+            "#include <atomic>\n#include <thread>\n"
+            "inline bool lvgl_port_lock(int) { return true; }\n"
+            "inline void lvgl_port_unlock() {}\n"
+            + helper + r"""
 int main() {
     BodyFaceState state;
     assert(!state.Read().Fresh(0));

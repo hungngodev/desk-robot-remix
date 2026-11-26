@@ -107,7 +107,10 @@ async def test_dock_approach_rejects_turn_without_three_fresh_clear_ranges(
             return b"simulated marker image"
 
         async def command(self, text):
+            from desk_robot.command_framing import expected_ack
+
             self.commands.append(text)
+            return {"ok": True, "robot_id": "robot-01", "reply": expected_ack(text)}
 
     head = SensorHead()
     controller = Coordinator(
@@ -174,7 +177,10 @@ async def test_dock_approach_moves_once_then_holds_before_contacts(
             return b"simulated marker image", time.monotonic(), (1234, 1, 1), 1
 
         async def command(self, text):
+            from desk_robot.command_framing import expected_ack
+
             self.commands.append(text)
+            return {"ok": True, "robot_id": "robot-01", "reply": expected_ack(text)}
 
     head = GuardedHead()
     if retire_on_fourth:
@@ -469,7 +475,10 @@ async def test_dock_refuses_stale_pre_camera_safety_after_sensor_fault(
             return b"real-frame-shaped-placeholder"
 
         async def command(self, line):
+            from desk_robot.command_framing import expected_ack
+
             self.commands.append(line)
+            return {"ok": True, "robot_id": "robot-01", "reply": expected_ack(line)}
 
     head = HeadWithMidframeFault()
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
@@ -531,7 +540,10 @@ async def test_dock_refuses_new_side_obstacle_after_camera_frame(
             return b"real-frame-shaped-placeholder"
 
         async def command(self, line):
+            from desk_robot.command_framing import expected_ack
+
             self.commands.append(line)
+            return {"ok": True, "robot_id": "robot-01", "reply": expected_ack(line)}
 
     head = SideChangedHead()
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
@@ -589,7 +601,10 @@ async def test_dock_slow_marker_inference_never_drives_from_expired_image(
             return b"head-camera-jpeg-placeholder"
 
         async def command(self, line):
+            from desk_robot.command_framing import expected_ack
+
             self.commands.append(line)
+            return {"ok": True, "robot_id": "robot-01", "reply": expected_ack(line)}
 
     entered = threading.Event()
 
@@ -660,7 +675,10 @@ async def test_dock_marker_expires_while_waiting_for_second_body_status(
             return b"marker-frame"
 
         async def command(self, command):
+            from desk_robot.command_framing import expected_ack
+
             self.commands.append(command)
+            return {"ok": True, "robot_id": "robot-01", "reply": expected_ack(command)}
 
     head = SlowStatus()
     controller = Coordinator(settings, {"robot-01": head}, SimulationVision())
@@ -1094,6 +1112,8 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
             }
 
         async def command(self, command, *, dispatch_check=None):
+            from desk_robot.command_framing import expected_ack
+
             if dispatch_check is not None:
                 # Model state changes while waiting for HttpHead's command locks.
                 if outcome == "queued_stream_replaced":
@@ -1111,7 +1131,7 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
                 if command == "drive 10 10 100":
                     # A new explicit operator permit, not automatic dock recovery.
                     assert marker_loss
-                    return {"ok": True}
+                    return {"ok": True, "robot_id": robot.id, "reply": expected_ack(command)}
                 assert self.ir_reads == sum(
                     c.startswith("drive ") for c in self.commands
                 )
@@ -1122,7 +1142,7 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
                     # simulated proof that the wheels actually reached a dock.
                     self.contacted = True
                     self.armed = False
-            return {"ok": True}
+            return {"ok": True, "robot_id": robot.id, "reply": expected_ack(command)}
 
         async def aux_status(self):
             self.aux_reads += 1
@@ -1160,7 +1180,7 @@ async def test_public_dock_replay_stops_without_unqualified_recovery(
     def detect(_jpeg, _camera, *, captured_at):
         if marker_loss and head.frames == 2:
             return None
-        x, z = (0, 500) if outcome == "pulse_budget" else next(poses)
+        x, z = (0, max(250, 500 - 10 * (head.frames - 1))) if outcome == "pulse_budget" else next(poses)
         return DockPose(x, 0, z, 0.5, captured_at)
 
     mock_dock_detector(monkeypatch, detect)
@@ -1374,11 +1394,14 @@ async def test_autonomous_low_battery_dock_and_charge_inhibition_lifecycle(
             }
 
         async def command(self, cmd):
+            from desk_robot.command_framing import expected_ack
+
             self.commands.append(cmd)
             if cmd == "arm":
                 self.armed = True
             elif cmd == "halt":
                 self.armed = False
+            return {"ok": True, "robot_id": robot.id, "reply": expected_ack(cmd)}
 
     def aux_packet(
         soc: int,
@@ -1570,6 +1593,8 @@ async def test_seated_robot_cannot_start_dock_approach_or_consume_permit(setting
     controller.permits["robot-01"] = time.monotonic() + 10
     controller.set_dock_charge_inhibition("robot-01", True)
     try:
+        assert "robot-01" not in controller.permits
+        controller.permits["robot-01"] = time.monotonic() + 10
         with pytest.raises(OperationError, match="seated or powered"):
             controller.dock("robot-01")
         with pytest.raises(OperationError, match="seated or powered"):

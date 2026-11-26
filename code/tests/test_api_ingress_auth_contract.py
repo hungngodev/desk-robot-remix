@@ -34,6 +34,7 @@ def test_rejected_credentials_never_read_body_or_dispatch(method, authorization)
         )
         assert sent[0]["type"] == "http.response.start"
         assert sent[0]["status"] == 401
+        assert (b"www-authenticate", b"Bearer") in sent[0]["headers"]
 
     asyncio.run(exercise())
 

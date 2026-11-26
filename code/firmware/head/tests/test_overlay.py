@@ -727,7 +727,7 @@ class OverlayTests(unittest.TestCase):
         self.assertIn("portMAX_DELAY", original)
         self.assertIn("data_if_mutex_", original)
         self.assertIn("#ifdef CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3", source)
-        self.assertIn("pdMS_TO_TICKS(120)", source)
+        self.assertIn("&bytes_written, 120);", source)
         self.assertIn("size_t bytes_written = 0", source)
         self.assertIn("const int safe_volume = std::clamp(output_volume(), 0, 100);", source)
         self.assertIn("pow(double(safe_volume) / 100.0, 2) * 65536", source)

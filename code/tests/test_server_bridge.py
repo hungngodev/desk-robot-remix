@@ -4503,3 +4503,40 @@ def test_identity_lookup_keeps_exact_spelling(bridge, monkeypatch):
         for (robot, device), voice in zip(mapping.items(), ("af_heart", "am_adam"), strict=True)
     ]
     assert module.fleet_device_and_voice_maps(robots)[0] == mapping
+
+
+async def test_lease_isolates_nonparticipant_heads_and_holds_until_stop_cleanup(
+    bridge, monkeypatch,
+):
+    monkeypatch.setenv(
+        "DESK_ROBOT_DEVICE_MAP",
+        json.dumps({"robot-01": "mac-01", "robot-02": "mac-02", "robot-03": "mac-03"}),
+    )
+    one, two, three = conn("mac-01"), conn("mac-02"), conn("mac-03")
+    one.client_listen_mode = "realtime"
+    three.client_listen_mode = "realtime"
+    bridge.register(one)
+    bridge.register(two)
+    bridge.register(three)
+    bridge.lease_ids = frozenset(["mac-01", "mac-02"])
+    bridge.lease_until = time.monotonic() + 20
+    bridge.active_device_id = "mac-01"
+    # Connected nonparticipant mac-03 must stay isolated while mac-01 holds the floor,
+    # while active speaker mac-01 preserves its realtime duplex barge-in path.
+    assert not bridge.suppress_message(one, b"human duplex barge-in")
+    assert bridge.suppress_message(three, b"third robot overheard speech")
+    assert bridge.suppress_message(three, '{"type":"listen","state":"start"}')
+    assert not bridge.observe_idle_human_voice(three, True)
+    assert not await bridge.interrupt_for_user_voice(three, True)
+    assert not await bridge.interrupt_for_normal_voice(three, True)
+    # Expired deadline must still keep suppression in force while lease_stopping cleanup runs.
+    bridge.lease_until = time.monotonic() - 1
+    bridge.lease_stopping = True
+    assert bridge.muted("mac-02")
+    assert bridge.suppress_message(two, b"late audio during stop")
+    assert bridge.suppress_message(three, b"third robot during stop")
+    bridge.lease_ids = frozenset()
+    bridge.lease_stopping = False
+    bridge.active_device_id = None
+    assert not bridge.muted("mac-02")
+    assert not bridge.suppress_message(three, b"normal unleased speech")

@@ -23,7 +23,7 @@ def test_personality_expression_keeps_physical_truth_contract():
     prompts = [expression_guidance(profile) for profile in profiles]
     assert len(set(prompts)) == len(profiles)
     for prompt in prompts:
-        assert "Never alter measured battery percentages, ToF ranges, safety faults" in prompt
+        assert "Never alter reported battery percentages or cell voltage (millivolts), ToF ranges, safety faults" in prompt
         assert "stop acknowledgments, or tool results" in prompt
         assert "safety always takes priority" in prompt
 

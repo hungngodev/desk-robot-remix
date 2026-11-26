@@ -216,11 +216,15 @@ struct SenseReferenceCodec {
     std::atomic<uint64_t> bench_capture_generation_{0};
     desk_robot::FreshBenchPcmConsent bench_consent_;
     desk_robot::SensePcmWindow bench_window_;
+    bool bench_start_pending_ = false;
     bool bench_transfer_active_ = false, bench_speaker_activity_in_window_ = false;
     esp_timer_handle_t bench_expiry_timer_ = nullptr;
     int64_t bench_started_us_ = 0;
     int bench_speaker_at_start_ = 0;
-    struct SpeakerActivity { int BeginWindow() { return 1; } } speaker_activity_;
+    struct SpeakerActivity {
+        int BeginWindow() { return 1; }
+        void EndWindow(int) {}
+    } speaker_activity_;
     static void BenchPcmExpiry(void*) {}
     static void ReleaseBenchPcmCapture(int16_t* p) { std::free(p); }
     void GrantBenchPcmConsent();

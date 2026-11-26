@@ -392,6 +392,10 @@ uint8_t thermal_next_chunk;
 uint32_t thermal_requested_ms, thermal_started_ms, thermal_sample_ms;
 float thermal[64], thermal_staging[64];
 namespace desk_robot_room {
+struct SensorRecoverySchedule {
+  enum Sensor { kScd, kBme, kAmg };
+  void record_success(Sensor) {}
+};
 bool read_thermal_chunk(int&, uint8_t, uint8_t chunk, float* pixels,
                         std::size_t destination_count) {
   assert(destination_count == 64U - 8U * chunk);
@@ -400,6 +404,7 @@ bool read_thermal_chunk(int&, uint8_t, uint8_t chunk, float* pixels,
   return true;
 }
 }
+desk_robot_room::SensorRecoverySchedule sensor_recovery;
 """ + step + r"""
 void run(uint32_t start, uint32_t last_start, uint32_t last_duration, bool valid) {
   amg_started = true;
@@ -800,6 +805,13 @@ struct FakeScd {
     clock_ms += 7; p = ppm; t = temp; rh = humidity; return measurement_status;
   }
 } scd;
+namespace desk_robot_room {
+struct SensorRecoverySchedule {
+  enum Sensor { kScd, kBme, kAmg };
+  void record_success(Sensor) {}
+};
+}
+desk_robot_room::SensorRecoverySchedule sensor_recovery;
 """ + step + r"""
 void run(uint32_t start) {
   clock_ms = scd_started_ms = start;

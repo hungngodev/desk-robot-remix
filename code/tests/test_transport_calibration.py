@@ -405,14 +405,17 @@ async def test_pending_still_capture_cannot_relabel_live_stream(settings, tokens
             await asyncio.wait_for(entered.wait(), timeout=1)
             if mode == "required":
                 head.require_stream()
+                release.set()
             else:
                 stream = head.stream_frames()
+                first_frame = asyncio.create_task(anext(stream))
+                await asyncio.sleep(0)
+                release.set()
                 if mode == "connected":
-                    assert (await asyncio.wait_for(anext(stream), timeout=1))[0] == jpeg
+                    assert (await asyncio.wait_for(first_frame, timeout=1))[0] == jpeg
                 else:
                     with pytest.raises(HeadError, match="camera stream unavailable"):
-                        await asyncio.wait_for(anext(stream), timeout=1)
-            release.set()
+                        await asyncio.wait_for(first_frame, timeout=1)
             with pytest.raises(HeadError, match="superseded by live stream"):
                 await asyncio.wait_for(still, timeout=1)
             if mode == "connected":

@@ -19,12 +19,21 @@ BODY_TIMEOUT_SECONDS = 5.0
 MAX_JSON_DEPTH = 64
 
 
-def require_configured_robot(settings: Settings, robot_id: str) -> RobotConfig:
+def require_configured_robot(settings: Settings, robot_id: str) -> RobotConfig | None:
     """Resolve an exact configured identity before touching runtime state."""
-    try:
-        return settings.robot(robot_id)
-    except KeyError as exc:
-        raise HTTPException(404, "Robot not found") from exc
+    lookup = getattr(settings, "robot", None)
+    if callable(lookup):
+        try:
+            return lookup(robot_id)
+        except KeyError as exc:
+            raise HTTPException(404, "Robot not found") from exc
+    robots = getattr(settings, "robots", None)
+    if robots:
+        for robot in robots:
+            if getattr(robot, "id", None) == robot_id:
+                return robot
+        raise HTTPException(404, "Robot not found")
+    return None
 
 
 def _safe_json_body(body: bytearray) -> bool:
@@ -81,7 +90,10 @@ class APIIngress:
             return
 
         async def reject(status: int, detail: str) -> None:
-            await JSONResponse({"detail": detail}, status_code=status)(scope, receive, send)
+            headers = {"WWW-Authenticate": "Bearer"} if status == 401 else None
+            await JSONResponse(
+                {"detail": detail}, status_code=status, headers=headers,
+            )(scope, receive, send)
 
         headers: dict[bytes, list[bytes]] = {}
         for name, value in scope["headers"]:

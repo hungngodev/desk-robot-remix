@@ -1870,7 +1870,13 @@ def apply(target: Path, board: str = "cores3") -> None:
     changed = subprocess.check_output(
         ["git", "status", "--porcelain", "--untracked-files=no"], cwd=target, text=True
     )
-    if changed:
+    hidden = any(
+        line and (line[0].islower() or line[0] == "S")
+        for line in subprocess.check_output(
+            ["git", "ls-files", "-v"], cwd=target, text=True
+        ).splitlines()
+    )
+    if changed or hidden:
         raise ValueError("Target has tracked changes; use a clean build copy")
     if any(checked_overlay_path(target, name).exists() for name in BOARDS.values()):
         raise ValueError("Target board directory already exists")

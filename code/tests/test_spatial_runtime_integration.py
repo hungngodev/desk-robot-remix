@@ -100,6 +100,8 @@ class SpatialHead:
         return _valid_jpeg()
 
     async def command(self, cmd: str):
+        from desk_robot.command_framing import expected_ack
+
         self.commands.append(cmd)
         if cmd == "arm":
             self.armed = True
@@ -107,6 +109,7 @@ class SpatialHead:
             self.armed = False
         elif cmd == "drive 20 20 100":
             self.x_mm += 20
+        return {"ok": True, "robot_id": self.robot_id, "reply": expected_ack(cmd)}
 
 
 def _seed_safe_grid(
@@ -242,7 +245,10 @@ def test_api_spatial_search_navigate_and_target_confirmation(
     """End-to-end API navigate uses SearchViewpoint -> plan_route -> live head steps -> detector verification."""
     settings.memory_dir = tmp_path / "memory"
     settings.trials_file = tmp_path / "trials.jsonl"
-    monkeypatch.setattr("desk_robot.controller.image_size", lambda _jpeg: (640, 480))
+    async def fake_sizes(_frames, *, max_bytes):
+        return ((640, 480),)
+
+    monkeypatch.setattr("desk_robot.controller.validated_camera_sizes", fake_sizes)
 
     app = create_app(settings)
     op = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
@@ -482,10 +488,11 @@ async def test_spatial_navigation_halts_on_pickup_invalidation_and_pose_replay(s
         class DelayOnceHead(SpatialHead):
             async def command(self, cmd: str):
                 nonlocal drive_injections
-                await super().command(cmd)
+                receipt = await super().command(cmd)
                 if cmd.startswith("drive "):
                     drive_injections += 1
                     rt.pet._notify_sensor("robot-01", "handling_tilt")
+                return receipt
 
         delayed_head = DelayOnceHead("robot-01")
         delayed_head.origin = head.origin
@@ -517,9 +524,10 @@ async def test_spatial_navigation_halts_on_pickup_invalidation_and_pose_replay(s
                 self.triggered = False
 
             async def command(self, cmd: str):
-                await super().command(cmd)
+                receipt = await super().command(cmd)
                 if cmd.startswith("drive "):
                     self.drives += 1
+                return receipt
 
             async def pose_status(self):
                 if self.drives >= 1 and not self.triggered:
@@ -589,7 +597,10 @@ async def test_spatial_navigate_barrier_cancellation_and_pre_pickup_rejection(
     robot.spatial_navigation_qualified = True
     robot.object_detector_qualified = True
     robot.motion_enabled = True
-    monkeypatch.setattr("desk_robot.controller.image_size", lambda _jpeg: (640, 480))
+    async def fake_sizes(_frames, *, max_bytes):
+        return ((640, 480),)
+
+    monkeypatch.setattr("desk_robot.controller.validated_camera_sizes", fake_sizes)
 
     class FixedVision:
         async def detect(self, _jpeg: bytes, target: str):
@@ -601,10 +612,11 @@ async def test_spatial_navigate_barrier_cancellation_and_pre_pickup_rejection(
 
     class BarrierHead(SpatialHead):
         async def command(self, cmd: str):
-            await super().command(cmd)
+            receipt = await super().command(cmd)
             if cmd.startswith("drive "):
                 first_drive_seen.set()
                 await asyncio.wait_for(release_first_drive.wait(), timeout=5)
+            return receipt
 
     head = BarrierHead("robot-01")
     rt.coordinator.heads["robot-01"] = head
@@ -865,6 +877,8 @@ class _HardwarePoseHead(SpatialHead):
     async def command(self, cmd: str):
         import math
 
+        from desk_robot.command_framing import expected_ack
+
         self.commands.append(cmd)
         if cmd == "arm":
             self.armed = True
@@ -880,6 +894,7 @@ class _HardwarePoseHead(SpatialHead):
             self.yaw_mrad = round(math.remainder(self.yaw_mrad / 1000.0 + math.pi / 2, math.tau) * 1000.0)
         elif cmd == "drive -20 20 100" and not self.ignore_turn:
             self.yaw_mrad = round(math.remainder(self.yaw_mrad / 1000.0 - math.pi / 2, math.tau) * 1000.0)
+        return {"ok": True, "robot_id": self.robot_id, "reply": expected_ack(cmd)}
 
 
 async def _setup_hardware_pose_runtime(settings, tmp_path, head: _HardwarePoseHead, map_to_odom):
@@ -1262,9 +1277,10 @@ async def test_three_cell_straight_route_revalidates_later_edges_independently(
             self.injected = False
 
         async def command(self, cmd: str):
-            await super().command(cmd)
+            receipt = await super().command(cmd)
             if cmd.startswith("drive "):
                 self.drive_count += 1
+            return receipt
 
         async def pose_status(self):
             if hazard_kind != "clean" and self.drive_count >= 1 and not self.injected:
@@ -1322,7 +1338,10 @@ def test_explicit_goal_report_only_target_omits_eyewitness_timestamp(
     app = create_app(settings)
     op = {"Authorization": f"Bearer {tokens['DESK_ROBOT_API_TOKEN']}"}
     tool = {"Authorization": f"Bearer {tokens['DESK_ROBOT_TOOL_TOKEN']}"}
-    monkeypatch.setattr("desk_robot.controller.image_size", lambda _jpeg: (640, 480))
+    async def fake_sizes(_frames, *, max_bytes):
+        return ((640, 480),)
+
+    monkeypatch.setattr("desk_robot.controller.validated_camera_sizes", fake_sizes)
 
     class MissingVision:
         async def detect(self, _jpeg: bytes, _target: str):

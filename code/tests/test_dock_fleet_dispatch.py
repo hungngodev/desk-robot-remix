@@ -1,5 +1,6 @@
 """Dock pulses must retain fleet ownership through the transport queue."""
 import asyncio
+from types import SimpleNamespace
 
 import pytest
 from desk_robot import operations
@@ -32,6 +33,7 @@ async def test_dock_pulse_rechecks_fleet_authority_at_dispatch(monkeypatch, boun
     coordinator.closed = False
     coordinator.tasks = {}
     coordinator.jobs = {job.id: job}
+    coordinator.robot = lambda _id: SimpleNamespace(motion_enabled=True)
     coordinator._permit_epoch = {job.robot_id: 1}
     coordinator._fleet_motion_owner = job.id
     coordinator.heads = {job.robot_id: QueuedHead()}

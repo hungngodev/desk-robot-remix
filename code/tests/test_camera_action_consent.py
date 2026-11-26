@@ -86,6 +86,7 @@ async def test_pickup_revocation_during_observe_never_grasps(settings, regrant):
     calibration = SimpleNamespace(
         grip_open=70, lift_down=80, servo_settle_seconds=0,
         ground=lambda center: (0, 0), within=lambda position: True,
+        has_pickup_floor_clearance=lambda: True,
         grip_ground_mm=(0, 0), alignment_tolerance_mm=1,
     )
     try:
@@ -159,15 +160,15 @@ async def test_pickup_revocation_before_detector_dispatch(settings, monkeypatch,
         if regrant:
             settings.voice_vision_tools_enabled = True
 
-    def image_size(_jpeg):
+    async def validated_sizes(_frames, *, max_bytes):
         asyncio.get_running_loop().call_soon(revoke)
-        return 20, 20
+        return ((20, 20),)
 
     async def detect(*args):
         calls.append("detect")
         return [SimpleNamespace(label="key", confidence=1.0, box=(0, 0, 10, 10))]
 
-    monkeypatch.setattr(controller_module, "image_size", image_size)
+    monkeypatch.setattr(controller_module, "validated_camera_sizes", validated_sizes)
     controller.vision = SimpleNamespace(detect=detect)
     calibration = SimpleNamespace(image_width=20, image_height=20, min_confidence=0.8)
     try:

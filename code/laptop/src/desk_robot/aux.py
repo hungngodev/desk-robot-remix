@@ -127,7 +127,7 @@ class NoseDialGate:
         )
 
 
-def ina226_monitor_warning(power: dict) -> str | None:
+def ina226_monitor_warning(power: dict[str, Any]) -> str | None:
     """Describe the last observed fault without treating it as a fresh sample."""
     if "monitor_fault" not in power:
         return None  # Older firmware cannot distinguish a fault from missing data.
@@ -195,11 +195,11 @@ def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
             or force.get("calibrated") is not False
             or not is_uint(force.get("jaw_seq"), 0xffffffff)
             or ("boot_id" in force and not is_uint(force["boot_id"], 0xffffffff))
-            or (jaw_age is not None and not is_uint(jaw_age, 0xffffffff))
-            or (jaw_valid is not None and not _bool(jaw_valid))
-            or (belly_seq is not None and not is_uint(belly_seq, 0xffffffff))
-            or (belly_age is not None and not is_uint(belly_age, 0xffffffff))
-            or (belly_valid is not None and not _bool(belly_valid))
+            or ("jaw_age_ms" in force and not is_uint(jaw_age, 0xffffffff))
+            or ("jaw_valid" in force and not _bool(jaw_valid))
+            or ("belly_seq" in force and not is_uint(belly_seq, 0xffffffff))
+            or ("belly_age_ms" in force and not is_uint(belly_age, 0xffffffff))
+            or ("belly_valid" in force and not _bool(belly_valid))
             # Saturated ADC clipping or staleness invalidates the corresponding channel
             or (jaw_valid is True and (
                 force["adc"][1] in (-32768, 32767)

@@ -63,7 +63,10 @@ class SensorHead:
         }
 
     async def command(self, command):
+        from desk_robot.command_framing import expected_ack
+
         self.commands.append(command)
+        return {"ok": True, "robot_id": "robot-01", "reply": expected_ack(command)}
 
 
 def camera():

@@ -300,7 +300,9 @@ async def test_drx062_fault_handling_discrimination_in_active_dialogue_without_m
         })
         putdown_ctx = render_live()
         assert "stable_putdown" in putdown_ctx
-        assert "not current telemetry" in putdown_ctx
+        assert "not current telemetry" in attention.timeline(
+            "robot-01", __import__("time").monotonic(),
+        )[0]["content"]
         assert "do not drive, reverse, rearm" in putdown_ctx
 
         # 3. Ordinary single cliff channel (other 3 cliff channels see floor).
