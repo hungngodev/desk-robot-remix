@@ -156,32 +156,29 @@ def _valid_evidence(e: object) -> bool:
                  (e.floor_mm is None and e.projection_qualified is False)))
 
 
-def resolve_object_target(
+def _result(
     query: ObjectQuery,
-    owner: ObjectOwner,
-    evidence: tuple[ObjectEvidence, ...] | list[ObjectEvidence],
+    status: str,
+    reason: str,
+    selected: ObjectEvidence | None = None,
     *,
-    now_us: int,
-    fresh_us: int = 250_000,
-    min_confidence: float = 0.75,
+    confirmed: tuple[int, int] | None = None,
+    hint: tuple[int, int] | None = None,
 ) -> ObjectTarget:
-    """Resolve evidence without granting actuation or declaring arrival.
+    return ObjectTarget(status, reason,
+                        query.robot_id if isinstance(query, ObjectQuery) else "",
+                        query.label if isinstance(query, ObjectQuery) else "",
+                        selected.source if selected else None,
+                        selected.seen_at_wall_s if selected else None,
+                        confirmed, hint,
+                        request_fence=query if status != "rejected" else None)
 
-    The owner must be obtained *after* the request starts and checked again by
-    the caller after any await. The caller must also reject a superseded owner
-    before planning or dispatch, even if this synchronous result was valid.
-    """
-    def result(status: str, reason: str, selected: ObjectEvidence | None = None,
-               *, confirmed: tuple[int, int] | None = None,
-               hint: tuple[int, int] | None = None) -> ObjectTarget:
-        return ObjectTarget(status, reason,
-                            query.robot_id if isinstance(query, ObjectQuery) else "",
-                            query.label if isinstance(query, ObjectQuery) else "",
-                            selected.source if selected else None,
-                            selected.seen_at_wall_s if selected else None,
-                            confirmed, hint,
-                            request_fence=query if status != "rejected" else None)
 
+def _request_rejection(
+    query: ObjectQuery, owner: ObjectOwner,
+    evidence: tuple[ObjectEvidence, ...] | list[ObjectEvidence],
+    now_us: int, fresh_us: int, min_confidence: float,
+) -> str | None:
     if (not _valid_request_identity(query, owner)
             or any(type(x) is not int for x in (
                 query.created_us, query.deadline_us, now_us, fresh_us))
@@ -190,65 +187,76 @@ def resolve_object_target(
             or type(min_confidence) not in (int, float)
             or not 0 < min_confidence <= 1
             or not isinstance(evidence, (tuple, list)) or len(evidence) > 128):
-        return result("rejected", "invalid_request_or_evidence_budget")
+        return "invalid_request_or_evidence_budget"
     if query.cancelled:
-        return result("rejected", "cancelled")
+        return "cancelled"
     if query.created_us > now_us or query.deadline_us <= now_us:
-        return result("rejected", "deadline_or_clock_invalid")
+        return "deadline_or_clock_invalid"
     if ((query.robot_id, query.session_id, query.turn_id) !=
             (owner.robot_id, owner.session_id, owner.turn_id)):
-        return result("rejected", "turn_or_robot_changed")
+        return "turn_or_robot_changed"
     if ((query.origin_id, query.epoch, query.anchor_id, query.calibration_id,
          query.camera_boot, query.host_boot_id, query.camera_grant) !=
             (owner.origin_id, owner.epoch, owner.anchor_id, owner.calibration_id,
              owner.camera_boot, owner.host_boot_id, owner.camera_grant)):
-        return result("rejected", "origin_map_or_camera_changed")
+        return "origin_map_or_camera_changed"
     if not owner.memory_allowed:
-        return result("rejected", "memory_consent_revoked")
+        return "memory_consent_revoked"
+    return None
 
+
+def _matching_records(
+    query: ObjectQuery, evidence: tuple[ObjectEvidence, ...] | list[ObjectEvidence], now_us: int,
+) -> list[ObjectEvidence]:
     # Reject evidence from another robot even if a store accidentally mixes rows.
     # A receipt in the future of this same Mac monotonic clock is impossible.
     # Do not downgrade it into a historical metric search hint. Other host
     # boots have incomparable monotonic clocks and remain historical only.
-    records = [e for e in evidence if _valid_evidence(e)
-               and e.robot_id == query.robot_id and e.label == query.label
-               and not (e.host_boot_id == query.host_boot_id
-                        and e.receipt_us is not None and e.receipt_us > now_us)]
-    seen = [e for e in records if e.source == "camera_seen"
-            and e.confidence >= min_confidence]
-    reports = [e for e in records if e.source == "user_reported"]
+    return [e for e in evidence if _valid_evidence(e)
+            and e.robot_id == query.robot_id and e.label == query.label
+            and not (e.host_boot_id == query.host_boot_id
+                     and e.receipt_us is not None and e.receipt_us > now_us)]
 
-    def same_map(e: ObjectEvidence) -> bool:
-        return ((e.origin_id, e.epoch, e.anchor_id, e.calibration_id) ==
-                (query.origin_id, query.epoch, query.anchor_id,
-                 query.calibration_id))
 
-    def fresh(e: ObjectEvidence) -> bool:
-        return (owner.camera_allowed and same_map(e)
-                and e.camera_boot == query.camera_boot
-                and e.host_boot_id == query.host_boot_id
-                and e.camera_grant == query.camera_grant
-                and e.receipt_us is not None
-                and e.captured_us is not None
-                and query.created_us <= e.captured_us <= e.receipt_us <= now_us
-                and now_us - e.captured_us <= fresh_us)
+def _same_map(e: ObjectEvidence, query: ObjectQuery) -> bool:
+    return ((e.origin_id, e.epoch, e.anchor_id, e.calibration_id) ==
+            (query.origin_id, query.epoch, query.anchor_id,
+             query.calibration_id))
 
-    def frame_identity(e: ObjectEvidence) -> tuple:
-        return (e.host_boot_id, e.camera_boot, e.camera_grant, e.frame_seq,
-                e.origin_id, e.epoch, e.anchor_id, e.calibration_id)
 
-    def projected_locations(selected: ObjectEvidence, candidates: list[ObjectEvidence]) -> set:
-        # Multiple detections of the same class in one frame do not identify
-        # which physical object the user meant. Identical receipts may coalesce.
-        return {tuple(e.floor_mm) if e.projection_qualified and e.floor_mm is not None
-                else None for e in candidates
-                if frame_identity(e) == frame_identity(selected)}
+def _fresh(
+    e: ObjectEvidence, query: ObjectQuery, owner: ObjectOwner, now_us: int, fresh_us: int,
+) -> bool:
+    return (owner.camera_allowed and _same_map(e, query)
+            and e.camera_boot == query.camera_boot
+            and e.host_boot_id == query.host_boot_id
+            and e.camera_grant == query.camera_grant
+            and e.receipt_us is not None
+            and e.captured_us is not None
+            and query.created_us <= e.captured_us <= e.receipt_us <= now_us
+            and now_us - e.captured_us <= fresh_us)
 
-    # Contradictions attach to the frame identity, not receipt freshness.
-    absent_frames = {frame_identity(e) for e in records
-                     if e.source == "camera_not_seen"}
-    positives = [e for e in seen if fresh(e)]
-    negatives = [e for e in records if e.source == "camera_not_seen" and fresh(e)]
+
+def _frame_identity(e: ObjectEvidence) -> tuple:
+    return (e.host_boot_id, e.camera_boot, e.camera_grant, e.frame_seq,
+            e.origin_id, e.epoch, e.anchor_id, e.calibration_id)
+
+
+def _projected_locations(selected: ObjectEvidence, candidates: list[ObjectEvidence]) -> set:
+    # Multiple detections of the same class in one frame do not identify
+    # which physical object the user meant. Identical receipts may coalesce.
+    return {tuple(e.floor_mm) if e.projection_qualified and e.floor_mm is not None
+            else None for e in candidates
+            if _frame_identity(e) == _frame_identity(selected)}
+
+
+def _latest_fresh_frames(
+    records: list[ObjectEvidence], seen: list[ObjectEvidence], query: ObjectQuery,
+    owner: ObjectOwner, now_us: int, fresh_us: int,
+) -> tuple[ObjectEvidence | None, ObjectEvidence | None]:
+    positives = [e for e in seen if _fresh(e, query, owner, now_us, fresh_us)]
+    negatives = [e for e in records if e.source == "camera_not_seen"
+                 and _fresh(e, query, owner, now_us, fresh_us)]
     # Native camera frames are ordered by frame sequence inside one
     # authenticated camera boot. Inference can finish out of order: the
     # receipt time of an OLD frame cannot override a newer missing-object
@@ -257,21 +265,32 @@ def resolve_object_target(
                       default=None)
     latest_absent = max(negatives, key=lambda e: (e.frame_seq, e.receipt_us),
                         default=None)
-    if (latest_seen is not None
-            and frame_identity(latest_seen) not in absent_frames
-            and (latest_absent is None or
-                 latest_seen.frame_seq > latest_absent.frame_seq)):
-        # Freshness selects the view, not which objects existed in that view.
-        # A conflicting detection from the same frame remains ambiguous even
-        # if its individual receipt has aged out.
-        locations = projected_locations(latest_seen, seen)
-        if len(locations) > 1:
-            return result("current_sighting", "ambiguous_projected_view", latest_seen)
-        if latest_seen.projection_qualified and latest_seen.floor_mm is not None:
-            return result("current_sighting", "fresh_projected_view", latest_seen,
-                          confirmed=latest_seen.floor_mm)
-        return result("current_sighting", "fresh_view_no_metric_projection", latest_seen)
+    return latest_seen, latest_absent
 
+
+def _resolve_current(
+    query: ObjectQuery, seen: list[ObjectEvidence], absent_frames: set[tuple],
+    latest_seen: ObjectEvidence | None, latest_absent: ObjectEvidence | None,
+) -> ObjectTarget | None:
+    if (latest_seen is None
+            or _frame_identity(latest_seen) in absent_frames
+            or (latest_absent is not None and latest_seen.frame_seq <= latest_absent.frame_seq)):
+        return None
+    # Freshness selects the view, not which objects existed in that view.
+    # A conflicting detection from the same frame remains ambiguous even
+    # if its individual receipt has aged out.
+    locations = _projected_locations(latest_seen, seen)
+    if len(locations) > 1:
+        return _result(query, "current_sighting", "ambiguous_projected_view", latest_seen)
+    if latest_seen.projection_qualified and latest_seen.floor_mm is not None:
+        return _result(query, "current_sighting", "fresh_projected_view", latest_seen,
+                      confirmed=latest_seen.floor_mm)
+    return _result(query, "current_sighting", "fresh_view_no_metric_projection", latest_seen)
+
+
+def _historical_candidates(
+    seen: list[ObjectEvidence], query: ObjectQuery,
+) -> list[ObjectEvidence]:
     # Historical observations cannot prove where a moved/hidden target is now.
     # A later user correction takes precedence but stays explicitly reported.
     # Wall time is descriptive and may jump backwards. Select the latest
@@ -293,6 +312,10 @@ def resolve_object_target(
     current_host = [e for e in candidates if e.host_boot_id == query.host_boot_id]
     if current_host:
         candidates = current_host
+    return candidates
+
+
+def _select_past(candidates: list[ObjectEvidence]) -> ObjectEvidence | None:
     past = candidates[0] if len(candidates) == 1 else None
     if (len(candidates) > 1
             and len({e.host_boot_id for e in candidates}) == 1
@@ -301,33 +324,80 @@ def resolve_object_target(
         latest = [e for e in candidates if e.captured_us == latest_capture]
         if len(latest) == 1:
             past = latest[0]
+    return past
 
+
+def _resolve_past(
+    query: ObjectQuery, past: ObjectEvidence, seen: list[ObjectEvidence],
+    absent_frames: set[tuple], latest_absent: ObjectEvidence | None, now_us: int,
+) -> ObjectTarget:
+    if _frame_identity(past) in absent_frames:
+        return _result(query, "unknown", "contradictory_camera_frame")
+    if len(_projected_locations(past, seen)) > 1:
+        return _result(query, "last_seen", "ambiguous_projected_view", past)
+    metric_hint = (past.projection_qualified and past.floor_mm is not None
+                   and _same_map(past, query))
+    hint_fresh = (past.host_boot_id == query.host_boot_id
+                  and past.captured_us is not None
+                  and 0 <= now_us - past.captured_us < MAX_SEARCH_HINT_AGE_US)
+    hint = past.floor_mm if metric_hint and hint_fresh else None
+    if metric_hint and not hint_fresh:
+        return _result(query, "last_seen", "search_hint_expired", past)
+    reason = "not_currently_confirmed" if latest_absent else "historical_sighting_only"
+    return _result(query, "last_seen", reason, past, hint=hint)
+
+
+def _resolve_history(
+    query: ObjectQuery, seen: list[ObjectEvidence], reports: list[ObjectEvidence],
+    absent_frames: set[tuple], latest_absent: ObjectEvidence | None, now_us: int,
+) -> ObjectTarget:
+    candidates = _historical_candidates(seen, query)
+    past = _select_past(candidates)
     report = max(reports, key=lambda e: e.seen_at_wall_s, default=None)
     if candidates and past is None:
         if report is not None and all(
                 report.seen_at_wall_s > e.seen_at_wall_s for e in seen):
-            return result("user_reported", "unverified_user_location", report)
+            return _result(query, "user_reported", "unverified_user_location", report)
         # No uniquely ordered historical view: do not invent its timestamp or
         # pass an arbitrary metric search hint to the route planner.
-        return result("last_seen", "historical_order_uncertain")
+        return _result(query, "last_seen", "historical_order_uncertain")
     if report is not None and (past is None or report.seen_at_wall_s > past.seen_at_wall_s):
-        return result("user_reported", "unverified_user_location", report)
+        return _result(query, "user_reported", "unverified_user_location", report)
     if past is not None:
-        if frame_identity(past) in absent_frames:
-            return result("unknown", "contradictory_camera_frame")
-        if len(projected_locations(past, seen)) > 1:
-            return result("last_seen", "ambiguous_projected_view", past)
-        metric_hint = (past.projection_qualified and past.floor_mm is not None
-                       and same_map(past))
-        hint_fresh = (past.host_boot_id == query.host_boot_id
-                      and past.captured_us is not None
-                      and 0 <= now_us - past.captured_us < MAX_SEARCH_HINT_AGE_US)
-        hint = past.floor_mm if metric_hint and hint_fresh else None
-        if metric_hint and not hint_fresh:
-            return result("last_seen", "search_hint_expired", past)
-        reason = "not_currently_confirmed" if latest_absent else "historical_sighting_only"
-        return result("last_seen", reason, past, hint=hint)
-    if report is not None:
-        return result("user_reported", "unverified_user_location", report)
-    return result("unknown", "no_qualified_observation")
+        return _resolve_past(query, past, seen, absent_frames, latest_absent, now_us)
+    return _result(query, "unknown", "no_qualified_observation")
 
+
+def resolve_object_target(
+    query: ObjectQuery,
+    owner: ObjectOwner,
+    evidence: tuple[ObjectEvidence, ...] | list[ObjectEvidence],
+    *,
+    now_us: int,
+    fresh_us: int = 250_000,
+    min_confidence: float = 0.75,
+) -> ObjectTarget:
+    """Resolve evidence without granting actuation or declaring arrival.
+
+    The owner must be obtained *after* the request starts and checked again by
+    the caller after any await. The caller must also reject a superseded owner
+    before planning or dispatch, even if this synchronous result was valid.
+    """
+    rejection = _request_rejection(query, owner, evidence, now_us, fresh_us, min_confidence)
+    if rejection is not None:
+        return _result(query, "rejected", rejection)
+
+    records = _matching_records(query, evidence, now_us)
+    seen = [e for e in records if e.source == "camera_seen"
+            and e.confidence >= min_confidence]
+    reports = [e for e in records if e.source == "user_reported"]
+    # Contradictions attach to the frame identity, not receipt freshness.
+    absent_frames = {_frame_identity(e) for e in records
+                     if e.source == "camera_not_seen"}
+    latest_seen, latest_absent = _latest_fresh_frames(
+        records, seen, query, owner, now_us, fresh_us,
+    )
+    current = _resolve_current(query, seen, absent_frames, latest_seen, latest_absent)
+    if current is not None:
+        return current
+    return _resolve_history(query, seen, reports, absent_frames, latest_absent, now_us)

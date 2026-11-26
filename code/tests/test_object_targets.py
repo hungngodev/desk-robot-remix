@@ -460,3 +460,65 @@ def test_recall_rejects_invalid_matching_owner_identity(changes):
     assert result.reason == "invalid_request_or_evidence_budget"
     assert result.status == "rejected" and result.request_fence is None
     assert not result.may_execute and not result.arrived
+
+
+@pytest.mark.parametrize(
+    ("query_changes", "owner_changes", "now_us", "reason"),
+    [
+        ({"cancelled": True, "deadline_us": True}, {"memory_allowed": False},
+         1_500_000, "invalid_request_or_evidence_budget"),
+        ({"cancelled": True}, {"turn_id": "other", "memory_allowed": False},
+         1_500_000, "cancelled"),
+        ({}, {"turn_id": "other", "memory_allowed": False},
+         1_500_000, "deadline_or_clock_invalid"),
+        ({}, {"turn_id": "other", "epoch": 99, "memory_allowed": False},
+         1_000_000, "turn_or_robot_changed"),
+        ({}, {"epoch": 99, "memory_allowed": False},
+         1_000_000, "origin_map_or_camera_changed"),
+    ],
+)
+def test_overlapping_rejections_preserve_precedence(query_changes, owner_changes, now_us, reason):
+    query, owner, seen = fixtures()
+    result = resolve([seen], query=replace(query, **query_changes),
+                     owner=replace(owner, **owner_changes), now_us=now_us)
+    assert (result.status, result.reason) == ("rejected", reason)
+    assert result.request_fence is None
+    assert not result.arrived and not result.may_execute
+
+
+@pytest.mark.parametrize("capture", [None, 950_000, 960_000])
+def test_historical_stream_selection_uses_unique_capture_time(capture):
+    query, _, seen = fixtures()
+    other = replace(seen, camera_grant=11, captured_us=capture, receipt_us=970_000,
+                    floor_mm=(240, 320))
+    for rows in ([seen, other], [other, seen]):
+        result = resolve(rows, now_us=1_300_001)
+        assert result.request_fence == query
+        assert result.status == "last_seen"
+        if capture == 960_000:
+            assert result.reason == "historical_sighting_only"
+            assert result.search_hint_mm == other.floor_mm
+        else:
+            assert result.reason == "historical_order_uncertain"
+            assert result.seen_at_wall_s is None and result.search_hint_mm is None
+        assert result.confirmed_floor_mm is None
+        assert not result.arrived and not result.may_execute
+
+
+@pytest.mark.parametrize("wall_time", [1800000000.1, 1800000001.0])
+def test_user_report_must_strictly_postdate_all_unordered_history(wall_time):
+    query, _, seen = fixtures()
+    first = replace(seen, host_boot_id="prior-one")
+    second = replace(seen, host_boot_id="prior-two")
+    report = ObjectEvidence(query.robot_id, query.label, "user_reported", wall_time)
+    for rows in ([first, report, second], [second, first, report]):
+        result = resolve(rows)
+        expected = (
+            ("user_reported", "unverified_user_location")
+            if wall_time > seen.seen_at_wall_s
+            else ("last_seen", "historical_order_uncertain")
+        )
+        assert (result.status, result.reason) == expected
+        assert result.request_fence == query
+        assert result.confirmed_floor_mm is None and result.search_hint_mm is None
+        assert not result.arrived and not result.may_execute
