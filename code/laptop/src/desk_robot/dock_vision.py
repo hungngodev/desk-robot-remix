@@ -258,18 +258,24 @@ def detect_apriltag(
     if raw_points.size != 8 or raw_points.shape not in ((1, 4, 2), (4, 2)):
         return None
     image_points = raw_points.reshape(4, 2)
+    # Independently enforce OpenCV's default minDistanceToBorder (3 px).
+    # https://docs.opencv.org/4.x/d1/dcd/structcv_1_1aruco_1_1DetectorParameters.html
+    border_px = 3
     if (not np.isfinite(image_points).all()
-            or np.any(image_points[:, 0] < 0)
-            or np.any(image_points[:, 0] >= frame.shape[1])
-            or np.any(image_points[:, 1] < 0)
-            or np.any(image_points[:, 1] >= frame.shape[0])):
+            or np.any(image_points[:, 0] < border_px)
+            or np.any(image_points[:, 0] > frame.shape[1] - 1 - border_px)
+            or np.any(image_points[:, 1] < border_px)
+            or np.any(image_points[:, 1] > frame.shape[0] - 1 - border_px)):
         return None
-    # Four in-frame corners can still describe a collapsed or crossed square.
-    # Reject subpixel/degenerate quads before native PnP can fit an unstable
-    # pose with deceptively small reprojection error.
+    # 36h11 has six data cells and one border cell on each side. A projected
+    # edge shorter than eight pixels is below one pixel per cell on average.
+    # This is a conservative raster heuristic, not calibrated pose covariance.
     edges = np.roll(image_points, -1, axis=0) - image_points
-    if np.any(np.sum(edges * edges, axis=1) < 4.0):
+    shortest_edge_px = float(np.min(np.hypot(edges[:, 0], edges[:, 1])))
+    marker_cells = 8
+    if shortest_edge_px < marker_cells:
         return None
+    corner_error_budget_px = min(max_reprojection_error_px, shortest_edge_px / marker_cells)
     x, y = image_points[:, 0], image_points[:, 1]
     signed_twice_area = np.sum(x * np.roll(y, -1) - y * np.roll(x, -1))
     if not np.isfinite(signed_twice_area) or abs(signed_twice_area) < 32.0:
@@ -312,7 +318,7 @@ def detect_apriltag(
         residual = projected - image_points
         corner_errors = np.hypot(residual[:, 0], residual[:, 1])
         if (not np.isfinite(corner_errors).all()
-                or np.any(corner_errors > max_reprojection_error_px)):
+                or np.any(corner_errors > corner_error_budget_px)):
             continue
         error = float(np.sqrt(np.mean(corner_errors ** 2)))
         # The physical printed face must point toward the camera. A good

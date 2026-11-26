@@ -999,3 +999,114 @@ def test_distorted_off_axis_tag_requires_face_to_viewing_ray(monkeypatch, x_mm, 
     assert assessment.phase == expected_phase
     assert not assessment.motor_authorized
     assert not assessment.charging_authorized
+
+
+@pytest.mark.parametrize(("left", "top", "width", "height", "reaches_pnp"), [
+    (2.9, 100, 40, 40, False),
+    (3, 100, 40, 40, True),
+    (596.1, 100, 40, 40, False),
+    (596, 100, 40, 40, True),
+    (100, 2.9, 40, 40, False),
+    (100, 3, 40, 40, True),
+    (100, 436.1, 40, 40, False),
+    (100, 436, 40, 40, True),
+    (100, 100, 7.9, 40, False),
+    (100, 100, 8, 40, True),
+    (100, 100, 40, 7.9, False),
+    (100, 100, 40, 8, True),
+])
+def test_dock_tag_minimum_raster_footprint(
+    monkeypatch, left, top, width, height, reaches_pnp,
+):
+    """Even in-frame corners need a full marker footprint and border margin."""
+    cv2 = pytest.importorskip("cv2")
+    import numpy as np
+
+    points = np.array([[
+        [left, top], [left + width, top],
+        [left + width, top + height], [left, top + height],
+    ]], dtype=np.float64)
+
+    class Detector:
+        def __init__(self, dictionary):
+            pass
+
+        def detectMarkers(self, frame):
+            return [points], np.array([[12]], dtype=np.int32), []
+
+    calls = []
+
+    def solve(*args, **kwargs):
+        calls.append(True)
+        return False, None, None
+
+    monkeypatch.setattr(cv2.aruco, "ArucoDetector", Detector)
+    monkeypatch.setattr(cv2, "solvePnP", solve)
+    pose = detect_apriltag(_encoded_frame(), calibration(), captured_at=5)
+    assert bool(calls) is reaches_pnp
+    assert pose is None
+    assessment = assess_dock(pose, now=5.1, target_distance_mm=120)
+    assert assessment.phase == "hold"
+    assert not assessment.motor_authorized and not assessment.charging_authorized
+
+
+@pytest.mark.parametrize(("error_px", "accepted"), [(1.0, True), (1.25, True), (1.26, False)])
+def test_small_dock_tag_reprojection_is_bounded_by_cell_footprint(monkeypatch, error_px, accepted):
+    """A sub-three-pixel residual can still exceed one cell of a distant tag."""
+    cv2 = pytest.importorskip("cv2")
+    import numpy as np
+
+    camera = DockCameraCalibration(410, 410, 320, 240, 20, 12)
+    points = np.array([[[315., 235.], [325., 235.], [325., 245.], [315., 245.]]])
+    projected = points.reshape(4, 1, 2).copy()
+    projected[0, 0, 0] += error_px
+
+    class Detector:
+        def __init__(self, dictionary):
+            pass
+
+        def detectMarkers(self, frame):
+            return [points], np.array([[12]], dtype=np.int32), []
+
+    rvec = np.array([[math.pi], [0.], [0.]])
+    tvec = np.array([[0.], [0.], [820.]])
+    monkeypatch.setattr(cv2.aruco, "ArucoDetector", Detector)
+    monkeypatch.setattr(cv2, "solvePnP", lambda *a, **kw: (True, rvec, tvec))
+    monkeypatch.setattr(cv2, "projectPoints", lambda *a: (projected, None))
+    pose = detect_apriltag(_encoded_frame(), camera, captured_at=0)
+    assert (pose is not None) is accepted
+    if accepted:
+        assert pose.reprojection_error_px == pytest.approx(error_px / 2)
+    assessment = assess_dock(pose, now=0.2, target_distance_mm=120)
+    assert assessment.phase == ("approach" if accepted else "hold")
+    assert not assessment.motor_authorized and not assessment.charging_authorized
+    for now in (-0.001, math.nextafter(0.2, math.inf)):
+        assert assess_dock(pose, now=now, target_distance_mm=120).phase == "hold"
+
+
+@pytest.mark.parametrize("invalid", ["missing_id", "mirrored"])
+def test_dock_tag_missing_id_or_mirror_cannot_reach_pnp(monkeypatch, invalid):
+    cv2 = pytest.importorskip("cv2")
+    import numpy as np
+
+    points = np.array([[[280., 200.], [360., 200.], [360., 280.], [280., 280.]]])
+    ids = np.array([[12]], dtype=np.int32)
+    if invalid == "missing_id":
+        ids = None
+    else:
+        points = points[:, ::-1]
+
+    class Detector:
+        def __init__(self, dictionary):
+            pass
+
+        def detectMarkers(self, frame):
+            return [points], ids, []
+
+    monkeypatch.setattr(cv2.aruco, "ArucoDetector", Detector)
+    monkeypatch.setattr(cv2, "solvePnP", lambda *a, **kw: pytest.fail("Invalid tag reached PnP"))
+    pose = detect_apriltag(_encoded_frame(), calibration(), captured_at=5)
+    assert pose is None
+    assessment = assess_dock(pose, now=5.1, target_distance_mm=120)
+    assert assessment.phase == "hold"
+    assert not assessment.motor_authorized and not assessment.charging_authorized
