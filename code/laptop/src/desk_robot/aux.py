@@ -209,9 +209,12 @@ def validate_aux(data: dict[str, Any], robot_id: str) -> dict[str, Any]:
                 force["adc"][0] in (-32768, 32767)
                 or (belly_seq is not None and belly_seq == 0)
                 or (belly_age is not None and belly_age >= 500)))
-            # Composite validity requires both channels to be fresh and unclipped
+            # Composite validity requires both channels to be fresh and unclipped.
+            # Zero is the no-acquisition sentinel even in legacy packets.
             or (force.get("valid") is True and (
-                force["adc"][0] in (-32768, 32767)
+                force["jaw_seq"] == 0
+                or belly_seq == 0
+                or force["adc"][0] in (-32768, 32767)
                 or force["adc"][1] in (-32768, 32767)
                 or (jaw_age is not None and jaw_age >= 500)
                 or (belly_age is not None and belly_age >= 500)

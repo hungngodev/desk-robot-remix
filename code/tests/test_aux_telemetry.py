@@ -26,6 +26,29 @@ def sample(robot="robot-01"):
     }
 
 
+@pytest.mark.parametrize("sequences", [
+    {"jaw_seq": 0}, {"belly_seq": 0}, {"jaw_seq": 0, "belly_seq": 0},
+])
+def test_zero_sequence_cannot_claim_composite_force_valid(sequences):
+    data = sample()
+    force = data["force"]
+    force.update(adc=[0, 0], **sequences)
+    with pytest.raises(ValueError, match="FSR"):
+        validate_aux(data, "robot-01")
+    force["valid"] = False
+    assert validate_aux(data, "robot-01")["force"] == force
+
+
+@pytest.mark.parametrize("seq", [1, 0xffffffff])
+def test_real_zero_force_measurement_is_valid(seq):
+    data = sample()
+    force = data["force"]
+    force.update(adc=[0, 0], jaw_seq=seq)
+    assert validate_aux(data, "robot-01")["force"]["valid"] is True
+    force["belly_seq"] = seq
+    assert validate_aux(data, "robot-01")["force"]["valid"] is True
+
+
 @pytest.mark.parametrize("fault", ["math_overflow", "shunt_saturated"])
 def test_ina226_fault_survives_validation_without_valid_current(fault):
     data = sample()

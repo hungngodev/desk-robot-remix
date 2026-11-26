@@ -14,6 +14,47 @@ static void check_floor(std::int64_t actual, std::int64_t numerator,
   CHECK(actual * denominator <= numerator);
   CHECK(numerator < (actual + 1) * denominator);
 }
+static void check_accessory_default_sentinels() {
+  const auto check_empty = [](const desk_robot::AccessoryReadings& a) {
+    for (const auto& angle : a.angle) {
+      CHECK(!angle.present && !angle.valid && angle.sample_seq == 0);
+      CHECK(angle.at_ms == 0 && angle.magnet_status == 0);
+    }
+    CHECK(!a.climate.present && !a.climate.valid && a.climate.sample_seq == 0);
+    CHECK(!a.barometer.present && !a.barometer.valid && a.barometer.sample_seq == 0);
+    CHECK(a.barometer.address == 0 && a.barometer.chip_id == 0);
+    CHECK(!a.force.present && !a.force.valid && a.force.valid_mask == 0);
+    CHECK(a.force.belly_sample_seq == 0 && a.force.jaw_sample_seq == 0);
+    CHECK(!a.gauge.fuel_present && !a.gauge.fuel_valid && a.gauge.fuel_sample_seq == 0);
+    CHECK(!a.gauge.monitor_present && !a.gauge.monitor_valid && a.gauge.monitor_sample_seq == 0);
+    CHECK(!a.gauge.pack_current_valid && a.gauge.pack_current_ma == 0);
+    CHECK(a.gauge.monitor_fault == desk_robot::Ina226Fault::None);
+    CHECK(!a.dock.present && !a.dock.valid && a.dock.sample_seq == 0);
+    CHECK(!a.dock.left_seated && !a.dock.right_seated);
+    CHECK(!a.dock.input_good && !a.dock.charge_indicated);
+    CHECK(!a.optional_inputs.present && !a.optional_inputs.valid);
+    CHECK(a.optional_inputs.sample_seq == 0);
+    CHECK(!a.nfc.present && !a.nfc.valid && !a.nfc.tag_visible);
+    CHECK(a.nfc.scan_seq == 0 && a.nfc.tag_events == 0 && a.nfc.tag_token == 0);
+    CHECK(a.nfc.uid_length == 0);
+    CHECK(!a.proximity.present && !a.proximity.valid && !a.proximity.saturated());
+    CHECK(!a.proximity.gesture_decoder_available && a.proximity.gesture_events == 0);
+    CHECK(a.proximity.gesture_direction == 0);
+  };
+  desk_robot::AccessoryReadings default_initialized;
+  check_empty(default_initialized);
+  desk_robot::AccessoryReadings value_initialized{};
+  check_empty(value_initialized);
+  // Model the aggregate reset in AccessorySensors::begin after prior evidence.
+  value_initialized.nfc.completed_scan(true, 123U, 4U, 42U);
+  value_initialized.force.valid = true;
+  value_initialized.force.valid_mask = 3;
+  value_initialized.force.jaw_sample_seq = 1;
+  value_initialized = desk_robot::AccessoryReadings{};
+  check_empty(value_initialized);
+  value_initialized.nfc.completed_scan(true, 123U, 4U, 0U);
+  CHECK(value_initialized.nfc.valid && value_initialized.nfc.tag_events == 1);
+}
 static void check_accessory_frame_integrity() {
   // Independent known CRC vectors: BE EF -> 92, 00 00 -> 81.
   std::uint8_t frame[6] = {0xbe, 0xef, 0x92, 0, 0, 0x81};
@@ -458,6 +499,7 @@ static void check_bmp280_trim_registers() {
 
 int main() {
   try {
+    check_accessory_default_sentinels();
     check_accessory_frame_integrity();
     check_simultaneous_gesture_clipping();
     check_register_precision();
