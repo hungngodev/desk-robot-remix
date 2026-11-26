@@ -30,6 +30,20 @@ int main() {
       assert(!sample.valid && sample.raw_adc == 0 && adc.next == 3);
     }
   }
+  // Keep neighboring samples inside the noise limit so a missing rail
+  // check cannot be masked by the independent burst-spread rejection.
+  for (int rail : {0, 4095}) {
+    const int near = rail == 0 ? 1 : 4094;
+    for (std::size_t position = 0; position < 3; ++position) {
+      FakeAdc adc{near, near, near};
+      adc.readings[position] = rail;
+      const auto sample = desk_robot_room::read_soil_sample([&]() { return adc(); });
+      assert(!sample.valid && sample.raw_adc == 0 && adc.next == 3);
+    }
+    FakeAdc adc{rail, rail, rail};
+    const auto sample = desk_robot_room::read_soil_sample([&]() { return adc(); });
+    assert(!sample.valid && sample.raw_adc == 0 && adc.next == 3);
+  }
   {
     FakeAdc adc{150, 800, 1000};
     assert(!desk_robot_room::read_soil_sample([&]() { return adc(); }).valid);

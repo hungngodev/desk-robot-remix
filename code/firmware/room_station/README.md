@@ -202,7 +202,10 @@ The report explicitly keeps those physical flags `false`.
    Enter the two actual raw integers, not guessed percentages, into
    `room_station_soil_dry_adc` and `room_station_soil_wet_adc` in the
    existing `code/config/fleet.hardware.example.toml` configuration.
-   They must be valid 12-bit readings separated by at least 100 counts.
+   For the selected SEN0193, both readings must be 1..4094 and dry ADC
+   must exceed wet ADC by at least 100 counts. Reversed endpoints are rejected.
+   See the [manufacturer example](https://wiki.dfrobot.com/sen0193/docs/18036)
+   for the decreasing ADC response with moisture; measure the actual fitted probe.
    Without both entries, the Mac says only `raw ADC`; with both entries
    it computes a clearly labeled **relative** moisture percentage.
 5. Set the Mac's `room_station_port` to the real local `/dev/` serial
