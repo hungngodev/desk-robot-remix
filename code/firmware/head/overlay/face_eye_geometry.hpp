@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <cstdint>
 
 namespace desk_robot::face_eye_geometry {
@@ -24,8 +26,20 @@ inline constexpr int8_t kNodReturn = -2;
 
 constexpr int EyeX(int index) { return kEyeLeft + index * kEyeStride; }
 constexpr int EyeY(int height) { return kSlotHeight / 2 - height / 2; }
-constexpr int PupilX(int offset) { return (kEyeWidth - kPupilWidth) / 2 + offset; }
+// Nonfinite observations have no direction. Saturate finite coordinates before
+// scaling or converting to an integer; keep rounding symmetric about center.
+inline int8_t NormalizedGazeOffset(float coordinate) noexcept {
+    if (!std::isfinite(coordinate)) return 0;
+    return static_cast<int8_t>(std::lround(std::clamp(coordinate, -1.0f, 1.0f) * kGazeExtent));
+}
+
+constexpr int ClampGazeOffset(int offset) {
+    return std::clamp(offset, -static_cast<int>(kGazeExtent), static_cast<int>(kGazeExtent));
+}
+constexpr int PupilX(int offset) {
+    return (kEyeWidth - kPupilWidth) / 2 + ClampGazeOffset(offset);
+}
 constexpr int PupilY(int height, int offset) {
-    return (height - kPupilHeight) / 2 + (height == kOpenHeight ? offset : 0);
+    return (height - kPupilHeight) / 2 + (height == kOpenHeight ? ClampGazeOffset(offset) : 0);
 }
 }  // namespace desk_robot::face_eye_geometry
