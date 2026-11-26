@@ -1,11 +1,5 @@
 #include "PulsePad.h"
 #include "../../include/MuxWrite.h"
-#ifndef DESK_ROBOT_MAX30102_FIFO_IR_FIRST
-#define DESK_ROBOT_MAX30102_FIFO_IR_FIRST 0
-#endif
-#if DESK_ROBOT_MAX30102_FIFO_IR_FIRST != 0 && DESK_ROBOT_MAX30102_FIFO_IR_FIRST != 1
-#error MAX30102 FIFO channel order must be zero or one
-#endif
 #if (defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER) || \
     (defined(DESK_ROBOT_FULL_SENSORS) && DESK_ROBOT_FULL_SENSORS)
 namespace desk_robot {
@@ -225,10 +219,9 @@ bool PulsePad::poll(std::uint32_t now_ms) {
     return false;
   }
   const std::uint8_t* latest = &data[(n - 1) * 6];
-  // Default is datasheet RED/IR. Set FIFO_IR_FIRST=1 only after proving
-  // the actual generic carrier's optical response with each LED isolated.
-  const auto channels = decode_optical_channels(
-      latest, DESK_ROBOT_MAX30102_FIFO_IR_FIRST == 1);
+  // Default is RED/IR. Recheck each LED after a generic GY-MAX30102 PCB
+  // swap; use the reversed lab profile only on measured channel identity.
+  const auto channels = decode_optical_channels(latest, kOpticalFifoIrFirst);
   // Full-scale ADC data cannot distinguish reflection from clipping.
   if (optical_channels_saturated(channels)) {
     sample_.valid = false;

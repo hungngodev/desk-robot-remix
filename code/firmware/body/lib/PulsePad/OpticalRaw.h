@@ -1,5 +1,11 @@
 #pragma once
 #include <cstdint>
+#ifndef DESK_ROBOT_MAX30102_FIFO_IR_FIRST
+#define DESK_ROBOT_MAX30102_FIFO_IR_FIRST 0
+#endif
+#if DESK_ROBOT_MAX30102_FIFO_IR_FIRST != 0 && DESK_ROBOT_MAX30102_FIFO_IR_FIRST != 1
+#error MAX30102 FIFO channel order must be zero or one
+#endif
 namespace desk_robot {
 // SparkFun MAX30105 driver / MAX30102 datasheet: FIFO red then IR, each 18 bits.
 // Portable parsing used by the bounded WROOM bridge, not a heart-rate diagnosis.
@@ -8,10 +14,15 @@ inline std::uint32_t optical18(const std::uint8_t* bytes) {
   return ((static_cast<std::uint32_t>(bytes[0]) & 0x03U) << 16) |
          (static_cast<std::uint32_t>(bytes[1]) << 8) | bytes[2];
 }
-// The MAX30102 datasheet specifies RED then IR, but generic carrier builds
-// can present inverted LED/FIFO channel wiring. Keep both interpretations
-// explicit; the selected PCB must be optically tested before interpreting
-// either channel as a qualified paw measurement.
+// Generic GY-MAX30102 PCB replacements can have reversed optical channel
+// identity despite the same part ID. Do not assume a genuine IC changes FIFO
+// order. Isolate each LED on the exact fitted PCB; requalify after every swap.
+// Only the reversed FIFO lab profile may be selected on measured evidence.
+// A compile flag or plausible raw value does not qualify paw interaction.
+static_assert(DESK_ROBOT_MAX30102_FIFO_IR_FIRST == 0 ||
+              DESK_ROBOT_MAX30102_FIFO_IR_FIRST == 1,
+              "MAX30102 FIFO channel order must be zero or one");
+constexpr bool kOpticalFifoIrFirst = DESK_ROBOT_MAX30102_FIFO_IR_FIRST == 1;
 struct OpticalChannels {
   std::uint32_t red = 0;
   std::uint32_t ir = 0;
