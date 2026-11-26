@@ -131,15 +131,15 @@ class CoreFact:
     updated_at: float
 
 
-_INVALID_MEMORY_CHARACTER = re.compile(r"[\x00\ud800-\udfff]")
+_INVALID_MEMORY_CHARACTER = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\ud800-\udfff]")
 
 
 def _validate_memory_text(
     value: object, limit: int, message: str, *,
     invalid_character_message: str | None = None,
 ) -> None:
-    """Reject text SQLite cannot bind before reserving a mutation generation."""
-    if not isinstance(value, str) or not 1 <= len(value.strip()) <= limit:
+    """Reject oversized or unsafe text before normalization or SQLite access."""
+    if not isinstance(value, str) or not 1 <= len(value) <= limit or not value.strip():
         raise ValueError(message)
     if _INVALID_MEMORY_CHARACTER.search(value):
         raise ValueError(invalid_character_message or message)
@@ -807,9 +807,8 @@ class MemoryStore:
             raise ValueError("Unknown robot memory identity")
         if type(own_only) is not bool:
             raise ValueError("own_only must be a bool")
-        if (not isinstance(query, str) or not 1 <= len(query.strip()) <= 240
-                or "\x00" in query or type(limit) is not int
-                or not 1 <= limit <= 12):
+        _validate_memory_text(query, 240, "Bounded memory question and limit required")
+        if type(limit) is not int or not 1 <= limit <= 12:
             raise ValueError("Bounded memory question and limit required")
         expression = _fts_query(query)
         if not expression:
