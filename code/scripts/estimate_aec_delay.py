@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import math
+import sys
 import wave
 from pathlib import Path
 
@@ -18,6 +19,13 @@ import numpy as np
 
 
 def read_wav(path: Path) -> tuple[np.ndarray, int]:
+    try:
+        return _read_pcm_wav(path)
+    except (wave.Error, EOFError) as exc:
+        raise ValueError("Invalid or incomplete WAV header") from exc
+
+
+def _read_pcm_wav(path: Path) -> tuple[np.ndarray, int]:
     if not path.is_file() or path.stat().st_size > 12_000_000:
         raise ValueError("WAV file missing or too large")
     with wave.open(str(path), "rb") as file:
@@ -113,8 +121,9 @@ def estimate_delay(
     *, sample_rate: int = 16000, max_delay_ms: float = 250,
 ) -> dict:
     """Positive lag is microphone capture after the supplied reference."""
-    if sample_rate != 16000 or not 10 <= max_delay_ms <= 400:
-        raise ValueError("Measure 16 kHz capture with 10 to 400 ms search")
+    if (sample_rate != 16000 or type(max_delay_ms) not in (int, float)
+            or not math.isfinite(max_delay_ms) or not 10 <= max_delay_ms <= 400):
+        raise ValueError("Measure 16 kHz capture with finite delay search of 10 to 400 ms")
     if (not isinstance(reference, np.ndarray)
             or not isinstance(microphone, np.ndarray)
             or reference.ndim != 1 or microphone.ndim != 1
@@ -138,8 +147,10 @@ def estimate_delay(
     ref, mic = ref - ref.mean(), mic - mic.mean()
     ref_energy = float(np.linalg.norm(ref))
     mic_energy = float(np.linalg.norm(mic))
-    if ref_energy < 0.0001 or mic_energy < 0.0001:
-        raise ValueError("Acoustic signal insufficient")
+    if ref_energy < 0.0001:
+        raise ValueError("Speaker reference acoustic signal insufficient")
+    if mic_energy < 0.0001:
+        raise ValueError("Microphone acoustic signal insufficient")
     size = len(ref) + len(mic) - 1
     nfft = 1 << (size - 1).bit_length()
     corr = np.fft.irfft(
@@ -290,13 +301,28 @@ def estimate_clock_drift(
     }
 
 
-def main() -> None:
+def main() -> int:
     cli = argparse.ArgumentParser(description=__doc__)
     cli.add_argument("--speaker", required=True, type=Path)
     cli.add_argument("--microphone", required=True, type=Path)
     cli.add_argument("--capture-report", type=Path)
     cli.add_argument("--max-delay-ms", type=float, default=250.0)
     args = cli.parse_args()
+    try:
+        report = _estimate_capture(args)
+    except (ValueError, OSError) as exc:
+        print(json.dumps({
+            "error": "invalid_aec_capture",
+            "message": str(exc),
+            "aec_physically_verified": False,
+            "natural_barge_in_verified": False,
+        }), file=sys.stderr)
+        return 2
+    print(json.dumps(report, indent=2, allow_nan=False))
+    return 0
+
+
+def _estimate_capture(args: argparse.Namespace) -> dict:
     speaker, speaker_rate = read_wav(args.speaker)
     microphone, mic_rate = read_wav(args.microphone)
     if mic_rate != 16000:
@@ -333,8 +359,8 @@ def main() -> None:
         report["esp_idf_delay_setting_applicable"] = False
         report["esp_idf_delay_setting_ms"] = None
     report["capture_report_pcm_matched"] = args.capture_report is not None
-    print(json.dumps(report, indent=2))
+    return report
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

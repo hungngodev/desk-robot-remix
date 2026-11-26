@@ -474,3 +474,61 @@ def test_cli_long_capture_requires_stable_drift_for_fixed_setting(tmp_path, unst
     assert report["esp_idf_delay_setting_ms"] == (None if unstable else 70)
     assert not report["aec_physically_verified"]
     assert not report["natural_barge_in_verified"]
+
+
+@pytest.mark.parametrize("fault, message", [
+    ("bad_header", "WAV header"),
+    ("empty_file", "WAV header"),
+    ("empty_pcm", "mono PCM16"),
+    ("stereo", "mono PCM16"),
+    ("mic_rate", "Microphone recording must be 16 kHz"),
+    ("silent_mic", "Microphone acoustic signal insufficient"),
+    ("silent_reference", "Speaker reference acoustic signal insufficient"),
+    ("nan_delay", "finite delay"),
+    ("inf_delay", "finite delay"),
+])
+def test_cli_rejects_invalid_capture_with_json_diagnostic(tmp_path, fault, message):
+    import json
+    import subprocess
+    import sys
+    import wave
+
+    rng = np.random.default_rng(877)
+    speaker = rng.integers(-6000, 6000, size=8000, dtype=np.int16)
+    mic = np.concatenate((np.zeros(1120, dtype=np.int16), speaker))[:8000]
+    for name, samples in (("speaker.wav", speaker), ("mic.wav", mic)):
+        is_mic = name == "mic.wav"
+        if (is_mic and fault == "silent_mic") or (not is_mic and fault == "silent_reference"):
+            samples = np.zeros_like(samples)
+        channels = 2 if is_mic and fault == "stereo" else 1
+        rate = 32000 if is_mic and fault == "mic_rate" else 16000
+        with wave.open(str(tmp_path / name), "wb") as wav:
+            wav.setnchannels(channels)
+            wav.setsampwidth(2)
+            wav.setframerate(rate)
+            if not (is_mic and fault == "empty_pcm"):
+                wav.writeframes(np.repeat(samples, channels).astype("<i2").tobytes())
+    if fault in ("bad_header", "empty_file"):
+        (tmp_path / "mic.wav").write_bytes(b"not a WAV header" if fault == "bad_header" else b"")
+    script = Path(__file__).resolve().parents[1] / "scripts/estimate_aec_delay.py"
+    command = [sys.executable, str(script), "--speaker", str(tmp_path / "speaker.wav"),
+               "--microphone", str(tmp_path / "mic.wav")]
+    if fault in ("nan_delay", "inf_delay"):
+        command.extend(["--max-delay-ms", fault.split("_")[0]])
+    result = subprocess.run(command, capture_output=True, text=True, timeout=10)
+    assert result.returncode == 2
+    assert not result.stdout
+    diagnostic = json.loads(result.stderr)
+    assert diagnostic["error"] == "invalid_aec_capture"
+    assert message in diagnostic["message"]
+    assert diagnostic["aec_physically_verified"] is False
+    assert diagnostic["natural_barge_in_verified"] is False
+    assert "esp_idf_delay_setting_ms" not in diagnostic
+
+
+@pytest.mark.parametrize("header", [b"", b"not a WAV header", b"RIFF\x00\x00\x00\x00"])
+def test_invalid_wav_header_raises_value_error(tmp_path, header):
+    path = tmp_path / "broken.wav"
+    path.write_bytes(header)
+    with pytest.raises(ValueError, match="WAV header"):
+        source["read_wav"](path)
