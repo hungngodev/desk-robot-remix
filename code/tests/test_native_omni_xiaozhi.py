@@ -2110,6 +2110,63 @@ async def test_native_voice_sends_one_video_frame_per_camera_receipt(native):
 
 
 
+@pytest.mark.parametrize("packet_ms", [1, 10, 20, 100, 300])
+async def test_native_endpoint_uses_contiguous_pcm_duration(native, monkeypatch, packet_ms):
+    """A brief pause must not end a turn, regardless of decoder packet size."""
+    module, bridge = native
+    conn, _ = connection()
+    bridge.connections["mac-01"] = conn
+    session = module.NativeOmniSession(
+        conn, url="ws://127.0.0.1:8099/v1/realtime?duplex=1",
+        model="openbmb/MiniCPM-o-4_5", token="p" * 32,
+    )
+    observed = []
+
+    class ModelSocket:
+        async def send_json(self, event):
+            observed.append(event)
+
+    session._socket = ModelSocket()
+    drained = _observe_playback_drain(session.incoming, monkeypatch)
+    worker = asyncio.create_task(session._send_mic())
+
+    async def feed(ms, speech):
+        drained.clear()
+        session.queue_mic(bytes(ms * 32), speech)
+        await asyncio.wait_for(drained.wait(), timeout=1)
+
+    try:
+        await feed(300, False)
+        assert not session._pending_audio_commits
+        await feed(100, True)
+        turn = (session._input_generation, session._readonly_turn, session._video_turn)
+        for _ in range(3):
+            await feed(32, False)
+        assert session._user_was_talking
+        assert not session._pending_audio_commits
+
+        await feed(100, True)
+        assert (session._input_generation, session._readonly_turn, session._video_turn) == turn
+        for _ in range((300 - 1) // packet_ms):
+            await feed(packet_ms, False)
+            assert session._user_was_talking
+            assert not session._pending_audio_commits
+
+        await feed(packet_ms, False)
+        assert not session._user_was_talking
+        assert len(session._pending_audio_commits) == 1
+        commits = [event for event in observed if event["type"] == "input_audio_buffer.commit"]
+        assert len(commits) == 1
+        assert commits[0]["final"] is True
+        await feed(300, False)
+        assert len(session._pending_audio_commits) == 1
+        assert sum(event["type"] == "input_audio_buffer.commit" for event in observed) == 1
+    finally:
+        session.closed = True
+        worker.cancel()
+        await asyncio.gather(worker, return_exceptions=True)
+
+
 @pytest.mark.parametrize("failure", ["socket_error", "send_stall"])
 async def test_native_mic_counts_only_confirmed_backend_sends_and_bounds_stalls(
     native, failure,
@@ -2131,13 +2188,14 @@ async def test_native_mic_counts_only_confirmed_backend_sends_and_bounds_stalls(
             await asyncio.Event().wait()
 
     session._socket = ModelSocket()
+    session._user_was_talking = True
     session.queue_mic(b"\x00" * 3200, False)
     failure_type = RuntimeError if failure == "socket_error" else TimeoutError
     with pytest.raises(failure_type):
         await asyncio.wait_for(session._send_mic(), timeout=2.5)
     assert session.audio_frames == 0
     assert session._last_video_sent_receipt_us is None
-    assert session._silent_frames == 0
+    assert session._silent_pcm_ms == 0
 
 
 @pytest.mark.parametrize("offset_seconds", [-3.0, 3.0])

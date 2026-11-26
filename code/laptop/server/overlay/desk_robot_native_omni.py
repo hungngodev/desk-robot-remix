@@ -80,6 +80,10 @@ def _pet_coordinator_url(robot: str, route: str) -> str:
 # 40-item queue limit, because a single model delta may carry up to 96,000 bytes.
 MAX_OUTGOING_AUDIO_BYTES = 384_000
 
+# 16 kHz mono PCM16: 32 bytes per millisecond.
+_PCM16K_BYTES_PER_MS = 32
+_END_OF_TURN_SILENCE_MS = 300
+
 _sessions: dict[str, "NativeOmniSession"] = {}
 _output_owner: str | None = None
 # A failed final head STOP cannot be erased by reconnecting the same device ID.
@@ -351,7 +355,7 @@ class NativeOmniSession:
         # human VAD turn. Audio packet receipt is not a speech permit.
         self._direct_reply_available = False
         self._direct_reply_active = False
-        self._silent_frames = 0
+        self._silent_pcm_ms = 0
         self._playback_generation = -1
         self._head_playback_counter = uuid.uuid4().int & 0x7ffffffe
         self._head_playback: HeadPlaybackContext | None = None
@@ -2118,10 +2122,10 @@ class NativeOmniSession:
                 self._last_video_sent_receipt_us = receipt
                 self.video_frames_forwarded += 1
             if packet.speech:
-                self._silent_frames = 0
+                self._silent_pcm_ms = 0
             elif was_talking:
-                self._silent_frames += 1
-                if self._silent_frames >= 3:
+                self._silent_pcm_ms += len(packet.pcm16k) // _PCM16K_BYTES_PER_MS
+                if self._silent_pcm_ms >= _END_OF_TURN_SILENCE_MS:
                     if len(self._pending_audio_commits) >= 16:
                         self.fail("Native model input commit acknowledgements stalled")
                         return
@@ -2134,7 +2138,7 @@ class NativeOmniSession:
                     await asyncio.wait_for(
                         self._send(self.wire.commit(final=True)), timeout=1.5,
                     )
-                    self._silent_frames = 0
+                    self._silent_pcm_ms = 0
                     self._user_was_talking = False
                     self._video_turn += 1
                     if self._live_transcript_enabled:
