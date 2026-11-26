@@ -5823,6 +5823,7 @@ async def test_proactive_model_rejects_long_uninvited_monologue_without_tts(
 
 @pytest.mark.parametrize("revocation", [
     "speaker_quiet", "peer_quiet", "human_vad", "social_consent",
+    "speaker_fault", "peer_fault", "speaker_fault_recovered", "peer_fault_recovered",
 ])
 async def test_sensor_social_dialogue_rechecks_live_permission_after_model_await(
     fleet, tmp_path, revocation,
@@ -5842,6 +5843,15 @@ async def test_sensor_social_dialogue_rechecks_live_permission_after_model_await
                 pet.states["robot-02"].quiet = True
             elif revocation == "human_vad":
                 pet._human_active_in_fleet = lambda _now: True
+            elif "fault" in revocation:
+                rid = "robot-01" if revocation.startswith("speaker") else "robot-02"
+                await pet._observe_body_safety(rid, 12, {"safety": {
+                    "required": True, "ready": False, "fault": "floor_out_of_range",
+                }})
+                if revocation.endswith("recovered"):
+                    await pet._observe_body_safety(rid, 12, {"safety": {
+                        "required": True, "ready": True, "fault": "none",
+                    }})
             else:
                 fleet.fleet_social_autonomy_enabled = False
             return "This remark must not reach the other robot."
@@ -5868,6 +5878,42 @@ async def test_sensor_social_dialogue_rechecks_live_permission_after_model_await
         assert all(state.spoken == 0 for state in pet.states.values())
         assert "Group conversation consent revoked" in (
             pet.states["robot-01"].last_error or ""
+        )
+    finally:
+        for state in pet.states.values():
+            state.enabled = False
+        await pet.close()
+
+
+@pytest.mark.parametrize("faulted_robot", ["robot-01", "robot-02"])
+async def test_social_peer_rejects_faulted_participants(fleet, tmp_path, faulted_robot):
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_social_autonomy_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(fleet, GroundedChat(), SimulatedSpeaker(), memory=memory)
+    pet = PetController(fleet, {}, conversation, memory, KeyScene(), speech_cooldown=0)
+    for rid in ("robot-01", "robot-02"):
+        pet.states[rid].enabled = True
+        pet.states[rid].generation = 12
+    try:
+        assert pet._social_peer("robot-01", "nfc_tag", time.monotonic()) == "robot-02"
+        offered_at = time.monotonic()
+        await pet._observe_body_safety(faulted_robot, 12, {"safety": {
+            "required": True, "ready": False, "fault": "floor_out_of_range",
+        }})
+        assert pet._social_peer("robot-01", "nfc_tag", time.monotonic()) is None
+        await pet._observe_body_safety(faulted_robot, 12, {"safety": {
+            "required": True, "ready": True, "fault": "none",
+        }})
+        assert pet._social_peer("robot-01", "nfc_tag", time.monotonic()) == "robot-02"
+        await pet._speak_social(
+            "robot-01", SceneChange("nfc_tag", "My NFC tag", 1.0), 12,
+            offered_at=offered_at, social_peer_id="robot-02",
+            social_peer_generation=12, camera_derived=False,
+            newer_human_turn=lambda: False,
+        )
+        assert pet.states["robot-01"].last_initiative_suppression == (
+            "social_peer_or_event_unavailable"
         )
     finally:
         for state in pet.states.values():

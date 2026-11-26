@@ -222,6 +222,7 @@ class PetState:
     last_touch_boot_id: int | None = None
     retired_touch_boot_ids: set[int] = field(default_factory=set, repr=False)
     last_safety_fault: str | None = None
+    last_social_fault_at: float = -math.inf
     safety_fault_events: int = 0
     last_extra_mask: int | None = None
     last_extra_events: dict[str, int] | None = None
@@ -1854,6 +1855,8 @@ class PetController:
             return
         previous = state.last_safety_fault
         state.last_safety_fault = fault
+        if previous != fault and fault not in ("none", "not_required"):
+            state.last_social_fault_at = time.monotonic()
         # Normal human head-touch doubles as the WROOM's immediate physical
         # motion stop. Revoke Mac motion authority, but do not fabricate a
         # second autobiographical "latched fault" for an ordinary petting
@@ -2811,6 +2814,11 @@ class PetController:
             for robot in self.settings.robots
         )
 
+    def _social_safety_clear(self, robot_id: str) -> bool:
+        # Stationary social speech grants no motion; an observed local fault
+        # still vetoes optional peer activity until it has actually cleared.
+        return self.states[robot_id].last_safety_fault in (None, "none", "not_required")
+
     def _social_peer(self, robot_id: str, kind: str, now: float) -> str | None:
         """Offer a short, shared witnessed event to a different consenting pet.
 
@@ -2818,6 +2826,7 @@ class PetController:
         Pair rotation prevents one peer monopolizing the conversation.
         """
         if (self._quiet_hours_active()
+                or not self._social_safety_clear(robot_id)
                 or not self.settings.fleet_social_autonomy_enabled
                 or not self.settings.fleet_text_sharing_enabled
                 or kind not in _SOCIAL_EVENT_KINDS
@@ -2831,6 +2840,7 @@ class PetController:
             robot.id for robot in self.settings.robots
             if robot.id != robot_id and self.states[robot.id].enabled
             and not self.states[robot.id].quiet
+            and self._social_safety_clear(robot.id)
         ]
         if not candidates:
             return None
@@ -3611,7 +3621,16 @@ class PetController:
         """Reuse one fleet speech owner for a consent-fenced social event."""
         state = self.states[robot_id]
         peer = self.states[social_peer_id]
+
+        def safety_current() -> bool:
+            return (
+                self._social_safety_clear(robot_id)
+                and self._social_safety_clear(social_peer_id)
+                and offered_at >= max(state.last_social_fault_at, peer.last_social_fault_at)
+            )
+
         if (not state.enabled or self.is_quiet(robot_id)
+                or not safety_current()
                 or state.generation != generation or self._closed
                 or not peer.enabled or self.is_quiet(social_peer_id)
                 or peer.generation != social_peer_generation
@@ -3662,6 +3681,7 @@ class PetController:
                 not self._closed and self.voice_monitor_ready
                 and self.settings.fleet_social_autonomy_enabled
                 and self.settings.fleet_text_sharing_enabled
+                and safety_current()
                 and state.enabled and not self.is_quiet(robot_id)
                 and state.generation == generation
                 and peer.enabled and not self.is_quiet(social_peer_id)
