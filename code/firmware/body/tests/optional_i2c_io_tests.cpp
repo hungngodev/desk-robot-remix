@@ -17,6 +17,50 @@ struct MuxWriteProbe {
   unsigned write(std::uint8_t value) { ++writes; mask = value; return write_count; }
   unsigned endTransmission(bool value) { ++ends; stop = value; return status; }
 };
+// A fitted 0x71 mux can ACK even when every downstream device is absent.
+static void check_empty_accessory_mux() {
+  TwoWire wire;
+  wire.accessory_devices_connected = false;
+  desk_robot::AccessorySensors sensors;
+  desk_robot::PulsePad pulse;
+  desk_robot::ExpansionTouch touch;
+  CHECK(sensors.begin(wire) && sensors.mux_present());
+  CHECK(!pulse.begin(wire) && pulse.mux_present());
+  CHECK(!touch.begin(wire) && !touch.verified());
+  CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+  std::uint8_t zones = 0x5a;
+  for (std::uint32_t ms = 0; ms < 1800; ms += 12) {
+    const auto before = wire.transactions;
+    sensors.poll(ms);
+    CHECK(!pulse.poll(ms) && !touch.poll(ms, zones));
+    // Only three verified mux operations: no absent-device polling.
+    CHECK(wire.transactions - before == 6U);
+    CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+    const auto& a = sensors.readings();
+    CHECK(!a.proximity.present && !a.proximity.valid && a.proximity.raw == 0U);
+    CHECK(!a.proximity.gesture_decoder_available && a.proximity.gesture_events == 0U);
+    CHECK(!a.force.present && !a.force.valid && a.force.valid_mask == 0U);
+    CHECK(a.force.belly_sample_seq == 0U && a.force.jaw_sample_seq == 0U);
+    CHECK(!a.climate.present && !a.climate.valid && a.climate.sample_seq == 0U);
+    CHECK(!a.barometer.present && !a.barometer.valid && a.barometer.sample_seq == 0U);
+    CHECK(!a.gauge.fuel_present && !a.gauge.fuel_valid && a.gauge.fuel_sample_seq == 0U);
+    CHECK(!a.gauge.monitor_present && !a.gauge.monitor_valid);
+    CHECK(!a.gauge.pack_current_valid && a.gauge.monitor_sample_seq == 0U);
+    // Missing mandatory dock evidence must NOT be manufactured as safe.
+    CHECK(!a.dock.present && !a.dock.valid && a.dock.sample_seq == 0U);
+    CHECK(!a.dock.left_seated && !a.dock.right_seated);
+    CHECK(!a.dock.input_good && !a.dock.charge_indicated);
+    CHECK(!a.optional_inputs.present && !a.optional_inputs.valid);
+    CHECK(a.optional_inputs.sample_seq == 0U);
+    CHECK(!a.nfc.present && !a.nfc.valid && !a.nfc.tag_visible);
+    CHECK(a.nfc.scan_seq == 0U && a.nfc.tag_events == 0U);
+    for (const auto& angle : a.angle)
+      CHECK(!angle.present && !angle.valid && angle.sample_seq == 0U);
+    CHECK(!pulse.sample().present && !pulse.sample().valid && pulse.sample().sample_seq == 0U);
+    CHECK(zones == 0x5a);
+  }
+}
+
 static void check_mux_write_boundary() {
   for (unsigned address = 0x70; address <= 0x71; ++address) {
     for (unsigned mask = 0; mask <= 0xff; ++mask) {
@@ -297,6 +341,7 @@ int main() {
   try {
     check_sht_crc_provenance();
     check_mux_write_boundary();
+    check_empty_accessory_mux();
     check_jaw_adc_rail_isolation();
     check_ads_start_provenance();
     check_short_pulse_fifo_reads();

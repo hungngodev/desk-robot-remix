@@ -98,6 +98,7 @@ class TwoWire {
   unsigned cap_failed_write_stops = 0;
   unsigned cap_register_requests = 0;
   bool optional_mux_installed = true;
+  bool accessory_devices_connected = true; // fitted mux, no downstream devices when false
   bool optional_mux_write_nack = false;
   bool optional_mux_read_nack = false;
   bool range_mux_write_nack = false;
@@ -214,6 +215,7 @@ class TwoWire {
   bool connected(std::uint8_t addr) const {
     if (addr == 0x70) return true;
     if (addr == 0x71) return optional_mux_installed;
+    if (extras != 0 && !accessory_devices_connected) return false;
     if (addr == 0x29)
       return (ranges != 0 && extras == 0 && (ranges & (ranges - 1U)) == 0 &&
               (ranges & tof_missing_lanes) == 0) ||
