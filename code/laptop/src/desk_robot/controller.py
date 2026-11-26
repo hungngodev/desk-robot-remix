@@ -1331,6 +1331,14 @@ class Coordinator:
         head = self.heads[job.robot_id]
         expected_dock = self.robot(job.robot_id).dock_beacon_id
         previous_ir: tuple[int, int] | None = None
+
+        async def capture_current_dock_frame() -> object:
+            # The bounded reply starts in a child task, after the health await.
+            self._require_job_motion(job)
+            self._require_camera_motion_grant(camera_grant)
+            capture_dock = getattr(head, "snapshot_for_dock", head.snapshot)
+            return await capture_dock()
+
         for attempt in range(16):
             # Every awaited receipt belongs to this motion epoch, not its successor.
             self._require_job_motion(job)
@@ -1345,9 +1353,8 @@ class Coordinator:
             # Local WROOM cliff stop remains mandatory for every short pulse.
             # Real docking reuses a strictly fresh MJPEG frame.
             self._require_job_motion(job)
-            capture_dock = getattr(head, "snapshot_for_dock", head.snapshot)
             observation = await _bounded_head_reply(
-                capture_dock(), seconds=2.0,
+                capture_current_dock_frame(), seconds=2.0,
                 timeout_message="Camera snapshot timeout",
             )
             self._require_job_motion(job)
@@ -1675,10 +1682,16 @@ class Coordinator:
         # stream frame is required for every successive grasp observation.
         if image_size(jpeg) != (c.image_width, c.image_height):
             raise OperationError("Camera resolution differs from measured calibration")
+        async def detect_current() -> list[Detection]:
+            # The queued inference may start after the operator opts out.
+            if self.settings.mode == "hardware":
+                self._pickup_live_media(robot_id, camera_grant)
+            return await self.vision.detect(jpeg, target)
+
         objects = [
             d
             for d in await _bounded_head_reply(
-                self.vision.detect(jpeg, target), seconds=15.0,
+                detect_current(), seconds=15.0,
                 timeout_message="Pickup vision inference timeout",
             )
             if d.label == target
