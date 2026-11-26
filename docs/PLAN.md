@@ -100,6 +100,30 @@ and a standalone cleanup failure propagates. See the lifecycle regression contra
 
 ---
 
+## Release layout source anchors
+
+These paths describe the current Mac package and host release checks, not physical
+qualification or a passing CI receipt. The API facade delegates to the extracted
+API modules below. When it imports another `api_*` module, update this list in
+the same change. The release layout regression checks these paths independently
+of the pinned upstream checkout.
+
+- `code/pyproject.toml`
+- `code/laptop/src/desk_robot/cli.py`
+- `code/laptop/src/desk_robot/calibration.py`
+- `code/laptop/src/desk_robot/simulator.py`
+- `code/laptop/src/desk_robot/api.py`
+- `code/laptop/src/desk_robot/api_dock_routes.py`
+- `code/laptop/src/desk_robot/api_ingress.py`
+- `code/laptop/src/desk_robot/api_lifecycle.py`
+- `code/laptop/src/desk_robot/api_memory_routes.py`
+- `code/laptop/src/desk_robot/api_native_omni_routes.py`
+- `code/laptop/src/desk_robot/api_readonly_context.py`
+- `code/laptop/src/desk_robot/api_readonly_planner.py`
+- `code/laptop/src/desk_robot/api_robot_status.py`
+- `code/laptop/src/desk_robot/api_spatial_pose.py`
+- `code/firmware/head/tests/test_release_checks.py`
+
 ## Complete linear build and permanent verification stages
 
 *Integrated from the user-requested full feature documentation review on 2026-11-09. This section is planning and source evidence only unless a measured result is linked.*

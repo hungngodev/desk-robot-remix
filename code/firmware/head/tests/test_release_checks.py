@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import json
 import os
+import tomllib
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -13,6 +14,40 @@ SPEC = importlib.util.spec_from_file_location("overlay_release", HEAD / "install
 overlay = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(overlay)
 UPSTREAM = Path(os.environ.get("DESK_ROBOT_UPSTREAM", HEAD.parents[1] / "upstream/xiaozhi-esp32"))
+
+
+
+def assert_release_layout(root: Path) -> None:
+    project = tomllib.loads((root / "code/pyproject.toml").read_text())
+    package = Path("code/laptop/src/desk_robot")
+    assert project["project"]["scripts"]["desk-robot"] == "desk_robot.cli:main"
+    wheel = project["tool"]["hatch"]["build"]["targets"]["wheel"]
+    assert "laptop/src/desk_robot" in wheel["packages"]
+    assert "firmware/head/tests" in project["tool"]["pytest"]["ini_options"]["testpaths"]
+    api = ast.parse((root / package / "api.py").read_text())
+    modules = {"cli", "calibration", "simulator", "api"}
+    modules.update(
+        node.module
+        for node in ast.walk(api)
+        if isinstance(node, ast.ImportFrom)
+        and node.level == 1
+        and node.module
+        and node.module.startswith("api_")
+    )
+    paths = {package / f"{module}.py" for module in modules}
+    paths.add(Path("code/pyproject.toml"))
+    paths.add(Path("code/firmware/head/tests/test_release_checks.py"))
+    plan = (root / "docs/PLAN.md").read_text()
+    _, heading, rest = plan.partition("## Release layout source anchors\n")
+    assert heading, "Missing release layout source anchors in PLAN.md"
+    section = rest.split("\n## ", 1)[0]
+    for path in sorted(paths):
+        assert (root / path).is_file(), f"Missing release source: {path}"
+        assert f"`{path.as_posix()}`" in section, f"Undocumented release source: {path}"
+
+
+def test_release_layout_matches_plan():
+    assert_release_layout(HEAD.parents[2])
 
 
 @pytest.mark.parametrize("fault", [None, "missing", "null", "empty", "wrong", "duplicate"])
