@@ -10579,3 +10579,49 @@ async def test_firmware_touch_preserves_human_floor(fleet, tmp_path, human_robot
             conversation.active = None
         state.enabled = False
         await pet.close()
+
+
+@pytest.mark.parametrize("expire_at", ["queued", "write"])
+async def test_expired_camera_auto_fanout_preserves_only_eyewitness(
+    fleet, tmp_path, monkeypatch, expire_at,
+):
+    fleet.mode = "hardware"
+    fleet.voice_vision_tools_enabled = True
+    fleet.fleet_text_sharing_enabled = True
+    fleet.fleet_text_auto_fanout_enabled = True
+    memory = MemoryStore(tmp_path, [r.id for r in fleet.robots])
+    conversation = Conversation(
+        fleet, GroundedChat(), SimulatedSpeaker(), memory=memory,
+    )
+    pet = PetController(fleet, {}, conversation, memory, KeyScene())
+    original_remember = memory.remember
+    original_to_thread = asyncio.to_thread
+    inserted_peers = []
+
+    def expire_after_peer_write(*args, **kwargs):
+        saved = original_remember(*args, **kwargs)
+        if saved and not kwargs["witnessed"]:
+            inserted_peers.append(args[0])
+            if expire_at == "write":
+                pet.max_observation_age = 0.5
+        return saved
+
+    async def expire_before_worker(func, *args, **kwargs):
+        if expire_at == "queued" and func.__name__ == "persist_peer_batch":
+            pet.max_observation_age = 0.5
+        return await original_to_thread(func, *args, **kwargs)
+
+    monkeypatch.setattr(memory, "remember", expire_after_peer_write)
+    monkeypatch.setattr(asyncio, "to_thread", expire_before_worker)
+    try:
+        assert await pet._store_observation(
+            "robot-01", SceneChange("key", "A fresh eyewitness key", 0.95),
+            camera_derived=True, camera_received_at=time.monotonic() - 1,
+            camera_source_identity=(7, 103, 6000001),
+        )
+        assert len(inserted_peers) == (1 if expire_at == "write" else 0)
+        assert memory.count("robot-01") == 1
+        assert all(memory.count(r.id) == 0 for r in fleet.robots if r.id != "robot-01")
+        assert all(not memory.core_facts(r.id) for r in fleet.robots)
+    finally:
+        await pet.close()

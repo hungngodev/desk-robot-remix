@@ -925,6 +925,7 @@ class PetController:
                     and self.settings.fleet_auto_fanout_consent_generation
                     == fanout_grant
                     and current_visual_epoch()
+                    and camera_receipt_current()
                     and (not camera_derived or self.settings.mode != "hardware"
                          or self.settings.voice_vision_tools_enabled)
                 )
