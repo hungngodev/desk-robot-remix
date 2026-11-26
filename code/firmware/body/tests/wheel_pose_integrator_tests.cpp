@@ -362,7 +362,41 @@ static void unhealthy_magnet_or_cached_wheel_revokes_pose() {
   }
 }
 
+static void signed_heading_wrap_and_projection() {
+  constexpr std::int64_t pi = 3141593;
+  for (int direction : {-1, 1}) {
+    WheelPoseIntegrator pose;
+    check(pose.configure(calibration()));
+    const auto before = direction * (pi - 100000);
+    const auto after = -before;
+    for (std::uint32_t i = 1; i <= 3; ++i)
+      check(pose.observe(observed(i, i * 100, 0, 0, before), i * 100 + 10));
+    check(pose.start_origin(310));
+    // The measured gyro crosses its wrap boundary during a 200 mrad turn.
+    check(pose.observe(observed(4, 400, -100 * direction, -100 * direction,
+                                after), 410));
+    check(pose.state().yaw_mrad == 200 * direction);
+    check(pose.state().x_mm == 0 && pose.state().y_mm == 0);
+    check(pose.observe(observed(5, 500, 200, -200, after), 510));
+    check(pose.state().x_mm == 19 && pose.state().y_mm == 3 * direction);
+    check(pose.observe(observed(6, 600, -200, 200, after), 610));
+    check(pose.state().x_mm == 0 && pose.state().y_mm == 0);
+    check(pose.state().origin == 1);
+
+    // Continue rotating until the local (origin-relative) heading wraps too.
+    for (std::uint32_t i = 7; i <= 21; ++i) {
+      const auto yaw = after + direction * 200000LL * (i - 6);
+      check(pose.observe(observed(i, i * 100, -100 * direction,
+                                  -100 * direction, yaw), i * 100 + 10));
+    }
+    check(pose.state().yaw_mrad == -3083 * direction);
+    check(pose.state().origin == 1);
+    check(pose.state().x_mm == 0 && pose.state().y_mm == 0);
+  }
+}
+
 int main() {
+  signed_heading_wrap_and_projection();
   unhealthy_magnet_or_cached_wheel_revokes_pose();
   refuse_reused_wheel_acquisition();
   origin_quality_respects_heading_uncertainty();
