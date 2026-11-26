@@ -75,12 +75,14 @@ def _check_original_license(manifest, expected, attribution):
     assert manifest["author"] == author
     assert manifest["license"] == license_id
     assert source in manifest["source_url"]
+    records = [record for record in _attribution_records(attribution) if source in record]
     assert any(
-        source in record
-        and author in record
-        and _license_token(license_id) in _license_token(record)
-        for record in _attribution_records(attribution)
+        author in record and _license_token(license_id) in _license_token(record)
+        for record in records
     ), f"Missing attribution for {source}: {license_id}"
+    assert not any(re.search(r"\bGPL", record, re.IGNORECASE) for record in records), (
+        f"Conflicting GPL attribution for {source}"
+    )
 
 
 def _attribution_records(attribution):
@@ -102,6 +104,27 @@ def _license_token(value):
     return re.sub(r"[^a-z0-9]", "", value.lower())
 
 
+def _load_original_manifest(directory):
+    path = directory / "source.json"
+    assert path.is_file(), f"Missing CAD source manifest: {path}"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _check_stepper_ancestor(manifest, attribution):
+    author, license_id, source = ORIGINAL_SOURCES["smars"]
+    ancestor = manifest["ancestor"]
+    assert ancestor["recorded_license"] == license_id
+    assert ancestor["author"] == author
+    assert source in ancestor["source_url"]
+    stepper_source = ORIGINAL_SOURCES["smars-stepper"][2]
+    assert any(
+        stepper_source in record
+        and "ncsa40" in _license_token(record)
+        and "no commercial grant inferred" in record
+        for record in _attribution_records(attribution)
+    ), "Missing stepper noncommercial ancestor warning"
+
+
 def test_original_cad_inventory_and_license_provenance():
     originals = CAD / "originals"
     attribution = (ROOT / "docs/ATTRIBUTION.md").read_text(encoding="utf-8")
@@ -111,13 +134,11 @@ def test_original_cad_inventory_and_license_provenance():
     )
     for directory, expected in ORIGINAL_SOURCES.items():
         source = originals / directory
-        manifest = json.loads((source / "source.json").read_text(encoding="utf-8"))
+        manifest = _load_original_manifest(source)
         _check_original_license(manifest, expected, attribution)
         _check_original_assets(source, manifest)
         if directory == "smars-stepper":
-            assert manifest["ancestor"]["recorded_license"] == "CC-BY-NC-SA-4.0"
-            assert manifest["ancestor"]["author"] == ORIGINAL_SOURCES["smars"][0]
-            assert "no commercial grant inferred" in attribution
+            _check_stepper_ancestor(manifest, attribution)
 
 
 @pytest.mark.parametrize("fault", ["unregistered", "missing", "duplicate", "changed", "size"])
@@ -166,3 +187,47 @@ def test_original_cad_attribution_cannot_borrow_neighbor_license(style):
         attribution = f"- {source}\n  {author}: MIT\n- neighbor\n  {author}: {license_id}"
     with pytest.raises(AssertionError, match="Missing attribution"):
         _check_original_license(manifest, expected, attribution)
+
+
+@pytest.mark.parametrize("tag", ["GPLv3", "GPL-3.0-only", "GPL3"])
+def test_original_cad_attribution_rejects_conflicting_gpl(tag):
+    expected = ORIGINAL_SOURCES["smars"]
+    author, license_id, source = expected
+    manifest = {"author": author, "license": license_id, "source_url": source}
+    attribution = f"| {source} | {author} | {license_id} |"
+    _check_original_license(manifest, expected, attribution + f"\n- Unrelated reference: {tag}")
+    with pytest.raises(AssertionError, match="Conflicting GPL attribution"):
+        _check_original_license(manifest, expected, attribution + f" {tag}")
+    manifest["license"] = tag
+    with pytest.raises(AssertionError):
+        _check_original_license(manifest, expected, attribution)
+
+
+def test_original_cad_missing_source_manifest(tmp_path):
+    path = tmp_path / "source.json"
+    path.write_text('{"license": "CC-BY-4.0"}', encoding="utf-8")
+    assert _load_original_manifest(tmp_path) == {"license": "CC-BY-4.0"}
+    path.unlink()
+    with pytest.raises(AssertionError, match="Missing CAD source manifest"):
+        _load_original_manifest(tmp_path)
+
+
+@pytest.mark.parametrize("fault", ["license", "author", "source_url", "warning", "neighbor", "nc"])
+def test_stepper_ancestor_rejects_provenance_drift(fault):
+    author, license_id, source = ORIGINAL_SOURCES["smars"]
+    ancestor = {"author": author, "recorded_license": license_id, "source_url": source}
+    manifest = {"ancestor": ancestor}
+    attribution = "- thing:2778904; ancestor NC-SA4.0; no commercial grant inferred."
+    _check_stepper_ancestor(manifest, attribution)
+    if fault == "license":
+        ancestor["recorded_license"] = "CC-BY-4.0"
+    elif fault in {"author", "source_url"}:
+        ancestor[fault] = "unrelated"
+    elif fault == "warning":
+        attribution = attribution.replace("no commercial grant inferred", "commercial use allowed")
+    elif fault == "neighbor":
+        attribution = attribution.replace("; no commercial", "\n- neighbor: no commercial")
+    else:
+        attribution = attribution.replace("NC-SA4.0", "BY4.0")
+    with pytest.raises(AssertionError):
+        _check_stepper_ancestor(manifest, attribution)
