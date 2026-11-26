@@ -127,7 +127,10 @@ qualification is still pending, and its SD slot must stay empty/disabled.
 [RIO's reference](../research/2026-11-03-sense-realtime-reuse.md) uses speaker
 BCLK7/LRC8/DIN9 and amplifier SD44. Those are **not** the compiled allocation
 above. Port software/reference handling to one checked map before wiring; do not
-mix the two tables or add an SD44 wire to the current build. Sense AEC software reference and urgent PCM flush are in the stacked firmware implementation. No hardware acoustic interruption gate has passed.
+mix the two tables or add an SD44 wire to the current build.
+The compiled Sense `AUDIO_AMP_SD_MODE_GPIO` is `GPIO_NUM_NC`; no MCU shutdown
+or switched amplifier supply is allocated. Digital I2S disable cannot certify
+pop-free shutdown, rail isolation or immediate acoustic silence. Sense AEC software reference and urgent PCM flush are in the stacked firmware implementation. No hardware acoustic interruption gate has passed.
 
 **MAX98357A I2S GAIN and acoustic baseline (provisional, NOT physically qualified):**
 For the selected digital MAX98357A, plan to leave its GAIN input electrically
