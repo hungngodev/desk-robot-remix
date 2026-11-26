@@ -1,5 +1,6 @@
 """Malformed local fleet configuration must stop the launcher cleanly."""
 
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
@@ -48,3 +49,35 @@ def test_launcher_credentials_follow_selected_config_from_other_cwd(tmp_path, ex
     assert result.returncode == 2
     assert "Credential file contains a malformed or duplicate entry" in result.stderr
     assert "Traceback" not in result.stderr
+
+
+@pytest.fixture
+def launcher(monkeypatch):
+    spec = importlib.util.spec_from_file_location(
+        "drx1106_launcher", ROOT / "laptop/server/run_server.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.syspath_prepend(str(ROOT / "laptop/src"))
+    spec.loader.exec_module(module)
+    return module
+
+
+@pytest.mark.parametrize("device_id", [False, 0, None, [], {}])
+def test_launcher_rejects_nonstring_unmapped_device(launcher, device_id):
+    robots = [
+        {"id": "robot-01", "device_id": "head-01", "voice": "af_heart"},
+        {"id": "robot-02", "device_id": device_id, "voice": "af_bella"},
+    ]
+    with pytest.raises(ValueError, match="Provisioned robot needs an ID, device and Kokoro voice"):
+        launcher.fleet_device_and_voice_maps(robots)
+
+
+@pytest.mark.parametrize("unmapped", [{}, {"device_id": ""}])
+def test_launcher_accepts_unprovisioned_sibling(launcher, unmapped):
+    robots = [
+        {"id": "robot-01", "device_id": "head-01", "voice": "af_heart"},
+        {"id": "robot-02", "voice": "af_bella", **unmapped},
+    ]
+    assert launcher.fleet_device_and_voice_maps(robots) == (
+        {"robot-01": "head-01"}, {"robot-01": "af_heart"},
+    )

@@ -26,8 +26,8 @@ def fleet_device_and_voice_maps(robots: list[dict]) -> tuple[dict[str, str], dic
     for robot in robots:
         if not isinstance(robot, dict):
             raise ValueError("Each fleet robot needs an object config")
-        device = robot.get("device_id")
-        if not device:
+        device = robot.get("device_id", "")
+        if device == "":
             continue  # Unprovisioned siblings do not own a live voice.
         robot_id = robot.get("id")
         voice = robot.get("voice")
