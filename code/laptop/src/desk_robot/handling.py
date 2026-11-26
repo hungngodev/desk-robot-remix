@@ -203,24 +203,12 @@ class HandlingGate:
         shake_delta_mg: int = 550,
         request_elapsed_ms: float = 0.0,
     ) -> tuple[str, ...]:
-        if (type(qualified) is not bool
-                or type(calibrated) is not bool
-                or type(now) not in (int, float)
-                or not -1e15 <= now <= 1e15
-                or not math.isfinite(now)
-                or type(shake_delta_mg) is not int
-                or not 300 <= shake_delta_mg <= 1400
-                or type(tilt_threshold_deg) not in (int, float)
-                or not 25 <= tilt_threshold_deg <= 75
-                or not math.isfinite(tilt_threshold_deg)):
-            raise ValueError("Physically qualified MPU6050 thresholds required")
+        self._validate_observation(qualified, calibrated, now, shake_delta_mg, tilt_threshold_deg)
         if not qualified or not calibrated:
             # Heuristic thresholds remain provisional until operator attestation.
             # Revoking qualification clears pose, never trusted source identity.
             # Otherwise an old conversion can seed calibration when reenabled.
-            previous = (self.last_boot_id, self.last_sample_ms, self.last_native_low_g)
-            self.reset(preserve_shake_cooldown=True)
-            self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
+            self._revoke_pose_keep_acquisition()
             return ()
         # Retired packets cannot reset a current pose on late delivery.
         imu = body.get("imu") if isinstance(body, dict) else None
@@ -232,9 +220,56 @@ class HandlingGate:
             # Invalidate pose even for delayed motor-active callbacks. Still
             # consume new valid IMU identities below so a cached conversion
             # cannot count as stationary when the motor envelope changes.
-            previous = (self.last_boot_id, self.last_sample_ms, self.last_native_low_g)
-            self.reset(preserve_shake_cooldown=True)
-            self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
+            self._revoke_pose_keep_acquisition()
+        if self._reject_conflicting_low_g(imu):
+            return ()
+        if self._reject_backdated_callback(body, imu, now):
+            return ()
+        if self._reject_old_acquisition(imu, stationary):
+            return ()
+        if self._reject_cached_conversion(body, imu, now, request_elapsed_ms):
+            return ()
+        sample = self._decode_after_gap(body, now, request_elapsed_ms)
+        if sample is None:
+            return ()
+        if not self._accept_acquisition(body["imu"], now):
+            return ()
+        if not self._accept_native_low_g(body["imu"]):
+            return ()
+        if not stationary:
+            # The acquisition fence and native low-g metadata are current,
+            # but motion-contaminated axes must never seed or emit a gesture.
+            return ()
+        return self._observe_stationary(
+            body, sample, tilt_threshold_deg, shake_delta_mg,
+        )
+
+    def _revoke_pose_keep_acquisition(self, *, preserve_native_metadata: bool = True) -> None:
+        """Invalidate pose and retain the replay fence and gesture cooldown."""
+        boot_id, sample_ms = self.last_boot_id, self.last_sample_ms
+        native = self.last_native_low_g if preserve_native_metadata else None
+        self.reset(preserve_shake_cooldown=True)
+        self.last_boot_id, self.last_sample_ms = boot_id, sample_ms
+        self.last_native_low_g = native
+
+    @staticmethod
+    def _validate_observation(
+        qualified: bool, calibrated: bool, now: float,
+        shake_delta_mg: int, tilt_threshold_deg: float,
+    ) -> None:
+        if (type(qualified) is not bool
+                or type(calibrated) is not bool
+                or type(now) not in (int, float)
+                or not -1e15 <= now <= 1e15
+                or not math.isfinite(now)
+                or type(shake_delta_mg) is not int
+                or not 300 <= shake_delta_mg <= 1400
+                or type(tilt_threshold_deg) not in (int, float)
+                or not 25 <= tilt_threshold_deg <= 75
+                or not math.isfinite(tilt_threshold_deg)):
+            raise ValueError("Physically qualified MPU6050 thresholds required")
+
+    def _reject_conflicting_low_g(self, imu: object) -> bool:
         # Conflicting same-acquisition native low-g metadata must revoke any
         # relative pose even when cached/replayed or arriving with a backdated
         # host callback timestamp.
@@ -256,12 +291,13 @@ class HandlingGate:
                         and not (irq and seq == 0)
                         and (self.last_low_g_seq is None or seq >= self.last_low_g_seq)):
                     self.last_low_g_seq = seq
-                previous = (self.last_boot_id, self.last_sample_ms, self.last_native_low_g)
                 previous_at = self.last_at
-                self.reset(preserve_shake_cooldown=True)
-                self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
+                self._revoke_pose_keep_acquisition()
                 self.last_at = previous_at
-                return ()
+                return True
+        return False
+
+    def _reject_backdated_callback(self, body: dict, imu: object, now: float) -> bool:
         if self.last_at is not None and now <= self.last_at:
             # Old stationary observations cannot replace newer calibration.
             # An explicit motor-active status must still revoke the pose:
@@ -284,7 +320,10 @@ class HandlingGate:
                         and imu["sample_ms"] <= self.last_sample_ms
                         and not (self.last_sample_ms >= 0xffff0000
                                  and imu["sample_ms"] <= 0xffff)):
-                    return ()
+                    return True
+        return False
+
+    def _reject_old_acquisition(self, imu: object, stationary: bool) -> bool:
         # An older acquisition with an intact stationary safety envelope
         # cannot revoke a newer pose merely because its IMU payload was
         # corrupted in transit. Invalid CURRENT acquisitions still fail closed.
@@ -301,7 +340,12 @@ class HandlingGate:
                         and not (self.last_sample_ms >= 0xffff0000
                                  and imu["sample_ms"] <= 0xffff))
                 )):
-            return ()
+            return True
+        return False
+
+    def _reject_cached_conversion(
+        self, body: dict, imu: object, now: float, request_elapsed_ms: float,
+    ) -> bool:
         # A valid late conversion must not impersonate a polling outage.
         # Invalid current telemetry still falls through to fail closed.
         if (self.last_boot_id is not None and isinstance(imu, dict)
@@ -316,39 +360,41 @@ class HandlingGate:
                     # still exposing the last cached conversion as fresh.
                     # Invalidate the pose/baseline, but retain the exact
                     # acquisition identity so that cached data cannot seed it.
-                    previous = (self.last_boot_id, self.last_sample_ms, self.last_native_low_g)
-                    self.reset(preserve_shake_cooldown=True)
-                    self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
-                return ()
+                    self._revoke_pose_keep_acquisition()
+                return True
             if (stamp < self.last_sample_ms
                     and not (self.last_sample_ms >= 0xffff0000
                              and stamp <= 0xffff)):
                 # A late older conversion is not evidence of a NEW polling
                 # outage; never erase the newer trusted pose on replay.
-                return ()
+                return True
+        return False
+
+    def _decode_after_gap(
+        self, body: dict, now: float, request_elapsed_ms: float,
+    ) -> tuple[tuple[float, ...], float] | None:
         if self.last_at is not None and now - self.last_at > 1.0:
             # Host reconnect invalidates calibration, not source identity.
-            previous = (self.last_boot_id, self.last_sample_ms, self.last_native_low_g)
-            self.reset(preserve_shake_cooldown=True)
-            self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
+            self._revoke_pose_keep_acquisition()
             # A transport gap invalidates pose, not the gesture cooldown.
         sample = _decode_mpu6050(body, request_elapsed_ms=request_elapsed_ms)
         if sample is None:
             # Bad telemetry invalidates pose, not the last trusted acquisition.
             # Otherwise replaying that conversion after a malformed status
             # could seed a fresh calibration with stale sensor data.
-            previous = (self.last_boot_id, self.last_sample_ms, self.last_native_low_g)
-            self.reset(preserve_shake_cooldown=True)
-            self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
+            self._revoke_pose_keep_acquisition()
             # Bad telemetry revokes pose, not the recent gesture cooldown.
             # Otherwise a quick recalibration can repeat a shake announcement.
-            return ()
-        boot_id = body["imu"]["boot_id"]
-        sample_ms = body["imu"]["sample_ms"]
+            return None
+        return sample
+
+    def _accept_acquisition(self, imu: dict, now: float) -> bool:
+        boot_id = imu["boot_id"]
+        sample_ms = imu["sample_ms"]
         if boot_id in self.retired_boot_ids:
             # Delayed status from a prior boot must not displace the current
             # calibration or revive a previously accepted conversion.
-            return ()
+            return False
         if self.last_boot_id is not None:
             if boot_id != self.last_boot_id:
                 # Never evict a retired identity: its delayed packets could
@@ -357,12 +403,11 @@ class HandlingGate:
                 if len(self.retired_boot_ids) >= 8:
                     # An unrecognized generation cannot be trusted. Keep the
                     # replay fence, but revoke any calibrated handling pose.
-                    previous = (self.last_boot_id, self.last_sample_ms, self.last_native_low_g)
-                    self.reset(preserve_shake_cooldown=True)
-                    self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
-                    return ()
+                    self._revoke_pose_keep_acquisition()
+                    return False
                 old_boot = self.last_boot_id
-                self.reset(preserve_shake_cooldown=True)  # new WROOM boot identity requires fresh calibration
+                # New WROOM boot identity requires fresh calibration.
+                self.reset(preserve_shake_cooldown=True)
                 self.last_low_g_seq = None  # MCU counter begins at zero per boot
                 self.retired_boot_ids.append(old_boot)
             elif sample_ms < self.last_sample_ms:
@@ -372,7 +417,7 @@ class HandlingGate:
                 if not (self.last_sample_ms >= 0xffff0000 and sample_ms <= 0xffff):
                     # A delayed conversion cannot invalidate a newer pose.
                     # Real boot changes and forward host gaps still reset it.
-                    return ()
+                    return False
                 # A 32-bit sensor clock rollover invalidates pose but must
                 # not reset the human gesture cooldown on the host clock.
                 previous_at = self.last_at
@@ -381,20 +426,22 @@ class HandlingGate:
             elif sample_ms - self.last_sample_ms > 0x7fffffff:
                 # A pre-wrap conversion arriving after wrap looks numerically
                 # newer. Reject implausibly large forward jumps as replay.
-                return ()
+                return False
             elif sample_ms == self.last_sample_ms:
-                return ()  # same physical conversion; do not update last_at
+                return False  # same physical conversion; do not update last_at
         self.last_boot_id = boot_id
         self.last_sample_ms = sample_ms
         # Accepted sensor acquisitions may arrive with an older host callback
         # time. Never rewind the gate's cooldown and polling clock.
         self.last_at = max(now, self.last_at) if self.last_at is not None else now
+        return True
+
+    def _accept_native_low_g(self, source: dict) -> bool:
         # FF_THR/FF_DUR are sampled by the WROOM silicon, not inferred from
         # the last accelerometer snapshot. A brief hardware IRQ can vanish
         # before a slow Mac body poll; preserve the monotonically increasing
         # count across automatic telemetry faults. This is an unqualified
         # low-g candidate, never a verified fall or motor/speech command.
-        source = body["imu"]
         self.last_native_low_g = self._native_low_g_snapshot(source)
         fields = ("low_g_valid", "low_g_irq", "low_g_seq")
         if any(key in source for key in fields):
@@ -430,14 +477,14 @@ class HandlingGate:
                 # Keep acquisition identity and event fence, but revoke
                 # relative pose until eight fresh quiet observations return.
                 # This never initiates motion or reports a verified fall.
-                previous = (self.last_boot_id, self.last_sample_ms, self.last_native_low_g)
-                self.reset(preserve_shake_cooldown=True)
-                self.last_boot_id, self.last_sample_ms, self.last_native_low_g = previous
-                return ()
-        if not stationary:
-            # The acquisition fence and native low-g metadata are current,
-            # but motion-contaminated axes must never seed or emit a gesture.
-            return ()
+                self._revoke_pose_keep_acquisition()
+                return False
+        return True
+
+    def _observe_stationary(
+        self, body: dict, sample: tuple[tuple[float, ...], float],
+        tilt_threshold_deg: float, shake_delta_mg: int,
+    ) -> tuple[str, ...]:
         acceleration, rotation_dps = sample
         # Decode the same validated MPU6050 axes, not a new I2C reader.
         # Estimating stationary bias follows the standard mean-zero-rate
@@ -455,57 +502,63 @@ class HandlingGate:
             # this is NOT a free-fall event or verified drop detector.
             # https://cdn.sparkfun.com/datasheets/Components/General%20IC/PS-MPU-6000A.pdf
             # Keep acquisition identity so a replay cannot seed calibration.
-            previous = (self.last_boot_id, self.last_sample_ms)
-            self.reset(preserve_shake_cooldown=True)
-            self.last_boot_id, self.last_sample_ms = previous
+            self._revoke_pose_keep_acquisition(preserve_native_metadata=False)
             # Implausible acceleration revokes pose, not the host cooldown.
             return ()
         if self.reference is None:
-            # Startup is an intentional physical calibration step. Accel
-            # must be near 1g and gyro quiet for 8 consecutive fresh reads.
-            if not (0.91 <= g <= 1.09 and rotation_dps <= 7):
-                self.startup_samples.clear()
-                self.startup_gyro_samples.clear()
-                return ()
-            self.startup_samples.append(acceleration)
-            self.startup_gyro_samples.append(gyro_axes)
-            if len(self.startup_samples) == 8:
-                reference = _gravity_reference(self.startup_samples)
-                if reference is None:
-                    # Conflicting stationary vectors invalidate calibration,
-                    # not the identity of the conversion just consumed.
-                    previous = (self.last_boot_id, self.last_sample_ms)
-                    self.reset(preserve_shake_cooldown=True)
-                    self.last_boot_id, self.last_sample_ms = previous
-                    return ()
-                mean_gyro = tuple(
-                    sum(v[i] for v in self.startup_gyro_samples) / 8
-                    for i in range(3)
-                )
-                # An average of moving samples is not a gyro zero point.
-                # A stationary calibration must hold every axis within one
-                # degree per second of the whole-window mean.
-                if any(
-                    abs(v[axis] - mean_gyro[axis]) > 1.0
-                    for v in self.startup_gyro_samples
-                    for axis in range(3)
-                ):
-                    self.startup_samples.clear()
-                    self.startup_gyro_samples.clear()
-                    return ()
-                self.reference = reference
-                self.gyro_bias_dps = mean_gyro
-                self.startup_samples.clear()
-                self.startup_gyro_samples.clear()
+            self._update_startup_reference(acceleration, gyro_axes, g, rotation_dps)
             return ()
 
         if self.gyro_bias_dps is None:
             # Missing stationary gyro evidence revokes the pose, but the
             # consumed conversion must remain fenced against replay.
-            previous = (self.last_boot_id, self.last_sample_ms)
-            self.reset(preserve_shake_cooldown=True)
-            self.last_boot_id, self.last_sample_ms = previous
+            self._revoke_pose_keep_acquisition(preserve_native_metadata=False)
             return ()
+        return self._gesture_events(acceleration, gyro_axes, g, tilt_threshold_deg, shake_delta_mg)
+
+    def _update_startup_reference(
+        self, acceleration: tuple[float, ...], gyro_axes: tuple[float, ...],
+        g: float, rotation_dps: float,
+    ) -> None:
+        # Startup is an intentional physical calibration step. Accel
+        # must be near 1g and gyro quiet for 8 consecutive fresh reads.
+        if not (0.91 <= g <= 1.09 and rotation_dps <= 7):
+            self.startup_samples.clear()
+            self.startup_gyro_samples.clear()
+            return
+        self.startup_samples.append(acceleration)
+        self.startup_gyro_samples.append(gyro_axes)
+        if len(self.startup_samples) == 8:
+            reference = _gravity_reference(self.startup_samples)
+            if reference is None:
+                # Conflicting stationary vectors invalidate calibration,
+                # not the identity of the conversion just consumed.
+                self._revoke_pose_keep_acquisition(preserve_native_metadata=False)
+                return
+            mean_gyro = tuple(
+                sum(v[i] for v in self.startup_gyro_samples) / 8
+                for i in range(3)
+            )
+            # An average of moving samples is not a gyro zero point.
+            # A stationary calibration must hold every axis within one
+            # degree per second of the whole-window mean.
+            if any(
+                abs(v[axis] - mean_gyro[axis]) > 1.0
+                for v in self.startup_gyro_samples
+                for axis in range(3)
+            ):
+                self.startup_samples.clear()
+                self.startup_gyro_samples.clear()
+                return
+            self.reference = reference
+            self.gyro_bias_dps = mean_gyro
+            self.startup_samples.clear()
+            self.startup_gyro_samples.clear()
+
+    def _gesture_events(
+        self, acceleration: tuple[float, ...], gyro_axes: tuple[float, ...],
+        g: float, tilt_threshold_deg: float, shake_delta_mg: int,
+    ) -> tuple[str, ...]:
         rotation_dps = math.hypot(*(
             raw - bias for raw, bias in
             zip(gyro_axes, self.gyro_bias_dps, strict=True)
