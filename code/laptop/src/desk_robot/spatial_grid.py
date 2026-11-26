@@ -102,6 +102,20 @@ class SpatialGrid:
         return (type(x) is int and type(y) is int
                 and 0 <= x < self.width and 0 <= y < self.height)
 
+    def cell_at_mm(self, x_mm: float, y_mm: float) -> tuple[int, int]:
+        """Map metric coordinates to half-open cells without clamping negatives."""
+        if type(x_mm) not in (int, float) or type(y_mm) not in (int, float):
+            raise ValueError("Metric coordinate outside map")
+        try:
+            # Floor division preserves the negative side of zero even when
+            # ordinary floating division would underflow to negative zero.
+            cell = (int(x_mm // CELL_MM), int(y_mm // CELL_MM))
+        except (ValueError, OverflowError) as exc:
+            raise ValueError("Metric coordinate outside map") from exc
+        if not self._contains_cell(*cell):
+            raise ValueError("Metric coordinate outside map")
+        return cell
+
     def record(self, batch: RangeCellBatch, *, now_us: int) -> None:
         """Atomically add a projected, qualified WROOM range observation.
 

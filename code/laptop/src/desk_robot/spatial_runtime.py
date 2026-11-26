@@ -215,14 +215,14 @@ class SpatialRuntime:
             map_base = state.map_to_odom.compose(odom_base_transform(receipt))
         except FrameError as exc:
             raise PoseError("Invalid map-to-base pose transform") from exc
-        cell_x = math.floor(map_base.x_mm / CELL_MM)
-        cell_y = math.floor(map_base.y_mm / CELL_MM)
-        if not (0 <= cell_x < state.grid.width and 0 <= cell_y < state.grid.height):
-            raise PoseError("Localized pose outside anchored spatial grid")
+        try:
+            cell = state.grid.cell_at_mm(map_base.x_mm, map_base.y_mm)
+        except ValueError as exc:
+            raise PoseError("Localized pose outside anchored spatial grid") from exc
         heading = round(map_base.yaw_rad / (math.pi / 2)) % 4
         if abs(wrap_yaw_rad(map_base.yaw_rad - heading * (math.pi / 2))) > yaw_tolerance_rad:
             raise PoseError("Localized heading diverges from lattice orientation")
-        return (cell_x, cell_y), heading
+        return cell, heading
 
     def verify_pose_matches_route_state(
         self,
