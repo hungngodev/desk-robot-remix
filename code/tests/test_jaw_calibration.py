@@ -32,10 +32,9 @@ def test_recommends_signed_raw_limits_without_marking_physical_success():
     assert result["manual_review_required"]
 
 
-@pytest.mark.parametrize("phase,endpoint", [
-    ("free", -32768), ("contact", 32767), ("upper", 32767),
-])
-def test_adc_clipping_cannot_qualify_force_trial(phase, endpoint):
+@pytest.mark.parametrize("phase", ["free", "contact", "upper"])
+@pytest.mark.parametrize("endpoint", [-32768, -1, 0, 32767])
+def test_adc_rails_cannot_qualify_force_trial(phase, endpoint):
     samples = measured_samples()
     _, seq = samples[phase][0]
     samples[phase][0] = (endpoint, seq)
@@ -344,3 +343,47 @@ async def test_capture_preserves_conversion_fence_between_phases_and_wrap():
                                  robot="robot-01", token="s" * 32, count=5,
                                  interval=0.12, boot_state=state)
             assert [seq for _, seq in rows] == expected
+
+
+@pytest.mark.parametrize("adc", [-1, 0, 32767])
+async def test_capture_rejects_jaw_rail_before_collecting_samples(adc):
+    calls = []
+
+    def respond(request):
+        calls.append(request)
+        return httpx.Response(200, json={
+            "robot_id": "robot-01",
+            "force": {"valid": True, "jaw_valid": True, "calibrated": False,
+                      "adc": [100, adc], "jaw_seq": 1,
+                      "boot_id": 17, "jaw_age_ms": 0},
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        with pytest.raises(ValueError):
+            await capture(client, base_url="http://127.0.0.1:8008",
+                          robot="robot-01", token="s" * 32,
+                          count=5, interval=0.12, boot_state={})
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("adc", [-1, 0, 32767])
+async def test_invalid_jaw_sample_leaves_no_candidate(tmp_path, monkeypatch, adc):
+    source = tmp_path / "grasp.json"
+    original = (ROOT / "config/calibration.example.json").read_text(encoding="utf-8")
+    source.write_text(original, encoding="utf-8")
+    monkeypatch.setenv("DESK_ROBOT_OPERATOR_TOKEN", "t" * 24)
+    monkeypatch.setattr("sys.argv", ["calibrate_jaw_fsr.py", "--calibration", str(source)])
+    monkeypatch.setattr("builtins.input", lambda _prompt: "")
+    samples = measured_samples()
+    samples["free"][0] = (adc, 1)
+    phases = iter(samples.values())
+    main = tool["main"]
+
+    async def fake_capture(*_args, **_kwargs):
+        return next(phases)
+
+    monkeypatch.setitem(main.__globals__, "capture", fake_capture)
+    with pytest.raises(ValueError, match="Untrusted"):
+        await main()
+    assert not (tmp_path / "grasp.jaw_candidate.json").exists()
+    assert source.read_text(encoding="utf-8") == original

@@ -82,6 +82,13 @@ def load_source_calibration(path: Path) -> dict:
     return source
 
 
+def _valid_calibration_adc(adc: object) -> bool:
+    # WROOM selects single-ended AIN1/GND (ADS1115 config 0xD383).
+    # Zero/negative codes near ground cannot rule out an open/short FSR.
+    # Reject them for physical calibration, not as a universal ADC error.
+    return type(adc) is int and 0 < adc < 32767
+
+
 def propose_force_limits(phases: dict[str, list[tuple[int, int]]]) -> dict:
     """Use real independent ADS1115 sample sequence numbers, never duplicate HTTP frames."""
     if set(phases) != {"free", "contact", "upper"}:
@@ -95,9 +102,7 @@ def propose_force_limits(phases: dict[str, list[tuple[int, int]]]) -> dict:
             raise ValueError(f"Need at least five distinct {name} samples")
         if any(
             not isinstance(row, tuple) or len(row) != 2
-            or type(row[0]) is not int or type(row[1]) is not int
-            or not -32768 <= row[0] <= 32767
-            or row[0] in (-32768, 32767)  # clipped ADC is not force evidence
+            or not _valid_calibration_adc(row[0]) or type(row[1]) is not int
             or not 1 <= row[1] <= 0xffffffff for row in rows
         ):
             raise ValueError(f"Untrusted {name} ADC records")
@@ -234,6 +239,8 @@ async def capture(
         if not isinstance(payload, dict) or payload.get("robot_id") != robot:
             raise ValueError("Jaw calibration robot identity mismatch")
         adc, seq = force_observation(payload)
+        if not _valid_calibration_adc(adc):
+            raise ValueError("Untrusted jaw ADC sample at or below ground")
         if boot_state is not None:
             # The real WROOM reports one boot identity and acquisition age.
             # A reboot between unloaded, light and upper force trials cannot
