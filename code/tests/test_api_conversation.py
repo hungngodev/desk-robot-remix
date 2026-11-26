@@ -1892,22 +1892,30 @@ async def test_kokoro_monitor_stop_accepts_request_without_claiming_acoustic_ack
         "head_flush_requested": True,
         "head_flush_acknowledged": False, "audible_stop_verified": False,
     }
+    calls = []
 
     class Response:
         def raise_for_status(self):
             pass
 
         def json(self):
-            return receipt
+            return receipt.copy()
 
     class Client:
         async def post(self, url, **kwargs):
+            calls.append((url, kwargs["headers"], kwargs["json"]))
             return Response()
 
     speaker = KokoroHeadSpeaker(settings, Client())
-    assert await speaker.monitor_lost(SimpleNamespace(device_id="head01")) == receipt
-    assert receipt["head_flush_acknowledged"] is False
-    assert receipt["audible_stop_verified"] is False
+    result = await speaker.monitor_lost(SimpleNamespace(device_id="head01"))
+    assert result == receipt
+    assert result["head_flush_acknowledged"] is False
+    assert result["audible_stop_verified"] is False
+    assert calls == [(
+        "http://test-bridge.invalid/interrupt",
+        {"Authorization": "Bearer " + "z" * 32},
+        {"device_id": "head01", "monitor_unavailable": True},
+    )]
 
 
 @pytest.mark.parametrize("route", ["interrupt", "operator_stop", "monitor_lost"])
@@ -1936,16 +1944,22 @@ async def test_kokoro_all_stop_routes_require_device_bound_receipts(
 
     class Client:
         async def post(self, url, **kwargs):
-            calls.append(kwargs["json"])
+            calls.append((url, kwargs["headers"], kwargs["json"]))
             return Response()
 
     speaker = KokoroHeadSpeaker(settings, Client())
     with pytest.raises(RuntimeError, match="STOP request unconfirmed"):
         await getattr(speaker, route)(SimpleNamespace(device_id="head01"))
-    assert len(calls) == 1
-    assert calls[0]["device_id"] == "head01"
-    assert calls[0].get("monitor_unavailable", False) is (route == "monitor_lost")
-    assert calls[0].get("revoke_initiative", False) is (route == "operator_stop")
+    expected_payload = {"device_id": "head01"}
+    if route == "monitor_lost":
+        expected_payload["monitor_unavailable"] = True
+    elif route == "operator_stop":
+        expected_payload["revoke_initiative"] = True
+    assert calls == [(
+        "http://test-bridge.invalid/interrupt",
+        {"Authorization": "Bearer " + "z" * 32},
+        expected_payload,
+    )]
 
 
 async def test_speaker_doubles_advertising_permission_support_accept_keyword():
