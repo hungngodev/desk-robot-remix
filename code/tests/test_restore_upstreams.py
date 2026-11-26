@@ -209,3 +209,18 @@ def test_missing_checkout_offline_cli_has_clear_error(tmp_path, monkeypatch, no_
 def test_git_authentication_prompt_disabled(monkeypatch):
     monkeypatch.setenv("GIT_TERMINAL_PROMPT", "1")
     assert restore.git_env()["GIT_TERMINAL_PROMPT"] == "0"
+
+
+def test_cached_checkout_with_replacement_ref_is_rejected(tmp_path, monkeypatch):
+    path = tmp_path / "upstream/source"
+    pin = repository(path)
+    (path / "tracked").write_text("different source")
+    git(path, "commit", "-qam", "newer")
+    current = git(path, "rev-parse", "HEAD")
+    git(path, "replace", pin, current)
+    configure(tmp_path, monkeypatch, commit=pin)
+    with pytest.raises(RuntimeError, match="replacement refs"):
+        restore.main()
+    assert git(path, "rev-parse", "HEAD") == current
+    assert (path / "tracked").read_text() == "different source"
+    assert git(path, "replace", "-l") == pin

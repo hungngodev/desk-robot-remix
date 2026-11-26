@@ -60,6 +60,9 @@ def require_checkout(path):
     common = run(["git", "rev-parse", "--git-common-dir"], path)
     if (path / common).resolve() != metadata.resolve():
         raise RuntimeError(f"Git metadata mismatch in {path}")
+    # A replacement ref can make HEAD name the pin while checking out other content.
+    if run(["git", "for-each-ref", "--format=%(refname)", "refs/replace/"], path):
+        raise RuntimeError(f"Refuse replacement refs in {path}")
 
 
 def require_visible_index(path):
