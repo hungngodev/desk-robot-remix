@@ -268,6 +268,16 @@ async def request(args: argparse.Namespace, settings: Settings) -> object:
     async with httpx.AsyncClient(
         base_url=args.url, headers=headers, timeout=310, trust_env=False,
     ) as client:
+        if settings.mode == "simulation":
+            # The default URL is shared by both modes. Verify before any robot
+            # request, then bind subsequent requests to simulation at ingress.
+            health = await client.get("/v1/health", timeout=5)
+            health.raise_for_status()
+            state = health.json()
+            if (not isinstance(state, dict) or state.get("mode") != "simulation"
+                    or state.get("runtime_ready") is not True):
+                raise ValueError("Simulation CLI requires a ready simulation server")
+            client.headers["X-Desk-Robot-Mode"] = "simulation"
         if args.action == "status":
             result = await client.get(f"/v1/robots/{args.robot}/status")
         elif args.action == "job":

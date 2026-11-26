@@ -36,7 +36,7 @@ def test_status_cli_degraded_json_and_exit(
     ))
     monkeypatch.setenv("OPERATOR", "a" * 40)
     monkeypatch.setattr(cli, "load_settings", lambda _: SimpleNamespace(
-        coordinator_token_env="OPERATOR",
+        coordinator_token_env="OPERATOR", mode="hardware",
     ))
     monkeypatch.setattr(cli, "load_env", lambda _: None)
     monkeypatch.setattr(sys, "argv", ["desk-robot", action, "pet"])

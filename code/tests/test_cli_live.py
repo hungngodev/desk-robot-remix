@@ -446,3 +446,107 @@ def test_cli_malformed_arguments_prevent_side_effects(command, diagnostic, monke
     assert "Traceback" not in captured.err
     assert calls == []
     assert {path.name: path.read_bytes() for path in tmp_path.iterdir()} == before
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", [
+    {"mode": "hardware", "runtime_ready": True},
+    {"mode": "simulation", "runtime_ready": False},
+    {"runtime_ready": True},
+    [],
+])
+@pytest.mark.parametrize("action", ["enable", "move", "pickup", "stop", "chat", "status"])
+async def test_simulation_cli_refuses_unconfirmed_server(monkeypatch, state, action):
+    calls = []
+
+    def respond(req):
+        calls.append((req.method, req.url.path))
+        return httpx.Response(200, json=state)
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original(
+        transport=httpx.MockTransport(respond), **kwargs,
+    ))
+    monkeypatch.setenv("TOKEN", "a" * 40)
+    config = SimpleNamespace(mode="simulation", coordinator_token_env="TOKEN")
+    args = SimpleNamespace(action=action, robot="robot-01", command="drive 15 15 100",
+                           target="key", robots=["robot-01"], turns=1, topic="hello",
+                           url="http://127.0.0.1:8765")
+    with pytest.raises(ValueError, match="ready simulation server"):
+        await request(args, config)
+    assert calls == [("GET", "/v1/health")]
+
+
+@pytest.mark.asyncio
+async def test_simulation_cli_binds_confirmed_server(monkeypatch):
+    calls = []
+
+    def respond(req):
+        calls.append((req.method, req.url.path, req.headers.get("X-Desk-Robot-Mode")))
+        if req.url.path == "/v1/health":
+            return httpx.Response(200, json={"mode": "simulation", "runtime_ready": True})
+        return httpx.Response(200, json={"ok": True})
+
+    original = httpx.AsyncClient
+    monkeypatch.setattr(httpx, "AsyncClient", lambda **kwargs: original(
+        transport=httpx.MockTransport(respond), **kwargs,
+    ))
+    monkeypatch.setenv("TOKEN", "a" * 40)
+    config = SimpleNamespace(mode="simulation", coordinator_token_env="TOKEN")
+    args = SimpleNamespace(action="enable", robot="robot-01", url="http://127.0.0.1:8765")
+    assert await request(args, config) == {"ok": True}
+    assert calls == [("GET", "/v1/health", None),
+                     ("POST", "/v1/robots/robot-01/enable", "simulation")]
+
+
+@pytest.mark.parametrize(("mode", "values", "allowed"), [
+    ("hardware", ["simulation"], False),
+    ("simulation", ["simulation"], True),
+    ("simulation", ["simulation", "simulation"], False),
+    ("hardware", [], True),
+    ("hardware", ["hardware"], True),
+    ("simulation", ["hardware"], False),
+    ("hardware", ["unknown"], False),
+])
+def test_runtime_mode_header_fences_route_dispatch(mode, values, allowed):
+    from desk_robot.api_ingress import APIIngress
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    app = FastAPI()
+    app.add_middleware(APIIngress, tokens=lambda: ("operator-secret", "tool-secret"), mode=mode)
+    calls = []
+
+    @app.post("/v1/action")
+    async def action():
+        calls.append("actuation")
+        return {"ok": True}
+
+    headers = [("Authorization", "Bearer operator-secret")]
+    headers.extend(("X-Desk-Robot-Mode", value) for value in values)
+    with TestClient(app) as client:
+        result = client.post("/v1/action", headers=headers)
+    assert result.status_code == (200 if allowed else 409)
+    assert calls == (["actuation"] if allowed else [])
+
+
+@pytest.mark.asyncio
+async def test_simulation_runtime_never_constructs_physical_transports(settings, monkeypatch):
+    from desk_robot import runtime as runtime_module
+    from desk_robot.simulator import SimulatedHead
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("Simulation must never construct a physical transport")
+
+    monkeypatch.setattr(runtime_module, "HttpHead", forbidden)
+    monkeypatch.setattr(runtime_module, "RoomSerialFeed", forbidden)
+    monkeypatch.setattr(runtime_module, "VoiceEventListener", forbidden)
+    settings.room_station_enabled = True
+    settings.room_station_port = "/dev/tty.usbmodem-test"
+    owner = await runtime_module.Runtime.create(settings)
+    try:
+        await owner.start()
+        assert owner.room_feed is None
+        assert owner._room_task is None
+        assert all(isinstance(head, SimulatedHead) for head in owner.coordinator.heads.values())
+    finally:
+        await owner.close()

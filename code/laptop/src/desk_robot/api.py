@@ -149,6 +149,7 @@ def create_app(settings: Settings, runtime: Runtime | None = None) -> FastAPI:
     app = FastAPI(title="Desk robot controls", version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         APIIngress, tokens=lambda: (app.state.operator_token, app.state.tool_token),
+        mode=settings.mode,
     )
     consumed_tool_receipts: dict[str, float] = {}
     group_request_active = False

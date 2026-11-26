@@ -58,9 +58,11 @@ def authorized_token(credential: str, operator: str, tool: str) -> bool:
 
 
 class APIIngress:
-    def __init__(self, app: ASGIApp, tokens: Callable[[], tuple[str, str]]):
+    def __init__(self, app: ASGIApp, tokens: Callable[[], tuple[str, str]],
+                 mode: str | None = None):
         self.app = app
         self.tokens = tokens
+        self.mode = mode
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http" or not scope["path"].startswith("/v1/"):
@@ -81,6 +83,14 @@ class APIIngress:
         if (scheme.lower() != "bearer" or not credential
                 or not authorized_token(credential, *self.tokens())):
             await reject(401, "A valid private token is required")
+            return
+
+        requested_mode = headers.get(b"x-desk-robot-mode")
+        if requested_mode is not None and (
+            self.mode not in ("simulation", "hardware")
+            or requested_mode != [self.mode.encode("ascii")]
+        ):
+            await reject(409, "Request runtime mode does not match server")
             return
 
         for name, values in headers.items():
