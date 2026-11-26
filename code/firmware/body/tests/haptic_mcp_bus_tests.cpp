@@ -3,6 +3,7 @@
 #include <stdexcept>
 #include "Wire.h"
 #include "AccessorySensors.h"
+#include "McpPortDirectionLock.h"
 TwoWire Wire;
 #define CHECK(x) do { if (!(x)) throw std::runtime_error(#x); } while (false)
 
@@ -249,8 +250,52 @@ static void check_unverified_direction_blocks_latch() {
   CHECK(!wire.unsafe_parallel_mux);
 }
 
+// DRX-1426: every single-bit direction/pullup mutation must latch a fault.
+// Normal verification is read-only; recovery may only make pins inputs.
+static void check_direction_lock_bit_mutations() {
+  const std::uint8_t addresses[] = {0x00, 0x01, 0x0C, 0x0D};
+  for (bool haptic : {false, true}) {
+    for (auto address : addresses) {
+      for (unsigned bit = 0; bit < 8; ++bit) {
+        std::uint8_t regs[0x16]{};
+        regs[0x00] = 0xFF;
+        regs[0x01] = haptic ? 0xFB : 0xFF;
+        regs[0x0C] = 0x0F;
+        regs[0x0D] = 0x01;
+        regs[0x15] = haptic ? 0x04 : 0x00;
+        desk_robot::McpPortDirectionLock lock;
+        if (haptic) lock.expect_haptic_output();
+        unsigned writes = 0;
+        auto read = [&](std::uint8_t reg, std::uint8_t& value) {
+          CHECK(reg < sizeof(regs));
+          value = regs[reg];
+          return true;
+        };
+        auto write = [&](std::uint8_t reg, std::uint8_t value) {
+          CHECK((reg == 0x00 || reg == 0x01) ? value == 0xFF :
+                reg == 0x15 && value == 0 && regs[0x01] == 0xFF);
+          ++writes;
+          regs[reg] = value;
+          return true;
+        };
+        CHECK(lock.verify(read, write, true));
+        CHECK(lock.verified() && !lock.faulted() && writes == 0);
+        regs[address] ^= static_cast<std::uint8_t>(1U << bit);
+        CHECK(!lock.verify(read, write, true));
+        CHECK(lock.faulted() && !lock.verified() && writes == 3);
+        CHECK(regs[0x00] == 0xFF && regs[0x01] == 0xFF && regs[0x15] == 0);
+        regs[0x0C] = 0x0F;
+        regs[0x0D] = 0x01;
+        CHECK(!lock.verify(read, write, true));
+        CHECK(lock.faulted() && !lock.verified() && writes == 3);
+      }
+    }
+  }
+}
+
 int main() {
   try {
+    check_direction_lock_bit_mutations();
     check_unverified_direction_blocks_latch();
     check_runtime_port_configuration_fault();
     check_external_bus_invalidation();
