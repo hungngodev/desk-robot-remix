@@ -124,11 +124,135 @@ static void check_ads_start_provenance() {
   CHECK(sensors.readings().force.valid_mask == 2U);
   CHECK(!wire.unsafe_parallel_mux);
 }
+// Exercise the actual optional driver entry points after a previously valid
+// sample. A short count is not an ACK for a complete physical observation.
+static void check_short_pulse_fifo_reads() {
+  for (std::size_t count = 0; count < 12; ++count) {
+    TwoWire wire;
+    desk_robot::PulsePad pulse;
+    fake_arduino_millis() = 0U;
+    CHECK(pulse.begin(wire));
+    CHECK(pulse.poll(0));
+    const auto before = pulse.sample();
+    wire.pulse_fifo_write_pointer = 6;
+    wire.next_short_read_address = 0x57;
+    wire.next_short_read_request = 12;
+    wire.next_short_read_count = count;
+    CHECK(!pulse.poll(100));
+    CHECK(wire.next_short_read_address == -1);
+    CHECK(!pulse.sample().valid);
+    CHECK(pulse.sample().sample_seq == before.sample_seq);
+    CHECK(pulse.sample().at_ms == before.at_ms);
+    CHECK(pulse.sample().red == before.red && pulse.sample().ir == before.ir);
+    CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+    // The next poll only discards the ambiguous FIFO; it cannot publish it.
+    wire.pulse_fifo_write_pointer = 7;
+    CHECK(!pulse.poll(200));
+    CHECK(!pulse.sample().valid && pulse.sample().sample_seq == before.sample_seq);
+    CHECK(wire.pulse_fifo_read_pointer == 7U);
+    wire.pulse_fifo_write_pointer = 8;
+    CHECK(pulse.poll(300));
+    CHECK(pulse.sample().valid && pulse.sample().at_ms == 300U);
+    CHECK(pulse.sample().sample_seq == before.sample_seq + 1U);
+    CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+  }
+}
+static void check_short_cap_status_reads() {
+  for (bool preferred : {false, true}) {
+    TwoWire wire;
+    wire.cap_uses_0x29 = preferred;
+    desk_robot::ExpansionTouch touch;
+    CHECK(touch.begin(wire));
+    std::uint8_t zones = 0;
+    CHECK(touch.poll(100, zones) && zones == 0xA5);
+    wire.cap_touch_bits = 0;
+    const auto clears = wire.cap_interrupt_clears;
+    wire.next_short_read_address = preferred ? 0x29 : 0x28;
+    wire.next_short_read_request = 1;
+    wire.next_short_read_count = 0;
+    CHECK(!touch.poll(180, zones));
+    CHECK(wire.next_short_read_address == -1);
+    CHECK(!touch.verified() && zones == 0xA5);
+    CHECK(wire.cap_interrupt_clears == clears);
+    CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+    for (unsigned step = 0; step < 7; ++step) {
+      CHECK(!touch.poll(430 + step * 250, zones));
+      CHECK(zones == 0xA5);
+    }
+    CHECK(touch.verified());
+    CHECK(touch.poll(2010, zones) && zones == 0U);
+    CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+  }
+}
+static void check_short_climate_reads() {
+  for (std::size_t count = 0; count < 6; ++count) {
+    TwoWire wire;
+    desk_robot::AccessorySensors sensors;
+    CHECK(sensors.begin(wire));
+    for (std::uint32_t ms = 0; ms < 1008; ms += 12) sensors.poll(ms);
+    const auto before = sensors.readings().climate;
+    CHECK(before.valid && before.sample_seq != 0U);
+    wire.next_short_read_address = 0x44;
+    wire.next_short_read_request = 6;
+    wire.next_short_read_count = count;
+    std::uint32_t ms = 1008;
+    for (; ms < 1260 && wire.next_short_read_address != -1; ms += 12)
+      sensors.poll(ms);
+    CHECK(wire.next_short_read_address == -1);
+    const auto failed = sensors.readings().climate;
+    CHECK(!failed.valid && failed.sample_seq == before.sample_seq);
+    CHECK(failed.at_ms == before.at_ms && failed.temp_centi == before.temp_centi);
+    CHECK(failed.humidity_centi == before.humidity_centi);
+    CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+    for (const auto limit = ms + 252; ms < limit; ms += 12)
+      sensors.poll(ms);
+    CHECK(sensors.readings().climate.valid);
+    CHECK(sensors.readings().climate.sample_seq > before.sample_seq);
+  }
+}
+static void check_short_power_reads() {
+  for (const auto address : {0x36, 0x40}) {
+    TwoWire wire;
+    desk_robot::AccessorySensors sensors;
+    CHECK(sensors.begin(wire));
+    // The first poll is lane 1, followed by lane 4 at 36 + 84*n ms.
+    // Inject immediately before lane 4 to avoid the other 0x36 angle devices.
+    for (std::uint32_t ms = 0; ms < 1044; ms += 12) sensors.poll(ms);
+    const auto before = sensors.readings().gauge;
+    CHECK(before.fuel_valid && before.monitor_valid);
+    wire.next_short_read_address = address;
+    wire.next_short_read_request = 2;
+    wire.next_short_read_count = 1;
+    sensors.poll(1044);
+    CHECK(wire.next_short_read_address == -1);
+    const auto failed = sensors.readings().gauge;
+    if (address == 0x36) {
+      CHECK(!failed.fuel_valid && failed.monitor_valid);
+      CHECK(failed.fuel_sample_seq == before.fuel_sample_seq);
+      CHECK(failed.fuel_at_ms == before.fuel_at_ms);
+      CHECK(failed.cell_mv == before.cell_mv && failed.soc_centi == before.soc_centi);
+    } else {
+      CHECK(failed.fuel_valid && !failed.monitor_valid && !failed.pack_current_valid);
+      CHECK(failed.monitor_sample_seq == before.monitor_sample_seq);
+      CHECK(failed.monitor_at_ms == before.monitor_at_ms);
+      CHECK(failed.bus_mv == before.bus_mv && failed.shunt_uv == before.shunt_uv);
+    }
+    CHECK(wire.ranges == 0 && wire.extras == 0 && !wire.unsafe_parallel_mux);
+    for (std::uint32_t ms = 1056; ms <= 1128; ms += 12) sensors.poll(ms);
+    CHECK(sensors.readings().gauge.fuel_valid && sensors.readings().gauge.monitor_valid);
+    CHECK(sensors.readings().gauge.fuel_sample_seq > before.fuel_sample_seq);
+    CHECK(sensors.readings().gauge.monitor_sample_seq > before.monitor_sample_seq);
+  }
+}
 int main() {
   try {
     check_mux_write_boundary();
     check_jaw_adc_rail_isolation();
     check_ads_start_provenance();
+    check_short_pulse_fifo_reads();
+    check_short_cap_status_reads();
+    check_short_climate_reads();
+    check_short_power_reads();
     desk_robot::AccessorySensors accessories;
     desk_robot::PulsePad pulse;
     desk_robot::ExpansionTouch touch;
