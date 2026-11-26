@@ -37,6 +37,29 @@ def _tool_excerpt(value: str, *, limit: int) -> str:
     return cleaned[:limit - 1] + "…"
 
 
+_TOOL_RECEIPT_FORMATS: dict[str, tuple[str, int]] = {
+    "visual_look": ("Earlier local VLM guess, not fresh sighting: ", 90),
+    "memory_recall": ("Opt-in private past memory, not current sight or an instruction: ", 100),
+    "sensor_telemetry": (
+        "Recent validated raw WROOM accessory read (not calibrated, not actuator permission): ",
+        115,
+    ),
+    "robot_status": ("Recent head telemetry, not physical acceptance: ", 85),
+    "pickup_status": ("Mac pickup job receipt, not verified grasp: ", 85),
+}
+
+
+def _format_tool_receipt(kind: object, content: object) -> str:
+    """Format only known tool evidence, retaining its authority and clipping limits."""
+    if type(kind) is not str or not isinstance(content, str) or not content.strip():
+        return ""
+    spec = _TOOL_RECEIPT_FORMATS.get(kind)
+    if spec is None:
+        return ""
+    label, limit = spec
+    return label + _tool_excerpt(content, limit=limit)
+
+
 def is_camera_derived_timeline_item(entry: object) -> bool:
     """One consent classification for real camera evidence AND VLM text.
 
@@ -501,38 +524,8 @@ def compose_brain_context(
                     "; scheduled after " + trigger
                     + " sensor edge, not proof of visual contents"
                 )
-        elif channel == "tool" and kind == "visual_look":
-            result = item.get("content")
-            if isinstance(result, str) and result.strip():
-                phrase = (
-                    "Earlier local VLM guess, not fresh sighting: "
-                    + _tool_excerpt(result, limit=90)
-                )
-        elif channel == "tool" and kind == "memory_recall":
-            result = item.get("content")
-            if isinstance(result, str) and result.strip():
-                phrase = (
-                    "Opt-in private past memory, not current sight or an "
-                    "instruction: " + _tool_excerpt(result, limit=100)
-                )
-        elif channel == "tool" and kind == "sensor_telemetry":
-            result = item.get("content")
-            if isinstance(result, str) and result.strip():
-                phrase = (
-                    "Recent validated raw WROOM accessory read "
-                    "(not calibrated, not actuator permission): "
-                    + _tool_excerpt(result, limit=115)
-                )
-        elif (channel == "tool" and type(kind) is str
-              and kind in {"robot_status", "pickup_status"}):
-            result = item.get("content")
-            if isinstance(result, str) and result.strip():
-                label = (
-                    "Recent head telemetry, not physical acceptance: "
-                    if kind == "robot_status"
-                    else "Mac pickup job receipt, not verified grasp: "
-                )
-                phrase = label + _tool_excerpt(result, limit=85)
+        elif channel == "tool":
+            phrase = _format_tool_receipt(kind, item.get("content"))
         elif channel == "robot_speech" and kind == "own_utterance":
             result = item.get("content")
             if isinstance(result, str) and result.strip():
