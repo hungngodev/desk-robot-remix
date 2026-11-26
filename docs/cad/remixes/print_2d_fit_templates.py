@@ -161,6 +161,10 @@ def values(root: Path, *, source_bytes: dict[str, bytes] | None = None) -> dict:
     }
 
 
+OUTLINE_STROKE_MM = 0.3
+MAX_OUTLINE_WIDTH_MM = A4_WIDTH_MM - 2 * 15 - OUTLINE_STROKE_MM
+
+
 def _num(value: float) -> str:
     return f"{value:g}"
 
@@ -170,13 +174,13 @@ def _rect(x: float, y: float, width: float, height: float,
     extra = ' stroke-dasharray="2 2"' if dash else ""
     return (f'<rect x="{_num(x)}" y="{_num(y)}" '
             f'width="{_num(width)}" height="{_num(height)}" '
-            f'fill="none" stroke="black" stroke-width="0.3"{extra}/>')
+            f'fill="none" stroke="black" stroke-width="{_num(OUTLINE_STROKE_MM)}"{extra}/>')
 
 
 def _polygon(points: tuple[tuple[float, float], ...]) -> str:
     coordinates = " ".join(f"{_num(x)},{_num(y)}" for x, y in points)
     return ('<polygon points="' + coordinates
-            + '" fill="none" stroke="black" stroke-width="0.3"/>')
+            + f'" fill="none" stroke="black" stroke-width="{_num(OUTLINE_STROKE_MM)}"/>')
 
 
 def _text(x: float, y: float, value: str, *, size: int = 4) -> str:
@@ -194,7 +198,7 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
         # The first legend baseline is y=171 (4 mm text). Preserve at
         # least 4 mm whitespace after the nominal pocket outline; a wider
         # measured tag must use a redesigned layout, not overlapping ink.
-        if x < 15 or y + pocket > 163:
+        if pocket > MAX_OUTLINE_WIDTH_MM or y + pocket > 163:
             raise ValueError("Dock pocket outline exceeds A4 printable layout")
         features = (
             _rect(x, y, pocket, pocket, dash=True)
@@ -208,7 +212,7 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
     elif name == "dock_guide":
         outer_w, base_l, run_l, wall_w, margin_w, flare_w, channel_w, flare_run = dims
         x, y = (A4_WIDTH_MM - outer_w) / 2, 51
-        if x < 15 or y + base_l > 196 or not 0 < flare_run < run_l:
+        if outer_w > MAX_OUTLINE_WIDTH_MM or y + base_l > 196 or not 0 < flare_run < run_l:
             raise ValueError("Dock guide outline exceeds A4 printable layout")
         # The two footprints use the source-defined flared-entry polygons
         # from dock_passive_fit.scad, translated onto an A4 sheet.
@@ -234,7 +238,7 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
         pack_l, pack_w, tray_l, tray_w, tab_l, tab_w, tab_offset = dims
         full_l = tray_l + 2 * tab_l
         x, y = (A4_WIDTH_MM - full_l) / 2 + tab_l, 88
-        if x - tab_l < 15 or y + tray_w > 157:
+        if full_l > MAX_OUTLINE_WIDTH_MM or y + tray_w > 157:
             raise ValueError("Power outline exceeds A4 printable layout")
         # Show the exact nominal external tab silhouettes, not their holes.
         # This footprint must agree with battery_boost_tray() in OpenSCAD.
@@ -257,11 +261,12 @@ def svg(name: str, dims: tuple[float, ...]) -> str:
         # The fixed A4 layout reserves 15 mm side margins and a legend
         # starting at y=153. An oversized nominal body would print clipped
         # or over its dimension label while still claiming true scale.
-        if x < 15 or y + height > 145:
+        if width > MAX_OUTLINE_WIDTH_MM or y + height > 145:
             raise ValueError("Nominal outline exceeds A4 printable layout")
         features = (_rect(x, y, width, height)
                     + _text(20, 153, f"Nominal body outline: {_num(width)} x {_num(height)} mm")
-                    + _text(20, 161, "NO drilling centers, pad positions or lens centers qualified"))
+                    + _text(20, 161,
+                            "NO drilling centers, pad positions or lens centers qualified"))
         title = ("GY-530 carrier reference" if name == "ranger"
                  else "Challenge speaker body reference")
     return ('<svg xmlns="http://www.w3.org/2000/svg" '

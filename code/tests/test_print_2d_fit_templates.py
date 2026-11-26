@@ -761,3 +761,40 @@ def test_a4_dock_accepts_valid_tag_recess_boundaries(tmp_path, old, new):
     assert manifest["source_dimensions_mm"]["dock"] == [60, 70, 71.2]
     assert manifest["actual_fit_verified"] is False
     assert source.verify(tmp_path, output) == manifest
+
+
+@pytest.mark.parametrize("name, dims", [
+    ("ranger", (180, 13.3)),
+    ("speaker", (180, 16)),
+    ("dock_guide", (180, 138, 107, 5, 8, 7, 154, 37)),
+    ("power", (140, 35, 164, 40.6, 8, 9, 5)),
+])
+def test_a4_outline_rejects_ink_inside_side_margin(name, dims):
+    source = load()
+    with pytest.raises(ValueError, match="exceeds A4 printable layout"):
+        source.svg(name, dims)
+
+
+@pytest.mark.parametrize("name, dims", [
+    ("ranger", (179.7, 13.3)),
+    ("speaker", (179.7, 16)),
+    ("dock_guide", (179.7, 138, 107, 5, 8, 7, 153.7, 37)),
+    ("power", (140, 35, 163.7, 40.6, 8, 9, 5)),
+    ("dock", (60, 70, 71.2)),
+])
+def test_a4_outline_stroke_and_scale_margins(name, dims):
+    source = load()
+    root = ElementTree.fromstring(source.svg(name, dims))
+    assert root.attrib == {"width": "210mm", "height": "297mm", "viewBox": "0 0 210 297"}
+    rects = root.findall("{http://www.w3.org/2000/svg}rect")
+    for rect in rects:
+        x = Decimal(rect.attrib["x"])
+        width = Decimal(rect.attrib["width"])
+        half = Decimal(rect.attrib["stroke-width"]) / 2
+        assert x - half >= 15
+        assert x + width + half <= 195
+    for x, y, width, height in ((20, 239, 100, 8), (20, 258, 50, 8), (173, 229, 8, 25)):
+        marks = [r for r in rects if r.get("x") == str(x) and r.get("y") == str(y)]
+        assert len(marks) == 1
+        assert Decimal(marks[0].attrib["width"]) == width
+        assert Decimal(marks[0].attrib["height"]) == height
