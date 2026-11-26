@@ -512,3 +512,36 @@ async def test_slow_drip_mjpeg_releases_real_socket(monkeypatch):
         assert head._stream_connected is False
         assert head._stream_latest is None
         assert head._last_camera is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("future", [100.001, float("nan"), float("inf")])
+async def test_snapshot_rejects_impossible_receipt_clock(monkeypatch, future):
+    async with httpx.AsyncClient() as client:
+        head = HttpHead(RobotConfig(
+            id="robot-01", name="Camera pet", token_env="SENSE_TEST_TOKEN",
+            head_url="http://head.example",
+        ), client)
+        head._stream_connected = True
+        head._stream_latest = b"\xff\xd8old\xff\xd9"
+        head._stream_received_at = future
+        head._stream_version = 1
+        monkeypatch.setattr(
+            "desk_robot.transport.time", SimpleNamespace(monotonic=lambda: 100.0),
+        )
+        pending = asyncio.create_task(head.snapshot(require_live_stream=True))
+        try:
+            await asyncio.sleep(0)
+            assert not pending.done()
+            assert head._snapshot_version == 0
+            async with head._stream_condition:
+                head._stream_latest = b"\xff\xd8fresh\xff\xd9"
+                head._stream_received_at = 100.0
+                head._stream_version = 2
+                head._stream_condition.notify_all()
+            assert await asyncio.wait_for(pending, timeout=1) == b"\xff\xd8fresh\xff\xd9"
+        finally:
+            if not pending.done():
+                pending.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await pending

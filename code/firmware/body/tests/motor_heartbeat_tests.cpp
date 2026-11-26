@@ -243,5 +243,19 @@ int main() {
       }
     }
   }
+  // A 32 ms gap spanning rollover remains timely, but a backwards clock
+  // must latch the deadline rather than pass a signed negative comparison.
+  heartbeat.reset();
+  CHECK(heartbeat.update(0xfffffff0U, true));
+  CHECK(heartbeat.check_authority(0x10U, true));
+  CHECK(!heartbeat.update(0x10U, true));
+  CHECK(!heartbeat.missed_deadline());
+  CHECK(!heartbeat.check_authority(0x3dU, true));
+  CHECK(heartbeat.missed_deadline());
+  heartbeat.reset();
+  CHECK(heartbeat.update(100U, true));
+  CHECK(!heartbeat.check_authority(99U, true));
+  CHECK(heartbeat.missed_deadline());
+  heartbeat.reset();
   std::cout << "PASS DC CPU heartbeat: stall latch, wrap, USB recovery\n";
 }

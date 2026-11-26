@@ -711,8 +711,8 @@ class HttpHead:
                             while (self._stream_connected and (
                                 self._stream_latest is None
                                 or self._stream_version <= self._snapshot_version
-                                or time.monotonic() - self._stream_received_at
-                                   > max_stream_age_seconds
+                                or not 0 <= time.monotonic() - self._stream_received_at
+                                    <= max_stream_age_seconds
                             )):
                                 await self._stream_condition.wait()
                             if not self._stream_connected:
