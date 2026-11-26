@@ -3,7 +3,6 @@ import math
 from itertools import permutations, product
 
 import pytest
-
 from desk_robot import handling
 from desk_robot.handling import HandlingGate, mpu6050_temperature_raw, raw_mpu6050
 
