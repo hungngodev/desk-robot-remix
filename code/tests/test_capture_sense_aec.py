@@ -804,3 +804,114 @@ def test_duplicate_privacy_receipt_prevents_capture_start():
         capture.capture_head(http, "http://192.168.1.23:8081", "robot-01", "x" * 32)
     assert len(http.calls) == 1
     assert http.calls[0][1] == "GET"
+
+
+def test_capture_polls_until_ready_without_restarting():
+    http = fake_read()
+    ready = json.loads(http.responses[2].getvalue())
+    http.responses[2:2] = [
+        Response({**ready, "ready": False, "active": True, "frames": count})
+        for count in (100, 100, 32000)
+    ]
+    pauses = []
+    raw, report = capture.capture_head(
+        http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
+        clock=iter([0.0, 0.1, 0.2, 0.3, 0.4]).__next__, pause=pauses.append,
+    )
+    assert len(raw) == capture.BYTES
+    assert report["frames"] == capture.FRAMES
+    assert pauses == [0.1, 0.1, 0.1]
+    assert [call[0].split("/")[-1] for call in http.calls] == [
+        "audio.reference", "audio.capture.start", *["audio.capture.status"] * 4,
+        "audio.capture.raw", "audio.reference",
+    ]
+    assert not http.responses
+
+
+@pytest.mark.parametrize(("status", "message"), [
+    ({"frames": 99}, "Sense PCM status changed identity or generation"),
+    ({"active": 1}, "Sense PCM status changed identity or generation"),
+    ({"failed": True}, "Sense reference sample gap invalidated trial"),
+    ({"ready": True}, "Sense ready state has wrong PCM length"),
+    ({"active": False}, "Sense PCM capture ended without complete result"),
+    ({"frames": 64000}, "Sense PCM capture ended without complete result"),
+])
+def test_capture_poll_rejects_inconsistent_progress(status, message):
+    http = fake_read()
+    ready = json.loads(http.responses[2].getvalue())
+    active = {**ready, "ready": False, "active": True, "frames": 100}
+    http.responses[2:3] = [Response(active), Response({**active, **status})]
+    pauses = []
+    with pytest.raises(RuntimeError) as caught:
+        capture.capture_head(
+            http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
+            clock=iter([0.0, 0.1, 0.2]).__next__, pause=pauses.append,
+        )
+    assert str(caught.value) == message
+    assert pauses == [0.1]
+    assert [call[0].split("/")[-1] for call in http.calls] == [
+        "audio.reference", "audio.capture.start", "audio.capture.status",
+        "audio.capture.status", "audio.capture.abort",
+    ]
+
+
+def test_capture_deadline_aborts_confirmed_generation_and_preserves_timeout():
+    http = fake_read(ready=False, frames=100, start_generation="42", status_generation="42")
+    original = http.open
+    aborted = []
+
+    def open_request(request, timeout):
+        if request.full_url.endswith("/api/audio.capture.abort"):
+            aborted.append((request.get_header("X-desk-audio-generation"),
+                            request.get_header("X-desk-audio-boot")))
+            raise OSError("abort unavailable")
+        return original(request, timeout)
+
+    http.open = open_request
+    pauses = []
+    with pytest.raises(RuntimeError, match="^Timed out waiting for complete Sense PCM$"):
+        capture.capture_head(
+            http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
+            clock=iter([0.0, 7.9, 8.0]).__next__, pause=pauses.append,
+        )
+    assert pauses == [0.1]
+    assert aborted == [("42", "7")]
+    assert [call[0].split("/")[-1] for call in http.calls] == [
+        "audio.reference", "audio.capture.start", "audio.capture.status",
+    ]
+
+
+@pytest.mark.parametrize(("change", "error", "message"), [
+    ({"robot_id": "robot-02"}, RuntimeError, "Sense PCM START identity unconfirmed"),
+    ({"ok": False}, RuntimeError, "Sense PCM START identity unconfirmed"),
+    ({"capture_generation": "0"}, ValueError, "Invalid Sense PCM capture generation"),
+])
+def test_uncertain_start_does_not_retry_or_abort_unknown_generation(change, error, message):
+    http = fake_read()
+    started = json.loads(http.responses[1].getvalue())
+    http.responses[1] = Response({**started, **change}, status=202)
+    with pytest.raises(error) as caught:
+        capture.capture_head(http, "http://192.168.1.23:8081", "robot-01", "x" * 32)
+    assert str(caught.value) == message
+    assert [call[0].split("/")[-1] for call in http.calls] == [
+        "audio.reference", "audio.capture.start",
+    ]
+
+
+@pytest.mark.parametrize(("changed", "message", "calls"), [
+    ({"initial_mic": True}, "Malformed Sense initial microphone frame count", 1),
+    ({"initial_speaker": True}, "Malformed Sense initial speaker frame count", 1),
+    ({"final_mic": True}, "Malformed Sense final microphone frame count", 6),
+    ({"final_speaker": True}, "Malformed Sense final speaker frame count", 6),
+])
+def test_capture_counter_validation_retains_phase_specific_errors(changed, message, calls):
+    http = fake_read(**changed)
+    with pytest.raises(ValueError) as caught:
+        capture.capture_head(
+            http, "http://192.168.1.23:8081", "robot-01", "x" * 32,
+            clock=iter([0.0, 0.1]).__next__, pause=lambda _: None,
+        )
+    assert str(caught.value) == message
+    assert len(http.calls) == calls
+    assert http.calls[-1][0].endswith("/api/audio.capture.abort" if calls == 6
+                                      else "/api/audio.reference")
