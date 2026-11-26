@@ -50,6 +50,28 @@ class SimulatedHead:
         self.fail_status = False
         self.show_target = True
         self._body_replay: dict | None = None
+        # Synthetic floor classifications, not calibrated VL53L0X measurements.
+        self._floor_safe = [True] * 4
+        self._cliff_fault_sensor: int | None = None
+
+    def inject_cliff_sample(self, lane: int, *, safe: bool) -> None:
+        """Inject one classified floor sample; a single unsafe sample latches STOP."""
+        if type(lane) is not int or not 0 <= lane < 4 or type(safe) is not bool:
+            raise ValueError("Expected a floor lane 0..3 and boolean safety classification")
+        self._floor_safe[lane] = safe
+        if not safe:
+            if self._cliff_fault_sensor is None:
+                self._cliff_fault_sensor = lane
+            self.armed = False
+            self._stop_motion()
+
+    def local_rearm(self) -> None:
+        """Model explicit local recovery; never grant or restore a drive permit."""
+        self.armed = False
+        self._stop_motion()
+        if self._body_replay is not None or not all(self._floor_safe):
+            raise HeadError("Simulated local safety interlock")
+        self._cliff_fault_sensor = None
 
     def replay_body_status(self, sample: dict) -> None:
         """Install one raw synthetic receipt; replay grants no motor authority.
@@ -104,6 +126,12 @@ class SimulatedHead:
             "drive_ms": max(0, self._drive_deadline_ms - now),
             "servo": {"position_source": "commanded"},
             "watchdog_ms": watchdog_ms,
+            "safety": {
+                "required": True,
+                "ready": self._cliff_fault_sensor is None,
+                "fault": "none" if self._cliff_fault_sensor is None else "floor_out_of_range",
+                "sensor": 255 if self._cliff_fault_sensor is None else self._cliff_fault_sensor,
+            },
         }
 
     async def command(self, command):
@@ -116,6 +144,8 @@ class SimulatedHead:
         if self._body_replay is not None and op in {"arm", "drive", "lift", "grip", "keepalive"}:
             raise HeadError("Simulated body replay has no motion authority")
         if op == "arm":
+            if self._cliff_fault_sensor is not None:
+                raise HeadError("Simulated cliff safety interlock latched")
             self._stop_motion()
             self.armed = True
         elif op in {"disarm", "halt"}:
