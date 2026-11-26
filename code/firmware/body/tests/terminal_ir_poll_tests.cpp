@@ -15,6 +15,8 @@ struct Queue {
   std::deque<Packet> pending;
   unsigned reads = 0, returns = 0;
   bool borrowed = false, installed = false;
+  unsigned arrivals_remaining = 0;
+  bool next_arrival_noise = false;
 };
 Queue queues[2];
 std::uint32_t now = 0, receive_cost = 0;
@@ -27,6 +29,13 @@ Packet packet(bool corrupt = false) {
     p.symbols[bit + 1] = {560, 0, (kCode & (1U << bit)) ? 1690U : 560U, 1};
   p.symbols[33] = {560, 0, 0, 0};
   if (corrupt) p.symbols[5].level0 = 1;
+  return p;
+}
+Packet mixed_packet(bool noise) {
+  if (!noise) return packet();
+  Packet p{};
+  p.symbols[0] = {180, 0, 300, 1};
+  p.bytes = sizeof(rmt_item32_t);
   return p;
 }
 void push(unsigned side, unsigned count = 1) {
@@ -55,6 +64,45 @@ void reset_fixture() {
   for (auto& q : queues) q = Queue{};
   now = receive_cost = 0;
   failed_start = -1;
+}
+// Simulate a producer adding alternating NEC and noise packets while the
+// consumer returns each borrowed item. No OS thread or scheduling luck.
+void check_mixed_arrivals(unsigned side, unsigned total, bool noise_first) {
+  reset_fixture();
+  desk_robot::TerminalIr ir;
+  CHECK(ir.begin(36, 39));
+  poll(ir, 100);
+  pair(); poll(ir, 125); check_matched(ir, 25);
+  const auto prior = ir.evidence(now);
+  auto& q = queues[side];
+  auto& other = queues[1 - side];
+  const auto reads = q.reads;
+  const auto returns = q.returns;
+  const auto other_returns = other.returns;
+  q.pending.push_back(mixed_packet(noise_first));
+  q.arrivals_remaining = total - 1;
+  q.next_arrival_noise = !noise_first;
+  push(1 - side);
+  poll(ir, 150); check_unmatched(ir);
+  const unsigned drained = total < 8 ? total : 8;
+  CHECK(q.returns - returns == drained);
+  CHECK(q.reads - reads == (total < 8 ? total + 1 : 8));
+  CHECK(q.pending.size() == total - drained && q.arrivals_remaining == 0);
+  CHECK(other.returns - other_returns == 1 && other.pending.empty());
+  CHECK(ir.evidence(now).left_seq == prior.left_seq);
+  CHECK(ir.evidence(now).right_seq == prior.right_seq);
+  if (total >= 8) {
+    // A capped drain, even with zero queued items, did not observe empty.
+    // Fresh-looking packets on either side must be discarded in quarantine.
+    pair(); poll(ir, now + 25); check_unmatched(ir);
+    CHECK(q.pending.empty() && other.pending.empty());
+    CHECK(ir.evidence(now).left_seq == prior.left_seq);
+    CHECK(ir.evidence(now).right_seq == prior.right_seq);
+  }
+  pair(); poll(ir, now + 25); check_matched(ir, 25);
+  CHECK(ir.evidence(now).left_seq == prior.left_seq + 1);
+  CHECK(ir.evidence(now).right_seq == prior.right_seq + 1);
+  CHECK(!ir.begin(36, 36));
 }
 // Individually fresh, matching IDs are not necessarily a paired bearing.
 // Include drain time in the later receiver's uncertainty, on either side.
@@ -122,6 +170,11 @@ void vRingbufferReturnItem(RingbufHandle_t ring, void* item) {
   q.borrowed = false;
   q.pending.pop_front();
   ++q.returns;
+  if (q.arrivals_remaining != 0) {
+    q.pending.push_back(mixed_packet(q.next_arrival_noise));
+    q.next_arrival_noise = !q.next_arrival_noise;
+    --q.arrivals_remaining;
+  }
 }
 
 int main() {
@@ -246,6 +299,10 @@ int main() {
     for (unsigned side = 0; side != 2; ++side) {
       check_receipt_window_pair(side, 120);
       check_receipt_window_pair(side, 121);
+      for (unsigned total : {2U, 7U, 8U, 9U}) {
+        check_mixed_arrivals(side, total, false);
+        check_mixed_arrivals(side, total, true);
+      }
     }
     reset_fixture();
     desk_robot::TerminalIr wrap;
@@ -254,7 +311,8 @@ int main() {
     pair(); poll(wrap, 0x12U); check_matched(wrap, 34);
     now = 0xb8U; check_matched(wrap, 200);
     now = 0xb9U; check_unmatched(wrap);
-    std::cout << "PASS production RMT poll: queue cap, quarantine, gap, drain cost, rollover, reset\n";
+    std::cout << "PASS production RMT poll: queue cap, mixed arrivals, quarantine, "
+                 "gap, drain cost, rollover, reset\n";
   } catch (const std::exception& e) {
     std::cerr << "FAIL " << e.what() << '\n';
     return EXIT_FAILURE;
