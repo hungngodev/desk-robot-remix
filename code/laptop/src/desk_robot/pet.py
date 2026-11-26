@@ -437,8 +437,11 @@ class PetController:
             )
 
     async def _trigger_low_battery_dock(
-        self, robot_id: str, initial_low: bool,
+        self, robot_id: str, initial_low: bool, *, generation: int,
     ) -> None:
+        state = self.states[robot_id]
+        if self._closed or not state.enabled or state.generation != generation:
+            return
         cb = getattr(self, "on_low_battery_dock", None)
         if not callable(cb):
             return
@@ -1711,7 +1714,9 @@ class PetController:
         # nor should speech wait for the preflight receipt. The observer owns
         # both children, so pause/close still cancels the in-flight dispatch.
         async with asyncio.TaskGroup() as tasks:
-            tasks.create_task(self._trigger_low_battery_dock(robot_id, dock_request_initial_low))
+            tasks.create_task(self._trigger_low_battery_dock(
+                robot_id, dock_request_initial_low, generation=generation,
+            ))
             tasks.create_task(self._publish_aux_changes(robot_id, generation, changes, received_at))
 
     async def _publish_aux_changes(
