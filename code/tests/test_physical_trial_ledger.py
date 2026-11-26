@@ -185,3 +185,39 @@ def test_release_count_matches_first_robot_only(tmp_path):
     for invalid in (0, 2, True, 1.0):
         with pytest.raises(ValueError, match="positive canonical ledger count"):
             ledger.require_recorded_physical_trials(tmp_path, score, invalid)
+
+
+@pytest.mark.parametrize(("field", "label"), [
+    ("notes", "DRY-RUN"),
+    ("firmware", "dry_run"),
+    ("calibration", "dry run"),
+    ("assembly_id", "dryrun"),
+    ("object_description", "dry runs"),
+    ("notes", "simulated"),
+    ("notes", "synthetic"),
+])
+def test_release_rejects_nonphysical_passing_population(tmp_path, field, label):
+    check_spec = importlib.util.spec_from_file_location(
+        "check_trials", SCRIPT.parent / "check_trials.py",
+    )
+    assert check_spec is not None and check_spec.loader is not None
+    check_trials = importlib.util.module_from_spec(check_spec)
+    check_spec.loader.exec_module(check_trials)
+    rows = [
+        dict(
+            robot_id="robot-01", assembly_id="chassis-01", category=category,
+            trial=str(trial), object_description=category, mass_g="12",
+            date="2026-01-01", firmware="revision-01", calibration="jaw-01",
+            flat_start="true", lift_mm="10", hold_seconds="3",
+            placed_under_control="true", assisted="false", notes="",
+        )
+        for category in ("key", "candy") for trial in range(1, 11)
+    ]
+    for row in rows:
+        row[field] = label
+    score = check_trials.summarize(rows, "robot-01")
+    assert score["physical_acceptance_pass"] is True
+    assert score["evidence_status"] == "HOLD"
+    write_ledger(tmp_path, rows=rows, patch={**score, "physical_trial_count": 20})
+    with pytest.raises(ValueError, match=f"Nonphysical trial provenance: {field}"):
+        ledger.require_recorded_physical_trials(tmp_path, check_trials.summarize, 20)

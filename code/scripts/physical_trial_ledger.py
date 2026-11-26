@@ -11,7 +11,7 @@ COLUMNS = (
     "placed_under_control", "assisted", "notes",
 )
 NONPHYSICAL = re.compile(
-    r"\b(?:simulated|simulation|simulator|synthetic|mock|test fixture|test image|"
+    r"\b(?:simulated|simulation|simulator|synthetic|mock|dry ?runs?|test fixture|test image|"
     r"not (?:a )?(?:real|physical) trial)\b", re.IGNORECASE,
 )
 
