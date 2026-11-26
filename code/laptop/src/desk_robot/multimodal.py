@@ -32,6 +32,7 @@ from .operations import _bounded_head_reply
 from .room_station import ROOM_OBSERVATION_SOURCE, STATION, RoomObservation, fresh_room_summary
 from .sensor_event_contract import DIRECT_INTERACTION_KINDS, TRIGGERS  # public names
 from .vision import OllamaScene
+from .vision_admission import LatestFrameAdmission
 
 # Keep source-ID deduplication longer than the 30s visible ASR context.
 # A saturated identity fence refuses new context rather than evicting live IDs.
@@ -1204,6 +1205,7 @@ class MultimodalOrchestrator:
         # Allow at most one optional background decode: reserve capacity for
         # a genuine authenticated human speech or direct visual question.
         self._optional_preprocess_slot = threading.BoundedSemaphore(1)
+        self._frame_admission = LatestFrameAdmission()
         self._preprocess_futures: set[Future[tuple[bytes, bytes, float]]] = set()
         self._preprocess_pool = ThreadPoolExecutor(
             max_workers=2, thread_name_prefix="desk-jpeg"
@@ -1276,6 +1278,7 @@ class MultimodalOrchestrator:
             return
         for robot_id in self.hub.robots:
             self._camera_grant_valid(robot_id, self._camera_grants[robot_id])
+        self._frame_admission.notify()
 
     def _camera_grant_valid(self, robot_id: str, origin: int | None) -> bool:
         """Reject old media grants and invalidate their cached JPEGs once.
@@ -1561,7 +1564,14 @@ class MultimodalOrchestrator:
                         generation = self.hub._generation[robot_id]
                         try:
                             prepared = await self._prepare_bounded(
-                                jpeg, priority=source == "speech"
+                                jpeg, priority=source == "speech",
+                                robot_id=robot_id, received=received,
+                                admit=lambda: (
+                                    self._camera_grant_valid(robot_id, camera_grant)
+                                    and generation == self.hub._generation[robot_id]
+                                    and turn == self._turn_epoch[robot_id]
+                                    and received > self._last_fleet_human_turn_at
+                                ),
                             )
                         except (RuntimeError, ValueError, OSError):
                             # A malformed or truncated JPEG is a bad FRAME, not
@@ -1932,31 +1942,54 @@ class MultimodalOrchestrator:
         except asyncio.CancelledError:
             raise
 
-    async def _prepare_bounded(
-        self, jpeg: bytes, *, priority: bool = False
-    ) -> tuple[bytes, bytes, float]:
-        """Limit native Pillow workers even if their awaiter is cancelled.
-
-        asyncio.to_thread can continue decoding after an asyncio cancellation.
-        A native future completion owns this capacity until Pillow truly exits.
-        Under overload, drop optional camera work instead of starting extra
-        native workers and interfering with live human audio.
-        """
-        if self._closed:
-            raise RuntimeError("Camera orchestration is closed")
-        optional = not priority
+    def _reserve_preprocess(self, optional: bool) -> None:
         if optional and not self._optional_preprocess_slot.acquire(blocking=False):
             raise RuntimeError("Background JPEG preprocessing busy")
         if not self._preprocess_slots.acquire(blocking=False):
             if optional:
                 self._optional_preprocess_slot.release()
             raise RuntimeError("JPEG preprocessing busy; do not queue stale frames")
+
+    async def _prepare_bounded(
+        self, jpeg: bytes, *, priority: bool = False,
+        robot_id: str | None = None, received: float | None = None,
+        admit: Callable[[], bool] | None = None,
+    ) -> tuple[bytes, bytes, float]:
+        """Limit native Pillow workers even if their awaiter is cancelled.
+
+        asyncio.to_thread can continue decoding after an asyncio cancellation.
+        A native future completion owns this capacity until Pillow truly exits.
+        Optional fleet work gets one latest-only pending ticket per robot.
+        Human requests bypass that queue and retain their reserved capacity.
+        """
+        if self._closed:
+            raise RuntimeError("Camera orchestration is closed")
+        optional = not priority
+        if optional and robot_id is not None:
+            self.hub._check(robot_id)
+            if received is None or admit is None:
+                raise ValueError("Fair camera admission requires receipt and provenance")
+
+            def reserve() -> bool:
+                try:
+                    self._reserve_preprocess(True)
+                except RuntimeError:
+                    return False
+                return True
+
+            await self._frame_admission.acquire(
+                robot_id, received, clock=time.monotonic, reserve=reserve, admit=admit,
+            )
+        else:
+            self._reserve_preprocess(optional)
+        loop = asyncio.get_running_loop()
         try:
             future = self._preprocess_pool.submit(_prepare, jpeg)
         except (RuntimeError, OSError):
             self._preprocess_slots.release()
             if optional:
                 self._optional_preprocess_slot.release()
+            self._frame_admission.notify()
             raise
 
         # Keep native futures independent of cancelled asyncio awaiters.
@@ -1974,6 +2007,13 @@ class MultimodalOrchestrator:
                 self._preprocess_slots.release()
                 if optional:
                     self._optional_preprocess_slot.release()
+                # The native worker may finish after its asyncio waiter or
+                # event loop has exited; only the live loop may wake tickets.
+                try:
+                    loop.call_soon_threadsafe(self._frame_admission.notify)
+                except RuntimeError:
+                    if not loop.is_closed():
+                        raise
 
         future.add_done_callback(finished)
         return await asyncio.wrap_future(future)
@@ -2104,7 +2144,17 @@ class MultimodalOrchestrator:
                 if self._closed:
                     raise RuntimeError("Multimodal orchestrator closed")
                 prepared = await self._prepare_bounded(
-                    jpeg, priority=source in ("speech", "voice_question")
+                    jpeg, priority=source in ("speech", "voice_question"),
+                    robot_id=robot_id, received=received,
+                    admit=lambda: (
+                        (getattr(self.settings, "mode", "hardware") != "hardware"
+                         or self._camera_grant_valid(robot_id, camera_grant))
+                        and generation == self.hub._generation[robot_id]
+                        and turn == self._turn_epoch[robot_id]
+                        and question == self._question_epoch[robot_id]
+                        and not self._scheduled_camera_quiet(source)
+                        and not self._any_human_active(time.monotonic())
+                    ),
                 )
                 if self._closed:
                     raise RuntimeError("Multimodal orchestrator closed")
@@ -2197,7 +2247,17 @@ class MultimodalOrchestrator:
         generation = self.hub._generation[robot_id]
         turn = self._turn_epoch[robot_id]
         question = self._question_epoch[robot_id]
-        prepared = await self._prepare_bounded(jpeg)
+        prepared = await self._prepare_bounded(
+            jpeg, robot_id=robot_id, received=now,
+            admit=lambda: (
+                self._camera_grant_valid(robot_id, camera_grant)
+                and generation == self.hub._generation[robot_id]
+                and turn == self._turn_epoch[robot_id]
+                and question == self._question_epoch[robot_id]
+                and now >= self._last_fleet_human_turn_at
+                and not self._any_human_active(time.monotonic())
+            ),
+        )
         if not self._camera_grant_valid(robot_id, camera_grant):
             # An old JPEG cannot enter the regranted scene after Pillow.
             return
@@ -2422,6 +2482,7 @@ class MultimodalOrchestrator:
 
     async def close(self) -> None:
         self._closed = True
+        self._frame_admission.close()
         self._camera_revocation_callback = None
         registries = (
             self._capture_tasks, self._stream_tasks, self._stream_supervisors,

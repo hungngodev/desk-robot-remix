@@ -290,7 +290,7 @@ async def test_stream_frame_aging_out_during_jpeg_decode_is_not_published():
     )
     calls = 0
 
-    async def delayed_first_decode(jpeg, *, priority=False):
+    async def delayed_first_decode(jpeg, *, priority=False, **_admission):
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -511,7 +511,7 @@ async def test_stream_consent_revoked_during_frame_preparation_cannot_publish_jp
         Vision(), asyncio.Lock(),
     )
 
-    async def slow_prepare(jpeg, *, priority):
+    async def slow_prepare(jpeg, *, priority, **_admission):
         assert not priority
         entered.set()
         await release.wait()
@@ -1055,7 +1055,7 @@ async def test_sensor_capture_revoked_during_jpeg_preparation_never_publishes():
         Vision(), asyncio.Lock(),
     )
 
-    async def blocked_prepare(jpeg, *, priority):
+    async def blocked_prepare(jpeg, *, priority, **_admission):
         entered.set()
         await release.wait()
         return _prepare(jpeg)
@@ -1760,7 +1760,7 @@ async def test_external_pet_jpeg_revoke_while_decoding_never_publishes():
         Vision(), asyncio.Lock(),
     )
 
-    async def blocked_prepare(jpeg, *, priority=False):
+    async def blocked_prepare(jpeg, *, priority=False, **_admission):
         entered.set()
         await release.wait()
         return _prepare(jpeg)
@@ -3691,7 +3691,7 @@ async def test_capture_camera_grant_stays_revoked_after_fast_regrant(
         await release.wait()
         return image(square=True)
 
-    async def held_decode(jpeg, *, priority):
+    async def held_decode(jpeg, *, priority, **_admission):
         entered.set()
         await release.wait()
         return _prepare(jpeg)
@@ -3757,7 +3757,7 @@ async def test_external_proactive_jpeg_cannot_publish_after_camera_revoke(
         settings, {rid: Head()}, Vision(), asyncio.Lock(),
     )
 
-    async def paused_decode(jpeg, *, priority=False):
+    async def paused_decode(jpeg, *, priority=False, **_admission):
         entered.set()
         await release.wait()
         return _prepare(jpeg)
@@ -3809,7 +3809,7 @@ async def test_continuous_stream_regrant_during_decode_rejects_old_frame(setting
         settings, {rid: head}, Vision(), asyncio.Lock(),
     )
 
-    async def paused_decode(jpeg, *, priority=False):
+    async def paused_decode(jpeg, *, priority=False, **_admission):
         if not entered.is_set():
             entered.set()
             try:
@@ -4201,7 +4201,7 @@ async def test_snapshot_preprocessing_cannot_publish_expired_receipt(monkeypatch
         Vision(), asyncio.Lock(),
     )
 
-    async def delayed_decode(jpeg, *, priority=False):
+    async def delayed_decode(jpeg, *, priority=False, **_admission):
         clock[0] += delay
         return _prepare(jpeg)
 
@@ -4232,7 +4232,7 @@ async def test_external_photo_preprocessing_cannot_publish_expired_receipt(monke
         Vision(), asyncio.Lock(),
     )
 
-    async def delayed_decode(jpeg):
+    async def delayed_decode(jpeg, **_admission):
         clock[0] += delay
         return _prepare(jpeg)
 
