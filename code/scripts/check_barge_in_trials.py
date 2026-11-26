@@ -67,7 +67,8 @@ def evaluate(records: list[dict]) -> dict:
     distance_bands = {
         name: {"count": 0, "on_time": 0, "understood": 0,
                "volumes": set(), "positions": set(), "loads": set(),
-               "speakers": set(), "turns": set(), "no_replay": True}
+               "speakers": set(), "turns": set(), "no_replay": True,
+               "i2s_cutoff_ms": []}
         for name in ("50cm", "100cm")
     }
     onset_times = set()
@@ -129,6 +130,7 @@ def evaluate(records: list[dict]) -> dict:
         else:
             raise ValueError("Record 50 cm or 100 cm speaking distance")
         band["count"] += 1
+        band["i2s_cutoff_ms"].append(stages[4] - stages[0])
         band["volumes"].add(volume)
         band["positions"].add(position)
         band["loads"].add(load)
@@ -279,9 +281,14 @@ def evaluate(records: list[dict]) -> dict:
             and len(band["speakers"]) >= 2
             and any(turn + 1 in band["turns"] for turn in band["turns"])
         )
+        cutoffs = band["i2s_cutoff_ms"]
+        timely_cutoffs = sum(0 < elapsed <= 120 for elapsed in cutoffs)
         distance_results[name] = {
             "human_trials": band["count"],
             "audible_stops_within_500ms": band["on_time"],
+            "i2s_stops_within_120ms": timely_cutoffs,
+            "max_onset_to_i2s_stop_ms": max(cutoffs, default=None),
+            "meets_120ms_i2s_cutoff": varied and timely_cutoffs == band["count"] == 20,
             "new_intents_understood": band["understood"],
             "coverage_complete": varied and band["count"] == 20,
             "meets_human_gate": (
@@ -301,6 +308,9 @@ def evaluate(records: list[dict]) -> dict:
         "required_distances_cm": [50, 100],
         "distance_results": distance_results,
         "audible_stops_within_500ms": on_time,
+        "meets_120ms_i2s_cutoff": all(
+            band["meets_120ms_i2s_cutoff"] for band in distance_results.values()
+        ),
         "new_intents_understood": understood,
         "robot_only_seconds": duration,
         "self_interruptions": echoes,

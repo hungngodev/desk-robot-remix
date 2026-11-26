@@ -613,3 +613,25 @@ def test_large_valid_clock_preserves_stop_boundary(latency_ms, passes):
     for row in rows[:2]:
         row["audible_stop_ms"] = row["human_onset_ms"] + latency_ms
     assert evaluate(rows)["meets_proposed_gate"] is passes
+
+
+@pytest.mark.parametrize("elapsed, expected", [(120, True), (120.001, False), (0, False)])
+def test_i2s_cutoff_is_separate_from_audible_gate(elapsed, expected):
+    records = both_distances()
+    if not elapsed:
+        for name in ("vad_arrival_ms", "abort_dispatch_ms", "head_queue_clear_ms"):
+            records[0][name] = 0
+    records[0]["i2s_stop_ms"] = elapsed
+    report = evaluate(records)
+    assert report["meets_proposed_gate"] is True
+    assert report["meets_120ms_i2s_cutoff"] is expected
+    near = report["distance_results"]["50cm"]
+    assert near["i2s_stops_within_120ms"] == (20 if expected else 19)
+    assert near["max_onset_to_i2s_stop_ms"] == max(120, elapsed)
+
+
+def test_i2s_cutoff_requires_both_distances():
+    report = evaluate(fake_rows())
+    assert report["distance_results"]["50cm"]["meets_120ms_i2s_cutoff"] is True
+    assert report["distance_results"]["100cm"]["max_onset_to_i2s_stop_ms"] is None
+    assert report["meets_120ms_i2s_cutoff"] is False

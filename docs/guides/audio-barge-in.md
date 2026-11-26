@@ -501,3 +501,17 @@ limit. Playback frame length and output DMA queues need a live
 oscilloscope/audio recording at the real XIAO board. If they exceed the
 20 trial metric, tune bounded queueing and driver cancellation using
 the upstream Xiaozhi implementation, not a second fabricated codec.
+
+
+### DRX-727: separate 120 ms digital playback cutoff target
+
+The trial checker now reports `i2s_stops_within_120ms` and
+`max_onset_to_i2s_stop_ms` for each distance, measured from human onset to
+I2S stop using the same rebased trial clock. The separate
+`meets_120ms_i2s_cutoff` result requires all twenty positive elapsed
+cutoffs at each of both covered distances to be no more than 120 ms.
+An empty distance has a null maximum and cannot pass. A 120 ms codec
+write timeout or WebSocket STOP send is not this measurement. The existing
+500 ms audible stop and utterance retention acceptance gate remains
+unchanged. Both require physical synchronized measurements; synthetic
+records and passing software tests do not qualify the assembled head.
