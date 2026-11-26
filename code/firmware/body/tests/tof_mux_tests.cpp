@@ -424,14 +424,26 @@ int main() {
       fake_arduino_millis() = saved_clock;
     }
     {
-      // A timeout, NACK or partial read cannot authorize a new optical sample.
-      for (int failure = 0; failure < 4; ++failure) {
+      // A timeout, NACK or partial transfer cannot authorize a new optical sample.
+      for (int failure = 0; failure < 8; ++failure) {
         Wire = TwoWire{};
         fake_i2c_lines() = FakeI2cLines{};
         desk_robot::TofBus bus;
         desk_robot::CliffGuard guard;
         ready(bus, guard);
         if (failure == 3) Wire.next_transfer_nack_address = 0x29;
+        if (failure == 4) Wire.next_read_nack_address = 0x70;
+        if (failure == 5) {
+          // Register pointer is accepted; interrupt clear data is rejected.
+          Wire.next_short_write_address = 0x29;
+          Wire.next_short_write_after = 1;
+        }
+        if (failure == 6) {
+          // An empty, ACKed optional-mux write is not a verified close.
+          Wire.next_short_write_address = 0x71;
+          Wire.next_short_write_after = 0;
+        }
+        if (failure == 7) Wire.next_read_nack_address = 0x71;
         if (failure == 0) Wire.next_stop_timeout_address = 0x70;
         if (failure == 1) Wire.next_read_timeout_address = 0x29;
         if (failure == 2) {
@@ -443,9 +455,11 @@ int main() {
         const auto before = millis();
         bus.poll(guard, before);
         // Timeout paths consume the configured budget; NACK and partial
-        // reads are modeled as immediate errors by the transport fake.
+        // transfers are modeled as immediate errors by the transport fake.
         CHECK(millis() - before == (failure < 2 ? 10U : 0U));
         CHECK(!Wire.repeated_start_pending);
+        CHECK(Wire.next_read_nack_address == -1);
+        CHECK(Wire.next_short_write_address == -1);
         CHECK(bus.new_optical_channel() == 255);
         CHECK(bus.new_extra_channel() == 255);
         faulted(guard);
