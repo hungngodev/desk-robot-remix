@@ -57,6 +57,12 @@ USD 13.67 payment is only the known minimum, not proof that other purchases
 never occurred. Account for the actual delivered price, shipping, tax and
 discounts of every earlier paid order without double-counting received stock.
 
+The USD 50.00 cap minus the known USD 13.67 payment leaves at most USD 36.33
+for all further landed costs, including freight and tax. This is a ceiling,
+not a verified remaining allowance: other prior payments may reduce it.
+Run `cd code && uv run --no-sync python scripts/check_budget.py` for the
+canonical historical sample comparison; an unknown landed total stays HOLD.
+
 In the private operator evidence JSON, `costs.paid_orders_complete` must be
 `true` only after review of the whole payment history. Its
 `costs.prior_spend_review` object must carry these fields:

@@ -6,6 +6,8 @@ Generated from docs/hardware/full-feature-plan.json by code/scripts/procurement_
 
 **FULL FLEET PURCHASE: HOLD. No complete electrical, mechanical or physical acceptance.** Quantities are design slots, not certified supplier checkouts. Estimated owned counts and ordered units have not been inspected.
 
+For the first-unit landed-cost cap and prior payment reconciliation, use [the first-robot procurement entry point](one-robot-inventory-and-shopping.md). Fleet quantities are not a first-unit checkout.
+
 ## 1. Owned or ordered, as reported
 
 | Component | Reported on hand, unverified | Estimated on hand, unverified | Ordered, inspection pending |

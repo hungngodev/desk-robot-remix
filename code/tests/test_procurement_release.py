@@ -2768,6 +2768,19 @@ def test_historical_pilot_rejects_binary_float_hidden_subcent(
         mod._documented_prior_spend_baseline()
 
 
+@pytest.mark.parametrize("cap, paid", [("50.01", "13.67"), ("50.00", "13.66")])
+def test_historical_pilot_rejects_cap_and_paid_floor_drift(tmp_path, monkeypatch, cap, paid):
+    monkeypatch.setattr(mod, "PLAN", tmp_path / "full-feature-plan.json")
+    payload = (
+        '{"currency":"USD","cap_usd":' + cap
+        + ',"reported_already_purchased_usd":' + paid
+        + ',"paid_reconciliation":{"payment_total_usd":13.67}}'
+    )
+    (tmp_path / "prior-paid-ledger.json").write_text(payload, encoding="utf-8")
+    with pytest.raises(ValueError, match="Invalid historical first-unit"):
+        mod._historical_pilot_budget(36.33)
+
+
 def test_historical_pilot_exact_cents_preserve_budget_output(tmp_path, monkeypatch):
     monkeypatch.setattr(mod, "PLAN", tmp_path / "full-feature-plan.json")
     payload = (
@@ -2776,6 +2789,11 @@ def test_historical_pilot_exact_cents_preserve_budget_output(tmp_path, monkeypat
     )
     (tmp_path / "bom.json").write_text(payload, encoding="utf-8")
     (tmp_path / "prior-paid-ledger.json").write_text(payload, encoding="utf-8")
+    for sample, expected in ((36.32, 49.99), (36.33, 50.00)):
+        boundary = mod._historical_pilot_budget(sample)
+        assert boundary["historical_combined_before_tax_shipping_usd"] == expected
+        assert boundary["historical_over_cap_before_tax_shipping_usd"] == 0
+        assert not boundary["current_landed_total_verified"]
     out = mod._historical_pilot_budget(36.34)
     assert out["historical_combined_before_tax_shipping_usd"] == 50.01
     assert out["historical_over_cap_before_tax_shipping_usd"] == 0.01

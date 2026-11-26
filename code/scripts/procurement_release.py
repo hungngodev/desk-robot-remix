@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 
 from landed_cost import (
     MAX_ACCOUNTING_UNITS,
+    PROTOTYPE_CAP_CENTS,
     account_landed_cost,
     cents,
     evidence_https_url,
@@ -850,9 +851,10 @@ def _read_prior_paid_ledger() -> dict:
     return data
 
 
-def _documented_prior_spend_baseline() -> dict:
+def _documented_prior_spend_baseline(reference: dict | None = None) -> dict:
     """Known paid receipt is a floor, never a completed historical register."""
-    reference = _read_prior_paid_ledger()
+    if reference is None:
+        reference = _read_prior_paid_ledger()
     if not isinstance(reference, dict) or reference.get("currency") != "USD":
         raise ValueError("Confirmed prior payment reference is missing or invalid")
     payment = reference.get("paid_reconciliation")
@@ -1177,12 +1179,12 @@ def _historical_pilot_budget(sample_subtotal_usd: float) -> dict:
     try:
         reference = _read_prior_paid_ledger()
         cap = _historical_usd_cents(reference.get("cap_usd"), "cap")
-        paid = _historical_usd_cents(
-            reference.get("reported_already_purchased_usd"), "paid"
-        )
+        paid = _documented_prior_spend_baseline(reference)["known_paid_cents"]
         subtotal = _historical_usd_cents(sample_subtotal_usd, "sample subtotal")
-        if reference.get("currency") != "USD" or cap == 0:
-            raise ValueError("expected a positive USD cap")
+        if cap != PROTOTYPE_CAP_CENTS:
+            raise ValueError("expected the canonical first-unit USD cap")
+        if paid > 10_000_000:
+            raise ValueError("paid: exceeds historical USD bound")
     except (OSError, ValueError) as exc:
         raise ValueError("Invalid historical first-unit pilot budget reference") from exc
     combined = paid + subtotal
@@ -2007,6 +2009,10 @@ def render_markdown(report: dict) -> str:
          else "HOLD. No complete electrical, mechanical or physical acceptance.") +
         "** Quantities are design slots, not certified supplier checkouts. "
         "Estimated owned counts and ordered units have not been inspected.",
+        "",
+        "For the first-unit landed-cost cap and prior payment reconciliation, use "
+        "[the first-robot procurement entry point](one-robot-inventory-and-shopping.md). "
+        "Fleet quantities are not a first-unit checkout.",
         "",
     ]
     output.extend(_verified_checkout_summary(report))

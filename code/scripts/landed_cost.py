@@ -14,6 +14,7 @@ from decimal import Decimal, InvalidOperation
 from urllib.parse import urlsplit
 
 MAX_ACCOUNTING_USD = Decimal("1000000000000")
+PROTOTYPE_CAP_CENTS = 5000
 
 
 def cents(value: object, label: str) -> int:
@@ -177,7 +178,7 @@ def account_landed_cost(
     role_categories: dict[str, str],
     *,
     expected_scope: str = "first_robot",
-    cap_cents: int = 5000,
+    cap_cents: int = PROTOTYPE_CAP_CENTS,
 ) -> dict:
     """Compute payable and lifetime prototype spend without authorizing a cart.
 
