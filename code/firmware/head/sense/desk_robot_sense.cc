@@ -229,6 +229,7 @@ private:
         bool model_mood_active = false;
         const char* local_mood = "neutral";
         desk_robot::FaceMoodMorph mood_morph;
+        desk_robot::FaceMouthAnimator mouth_animator;
         uint32_t model_mood_started_ms = 0;
         while (true) {
             const uint32_t now_ms = static_cast<uint32_t>(esp_timer_get_time() / 1000);
@@ -331,6 +332,10 @@ private:
                 body_unhealthy, dock_lockout, mic_privacy_on, voice_link_lost);
             const bool priority_active = desk_robot::FaceStatusBlocksExpression(local_status);
             if (priority_active || !face_available) model_mood_active = false;
+            const bool mouth_allowed = speaking && !priority_active && !voice_link_lost;
+            const auto speech_level = mouth_allowed ?
+                static_cast<SenseReferenceCodec*>(board->GetAudioCodec())->ReadSpeechLevel(
+                    esp_timer_get_time()) : desk_robot::SpeechLevel{};
             {
                 FaceRenderGuard render_lock;
                 if (!render_lock) {
@@ -339,6 +344,7 @@ private:
                     last_face_available = false;
                     model_mood_active = false;
                     mood_morph.Step(now_ms, local_mood, false);
+                    mouth_animator.Step({}, false);
                     board->eye_animator_.Step(
                         now_ms, Motion::kNone, false,
                         priority_active || !isAwake(board->face_behavior_.state()));
@@ -376,7 +382,8 @@ private:
                     }
                     // Idle gaze yields to Mac cues; the bounded cosmetic mood
                     // bridge can ease either local or Mac expressions. Safety and
-                    // voice suppress both immediately, without changing stock glyphs.
+                    // voice suppress idle gestures immediately. Only fresh digital
+                    // speaker activity can open the optional cosmetic mouth.
                     if (board->local_eye_display_ != nullptr) {
                         auto eyes = board->eye_animator_.Step(
                             now_ms, action.motion,
@@ -385,6 +392,8 @@ private:
                         const auto height = mood_morph.Step(
                             now_ms, local_mood, face_available && !priority_active);
                         eyes = desk_robot::BlendMoodAperture(eyes, height);
+                        eyes.mouth_height = mouth_animator.Step(speech_level, mouth_allowed);
+                        if (eyes.mouth_height != 0) eyes.visible = true;
                         board->local_eye_display_->ShowEyes(eyes);
                         const auto hsm_state = board->face_behavior_.state();
                         const bool sleeping = hsm_state == State::kSleeping;

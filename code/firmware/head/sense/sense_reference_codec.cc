@@ -76,8 +76,11 @@ void SenseReferenceCodec::PublishAcceptedLocked(
     FillSilenceLocked(now_us);
     // The canonical TX scratch contains the actual converted PCM32 submitted
     // to I2S. Do not recompute volume from a setting that may have changed.
+    uint64_t amplitude_sum = 0;
     for (int i = 0; i < samples; ++i) {
         const int16_t scaled = desk_robot::Pcm32ToReferenceSample(source[i]);
+        const int32_t wide = scaled;
+        amplitude_sum += wide < 0 ? -wide : wide;
         // Filter the actual accepted PCM before reducing its sample rate.
         // One output at most per input, with history and pair phase retained.
         int16_t filtered = 0;
@@ -88,6 +91,7 @@ void SenseReferenceCodec::PublishAcceptedLocked(
     // The accepted chunk advances the clock by its actual sample duration.
     // Never reset it to the callback time: that would count the same 60 ms
     // of speech again when the 10 ms PDM capture reader fills silence.
+    speech_level_.Publish(amplitude_sum, samples, now_us);
     reference_clock_.accepted_output_frames(samples);
 }
 
@@ -322,6 +326,8 @@ int SenseReferenceCodec::Write(const int16_t* data, int samples) {
             stale_write = true;
             if (stale_publish_discards_ != UINT32_MAX) ++stale_publish_discards_;
             reference_integrity_failed_ = true;
+        } else if (started_generation == speaker_activity_.generation()) {
+            speech_level_.Reset();
         }
     }
     // The authenticated diagnostic reader observes these sticky counters;
@@ -340,6 +346,7 @@ void SenseReferenceCodec::ClearReference() {
     // Invalidate writes that entered the inherited blocking I2S path before
     // this reset. Never reset this generation with the ring write index.
     speaker_activity_.Reset();
+    speech_level_.Reset();
     consecutive_missing_reference_reads_ = 0;
     reference_read_seen_ = false;
     last_reference_read_write_index_ = 0;

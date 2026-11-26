@@ -60,6 +60,13 @@ public:
             lv_obj_set_style_bg_color(pupil_[i], lv_color_white(), 0);
             lv_obj_set_style_bg_opa(pupil_[i], LV_OPA_COVER, 0);
         }
+        mouth_ = lv_obj_create(eye_layer_);
+        lv_obj_set_style_radius(mouth_, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_pad_all(mouth_, 0, 0);
+        lv_obj_set_style_border_width(mouth_, 0, 0);
+        lv_obj_set_style_bg_color(mouth_, lv_color_black(), 0);
+        lv_obj_set_style_bg_opa(mouth_, LV_OPA_COVER, 0);
+        lv_obj_add_flag(mouth_, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(eye_layer_, LV_OBJ_FLAG_HIDDEN);
         // Keep Xiaozhi's independent low-battery warning above cosmetic eyes.
         if (low_battery_popup_) lv_obj_move_foreground(low_battery_popup_);
@@ -192,9 +199,12 @@ private:
         frame.x = std::clamp<int>(frame.x, -kGazeExtent, kGazeExtent);
         frame.y = std::clamp<int>(frame.y, -kGazeExtent, kGazeExtent);
         frame.lid_height = std::clamp<int>(frame.lid_height, kClosedHeight, kOpenHeight);
+        constexpr int mouth_top = kSlotHeight * 3 / 4;
+        frame.mouth_height = std::min<int>(frame.mouth_height, kSlotHeight - mouth_top);
         if (frame_known_ && frame.visible == last_.visible &&
             frame.closed == last_.closed && frame.x == last_.x &&
-            frame.y == last_.y && frame.lid_height == last_.lid_height) return;
+            frame.y == last_.y && frame.lid_height == last_.lid_height &&
+            frame.mouth_height == last_.mouth_height) return;
         if (!frame.visible) {
             lv_obj_add_flag(eye_layer_, LV_OBJ_FLAG_HIDDEN);
         } else {
@@ -209,6 +219,14 @@ private:
                     lv_obj_remove_flag(pupil_[i], LV_OBJ_FLAG_HIDDEN);
                 }
             }
+            if (frame.mouth_height != 0) {
+                constexpr int mouth_width = 10;
+                lv_obj_set_size(mouth_, mouth_width, frame.mouth_height);
+                lv_obj_set_pos(mouth_, (kSlotWidth - mouth_width) / 2, mouth_top);
+                lv_obj_remove_flag(mouth_, LV_OBJ_FLAG_HIDDEN);
+            } else {
+                lv_obj_add_flag(mouth_, LV_OBJ_FLAG_HIDDEN);
+            }
             lv_obj_remove_flag(eye_layer_, LV_OBJ_FLAG_HIDDEN);
         }
         last_ = frame;
@@ -216,6 +234,7 @@ private:
     }
 
     lv_obj_t* eye_layer_ = nullptr;
+    lv_obj_t* mouth_ = nullptr;
     lv_obj_t* eye_[face_eye_geometry::kEyeCount] = {};
     lv_obj_t* pupil_[face_eye_geometry::kEyeCount] = {};
     FaceIdlePower idle_power_;

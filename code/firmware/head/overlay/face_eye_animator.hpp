@@ -14,6 +14,7 @@ struct EyeFrame {
     int8_t x = 0;
     int8_t y = 0;
     uint8_t lid_height = face_eye_geometry::kOpenHeight;
+    uint8_t mouth_height = 0;
 };
 
 // Preserve an active gaze and blink while the independent mood aperture eases.

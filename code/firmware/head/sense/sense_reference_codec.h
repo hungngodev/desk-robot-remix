@@ -13,6 +13,7 @@
 #include "reference_timeline.h"
 #include "reference_decimator.h"
 #include "sense_speaker_activity.hpp"
+#include "face_speech_envelope.hpp"
 #include "sdkconfig.h"
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
 #include "sense_pcm_window.h"
@@ -68,6 +69,12 @@ public:
         bool integrity_failed;
     };
     ReferenceDiagnostics GetReferenceDiagnostics();
+
+    // Optional cosmetic sampling never waits for the realtime reference owner.
+    desk_robot::SpeechLevel ReadSpeechLevel(int64_t now_us) {
+        std::unique_lock<std::mutex> lock(reference_mutex_, std::try_to_lock);
+        return lock.owns_lock() ? speech_level_.Read(now_us) : desk_robot::SpeechLevel{};
+    }
 #ifdef CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED
     // A private opt-in build and one authenticated operator request are
     // required. This reuses the Xiaozhi 16 kHz mic/reference Read callback.
@@ -160,6 +167,7 @@ private:
     // publish its old accepted frames after ClearReference() reset the ring.
     // Guarded by reference_mutex_, not a competing audio task/driver.
     desk_robot::SenseSpeakerActivity speaker_activity_{};
+    desk_robot::SpeechLevelWindow speech_level_{};
     uint32_t stale_publish_discards_ = 0;
     // I2S timeout/short output cannot be counted as fully delivered speech.
     uint32_t short_output_writes_ = 0;
