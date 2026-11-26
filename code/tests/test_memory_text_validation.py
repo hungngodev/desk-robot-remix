@@ -1,11 +1,12 @@
 """Invalid text must not consume an operator's durable mutation reservation."""
 
 import pytest
-
 from desk_robot.memory import MemoryStore
 
 
-@pytest.mark.parametrize("bad", ["bad\ud800", "bad\udfff", "bad\x00", "bad\x1b", "bad\x7f", "bad\x85"])
+@pytest.mark.parametrize("bad", [
+    "bad\ud800", "bad\udfff", "bad\x00", "bad\x1b", "bad\x7f", "bad\x85",
+])
 def test_invalid_core_text_does_not_supersede_pending_request(tmp_path, bad):
     store = MemoryStore(tmp_path, ["pet_a", "pet_b"])
     pending = store.reserve_core_fact_mutation("pet_a", "favorite_game", "điện 😀")
@@ -23,7 +24,9 @@ def test_invalid_core_text_does_not_supersede_pending_request(tmp_path, bad):
     assert reopened.core_facts("pet_b") == []
 
 
-@pytest.mark.parametrize("bad", ["bad\ud800", "bad\udfff", "bad\x00", "bad\x1b", "bad\x7f", "bad\x85"])
+@pytest.mark.parametrize("bad", [
+    "bad\ud800", "bad\udfff", "bad\x00", "bad\x1b", "bad\x7f", "bad\x85",
+])
 def test_invalid_episode_text_does_not_supersede_pending_request(tmp_path, bad):
     store = MemoryStore(tmp_path, ["pet_a"])
     assert store.remember(
@@ -48,6 +51,7 @@ def test_invalid_episode_text_does_not_supersede_pending_request(tmp_path, bad):
     assert reopened.get_episode("pet_a", "event").summary == "điện 😀"
     assert reopened.get_episode("pet_a", "invalid") is None
     assert reopened.count("pet_a") == 1
+
 
 @pytest.mark.parametrize("bad", [
     "x" * 1_000_000,
@@ -109,3 +113,21 @@ def test_valid_unicode_and_json_like_plain_text_remain_opaque(tmp_path):
     assert store.set_core_fact("pet_a", "favorite_game", "😀" * 200)
     assert store.core_facts("pet_a")[0].value == "😀" * 200
 
+
+class MisleadingText(str):
+    def __len__(self):
+        return 5
+
+    def strip(self):
+        return "x" * 1_000_000
+
+
+def test_nonplain_string_cannot_rewrite_validated_text(tmp_path):
+    store = MemoryStore(tmp_path, ["pet_a"])
+    bad = MisleadingText("valid")
+    with pytest.raises(ValueError, match="Bounded nonempty description required"):
+        store.remember(
+            "pet_a", "invalid", bad, kind="scene",
+            source_robot="pet_a", witnessed=True,
+        )
+    assert store.count("pet_a") == 0

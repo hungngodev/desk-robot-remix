@@ -139,7 +139,7 @@ def _validate_memory_text(
     invalid_character_message: str | None = None,
 ) -> None:
     """Reject oversized or unsafe text before normalization or SQLite access."""
-    if not isinstance(value, str) or not 1 <= len(value) <= limit or not value.strip():
+    if type(value) is not str or not 1 <= len(value) <= limit or not value.strip():
         raise ValueError(message)
     if _INVALID_MEMORY_CHARACTER.search(value):
         raise ValueError(invalid_character_message or message)
