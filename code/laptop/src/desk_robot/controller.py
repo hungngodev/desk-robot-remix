@@ -1718,7 +1718,7 @@ class Coordinator:
         if self.dock_inhibited(robot_id):
             raise OperationError("Pickup refused: robot is seated or powered on dock")
         calibration = Calibration.load(robot.calibration)
-        calibration.verify_ready()
+        calibration.verify_ready(robot_id=robot_id)
         if calibration.simulation_only and self.settings.mode != "simulation":
             raise OperationError("Simulation calibration cannot be used on hardware")
         if self.settings.mode == "hardware" and calibration.hold_seconds < 3:

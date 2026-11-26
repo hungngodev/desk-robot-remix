@@ -105,6 +105,33 @@ async def test_permit_expiry_motion_default_and_simulation_calibration(settings)
     assert head.commands == []
 
 
+async def test_hardware_pickup_rejects_foreign_calibration_before_job(settings, tmp_path):
+    import json
+
+    data = json.loads(settings.robots[0].calibration.read_text())
+    data.update(
+        simulation_only=False, robot_id="robot-01", hold_seconds=3,
+        grip_force_delta_raw=100, grip_force_limit_raw=500,
+        pickup_floor_clearance_mm=0.25,
+    )
+    first = tmp_path / "unit-a.json"
+    first.write_text(json.dumps(data))
+    second = tmp_path / "unit-b.json"
+    second.write_bytes(first.read_bytes())
+    settings.robots[0].calibration = first
+    settings.robots[1].calibration = second
+    settings.mode = "hardware"
+    c, head = make(settings)
+    try:
+        with pytest.raises(ValueError, match="does not match"):
+            c.pickup("robot-02", "key")
+        assert not c.jobs
+        assert not head.commands
+        assert not c.heads["robot-02"].commands
+    finally:
+        await c.close()
+
+
 @pytest.mark.parametrize("failure", ["drive", "keepalive"])
 async def test_uncertain_commands_not_retried_and_stop_finally(settings, failure):
     c, head = make(settings)
@@ -258,6 +285,7 @@ async def test_real_pickup_rejects_sub_three_second_hold(settings, tmp_path):
     original = settings.robots[0].calibration.read_text()
     config = json.loads(original)
     config["simulation_only"] = False
+    config["robot_id"] = "robot-01"
     config["hold_seconds"] = 0.5
     measured = tmp_path / "measured.json"
     measured.write_text(json.dumps(config))
@@ -280,7 +308,7 @@ async def test_pickup_refuses_unqualified_floor_clearance_before_motion(settings
 
     config = json.loads(settings.robots[0].calibration.read_text())
     config.update(
-        measured=True, simulation_only=False, hold_seconds=3,
+        measured=True, simulation_only=False, hold_seconds=3, robot_id="robot-01",
         grip_force_delta_raw=100, grip_force_limit_raw=500,
     )
     measured = tmp_path / "uncleared.json"
@@ -2386,7 +2414,7 @@ async def test_tactile_pickup_fleet_owner_covers_contact_release_and_halt(
 
     calibration = json.loads(settings.robots[0].calibration.read_text())
     calibration.update(
-        simulation_only=False, hold_seconds=3,
+        simulation_only=False, hold_seconds=3, robot_id="robot-01",
         grip_force_delta_raw=100, grip_force_limit_raw=500,
         pickup_floor_clearance_mm=0.25,
     )

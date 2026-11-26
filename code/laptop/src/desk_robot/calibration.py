@@ -10,7 +10,7 @@ import numpy as np
 from numpy.typing import NDArray
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
-from .private_files import replace_private_text
+from .private_files import is_private_robot_id, replace_private_text
 
 
 def _unique_calibration_json_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
@@ -27,6 +27,8 @@ class Calibration(BaseModel):
     simulation_only: bool = Field(default=False, strict=True)
     model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
     measured: bool = Field(default=False, strict=True)
+    # Bind physical measurements to the configured robot, not the file path.
+    robot_id: str | None = Field(default=None, strict=True)
     # Explicit operator expiry; legacy files have no known expiry.
     expires_at: AwareDatetime | None = None
     image_width: int = Field(gt=0)
@@ -63,6 +65,8 @@ class Calibration(BaseModel):
 
     @model_validator(mode="after")
     def geometry(self) -> Self:
+        if self.robot_id is not None and not is_private_robot_id(self.robot_id):
+            raise ValueError("Invalid calibration robot_id")
         if len(self.pixel_points) != len(self.ground_points_mm):
             raise ValueError("Calibration point pairs must have equal length")
         for x, y in self.pixel_points:
@@ -130,7 +134,8 @@ class Calibration(BaseModel):
         x0, y0, x1, y1 = self.work_area_mm
         return x0 <= point[0] <= x1 and y0 <= point[1] <= y1
 
-    def verify_ready(self) -> None:
+    def verify_ready(self, *, robot_id: str | None = None) -> None:
+        """Validate readiness; robot-scoped callers must supply the exact routing ID."""
         if not self.measured:
             raise ValueError(
                 "Calibration is an unmeasured example; measure this robot before pickup"
@@ -138,6 +143,14 @@ class Calibration(BaseModel):
 
         if self.expires_at is not None and datetime.now(UTC) >= self.expires_at:
             raise ValueError("Calibration expired; re-calibrate this robot before pickup")
+
+        if robot_id is not None:
+            if not is_private_robot_id(robot_id):
+                raise ValueError("Invalid requested calibration robot_id")
+            if self.robot_id is None and not self.simulation_only:
+                raise ValueError("Calibration has no robot_id; re-calibrate this robot")
+            if self.robot_id is not None and self.robot_id != robot_id:
+                raise ValueError("Calibration robot_id does not match requested robot")
 
     def has_pickup_floor_clearance(self) -> bool:
         """Require positive measured sweep clearance, not object thickness."""
