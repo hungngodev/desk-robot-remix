@@ -18,6 +18,7 @@ from .config import RobotConfig, Settings, quiet_hours_active, secret
 from .conversation_consent import GroupContextConsent
 from .fleet_dialogue_budget import RollingGroupBudget, group_utterance_limit
 from .memory import MemoryStore, MemoryWriteSealed
+from .memory_worker import MemoryWriteBackpressure, optional_memory_writer
 from .streamed_ollama import ollama_speech_segments
 
 _SPEAKER_ABORT_TIMEOUT_S = 2.0
@@ -862,7 +863,7 @@ class Conversation:
                     record_failure(exc)
 
             worker = asyncio.create_task(
-                asyncio.to_thread(persist_with_consent_cleanup)
+                optional_memory_writer.run(persist_with_consent_cleanup)
             )
             try:
                 finished, _ = await asyncio.wait({worker}, timeout=0.2)
@@ -883,7 +884,9 @@ class Conversation:
                     )
                 worker.add_done_callback(observe_late_write)
                 raise
-            except (sqlite3.Error, MemoryWriteSealed, OSError, ValueError) as exc:
+            except (
+                sqlite3.Error, MemoryWriteSealed, MemoryWriteBackpressure, OSError, ValueError,
+            ) as exc:
                 # Private SQLite alias rejection is a persistence failure,
                 # never authority to abort an otherwise valid group dialogue.
                 record_failure(exc)

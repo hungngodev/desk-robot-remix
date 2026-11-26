@@ -4,7 +4,9 @@ This is a local, text-only SQLite store, not a vector search system and not
 camera history. A peer telling a story must never be reclassified as something
 the receiver saw. There are no motion permits, commands, images or secrets in
 the schema. All calls are synchronous; callers should serialize writes and
-offload blocking I/O from their asyncio event loop.
+offload blocking I/O from their asyncio event loop. Optional group speech
+writes use the bounded memory_worker lane; required privacy mutations retain
+their existing ordered ownership.
 """
 
 from __future__ import annotations
