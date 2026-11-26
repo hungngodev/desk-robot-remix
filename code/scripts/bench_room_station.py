@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Callable
 
 from desk_robot.room_station import SENSORS, STATION, RoomObservation, RoomSerialFeed
+from desk_robot.serial_device import is_local_serial_path
 
 
 def _git_sha() -> str | None:
@@ -46,7 +47,7 @@ def _git_sha() -> str | None:
 
 
 def _validate_capture_args(port: str, seconds: float) -> None:
-    if not isinstance(port, str) or not port.startswith("/dev/"):
+    if not is_local_serial_path(port):
         raise ValueError("Explicit /dev/ room station USB port required")
     # Huge integers can raise OverflowError during math.isfinite().
     # Treat impossible durations as rejected input, not a crashed bench.

@@ -609,6 +609,7 @@ def test_room_reader_requests_posix_exclusive_port_ownership(monkeypatch):
                 return handshake
             raise AssertionError("Reader should not run after stop")
 
+    monkeypatch.setattr("desk_robot.room_station.require_local_serial_device", lambda _: None)
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=FakePort))
     feed = RoomSerialFeed("/dev/cu.test", lambda observation: None)
     feed._read_port(lambda: False)
@@ -653,6 +654,7 @@ def test_unterminated_or_oversized_serial_fragments_never_become_room_frames(mon
             self.reads += 1
             return packet
 
+    monkeypatch.setattr("desk_robot.room_station.require_local_serial_device", lambda _: None)
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
     feed = RoomSerialFeed("/dev/cu.test", lambda observation: received.append(observation.seq))
     feed._read_port(lambda: not opened or opened[0].reads < len(chunks))
@@ -699,6 +701,7 @@ def test_sync_ack_suffix_cannot_synchronize_truncated_usb_line(monkeypatch, pref
             self.reads += 1
             return packet
 
+    monkeypatch.setattr("desk_robot.room_station.require_local_serial_device", lambda _: None)
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
     feed = RoomSerialFeed("/dev/cu.test", lambda observation: received.append(observation.seq))
     feed._read_port(lambda: not opened or opened[0].reads < 6)
@@ -754,6 +757,7 @@ def test_recursive_json_parse_error_does_not_restart_usb_replay_epoch(monkeypatc
             self.reads += 1
             return chunk
 
+    monkeypatch.setattr("desk_robot.room_station.require_local_serial_device", lambda _: None)
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
     feed = RoomSerialFeed("/dev/cu.test", lambda obs: received.append(obs.seq))
     feed._read_port(lambda: not opened or opened[0].reads < len(chunks))
@@ -790,6 +794,7 @@ def test_cancel_after_usb_read_discards_retired_station_epoch(monkeypatch):
             alive["running"] = False
             return json.dumps(frame(1, 1000)).encode() + b"\n"
 
+    monkeypatch.setattr("desk_robot.room_station.require_local_serial_device", lambda _: None)
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
     feed = RoomSerialFeed("/dev/cu.test", lambda obs: delivered.append(obs.seq))
     feed._read_port(lambda: alive["running"])
@@ -826,6 +831,7 @@ def test_callback_exception_does_not_reopen_usb_or_reset_replay_fence(monkeypatc
             self.reads += 1
             return (json.dumps(packets[self.reads - 1]).encode() + b"\n") if self.reads <= 3 else b""
 
+    monkeypatch.setattr("desk_robot.room_station.require_local_serial_device", lambda _: None)
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=FakePort))
     attempts = []
 
@@ -873,6 +879,7 @@ def test_room_callback_failure_is_not_erased_by_clean_reader_shutdown(monkeypatc
             threading.Event().wait(0.001)
             return b""
 
+    monkeypatch.setattr("desk_robot.room_station.require_local_serial_device", lambda _: None)
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
 
     async def scenario():
@@ -976,6 +983,7 @@ def test_usb_reconnect_sync_discards_complete_buffered_old_sensor_frame(monkeypa
                 return new   # Emitted only after current-session ACK
             return b""
 
+    monkeypatch.setattr("desk_robot.room_station.require_local_serial_device", lambda _: None)
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=ReplayPort))
     reader = RoomSerialFeed("/dev/cu.test", lambda obs: observed.append(obs.seq))
     reader._read_port(lambda: not opened or opened[0].reads < 4)
@@ -1007,6 +1015,7 @@ def test_room_station_missing_current_epoch_ack_never_delivers_old_json(monkeypa
         def readline(self, size):
             return json.dumps(frame()).encode() + b"\n"
 
+    monkeypatch.setattr("desk_robot.room_station.require_local_serial_device", lambda _: None)
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=NoAckPort))
     reader = RoomSerialFeed("/dev/cu.test", observed.append)
     with pytest.raises(RuntimeError, match="post-connect SYNC unacknowledged"):
@@ -1053,6 +1062,7 @@ def test_usb_reader_rechallenges_after_a_stalled_post_ack_frame(monkeypatch):
                 return json.dumps(frame(self.samples, self.samples * 1000)).encode() + b"\n"
             return b""
 
+    monkeypatch.setattr("desk_robot.room_station.require_local_serial_device", lambda _: None)
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
     feed = RoomSerialFeed("/dev/cu.test", lambda obs: observed.append(obs.seq))
     feed._read_port(lambda: not opened or opened[0].samples < 4)
@@ -1101,6 +1111,7 @@ def test_usb_reader_never_accepts_second_frame_without_its_own_ack(monkeypatch):
             clock["now"] += module.USB_SYNC_TIMEOUT_S + 0.1
             return b""
 
+    monkeypatch.setattr("desk_robot.room_station.require_local_serial_device", lambda _: None)
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
     feed = RoomSerialFeed("/dev/cu.test", lambda obs: observed.append(obs.seq))
     with pytest.raises(RuntimeError, match="SYNC unacknowledged"):
@@ -1142,6 +1153,7 @@ def test_real_feather_crlf_and_legacy_lf_sync_handshake(monkeypatch, terminator)
                 return json.dumps(frame(1, 1000)).encode() + b"\n"
             return b""
 
+    monkeypatch.setattr("desk_robot.room_station.require_local_serial_device", lambda _: None)
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
     feed = RoomSerialFeed("/dev/cu.test", lambda sample: observed.append(sample.seq))
     feed._read_port(lambda: not opened or opened[0].reads < 3)
@@ -1181,6 +1193,7 @@ def test_feather_wrong_nonce_crlf_does_not_unlock_buffered_json(monkeypatch):
                 return json.dumps(frame(2, 2000)).encode() + b"\n"
             return b""
 
+    monkeypatch.setattr("desk_robot.room_station.require_local_serial_device", lambda _: None)
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
     feed = RoomSerialFeed("/dev/cu.test", lambda sample: observed.append(sample.seq))
     feed._read_port(lambda: not opened or opened[0].reads < 5)
@@ -1229,6 +1242,7 @@ def test_room_station_rejects_nonce_ack_after_read_deadline(
             self.samples += 1
             return json.dumps(frame(self.samples, self.samples * 1000)).encode() + b"\n"
 
+    monkeypatch.setattr("desk_robot.room_station.require_local_serial_device", lambda _: None)
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=Port))
     feed = RoomSerialFeed("/dev/cu.test", lambda obs: observed.append(obs.seq))
     with pytest.raises(RuntimeError, match="post-connect SYNC unacknowledged"):
@@ -1324,6 +1338,7 @@ def test_usb_trickle_cannot_extend_sync_deadline_to_frame_size(monkeypatch):
         def write(self, request):
             return len(request)
 
+    monkeypatch.setattr("desk_robot.room_station.require_local_serial_device", lambda _: None)
     monkeypatch.setattr(serial, "Serial", TricklePort)
     feed = RoomSerialFeed("/dev/cu.test", lambda observation: pytest.fail("Unsolicited frame"))
     with pytest.raises(RuntimeError, match="post-connect SYNC unacknowledged"):

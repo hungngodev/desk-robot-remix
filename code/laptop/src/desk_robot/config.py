@@ -23,6 +23,7 @@ from pydantic import (
 )
 
 from .fleet_identity import device_identity_key
+from .serial_device import is_local_serial_path
 from .personality_policy import PersonalityProfile
 from .private_files import read_private_env as read_private_env
 
@@ -226,9 +227,7 @@ class Settings(BaseModel):
         if self.fleet_social_autonomy_enabled and not self.fleet_text_sharing_enabled:
             raise ValueError("Automatic peer dialogue requires explicit local text sharing consent")
         if self.room_station_enabled and (
-            self.mode != "hardware" or not isinstance(self.room_station_port, str)
-            or not self.room_station_port.startswith("/dev/")
-            or len(self.room_station_port) > 255
+            self.mode != "hardware" or not is_local_serial_path(self.room_station_port)
         ):
             raise ValueError("Room station requires a real explicit local USB serial port")
         if self.room_station_context_enabled and not self.room_station_enabled:

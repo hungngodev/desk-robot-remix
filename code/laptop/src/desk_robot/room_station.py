@@ -17,6 +17,7 @@ from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Callable
 
+from .serial_device import is_local_serial_path, require_local_serial_device
 from .soil_calibration import SoilCalibration
 
 STATION = "room-pod-01"
@@ -405,7 +406,7 @@ class RoomSerialFeed:
     def __init__(self, port: str, on_observation: Callable[[RoomObservation], None],
                  soil_calibration: SoilCalibration | None = None,
                  on_disconnect: Callable[[], None] | None = None):
-        if not isinstance(port, str) or not port.startswith("/dev/"):
+        if not is_local_serial_path(port):
             raise ValueError("Room station requires an explicit local serial device")
         self.port = port
         self.on_observation = on_observation
@@ -421,6 +422,7 @@ class RoomSerialFeed:
         # pySerial 3.5 POSIX advisory lock: avoid two cooperating readers
         # interleaving bytes on this sole local USB station transport.
         # Device access and user consent remain separately enforced.
+        require_local_serial_device(self.port)
         with serial.Serial(self.port, baudrate=115200, timeout=.25,
                            write_timeout=.25, exclusive=True) as port:
             # Reset at real connection opening, not after a callback failure.

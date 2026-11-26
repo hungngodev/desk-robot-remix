@@ -72,6 +72,7 @@ def test_usb_recovery_after_split_line_64k_garbage_and_duplicate_keys(monkeypatc
 
     port = Port()
     monkeypatch.setitem(sys.modules, "serial", SimpleNamespace(Serial=lambda *a, **kw: port))
+    monkeypatch.setattr("desk_robot.room_station.require_local_serial_device", lambda _: None)
     feed = RoomSerialFeed("/dev/cu.test", lambda observation: observed.append(observation.seq))
     feed._read_port(lambda: port.reads < len(chunks))
     assert observed == [2]

@@ -113,6 +113,7 @@ def test_read_only_cli_reports_matched_goodput_and_rtt(monkeypatch, capsys):
     # The first status reply takes two reads; exclude a complete unrelated
     # diagnostic line from matched bytes, but include its time in RTT.
     port = InspectPort([b"boot diagnostic\n", reply, reply])
+    monkeypatch.setitem(transact.__globals__, "require_local_serial_device", lambda _: None)
 
     def open_port(name, baud, *, timeout, write_timeout):
         assert (name, baud, timeout, write_timeout) == ("fake", 115200, 0.03, 0.15)
@@ -206,6 +207,7 @@ def test_valid_drive_duration_is_resolved_before_actuation(
             }[current]
 
     port = CommandPort([])
+    monkeypatch.setitem(transact.__globals__, "require_local_serial_device", lambda _: None)
     monkeypatch.setitem(
         transact.__globals__, "time",
         SimpleNamespace(monotonic=lambda: port.now, sleep=port.sleep),

@@ -11,6 +11,7 @@ import statistics
 import time
 
 import serial
+from desk_robot.serial_device import require_local_serial_device
 from desk_robot.transport import drive_duration_ms, expected_ack, validate_command
 
 
@@ -327,6 +328,10 @@ def main():
         else:
             duration = 1.5
 
+    try:
+        require_local_serial_device(args.port)
+    except ValueError as exc:
+        p.error(str(exc))
     with serial.Serial(args.port, 115200, timeout=0.03, write_timeout=0.15) as port:
         # Opening USB may reset the dev board. Boot starts disarmed even if
         # a previous calibration was stored in NVS.
