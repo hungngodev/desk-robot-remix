@@ -121,14 +121,26 @@ qualifies a high-consequence desk edge stop.
 
 A sensor that reports a cliff only once the leading wheel reaches the edge
 cannot prevent falling, even if its range reading is perfect. The firmware
-`CliffGuard` latches invalid readings or out of range but hardware placement
-and stopping inertia remain physical proof obligations.
+`CliffGuard` latches invalid, stale, missing or out-of-range critical readings;
+it does not calculate stopping distance. Its calibrated freshness interval
+(30 through 200 ms) bounds accepted sample age, not measured end-to-end
+edge detection and motor stop latency. Account separately for the worst
+remaining detection/controller/output latency and the loaded distance from
+stop output to rest. For DRV8833 LOW/LOW this is coast distance, not active
+braking. Do not omit either interval or count the same travel twice.
+Hardware placement and stopping inertia remain physical proof obligations.
 
 ## All-direction stopping, not just a forward ray
 
 A forward lead calculation still cannot clear reverse, turn-in-place or
-curved commands. The actual WROOM body source permits independent positive
-and negative wheel speeds. For a differential drive with measured separation
+curved commands. Although the differential-drive model accepts independent
+signed wheel speeds, the actual WROOM `BodyControl.cpp` guarded stepper and
+DC profiles currently reject negative or unequal wheel commands with
+`ERR drive directional_clearance_unqualified`, stop both wheels, and do not
+renew the control lease. The three side/rear ToF lanes remain read-only.
+The planar screen evaluates proposed geometry offline; even a passing result
+cannot lift this firmware restriction or authorize a physical trial.
+For a differential drive with measured separation
 `B` and left/right ground speeds `vL, vR`, the center translational
 speed is `(vR+vL)/2`, the rotation rate is `(vR-vL)/B`, and a point
 `(x,y)` on the chassis has instantaneous planar velocity
