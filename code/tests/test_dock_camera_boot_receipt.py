@@ -177,3 +177,18 @@ async def test_dispatch_rejects_replaced_stream_inside_command_queue(
     with pytest.raises(HeadError, match="Dock JPEG boot changed"):
         await asyncio.wait_for(task, 1)
     assert posts == []
+
+
+@pytest.mark.asyncio
+async def test_boot_transition_discards_unpublished_cached_jpeg():
+    head = make_head()
+    generation = head._stream_generation
+    async with head._stream_condition:
+        # A multipart batch may advance boot provenance before it publishes
+        # the new JPEG, then fail parsing a subsequent part.
+        head._accept_camera_identity((101, 1, 2000))
+        assert head._stream_latest is None
+        assert head._stream_generation == generation
+        assert 100 in head._retired_camera_boots
+        with pytest.raises(HeadError, match="retired boot"):
+            head._accept_camera_identity((100, 2, 3000))

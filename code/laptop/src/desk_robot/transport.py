@@ -525,6 +525,9 @@ class HttpHead:
             if len(self._retired_camera_boots) >= 8:
                 raise HeadError("Camera reboot history exhausted; reset observation session")
             self._retired_camera_boots.add(earlier[0])
+            # Do not relabel a cached pre-reboot JPEG with the new boot.
+            # A later multipart parse failure may prevent new publication.
+            self._stream_latest = None
         elif earlier and (
             sequence <= earlier[1] or completed <= earlier[2]
         ):
