@@ -13,6 +13,27 @@ RUNNER = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(RUNNER)
 
 
+def _assert_compiles_and_runs(calls, sources, build):
+    assert sources
+    assert len(calls) == 2 * len(sources)
+    required_flags = {
+        "-std=c++17", "-Wall", "-Wextra", "-Wconversion", "-Werror",
+        "-fsanitize=address,undefined", "-fno-sanitize-recover=undefined",
+        "-fno-omit-frame-pointer",
+    }
+    for index, source in enumerate(sources):
+        compile_cmd, compile_options = calls[index * 2]
+        run_cmd, run_options = calls[index * 2 + 1]
+        executable = str(build / source.stem)
+        assert compile_cmd[0] == "c++"
+        assert required_flags <= set(compile_cmd)
+        assert compile_cmd[-3:] == [str(source), "-o", executable]
+        assert compile_options["check"] and run_options["check"]
+        assert compile_options["timeout"] == 30
+        assert run_options["timeout"] == 15
+        assert run_cmd == [executable]
+
+
 def test_room_station_runner_discovers_new_sources(tmp_path, monkeypatch):
     station = tmp_path / "station"
     sources = station / "tests"
@@ -25,23 +46,32 @@ def test_room_station_runner_discovers_new_sources(tmp_path, monkeypatch):
     )
     (sources / "bme_step_tests.cpp").touch()
     (sources / "new_tests.cpp").touch()
+    (sources / "probe.cpp").touch()
     (sources / "README.md").touch()
     calls = []
     monkeypatch.setattr(RUNNER.shutil, "which", lambda _: "c++")
     monkeypatch.setattr(RUNNER.subprocess, "run", lambda cmd, **kw: calls.append((cmd, kw)))
     RUNNER.run_tests(station, tmp_path)
-    assert len(calls) == 4
-    for index, name in enumerate(("bme_step_tests", "new_tests")):
-        compile_cmd, compile_options = calls[index * 2]
-        run_cmd, run_options = calls[index * 2 + 1]
-        assert str(sources / f"{name}.cpp") in compile_cmd
-        assert "-fsanitize=address,undefined" in compile_cmd
-        assert "-fno-sanitize-recover=undefined" in compile_cmd
-        assert "-Wconversion" in compile_cmd
-        assert "-Werror" in compile_cmd
-        assert compile_options["check"] and run_options["check"]
-        assert run_cmd == [str(tmp_path / name)]
+    _assert_compiles_and_runs(
+        calls, [sources / name for name in ("bme_step_tests.cpp", "new_tests.cpp", "probe.cpp")],
+        tmp_path,
+    )
     assert "void bme_step(unsigned) {}" in (tmp_path / "bme_step_under_test.h").read_text()
+
+
+def test_room_station_runner_covers_live_sources(tmp_path, monkeypatch):
+    station = SCRIPT.parents[1] / "firmware/room_station"
+    # Enumerate independently of the runner's glob so a narrowed pattern,
+    # hardcoded inventory, duplicate or skipped execution fails this contract.
+    sources = sorted(
+        path for path in (station / "tests").iterdir()
+        if path.is_file() and path.suffix == ".cpp"
+    )
+    calls = []
+    monkeypatch.setattr(RUNNER.shutil, "which", lambda _: "c++")
+    monkeypatch.setattr(RUNNER.subprocess, "run", lambda cmd, **kw: calls.append((cmd, kw)))
+    RUNNER.run_tests(station, tmp_path)
+    _assert_compiles_and_runs(calls, sources, tmp_path)
 
 
 def test_room_station_runner_rejects_empty_suite(tmp_path, monkeypatch):
@@ -50,7 +80,8 @@ def test_room_station_runner_rejects_empty_suite(tmp_path, monkeypatch):
         RUNNER.run_tests(tmp_path, tmp_path)
 
 
-def test_room_station_runner_propagates_failed_test(tmp_path, monkeypatch):
+@pytest.mark.parametrize("failure_phase", ["compile", "execute"])
+def test_room_station_runner_propagates_failed_test(tmp_path, monkeypatch, failure_phase):
     station = tmp_path / "station"
     (station / "tests").mkdir(parents=True)
     (station / "src").mkdir()
@@ -60,11 +91,14 @@ def test_room_station_runner_propagates_failed_test(tmp_path, monkeypatch):
     )
     (station / "tests/failure.cpp").touch()
     monkeypatch.setattr(RUNNER.shutil, "which", lambda _: "c++")
+    calls = []
 
-    def fail_on_execution(cmd, **kwargs):
-        if len(cmd) == 1:
+    def fail_on_command(cmd, **kwargs):
+        calls.append(cmd)
+        if (len(cmd) == 1) == (failure_phase == "execute"):
             raise subprocess.CalledProcessError(1, cmd)
 
-    monkeypatch.setattr(RUNNER.subprocess, "run", fail_on_execution)
+    monkeypatch.setattr(RUNNER.subprocess, "run", fail_on_command)
     with pytest.raises(subprocess.CalledProcessError):
         RUNNER.run_tests(station, tmp_path)
+    assert len(calls) == (1 if failure_phase == "compile" else 2)
