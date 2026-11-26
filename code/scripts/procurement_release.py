@@ -28,6 +28,9 @@ from landed_cost import (
     sum_line_cost_cents,
 )
 
+from procurement_policy import adafruit_new_hardware as _ad_fruit_new_hardware
+from procurement_policy import selected_sensor_identity_matches
+
 ROOT = Path(__file__).resolve().parents[2]
 PLAN = ROOT / "docs/hardware/full-feature-plan.json"
 
@@ -245,23 +248,6 @@ def _selected_carrier(part_evidence: object) -> dict | None:
     return fields
 
 
-def _ad_fruit_new_hardware(part_evidence: object, quantity: int) -> bool:
-    """Reject branded NEW boards, even when a reseller is named as vendor.
-
-    Brand, seller, product/SKU and reviewed physical item must agree. An
-    already-owned board is not a new purchase; open-source Adafruit drivers
-    remain allowed without purchasing Adafruit-branded carriers.
-    """
-    if quantity <= 0 or not isinstance(part_evidence, dict):
-        return False
-    return any(
-        isinstance(part_evidence.get(field), str)
-        and "adafruit" in part_evidence[field].casefold()
-        for field in ("vendor", "brand", "sku", "product_name",
-                      "product_url", "resolved_item", "pcb_revision")
-    )
-
-
 def _unexpected_or_excess_roles(selected: dict, expected: dict, scope: str) -> list[str]:
     """Identify phantom roles and extra installed units, not spare inventory."""
     return [
@@ -293,7 +279,9 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
         ident = part["id"]
         # The user explicitly selected inexpensive VL53L0X for desk ranging.
         # Reject premium substitutions before an agent can generate a cart.
-        if ident == "cliff_obstacle" and "VL53L0X" not in str(part.get("name", "")):
+        if ident == "cliff_obstacle" and (
+            not isinstance(part.get("name"), str) or "VL53L0X" not in part["name"]
+        ):
             raise ValueError("Cliff sensor must be the approved low-cost VL53L0X")
         if ident in seen:
             raise ValueError(f"Duplicate part ID: {ident}")
@@ -316,8 +304,11 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
         selected_carrier = _selected_carrier(ev)
         if selected_carrier is None:
             missing.insert(0, "exact_vendor_sku_and_pcb_revision")
-        if _ad_fruit_new_hardware(ev, max(needed - owned, 0)):
+        if (_ad_fruit_new_hardware(ev, needed - owned)
+                or _ad_fruit_new_hardware(part, needed - owned)):
             missing.append("no_new_adafruit_hardware")
+        if not selected_sensor_identity_matches(ident, part.get("name"), ev):
+            missing.append("unapproved_selected_sensor_identity")
         chosen = FIXED_SOURCE_SKUS.get(ident)
         if chosen is not None and (
                 ev.get("vendor"), ev.get("sku")) != chosen:
@@ -425,7 +416,8 @@ def generate(plan: dict, evidence: dict | None = None) -> dict:
             missing.insert(0, "exact_vendor_sku_and_pcb_revision")
         remaining = qty - owned - estimated - ordered
         # Unreceived and estimated boards are not already-owned exceptions.
-        if _ad_fruit_new_hardware(ev, qty - owned):
+        if (_ad_fruit_new_hardware(ev, qty - owned)
+                or _ad_fruit_new_hardware(module, qty - owned)):
             missing.append("no_new_adafruit_hardware")
         room.append({"id": ident, "name": module.get("name"),
                      "shared_total": qty, "per_robot": 0,
@@ -1245,6 +1237,10 @@ def first_robot_pilot_samples(report: dict) -> dict:
                           else "EXCLUDED_MOTOR_ALTERNATIVE")
         elif ident in PILOT_PHYSICAL_SELECTION_HOLDS:
             action = "HOLD_POWER_MOTION_OR_FIT_SELECTION"
+        elif "no_new_adafruit_hardware" in part["missing_part_evidence"]:
+            action = "HOLD_UNAPPROVED_NEW_HARDWARE"
+        elif "unapproved_selected_sensor_identity" in part["missing_part_evidence"]:
+            action = "HOLD_CHANGED_PART_IDENTITY"
         elif source is not None:
             if part["name"] != source[0]:
                 action = "HOLD_CHANGED_PART_IDENTITY"

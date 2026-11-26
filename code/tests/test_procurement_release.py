@@ -3000,3 +3000,51 @@ def test_full_checkout_cannot_price_away_required_scope(scope, mutation):
                else "Incomplete full checkout scope")
     assert any(message in error for error in cost["errors"])
     assert "Payable now: unknown" in mod.cost_quote_markdown(cost)
+
+
+@pytest.mark.parametrize("role, replacement", [
+    ("cliff_obstacle", "VL53L0X or VL53L4CD"),
+    ("cliff_obstacle", "VL53L0X or VL6180X"),
+    ("imu", "MPU6050 or BerryIMU"),
+])
+def test_drx723_changed_selected_sensor_is_held_in_release(role, replacement):
+    import json
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    next(row for row in plan["parts"] if row["id"] == role)["name"] = replacement
+    report = mod.generate(plan)
+    row = next(item for item in report["robots"] if item["id"] == role)
+    assert "unapproved_selected_sensor_identity" in row["missing_part_evidence"]
+    assert not report["order_released"]
+    assert not mod.first_robot_projection(report)["purchase_approved"]
+
+
+@pytest.mark.parametrize("role, field, value", [
+    ("cliff_obstacle", "model", "VL53L4CD"),
+    ("imu", "model", "BerryIMU"),
+    ("imu", "seller", "Adafruit Industries"),
+])
+def test_drx723_reviewed_identity_is_held(role, field, value):
+    import json
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    report = mod.generate(plan, {"parts": {role: {field: value}}})
+    row = next(item for item in report["robots"] if item["id"] == role)
+    reason = ("no_new_adafruit_hardware" if field == "seller"
+              else "unapproved_selected_sensor_identity")
+    assert reason in row["missing_part_evidence"]
+    assert not row["approved_for_fleet_purchase"]
+
+
+def test_drx723_plan_brand_and_pilot_receipt_cannot_bypass_purchase_policy():
+    import json
+
+    plan = json.loads(mod.PLAN.read_text(encoding="utf-8"))
+    next(row for row in plan["parts"] if row["id"] == "amp")["name"] += " Adafruit"
+    report = mod.generate(plan, {"parts": {"cliff_obstacle": {"seller": "Adafruit"}}})
+    amp = next(row for row in report["robots"] if row["id"] == "amp")
+    assert "no_new_adafruit_hardware" in amp["missing_part_evidence"]
+    pilot = mod.first_robot_pilot_samples(report)
+    tof = next(row for row in pilot["roles"] if row["id"] == "cliff_obstacle")
+    assert tof["pilot_action"] == "HOLD_UNAPPROVED_NEW_HARDWARE"
+    assert tof["pilot_sample_quantity"] == 0
