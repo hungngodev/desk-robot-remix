@@ -8,6 +8,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 GUIDE = ROOT / "docs/guides/one-complete-robot.md"
 
@@ -220,4 +222,75 @@ def test_documented_procurement_views_execute_without_release_authority():
         assert result.returncode == 0, result.stderr
         for marker in expected[argv[6]]:
             assert marker in result.stdout
+        if argv[6] == "pilot-cart-markdown":
+            _assert_pilot_sku_rows(result.stdout)
+            for sku in sorted(_PILOT_SKUS):
+                mutant = "\n".join(
+                    line for line in result.stdout.splitlines()
+                    if not (line.startswith("|") and f"| {sku} |" in line)
+                )
+                with pytest.raises(AssertionError):
+                    _assert_pilot_sku_rows(mutant + "\n" + sku)
     assert seen == set(expected)
+
+
+_PILOT_SKUS = {
+    "SEN-19-006", "COM-05-067", "SEN-25-020", "SEN-24-027", "COM-05-045",
+    "COM-05-093", "DFR0954", "D2F-01L3", "CS20-02P110-04-1X", "2873",
+    "BOB-13282", "TSOP38438", "TSAL6200",
+}
+
+
+def _assert_pilot_sku_rows(markdown):
+    header = "| Candidate checkout seller | Brand or manufacturer | SKU |"
+    lines = markdown.splitlines()
+    start = next(i for i, line in enumerate(lines) if line.startswith(header))
+    rows = []
+    for line in lines[start + 2:]:
+        if not line.startswith("|"):
+            break
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        assert len(cells) == 9, line
+        rows.append(cells[2])
+    assert len(rows) == len(_PILOT_SKUS), rows
+    assert set(rows) == _PILOT_SKUS, rows
+
+
+_SAFETY_MARKERS = (
+    ("3. Wiring starts unpowered and with independent safety",
+     "0x70 and 0x71 mux lanes must be isolated and verified at 3.3 V"),
+    ("4. Build and inspect code without energizing a robot",
+     "3.3 V probe output and analog A0"),
+    ("4. Build and inspect code without energizing a robot", "3.3 V UART"),
+    ("7. Final release decision",
+     "Final parts printing, full buying release, loaded desk movement, "
+     "battery charging and autonomous docking remain HOLD until the named receipts exist."),
+)
+_DC_MARKERS = (
+    "LOW/LOW (coast, high impedance) from HIGH/HIGH (active brake)",
+    "must be zero on STOP; neither coast nor nSLEEP LOW proves zero wheel speed.",
+    "No active-brake substitution is qualified. Measure loaded coast distance.",
+)
+
+
+def _assert_builder_safety_markers(guide, dc_guide):
+    for heading, marker in _SAFETY_MARKERS:
+        section = guide.split(f"## {heading}\n", 1)[1].split("\n## ", 1)[0]
+        assert marker in " ".join(section.split()), heading
+    dc = " ".join(dc_guide.split())
+    for marker in _DC_MARKERS:
+        assert marker in dc, marker
+
+
+def test_builder_safety_warnings_are_scoped_and_mutation_sensitive():
+    guide = GUIDE.read_text(encoding="utf-8")
+    dc = (ROOT / "docs/hardware/dc-motor-independent-watchdog.md").read_text(
+        encoding="utf-8"
+    )
+    _assert_builder_safety_markers(guide, dc)
+    for _, marker in _SAFETY_MARKERS:
+        with pytest.raises(AssertionError):
+            _assert_builder_safety_markers(guide.replace(marker, "", 1), dc)
+    for marker in _DC_MARKERS:
+        with pytest.raises(AssertionError):
+            _assert_builder_safety_markers(guide, " ".join(dc.split()).replace(marker, "", 1))
