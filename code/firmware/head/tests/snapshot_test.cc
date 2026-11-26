@@ -5,10 +5,13 @@
 #include <cstdint>
 #include <cstdlib>
 #include <expected>
+#include <limits>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include "overlay/camera_frame_bounds.hpp"
 
 enum { PIXFORMAT_RGB565, PIXFORMAT_JPEG, PIXFORMAT_OTHER, V4L2_PIX_FMT_RGB565 };
 struct Frame {
@@ -42,6 +45,7 @@ bool encoder_ok = true;
 bool encoder_framing_ok = true;
 bool encoder_partial_failure = false;
 bool encoder_null_output = false;
+std::size_t encoder_reported_length = 5;
 int encoder_calls = 0;
 bool image_to_jpeg(uint8_t* src, size_t size, uint16_t width, uint16_t height,
                    int format, int quality, uint8_t** out, size_t* len) {
@@ -59,6 +63,7 @@ bool image_to_jpeg(uint8_t* src, size_t size, uint16_t width, uint16_t height,
     *out = static_cast<uint8_t*>(malloc(*len));
     const uint8_t bytes[] = {0xff, 0xd8, src[0], 0xff, static_cast<uint8_t>(encoder_framing_ok ? 0xd9 : 0)};
     std::copy(bytes, bytes + 5, *out);
+    *len = encoder_reported_length;
     return encoder_ok;
 }
 class Esp32Camera {
@@ -67,6 +72,7 @@ public:
     bool capture_ok = true;
     bool frame_available = true;
     bool native_jpeg_ok = true;
+    bool native_soi_ok = true;
     uint8_t pixels[8] = {};
     Frame frame{pixels, 8, 2, 2, PIXFORMAT_RGB565};
     Frame* current_fb_ = nullptr;
@@ -84,7 +90,7 @@ public:
             // with EOI. The prior synthetic JPEG was four arbitrary RGB
             // bytes and rightly failed the new production validation.
             pixels[0] = 0xff;
-            pixels[1] = 0xd8;
+            pixels[1] = native_soi_ok ? 0xd8 : 0;
             pixels[2] = 0xff;
             pixels[3] = native_jpeg_ok ? 0xd9 : 0;
         } else {
@@ -129,6 +135,27 @@ int main() {
     assert(!capture());
     encoder_framing_ok = true;
     assert(capture());
+    for (std::size_t length : {std::size_t{0}, std::size_t{3},
+                               std::size_t{512 * 1024 + 1},
+                               std::numeric_limits<std::size_t>::max()}) {
+        encoder_reported_length = length;
+        assert(!capture());
+    }
+    encoder_reported_length = 5;
+    const int before_invalid_rgb = encoder_calls;
+    camera.frame.len = 7;
+    assert(!capture());
+    camera.frame.len = 9;
+    assert(!capture());
+    camera.frame.len = 8;
+    camera.frame.width = std::numeric_limits<uint16_t>::max();
+    camera.frame.height = std::numeric_limits<uint16_t>::max();
+    assert(!capture());
+    camera.frame.width = 0;
+    assert(!capture());
+    camera.frame.width = camera.frame.height = 2;
+    assert(encoder_calls == before_invalid_rgb);
+    assert(capture());
     camera.frame.format = PIXFORMAT_OTHER;
     assert(!capture());
     const int before_native = encoder_calls;
@@ -142,8 +169,13 @@ int main() {
     assert(!capture());
     camera.frame.len = 512 * 1024 + 1;
     assert(!capture());
+    camera.frame.len = std::numeric_limits<std::size_t>::max();
+    assert(!capture());
     camera.frame.len = 4;
     assert(capture()->size() == 4);
+    camera.native_soi_ok = false;
+    assert(!capture());
+    camera.native_soi_ok = true;
     camera.native_jpeg_ok = false;
     assert(!capture());
     camera.frame_available = false;

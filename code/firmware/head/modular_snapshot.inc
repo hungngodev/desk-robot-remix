@@ -31,9 +31,12 @@ std::expected<std::vector<uint8_t>, std::string> Esp32Camera::SnapshotJpeg() {
     // used by the upstream Explain encoder, preserving camera color handling.
     if (current_fb_->format != PIXFORMAT_RGB565 || !encode_buf_)
         return std::unexpected("Unsupported snapshot pixel format");
+    if (!desk_robot::ValidRgb565Frame(
+            current_fb_->width, current_fb_->height, current_fb_->len))
+        return std::unexpected("Invalid RGB565 snapshot frame");
     uint8_t* jpeg = nullptr;
     size_t len = 0;
-    const bool ok = image_to_jpeg(encode_buf_, current_fb_->width * current_fb_->height * 2,
+    const bool ok = image_to_jpeg(encode_buf_, current_fb_->len,
         current_fb_->width, current_fb_->height, V4L2_PIX_FMT_RGB565, 80, &jpeg, &len);
     if (!ok || !jpeg || len < 4 || len > 512 * 1024 ||
         jpeg[0] != 0xff || jpeg[1] != 0xd8 ||
