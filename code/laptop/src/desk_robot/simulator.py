@@ -149,18 +149,18 @@ class SimulatedHead:
     async def snapshot(self):
         if self.fail_snapshot:
             raise HeadError("Simulated camera failure")
-        image = Image.new("RGB", (200, 200), "white")
-        if self.show_target:
-            x, y = (100, 65) if self.lifted else self.position
-            ImageDraw.Draw(image).rectangle((x - 7, y - 5, x + 7, y + 5), fill=(240, 0, 0))
-        out = BytesIO()
-        image.save(out, "JPEG")
-        return out.getvalue()
+        with Image.new("RGB", (200, 200), "white") as image, BytesIO() as out:
+            if self.show_target:
+                x, y = (100, 65) if self.lifted else self.position
+                ImageDraw.Draw(image).rectangle((x - 7, y - 5, x + 7, y + 5), fill=(240, 0, 0))
+            image.save(out, "JPEG")
+            return out.getvalue()
 
 
 class SimulationVision:
     async def detect(self, jpeg, label):
-        pixels = np.array(Image.open(BytesIO(jpeg)).convert("RGB"))
+        with BytesIO(jpeg) as source, Image.open(source) as image, image.convert("RGB") as rgb:
+            pixels = np.array(rgb)
         yy, xx = np.where((pixels[:, :, 0] > 150) & (pixels[:, :, 1] < 80) & (pixels[:, :, 2] < 80))
         if len(xx) == 0:
             return []
