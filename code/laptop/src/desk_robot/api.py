@@ -47,7 +47,7 @@ from .api_spatial_pose import register_spatial_pose_route
 from .config import Settings, api_credentials, quiet_hours_active, secret
 from .controller import OperationError
 from .conversation import conversation_turns
-from .operations import _bounded_head_reply
+from .operations import bounded_head_reply as _bounded_head_reply
 from .runtime import Runtime
 from .transport import HeadError
 

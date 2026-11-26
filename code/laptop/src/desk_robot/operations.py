@@ -7,6 +7,15 @@ from typing import Awaitable, Callable, TypeVar
 
 from .command_framing import MAX_DRIVE_DURATION_MS, command_ack_matches, expected_ack
 
+__all__ = [
+    "OperationError",
+    "bounded_head_reply",
+    "bounded_pulse_stop",
+    "dispatch_job_command",
+    "require_active_operation",
+    "require_command_receipt",
+]
+
 _T = TypeVar("_T")
 
 
@@ -90,3 +99,9 @@ async def _bounded_pulse_stop(head, robot_id: str) -> dict:
 
 class OperationError(RuntimeError):
     pass
+
+
+# Shared subsystem boundary; retain existing private names for legacy callers.
+bounded_head_reply = _bounded_head_reply
+bounded_pulse_stop = _bounded_pulse_stop
+require_command_receipt = _require_command_receipt
