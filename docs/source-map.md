@@ -206,6 +206,7 @@ entry points; executing a script alone does not release any physical gate.
 * [serial_bench.py](../code/scripts/serial_bench.py)
 * [verify_playbook_receipts.py](../code/scripts/verify_playbook_receipts.py)
 * [verify_procurement_receipts.py](../code/scripts/verify_procurement_receipts.py)
+* [verify_room_station_dependencies.py](../code/scripts/verify_room_station_dependencies.py)
 * [verify_room_station_host.py](../code/scripts/verify_room_station_host.py)
 * [verify_safety_suite_order.py](../code/scripts/verify_safety_suite_order.py)
 * [verify_system.py](../code/scripts/verify_system.py)

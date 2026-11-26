@@ -36,7 +36,7 @@
       "platformio/toolchain-gccarmnoneeabi": "1.70201.0"
     },
     "platformio": "6.1.18",
-    "inventory_baseline_run": 44448261445,
+    "inventory_baseline_run": 45892803019,
     "direct_libraries": {
       "Sensirion I2C SCD4x": {
         "url": "https://github.com/Sensirion/arduino-i2c-scd4x.git",
@@ -69,7 +69,7 @@
     "transitive_libraries": {
       "Sensirion Core": "0.7.3",
       "Adafruit Unified Sensor": "1.1.15",
-      "Adafruit GFX Library": "1.13.0",
+      "Adafruit GFX Library": "2.0.0",
       "Adafruit BusIO": "1.17.4",
       "Adafruit SSD1306": "2.5.17",
       "Adafruit ST7735 and ST7789 Library": "1.12.0",
@@ -83,7 +83,7 @@
     "transitive_notice_sources": {
       "Sensirion Core": "https://github.com/Sensirion/arduino-core/blob/6c087aae9e11c66e2b01a0c79d9f1632e1821b65/LICENSE",
       "Adafruit Unified Sensor": "https://github.com/adafruit/Adafruit_Sensor/blob/0a9127a1e886ff1adb4c1b6f5958b24108d55aa6/LICENSE.txt",
-      "Adafruit GFX Library": "https://github.com/adafruit/Adafruit-GFX-Library/blob/85ce269b270eb1241e36a22cceec2c5e0905f48c/license.txt",
+      "Adafruit GFX Library": "https://github.com/adafruit/Adafruit-GFX-Library/blob/249bc2b105bdeb0022f7e4762e77a38e94aa0d7b/license.txt",
       "Adafruit BusIO": "https://github.com/adafruit/Adafruit_BusIO/blob/3b8364267c3ee6e16bad91bc2101aefbd5b5915f/LICENSE",
       "Adafruit SSD1306": "https://github.com/adafruit/Adafruit_SSD1306/blob/d94f699451d72286357cba7259055ffff2c2940b/license.txt",
       "Adafruit ST7735 and ST7789 Library": "https://github.com/adafruit/Adafruit-ST7735-Library/blob/d568339f957380ceb05dda57f6712c2704a6394f/README.txt",
