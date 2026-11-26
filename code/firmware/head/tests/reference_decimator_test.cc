@@ -1,4 +1,5 @@
 #include "reference_decimator.h"
+#include "reference_timeline.h"
 #include <array>
 #include <cassert>
 #include <cmath>
@@ -6,7 +7,63 @@
 
 using desk_robot::ReferenceDecimator;
 
+// Clearing history for silence must preserve the next emission phase even
+// after the circular history wraps; cancellation must instead restart it.
+static void CheckGapAndResetPhase() {
+  for (int prefix : {63, 64, 65, 127, 128, 129, 31999, 32000, 32001}) {
+    ReferenceDecimator d;
+    int16_t y = 0;
+    for (int i = 0; i < prefix; ++i) {
+      assert(d.Push(i % 3 == 0 ? -32768 : 32767, y) == (i % 2 == 0));
+    }
+    d.ClearHistory();
+    for (int i = 0; i < 130; ++i) {
+      y = 12345;
+      const bool emitted = d.Push(0, y);
+      assert(emitted == ((prefix + i) % 2 == 0));
+      assert(y == (emitted ? 0 : 12345));
+    }
+    d.Reset();
+    assert(d.Push(0, y) && y == 0);
+    y = 12345;
+    assert(!d.Push(0, y) && y == 12345);
+  }
+}
+
+// Use irregular accepted chunk sizes, including odd partial I2S writes.
+// The ring clock and FIR must agree on the cumulative 2:1 frame count.
+static void CheckAcceptedChunkPhase() {
+  ReferenceDecimator d;
+  desk_robot::PlaybackReferenceClock clock;
+  constexpr int64_t origin = 1000000;
+  constexpr std::array<int, 9> sizes{1, 3, 63, 64, 65, 1919, 1920, 1921, 32000};
+  uint64_t accepted = 0, published = 0;
+  assert(clock.silence_frames(origin, 16384) == 0);
+  for (int round = 0; round < 20; ++round) {
+    for (const int size : sizes) {
+      assert(clock.silence_frames(origin, 16384) == 0);
+      for (int i = 0; i < size; ++i) {
+        const uint32_t bits = static_cast<uint32_t>(accepted) * 2654435761U;
+        const auto pcm = static_cast<int32_t>(int64_t(bits) + INT32_MIN);
+        int16_t y = 12345;
+        const bool emitted = d.Push(desk_robot::Pcm32ToReferenceSample(pcm), y);
+        assert(emitted == (accepted % 2 == 0));
+        if (emitted) ++published;
+        else assert(y == 12345);
+        ++accepted;
+      }
+      clock.accepted_output_frames(size);
+      assert(published == (accepted + 1) / 2);
+      assert(clock.represented_end_us() ==
+             origin + static_cast<int64_t>(accepted * 1000000U / 32000U));
+      assert(clock.future_reference_frames(origin, UINT64_MAX) == published);
+    }
+  }
+}
+
 int main() {
+  CheckAcceptedChunkPhase();
+  CheckGapAndResetPhase();
   using desk_robot::Pcm32ToReferenceSample;
   assert(Pcm32ToReferenceSample(INT32_MAX) == 32767);
   assert(Pcm32ToReferenceSample(INT32_MIN) == -32768);
@@ -15,6 +72,17 @@ int main() {
   assert(Pcm32ToReferenceSample(32768) == 1);
   assert(Pcm32ToReferenceSample(-32767) == 0);
   assert(Pcm32ToReferenceSample(-32768) == -1);
+  assert(Pcm32ToReferenceSample(INT32_MIN + 32768) == -32768);
+  assert(Pcm32ToReferenceSample(INT32_MIN + 32769) == -32767);
+  assert(Pcm32ToReferenceSample(INT32_MAX - 32768) == 32767);
+  // Sweep the three values around every representable half-step. This
+  // checks signed tie handling and the transition into positive saturation.
+  for (int64_t lower = -32768; lower < 32767; ++lower) {
+    const int32_t half = static_cast<int32_t>(lower * 65536 + 32768);
+    assert(Pcm32ToReferenceSample(half - 1) == lower);
+    assert(Pcm32ToReferenceSample(half) == (lower < 0 ? lower : lower + 1));
+    assert(Pcm32ToReferenceSample(half + 1) == lower + 1);
+  }
   for (int32_t sample = -32768; sample <= 32767; ++sample)
     assert(Pcm32ToReferenceSample(sample * 65536) == sample);
   constexpr double pi = 3.14159265358979323846;
