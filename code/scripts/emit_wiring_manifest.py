@@ -24,6 +24,15 @@ BODY_SINGLE = {
     "terminal_ir_left_reserved": "kTerminalIrLeftInput",
     "terminal_ir_right_reserved": "kTerminalIrRightInput",
 }
+ACCESSORY_CONTROL_PINS = {
+    "CAP1188 ALERT (0x71 CH0)": "kCap1188AlertPin",
+    "MAX30102 INT (0x71 CH0)": "kMax30102IntPin",
+    "APDS9960 INT (0x71 CH1)": "kApds9960IntPin",
+    "PN532 IRQ (0x71 CH5)": "kPn532IrqPin",
+    "PN532 RESET (0x71 CH5)": "kPn532ResetPin",
+    "MCP23017 INTA (0x71 CH5)": "kMcp23017IntAPin",
+    "MCP23017 INTB (0x71 CH5)": "kMcp23017IntBPin",
+}
 HEAD_SINGLE = {
     "oled_sda": "DISPLAY_SDA_PIN", "oled_scl": "DISPLAY_SCL_PIN",
     "amp_bclk": "AUDIO_I2S_SPK_GPIO_BCLK",
@@ -196,6 +205,12 @@ def _pin_array(source: str, symbol: str) -> list[str]:
     return [re.sub(r"\s*([\[\]])\s*", r"\1", item.strip()) for item in items]
 
 
+def _verify_accessory_control_pins(source: str) -> None:
+    for label, symbol in ACCESSORY_CONTROL_PINS.items():
+        if _body_pin(source, symbol) != -1:
+            raise ValueError(f"Accessory control pin must remain unallocated: {label}")
+
+
 def _verify_body_profiles(body_pins: dict, body: str) -> None:
     stepper = _active_body_source(body, {
         "DESK_ROBOT_STEPPER": 1,
@@ -208,6 +223,7 @@ def _verify_body_profiles(body_pins: dict, body: str) -> None:
         "DESK_ROBOT_ENABLE_DC_WATCHDOG": 1,
     })
     for source in (stepper, dc):
+        _verify_accessory_control_pins(source)
         for label, symbol in BODY_SINGLE.items():
             if _body_pin(source, symbol) != body_pins[label]:
                 raise ValueError(f"Firmware body pin drift: {label}")
@@ -539,6 +555,10 @@ def render(plan: dict, body: str, head: str) -> str:
         "MCP23017 0x20 GPA2/GPA3 via 3.3V pullups",
         "Read-only; PGOOD=LOW input good, CHG=LOW charge indicated",
         "Indicator not battery current, status HIGH-Z when disconnected")
+    for label in ACCESSORY_CONTROL_PINS:
+        row(label, "No WROOM GPIO",
+            "No MCU signal allocation; do not share IRQ lines",
+            "I2C polling only; exact carrier reset/bias requirements HOLD")
     row("Fused rated 5V system boost through head branch Schottky anode",
         "XIAO Sense 5V input at Schottky cathode",
         "External to head ONLY, reversed current blocked from XIAO USB",

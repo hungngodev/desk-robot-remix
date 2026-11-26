@@ -45,6 +45,20 @@ constexpr int kBumperInput = 35;
 // ESP32 GPIO36/39 RTC/ADC glitch erratum needs RMT filtering and bench tests.
 constexpr int kTerminalIrLeftInput = 36;
 constexpr int kTerminalIrRightInput = 39;
+// Accessory mux 0x71 uses bounded I2C polling, not dedicated MCU IRQs.
+// -1 means no WROOM allocation; module-specific reset/bias still needs review.
+constexpr int kCap1188AlertPin = -1;
+constexpr int kMax30102IntPin = -1;
+constexpr int kApds9960IntPin = -1;
+constexpr int kPn532IrqPin = -1;
+constexpr int kPn532ResetPin = -1;
+constexpr int kMcp23017IntAPin = -1;
+constexpr int kMcp23017IntBPin = -1;
+static_assert(kCap1188AlertPin == -1 && kMax30102IntPin == -1 &&
+              kApds9960IntPin == -1 && kPn532IrqPin == -1 &&
+              kPn532ResetPin == -1 && kMcp23017IntAPin == -1 &&
+              kMcp23017IntBPin == -1,
+              "Accessory control pins are unallocated in the polled profiles");
 // Dock seat/charger status is NOT a WROOM output or a power-enable pin.
 // MCP23017 at accessory mux 0x71 lane 5, address 0x20, BANK=0:
 // GPA0/1 are independent NC seat switches; GPA2/3 are active-low

@@ -36,6 +36,13 @@ contact rating or wire gauge is approved by this signal allocation.
 | INA226 0x40 on accessory TCA9548A 0x71 CH4 | Kelvin sense across protected pack current shunt | Opt-in signed 5mOhm current, fresh I2C seq, 3.3V logic | Not physical calibration; NO software charge enable or approval |
 | Two independent normally closed dock stop switches | MCP23017 0x20 GPA0/GPA1 via 3.3V pullups | Each closes to GND; open/HIGH on either input blocks motion | Mandatory source interlock; actual switches and fault behavior HOLD |
 | BQ24075 open drain PGOOD and CHG | MCP23017 0x20 GPA2/GPA3 via 3.3V pullups | Read-only; PGOOD=LOW input good, CHG=LOW charge indicated | Indicator not battery current, status HIGH-Z when disconnected |
+| CAP1188 ALERT (0x71 CH0) | No WROOM GPIO | No MCU signal allocation; do not share IRQ lines | I2C polling only; exact carrier reset/bias requirements HOLD |
+| MAX30102 INT (0x71 CH0) | No WROOM GPIO | No MCU signal allocation; do not share IRQ lines | I2C polling only; exact carrier reset/bias requirements HOLD |
+| APDS9960 INT (0x71 CH1) | No WROOM GPIO | No MCU signal allocation; do not share IRQ lines | I2C polling only; exact carrier reset/bias requirements HOLD |
+| PN532 IRQ (0x71 CH5) | No WROOM GPIO | No MCU signal allocation; do not share IRQ lines | I2C polling only; exact carrier reset/bias requirements HOLD |
+| PN532 RESET (0x71 CH5) | No WROOM GPIO | No MCU signal allocation; do not share IRQ lines | I2C polling only; exact carrier reset/bias requirements HOLD |
+| MCP23017 INTA (0x71 CH5) | No WROOM GPIO | No MCU signal allocation; do not share IRQ lines | I2C polling only; exact carrier reset/bias requirements HOLD |
+| MCP23017 INTB (0x71 CH5) | No WROOM GPIO | No MCU signal allocation; do not share IRQ lines | I2C polling only; exact carrier reset/bias requirements HOLD |
 | Fused rated 5V system boost through head branch Schottky anode | XIAO Sense 5V input at Schottky cathode | External to head ONLY, reversed current blocked from XIAO USB | Seeed official XIAO external 5V diode rule; exact diode current/heat HOLD |
 | Fused rated 5V motor/servo branch with local >=470uF rated bulk | MG90S lift/grip and motor driver VM power | Direct rated 5V branch, NEVER via XIAO 3V3 or USB/diode | 470uF documented in cgro00 V2 servo wiring, NOT sufficient-rating proof for this robot |
 | Fused rated 5V audio branch, independent of XIAO diode | MAX98357A VIN with local 0.1uF + 10uF decoupling | Common ground; amplifier outputs floating differential | MAX98357A manufacturer datasheet bypass; current/acoustic tests HOLD |
