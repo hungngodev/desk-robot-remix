@@ -198,3 +198,86 @@ def test_competing_bind_and_timeout_release(tmp_path):
         server.capture("127.0.0.1", "127.0.0.1", target, 8000, 1, .02, output, consent=True)
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
         receiver.bind(("127.0.0.1", target))
+
+
+def test_rejected_datagrams_backoff_without_extending_deadline(tmp_path, monkeypatch):
+    ticks = iter((10.0, 10.0, 10.01, 10.02, 10.0995, 10.1))
+    sleeps = []
+    received = []
+    closed = []
+
+    class Receiver:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            closed.append(True)
+
+        def bind(self, address):
+            pass
+
+        def settimeout(self, timeout):
+            assert 0 < timeout <= .1
+
+        def recvfrom(self, size):
+            assert size == 65535
+            received.append(True)
+            return b"x", ("127.0.0.1", 12345)
+
+    monkeypatch.setattr(server.socket, "socket", lambda *args: Receiver())
+    monkeypatch.setattr(server.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(server.time, "sleep", sleeps.append)
+    output = tmp_path / "invalid.wav"
+    with pytest.raises(ValueError, match="no valid PCM"):
+        server.capture("127.0.0.1", "127.0.0.1", 8000, 8000, 1, .1, output, consent=True)
+    assert sleeps == pytest.approx([.001, .0005])
+    assert received == [True, True]
+    assert closed == [True]
+    with wave.open(str(output)) as wav:
+        assert wav.getnframes() == 0
+
+
+def test_repeated_sender_close_releases_receiver(tmp_path):
+    target = port()
+    for index in range(12):
+        output = tmp_path / f"partial-{index}.wav"
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sender:
+            def send_then_close(output=output, sender=sender):
+                deadline = time.monotonic() + 1
+                while not output.exists() and time.monotonic() < deadline:
+                    time.sleep(.001)
+                sender.sendto(b"ab" * 8, ("127.0.0.1", target))
+                sender.close()
+
+            worker = threading.Thread(target=send_then_close)
+            worker.start()
+            try:
+                assert server.capture(
+                    "127.0.0.1", "127.0.0.1", target, 8000, 1, .05, output, consent=True
+                ) == 8
+            finally:
+                worker.join()
+        with wave.open(str(output)) as wav:
+            assert wav.getnframes() == 8
+            assert wav.readframes(9) == b"ab" * 8
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
+            receiver.bind(("127.0.0.1", target))
+
+
+def test_wave_setup_failure_closes_file_and_receiver(tmp_path, monkeypatch):
+    target = port()
+    opened = []
+
+    def fail_wave(raw, mode):
+        opened.append(raw)
+        raise OSError("wave setup failed")
+
+    monkeypatch.setattr(server.wave, "open", fail_wave)
+    for index in range(12):
+        output = tmp_path / f"failed-{index}.wav"
+        with pytest.raises(OSError, match="wave setup failed"):
+            server.capture("127.0.0.1", "127.0.0.1", target, 8000, 1, .1, output, consent=True)
+        assert opened[-1].closed
+        assert stat.S_IMODE(output.stat().st_mode) == 0o600
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
+            receiver.bind(("127.0.0.1", target))

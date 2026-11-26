@@ -13,6 +13,13 @@ import wave
 from pathlib import Path
 
 
+REJECTED_DATAGRAM_BACKOFF = 0.001
+
+
+def _private_opener(path, flags):
+    return os.open(path, flags, 0o600)
+
+
 def capture(
     bind: str | ipaddress.IPv4Address,
     peer: str | ipaddress.IPv4Address,
@@ -49,8 +56,7 @@ def capture(
     written = 0
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as receiver:
         receiver.bind((bind, port))
-        fd = os.open(output, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, "wb") as raw, wave.open(raw, "wb") as wav:
+        with open(output, "xb", opener=_private_opener) as raw, wave.open(raw, "wb") as wav:
             wav.setparams((channels, 2, samplerate, 0, "NONE", "not compressed"))
             deadline = time.monotonic() + duration
             while remaining:
@@ -63,9 +69,12 @@ def capture(
                 except socket.timeout:
                     break
                 # A receive may return after the deadline if the process was descheduled.
-                if time.monotonic() >= deadline:
+                received_at = time.monotonic()
+                if received_at >= deadline:
                     break
                 if address[0] != peer or not data or len(data) % frame_bytes:
+                    # Bound rejected-packet processing without delaying valid PCM.
+                    time.sleep(min(REJECTED_DATAGRAM_BACKOFF, deadline - received_at))
                     continue
                 data = data[:remaining]
                 wav.writeframesraw(data)
