@@ -2,6 +2,8 @@
 
 Raw samples are never evidence of medical data, a real grasp force, charging,
 calibrated locomotion, or authorization to move motors.
+A valid flag describes sample validity, not physical qualification. Software
+regression coverage does not clear the accessory-specific physical bench hold.
 """
 from __future__ import annotations
 
