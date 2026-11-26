@@ -97,6 +97,18 @@ static void check_accessory_frame_integrity() {
     CHECK(!desk_robot::ads1115_completed_for_channel(word, 255));
   }
 }
+static void check_ads1115_force_conversion() {
+  for (std::int32_t expected = -32768; expected <= 32767; ++expected) {
+    const auto word = static_cast<std::uint16_t>(expected);
+    std::int16_t adc = 123;
+    const bool valid = desk_robot::ads1115_force_from_raw(word, adc);
+    if (expected == -32768 || expected == 32767) {
+      CHECK(!valid && adc == 123);
+    } else {
+      CHECK(valid && adc == expected);
+    }
+  }
+}
 static void check_simultaneous_gesture_clipping() {
   // Every nonempty subset of clipped quadrants invalidates the entire swipe,
   // including a saturated orthogonal pair and clipping between FIFO batches.
@@ -501,6 +513,7 @@ int main() {
   try {
     check_accessory_default_sentinels();
     check_accessory_frame_integrity();
+    check_ads1115_force_conversion();
     check_simultaneous_gesture_clipping();
     check_register_precision();
     check_bmp280_register_rails();

@@ -131,6 +131,16 @@ constexpr bool ads1115_completed_for_channel(std::uint16_t config,
 constexpr bool ads1115_force_raw_valid(std::uint16_t raw) {
   return raw != 0x7fffU && raw != 0x8000U;
 }
+// Decode the signed wire code without implementation-defined narrowing.
+// Saturation is invalid evidence and must leave the output unchanged.
+inline bool ads1115_force_from_raw(std::uint16_t raw, std::int16_t& out) {
+  if (!ads1115_force_raw_valid(raw)) return false;
+  const std::int32_t signed_code = raw < 0x8000U
+      ? static_cast<std::int32_t>(raw)
+      : static_cast<std::int32_t>(raw) - 65536;
+  out = static_cast<std::int16_t>(signed_code);
+  return true;
+}
 
 struct ForceRaw {
   bool present = false, valid = false;

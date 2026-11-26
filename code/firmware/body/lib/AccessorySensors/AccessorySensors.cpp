@@ -410,8 +410,7 @@ void AccessorySensors::force(std::uint32_t now_ms) {
     f.valid_mask = 0;
   // Conversion register codes 0x7fff and 0x8000 are signed full-scale
   // rails, not OS status bits. Reject them as unqualified FSR evidence.
-  } else if (fresh && ads1115_force_raw_valid(value)) {
-    f.adc[ads_channel_] = static_cast<std::int16_t>(value);
+  } else if (fresh && ads1115_force_from_raw(value, f.adc[ads_channel_])) {
     f.valid_mask |= static_cast<std::uint8_t>(1U << ads_channel_);
     // Timestamp conservatively at the start of the single shot, not the
     // later mux visit that retrieved its cached result.
