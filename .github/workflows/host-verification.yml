@@ -351,35 +351,8 @@ jobs:
         run: cmake --build /tmp/desk-robot-body-host --parallel 2
       - name: Run tests
         run: ctest --test-dir /tmp/desk-robot-body-host --output-on-failure --no-tests=error
-      - name: Verify complete room thermal pixel decoding with sanitizers
-        run: |
-          c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/thermal_pixels_tests.cpp -o /tmp/desk-room-thermal-test
-          /tmp/desk-room-thermal-test
-      - name: Verify optional soil ADC samples fail closed under faults
-        run: |
-          c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/soil_sample_tests.cpp -o /tmp/desk-room-soil-test
-          /tmp/desk-room-soil-test
-      - name: Verify room radar evidence keeps its acquisition timestamp
-        run: |
-          c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/radar_sample_clock_tests.cpp -o /tmp/desk-room-radar-clock-test
-          /tmp/desk-room-radar-clock-test
-
-      - name: Verify room SCD40 cached samples fail closed on readiness errors
-        run: |
-          c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/scd_sample_freshness_tests.cpp -o /tmp/desk-room-scd-test
-          /tmp/desk-room-scd-test
-      - name: Verify isolated room sensor re-probe without starving radar and USB
-        run: |
-          c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/sensor_recovery_tests.cpp -o /tmp/desk-room-recovery-test
-          /tmp/desk-room-recovery-test
-      - name: Verify bounded post-connect room USB epoch challenge
-        run: |
-          c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/usb_epoch_sync_tests.cpp -o /tmp/desk-room-usb-sync-test
-          /tmp/desk-room-usb-sync-test
-      - name: Verify room BME688 completed-conversion publication with sanitizers
-        run: |
-          c++ -std=c++17 -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer -Icode/firmware/room_station/src code/firmware/room_station/tests/bme_completed_sample_tests.cpp -o /tmp/desk-room-bme-test
-          /tmp/desk-room-bme-test
+      - name: Verify every room station C++ test with sanitizers
+        run: python3 code/scripts/verify_room_station_host.py
 
   sense-idf:
     concurrency:
