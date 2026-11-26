@@ -485,10 +485,10 @@ int main() {
         self.assertIn('if (priority_active) {', face)
         renderer = (HEAD / "overlay/face_eye_display.hpp").read_text()
         self.assertIn('OledDisplay::SetEmotion("neutral");', renderer)
-        self.assertIn('else if (requested_mood != desk_robot::CosmeticMood::kNone)', face)
+        self.assertIn('else if (!voice_link_lost &&\n                                   requested_mood != desk_robot::CosmeticMood::kNone)', face)
         self.assertLess(
             face.index('if (priority_active) {'),
-            face.index('else if (requested_mood != desk_robot::CosmeticMood::kNone)'),
+            face.index('else if (!voice_link_lost &&\n                                   requested_mood != desk_robot::CosmeticMood::kNone)'),
         )
         self.assertIn('vTaskDelay(pdMS_TO_TICKS(100));', face)
         self.assertIn('xTaskCreate(BodyPollTask, "sense_body_poll"', source)
@@ -1694,7 +1694,7 @@ def test_sense_fault_face_overrides_idle_moods_and_recovers_once():
     )[0]
     assert 'if (priority_active) {' in face
     fault = face.split('if (priority_active) {', 2)[-1].split(
-        '} else if (requested_mood', 1
+        '} else if (!voice_link_lost', 1
     )[0]
     # Motor safety is factual; a fault must not force scripted sadness.
     assert 'SetEmotion("sad")' not in fault
