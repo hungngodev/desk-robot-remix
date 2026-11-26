@@ -23,13 +23,18 @@ def test_pcm_scratch_is_cleared_after_read(tmp_path):
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #define ESP_LOGW(...) ((void)0)
 int64_t esp_timer_get_time() { return 100; }
 struct NoAudioCodecSimplexPdm {
     bool short_read = false;
+    int read_calls = 0;
+    std::function<void()> after_read;
     int Read(int16_t* dest, int frames) {
+        ++read_calls;
         std::fill_n(dest, frames, 123);
+        if (after_read) after_read();
         return short_read ? frames - 1 : frames;
     }
 };
@@ -42,6 +47,8 @@ struct SenseReferenceCodec : NoAudioCodecSimplexPdm {
     std::array<int16_t, kMaxReadFrames> microphone_frame_{}, reference_frame_{};
     uint32_t microphone_frames_read_ = 0, reference_overwrite_reads_ = 0;
     uint32_t consecutive_missing_reference_reads_ = 0;
+    uint32_t short_input_reads_ = 0;
+    bool reference_integrity_failed_ = false;
     bool revoke_on_reference = false;
     void FillSilenceLocked(int64_t) {}
     bool ReadReferenceLocked(int16_t* dest, int frames, int64_t) {
@@ -70,14 +77,29 @@ int main() {
     assert(codec.Read(dest, 32) == 32);
     codec.AssertScratchClean();
     codec.short_read = true;
+    std::fill_n(dest, 128, 789);
     assert(codec.Read(dest, 128) == 0);
+    for (auto sample : dest) assert(sample == 0);
+    assert(codec.short_input_reads_ == 1 && codec.reference_integrity_failed_);
     codec.AssertScratchClean();
     codec.short_read = false;
+    // A mute/unmute cycle during a PDM read invalidates its original epoch.
+    codec.after_read = [&] { codec.microphone_privacy_epoch_.fetch_add(2); };
+    std::fill_n(dest, 128, 789);
+    assert(codec.Read(dest, 128) == 0);
+    for (auto sample : dest) assert(sample == 0);
+    codec.AssertScratchClean();
+    codec.after_read = {};
+    assert(codec.Read(dest, 128) == 128);
     codec.revoke_on_reference = true;
     assert(codec.Read(dest, 128) == 0);
     for (auto sample : dest) assert(sample == 0);
     codec.AssertScratchClean();
+    const int reads_before_mute = codec.read_calls;
+    std::fill_n(dest, 128, 789);
     assert(codec.Read(dest, 128) == 0);
+    for (auto sample : dest) assert(sample == 0);
+    assert(codec.read_calls == reads_before_mute);
     codec.AssertScratchClean();
 }
 ''')

@@ -149,7 +149,10 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
     if (frames > kMaxReadFrames) return 0;
     const uint32_t privacy_epoch = microphone_privacy_epoch_.load(
         std::memory_order_acquire);
-    if (microphone_privacy_muted_.load(std::memory_order_acquire)) return 0;
+    if (microphone_privacy_muted_.load(std::memory_order_acquire)) {
+        std::fill_n(dest, samples, 0);
+        return 0;
+    }
     // The head owns one realtime capture reader. A bounded mutex also
     // prevents concurrent callbacks from corrupting shared frame scratch.
     std::lock_guard<std::mutex> input_lock(input_read_mutex_);
@@ -157,6 +160,7 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
     // mutex. Do not start a new hardware read on a revoked capture epoch.
     if (microphone_privacy_muted_.load(std::memory_order_acquire) ||
         privacy_epoch != microphone_privacy_epoch_.load(std::memory_order_acquire)) {
+        std::fill_n(dest, samples, 0);
         return 0;
     }
     // Keep microphone/I2S read outside reference_mutex_: it can block for
@@ -182,12 +186,14 @@ int SenseReferenceCodec::Read(int16_t* dest, int samples) {
         }
         // An error or short PDM read can still have written raw microphone PCM.
         std::fill_n(microphone_frame_.begin(), frames, 0);
+        std::fill_n(dest, samples, 0);
         return 0; // AudioCodec::InputData is boolean; reject partial frames.
     }
     // Discard a PDM read that crossed a physical BOOT mute/unmute epoch.
     if (microphone_privacy_muted_.load(std::memory_order_acquire) ||
         privacy_epoch != microphone_privacy_epoch_.load(std::memory_order_acquire)) {
         std::fill_n(microphone_frame_.begin(), frames, 0);
+        std::fill_n(dest, samples, 0);
         return 0;
     }
     // Timestamp the completed PDM read once, before reference work or task
