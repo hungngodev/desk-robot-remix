@@ -2,6 +2,7 @@
 
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing, contextmanager
 from threading import Event
 
 import desk_robot.memory as memory_module
@@ -13,6 +14,31 @@ from desk_robot.memory import (
 )
 
 
+@contextmanager
+def open_database(path):
+    # sqlite3's transaction context commits or rolls back but does not close.
+    with closing(sqlite3.connect(path)) as db, db:
+        yield db
+
+
+def test_database_context_closes_after_commit_and_rollback(tmp_path):
+    path = tmp_path / "lifecycle.sqlite3"
+    with open_database(path) as db:
+        db.execute("CREATE TABLE entries (value INTEGER)")
+        db.execute("INSERT INTO entries VALUES (1)")
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        db.execute("SELECT 1")
+
+    with pytest.raises(RuntimeError, match="rollback probe"), open_database(path) as db:
+        db.execute("INSERT INTO entries VALUES (2)")
+        raise RuntimeError("rollback probe")
+    with pytest.raises(sqlite3.ProgrammingError, match="closed database"):
+        db.execute("SELECT 1")
+
+    with open_database(path) as db:
+        assert db.execute("SELECT value FROM entries").fetchall() == [(1,)]
+
+
 def remember(store, pet, event):
     return store.remember(
         pet, event, f"Original observation {event}",
@@ -21,7 +47,7 @@ def remember(store, pet, event):
 
 
 def read_fence(root, pet):
-    with sqlite3.connect(root / f"{pet}.sqlite3") as db:
+    with open_database(root / f"{pet}.sqlite3") as db:
         return (
             db.execute("SELECT COUNT(*) FROM deleted_episode_ids").fetchone()[0],
             db.execute(
@@ -121,7 +147,7 @@ def test_sealed_absent_edits_do_not_grow_episode_mutation_ledger(tmp_path, monke
     pet = "robot-01"
 
     def generations(robot_id):
-        with sqlite3.connect(root / f"{robot_id}.sqlite3") as db:
+        with open_database(root / f"{robot_id}.sqlite3") as db:
             return dict(db.execute("SELECT event_id,generation FROM episode_mutations"))
 
     assert remember(store, pet, "retained")
@@ -192,7 +218,7 @@ def test_direct_absent_corrections_do_not_grow_unsealed_mutation_ledger(tmp_path
     for i in range(30):
         assert not store.correct_episode(pet, f"absent-{i}", "No such observation")
 
-    with sqlite3.connect(root / f"{pet}.sqlite3") as db:
+    with open_database(root / f"{pet}.sqlite3") as db:
         assert db.execute("SELECT COUNT(*) FROM episode_mutations").fetchone() == (0,)
     assert read_fence(root, pet) == (0, 0)
 
@@ -229,7 +255,7 @@ def test_forget_status_and_search_across_overlapping_reader_and_restart(
 
     monkeypatch.setattr(MemoryStore, "_fence_episode_replay", staticmethod(signal_fence))
     with ThreadPoolExecutor(max_workers=1) as pool:
-        with sqlite3.connect(root / f"{pet}.sqlite3") as reader:
+        with open_database(root / f"{pet}.sqlite3") as reader:
             reader.execute("BEGIN")
             try:
                 assert reader.execute(
@@ -274,7 +300,7 @@ def test_forget_rolls_back_cleanup_and_seal_without_touching_four_peers(
     store = MemoryStore(root, pets)
 
     def snapshot(pet):
-        with sqlite3.connect(root / f"{pet}.sqlite3") as db:
+        with open_database(root / f"{pet}.sqlite3") as db:
             return {
                 "episode": db.execute("SELECT * FROM memories").fetchall(),
                 "camera": db.execute("SELECT * FROM camera_provenance").fetchall(),
@@ -295,7 +321,7 @@ def test_forget_rolls_back_cleanup_and_seal_without_touching_four_peers(
         assert remember(store, pet, event)
         # Seed the sidecars directly: this test targets the database deletion
         # transaction, not camera ingestion or the spatial mapping pipeline.
-        with sqlite3.connect(root / f"{pet}.sqlite3") as db:
+        with open_database(root / f"{pet}.sqlite3") as db:
             db.execute(
                 "INSERT INTO camera_provenance VALUES (?, 1, 2, 3, 4, '5')", (event,)
             )
@@ -310,7 +336,7 @@ def test_forget_rolls_back_cleanup_and_seal_without_touching_four_peers(
 
     # Abort from a sidecar cleanup trigger, after the writer has advanced its
     # mutation generation and tentatively saturated the replay fence.
-    with sqlite3.connect(root / f"{target}.sqlite3") as db:
+    with open_database(root / f"{target}.sqlite3") as db:
         db.execute(
             """CREATE TRIGGER injected_cleanup_failure
                AFTER DELETE ON camera_provenance BEGIN
@@ -322,7 +348,7 @@ def test_forget_rolls_back_cleanup_and_seal_without_touching_four_peers(
     assert {pet: snapshot(pet) for pet in pets} == before
     assert read_fence(root, target) == (1, 0)
 
-    with sqlite3.connect(root / f"{target}.sqlite3") as db:
+    with open_database(root / f"{target}.sqlite3") as db:
         db.execute("DROP TRIGGER injected_cleanup_failure")
     assert store.forget_episode(target, event)
     after = snapshot(target)
