@@ -1,6 +1,6 @@
 #include "TofBus.h"
 #include "TofResult.h"
-#include "../../include/MuxWrite.h"
+#include "../../include/TofTransactions.h"
 #include "BerryImu.h"
 
 #if (defined(DESK_ROBOT_STEPPER) && DESK_ROBOT_STEPPER) || \
@@ -13,62 +13,29 @@ namespace desk_robot {
 bool TofBus::quiesce_optional_mux() {
   if (!physical_bus_accessible()) return false;
   if (!optional_mux_present_) return true;
-  // A fitted optional bus must not keep a lane selected while the local
-  // guard reads the 0x70 floor mux. Verify the CONTROL REGISTER, not just
-  // ACK: a stuck mux could expose a different sensor at the shared 0x29.
-  if (!write_mux_mask(wire_, kOptionalMuxAddress, 0).ok() || !bus_idle()) return false;
-  if (wire_.requestFrom(kOptionalMuxAddress, static_cast<size_t>(1), true) != 1 ||
-      wire_.available() < 1) return false;
-  return wire_.read() == 0 && bus_idle();
+  return checked_mux_mask(wire_, kOptionalMuxAddress, 0,
+                          [this]() { return bus_idle(); });
 }
 
 bool TofBus::quiesce_range_mux() {
   if (!physical_bus_accessible()) return false;
-  return write_mux_mask(wire_, kMuxAddress, 0).ok() && bus_idle() &&
-         wire_.requestFrom(kMuxAddress, static_cast<size_t>(1), true) == 1 &&
-         wire_.available() >= 1 && wire_.read() == 0 && bus_idle();
+  return checked_mux_mask(wire_, kMuxAddress, 0,
+                          [this]() { return bus_idle(); });
 }
 
 bool TofBus::select(std::uint8_t channel) {
   if (channel >= kRangeCount || !quiesce_optional_mux()) return false;
   const auto expected = static_cast<std::uint8_t>(1U << channel);
-  const auto result = write_mux_mask(wire_, kMuxAddress, expected);
-  // The STOP activates the new downstream lane. A hung sensor can
-  // pull SDA/SCL low here even though the mux write itself ACKed. Do not
-  // start another potentially blocking readback transaction on held lines.
-  if (!result.ok() || !bus_idle()) return false;
-  // TCA9548A SCPS207H, section 7.5.4: one-byte control register readback.
-  // The explicit STOP above activates the selected channel before reading.
-  // A wrong/multiple channel must never be accepted as a cliff measurement.
-  if (wire_.requestFrom(kMuxAddress, static_cast<size_t>(1), true) != 1 ||
-      wire_.available() < 1) return false;
-  return wire_.read() == expected && bus_idle();
+  return checked_mux_mask(wire_, kMuxAddress, expected,
+                          [this]() { return bus_idle(); });
 }
 
 bool TofBus::read_register(std::uint8_t reg, std::uint8_t* out, std::uint8_t length) {
-  if (!out || length == 0 || length > kMaxSampleBytes) return false;
-  wire_.beginTransmission(kSensorAddress);
-  const bool written = wire_.write(reg) == 1;
-  // Only an accepted register pointer may use the repeated START. An
-  // unsuccessful write must terminate with STOP so the next safety read
-  // does not inherit a half-open I2C transaction.
-  const int result = wire_.endTransmission(!written);
-  if (!written || result != 0) return false;
-  if (wire_.requestFrom(kSensorAddress, static_cast<size_t>(length), true) != length) return false;
-  for (std::uint8_t n = 0; n < length; ++n) {
-    if (wire_.available() < 1) return false;
-    const int sample = wire_.read();
-    if (sample < 0) return false;
-    out[n] = static_cast<std::uint8_t>(sample);
-  }
-  return true;
+  return read_tof_register(wire_, reg, out, length);
 }
 
 bool TofBus::write_byte(std::uint8_t reg, std::uint8_t value) {
-  wire_.beginTransmission(kSensorAddress);
-  const bool written = wire_.write(reg) == 1 && wire_.write(value) == 1;
-  const int result = wire_.endTransmission(true);
-  return written && result == 0;
+  return write_tof_byte(wire_, reg, value);
 }
 
 void TofBus::failed(CliffGuard& guard) {

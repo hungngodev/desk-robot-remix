@@ -6,6 +6,8 @@
 #include <Wire.h>
 #include <VL53L0X.h>
 #include "BodyPins.h"
+#include "TofTransactions.h"
+#include "../lib/TofBus/TofResult.h"
 
 #if !DESK_ROBOT_STEPPER
 #error Ranging bench must neutralize the entire eight-phase actuator harness
@@ -13,6 +15,7 @@
 
 namespace {
 constexpr uint8_t kMux = 0x70;
+constexpr uint8_t kOptionalMux = 0x71;
 constexpr uint8_t kSensorChannel = 0;
 constexpr uint32_t kReportEveryMs = 120;
 // The stepper harness is the superset of both drive alternatives. If the
@@ -28,6 +31,7 @@ static_assert(covers_motor_pin(body_pins::kLeftIn1) &&
               "Ranging bench must hold both motor harness alternatives low");
 VL53L0X sensor;
 bool ready = false;
+bool optional_mux_present = false;
 uint32_t last_report_ms = 0;
 
 bool bus_idle() {
@@ -40,17 +44,29 @@ void hold_low(int pin) {
   pinMode(pin, OUTPUT);
 }
 
+bool quiesce_optional_mux() {
+  return bus_idle() && (!optional_mux_present ||
+      desk_robot::checked_mux_mask(Wire, kOptionalMux, 0, bus_idle));
+}
+
 bool select_sensor() {
-  if (!bus_idle()) return false;
-  Wire.beginTransmission(kMux);
-  // Always terminate a started transmission, including short writes.
-  const bool wrote = Wire.write(static_cast<uint8_t>(1U << kSensorChannel)) == 1;
-  const bool acknowledged = Wire.endTransmission(true) == 0;
-  if (!wrote || !acknowledged || !bus_idle()) return false;
-  if (Wire.requestFrom(kMux, static_cast<size_t>(1), true) != 1 ||
-      Wire.available() < 1)
-    return false;
-  return Wire.read() == (1U << kSensorChannel) && bus_idle();
+  return quiesce_optional_mux() && desk_robot::checked_mux_mask(
+      Wire, kMux, 1U << kSensorChannel, bus_idle);
+}
+
+void fault(const char* message) {
+  ready = false;
+  Serial.println(message);
+  // No RESET GPIO exists on this harness. Isolate reachable lanes, but
+  // never transact on held lines or resume sampling after a transport fault.
+  if (bus_idle()) (void)quiesce_optional_mux();
+  if (bus_idle()) (void)desk_robot::checked_mux_mask(Wire, kMux, 0, bus_idle);
+}
+
+void report(uint32_t now, uint16_t mm, bool valid) {
+  Serial.printf("t_ms=%lu range_mm=%u valid=%u timeout=%u\n",
+                static_cast<unsigned long>(now), static_cast<unsigned>(mm),
+                valid ? 1U : 0U, 0U);
 }
 }
 
@@ -65,24 +81,31 @@ void setup() {
     Serial.println("FAIL i2c_begin");
     return;
   }
-  Wire.setTimeOut(15);
+  Wire.setTimeOut(10);
+  if (!bus_idle()) {
+    fault("FAIL i2c_held_lines");
+    return;
+  }
+  Wire.beginTransmission(kOptionalMux);
+  optional_mux_present = Wire.endTransmission(true) == 0;
   if (!select_sensor()) {
-    Serial.println("FAIL mux0x70_ch0_select_or_readback");
+    fault("FAIL mux0x70_ch0_select_or_readback");
     return;
   }
   sensor.setBus(&Wire);
-  sensor.setTimeout(80); // Pololu timeout is bounded; BENCH ONLY.
+  sensor.setTimeout(80);
   if (!sensor.init() || sensor.timeoutOccurred() || sensor.last_status != 0 || !bus_idle()) {
-    Serial.println("FAIL vl53l0x_init_or_absent");
+    fault("FAIL vl53l0x_init_or_absent");
     return;
   }
   if (!sensor.setMeasurementTimingBudget(33000) || sensor.last_status != 0 || !bus_idle()) {
-    Serial.println("FAIL vl53l0x_timing_budget");
+    fault("FAIL vl53l0x_timing_budget");
     return;
   }
   sensor.startContinuous();
-  if (sensor.last_status != 0 || sensor.timeoutOccurred() || !bus_idle()) {
-    Serial.println("FAIL vl53l0x_start");
+  if (sensor.last_status != 0 || sensor.timeoutOccurred() || !bus_idle() ||
+      !quiesce_optional_mux() || !desk_robot::checked_mux_mask(Wire, kMux, 0, bus_idle)) {
+    fault("FAIL vl53l0x_start_or_isolation");
     return;
   }
   ready = true;
@@ -98,18 +121,29 @@ void loop() {
   if (now - last_report_ms < kReportEveryMs) return;
   last_report_ms = now;
   if (!select_sensor()) {
-    ready = false; // Do not treat a previous sample as newly valid.
-    Serial.println("FAIL mux_select_or_readback; sampling_latched_off");
+    fault("FAIL mux_select_or_readback; sampling_latched_off");
     return;
   }
-  const uint16_t mm = sensor.readRangeContinuousMillimeters();
-  const bool timed_out = sensor.timeoutOccurred();
-  const bool bus_ok = sensor.last_status == 0 && bus_idle();
-  const bool valid = !timed_out && bus_ok && mm >= 30U && mm <= 1300U;
-  if (timed_out || !bus_ok) ready = false;
-  Serial.printf("t_ms=%lu range_mm=%u valid=%u timeout=%u\n",
-                static_cast<unsigned long>(now), static_cast<unsigned>(mm),
-                valid ? 1U : 0U, timed_out ? 1U : 0U);
-  if (!ready) Serial.println("FAIL ranging_io; sampling_latched_off");
+  uint8_t status = 0;
+  if (!desk_robot::read_tof_register(Wire, 0x13, &status, 1) || !bus_idle()) {
+    fault("FAIL ranging_io; sampling_latched_off");
+    return;
+  }
+  if ((status & 0x18U) != 0) {
+    report(now, 0, false);
+    if (!desk_robot::write_tof_byte(Wire, 0x0B, 0x01) || !bus_idle())
+      fault("FAIL ranging_io; sampling_latched_off");
+    return;
+  }
+  // Not ready is not a new reading; never renew cached sample evidence.
+  if ((status & 0x07U) == 0) return;
+  uint8_t raw[12]{};
+  if (!desk_robot::read_tof_register(Wire, 0x14, raw, sizeof(raw)) || !bus_idle() ||
+      !desk_robot::write_tof_byte(Wire, 0x0B, 0x01) || !bus_idle()) {
+    fault("FAIL ranging_io; sampling_latched_off");
+    return;
+  }
+  const auto result = desk_robot::decode_tof_result(raw);
+  report(now, result.distance_mm, result.accepted);
   // These are raw measurements, NOT sufficient evidence of safe cliff stops.
 }
