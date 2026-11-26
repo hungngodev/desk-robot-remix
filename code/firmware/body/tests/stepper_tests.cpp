@@ -292,6 +292,36 @@ void rate_ceiling_during_ramp_and_reversal() {
   }
 }
 
+// Fast polls must accumulate fractional milli-step rates without losing
+// elapsed microseconds, including reversal and micros() rollover.
+void microsecond_ramp_accumulates_without_rounding() {
+  for (const std::uint32_t start : {100U, 0xfffffff0U}) {
+    for (const int sign : {-1, 1}) {
+      StepperDrive drive;
+      CHECK(drive.update(start, sign * 40, true) == kPhases[0]);
+      for (std::uint32_t elapsed = 1; elapsed <= 1000U; ++elapsed) {
+        const int expected = sign * static_cast<int>(elapsed * 320U / 1000U);
+        CHECK(drive.update(start + elapsed, sign * 40, true) == kPhases[0]);
+        CHECK(drive.rate_milli_steps_per_second() == expected);
+        CHECK(drive.update(start + elapsed, sign * 40, true) == kPhases[0]);
+        CHECK(drive.rate_milli_steps_per_second() == expected);
+      }
+      for (std::uint32_t elapsed = 1; elapsed <= 1000U; ++elapsed) {
+        const int expected = sign * static_cast<int>((1000U - elapsed) * 320U / 1000U);
+        CHECK(drive.update(start + 1000U + elapsed, -sign * 40, true) == kPhases[0]);
+        CHECK(drive.rate_milli_steps_per_second() == expected);
+      }
+      for (std::uint32_t elapsed = 1; elapsed <= 1000U; ++elapsed) {
+        const int expected = -sign * static_cast<int>(elapsed * 320U / 1000U);
+        CHECK(drive.update(start + 2000U + elapsed, -sign * 40, true) == kPhases[0]);
+        CHECK(drive.rate_milli_steps_per_second() == expected);
+      }
+      CHECK(drive.update(start + 3000U, -sign * 40, false) == 0);
+      CHECK(drive.rate_milli_steps_per_second() == 0);
+    }
+  }
+}
+
 void clock_rollover_matches_normal_clock() {
   StepperDrive normal;
   StepperDrive wrapped;
@@ -321,6 +351,8 @@ int main(int argc, char** argv) {
       {"steady_rate_phase_spacing", steady_rate_phase_spacing},
       {"fractional_period_rounds_up", fractional_period_rounds_up},
       {"rate_ceiling_during_ramp_and_reversal", rate_ceiling_during_ramp_and_reversal},
+      {"microsecond_ramp_accumulates_without_rounding",
+       microsecond_ramp_accumulates_without_rounding},
       {"clock_rollover_matches_normal_clock", clock_rollover_matches_normal_clock}};
   int ran = 0;
   for (const auto& test : tests) {
