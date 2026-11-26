@@ -21,6 +21,11 @@ struct Registers {
       value = values.at(reg);
       return true;
     }, [this](std::uint8_t reg, std::uint8_t value) {
+      // Check every attempted write, not only the final register state.
+      // Dock port A must never be driven, even if a later write repairs it.
+      CHECK(reg == 0x00 || reg == 0x01 || reg == 0x15);
+      CHECK(value == (reg == 0x15 ? 0x00 : 0xFF));
+      if (reg == 0x15) CHECK(values[0x01] == 0xFF);
       ++writes;
       if (reg == 0x15) ++latch_writes;
       if (reg == fail_write) return false;
