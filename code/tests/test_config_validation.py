@@ -346,3 +346,41 @@ def test_nested_configuration_type_error_does_not_echo_rejected_values(tmp_path)
     with pytest.raises(ValueError, match=r"robots\.0\.motion_enabled") as error:
         load_settings(path)
     assert marker not in str(error.value)
+
+
+@pytest.mark.parametrize("field,lower,upper", [
+    ("max_job_seconds", 1, 120),
+    ("pet_activity_min_interval_seconds", 5, 600),
+    ("pet_activity_max_interval_seconds", 5, 600),
+    ("fleet_social_min_interval_seconds", 30, 3600),
+])
+def test_timeout_bounds_and_invalid_numbers(field, lower, upper):
+    # Keep the interval pair valid so its ordering check cannot mask a missing bound.
+    base = {"pet_activity_min_interval_seconds": 5,
+            "pet_activity_max_interval_seconds": 600}
+    for value in (lower, upper):
+        settings = Settings(robots=[_robot()], **{**base, field: value})
+        assert getattr(settings, field) == value
+    for value in (-1, lower - 1, upper + 1, float("nan"), float("inf"),
+                  float("-inf"), True, str(lower)):
+        with pytest.raises(ValueError, match=field):
+            Settings(robots=[_robot()], **{**base, field: value})
+
+
+@pytest.mark.parametrize("mode", ["hardware", "simulation"])
+@pytest.mark.parametrize("alias", ["robot-01", "ROBOT-01"])
+def test_robot_id_aliases_rejected_independently_of_other_fleet_fields(mode, alias):
+    robots = _hardware_pair()
+    assert len(Settings(mode=mode, robots=robots).robots) == 2
+    robots[1]["id"] = alias
+    with pytest.raises(ValueError, match="unique robot IDs"):
+        Settings(mode=mode, robots=robots)
+
+
+@pytest.mark.parametrize("field", ["max_speed", "drive_permit_ms", "watchdog_ms"])
+@pytest.mark.parametrize("value", [-1, float("nan"), float("inf"), True, 0])
+def test_unsupported_body_safety_fields_reject_every_value(field, value):
+    with pytest.raises(ValueError, match=field):
+        Settings(robots=[_robot()], **{field: value})
+    with pytest.raises(ValueError, match=field):
+        RobotConfig(**_robot(), **{field: value})
