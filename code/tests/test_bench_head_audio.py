@@ -85,6 +85,15 @@ def test_audio_bench_rejects_parent_traversal_before_mkdir(tmp_path):
     assert not (private / "created").exists()
 
 
+@pytest.fixture(autouse=True)
+def _nominal_receipt_clock(monkeypatch):
+    """Keep unrelated negative cases from failing solely on rate drift."""
+    receipt_times = count(0, 1_000_000_000)
+    monkeypatch.setattr(bench, "time", SimpleNamespace(
+        monotonic=time.monotonic, monotonic_ns=lambda: next(receipt_times),
+    ))
+
+
 def _sample(n: int, *, robot_id: str = "robot-01", failure=False,
             underflow_reads: int = 8) -> dict:
     return {
@@ -94,8 +103,8 @@ def _sample(n: int, *, robot_id: str = "robot-01", failure=False,
         "reference_overwrite_reads": 0,
         "discarded_stale_writes": 0,
         "short_output_writes": 0,
-        "microphone_frames_read": n * 160,
-        "speaker_frames_accepted": n * 320,
+        "microphone_frames_read": n * 16000,
+        "speaker_frames_accepted": n * 32000,
         "microphone_privacy_muted": False,
         "microphone_privacy_epoch": 0,
         "reference_integrity_failed": failure,
@@ -117,12 +126,8 @@ def _sample(n: int, *, robot_id: str = "robot-01", failure=False,
     (16000, 0, False),
 ])
 async def test_audio_bench_samples_real_codec_status_without_pcm_or_motor(
-    monkeypatch, mic_hz, speaker_hz, healthy,
+    mic_hz, speaker_hz, healthy,
 ):
-    receipt_times = count(0, 1_000_000_000)
-    monkeypatch.setattr(bench, "time", SimpleNamespace(
-        monotonic=time.monotonic, monotonic_ns=lambda: next(receipt_times),
-    ))
 
     class Head:
         def __init__(self):
@@ -144,6 +149,11 @@ async def test_audio_bench_samples_real_codec_status_without_pcm_or_motor(
     assert report["samples"] >= 2
     assert report["reference_counter_delta"]["reference_underflow_reads"] == 0
     assert report["probe_errors"] == 0
+    assert report["counter_interval_s"] == report["samples"] - 1
+    assert report["counter_throughput_hz"] == {
+        "microphone_frames_read": mic_hz, "speaker_frames_accepted": speaker_hz,
+    }
+    assert report["counter_rate_within_tolerance"] is healthy
     assert report["reference_software_integrity_observed"] is healthy
     assert report["physical_aec_delay_measured"] is False
     assert report["actual_speaker_playback_verified"] is False
@@ -184,6 +194,7 @@ async def test_audio_bench_rejects_fresh_reference_underflows():
     )
     assert result["samples"] >= 2
     assert result["reference_counter_delta"]["reference_underflow_reads"] > 0
+    assert result["counter_rate_within_tolerance"] is True
     assert result["reference_software_integrity_observed"] is False
     assert result["physical_aec_delay_measured"] is False
 
@@ -224,6 +235,7 @@ async def test_audio_bench_rejects_active_boot_privacy_mute():
     )
     assert result["samples"] >= 2
     assert result["microphone_privacy_muted_observed"] is True
+    assert result["counter_rate_within_tolerance"] is True
     assert result["reference_software_integrity_observed"] is False
     assert result["actual_speaker_playback_verified"] is False
 
@@ -267,6 +279,7 @@ async def test_audio_bench_rejects_privacy_regrant_between_samples():
     assert report["probe_errors"] == 0
     assert report["microphone_privacy_muted_observed"] is False
     assert report["microphone_privacy_epoch_delta"] == 1
+    assert report["counter_rate_within_tolerance"] is True
     assert report["reference_software_integrity_observed"] is False
     assert report["actual_speaker_playback_verified"] is False
     assert report["physical_aec_delay_measured"] is False
@@ -302,6 +315,7 @@ async def test_audio_bench_rejects_incomplete_speaker_output_receipts():
     )
     assert result["samples"] >= 2
     assert result["reference_counter_delta"]["short_output_writes"] > 0
+    assert result["counter_rate_within_tolerance"] is True
     assert result["reference_software_integrity_observed"] is False
     assert result["actual_speaker_playback_verified"] is False
 
