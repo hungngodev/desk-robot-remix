@@ -335,8 +335,10 @@ class PetController:
         self.max_observation_age = max_observation_age
         self.activity_min_interval = float(activity_min_interval)
         self.activity_max_interval = float(activity_max_interval)
-        # The fleet clock owns its RNG rather than consuming process-wide state.
-        self._activity_rng = random.Random() if activity_rng is None else activity_rng
+        # Snapshot an injected RNG so callers or other fleets cannot advance our clock.
+        self._activity_rng = random.Random()
+        if activity_rng is not None:
+            self._activity_rng.setstate(activity_rng.getstate())
         # Direct voluntary contact deserves a faster reply than a passive
         # camera remark, but still shares the one fleet audio budget.
         self.interaction_cooldown = interaction_cooldown

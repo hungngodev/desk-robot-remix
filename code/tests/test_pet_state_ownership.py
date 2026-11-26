@@ -55,11 +55,46 @@ async def test_fleet_activity_loop_uses_owned_rng(tmp_path, monkeypatch):
     monkeypatch.setattr(pet, "_reconsider_activity", finish)
     try:
         await asyncio.wait_for(pet._activity_loop(), timeout=1)
-        assert rng.getstate() == expected.getstate()
+        assert pet._activity_rng.getstate() == expected.getstate()
+        assert rng.getstate() == random.Random(seed).getstate()
         assert other._activity_rng.getstate() == other_state
     finally:
         await pet.close()
         await other.close()
+
+
+
+async def test_shared_injected_rng_is_only_a_state_snapshot(tmp_path, monkeypatch):
+    rng = random.Random(42)
+    rng.random()
+    initial_state = rng.getstate()
+    first = _controller(
+        tmp_path / "first", activity_rng=rng,
+        activity_min_interval=0.01, activity_max_interval=0.02,
+    )
+    second = _controller(tmp_path / "second", activity_rng=rng)
+    expected = random.Random()
+    expected.setstate(initial_state)
+    expected.uniform(0.01, 0.02)
+
+    def finish():
+        first._closed = True
+
+    monkeypatch.setattr(first, "_reconsider_activity", finish)
+    try:
+        await asyncio.wait_for(first._activity_loop(), timeout=1)
+        assert first._activity_rng.getstate() == expected.getstate()
+        assert second._activity_rng.getstate() == initial_state
+        assert rng.getstate() == initial_state
+        assert first._activity_rng is not second._activity_rng
+        assert first._activity_rng is not rng
+        assert second._activity_rng is not rng
+        rng.random()
+        assert second._activity_rng.getstate() == initial_state
+        assert first._activity_rng.getstate() == expected.getstate()
+    finally:
+        await first.close()
+        await second.close()
 
 
 async def test_default_controller_and_pet_state_are_independent(tmp_path):
