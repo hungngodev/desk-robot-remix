@@ -215,7 +215,7 @@ class HttpHead:
 
     async def _request(self, method: str, path: str, **kwargs) -> httpx.Response:
         try:
-            async with asyncio.timeout(_REQUEST_DEADLINE_SECONDS):
+            async with asyncio.timeout(_REQUEST_DEADLINE_SECONDS) as deadline:
                 response = await self.client.request(
                     method,
                     self.config.head_url.rstrip("/") + path,
@@ -226,6 +226,9 @@ class HttpHead:
                     follow_redirects=False,
                     **kwargs,
                 )
+            # A cancellation-resistant adapter can swallow the timeout signal.
+            if deadline.expired():
+                raise TimeoutError("Head request deadline expired")
             response.raise_for_status()
             return response
         except (httpx.HTTPError, ValueError, OSError) as exc:

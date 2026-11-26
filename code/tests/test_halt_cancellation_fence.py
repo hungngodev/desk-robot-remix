@@ -1,11 +1,11 @@
 """Terminal HALT recovery must not trust a cancelled transport receipt."""
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import httpx
 import pytest
-
 from desk_robot.transport import HeadError, HttpHead
 
 
@@ -65,3 +65,42 @@ async def test_cancelled_command_receipt_cannot_reopen_motion(cancelled_command)
                 *(task for task in (interrupted, contender) if task is not None),
                 return_exceptions=True,
             )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expired_command", ["halt", "drive 20 20 100"])
+async def test_expired_request_cannot_restore_motion(monkeypatch, expired_command):
+    monkeypatch.setattr("desk_robot.transport._REQUEST_DEADLINE_SECONDS", 0.01)
+    monkeypatch.setattr("desk_robot.transport.secret", lambda _: "fixture-token")
+    sent = []
+    replies = {
+        "halt": "OK halt",
+        "arm": "OK arm",
+        "drive 20 20 100": "OK drive left=20 right=20 ms=100",
+    }
+
+    async def handler(request):
+        command = json.loads(request.content)["command"]
+        sent.append(command)
+        if len(sent) == 1:
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                pass  # asyncio.timeout can clear its own cancellation count on exit.
+        return httpx.Response(200, json={
+            "ok": True, "robot_id": "robot-01", "reply": replies[command],
+        })
+
+    config = SimpleNamespace(
+        id="robot-01", head_url="http://robot.invalid", token_env="HEAD_TOKEN",
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        head = HttpHead(config, client)
+        with pytest.raises(HeadError, match="deadline expired"):
+            await asyncio.wait_for(head.command(expired_command), timeout=1)
+        with pytest.raises(HeadError, match="require acknowledged HALT"):
+            await head.command("arm")
+        assert sent == [expired_command]
+        await head.command("halt")
+        await head.command("arm")
+        assert sent == [expired_command, "halt", "arm"]
