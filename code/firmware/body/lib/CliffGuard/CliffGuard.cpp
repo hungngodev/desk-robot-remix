@@ -1,4 +1,5 @@
 #include "CliffGuard.h"
+#include "../../include/TofWireLimits.h"
 
 namespace desk_robot {
 
@@ -9,14 +10,15 @@ bool CliffGuard::valid_config(const CliffConfig& config) noexcept {
   // policy that the operator command rightly refuses. Actual certified
   // freshness may need to be STRICTER given sensor cadence and wheel speed.
   if (!valid_stored_calibrated_flag(config) || config.freshness_ms < 30U ||
-      config.freshness_ms > 200U || config.front_obstacle_mm < 30 ||
-      config.front_max_mm > 1300 ||
+      config.freshness_ms > kTofCriticalExpiryMs ||
+      !tof_range_in_bounds(config.front_obstacle_mm) ||
+      !tof_range_in_bounds(config.front_max_mm) ||
       config.front_obstacle_mm >= config.front_max_mm) return false;
   for (const auto& floor : config.floor) {
     // Match the active VL53L0X TofBus 30..1300mm valid range; never
     // accept a staged calibration no actual sensor sample can satisfy.
-    if (floor.min_mm < 30 || floor.min_mm > floor.max_mm ||
-        floor.max_mm > 1300) return false;
+    if (!tof_range_in_bounds(floor.min_mm) || floor.min_mm > floor.max_mm ||
+        !tof_range_in_bounds(floor.max_mm)) return false;
   }
   return true;
 }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include "../../include/TofWireLimits.h"
 
 namespace desk_robot {
 
@@ -27,8 +28,8 @@ inline constexpr TofResult make_tof_result(std::uint8_t status, std::uint16_t si
                                            std::uint16_t ambient,
                                            std::uint16_t distance) noexcept {
   return {signal, ambient, distance,
-          ((status & 0x78U) >> 3) == 11U && signal >= 32U &&
-              distance >= 30U && distance <= 1300U};
+          ((status & 0x78U) >> 3) == 11U && signal >= kTofMinSignal97 &&
+              tof_range_in_bounds(distance)};
 }
 }  // namespace detail
 

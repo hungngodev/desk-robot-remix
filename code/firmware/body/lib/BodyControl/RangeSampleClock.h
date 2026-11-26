@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include "../../include/TofWireLimits.h"
 
 namespace desk_robot {
 
@@ -17,7 +18,7 @@ constexpr bool range_sample_accepts(bool present, std::uint32_t now_ms,
 constexpr bool range_sample_expired(bool present, bool critical,
                                     std::uint32_t now_ms,
                                     std::uint32_t sample_ms) {
-  return present && (now_ms - sample_ms >= (critical ? 200U : 351U));
+  return present && (now_ms - sample_ms >= (critical ? kTofCriticalExpiryMs : kTofSideExpiryMs));
 }
 
 }  // namespace desk_robot
