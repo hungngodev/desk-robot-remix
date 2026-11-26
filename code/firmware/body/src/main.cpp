@@ -532,7 +532,6 @@ void setup() {
     if (ledcSetup(body_pins::kMotorChannels[i], body_pins::kMotorFrequency,
                   body_pins::kMotorResolution) == 0) pwm_ready = false;
     ledcWrite(body_pins::kMotorChannels[i], 0);
-    ledcAttachPin(body_pins::kMotorPins[i], body_pins::kMotorChannels[i]);
   }
 #endif
   for (int channel : body_pins::kServoChannels) {
@@ -540,6 +539,13 @@ void setup() {
                   body_pins::kServoResolution) == 0) pwm_ready = false;
     ledcWrite(channel, 0);
   }
+#if !DESK_ROBOT_STEPPER
+  // Keep GPIO LOW ownership until every PWM timer has initialized safely.
+  if (pwm_ready) {
+    for (int i = 0; i < 4; ++i)
+      ledcAttachPin(body_pins::kMotorPins[i], body_pins::kMotorChannels[i]);
+  }
+#endif
   zero_motor_pwm();
   Serial.begin(115200);
   head_uart.begin(115200, SERIAL_8N1, body_pins::kUartRx, body_pins::kUartTx);
