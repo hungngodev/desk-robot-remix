@@ -2271,8 +2271,9 @@ async def test_operator_interrupt_reuses_native_generation_flush_not_duplicate_s
     assert first.client_abort is True
 
 
+@pytest.mark.parametrize("failure", [RuntimeError, ValueError, TimeoutError])
 async def test_broken_native_voice_cannot_block_operator_physical_speaker_stop(
-    bridge, monkeypatch,
+    bridge, monkeypatch, caplog, failure,
 ):
     """If native model cancellation raises, issue real XIAO STOP anyway."""
     sent = []
@@ -2287,7 +2288,7 @@ async def test_broken_native_voice_cannot_block_operator_physical_speaker_stop(
     bridge.register(first)
 
     async def broken_native(_conn):
-        raise RuntimeError("Native model cancellation service is broken")
+        raise failure("private native model input must not reach logs")
 
     monkeypatch.setitem(sys.modules, "desk_robot_native_omni", SimpleNamespace(
         suspend_proactive_for_operator=broken_native,
@@ -2309,6 +2310,42 @@ async def test_broken_native_voice_cannot_block_operator_physical_speaker_stop(
     }]
     assert bridge.interrupt_generation["mac-01"] == 1
     assert first.client_abort is True
+    records = [
+        record for record in caplog.records
+        if getattr(record, "bridge_operation", None) == "operator_interrupt"
+    ]
+    assert len(records) == 1
+    assert records[0].bridge_exception_type == failure.__name__
+    assert "private native model input" not in caplog.text
+    assert "physical-private-01" not in caplog.text
+
+
+async def test_operator_interrupt_propagates_cancellation(bridge, monkeypatch, caplog):
+    ids, handlers = fleet_handlers(bridge, monkeypatch)
+    entered = asyncio.Event()
+
+    async def cancel_native(_conn):
+        entered.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(bridge, "_native_adapter", lambda: SimpleNamespace(
+        on_barge=cancel_native,
+    ))
+    task = asyncio.create_task(
+        handlers["/interrupt"](body_request({"device_id": ids[0]}))
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), timeout=1)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, timeout=1)
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert not any(
+        getattr(record, "bridge_operation", None) == "operator_interrupt"
+        for record in caplog.records
+    )
 
 
 @pytest.mark.parametrize("reason", ["operator", "monitor", "barge"])

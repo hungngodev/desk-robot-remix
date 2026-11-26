@@ -338,6 +338,14 @@ def native_tts_config(conn):
     return isolated
 
 
+def _log_optional_failure(operation: str, exc: Exception) -> None:
+    """Report degraded optional work without exposing private input or credentials."""
+    logging.getLogger(__name__).warning(
+        "Desk robot bridge %s failed: %s", operation, type(exc).__name__,
+        extra={"bridge_operation": operation, "bridge_exception_type": type(exc).__name__},
+    )
+
+
 async def inject_live_context_into_legacy_llm(conn) -> None:
     """Supply actual Mac tool evidence only to the next model request.
 
@@ -421,8 +429,10 @@ async def inject_live_context_into_legacy_llm(conn) -> None:
         data = await asyncio.wait_for(
             call(conn, "interaction-context"), timeout=0.65
         )
-    except Exception:
-        return  # Preserve original persona and normal Xiaozhi ASR/LLM.
+    except Exception as exc:
+        # Optional context must not break the canonical conversation path.
+        _log_optional_failure("legacy_live_context", exc)
+        return
     if (connections.get(device) is not conn
             or voice_turn_generation.get(device, 0) != generation
             or getattr(conn, "_desk_live_context_request", None) != nonce
@@ -766,8 +776,9 @@ async def interrupt_for_normal_voice(conn, have_voice: bool) -> bool:
             if native is not None:
                 try:
                     await asyncio.wait_for(native.on_barge(conn), timeout=0.5)
-                except Exception:
-                    pass  # Optional model failure is not task cancellation.
+                except Exception as exc:
+                    # STOP remains independently owned; cancellation propagates.
+                    _log_optional_failure("normal_barge_cleanup", exc)
     return True
 
 
@@ -1207,11 +1218,12 @@ def create_app():
                 )
                 if callable(action):
                     stopped_native = await action(connection) is True
-        except Exception:
+        except Exception as exc:
             # An unavailable native module, broken model connection or
             # failed remote cancel is NEVER allowed to suppress the physical
             # XIAO STOP fallback. Sending STOP twice is safer than sending
             # none; its decoder flush is an idempotent safety action.
+            _log_optional_failure("operator_interrupt", exc)
             stopped_native = False
         if not stopped_native:
             # A Mac Opus packet can still be in flight when the native model
