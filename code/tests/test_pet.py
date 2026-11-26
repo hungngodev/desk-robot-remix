@@ -10180,3 +10180,42 @@ async def test_scheduled_quiet_blocks_speculative_scene_until_morning(
         task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         await pet.close()
+
+
+async def test_pet_initiative_windows_stay_bounded_during_one_thousand_candidates(
+    fleet, tmp_path,
+):
+    memory = MemoryStore(tmp_path, [robot.id for robot in fleet.robots])
+    speaker = SimulatedSpeaker()
+    pet = PetController(
+        fleet, {}, Conversation(fleet, GroundedChat(), speaker, memory=memory),
+        memory, KeyScene(), speech_cooldown=0, interaction_cooldown=0,
+        group_window=60,
+    )
+    state = pet.states["robot-01"]
+    state.enabled, state.generation, state.quiet = True, 9, True
+    pet.set_voice_monitor_ready(True)
+    try:
+        for index in range(1000):
+            pet._consider_speech(
+                "robot-01", SceneChange("key", f"Key {index}", 0.99), 9,
+                camera_derived=True,
+            )
+            assert len(pet._event_kinds) <= 64
+        assert len(pet._event_kinds) == 64
+        assert not pet._admitted_event_kinds
+        assert not speaker.spoken
+        # Simulate a full live admission window, retaining every replay fence.
+        pet._admitted_event_kinds.update(pet._event_kinds)
+        before = dict(pet._admitted_event_kinds)
+        state.quiet = False
+        pet._consider_speech(
+            "robot-01", SceneChange("key", "Another unique key", 0.99), 9,
+            camera_derived=True,
+        )
+        assert pet._admitted_event_kinds == before
+        assert state.last_initiative_suppression == "initiative_window_capacity"
+        assert pet._speech_task is None
+    finally:
+        state.enabled = False
+        await pet.close()

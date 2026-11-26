@@ -39,6 +39,7 @@ from .initiative_policy import (
     cooldown_pending,
     event_cooldown,
     event_identity,
+    event_window_has_capacity,
     quiet_voice_veto,
     receipt_veto,
 )
@@ -2957,18 +2958,14 @@ class PetController:
             camera_derived=camera_derived,
             physical_event=change.kind in _PHYSICAL_INITIATIVE_KINDS,
         )
-        if len(self._admitted_event_kinds) >= 64:
-            self._admitted_event_kinds = {
-                key: seen for key, seen in self._admitted_event_kinds.items()
-                if now - seen < self.group_window
-            }
+        admission_capacity = event_window_has_capacity(
+            self._admitted_event_kinds, event_key, now=now, window=self.group_window,
+        )
         previous = self._admitted_event_kinds.get(event_key, -math.inf)
-        if len(self._event_kinds) >= 64:
-            self._event_kinds = {
-                key: seen for key, seen in self._event_kinds.items()
-                if now - seen < self.group_window
-            }
-        self._event_kinds[event_key] = now
+        if event_window_has_capacity(
+            self._event_kinds, event_key, now=now, window=self.group_window,
+        ):
+            self._event_kinds[event_key] = now
         # A repeated VLM arrival guess after unrelated pixel movement must not
         # become novel merely because the short fleet budget has expired.
         # Keep this longer window local to a camera grant and pet. Person/hand
@@ -3008,6 +3005,10 @@ class PetController:
                 self._clear_deferred_speech(state)
             state.suppressed += 1
             state.last_initiative_suppression = "quiet_voice_or_group_budget"
+            return
+        if not admission_capacity:
+            state.suppressed += 1
+            state.last_initiative_suppression = "initiative_window_capacity"
             return
         if (
             self.conversation.active is not None

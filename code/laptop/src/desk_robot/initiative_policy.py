@@ -80,3 +80,17 @@ def event_identity(
     )
     key = (owner, kind, ("camera:" if camera_derived else "other:") + signature)
     return key, signature
+
+
+_EVENT_WINDOW_CAPACITY = 64
+
+
+def event_window_has_capacity(
+    entries: dict[tuple[str | None, str, str], float],
+    key: tuple[str | None, str, str], *, now: float, window: float,
+) -> bool:
+    """Make room only by expiring old keys, never evict live admission fences."""
+    if len(entries) >= _EVENT_WINDOW_CAPACITY:
+        for expired in [key for key, stamp in entries.items() if now - stamp >= window]:
+            del entries[expired]
+    return key in entries or len(entries) < _EVENT_WINDOW_CAPACITY

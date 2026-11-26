@@ -6,6 +6,7 @@ from desk_robot.initiative_policy import (
     cooldown_pending,
     event_cooldown,
     event_identity,
+    event_window_has_capacity,
     quiet_voice_veto,
     receipt_veto,
 )
@@ -93,3 +94,23 @@ def test_camera_signature_preserves_order_sensitive_evidence(left, right):
         )[0]
 
     assert identity(left) != identity(right)
+
+
+def test_event_window_bounds_one_thousand_fresh_candidates_without_evicting_fences():
+    entries = {}
+    for index in range(1000):
+        key, _ = event_identity(
+            robot_id="robot-01", kind="key", description=f"Key {index}",
+            camera_derived=True, physical_event=False,
+        )
+        if event_window_has_capacity(entries, key, now=100.0, window=5.0):
+            entries[key] = 100.0
+        assert len(entries) <= 64
+    first = (None, "key", "camera:0 key")
+    assert len(entries) == 64
+    assert entries[first] == 100.0
+    assert event_window_has_capacity(entries, first, now=104.99, window=5.0)
+    new_key = (None, "key", "camera:new")
+    assert not event_window_has_capacity(entries, new_key, now=104.99, window=5.0)
+    assert event_window_has_capacity(entries, new_key, now=105.0, window=5.0)
+    assert not entries
