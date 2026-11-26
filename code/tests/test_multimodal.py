@@ -4767,3 +4767,52 @@ async def test_rejected_visual_question_preserves_active_owner(question):
             task.cancel()
         await asyncio.gather(task, return_exceptions=True)
         await service.close()
+
+
+@pytest.mark.parametrize("evicted", [False, True])
+def test_timeline_retained_edges_keep_original_age_and_priority(evicted):
+    """The overflow path must match normal admission without duplicating edges."""
+    hub = CameraFrameHub(["robot-01", "robot-02"])
+    robot = "robot-01"
+    stamp = 100.0
+    edges = [("safety_fault", stamp), ("paw_contact", stamp), ("human_voice", stamp)]
+    hub.latest_safety_fault[robot] = stamp
+    hub.latest_safety_fault_detail[robot] = "cliff"
+    hub.latest_direct_interaction[robot] = edges[1]
+    hub.voice_started_at[robot] = stamp
+    hub.event_history[robot].extend(edges)
+    if evicted:
+        hub.event_history[robot].extend([("handling_shake", stamp + 0.25)] * 12)
+    timeline = hub.interaction_timeline(robot, stamp + 8, limit=16)
+    retained = [item for item in timeline if item["kind"] in {kind for kind, _ in edges}]
+    assert [item["kind"] for item in retained] == [kind for kind, _ in edges]
+    assert [item["age_ms"] for item in retained] == [8000, 8000, 8000]
+    assert [item["channel"] for item in retained] == ["sensor", "sensor", "human_voice"]
+    assert retained[0]["fault_detail"] == "cliff"
+    assert "fault_detail" not in retained[1] and "fault_detail" not in retained[2]
+    assert retained[2]["source"] == "authenticated_xiaozhi_vad"
+    assert all(item["physical_action_verified"] is False for item in retained)
+    assert hub.interaction_timeline(robot, stamp + 8, limit=1) == retained[:1]
+    assert not any(item["kind"] in {kind for kind, _ in edges}
+                   for item in hub.interaction_timeline(robot, stamp + 8.001))
+    assert hub.interaction_timeline("robot-02", stamp + 8) == []
+
+
+def test_timeline_expired_vad_still_fences_prior_turn_transcript():
+    hub = CameraFrameHub(["robot-01"])
+    robot = "robot-01"
+    hub.voice_started_at[robot] = 100.0
+    hub.heard_history[robot].extend([
+        ("old", "prior turn", 99.0),
+        ("current", "current turn", 100.0),
+        ("future", "future receipt", 131.0),
+    ])
+    timeline = hub.interaction_timeline(robot, 130.0)
+    assert len(timeline) == 1
+    assert timeline[0]["channel"] == "human_transcript"
+    assert timeline[0]["content"] == "current turn"
+    assert timeline[0]["source_at"] == 100.0
+    assert timeline[0]["age_ms"] == 30000
+    assert timeline[0]["transcription_verified"] is False
+    assert timeline[0]["speaker_identity_verified"] is False
+    assert not hub.interaction_timeline(robot, 130.001)

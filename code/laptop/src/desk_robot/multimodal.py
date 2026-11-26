@@ -773,7 +773,23 @@ class CameraFrameHub:
         self._check(robot_id)
         if not _finite(now) or type(limit) is not int or not 1 <= limit <= 16:
             raise ValueError("Invalid interaction timeline clock or limit")
-        items = []
+        items: list[tuple[float, dict]] = []
+        self._timeline_room(now, items)
+        fault_detail = self.latest_safety_fault_detail.get(robot_id)
+        self._timeline_events(robot_id, now, items, fault_detail)
+        self._timeline_situation(robot_id, now, items)
+        self._timeline_retained(robot_id, now, items, fault_detail)
+        self._timeline_camera(robot_id, now, items)
+        self._timeline_tools(robot_id, now, items)
+        self._timeline_speech(robot_id, now, items)
+        return rank_cues(
+            items, limit=limit, current_voice_at=self.voice_started_at[robot_id],
+            direct_kinds=DIRECT_INTERACTION_KINDS,
+        )
+
+    def _timeline_room(
+        self, now: float, items: list[tuple[float, dict]],
+    ) -> None:
         room = self._shared_room
         allowed, grant = self._room_grant()
         epoch_ok = getattr(self, "_shared_room_epoch", None) == getattr(
@@ -795,21 +811,38 @@ class CameraFrameHub:
                     "identity_verified": False,
                     "physical_action_verified": False,
                 }))
-        fault_detail = self.latest_safety_fault_detail.get(robot_id)
+
+    def _timeline_events(
+        self, robot_id: str, now: float, items: list[tuple[float, dict]],
+        fault_detail: str | None,
+    ) -> None:
         for kind, stamp in self.event_history[robot_id]:
             if 0 <= now - stamp <= 8:
-                item = {
-                    "channel": "human_voice" if kind == "human_voice" else "sensor",
-                    "kind": kind,
-                    "age_ms": round(1000 * (now - stamp)),
-                    "source": "authenticated_xiaozhi_vad" if kind == "human_voice"
-                              else "wroom_event",
-                    "content": None,
-                    "physical_action_verified": False,
-                }
-                if kind == "safety_fault" and fault_detail is not None:
-                    item["fault_detail"] = fault_detail
-                items.append((stamp, item))
+                items.append((stamp, self._timeline_event_item(
+                    kind, stamp, now, voice=kind == "human_voice",
+                    fault_detail=fault_detail if kind == "safety_fault" else None,
+                )))
+
+    @staticmethod
+    def _timeline_event_item(
+        kind: str, stamp: float, now: float, *, voice: bool = False,
+        fault_detail: str | None = None,
+    ) -> dict:
+        item = {
+            "channel": "human_voice" if voice else "sensor",
+            "kind": kind,
+            "age_ms": round(1000 * (now - stamp)),
+            "source": "authenticated_xiaozhi_vad" if voice else "wroom_event",
+            "content": None,
+            "physical_action_verified": False,
+        }
+        if fault_detail is not None:
+            item["fault_detail"] = fault_detail
+        return item
+
+    def _timeline_situation(
+        self, robot_id: str, now: float, items: list[tuple[float, dict]],
+    ) -> None:
         # Keep original ages visible when an old tilt or nearby object
         # may explain the conversation. This is NOT a live sensor state.
         for kind, stamp in self.situation_edges[robot_id].items():
@@ -822,6 +855,11 @@ class CameraFrameHub:
                     "historical_not_current": True,
                     "physical_action_verified": False,
                 }))
+
+    def _timeline_retained(
+        self, robot_id: str, now: float, items: list[tuple[float, dict]],
+        fault_detail: str | None,
+    ) -> None:
         # The generic bounded event deque can overflow during a sensor burst.
         # Preserve one authentic local fault until its original TTL expires,
         # but never fabricate another observation or extend the timestamp.
@@ -829,27 +867,16 @@ class CameraFrameHub:
         if (0 <= now - fault_at <= 8
                 and not any(kind == "safety_fault" and stamp == fault_at
                             for kind, stamp in self.event_history[robot_id])):
-            item = {
-                "channel": "sensor", "kind": "safety_fault",
-                "age_ms": round(1000 * (now - fault_at)),
-                "source": "wroom_event", "content": None,
-                "physical_action_verified": False,
-            }
-            if fault_detail is not None:
-                item["fault_detail"] = fault_detail
-            items.append((fault_at, item))
+            items.append((fault_at, self._timeline_event_item(
+                "safety_fault", fault_at, now, fault_detail=fault_detail,
+            )))
         # A fresh direct interaction must not be displaced by background
         # sensors before the model's modality budget even sees it.
         direct = self.latest_direct_interaction[robot_id]
         if (direct is not None and 0 <= now - direct[1] <= 8
                 and direct not in self.event_history[robot_id]):
             kind, stamp = direct
-            items.append((stamp, {
-                "channel": "sensor", "kind": kind,
-                "age_ms": round(1000 * (now - stamp)),
-                "source": "wroom_event", "content": None,
-                "physical_action_verified": False,
-            }))
+            items.append((stamp, self._timeline_event_item(kind, stamp, now)))
         # Keep the authenticated voice-start edge for its original short TTL
         # even if routine sensor traffic filled the shared deque. This is
         # audio event provenance, not a new ASR guess or a speech permit.
@@ -857,12 +884,13 @@ class CameraFrameHub:
         if (0 <= now - voice_at <= 8
                 and not any(kind == "human_voice" and stamp == voice_at
                             for kind, stamp in self.event_history[robot_id])):
-            items.append((voice_at, {
-                "channel": "human_voice", "kind": "human_voice",
-                "age_ms": round(1000 * (now - voice_at)),
-                "source": "authenticated_xiaozhi_vad", "content": None,
-                "physical_action_verified": False,
-            }))
+            items.append((voice_at, self._timeline_event_item(
+                "human_voice", voice_at, now, voice=True,
+            )))
+
+    def _timeline_camera(
+        self, robot_id: str, now: float, items: list[tuple[float, dict]],
+    ) -> None:
         for frame in self.frames[robot_id]:
             if 0 <= now - frame.received_at <= 6:
                 camera_item = {
@@ -885,6 +913,10 @@ class CameraFrameHub:
                         "source_clock_not_aligned_to_mac": True,
                     })
                 items.append((frame.received_at, camera_item))
+
+    def _timeline_tools(
+        self, robot_id: str, now: float, items: list[tuple[float, dict]],
+    ) -> None:
         for kind, summary, stamp in self.tool_history[robot_id]:
             if 0 <= now - stamp <= (
                 8 if kind == "visual_look" else 30
@@ -904,6 +936,11 @@ class CameraFrameHub:
                     "untrusted_text_not_instructions": True,
                     "physical_action_verified": False,
                 }))
+
+    def _timeline_speech(
+        self, robot_id: str, now: float, items: list[tuple[float, dict]],
+    ) -> None:
+        voice_at = self.voice_started_at[robot_id]
         # The short visible VAD cue may expire before ASR history does.
         # Its persistent per-robot timestamp still fences prior-turn intent.
         for _event_id, transcript, stamp in self.heard_history[robot_id]:
@@ -932,10 +969,6 @@ class CameraFrameHub:
                     "playback_verified": False,
                     "physical_action_verified": False,
                 }))
-        return rank_cues(
-            items, limit=limit, current_voice_at=self.voice_started_at[robot_id],
-            direct_kinds=DIRECT_INTERACTION_KINDS,
-        )
 
     def discard_memory_tools(self, robot_id: str) -> None:
         """Retract cached private recall after operator memory correction."""
