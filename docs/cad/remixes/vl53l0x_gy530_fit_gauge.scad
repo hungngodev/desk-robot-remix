@@ -49,14 +49,24 @@ module vl53l0x_gy530_fit_gauge() {
  * Heights 35/45/55 mm describe the board support rim, NOT lens standoff.
  */
 module vl53l0x_gy530_height_trial(height_mm) {
-    bottom_x = 36;
+    bottom_x = 37;
     bottom_y = 39;
-    inner_bottom_x = 30;
+    inner_bottom_x = 31;
     inner_bottom_y = 33;
     top_x = board_x + 6;
     top_y = board_y + 6;
     inner_top_x = board_x - 3;
     inner_top_y = board_y - 3;
+    // ST DS11555 rev 6 section 6.1: system FoV is a full 25 degrees.
+    // Use the adapter's provisional 6 mm optical envelope, centered at the
+    // board rim. This is a geometric screen, NOT a measured optical origin.
+    optical_r = 3;
+    half_angle = 25/2;
+    assert(min(inner_bottom_x,inner_bottom_y)/2 >=
+           optical_r + height_mm*tan(half_angle),
+           "Height trial base clips nominal optical keepout");
+    assert(min(inner_top_x,inner_top_y)/2 >= optical_r + 3*tan(half_angle),
+           "Height trial rim clips nominal optical keepout");
     assert(height_mm >= 35 && height_mm <= 55,
            "Height trial outside measured candidate range");
     assert(bottom_x - inner_bottom_x >= 6 && bottom_y - inner_bottom_y >= 6,

@@ -630,7 +630,7 @@ def test_unpowered_gy530_optical_height_trial_is_watertight(tmp_path, height):
     ], check=True, capture_output=True, text=True, timeout=90)
     assert module().closed_mesh_edges(result) > 0
     assert module().mesh_bounds_mm(result)["dimensions_mm"] == [
-        36.0, 39.0, float(height)
+        37.0, 39.0, float(height)
     ]
 
 

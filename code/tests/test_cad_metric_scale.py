@@ -1,8 +1,11 @@
 """Guard native-scale source geometry and the provisional Fusion import contract."""
 
 import ast
+import math
 import re
+import shutil
 import struct
+import subprocess
 from pathlib import Path
 from xml.etree import ElementTree as ET
 from zipfile import ZipFile
@@ -106,3 +109,66 @@ def test_fit_scad_does_not_import_scaled_upstream_meshes(relative):
     # The exporter stages standalone SCAD sources; adding an import/include
     # requires explicit dependency provenance and a new unit contract.
     assert not re.search(r"\b(?:import|include|use)\s*[(<]", code)
+
+
+def _render_gy530_vertices(tmp_path, filename, part):
+    if shutil.which("openscad") is None:
+        pytest.skip("Needs OpenSCAD CLI")
+    target = tmp_path / f"{part}.stl"
+    subprocess.run(
+        ["openscad", "--export-format", "binstl", "-o", str(target),
+         "-D", f'part="{part}"', str(CAD / "remixes" / filename)],
+        check=True, capture_output=True, text=True, timeout=90,
+    )
+    return set(_stl_vertices(target.read_bytes()))
+
+
+def _nominal_optical_radius(depth):
+    # ST DS11555 rev 6 section 6.1: 25 degrees full system FoV.
+    # The centered 6 mm reference envelope is provisional, not measured optics.
+    return 3 + depth * math.tan(math.radians(12.5))
+
+
+@pytest.mark.parametrize("height", [35, 45, 55])
+def test_gy530_height_trial_clears_nominal_optical_keepout(tmp_path, height):
+    vertices = _render_gy530_vertices(
+        tmp_path, "vl53l0x_gy530_fit_gauge.scad", f"vl53l0x_gy530_height_trial_{height:03}",
+    )
+    # The centered rectangular hull has straight walls between these levels.
+    # Test the rendered inner corners, not just declared SCAD dimensions.
+    levels = {z for _, _, z in vertices}
+    assert {0, 3, height} <= levels
+    for z in levels:
+        ring = [(abs(x), abs(y)) for x, y, level in vertices if level == z]
+        inner_radius = min(min(x, y) for x, y in ring)
+        assert inner_radius >= _nominal_optical_radius(height - z)
+    _assert_native_dimensions(vertices, (37, 39, height))
+
+
+def test_gy530_adapter_chassis_slots_and_nominal_optical_keepout(tmp_path):
+    vertices = _render_gy530_vertices(
+        tmp_path, "one_robot_adapter_kit.scad", "tof_adjustable",
+    )
+    _assert_native_dimensions(vertices, (22.5, 19, 20.3))
+    # The M2 clearance slots are on the chassis base, not the GY-530 PCB.
+    for sign in (-1, 1):
+        slot_x = [sign * x for x, _, z in vertices if z == 0 and 0 < sign * x < 10]
+        assert min(slot_x) == pytest.approx(4.45, abs=0.002)
+        assert max(slot_x) == pytest.approx(6.8, abs=0.002)
+    # A centered 8 mm aperture passes through both sides of the 3 mm face.
+    for face_y in (6, 9):
+        ring = [(x, z) for x, y, z in vertices if y == face_y and abs(x) < 5]
+        assert len(ring) == 48
+        for x, z in ring:
+            assert math.hypot(x, z - 11.15) == pytest.approx(4, abs=0.002)
+        assert 4 * math.cos(math.pi / len(ring)) >= _nominal_optical_radius(3)
+
+
+def test_gy530_fit_cup_preserves_nominal_board_clearance(tmp_path):
+    vertices = _render_gy530_vertices(
+        tmp_path, "vl53l0x_gy530_fit_gauge.scad", "vl53l0x_gy530_fit_gauge",
+    )
+    _assert_native_dimensions(vertices, (15.2, 18, 4.3))
+    # Use the pocket corners at the floor, excluding the removal notch.
+    corners = [(x, y) for x, y, z in vertices if z == 1.5 and x >= 2]
+    _assert_native_dimensions([(x, y, 0) for x, y in corners], (11.2, 14, 0))

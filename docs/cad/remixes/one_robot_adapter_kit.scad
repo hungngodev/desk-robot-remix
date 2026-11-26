@@ -106,6 +106,7 @@ module tof_adjustable(){
   // Preserve the 19 mm base envelope. Shorten and shift the mounting
   // slots forward so the printable web stays >=2 mm and the cuts do
   // not enter the support gusset envelope. Actual fastener fit remains open.
+  // These M2 chassis slots are not PCB pitch or M2.5 carrier holes.
   base_y=19;
   slot_y=-4.5;
   slot_span=3;
@@ -126,6 +127,10 @@ module tof_adjustable(){
          "ToF aperture breaches face printable web");
   assert(base_x/2-5.5-aperture_r>=1,
          "ToF aperture intersects or thins support gusset clearance");
+  // Full system FoV is 25 degrees (ST DS11555 rev 6, section 6.1).
+  // Centered reference envelope only; lens location/standoff remain open.
+  assert(aperture_r*cos(180/$fn)>=tof_lens_d/2+3*tan(25/2),
+         "ToF face clips nominal optical keepout");
   difference(){
     union(){
       translate([0,0,1.5]) cube([base_x,base_y,3],center=true);
@@ -139,7 +144,7 @@ module tof_adjustable(){
     for(x=[-base_x/4,base_x/4])
       translate([x,slot_y,1.5]) rotate([0,0,90]) oval_slot(slot_span,m2_clearance_d,7);
     translate([0,7.5,face_z/2+1]) rotate([90,0,0])
-      cylinder(h=7,d=tof_lens_d+2,center=true);
+      cylinder(h=7,d=2*aperture_r,center=true);
     // No fake GY-530 PCB screw holes. The formerly assumed centers at
     // +/- (10.5/2 - 2) mm put both 6 mm slots THROUGH the optical aperture.
     // The actual carrier has no qualified mounting-hole coordinates yet.
