@@ -4366,3 +4366,42 @@ def test_session_replacement_retires_only_its_tool_context(bridge, monkeypatch):
     assert not peer_signal.is_set()
     bridge.register(conn("unmapped"))
     assert "unmapped" not in bridge.connections
+
+
+@pytest.mark.parametrize("mapping", [
+    {"Pet-A": "Head-A", "pet-a": "Head-B"},
+    {"Pet-A": "Head-A", "Pet-B": "head-a"},
+])
+def test_fleet_rejects_case_aliases(bridge, mapping, monkeypatch):
+    monkeypatch.setenv("DESK_ROBOT_DEVICE_MAP", json.dumps(mapping))
+    with pytest.raises(ValueError, match="unique"):
+        bridge.device_map()
+    spec = importlib.util.spec_from_file_location(
+        "identity_fleet_runner", ROOT / "laptop/server/run_server.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    robots = [
+        {"id": robot, "device_id": device, "voice": voice}
+        for (robot, device), voice in zip(mapping.items(), ("af_heart", "am_adam"), strict=True)
+    ]
+    with pytest.raises(ValueError, match="unique"):
+        module.fleet_device_and_voice_maps(robots)
+
+
+def test_identity_lookup_keeps_exact_spelling(bridge, monkeypatch):
+    mapping = {"Pet-A": "Head-A", "pet-b": "head-b"}
+    monkeypatch.setenv("DESK_ROBOT_DEVICE_MAP", json.dumps(mapping))
+    assert bridge.device_map() == mapping
+    assert bridge.robot_for_device("Head-A") == "Pet-A"
+    assert bridge.robot_for_device("head-a") is None
+    spec = importlib.util.spec_from_file_location(
+        "identity_fleet_runner", ROOT / "laptop/server/run_server.py"
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    robots = [
+        {"id": robot, "device_id": device, "voice": voice}
+        for (robot, device), voice in zip(mapping.items(), ("af_heart", "am_adam"), strict=True)
+    ]
+    assert module.fleet_device_and_voice_maps(robots)[0] == mapping

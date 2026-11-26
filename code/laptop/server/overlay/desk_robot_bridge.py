@@ -277,10 +277,13 @@ def device_map():
         "DESK_ROBOT_DEVICE_MAP",
         "Configure an unambiguous robot ID -> Xiaozhi device ID mapping",
     )
-    if not mapping or len(set(mapping.values())) != len(mapping):
-        raise ValueError("Configure a unique robot ID -> Xiaozhi device ID mapping")
     if not all(isinstance(k, str) and isinstance(v, str) and k and v for k, v in mapping.items()):
         raise ValueError("Device IDs must be nonempty strings")
+    # Match Mac fleet admission, but never rewrite the configured identities.
+    if (not mapping
+            or len({robot.casefold() for robot in mapping}) != len(mapping)
+            or len({device.casefold() for device in mapping.values()}) != len(mapping)):
+        raise ValueError("Configure a unique robot ID -> Xiaozhi device ID mapping")
     return mapping
 
 

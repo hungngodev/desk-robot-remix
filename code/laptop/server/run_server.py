@@ -36,7 +36,8 @@ def fleet_device_and_voice_maps(robots: list[dict]) -> tuple[dict[str, str], dic
                 or not isinstance(voice, str)
                 or re.fullmatch(r"[a-z]{2}_[a-z][a-z0-9_]{0,31}", voice) is None):
             raise ValueError("Provisioned robot needs an ID, device and Kokoro voice")
-        if robot_id in devices or device in devices.values():
+        if (robot_id.casefold() in {key.casefold() for key in devices}
+                or device.casefold() in {value.casefold() for value in devices.values()}):
             raise ValueError("Xiaozhi device and robot identities must be unique")
         if voice in voices.values():
             raise ValueError("Provisioned Xiaozhi fleet voices must be distinct")
