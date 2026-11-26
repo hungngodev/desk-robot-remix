@@ -480,3 +480,51 @@ def test_invalid_camera_chronology_is_not_spatial_evidence(
     assert spatial.last_seen(robots[0], "flat_key", now=when + 2) is None
     peer = spatial.last_seen(robots[1], "flat_key", now=when + 2)
     assert peer is not None and peer.evidence == evidence(when)
+
+
+def test_object_age_is_independent_of_newer_sightings_after_restart(tmp_path):
+    root = tmp_path / "private"
+    robot = "robot-01"
+    db = MemoryStore(root, [robot])
+    spatial = SpatialMemory(db)
+    when = int(time.time()) - 3 * 86400
+    mug_when = when + 2 * 86400
+    mug = replace(evidence(mug_when), object_key="mug", camera_seq=5,
+                  camera_complete_us=950_000)
+    for event_id, observation, confidence in (
+        ("keys-seen", evidence(when), 0.93), ("mug-seen", mug, 0.72),
+    ):
+        assert db.remember(
+            robot, event_id, observation.object_key, kind="vision",
+            source_robot=robot, witnessed=True, observed_at=observation.observed_at,
+            confidence=confidence, camera_provenance=CameraProvenance(
+                observation.observed_at, observation.observed_at,
+                (observation.camera_boot, observation.camera_seq,
+                 observation.camera_complete_us),
+            ),
+        )
+        assert spatial.attach(robot, event_id, observation)
+
+    spatial = SpatialMemory(MemoryStore(root, [robot]))
+    for elapsed, expected_status in (
+        (3600, "pending_localization"), (86400, "pending_localization"),
+        (86401, "stale"), (2 * 86400 + 1, "stale"),
+    ):
+        keys = spatial.last_seen(robot, "flat_key", now=when + elapsed)
+        assert keys is not None
+        assert keys.event_id == "keys-seen"
+        assert keys.status == expected_status
+        assert keys.age_s == elapsed
+        assert keys.episode_confidence == 0.93
+
+    now = mug_when + 1
+    keys = spatial.last_seen(robot, "flat_key", now=now,
+                             current_origin=(7, "odom-1"), current_camera=(11, 5, 950_000))
+    recent_mug = spatial.last_seen(robot, "mug", now=now,
+                                   current_origin=(7, "odom-1"), current_camera=(11, 5, 950_000))
+    assert keys is not None and keys.status == "stale"
+    assert keys.age_s == 2 * 86400 + 1
+    assert recent_mug is not None and recent_mug.status == "pending_localization"
+    assert recent_mug.event_id == "mug-seen"
+    assert recent_mug.age_s == 1
+    assert recent_mug.episode_confidence == 0.72
