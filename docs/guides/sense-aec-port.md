@@ -14,6 +14,12 @@ Known source paths below refer to those revisions. [Source record](../hardware/r
 
 ## Existing seams
 
+The active Sense pin contract (`code/firmware/head/sense/config.h`, checked by
+`code/firmware/head/tests/test_sense.py`) uses onboard PDM clock GPIO42 and data
+GPIO41 at 16 kHz; MAX98357A I2S BCLK GPIO4, LRCK GPIO7 and DOUT GPIO8 at
+32 kHz. The initial 24 kHz Opus decoder rate is not the amplifier clock.
+No MCU-controlled amplifier SD_MODE or switched supply is wired (`GPIO_NUM_NC`).
+
 | File / symbol | Relevant contract |
 | --- | --- |
 | `main/audio/engines/afe_audio_engine.cc`, `AfeAudioEngine::Initialize` / `Feed` | Existing engine selects `MR` for two input channels with a reference. Input is interleaved signed 16-bit PCM at 16 kHz: mic, reference, mic, reference. Query its actual feed chunk size. |
@@ -84,9 +90,10 @@ reads, ring-overwrite reads and stale post-cancellation writes. If a
 complete ring capacity of reference samples is published between
 microphone reads, the newest read does not silently claim a valid
 time-aligned history. It substitutes silence, marks A2 reference
-integrity failed and warns only for the first occurrence or every 32
-new such errors. A sustained 32-read underflow or stale
-post-cancellation playback publish also marks integrity failure.
+integrity failed. The realtime codec counts these errors without synchronous
+console logging. A sustained 32-read underflow or stale post-cancellation
+playback publish also marks integrity failure. Short input reads and uncertain
+or short output writes are separate sticky integrity failures.
 `GetReferenceDiagnostics()` returns these counts and the sticky
 `integrity_failed` flag under the codec mutex. `ClearReference()`
 resets session indices but **does not erase the lifetime failure**.
@@ -228,7 +235,9 @@ store them outside the local protected trial directory.
    audible speaker playback or measured AEC quality.
    The output is private mode 0600 `microphone.wav`,
    `speaker_reference.wav`, and `capture.json`, in a mode 0700
-   directory with no overwrite.
+   directory with no overwrite. Both WAV files are mono 16 kHz PCM16,
+   including `speaker_reference.wav`: it already contains the codec's filtered
+   and decimated reference, not raw 32 kHz speaker PCM. Do not decimate it again.
 4. Read these real source frames with the existing offline estimator:
 
    ```sh
@@ -261,9 +270,9 @@ it does not prove physical loudspeaker propagation, analog output
 drain, zero acoustic echo, or the actual audible silence position after
 barge-in. There is no hardware evidence yet for echo suppression, ERLE,
 double-talk preservation, interruption timing, temperature drift,
-accurate amplifier feedback or five-pet simultaneity. `capture.json`
-and `estimate_aec_delay.py` must keep
-`aec_physically_qualified=false` until real bench trials are reviewed.
+accurate amplifier feedback or five-pet simultaneity. `capture.json` reports `aec_physically_qualified=false`; the offline estimator
+reports `aec_physically_verified=false` and `natural_barge_in_verified=false`.
+Neither tool promotes its own software output to physical qualification.
 The independent playback acknowledgment thread remains open.
 
 ## Configuration and verification
