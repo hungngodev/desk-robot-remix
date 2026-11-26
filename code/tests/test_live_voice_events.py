@@ -1789,3 +1789,121 @@ async def test_cross_peer_vad_handoff_never_opens_fleet_floor():
         assert listener.cursor == 12 and listener.handled == 2
     assert active == {"robot-02"}
     assert events == [("robot-02", "speech_start")]
+
+
+@pytest.mark.parametrize("kind, source", [
+    ("speech_start", "xiaozhi_server_vad"),
+    ("normal", "xiaozhi_aec_vad"),
+    ("group", "xiaozhi_aec_vad"),
+])
+@pytest.mark.parametrize("failed_peer", [None, "robot-04", "robot-01"])
+async def test_human_vad_flushes_every_fleet_audio_owner_before_cursor_ack(
+    kind, source, failed_peer,
+):
+    """DRX-1266: a slow addressed head cannot serialize peer or group STOP."""
+    import asyncio
+    from types import SimpleNamespace
+
+    from desk_robot.runtime import Runtime
+
+    ids = [f"robot-0{i}" for i in range(1, 6)]
+    addressed = ids[0]
+    owners = set(ids) | {"group"}
+    # Intentionally overlap mocked audio owners to exercise interruption
+    # during cleanup races, not to authorize concurrent physical playback.
+    active_audio = owners.copy()
+    calls = []
+    peer_attempts = set()
+    peers_finished = asyncio.Event()
+    release_addressed = asyncio.Event()
+    old_generations = dict.fromkeys(ids, 1)
+    current_generations = {**old_generations, addressed: 2}
+    runtime = Runtime.__new__(Runtime)
+    runtime.settings = SimpleNamespace(robots=[SimpleNamespace(id=rid) for rid in ids])
+    voice_state = {}
+    runtime.coordinator = SimpleNamespace(set_voice_state=voice_state.update)
+
+    async def flush(owner):
+        calls.append(owner)
+        assert runtime._voice_turn_generations == current_generations
+        assert voice_state["voice_stop_unconfirmed"] is True
+        try:
+            if owner == addressed:
+                await release_addressed.wait()
+            if owner == failed_peer:
+                raise OSError("Peer decoder STOP unconfirmed")
+            active_audio.remove(owner)
+        finally:
+            if owner != addressed:
+                peer_attempts.add(owner)
+                if peer_attempts == owners - {addressed}:
+                    peers_finished.set()
+
+    async def stop_group():
+        await flush("group")
+
+    runtime.pet = SimpleNamespace(interrupt=flush)
+    runtime.conversation = SimpleNamespace(stop=stop_group)
+
+    def mock(request):
+        assert request.headers["Authorization"] == "Bearer " + "s" * 32
+        assert request.url.path == "/events"
+        bootstrap = request.url.params.get("bootstrap") == "1"
+        return httpx.Response(200, json={
+            "cursor": 10 if bootstrap else 11,
+            "reset": False, "lost": False,
+            "active_human_robots": [] if bootstrap else [addressed],
+            "voice_turn_generations": old_generations if bootstrap else current_generations,
+            "events": [] if bootstrap else [{
+                "seq": 11, "robot_id": addressed, "kind": kind,
+                "source": source, "voice_turn_generation": 2,
+            }],
+        })
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(mock)) as client:
+        listener = VoiceEventListener(
+            client, url="http://127.0.0.1:8766", token="s" * 32,
+            robot_ids=set(ids), on_interrupt=runtime._on_voice_interrupt,
+            on_voice_generations=runtime._on_voice_generations,
+            require_snapshot=True, require_turn_generations=True,
+        )
+        assert await listener.poll() == 0
+        poll = asyncio.create_task(listener.poll())
+        try:
+            # Do not release the addressed head until all four peers and
+            # group STOP have been attempted inside the 500 ms listener budget.
+            await asyncio.wait_for(peers_finished.wait(), timeout=0.4)
+            expected_active = {addressed} | ({failed_peer} if failed_peer else set())
+            assert active_audio == expected_active
+            assert set(calls) == owners and len(calls) == len(owners)
+            assert listener.cursor == 10 and listener.handled == 0
+            assert not poll.done()
+            assert runtime._voice_stop_unconfirmed
+            if failed_peer == addressed:
+                # A wedged addressed decoder must time out without an ACK.
+                with pytest.raises(TimeoutError, match="Voice interruption incomplete"):
+                    await asyncio.wait_for(poll, timeout=0.65)
+                assert active_audio == {addressed}
+                assert listener.cursor == 10 and listener.handled == 0
+                assert runtime._voice_stop_unconfirmed
+                assert voice_state["voice_stop_unconfirmed"] is True
+                return
+            release_addressed.set()
+            if failed_peer:
+                with pytest.raises(RuntimeError, match="Unable to preempt"):
+                    await poll
+                assert active_audio == {failed_peer}
+                assert listener.cursor == 10 and listener.handled == 0
+                assert runtime._voice_stop_unconfirmed
+                assert voice_state["voice_stop_unconfirmed"] is True
+            else:
+                assert await poll == 1
+                assert not active_audio
+                assert listener.cursor == 11 and listener.handled == 1
+                assert not runtime._voice_stop_unconfirmed
+                assert voice_state["voice_stop_unconfirmed"] is False
+        finally:
+            release_addressed.set()
+            if not poll.done():
+                poll.cancel()
+            await asyncio.gather(poll, return_exceptions=True)
