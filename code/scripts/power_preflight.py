@@ -405,6 +405,11 @@ def _pack_shunt_checks(
     input_after_shunt = Decimal(str(dropout_input_v)) - discharge * resistance
     return {
         "pack_shunt_matches_firmware_and_thermal_rating": thermal_ok,
+        # TI INA226 register 0x01: 2.5uV/LSB; firmware rejects both rail
+        # codes. Use the smaller nonrail magnitude (81915uV / 5mOhm),
+        # for either polarity. This is nominal ADC range, not stall protection.
+        "pack_shunt_peak_within_ina226_nominal_range": (
+            shunt_matches and peak <= Decimal("16.383")),
         "regulator_covers_pack_shunt_drop": (
             shunt_matches and Decimal(str(regulator_min_input_v)) <= input_after_shunt),
     }

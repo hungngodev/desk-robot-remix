@@ -1532,3 +1532,32 @@ def test_stack_pgood_evidence_requires_explicit_boolean(bad):
     cfg["charger_pgood_routed_on_paper"] = bad
     with pytest.raises(ValueError, match="PGOOD routing evidence"):
         one_stack(**cfg)
+
+@pytest.mark.parametrize("direction", ["discharge_peak_a", "charge_peak_a"])
+@pytest.mark.parametrize("peak, expected", [(4.5, True), (16.383, True),
+                                           (16.3835, False), (16.384, False)])
+def test_pack_shunt_ina226_nominal_range_is_independent_of_thermal_rating(
+    direction, peak, expected
+):
+    checks = runpy.run_path(str(
+        Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+    ))["_pack_shunt_checks"]
+    peaks = dict(discharge_peak_a=1.0, charge_peak_a=1.0)
+    peaks[direction] = peak
+    result = checks(milliohm=5, rated_w=2, derated_w=2,
+                    dropout_input_v=2.9, regulator_min_input_v=2.5, **peaks)
+    assert result["pack_shunt_matches_firmware_and_thermal_rating"] is True
+    assert result["regulator_covers_pack_shunt_drop"] is True
+    assert result["pack_shunt_peak_within_ina226_nominal_range"] is expected
+
+
+@pytest.mark.parametrize("milliohm", [None, 4.99, 10])
+def test_pack_shunt_ina226_nominal_range_requires_selected_shunt(milliohm):
+    checks = runpy.run_path(str(
+        Path(__file__).resolve().parents[1] / "scripts/power_preflight.py"
+    ))["_pack_shunt_checks"]
+    result = checks(milliohm=milliohm, rated_w=2, derated_w=2,
+                    discharge_peak_a=4.5, charge_peak_a=1.0,
+                    dropout_input_v=2.9, regulator_min_input_v=2.5)
+    assert result["pack_shunt_peak_within_ina226_nominal_range"] is False
+
