@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -52,3 +53,26 @@ def test_private_config_credentials_follow_fleet(tmp_path, monkeypatch, capsys, 
     assert target.stat().st_mode & 0o777 == 0o600
     output = capsys.readouterr()
     assert expected not in output.out + output.err
+
+
+def test_private_config_import_preserves_process_state(tmp_path):
+    script = """
+import importlib.util
+import os
+import sys
+
+original_path = sys.path[:]
+original_env = dict(os.environ)
+for name in ("private_config_first", "private_config_second"):
+    spec = importlib.util.spec_from_file_location(name, sys.argv[1])
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    assert callable(module.read_private_env)
+    assert sys.path == original_path, "private configuration import changed sys.path"
+    assert dict(os.environ) == original_env, "private configuration import changed environment"
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-c", script, str(SPEC.origin)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr

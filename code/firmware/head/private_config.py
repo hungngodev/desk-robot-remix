@@ -14,8 +14,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 # Provisioning runs in the head toolchain, without Mac package dependencies.
-sys.path.insert(0, str(ROOT / "laptop/src"))
-from desk_robot.private_files import read_private_env  # noqa: E402
+_original_path = sys.path[:]
+try:
+    sys.path.insert(0, str(ROOT / "laptop/src"))
+    from desk_robot.private_files import read_private_env
+finally:
+    sys.path[:] = _original_path
+    del _original_path
 
 
 def robot_token_env(config_path, robot_id):
