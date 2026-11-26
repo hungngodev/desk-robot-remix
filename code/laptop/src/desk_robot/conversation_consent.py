@@ -4,6 +4,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from .brain_context import live_asr_in_current_grant
+
 if TYPE_CHECKING:
     from .config import Settings
 
@@ -47,6 +49,19 @@ class GroupContextConsent:
     def admit_room(self) -> None:
         if self.room_generation is None:
             self.room_generation = self.settings.room_station_consent_generation
+
+    def filter_live_transcripts(self, timeline: list[dict], *, now: float) -> list[dict]:
+        """Exclude queued ASR captured before the current live grant."""
+        settings = self.settings
+        if settings.mode != "hardware":
+            return timeline
+        return [
+            item for item in timeline
+            if live_asr_in_current_grant(
+                item, now=now, enabled=settings.voice_vision_tools_enabled,
+                consent_started_at=settings.camera_consent_started_at,
+            )
+        ]
 
     def revoked(self, *, private_memory_current: bool) -> bool:
         """Use the same source predicate for speech admission and prompt cleanup."""

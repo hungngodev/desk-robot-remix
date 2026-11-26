@@ -1145,6 +1145,7 @@ class Conversation:
                     if not (item.get("channel") == "tool"
                             and item.get("kind") == "memory_recall")
                 ]
+                timeline = consent.filter_live_transcripts(timeline, now=time.monotonic())
                 return compose_brain_context([], [], timeline).interaction
 
             def topic_prompt() -> str:
