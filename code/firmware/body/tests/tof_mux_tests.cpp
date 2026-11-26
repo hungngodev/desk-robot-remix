@@ -790,11 +790,15 @@ int main() {
       // Already acquired side 5 before the bus fault, then polled critical 0
       // at failure. It must wait through side 6 and side 7 before returning
       // to a NEW side 5 read. No cached value may become valid meanwhile.
-      for (std::uint32_t at = 70; at < 86; ++at)
+      // Fault restart repeats critical lane 0; lane 4 is due at 86.
+      for (std::uint32_t at = 70; at <= 86; ++at) {
         bus.poll(guard, at);
-      CHECK(!bus.extra_diagnostic(0, 86).valid);
-      bus.poll(guard, 86);  // first independent side 5 conversion
-      CHECK(bus.extra_diagnostic(0, 86).valid);
+        CHECK(!bus.extra_diagnostic(0, at).valid);
+      }
+      CHECK(bus.last_channel() == 4);
+      bus.poll(guard, 87);  // first independent side 5 conversion
+      CHECK(bus.last_channel() == 5 && bus.new_extra_channel() == 0);
+      CHECK(bus.extra_diagnostic(0, 87).valid);
     }
     {
       // The 0x71 touch mux NACKed at the very start of ToF init. Later

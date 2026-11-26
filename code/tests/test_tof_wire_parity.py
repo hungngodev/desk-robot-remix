@@ -46,9 +46,26 @@ static bool check_scan_admission() {
   return true;
 }
 
+// After a failed critical selection, restart at lane 0 and preserve side rotation.
+static bool check_fault_rotation() {
+  desk_robot::RangeScanOrder scan(true);
+  for (unsigned lane = 0; lane < 5; ++lane) {
+    if (scan.next(lane * 10U) != lane) return false;
+  }
+  if (scan.next(60) != 5 || scan.next(61) != 0) return false;
+  scan.transport_fault();
+  for (unsigned now = 70; now < 87; ++now) {
+    const auto lane = scan.next(now);
+    if (lane == 5 || (now == 86 && lane != 4)) return false;
+    scan.transport_succeeded(lane);
+  }
+  return scan.next(87) == 5;
+}
+
 int main() {
   using namespace desk_robot;
   if (!check_scan_admission()) return 4;
+  if (!check_fault_rotation()) return 5;
   for (unsigned mm : {0U, 29U, 30U, 31U, 1299U, 1300U, 1301U, 8190U, 65535U}) {
     CliffConfig config{};
     config.calibrated = true;
