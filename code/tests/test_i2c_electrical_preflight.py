@@ -452,3 +452,20 @@ def test_mixed_rail_sink_budget_before_rounding(line, high_owner, offset, passes
     assert report["lines"][other]["paper_electrical_pass"]
     assert report["selected_branch_paper_pass"] is passes
     assert not report["qualified_hardware"]
+
+
+@pytest.mark.parametrize("voltage, passes", [(3.25, True), (3.3, True), (3.35, False)])
+def test_uniform_rail_changes_minimum_equivalent_pullup(voltage, passes):
+    segments = segment(upstream_pullups=(1940,), downstream_pullups=(1940,))
+    for part in segments:
+        for line in ("sda", "scl"):
+            part[line]["pullup_v"] = voltage
+    report = tool.screen_selected_segment(*segments)
+    for line in ("sda", "scl"):
+        values = report["lines"][line]
+        assert values["combined_ohms"] == 970
+        assert values["upstream_only_paper_pass"]
+        assert values["estimated_rise_ns"] == pytest.approx(98.626, abs=.001)
+        assert values["sink_budget_pass"] is passes
+    assert report["selected_branch_paper_pass"] is passes
+    assert not report["qualified_hardware"]
