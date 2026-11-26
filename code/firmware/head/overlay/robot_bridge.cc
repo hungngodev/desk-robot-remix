@@ -1177,10 +1177,10 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
             return reject(400, "request body deadline exceeded");
         got += static_cast<size_t>(n);
     }
-    if (body.find('\0') != std::string::npos || body.find("\\u0000") != std::string::npos) return Json(req, 400, Envelope(false, "embedded null"));
+    if (body.find('\0') != std::string::npos || body.find("\\u0000") != std::string::npos) return reject(400, "embedded null");
     auto json = Parse(body);
     if (!json || !cJSON_IsObject(json.get()) || cJSON_GetArraySize(json.get()) != 1)
-        return Json(req, 400, Envelope(false, "expected one event or command field"));
+        return reject(400, "expected one event or command field");
     if (strcmp(req->uri, "/api/face") == 0) {
 #if !defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3)
         // Only Sense has a local task consuming these queued cues.
@@ -1209,7 +1209,7 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
     }
     auto item = cJSON_GetObjectItemCaseSensitive(json.get(), "command");
     if (!cJSON_IsString(item) || !item->valuestring)
-        return Json(req, 400, Envelope(false, "command must be a string"));
+        return reject(400, "command must be a string");
     auto reply = Transact(item->valuestring, true);
     return Json(req, reply.status, Envelope(reply.ok, reply.text));
 }
