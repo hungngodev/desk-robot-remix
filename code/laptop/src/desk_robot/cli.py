@@ -373,6 +373,13 @@ def _doctor_report(args: argparse.Namespace, settings: Settings) -> dict[str, ob
     return result
 
 
+def _degraded_status(value: object, robot_id: str) -> bool:
+    if not isinstance(value, dict) or value.get("robot_id") != robot_id:
+        return False
+    health = value.get("health")
+    return isinstance(health, dict) and health.get("state") == "degraded"
+
+
 def main() -> None:
     p = _build_parser()
     args = p.parse_args()
@@ -404,6 +411,18 @@ def main() -> None:
         else:
             result = asyncio.run(request(args, settings))
         print(json.dumps(result, indent=2))
+        if args.action == "status" and _degraded_status(result, args.robot):
+            p.exit(1)
+    except httpx.HTTPStatusError as exc:
+        if args.action == "status" and exc.response.status_code == 503:
+            try:
+                result = exc.response.json()
+            except ValueError:
+                result = None
+            if _degraded_status(result, args.robot):
+                print(json.dumps(result, indent=2))
+                p.exit(1)
+        p.exit(1, f"{exc}\n")
     except (ValueError, OSError, httpx.HTTPError) as exc:
         p.exit(1, f"{exc}\n")
 
