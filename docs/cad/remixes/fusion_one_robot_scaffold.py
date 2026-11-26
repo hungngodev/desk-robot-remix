@@ -249,13 +249,17 @@ def run(context):
 
     app = adsk.core.Application.get()
     ui = app.userInterface
+    document = None
     try:
         repo = find_repo(Path(__file__).resolve())
         verify_original_source_revisions(repo)
         jaw_warning = jaw_topology_warning(repo)
         fit_receipt = verify_optional_fit_references(repo)
         sources = build_manifest(repo)
-        app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)
+        power_warning = packaging_warning(fit_receipt)
+        document = app.documents.add(adsk.core.DocumentTypes.FusionDesignDocumentType)
+        if document is None:
+            raise RuntimeError("Cannot create a Fusion document")
         design = adsk.fusion.Design.cast(app.activeProduct)
         if design is None:
             raise RuntimeError("Cannot create a Fusion design")
@@ -281,7 +285,14 @@ def run(context):
             "mg90s_sweep_screen.py with measured lift and jaw geometry and all eight "
             "ToF optical keepouts plus the battery cover; a clear screen is not fit proof. Then model "
             "adapters to caliper measurements before printing.\\n"
-            + packaging_warning(fit_receipt) + "\n" + jaw_warning
+            + power_warning + "\n" + jaw_warning
         )
     except Exception:
-        ui.messageBox("Desk robot Fusion import failure:\\n" + traceback.format_exc())
+        failure = traceback.format_exc()
+        if document is not None:
+            try:
+                if not document.close(False):
+                    failure += "\nDocument cleanup failed: close returned false."
+            except Exception:
+                failure += "\nDocument cleanup failed:\n" + traceback.format_exc()
+        ui.messageBox("Desk robot Fusion import failure:\\n" + failure)
