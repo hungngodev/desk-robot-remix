@@ -70,6 +70,8 @@ private:
     static void BenchPcmTask(void* context);
 #endif
     Reply Transact(const std::string& command, bool operator_control);
+    // Caller retains the UART mutex and urgency request through the reply.
+    static Reply ReadBodyReply(const Command& command, const UrgentStopGate::Request& urgency);
     bool Authorize(httpd_req_t* req);
     esp_err_t Handle(httpd_req_t* req);
     esp_err_t Json(httpd_req_t* req, int status, const std::string& body);

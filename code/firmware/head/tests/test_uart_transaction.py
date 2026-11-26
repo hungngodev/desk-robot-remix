@@ -91,10 +91,12 @@ struct Bridge {
     std::mutex uart_mutex_;
     UrgentStopGate urgent_stop_gate_;
     Reply Transact(const std::string&, bool);
+    static Reply ReadBodyReply(const Command&, const UrgentStopGate::Request&);
 };
 ''' + extract("bool BodyWireByteValid(") + "\n" +
         extract("bool BodyWireValid(") + "\n" +
-        extract("Reply Bridge::Transact(") + r'''
+        extract("Reply Bridge::Transact(") + "\n" +
+        extract("Reply Bridge::ReadBodyReply(") + r'''
 void reset() {
     flush_result = read_error = writes = reads = 0;
     tick = 0;
@@ -149,6 +151,18 @@ int main() {
     rx = "EVT startup\r\nOK ping\r\n";
     a = b.Transact("ping", true);
     assert(a.ok && writes == 1);
+    reset();
+    rx = "OK stop\r\nERR ping refused\r\nOK ping\r\n";
+    a = b.Transact("ping", true);
+    assert(a.status == 400 && !a.ok && a.text == "ERR ping refused");
+    reset();
+    rx = "ERR input unknown_command\r\n";
+    a = b.Transact("pose", false);
+    assert(a.status == 501 && !a.ok && a.text == "pose unsupported by body firmware");
+    reset();
+    rx = "{}\r\n";
+    a = b.Transact("pose", false);
+    assert(a.status == 503 && !a.ok && a.text == "malformed or unsupported pose response");
     reset();
     rx = std::string(1920, 'x') + "\nOK ping\n";
     assert(b.Transact("ping", true).ok);

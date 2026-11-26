@@ -496,6 +496,11 @@ Reply Bridge::Transact(const std::string& text, bool operator_control) {
     if (uart_write_bytes(kUart, wire.data(), wire.size()) != static_cast<int>(wire.size()) ||
         uart_wait_tx_done(kUart, pdMS_TO_TICKS(30)) != ESP_OK) return {503, false, "body UART write failed"};
     if (!rx_clean) return {503, false, "body stop sent; ACK uncertain after receive cleanup failure"};
+    return ReadBodyReply(command, urgency);
+}
+
+Reply Bridge::ReadBodyReply(const Command& command,
+                            const UrgentStopGate::Request& urgency) {
     const auto deadline = esp_timer_get_time() + kTimeoutMs * 1000;
     std::string line;
     bool body_cr_pending = false;
@@ -869,6 +874,41 @@ void Bridge::BenchPcmTask(void* context) {
 }
 #endif
 
+namespace {
+struct HttpFraming {
+    bool json_route;
+    int status;
+    const char* error;
+};
+
+HttpFraming InspectHttpFraming(httpd_req_t* req) {
+    // ESP-IDF httpd_req_recv does not support chunked request bodies.
+    // Check the original decimal header as well as HTTPD's size_t result:
+    // older ESP-IDF parsers can narrow a 64-bit Content-Length on ESP32.
+    char transfer_encoding[1] = {};
+    if (httpd_req_get_hdr_value_str(req, "Transfer-Encoding", transfer_encoding,
+                                    sizeof(transfer_encoding)) != ESP_ERR_NOT_FOUND)
+        return {false, 400, "transfer encoding unsupported"};
+    char content_length[24] = {};
+    const auto length_status = httpd_req_get_hdr_value_str(
+        req, "Content-Length", content_length, sizeof(content_length));
+    const auto length_bytes = httpd_req_get_hdr_value_len(req, "Content-Length");
+    if (length_status == ESP_ERR_NOT_FOUND) {
+        if (req->content_len != 0) return {false, 400, "missing content length"};
+    } else if (length_status != ESP_OK || length_bytes >= sizeof(content_length) ||
+               !ContentLengthMatches(std::string_view(content_length, length_bytes),
+                                     req->content_len)) {
+        return {false, 400, "invalid content length"};
+    }
+    if (req->content_len > kMaxBody) return {false, 413, "invalid body length"};
+    const bool json_route = req->method == HTTP_POST &&
+        (strcmp(req->uri, "/api/command") == 0 || strcmp(req->uri, "/api/face") == 0);
+    if (!json_route && req->content_len != 0)
+        return {false, 400, "request body not permitted"};
+    return {json_route, 200, nullptr};
+}
+}  // namespace
+
 esp_err_t Bridge::Handle(httpd_req_t* req) {
     if (!Authorize(req)) return Json(req, 401, Envelope(false, "unauthorized"));
     const auto reject = [&](int status, const char* reason) {
@@ -876,29 +916,9 @@ esp_err_t Bridge::Handle(httpd_req_t* req) {
         (void)Json(req, status, Envelope(false, reason));
         return ESP_FAIL; // HTTPD closes instead of draining unread request data.
     };
-    // ESP-IDF httpd_req_recv does not support chunked request bodies.
-    // Check the original decimal header as well as HTTPD's size_t result:
-    // older ESP-IDF parsers can narrow a 64-bit Content-Length on ESP32.
-    char transfer_encoding[1] = {};
-    if (httpd_req_get_hdr_value_str(req, "Transfer-Encoding", transfer_encoding,
-                                    sizeof(transfer_encoding)) != ESP_ERR_NOT_FOUND)
-        return reject(400, "transfer encoding unsupported");
-    char content_length[24] = {};
-    const auto length_status = httpd_req_get_hdr_value_str(
-        req, "Content-Length", content_length, sizeof(content_length));
-    const auto length_bytes = httpd_req_get_hdr_value_len(req, "Content-Length");
-    if (length_status == ESP_ERR_NOT_FOUND) {
-        if (req->content_len != 0) return reject(400, "missing content length");
-    } else if (length_status != ESP_OK || length_bytes >= sizeof(content_length) ||
-               !ContentLengthMatches(std::string_view(content_length, length_bytes),
-                                     req->content_len)) {
-        return reject(400, "invalid content length");
-    }
-    if (req->content_len > kMaxBody) return reject(413, "invalid body length");
-    const bool json_route = req->method == HTTP_POST &&
-        (strcmp(req->uri, "/api/command") == 0 || strcmp(req->uri, "/api/face") == 0);
-    if (!json_route && req->content_len != 0)
-        return reject(400, "request body not permitted");
+    const auto framing = InspectHttpFraming(req);
+    if (framing.error) return reject(framing.status, framing.error);
+    const bool json_route = framing.json_route;
 
 #if defined(CONFIG_BOARD_TYPE_DESK_ROBOT_SENSE_S3) && defined(CONFIG_DESK_ROBOT_AEC_PCM_CAPTURE_ENABLED)
     // A capture generation is only unique within a head boot. Check both
