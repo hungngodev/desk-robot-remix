@@ -37,11 +37,19 @@ void fresh(CliffGuard& guard, std::uint32_t now) {
 }
 
 void observe(BodyControl& body, LineReceiver& head, std::uint32_t now,
-             std::uint64_t sample_us) {
+             std::uint64_t sample_us, std::uint32_t pose_seq) {
     for (const auto verb : {"status", "aux", "ir", "optics", "pose", "ping"}) {
         const auto reply = head_command(body, head, verb, false, now, sample_us);
         assert(!reply.empty());
         assert(reply.find("OK drive") != 0 && reply.find("OK arm") != 0);
+        if (std::string(verb) == "pose") {
+            // Polling must produce a fresh unavailable pose, not an error,
+            // stale receipt or navigation authority.
+            assert(reply == "{\"v\":1,\"body_boot\":42,\"origin\":0,\"seq\":" +
+                   std::to_string(pose_seq) + ",\"sample_us\":" +
+                   std::to_string(sample_us) + ",\"x_mm\":0,\"y_mm\":0,"
+                   "\"yaw_mrad\":0,\"quality\":\"unavailable\"}");
+        }
     }
 }
 
@@ -141,7 +149,7 @@ void verify(BodyProfile profile, std::uint32_t start) {
     for (std::uint32_t elapsed = 1; elapsed <= 200; ++elapsed) {
         const auto now = start + elapsed;
         fresh(guard, now);
-        observe(body, head, now, 1000000ULL + elapsed * 1000ULL);
+        observe(body, head, now, 1000000ULL + elapsed * 1000ULL, elapsed);
         if (elapsed < 200) {
             assert(body.state().armed && body.state().left == 20);
             assert(body.watchdog_remaining(now) == 200 - elapsed);
@@ -186,7 +194,7 @@ void verify(BodyProfile profile, std::uint32_t start) {
     for (std::uint32_t elapsed = 1; elapsed <= 600; ++elapsed) {
         now = start + 201 + elapsed;
         fresh(guard, now);
-        observe(body, head, now, 2000000ULL + elapsed * 1000ULL);
+        observe(body, head, now, 2000000ULL + elapsed * 1000ULL, 200U + elapsed);
         if (elapsed == 100)
             assert(head_command(body, head, "keepalive", true, now) == "OK keepalive");
         if (elapsed < 250) {
